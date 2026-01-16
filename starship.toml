@@ -8,7 +8,8 @@ disabled=true
 disabled=true
 
 [custom.stack]
-command = "~/.dotfiles/scripts/stack-prompt.sh"
+command = "/Users/philbrockman/.dotfiles/scripts/stack-prompt.sh"
 when = "test -f .stack"
 format = "[$output]($style) "
 style = "purple"
+description = "Git stack position"
