@@ -31,6 +31,7 @@ import { backupRestore } from "./commands/backup.ts";
 import { check } from "./commands/check.ts";
 import { abortEdit, edit, returnFromEdit } from "./commands/edit.ts";
 import { fixup } from "./commands/fixup.ts";
+import { init } from "./commands/init.ts";
 import { insert } from "./commands/insert.ts";
 import { last } from "./commands/last.ts";
 import { list } from "./commands/list.ts";
@@ -46,6 +47,9 @@ import { update } from "./commands/update.ts";
 const [cmd, ...args] = process.argv.slice(2);
 
 switch (cmd) {
+  case "init":
+    init(args[0]);
+    break;
   case "add":
     if (!args[0]) {
       console.error("Usage: stack add <parent>");
@@ -128,8 +132,13 @@ switch (cmd) {
     console.log(`
 stack - Branch Stack Tool
 
+Modes:
+  Convention mode: Branches auto-detected by prefix (e.g., goals-1, goals-2)
+  Explicit mode:   Branches tracked manually with 'stack add'
+
 Commands:
-  add <parent>      Track current branch as child of parent
+  init [prefix]     Setup convention mode (e.g., stack init goals-)
+  add <parent>      Track current branch as child of parent (explicit mode)
   remove            Untrack current branch
   insert <branch> --after <parent>
                     Insert new branch, reparent children
@@ -154,21 +163,16 @@ Commands:
   fixup <branch>    Apply staged changes to ancestor branch, update stack
 
 Examples:
-  stack add main
+  # Convention mode (recommended):
+  stack init goals-          # setup prefix
+  git checkout -b goals-1    # auto-tracked!
+  git checkout -b goals-2    # auto-tracked!
+  stack list                 # shows: main -> goals-1 -> goals-2
+  stack update               # rebase in order
+
+  # Explicit mode:
+  stack add main             # track current branch
   stack list
   stack update
-
-  # Quick fix in ancestor branch (stay on current branch):
-  git add -p                 # stage changes for ancestor
-  stack fixup goals-2        # apply to goals-2, rebase back
-
-  # Bigger edit in ancestor branch:
-  stack edit goals-2         # stash, checkout goals-2
-  # ... make changes, commit ...
-  stack return               # rebase descendants, return
-
-  # Insert a branch in the middle of a chain:
-  stack insert goals-1.5 --after goals-1
-  stack update               # rebase the chain
 `);
 }

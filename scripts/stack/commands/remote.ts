@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
-import { getForkRemote, loadConfig } from "../lib.ts";
+import { getForkRemote, git, loadConfig } from "../lib.ts";
 
 const LOCAL_CONFIG = join(process.cwd(), ".stackrc");
 
@@ -12,6 +12,19 @@ export function remote(newRemote?: string) {
     const source = config.remote ? (existsSync(LOCAL_CONFIG) ? ".stackrc" : "~/.stackrc") : "auto-detected";
     console.log(`Current remote: ${current} (${source})`);
     return;
+  }
+
+  // Validate remote exists
+  try {
+    const remotes = git("remote").split("\n").filter(Boolean);
+    if (!remotes.includes(newRemote)) {
+      console.error(`Remote '${newRemote}' does not exist`);
+      console.error(`Available remotes: ${remotes.join(", ")}`);
+      process.exit(1);
+    }
+  } catch {
+    console.error("Failed to list remotes");
+    process.exit(1);
   }
 
   // Set new remote

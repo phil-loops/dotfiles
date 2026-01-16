@@ -1,10 +1,40 @@
 import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { homedir } from "os";
-import { join } from "path";
+import { basename, join } from "path";
 
-export const STACK_FILE = join(process.cwd(), ".stack");
-export const EDIT_STATE_FILE = join(process.cwd(), ".stack-edit");
+/**
+ * Get the stack data directory for the current repo
+ * Stored in ~/.local/share/stack/<repo-name>/
+ */
+function getStackDir(): string {
+  // Get repo root directory name
+  let repoName: string;
+  try {
+    const repoRoot = execSync("git rev-parse --show-toplevel", { encoding: "utf-8" }).trim();
+    repoName = basename(repoRoot);
+  } catch {
+    repoName = basename(process.cwd());
+  }
+
+  const stackDir = join(homedir(), ".local", "share", "stack", repoName);
+
+  // Create directory if it doesn't exist
+  if (!existsSync(stackDir)) {
+    mkdirSync(stackDir, { recursive: true });
+  }
+
+  return stackDir;
+}
+
+export function getStackFile(): string {
+  return join(getStackDir(), "stack");
+}
+
+export function getEditStateFile(): string {
+  return join(getStackDir(), "edit-state");
+}
+
 const LOCAL_CONFIG_FILE = join(process.cwd(), ".stackrc");
 const GLOBAL_CONFIG_FILE = join(homedir(), ".stackrc");
 
@@ -41,8 +71,14 @@ export function loadConfig(): Config {
   return config;
 }
 
-// Maps child branch -> parent branch
+// Maps child branch -> parent branch (explicit mode)
 export type Stack = Record<string, string>;
+
+// Convention-based stack config
+export type ConventionConfig = {
+  prefix: string; // e.g., "goals-"
+  root: string; // e.g., "main"
+};
 
 // State saved during `stack edit`
 export type EditState = {
@@ -50,9 +86,85 @@ export type EditState = {
   hasStash: boolean;
 };
 
+function getConventionFile(): string {
+  return join(getStackDir(), "convention");
+}
+
+export function loadConvention(): ConventionConfig | null {
+  const file = getConventionFile();
+  if (!existsSync(file)) return null;
+  try {
+    return JSON.parse(readFileSync(file, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+export function saveConvention(config: ConventionConfig) {
+  writeFileSync(getConventionFile(), JSON.stringify(config, null, 2) + "\n");
+}
+
+export function clearConvention() {
+  const file = getConventionFile();
+  if (existsSync(file)) {
+    execSync(`rm "${file}"`);
+  }
+}
+
+/**
+ * Get all branches matching a prefix, sorted numerically
+ * Handles: goals-1, goals-1.5, goals-2, goals-10
+ */
+export function getBranchesByPrefix(prefix: string): string[] {
+  try {
+    const allBranches = git("branch --list").split("\n").map((b) => b.trim().replace(/^\*\s*/, ""));
+    const matching = allBranches.filter((b) => b.startsWith(prefix));
+
+    // Extract numeric suffix and sort
+    return matching.sort((a, b) => {
+      const numA = parseFloat(a.slice(prefix.length)) || 0;
+      const numB = parseFloat(b.slice(prefix.length)) || 0;
+      return numA - numB;
+    });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get the parent branch in a convention-based stack
+ */
+export function getConventionParent(branch: string, config: ConventionConfig): string | null {
+  const branches = getBranchesByPrefix(config.prefix);
+  const idx = branches.indexOf(branch);
+  if (idx <= 0) return config.root; // First branch or not found -> root is parent
+  return branches[idx - 1];
+}
+
+/**
+ * Get children in a convention-based stack
+ */
+export function getConventionChildren(branch: string, config: ConventionConfig): string[] {
+  const branches = getBranchesByPrefix(config.prefix);
+  if (branch === config.root) {
+    return branches.length > 0 ? [branches[0]] : [];
+  }
+  const idx = branches.indexOf(branch);
+  if (idx === -1 || idx === branches.length - 1) return [];
+  return [branches[idx + 1]];
+}
+
+/**
+ * Check if current branch matches a convention prefix
+ */
+export function matchesConvention(branch: string, config: ConventionConfig): boolean {
+  return branch.startsWith(config.prefix);
+}
+
 export function loadStack(): Stack {
-  if (!existsSync(STACK_FILE)) return {};
-  const content = readFileSync(STACK_FILE, "utf-8");
+  const stackFile = getStackFile();
+  if (!existsSync(stackFile)) return {};
+  const content = readFileSync(stackFile, "utf-8");
   const stack: Stack = {};
   for (const line of content.trim().split("\n")) {
     if (!line) continue;
@@ -66,25 +178,27 @@ export function saveStack(stack: Stack) {
   const content = Object.entries(stack)
     .map(([child, parent]) => `${child}:${parent}`)
     .join("\n");
-  writeFileSync(STACK_FILE, content + "\n");
+  writeFileSync(getStackFile(), content + "\n");
 }
 
 export function loadEditState(): EditState | null {
-  if (!existsSync(EDIT_STATE_FILE)) return null;
+  const editFile = getEditStateFile();
+  if (!existsSync(editFile)) return null;
   try {
-    return JSON.parse(readFileSync(EDIT_STATE_FILE, "utf-8"));
+    return JSON.parse(readFileSync(editFile, "utf-8"));
   } catch {
     return null;
   }
 }
 
 export function saveEditState(state: EditState) {
-  writeFileSync(EDIT_STATE_FILE, JSON.stringify(state));
+  writeFileSync(getEditStateFile(), JSON.stringify(state));
 }
 
 export function clearEditState() {
-  if (existsSync(EDIT_STATE_FILE)) {
-    execSync(`rm ${EDIT_STATE_FILE}`);
+  const editFile = getEditStateFile();
+  if (existsSync(editFile)) {
+    execSync(`rm "${editFile}"`);
   }
 }
 
