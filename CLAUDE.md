@@ -17,4 +17,10 @@ When working with stacked/dependent branches, use the `stack` command instead of
 - `stack pr` - push and create PR targeting parent branch
 - `stack push-all` - push all tracked branches
 
+For editing ancestor branches:
+- `stack edit <branch>` - stash changes, checkout branch, remember where to return
+- `stack return` - update descendants, return to original branch, restore stash
+- `stack edit --abort` - cancel edit mode without changes
+- `stack fixup <branch>` - apply staged changes to ancestor branch, update stack back to current
+
 The stack is stored in `.stack` file in the repo root. Check if it exists before suggesting raw git rebase commands.
