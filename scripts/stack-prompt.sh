@@ -62,4 +62,4 @@ if [ -z "$REMOTE" ]; then
   fi
 fi
 
-echo "📚${REMOTE}:${pos}/${total}→${PARENT}"
+echo "📚${BRANCH} ${REMOTE}:${pos}/${total}→${PARENT}"
