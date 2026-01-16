@@ -7,7 +7,7 @@ eval "$(starship init zsh)"
 alias kcup="kubectl config use-context production"
 alias kcus="kubectl config use-context staging"
 alias zconfig="nvim ~/.zshrc"
-alias zsource="cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && cd - && source ~/.zshrc"
+alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles"; git push); source ~/.zshrc'
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
 alias stack="node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts"
 alias db="task db:port_forward"
