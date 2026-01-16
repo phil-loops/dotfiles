@@ -1,4 +1,7 @@
+format = "$kubernetes$custom"
+
 [kubernetes]
+format = '[$symbol$context]($style) '
 disabled=false
 
 [nodejs]
@@ -26,6 +29,6 @@ description = "Git stack position"
 [custom.git_simple]
 command = "git branch --show-current"
 when = "test ! -f .stack || ! grep -q \"^$(git branch --show-current 2>/dev/null):\" .stack 2>/dev/null"
-format = "on [$output]($style) "
+format = "[$output]($style) "
 style = "bold purple"
 description = "Git branch when not in stack"
