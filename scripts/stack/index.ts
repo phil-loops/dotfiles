@@ -38,6 +38,7 @@ import { moveChanges } from "./commands/move.ts";
 import { parent } from "./commands/parent.ts";
 import { plan } from "./commands/plan.ts";
 import { pr } from "./commands/pr.ts";
+import { remote } from "./commands/remote.ts";
 import { pushAll } from "./commands/push-all.ts";
 import { remove } from "./commands/remove.ts";
 import { update } from "./commands/update.ts";
@@ -88,6 +89,9 @@ switch (cmd) {
   case "pr":
     pr();
     break;
+  case "remote":
+    remote(args[0]);
+    break;
   case "last":
     last();
     break;
@@ -136,6 +140,8 @@ Commands:
   update --all      Rebase entire tree from root
   parent            Print parent branch name
   pr                Push and create PR targeting parent
+  remote            Show current remote
+  remote <name>     Set remote (saves to .stackrc)
   last              Switch to deepest branch in stack
   push-all          Push all tracked branches
   move-to-root      Stash changes and move to root branch

@@ -25,11 +25,35 @@ done
 total=$count
 current="$BRANCH"
 while true; do
-  # Find children
   child=$(grep ":${current}$" "$STACK_FILE" 2>/dev/null | head -1 | cut -d: -f1)
   [ -z "$child" ] && break
   current="$child"
   ((total++))
 done
 
-echo "📚${count}/${total}→${PARENT}"
+# Get remote from config or auto-detect
+REMOTE=""
+if [ -f ".stackrc" ]; then
+  REMOTE=$(grep -o '"remote"[[:space:]]*:[[:space:]]*"[^"]*"' .stackrc 2>/dev/null | cut -d'"' -f4)
+fi
+if [ -z "$REMOTE" ] && [ -f "$HOME/.stackrc" ]; then
+  REMOTE=$(grep -o '"remote"[[:space:]]*:[[:space:]]*"[^"]*"' "$HOME/.stackrc" 2>/dev/null | cut -d'"' -f4)
+fi
+if [ -z "$REMOTE" ]; then
+  # Auto-detect: prefer phil-loops if exists
+  if git remote | grep -q "^phil-loops$" 2>/dev/null; then
+    REMOTE="phil-loops"
+  else
+    REMOTE="origin"
+  fi
+fi
+
+# Shorten remote name for display
+case "$REMOTE" in
+  phil-loops) REMOTE_SHORT="phil" ;;
+  loops-so)   REMOTE_SHORT="team" ;;
+  origin)     REMOTE_SHORT="origin" ;;
+  *)          REMOTE_SHORT="$REMOTE" ;;
+esac
+
+echo "📚${REMOTE_SHORT}:${count}/${total}→${PARENT}"
