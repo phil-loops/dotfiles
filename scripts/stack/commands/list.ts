@@ -37,6 +37,11 @@ export function list() {
   const allChildren = new Set(Object.keys(stack));
   const roots = [...allParents].filter((p) => !allChildren.has(p));
 
+  // Show note if current branch isn't in the stack
+  if (!stack[branch] && !roots.includes(branch)) {
+    console.log(`(You're on ${branch}, not in the stack)\n`);
+  }
+
   function printTree(b: string, indent: string) {
     const marker = b === branch ? " <-- you" : "";
     console.log(indent + b + marker);

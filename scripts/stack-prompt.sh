@@ -32,7 +32,9 @@ if [ -f "$CONVENTION_FILE" ]; then
         done
         ;;
       *)
-        exit 0  # Branch doesn't match convention prefix
+        # On root or non-matching branch - just show branch name
+        echo "$BRANCH"
+        exit 0
         ;;
     esac
   fi
@@ -86,4 +88,11 @@ if [ -z "$REMOTE" ]; then
   fi
 fi
 
-echo "${REMOTE} 📚 ${BRANCH} ${pos}/${total} → ${PARENT}"
+# Remote emoji: 🏠 for origin, 🔱 for fork
+if [ "$REMOTE" = "origin" ]; then
+  REMOTE_EMOJI="🏠"
+else
+  REMOTE_EMOJI="🔱"
+fi
+
+echo "${REMOTE_EMOJI} ${BRANCH}🌱 ${pos}/${total}🤿"
