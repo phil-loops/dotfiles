@@ -6,6 +6,7 @@
  * USAGE:
  *   stack add <parent>       # mark current branch as child of parent
  *   stack remove             # untrack current branch
+ *   stack insert <b> --after <p>  # insert branch, reparent children
  *   stack list               # show the branch tree
  *   stack check              # dry-run conflict detection
  *   stack update             # rebase current branch + descendants
@@ -29,6 +30,7 @@ import { backupRestore } from "./commands/backup.ts";
 import { check } from "./commands/check.ts";
 import { abortEdit, edit, returnFromEdit } from "./commands/edit.ts";
 import { fixup } from "./commands/fixup.ts";
+import { insert } from "./commands/insert.ts";
 import { last } from "./commands/last.ts";
 import { list } from "./commands/list.ts";
 import { moveChanges } from "./commands/move.ts";
@@ -51,6 +53,18 @@ switch (cmd) {
   case "remove":
     remove();
     break;
+  case "insert": {
+    // Parse: stack insert <new-branch> --after <parent>
+    const afterIdx = args.indexOf("--after");
+    if (afterIdx === -1 || !args[0] || !args[afterIdx + 1]) {
+      console.error("Usage: stack insert <new-branch> --after <parent>");
+      process.exit(1);
+    }
+    const newBranch = args[0];
+    const afterBranch = args[afterIdx + 1];
+    insert(newBranch, afterBranch);
+    break;
+  }
   case "list":
     list();
     break;
@@ -108,6 +122,8 @@ stack - Branch Stack Tool
 Commands:
   add <parent>      Track current branch as child of parent
   remove            Untrack current branch
+  insert <branch> --after <parent>
+                    Insert new branch, reparent children
   list              Show the branch tree
   check             Dry-run conflict detection across the stack
   update            Rebase current branch + descendants
@@ -138,5 +154,9 @@ Examples:
   stack edit goals-2         # stash, checkout goals-2
   # ... make changes, commit ...
   stack return               # rebase descendants, return
+
+  # Insert a branch in the middle of a chain:
+  stack insert goals-1.5 --after goals-1
+  stack update               # rebase the chain
 `);
 }
