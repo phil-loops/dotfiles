@@ -11,6 +11,7 @@ When working with stacked/dependent branches, use the `stack` command instead of
 
 - `stack add <parent>` - track current branch as child of parent
 - `stack list` - show branch tree
+- `stack check` - dry-run conflict detection (run before update)
 - `stack update` - rebase current branch + descendants onto their parents
 - `stack update --all` - rebase entire tree
 - `stack parent` - print parent branch

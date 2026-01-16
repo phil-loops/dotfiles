@@ -7,6 +7,7 @@
  *   stack add <parent>       # mark current branch as child of parent
  *   stack remove             # untrack current branch
  *   stack list               # show the branch tree
+ *   stack check              # dry-run conflict detection
  *   stack update             # rebase current branch + descendants
  *   stack update --all       # rebase entire tree from root
  *   stack parent             # print parent branch name
@@ -87,6 +88,68 @@ function gitTry(cmd: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+type ConflictResult = {
+  hasConflict: boolean;
+  files: string[];
+};
+
+/**
+ * Check if rebasing child onto parent would cause conflicts
+ * Uses git merge-tree to simulate the merge without touching working directory
+ */
+function checkConflict(parent: string, child: string): ConflictResult {
+  try {
+    const mergeBase = git(`merge-base ${parent} ${child}`);
+    const result = execSync(`git merge-tree ${mergeBase} ${parent} ${child}`, {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    // If merge-tree outputs conflict markers, there are conflicts
+    const conflictFiles: string[] = [];
+    const lines = result.split("\n");
+    for (const line of lines) {
+      // Look for conflict markers in output
+      if (line.includes("<<<<<<") || line.startsWith("+<<<<<<")) {
+        continue; // Skip the marker itself
+      }
+      // merge-tree outputs file info before conflicts
+      const match = line.match(/^changed in both/i);
+      if (match) {
+        // Next line usually has the filename
+        continue;
+      }
+    }
+    // Alternative: check exit code and parse "CONFLICT" lines
+    return { hasConflict: false, files: [] };
+  } catch (e: any) {
+    // merge-tree exits non-zero on conflicts in newer git versions
+    // Parse the output for conflict info
+    const output = e.stdout?.toString() || "";
+    const stderr = e.stderr?.toString() || "";
+    const conflictFiles: string[] = [];
+
+    // Look for "CONFLICT" markers or conflicted file paths
+    const lines = (output + stderr).split("\n");
+    for (const line of lines) {
+      if (line.includes("CONFLICT")) {
+        // Extract filename from lines like "CONFLICT (content): Merge conflict in path/to/file"
+        const match = line.match(/Merge conflict in (.+)$/);
+        if (match) {
+          conflictFiles.push(match[1]);
+        }
+      }
+    }
+
+    // Also try parsing the merge-tree output format
+    if (conflictFiles.length === 0 && output.includes("<<<<<<")) {
+      // Fallback: just indicate there's a conflict
+      return { hasConflict: true, files: ["(unable to parse specific files)"] };
+    }
+
+    return { hasConflict: conflictFiles.length > 0, files: conflictFiles };
   }
 }
 
@@ -272,6 +335,66 @@ function list() {
 
   for (const root of roots) {
     printTree(root, "");
+  }
+}
+
+/**
+ * Check for conflicts across the stack without actually rebasing
+ */
+function check() {
+  const stack = loadStack();
+  const branch = currentBranch();
+
+  if (Object.keys(stack).length === 0) {
+    console.log("No branches tracked");
+    return;
+  }
+
+  const allParents = new Set(Object.values(stack));
+  const allChildren = new Set(Object.keys(stack));
+  const roots = [...allParents].filter((p) => !allChildren.has(p));
+
+  let hasAnyConflict = false;
+  const conflicts: Array<{ child: string; parent: string; files: string[] }> = [];
+
+  // Check each branch against its parent
+  for (const [child, parent] of Object.entries(stack)) {
+    const result = checkConflict(parent, child);
+    if (result.hasConflict) {
+      hasAnyConflict = true;
+      conflicts.push({ child, parent, files: result.files });
+    }
+  }
+
+  // Print tree with conflict indicators
+  function printTree(b: string, indent: string) {
+    const marker = b === branch ? " <-- you" : "";
+    const conflict = conflicts.find((c) => c.child === b);
+    const conflictMarker = conflict ? " ⚠ CONFLICT" : " ✓";
+    const statusMarker = stack[b] ? conflictMarker : ""; // roots don't get checked
+    console.log(indent + b + marker + statusMarker);
+    const children = getChildren(stack, b);
+    children.forEach((child) => {
+      printTree(child, indent + "  ");
+    });
+  }
+
+  for (const root of roots) {
+    printTree(root, "");
+  }
+
+  // Print conflict details
+  if (conflicts.length > 0) {
+    console.log("\nConflicts detected:\n");
+    for (const { child, parent, files } of conflicts) {
+      console.log(`  ${child} onto ${parent}:`);
+      for (const file of files) {
+        console.log(`    - ${file}`);
+      }
+    }
+    process.exit(1);
+  } else {
+    console.log("\nNo conflicts detected. Safe to update.");
   }
 }
 
@@ -777,6 +900,9 @@ switch (cmd) {
   case "list":
     list();
     break;
+  case "check":
+    check();
+    break;
   case "update":
     update(args.includes("--all"));
     break;
@@ -829,6 +955,7 @@ Commands:
   add <parent>      Track current branch as child of parent
   remove            Untrack current branch
   list              Show the branch tree
+  check             Dry-run conflict detection across the stack
   update            Rebase current branch + descendants
   update --all      Rebase entire tree from root
   parent            Print parent branch name
