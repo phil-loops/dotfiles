@@ -48,12 +48,4 @@ if [ -z "$REMOTE" ]; then
   fi
 fi
 
-# Shorten remote name for display
-case "$REMOTE" in
-  phil-loops) REMOTE_SHORT="phil" ;;
-  loops-so)   REMOTE_SHORT="team" ;;
-  origin)     REMOTE_SHORT="origin" ;;
-  *)          REMOTE_SHORT="$REMOTE" ;;
-esac
-
-echo "📚${REMOTE_SHORT}:${count}/${total}→${PARENT}"
+echo "📚${REMOTE}:${count}/${total}→${PARENT}"
