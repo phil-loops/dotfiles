@@ -11,25 +11,39 @@ BRANCH=$(git branch --show-current 2>/dev/null)
 PARENT=$(grep "^${BRANCH}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
 [ -z "$PARENT" ] && exit 0
 
-# Count position in stack
-count=1
+# Count position in stack (0-indexed, not counting root)
+pos=0
+current="$BRANCH"
+while true; do
+  p=$(grep "^${current}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
+  [ -z "$p" ] && break
+  # Only count if parent is also tracked (not the root)
+  if grep -q "^${p}:" "$STACK_FILE" 2>/dev/null; then
+    ((pos++))
+  fi
+  current="$p"
+done
+
+# Count total tracked branches in this chain
+total=0
+# Go to root first
 current="$BRANCH"
 while true; do
   p=$(grep "^${current}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
   [ -z "$p" ] && break
   current="$p"
-  ((count++))
 done
-
-# Count total depth from root
-total=$count
-current="$BRANCH"
-while true; do
-  child=$(grep ":${current}$" "$STACK_FILE" 2>/dev/null | head -1 | cut -d: -f1)
-  [ -z "$child" ] && break
-  current="$child"
-  ((total++))
-done
+root="$current"
+# Now count all descendants of root
+count_descendants() {
+  local b="$1"
+  for child in $(grep ":${b}$" "$STACK_FILE" 2>/dev/null | cut -d: -f1); do
+    ((total++))
+    count_descendants "$child"
+  done
+}
+count_descendants "$root"
+((total--))  # 0-indexed max
 
 # Get remote from config or auto-detect
 REMOTE=""
@@ -48,4 +62,4 @@ if [ -z "$REMOTE" ]; then
   fi
 fi
 
-echo "📚${REMOTE}:${count}/${total}→${PARENT}"
+echo "📚${REMOTE}:${pos}/${total}→${PARENT}"
