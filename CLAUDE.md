@@ -25,3 +25,5 @@ For editing ancestor branches:
 - `stack fixup <branch>` - apply staged changes to ancestor branch, update stack back to current
 
 The stack is stored in `.stack` file in the repo root. Check if it exists before suggesting raw git rebase commands.
+
+**Important:** Always use the shell alias via `/bin/zsh -ic 'stack ...'` instead of running the script directly.
