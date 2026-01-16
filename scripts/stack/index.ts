@@ -9,6 +9,7 @@
  *   stack insert <b> --after <p>  # insert branch, reparent children
  *   stack list               # show the branch tree
  *   stack check              # dry-run conflict detection
+ *   stack plan               # analyze stack for PR planning
  *   stack update             # rebase current branch + descendants
  *   stack update --all       # rebase entire tree from root
  *   stack parent             # print parent branch name
@@ -35,6 +36,7 @@ import { last } from "./commands/last.ts";
 import { list } from "./commands/list.ts";
 import { moveChanges } from "./commands/move.ts";
 import { parent } from "./commands/parent.ts";
+import { plan } from "./commands/plan.ts";
 import { pr } from "./commands/pr.ts";
 import { pushAll } from "./commands/push-all.ts";
 import { remove } from "./commands/remove.ts";
@@ -70,6 +72,9 @@ switch (cmd) {
     break;
   case "check":
     check();
+    break;
+  case "plan":
+    plan();
     break;
   case "update":
     update(args.includes("--all"));
@@ -126,6 +131,7 @@ Commands:
                     Insert new branch, reparent children
   list              Show the branch tree
   check             Dry-run conflict detection across the stack
+  plan              Analyze stack for PR planning (copies to clipboard)
   update            Rebase current branch + descendants
   update --all      Rebase entire tree from root
   parent            Print parent branch name
