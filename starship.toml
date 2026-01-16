@@ -10,6 +10,9 @@ disabled=true
 [git_branch]
 disabled = true
 
+[git_status]
+disabled = true
+
 [custom.stack]
 command = "/Users/philbrockman/.dotfiles/scripts/stack-prompt.sh"
 when = "test -f .stack && grep -q \"^$(git branch --show-current 2>/dev/null):\" .stack 2>/dev/null"
