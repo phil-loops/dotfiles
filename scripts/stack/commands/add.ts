@@ -1,4 +1,4 @@
-import { currentBranch, loadStack, saveStack, wouldCreateCycle } from "../lib.ts";
+import { currentBranch, gitTry, loadStack, saveStack, wouldCreateCycle } from "../lib.ts";
 
 export function add(parent: string) {
   const branch = currentBranch();
@@ -9,6 +9,12 @@ export function add(parent: string) {
 
   if (branch === parent) {
     console.error("Cannot set branch as its own parent");
+    process.exit(1);
+  }
+
+  // Validate parent branch exists
+  if (!gitTry(`rev-parse --verify ${parent}`)) {
+    console.error(`Branch '${parent}' does not exist`);
     process.exit(1);
   }
 

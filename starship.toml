@@ -1,4 +1,4 @@
-format = "$kubernetes$custom"
+format = "$kubernetes$custom\n[>](green) "
 
 [kubernetes]
 format = '[$symbol$context]($style) '
@@ -21,14 +21,15 @@ disabled = true
 
 [custom.stack]
 command = "/Users/philbrockman/.dotfiles/scripts/stack-prompt.sh"
-when = "test -f .stack && grep -q \"^$(git branch --show-current 2>/dev/null):\" .stack 2>/dev/null"
+when = "REPO=$(basename $(git rev-parse --show-toplevel 2>/dev/null) 2>/dev/null) && (test -f ~/.local/share/stack/$REPO/stack || test -f ~/.local/share/stack/$REPO/convention)"
 format = "[$output]($style) "
 style = "purple"
 description = "Git stack position"
+command_timeout = 1000
 
 [custom.git_simple]
 command = "git branch --show-current"
-when = "test ! -f .stack || ! grep -q \"^$(git branch --show-current 2>/dev/null):\" .stack 2>/dev/null"
+when = "REPO=$(basename $(git rev-parse --show-toplevel 2>/dev/null) 2>/dev/null); test ! -f ~/.local/share/stack/$REPO/stack && test ! -f ~/.local/share/stack/$REPO/convention"
 format = "[$output]($style) "
 style = "bold purple"
 description = "Git branch when not in stack"
