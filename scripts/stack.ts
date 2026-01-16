@@ -16,6 +16,11 @@
  *   stack move-to-root       # stash changes and move to root branch
  *   stack move-to-last       # stash changes and move to deepest branch
  *   stack backup-restore     # list and restore from backups
+ *
+ *   stack edit <branch>      # stash, checkout branch, remember origin
+ *   stack edit --abort       # cancel edit, return to original branch
+ *   stack return             # update descendants, return, pop stash
+ *   stack fixup <branch>     # apply staged changes to ancestor, update stack
  */
 
 import { execSync } from "child_process";
@@ -23,9 +28,16 @@ import { existsSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 
 const STACK_FILE = join(process.cwd(), ".stack");
+const EDIT_STATE_FILE = join(process.cwd(), ".stack-edit");
 
 // Maps child branch -> parent branch
 type Stack = Record<string, string>;
+
+// State saved during `stack edit`
+type EditState = {
+  returnBranch: string;
+  hasStash: boolean;
+};
 
 function loadStack(): Stack {
   if (!existsSync(STACK_FILE)) return {};
@@ -44,6 +56,25 @@ function saveStack(stack: Stack) {
     .map(([child, parent]) => `${child}:${parent}`)
     .join("\n");
   writeFileSync(STACK_FILE, content + "\n");
+}
+
+function loadEditState(): EditState | null {
+  if (!existsSync(EDIT_STATE_FILE)) return null;
+  try {
+    return JSON.parse(readFileSync(EDIT_STATE_FILE, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+function saveEditState(state: EditState) {
+  writeFileSync(EDIT_STATE_FILE, JSON.stringify(state));
+}
+
+function clearEditState() {
+  if (existsSync(EDIT_STATE_FILE)) {
+    execSync(`rm ${EDIT_STATE_FILE}`);
+  }
 }
 
 function git(cmd: string): string {
@@ -427,6 +458,272 @@ function pushAll() {
   console.log("\nDone!");
 }
 
+/**
+ * Edit a different branch in the stack, remembering where to return
+ * Usage: stack edit goals-2
+ */
+function edit(targetBranch: string) {
+  const branch = currentBranch();
+  if (!branch) {
+    console.error("Not on a branch");
+    process.exit(1);
+  }
+
+  if (branch === targetBranch) {
+    console.error(`Already on ${targetBranch}`);
+    process.exit(1);
+  }
+
+  const existingState = loadEditState();
+  if (existingState) {
+    console.error(`Already in edit mode (editing from ${existingState.returnBranch})`);
+    console.error("Run 'stack return' first or 'stack edit --abort' to cancel");
+    process.exit(1);
+  }
+
+  // Check for uncommitted changes
+  const status = git("status --porcelain");
+  const hasChanges = status.trim().length > 0;
+
+  if (hasChanges) {
+    console.log("Stashing uncommitted changes...");
+    git("stash push -u -m 'stack-edit-stash'");
+  }
+
+  // Save state
+  saveEditState({ returnBranch: branch, hasStash: hasChanges });
+
+  // Checkout target
+  git(`checkout ${targetBranch}`);
+
+  console.log(`\nNow on ${targetBranch}`);
+  console.log("Make your changes, commit, then run 'stack return'");
+}
+
+/**
+ * Return from edit mode: update descendants and go back to original branch
+ */
+function returnFromEdit() {
+  const state = loadEditState();
+  if (!state) {
+    console.error("Not in edit mode. Use 'stack edit <branch>' first");
+    process.exit(1);
+  }
+
+  const branch = currentBranch();
+  const stack = loadStack();
+
+  // Check for uncommitted changes on the edit branch
+  const status = git("status --porcelain");
+  if (status.trim()) {
+    console.error("You have uncommitted changes. Commit or stash them first.");
+    process.exit(1);
+  }
+
+  // Get branches to update: from current branch to return branch (inclusive of return branch)
+  const descendants = getDescendants(stack, branch);
+  const toRebase = descendants.filter((b) => {
+    // Include if it's an ancestor of returnBranch or is returnBranch
+    let current = state.returnBranch;
+    while (current) {
+      if (current === b) return true;
+      current = stack[current];
+    }
+    return false;
+  });
+
+  if (toRebase.length > 0) {
+    console.log(`\nUpdating descendants: ${toRebase.join(" -> ")}\n`);
+
+    // Create backups
+    const backups: Record<string, string> = {};
+    for (const b of toRebase) {
+      backups[b] = createBackup(b);
+    }
+
+    // Rebase each
+    for (const b of toRebase) {
+      const parent = stack[b];
+      if (!parent) continue;
+
+      console.log(`Rebasing ${b} onto ${parent}...`);
+      git(`checkout ${b}`);
+
+      if (gitTry(`rebase ${parent}`)) {
+        console.log(`Done: ${b}`);
+      } else {
+        console.error(`\nFailed: ${b} (merge conflict)`);
+        console.error("Resolve the conflict, then run 'stack return' again");
+        process.exit(1);
+      }
+    }
+  }
+
+  // Return to original branch
+  git(`checkout ${state.returnBranch}`);
+
+  // Pop stash if we had one
+  if (state.hasStash) {
+    console.log("\nRestoring stashed changes...");
+    git("stash pop");
+  }
+
+  clearEditState();
+  console.log(`\nBack on ${state.returnBranch}`);
+}
+
+/**
+ * Abort edit mode without making changes
+ */
+function abortEdit() {
+  const state = loadEditState();
+  if (!state) {
+    console.error("Not in edit mode");
+    process.exit(1);
+  }
+
+  git(`checkout ${state.returnBranch}`);
+
+  if (state.hasStash) {
+    console.log("Restoring stashed changes...");
+    git("stash pop");
+  }
+
+  clearEditState();
+  console.log(`Aborted. Back on ${state.returnBranch}`);
+}
+
+/**
+ * Fixup: take staged changes, commit them to a different branch, update stack
+ * Usage: stack fixup goals-2
+ */
+function fixup(targetBranch: string) {
+  const stack = loadStack();
+  const branch = currentBranch();
+
+  if (!branch) {
+    console.error("Not on a branch");
+    process.exit(1);
+  }
+
+  // Verify target is an ancestor
+  let isAncestor = false;
+  let current = branch;
+  while (stack[current]) {
+    if (stack[current] === targetBranch || current === targetBranch) {
+      isAncestor = true;
+      break;
+    }
+    current = stack[current];
+  }
+  if (current === targetBranch) isAncestor = true;
+
+  if (!isAncestor) {
+    console.error(`${targetBranch} is not an ancestor of ${branch}`);
+    process.exit(1);
+  }
+
+  // Check for staged changes
+  const staged = git("diff --cached --name-only");
+  if (!staged.trim()) {
+    console.error("No staged changes. Stage your changes with 'git add' first");
+    process.exit(1);
+  }
+
+  // Check for unstaged changes (we'll preserve these)
+  const unstaged = git("diff --name-only");
+  const hasUnstaged = unstaged.trim().length > 0;
+
+  if (hasUnstaged) {
+    console.log("Stashing unstaged changes...");
+    git("stash push --keep-index -m 'stack-fixup-unstaged'");
+  }
+
+  // Create a patch from staged changes
+  console.log("Creating patch from staged changes...");
+  const patch = git("diff --cached");
+  const patchFile = join(process.cwd(), ".stack-fixup.patch");
+  writeFileSync(patchFile, patch);
+
+  // Reset staged changes
+  git("reset HEAD");
+
+  // Checkout target branch
+  git(`checkout ${targetBranch}`);
+
+  // Apply patch
+  console.log(`Applying changes to ${targetBranch}...`);
+  try {
+    execSync(`git apply ${patchFile}`, { encoding: "utf-8" });
+  } catch (e) {
+    console.error("Failed to apply patch. There may be conflicts.");
+    console.error("Aborting...");
+    git(`checkout ${branch}`);
+    if (hasUnstaged) git("stash pop");
+    execSync(`rm ${patchFile}`);
+    process.exit(1);
+  }
+
+  // Stage and commit
+  git("add -A");
+  const commitMsg = `fixup from ${branch}`;
+  git(`commit -m "${commitMsg}"`);
+  console.log(`Committed to ${targetBranch}`);
+
+  // Clean up patch file
+  execSync(`rm ${patchFile}`);
+
+  // Now update all branches from target to current
+  const toRebase = getDescendants(stack, targetBranch).filter((b) => {
+    // Only include branches between target and original branch
+    let c = branch;
+    while (c && c !== targetBranch) {
+      if (c === b) return true;
+      c = stack[c];
+    }
+    return false;
+  });
+
+  // Add original branch if it's tracked
+  if (stack[branch]) {
+    toRebase.push(branch);
+  }
+
+  if (toRebase.length > 0) {
+    console.log(`\nUpdating: ${toRebase.join(" -> ")}`);
+
+    for (const b of toRebase) {
+      const parent = stack[b];
+      if (!parent) continue;
+
+      createBackup(b);
+      git(`checkout ${b}`);
+
+      if (gitTry(`rebase ${parent}`)) {
+        console.log(`Rebased: ${b}`);
+      } else {
+        console.error(`\nFailed to rebase ${b}`);
+        console.error("Resolve conflicts and run 'git rebase --continue'");
+        if (hasUnstaged) {
+          console.error("Your unstaged changes are still in the stash");
+        }
+        process.exit(1);
+      }
+    }
+  }
+
+  // Return to original branch
+  git(`checkout ${branch}`);
+
+  // Restore unstaged changes
+  if (hasUnstaged) {
+    console.log("Restoring unstaged changes...");
+    git("stash pop");
+  }
+
+  console.log(`\nDone! Fixup applied to ${targetBranch} and propagated to ${branch}`);
+}
+
 function moveChanges(target: "root" | "last") {
   const stack = loadStack();
   const branch = currentBranch();
@@ -504,6 +801,26 @@ switch (cmd) {
   case "move-to-last":
     moveChanges("last");
     break;
+  case "edit":
+    if (args[0] === "--abort") {
+      abortEdit();
+    } else if (!args[0]) {
+      console.error("Usage: stack edit <branch> or stack edit --abort");
+      process.exit(1);
+    } else {
+      edit(args[0]);
+    }
+    break;
+  case "return":
+    returnFromEdit();
+    break;
+  case "fixup":
+    if (!args[0]) {
+      console.error("Usage: stack fixup <branch>");
+      process.exit(1);
+    }
+    fixup(args[0]);
+    break;
   default:
     console.log(`
 Branch Stack Tool
@@ -522,9 +839,23 @@ Commands:
   move-to-last      Stash changes and move to deepest branch
   backup-restore    List backups and show restore commands
 
+  edit <branch>     Stash, checkout branch, remember where to return
+  edit --abort      Cancel edit mode, return to original branch
+  return            After editing: update descendants, return, pop stash
+  fixup <branch>    Apply staged changes to ancestor branch, update stack
+
 Examples:
   stack add main
   stack list
   stack update
+
+  # Quick fix in ancestor branch (stay on current branch):
+  git add -p                 # stage changes for ancestor
+  stack fixup goals-2        # apply to goals-2, rebase back
+
+  # Bigger edit in ancestor branch:
+  stack edit goals-2         # stash, checkout goals-2
+  # ... make changes, commit ...
+  stack return               # rebase descendants, return
 `);
 }
