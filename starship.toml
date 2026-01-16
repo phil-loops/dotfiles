@@ -1,4 +1,5 @@
 format = "$kubernetes$custom\n[>](green) "
+command_timeout = 1000
 
 [kubernetes]
 format = '[$symbol$context]($style) '
@@ -25,7 +26,6 @@ when = "REPO=$(basename $(git rev-parse --show-toplevel 2>/dev/null) 2>/dev/null
 format = "[$output]($style) "
 style = "purple"
 description = "Git stack position"
-command_timeout = 1000
 
 [custom.git_simple]
 command = "git branch --show-current"
