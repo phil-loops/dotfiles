@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import type { Command } from "../types.ts";
 import { currentBranch, findRoot, getChainFromRoot, getChildren, git, loadStack } from "../lib.ts";
 
 type BranchStats = {
@@ -23,11 +24,9 @@ function getBranchStats(branch: string, parent: string | null): BranchStats {
   }
 
   try {
-    // Get diff stats
     const diffStat = git(`diff --stat ${parent}...${branch}`);
     const files = git(`diff --name-only ${parent}...${branch}`).split("\n").filter(Boolean);
 
-    // Parse additions/deletions from diff --stat
     let additions = 0;
     let deletions = 0;
     const statMatch = diffStat.match(/(\d+) insertions?\(\+\)/);
@@ -35,7 +34,6 @@ function getBranchStats(branch: string, parent: string | null): BranchStats {
     if (statMatch) additions = parseInt(statMatch[1]);
     if (delMatch) deletions = parseInt(delMatch[1]);
 
-    // Get commit count
     const commits = git(`rev-list --count ${parent}..${branch}`);
 
     return {
@@ -75,11 +73,11 @@ function getUntrackedBranches(): string[] {
   try {
     const allBranches = git("branch --format='%(refname:short)'")
       .split("\n")
-      .map(b => b.replace(/'/g, "").trim())
+      .map((b) => b.replace(/'/g, "").trim())
       .filter(Boolean)
-      .filter(b => !b.startsWith("backup/"));
+      .filter((b) => !b.startsWith("backup/"));
 
-    return allBranches.filter(b => !trackedBranches.has(b) && b !== "main" && b !== "master");
+    return allBranches.filter((b) => !trackedBranches.has(b) && b !== "main" && b !== "master");
   } catch {
     return [];
   }
@@ -97,48 +95,40 @@ function findFileOverlaps(stats: BranchStats[]): Map<string, string[]> {
     }
   }
 
-  // Only return files touched by multiple branches
   return new Map([...fileMap.entries()].filter(([_, branches]) => branches.length > 1));
 }
 
-export function plan() {
-  const stack = loadStack();
-  const branch = currentBranch();
+export const command: Command = {
+  name: "plan",
+  help: "Analyze stack for PR planning (copies to clipboard)",
+  run() {
+    const stack = loadStack();
+    const branch = currentBranch();
 
-  console.log("Analyzing stack for PR planning...\n");
+    console.log("Analyzing stack for PR planning...\n");
 
-  // Get stack structure
-  const allBranches = Object.keys(stack);
-  if (allBranches.length === 0) {
-    console.error("No branches tracked. Use 'stack add <parent>' first.");
-    process.exit(1);
-  }
+    const allBranches = Object.keys(stack);
+    if (allBranches.length === 0) {
+      console.error("No branches tracked. Use 'stack add <parent>' first.");
+      process.exit(1);
+    }
 
-  const root = findRoot(stack, branch || allBranches[0]);
-  const chain = getChainFromRoot(stack, branch || allBranches[0]);
+    const root = findRoot(stack, branch || allBranches[0]);
+    const chain = getChainFromRoot(stack, branch || allBranches[0]);
 
-  // Gather stats for each branch
-  const stats: BranchStats[] = [];
+    const stats: BranchStats[] = [];
+    stats.push({ branch: root, parent: null, additions: 0, deletions: 0, filesChanged: [], commits: 0 });
 
-  // Add root (no stats, just for structure)
-  stats.push({ branch: root, parent: null, additions: 0, deletions: 0, filesChanged: [], commits: 0 });
+    for (const b of chain) {
+      const parent = stack[b];
+      stats.push(getBranchStats(b, parent));
+    }
 
-  for (const b of chain) {
-    const parent = stack[b];
-    stats.push(getBranchStats(b, parent));
-  }
+    const overlaps = findFileOverlaps(stats.filter((s) => s.parent !== null));
+    const uncommitted = getUncommittedChanges();
+    const untrackedBranches = getUntrackedBranches();
 
-  // Find file overlaps (potential merge conflicts)
-  const overlaps = findFileOverlaps(stats.filter(s => s.parent !== null));
-
-  // Get uncommitted changes
-  const uncommitted = getUncommittedChanges();
-
-  // Get untracked branches that might be relevant
-  const untrackedBranches = getUntrackedBranches();
-
-  // Build the analysis prompt
-  let prompt = `# Stack Analysis for PR Planning
+    let prompt = `# Stack Analysis for PR Planning
 
 ## Goal
 Help me organize my branches into small, atomic PRs (ideally under 200 lines changed each) that can be reviewed and merged independently without creating merge conflicts.
@@ -148,77 +138,76 @@ Help me organize my branches into small, atomic PRs (ideally under 200 lines cha
 \`\`\`
 `;
 
-  // Print tree
-  function printTree(b: string, indent: string) {
-    const stat = stats.find(s => s.branch === b);
-    const linesChanged = stat ? stat.additions + stat.deletions : 0;
-    const marker = b === branch ? " <-- current" : "";
-    const sizeWarning = linesChanged > 200 ? " ⚠️ LARGE" : "";
+    function printTree(b: string, indent: string) {
+      const stat = stats.find((s) => s.branch === b);
+      const linesChanged = stat ? stat.additions + stat.deletions : 0;
+      const marker = b === branch ? " <-- current" : "";
+      const sizeWarning = linesChanged > 200 ? " ⚠️ LARGE" : "";
 
-    if (stat && stat.parent) {
-      prompt += `${indent}${b} (+${stat.additions}/-${stat.deletions}, ${stat.commits} commits)${marker}${sizeWarning}\n`;
-    } else {
-      prompt += `${indent}${b}${marker}\n`;
+      if (stat && stat.parent) {
+        prompt += `${indent}${b} (+${stat.additions}/-${stat.deletions}, ${stat.commits} commits)${marker}${sizeWarning}\n`;
+      } else {
+        prompt += `${indent}${b}${marker}\n`;
+      }
+
+      const children = getChildren(stack, b);
+      children.forEach((child) => printTree(child, indent + "  "));
     }
 
-    const children = getChildren(stack, b);
-    children.forEach(child => printTree(child, indent + "  "));
-  }
-
-  printTree(root, "");
-  prompt += `\`\`\`
+    printTree(root, "");
+    prompt += `\`\`\`
 
 ## Branch Details
 
 `;
 
-  for (const stat of stats) {
-    if (!stat.parent) continue;
+    for (const stat of stats) {
+      if (!stat.parent) continue;
 
-    const total = stat.additions + stat.deletions;
-    prompt += `### ${stat.branch} (${total} lines, ${stat.commits} commits)
+      const total = stat.additions + stat.deletions;
+      prompt += `### ${stat.branch} (${total} lines, ${stat.commits} commits)
 - Parent: ${stat.parent}
 - Files changed (${stat.filesChanged.length}):
-${stat.filesChanged.map(f => `  - ${f}`).join("\n")}
+${stat.filesChanged.map((f) => `  - ${f}`).join("\n")}
 
 `;
-  }
+    }
 
-  if (overlaps.size > 0) {
-    prompt += `## ⚠️ File Overlaps (Potential Merge Conflicts)
+    if (overlaps.size > 0) {
+      prompt += `## ⚠️ File Overlaps (Potential Merge Conflicts)
 
 These files are touched by multiple branches:
 
 `;
-    for (const [file, branches] of overlaps) {
-      prompt += `- \`${file}\`: ${branches.join(", ")}\n`;
+      for (const [file, branches] of overlaps) {
+        prompt += `- \`${file}\`: ${branches.join(", ")}\n`;
+      }
+      prompt += "\n";
     }
-    prompt += "\n";
-  }
 
-  if (uncommitted.staged.length > 0 || uncommitted.unstaged.length > 0) {
-    prompt += `## Uncommitted Changes
+    if (uncommitted.staged.length > 0 || uncommitted.unstaged.length > 0) {
+      prompt += `## Uncommitted Changes
 
 `;
-    if (uncommitted.staged.length > 0) {
-      prompt += `Staged: ${uncommitted.staged.join(", ")}\n`;
+      if (uncommitted.staged.length > 0) {
+        prompt += `Staged: ${uncommitted.staged.join(", ")}\n`;
+      }
+      if (uncommitted.unstaged.length > 0) {
+        prompt += `Unstaged: ${uncommitted.unstaged.join(", ")}\n`;
+      }
+      prompt += "\n";
     }
-    if (uncommitted.unstaged.length > 0) {
-      prompt += `Unstaged: ${uncommitted.unstaged.join(", ")}\n`;
-    }
-    prompt += "\n";
-  }
 
-  if (untrackedBranches.length > 0) {
-    prompt += `## Untracked Branches
+    if (untrackedBranches.length > 0) {
+      prompt += `## Untracked Branches
 
 These branches exist but aren't in the stack:
-${untrackedBranches.map(b => `- ${b}`).join("\n")}
+${untrackedBranches.map((b) => `- ${b}`).join("\n")}
 
 `;
-  }
+    }
 
-  prompt += `## Questions
+    prompt += `## Questions
 
 1. Are there any branches that should be split into smaller PRs?
 2. Are there branches that could be reordered to reduce file overlaps?
@@ -233,14 +222,14 @@ ${untrackedBranches.map(b => `- ${b}`).join("\n")}
 - \`stack update\` - Rebase the stack after restructuring
 `;
 
-  console.log(prompt);
+    console.log(prompt);
 
-  // Also copy to clipboard if pbcopy is available
-  try {
-    execSync("which pbcopy", { stdio: "pipe" });
-    const proc = execSync(`echo "${prompt.replace(/"/g, '\\"')}" | pbcopy`, { stdio: "pipe" });
-    console.log("\n---\n✓ Copied to clipboard. Paste into Claude for analysis.");
-  } catch {
-    console.log("\n---\nCopy the above and paste into Claude for analysis.");
-  }
-}
+    try {
+      execSync("which pbcopy", { stdio: "pipe" });
+      execSync(`echo "${prompt.replace(/"/g, '\\"')}" | pbcopy`, { stdio: "pipe" });
+      console.log("\n---\n✓ Copied to clipboard. Paste into Claude for analysis.");
+    } catch {
+      console.log("\n---\nCopy the above and paste into Claude for analysis.");
+    }
+  },
+};

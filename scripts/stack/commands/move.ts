@@ -1,6 +1,7 @@
+import type { Command } from "../types.ts";
 import { currentBranch, findRoot, getChainFromRoot, git, loadStack } from "../lib.ts";
 
-export function moveChanges(target: "root" | "last") {
+function moveChanges(target: "root" | "last") {
   const stack = loadStack();
   const branch = currentBranch();
 
@@ -33,3 +34,20 @@ export function moveChanges(target: "root" | "last") {
 
   console.log(`\nDone! Now on ${targetBranch} with your changes.`);
 }
+
+export const commands: Command[] = [
+  {
+    name: "move-to-root",
+    help: "Stash changes and move to root branch",
+    run() {
+      moveChanges("root");
+    },
+  },
+  {
+    name: "move-to-last",
+    help: "Stash changes and move to deepest branch",
+    run() {
+      moveChanges("last");
+    },
+  },
+];
