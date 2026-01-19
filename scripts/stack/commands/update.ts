@@ -1,5 +1,4 @@
 import {
-  createBackup,
   currentBranch,
   getBranchesByPrefix,
   getChainFromRoot,
@@ -42,14 +41,6 @@ export function update(all: boolean) {
 
     console.log(`\nWill rebase: ${toRebase.join(" -> ")}\n`);
 
-    console.log("Creating backups...");
-    const backups: Record<string, string> = {};
-    for (const b of toRebase) {
-      backups[b] = createBackup(b);
-      console.log(`  ${b} -> ${backups[b]}`);
-    }
-    console.log("");
-
     for (const b of toRebase) {
       const parent = getConventionParent(b, convention)!;
 
@@ -67,9 +58,8 @@ To resolve:
   3. git rebase --continue
   4. Re-run: stack update
 
-To abort and restore:
-  1. git rebase --abort
-  2. git reset --hard ${backups[b]}
+To abort: git rebase --abort
+Use 'git reflog' to find previous state if needed.
 `);
         process.exit(1);
       }
@@ -102,14 +92,6 @@ To abort and restore:
 
   console.log(`\nWill rebase: ${toRebase.join(" -> ")}\n`);
 
-  console.log("Creating backups...");
-  const backups: Record<string, string> = {};
-  for (const b of toRebase) {
-    backups[b] = createBackup(b);
-    console.log(`  ${b} -> ${backups[b]}`);
-  }
-  console.log("");
-
   for (const b of toRebase) {
     const parent = stack[b];
     if (!parent) continue;
@@ -128,9 +110,8 @@ To resolve:
   3. git rebase --continue
   4. Re-run: stack update
 
-To abort and restore:
-  1. git rebase --abort
-  2. git reset --hard ${backups[b]}
+To abort: git rebase --abort
+Use 'git reflog' to find previous state if needed.
 `);
       process.exit(1);
     }
