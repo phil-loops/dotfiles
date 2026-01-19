@@ -372,13 +372,9 @@ local function open_review(idx)
   -- Open new diffview
   vim.cmd("DiffviewOpen " .. item.parent .. "..." .. item.branch)
 
-  -- Reopen branch panel after diffview loads, focus diff view
+  -- Reopen branch panel after diffview loads
   vim.defer_fn(function()
     open_panel_above_diffview()
-    -- Always focus the rightmost window (diff view)
-    vim.cmd("wincmd l")
-    vim.cmd("wincmd l")
-    vim.cmd("wincmd l")
   end, 100)
 
   -- Update statusline to show position
@@ -694,6 +690,83 @@ vim.keymap.set("n", "<leader>gl", "<cmd>StackList<cr>", { desc = "Stack branch l
 vim.keymap.set("n", "<leader>g3", "<cmd>Stack3Way<cr>", { desc = "3-way diff: parent/current/final" })
 vim.keymap.set("n", "<leader>gp", "<cmd>StackPanel<cr>", { desc = "Toggle stack branch panel" })
 
+-- Quick jump to specific panels
+vim.keymap.set("n", "<leader>gb", function()
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    vim.api.nvim_set_current_win(panel_win)
+  end
+end, { desc = "Jump to branch panel" })
+
+vim.keymap.set("n", "<leader>gf", function()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if vim.api.nvim_buf_get_name(buf):match("DiffviewFilePanel") then
+      vim.api.nvim_set_current_win(win)
+      return
+    end
+  end
+end, { desc = "Jump to file panel" })
+
+vim.keymap.set("n", "<leader>gd", function()
+  -- Jump to rightmost window (diff view)
+  vim.cmd("wincmd l")
+  vim.cmd("wincmd l")
+  vim.cmd("wincmd l")
+end, { desc = "Jump to diff view" })
+
+-- File navigation within diffview
+vim.keymap.set("n", "]f", function()
+  local ok, diffview_lib = pcall(require, "diffview.lib")
+  if ok then
+    local view = diffview_lib.get_current_view()
+    if view then
+      view:next_file()
+    end
+  end
+end, { desc = "Next file in diff" })
+
+vim.keymap.set("n", "[f", function()
+  local ok, diffview_lib = pcall(require, "diffview.lib")
+  if ok then
+    local view = diffview_lib.get_current_view()
+    if view then
+      view:prev_file()
+    end
+  end
+end, { desc = "Prev file in diff" })
+
+vim.keymap.set("n", "<leader>ge", function()
+  -- Open the current file for editing
+  local bufname = vim.fn.expand("%:p")
+  local rel_file = nil
+
+  -- Try to extract file path from diffview buffer name
+  -- Format: diffview:///path/.git/abc123/filepath
+  rel_file = bufname:match("%.git/[^/]+/(.+)$")
+
+  -- If not in a diffview buffer, try getting from file panel
+  if not rel_file then
+    local ok, diffview_lib = pcall(require, "diffview.lib")
+    if ok then
+      local view = diffview_lib.get_current_view()
+      if view then
+        local file_entry = view.panel:get_item_at_cursor()
+        if file_entry and file_entry.path then
+          rel_file = file_entry.path
+        end
+      end
+    end
+  end
+
+  if rel_file then
+    -- Open in new tab to preserve diffview
+    vim.cmd("tabedit " .. rel_file)
+    vim.notify("Editing: " .. rel_file, vim.log.levels.INFO)
+  else
+    vim.notify("Could not determine file to edit. Try selecting a file in the panel first.", vim.log.levels.WARN)
+  end
+end, { desc = "Edit current file" })
+
 -- On first load, open first branch. On reload, stay at current position.
 if not _G.stack_review_loaded then
   _G.stack_review_loaded = true
@@ -708,7 +781,8 @@ end
   console.log("  ]b / [b      next/prev branch");
   console.log("  <leader>gl   branch list (fuzzy jump)");
   console.log("  <leader>gs   show current position");
-  console.log("  ]f / [f      next/prev file");
+  console.log("  <leader>ge   edit current file");
+  console.log("  ]f / [f      next/prev file (diffview)");
   console.log("  <tab>        toggle file panel");
   console.log("  :StackJump N jump to branch N");
   console.log("  :qa          quit review\n");
