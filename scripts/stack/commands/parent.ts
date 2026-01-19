@@ -1,5 +1,5 @@
 import type { Command } from "../types.ts";
-import { currentBranch, getConventionParent, loadConvention, loadStack } from "../lib.ts";
+import { currentBranch, loadStack } from "../lib.ts";
 
 export const command: Command = {
   name: "parent",
@@ -12,27 +12,14 @@ export const command: Command = {
       process.exit(1);
     }
 
-    // Convention mode
-    const convention = loadConvention();
-    if (convention) {
-      const p = getConventionParent(branch, convention);
-      if (p) {
-        console.log(p);
-      } else {
-        console.error(`Branch "${branch}" doesn't match prefix ${convention.prefix}`);
-        process.exit(1);
-      }
-      return;
-    }
-
-    // Explicit mode
     const stack = loadStack();
-    const p = stack[branch];
-    if (!p) {
+    const parent = stack[branch];
+
+    if (!parent) {
       console.error(`Branch "${branch}" not tracked`);
       process.exit(1);
     }
 
-    console.log(p);
+    console.log(parent);
   },
 };

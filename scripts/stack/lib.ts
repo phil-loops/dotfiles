@@ -71,45 +71,14 @@ export function loadConfig(): Config {
   return config;
 }
 
-// Maps child branch -> parent branch (explicit mode)
+// Maps child branch -> parent branch
 export type Stack = Record<string, string>;
-
-// Convention-based stack config
-export type ConventionConfig = {
-  prefix: string; // e.g., "goals-"
-  root: string; // e.g., "main"
-};
 
 // State saved during `stack edit`
 export type EditState = {
   returnBranch: string;
   hasStash: boolean;
 };
-
-function getConventionFile(): string {
-  return join(getStackDir(), "convention");
-}
-
-export function loadConvention(): ConventionConfig | null {
-  const file = getConventionFile();
-  if (!existsSync(file)) return null;
-  try {
-    return JSON.parse(readFileSync(file, "utf-8"));
-  } catch {
-    return null;
-  }
-}
-
-export function saveConvention(config: ConventionConfig) {
-  writeFileSync(getConventionFile(), JSON.stringify(config, null, 2) + "\n");
-}
-
-export function clearConvention() {
-  const file = getConventionFile();
-  if (existsSync(file)) {
-    execSync(`rm "${file}"`);
-  }
-}
 
 /**
  * Get all branches matching a prefix, sorted numerically
@@ -129,36 +98,6 @@ export function getBranchesByPrefix(prefix: string): string[] {
   } catch {
     return [];
   }
-}
-
-/**
- * Get the parent branch in a convention-based stack
- */
-export function getConventionParent(branch: string, config: ConventionConfig): string | null {
-  const branches = getBranchesByPrefix(config.prefix);
-  const idx = branches.indexOf(branch);
-  if (idx <= 0) return config.root; // First branch or not found -> root is parent
-  return branches[idx - 1];
-}
-
-/**
- * Get children in a convention-based stack
- */
-export function getConventionChildren(branch: string, config: ConventionConfig): string[] {
-  const branches = getBranchesByPrefix(config.prefix);
-  if (branch === config.root) {
-    return branches.length > 0 ? [branches[0]] : [];
-  }
-  const idx = branches.indexOf(branch);
-  if (idx === -1 || idx === branches.length - 1) return [];
-  return [branches[idx + 1]];
-}
-
-/**
- * Check if current branch matches a convention prefix
- */
-export function matchesConvention(branch: string, config: ConventionConfig): boolean {
-  return branch.startsWith(config.prefix);
 }
 
 export function loadStack(): Stack {

@@ -1,12 +1,5 @@
 import type { Command } from "../types.ts";
-import {
-  currentBranch,
-  getBranchesByPrefix,
-  getChainFromRoot,
-  git,
-  loadConvention,
-  loadStack,
-} from "../lib.ts";
+import { currentBranch, getChainFromRoot, git, loadStack } from "../lib.ts";
 
 export const command: Command = {
   name: "step",
@@ -15,26 +8,19 @@ export const command: Command = {
   run(args) {
     const back = args.includes("--back");
     const branch = currentBranch();
-    const convention = loadConvention();
+    const stack = loadStack();
 
-    let chain: string[];
-    let root: string;
-
-    if (convention) {
-      chain = getBranchesByPrefix(convention.prefix);
-      root = convention.root;
-    } else {
-      const stack = loadStack();
-      if (Object.keys(stack).length === 0) {
-        console.error("No branches tracked");
-        process.exit(1);
-      }
-      chain = getChainFromRoot(stack, branch);
-      // Find root
-      const allParents = new Set(Object.values(stack));
-      const allChildren = new Set(Object.keys(stack));
-      root = [...allParents].find((p) => !allChildren.has(p)) || "main";
+    if (Object.keys(stack).length === 0) {
+      console.error("No branches tracked");
+      process.exit(1);
     }
+
+    const chain = getChainFromRoot(stack, branch);
+
+    // Find root
+    const allParents = new Set(Object.values(stack));
+    const allChildren = new Set(Object.keys(stack));
+    const root = [...allParents].find((p) => !allChildren.has(p)) || "main";
 
     // Include root at the beginning for navigation
     const fullChain = [root, ...chain];

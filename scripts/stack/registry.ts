@@ -32,10 +32,6 @@ export function showHelp() {
   console.log(`
 stack - Branch Stack Tool
 
-Modes:
-  Convention mode: Branches auto-detected by prefix (e.g., goals-1, goals-2)
-  Explicit mode:   Branches tracked manually with 'stack add'
-
 Commands:`);
 
   // Group and display commands
@@ -53,15 +49,13 @@ Commands:`);
 
   console.log(`
 Examples:
-  # Convention mode (recommended):
-  stack init goals-          # setup prefix
-  git checkout -b goals-1    # auto-tracked!
-  git checkout -b goals-2    # auto-tracked!
+  # Init from existing branches:
+  stack init goals-          # finds goals-1, goals-2, etc.
   stack list                 # shows: main -> goals-1 -> goals-2
   stack update               # rebase in order
 
-  # Explicit mode:
-  stack add main             # track current branch
+  # Or add branches manually:
+  stack add main             # track current branch with parent
   stack list
   stack update
 `);
