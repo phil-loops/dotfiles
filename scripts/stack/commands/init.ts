@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, getBranchesByPrefix, gitTry, loadStack, saveStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "stack",
   name: "init",
   help: "Initialize stack from branch prefix (e.g., stack init goals-)",
   args: "[prefix]",

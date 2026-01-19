@@ -1,7 +1,7 @@
 import { readdirSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
-import type { Command } from "./types.ts";
+import { CATEGORIES, type Category, type Command } from "./types.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const commandsDir = join(__dirname, "commands");
@@ -29,34 +29,40 @@ for (const file of files) {
 }
 
 export function showHelp() {
-  console.log(`
-stack - Branch Stack Tool
+  console.log(`\nstack - Branch Stack Tool\n`);
 
-Commands:`);
-
-  // Group and display commands
-  const sorted = [...commands.values()].sort((a, b) => a.name.localeCompare(b.name));
-
-  // Find max width for alignment
-  const maxWidth = Math.max(...sorted.map((c) => c.name.length + (c.args?.length || 0) + 1));
-  const padWidth = Math.max(maxWidth + 4, 20);
-
-  for (const cmd of sorted) {
-    const args = cmd.args ? ` ${cmd.args}` : "";
-    const name = `  ${cmd.name}${args}`.padEnd(padWidth);
-    console.log(`${name}${cmd.help}`);
+  // Group commands by category
+  const byCategory = new Map<Category, Command[]>();
+  for (const cmd of commands.values()) {
+    const list = byCategory.get(cmd.category) || [];
+    list.push(cmd);
+    byCategory.set(cmd.category, list);
   }
 
-  console.log(`
-Examples:
-  # Init from existing branches:
-  stack init goals-          # finds goals-1, goals-2, etc.
-  stack list                 # shows: main -> goals-1 -> goals-2
-  stack update               # rebase in order
+  // Find max width for alignment
+  const allCmds = [...commands.values()];
+  const maxWidth = Math.max(...allCmds.map((c) => c.name.length + (c.args?.length || 0) + 1));
+  const padWidth = Math.max(maxWidth + 4, 20);
 
-  # Or add branches manually:
-  stack add main             # track current branch with parent
-  stack list
-  stack update
-`);
+  // Display in category order
+  const categoryOrder: Category[] = ["nav", "stack", "git", "util"];
+  for (const cat of categoryOrder) {
+    const cmds = byCategory.get(cat);
+    if (!cmds || cmds.length === 0) continue;
+
+    console.log(`${CATEGORIES[cat]}:`);
+    cmds.sort((a, b) => a.name.localeCompare(b.name));
+    for (const cmd of cmds) {
+      const args = cmd.args ? ` ${cmd.args}` : "";
+      const name = `  ${cmd.name}${args}`.padEnd(padWidth);
+      console.log(`${name}${cmd.help}`);
+    }
+    console.log();
+  }
+
+  console.log(`Examples:
+  stack init goals-          # init from branch prefix
+  stack list                 # show branch tree
+  stack update --all         # rebase entire stack
+  stack pr                   # push and create PR`);
 }

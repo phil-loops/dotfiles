@@ -6,6 +6,7 @@ import { getForkRemote, git, loadConfig } from "../lib.ts";
 const LOCAL_CONFIG = join(process.cwd(), ".stackrc");
 
 export const command: Command = {
+  category: "util",
   name: "remote",
   help: "Show or set remote (saves to .stackrc)",
   args: "[name]",

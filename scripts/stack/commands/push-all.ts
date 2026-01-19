@@ -3,6 +3,7 @@ import type { Command } from "../types.ts";
 import { getForkRemote, loadStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "git",
   name: "push-all",
   help: "Push all tracked branches",
   run() {

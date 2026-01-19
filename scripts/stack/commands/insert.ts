@@ -3,6 +3,7 @@ import { getChildren, git, loadStack, saveStack } from "../lib.ts";
 import { parseArgs } from "../args.ts";
 
 export const command: Command = {
+  category: "stack",
   name: "insert",
   help: "Insert new branch, reparent children",
   args: "<branch> --after <parent>",

@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, getChainFromRoot, git, loadStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "nav",
   name: "last",
   help: "Switch to deepest branch in stack",
   run() {

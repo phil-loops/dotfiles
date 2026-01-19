@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, gitTry, loadStack, saveStack, wouldCreateCycle } from "../lib.ts";
 
 export const command: Command = {
+  category: "stack",
   name: "add",
   help: "Track current branch as child of parent",
   args: "<parent>",

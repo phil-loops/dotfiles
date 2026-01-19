@@ -10,6 +10,7 @@ import {
 import { parseArgs } from "../args.ts";
 
 export const command: Command = {
+  category: "git",
   name: "update",
   help: "Rebase current branch + descendants (--all for entire tree)",
   args: "[--all]",

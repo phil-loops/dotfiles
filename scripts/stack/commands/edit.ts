@@ -64,7 +64,8 @@ function abortEdit() {
 
 export const commands: Command[] = [
   {
-    name: "edit",
+    category: "stack",
+  name: "edit",
     help: "Stash, checkout branch, remember where to return",
     args: "<branch>",
     run(args) {
@@ -79,7 +80,8 @@ export const commands: Command[] = [
     },
   },
   {
-    name: "return",
+    category: "stack",
+  name: "return",
     help: "After editing: update descendants, return, pop stash",
     run() {
       const state = loadEditState();

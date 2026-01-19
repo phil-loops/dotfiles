@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { checkConflict, currentBranch, getChildren, loadStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "git",
   name: "check",
   help: "Dry-run conflict detection across the stack",
   run() {

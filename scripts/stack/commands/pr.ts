@@ -3,6 +3,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, getForkRemote, getGitHubRepo, loadStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "git",
   name: "pr",
   help: "Push and create PR targeting parent",
   run() {

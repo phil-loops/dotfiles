@@ -3,6 +3,7 @@ import { currentBranch, getChainFromRoot, git, loadStack } from "../lib.ts";
 import { parseArgs } from "../args.ts";
 
 export const command: Command = {
+  category: "nav",
   name: "step",
   help: "Move to next branch and show diff summary",
   args: "[--back]",

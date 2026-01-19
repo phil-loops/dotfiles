@@ -99,6 +99,7 @@ function findFileOverlaps(stats: BranchStats[]): Map<string, string[]> {
 }
 
 export const command: Command = {
+  category: "util",
   name: "plan",
   help: "Analyze stack for PR planning (copies to clipboard)",
   run() {
