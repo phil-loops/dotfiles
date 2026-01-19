@@ -24,6 +24,7 @@
  *   stack edit --abort       # cancel edit, return to original branch
  *   stack return             # update descendants, return, pop stash
  *   stack fixup <branch>     # apply staged changes to ancestor, update stack
+ *   stack peel [name] [--base b]  # create fresh branch with diff as changes
  */
 
 import { add } from "./commands/add.ts";
@@ -37,6 +38,7 @@ import { last } from "./commands/last.ts";
 import { list } from "./commands/list.ts";
 import { moveChanges } from "./commands/move.ts";
 import { parent } from "./commands/parent.ts";
+import { peel } from "./commands/peel.ts";
 import { plan } from "./commands/plan.ts";
 import { pr } from "./commands/pr.ts";
 import { remote } from "./commands/remote.ts";
@@ -128,6 +130,25 @@ switch (cmd) {
     }
     fixup(args[0]);
     break;
+  case "peel": {
+    // Parse: stack peel [new-branch] [--base <base>]
+    const baseIdx = args.indexOf("--base");
+    let newBranch: string | undefined;
+    let baseBranch = "main";
+
+    if (baseIdx !== -1) {
+      baseBranch = args[baseIdx + 1] || "main";
+      // Get new branch name if it's before --base
+      if (baseIdx > 0) {
+        newBranch = args[0];
+      }
+    } else if (args[0]) {
+      newBranch = args[0];
+    }
+
+    peel(newBranch, baseBranch);
+    break;
+  }
   default:
     console.log(`
 stack - Branch Stack Tool
@@ -161,6 +182,8 @@ Commands:
   edit --abort      Cancel edit mode, return to original branch
   return            After editing: update descendants, return, pop stash
   fixup <branch>    Apply staged changes to ancestor branch, update stack
+  peel [name] [--base <branch>]
+                    Create new branch with diff as uncommitted changes
 
 Examples:
   # Convention mode (recommended):
