@@ -1,13 +1,5 @@
 import type { Command } from "../types.ts";
-import {
-  currentBranch,
-  getChildren,
-  git,
-  loadConvention,
-  loadStack,
-  getBranchesByPrefix,
-  getConventionParent,
-} from "../lib.ts";
+import { currentBranch, getChildren, git, loadStack } from "../lib.ts";
 
 const DEFAULT_THRESHOLD = 150;
 
@@ -59,39 +51,22 @@ export const command: Command = {
     }
 
     const stack = loadStack();
-    const convention = loadConvention();
     const branch = currentBranch();
 
-    const stats: BranchStats[] = [];
-
-    // Handle convention mode
-    if (convention) {
-      const branches = getBranchesByPrefix(convention.prefix);
-      for (const b of branches) {
-        const parent = getConventionParent(b, convention);
-        if (parent) {
-          const loc = getTsLoc(parent, b);
-          stats.push({ branch: b, parent, loc, exceeds: loc > threshold });
-        }
-      }
-    }
-
-    // Handle explicit mode
-    for (const [child, parent] of Object.entries(stack)) {
-      // Skip if already handled by convention
-      if (convention && child.startsWith(convention.prefix)) continue;
-
-      const loc = getTsLoc(parent, child);
-      stats.push({ branch: child, parent, loc, exceeds: loc > threshold });
-    }
-
-    if (stats.length === 0) {
+    if (Object.keys(stack).length === 0) {
       console.log("No branches tracked");
       return;
     }
 
+    const stats: BranchStats[] = [];
+
+    for (const [child, parent] of Object.entries(stack)) {
+      const loc = getTsLoc(parent, child);
+      stats.push({ branch: child, parent, loc, exceeds: loc > threshold });
+    }
+
     // Build tree for display
-    const allParents = new Set([...stats.map((s) => s.parent)]);
+    const allParents = new Set(stats.map((s) => s.parent));
     const allChildren = new Set(stats.map((s) => s.branch));
     const roots = [...allParents].filter((p) => !allChildren.has(p));
 
@@ -109,11 +84,8 @@ export const command: Command = {
         console.log(`${indent}${b}${marker}`);
       }
 
-      // Get children from both stack and convention
-      const children = new Set<string>();
-      for (const s of stats) {
-        if (s.parent === b) children.add(s.branch);
-      }
+      // Get children
+      const children = getChildren(stack, b);
       for (const child of children) {
         printTree(child, indent + "  ");
       }

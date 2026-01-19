@@ -1,39 +1,17 @@
 import type { Command } from "../types.ts";
-import { currentBranch, getBranchesByPrefix, getChildren, loadConvention, loadStack } from "../lib.ts";
+import { currentBranch, getChildren, loadStack } from "../lib.ts";
 
 export const command: Command = {
   name: "list",
   help: "Show the branch tree",
   run() {
-    const convention = loadConvention();
-    const branch = currentBranch();
-
-    // Convention mode
-    if (convention) {
-      const branches = getBranchesByPrefix(convention.prefix);
-      if (branches.length === 0) {
-        console.log(`No branches matching ${convention.prefix}*`);
-        console.log(`Create one with: git checkout -b ${convention.prefix}1`);
-        return;
-      }
-
-      console.log(convention.root);
-      for (let i = 0; i < branches.length; i++) {
-        const b = branches[i];
-        const marker = b === branch ? " <-- you" : "";
-        const indent = "  ".repeat(i + 1);
-        console.log(indent + b + marker);
-      }
-      return;
-    }
-
-    // Explicit mode
     const stack = loadStack();
+    const branch = currentBranch();
 
     if (Object.keys(stack).length === 0) {
       console.log("No branches tracked.");
-      console.log("Use: stack add <parent>    (explicit mode)");
-      console.log("Or:  stack init <prefix>   (convention mode)");
+      console.log("Use: stack add <parent>    (track current branch)");
+      console.log("Or:  stack init <prefix>   (init from branch prefix)");
       return;
     }
 
