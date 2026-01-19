@@ -328,11 +328,18 @@ function runNvimReview(chain: string[], _stack: Record<string, string>) {
   fs.writeFileSync(chainFile, JSON.stringify(reviewChain));
   fs.writeFileSync(stateFile, JSON.stringify({ index: 0 }));
 
+  // Define luaFile path before using it in template
+  const luaFile = path.join(tmpDir, "init.lua");
+
   // Create lua init script for stack review navigation
   const luaScript = `
 -- Stack Review Navigation
 local chain_file = "${chainFile}"
 local state_file = "${stateFile}"
+
+-- Forward declarations
+local open_panel_above_diffview
+local update_panel
 
 local function read_json(file)
   local f = io.open(file, "r")
@@ -364,6 +371,11 @@ local function open_review(idx)
 
   -- Open new diffview
   vim.cmd("DiffviewOpen " .. item.parent .. "..." .. item.branch)
+
+  -- Reopen branch panel after diffview loads
+  vim.defer_fn(function()
+    open_panel_above_diffview()
+  end, 100)
 
   -- Update statusline to show position
   vim.notify(string.format("Reviewing: %s (%d/%d)", item.branch, idx + 1, #chain), vim.log.levels.INFO)
@@ -429,6 +441,234 @@ vim.api.nvim_create_user_command("StackJump", function(opts)
   open_review(idx - 1)
 end, { nargs = 1 })
 
+-- 3-way view: root vs parent vs current
+vim.api.nvim_create_user_command("Stack3Way", function()
+  local state = get_state()
+  local chain = get_chain()
+  local item = chain[state.index + 1]
+
+  -- Get git root
+  local git_root = vim.fn.systemlist("git rev-parse --show-toplevel")[1]
+
+  -- Try multiple methods to get the file path
+  local rel_file = nil
+
+  -- Method 1: Try to get from diffview's current entry
+  local ok, diffview_lib = pcall(require, "diffview.lib")
+  if ok then
+    local view = diffview_lib.get_current_view()
+    if view then
+      local file_entry = view.panel:get_item_at_cursor()
+      if file_entry and file_entry.path then
+        rel_file = file_entry.path
+      end
+    end
+  end
+
+  -- Method 2: Parse from diffview buffer name
+  if not rel_file then
+    local bufname = vim.fn.expand("%:p")
+    -- diffview://panels/0/DiffviewFilePanel is the panel - skip
+    if not bufname:match("DiffviewFilePanel") then
+      -- Try: diffview:///path/.git/abc123/filepath
+      rel_file = bufname:match("%.git/[^/]+/(.+)$")
+    end
+  end
+
+  -- Method 3: Get from current window if it's a normal file
+  if not rel_file then
+    local bufname = vim.fn.expand("%:p")
+    if not bufname:match("^diffview://") and vim.fn.filereadable(bufname) == 1 then
+      rel_file = bufname:gsub(git_root .. "/", "")
+    end
+  end
+
+  -- Method 4: Prompt user
+  if not rel_file or rel_file == "" then
+    rel_file = vim.fn.input("File path (relative to repo): ")
+  end
+
+  if not rel_file or rel_file == "" then
+    vim.notify("Could not determine file path", vim.log.levels.ERROR)
+    return
+  end
+
+  -- Get branches for 3-way view
+  local parent = item.parent                    -- One step back
+  local current = item.branch                   -- Current branch being reviewed
+  local final_branch = chain[#chain].branch     -- Last branch in stack (end result)
+
+  -- Helper to check if file exists in a branch
+  local function file_exists_in_branch(branch, filepath)
+    local result = vim.fn.systemlist(string.format("git cat-file -e %s:%s 2>/dev/null; echo $?", branch, filepath))
+    return result[#result] == "0"
+  end
+
+  -- Helper to open file from branch (or show [NEW FILE] message)
+  local function open_branch_file(branch, filepath, label)
+    if file_exists_in_branch(branch, filepath) then
+      vim.cmd("Gedit " .. branch .. ":" .. filepath)
+      vim.cmd("setlocal readonly nomodifiable")
+    else
+      vim.cmd("enew")
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, {"[FILE DOES NOT EXIST IN " .. branch .. "]"})
+      vim.cmd("setlocal readonly nomodifiable buftype=nofile bufhidden=wipe")
+    end
+    -- Don't rename - let fugitive/nvim handle buffer names naturally
+  end
+
+  -- Open 3-way split in new tab
+  vim.cmd("tabnew")
+
+  -- Left: parent version (one step back)
+  open_branch_file(parent, rel_file, "PARENT")
+
+  -- Center: current version (what you're reviewing)
+  vim.cmd("vsplit")
+  open_branch_file(current, rel_file, "CURRENT")
+
+  -- Right: final version (end result of full stack)
+  vim.cmd("vsplit")
+  open_branch_file(final_branch, rel_file, "FINAL")
+
+  -- Enable diff mode on all three
+  vim.cmd("windo diffthis")
+  vim.cmd("wincmd =")
+  vim.cmd("1wincmd w")  -- Focus first window
+
+  vim.notify(string.format("3-way: %s → %s → %s", parent, current, final_branch), vim.log.levels.INFO)
+end, {})
+
+-- Branch navigation panel
+local panel_buf = nil
+local panel_win = nil
+
+update_panel = function()
+  if not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
+
+  local state = get_state()
+  local chain = get_chain()
+  local lines = {}
+
+  for i, item in ipairs(chain) do
+    local marker = (i - 1 == state.index) and " ◀" or ""
+    local prefix = (i - 1 == state.index) and "▶ " or "  "
+    -- Shorten branch name for display
+    local short_name = item.branch:gsub("goals%-v0%-", "")
+    table.insert(lines, string.format("%s%d. %s%s", prefix, i, short_name, marker))
+  end
+
+  vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
+  vim.api.nvim_buf_set_lines(panel_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(panel_buf, "modifiable", false)
+
+  -- Move cursor to current branch
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    pcall(vim.api.nvim_win_set_cursor, panel_win, {state.index + 1, 0})
+  end
+end
+
+local function setup_panel_keymaps()
+  local opts = { buffer = panel_buf, silent = true }
+  vim.keymap.set("n", "<CR>", function()
+    local line = vim.api.nvim_get_current_line()
+    local idx = tonumber(line:match("(%d+)%."))
+    if idx then
+      open_review(idx - 1)
+      update_panel()
+      vim.cmd("wincmd l")  -- Go to diff window
+    end
+  end, opts)
+  vim.keymap.set("n", "q", function()
+    if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+      vim.api.nvim_win_close(panel_win, true)
+      panel_win = nil
+    end
+  end, opts)
+  -- Navigate and jump with single key
+  vim.keymap.set("n", "J", function()
+    local state = get_state()
+    local chain = get_chain()
+    if state.index + 1 < #chain then
+      open_review(state.index + 1)
+      update_panel()
+    end
+  end, opts)
+  vim.keymap.set("n", "K", function()
+    local state = get_state()
+    if state.index > 0 then
+      open_review(state.index - 1)
+      update_panel()
+    end
+  end, opts)
+end
+
+open_panel_above_diffview = function()
+  -- If panel already exists and is valid, just update it
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    update_panel()
+    return
+  end
+
+  -- Find the diffview file panel window
+  local file_panel_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local bufname = vim.api.nvim_buf_get_name(buf)
+    if bufname:match("DiffviewFilePanel") then
+      file_panel_win = win
+      break
+    end
+  end
+
+  if not file_panel_win then
+    vim.notify("Diffview panel not found", vim.log.levels.WARN)
+    return
+  end
+
+  -- Go to file panel window and split above it
+  vim.api.nvim_set_current_win(file_panel_win)
+
+  -- Create buffer (don't set a name to avoid conflicts)
+  panel_buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_option(panel_buf, "buftype", "nofile")
+  vim.api.nvim_buf_set_option(panel_buf, "bufhidden", "wipe")
+
+  -- Split above with fixed height
+  local chain = get_chain()
+  local height = math.min(#chain + 2, 20)
+  vim.cmd("aboveleft " .. height .. "split")
+  panel_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(panel_win, panel_buf)
+  vim.api.nvim_win_set_option(panel_win, "number", false)
+  vim.api.nvim_win_set_option(panel_win, "relativenumber", false)
+  vim.api.nvim_win_set_option(panel_win, "signcolumn", "no")
+  vim.api.nvim_win_set_option(panel_win, "winfixheight", true)
+  vim.api.nvim_win_set_option(panel_win, "cursorline", true)
+
+  update_panel()
+  setup_panel_keymaps()
+
+  -- Go back to diff window
+  vim.cmd("wincmd l")
+end
+
+local function toggle_panel()
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    vim.api.nvim_win_close(panel_win, true)
+    panel_win = nil
+  else
+    open_panel_above_diffview()
+  end
+end
+
+vim.api.nvim_create_user_command("StackPanel", toggle_panel, {})
+
+-- Auto-open branch panel above diffview after it loads
+vim.defer_fn(function()
+  open_panel_above_diffview()
+end, 150)
+
 -- Reload command (re-source this script without losing position)
 local script_path = "${luaFile}"
 vim.api.nvim_create_user_command("StackReload", function()
@@ -437,10 +677,18 @@ vim.api.nvim_create_user_command("StackReload", function()
 end, {})
 
 -- Keybindings for navigation
-vim.keymap.set("n", "]b", "<cmd>StackNext<cr>", { desc = "Next branch in stack" })
-vim.keymap.set("n", "[b", "<cmd>StackPrev<cr>", { desc = "Prev branch in stack" })
+vim.keymap.set("n", "]b", function()
+  vim.cmd("StackNext")
+  update_panel()
+end, { desc = "Next branch in stack" })
+vim.keymap.set("n", "[b", function()
+  vim.cmd("StackPrev")
+  update_panel()
+end, { desc = "Prev branch in stack" })
 vim.keymap.set("n", "<leader>gs", "<cmd>StackStatus<cr>", { desc = "Stack review status" })
 vim.keymap.set("n", "<leader>gl", "<cmd>StackList<cr>", { desc = "Stack branch list" })
+vim.keymap.set("n", "<leader>g3", "<cmd>Stack3Way<cr>", { desc = "3-way diff: parent/current/final" })
+vim.keymap.set("n", "<leader>gp", "<cmd>StackPanel<cr>", { desc = "Toggle stack branch panel" })
 
 -- On first load, open first branch. On reload, stay at current position.
 if not _G.stack_review_loaded then
@@ -449,7 +697,6 @@ if not _G.stack_review_loaded then
 end
 `;
 
-  const luaFile = path.join(tmpDir, "init.lua");
   fs.writeFileSync(luaFile, luaScript);
 
   console.log(`\nStack Review: ${reviewChain.length} branches to review`);
