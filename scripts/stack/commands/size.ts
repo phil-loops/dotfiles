@@ -1,5 +1,6 @@
 import type { Command } from "../types.ts";
 import { currentBranch, getChildren, git, loadStack } from "../lib.ts";
+import { parseArgs } from "../args.ts";
 
 const DEFAULT_THRESHOLD = 150;
 
@@ -43,7 +44,8 @@ export const command: Command = {
   args: "[threshold]",
   help: "Check .ts LOC changes per branch (default: 150)",
   run(args: string[]) {
-    const threshold = args[0] ? parseInt(args[0], 10) : DEFAULT_THRESHOLD;
+    const { positionals } = parseArgs(args, {});
+    const threshold = positionals[0] ? parseInt(positionals[0], 10) : DEFAULT_THRESHOLD;
 
     if (isNaN(threshold) || threshold <= 0) {
       console.error("Threshold must be a positive number");
