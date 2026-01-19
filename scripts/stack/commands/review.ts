@@ -372,9 +372,13 @@ local function open_review(idx)
   -- Open new diffview
   vim.cmd("DiffviewOpen " .. item.parent .. "..." .. item.branch)
 
-  -- Reopen branch panel after diffview loads
+  -- Reopen branch panel after diffview loads, focus diff view
   vim.defer_fn(function()
     open_panel_above_diffview()
+    -- Always focus the rightmost window (diff view)
+    vim.cmd("wincmd l")
+    vim.cmd("wincmd l")
+    vim.cmd("wincmd l")
   end, 100)
 
   -- Update statusline to show position
