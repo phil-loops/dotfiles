@@ -3,6 +3,7 @@ import { currentBranch, git } from "../lib.ts";
 import { parseArgs } from "../args.ts";
 
 export const command: Command = {
+  category: "util",
   name: "peel",
   help: "Create new branch with diff as uncommitted changes",
   args: "[name] [--base <branch>]",

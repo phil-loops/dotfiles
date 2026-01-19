@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, listBackups } from "../lib.ts";
 
 export const command: Command = {
+  category: "util",
   name: "backup-restore",
   help: "List backups and show restore commands",
   run() {

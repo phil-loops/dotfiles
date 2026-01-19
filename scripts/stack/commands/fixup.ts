@@ -5,6 +5,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, getDescendants, git, gitTry, loadStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "stack",
   name: "fixup",
   help: "Apply staged changes to ancestor branch, update stack",
   args: "<branch>",

@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, getChildren, loadStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "nav",
   name: "list",
   help: "Show the branch tree",
   run() {

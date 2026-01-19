@@ -40,6 +40,7 @@ function getTsLoc(parent: string, child: string): number {
 }
 
 export const command: Command = {
+  category: "util",
   name: "size",
   args: "[threshold]",
   help: "Check .ts LOC changes per branch (default: 150)",

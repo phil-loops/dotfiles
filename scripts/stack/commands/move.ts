@@ -37,14 +37,16 @@ function moveChanges(target: "root" | "last") {
 
 export const commands: Command[] = [
   {
-    name: "move-to-root",
+    category: "util",
+  name: "move-to-root",
     help: "Stash changes and move to root branch",
     run() {
       moveChanges("root");
     },
   },
   {
-    name: "move-to-last",
+    category: "util",
+  name: "move-to-last",
     help: "Stash changes and move to deepest branch",
     run() {
       moveChanges("last");

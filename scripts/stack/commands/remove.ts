@@ -2,6 +2,7 @@ import type { Command } from "../types.ts";
 import { currentBranch, getChildren, loadStack, saveStack } from "../lib.ts";
 
 export const command: Command = {
+  category: "stack",
   name: "remove",
   help: "Untrack current branch",
   run() {
