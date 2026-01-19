@@ -7,13 +7,16 @@ import {
   gitTry,
   loadStack,
 } from "../lib.ts";
+import { parseArgs } from "../args.ts";
 
 export const command: Command = {
   name: "update",
   help: "Rebase current branch + descendants (--all for entire tree)",
   args: "[--all]",
   run(args) {
-    const all = args.includes("--all");
+    const { values } = parseArgs(args, {
+      all: { type: "boolean", short: "a" },
+    });
     const branch = currentBranch();
     const stack = loadStack();
 
@@ -23,7 +26,7 @@ export const command: Command = {
     }
 
     let toRebase: string[];
-    if (all) {
+    if (values.all) {
       toRebase = getChainFromRoot(stack, branch);
     } else {
       toRebase = [branch, ...getDescendants(stack, branch)].filter((b) => stack[b]);

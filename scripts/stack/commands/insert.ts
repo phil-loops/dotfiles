@@ -1,19 +1,23 @@
 import type { Command } from "../types.ts";
 import { getChildren, git, loadStack, saveStack } from "../lib.ts";
+import { parseArgs } from "../args.ts";
 
 export const command: Command = {
   name: "insert",
   help: "Insert new branch, reparent children",
   args: "<branch> --after <parent>",
   run(args) {
-    // Parse: stack insert <new-branch> --after <parent>
-    const afterIdx = args.indexOf("--after");
-    if (afterIdx === -1 || !args[0] || !args[afterIdx + 1]) {
+    const { values, positionals } = parseArgs(args, {
+      after: { type: "string", short: "a" },
+    });
+
+    const newBranch = positionals[0];
+    const afterBranch = values.after;
+
+    if (!newBranch || !afterBranch) {
       console.error("Usage: stack insert <new-branch> --after <parent>");
       process.exit(1);
     }
-    const newBranch = args[0];
-    const afterBranch = args[afterIdx + 1];
 
     const stack = loadStack();
 

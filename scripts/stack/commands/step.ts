@@ -1,12 +1,15 @@
 import type { Command } from "../types.ts";
 import { currentBranch, getChainFromRoot, git, loadStack } from "../lib.ts";
+import { parseArgs } from "../args.ts";
 
 export const command: Command = {
   name: "step",
   help: "Move to next branch and show diff summary",
   args: "[--back]",
   run(args) {
-    const back = args.includes("--back");
+    const { values } = parseArgs(args, {
+      back: { type: "boolean", short: "b" },
+    });
     const branch = currentBranch();
     const stack = loadStack();
 
@@ -31,7 +34,7 @@ export const command: Command = {
       process.exit(1);
     }
 
-    const nextIdx = back ? currentIdx - 1 : currentIdx + 1;
+    const nextIdx = values.back ? currentIdx - 1 : currentIdx + 1;
 
     if (nextIdx < 0) {
       console.log("Already at the root of the stack");

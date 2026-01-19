@@ -1,24 +1,18 @@
 import type { Command } from "../types.ts";
 import { currentBranch, git } from "../lib.ts";
+import { parseArgs } from "../args.ts";
 
 export const command: Command = {
   name: "peel",
   help: "Create new branch with diff as uncommitted changes",
   args: "[name] [--base <branch>]",
   run(args) {
-    // Parse: stack peel [new-branch] [--base <base>]
-    const baseIdx = args.indexOf("--base");
-    let newBranchName: string | undefined;
-    let baseBranch = "main";
+    const { values, positionals } = parseArgs(args, {
+      base: { type: "string", short: "b", default: "main" },
+    });
 
-    if (baseIdx !== -1) {
-      baseBranch = args[baseIdx + 1] || "main";
-      if (baseIdx > 0) {
-        newBranchName = args[0];
-      }
-    } else if (args[0]) {
-      newBranchName = args[0];
-    }
+    const newBranchName = positionals[0];
+    const baseBranch = values.base!;
 
     const sourceBranch = currentBranch();
 
