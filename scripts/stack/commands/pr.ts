@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
 import type { Command } from "../types.ts";
-import { currentBranch, getGitHubRepo, loadStack } from "../lib.ts";
+import { currentBranch, getForkRemote, getGitHubRepo, loadStack } from "../lib.ts";
 
 export const command: Command = {
   name: "pr",
@@ -26,9 +26,10 @@ export const command: Command = {
       process.exit(1);
     }
 
-    console.log("Pushing...\n");
+    const remote = getForkRemote();
+    console.log(`Pushing ${branch} to ${remote}...\n`);
     try {
-      execSync(`/bin/zsh -ic 'ppl'`, { stdio: "inherit" });
+      execSync(`git push ${remote} HEAD:${branch}`, { stdio: "inherit" });
     } catch {
       console.error("Push failed");
       process.exit(1);
