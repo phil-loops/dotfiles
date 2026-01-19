@@ -4,7 +4,7 @@ import { commands, showHelp } from "./registry.ts";
 
 const [cmd, ...args] = process.argv.slice(2);
 
-if (!cmd) {
+if (!cmd || cmd === "--help" || cmd === "-h") {
   showHelp();
   process.exit(0);
 }
