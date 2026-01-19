@@ -1,7 +1,7 @@
 import { execSync } from "child_process";
 import { writeFileSync } from "fs";
 import { join } from "path";
-import { createBackup, currentBranch, getDescendants, git, gitTry, loadStack } from "../lib.ts";
+import { currentBranch, getDescendants, git, gitTry, loadStack } from "../lib.ts";
 
 export function fixup(targetBranch: string) {
   const stack = loadStack();
@@ -90,7 +90,6 @@ export function fixup(targetBranch: string) {
       const parent = stack[b];
       if (!parent) continue;
 
-      createBackup(b);
       git(`checkout ${b}`);
 
       if (gitTry(`rebase ${parent}`)) {

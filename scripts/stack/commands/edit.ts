@@ -1,6 +1,5 @@
 import {
   clearEditState,
-  createBackup,
   currentBranch,
   getDescendants,
   git,
@@ -72,11 +71,6 @@ export function returnFromEdit() {
 
   if (toRebase.length > 0) {
     console.log(`\nUpdating descendants: ${toRebase.join(" -> ")}\n`);
-
-    const backups: Record<string, string> = {};
-    for (const b of toRebase) {
-      backups[b] = createBackup(b);
-    }
 
     for (const b of toRebase) {
       const parent = stack[b];
