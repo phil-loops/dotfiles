@@ -1,27 +1,32 @@
 import { execSync } from "child_process";
+import type { Command } from "../types.ts";
 import { getForkRemote, loadStack } from "../lib.ts";
 
-export function pushAll() {
-  const stack = loadStack();
+export const command: Command = {
+  name: "push-all",
+  help: "Push all tracked branches",
+  run() {
+    const stack = loadStack();
 
-  if (Object.keys(stack).length === 0) {
-    console.error("No branches tracked");
-    process.exit(1);
-  }
-
-  const remote = getForkRemote();
-  const allBranches = Object.keys(stack);
-
-  console.log(`Pushing ${allBranches.length} branches to ${remote}...\n`);
-
-  for (const branch of allBranches) {
-    console.log(`Pushing ${branch}...`);
-    try {
-      execSync(`git push ${remote} ${branch} -f`, { stdio: "inherit" });
-    } catch {
-      console.error(`Failed to push ${branch}`);
+    if (Object.keys(stack).length === 0) {
+      console.error("No branches tracked");
+      process.exit(1);
     }
-  }
 
-  console.log("\nDone!");
-}
+    const remote = getForkRemote();
+    const allBranches = Object.keys(stack);
+
+    console.log(`Pushing ${allBranches.length} branches to ${remote}...\n`);
+
+    for (const branch of allBranches) {
+      console.log(`Pushing ${branch}...`);
+      try {
+        execSync(`git push ${remote} ${branch} -f`, { stdio: "inherit" });
+      } catch {
+        console.error(`Failed to push ${branch}`);
+      }
+    }
+
+    console.log("\nDone!");
+  },
+};
