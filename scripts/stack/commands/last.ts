@@ -1,5 +1,5 @@
 import type { Command } from "../types.ts";
-import { currentBranch, getChainFromRoot, git, loadStack } from "../lib.ts";
+import { currentBranch, getChainFromRoot, git, gitTry, loadStack } from "../lib.ts";
 
 export const command: Command = {
   category: "nav",
@@ -20,7 +20,15 @@ export const command: Command = {
       process.exit(1);
     }
 
-    const lastBranch = chain[chain.length - 1];
+    // Filter to branches that exist locally
+    const localBranches = chain.filter((b) => gitTry(`show-ref --verify --quiet refs/heads/${b}`));
+
+    if (localBranches.length === 0) {
+      console.error("No local branches in chain");
+      process.exit(1);
+    }
+
+    const lastBranch = localBranches[localBranches.length - 1];
     console.log(`Switching to ${lastBranch}`);
     git(`checkout ${lastBranch}`);
   },
