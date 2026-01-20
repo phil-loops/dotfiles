@@ -688,6 +688,7 @@ end, { desc = "Prev branch in stack" })
 vim.keymap.set("n", "<leader>gs", "<cmd>StackStatus<cr>", { desc = "Stack review status" })
 vim.keymap.set("n", "<leader>gl", "<cmd>StackList<cr>", { desc = "Stack branch list" })
 vim.keymap.set("n", "<leader>g3", "<cmd>Stack3Way<cr>", { desc = "3-way diff: parent/current/final" })
+vim.keymap.set("n", "<leader>g?", "<cmd>StackFileStatus<cr>", { desc = "Check if file matches final state" })
 vim.keymap.set("n", "<leader>gp", "<cmd>StackPanel<cr>", { desc = "Toggle stack branch panel" })
 
 -- Quick jump to specific panels
@@ -714,13 +715,90 @@ vim.keymap.set("n", "<leader>gd", function()
   vim.cmd("wincmd l")
 end, { desc = "Jump to diff view" })
 
--- File navigation within diffview
+-- Check if current file matches its final version in the stack
+local function get_current_file()
+  local bufname = vim.fn.expand("%:p")
+  local rel_file = bufname:match("%.git/[^/]+/(.+)$")
+  if not rel_file then
+    local ok, diffview_lib = pcall(require, "diffview.lib")
+    if ok then
+      local view = diffview_lib.get_current_view()
+      if view then
+        local file_entry = view.panel:get_item_at_cursor()
+        if file_entry and file_entry.path then
+          rel_file = file_entry.path
+        end
+      end
+    end
+  end
+  return rel_file
+end
+
+local function check_file_final_status(rel_file)
+  if not rel_file then return nil end
+
+  local state = get_state()
+  local chain = get_chain()
+  local current_branch = chain[state.index + 1].branch
+  local final_branch = chain[#chain].branch
+
+  -- If we're already on the final branch, it's by definition final
+  if current_branch == final_branch then
+    return "final", "This IS the final branch"
+  end
+
+  -- Compare file content between current branch and final branch
+  local current_hash = vim.fn.systemlist(string.format("git rev-parse %s:%s 2>/dev/null", current_branch, rel_file))[1]
+  local final_hash = vim.fn.systemlist(string.format("git rev-parse %s:%s 2>/dev/null", final_branch, rel_file))[1]
+
+  -- Handle file not existing in one or both branches
+  if not current_hash or current_hash:match("^fatal") then
+    if not final_hash or final_hash:match("^fatal") then
+      return "final", "File doesn't exist in either branch"
+    else
+      return "changes", "File will be ADDED in later branches"
+    end
+  end
+
+  if not final_hash or final_hash:match("^fatal") then
+    return "changes", "File will be DELETED in later branches"
+  end
+
+  if current_hash == final_hash then
+    return "final", "✓ FINAL - matches end state"
+  else
+    return "changes", "⋯ Will change in later branches"
+  end
+end
+
+vim.api.nvim_create_user_command("StackFileStatus", function()
+  local rel_file = get_current_file()
+  if not rel_file then
+    vim.notify("Could not determine current file", vim.log.levels.WARN)
+    return
+  end
+
+  local status, msg = check_file_final_status(rel_file)
+  local level = status == "final" and vim.log.levels.INFO or vim.log.levels.WARN
+  vim.notify(rel_file .. ": " .. msg, level)
+end, {})
+
+-- File navigation within diffview (with auto status check)
 vim.keymap.set("n", "]f", function()
   local ok, diffview_lib = pcall(require, "diffview.lib")
   if ok then
     local view = diffview_lib.get_current_view()
     if view then
       view:next_file()
+      -- Show file status after a brief delay
+      vim.defer_fn(function()
+        local rel_file = get_current_file()
+        if rel_file then
+          local status, msg = check_file_final_status(rel_file)
+          local level = status == "final" and vim.log.levels.INFO or vim.log.levels.WARN
+          vim.notify(msg, level)
+        end
+      end, 100)
     end
   end
 end, { desc = "Next file in diff" })
@@ -731,6 +809,15 @@ vim.keymap.set("n", "[f", function()
     local view = diffview_lib.get_current_view()
     if view then
       view:prev_file()
+      -- Show file status after a brief delay
+      vim.defer_fn(function()
+        local rel_file = get_current_file()
+        if rel_file then
+          local status, msg = check_file_final_status(rel_file)
+          local level = status == "final" and vim.log.levels.INFO or vim.log.levels.WARN
+          vim.notify(msg, level)
+        end
+      end, 100)
     end
   end
 end, { desc = "Prev file in diff" })
@@ -779,10 +866,11 @@ end
   console.log(`\nStack Review: ${reviewChain.length} branches to review`);
   console.log("\nKeybindings:");
   console.log("  ]b / [b      next/prev branch");
+  console.log("  ]f / [f      next/prev file (shows final status)");
   console.log("  <leader>gl   branch list (fuzzy jump)");
   console.log("  <leader>gs   show current position");
+  console.log("  <leader>g?   check if file matches final state");
   console.log("  <leader>ge   edit current file");
-  console.log("  ]f / [f      next/prev file (diffview)");
   console.log("  <tab>        toggle file panel");
   console.log("  :StackJump N jump to branch N");
   console.log("  :qa          quit review\n");
