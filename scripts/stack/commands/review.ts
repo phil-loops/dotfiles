@@ -359,11 +359,27 @@ local function get_chain() return read_json(chain_file) end
 local function get_state() return read_json(state_file) end
 local function set_state(s) write_json(state_file, s) end
 
+local function branch_exists(branch)
+  local result = vim.fn.system("git rev-parse --verify --quiet " .. branch)
+  return vim.v.shell_error == 0
+end
+
 local function open_review(idx)
   local chain = get_chain()
   if not chain or idx < 0 or idx >= #chain then return false end
 
   local item = chain[idx + 1]  -- lua is 1-indexed
+
+  -- Validate both branches exist before attempting diff
+  if not branch_exists(item.parent) then
+    vim.notify("Branch not found: " .. item.parent .. " (try: git fetch origin " .. item.parent .. ":" .. item.parent .. ")", vim.log.levels.ERROR)
+    return false
+  end
+  if not branch_exists(item.branch) then
+    vim.notify("Branch not found: " .. item.branch .. " (try: git fetch origin " .. item.branch .. ":" .. item.branch .. ")", vim.log.levels.ERROR)
+    return false
+  end
+
   set_state({ index = idx })
 
   -- Close existing diffview if open

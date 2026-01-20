@@ -27,3 +27,6 @@ For editing ancestor branches:
 The stack is stored in `.stack` file in the repo root. Check if it exists before suggesting raw git rebase commands.
 
 **Important:** Always use the shell alias via `/bin/zsh -ic 'stack ...'` instead of running the script directly.
+
+# Git Commits
+Never add Co-Authored-By lines. Commits are mine alone.
