@@ -42,9 +42,23 @@ opl() {
 oplpr() {
     local current_branch=$(git branch --show-current)
     local base_branch=${1:-main}
-    
+
     echo "Opening PR comparison for '$current_branch' against '$base_branch' on phil-loops..."
     open "https://github.com/phil-loops/loops/compare/${base_branch}...phil-loops:loops:${current_branch}"
+}
+
+pr-review() {
+    local pr=$(gh pr list --repo loops-so/loops --search "review-requested:@me" \
+        --json number,title,headRefName,author \
+        --template '{{range .}}{{.number}}	{{.author.login}}	{{.title}}	{{.headRefName}}{{"\n"}}{{end}}' \
+        | fzf --delimiter='\t' --with-nth=1,2,3 --preview 'gh pr view --repo loops-so/loops {1}')
+
+    [[ -z "$pr" ]] && return
+
+    local pr_num=$(echo "$pr" | cut -f1)
+
+    gh pr checkout --repo loops-so/loops "$pr_num"
+    nvim -c "DiffviewOpen main"
 }
 
 export GPG_TTY=$(tty)
