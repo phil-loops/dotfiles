@@ -7,8 +7,21 @@ cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && c
 
 # Git Branch Stacks
 
-When working with stacked/dependent branches, use the `stack` command instead of raw git commands:
+**IMPORTANT:** Before suggesting `git rebase`, `git push`, or creating PRs, first check if the repo uses stacks:
+```
+test -f .stack && echo "STACKED REPO - use stack commands"
+```
 
+If a `.stack` file exists, ALWAYS use `stack` commands instead of raw git:
+
+| Instead of... | Use... |
+|---------------|--------|
+| `git rebase` | `stack update` |
+| `git push` | `stack push-all` |
+| `gh pr create` | `stack pr` |
+| `git checkout <ancestor>` | `stack edit <branch>` |
+
+**Available commands:**
 - `stack add <parent>` - track current branch as child of parent
 - `stack list` - show branch tree
 - `stack check` - dry-run conflict detection (run before update)
@@ -18,13 +31,11 @@ When working with stacked/dependent branches, use the `stack` command instead of
 - `stack pr` - push and create PR targeting parent branch
 - `stack push-all` - push all tracked branches
 
-For editing ancestor branches:
+**For editing ancestor branches:**
 - `stack edit <branch>` - stash changes, checkout branch, remember where to return
 - `stack return` - update descendants, return to original branch, restore stash
 - `stack edit --abort` - cancel edit mode without changes
 - `stack fixup <branch>` - apply staged changes to ancestor branch, update stack back to current
-
-The stack is stored in `.stack` file in the repo root. Check if it exists before suggesting raw git rebase commands.
 
 **Important:** Always use the shell alias via `/bin/zsh -ic 'stack ...'` instead of running the script directly.
 
