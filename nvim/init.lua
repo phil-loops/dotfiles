@@ -912,6 +912,8 @@ require('lazy').setup({
 
       -- You can configure highlights by doing something like:
       vim.cmd.hi 'Comment gui=none'
+      vim.api.nvim_set_hl(0, 'CursorLine', { bg = '#3d3d3d' })
+      vim.api.nvim_set_hl(0, 'CursorLineNr', { fg = '#ffcc00', bold = true })
     end,
   },
 

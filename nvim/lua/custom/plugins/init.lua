@@ -11,6 +11,13 @@ return {
       { '<leader>gD', '<cmd>DiffviewOpen main<cr>', desc = 'Diffview: Open (vs main)' },
       { '<leader>gh', '<cmd>DiffviewFileHistory %<cr>', desc = 'Diffview: File history' },
       { '<leader>gH', '<cmd>DiffviewFileHistory<cr>', desc = 'Diffview: Branch history' },
+      {
+        '<leader>gr',
+        function()
+          require('custom.diffview-reviewed').toggle()
+        end,
+        desc = 'Diffview: Toggle file reviewed',
+      },
     },
     opts = {
       enhanced_diff_hl = true,
