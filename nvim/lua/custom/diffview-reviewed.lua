@@ -347,10 +347,10 @@ function M.refresh_indicators()
       -- Check if this line contains the filepath (at the end or as component)
       local fname = vim.fn.fnamemodify(filepath, ':t')
       if line:find(fname, 1, true) then
-        -- Add virtual text indicator
+        -- Add virtual text indicator at start of line
         vim.api.nvim_buf_set_extmark(buf, ns_id, i - 1, 0, {
-          virt_text = { { ' ' .. M.opts.icon, M.opts.hl } },
-          virt_text_pos = 'eol',
+          virt_text = { { M.opts.icon .. ' ', M.opts.hl } },
+          virt_text_pos = 'inline',
         })
         break
       end
