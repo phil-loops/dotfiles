@@ -35,5 +35,10 @@ return {
         },
       },
     },
+    config = function(_, opts)
+      require('diffview').setup(opts)
+      -- Load reviewed module so autocmds are registered
+      require('custom.diffview-reviewed')
+    end,
   },
 }

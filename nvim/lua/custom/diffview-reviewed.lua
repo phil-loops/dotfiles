@@ -12,6 +12,9 @@ M.opts = {
 -- State: reviewed[git_root][base_ref][filepath] = true
 local reviewed = {}
 
+-- Track which git roots we've loaded state for
+local loaded_roots = {}
+
 -- Namespace for extmarks
 local ns_id = vim.api.nvim_create_namespace('diffview_reviewed')
 
@@ -33,15 +36,16 @@ local function get_persistence_path()
   return git_root .. '/.git/diffview-reviewed.json'
 end
 
--- Load reviewed state from file
-local function load_state()
-  local path = get_persistence_path()
-  if not path then
+-- Load reviewed state from file for a specific git root
+local function load_state_for_root(git_root)
+  if not git_root or loaded_roots[git_root] then
     return
   end
 
+  local path = git_root .. '/.git/diffview-reviewed.json'
   local file = io.open(path, 'r')
   if not file then
+    loaded_roots[git_root] = true
     return
   end
 
@@ -50,25 +54,29 @@ local function load_state()
 
   if content and content ~= '' then
     local ok, data = pcall(vim.json.decode, content)
-    if ok and data then
-      reviewed = data
+    if ok and data and data[git_root] then
+      reviewed[git_root] = data[git_root]
     end
   end
+
+  loaded_roots[git_root] = true
 end
 
--- Save reviewed state to file
-local function save_state()
-  local path = get_persistence_path()
-  if not path then
+-- Save reviewed state to file for a specific git root
+local function save_state_for_root(git_root)
+  if not git_root then
     return
   end
 
+  local path = git_root .. '/.git/diffview-reviewed.json'
   local file = io.open(path, 'w')
   if not file then
     return
   end
 
-  local ok, json = pcall(vim.json.encode, reviewed)
+  -- Save only this git root's data
+  local data = { [git_root] = reviewed[git_root] }
+  local ok, json = pcall(vim.json.encode, data)
   if ok then
     file:write(json)
   end
@@ -91,6 +99,9 @@ local function get_view_info()
   if not git_root then
     return nil, nil
   end
+
+  -- Ensure state is loaded for this git root
+  load_state_for_root(git_root)
 
   -- Get base ref from the view (e.g., "main", "HEAD", etc.)
   local base_ref = 'unknown'
@@ -236,7 +247,7 @@ function M.toggle()
   end
 
   -- Save and refresh
-  save_state()
+  save_state_for_root(git_root)
   M.refresh_indicators()
 end
 
@@ -249,10 +260,25 @@ function M.clear()
 
   if reviewed[git_root] and reviewed[git_root][base_ref] then
     reviewed[git_root][base_ref] = {}
-    save_state()
+    save_state_for_root(git_root)
     M.refresh_indicators()
     vim.notify('Cleared all reviewed files', vim.log.levels.INFO)
   end
+end
+
+-- Force reload state from disk (useful if changed externally)
+function M.reload()
+  local git_root = get_git_root()
+  if not git_root then
+    return
+  end
+
+  -- Clear cached state to force reload
+  loaded_roots[git_root] = nil
+  reviewed[git_root] = nil
+  load_state_for_root(git_root)
+  M.refresh_indicators()
+  vim.notify('Reloaded review state', vim.log.levels.INFO)
 end
 
 -- Get stats for current view
@@ -339,9 +365,6 @@ function M.setup(opts)
   -- Create highlight group if it doesn't exist
   vim.api.nvim_set_hl(0, 'DiffviewReviewed', { fg = '#98c379', bold = true })
 
-  -- Load persisted state
-  load_state()
-
   -- Set up autocommands to refresh indicators
   local augroup = vim.api.nvim_create_augroup('DiffviewReviewed', { clear = true })
 
@@ -364,9 +387,8 @@ function M.setup(opts)
     group = augroup,
     pattern = { 'DiffviewFiles', 'DiffviewFileHistory' },
     callback = function()
-      -- Reload state in case it changed externally
-      load_state()
       vim.defer_fn(function()
+        -- State will be loaded on-demand via get_view_info()
         M.refresh_indicators()
       end, 100)
     end,
