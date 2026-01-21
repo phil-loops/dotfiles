@@ -13,6 +13,7 @@ alias stack="node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/s
 alias db="task db:port_forward"
 alias db:rw="task db:port_forward:rw"
 alias refresh="rm -fr .next node_modules && task dev"
+alias docs="cd ~/coding/docs && mintlify dev"
 
 ppl() {
     local current_branch=$(git branch --show-current)
