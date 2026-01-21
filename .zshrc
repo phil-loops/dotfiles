@@ -48,11 +48,14 @@ oplpr() {
 }
 
 pr-review() {
+    local cache_dir=$(mktemp -d)
+    trap "rm -rf $cache_dir" EXIT
+
     local pr=$(gh pr list --repo loops-so/loops --search "review-requested:@me" \
         --json number,title,headRefName,author \
         --template '{{range .}}{{.number}}	{{.author.login}}	{{.title}}	{{.headRefName}}{{"\n"}}{{end}}' \
         | fzf --delimiter='\t' --with-nth=1,2,3 \
-            --preview 'gh pr view --repo loops-so/loops {1} && echo "" && echo "───── Files Changed ─────" && gh pr diff --repo loops-so/loops {1} --stat')
+            --preview "f=$cache_dir/{1}.txt; [[ -f \$f ]] && cat \$f || { gh pr view --repo loops-so/loops {1} && echo '' && echo '───── Files Changed ─────' && gh pr diff --repo loops-so/loops {1} --stat; } | tee \$f")
 
     [[ -z "$pr" ]] && return
 
