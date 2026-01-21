@@ -75,7 +75,7 @@ _loops_pr_review() {
         --json number,title,headRefName,author,updatedAt \
         --template '{{range .}}{{.number}}	{{.author.login}}	{{timeago .updatedAt}}	{{.title}}	{{.headRefName}}{{"\n"}}{{end}}' \
         | fzf --delimiter='\t' --with-nth=1,2,3,4 \
-            --preview "f=$cache_dir/{1}.txt; [[ -f \$f ]] && cat \$f || { gh pr view --repo loops-so/loops {1} && echo '' && echo '───── Files Changed ─────' && gh pr diff --repo loops-so/loops {1} --stat; } | tee \$f")
+            --preview "f=$cache_dir/{1}.txt; [[ -s \$f ]] && cat \$f || { out=\$(gh pr view --repo loops-so/loops {1} && echo '' && echo '───── Files Changed ─────' && gh pr diff --repo loops-so/loops {1} --stat); [[ -n \"\$out\" ]] && echo \"\$out\" | tee \$f || echo 'Loading...'; }")
 
     [[ -z "$pr" ]] && return
 
