@@ -9,7 +9,6 @@ alias kcus="kubectl config use-context staging"
 alias zconfig="nvim ~/.zshrc"
 alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles"; git push); source ~/.zshrc'
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
-alias stack="node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts"
 alias db="task db:port_forward"
 alias db:rw="task db:port_forward:rw"
 alias refresh="rm -fr .next node_modules && task dev"
@@ -47,7 +46,28 @@ oplpr() {
     open "https://github.com/phil-loops/loops/compare/${base_branch}...phil-loops:loops:${current_branch}"
 }
 
-pr-review() {
+loops() {
+    local cmd=$1
+    shift
+
+    case "$cmd" in
+        stack)
+            node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts "$@"
+            ;;
+        pr-review)
+            _loops_pr_review "$@"
+            ;;
+        *)
+            echo "Usage: loops <command>"
+            echo ""
+            echo "Commands:"
+            echo "  stack       Manage git branch stacks"
+            echo "  pr-review   Review PRs assigned to you"
+            ;;
+    esac
+}
+
+_loops_pr_review() {
     local cache_dir=$(mktemp -d)
     trap "rm -rf $cache_dir" EXIT
 
