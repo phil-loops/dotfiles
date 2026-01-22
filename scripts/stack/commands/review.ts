@@ -902,10 +902,8 @@ vim.keymap.set("n", "<leader>ge", function()
   end
 end, { desc = "Edit current file" })
 
--- Suppress devicons warning by ensuring diffview doesn't require them
-pcall(function()
-  require('diffview').setup({ use_icons = false })
-end)
+-- Load devicons first to prevent warning
+pcall(function() require('nvim-web-devicons').setup() end)
 
 -- On first load, open first branch. On reload, stay at current position.
 if not _G.stack_review_loaded then
