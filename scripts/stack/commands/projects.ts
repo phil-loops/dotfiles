@@ -11,7 +11,7 @@ export const command: Command = {
   category: "nav",
   name: "projects",
   help: "Show top-level projects (direct children of main)",
-  args: "[number|name]",
+  args: "[number|name] [subcommand]",
   run(args: string[]) {
     const stack = loadStack();
     const branch = currentBranch();
@@ -41,7 +41,7 @@ export const command: Command = {
       }
     }
 
-    // If given an argument, switch to that project
+    // If given an argument, switch to that project or run a subcommand
     if (args.length > 0) {
       const arg = args[0];
       let target: string | null = null;
@@ -55,13 +55,25 @@ export const command: Command = {
         target = projects.find((p) => p === arg) || projects.find((p) => p.includes(arg)) || null;
       }
 
-      if (target) {
-        git(`checkout ${target}`);
-        console.log(`Switched to ${target}`);
-      } else {
+      if (!target) {
         console.log(`Project not found: ${arg}`);
         console.log(`Available: ${projects.join(", ")}`);
+        return;
       }
+
+      // Check for subcommand
+      const subcommand = args[1];
+      if (subcommand === "review") {
+        // Run review with --nvim --all on the target project
+        import("./review.ts").then((mod) => {
+          mod.command.run(["--nvim", "--all", "--from", target]);
+        });
+        return;
+      }
+
+      // No subcommand - just switch to the project
+      git(`checkout ${target}`);
+      console.log(`Switched to ${target}`);
       return;
     }
 

@@ -4,6 +4,35 @@ import { parseArgs } from "../args.ts";
 
 const DEFAULT_THRESHOLD = 150;
 
+/**
+ * Get the root ancestor of a branch (the branch that has no parent in the stack)
+ */
+function getRoot(stack: Record<string, string>, branch: string): string {
+  let current = branch;
+  while (stack[current]) {
+    current = stack[current];
+  }
+  return current;
+}
+
+/**
+ * Get all branches in the same tree as the given branch
+ */
+function getTreeBranches(stack: Record<string, string>, branch: string): Set<string> {
+  const root = getRoot(stack, branch);
+  const tree = new Set<string>();
+
+  function collectDescendants(b: string) {
+    tree.add(b);
+    for (const child of getChildren(stack, b)) {
+      collectDescendants(child);
+    }
+  }
+
+  collectDescendants(root);
+  return tree;
+}
+
 type BranchStats = {
   branch: string;
   parent: string;
@@ -42,10 +71,12 @@ function getTsLoc(parent: string, child: string): number {
 export const command: Command = {
   category: "util",
   name: "size",
-  args: "[threshold]",
-  help: "Check .ts LOC changes per branch (default: 150)",
+  args: "[threshold] [--all]",
+  help: "Check .ts LOC changes per branch (default: 150, current tree only)",
   run(args: string[]) {
-    const { positionals } = parseArgs(args, {});
+    const { values, positionals } = parseArgs(args, {
+      all: { type: "boolean", short: "a" },
+    });
     const threshold = positionals[0] ? parseInt(positionals[0], 10) : DEFAULT_THRESHOLD;
 
     if (isNaN(threshold) || threshold <= 0) {
@@ -61,9 +92,13 @@ export const command: Command = {
       return;
     }
 
+    // Filter to current tree unless --all is specified
+    const treeBranches = branch && !values.all ? getTreeBranches(stack, branch) : null;
+
     const stats: BranchStats[] = [];
 
     for (const [child, parent] of Object.entries(stack)) {
+      if (treeBranches && !treeBranches.has(child)) continue;
       const loc = getTsLoc(parent, child);
       stats.push({ branch: child, parent, loc, exceeds: loc > threshold });
     }
@@ -71,7 +106,9 @@ export const command: Command = {
     // Build tree for display
     const allParents = new Set(stats.map((s) => s.parent));
     const allChildren = new Set(stats.map((s) => s.branch));
-    const roots = [...allParents].filter((p) => !allChildren.has(p));
+    const roots = treeBranches
+      ? [getRoot(stack, branch!)]
+      : [...allParents].filter((p) => !allChildren.has(p));
 
     const statsMap = new Map(stats.map((s) => [s.branch, s]));
 
