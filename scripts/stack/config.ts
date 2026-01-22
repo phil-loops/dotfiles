@@ -9,6 +9,7 @@ const GLOBAL_CONFIG_FILE = join(homedir(), ".stackrc");
 export type Config = {
   remote?: string; // e.g. "phil-loops" or "origin"
   repo?: string; // e.g. "phil-loops/loops" for gh commands
+  reviewEditor?: "nvim" | "terminal"; // default editor for stack review
 };
 
 /**
