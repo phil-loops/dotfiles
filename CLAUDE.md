@@ -7,6 +7,18 @@ cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && c
 
 # Git Branch Stacks
 
+Stacked PRs break large features into a sequence of small, focused, reviewable changes.
+
+**Why stacked PRs?**
+- Humans struggle to review changes larger than ~150 lines of code effectively
+- Large PRs get rubber-stamped or delayed; small atomic changes are easier to reason about
+- Each PR builds on the previous, creating a logical narrative through the feature
+
+**When implementing features:**
+1. Plan the sequence - break into logical atomic units (~150 LOC each)
+2. Each branch = one reviewable unit, self-contained, builds on previous
+3. Keep changes focused - don't mix concerns (e.g., schema vs UI vs tests)
+
 **IMPORTANT:** Before suggesting `git rebase`, `git push`, or creating PRs, first check if the repo uses stacks:
 ```
 test -f .stack && echo "STACKED REPO - use loops stack commands"
