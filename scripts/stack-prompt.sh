@@ -17,17 +17,20 @@ if [ -f "$STACK_FILE" ]; then
 
   if [ -n "$PARENT" ]; then
     # Branch is explicitly tracked - use explicit mode
+    # Walk up to find root and the first branch in this stack (stack_root)
     pos=0
     current="$BRANCH"
+    stack_root=""
     while true; do
       p=$(grep "^${current}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
       [ -z "$p" ] && break
       ((pos++))
+      stack_root="$current"  # last tracked branch before root
       current="$p"
     done
     root="$current"
 
-    # Count total tracked branches in this chain
+    # Count total tracked branches in THIS stack only (from stack_root down)
     total=0
     count_descendants() {
       local b="$1"
@@ -36,7 +39,7 @@ if [ -f "$STACK_FILE" ]; then
         count_descendants "$child"
       done
     }
-    count_descendants "$root"
+    [ -n "$stack_root" ] && { ((total++)); count_descendants "$stack_root"; }
   fi
 fi
 
