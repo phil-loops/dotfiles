@@ -3,10 +3,8 @@
 --
 -- See the kickstart.nvim README for more information
 return {
-  { 'nvim-tree/nvim-web-devicons', lazy = false },
   {
     'sindrets/diffview.nvim',
-    dependencies = { 'nvim-tree/nvim-web-devicons' },
     cmd = { 'DiffviewOpen', 'DiffviewFileHistory' },
     keys = {
       { '<leader>gd', '<cmd>DiffviewOpen<cr>', desc = 'Diffview: Open (vs HEAD)' },
@@ -22,11 +20,7 @@ return {
       },
     },
     opts = {
-      use_icons = true,  -- requires nvim-web-devicons
-      icons = {
-        folder_closed = ">",
-        folder_open = "v",
-      },
+      use_icons = false,
       enhanced_diff_hl = true,
       view = {
         default = {
