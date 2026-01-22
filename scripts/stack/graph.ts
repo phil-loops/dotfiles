@@ -48,3 +48,24 @@ export function getChainFromRoot(stack: Stack, branch: string): string[] {
   walk(root);
   return chain;
 }
+
+/**
+ * Get only the branches in the current stack (not all stacks).
+ * Finds the first-level child of root that contains the current branch,
+ * then returns that branch and all its descendants.
+ */
+export function getCurrentStack(stack: Stack, branch: string): string[] {
+  // If branch isn't tracked, return empty
+  if (!stack[branch]) return [];
+
+  // Walk up to find the stack root (first tracked branch whose parent is untracked)
+  let stackRoot = branch;
+  let current = branch;
+  while (stack[current]) {
+    stackRoot = current;
+    current = stack[current];
+  }
+
+  // Return stack root and all its descendants
+  return [stackRoot, ...getDescendants(stack, stackRoot)];
+}

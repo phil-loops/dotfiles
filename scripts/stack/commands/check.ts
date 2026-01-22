@@ -1,5 +1,5 @@
 import type { Command } from "../types.ts";
-import { checkConflict, currentBranch, getChildren, loadStack } from "../lib.ts";
+import { checkConflict, currentBranch, findRoot, getChildren, getCurrentStack, loadStack } from "../lib.ts";
 
 export const command: Command = {
   category: "git",
@@ -14,34 +14,43 @@ export const command: Command = {
       return;
     }
 
-    const allParents = new Set(Object.values(stack));
-    const allChildren = new Set(Object.keys(stack));
-    const roots = [...allParents].filter((p) => !allChildren.has(p));
+    const currentStackBranches = getCurrentStack(stack, branch);
+    if (currentStackBranches.length === 0) {
+      console.log("Current branch is not in a tracked stack");
+      return;
+    }
 
+    const currentStackSet = new Set(currentStackBranches);
     const conflicts: Array<{ child: string; parent: string; files: string[] }> = [];
 
-    for (const [child, parent] of Object.entries(stack)) {
+    // Only check branches in the current stack
+    for (const child of currentStackBranches) {
+      const parent = stack[child];
+      if (!parent) continue;
       const result = checkConflict(parent, child);
       if (result.hasConflict) {
         conflicts.push({ child, parent, files: result.files });
       }
     }
 
+    const root = findRoot(stack, branch);
+
     function printTree(b: string, indent: string) {
+      // Only print branches in current stack (plus root)
+      if (b !== root && !currentStackSet.has(b)) return;
+
       const marker = b === branch ? " <-- you" : "";
       const conflict = conflicts.find((c) => c.child === b);
       const conflictMarker = conflict ? " ⚠ CONFLICT" : " ✓";
       const statusMarker = stack[b] ? conflictMarker : "";
       console.log(indent + b + marker + statusMarker);
-      const children = getChildren(stack, b);
+      const children = getChildren(stack, b).filter((c) => currentStackSet.has(c));
       children.forEach((child) => {
         printTree(child, indent + "  ");
       });
     }
 
-    for (const root of roots) {
-      printTree(root, "");
-    }
+    printTree(root, "");
 
     if (conflicts.length > 0) {
       console.log("\nConflicts detected:\n");
