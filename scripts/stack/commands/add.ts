@@ -1,15 +1,20 @@
 import type { Command } from "../types.ts";
-import { currentBranch, gitTry, loadStack, saveStack, wouldCreateCycle } from "../lib.ts";
+import { currentBranch, getChildren, gitTry, loadStack, saveStack, wouldCreateCycle } from "../lib.ts";
+import { parseArgs } from "../args.ts";
 
 export const command: Command = {
   category: "stack",
   name: "add",
   help: "Track current branch as child of parent",
-  args: "<parent>",
+  args: "<parent> [--reparent]",
   run(args) {
-    const parent = args[0];
+    const { values, positionals } = parseArgs(args, {
+      reparent: { type: "boolean", short: "r" },
+    });
+
+    const parent = positionals[0];
     if (!parent) {
-      console.error("Usage: stack add <parent>");
+      console.error("Usage: stack add <parent> [--reparent]");
       process.exit(1);
     }
 
@@ -37,7 +42,23 @@ export const command: Command = {
     }
 
     stack[branch] = parent;
-    saveStack(stack);
     console.log(`Added: ${branch} -> ${parent}`);
+
+    // Optionally reparent children of parent to point to this branch
+    if (values.reparent) {
+      const children = getChildren(stack, parent);
+      const toReparent = children.filter((c) => c !== branch);
+
+      for (const child of toReparent) {
+        console.log(`Reparenting: ${child} -> ${branch}`);
+        stack[child] = branch;
+      }
+
+      if (toReparent.length > 0) {
+        console.log(`\nRun 'stack update' to rebase the chain`);
+      }
+    }
+
+    saveStack(stack);
   },
 };
