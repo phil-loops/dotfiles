@@ -711,6 +711,34 @@ vim.keymap.set("n", "<leader>g3", "<cmd>Stack3Way<cr>", { desc = "3-way diff: pa
 vim.keymap.set("n", "<leader>g?", "<cmd>StackFileStatus<cr>", { desc = "Check if file matches final state" })
 vim.keymap.set("n", "<leader>gp", "<cmd>StackPanel<cr>", { desc = "Toggle stack branch panel" })
 
+-- Help command
+vim.api.nvim_create_user_command("StackHelp", function()
+  local help = {
+    "Stack Review Keybindings:",
+    "",
+    "  ]b / [b        next/prev branch",
+    "  ]f / [f        next/prev file",
+    "  J / K          next/prev branch (in panel)",
+    "  <CR>           jump to branch (in panel)",
+    "",
+    "  <leader>gl     branch list (fuzzy jump)",
+    "  <leader>gs     show current position",
+    "  <leader>g?     check if file matches final",
+    "  <leader>g3     3-way diff view",
+    "  <leader>ge     edit current file",
+    "  <leader>gp     toggle branch panel",
+    "",
+    "  <leader>gb     jump to branch panel",
+    "  <leader>gf     jump to file panel",
+    "  <leader>gd     jump to diff view",
+    "",
+    "  :StackJump N   jump to branch N",
+    "  :qa            quit review",
+  }
+  vim.notify(table.concat(help, "\\n"), vim.log.levels.INFO)
+end, {})
+vim.keymap.set("n", "g?", "<cmd>StackHelp<cr>", { desc = "Stack review help" })
+
 -- Quick jump to specific panels
 vim.keymap.set("n", "<leader>gb", function()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
@@ -883,18 +911,6 @@ end
 
   fs.writeFileSync(luaFile, luaScript);
 
-  console.log(`\nStack Review: ${reviewChain.length} branches to review`);
-  console.log("\nKeybindings:");
-  console.log("  ]b / [b      next/prev branch");
-  console.log("  ]f / [f      next/prev file (shows final status)");
-  console.log("  <leader>gl   branch list (fuzzy jump)");
-  console.log("  <leader>gs   show current position");
-  console.log("  <leader>g?   check if file matches final state");
-  console.log("  <leader>ge   edit current file");
-  console.log("  <tab>        toggle file panel");
-  console.log("  :StackJump N jump to branch N");
-  console.log("  :qa          quit review\n");
-
   try {
     execSync(`nvim -c "luafile ${luaFile}"`, { stdio: "inherit" });
   } catch {
@@ -910,8 +926,6 @@ end
   } catch {
     // ignore cleanup errors
   }
-
-  console.log("\nReview complete!");
 }
 
 /**
