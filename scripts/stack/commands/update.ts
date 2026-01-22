@@ -1,7 +1,7 @@
 import type { Command } from "../types.ts";
 import {
   currentBranch,
-  getChainFromRoot,
+  getCurrentStack,
   getDescendants,
   git,
   gitTry,
@@ -28,7 +28,7 @@ export const command: Command = {
 
     let toRebase: string[];
     if (values.all) {
-      toRebase = getChainFromRoot(stack, branch);
+      toRebase = getCurrentStack(stack, branch);
     } else {
       toRebase = [branch, ...getDescendants(stack, branch)].filter((b) => stack[b]);
     }
