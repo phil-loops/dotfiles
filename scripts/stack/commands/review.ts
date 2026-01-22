@@ -7,6 +7,7 @@ import {
   loadStack,
 } from "../lib.ts";
 import { parseArgs } from "../args.ts";
+import { loadConfig } from "../config.ts";
 import * as readline from "readline";
 import { execSync } from "child_process";
 import * as fs from "fs";
@@ -69,7 +70,10 @@ export const command: Command = {
       process.exit(1);
     }
 
-    if (values.nvim) {
+    const config = loadConfig();
+    const useNvim = values.nvim || config.reviewEditor === "nvim";
+
+    if (useNvim) {
       runNvimReview(chain, stack);
     } else {
       runInteractiveReview(chain, stack);
