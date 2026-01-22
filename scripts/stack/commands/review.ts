@@ -902,9 +902,6 @@ vim.keymap.set("n", "<leader>ge", function()
   end
 end, { desc = "Edit current file" })
 
--- Load devicons first to prevent warning
-pcall(function() require('nvim-web-devicons').setup() end)
-
 -- On first load, open first branch. On reload, stay at current position.
 if not _G.stack_review_loaded then
   _G.stack_review_loaded = true
