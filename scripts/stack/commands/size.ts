@@ -16,10 +16,26 @@ function getRoot(stack: Record<string, string>, branch: string): string {
 }
 
 /**
- * Get all branches in the same tree as the given branch
+ * Get the subtree root - the first tracked ancestor (child of an untracked branch like main)
+ */
+function getSubtreeRoot(stack: Record<string, string>, branch: string): string {
+  let current = branch;
+  let subtreeRoot = branch;
+
+  // Walk up the ancestry, keeping track of the last tracked branch
+  while (stack[current]) {
+    subtreeRoot = current;
+    current = stack[current];
+  }
+
+  return subtreeRoot;
+}
+
+/**
+ * Get all branches in the same subtree as the given branch
  */
 function getTreeBranches(stack: Record<string, string>, branch: string): Set<string> {
-  const root = getRoot(stack, branch);
+  const subtreeRoot = getSubtreeRoot(stack, branch);
   const tree = new Set<string>();
 
   function collectDescendants(b: string) {
@@ -29,7 +45,7 @@ function getTreeBranches(stack: Record<string, string>, branch: string): Set<str
     }
   }
 
-  collectDescendants(root);
+  collectDescendants(subtreeRoot);
   return tree;
 }
 
@@ -107,7 +123,7 @@ export const command: Command = {
     const allParents = new Set(stats.map((s) => s.parent));
     const allChildren = new Set(stats.map((s) => s.branch));
     const roots = treeBranches
-      ? [getRoot(stack, branch!)]
+      ? [getSubtreeRoot(stack, branch!)]
       : [...allParents].filter((p) => !allChildren.has(p));
 
     const statsMap = new Map(stats.map((s) => [s.branch, s]));
