@@ -11,13 +11,41 @@ CONVENTION_FILE="$STACK_DIR/convention"
 BRANCH=$(git branch --show-current 2>/dev/null)
 [ -z "$BRANCH" ] && exit 0
 
-# Check for convention mode first
-if [ -f "$CONVENTION_FILE" ]; then
+# Check explicit stack file first (takes precedence)
+if [ -f "$STACK_FILE" ]; then
+  PARENT=$(grep "^${BRANCH}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
+
+  if [ -n "$PARENT" ]; then
+    # Branch is explicitly tracked - use explicit mode
+    pos=0
+    current="$BRANCH"
+    while true; do
+      p=$(grep "^${current}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
+      [ -z "$p" ] && break
+      ((pos++))
+      current="$p"
+    done
+    root="$current"
+
+    # Count total tracked branches in this chain
+    total=0
+    count_descendants() {
+      local b="$1"
+      for child in $(grep ":${b}$" "$STACK_FILE" 2>/dev/null | cut -d: -f1); do
+        ((total++))
+        count_descendants "$child"
+      done
+    }
+    count_descendants "$root"
+  fi
+fi
+
+# If not explicitly tracked, try convention mode
+if [ -z "$PARENT" ] && [ -f "$CONVENTION_FILE" ]; then
   PREFIX=$(grep -o '"prefix"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONVENTION_FILE" 2>/dev/null | cut -d'"' -f4)
   ROOT=$(grep -o '"root"[[:space:]]*:[[:space:]]*"[^"]*"' "$CONVENTION_FILE" 2>/dev/null | cut -d'"' -f4)
 
   if [ -n "$PREFIX" ]; then
-    # Check if current branch matches prefix
     case "$BRANCH" in
       "$PREFIX"*)
         # Get all matching branches, sorted by version number
@@ -31,42 +59,14 @@ if [ -f "$CONVENTION_FILE" ]; then
           prev="$b"
         done
         ;;
-      *)
-        # On root or non-matching branch - just show branch name
-        echo "$BRANCH"
-        exit 0
-        ;;
     esac
   fi
-else
-  # Explicit mode
-  [ ! -f "$STACK_FILE" ] && exit 0
+fi
 
-  # Look up parent
-  PARENT=$(grep "^${BRANCH}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
-  [ -z "$PARENT" ] && exit 0
-
-  # Count depth from root (1 = first branch after root)
-  pos=0
-  current="$BRANCH"
-  while true; do
-    p=$(grep "^${current}:" "$STACK_FILE" 2>/dev/null | cut -d: -f2)
-    [ -z "$p" ] && break
-    ((pos++))
-    current="$p"
-  done
-  root="$current"
-
-  # Count total tracked branches in this chain
-  total=0
-  count_descendants() {
-    local b="$1"
-    for child in $(grep ":${b}$" "$STACK_FILE" 2>/dev/null | cut -d: -f1); do
-      ((total++))
-      count_descendants "$child"
-    done
-  }
-  count_descendants "$root"
+# If still not tracked, just show branch name
+if [ -z "$PARENT" ]; then
+  echo "$BRANCH"
+  exit 0
 fi
 
 [ -z "$PARENT" ] && exit 0
