@@ -731,6 +731,7 @@ vim.api.nvim_create_user_command("StackHelp", function()
     "  <leader>gb     jump to branch panel",
     "  <leader>gf     jump to file panel",
     "  <leader>gd     jump to diff view",
+    "  <leader>gy     copy branch name to clipboard",
     "",
     "  :StackJump N   jump to branch N",
     "  :qa            quit review",
@@ -738,6 +739,16 @@ vim.api.nvim_create_user_command("StackHelp", function()
   vim.notify(table.concat(help, "\\n"), vim.log.levels.INFO)
 end, {})
 vim.keymap.set("n", "g?", "<cmd>StackHelp<cr>", { desc = "Stack review help" })
+
+-- Copy current branch name to clipboard
+vim.api.nvim_create_user_command("StackYank", function()
+  local state = get_state()
+  local chain = get_chain()
+  local item = chain[state.index + 1]
+  vim.fn.setreg("+", item.branch)
+  vim.notify("Copied: " .. item.branch, vim.log.levels.INFO)
+end, {})
+vim.keymap.set("n", "<leader>gy", "<cmd>StackYank<cr>", { desc = "Copy branch name to clipboard" })
 
 -- Quick jump to specific panels
 vim.keymap.set("n", "<leader>gb", function()
