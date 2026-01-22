@@ -3,7 +3,7 @@
 --
 -- See the kickstart.nvim README for more information
 return {
-  { 'nvim-tree/nvim-web-devicons' },
+  { 'nvim-tree/nvim-web-devicons', lazy = false },
   {
     'sindrets/diffview.nvim',
     dependencies = { 'nvim-tree/nvim-web-devicons' },
@@ -22,6 +22,11 @@ return {
       },
     },
     opts = {
+      use_icons = true,  -- requires nvim-web-devicons
+      icons = {
+        folder_closed = ">",
+        folder_open = "v",
+      },
       enhanced_diff_hl = true,
       view = {
         default = {
