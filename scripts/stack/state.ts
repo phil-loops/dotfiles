@@ -34,6 +34,10 @@ export function getEditStateFile(): string {
   return join(getStackDir(), "edit-state");
 }
 
+export function getSnapshotFile(): string {
+  return join(getStackDir(), "snapshot");
+}
+
 // Maps child branch -> parent branch
 export type Stack = Record<string, string>;
 
@@ -100,5 +104,40 @@ export function listBackups(branch: string): string[] {
       .filter(Boolean);
   } catch {
     return [];
+  }
+}
+
+// Snapshot: records branch HEADs before operations
+export type Snapshot = {
+  timestamp: string;
+  operation: string;
+  branches: Record<string, string>; // branch name -> commit hash
+};
+
+export function saveSnapshot(operation: string, branches: string[]) {
+  const snapshot: Snapshot = {
+    timestamp: new Date().toISOString(),
+    operation,
+    branches: {},
+  };
+
+  for (const branch of branches) {
+    try {
+      snapshot.branches[branch] = git(`rev-parse ${branch}`);
+    } catch {
+      // Branch might not exist yet
+    }
+  }
+
+  writeFileSync(getSnapshotFile(), JSON.stringify(snapshot, null, 2));
+}
+
+export function loadSnapshot(): Snapshot | null {
+  const snapshotFile = getSnapshotFile();
+  if (!existsSync(snapshotFile)) return null;
+  try {
+    return JSON.parse(readFileSync(snapshotFile, "utf-8"));
+  } catch {
+    return null;
   }
 }
