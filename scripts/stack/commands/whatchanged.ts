@@ -7,12 +7,13 @@ export const command: Command = {
   category: "info",
   name: "whatchanged",
   help: "Show what changed since you last reviewed (--ack to mark reviewed)",
-  args: "[--files] [--diff] [--ack]",
+  args: "[--files] [--diff] [--ack] [--show <file>]",
   run(args) {
-    const { values } = parseArgs(args, {
+    const { values, positionals } = parseArgs(args, {
       files: { type: "boolean", short: "f" },
       diff: { type: "boolean", short: "d" },
       ack: { type: "boolean", short: "a" },
+      show: { type: "string", short: "s" },
     });
 
     const stack = loadStack();
@@ -33,6 +34,52 @@ export const command: Command = {
     const ack = loadAck();
     if (!ack) {
       console.log("No previous state to compare. Run 'stack whatchanged --ack' to set baseline.");
+      return;
+    }
+
+    // If --show <file>, show the diff for that file across changed branches
+    const showFile = values.show || positionals[0];
+    if (showFile) {
+      console.log(`Diff for: ${showFile}\n`);
+
+      for (const branch of branches) {
+        const oldHash = ack.branches[branch];
+        if (!oldHash) continue;
+
+        let currentHash: string;
+        try {
+          currentHash = git(`rev-parse ${branch}`);
+        } catch {
+          continue;
+        }
+
+        if (oldHash === currentHash) continue;
+
+        // Check if this file changed in this branch
+        try {
+          const filesChanged = execSync(
+            `git diff --name-only ${oldHash}..${currentHash}`,
+            { encoding: "utf-8" }
+          ).trim();
+
+          if (!filesChanged.split("\n").includes(showFile)) continue;
+
+          console.log(`\n${"=".repeat(60)}`);
+          console.log(`${branch}`);
+          console.log(`${"=".repeat(60)}`);
+
+          const diff = execSync(
+            `git diff ${oldHash}..${currentHash} -- "${showFile}"`,
+            { encoding: "utf-8" }
+          ).trim();
+
+          if (diff) {
+            console.log(diff);
+          }
+        } catch {
+          // Ignore
+        }
+      }
       return;
     }
 
