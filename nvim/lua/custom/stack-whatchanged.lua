@@ -3,9 +3,24 @@
 
 local M = {}
 
+-- Get git root
+local function get_git_root()
+  local result = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
+  if vim.v.shell_error ~= 0 then
+    return nil
+  end
+  return result
+end
+
 -- Parse output of `loops stack whatchanged --files`
 local function parse_whatchanged()
-  local output = vim.fn.systemlist('loops stack whatchanged --files 2>/dev/null')
+  local git_root = get_git_root()
+  if not git_root then
+    return nil, 'Not in a git repository'
+  end
+
+  local cmd = string.format('cd "%s" && loops stack whatchanged --files 2>/dev/null', git_root)
+  local output = vim.fn.systemlist(cmd)
   if vim.v.shell_error ~= 0 then
     return nil, 'Not in a stack or no baseline set'
   end
@@ -46,7 +61,11 @@ end
 
 -- Get diff for a specific file
 local function get_file_diff(filepath)
-  local cmd = string.format('loops stack whatchanged --show "%s" 2>/dev/null', filepath)
+  local git_root = get_git_root()
+  if not git_root then
+    return ''
+  end
+  local cmd = string.format('cd "%s" && loops stack whatchanged --show "%s" 2>/dev/null', git_root, filepath)
   local output = vim.fn.system(cmd)
   return output
 end
@@ -147,7 +166,13 @@ end
 
 -- Acknowledge changes
 function M.ack()
-  local output = vim.fn.system('loops stack whatchanged --ack 2>&1')
+  local git_root = get_git_root()
+  if not git_root then
+    vim.notify('Not in a git repository', vim.log.levels.ERROR)
+    return
+  end
+  local cmd = string.format('cd "%s" && loops stack whatchanged --ack 2>&1', git_root)
+  local output = vim.fn.system(cmd)
   vim.notify(vim.trim(output), vim.log.levels.INFO)
 end
 
