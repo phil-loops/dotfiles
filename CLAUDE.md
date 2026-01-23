@@ -59,3 +59,6 @@ Run `loops stack` to see full help.
 
 # Git Commits
 Never add Co-Authored-By lines. Commits are mine alone.
+
+# State and Acknowledgment Commands
+Never automatically run commands that acknowledge, dismiss, or clear user state (like `whatchanged --ack`). The user must explicitly request these actions. Always ask before running any command that resets tracked state - don't assume that viewing something means the user wants to dismiss it.
