@@ -3,8 +3,11 @@
 
 local M = {}
 
--- The actual command (loops is a shell function, so call node directly)
-local STACK_CMD = 'node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts'
+-- Cache for parsed data
+local cache = {
+  data = nil,
+  time = 0,
+}
 
 -- Get git root
 local function get_git_root()
@@ -15,67 +18,127 @@ local function get_git_root()
   return result
 end
 
--- Parse output of `loops stack whatchanged --files`
-local function parse_whatchanged()
+-- Get repo name from git root
+local function get_repo_name()
   local git_root = get_git_root()
-  if not git_root then
-    return nil, 'Not in a git repository'
-  end
-
-  local cmd = string.format('cd "%s" && %s whatchanged --files 2>/dev/null', git_root, STACK_CMD)
-  local output = vim.fn.systemlist(cmd)
-  if vim.v.shell_error ~= 0 then
-    return nil, 'Not in a stack or no baseline set'
-  end
-
-  local results = {
-    last_reviewed = nil,
-    branches = {},
-    all_files = {},
-  }
-
-  local current_branch = nil
-
-  for _, line in ipairs(output) do
-    -- Parse "Last reviewed: <timestamp>"
-    local timestamp = line:match('^Last reviewed: (.+)$')
-    if timestamp then
-      results.last_reviewed = timestamp
-    end
-
-    -- Parse "branch-name: oldsha -> newsha"
-    local branch = line:match('^([%w%-_/]+): %w+ %-> %w+$')
-    if branch then
-      current_branch = branch
-      results.branches[branch] = {}
-    end
-
-    -- Parse "  filename" (indented file under a branch)
-    local file = line:match('^  ([%S]+)$')
-    if file and current_branch then
-      table.insert(results.branches[current_branch], file)
-      results.all_files[file] = results.all_files[file] or {}
-      table.insert(results.all_files[file], current_branch)
-    end
-  end
-
-  return results
+  if not git_root then return nil end
+  return vim.fn.fnamemodify(git_root, ':t')
 end
 
--- Get diff for a specific file
-local function get_file_diff(filepath)
-  local git_root = get_git_root()
-  if not git_root then
-    return ''
+-- Read and parse the ack file directly (no node needed)
+local function read_ack_file()
+  local repo_name = get_repo_name()
+  if not repo_name then return nil end
+
+  local ack_path = vim.fn.expand('~/.local/share/stack/' .. repo_name .. '/ack')
+  local file = io.open(ack_path, 'r')
+  if not file then return nil end
+
+  local content = file:read('*all')
+  file:close()
+
+  local ok, data = pcall(vim.json.decode, content)
+  if not ok then return nil end
+
+  return data
+end
+
+-- Read stack file to get branch list
+local function read_stack_file()
+  local repo_name = get_repo_name()
+  if not repo_name then return {} end
+
+  local stack_path = vim.fn.expand('~/.local/share/stack/' .. repo_name .. '/stack')
+  local file = io.open(stack_path, 'r')
+  if not file then return {} end
+
+  local branches = {}
+  for line in file:lines() do
+    local child = line:match('^([^:]+):')
+    if child then
+      table.insert(branches, child)
+    end
   end
-  local cmd = string.format('cd "%s" && %s whatchanged --show "%s" 2>/dev/null', git_root, STACK_CMD, filepath)
+  file:close()
+
+  return branches
+end
+
+-- Get current hash for a branch
+local function get_branch_hash(branch)
+  local result = vim.fn.systemlist('git rev-parse ' .. branch .. ' 2>/dev/null')[1]
+  if vim.v.shell_error ~= 0 then return nil end
+  return result
+end
+
+-- Get changed files between two commits
+local function get_changed_files(old_hash, new_hash)
+  local cmd = string.format('git diff --name-only %s..%s 2>/dev/null', old_hash, new_hash)
+  local output = vim.fn.systemlist(cmd)
+  if vim.v.shell_error ~= 0 then return {} end
+  return output
+end
+
+-- Get diff for a file between old and new hash
+local function get_file_diff(filepath, old_hash, new_hash)
+  local cmd = string.format('git diff %s..%s -- "%s" 2>/dev/null', old_hash, new_hash, filepath)
   local output = vim.fn.system(cmd)
   return output
 end
 
+-- Parse whatchanged (reads files directly, no node)
+local function parse_whatchanged()
+  -- Use cache if fresh (within 2 seconds)
+  local now = vim.loop.now()
+  if cache.data and (now - cache.time) < 2000 then
+    return cache.data
+  end
+
+  local ack = read_ack_file()
+  if not ack then
+    return nil, 'No baseline set. Run :StackAck first'
+  end
+
+  local branches = read_stack_file()
+  if #branches == 0 then
+    return nil, 'Not in a stack'
+  end
+
+  local results = {
+    last_reviewed = ack.timestamp,
+    branches = {},
+    all_files = {},
+    -- Store hashes for diff lookup
+    hashes = {},
+  }
+
+  for _, branch in ipairs(branches) do
+    local old_hash = ack.branches[branch]
+    if old_hash then
+      local new_hash = get_branch_hash(branch)
+      if new_hash and old_hash ~= new_hash and not new_hash:find('^' .. old_hash) and not old_hash:find('^' .. new_hash:sub(1,8)) then
+        local files = get_changed_files(old_hash, new_hash)
+        if #files > 0 then
+          results.branches[branch] = files
+          results.hashes[branch] = { old = old_hash, new = new_hash }
+          for _, file in ipairs(files) do
+            results.all_files[file] = results.all_files[file] or { branches = {}, hashes = {} }
+            table.insert(results.all_files[file].branches, branch)
+            results.all_files[file].hashes[branch] = { old = old_hash, new = new_hash }
+          end
+        end
+      end
+    end
+  end
+
+  cache.data = results
+  cache.time = now
+  return results
+end
+
 -- Open telescope picker with changed files
 function M.telescope_picker()
-  local ok, telescope = pcall(require, 'telescope')
+  local ok, _ = pcall(require, 'telescope')
   if not ok then
     vim.notify('Telescope not available', vim.log.levels.ERROR)
     return
@@ -99,23 +162,23 @@ function M.telescope_picker()
     return
   end
 
-  -- Build entries: file + which branches it changed in
+  -- Build entries
   local entries = {}
-  for file, branches in pairs(results.all_files) do
+  for file, info in pairs(results.all_files) do
     table.insert(entries, {
       file = file,
-      branches = branches,
-      display = string.format('%s  (%s)', file, table.concat(branches, ', ')),
+      branches = info.branches,
+      hashes = info.hashes,
+      display = string.format('%s  (%d branches)', file, #info.branches),
     })
   end
 
-  -- Sort by filename
   table.sort(entries, function(a, b)
     return a.file < b.file
   end)
 
   pickers.new({}, {
-    prompt_title = 'Stack Changed Files (' .. (results.last_reviewed or 'unknown') .. ')',
+    prompt_title = 'Stack Changed (' .. (results.last_reviewed or '?') .. ')',
     finder = finders.new_table({
       results = entries,
       entry_maker = function(entry)
@@ -131,9 +194,14 @@ function M.telescope_picker()
     previewer = previewers.new_buffer_previewer({
       title = 'Diff',
       define_preview = function(self, entry, status)
-        local diff = get_file_diff(entry.value.file)
-        vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, vim.split(diff, '\n'))
-        vim.bo[self.state.bufnr].filetype = 'diff'
+        -- Get diff from first branch that changed this file
+        local first_branch = entry.value.branches[1]
+        local hashes = entry.value.hashes[first_branch]
+        if hashes then
+          local diff = get_file_diff(entry.value.file, hashes.old, hashes.new)
+          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, vim.split(diff, '\n'))
+          vim.bo[self.state.bufnr].filetype = 'diff'
+        end
       end,
     }),
     attach_mappings = function(prompt_bufnr, map)
@@ -145,7 +213,6 @@ function M.telescope_picker()
         end
       end)
 
-      -- <C-d> to open diffview for this file
       map('i', '<C-d>', function()
         actions.close(prompt_bufnr)
         local selection = action_state.get_selected_entry()
@@ -167,15 +234,19 @@ function M.telescope_picker()
   }):find()
 end
 
--- Acknowledge changes
+-- Acknowledge changes (still needs node for writing)
 function M.ack()
   local git_root = get_git_root()
   if not git_root then
     vim.notify('Not in a git repository', vim.log.levels.ERROR)
     return
   end
-  local cmd = string.format('cd "%s" && %s whatchanged --ack 2>&1', git_root, STACK_CMD)
+  local cmd = string.format(
+    'cd "%s" && node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts whatchanged --ack 2>&1',
+    git_root
+  )
   local output = vim.fn.system(cmd)
+  cache.data = nil -- Clear cache
   vim.notify(vim.trim(output), vim.log.levels.INFO)
 end
 
