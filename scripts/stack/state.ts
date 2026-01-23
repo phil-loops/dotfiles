@@ -38,6 +38,10 @@ export function getSnapshotFile(): string {
   return join(getStackDir(), "snapshot");
 }
 
+export function getAckFile(): string {
+  return join(getStackDir(), "ack");
+}
+
 // Maps child branch -> parent branch
 export type Stack = Record<string, string>;
 
@@ -137,6 +141,34 @@ export function loadSnapshot(): Snapshot | null {
   if (!existsSync(snapshotFile)) return null;
   try {
     return JSON.parse(readFileSync(snapshotFile, "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+export function saveAck(branches: string[]) {
+  const ack: Snapshot = {
+    timestamp: new Date().toISOString(),
+    operation: "ack",
+    branches: {},
+  };
+
+  for (const branch of branches) {
+    try {
+      ack.branches[branch] = git(`rev-parse ${branch}`);
+    } catch {
+      // Branch might not exist
+    }
+  }
+
+  writeFileSync(getAckFile(), JSON.stringify(ack, null, 2));
+}
+
+export function loadAck(): Snapshot | null {
+  const ackFile = getAckFile();
+  if (!existsSync(ackFile)) return null;
+  try {
+    return JSON.parse(readFileSync(ackFile, "utf-8"));
   } catch {
     return null;
   }
