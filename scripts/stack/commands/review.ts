@@ -70,19 +70,24 @@ export const command: Command = {
       process.exit(1);
     }
 
+    // Find starting index based on current branch position in chain
+    const current = currentBranch();
+    const currentIdx = chain.indexOf(current);
+    const startIdx = currentIdx >= 1 ? currentIdx : 1;
+
     const config = loadConfig();
     const useNvim = values.nvim || config.reviewEditor === "nvim";
 
     if (useNvim) {
-      runNvimReview(chain, stack);
+      runNvimReview(chain, stack, startIdx);
     } else {
-      runInteractiveReview(chain, stack);
+      runInteractiveReview(chain, stack, startIdx);
     }
   },
 };
 
-function runInteractiveReview(chain: string[], stack: Record<string, string>) {
-  let idx = 1; // Start from first non-root branch
+function runInteractiveReview(chain: string[], stack: Record<string, string>, startIdx: number) {
+  let idx = startIdx;
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -316,7 +321,7 @@ function openInEditor(branch: string, parent: string) {
   }
 }
 
-function runNvimReview(chain: string[], _stack: Record<string, string>) {
+function runNvimReview(chain: string[], _stack: Record<string, string>, startIdx: number) {
   // Write chain data to temp file for nvim to read
   const tmpDir = path.join(os.tmpdir(), "stack-review");
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -330,7 +335,9 @@ function runNvimReview(chain: string[], _stack: Record<string, string>) {
     reviewChain.push({ branch: chain[i], parent: chain[i - 1] });
   }
   fs.writeFileSync(chainFile, JSON.stringify(reviewChain));
-  fs.writeFileSync(stateFile, JSON.stringify({ index: 0 }));
+  // Start at current branch position (reviewChain index is startIdx - 1 since it excludes root)
+  const nvimStartIdx = Math.max(0, startIdx - 1);
+  fs.writeFileSync(stateFile, JSON.stringify({ index: nvimStartIdx }));
 
   // Define luaFile path before using it in template
   const luaFile = path.join(tmpDir, "init.lua");
@@ -750,6 +757,25 @@ vim.api.nvim_create_user_command("StackYank", function()
 end, {})
 vim.keymap.set("n", "<leader>gy", "<cmd>StackYank<cr>", { desc = "Copy branch name to clipboard" })
 
+-- Checkout the branch being reviewed
+vim.api.nvim_create_user_command("StackCheckout", function()
+  local state = get_state()
+  local chain = get_chain()
+  local item = chain[state.index + 1]
+  vim.fn.jobstart({"git", "checkout", item.branch}, {
+    on_exit = function(_, code)
+      vim.schedule(function()
+        if code == 0 then
+          vim.notify("Checked out: " .. item.branch, vim.log.levels.INFO)
+        else
+          vim.notify("Failed to checkout: " .. item.branch, vim.log.levels.ERROR)
+        end
+      end)
+    end
+  })
+end, {})
+vim.keymap.set("n", "gC", "<cmd>StackCheckout<cr>", { desc = "Checkout reviewed branch" })
+
 -- Quick jump to specific panels
 vim.keymap.set("n", "<leader>gb", function()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
@@ -913,10 +939,11 @@ vim.keymap.set("n", "<leader>ge", function()
   end
 end, { desc = "Edit current file" })
 
--- On first load, open first branch. On reload, stay at current position.
+-- On first load, open at current branch position. On reload, stay at current position.
 if not _G.stack_review_loaded then
   _G.stack_review_loaded = true
-  open_review(0)
+  local state = get_state()
+  open_review(state.index)
 end
 `;
 
