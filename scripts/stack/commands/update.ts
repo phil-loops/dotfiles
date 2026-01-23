@@ -7,6 +7,7 @@ import {
   git,
   gitTry,
   loadStack,
+  saveSnapshot,
 } from "../lib.ts";
 import { parseArgs } from "../args.ts";
 
@@ -67,6 +68,9 @@ export const command: Command = {
       }
       console.log("Conflict check passed.\n");
     }
+
+    // Save snapshot before rebasing
+    saveSnapshot("update", toRebase);
 
     for (const b of toRebase) {
       const parent = stack[b];
