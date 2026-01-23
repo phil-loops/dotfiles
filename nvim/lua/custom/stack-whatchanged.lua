@@ -229,6 +229,25 @@ function M.telescope_picker()
         end
       end)
 
+      -- Trace file through stack
+      map('i', '<C-t>', function()
+        actions.close(prompt_bufnr)
+        local selection = action_state.get_selected_entry()
+        if selection then
+          vim.cmd('tabnew')
+          M.trace(selection.value.file)
+        end
+      end)
+
+      map('n', '<C-t>', function()
+        actions.close(prompt_bufnr)
+        local selection = action_state.get_selected_entry()
+        if selection then
+          vim.cmd('tabnew')
+          M.trace(selection.value.file)
+        end
+      end)
+
       return true
     end,
   }):find()
