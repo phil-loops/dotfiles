@@ -1,5 +1,6 @@
 import type { Command } from "../types.ts";
 import {
+  checkConflict,
   currentBranch,
   getCurrentStack,
   getDescendants,
@@ -13,10 +14,11 @@ export const command: Command = {
   category: "git",
   name: "update",
   help: "Rebase current branch + descendants (--all for entire tree)",
-  args: "[--all]",
+  args: "[--all] [--force]",
   run(args) {
     const { values } = parseArgs(args, {
       all: { type: "boolean", short: "a" },
+      force: { type: "boolean", short: "f" },
     });
     const branch = currentBranch();
     const stack = loadStack();
@@ -39,6 +41,32 @@ export const command: Command = {
     }
 
     console.log(`\nWill rebase: ${toRebase.join(" -> ")}\n`);
+
+    // Check for conflicts first (unless --force)
+    if (!values.force) {
+      const conflicts: Array<{ child: string; parent: string; files: string[] }> = [];
+      for (const b of toRebase) {
+        const parent = stack[b];
+        if (!parent) continue;
+        const result = checkConflict(parent, b);
+        if (result.hasConflict) {
+          conflicts.push({ child: b, parent, files: result.files });
+        }
+      }
+
+      if (conflicts.length > 0) {
+        console.error("Conflicts detected:\n");
+        for (const { child, parent, files } of conflicts) {
+          console.error(`  ${child} onto ${parent}:`);
+          for (const file of files) {
+            console.error(`    - ${file}`);
+          }
+        }
+        console.error("\nAborting. Use --force to attempt anyway.");
+        process.exit(1);
+      }
+      console.log("Conflict check passed.\n");
+    }
 
     for (const b of toRebase) {
       const parent = stack[b];
