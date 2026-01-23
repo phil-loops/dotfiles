@@ -2,6 +2,16 @@
 --  I promise not to create any merge conflicts in this directory :)
 --
 -- See the kickstart.nvim README for more information
+
+-- Load stack-whatchanged module
+local stack = require('custom.stack-whatchanged')
+stack.setup()
+
+-- Keybindings for stack
+vim.keymap.set('n', '<leader>sc', stack.telescope_picker, { desc = 'Stack: Changed files' })
+vim.keymap.set('n', '<leader>sa', stack.ack, { desc = 'Stack: Ack changes' })
+vim.keymap.set('n', '<leader>ss', stack.summary, { desc = 'Stack: Summary' })
+
 return {
   {
     'sindrets/diffview.nvim',
