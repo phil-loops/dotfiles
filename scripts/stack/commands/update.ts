@@ -69,8 +69,9 @@ export const command: Command = {
       console.log("Conflict check passed.\n");
     }
 
-    // Save snapshot before rebasing
-    saveSnapshot("update", toRebase);
+    // Save snapshot of ALL branches before rebasing (so whatchanged shows full picture)
+    const allBranches = Object.keys(stack);
+    saveSnapshot("update", allBranches);
 
     for (const b of toRebase) {
       const parent = stack[b];
