@@ -1,5 +1,5 @@
 import type { Command } from "../types.ts";
-import { currentBranch, extractKeyChanges, getChainFromRoot, git, loadStack } from "../lib.ts";
+import { currentBranch, extractKeyChanges, getChainFromRoot, git, gitTry, loadStack } from "../lib.ts";
 import { parseArgs } from "../args.ts";
 import { execSync } from "child_process";
 
@@ -74,6 +74,29 @@ export const command: Command = {
 
     const targetBranch = fullChain[nextIdx];
     const parentBranch = nextIdx > 0 ? fullChain[nextIdx - 1] : null;
+
+    // Check if target branch needs rebasing onto its parent
+    if (parentBranch && !values.back) {
+      try {
+        const mergeBase = git(`merge-base ${parentBranch} ${targetBranch}`);
+        const parentHead = git(`rev-parse ${parentBranch}`);
+
+        if (mergeBase !== parentHead) {
+          console.log(`\n${targetBranch} is behind ${parentBranch}, updating...`);
+          git(`checkout ${targetBranch}`);
+          if (!gitTry(`rebase ${parentBranch}`)) {
+            console.error(`\nRebase failed (conflict). Resolve with:`);
+            console.error(`  1. Edit conflicted files`);
+            console.error(`  2. git add <files>`);
+            console.error(`  3. git rebase --continue`);
+            process.exit(1);
+          }
+          console.log("Updated.\n");
+        }
+      } catch {
+        // If we can't check, just proceed
+      }
+    }
 
     git(`checkout ${targetBranch}`);
 
