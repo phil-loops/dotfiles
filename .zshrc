@@ -57,14 +57,44 @@ loops() {
         pr-review)
             _loops_pr_review "$@"
             ;;
+        clean-migrations)
+            _loops_clean_migrations "$@"
+            ;;
         *)
             echo "Usage: loops <command>"
             echo ""
             echo "Commands:"
-            echo "  stack       Manage git branch stacks"
-            echo "  pr-review   Review PRs assigned to you"
+            echo "  stack             Manage git branch stacks"
+            echo "  pr-review         Review PRs assigned to you"
+            echo "  clean-migrations  Remove empty migration folders"
             ;;
     esac
+}
+
+_loops_clean_migrations() {
+    local migrations_dir="prisma/migrations"
+
+    if [[ ! -d "$migrations_dir" ]]; then
+        echo "No prisma/migrations directory found"
+        return 1
+    fi
+
+    local removed=0
+    for dir in "$migrations_dir"/*/; do
+        [[ ! -d "$dir" ]] && continue
+        # Check if directory is empty (no files, only maybe subdirs)
+        if [[ -z "$(ls -A "$dir" 2>/dev/null)" ]]; then
+            echo "Removing empty: $dir"
+            rmdir "$dir"
+            ((removed++))
+        fi
+    done
+
+    if [[ $removed -eq 0 ]]; then
+        echo "No empty migration folders found"
+    else
+        echo "Removed $removed empty folder(s)"
+    fi
 }
 
 _loops_pr_review() {
