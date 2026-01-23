@@ -47,8 +47,8 @@ export function parseArgs<T extends Options>(
   for (const [name, opt] of Object.entries(options)) {
     config.options[name] = {
       type: opt.type,
-      short: opt.short,
-      default: opt.default,
+      ...(opt.short && { short: opt.short }),
+      ...(opt.default !== undefined && { default: opt.default }),
     };
   }
 
