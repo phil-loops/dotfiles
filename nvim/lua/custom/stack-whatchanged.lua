@@ -271,6 +271,152 @@ function M.summary()
   end
 end
 
+-- Trace file through stack (telescope picker showing evolution)
+function M.trace(filepath)
+  filepath = filepath or vim.fn.expand('%:.')
+  if filepath == '' then
+    vim.notify('No file to trace', vim.log.levels.WARN)
+    return
+  end
+
+  local ok, _ = pcall(require, 'telescope')
+  if not ok then
+    vim.notify('Telescope not available', vim.log.levels.ERROR)
+    return
+  end
+
+  local pickers = require('telescope.pickers')
+  local finders = require('telescope.finders')
+  local conf = require('telescope.config').values
+  local actions = require('telescope.actions')
+  local action_state = require('telescope.actions.state')
+  local previewers = require('telescope.previewers')
+
+  local branches = read_stack_file()
+  if #branches == 0 then
+    vim.notify('Not in a stack', vim.log.levels.WARN)
+    return
+  end
+
+  -- Read stack to get parent relationships
+  local stack = {}
+  local repo_name = get_repo_name()
+  local stack_path = vim.fn.expand('~/.local/share/stack/' .. repo_name .. '/stack')
+  local file = io.open(stack_path, 'r')
+  if file then
+    for line in file:lines() do
+      local child, parent = line:match('^([^:]+):(.+)$')
+      if child and parent then
+        stack[child] = parent
+      end
+    end
+    file:close()
+  end
+
+  -- Get file content at each branch
+  local function get_file_at_branch(branch)
+    local cmd = string.format('git show %s:"%s" 2>/dev/null', branch, filepath)
+    local output = vim.fn.system(cmd)
+    if vim.v.shell_error ~= 0 then return nil end
+    return output
+  end
+
+  -- Build entries for branches that have/touch this file
+  local entries = {}
+  local prev_content = nil
+
+  for _, branch in ipairs(branches) do
+    local parent = stack[branch]
+    local content = get_file_at_branch(branch)
+    local parent_content = parent and get_file_at_branch(parent) or nil
+
+    local status, stats
+    if content == nil and parent_content == nil then
+      goto continue
+    elseif content == nil and parent_content ~= nil then
+      status = 'deleted'
+      stats = string.format('-%d lines', #vim.split(parent_content, '\n'))
+    elseif content ~= nil and parent_content == nil then
+      status = 'introduced'
+      stats = string.format('+%d lines', #vim.split(content, '\n'))
+    elseif content == parent_content then
+      status = 'unchanged'
+      stats = ''
+    else
+      status = 'modified'
+      -- Get numstat
+      local numstat = vim.fn.system(string.format('git diff --numstat %s..%s -- "%s" 2>/dev/null', parent, branch, filepath))
+      local add, del = numstat:match('^(%d+)%s+(%d+)')
+      stats = string.format('+%s/-%s', add or '?', del or '?')
+    end
+
+    local icon = status == 'introduced' and '+' or
+                 status == 'modified' and '~' or
+                 status == 'deleted' and '-' or ' '
+
+    table.insert(entries, {
+      branch = branch,
+      parent = parent,
+      status = status,
+      stats = stats,
+      icon = icon,
+      display = string.format('%s %s  %s', icon, branch, stats),
+    })
+
+    ::continue::
+  end
+
+  if #entries == 0 then
+    vim.notify('File not found in any branch', vim.log.levels.INFO)
+    return
+  end
+
+  pickers.new({}, {
+    prompt_title = 'Stack Trace: ' .. filepath,
+    finder = finders.new_table({
+      results = entries,
+      entry_maker = function(entry)
+        return {
+          value = entry,
+          display = entry.display,
+          ordinal = entry.branch,
+        }
+      end,
+    }),
+    sorter = conf.generic_sorter({}),
+    previewer = previewers.new_buffer_previewer({
+      title = 'Diff',
+      define_preview = function(self, entry, status)
+        local e = entry.value
+        if e.status == 'unchanged' then
+          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, { '(unchanged)' })
+          return
+        end
+        if e.parent then
+          local diff = vim.fn.system(string.format('git diff %s..%s -- "%s"', e.parent, e.branch, filepath))
+          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, vim.split(diff, '\n'))
+          vim.bo[self.state.bufnr].filetype = 'diff'
+        else
+          -- No parent, show file content
+          local content = vim.fn.system(string.format('git show %s:"%s"', e.branch, filepath))
+          vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, vim.split(content, '\n'))
+        end
+      end,
+    }),
+    attach_mappings = function(prompt_bufnr, map)
+      actions.select_default:replace(function()
+        actions.close(prompt_bufnr)
+        local selection = action_state.get_selected_entry()
+        if selection then
+          -- Show the file at that branch
+          vim.cmd('Gedit ' .. selection.value.branch .. ':' .. filepath)
+        end
+      end)
+      return true
+    end,
+  }):find()
+end
+
 -- Setup commands
 function M.setup()
   vim.api.nvim_create_user_command('StackChanged', function()
@@ -284,6 +430,10 @@ function M.setup()
   vim.api.nvim_create_user_command('StackSummary', function()
     M.summary()
   end, { desc = 'Show stack change summary' })
+
+  vim.api.nvim_create_user_command('StackTrace', function(opts)
+    M.trace(opts.args ~= '' and opts.args or nil)
+  end, { desc = 'Trace file evolution through stack', nargs = '?' })
 end
 
 return M
