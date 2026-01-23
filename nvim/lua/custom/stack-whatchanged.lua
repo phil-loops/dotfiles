@@ -3,6 +3,9 @@
 
 local M = {}
 
+-- The actual command (loops is a shell function, so call node directly)
+local STACK_CMD = 'node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts'
+
 -- Get git root
 local function get_git_root()
   local result = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
@@ -19,7 +22,7 @@ local function parse_whatchanged()
     return nil, 'Not in a git repository'
   end
 
-  local cmd = string.format('cd "%s" && loops stack whatchanged --files 2>/dev/null', git_root)
+  local cmd = string.format('cd "%s" && %s whatchanged --files 2>/dev/null', git_root, STACK_CMD)
   local output = vim.fn.systemlist(cmd)
   if vim.v.shell_error ~= 0 then
     return nil, 'Not in a stack or no baseline set'
@@ -65,7 +68,7 @@ local function get_file_diff(filepath)
   if not git_root then
     return ''
   end
-  local cmd = string.format('cd "%s" && loops stack whatchanged --show "%s" 2>/dev/null', git_root, filepath)
+  local cmd = string.format('cd "%s" && %s whatchanged --show "%s" 2>/dev/null', git_root, STACK_CMD, filepath)
   local output = vim.fn.system(cmd)
   return output
 end
@@ -171,7 +174,7 @@ function M.ack()
     vim.notify('Not in a git repository', vim.log.levels.ERROR)
     return
   end
-  local cmd = string.format('cd "%s" && loops stack whatchanged --ack 2>&1', git_root)
+  local cmd = string.format('cd "%s" && %s whatchanged --ack 2>&1', git_root, STACK_CMD)
   local output = vim.fn.system(cmd)
   vim.notify(vim.trim(output), vim.log.levels.INFO)
 end
