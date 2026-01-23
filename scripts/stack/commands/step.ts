@@ -1,17 +1,42 @@
 import type { Command } from "../types.ts";
 import { currentBranch, extractKeyChanges, getChainFromRoot, git, loadStack } from "../lib.ts";
 import { parseArgs } from "../args.ts";
+import { execSync } from "child_process";
 
 export const command: Command = {
   category: "nav",
   name: "step",
   help: "Move to next branch and show diff summary",
-  args: "[--back]",
+  args: "[--back] [--skip-lint] [--skip-compile]",
   run(args) {
     const { values } = parseArgs(args, {
       back: { type: "boolean", short: "b" },
+      "skip-lint": { type: "boolean" },
+      "skip-compile": { type: "boolean" },
     });
     const branch = currentBranch();
+
+    // Run lint unless skipped
+    if (!values["skip-lint"] && !values.back) {
+      console.log("Running lint...");
+      try {
+        execSync("task lint:warn", { stdio: "inherit" });
+      } catch {
+        console.error("\nLint failed. Fix errors or use --skip-lint to proceed anyway.");
+        process.exit(1);
+      }
+    }
+
+    // Run compile unless skipped
+    if (!values["skip-compile"] && !values.back) {
+      console.log("Running compile check...");
+      try {
+        execSync("npx tsc --noEmit", { stdio: "inherit" });
+      } catch {
+        console.error("\nCompile failed. Fix errors or use --skip-compile to proceed anyway.");
+        process.exit(1);
+      }
+    }
     const stack = loadStack();
 
     if (Object.keys(stack).length === 0) {
