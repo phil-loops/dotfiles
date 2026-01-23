@@ -179,6 +179,7 @@ function M.telescope_picker()
 
   pickers.new({}, {
     prompt_title = 'Stack Changed (' .. (results.last_reviewed or '?') .. ')',
+    results_title = '<CR> open │ <C-t> trace │ <C-d> diffview',
     finder = finders.new_table({
       results = entries,
       entry_maker = function(entry)
@@ -392,6 +393,7 @@ function M.trace(filepath)
 
   pickers.new({}, {
     prompt_title = 'Stack Trace: ' .. filepath,
+    results_title = '<CR> view at branch',
     finder = finders.new_table({
       results = entries,
       entry_maker = function(entry)
@@ -436,6 +438,142 @@ function M.trace(filepath)
   }):find()
 end
 
+-- Help and debug
+M.keymaps = {
+  { mode = 'n', key = '<leader>sc', desc = 'StackChanged - browse changed files' },
+  { mode = 'n', key = '<leader>sa', desc = 'StackAck - acknowledge changes' },
+  { mode = 'n', key = '<leader>ss', desc = 'StackSummary - quick summary' },
+}
+
+M.picker_keys = {
+  { key = '<CR>', desc = 'Open file' },
+  { key = '<C-t>', desc = 'Trace file through stack (new tab)' },
+  { key = '<C-d>', desc = 'DiffviewFileHistory' },
+}
+
+M.commands = {
+  { cmd = 'StackChanged', desc = 'Telescope picker for changed files' },
+  { cmd = 'StackAck', desc = 'Mark current state as reviewed' },
+  { cmd = 'StackSummary', desc = 'Show change count summary' },
+  { cmd = 'StackTrace [file]', desc = 'Trace file evolution through stack' },
+  { cmd = 'StackHelp', desc = 'Show this help' },
+  { cmd = 'StackDebug', desc = 'Check for keymap conflicts' },
+}
+
+function M.help()
+  local lines = {
+    'Stack Plugin Commands:',
+    '',
+  }
+  for _, c in ipairs(M.commands) do
+    table.insert(lines, string.format('  :%s', c.cmd))
+    table.insert(lines, string.format('      %s', c.desc))
+  end
+  table.insert(lines, '')
+  table.insert(lines, 'Global Keymaps (if configured):')
+  for _, k in ipairs(M.keymaps) do
+    table.insert(lines, string.format('  %s  %s', k.key, k.desc))
+  end
+  table.insert(lines, '')
+  table.insert(lines, 'Picker Keymaps:')
+  for _, k in ipairs(M.picker_keys) do
+    table.insert(lines, string.format('  %s  %s', k.key, k.desc))
+  end
+
+  -- Display in floating window
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  local width = 60
+  local height = #lines
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = 'editor',
+    width = width,
+    height = height,
+    row = (vim.o.lines - height) / 2,
+    col = (vim.o.columns - width) / 2,
+    style = 'minimal',
+    border = 'rounded',
+    title = ' Stack Help ',
+    title_pos = 'center',
+  })
+
+  -- Close on q or escape
+  vim.keymap.set('n', 'q', function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+  vim.keymap.set('n', '<Esc>', function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+end
+
+function M.debug()
+  local lines = { 'Stack Plugin Debug:', '' }
+  local conflicts = 0
+
+  -- Check global keymaps
+  table.insert(lines, 'Keymap Conflicts:')
+  for _, k in ipairs(M.keymaps) do
+    local existing = vim.fn.maparg(k.key, k.mode)
+    if existing ~= '' and not existing:find('Stack') then
+      table.insert(lines, string.format('  ⚠ %s already mapped to: %s', k.key, existing))
+      conflicts = conflicts + 1
+    else
+      table.insert(lines, string.format('  ✓ %s available', k.key))
+    end
+  end
+
+  table.insert(lines, '')
+  table.insert(lines, 'Stack State:')
+
+  local repo = get_repo_name()
+  if repo then
+    table.insert(lines, string.format('  Repo: %s', repo))
+  else
+    table.insert(lines, '  ⚠ Not in a git repo')
+  end
+
+  local branches = read_stack_file()
+  if #branches > 0 then
+    table.insert(lines, string.format('  Branches tracked: %d', #branches))
+  else
+    table.insert(lines, '  ⚠ No stack file found')
+  end
+
+  local ack = read_ack_file()
+  if ack then
+    table.insert(lines, string.format('  Last ack: %s', ack.timestamp or '?'))
+  else
+    table.insert(lines, '  ⚠ No ack baseline set')
+  end
+
+  table.insert(lines, '')
+  if conflicts > 0 then
+    table.insert(lines, string.format('Found %d keymap conflict(s)', conflicts))
+  else
+    table.insert(lines, 'No keymap conflicts detected')
+  end
+
+  -- Display
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+
+  local width = 60
+  local height = #lines
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = 'editor',
+    width = width,
+    height = height,
+    row = (vim.o.lines - height) / 2,
+    col = (vim.o.columns - width) / 2,
+    style = 'minimal',
+    border = 'rounded',
+    title = ' Stack Debug ',
+    title_pos = 'center',
+  })
+
+  vim.keymap.set('n', 'q', function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+  vim.keymap.set('n', '<Esc>', function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+end
+
 -- Setup commands
 function M.setup()
   vim.api.nvim_create_user_command('StackChanged', function()
@@ -453,6 +591,14 @@ function M.setup()
   vim.api.nvim_create_user_command('StackTrace', function(opts)
     M.trace(opts.args ~= '' and opts.args or nil)
   end, { desc = 'Trace file evolution through stack', nargs = '?' })
+
+  vim.api.nvim_create_user_command('StackHelp', function()
+    M.help()
+  end, { desc = 'Show stack plugin help' })
+
+  vim.api.nvim_create_user_command('StackDebug', function()
+    M.debug()
+  end, { desc = 'Debug stack plugin state and keymaps' })
 end
 
 return M
