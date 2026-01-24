@@ -132,7 +132,7 @@ function M.trace(filepath)
 
   table.insert(lines, sep)
   table.insert(lines, string.format('  FILE HISTORY: %s', filepath))
-  table.insert(lines, string.format('  %d changes across the stack  |  r = mark reviewed  |  q = close', #changes))
+  table.insert(lines, string.format('  %d changes  |  y = copy path  |  r = reviewed  |  q = close', #changes))
   table.insert(lines, sep)
   table.insert(lines, '')
 
@@ -210,6 +210,12 @@ function M.trace(filepath)
       panel.refresh_data()
       panel.render()
     end
+  end, opts)
+
+  -- Yank filepath to clipboard
+  vim.keymap.set('n', 'y', function()
+    vim.fn.setreg('+', filepath)
+    vim.notify('Copied: ' .. filepath, vim.log.levels.INFO)
   end, opts)
 end
 
