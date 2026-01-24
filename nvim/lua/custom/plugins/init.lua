@@ -3,14 +3,38 @@
 --
 -- See the kickstart.nvim README for more information
 
--- Load stack-whatchanged module
-local stack = require('custom.stack-whatchanged')
-stack.setup()
+-- Load stack-whatchanged module (for trace functionality)
+local stack_whatchanged = require('custom.stack-whatchanged')
+stack_whatchanged.setup()
 
--- Keybindings for stack
-vim.keymap.set('n', '<leader>sc', stack.telescope_picker, { desc = 'Stack: Changed files' })
-vim.keymap.set('n', '<leader>sa', stack.ack, { desc = 'Stack: Ack changes' })
-vim.keymap.set('n', '<leader>ss', stack.summary, { desc = 'Stack: Summary' })
+-- Load stack-review module (unified review experience)
+local stack_review = require('custom.stack-review')
+stack_review.setup()
+
+-- Keybindings for stack review (leader-s prefix)
+vim.keymap.set('n', '<leader>sc', function()
+  stack_review.open()
+end, { desc = 'Stack Review: Open/resume' })
+
+vim.keymap.set('n', '<leader>sr', function()
+  stack_review.toggle_reviewed()
+end, { desc = 'Stack Review: Toggle file reviewed' })
+
+vim.keymap.set('n', '<leader>ss', function()
+  stack_review.show_progress()
+end, { desc = 'Stack Review: Progress' })
+
+vim.keymap.set('n', '<leader>sa', function()
+  stack_review.complete()
+end, { desc = 'Stack Review: Complete (ack)' })
+
+vim.keymap.set('n', '<leader>sq', function()
+  stack_review.quit()
+end, { desc = 'Stack Review: Quit (preserve)' })
+
+vim.keymap.set('n', '<leader>st', function()
+  stack_whatchanged.trace()
+end, { desc = 'Stack: Trace current file' })
 
 return {
   {
@@ -21,13 +45,6 @@ return {
       { '<leader>gD', '<cmd>DiffviewOpen main<cr>', desc = 'Diffview: Open (vs main)' },
       { '<leader>gh', '<cmd>DiffviewFileHistory %<cr>', desc = 'Diffview: File history' },
       { '<leader>gH', '<cmd>DiffviewFileHistory<cr>', desc = 'Diffview: Branch history' },
-      {
-        '<leader>gr',
-        function()
-          require('custom.diffview-reviewed').toggle()
-        end,
-        desc = 'Diffview: Toggle file reviewed',
-      },
     },
     opts = {
       use_icons = false,
@@ -74,10 +91,5 @@ return {
         },
       },
     },
-    config = function(_, opts)
-      require('diffview').setup(opts)
-      -- Load reviewed module so autocmds are registered
-      require('custom.diffview-reviewed')
-    end,
   },
 }
