@@ -17,6 +17,46 @@ local M = {}
 local state = nil
 local state_path = nil
 
+-- In-memory cache for computed branch/file data
+local cache = {
+  data = nil,           -- The computed get_changed_files_by_branch result
+  computing = false,    -- Whether an async refresh is in progress
+  last_updated = 0,     -- vim.loop.now() timestamp
+  subscribers = {},     -- Callbacks to notify when cache updates
+}
+
+-- Subscribe to cache updates (returns unsubscribe function)
+function M.on_cache_update(callback)
+  table.insert(cache.subscribers, callback)
+  return function()
+    for i, cb in ipairs(cache.subscribers) do
+      if cb == callback then
+        table.remove(cache.subscribers, i)
+        return
+      end
+    end
+  end
+end
+
+-- Notify all subscribers that cache updated
+local function notify_subscribers()
+  for _, callback in ipairs(cache.subscribers) do
+    vim.schedule(function()
+      pcall(callback, cache.data)
+    end)
+  end
+end
+
+-- Check if cache is available
+function M.has_cache()
+  return cache.data ~= nil
+end
+
+-- Check if currently computing
+function M.is_computing()
+  return cache.computing
+end
+
 -- Get git root directory
 local function get_git_root()
   local result = vim.fn.systemlist('git rev-parse --show-toplevel')[1]
@@ -89,7 +129,7 @@ local function get_branch_hash(branch)
   return result
 end
 
--- Get changed files between two commits
+-- Get changed files between two commits (sync version for fallback)
 local function get_changed_files(old_hash, new_hash)
   local cmd = string.format('git diff --name-only %s..%s 2>/dev/null', old_hash, new_hash)
   local output = vim.fn.systemlist(cmd)
@@ -97,6 +137,173 @@ local function get_changed_files(old_hash, new_hash)
     return {}
   end
   return output
+end
+
+-- Async git command execution
+-- Runs a git command and calls callback with output lines
+local function git_async(cmd, callback)
+  local output = {}
+  vim.fn.jobstart(cmd, {
+    stdout_buffered = true,
+    on_stdout = function(_, data)
+      if data then
+        for _, line in ipairs(data) do
+          if line ~= '' then
+            table.insert(output, line)
+          end
+        end
+      end
+    end,
+    on_exit = function(_, exit_code)
+      callback(output, exit_code)
+    end,
+  })
+end
+
+-- Async refresh of cache data
+-- Computes all branch/file changes in background, then updates cache
+function M.refresh_async(force)
+  -- Don't start another refresh if one is in progress (unless forced)
+  if cache.computing and not force then
+    return
+  end
+
+  -- Load state if needed
+  if not state then
+    M.load()
+  end
+  if not state or not state.baseline then
+    return
+  end
+
+  cache.computing = true
+
+  local branches, parents = read_stack_file()
+  if #branches == 0 then
+    cache.computing = false
+    return
+  end
+
+  -- We'll collect results here
+  local results = {
+    branches = {},
+    file_info = {},
+    ordered_branches = {},
+  }
+
+  -- Track pending operations
+  local pending = 0
+  local branch_hashes = {}
+
+  -- First, get current hashes for all branches (async)
+  for _, branch in ipairs(branches) do
+    pending = pending + 1
+    git_async({ 'git', 'rev-parse', branch }, function(output, exit_code)
+      if exit_code == 0 and output[1] then
+        branch_hashes[branch] = output[1]
+      end
+      pending = pending - 1
+
+      -- Once all hashes are fetched, get diffs
+      if pending == 0 then
+        M._process_branch_diffs(branches, parents, branch_hashes, results)
+      end
+    end)
+  end
+end
+
+-- Internal: Process diffs for all branches (called after hashes are fetched)
+function M._process_branch_diffs(branches, parents, branch_hashes, results)
+  local pending = 0
+  local branches_with_changes = {}
+
+  -- Find branches that have changes
+  for _, branch in ipairs(branches) do
+    local old_hash = state.baseline[branch]
+    local new_hash = branch_hashes[branch]
+    if old_hash and new_hash and old_hash ~= new_hash then
+      table.insert(branches_with_changes, {
+        name = branch,
+        parent = parents[branch],
+        old_hash = old_hash,
+        new_hash = new_hash,
+      })
+    end
+  end
+
+  if #branches_with_changes == 0 then
+    -- No changes, update cache with empty results
+    cache.data = results
+    cache.computing = false
+    cache.last_updated = vim.loop.now()
+    notify_subscribers()
+    return
+  end
+
+  -- Get file diffs for each branch with changes
+  for _, branch_info in ipairs(branches_with_changes) do
+    pending = pending + 1
+    local cmd = { 'git', 'diff', '--name-only', branch_info.old_hash .. '..' .. branch_info.new_hash }
+    git_async(cmd, function(files, exit_code)
+      if exit_code == 0 and #files > 0 then
+        results.branches[branch_info.name] = {
+          name = branch_info.name,
+          parent = branch_info.parent,
+          files = files,
+          old_hash = branch_info.old_hash,
+          new_hash = branch_info.new_hash,
+        }
+        table.insert(results.ordered_branches, branch_info.name)
+
+        -- Track which branches touch each file
+        for _, filepath in ipairs(files) do
+          results.file_info[filepath] = results.file_info[filepath] or { branches = {} }
+          table.insert(results.file_info[filepath].branches, branch_info.name)
+        end
+      end
+
+      pending = pending - 1
+      if pending == 0 then
+        -- All diffs complete, finalize results
+        M._finalize_cache(results)
+      end
+    end)
+  end
+end
+
+-- Internal: Finalize cache after all async operations complete
+function M._finalize_cache(results)
+  -- Sort ordered_branches to match original stack order
+  local branches, _ = read_stack_file()
+  local branch_order = {}
+  for i, b in ipairs(branches) do
+    branch_order[b] = i
+  end
+  table.sort(results.ordered_branches, function(a, b)
+    return (branch_order[a] or 999) < (branch_order[b] or 999)
+  end)
+
+  -- Determine which branch is "final" for each file
+  for filepath, info in pairs(results.file_info) do
+    local final_branch = nil
+    local final_index = 0
+    for _, branch in ipairs(info.branches) do
+      local idx = branch_order[branch] or 0
+      if idx > final_index then
+        final_index = idx
+        final_branch = branch
+      end
+    end
+    info.final_branch = final_branch
+  end
+
+  -- Update cache
+  cache.data = results
+  cache.computing = false
+  cache.last_updated = vim.loop.now()
+
+  -- Notify subscribers
+  notify_subscribers()
 end
 
 -- Load state from disk
@@ -220,11 +427,43 @@ function M.start_review()
     return nil, err
   end
 
+  -- Immediately start populating cache in background
+  M.refresh_async()
+
   return state
 end
 
 -- Get all files that have changed since baseline, organized by branch
+-- Returns cached data immediately if available, triggers async refresh
 function M.get_changed_files_by_branch()
+  if not state then
+    M.load()
+  end
+  if not state or not state.baseline then
+    return nil, 'No active review session'
+  end
+
+  -- If we have cached data, return it immediately
+  if cache.data then
+    -- Trigger background refresh if data might be stale (older than 30 seconds)
+    local age = vim.loop.now() - cache.last_updated
+    if age > 30000 and not cache.computing then
+      M.refresh_async()
+    end
+    return cache.data
+  end
+
+  -- No cache - trigger async refresh and return empty for now
+  -- (caller should subscribe to updates or call get_changed_files_by_branch_sync)
+  if not cache.computing then
+    M.refresh_async()
+  end
+
+  return nil, 'Computing changes...'
+end
+
+-- Synchronous version (blocks UI - use sparingly, e.g., for initial load fallback)
+function M.get_changed_files_by_branch_sync()
   if not state then
     M.load()
   end
@@ -234,8 +473,8 @@ function M.get_changed_files_by_branch()
 
   local branches, parents = read_stack_file()
   local results = {
-    branches = {},      -- { name, parent, files = { path, is_final, status } }
-    file_info = {},     -- file_path -> { branches = {...}, final_branch = "..." }
+    branches = {},
+    file_info = {},
     ordered_branches = {},
   }
 
@@ -267,7 +506,6 @@ function M.get_changed_files_by_branch()
   end
 
   -- Second pass: determine which branch is "final" for each file
-  -- (the last branch in the stack that modifies it)
   for filepath, info in pairs(results.file_info) do
     local final_branch = nil
     local final_index = 0
@@ -282,7 +520,23 @@ function M.get_changed_files_by_branch()
     info.final_branch = final_branch
   end
 
+  -- Update cache with sync result
+  cache.data = results
+  cache.last_updated = vim.loop.now()
+
   return results
+end
+
+-- Invalidate cache (call after git operations)
+function M.invalidate_cache()
+  cache.data = nil
+  cache.last_updated = 0
+end
+
+-- Force refresh cache now (async)
+function M.refresh_cache()
+  M.invalidate_cache()
+  M.refresh_async(true)
 end
 
 -- Mark a file as reviewed
