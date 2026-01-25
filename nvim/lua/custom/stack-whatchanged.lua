@@ -244,14 +244,9 @@ function M.trace(filepath)
     end
   end
 
-  -- Close the trace view
+  -- Close the trace view (close the whole tab)
   local function close_trace()
-    if trace.list_win and vim.api.nvim_win_is_valid(trace.list_win) then
-      vim.api.nvim_win_close(trace.list_win, true)
-    end
-    if trace.diff_win and vim.api.nvim_win_is_valid(trace.diff_win) then
-      vim.api.nvim_win_close(trace.diff_win, true)
-    end
+    vim.cmd('tabclose')
   end
 
   -- Create buffers
@@ -266,7 +261,12 @@ function M.trace(filepath)
   vim.bo[trace.diff_buf].swapfile = false
   vim.bo[trace.diff_buf].filetype = 'diff'
 
-  -- Create windows: list on left (narrow), diff on right (wide)
+  -- Open in a new tab to avoid messing with existing layout
+  vim.cmd('tabnew')
+  trace.diff_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(trace.diff_win, trace.diff_buf)
+
+  -- Create list window on the left
   vim.cmd('topleft vertical 38split')
   trace.list_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(trace.list_win, trace.list_buf)
@@ -275,10 +275,6 @@ function M.trace(filepath)
   vim.wo[trace.list_win].signcolumn = 'no'
   vim.wo[trace.list_win].cursorline = true
   vim.wo[trace.list_win].winfixwidth = true
-
-  vim.cmd('wincmd l')
-  trace.diff_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(trace.diff_win, trace.diff_buf)
 
   -- Initial render
   render_list()
