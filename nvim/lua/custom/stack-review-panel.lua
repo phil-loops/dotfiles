@@ -63,13 +63,16 @@ function M.refresh_data()
 
   -- Build flat file list (deduped)
   for filepath, info in pairs(changes.file_info) do
-    local is_new_final = info.introduced_in and (info.introduced_in == info.final_branch)
     local branch_count = #info.branches
+    local is_new = info.introduced_in ~= nil
+    -- Quick scan = only appears in 1 branch (no evolution to trace)
+    local is_quick_scan = branch_count == 1
     table.insert(panel.files, {
       path = filepath,
       branches = info.branches,
       branch_count = branch_count,
-      is_new_final = is_new_final,
+      is_new = is_new,
+      is_quick_scan = is_quick_scan,
       first_branch = info.first_branch,
       final_branch = info.final_branch,
       introduced_in = info.introduced_in,
@@ -78,11 +81,11 @@ function M.refresh_data()
     })
   end
 
-  -- Sort: Files that evolve first, then NEW+FINAL at the end
+  -- Sort: Files that evolve (2+ branches) first, then quick scan (1 branch) at the end
   table.sort(panel.files, function(a, b)
-    -- NEW+FINAL goes to the bottom
-    if a.is_new_final ~= b.is_new_final then
-      return not a.is_new_final  -- false < true, so non-new-final comes first
+    -- Quick scan goes to the bottom
+    if a.is_quick_scan ~= b.is_quick_scan then
+      return not a.is_quick_scan
     end
     -- Then sort alphabetically by filename
     return a.path < b.path
@@ -125,21 +128,21 @@ local function build_lines()
       goto continue_file
     end
 
-    -- Add separator before NEW+FINAL section
-    if file_info.is_new_final and not shown_separator then
-      -- Check if there were any non-NEW+FINAL files shown before
+    -- Add separator before quick scan section (1 branch only)
+    if file_info.is_quick_scan and not shown_separator then
+      -- Check if there were any multi-branch files shown before
       local has_prior_files = false
       for _, f in ipairs(panel.files) do
         if f == file_info then break end
-        if not f.is_new_final and not (panel.hide_reviewed and f.reviewed) then
+        if not f.is_quick_scan and not (panel.hide_reviewed and f.reviewed) then
           has_prior_files = true
           break
         end
       end
       if has_prior_files then
         table.insert(lines, '')
-        table.insert(lines, '  ── new files (quick scan) ──')
-        table.insert(highlights, { line = #lines, col = 2, end_col = 30, hl = 'StackReviewLater' })
+        table.insert(lines, '  ── quick scan (1 branch) ──')
+        table.insert(highlights, { line = #lines, col = 2, end_col = 29, hl = 'StackReviewLater' })
         line_map[#lines] = { type = 'separator' }
       end
       shown_separator = true
@@ -150,8 +153,13 @@ local function build_lines()
 
     -- Build the info string
     local info
-    if file_info.is_new_final then
-      info = 'NEW'
+    if file_info.is_quick_scan then
+      -- Show NEW if it's a new file, otherwise just show the branch name
+      if file_info.is_new then
+        info = 'NEW'
+      else
+        info = file_info.final_branch
+      end
     else
       info = string.format('%d branches', file_info.branch_count)
     end
@@ -166,7 +174,7 @@ local function build_lines()
     table.insert(highlights, { line = #lines, col = 4, end_col = filename_end, hl = file_hl })
 
     -- Highlight the info
-    local info_hl = file_info.is_new_final and 'StackReviewNew' or 'StackReviewLater'
+    local info_hl = file_info.is_quick_scan and 'StackReviewNew' or 'StackReviewLater'
     table.insert(highlights, { line = #lines, col = #file_line - #info, end_col = #file_line, hl = info_hl })
 
     -- Show note if present
