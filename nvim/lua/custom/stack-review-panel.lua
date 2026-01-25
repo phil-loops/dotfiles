@@ -17,6 +17,8 @@ local panel = {
   cursor_file = nil,   -- currently selected file
   cursor_line = 1,     -- current line in panel
   hide_reviewed = true, -- hide reviewed files by default
+  unsubscribe = nil,   -- function to unsubscribe from cache updates
+  loading = false,     -- whether we're waiting for cache
 }
 
 -- Namespace for extmarks
@@ -36,16 +38,27 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, 'StackReviewNote', { fg = '#d19a66', italic = true })
 end
 
--- Load data from state
+-- Load data from state (returns true if data available, false if loading)
 function M.refresh_data()
-  local changes = state.get_changed_files_by_branch()
+  local changes, err = state.get_changed_files_by_branch()
+
+  -- Check if we're still computing
   if not changes then
+    panel.loading = state.is_computing()
+    if panel.loading then
+      panel.branches = {}
+      panel.branch_files = {}
+      panel.file_info = {}
+      return false
+    end
+    -- Not computing and no data - might be an error
     panel.branches = {}
     panel.branch_files = {}
     panel.file_info = {}
     return false
   end
 
+  panel.loading = false
   panel.branches = changes.ordered_branches
   panel.file_info = changes.file_info
   panel.branch_files = {}
@@ -90,6 +103,16 @@ local function build_lines()
   local lines = {}
   local highlights = {}
   local line_map = {}  -- line_num -> { type = "branch"|"file", branch = ..., file = ... }
+
+  -- Show loading state if computing
+  if panel.loading then
+    table.insert(lines, '  STACK REVIEW')
+    table.insert(highlights, { line = #lines, col = 0, end_col = 14, hl = 'StackReviewHeader' })
+    table.insert(lines, '')
+    table.insert(lines, '  Computing changes...')
+    table.insert(highlights, { line = #lines, col = 0, end_col = 22, hl = 'StackReviewProgress' })
+    return lines, highlights, line_map
+  end
 
   -- Header
   local progress = state.get_progress()
@@ -522,6 +545,26 @@ function M.open()
   vim.keymap.set('n', 'r', function() M.toggle_reviewed() end, opts)
   vim.keymap.set('n', 'n', function() M.add_note() end, opts)
   vim.keymap.set('n', 'h', function() M.toggle_hide_reviewed() end, opts)
+  vim.keymap.set('n', 'R', function()
+    state.refresh_cache()
+    panel.loading = true
+    M.render()
+  end, vim.tbl_extend('force', opts, { desc = 'Force refresh' }))
+
+  -- Subscribe to cache updates for async re-render
+  if panel.unsubscribe then
+    panel.unsubscribe()
+  end
+  panel.unsubscribe = state.on_cache_update(function()
+    if M.is_open() then
+      M.refresh_data()
+      -- Set cursor to first branch if not set
+      if not panel.cursor_branch and panel.branches[1] then
+        panel.cursor_branch = panel.branches[1]
+      end
+      M.render()
+    end
+  end)
 
   -- Load data and render
   M.refresh_data()
@@ -537,6 +580,12 @@ end
 
 -- Close the panel
 function M.close()
+  -- Unsubscribe from cache updates
+  if panel.unsubscribe then
+    panel.unsubscribe()
+    panel.unsubscribe = nil
+  end
+
   if panel.win and vim.api.nvim_win_is_valid(panel.win) then
     vim.api.nvim_win_close(panel.win, true)
   end

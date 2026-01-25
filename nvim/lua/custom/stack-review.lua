@@ -353,6 +353,49 @@ function M.setup()
   vim.api.nvim_create_user_command('StackReviewProgress', function()
     M.show_progress()
   end, { desc = 'Show review progress' })
+
+  vim.api.nvim_create_user_command('StackReviewRefresh', function()
+    state.refresh_cache()
+    vim.notify('Refreshing stack review cache...', vim.log.levels.INFO)
+  end, { desc = 'Force refresh cache' })
+
+  -- Auto-refresh cache after git operations
+  local refresh_group = vim.api.nvim_create_augroup('StackReviewRefresh', { clear = true })
+
+  -- Refresh when returning to nvim after shell commands (likely git operations)
+  vim.api.nvim_create_autocmd('FocusGained', {
+    group = refresh_group,
+    callback = function()
+      -- Only refresh if we have an active session
+      if state.has_active_session() then
+        state.refresh_async()
+      end
+    end,
+  })
+
+  -- Refresh after fugitive operations
+  vim.api.nvim_create_autocmd('User', {
+    group = refresh_group,
+    pattern = 'FugitiveChanged',
+    callback = function()
+      if state.has_active_session() then
+        state.refresh_async()
+      end
+    end,
+  })
+
+  -- Pre-warm cache when entering a git repo with active session
+  vim.api.nvim_create_autocmd('DirChanged', {
+    group = refresh_group,
+    callback = function()
+      -- Check if there's an active session and pre-warm cache
+      vim.defer_fn(function()
+        if state.has_active_session() and not state.has_cache() then
+          state.refresh_async()
+        end
+      end, 100)
+    end,
+  })
 end
 
 return M
