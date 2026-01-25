@@ -95,9 +95,17 @@ local function setup_keymaps()
     M.quit()
   end, vim.tbl_extend('force', opts, { desc = 'Stack Review: Quit (preserve)' }))
 
-  -- Panel-specific keymaps (CR to view diff)
+  -- Panel-specific keymaps (CR to trace file through stack)
   if panel.get_buf() then
     vim.keymap.set('n', '<CR>', function()
+      local filepath = panel.get_selected()
+      if filepath then
+        local stack_whatchanged = require('custom.stack-whatchanged')
+        stack_whatchanged.trace(filepath)
+      end
+    end, { buffer = panel.get_buf(), silent = true, desc = 'Trace file' })
+
+    vim.keymap.set('n', 'd', function()
       open_file_diff()
     end, { buffer = panel.get_buf(), silent = true, desc = 'View diff' })
 
