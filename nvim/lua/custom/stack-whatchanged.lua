@@ -126,7 +126,7 @@ function M.trace(filepath)
     -- Get diff stats
     local stats = ''
     if parent then
-      local stat_output = vim.fn.system(string.format('git diff --stat %s..%s -- "%s" 2>/dev/null', parent, branch, filepath))
+      local stat_output = vim.fn.system(string.format('git diff -w --stat %s..%s -- "%s" 2>/dev/null', parent, branch, filepath))
       local adds, dels = stat_output:match('(%d+) insertion'), stat_output:match('(%d+) deletion')
       if adds or dels then
         stats = string.format('+%s -%s', adds or '0', dels or '0')
@@ -214,7 +214,7 @@ function M.trace(filepath)
     table.insert(lines, '')
 
     if change.parent then
-      local diff = vim.fn.system(string.format('git diff %s..%s -- "%s" 2>/dev/null', change.parent, change.branch, filepath))
+      local diff = vim.fn.system(string.format('git diff -w %s..%s -- "%s" 2>/dev/null', change.parent, change.branch, filepath))
       for _, line in ipairs(vim.split(diff, '\n')) do
         table.insert(lines, line)
       end
