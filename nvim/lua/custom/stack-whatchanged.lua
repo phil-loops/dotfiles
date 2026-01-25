@@ -47,7 +47,8 @@ local function read_stack_file()
   return branches
 end
 
--- Trace file through stack - one scrollable buffer with all diffs
+-- Trace file through stack - master/detail view
+-- Left: list of branches, Right: diff updates as you navigate
 function M.trace(filepath)
   filepath = filepath or vim.fn.expand('%:.')
   if filepath == '' then
@@ -111,10 +112,21 @@ function M.trace(filepath)
       status = 'modified'
     end
 
+    -- Get diff stats
+    local stats = ''
+    if parent then
+      local stat_output = vim.fn.system(string.format('git diff --stat %s..%s -- "%s" 2>/dev/null', parent, branch, filepath))
+      local adds, dels = stat_output:match('(%d+) insertion'), stat_output:match('(%d+) deletion')
+      if adds or dels then
+        stats = string.format('+%s -%s', adds or '0', dels or '0')
+      end
+    end
+
     table.insert(changes, {
       branch = branch,
       parent = parent,
       status = status,
+      stats = stats,
     })
 
     ::continue::
@@ -125,97 +137,203 @@ function M.trace(filepath)
     return
   end
 
-  -- Build one buffer with ALL diffs concatenated
-  local lines = {}
   local filename = vim.fn.fnamemodify(filepath, ':t')
-  local sep = string.rep('=', 70)
 
-  table.insert(lines, sep)
-  table.insert(lines, string.format('  FILE HISTORY: %s', filepath))
-  table.insert(lines, string.format('  %d changes  |  Y = copy path  |  r = reviewed  |  q = close', #changes))
-  table.insert(lines, sep)
-  table.insert(lines, '')
+  -- Create the trace state
+  local trace = {
+    filepath = filepath,
+    filename = filename,
+    changes = changes,
+    selected = 1,
+    list_buf = nil,
+    list_win = nil,
+    diff_buf = nil,
+    diff_win = nil,
+  }
 
-  for i, change in ipairs(changes) do
-    -- Section header
-    local header = string.format('[ %d/%d ] %s', i, #changes, change.branch)
-    if change.status == 'CREATED' then
-      header = header .. '  ** FILE CREATED **'
-    elseif change.status == 'DELETED' then
-      header = header .. '  ** FILE DELETED **'
+  -- Build the branch list content
+  local function build_list_lines()
+    local lines = {}
+    table.insert(lines, ' TRACE: ' .. filename)
+    table.insert(lines, ' ' .. filepath)
+    table.insert(lines, string.rep('─', 35))
+
+    for i, change in ipairs(trace.changes) do
+      local marker = (i == trace.selected) and '>' or ' '
+      local status_icon = ''
+      if change.status == 'CREATED' then
+        status_icon = ' [NEW]'
+      elseif change.status == 'DELETED' then
+        status_icon = ' [DEL]'
+      end
+      local line = string.format('%s %d. %s%s', marker, i, change.branch, status_icon)
+      if change.stats ~= '' then
+        line = line .. '  ' .. change.stats
+      end
+      table.insert(lines, line)
     end
 
-    table.insert(lines, string.rep('-', 70))
-    table.insert(lines, header)
-    table.insert(lines, string.rep('-', 70))
+    table.insert(lines, string.rep('─', 35))
+    table.insert(lines, ' j/k  navigate')
+    table.insert(lines, ' r    mark reviewed')
+    table.insert(lines, ' q    close')
 
-    -- Get the diff
-    if change.parent then
-      local diff = vim.fn.system(string.format('git diff %s..%s -- "%s" 2>/dev/null', change.parent, change.branch, filepath))
-      -- Skip the diff header lines (a/b paths), keep the interesting part
-      local diff_lines = vim.split(diff, '\n')
-      local in_content = false
-      for _, line in ipairs(diff_lines) do
-        if line:match('^@@') then
-          in_content = true
-        end
-        if in_content then
-          table.insert(lines, line)
-        end
-      end
-    else
-      -- No parent = file created, show the content
-      local content = get_file_at_branch(change.branch)
-      if content then
-        for _, line in ipairs(vim.split(content, '\n')) do
-          table.insert(lines, '+ ' .. line)
-        end
-      end
-    end
-
-    table.insert(lines, '')
+    return lines
   end
 
-  table.insert(lines, sep)
-  table.insert(lines, '  END OF HISTORY')
-  table.insert(lines, sep)
+  -- Get diff for selected branch
+  local function get_diff_lines()
+    local change = trace.changes[trace.selected]
+    if not change then return { 'No change selected' } end
 
-  -- Create buffer
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'wipe'
-  vim.bo[buf].filetype = 'diff'
+    local lines = {}
+    local header = string.format('── %s ──', change.branch)
+    if change.status == 'CREATED' then
+      header = header .. '  FILE CREATED'
+    elseif change.status == 'DELETED' then
+      header = header .. '  FILE DELETED'
+    end
+    table.insert(lines, header)
+    table.insert(lines, '')
 
-  -- Open in a new tab for full screen scrolling
-  vim.cmd('tabnew')
-  local win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(win, buf)
+    if change.parent then
+      local diff = vim.fn.system(string.format('git diff %s..%s -- "%s" 2>/dev/null', change.parent, change.branch, filepath))
+      for _, line in ipairs(vim.split(diff, '\n')) do
+        table.insert(lines, line)
+      end
+    else
+      -- No parent = file created, show full content as additions
+      local content = get_file_at_branch(change.branch)
+      if content then
+        table.insert(lines, '@@ -0,0 +1 @@ (new file)')
+        for _, line in ipairs(vim.split(content, '\n')) do
+          table.insert(lines, '+' .. line)
+        end
+      end
+    end
 
-  -- Keymaps
-  local opts = { buffer = buf, silent = true }
+    return lines
+  end
 
-  vim.keymap.set('n', 'q', function()
-    vim.cmd('tabclose')
-  end, opts)
+  -- Render the list
+  local function render_list()
+    if not trace.list_buf or not vim.api.nvim_buf_is_valid(trace.list_buf) then return end
+    vim.bo[trace.list_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(trace.list_buf, 0, -1, false, build_list_lines())
+    vim.bo[trace.list_buf].modifiable = false
+  end
+
+  -- Render the diff
+  local function render_diff()
+    if not trace.diff_buf or not vim.api.nvim_buf_is_valid(trace.diff_buf) then return end
+    vim.bo[trace.diff_buf].modifiable = true
+    vim.api.nvim_buf_set_lines(trace.diff_buf, 0, -1, false, get_diff_lines())
+    vim.bo[trace.diff_buf].modifiable = false
+  end
+
+  -- Update selection and re-render
+  local function update_selection(new_idx)
+    if new_idx < 1 then new_idx = #trace.changes end
+    if new_idx > #trace.changes then new_idx = 1 end
+    trace.selected = new_idx
+    render_list()
+    render_diff()
+    -- Keep cursor on the selected line in list
+    if trace.list_win and vim.api.nvim_win_is_valid(trace.list_win) then
+      pcall(vim.api.nvim_win_set_cursor, trace.list_win, { trace.selected + 3, 0 })  -- +3 for header lines
+    end
+  end
+
+  -- Close the trace view
+  local function close_trace()
+    if trace.list_win and vim.api.nvim_win_is_valid(trace.list_win) then
+      vim.api.nvim_win_close(trace.list_win, true)
+    end
+    if trace.diff_win and vim.api.nvim_win_is_valid(trace.diff_win) then
+      vim.api.nvim_win_close(trace.diff_win, true)
+    end
+  end
+
+  -- Create buffers
+  trace.list_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[trace.list_buf].buftype = 'nofile'
+  vim.bo[trace.list_buf].bufhidden = 'wipe'
+  vim.bo[trace.list_buf].swapfile = false
+
+  trace.diff_buf = vim.api.nvim_create_buf(false, true)
+  vim.bo[trace.diff_buf].buftype = 'nofile'
+  vim.bo[trace.diff_buf].bufhidden = 'wipe'
+  vim.bo[trace.diff_buf].swapfile = false
+  vim.bo[trace.diff_buf].filetype = 'diff'
+
+  -- Create windows: list on left (narrow), diff on right (wide)
+  vim.cmd('topleft vertical 38split')
+  trace.list_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(trace.list_win, trace.list_buf)
+  vim.wo[trace.list_win].number = false
+  vim.wo[trace.list_win].relativenumber = false
+  vim.wo[trace.list_win].signcolumn = 'no'
+  vim.wo[trace.list_win].cursorline = true
+  vim.wo[trace.list_win].winfixwidth = true
+
+  vim.cmd('wincmd l')
+  trace.diff_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(trace.diff_win, trace.diff_buf)
+
+  -- Initial render
+  render_list()
+  render_diff()
+
+  -- Focus the list
+  vim.api.nvim_set_current_win(trace.list_win)
+  pcall(vim.api.nvim_win_set_cursor, trace.list_win, { 4, 0 })  -- First branch line
+
+  -- Keymaps for list buffer
+  local opts = { buffer = trace.list_buf, silent = true }
+
+  vim.keymap.set('n', 'j', function() update_selection(trace.selected + 1) end, opts)
+  vim.keymap.set('n', 'k', function() update_selection(trace.selected - 1) end, opts)
+  vim.keymap.set('n', '<Down>', function() update_selection(trace.selected + 1) end, opts)
+  vim.keymap.set('n', '<Up>', function() update_selection(trace.selected - 1) end, opts)
+  vim.keymap.set('n', '<CR>', function() update_selection(trace.selected) end, opts)
+
+  vim.keymap.set('n', 'q', close_trace, opts)
+  vim.keymap.set('n', '<Esc>', close_trace, opts)
 
   vim.keymap.set('n', 'r', function()
     local state = require('custom.stack-review-state')
     local panel = require('custom.stack-review-panel')
     state.mark_reviewed(filepath, true)
     vim.notify('Reviewed: ' .. filename, vim.log.levels.INFO)
-    vim.cmd('tabclose')
+    close_trace()
     if panel.is_open() then
       panel.refresh_data()
       panel.render()
     end
   end, opts)
 
-  -- Yank filepath to clipboard
   vim.keymap.set('n', 'Y', function()
     vim.fn.setreg('+', filepath)
     vim.notify('Copied: ' .. filepath, vim.log.levels.INFO)
+  end, opts)
+
+  -- Also allow scrolling the diff from the list window
+  vim.keymap.set('n', '<C-d>', function()
+    if trace.diff_win and vim.api.nvim_win_is_valid(trace.diff_win) then
+      local scroll = math.floor(vim.api.nvim_win_get_height(trace.diff_win) / 2)
+      vim.api.nvim_win_call(trace.diff_win, function()
+        vim.cmd('normal! ' .. scroll .. 'j')
+      end)
+    end
+  end, opts)
+
+  vim.keymap.set('n', '<C-u>', function()
+    if trace.diff_win and vim.api.nvim_win_is_valid(trace.diff_win) then
+      local scroll = math.floor(vim.api.nvim_win_get_height(trace.diff_win) / 2)
+      vim.api.nvim_win_call(trace.diff_win, function()
+        vim.cmd('normal! ' .. scroll .. 'k')
+      end)
+    end
   end, opts)
 end
 
