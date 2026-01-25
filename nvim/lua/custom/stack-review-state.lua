@@ -130,13 +130,23 @@ local function get_branch_hash(branch)
 end
 
 -- Get changed files between two commits (sync version for fallback)
-local function get_changed_files(old_hash, new_hash)
-  local cmd = string.format('git diff --name-only %s..%s 2>/dev/null', old_hash, new_hash)
+-- Returns files list and file_status table
+local function get_changed_files(old_ref, new_ref)
+  local cmd = string.format('git diff --name-status %s..%s 2>/dev/null', old_ref, new_ref)
   local output = vim.fn.systemlist(cmd)
   if vim.v.shell_error ~= 0 then
-    return {}
+    return {}, {}
   end
-  return output
+  local files = {}
+  local file_status = {}
+  for _, line in ipairs(output) do
+    local status, filepath = line:match('^(%w)%s+(.+)$')
+    if status and filepath then
+      table.insert(files, filepath)
+      file_status[filepath] = status
+    end
+  end
+  return files, file_status
 end
 
 -- Async git command execution
@@ -246,22 +256,37 @@ function M._process_branch_diffs(branches, parents, branch_hashes, results)
     pending = pending + 1
     -- Diff against parent branch to show only branch-specific changes
     local diff_base = branch_info.parent or 'main'
-    local cmd = { 'git', 'diff', '--name-only', diff_base .. '..' .. branch_info.name }
-    git_async(cmd, function(files, exit_code)
-      if exit_code == 0 and #files > 0 then
-        results.branches[branch_info.name] = {
-          name = branch_info.name,
-          parent = branch_info.parent,
-          files = files,
-          old_hash = branch_info.old_hash,
-          new_hash = branch_info.new_hash,
-        }
-        table.insert(results.ordered_branches, branch_info.name)
+    -- Use --diff-filter to detect new files (A=added) vs modified (M)
+    local cmd = { 'git', 'diff', '--name-status', diff_base .. '..' .. branch_info.name }
+    git_async(cmd, function(output, exit_code)
+      if exit_code == 0 and #output > 0 then
+        local files = {}
+        local file_status = {}  -- filepath -> 'A' (added) or 'M' (modified) or 'D' (deleted)
+        for _, line in ipairs(output) do
+          local status, filepath = line:match('^(%w)%s+(.+)$')
+          if status and filepath then
+            table.insert(files, filepath)
+            file_status[filepath] = status
+          end
+        end
 
-        -- Track which branches touch each file
-        for _, filepath in ipairs(files) do
-          results.file_info[filepath] = results.file_info[filepath] or { branches = {} }
-          table.insert(results.file_info[filepath].branches, branch_info.name)
+        if #files > 0 then
+          results.branches[branch_info.name] = {
+            name = branch_info.name,
+            parent = branch_info.parent,
+            files = files,
+            file_status = file_status,
+            old_hash = branch_info.old_hash,
+            new_hash = branch_info.new_hash,
+          }
+          table.insert(results.ordered_branches, branch_info.name)
+
+          -- Track which branches touch each file
+          for _, filepath in ipairs(files) do
+            results.file_info[filepath] = results.file_info[filepath] or { branches = {}, status = {} }
+            table.insert(results.file_info[filepath].branches, branch_info.name)
+            results.file_info[filepath].status[branch_info.name] = file_status[filepath]
+          end
         end
       end
 
@@ -286,18 +311,33 @@ function M._finalize_cache(results)
     return (branch_order[a] or 999) < (branch_order[b] or 999)
   end)
 
-  -- Determine which branch is "final" for each file
+  -- Determine which branch is "first" and "final" for each file
   for filepath, info in pairs(results.file_info) do
+    local first_branch = nil
+    local first_index = 999
     local final_branch = nil
     local final_index = 0
+
     for _, branch in ipairs(info.branches) do
       local idx = branch_order[branch] or 0
+      if idx < first_index then
+        first_index = idx
+        first_branch = branch
+      end
       if idx > final_index then
         final_index = idx
         final_branch = branch
       end
     end
+
+    info.first_branch = first_branch
     info.final_branch = final_branch
+
+    -- Determine if file was introduced (added) in its first branch
+    -- Status 'A' means added, anything else means it existed before
+    if first_branch and info.status and info.status[first_branch] == 'A' then
+      info.introduced_in = first_branch
+    end
   end
 
   -- Update cache
@@ -490,12 +530,13 @@ function M.get_changed_files_by_branch_sync()
       if new_hash and old_hash ~= new_hash then
         -- Diff against parent branch, not old hash
         local parent = parents[branch] or 'main'
-        local files = get_changed_files(parent, branch)
+        local files, file_status = get_changed_files(parent, branch)
         if #files > 0 then
           results.branches[branch] = {
             name = branch,
             parent = parent,
             files = files,
+            file_status = file_status,
             old_hash = old_hash,
             new_hash = new_hash,
           }
@@ -503,27 +544,44 @@ function M.get_changed_files_by_branch_sync()
 
           -- Track which branches touch each file
           for _, filepath in ipairs(files) do
-            results.file_info[filepath] = results.file_info[filepath] or { branches = {} }
+            results.file_info[filepath] = results.file_info[filepath] or { branches = {}, status = {} }
             table.insert(results.file_info[filepath].branches, branch)
+            results.file_info[filepath].status[branch] = file_status[filepath]
           end
         end
       end
     end
   end
 
-  -- Second pass: determine which branch is "final" for each file
+  -- Second pass: determine which branch is "first" and "final" for each file
   for filepath, info in pairs(results.file_info) do
+    local first_branch = nil
+    local first_index = 999
     local final_branch = nil
     local final_index = 0
+
     for _, branch in ipairs(info.branches) do
       for i, b in ipairs(results.ordered_branches) do
-        if b == branch and i > final_index then
-          final_index = i
-          final_branch = branch
+        if b == branch then
+          if i < first_index then
+            first_index = i
+            first_branch = branch
+          end
+          if i > final_index then
+            final_index = i
+            final_branch = branch
+          end
         end
       end
     end
+
+    info.first_branch = first_branch
     info.final_branch = final_branch
+
+    -- Determine if file was introduced (added) in its first branch
+    if first_branch and info.status and info.status[first_branch] == 'A' then
+      info.introduced_in = first_branch
+    end
   end
 
   -- Update cache with sync result
