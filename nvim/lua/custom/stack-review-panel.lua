@@ -47,64 +47,46 @@ function M.refresh_data()
   if not changes then
     panel.loading = state.is_computing()
     if panel.loading then
-      panel.branches = {}
-      panel.branch_files = {}
+      panel.files = {}
       panel.file_info = {}
       return false
     end
     -- Not computing and no data - might be an error
-    panel.branches = {}
-    panel.branch_files = {}
+    panel.files = {}
     panel.file_info = {}
     return false
   end
 
   panel.loading = false
-  panel.branches = changes.ordered_branches
   panel.file_info = changes.file_info
-  panel.branch_files = {}
+  panel.files = {}
 
-  -- Build file lists per branch
-  for _, branch in ipairs(panel.branches) do
-    local branch_data = changes.branches[branch]
-    if branch_data then
-      panel.branch_files[branch] = {}
-      for _, filepath in ipairs(branch_data.files) do
-        local info = panel.file_info[filepath] or {}
-        local is_final = info.final_branch == branch
-        local is_new = info.introduced_in == branch
-        local file_status = branch_data.file_status and branch_data.file_status[filepath] or 'M'
-        table.insert(panel.branch_files[branch], {
-          path = filepath,
-          is_final = is_final,
-          is_new = is_new,
-          status = file_status,  -- 'A' = added, 'M' = modified, 'D' = deleted
-          reviewed = state.is_reviewed(filepath),
-          note = state.get_note(filepath),
-        })
-      end
-      -- Sort: Files that evolve (need review) first, then NEW+FINAL (quick scan)
-      -- Priority: 1) NEW+later, 2) modified+later, 3) modified+FINAL, 4) NEW+FINAL
-      table.sort(panel.branch_files[branch], function(a, b)
-        local function priority(f)
-          if f.is_new and not f.is_final then return 1 end      -- NEW +later (evolves)
-          if not f.is_new and not f.is_final then return 2 end  -- modified +later
-          if not f.is_new and f.is_final then return 3 end      -- modified FINAL
-          return 4                                               -- NEW FINAL (quick scan)
-        end
-        local pa, pb = priority(a), priority(b)
-        if pa ~= pb then return pa < pb end
-        return a.path < b.path
-      end)
-    end
+  -- Build flat file list (deduped)
+  for filepath, info in pairs(changes.file_info) do
+    local is_new_final = info.introduced_in and (info.introduced_in == info.final_branch)
+    local branch_count = #info.branches
+    table.insert(panel.files, {
+      path = filepath,
+      branches = info.branches,
+      branch_count = branch_count,
+      is_new_final = is_new_final,
+      first_branch = info.first_branch,
+      final_branch = info.final_branch,
+      introduced_in = info.introduced_in,
+      reviewed = state.is_reviewed(filepath),
+      note = state.get_note(filepath),
+    })
   end
 
-  -- Expand all branches by default
-  for _, branch in ipairs(panel.branches) do
-    if panel.expanded[branch] == nil then
-      panel.expanded[branch] = true
+  -- Sort: Files that evolve first, then NEW+FINAL at the end
+  table.sort(panel.files, function(a, b)
+    -- NEW+FINAL goes to the bottom
+    if a.is_new_final ~= b.is_new_final then
+      return not a.is_new_final  -- false < true, so non-new-final comes first
     end
-  end
+    -- Then sort alphabetically by filename
+    return a.path < b.path
+  end)
 
   return true
 end
@@ -113,7 +95,7 @@ end
 local function build_lines()
   local lines = {}
   local highlights = {}
-  local line_map = {}  -- line_num -> { type = "branch"|"file", branch = ..., file = ... }
+  local line_map = {}  -- line_num -> { type = "file", file = ... }
 
   -- Show loading state if computing
   if panel.loading then
@@ -132,113 +114,70 @@ local function build_lines()
   table.insert(highlights, { line = #lines, col = 0, end_col = #header, hl = 'StackReviewHeader' })
   table.insert(lines, '')
 
-  -- Branches section
-  table.insert(lines, '  BRANCHES')
-  table.insert(highlights, { line = #lines, col = 0, end_col = 11, hl = 'StackReviewHeader' })
+  -- Files section
+  table.insert(lines, '  FILES TO REVIEW')
+  table.insert(highlights, { line = #lines, col = 0, end_col = 18, hl = 'StackReviewHeader' })
 
-  for i, branch in ipairs(panel.branches) do
-    -- Count unreviewed files for this branch
-    local unreviewed_count = 0
-    if panel.branch_files[branch] then
-      for _, file_info in ipairs(panel.branch_files[branch]) do
-        if not file_info.reviewed then
-          unreviewed_count = unreviewed_count + 1
+  local shown_separator = false
+  for _, file_info in ipairs(panel.files) do
+    -- Skip reviewed files if hide_reviewed is on
+    if panel.hide_reviewed and file_info.reviewed then
+      goto continue_file
+    end
+
+    -- Add separator before NEW+FINAL section
+    if file_info.is_new_final and not shown_separator then
+      -- Check if there were any non-NEW+FINAL files shown before
+      local has_prior_files = false
+      for _, f in ipairs(panel.files) do
+        if f == file_info then break end
+        if not f.is_new_final and not (panel.hide_reviewed and f.reviewed) then
+          has_prior_files = true
+          break
         end
       end
-    end
-
-    -- Skip branch entirely if hiding reviewed and all files reviewed
-    if panel.hide_reviewed and unreviewed_count == 0 then
-      goto continue_branch
-    end
-
-    local prefix = panel.expanded[branch] and '  v ' or '  > '
-    local indicator = (panel.cursor_branch == branch) and '*' or ' '
-    local line = prefix .. indicator .. branch
-    table.insert(lines, line)
-    line_map[#lines] = { type = 'branch', branch = branch, index = i }
-
-    local hl = (panel.cursor_branch == branch) and 'StackReviewBranchActive' or 'StackReviewBranch'
-    table.insert(highlights, { line = #lines, col = 4, end_col = #line, hl = hl })
-
-    -- Show files if expanded
-    if panel.expanded[branch] and panel.branch_files[branch] then
-      local shown_separator = false
-      for _, file_info in ipairs(panel.branch_files[branch]) do
-        -- Skip reviewed files if hide_reviewed is on
-        if panel.hide_reviewed and file_info.reviewed then
-          goto continue_file
-        end
-
-        -- Add separator before NEW+FINAL section (quick scan files)
-        if file_info.is_new and file_info.is_final and not shown_separator then
-          -- Check if there were any non-NEW+FINAL files shown before
-          local has_prior_files = false
-          for _, f in ipairs(panel.branch_files[branch]) do
-            if f == file_info then break end
-            if not (panel.hide_reviewed and f.reviewed) then
-              has_prior_files = true
-              break
-            end
-          end
-          if has_prior_files then
-            table.insert(lines, '      ── new files ──')
-            table.insert(highlights, { line = #lines, col = 6, end_col = 22, hl = 'StackReviewLater' })
-            line_map[#lines] = { type = 'separator', branch = branch }
-          end
-          shown_separator = true
-        end
-
-        local icon = file_info.reviewed and '+' or '.'
-        -- Build status tags: NEW (if introduced), then FINAL or +later
-        local tags = {}
-        if file_info.is_new then
-          table.insert(tags, 'NEW')
-        end
-        if file_info.is_final then
-          table.insert(tags, 'FINAL')
-        else
-          table.insert(tags, '+later')
-        end
-        local status = table.concat(tags, ' ')
-
-        local file_line = string.format('      %s %s  %s', icon, vim.fn.fnamemodify(file_info.path, ':t'), status)
-        table.insert(lines, file_line)
-        line_map[#lines] = { type = 'file', branch = branch, file = file_info.path }
-
-        -- Highlight filename based on reviewed status
-        local file_hl = file_info.reviewed and 'StackReviewFileReviewed' or 'StackReviewFile'
-        local filename_end = #file_line - #status - 2
-        table.insert(highlights, { line = #lines, col = 6, end_col = filename_end, hl = file_hl })
-
-        -- Highlight each tag separately
-        local tag_start = #file_line - #status
-        for _, tag in ipairs(tags) do
-          local tag_hl
-          if tag == 'NEW' then
-            tag_hl = 'StackReviewNew'
-          elseif tag == 'FINAL' then
-            tag_hl = 'StackReviewFinal'
-          else
-            tag_hl = 'StackReviewLater'
-          end
-          table.insert(highlights, { line = #lines, col = tag_start, end_col = tag_start + #tag, hl = tag_hl })
-          tag_start = tag_start + #tag + 1  -- +1 for space
-        end
-
-        -- Show note if present
-        if file_info.note then
-          local note_line = '          "' .. file_info.note .. '"'
-          table.insert(lines, note_line)
-          line_map[#lines] = { type = 'note', branch = branch, file = file_info.path }
-          table.insert(highlights, { line = #lines, col = 0, end_col = #note_line, hl = 'StackReviewNote' })
-        end
-
-        ::continue_file::
+      if has_prior_files then
+        table.insert(lines, '')
+        table.insert(lines, '  ── new files (quick scan) ──')
+        table.insert(highlights, { line = #lines, col = 2, end_col = 30, hl = 'StackReviewLater' })
+        line_map[#lines] = { type = 'separator' }
       end
+      shown_separator = true
     end
 
-    ::continue_branch::
+    local icon = file_info.reviewed and '+' or '.'
+    local filename = vim.fn.fnamemodify(file_info.path, ':t')
+
+    -- Build the info string
+    local info
+    if file_info.is_new_final then
+      info = 'NEW'
+    else
+      info = string.format('%d branches', file_info.branch_count)
+    end
+
+    local file_line = string.format('    %s %s  %s', icon, filename, info)
+    table.insert(lines, file_line)
+    line_map[#lines] = { type = 'file', file = file_info.path }
+
+    -- Highlight filename based on reviewed status
+    local file_hl = file_info.reviewed and 'StackReviewFileReviewed' or 'StackReviewFile'
+    local filename_end = #file_line - #info - 2
+    table.insert(highlights, { line = #lines, col = 4, end_col = filename_end, hl = file_hl })
+
+    -- Highlight the info
+    local info_hl = file_info.is_new_final and 'StackReviewNew' or 'StackReviewLater'
+    table.insert(highlights, { line = #lines, col = #file_line - #info, end_col = #file_line, hl = info_hl })
+
+    -- Show note if present
+    if file_info.note then
+      local note_line = '        "' .. file_info.note .. '"'
+      table.insert(lines, note_line)
+      line_map[#lines] = { type = 'note', file = file_info.path }
+      table.insert(highlights, { line = #lines, col = 0, end_col = #note_line, hl = 'StackReviewNote' })
+    end
+
+    ::continue_file::
   end
 
   -- Help section
@@ -246,10 +185,8 @@ local function build_lines()
   table.insert(lines, '  ─────────────────────────────────')
   local hide_status = panel.hide_reviewed and '(hiding reviewed)' or '(showing all)'
   table.insert(lines, '  ' .. hide_status)
-  table.insert(lines, '  ]b/[b  next/prev branch')
-  table.insert(lines, '  ]f/[f  next/prev file')
+  table.insert(lines, '  j/k    navigate files')
   table.insert(lines, '  <CR>   trace file history')
-  table.insert(lines, '  d      view branch diff')
   table.insert(lines, '  r      mark reviewed')
   table.insert(lines, '  h      toggle hide reviewed')
   table.insert(lines, '  a      complete review')
