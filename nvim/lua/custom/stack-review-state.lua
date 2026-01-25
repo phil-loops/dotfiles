@@ -241,9 +241,12 @@ function M._process_branch_diffs(branches, parents, branch_hashes, results)
   end
 
   -- Get file diffs for each branch with changes
+  -- Use parent..branch to show only what this branch introduces (not inherited changes)
   for _, branch_info in ipairs(branches_with_changes) do
     pending = pending + 1
-    local cmd = { 'git', 'diff', '--name-only', branch_info.old_hash .. '..' .. branch_info.new_hash }
+    -- Diff against parent branch to show only branch-specific changes
+    local diff_base = branch_info.parent or 'main'
+    local cmd = { 'git', 'diff', '--name-only', diff_base .. '..' .. branch_info.name }
     git_async(cmd, function(files, exit_code)
       if exit_code == 0 and #files > 0 then
         results.branches[branch_info.name] = {
@@ -479,16 +482,19 @@ function M.get_changed_files_by_branch_sync()
   }
 
   -- First pass: collect all changes per branch
+  -- Use parent..branch to show only branch-specific changes (not inherited from main)
   for _, branch in ipairs(branches) do
     local old_hash = state.baseline[branch]
     if old_hash then
       local new_hash = get_branch_hash(branch)
       if new_hash and old_hash ~= new_hash then
-        local files = get_changed_files(old_hash, new_hash)
+        -- Diff against parent branch, not old hash
+        local parent = parents[branch] or 'main'
+        local files = get_changed_files(parent, branch)
         if #files > 0 then
           results.branches[branch] = {
             name = branch,
-            parent = parents[branch],
+            parent = parent,
             files = files,
             old_hash = old_hash,
             new_hash = new_hash,
