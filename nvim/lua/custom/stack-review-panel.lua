@@ -34,6 +34,7 @@ local function setup_highlights()
   vim.api.nvim_set_hl(0, 'StackReviewFilePending', { fg = '#e06c75' })
   vim.api.nvim_set_hl(0, 'StackReviewFinal', { fg = '#c678dd' })
   vim.api.nvim_set_hl(0, 'StackReviewLater', { fg = '#5c6370', italic = true })
+  vim.api.nvim_set_hl(0, 'StackReviewNew', { fg = '#98c379', bold = true })
   vim.api.nvim_set_hl(0, 'StackReviewProgress', { fg = '#56b6c2' })
   vim.api.nvim_set_hl(0, 'StackReviewNote', { fg = '#d19a66', italic = true })
 end
@@ -71,15 +72,24 @@ function M.refresh_data()
       for _, filepath in ipairs(branch_data.files) do
         local info = panel.file_info[filepath] or {}
         local is_final = info.final_branch == branch
+        local is_new = info.introduced_in == branch
+        local file_status = branch_data.file_status and branch_data.file_status[filepath] or 'M'
         table.insert(panel.branch_files[branch], {
           path = filepath,
           is_final = is_final,
+          is_new = is_new,
+          status = file_status,  -- 'A' = added, 'M' = modified, 'D' = deleted
           reviewed = state.is_reviewed(filepath),
           note = state.get_note(filepath),
         })
       end
-      -- Sort: FINAL files first, then alphabetically
+      -- Sort: NEW files first, then FINAL, then alphabetically
       table.sort(panel.branch_files[branch], function(a, b)
+        -- New files first
+        if a.is_new ~= b.is_new then
+          return a.is_new
+        end
+        -- Then final files
         if a.is_final ~= b.is_final then
           return a.is_final
         end
@@ -159,16 +169,41 @@ local function build_lines()
         end
 
         local icon = file_info.reviewed and '+' or '.'
-        local status = file_info.is_final and 'FINAL' or '+later'
+        -- Build status tags: NEW (if introduced), then FINAL or +later
+        local tags = {}
+        if file_info.is_new then
+          table.insert(tags, 'NEW')
+        end
+        if file_info.is_final then
+          table.insert(tags, 'FINAL')
+        else
+          table.insert(tags, '+later')
+        end
+        local status = table.concat(tags, ' ')
+
         local file_line = string.format('      %s %s  %s', icon, vim.fn.fnamemodify(file_info.path, ':t'), status)
         table.insert(lines, file_line)
         line_map[#lines] = { type = 'file', branch = branch, file = file_info.path }
 
-        -- Highlight based on status
+        -- Highlight filename based on reviewed status
         local file_hl = file_info.reviewed and 'StackReviewFileReviewed' or 'StackReviewFile'
-        local status_hl = file_info.is_final and 'StackReviewFinal' or 'StackReviewLater'
-        table.insert(highlights, { line = #lines, col = 6, end_col = #file_line - #status - 2, hl = file_hl })
-        table.insert(highlights, { line = #lines, col = #file_line - #status, end_col = #file_line, hl = status_hl })
+        local filename_end = #file_line - #status - 2
+        table.insert(highlights, { line = #lines, col = 6, end_col = filename_end, hl = file_hl })
+
+        -- Highlight each tag separately
+        local tag_start = #file_line - #status
+        for _, tag in ipairs(tags) do
+          local tag_hl
+          if tag == 'NEW' then
+            tag_hl = 'StackReviewNew'
+          elseif tag == 'FINAL' then
+            tag_hl = 'StackReviewFinal'
+          else
+            tag_hl = 'StackReviewLater'
+          end
+          table.insert(highlights, { line = #lines, col = tag_start, end_col = tag_start + #tag, hl = tag_hl })
+          tag_start = tag_start + #tag + 1  -- +1 for space
+        end
 
         -- Show note if present
         if file_info.note then
