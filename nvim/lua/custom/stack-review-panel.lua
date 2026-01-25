@@ -557,12 +557,29 @@ function M.open()
   end
   panel.unsubscribe = state.on_cache_update(function()
     if M.is_open() then
+      -- Save current position
+      local prev_branch = panel.cursor_branch
+      local prev_file = panel.cursor_file
+
       M.refresh_data()
-      -- Set cursor to first branch if not set
-      if not panel.cursor_branch and panel.branches[1] then
+
+      -- Restore position if still valid, otherwise default to first branch
+      if prev_branch and panel.branch_files[prev_branch] then
+        panel.cursor_branch = prev_branch
+        panel.cursor_file = prev_file
+      elseif panel.branches[1] then
         panel.cursor_branch = panel.branches[1]
+        panel.cursor_file = nil
       end
+
       M.render()
+
+      -- Recalculate cursor line from branch/file position
+      if panel.cursor_file then
+        M.focus_current_file()
+      elseif panel.cursor_branch then
+        M.focus_current_branch()
+      end
     end
   end)
 
