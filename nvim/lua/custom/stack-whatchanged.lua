@@ -87,6 +87,17 @@ function M.trace(filepath)
     return output
   end
 
+  -- Calculate depth of each branch (distance from main)
+  local function get_depth(branch)
+    local depth = 0
+    local current = branch
+    while current and current ~= 'main' do
+      depth = depth + 1
+      current = stack[current]
+    end
+    return depth
+  end
+
   -- Collect only branches that changed the file
   local changes = {}
 
@@ -127,10 +138,16 @@ function M.trace(filepath)
       parent = parent,
       status = status,
       stats = stats,
+      depth = get_depth(branch),
     })
 
     ::continue::
   end
+
+  -- Sort by depth (chronological order - earliest first)
+  table.sort(changes, function(a, b)
+    return a.depth < b.depth
+  end)
 
   if #changes == 0 then
     vim.notify('File not modified in any branch', vim.log.levels.INFO)
