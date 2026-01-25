@@ -83,16 +83,17 @@ function M.refresh_data()
           note = state.get_note(filepath),
         })
       end
-      -- Sort: NEW files first, then FINAL, then alphabetically
+      -- Sort: Files that evolve (need review) first, then NEW+FINAL (quick scan)
+      -- Priority: 1) NEW+later, 2) modified+later, 3) modified+FINAL, 4) NEW+FINAL
       table.sort(panel.branch_files[branch], function(a, b)
-        -- New files first
-        if a.is_new ~= b.is_new then
-          return a.is_new
+        local function priority(f)
+          if f.is_new and not f.is_final then return 1 end      -- NEW +later (evolves)
+          if not f.is_new and not f.is_final then return 2 end  -- modified +later
+          if not f.is_new and f.is_final then return 3 end      -- modified FINAL
+          return 4                                               -- NEW FINAL (quick scan)
         end
-        -- Then final files
-        if a.is_final ~= b.is_final then
-          return a.is_final
-        end
+        local pa, pb = priority(a), priority(b)
+        if pa ~= pb then return pa < pb end
         return a.path < b.path
       end)
     end
@@ -162,10 +163,30 @@ local function build_lines()
 
     -- Show files if expanded
     if panel.expanded[branch] and panel.branch_files[branch] then
+      local shown_separator = false
       for _, file_info in ipairs(panel.branch_files[branch]) do
         -- Skip reviewed files if hide_reviewed is on
         if panel.hide_reviewed and file_info.reviewed then
           goto continue_file
+        end
+
+        -- Add separator before NEW+FINAL section (quick scan files)
+        if file_info.is_new and file_info.is_final and not shown_separator then
+          -- Check if there were any non-NEW+FINAL files shown before
+          local has_prior_files = false
+          for _, f in ipairs(panel.branch_files[branch]) do
+            if f == file_info then break end
+            if not (panel.hide_reviewed and f.reviewed) then
+              has_prior_files = true
+              break
+            end
+          end
+          if has_prior_files then
+            table.insert(lines, '      ── new files ──')
+            table.insert(highlights, { line = #lines, col = 6, end_col = 22, hl = 'StackReviewLater' })
+            line_map[#lines] = { type = 'separator', branch = branch }
+          end
+          shown_separator = true
         end
 
         local icon = file_info.reviewed and '+' or '.'
