@@ -81,13 +81,11 @@ function M.refresh_data()
     })
   end
 
-  -- Sort: Files that evolve (2+ branches) first, then quick scan (1 branch) at the end
+  -- Sort by branch count (most branches first), then alphabetically
   table.sort(panel.files, function(a, b)
-    -- Quick scan goes to the bottom
-    if a.is_quick_scan ~= b.is_quick_scan then
-      return not a.is_quick_scan
+    if a.branch_count ~= b.branch_count then
+      return a.branch_count > b.branch_count
     end
-    -- Then sort alphabetically by filename
     return a.path < b.path
   end)
 
@@ -121,47 +119,22 @@ local function build_lines()
   table.insert(lines, '  FILES TO REVIEW')
   table.insert(highlights, { line = #lines, col = 0, end_col = 18, hl = 'StackReviewHeader' })
 
-  local shown_separator = false
   for _, file_info in ipairs(panel.files) do
     -- Skip reviewed files if hide_reviewed is on
     if panel.hide_reviewed and file_info.reviewed then
       goto continue_file
     end
 
-    -- Add separator before quick scan section (1 branch only)
-    if file_info.is_quick_scan and not shown_separator then
-      -- Check if there were any multi-branch files shown before
-      local has_prior_files = false
-      for _, f in ipairs(panel.files) do
-        if f == file_info then break end
-        if not f.is_quick_scan and not (panel.hide_reviewed and f.reviewed) then
-          has_prior_files = true
-          break
-        end
-      end
-      if has_prior_files then
-        table.insert(lines, '')
-        table.insert(lines, '  ── quick scan (1 branch) ──')
-        table.insert(highlights, { line = #lines, col = 2, end_col = 29, hl = 'StackReviewLater' })
-        line_map[#lines] = { type = 'separator' }
-      end
-      shown_separator = true
-    end
-
     local icon = file_info.reviewed and '+' or '.'
     local filename = vim.fn.fnamemodify(file_info.path, ':t')
 
-    -- Build the info string
+    -- Build the info string: "N branches" or "NEW" for new single-branch files
     local info
-    if file_info.is_quick_scan then
-      -- Show NEW if it's a new file, otherwise just show the branch name
-      if file_info.is_new then
-        info = 'NEW'
-      else
-        info = file_info.final_branch
-      end
+    if file_info.is_new and file_info.branch_count == 1 then
+      info = 'NEW'
     else
-      info = string.format('%d branches', file_info.branch_count)
+      local suffix = file_info.branch_count == 1 and 'branch' or 'branches'
+      info = string.format('%d %s', file_info.branch_count, suffix)
     end
 
     local file_line = string.format('    %s %s  %s', icon, filename, info)
@@ -174,7 +147,7 @@ local function build_lines()
     table.insert(highlights, { line = #lines, col = 4, end_col = filename_end, hl = file_hl })
 
     -- Highlight the info
-    local info_hl = file_info.is_quick_scan and 'StackReviewNew' or 'StackReviewLater'
+    local info_hl = (file_info.is_new and file_info.branch_count == 1) and 'StackReviewNew' or 'StackReviewLater'
     table.insert(highlights, { line = #lines, col = #file_line - #info, end_col = #file_line, hl = info_hl })
 
     -- Show note if present
