@@ -25,8 +25,9 @@ local function open_branch_diff(branch)
     session.diffview_open = false
   end
 
-  -- Open diffview comparing old hash to new hash
-  local cmd = string.format('DiffviewOpen %s..%s', info.old_hash:sub(1, 8), info.new_hash:sub(1, 8))
+  -- Open diffview comparing parent to branch (shows only branch-specific changes)
+  local parent = info.parent or 'main'
+  local cmd = string.format('DiffviewOpen %s..%s', parent, info.name)
   vim.cmd(cmd)
   session.diffview_open = true
 end
@@ -48,8 +49,9 @@ local function open_file_diff()
     pcall(vim.cmd, 'DiffviewClose')
   end
 
-  -- Open diffview for this specific range, focused on file
-  local cmd = string.format('DiffviewOpen %s..%s -- %s', info.old_hash:sub(1, 8), info.new_hash:sub(1, 8), filepath)
+  -- Open diffview comparing parent to branch, focused on file
+  local parent = info.parent or 'main'
+  local cmd = string.format('DiffviewOpen %s..%s -- %s', parent, info.name, filepath)
   vim.cmd(cmd)
   session.diffview_open = true
 end
