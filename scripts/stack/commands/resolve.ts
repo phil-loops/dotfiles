@@ -454,6 +454,7 @@ export const command: Command = {
       "text": { type: "boolean", short: "t" },  // Old text-based mode
       "deletions": { type: "boolean", short: "d" },  // Show only deletion zones
       "json": { type: "boolean", short: "j" },  // Output JSON for AI processing
+      "ai": { type: "boolean" },  // Use Claude CLI to analyze and recommend
     });
 
     const stack = loadStack();
@@ -484,6 +485,235 @@ export const command: Command = {
     console.log(`${YELLOW}Found ${filesToResolve.length} file(s) with drift:${RESET}`);
     for (const f of filesToResolve) {
       console.log(`  ${YELLOW}⚠${RESET}  ${f.path}`);
+    }
+
+    // AI mode: use Claude CLI to analyze deletion zones
+    if (values["ai"]) {
+      const allZones: DeletionZone[] = [];
+
+      for (const file of filesToResolve) {
+        const diff = git(`diff ${branch}..${file.finalBranch} -- "${file.path}"`);
+        const zones = extractDeletionZones(diff, file.path);
+        allZones.push(...zones);
+      }
+
+      if (allZones.length === 0) {
+        console.log(`\n${GREEN}✓ No deletion zones found - downstream changes are additions only${RESET}`);
+        return;
+      }
+
+      console.log(`\n${CYAN}Found ${allZones.length} deletion zone(s). Sending to Claude for analysis...${RESET}\n`);
+
+      // Prepare JSON input for Claude
+      const input = {
+        branch,
+        context: "These are code deletions that happen downstream in a git branch stack. " +
+                 "For each zone, the code exists in the current branch but was removed in a later branch. " +
+                 "We want to decide if the deletion should be 'pulled back' to this branch.",
+        zones: allZones.map((z, i) => ({
+          id: i + 1,
+          file: z.file,
+          lineRange: `${z.lineStart}-${z.lineEnd}`,
+          contextBefore: z.contextBefore.join("\n"),
+          deletedCode: z.deletedLines.join("\n"),
+          contextAfter: z.contextAfter.join("\n"),
+        })),
+      };
+
+      const prompt = `Analyze these code deletion zones from a stacked PR workflow.
+
+For each zone, determine:
+1. Is this a REFACTOR (code renamed/moved/improved) or REMOVAL (code no longer needed)?
+2. Should this deletion be applied to the earlier branch?
+
+Respond in this exact JSON format:
+{
+  "recommendations": [
+    {
+      "id": 1,
+      "action": "APPLY" or "SKIP",
+      "reason": "brief explanation"
+    }
+  ],
+  "summary": "one sentence overall summary"
+}
+
+Input:
+${JSON.stringify(input, null, 2)}`;
+
+      // Write prompt to temp file and pipe to claude
+      const tmpPrompt = `/tmp/stack-resolve-prompt.txt`;
+      fs.writeFileSync(tmpPrompt, prompt);
+
+      let claudeOutput = "";
+      try {
+        claudeOutput = execSync(`cat "${tmpPrompt}" | claude --print`, {
+          encoding: "utf8",
+          maxBuffer: 10 * 1024 * 1024,
+        });
+      } catch (e: any) {
+        console.error(`${RED}Failed to run claude CLI: ${e.message}${RESET}`);
+        console.log(`${DIM}Make sure 'claude' CLI is installed and working.${RESET}`);
+        try { fs.unlinkSync(tmpPrompt); } catch {}
+        return;
+      }
+
+      try { fs.unlinkSync(tmpPrompt); } catch {}
+
+      // Try to parse JSON from Claude's response
+      let recommendations: { id: number; action: string; reason: string }[] = [];
+      let summary = "";
+
+      // Extract JSON from response (Claude might include explanation text)
+      const jsonMatch = claudeOutput.match(/\{[\s\S]*"recommendations"[\s\S]*\}/);
+      if (jsonMatch) {
+        try {
+          const parsed = JSON.parse(jsonMatch[0]);
+          recommendations = parsed.recommendations || [];
+          summary = parsed.summary || "";
+        } catch {
+          console.log(`${YELLOW}Could not parse Claude's JSON response. Showing raw output:${RESET}\n`);
+          console.log(claudeOutput);
+          return;
+        }
+      } else {
+        console.log(`${YELLOW}Claude's response:${RESET}\n`);
+        console.log(claudeOutput);
+        return;
+      }
+
+      // Display recommendations
+      console.log(`${CYAN}${BOLD}━━━ Claude's Analysis ━━━${RESET}\n`);
+      if (summary) {
+        console.log(`${DIM}${summary}${RESET}\n`);
+      }
+
+      const toApply: DeletionZone[] = [];
+      const toSkip: DeletionZone[] = [];
+
+      for (const rec of recommendations) {
+        const zone = allZones[rec.id - 1];
+        if (!zone) continue;
+
+        const actionColor = rec.action === "APPLY" ? GREEN : YELLOW;
+        const actionIcon = rec.action === "APPLY" ? "✓" : "○";
+
+        console.log(`${actionColor}${actionIcon} Zone ${rec.id}${RESET} (${zone.file}:${zone.lineStart})`);
+        console.log(`  ${DIM}Action: ${rec.action}${RESET}`);
+        console.log(`  ${DIM}Reason: ${rec.reason}${RESET}`);
+
+        // Show the deleted code
+        console.log(`  ${DIM}Code:${RESET}`);
+        for (const line of zone.deletedLines.slice(0, 3)) {
+          console.log(`    ${RED}- ${line}${RESET}`);
+        }
+        if (zone.deletedLines.length > 3) {
+          console.log(`    ${DIM}... (${zone.deletedLines.length - 3} more lines)${RESET}`);
+        }
+        console.log();
+
+        if (rec.action === "APPLY") {
+          toApply.push(zone);
+        } else {
+          toSkip.push(zone);
+        }
+      }
+
+      // Summary
+      console.log(`${CYAN}━━━ Summary ━━━${RESET}`);
+      console.log(`  ${GREEN}Apply: ${toApply.length}${RESET} deletion(s)`);
+      console.log(`  ${YELLOW}Skip: ${toSkip.length}${RESET} deletion(s)\n`);
+
+      if (toApply.length === 0) {
+        console.log(`${DIM}No deletions to apply.${RESET}`);
+        return;
+      }
+
+      // Log the analysis
+      const logFile = `.stack-resolve-log.md`;
+      const logContent = `# Drift Resolution - ${new Date().toISOString()}
+
+## Branch: ${branch}
+
+${recommendations.map(rec => {
+  const zone = allZones[rec.id - 1];
+  return `### Zone ${rec.id}: ${zone?.file}:${zone?.lineStart}-${zone?.lineEnd}
+**Decision:** ${rec.action}
+**Reason:** ${rec.reason}
+
+\`\`\`diff
+${zone?.deletedLines.map(l => "- " + l).join("\n")}
+\`\`\`
+`;
+}).join("\n")}
+`;
+
+      // Ask for confirmation
+      const answer = await prompt(`${YELLOW}Apply ${toApply.length} deletion(s) recommended by Claude?${RESET} [y/n/v] `);
+
+      if (answer === "v" || answer === "view") {
+        // Show full details before deciding
+        for (const zone of toApply) {
+          displayDeletionZone(zone, toApply.indexOf(zone), toApply.length);
+        }
+        const confirmAnswer = await prompt(`\n${YELLOW}Apply these deletions?${RESET} [y/n] `);
+        if (confirmAnswer !== "y" && confirmAnswer !== "yes") {
+          console.log(`${DIM}Aborted.${RESET}`);
+          return;
+        }
+      } else if (answer !== "y" && answer !== "yes") {
+        console.log(`${DIM}Aborted.${RESET}`);
+        return;
+      }
+
+      // Apply the deletions
+      const appliedZones: DeletionZone[] = [];
+      for (const zone of toApply) {
+        if (applyDeletionZone(zone)) {
+          appliedZones.push(zone);
+          console.log(`${GREEN}✓ Applied deletion in ${zone.file}:${zone.lineStart}${RESET}`);
+        }
+      }
+
+      if (appliedZones.length === 0) {
+        console.log(`${YELLOW}No deletions could be applied (code may have changed).${RESET}`);
+        return;
+      }
+
+      // Write log file
+      fs.writeFileSync(logFile, logContent);
+      console.log(`\n${DIM}Analysis logged to ${logFile}${RESET}`);
+
+      // Stage and commit
+      const modifiedFiles = [...new Set(appliedZones.map(z => z.file))];
+      for (const file of modifiedFiles) {
+        execSync(`git add "${file}"`, { stdio: "inherit" });
+      }
+
+      const commitAnswer = await prompt(`\n${YELLOW}Commit changes?${RESET} [a]mend, [n]ew commit, [s]kip: `);
+
+      if (commitAnswer === "a" || commitAnswer === "amend") {
+        execSync(`git commit --amend --no-edit`, { stdio: "inherit" });
+        console.log(`${GREEN}✓ Amended commit${RESET}`);
+
+        const rebaseAnswer = await prompt(`\n${YELLOW}Rebase downstream branches?${RESET} [y/n] `);
+        if (rebaseAnswer === "y" || rebaseAnswer === "yes") {
+          console.log(`\n${CYAN}Running: loops stack return${RESET}\n`);
+          try {
+            execSync(`node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts return`, { stdio: "inherit" });
+            console.log(`\n${GREEN}✓ Stack updated!${RESET}`);
+          } catch {
+            console.error(`\n${RED}Rebase had conflicts. Resolve and run: loops stack return --continue${RESET}`);
+          }
+        }
+      } else if (commitAnswer === "n" || commitAnswer === "new") {
+        execSync(`git commit -m "resolve: apply AI-recommended deletions from downstream"`, { stdio: "inherit" });
+        console.log(`${GREEN}✓ Created commit${RESET}`);
+      } else {
+        console.log(`${DIM}Changes staged but not committed.${RESET}`);
+      }
+
+      return;
     }
 
     // Deletions mode: extract and show only the deletion zones
