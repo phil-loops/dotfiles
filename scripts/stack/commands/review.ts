@@ -683,6 +683,22 @@ vim.keymap.set("n", "<leader>gd", function()
   vim.cmd("wincmd l")
 end, { desc = "Jump to diff view" })
 
+-- Fixed file panel toggle (avoids 4-column bug)
+vim.keymap.set("n", "<leader>b", function()
+  local ok, diffview_lib = pcall(require, "diffview.lib")
+  if not ok then return end
+  local view = diffview_lib.get_current_view()
+  if not view then return end
+
+  -- Toggle the panel
+  view.panel:toggle(false)
+
+  -- Fix layout after toggle by equalizing windows
+  vim.defer_fn(function()
+    vim.cmd("wincmd =")
+  end, 10)
+end, { desc = "Toggle file panel (fixed)" })
+
 -- Check if current file matches its final version in the stack
 local function get_current_file()
   local bufname = vim.fn.expand("%:p")
