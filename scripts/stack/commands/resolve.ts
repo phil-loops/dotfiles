@@ -272,12 +272,10 @@ export const command: Command = {
   category: "edit",
   name: "resolve",
   help: "Resolve drift by pulling final versions of files into current branch",
-  args: "[--dry-run] [--all] [file...]",
+  args: "[--hierarchical-text-dump] [file...]",
   async run(args) {
     const { values, positionals } = parseArgs(args, {
-      "dry-run": { type: "boolean", short: "n" },
-      all: { type: "boolean", short: "a" },
-      yes: { type: "boolean", short: "y" },
+      "text": { type: "boolean", short: "t" },  // Old text-based mode
     });
 
     const stack = loadStack();
@@ -310,30 +308,99 @@ export const command: Command = {
       console.log(`  ${YELLOW}⚠${RESET}  ${f.path}`);
     }
 
-    if (values["dry-run"]) {
-      console.log(`\n${DIM}(dry-run mode - no changes made)${RESET}`);
+    // Visual mode (default): open nvim with side-by-side diff
+    if (!values["text"]) {
+      console.log(`\n${CYAN}Opening visual diff in nvim...${RESET}`);
+      console.log(`${DIM}Left: your version (editable) | Right: final version (reference)${RESET}`);
+      console.log(`${DIM}Use :diffget (or do) to pull changes, :diffput (or dp) to push${RESET}`);
+      console.log(`${DIM}Save with :w when done, then :qa to finish${RESET}\n`);
 
       for (const file of filesToResolve) {
-        const { additions, deletions, diff } = showFileDiff(file, branch);
+        const answer = await prompt(`${YELLOW}Review ${file.path}?${RESET} [y/n/q] `);
 
-        if (!diff) {
-          console.log(`${DIM}No diff found${RESET}`);
+        if (answer === "q") {
+          console.log(`${DIM}Aborted.${RESET}`);
+          return;
+        }
+
+        if (answer !== "y" && answer !== "yes" && answer !== "") {
+          console.log(`${DIM}Skipped${RESET}`);
           continue;
         }
 
-        const hunks = parseDiffHunks(diff);
-        console.log(`\n${YELLOW}${hunks.length} hunk(s), ${GREEN}+${additions}${RESET} ${RED}-${deletions}${RESET}\n`);
+        // Create temp file with final version for reference
+        const finalContent = git(`show ${file.finalBranch}:"${file.path}"`);
+        const tmpFinal = `/tmp/stack-resolve-final.ts`;
+        fs.writeFileSync(tmpFinal, finalContent);
 
-        // Show all hunks in dry-run mode
-        for (let i = 0; i < hunks.length; i++) {
-          displayHunk(hunks[i], i, hunks.length);
+        // Open nvim: left = actual file (editable), right = final version (reference)
+        try {
+          execSync(`nvim -d "${file.path}" "${tmpFinal}" -c "wincmd l | set readonly | set nomodifiable | wincmd h"`, { stdio: "inherit" });
+        } catch {
+          // User quit nvim
         }
 
-        console.log(`\n${DIM}─────────────────────────────────${RESET}`);
-        console.log(`${DIM}Run without --dry-run to apply these changes${RESET}`);
+        // Clean up temp file
+        try { fs.unlinkSync(tmpFinal); } catch {}
+
+        // Check if file was modified
+        const status = git(`status --porcelain "${file.path}"`);
+        if (status.trim()) {
+          console.log(`${GREEN}✓ ${file.path} was modified${RESET}`);
+        } else {
+          console.log(`${DIM}No changes to ${file.path}${RESET}`);
+        }
       }
+
+      // If any files were modified, offer to commit
+      const overallStatus = git(`status --porcelain`);
+      if (overallStatus.trim()) {
+        console.log(`\n${CYAN}━━━ Changes detected ━━━${RESET}`);
+        execSync(`git status --short`, { stdio: "inherit" });
+
+        const commitAnswer = await prompt(`\n${YELLOW}Commit changes?${RESET} [a]mend, [n]ew commit, [s]kip: `);
+
+        if (commitAnswer === "a" || commitAnswer === "amend") {
+          for (const file of filesToResolve) {
+            const status = git(`status --porcelain "${file.path}"`);
+            if (status.trim()) {
+              execSync(`git add "${file.path}"`, { stdio: "inherit" });
+            }
+          }
+          execSync(`git commit --amend --no-edit`, { stdio: "inherit" });
+          console.log(`${GREEN}✓ Amended commit${RESET}`);
+
+          const rebaseAnswer = await prompt(`\n${YELLOW}Rebase downstream branches?${RESET} [y/n] `);
+          if (rebaseAnswer === "y" || rebaseAnswer === "yes") {
+            console.log(`\n${CYAN}Running: loops stack return${RESET}\n`);
+            try {
+              execSync(`node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts return`, { stdio: "inherit" });
+              console.log(`\n${GREEN}✓ Stack updated!${RESET}`);
+            } catch {
+              console.error(`\n${RED}Rebase had conflicts. Resolve and run: loops stack return --continue${RESET}`);
+            }
+          }
+        } else if (commitAnswer === "n" || commitAnswer === "new") {
+          for (const file of filesToResolve) {
+            const status = git(`status --porcelain "${file.path}"`);
+            if (status.trim()) {
+              execSync(`git add "${file.path}"`, { stdio: "inherit" });
+            }
+          }
+          execSync(`git commit -m "resolve: incorporate final versions of drifted code"`, { stdio: "inherit" });
+          console.log(`${GREEN}✓ Created commit${RESET}`);
+        } else {
+          console.log(`${DIM}Changes left unstaged.${RESET}`);
+        }
+      } else {
+        console.log(`\n${DIM}No changes made.${RESET}`);
+      }
+
       return;
     }
+
+    // Text mode (--text flag): old hunk-based flow
+    console.log(`${DIM}(Text mode - use without --text for visual diff)${RESET}\n`);
 
     // Process each file
     const modifiedFiles: string[] = [];
@@ -355,16 +422,11 @@ export const command: Command = {
       }
 
       // Ask for mode
-      let mode: string;
-      if (values.yes || values.all) {
-        mode = "a";
-      } else {
-        console.log(`${CYAN}[a]${RESET}pply all hunks for this file`);
-        console.log(`${CYAN}[i]${RESET}nteractive - review each hunk`);
-        console.log(`${CYAN}[s]${RESET}kip this file`);
-        console.log(`${CYAN}[q]${RESET}uit\n`);
-        mode = await prompt(`Mode for ${file.path}? `);
-      }
+      console.log(`${CYAN}[a]${RESET}pply all hunks for this file`);
+      console.log(`${CYAN}[i]${RESET}nteractive - review each hunk`);
+      console.log(`${CYAN}[s]${RESET}kip this file`);
+      console.log(`${CYAN}[q]${RESET}uit\n`);
+      const mode = await prompt(`Mode for ${file.path}? `);
 
       if (mode === "q") {
         console.log(`\n${YELLOW}Aborted.${RESET}`);
