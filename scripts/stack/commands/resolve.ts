@@ -520,22 +520,28 @@ export const command: Command = {
         })),
       };
 
-      const prompt = `Analyze these code deletion zones from a stacked PR workflow.
+      const prompt = `You are helping with "append-only" development in a stacked PR workflow.
 
-For each zone, determine:
-1. Is this a REFACTOR (code renamed/moved/improved) or REMOVAL (code no longer needed)?
-2. Should this deletion be applied to the earlier branch?
+CONTEXT: Branch "${branch}" adds some code. Later branches modify/remove some of that code.
+GOAL: We want to minimize churn. If code was added then later changed, we might want the FINAL version from the start.
 
-Respond in this exact JSON format:
+These "deletion zones" show code that EXISTS in ${branch} but was REMOVED downstream.
+
+For each zone, answer:
+1. Was this code REPLACED with something better (refactor/rename)? → APPLY (use the better version from the start)
+2. Was this code REMOVED because it's not needed? → APPLY (don't add it if we'll just remove it)
+3. Is this a partial fragment that can't be applied alone? → SKIP (need more context)
+4. Is this removal dependent on other changes not yet in this branch? → SKIP (can't apply yet)
+
+IMPORTANT: Lean toward APPLY when the deletion represents a clear improvement or simplification.
+The goal is reducing unnecessary code churn, not preserving every line.
+
+Respond ONLY with this JSON (no other text):
 {
   "recommendations": [
-    {
-      "id": 1,
-      "action": "APPLY" or "SKIP",
-      "reason": "brief explanation"
-    }
+    {"id": 1, "action": "APPLY", "reason": "brief explanation"}
   ],
-  "summary": "one sentence overall summary"
+  "summary": "one sentence"
 }
 
 Input:
