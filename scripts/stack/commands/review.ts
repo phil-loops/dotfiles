@@ -599,66 +599,42 @@ vim.api.nvim_create_user_command("StackDrift", function()
   }, function(choice)
     if not choice then return end
 
-    -- Find which branches after this one modified the file
     local introduced_branch = item.branch
-    local modified_in = {}
+    local final_branch = chain[#chain].branch
 
-    for i = state.index + 2, #chain do  -- Start from next branch
-      local b = chain[i]
-      -- Check if file was modified in this branch
-      local diff = vim.fn.systemlist(string.format(
-        "git diff --name-only %s...%s -- %s 2>/dev/null",
-        chain[i - 1].branch, b.branch, vim.fn.shellescape(choice)
-      ))
-      if #diff > 0 and diff[1] ~= "" then
-        table.insert(modified_in, b.branch)
-      end
-    end
-
-    if #modified_in == 0 then
-      vim.notify("File not modified in later branches (data may be stale)", vim.log.levels.WARN)
-      return
-    end
-
-    -- Open in new tab: introduced version vs each modified version
+    -- Simple: show introduced version vs final version
     vim.cmd("tabnew")
 
-    local function open_file_version(branch, filepath)
-      local result = vim.fn.system(string.format("git cat-file -e %s:%s 2>/dev/null; echo $?", branch, filepath))
-      local exists = result:gsub("%s+", "") == "0"
-      if exists then
-        vim.cmd("Gedit " .. branch .. ":" .. filepath)
-        vim.cmd("setlocal readonly nomodifiable")
-      else
-        vim.cmd("enew")
-        vim.api.nvim_buf_set_lines(0, 0, -1, false, {"[FILE DOES NOT EXIST IN " .. branch .. "]"})
-        vim.cmd("setlocal readonly nomodifiable buftype=nofile")
+    -- Helper to load file content from a branch into current buffer
+    local function load_branch_file(branch, filepath)
+      local content = vim.fn.systemlist(string.format("git show %s:%s 2>/dev/null", branch, filepath))
+      if vim.v.shell_error ~= 0 then
+        content = {"[FILE DOES NOT EXIST IN " .. branch .. "]"}
       end
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, content)
+      vim.cmd("setlocal readonly nomodifiable buftype=nofile")
+      -- Set filetype based on extension
+      local ext = filepath:match("%.([^%.]+)$")
+      if ext then vim.bo.filetype = ext end
     end
 
-    -- Build versions to show (max 4 splits)
-    local versions = { introduced_branch }
-    for i, b in ipairs(modified_in) do
-      if #versions < 4 then
-        table.insert(versions, b)
-      end
-    end
+    -- Left: introduced version
+    vim.cmd("enew")
+    vim.api.nvim_buf_set_name(0, introduced_branch .. ":" .. choice)
+    load_branch_file(introduced_branch, choice)
 
-    -- Open first version (where introduced)
-    open_file_version(versions[1], choice)
+    -- Right: final version
+    vim.cmd("vsplit")
+    vim.cmd("enew")
+    vim.api.nvim_buf_set_name(0, final_branch .. ":" .. choice)
+    load_branch_file(final_branch, choice)
 
-    -- Open rest in splits
-    for i = 2, #versions do
-      vim.cmd("vsplit")
-      open_file_version(versions[i], choice)
-    end
-
-    -- Enable diff mode
+    -- Enable diff
     vim.cmd("windo diffthis")
     vim.cmd("wincmd =")
     vim.cmd("1wincmd w")
 
-    vim.notify(string.format("Drift: %s → %s", introduced_branch, table.concat(modified_in, " → ")), vim.log.levels.INFO)
+    vim.notify(string.format("Drift: %s (introduced) vs %s (final)", introduced_branch, final_branch), vim.log.levels.INFO)
   end)
 end, {})
 vim.keymap.set("n", "<leader>gD", "<cmd>StackDrift<cr>", { desc = "Show drifted files" })
