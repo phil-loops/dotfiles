@@ -12,13 +12,34 @@ import {
   loadStack,
 } from "../lib.ts";
 
+// ============ File filter ============
+
+type FileFilter = { includeTsx: boolean; includeTests: boolean };
+
+function matchesFilter(file: string, filter: FileFilter): boolean {
+  if (!file.endsWith(".ts") && !file.endsWith(".tsx")) return false;
+  if (file.endsWith(".tsx") && !filter.includeTsx) return false;
+  if (file.endsWith(".test.ts") && !filter.includeTests) return false;
+  if (file.endsWith(".test.tsx") && !filter.includeTests) return false;
+  return true;
+}
+
 // ============ Size helpers ============
 
-function getTsLoc(parent: string, child: string): number {
+function getTsLoc(parent: string, child: string, filter: FileFilter): number {
   try {
-    const diffOutput = git(
-      `diff --numstat ${parent}...${child} -- "*.ts" ":!*.tsx" ":!*.test.ts"`
-    );
+    let pathSpec = `-- "*.ts"`;
+    if (filter.includeTsx) {
+      pathSpec = `-- "*.ts" "*.tsx"`;
+    }
+    if (!filter.includeTests) {
+      pathSpec += ` ":!*.test.ts" ":!*.test.tsx"`;
+    }
+    if (!filter.includeTsx) {
+      pathSpec += ` ":!*.tsx"`;
+    }
+
+    const diffOutput = git(`diff --numstat ${parent}...${child} ${pathSpec}`);
     if (!diffOutput.trim()) return 0;
 
     let totalLoc = 0;
@@ -44,7 +65,7 @@ type BranchDriftInfo = {
   branchHealth: Map<string, { clean: boolean; driftedFiles: number; totalFiles: number }>;
 };
 
-function getDrifts(orderedBranches: string[], stack: Record<string, string>): BranchDriftInfo {
+function getDrifts(orderedBranches: string[], stack: Record<string, string>, filter: FileFilter): BranchDriftInfo {
   const fileIntroducedIn = new Map<string, string>();
   const fileDrifts: DriftInfo[] = [];
   const filesPerBranch = new Map<string, Set<string>>();
@@ -58,9 +79,7 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>): Br
       const diffOutput = git(`diff --name-only ${parent}...${child}`);
       if (!diffOutput) continue;
 
-      const files = diffOutput.split("\n").filter((f) => {
-        return f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".tsx");
-      });
+      const files = diffOutput.split("\n").filter((f) => matchesFilter(f, filter));
 
       for (const file of files) {
         if (!fileIntroducedIn.has(file)) {
@@ -125,8 +144,8 @@ function getConflicts(stack: Record<string, string>, branches: string[]): Confli
 export const command: Command = {
   category: "util",
   name: "info",
-  args: "[-s|--size] [-d|--drift] [-c|--conflicts] [-p|--plan]",
-  help: "Show stack info (flags: size, drift, conflicts, plan)",
+  args: "[-s|--size] [-d|--drift] [-c|--conflicts] [-p|--plan] [--tsx] [--tests]",
+  help: "Show stack info (flags: size, drift, conflicts, plan, tsx, tests)",
   run(args: string[]) {
     const { values } = parseArgs(args, {
       size: { type: "boolean", short: "s" },
@@ -134,7 +153,14 @@ export const command: Command = {
       conflicts: { type: "boolean", short: "c" },
       plan: { type: "boolean", short: "p" },
       all: { type: "boolean", short: "a" },
+      tsx: { type: "boolean" },
+      tests: { type: "boolean" },
     });
+
+    const fileFilter = {
+      includeTsx: values.tsx || false,
+      includeTests: values.tests || false,
+    };
 
     const stack = loadStack();
     const branch = currentBranch();
@@ -158,14 +184,14 @@ export const command: Command = {
 
     // Gather data based on flags
     const sizeData = (values.size || showOverview) ? new Map<string, number>() : null;
-    const driftResult = (values.drift || showOverview) ? getDrifts(orderedBranches, stack) : null;
+    const driftResult = (values.drift || showOverview) ? getDrifts(orderedBranches, stack, fileFilter) : null;
     const conflictData = (values.conflicts || showOverview) ? getConflicts(stack, currentStackBranches) : null;
 
     if (sizeData) {
       for (const b of currentStackBranches) {
         const parent = stack[b];
         if (parent) {
-          sizeData.set(b, getTsLoc(parent, b));
+          sizeData.set(b, getTsLoc(parent, b, fileFilter));
         }
       }
     }
