@@ -1,7 +1,7 @@
 
 # Auto-start tmux (skip with NO_TMUX=1 zsh)
 if [[ -z "$TMUX" && -z "$NO_TMUX" && -t 0 ]]; then
-  exec tmux new-session -A -s main
+  exec tmux new-session -A -s loops
 fi
 
 export VOLTA_HOME="$HOME/.volta"
