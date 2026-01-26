@@ -62,7 +62,7 @@ type DriftInfo = { file: string; introducedIn: string; modifiedIn: string[] };
 type BranchDriftInfo = {
   fileDrifts: DriftInfo[];
   // Per-branch: how many files from this branch are edited downstream
-  branchHealth: Map<string, { clean: boolean; driftedFiles: number; totalFiles: number }>;
+  branchHealth: Map<string, { clean: boolean; driftedFiles: number; driftedFileList: string[]; totalFiles: number }>;
 };
 
 function getDrifts(orderedBranches: string[], stack: Record<string, string>, filter: FileFilter): BranchDriftInfo {
@@ -104,14 +104,15 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>, fil
   }
 
   // Second pass: compute per-branch health
-  const branchHealth = new Map<string, { clean: boolean; driftedFiles: number; totalFiles: number }>();
+  const branchHealth = new Map<string, { clean: boolean; driftedFiles: number; driftedFileList: string[]; totalFiles: number }>();
 
   for (const branch of orderedBranches) {
     const files = filesPerBranch.get(branch) || new Set();
-    const driftedFiles = fileDrifts.filter((d) => d.introducedIn === branch).length;
+    const driftedFilesInfo = fileDrifts.filter((d) => d.introducedIn === branch);
     branchHealth.set(branch, {
-      clean: driftedFiles === 0,
-      driftedFiles,
+      clean: driftedFilesInfo.length === 0,
+      driftedFiles: driftedFilesInfo.length,
+      driftedFileList: driftedFilesInfo.map((d) => d.file),
       totalFiles: files.size,
     });
   }
@@ -244,7 +245,7 @@ export const command: Command = {
   },
 };
 
-type BranchHealth = { clean: boolean; driftedFiles: number; totalFiles: number };
+type BranchHealth = { clean: boolean; driftedFiles: number; driftedFileList: string[]; totalFiles: number };
 
 function printTree(
   b: string,
@@ -304,6 +305,18 @@ function printTree(
   if (changes.length > 0) {
     const changeIndent = contentPrefix + (children.length > 0 ? "│  " : "   ");
     console.log(`${changeIndent}${changes.join(", ")}`);
+  }
+
+  // Print drifted files inline
+  if (showOverview && health && health.driftedFileList.length > 0) {
+    const driftIndent = contentPrefix + (children.length > 0 ? "│  " : "   ");
+    const maxFiles = 3;
+    const fileNames = health.driftedFileList.slice(0, maxFiles).map((f) => f.split("/").pop());
+    let driftLine = `↳ drift: ${fileNames.join(", ")}`;
+    if (health.driftedFileList.length > maxFiles) {
+      driftLine += ` + ${health.driftedFileList.length - maxFiles} more`;
+    }
+    console.log(`${driftIndent}${driftLine}`);
   }
 
   children.forEach((child, i) => {
