@@ -14,6 +14,79 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 
+// ============ Health calculation (shared with info.ts logic) ============
+
+type BranchHealth = {
+  clean: boolean;
+  driftedFiles: number;
+  totalFiles: number;
+  loc: number;
+};
+
+function calculateHealth(chain: string[], stack: Record<string, string>): Map<string, BranchHealth> {
+  const fileIntroducedIn = new Map<string, string>();
+  const filesPerBranch = new Map<string, Set<string>>();
+  const driftedFrom = new Map<string, number>(); // branch -> count of drifted files
+  const locPerBranch = new Map<string, number>();
+
+  // Build ordered branches from root
+  for (let i = 1; i < chain.length; i++) {
+    const parent = chain[i - 1];
+    const child = chain[i];
+
+    try {
+      // Get files changed
+      const diffOutput = git(`diff --name-only ${parent}...${child}`);
+      const files = diffOutput.split("\n").filter((f) =>
+        f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".tsx")
+      );
+
+      // Track LOC
+      const locOutput = git(`diff --numstat ${parent}...${child} -- "*.ts" ":!*.tsx" ":!*.test.ts"`);
+      let loc = 0;
+      for (const line of locOutput.split("\n")) {
+        if (!line.trim()) continue;
+        const [added, removed] = line.split("\t");
+        if (added !== "-" && removed !== "-") {
+          loc += parseInt(added, 10) + parseInt(removed, 10);
+        }
+      }
+      locPerBranch.set(child, loc);
+
+      for (const file of files) {
+        if (!fileIntroducedIn.has(file)) {
+          fileIntroducedIn.set(file, child);
+          if (!filesPerBranch.has(child)) {
+            filesPerBranch.set(child, new Set());
+          }
+          filesPerBranch.get(child)!.add(file);
+        } else {
+          // File drifted - increment count for original branch
+          const originalBranch = fileIntroducedIn.get(file)!;
+          driftedFrom.set(originalBranch, (driftedFrom.get(originalBranch) || 0) + 1);
+        }
+      }
+    } catch {
+      // skip
+    }
+  }
+
+  // Build health map
+  const health = new Map<string, BranchHealth>();
+  for (const branch of chain) {
+    const files = filesPerBranch.get(branch) || new Set();
+    const drifted = driftedFrom.get(branch) || 0;
+    health.set(branch, {
+      clean: drifted === 0,
+      driftedFiles: drifted,
+      totalFiles: files.size,
+      loc: locPerBranch.get(branch) || 0,
+    });
+  }
+
+  return health;
+}
+
 interface CodeSnippet {
   file: string;
   line: number;
@@ -78,8 +151,11 @@ export const command: Command = {
     const config = loadConfig();
     const useNvim = values.nvim || config.reviewEditor === "nvim";
 
+    // Calculate health for all branches
+    const health = calculateHealth(chain, stack);
+
     if (useNvim) {
-      runNvimReview(chain, stack, startIdx);
+      runNvimReview(chain, stack, startIdx, health);
     } else {
       runInteractiveReview(chain, stack, startIdx);
     }
@@ -321,7 +397,7 @@ function openInEditor(branch: string, parent: string) {
   }
 }
 
-function runNvimReview(chain: string[], _stack: Record<string, string>, startIdx: number) {
+function runNvimReview(chain: string[], _stack: Record<string, string>, startIdx: number, health: Map<string, BranchHealth>) {
   // Write chain data to temp file for nvim to read
   const tmpDir = path.join(os.tmpdir(), "stack-review");
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -329,10 +405,20 @@ function runNvimReview(chain: string[], _stack: Record<string, string>, startIdx
   const chainFile = path.join(tmpDir, "chain.json");
   const stateFile = path.join(tmpDir, "state.json");
 
-  // Write chain (skip root at index 0, pairs of [branch, parent])
+  // Write chain (skip root at index 0, pairs of [branch, parent]) with health data
   const reviewChain = [];
   for (let i = 1; i < chain.length; i++) {
-    reviewChain.push({ branch: chain[i], parent: chain[i - 1] });
+    const branch = chain[i];
+    const h = health.get(branch);
+    reviewChain.push({
+      branch,
+      parent: chain[i - 1],
+      health: h ? {
+        clean: h.clean,
+        driftedFiles: h.driftedFiles,
+        loc: h.loc,
+      } : null,
+    });
   }
   fs.writeFileSync(chainFile, JSON.stringify(reviewChain));
   // Start at current branch position (reviewChain index is startIdx - 1 since it excludes root)
@@ -581,8 +667,24 @@ update_panel = function()
     local marker = (i - 1 == state.index) and " ◀" or ""
     local prefix = (i - 1 == state.index) and "▶ " or "  "
     -- Shorten branch name for display
-    local short_name = item.branch:gsub("goals%-v0%-", "")
-    table.insert(lines, string.format("%s%d. %s%s", prefix, i, short_name, marker))
+    local short_name = item.branch:gsub("goals%-v1%-", ""):gsub("goals%-v0%-", "")
+
+    -- Build health indicator
+    local health_str = ""
+    if item.health then
+      if item.health.clean then
+        health_str = " ✅"
+      else
+        health_str = string.format(" ⚠️%d", item.health.driftedFiles)
+      end
+      if item.health.loc > 150 then
+        health_str = health_str .. string.format(" 🔴%d", item.health.loc)
+      elseif item.health.loc > 0 then
+        health_str = health_str .. string.format(" %d", item.health.loc)
+      end
+    end
+
+    table.insert(lines, string.format("%s%d. %s%s%s", prefix, i, short_name, health_str, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
