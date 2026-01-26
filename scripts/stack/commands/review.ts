@@ -16,6 +16,7 @@ import * as path from "path";
 type BranchHealth = {
   clean: boolean;
   driftedFiles: number;
+  driftedFileList: string[];  // actual file paths that drifted
   totalFiles: number;
   loc: number;
 };
@@ -23,7 +24,7 @@ type BranchHealth = {
 function calculateHealth(chain: string[], stack: Record<string, string>): Map<string, BranchHealth> {
   const fileIntroducedIn = new Map<string, string>();
   const filesPerBranch = new Map<string, Set<string>>();
-  const driftedFrom = new Map<string, number>(); // branch -> count of drifted files
+  const driftedFilesFrom = new Map<string, Set<string>>(); // branch -> set of drifted file paths
   const locPerBranch = new Map<string, number>();
 
   // Build ordered branches from root
@@ -58,9 +59,12 @@ function calculateHealth(chain: string[], stack: Record<string, string>): Map<st
           }
           filesPerBranch.get(child)!.add(file);
         } else {
-          // File drifted - increment count for original branch
+          // File drifted - track it for the original branch
           const originalBranch = fileIntroducedIn.get(file)!;
-          driftedFrom.set(originalBranch, (driftedFrom.get(originalBranch) || 0) + 1);
+          if (!driftedFilesFrom.has(originalBranch)) {
+            driftedFilesFrom.set(originalBranch, new Set());
+          }
+          driftedFilesFrom.get(originalBranch)!.add(file);
         }
       }
     } catch {
@@ -72,10 +76,11 @@ function calculateHealth(chain: string[], stack: Record<string, string>): Map<st
   const health = new Map<string, BranchHealth>();
   for (const branch of chain) {
     const files = filesPerBranch.get(branch) || new Set();
-    const drifted = driftedFrom.get(branch) || 0;
+    const driftedSet = driftedFilesFrom.get(branch) || new Set();
     health.set(branch, {
-      clean: drifted === 0,
-      driftedFiles: drifted,
+      clean: driftedSet.size === 0,
+      driftedFiles: driftedSet.size,
+      driftedFileList: [...driftedSet],
       totalFiles: files.size,
       loc: locPerBranch.get(branch) || 0,
     });
@@ -165,6 +170,7 @@ function runNvimReview(chain: string[], _stack: Record<string, string>, startIdx
       health: h ? {
         clean: h.clean,
         driftedFiles: h.driftedFiles,
+        driftedFileList: h.driftedFileList,
         loc: h.loc,
       } : null,
     });
@@ -575,6 +581,36 @@ vim.keymap.set("n", "<leader>g3", "<cmd>Stack3Way<cr>", { desc = "3-way diff: pa
 vim.keymap.set("n", "<leader>g?", "<cmd>StackFileStatus<cr>", { desc = "Check if file matches final state" })
 vim.keymap.set("n", "<leader>gp", "<cmd>StackPanel<cr>", { desc = "Toggle stack branch panel" })
 
+-- Show drifted files for current branch and allow tracing
+vim.api.nvim_create_user_command("StackDrift", function()
+  local state = get_state()
+  local chain = get_chain()
+  local item = chain[state.index + 1]
+
+  if not item.health or not item.health.driftedFileList or #item.health.driftedFileList == 0 then
+    vim.notify("No drifted files for " .. item.branch, vim.log.levels.INFO)
+    return
+  end
+
+  local files = item.health.driftedFileList
+  vim.ui.select(files, {
+    prompt = "Drifted files from " .. item.branch .. " (select to trace):",
+    format_item = function(f) return f end,
+  }, function(choice)
+    if choice then
+      -- Run loops stack trace --visual on the selected file
+      vim.cmd("tabnew")
+      vim.fn.termopen("loops stack trace " .. vim.fn.shellescape(choice) .. " --visual", {
+        on_exit = function()
+          -- Close the terminal tab when done
+          vim.cmd("bdelete!")
+        end
+      })
+    end
+  end)
+end, {})
+vim.keymap.set("n", "<leader>gD", "<cmd>StackDrift<cr>", { desc = "Show drifted files" })
+
 -- Help command
 vim.api.nvim_create_user_command("StackHelp", function()
   local help = {
@@ -589,6 +625,7 @@ vim.api.nvim_create_user_command("StackHelp", function()
     "  <leader>gs     show current position",
     "  <leader>g?     check if file matches final",
     "  <leader>g3     3-way diff view",
+    "  <leader>gD     show drifted files (trace)",
     "  <leader>ge     edit current file",
     "  <leader>gp     toggle branch panel",
     "",
@@ -598,6 +635,7 @@ vim.api.nvim_create_user_command("StackHelp", function()
     "  <leader>gy     copy branch name to clipboard",
     "",
     "  :StackJump N   jump to branch N",
+    "  :StackDrift    show drifted files",
     "  :qa            quit review",
   }
   vim.notify(table.concat(help, "\\n"), vim.log.levels.INFO)
