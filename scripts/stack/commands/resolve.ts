@@ -428,6 +428,57 @@ function pullFinalVersion(file: DriftedFile): boolean {
 }
 
 /**
+ * Show a summary of what changed after applying
+ */
+function showChangeSummary(files: string[], plan: { path: string; action: string; reason: string; changes?: any[] }[]): void {
+  console.log(`\n${CYAN}${BOLD}━━━ WHAT CHANGED ━━━${RESET}\n`);
+
+  for (const file of files) {
+    // Get the actual diff for this file
+    try {
+      const diff = execSync(`git diff HEAD -- "${file}"`, { encoding: "utf8" });
+      if (!diff.trim()) {
+        // File was staged, check staged diff
+        const stagedDiff = execSync(`git diff --cached -- "${file}"`, { encoding: "utf8" });
+        if (stagedDiff.trim()) {
+          console.log(`${GREEN}✓ ${file}${RESET}`);
+          // Show summary stats
+          const additions = (stagedDiff.match(/^\+[^+]/gm) || []).length;
+          const deletions = (stagedDiff.match(/^-[^-]/gm) || []).length;
+          console.log(`  ${GREEN}+${additions}${RESET} ${RED}-${deletions}${RESET} lines\n`);
+
+          // Show the actual changes (truncated)
+          const lines = stagedDiff.split("\n").slice(0, 30);
+          for (const line of lines) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+              console.log(`  ${GREEN}${line}${RESET}`);
+            } else if (line.startsWith("-") && !line.startsWith("---")) {
+              console.log(`  ${RED}${line}${RESET}`);
+            }
+          }
+          if (stagedDiff.split("\n").length > 30) {
+            console.log(`  ${DIM}... (truncated)${RESET}`);
+          }
+          console.log();
+        }
+      }
+    } catch {}
+
+    // Compare to plan
+    const plannedFile = plan.find(p => p.path === file);
+    if (plannedFile) {
+      console.log(`  ${DIM}Plan: ${plannedFile.action} - ${plannedFile.reason}${RESET}`);
+      if (plannedFile.changes) {
+        for (const c of plannedFile.changes) {
+          console.log(`  ${DIM}  • ${c.type}: ${c.description}${RESET}`);
+        }
+      }
+      console.log();
+    }
+  }
+}
+
+/**
  * Interactive prompt
  */
 async function prompt(question: string): Promise<string> {
@@ -447,14 +498,13 @@ async function prompt(question: string): Promise<string> {
 export const command: Command = {
   category: "edit",
   name: "resolve",
-  help: "Resolve drift by pulling final versions of files into current branch",
-  args: "[--deletions] [--json] [file...]",
+  help: "Resolve drift by analyzing with Claude and applying recommended changes",
+  args: "[--manual] [--dry-run] [file...]",
   async run(args) {
     const { values, positionals } = parseArgs(args, {
-      "text": { type: "boolean", short: "t" },  // Old text-based mode
-      "deletions": { type: "boolean", short: "d" },  // Show only deletion zones
-      "json": { type: "boolean", short: "j" },  // Output JSON for AI processing
-      "ai": { type: "boolean" },  // Use Claude CLI to analyze and recommend
+      "manual": { type: "boolean", short: "m" },  // Skip AI, manual mode
+      "dry-run": { type: "boolean", short: "n" },  // Show plan without applying
+      "json": { type: "boolean", short: "j" },  // Output JSON only
     });
 
     const stack = loadStack();
@@ -482,14 +532,20 @@ export const command: Command = {
       );
     }
 
-    console.log(`${YELLOW}Found ${filesToResolve.length} file(s) with drift:${RESET}`);
+    // === SECTION 1: SITUATION ===
+    console.log(`${CYAN}${BOLD}━━━ SITUATION ━━━${RESET}\n`);
+    console.log(`Branch: ${CYAN}${branch}${RESET}`);
+    console.log(`Drifted files: ${YELLOW}${filesToResolve.length}${RESET}\n`);
+
     for (const f of filesToResolve) {
       console.log(`  ${YELLOW}⚠${RESET}  ${f.path}`);
+      console.log(`    ${DIM}Added here, modified in: ${f.modifiedIn.join(" → ")}${RESET}`);
     }
+    console.log();
 
-    // AI mode: use Claude CLI to analyze diffs (two-phase approach)
-    if (values["ai"]) {
-      console.log(`\n${CYAN}Phase 1: Analyzing diffs...${RESET}\n`);
+    // Default: AI-assisted analysis
+    if (!values["manual"]) {
+      console.log(`${CYAN}${BOLD}━━━ PLAN (analyzing with Claude) ━━━${RESET}\n`);
 
       // Get diffs for each file
       const fileDiffs: { file: string; diff: string; finalBranch: string }[] = [];
@@ -580,8 +636,8 @@ ${fd.diff}
         return;
       }
 
-      // Show Phase 1 results
-      console.log(`${CYAN}${BOLD}━━━ Phase 1: Analysis ━━━${RESET}\n`);
+      // Show Claude's analysis
+      console.log(`${CYAN}${BOLD}Claude's Analysis:${RESET}\n`);
       if (phase1Summary) console.log(`${phase1Summary}\n`);
 
       for (const rec of phase1Recs) {
@@ -606,7 +662,7 @@ ${fd.diff}
       }
 
       // PHASE 2: For files needing changes, get the actual modified content
-      console.log(`${CYAN}${BOLD}━━━ Phase 2: Generating code for ${filesToChange.length} file(s) ━━━${RESET}\n`);
+      console.log(`\n${CYAN}Generating code for ${filesToChange.length} file(s)...${RESET}\n`);
 
       const phase2Files: { path: string; currentContent: string; finalContent: string; rec: typeof phase1Recs[0] }[] = [];
 
@@ -846,12 +902,15 @@ ${rec.changes?.map(c => `- **${c.type}**: ${c.description}`).join("\n") || ""}
         return;
       }
 
-      // Stage and commit
+      // Stage files
       for (const file of appliedFiles) {
         execSync(`git add "${file}"`, { stdio: "inherit" });
       }
 
-      const commitAnswer = await prompt(`\n${YELLOW}Commit changes?${RESET} [a]mend, [n]ew commit, [s]kip: `);
+      // Show what changed vs the plan
+      showChangeSummary(appliedFiles, phase1Recs);
+
+      const commitAnswer = await prompt(`${YELLOW}Commit changes?${RESET} [a]mend, [n]ew commit, [s]kip: `);
 
       if (commitAnswer === "a" || commitAnswer === "amend") {
         execSync(`git commit --amend --no-edit`, { stdio: "inherit" });
