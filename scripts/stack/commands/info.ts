@@ -148,7 +148,7 @@ export const command: Command = {
 
     // Print tree with annotations
     console.log();
-    printTree(root, "", stack, branch, currentStackBranches, sizeData, conflictData, showOverview);
+    printTree(root, "", "", stack, branch, currentStackBranches, sizeData, conflictData, showOverview);
 
     // Size summary
     if (values.size || showOverview) {
@@ -196,7 +196,8 @@ export const command: Command = {
 
 function printTree(
   b: string,
-  indent: string,
+  linePrefix: string,
+  contentPrefix: string,
   stack: Record<string, string>,
   currentBranch: string,
   stackBranches: string[],
@@ -230,18 +231,18 @@ function printTree(
     } catch {}
   }
 
-  console.log(`${indent}${b}${suffix}${marker}`);
+  console.log(`${linePrefix}${b}${suffix}${marker}`);
 
   if (changes.length > 0) {
-    const changeIndent = indent + (children.length > 0 ? "│  " : "   ");
+    const changeIndent = contentPrefix + (children.length > 0 ? "│  " : "   ");
     console.log(`${changeIndent}${changes.join(", ")}`);
   }
 
   children.forEach((child, i) => {
     const isLast = i === children.length - 1;
     const connector = isLast ? "└─ " : "├─ ";
-    const nextIndent = indent + (isLast ? "   " : "│  ");
-    printTree(child, indent + connector, stack, currentBranch, stackBranches, sizeData, conflictData, showOverview);
+    const nextContentPrefix = contentPrefix + (isLast ? "   " : "│  ");
+    printTree(child, contentPrefix + connector, nextContentPrefix, stack, currentBranch, stackBranches, sizeData, conflictData, showOverview);
   });
 }
 
