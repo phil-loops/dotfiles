@@ -314,7 +314,23 @@ export const command: Command = {
       console.log(`\n${DIM}(dry-run mode - no changes made)${RESET}`);
 
       for (const file of filesToResolve) {
-        showFileDiff(file, branch);
+        const { additions, deletions, diff } = showFileDiff(file, branch);
+
+        if (!diff) {
+          console.log(`${DIM}No diff found${RESET}`);
+          continue;
+        }
+
+        const hunks = parseDiffHunks(diff);
+        console.log(`\n${YELLOW}${hunks.length} hunk(s), ${GREEN}+${additions}${RESET} ${RED}-${deletions}${RESET}\n`);
+
+        // Show all hunks in dry-run mode
+        for (let i = 0; i < hunks.length; i++) {
+          displayHunk(hunks[i], i, hunks.length);
+        }
+
+        console.log(`\n${DIM}─────────────────────────────────${RESET}`);
+        console.log(`${DIM}Run without --dry-run to apply these changes${RESET}`);
       }
       return;
     }
