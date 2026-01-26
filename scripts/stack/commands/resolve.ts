@@ -3,6 +3,7 @@ import { currentBranch, git, loadStack, getDescendants } from "../lib.ts";
 import { parseArgs } from "../args.ts";
 import { execSync } from "child_process";
 import * as readline from "readline";
+import * as fs from "fs";
 
 // ANSI colors
 const RED = "\x1b[31m";
@@ -10,6 +11,7 @@ const GREEN = "\x1b[32m";
 const YELLOW = "\x1b[33m";
 const CYAN = "\x1b[36m";
 const DIM = "\x1b[2m";
+const BOLD = "\x1b[1m";
 const RESET = "\x1b[0m";
 
 type DriftedFile = {
@@ -70,40 +72,162 @@ function findDriftedFiles(branch: string, stack: Record<string, string>): Drifte
   return driftedFiles;
 }
 
+type Hunk = {
+  header: string;
+  lines: string[];
+  startLine: number;
+  context: string;  // First meaningful line for identification
+  additions: number;
+  deletions: number;
+};
+
+/**
+ * Parse a diff into individual hunks
+ */
+function parseDiffHunks(diff: string): Hunk[] {
+  const hunks: Hunk[] = [];
+  const lines = diff.split("\n");
+
+  let currentHunk: Hunk | null = null;
+
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      // Save previous hunk
+      if (currentHunk) {
+        hunks.push(currentHunk);
+      }
+
+      // Parse line number from @@ -start,count +start,count @@
+      const match = line.match(/@@ -(\d+)/);
+      const startLine = match ? parseInt(match[1], 10) : 0;
+
+      currentHunk = {
+        header: line,
+        lines: [line],
+        startLine,
+        context: "",
+        additions: 0,
+        deletions: 0,
+      };
+    } else if (currentHunk) {
+      currentHunk.lines.push(line);
+
+      if (line.startsWith("+") && !line.startsWith("+++")) {
+        currentHunk.additions++;
+        // Capture first addition as context
+        if (!currentHunk.context && line.length > 1) {
+          currentHunk.context = line.substring(1).trim().substring(0, 50);
+        }
+      } else if (line.startsWith("-") && !line.startsWith("---")) {
+        currentHunk.deletions++;
+        // Use deletion as context if no addition yet
+        if (!currentHunk.context && line.length > 1) {
+          currentHunk.context = line.substring(1).trim().substring(0, 50);
+        }
+      }
+    }
+  }
+
+  // Don't forget last hunk
+  if (currentHunk) {
+    hunks.push(currentHunk);
+  }
+
+  return hunks;
+}
+
+/**
+ * Display a single hunk with colors
+ */
+function displayHunk(hunk: Hunk, index: number, total: number): void {
+  console.log(`\n${CYAN}${BOLD}Hunk ${index + 1}/${total}${RESET} ${DIM}(line ${hunk.startLine})${RESET}`);
+  console.log(`${DIM}Context: ${hunk.context || "(empty)"}${RESET}`);
+  console.log(`${DIM}Changes: ${GREEN}+${hunk.additions}${RESET} ${RED}-${hunk.deletions}${RESET}\n`);
+
+  for (const line of hunk.lines) {
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      console.log(`${GREEN}${line}${RESET}`);
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      console.log(`${RED}${line}${RESET}`);
+    } else if (line.startsWith("@@")) {
+      console.log(`${CYAN}${line}${RESET}`);
+    } else {
+      console.log(DIM + line + RESET);
+    }
+  }
+}
+
+/**
+ * Apply a single hunk to the working directory
+ */
+function applyHunk(file: DriftedFile, hunk: Hunk, branch: string): boolean {
+  try {
+    // Create a minimal patch for just this hunk
+    const patchLines = [
+      `--- a/${file.path}`,
+      `+++ b/${file.path}`,
+      ...hunk.lines,
+    ];
+    const patch = patchLines.join("\n") + "\n";
+
+    // Write patch to temp file
+    const tmpPatch = `/tmp/stack-resolve-hunk.patch`;
+    fs.writeFileSync(tmpPatch, patch);
+
+    // Apply the patch
+    execSync(`git apply --3way "${tmpPatch}"`, { stdio: "pipe" });
+    fs.unlinkSync(tmpPatch);
+
+    return true;
+  } catch (e: any) {
+    // Try without --3way as fallback
+    try {
+      const patchLines = [
+        `--- a/${file.path}`,
+        `+++ b/${file.path}`,
+        ...hunk.lines,
+      ];
+      const patch = patchLines.join("\n") + "\n";
+      const tmpPatch = `/tmp/stack-resolve-hunk.patch`;
+      fs.writeFileSync(tmpPatch, patch);
+      execSync(`git apply "${tmpPatch}"`, { stdio: "pipe" });
+      fs.unlinkSync(tmpPatch);
+      return true;
+    } catch {
+      console.error(`${RED}Failed to apply hunk (may conflict)${RESET}`);
+      return false;
+    }
+  }
+}
+
 /**
  * Show diff between current branch version and final version
  */
-function showFileDiff(file: DriftedFile, branch: string): { additions: number; deletions: number } {
+function showFileDiff(file: DriftedFile, branch: string): { additions: number; deletions: number; diff: string } {
   console.log(`\n${CYAN}━━━ ${file.path} ━━━${RESET}`);
   console.log(`${DIM}Introduced in: ${branch}${RESET}`);
   console.log(`${DIM}Modified in: ${file.modifiedIn.join(" → ")}${RESET}`);
-  console.log(`${DIM}Final version: ${file.finalBranch}${RESET}\n`);
+  console.log(`${DIM}Final version: ${file.finalBranch}${RESET}`);
 
-  // Show the diff between this branch and final
+  // Get the diff between this branch and final
   try {
-    const diff = git(`diff ${branch}...${file.finalBranch} -- "${file.path}"`);
+    const diff = git(`diff ${branch}..${file.finalBranch} -- "${file.path}"`);
 
     let additions = 0;
     let deletions = 0;
 
     for (const line of diff.split("\n")) {
       if (line.startsWith("+") && !line.startsWith("+++")) {
-        console.log(`${GREEN}${line}${RESET}`);
         additions++;
       } else if (line.startsWith("-") && !line.startsWith("---")) {
-        console.log(`${RED}${line}${RESET}`);
         deletions++;
-      } else if (line.startsWith("@@")) {
-        console.log(`${CYAN}${line}${RESET}`);
-      } else {
-        console.log(DIM + line + RESET);
       }
     }
 
-    return { additions, deletions };
+    return { additions, deletions, diff };
   } catch {
     console.log(`${DIM}(Could not generate diff)${RESET}`);
-    return { additions: 0, deletions: 0 };
+    return { additions: 0, deletions: 0, diff: "" };
   }
 }
 
@@ -196,37 +320,101 @@ export const command: Command = {
     }
 
     // Process each file
-    const pulledFiles: string[] = [];
+    const modifiedFiles: string[] = [];
 
     for (const file of filesToResolve) {
-      const { additions, deletions } = showFileDiff(file, branch);
+      const { additions, deletions, diff } = showFileDiff(file, branch);
 
-      console.log(`\n${DIM}This diff shows what changes downstream.${RESET}`);
-      console.log(`${DIM}Pulling final version will incorporate ${GREEN}+${additions}${RESET}${DIM}/${RED}-${deletions}${RESET}${DIM} into this branch.${RESET}\n`);
-
-      let action: string;
-      if (values.yes || values.all) {
-        action = "p";
-        console.log(`${DIM}Auto-pulling (--yes or --all flag)${RESET}`);
-      } else {
-        action = await prompt(
-          `${CYAN}[p]${RESET}ull final version, ${CYAN}[s]${RESET}kip, ${CYAN}[q]${RESET}uit? `
-        );
+      if (!diff) {
+        console.log(`${DIM}No diff found, skipping${RESET}`);
+        continue;
       }
 
-      if (action === "q") {
+      const hunks = parseDiffHunks(diff);
+      console.log(`\n${YELLOW}${hunks.length} hunk(s) to review${RESET}`);
+      console.log(`${DIM}Total changes: ${GREEN}+${additions}${RESET}${DIM} ${RED}-${deletions}${RESET}\n`);
+
+      if (hunks.length === 0) {
+        continue;
+      }
+
+      // Ask for mode
+      let mode: string;
+      if (values.yes || values.all) {
+        mode = "a";
+      } else {
+        console.log(`${CYAN}[a]${RESET}pply all hunks for this file`);
+        console.log(`${CYAN}[i]${RESET}nteractive - review each hunk`);
+        console.log(`${CYAN}[s]${RESET}kip this file`);
+        console.log(`${CYAN}[q]${RESET}uit\n`);
+        mode = await prompt(`Mode for ${file.path}? `);
+      }
+
+      if (mode === "q") {
         console.log(`\n${YELLOW}Aborted.${RESET}`);
         return;
       }
 
-      if (action === "p" || action === "pull") {
-        if (pullFinalVersion(file)) {
-          pulledFiles.push(file.path);
-        }
-      } else {
+      if (mode === "s" || mode === "skip") {
         console.log(`${DIM}Skipped ${file.path}${RESET}`);
+        continue;
+      }
+
+      let appliedAny = false;
+
+      if (mode === "a" || mode === "all") {
+        // Apply all hunks
+        for (const hunk of hunks) {
+          if (applyHunk(file, hunk, branch)) {
+            appliedAny = true;
+          }
+        }
+        if (appliedAny) {
+          console.log(`${GREEN}✓ Applied all hunks to ${file.path}${RESET}`);
+        }
+      } else if (mode === "i" || mode === "interactive") {
+        // Interactive mode - review each hunk
+        for (let i = 0; i < hunks.length; i++) {
+          const hunk = hunks[i];
+          displayHunk(hunk, i, hunks.length);
+
+          const action = await prompt(
+            `${CYAN}[y]${RESET}es apply, ${CYAN}[n]${RESET}o skip, ${CYAN}[a]${RESET}ll remaining, ${CYAN}[q]${RESET}uit file? `
+          );
+
+          if (action === "q") {
+            console.log(`${DIM}Stopping at this hunk${RESET}`);
+            break;
+          }
+
+          if (action === "a") {
+            // Apply this and all remaining
+            for (let j = i; j < hunks.length; j++) {
+              if (applyHunk(file, hunks[j], branch)) {
+                appliedAny = true;
+              }
+            }
+            console.log(`${GREEN}✓ Applied remaining hunks${RESET}`);
+            break;
+          }
+
+          if (action === "y" || action === "yes") {
+            if (applyHunk(file, hunk, branch)) {
+              appliedAny = true;
+              console.log(`${GREEN}✓ Applied${RESET}`);
+            }
+          } else {
+            console.log(`${DIM}Skipped${RESET}`);
+          }
+        }
+      }
+
+      if (appliedAny) {
+        modifiedFiles.push(file.path);
       }
     }
+
+    const pulledFiles = modifiedFiles;
 
     if (pulledFiles.length === 0) {
       console.log(`\n${DIM}No files changed.${RESET}`);
