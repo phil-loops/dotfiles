@@ -38,11 +38,18 @@ function getTsLoc(parent: string, child: string): number {
 // ============ Drift helpers ============
 
 type DriftInfo = { file: string; introducedIn: string; modifiedIn: string[] };
+type BranchDriftInfo = {
+  fileDrifts: DriftInfo[];
+  // Per-branch: how many files from this branch are edited downstream
+  branchHealth: Map<string, { clean: boolean; driftedFiles: number; totalFiles: number }>;
+};
 
-function getDrifts(orderedBranches: string[], stack: Record<string, string>): DriftInfo[] {
+function getDrifts(orderedBranches: string[], stack: Record<string, string>): BranchDriftInfo {
   const fileIntroducedIn = new Map<string, string>();
-  const drifts: DriftInfo[] = [];
+  const fileDrifts: DriftInfo[] = [];
+  const filesPerBranch = new Map<string, Set<string>>();
 
+  // First pass: track which files each branch introduces
   for (let i = 1; i < orderedBranches.length; i++) {
     const parent = orderedBranches[i - 1];
     const child = orderedBranches[i];
@@ -58,12 +65,16 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>): Dr
       for (const file of files) {
         if (!fileIntroducedIn.has(file)) {
           fileIntroducedIn.set(file, child);
+          if (!filesPerBranch.has(child)) {
+            filesPerBranch.set(child, new Set());
+          }
+          filesPerBranch.get(child)!.add(file);
         } else {
           const introducedIn = fileIntroducedIn.get(file)!;
-          let drift = drifts.find((d) => d.file === file);
+          let drift = fileDrifts.find((d) => d.file === file);
           if (!drift) {
             drift = { file, introducedIn, modifiedIn: [] };
-            drifts.push(drift);
+            fileDrifts.push(drift);
           }
           drift.modifiedIn.push(child);
         }
@@ -73,7 +84,20 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>): Dr
     }
   }
 
-  return drifts;
+  // Second pass: compute per-branch health
+  const branchHealth = new Map<string, { clean: boolean; driftedFiles: number; totalFiles: number }>();
+
+  for (const branch of orderedBranches) {
+    const files = filesPerBranch.get(branch) || new Set();
+    const driftedFiles = fileDrifts.filter((d) => d.introducedIn === branch).length;
+    branchHealth.set(branch, {
+      clean: driftedFiles === 0,
+      driftedFiles,
+      totalFiles: files.size,
+    });
+  }
+
+  return { fileDrifts, branchHealth };
 }
 
 // ============ Conflicts helpers ============
@@ -134,7 +158,7 @@ export const command: Command = {
 
     // Gather data based on flags
     const sizeData = (values.size || showOverview) ? new Map<string, number>() : null;
-    const driftData = (values.drift || showOverview) ? getDrifts(orderedBranches, stack) : null;
+    const driftResult = (values.drift || showOverview) ? getDrifts(orderedBranches, stack) : null;
     const conflictData = (values.conflicts || showOverview) ? getConflicts(stack, currentStackBranches) : null;
 
     if (sizeData) {
@@ -148,7 +172,7 @@ export const command: Command = {
 
     // Print tree with annotations
     console.log();
-    printTree(root, "", "", stack, branch, currentStackBranches, sizeData, conflictData, showOverview);
+    printTree(root, "", "", stack, branch, currentStackBranches, sizeData, driftResult?.branchHealth || null, conflictData, showOverview);
 
     // Size summary
     if (values.size || showOverview) {
@@ -160,14 +184,14 @@ export const command: Command = {
     }
 
     // Drift details
-    if (values.drift && driftData && driftData.length > 0) {
-      console.log(`\nDrifted files (${driftData.length}):\n`);
-      for (const { file, introducedIn, modifiedIn } of driftData) {
+    if (values.drift && driftResult && driftResult.fileDrifts.length > 0) {
+      console.log(`\nDrifted files (${driftResult.fileDrifts.length}):\n`);
+      for (const { file, introducedIn, modifiedIn } of driftResult.fileDrifts) {
         console.log(`  ${file}`);
         console.log(`    added: ${introducedIn} -> modified: ${modifiedIn.join(", ")}`);
       }
-    } else if (showOverview && driftData && driftData.length > 0) {
-      console.log(`\n${driftData.length} file(s) drifted (use -d for details)`);
+    } else if (showOverview && driftResult && driftResult.fileDrifts.length > 0) {
+      console.log(`\n${driftResult.fileDrifts.length} file(s) drifted (use -d for details)`);
     }
 
     // Conflict details
@@ -194,6 +218,8 @@ export const command: Command = {
   },
 };
 
+type BranchHealth = { clean: boolean; driftedFiles: number; totalFiles: number };
+
 function printTree(
   b: string,
   linePrefix: string,
@@ -202,6 +228,7 @@ function printTree(
   currentBranch: string,
   stackBranches: string[],
   sizeData: Map<string, number> | null,
+  branchHealth: Map<string, BranchHealth> | null,
   conflictData: ConflictInfo[] | null,
   showOverview: boolean
 ) {
@@ -209,6 +236,16 @@ function printTree(
   const children = getChildren(stack, b).filter((c) => stackBranches.includes(c));
 
   let annotations: string[] = [];
+
+  // Health indicator: ✓ for clean, ~N for drifted files
+  const health = branchHealth?.get(b);
+  if (health && health.totalFiles > 0) {
+    if (health.clean) {
+      annotations.push("✓");
+    } else {
+      annotations.push(`~${health.driftedFiles}`);
+    }
+  }
 
   if (sizeData?.has(b)) {
     const loc = sizeData.get(b)!;
@@ -242,7 +279,7 @@ function printTree(
     const isLast = i === children.length - 1;
     const connector = isLast ? "└─ " : "├─ ";
     const nextContentPrefix = contentPrefix + (isLast ? "   " : "│  ");
-    printTree(child, contentPrefix + connector, nextContentPrefix, stack, currentBranch, stackBranches, sizeData, conflictData, showOverview);
+    printTree(child, contentPrefix + connector, nextContentPrefix, stack, currentBranch, stackBranches, sizeData, branchHealth, conflictData, showOverview);
   });
 }
 
