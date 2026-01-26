@@ -445,7 +445,7 @@ update_panel = function()
       end
     end
 
-    table.insert(lines, string.format("%s%d. %s%s%s", prefix, i, short_name, health_str, marker))
+    table.insert(lines, string.format("%s%s%s%s", prefix, short_name, health_str, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
@@ -461,13 +461,10 @@ end
 local function setup_panel_keymaps()
   local opts = { buffer = panel_buf, silent = true }
   vim.keymap.set("n", "<CR>", function()
-    local line = vim.api.nvim_get_current_line()
-    local idx = tonumber(line:match("(%d+)%."))
-    if idx then
-      open_review(idx - 1)
-      update_panel()
-      vim.cmd("wincmd l")  -- Go to diff window
-    end
+    local line_num = vim.api.nvim_win_get_cursor(0)[1]
+    open_review(line_num - 1)
+    update_panel()
+    vim.cmd("wincmd l")  -- Go to diff window
   end, opts)
   vim.keymap.set("n", "q", function()
     if panel_win and vim.api.nvim_win_is_valid(panel_win) then
@@ -530,7 +527,7 @@ open_panel_above_diffview = function()
   vim.cmd("aboveleft " .. height .. "split")
   panel_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(panel_win, panel_buf)
-  vim.api.nvim_win_set_option(panel_win, "number", false)
+  vim.api.nvim_win_set_option(panel_win, "number", true)
   vim.api.nvim_win_set_option(panel_win, "relativenumber", false)
   vim.api.nvim_win_set_option(panel_win, "signcolumn", "no")
   vim.api.nvim_win_set_option(panel_win, "winfixheight", true)
