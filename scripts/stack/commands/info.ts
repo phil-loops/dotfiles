@@ -58,6 +58,16 @@ function getTsLoc(parent: string, child: string, filter: FileFilter): number {
 
 // ============ Drift helpers ============
 
+// Check if a file diff has deletions (real drift) vs just additions (acceptable growth)
+function hasMinusLines(parent: string, child: string, file: string): boolean {
+  try {
+    const diff = git(`diff ${parent}...${child} -- "${file}"`);
+    return diff.split("\n").some((l) => l.startsWith("-") && !l.startsWith("---"));
+  } catch {
+    return false;
+  }
+}
+
 type DriftInfo = { file: string; introducedIn: string; modifiedIn: string[] };
 type BranchDriftInfo = {
   fileDrifts: DriftInfo[];
@@ -89,13 +99,16 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>, fil
           }
           filesPerBranch.get(child)!.add(file);
         } else {
-          const introducedIn = fileIntroducedIn.get(file)!;
-          let drift = fileDrifts.find((d) => d.file === file);
-          if (!drift) {
-            drift = { file, introducedIn, modifiedIn: [] };
-            fileDrifts.push(drift);
+          // Only count as drift if there are deletions (not just additions)
+          if (hasMinusLines(parent, child, file)) {
+            const introducedIn = fileIntroducedIn.get(file)!;
+            let drift = fileDrifts.find((d) => d.file === file);
+            if (!drift) {
+              drift = { file, introducedIn, modifiedIn: [] };
+              fileDrifts.push(drift);
+            }
+            drift.modifiedIn.push(child);
           }
-          drift.modifiedIn.push(child);
         }
       }
     } catch {
