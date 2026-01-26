@@ -597,16 +597,68 @@ vim.api.nvim_create_user_command("StackDrift", function()
     prompt = "Drifted files from " .. item.branch .. " (select to trace):",
     format_item = function(f) return f end,
   }, function(choice)
-    if choice then
-      -- Run loops stack trace --visual on the selected file
-      vim.cmd("tabnew")
-      vim.fn.termopen("loops stack trace " .. vim.fn.shellescape(choice) .. " --visual", {
-        on_exit = function()
-          -- Close the terminal tab when done
-          vim.cmd("bdelete!")
-        end
-      })
+    if not choice then return end
+
+    -- Find which branches after this one modified the file
+    local introduced_branch = item.branch
+    local modified_in = {}
+
+    for i = state.index + 2, #chain do  -- Start from next branch
+      local b = chain[i]
+      -- Check if file was modified in this branch
+      local diff = vim.fn.systemlist(string.format(
+        "git diff --name-only %s...%s -- %s 2>/dev/null",
+        chain[i - 1].branch, b.branch, vim.fn.shellescape(choice)
+      ))
+      if #diff > 0 and diff[1] ~= "" then
+        table.insert(modified_in, b.branch)
+      end
     end
+
+    if #modified_in == 0 then
+      vim.notify("File not modified in later branches (data may be stale)", vim.log.levels.WARN)
+      return
+    end
+
+    -- Open in new tab: introduced version vs each modified version
+    vim.cmd("tabnew")
+
+    local function open_file_version(branch, filepath)
+      local result = vim.fn.system(string.format("git cat-file -e %s:%s 2>/dev/null; echo $?", branch, filepath))
+      local exists = result:gsub("%s+", "") == "0"
+      if exists then
+        vim.cmd("Gedit " .. branch .. ":" .. filepath)
+        vim.cmd("setlocal readonly nomodifiable")
+      else
+        vim.cmd("enew")
+        vim.api.nvim_buf_set_lines(0, 0, -1, false, {"[FILE DOES NOT EXIST IN " .. branch .. "]"})
+        vim.cmd("setlocal readonly nomodifiable buftype=nofile")
+      end
+    end
+
+    -- Build versions to show (max 4 splits)
+    local versions = { introduced_branch }
+    for i, b in ipairs(modified_in) do
+      if #versions < 4 then
+        table.insert(versions, b)
+      end
+    end
+
+    -- Open first version (where introduced)
+    open_file_version(versions[1], choice)
+
+    -- Open rest in splits
+    for i = 2, #versions do
+      vim.cmd("vsplit")
+      open_file_version(versions[i], choice)
+    end
+
+    -- Enable diff mode
+    vim.cmd("windo diffthis")
+    vim.cmd("wincmd =")
+    vim.cmd("1wincmd w")
+
+    vim.notify(string.format("Drift: %s → %s", introduced_branch, table.concat(modified_in, " → ")), vim.log.levels.INFO)
   end)
 end, {})
 vim.keymap.set("n", "<leader>gD", "<cmd>StackDrift<cr>", { desc = "Show drifted files" })
