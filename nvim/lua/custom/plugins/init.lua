@@ -15,6 +15,12 @@ stack_review.setup()
 local stack_nav = require('custom.stack-nav')
 stack_nav.setup({ key = '<leader>sv' })  -- [S]tack [V]iew
 
+-- Load stack-file-inspect module (3-panel file evolution view)
+local stack_file_inspect = require('custom.stack-file-inspect')
+stack_file_inspect.setup()  -- Sets up <leader>if
+
+-- Note: stack-diffview-drift functionality is now built into the forked diffview.nvim
+
 -- Keybindings for stack review (leader-s prefix)
 vim.keymap.set('n', '<leader>sc', function()
   stack_review.open()
@@ -42,7 +48,8 @@ end, { desc = 'Stack: Trace current file' })
 
 return {
   {
-    'sindrets/diffview.nvim',
+    'phil-loops/diffview.nvim',
+    branch = 'stack-drift',
     cmd = { 'DiffviewOpen', 'DiffviewFileHistory' },
     keys = {
       { '<leader>gd', '<cmd>DiffviewOpen<cr>', desc = 'Diffview: Open (vs HEAD)' },
