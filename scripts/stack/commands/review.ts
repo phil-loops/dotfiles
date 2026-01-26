@@ -581,7 +581,7 @@ vim.keymap.set("n", "<leader>g3", "<cmd>Stack3Way<cr>", { desc = "3-way diff: pa
 vim.keymap.set("n", "<leader>g?", "<cmd>StackFileStatus<cr>", { desc = "Check if file matches final state" })
 vim.keymap.set("n", "<leader>gp", "<cmd>StackPanel<cr>", { desc = "Toggle stack branch panel" })
 
--- Show drifted files for current branch and allow tracing
+-- Show drifted files for current branch and trace through ALL branches that touched it
 vim.api.nvim_create_user_command("StackDrift", function()
   local state = get_state()
   local chain = get_chain()
@@ -599,42 +599,69 @@ vim.api.nvim_create_user_command("StackDrift", function()
   }, function(choice)
     if not choice then return end
 
-    local introduced_branch = item.branch
-    local final_branch = chain[#chain].branch
+    -- Find ALL branches in the stack that touched this file
+    local touched_branches = {}
+    for i, b in ipairs(chain) do
+      local parent = b.parent
+      if parent then
+        -- Check if file changed between parent and this branch
+        local diff = vim.fn.system(string.format(
+          "git diff --name-only %s...%s -- %s 2>/dev/null",
+          parent, b.branch, vim.fn.shellescape(choice)
+        ))
+        if diff:match("%S") then
+          table.insert(touched_branches, b.branch)
+        end
+      end
+    end
 
-    -- Simple: show introduced version vs final version
-    vim.cmd("tabnew")
+    if #touched_branches == 0 then
+      vim.notify("File not found in stack branches", vim.log.levels.WARN)
+      return
+    end
 
-    -- Helper to load file content from a branch into current buffer
+    -- Helper to load file content from a branch
     local function load_branch_file(branch, filepath)
       local content = vim.fn.systemlist(string.format("git show %s:%s 2>/dev/null", branch, filepath))
       if vim.v.shell_error ~= 0 then
         content = {"[FILE DOES NOT EXIST IN " .. branch .. "]"}
       end
       vim.api.nvim_buf_set_lines(0, 0, -1, false, content)
-      vim.cmd("setlocal readonly nomodifiable buftype=nofile")
-      -- Set filetype based on extension
+      vim.cmd("setlocal readonly nomodifiable buftype=nofile bufhidden=wipe")
       local ext = filepath:match("%.([^%.]+)$")
       if ext then vim.bo.filetype = ext end
     end
 
-    -- Left: introduced version
-    vim.cmd("enew")
-    vim.api.nvim_buf_set_name(0, introduced_branch .. ":" .. choice)
-    load_branch_file(introduced_branch, choice)
+    -- Limit to 4 splits max, pick evenly spaced if more
+    local to_show = touched_branches
+    if #touched_branches > 4 then
+      to_show = {
+        touched_branches[1],
+        touched_branches[math.floor(#touched_branches / 3)],
+        touched_branches[math.floor(2 * #touched_branches / 3)],
+        touched_branches[#touched_branches],
+      }
+      vim.notify(string.format("Showing 4 of %d branches that touched this file", #touched_branches), vim.log.levels.INFO)
+    end
 
-    -- Right: final version
-    vim.cmd("vsplit")
-    vim.cmd("enew")
-    vim.api.nvim_buf_set_name(0, final_branch .. ":" .. choice)
-    load_branch_file(final_branch, choice)
+    -- Open in new tab with vertical splits
+    vim.cmd("tabnew")
 
-    -- Enable diff
+    for i, branch in ipairs(to_show) do
+      if i > 1 then vim.cmd("vsplit") end
+      vim.cmd("enew")
+      vim.api.nvim_buf_set_name(0, string.format("[%d] %s", i, branch))
+      load_branch_file(branch, choice)
+    end
+
+    -- Enable diff across all
     vim.cmd("windo diffthis")
     vim.cmd("wincmd =")
     vim.cmd("1wincmd w")
 
-    vim.notify(string.format("Drift: %s (introduced) vs %s (final)", introduced_branch, final_branch), vim.log.levels.INFO)
+    -- Show evolution path
+    local path = table.concat(to_show, " → ")
+    vim.notify("Evolution: " .. path, vim.log.levels.INFO)
   end)
 end, {})
 vim.keymap.set("n", "<leader>gD", "<cmd>StackDrift<cr>", { desc = "Show drifted files" })
