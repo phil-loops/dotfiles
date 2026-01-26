@@ -356,8 +356,8 @@ function M.setup(opts)
   opts = opts or {}
 
   -- Default keymap
-  local key = opts.key or '<leader>sn'
-  vim.keymap.set('n', key, function() M.toggle() end, { desc = 'Stack Navigator' })
+  local key = opts.key or '<leader>sv'
+  vim.keymap.set('n', key, function() M.toggle() end, { desc = 'Stack: View navigator' })
 
   -- Also set up [b and ]b for quick navigation without opening the window
   vim.keymap.set('n', '[b', function()
