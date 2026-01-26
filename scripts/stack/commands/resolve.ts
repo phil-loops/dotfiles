@@ -81,6 +81,182 @@ type Hunk = {
   deletions: number;
 };
 
+type DeletionZone = {
+  file: string;
+  lineStart: number;
+  lineEnd: number;
+  deletedLines: string[];  // The actual lines that were removed
+  contextBefore: string[]; // Context lines before deletion
+  contextAfter: string[];  // Context lines after deletion
+  hunkHeader: string;
+};
+
+/**
+ * Extract only the DELETION zones from a diff
+ * These are the parts where code from the current branch was removed downstream
+ */
+function extractDeletionZones(diff: string, filepath: string): DeletionZone[] {
+  const zones: DeletionZone[] = [];
+  const lines = diff.split("\n");
+
+  let currentLine = 0;
+  let hunkHeader = "";
+  let hunkStartLine = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (line.startsWith("@@")) {
+      // Parse @@ -start,count +start,count @@
+      const match = line.match(/@@ -(\d+)/);
+      hunkStartLine = match ? parseInt(match[1], 10) : 0;
+      currentLine = hunkStartLine;
+      hunkHeader = line;
+      continue;
+    }
+
+    // Skip file headers
+    if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("diff ")) {
+      continue;
+    }
+
+    // Found a deletion - collect consecutive deletions
+    if (line.startsWith("-")) {
+      const deletedLines: string[] = [];
+      const contextBefore: string[] = [];
+      const contextAfter: string[] = [];
+      const zoneStartLine = currentLine;
+
+      // Get context before (look back for context lines)
+      for (let j = i - 1; j >= 0 && j >= i - 3; j--) {
+        const prevLine = lines[j];
+        if (prevLine.startsWith(" ")) {
+          contextBefore.unshift(prevLine.substring(1));
+        } else if (prevLine.startsWith("@@")) {
+          break;
+        }
+      }
+
+      // Collect all consecutive deletions
+      while (i < lines.length && lines[i].startsWith("-")) {
+        deletedLines.push(lines[i].substring(1));
+        currentLine++;
+        i++;
+      }
+
+      const zoneEndLine = currentLine - 1;
+
+      // Get context after
+      let j = i;
+      while (j < lines.length && j < i + 3) {
+        const nextLine = lines[j];
+        if (nextLine.startsWith(" ")) {
+          contextAfter.push(nextLine.substring(1));
+        } else if (nextLine.startsWith("@@")) {
+          break;
+        }
+        j++;
+      }
+
+      // Adjust i back since we're in a loop
+      i--;
+
+      zones.push({
+        file: filepath,
+        lineStart: zoneStartLine,
+        lineEnd: zoneEndLine,
+        deletedLines,
+        contextBefore,
+        contextAfter,
+        hunkHeader,
+      });
+    } else if (line.startsWith(" ")) {
+      currentLine++;
+    }
+    // Note: additions (+) don't increment currentLine since they're in the "new" file
+  }
+
+  return zones;
+}
+
+/**
+ * Display a deletion zone with context
+ */
+function displayDeletionZone(zone: DeletionZone, index: number, total: number): void {
+  console.log(`\n${CYAN}${BOLD}Zone ${index + 1}/${total}${RESET} ${DIM}(lines ${zone.lineStart}-${zone.lineEnd})${RESET}`);
+  console.log(`${DIM}File: ${zone.file}${RESET}`);
+  console.log();
+
+  // Context before
+  for (const line of zone.contextBefore) {
+    console.log(`${DIM}  ${line}${RESET}`);
+  }
+
+  // Deleted lines (highlighted)
+  for (const line of zone.deletedLines) {
+    console.log(`${RED}- ${line}${RESET}`);
+  }
+
+  // Context after
+  for (const line of zone.contextAfter) {
+    console.log(`${DIM}  ${line}${RESET}`);
+  }
+}
+
+/**
+ * Apply a deletion zone to the working file
+ * This removes the deleted lines from the current branch so they don't need to be removed downstream
+ */
+function applyDeletionZone(zone: DeletionZone): boolean {
+  try {
+    const content = fs.readFileSync(zone.file, "utf8");
+    const lines = content.split("\n");
+
+    // Find the deletion zone by matching context + deleted lines
+    let matchStart = -1;
+
+    for (let i = 0; i <= lines.length - zone.deletedLines.length; i++) {
+      let matches = true;
+
+      // Check if deleted lines match at this position
+      for (let j = 0; j < zone.deletedLines.length; j++) {
+        if (lines[i + j] !== zone.deletedLines[j]) {
+          matches = false;
+          break;
+        }
+      }
+
+      if (matches) {
+        // Also verify context if available
+        if (zone.contextBefore.length > 0) {
+          const contextMatches = zone.contextBefore.every((ctx, idx) => {
+            const lineIdx = i - zone.contextBefore.length + idx;
+            return lineIdx >= 0 && lines[lineIdx] === ctx;
+          });
+          if (!contextMatches) continue;
+        }
+
+        matchStart = i;
+        break;
+      }
+    }
+
+    if (matchStart === -1) {
+      console.error(`${YELLOW}Warning: Could not locate deletion zone in current file (code may have changed)${RESET}`);
+      return false;
+    }
+
+    // Remove the lines
+    lines.splice(matchStart, zone.deletedLines.length);
+    fs.writeFileSync(zone.file, lines.join("\n"));
+
+    return true;
+  } catch (e: any) {
+    console.error(`${RED}Failed to apply deletion: ${e.message}${RESET}`);
+    return false;
+  }
+}
+
 /**
  * Parse a diff into individual hunks
  */
@@ -272,10 +448,12 @@ export const command: Command = {
   category: "edit",
   name: "resolve",
   help: "Resolve drift by pulling final versions of files into current branch",
-  args: "[--hierarchical-text-dump] [file...]",
+  args: "[--deletions] [--json] [file...]",
   async run(args) {
     const { values, positionals } = parseArgs(args, {
       "text": { type: "boolean", short: "t" },  // Old text-based mode
+      "deletions": { type: "boolean", short: "d" },  // Show only deletion zones
+      "json": { type: "boolean", short: "j" },  // Output JSON for AI processing
     });
 
     const stack = loadStack();
@@ -306,6 +484,139 @@ export const command: Command = {
     console.log(`${YELLOW}Found ${filesToResolve.length} file(s) with drift:${RESET}`);
     for (const f of filesToResolve) {
       console.log(`  ${YELLOW}⚠${RESET}  ${f.path}`);
+    }
+
+    // Deletions mode: extract and show only the deletion zones
+    if (values["deletions"] || values["json"]) {
+      const allZones: DeletionZone[] = [];
+
+      for (const file of filesToResolve) {
+        const diff = git(`diff ${branch}..${file.finalBranch} -- "${file.path}"`);
+        const zones = extractDeletionZones(diff, file.path);
+        allZones.push(...zones);
+      }
+
+      if (allZones.length === 0) {
+        console.log(`\n${GREEN}✓ No deletion zones found - downstream changes are additions only${RESET}`);
+        return;
+      }
+
+      // JSON mode for AI processing
+      if (values["json"]) {
+        const output = {
+          branch,
+          totalDeletionZones: allZones.length,
+          zones: allZones.map((z, i) => ({
+            id: i + 1,
+            file: z.file,
+            lineRange: `${z.lineStart}-${z.lineEnd}`,
+            deletedLineCount: z.deletedLines.length,
+            contextBefore: z.contextBefore,
+            deletedLines: z.deletedLines,
+            contextAfter: z.contextAfter,
+          })),
+        };
+        console.log(JSON.stringify(output, null, 2));
+        return;
+      }
+
+      // Interactive deletion zone review
+      console.log(`\n${CYAN}Found ${allZones.length} deletion zone(s)${RESET}`);
+      console.log(`${DIM}These are code blocks that exist in ${branch} but were removed downstream.${RESET}`);
+      console.log(`${DIM}Applying a deletion here means the code won't need to be removed downstream.${RESET}\n`);
+
+      const appliedZones: DeletionZone[] = [];
+
+      for (let i = 0; i < allZones.length; i++) {
+        const zone = allZones[i];
+        displayDeletionZone(zone, i, allZones.length);
+
+        console.log();
+        console.log(`${CYAN}[y]${RESET}es - Remove this code from ${branch} (apply deletion)`);
+        console.log(`${CYAN}[n]${RESET}o  - Keep this code (don't apply deletion)`);
+        console.log(`${CYAN}[v]${RESET}im - Open in vim diff to see full context`);
+        console.log(`${CYAN}[a]${RESET}ll - Apply all remaining deletions`);
+        console.log(`${CYAN}[q]${RESET}uit\n`);
+
+        const action = await prompt(`Apply this deletion? `);
+
+        if (action === "q") {
+          console.log(`${DIM}Aborted.${RESET}`);
+          break;
+        }
+
+        if (action === "a") {
+          // Apply all remaining
+          for (let j = i; j < allZones.length; j++) {
+            if (applyDeletionZone(allZones[j])) {
+              appliedZones.push(allZones[j]);
+              console.log(`${GREEN}✓ Applied deletion ${j + 1}/${allZones.length}${RESET}`);
+            }
+          }
+          break;
+        }
+
+        if (action === "v" || action === "vim") {
+          // Open in vim diff mode
+          const finalContent = git(`show ${filesToResolve.find(f => f.path === zone.file)!.finalBranch}:"${zone.file}"`);
+          const tmpFinal = `/tmp/stack-resolve-final.ts`;
+          fs.writeFileSync(tmpFinal, finalContent);
+          try {
+            execSync(`nvim -d "${zone.file}" "${tmpFinal}" -c "wincmd l | set readonly | set nomodifiable | wincmd h | normal ${zone.lineStart}G"`, { stdio: "inherit" });
+          } catch {}
+          try { fs.unlinkSync(tmpFinal); } catch {}
+
+          // Re-ask after vim
+          i--;
+          continue;
+        }
+
+        if (action === "y" || action === "yes") {
+          if (applyDeletionZone(zone)) {
+            appliedZones.push(zone);
+            console.log(`${GREEN}✓ Applied${RESET}`);
+          }
+        } else {
+          console.log(`${DIM}Skipped${RESET}`);
+        }
+      }
+
+      if (appliedZones.length > 0) {
+        console.log(`\n${CYAN}━━━ Applied ${appliedZones.length} deletion(s) ━━━${RESET}`);
+
+        // Stage modified files
+        const modifiedFiles = [...new Set(appliedZones.map(z => z.file))];
+        for (const file of modifiedFiles) {
+          execSync(`git add "${file}"`, { stdio: "inherit" });
+        }
+
+        const commitAnswer = await prompt(`${YELLOW}Commit changes?${RESET} [a]mend, [n]ew commit, [s]kip: `);
+
+        if (commitAnswer === "a" || commitAnswer === "amend") {
+          execSync(`git commit --amend --no-edit`, { stdio: "inherit" });
+          console.log(`${GREEN}✓ Amended commit${RESET}`);
+
+          const rebaseAnswer = await prompt(`\n${YELLOW}Rebase downstream branches?${RESET} [y/n] `);
+          if (rebaseAnswer === "y" || rebaseAnswer === "yes") {
+            console.log(`\n${CYAN}Running: loops stack return${RESET}\n`);
+            try {
+              execSync(`node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts return`, { stdio: "inherit" });
+              console.log(`\n${GREEN}✓ Stack updated!${RESET}`);
+            } catch {
+              console.error(`\n${RED}Rebase had conflicts. Resolve and run: loops stack return --continue${RESET}`);
+            }
+          }
+        } else if (commitAnswer === "n" || commitAnswer === "new") {
+          execSync(`git commit -m "resolve: apply ${appliedZones.length} deletion(s) from downstream"`, { stdio: "inherit" });
+          console.log(`${GREEN}✓ Created commit${RESET}`);
+        } else {
+          console.log(`${DIM}Changes staged but not committed.${RESET}`);
+        }
+      } else {
+        console.log(`\n${DIM}No deletions applied.${RESET}`);
+      }
+
+      return;
     }
 
     // Visual mode (default): open nvim with side-by-side diff
