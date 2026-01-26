@@ -553,13 +553,21 @@ ${JSON.stringify(input, null, 2)}`;
 
       let claudeOutput = "";
       try {
-        claudeOutput = execSync(`cat "${tmpPrompt}" | claude --print`, {
+        // Use -p flag and increase timeout for longer prompts
+        claudeOutput = execSync(`claude -p < "${tmpPrompt}"`, {
           encoding: "utf8",
           maxBuffer: 10 * 1024 * 1024,
+          timeout: 120000,  // 2 minute timeout
         });
       } catch (e: any) {
-        console.error(`${RED}Failed to run claude CLI: ${e.message}${RESET}`);
-        console.log(`${DIM}Make sure 'claude' CLI is installed and working.${RESET}`);
+        console.error(`${RED}Failed to run claude CLI${RESET}`);
+        if (e.stderr) {
+          console.error(`${DIM}${e.stderr}${RESET}`);
+        }
+        if (e.stdout) {
+          console.log(`${DIM}Partial output: ${e.stdout}${RESET}`);
+        }
+        console.log(`${DIM}Error: ${e.message}${RESET}`);
         try { fs.unlinkSync(tmpPrompt); } catch {}
         return;
       }
