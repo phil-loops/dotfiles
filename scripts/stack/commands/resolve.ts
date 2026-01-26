@@ -487,69 +487,97 @@ export const command: Command = {
       console.log(`  ${YELLOW}⚠${RESET}  ${f.path}`);
     }
 
-    // AI mode: use Claude CLI to analyze deletion zones
+    // AI mode: use Claude CLI to analyze diffs
     if (values["ai"]) {
-      const allZones: DeletionZone[] = [];
+      console.log(`\n${CYAN}Gathering diffs for Claude analysis...${RESET}\n`);
+
+      // Get full diffs for each file (showing both deletions AND additions)
+      const fileDiffs: { file: string; diff: string; finalBranch: string }[] = [];
 
       for (const file of filesToResolve) {
         const diff = git(`diff ${branch}..${file.finalBranch} -- "${file.path}"`);
-        const zones = extractDeletionZones(diff, file.path);
-        allZones.push(...zones);
+        if (diff.trim()) {
+          fileDiffs.push({ file: file.path, diff, finalBranch: file.finalBranch });
+        }
       }
 
-      if (allZones.length === 0) {
-        console.log(`\n${GREEN}✓ No deletion zones found - downstream changes are additions only${RESET}`);
+      if (fileDiffs.length === 0) {
+        console.log(`\n${GREEN}✓ No diffs found${RESET}`);
         return;
       }
 
-      console.log(`\n${CYAN}Found ${allZones.length} deletion zone(s). Sending to Claude for analysis...${RESET}\n`);
-
-      // Prepare JSON input for Claude
-      const input = {
-        branch,
-        context: "These are code deletions that happen downstream in a git branch stack. " +
-                 "For each zone, the code exists in the current branch but was removed in a later branch. " +
-                 "We want to decide if the deletion should be 'pulled back' to this branch.",
-        zones: allZones.map((z, i) => ({
-          id: i + 1,
-          file: z.file,
-          lineRange: `${z.lineStart}-${z.lineEnd}`,
-          contextBefore: z.contextBefore.join("\n"),
-          deletedCode: z.deletedLines.join("\n"),
-          contextAfter: z.contextAfter.join("\n"),
-        })),
-      };
+      // Also get current file contents for context
+      const fileContents: { file: string; currentContent: string; finalContent: string }[] = [];
+      for (const fd of fileDiffs) {
+        try {
+          const currentContent = fs.readFileSync(fd.file, "utf8");
+          const finalContent = git(`show ${fd.finalBranch}:"${fd.file}"`);
+          fileContents.push({ file: fd.file, currentContent, finalContent });
+        } catch {}
+      }
 
       const prompt = `You are helping with "append-only" development in a stacked PR workflow.
 
-CONTEXT: Branch "${branch}" adds some code. Later branches modify/remove some of that code.
-GOAL: We want to minimize churn. If code was added then later changed, we might want the FINAL version from the start.
+CONTEXT:
+- Current branch: "${branch}"
+- This branch adds code that gets modified in later branches
+- Goal: Minimize churn by using the FINAL version of code from the start
 
-These "deletion zones" show code that EXISTS in ${branch} but was REMOVED downstream.
+For each file, I'm showing you:
+1. The unified diff (- lines exist in current branch, + lines are the final version)
+2. The current file content
+3. The final file content
 
-For each zone, answer:
-1. Was this code REPLACED with something better (refactor/rename)? → APPLY (use the better version from the start)
-2. Was this code REMOVED because it's not needed? → APPLY (don't add it if we'll just remove it)
-3. Is this a partial fragment that can't be applied alone? → SKIP (need more context)
-4. Is this removal dependent on other changes not yet in this branch? → SKIP (can't apply yet)
+YOUR TASK:
+Analyze the diffs and recommend specific changes to make to the CURRENT branch.
+Focus on cases where code was:
+- RENAMED (use the final name from the start)
+- REFACTORED (use the cleaner version from the start)
+- REMOVED (don't add it if it gets removed)
 
-IMPORTANT: Lean toward APPLY when the deletion represents a clear improvement or simplification.
-The goal is reducing unnecessary code churn, not preserving every line.
-
-Respond ONLY with this JSON (no other text):
+Output a JSON response with this structure:
 {
-  "recommendations": [
-    {"id": 1, "action": "APPLY", "reason": "brief explanation"}
+  "files": [
+    {
+      "path": "file/path.ts",
+      "action": "REPLACE_FILE" | "APPLY_CHANGES" | "SKIP",
+      "reason": "explanation",
+      "changes": [
+        {
+          "type": "rename" | "refactor" | "remove",
+          "description": "what changed",
+          "oldCode": "brief snippet of old code",
+          "newCode": "brief snippet of new code (or null if removed)"
+        }
+      ]
+    }
   ],
-  "summary": "one sentence"
+  "summary": "overall summary"
 }
 
-Input:
-${JSON.stringify(input, null, 2)}`;
+If REPLACE_FILE: The whole file should use the final version
+If APPLY_CHANGES: Specific changes should be cherry-picked
+If SKIP: The current version is fine, changes are additive only
+
+FILES:
+${fileDiffs.map((fd, i) => `
+=== FILE ${i + 1}: ${fd.file} ===
+
+DIFF (current → final):
+${fd.diff}
+
+CURRENT VERSION:
+${fileContents[i]?.currentContent || "(could not read)"}
+
+FINAL VERSION:
+${fileContents[i]?.finalContent || "(could not read)"}
+`).join("\n---\n")}`;
 
       // Write prompt to temp file and pipe to claude
       const tmpPrompt = `/tmp/stack-resolve-prompt.txt`;
       fs.writeFileSync(tmpPrompt, prompt);
+
+      console.log(`${CYAN}Sending to Claude CLI (this may take a moment)...${RESET}\n`);
 
       let claudeOutput = "";
       try {
@@ -557,7 +585,7 @@ ${JSON.stringify(input, null, 2)}`;
         claudeOutput = execSync(`claude -p < "${tmpPrompt}"`, {
           encoding: "utf8",
           maxBuffer: 10 * 1024 * 1024,
-          timeout: 120000,  // 2 minute timeout
+          timeout: 180000,  // 3 minute timeout for larger files
         });
       } catch (e: any) {
         console.error(`${RED}Failed to run claude CLI${RESET}`);
@@ -575,15 +603,21 @@ ${JSON.stringify(input, null, 2)}`;
       try { fs.unlinkSync(tmpPrompt); } catch {}
 
       // Try to parse JSON from Claude's response
-      let recommendations: { id: number; action: string; reason: string }[] = [];
+      type FileRec = {
+        path: string;
+        action: "REPLACE_FILE" | "APPLY_CHANGES" | "SKIP";
+        reason: string;
+        changes?: { type: string; description: string; oldCode?: string; newCode?: string }[];
+      };
+      let fileRecs: FileRec[] = [];
       let summary = "";
 
       // Extract JSON from response (Claude might include explanation text)
-      const jsonMatch = claudeOutput.match(/\{[\s\S]*"recommendations"[\s\S]*\}/);
+      const jsonMatch = claudeOutput.match(/\{[\s\S]*"files"[\s\S]*\}/);
       if (jsonMatch) {
         try {
           const parsed = JSON.parse(jsonMatch[0]);
-          recommendations = parsed.recommendations || [];
+          fileRecs = parsed.files || [];
           summary = parsed.summary || "";
         } catch {
           console.log(`${YELLOW}Could not parse Claude's JSON response. Showing raw output:${RESET}\n`);
@@ -599,47 +633,46 @@ ${JSON.stringify(input, null, 2)}`;
       // Display recommendations
       console.log(`${CYAN}${BOLD}━━━ Claude's Analysis ━━━${RESET}\n`);
       if (summary) {
-        console.log(`${DIM}${summary}${RESET}\n`);
+        console.log(`${summary}\n`);
       }
 
-      const toApply: DeletionZone[] = [];
-      const toSkip: DeletionZone[] = [];
+      const filesToReplace: { path: string; rec: FileRec }[] = [];
+      const filesToSkip: { path: string; rec: FileRec }[] = [];
 
-      for (const rec of recommendations) {
-        const zone = allZones[rec.id - 1];
-        if (!zone) continue;
+      for (const rec of fileRecs) {
+        const actionColor = rec.action === "REPLACE_FILE" ? GREEN : rec.action === "APPLY_CHANGES" ? YELLOW : DIM;
+        const actionIcon = rec.action === "REPLACE_FILE" ? "✓" : rec.action === "APPLY_CHANGES" ? "△" : "○";
 
-        const actionColor = rec.action === "APPLY" ? GREEN : YELLOW;
-        const actionIcon = rec.action === "APPLY" ? "✓" : "○";
-
-        console.log(`${actionColor}${actionIcon} Zone ${rec.id}${RESET} (${zone.file}:${zone.lineStart})`);
+        console.log(`${actionColor}${actionIcon} ${rec.path}${RESET}`);
         console.log(`  ${DIM}Action: ${rec.action}${RESET}`);
         console.log(`  ${DIM}Reason: ${rec.reason}${RESET}`);
 
-        // Show the deleted code
-        console.log(`  ${DIM}Code:${RESET}`);
-        for (const line of zone.deletedLines.slice(0, 3)) {
-          console.log(`    ${RED}- ${line}${RESET}`);
-        }
-        if (zone.deletedLines.length > 3) {
-          console.log(`    ${DIM}... (${zone.deletedLines.length - 3} more lines)${RESET}`);
+        if (rec.changes && rec.changes.length > 0) {
+          console.log(`  ${DIM}Changes:${RESET}`);
+          for (const change of rec.changes) {
+            console.log(`    • ${change.type}: ${change.description}`);
+            if (change.oldCode && change.newCode) {
+              console.log(`      ${RED}- ${change.oldCode.substring(0, 60)}${change.oldCode.length > 60 ? "..." : ""}${RESET}`);
+              console.log(`      ${GREEN}+ ${change.newCode.substring(0, 60)}${change.newCode.length > 60 ? "..." : ""}${RESET}`);
+            }
+          }
         }
         console.log();
 
-        if (rec.action === "APPLY") {
-          toApply.push(zone);
+        if (rec.action === "REPLACE_FILE") {
+          filesToReplace.push({ path: rec.path, rec });
         } else {
-          toSkip.push(zone);
+          filesToSkip.push({ path: rec.path, rec });
         }
       }
 
       // Summary
       console.log(`${CYAN}━━━ Summary ━━━${RESET}`);
-      console.log(`  ${GREEN}Apply: ${toApply.length}${RESET} deletion(s)`);
-      console.log(`  ${YELLOW}Skip: ${toSkip.length}${RESET} deletion(s)\n`);
+      console.log(`  ${GREEN}Replace: ${filesToReplace.length}${RESET} file(s) with final version`);
+      console.log(`  ${YELLOW}Skip: ${filesToSkip.length}${RESET} file(s)\n`);
 
-      if (toApply.length === 0) {
-        console.log(`${DIM}No deletions to apply.${RESET}`);
+      if (filesToReplace.length === 0) {
+        console.log(`${DIM}No files to replace.${RESET}`);
         return;
       }
 
@@ -649,28 +682,40 @@ ${JSON.stringify(input, null, 2)}`;
 
 ## Branch: ${branch}
 
-${recommendations.map(rec => {
-  const zone = allZones[rec.id - 1];
-  return `### Zone ${rec.id}: ${zone?.file}:${zone?.lineStart}-${zone?.lineEnd}
-**Decision:** ${rec.action}
+## Summary
+${summary}
+
+${fileRecs.map(rec => `### ${rec.path}
+**Action:** ${rec.action}
 **Reason:** ${rec.reason}
 
-\`\`\`diff
-${zone?.deletedLines.map(l => "- " + l).join("\n")}
-\`\`\`
+${rec.changes?.map(c => `- **${c.type}**: ${c.description}`).join("\n") || ""}
+`).join("\n")}
 `;
-}).join("\n")}
-`;
+      fs.writeFileSync(logFile, logContent);
+      console.log(`${DIM}Analysis logged to ${logFile}${RESET}\n`);
 
       // Ask for confirmation
-      const answer = await prompt(`${YELLOW}Apply ${toApply.length} deletion(s) recommended by Claude?${RESET} [y/n/v] `);
+      const answer = await prompt(`${YELLOW}Replace ${filesToReplace.length} file(s) with final versions?${RESET} [y/n/v] `);
 
       if (answer === "v" || answer === "view") {
-        // Show full details before deciding
-        for (const zone of toApply) {
-          displayDeletionZone(zone, toApply.indexOf(zone), toApply.length);
+        // Open each file in diff view
+        for (const { path } of filesToReplace) {
+          const fileData = filesToResolve.find(f => f.path === path);
+          if (!fileData) continue;
+
+          const finalContent = git(`show ${fileData.finalBranch}:"${path}"`);
+          const tmpFinal = `/tmp/stack-resolve-final.ts`;
+          fs.writeFileSync(tmpFinal, finalContent);
+
+          console.log(`\n${CYAN}Viewing: ${path}${RESET}`);
+          try {
+            execSync(`nvim -d "${path}" "${tmpFinal}" -c "wincmd l | set readonly | set nomodifiable | wincmd h"`, { stdio: "inherit" });
+          } catch {}
+          try { fs.unlinkSync(tmpFinal); } catch {}
         }
-        const confirmAnswer = await prompt(`\n${YELLOW}Apply these deletions?${RESET} [y/n] `);
+
+        const confirmAnswer = await prompt(`\n${YELLOW}Apply the replacements?${RESET} [y/n] `);
         if (confirmAnswer !== "y" && confirmAnswer !== "yes") {
           console.log(`${DIM}Aborted.${RESET}`);
           return;
@@ -680,27 +725,29 @@ ${zone?.deletedLines.map(l => "- " + l).join("\n")}
         return;
       }
 
-      // Apply the deletions
-      const appliedZones: DeletionZone[] = [];
-      for (const zone of toApply) {
-        if (applyDeletionZone(zone)) {
-          appliedZones.push(zone);
-          console.log(`${GREEN}✓ Applied deletion in ${zone.file}:${zone.lineStart}${RESET}`);
+      // Apply the replacements
+      const appliedFiles: string[] = [];
+      for (const { path } of filesToReplace) {
+        const fileData = filesToResolve.find(f => f.path === path);
+        if (!fileData) continue;
+
+        try {
+          const finalContent = git(`show ${fileData.finalBranch}:"${path}"`);
+          fs.writeFileSync(path, finalContent);
+          appliedFiles.push(path);
+          console.log(`${GREEN}✓ Replaced ${path} with version from ${fileData.finalBranch}${RESET}`);
+        } catch (e: any) {
+          console.error(`${RED}✗ Failed to replace ${path}: ${e.message}${RESET}`);
         }
       }
 
-      if (appliedZones.length === 0) {
-        console.log(`${YELLOW}No deletions could be applied (code may have changed).${RESET}`);
+      if (appliedFiles.length === 0) {
+        console.log(`${YELLOW}No files could be replaced.${RESET}`);
         return;
       }
 
-      // Write log file
-      fs.writeFileSync(logFile, logContent);
-      console.log(`\n${DIM}Analysis logged to ${logFile}${RESET}`);
-
       // Stage and commit
-      const modifiedFiles = [...new Set(appliedZones.map(z => z.file))];
-      for (const file of modifiedFiles) {
+      for (const file of appliedFiles) {
         execSync(`git add "${file}"`, { stdio: "inherit" });
       }
 
@@ -721,7 +768,7 @@ ${zone?.deletedLines.map(l => "- " + l).join("\n")}
           }
         }
       } else if (commitAnswer === "n" || commitAnswer === "new") {
-        execSync(`git commit -m "resolve: apply AI-recommended deletions from downstream"`, { stdio: "inherit" });
+        execSync(`git commit -m "resolve: use final versions of drifted files (AI-assisted)"`, { stdio: "inherit" });
         console.log(`${GREEN}✓ Created commit${RESET}`);
       } else {
         console.log(`${DIM}Changes staged but not committed.${RESET}`);
