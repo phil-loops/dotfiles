@@ -13,7 +13,7 @@ stack_review.setup()
 
 -- Load stack-nav module (visual stack navigator)
 local stack_nav = require('custom.stack-nav')
-stack_nav.setup({ key = '<leader>sn' })
+stack_nav.setup({ key = '<leader>sv' })  -- [S]tack [V]iew
 
 -- Keybindings for stack review (leader-s prefix)
 vim.keymap.set('n', '<leader>sc', function()
