@@ -319,33 +319,25 @@ function M.inspect(filepath)
       return
     end
 
+    -- Show file content at parent branch (empty if file doesn't exist)
     local content = ''
-    local header = ''
-
     if change.parent then
       content = get_file_at_branch(change.parent, filepath) or ''
-      header = string.format('── %s (parent) ──', change.parent)
-    else
-      content = ''
-      header = '── (no parent - file created) ──'
     end
 
-    local lines = { header, '' }
-    for _, line in ipairs(vim.split(content, '\n')) do
-      table.insert(lines, line)
-    end
+    local lines = vim.split(content, '\n')
 
     vim.bo[inspect.parent_buf].modifiable = true
     vim.api.nvim_buf_set_lines(inspect.parent_buf, 0, -1, false, lines)
     vim.bo[inspect.parent_buf].modifiable = false
 
-    -- Set filetype for syntax highlighting (skip header)
+    -- Set filetype for syntax highlighting
     if filetype ~= '' then
       vim.bo[inspect.parent_buf].filetype = filetype
     end
   end
 
-  -- Render the diff
+  -- Render the current branch file (for side-by-side diff)
   local function render_diff()
     if not inspect.diff_buf or not vim.api.nvim_buf_is_valid(inspect.diff_buf) then
       return
@@ -356,35 +348,61 @@ function M.inspect(filepath)
       return
     end
 
-    local lines = {}
-    local header = string.format('── %s ──', change.branch)
-    if change.status == 'CREATED' then
-      header = header .. '  FILE CREATED'
-    elseif change.status == 'DELETED' then
-      header = header .. '  FILE DELETED'
-    end
-    table.insert(lines, header)
-    table.insert(lines, '')
-
-    if change.parent then
-      local diff = get_file_diff(change.parent, change.branch, filepath)
-      for _, line in ipairs(vim.split(diff, '\n')) do
-        table.insert(lines, line)
-      end
-    else
-      -- No parent - show full file as additions
-      local content = get_file_at_branch(change.branch, filepath)
-      if content then
-        table.insert(lines, '@@ -0,0 +1 @@ (new file)')
-        for _, line in ipairs(vim.split(content, '\n')) do
-          table.insert(lines, '+' .. line)
-        end
-      end
-    end
+    -- Show file content at the current branch (not raw diff)
+    local content = get_file_at_branch(change.branch, filepath) or ''
+    local lines = vim.split(content, '\n')
 
     vim.bo[inspect.diff_buf].modifiable = true
     vim.api.nvim_buf_set_lines(inspect.diff_buf, 0, -1, false, lines)
     vim.bo[inspect.diff_buf].modifiable = false
+
+    -- Set filetype for syntax highlighting
+    if filetype ~= '' then
+      vim.bo[inspect.diff_buf].filetype = filetype
+    end
+  end
+
+  -- Enable diff mode on parent and current branch windows
+  local function enable_diff_mode()
+    local change = inspect.changes[inspect.selected]
+    if not change then return end
+
+    -- Disable diff first to reset state
+    if inspect.parent_win and vim.api.nvim_win_is_valid(inspect.parent_win) then
+      vim.api.nvim_win_call(inspect.parent_win, function()
+        vim.cmd('diffoff')
+      end)
+    end
+    if inspect.diff_win and vim.api.nvim_win_is_valid(inspect.diff_win) then
+      vim.api.nvim_win_call(inspect.diff_win, function()
+        vim.cmd('diffoff')
+      end)
+    end
+
+    -- Set winbar labels to show which branch is which
+    local parent_label = change.parent and ('BEFORE: ' .. change.parent:gsub('goals%-v1%-', '')) or '(file not created yet)'
+    local current_label = 'AFTER: ' .. change.branch:gsub('goals%-v1%-', '')
+
+    if inspect.parent_win and vim.api.nvim_win_is_valid(inspect.parent_win) then
+      vim.wo[inspect.parent_win].winbar = ' ' .. parent_label
+    end
+    if inspect.diff_win and vim.api.nvim_win_is_valid(inspect.diff_win) then
+      vim.wo[inspect.diff_win].winbar = ' ' .. current_label
+    end
+
+    -- Enable diff mode on both windows
+    vim.defer_fn(function()
+      if inspect.parent_win and vim.api.nvim_win_is_valid(inspect.parent_win) then
+        vim.api.nvim_win_call(inspect.parent_win, function()
+          vim.cmd('diffthis')
+        end)
+      end
+      if inspect.diff_win and vim.api.nvim_win_is_valid(inspect.diff_win) then
+        vim.api.nvim_win_call(inspect.diff_win, function()
+          vim.cmd('diffthis')
+        end)
+      end
+    end, 10)
   end
 
   -- Update selection
@@ -399,6 +417,7 @@ function M.inspect(filepath)
     render_list()
     render_parent()
     render_diff()
+    enable_diff_mode()
   end
 
   -- Close the inspect view
@@ -451,15 +470,18 @@ function M.inspect(filepath)
   vim.wo[inspect.parent_win].number = true
   vim.wo[inspect.parent_win].signcolumn = 'no'
   vim.wo[inspect.parent_win].wrap = false
+  vim.wo[inspect.parent_win].scrollbind = false  -- Will be set by diffthis
 
-  vim.wo[inspect.diff_win].number = false
+  vim.wo[inspect.diff_win].number = true
   vim.wo[inspect.diff_win].signcolumn = 'no'
   vim.wo[inspect.diff_win].wrap = false
+  vim.wo[inspect.diff_win].scrollbind = false  -- Will be set by diffthis
 
   -- Initial render
   render_list()
   render_parent()
   render_diff()
+  enable_diff_mode()
 
   -- Focus the list
   vim.api.nvim_set_current_win(inspect.list_win)
