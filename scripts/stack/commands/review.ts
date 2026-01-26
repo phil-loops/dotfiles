@@ -418,18 +418,24 @@ update_panel = function()
     -- Shorten branch name for display
     local short_name = item.branch:gsub("goals%-v1%-", ""):gsub("goals%-v0%-", "")
 
-    -- Build health indicator
+    -- Build health indicator: ✅ only if no drift AND not large
     local health_str = ""
     if item.health then
-      if item.health.clean then
-        health_str = " ✅"
+      local is_drifted = item.health.driftedFiles > 0
+      local is_large = item.health.loc > 150
+      local is_clean = not is_drifted and not is_large
+
+      if is_clean and item.health.loc > 0 then
+        health_str = string.format(" ✅ %d", item.health.loc)
       else
-        health_str = string.format(" ⚠️%d", item.health.driftedFiles)
-      end
-      if item.health.loc > 150 then
-        health_str = health_str .. string.format(" 🔴%d", item.health.loc)
-      elseif item.health.loc > 0 then
-        health_str = health_str .. string.format(" %d", item.health.loc)
+        if is_drifted then
+          health_str = string.format(" ⚠️%d", item.health.driftedFiles)
+        end
+        if is_large then
+          health_str = health_str .. string.format(" 🔴%d", item.health.loc)
+        elseif item.health.loc > 0 and is_drifted then
+          health_str = health_str .. string.format(" %d", item.health.loc)
+        end
       end
     end
 

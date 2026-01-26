@@ -263,21 +263,23 @@ function printTree(
 
   let annotations: string[] = [];
 
-  // Health indicator
+  // Health indicator: ✅ only if no drift AND not large
   const health = branchHealth?.get(b);
-  if (health && health.totalFiles > 0) {
-    if (health.clean) {
-      annotations.push("✅");
-    } else {
-      annotations.push(`⚠️ ${health.driftedFiles}`);
-    }
-  }
+  const loc = sizeData?.get(b) || 0;
+  const isDrifted = health && health.driftedFiles > 0;
+  const isLarge = loc > 150;
+  const isClean = !isDrifted && !isLarge;
 
-  if (sizeData?.has(b)) {
-    const loc = sizeData.get(b)!;
-    if (loc > 150) {
-      annotations.push(`🔴 ${loc}`);
-    } else if (loc > 0) {
+  if (isClean && loc > 0) {
+    annotations.push(`✅ ${loc}`);
+  } else {
+    if (isDrifted) {
+      annotations.push(`⚠️${health!.driftedFiles}`);
+    }
+    if (isLarge) {
+      annotations.push(`🔴${loc}`);
+    } else if (loc > 0 && isDrifted) {
+      // Show LOC after drift indicator if not large
       annotations.push(`${loc}`);
     }
   }
