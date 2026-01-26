@@ -11,6 +11,10 @@ stack_whatchanged.setup()
 local stack_review = require('custom.stack-review')
 stack_review.setup()
 
+-- Load stack-nav module (visual stack navigator)
+local stack_nav = require('custom.stack-nav')
+stack_nav.setup({ key = '<leader>sn' })
+
 -- Keybindings for stack review (leader-s prefix)
 vim.keymap.set('n', '<leader>sc', function()
   stack_review.open()
