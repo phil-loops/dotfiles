@@ -549,15 +549,18 @@ Output a JSON response with this structure:
           "oldCode": "brief snippet of old code",
           "newCode": "brief snippet of new code (or null if removed)"
         }
-      ]
+      ],
+      "newFileContent": "FULL file content to use (required for REPLACE_FILE and APPLY_CHANGES)"
     }
   ],
   "summary": "overall summary"
 }
 
-If REPLACE_FILE: The whole file should use the final version
-If APPLY_CHANGES: Specific changes should be cherry-picked
-If SKIP: The current version is fine, changes are additive only
+If REPLACE_FILE: Use the exact final version. Set newFileContent to the final file content.
+If APPLY_CHANGES: Cherry-pick specific changes. Set newFileContent to a modified version that applies only the beneficial changes (not purely additive downstream code).
+If SKIP: The current version is fine, no newFileContent needed.
+
+IMPORTANT: For REPLACE_FILE and APPLY_CHANGES, you MUST include the complete newFileContent with the actual code to use.
 
 FILES:
 ${fileDiffs.map((fd, i) => `
@@ -608,6 +611,7 @@ ${fileContents[i]?.finalContent || "(could not read)"}
         action: "REPLACE_FILE" | "APPLY_CHANGES" | "SKIP";
         reason: string;
         changes?: { type: string; description: string; oldCode?: string; newCode?: string }[];
+        newFileContent?: string;  // The actual code to use
       };
       let fileRecs: FileRec[] = [];
       let summary = "";
@@ -659,8 +663,12 @@ ${fileContents[i]?.finalContent || "(could not read)"}
         }
         console.log();
 
-        if (rec.action === "REPLACE_FILE") {
+        // Files with newFileContent can be applied (either REPLACE_FILE or APPLY_CHANGES)
+        if ((rec.action === "REPLACE_FILE" || rec.action === "APPLY_CHANGES") && rec.newFileContent) {
           filesToReplace.push({ path: rec.path, rec });
+        } else if (rec.action === "APPLY_CHANGES" && !rec.newFileContent) {
+          console.log(`  ${YELLOW}⚠ No newFileContent provided - cannot apply${RESET}`);
+          filesToSkip.push({ path: rec.path, rec });
         } else {
           filesToSkip.push({ path: rec.path, rec });
         }
@@ -668,7 +676,7 @@ ${fileContents[i]?.finalContent || "(could not read)"}
 
       // Summary
       console.log(`${CYAN}━━━ Summary ━━━${RESET}`);
-      console.log(`  ${GREEN}Replace: ${filesToReplace.length}${RESET} file(s) with final version`);
+      console.log(`  ${GREEN}Apply: ${filesToReplace.length}${RESET} file(s)`);
       console.log(`  ${YELLOW}Skip: ${filesToSkip.length}${RESET} file(s)\n`);
 
       if (filesToReplace.length === 0) {
@@ -696,26 +704,23 @@ ${rec.changes?.map(c => `- **${c.type}**: ${c.description}`).join("\n") || ""}
       console.log(`${DIM}Analysis logged to ${logFile}${RESET}\n`);
 
       // Ask for confirmation
-      const answer = await prompt(`${YELLOW}Replace ${filesToReplace.length} file(s) with final versions?${RESET} [y/n/v] `);
+      const answer = await prompt(`${YELLOW}Apply changes to ${filesToReplace.length} file(s)?${RESET} [y/n/v] `);
 
       if (answer === "v" || answer === "view") {
-        // Open each file in diff view
-        for (const { path } of filesToReplace) {
-          const fileData = filesToResolve.find(f => f.path === path);
-          if (!fileData) continue;
-
-          const finalContent = git(`show ${fileData.finalBranch}:"${path}"`);
-          const tmpFinal = `/tmp/stack-resolve-final.ts`;
-          fs.writeFileSync(tmpFinal, finalContent);
+        // Open each file in diff view - comparing current to Claude's recommended version
+        for (const { path, rec } of filesToReplace) {
+          const tmpNew = `/tmp/stack-resolve-new.ts`;
+          fs.writeFileSync(tmpNew, rec.newFileContent || "");
 
           console.log(`\n${CYAN}Viewing: ${path}${RESET}`);
+          console.log(`${DIM}Left: current | Right: Claude's recommendation${RESET}`);
           try {
-            execSync(`nvim -d "${path}" "${tmpFinal}" -c "wincmd l | set readonly | set nomodifiable | wincmd h"`, { stdio: "inherit" });
+            execSync(`nvim -d "${path}" "${tmpNew}" -c "wincmd l | set readonly | set nomodifiable | wincmd h"`, { stdio: "inherit" });
           } catch {}
-          try { fs.unlinkSync(tmpFinal); } catch {}
+          try { fs.unlinkSync(tmpNew); } catch {}
         }
 
-        const confirmAnswer = await prompt(`\n${YELLOW}Apply the replacements?${RESET} [y/n] `);
+        const confirmAnswer = await prompt(`\n${YELLOW}Apply the changes?${RESET} [y/n] `);
         if (confirmAnswer !== "y" && confirmAnswer !== "yes") {
           console.log(`${DIM}Aborted.${RESET}`);
           return;
@@ -725,19 +730,20 @@ ${rec.changes?.map(c => `- **${c.type}**: ${c.description}`).join("\n") || ""}
         return;
       }
 
-      // Apply the replacements
+      // Apply the changes using Claude's newFileContent
       const appliedFiles: string[] = [];
-      for (const { path } of filesToReplace) {
-        const fileData = filesToResolve.find(f => f.path === path);
-        if (!fileData) continue;
+      for (const { path, rec } of filesToReplace) {
+        if (!rec.newFileContent) {
+          console.error(`${RED}✗ No content for ${path}${RESET}`);
+          continue;
+        }
 
         try {
-          const finalContent = git(`show ${fileData.finalBranch}:"${path}"`);
-          fs.writeFileSync(path, finalContent);
+          fs.writeFileSync(path, rec.newFileContent);
           appliedFiles.push(path);
-          console.log(`${GREEN}✓ Replaced ${path} with version from ${fileData.finalBranch}${RESET}`);
+          console.log(`${GREEN}✓ Applied changes to ${path}${RESET}`);
         } catch (e: any) {
-          console.error(`${RED}✗ Failed to replace ${path}: ${e.message}${RESET}`);
+          console.error(`${RED}✗ Failed to update ${path}: ${e.message}${RESET}`);
         }
       }
 
