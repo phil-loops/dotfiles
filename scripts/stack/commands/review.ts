@@ -33,40 +33,42 @@ function calculateHealth(chain: string[], stack: Record<string, string>): Map<st
     const child = chain[i];
 
     try {
-      // Get files changed
-      const diffOutput = git(`diff --name-only ${parent}...${child}`);
-      const files = diffOutput.split("\n").filter((f) =>
-        f.endsWith(".ts") && !f.endsWith(".test.ts") && !f.endsWith(".tsx")
-      );
+      // Get per-file stats: additions, deletions, filename
+      const numstatOutput = git(`diff --numstat ${parent}...${child} -- "*.ts" ":!*.tsx" ":!*.test.ts"`);
+      let totalLoc = 0;
 
-      // Track LOC
-      const locOutput = git(`diff --numstat ${parent}...${child} -- "*.ts" ":!*.tsx" ":!*.test.ts"`);
-      let loc = 0;
-      for (const line of locOutput.split("\n")) {
+      for (const line of numstatOutput.split("\n")) {
         if (!line.trim()) continue;
-        const [added, removed] = line.split("\t");
-        if (added !== "-" && removed !== "-") {
-          loc += parseInt(added, 10) + parseInt(removed, 10);
-        }
-      }
-      locPerBranch.set(child, loc);
+        const parts = line.split("\t");
+        if (parts.length < 3) continue;
 
-      for (const file of files) {
+        const [addedStr, removedStr, file] = parts;
+        if (addedStr === "-" || removedStr === "-") continue; // binary file
+
+        const added = parseInt(addedStr, 10);
+        const removed = parseInt(removedStr, 10);
+        totalLoc += added + removed;
+
         if (!fileIntroducedIn.has(file)) {
+          // First time seeing this file - track which branch introduced it
           fileIntroducedIn.set(file, child);
           if (!filesPerBranch.has(child)) {
             filesPerBranch.set(child, new Set());
           }
           filesPerBranch.get(child)!.add(file);
-        } else {
-          // File drifted - track it for the original branch
+        } else if (removed > 0) {
+          // File was introduced earlier AND this change has deletions = drift
+          // This means code added in an earlier branch is being removed/modified
           const originalBranch = fileIntroducedIn.get(file)!;
           if (!driftedFilesFrom.has(originalBranch)) {
             driftedFilesFrom.set(originalBranch, new Set());
           }
           driftedFilesFrom.get(originalBranch)!.add(file);
         }
+        // If file was introduced earlier but this change only adds lines, that's fine
       }
+
+      locPerBranch.set(child, totalLoc);
     } catch {
       // skip
     }
