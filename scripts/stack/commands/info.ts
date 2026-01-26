@@ -237,27 +237,30 @@ function printTree(
 
   let annotations: string[] = [];
 
-  // Health indicator: ✓ for clean, ~N for drifted files
+  // Health indicator
   const health = branchHealth?.get(b);
   if (health && health.totalFiles > 0) {
     if (health.clean) {
-      annotations.push("✓");
+      annotations.push("✅");
     } else {
-      annotations.push(`~${health.driftedFiles}`);
+      annotations.push(`⚠️ ${health.driftedFiles}`);
     }
   }
 
   if (sizeData?.has(b)) {
     const loc = sizeData.get(b)!;
-    const flag = loc > 150 ? "!" : "";
-    annotations.push(`${loc}${flag}`);
+    if (loc > 150) {
+      annotations.push(`🔴 ${loc}`);
+    } else if (loc > 0) {
+      annotations.push(`${loc}`);
+    }
   }
 
   if (conflictData?.find((c) => c.child === b)) {
-    annotations.push("conflict");
+    annotations.push("💥");
   }
 
-  const suffix = annotations.length > 0 ? ` (${annotations.join(", ")})` : "";
+  const suffix = annotations.length > 0 ? ` (${annotations.join(" ")})` : "";
 
   // Get key changes for overview
   let changes: string[] = [];
