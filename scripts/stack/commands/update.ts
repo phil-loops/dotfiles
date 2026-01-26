@@ -1,3 +1,4 @@
+import { execSync } from "child_process";
 import type { Command } from "../types.ts";
 import {
   checkConflict,
@@ -10,6 +11,24 @@ import {
   saveSnapshot,
 } from "../lib.ts";
 import { parseArgs } from "../args.ts";
+
+// ANSI colors
+const YELLOW = "\x1b[33m";
+const DIM = "\x1b[2m";
+const RESET = "\x1b[0m";
+
+function checkForDrift(): number {
+  try {
+    const output = execSync(
+      `node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts info -d`,
+      { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+    );
+    const driftCount = (output.match(/⚠️/g) || []).length;
+    return driftCount;
+  } catch {
+    return 0;
+  }
+}
 
 export const command: Command = {
   category: "git",
@@ -100,5 +119,12 @@ Use 'git reflog' to find previous state if needed.
 
     git(`checkout ${branch}`);
     console.log(`Done! Back on ${branch}`);
+
+    // Check for remaining drift
+    const driftCount = checkForDrift();
+    if (driftCount > 0) {
+      console.log(`\n${YELLOW}⚠ ${driftCount} branch(es) still have drift${RESET}`);
+      console.log(`${DIM}  Run 'loops stack resolve' to fix with AI assistance${RESET}`);
+    }
   },
 };
