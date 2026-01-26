@@ -487,11 +487,11 @@ export const command: Command = {
       console.log(`  ${YELLOW}⚠${RESET}  ${f.path}`);
     }
 
-    // AI mode: use Claude CLI to analyze diffs
+    // AI mode: use Claude CLI to analyze diffs (two-phase approach)
     if (values["ai"]) {
-      console.log(`\n${CYAN}Gathering diffs for Claude analysis...${RESET}\n`);
+      console.log(`\n${CYAN}Phase 1: Analyzing diffs...${RESET}\n`);
 
-      // Get full diffs for each file (showing both deletions AND additions)
+      // Get diffs for each file
       const fileDiffs: { file: string; diff: string; finalBranch: string }[] = [];
 
       for (const file of filesToResolve) {
@@ -506,104 +506,198 @@ export const command: Command = {
         return;
       }
 
-      // Also get current file contents for context
-      const fileContents: { file: string; currentContent: string; finalContent: string }[] = [];
-      for (const fd of fileDiffs) {
-        try {
-          const currentContent = fs.readFileSync(fd.file, "utf8");
-          const finalContent = git(`show ${fd.finalBranch}:"${fd.file}"`);
-          fileContents.push({ file: fd.file, currentContent, finalContent });
-        } catch {}
-      }
-
-      const prompt = `You are helping with "append-only" development in a stacked PR workflow.
+      // PHASE 1: Send only diffs to get recommendations
+      const phase1Prompt = `You are helping with "append-only" development in a stacked PR workflow.
 
 CONTEXT:
 - Current branch: "${branch}"
 - This branch adds code that gets modified in later branches
 - Goal: Minimize churn by using the FINAL version of code from the start
 
-For each file, I'm showing you:
-1. The unified diff (- lines exist in current branch, + lines are the final version)
-2. The current file content
-3. The final file content
+I'm showing you the DIFFS for each file (- = current branch, + = final version).
 
 YOUR TASK:
-Analyze the diffs and recommend specific changes to make to the CURRENT branch.
-Focus on cases where code was:
-- RENAMED (use the final name from the start)
-- REFACTORED (use the cleaner version from the start)
-- REMOVED (don't add it if it gets removed)
+Analyze each diff and recommend an action:
+- REPLACE_FILE: The whole file should use the final version (simple case)
+- APPLY_CHANGES: Only some changes should be applied (cherry-pick beneficial changes, skip purely additive downstream code)
+- SKIP: Current version is fine, changes are all additive
 
-Output a JSON response with this structure:
+Output JSON:
 {
   "files": [
     {
       "path": "file/path.ts",
       "action": "REPLACE_FILE" | "APPLY_CHANGES" | "SKIP",
-      "reason": "explanation",
+      "reason": "brief explanation",
       "changes": [
-        {
-          "type": "rename" | "refactor" | "remove",
-          "description": "what changed",
-          "oldCode": "brief snippet of old code",
-          "newCode": "brief snippet of new code (or null if removed)"
-        }
-      ],
-      "newFileContent": "FULL file content to use (required for REPLACE_FILE and APPLY_CHANGES)"
+        {"type": "rename|refactor|remove", "description": "what changed"}
+      ]
     }
   ],
-  "summary": "overall summary"
+  "summary": "one sentence"
 }
 
-If REPLACE_FILE: Use the exact final version. Set newFileContent to the final file content.
-If APPLY_CHANGES: Cherry-pick specific changes. Set newFileContent to a modified version that applies only the beneficial changes (not purely additive downstream code).
-If SKIP: The current version is fine, no newFileContent needed.
-
-IMPORTANT: For REPLACE_FILE and APPLY_CHANGES, you MUST include the complete newFileContent with the actual code to use.
-
-FILES:
+DIFFS:
 ${fileDiffs.map((fd, i) => `
 === FILE ${i + 1}: ${fd.file} ===
-
-DIFF (current → final):
 ${fd.diff}
-
-CURRENT VERSION:
-${fileContents[i]?.currentContent || "(could not read)"}
-
-FINAL VERSION:
-${fileContents[i]?.finalContent || "(could not read)"}
 `).join("\n---\n")}`;
 
-      // Write prompt to temp file and pipe to claude
+      // Phase 1: Get recommendations
       const tmpPrompt = `/tmp/stack-resolve-prompt.txt`;
-      fs.writeFileSync(tmpPrompt, prompt);
+      fs.writeFileSync(tmpPrompt, phase1Prompt);
 
-      console.log(`${CYAN}Sending to Claude CLI (this may take a moment)...${RESET}\n`);
-
-      let claudeOutput = "";
+      let phase1Output = "";
       try {
-        // Use -p flag and increase timeout for longer prompts
-        claudeOutput = execSync(`claude -p < "${tmpPrompt}"`, {
+        phase1Output = execSync(`claude -p < "${tmpPrompt}"`, {
           encoding: "utf8",
           maxBuffer: 10 * 1024 * 1024,
-          timeout: 180000,  // 3 minute timeout for larger files
+          timeout: 120000,
         });
       } catch (e: any) {
         console.error(`${RED}Failed to run claude CLI${RESET}`);
-        if (e.stderr) {
-          console.error(`${DIM}${e.stderr}${RESET}`);
-        }
-        if (e.stdout) {
-          console.log(`${DIM}Partial output: ${e.stdout}${RESET}`);
-        }
         console.log(`${DIM}Error: ${e.message}${RESET}`);
         try { fs.unlinkSync(tmpPrompt); } catch {}
         return;
       }
-
       try { fs.unlinkSync(tmpPrompt); } catch {}
+
+      // Parse Phase 1 response
+      const phase1Match = phase1Output.match(/\{[\s\S]*"files"[\s\S]*\}/);
+      if (!phase1Match) {
+        console.log(`${YELLOW}Claude's response:${RESET}\n${phase1Output}`);
+        return;
+      }
+
+      let phase1Recs: { path: string; action: string; reason: string; changes?: any[] }[];
+      let phase1Summary = "";
+      try {
+        const parsed = JSON.parse(phase1Match[0]);
+        phase1Recs = parsed.files || [];
+        phase1Summary = parsed.summary || "";
+      } catch {
+        console.log(`${YELLOW}Could not parse response:${RESET}\n${phase1Output}`);
+        return;
+      }
+
+      // Show Phase 1 results
+      console.log(`${CYAN}${BOLD}━━━ Phase 1: Analysis ━━━${RESET}\n`);
+      if (phase1Summary) console.log(`${phase1Summary}\n`);
+
+      for (const rec of phase1Recs) {
+        const color = rec.action === "SKIP" ? DIM : rec.action === "REPLACE_FILE" ? GREEN : YELLOW;
+        const icon = rec.action === "SKIP" ? "○" : rec.action === "REPLACE_FILE" ? "✓" : "△";
+        console.log(`${color}${icon} ${rec.path}${RESET} - ${rec.action}`);
+        console.log(`  ${DIM}${rec.reason}${RESET}`);
+        if (rec.changes) {
+          for (const c of rec.changes) {
+            console.log(`  • ${c.type}: ${c.description}`);
+          }
+        }
+        console.log();
+      }
+
+      // Filter to files that need changes
+      const filesToChange = phase1Recs.filter(r => r.action !== "SKIP");
+
+      if (filesToChange.length === 0) {
+        console.log(`${GREEN}✓ No changes needed${RESET}`);
+        return;
+      }
+
+      // PHASE 2: For files needing changes, get the actual modified content
+      console.log(`${CYAN}${BOLD}━━━ Phase 2: Generating code for ${filesToChange.length} file(s) ━━━${RESET}\n`);
+
+      const phase2Files: { path: string; currentContent: string; finalContent: string; rec: typeof phase1Recs[0] }[] = [];
+
+      for (const rec of filesToChange) {
+        const fd = fileDiffs.find(f => f.file === rec.path);
+        if (!fd) continue;
+
+        try {
+          const currentContent = fs.readFileSync(rec.path, "utf8");
+          const finalContent = git(`show ${fd.finalBranch}:"${rec.path}"`);
+          phase2Files.push({ path: rec.path, currentContent, finalContent, rec });
+        } catch {}
+      }
+
+      const phase2Prompt = `Generate the modified file content based on these recommendations.
+
+For each file, I'll give you:
+- The recommendation from Phase 1
+- The current file content
+- The final file content
+
+YOUR TASK:
+Generate the newFileContent for each file:
+- For REPLACE_FILE: Use the final version exactly
+- For APPLY_CHANGES: Apply only the beneficial changes (renames, refactors, removals) but skip purely additive downstream code
+
+Output JSON:
+{
+  "files": [
+    {
+      "path": "file/path.ts",
+      "newFileContent": "the complete file content to use"
+    }
+  ]
+}
+
+FILES:
+${phase2Files.map(f => `
+=== ${f.path} ===
+RECOMMENDATION: ${f.rec.action}
+REASON: ${f.rec.reason}
+CHANGES TO APPLY: ${JSON.stringify(f.rec.changes || [])}
+
+CURRENT:
+${f.currentContent}
+
+FINAL:
+${f.finalContent}
+`).join("\n---\n")}`;
+
+      fs.writeFileSync(tmpPrompt, phase2Prompt);
+
+      let phase2Output = "";
+      try {
+        phase2Output = execSync(`claude -p < "${tmpPrompt}"`, {
+          encoding: "utf8",
+          maxBuffer: 10 * 1024 * 1024,
+          timeout: 180000,
+        });
+      } catch (e: any) {
+        console.error(`${RED}Phase 2 failed${RESET}`);
+        console.log(`${DIM}Error: ${e.message}${RESET}`);
+        try { fs.unlinkSync(tmpPrompt); } catch {}
+        return;
+      }
+      try { fs.unlinkSync(tmpPrompt); } catch {}
+
+      // Parse Phase 2 response
+      const phase2Match = phase2Output.match(/\{[\s\S]*"files"[\s\S]*\}/);
+      if (!phase2Match) {
+        console.log(`${YELLOW}Phase 2 response:${RESET}\n${phase2Output}`);
+        return;
+      }
+
+      let phase2Results: { path: string; newFileContent: string }[];
+      try {
+        const parsed = JSON.parse(phase2Match[0]);
+        phase2Results = parsed.files || [];
+      } catch {
+        console.log(`${YELLOW}Could not parse Phase 2 response${RESET}`);
+        return;
+      }
+
+      // Merge Phase 1 and Phase 2 results
+      const claudeOutput = JSON.stringify({
+        files: phase1Recs.map(rec => {
+          const phase2 = phase2Results.find(p => p.path === rec.path);
+          return { ...rec, newFileContent: phase2?.newFileContent };
+        }),
+        summary: phase1Summary,
+      });
 
       // Try to parse JSON from Claude's response
       type FileRec = {
