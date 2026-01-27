@@ -1,3 +1,6 @@
+import { writeFileSync, unlinkSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import type { Command } from "../types.ts";
 import {
   currentBranch,
@@ -45,21 +48,18 @@ function squashBranch(branch: string, parent: string, message: string): boolean 
 
   // Commit with combined message
   // Use a temp file for the message to handle special characters
-  const fs = require("fs");
-  const os = require("os");
-  const path = require("path");
-  const msgFile = path.join(os.tmpdir(), `stack-compress-msg-${Date.now()}.txt`);
-  fs.writeFileSync(msgFile, message);
+  const msgFile = join(tmpdir(), `stack-compress-msg-${Date.now()}.txt`);
+  writeFileSync(msgFile, message);
 
   try {
     if (!gitTry(`commit -F "${msgFile}"`)) {
-      fs.unlinkSync(msgFile);
+      unlinkSync(msgFile);
       return false;
     }
-    fs.unlinkSync(msgFile);
+    unlinkSync(msgFile);
     return true;
   } catch {
-    try { fs.unlinkSync(msgFile); } catch {}
+    try { unlinkSync(msgFile); } catch {}
     return false;
   }
 }
