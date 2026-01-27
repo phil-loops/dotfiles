@@ -5,6 +5,14 @@ When updating dotfiles (scripts, zshrc, CLAUDE.md, etc), use `zsource` to commit
 cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && cd - && source ~/.zshrc
 ```
 
+## Script Placement
+**Never put scripts in ~/bin.** Always place scripts in `~/.dotfiles/` so they're version controlled:
+- CLI commands: `~/.dotfiles/scripts/stack/commands/*.ts` (for `loops stack` subcommands)
+- Shell functions: `~/.dotfiles/.zshrc` or dedicated files sourced from it
+- Standalone scripts: `~/.dotfiles/scripts/`
+
+This ensures nothing is lost if the computer dies.
+
 # Git Branch Stacks
 
 Stacked PRs break large features into small, focused, reviewable changes (~150 LOC each).
@@ -27,6 +35,13 @@ If a `.stack` file exists, use `loops stack` commands instead of raw git:
 - `loops stack info` - overview with size, drift, conflicts (use `-s`, `-d`, `-c` for details)
 - `loops stack go <next|prev|last|root>` - navigate the stack
 - `loops stack edit/return/fixup` - edit ancestor branches safely
+- `loops stack inject` - analyze where uncommitted changes should land in the stack
+
+## Placing Changes in the Stack
+When you have uncommitted changes that might belong on earlier branches:
+1. Run `loops stack inject` to analyze where each file logically belongs
+2. It finds where files were introduced/last modified in the stack
+3. Recommends injection points and provides step-by-step instructions
 
 Run `loops stack` for full command reference.
 
