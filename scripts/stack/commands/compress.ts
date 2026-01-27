@@ -4,8 +4,8 @@ import { join } from "path";
 import type { Command } from "../types.ts";
 import {
   currentBranch,
+  getChildren,
   getCurrentStack,
-  getDescendants,
   git,
   gitTry,
   loadStack,
@@ -190,16 +190,17 @@ export const command: Command = {
       console.log(`${GREEN}Done: ${b}${RESET}`);
       compressedCount++;
 
-      // Rebase all descendants using --onto to avoid replaying parent commits
-      // git rebase --onto <newHead> <oldHead> <descendant>
+      // Rebase only DIRECT children using --onto to avoid replaying parent commits
+      // git rebase --onto <newHead> <oldHead> <child>
       // This takes commits after oldHead and replays them onto newHead
-      const descendants = getDescendants(stack, b).filter((d) => toCompress.includes(d));
-      if (descendants.length > 0) {
-        console.log(`${DIM}  Rebasing ${descendants.length} descendant(s)...${RESET}`);
-        for (const desc of descendants) {
-          git(`checkout ${desc}`);
-          if (!gitTry(`rebase --onto ${newHead} ${oldHead} ${desc}`)) {
-            console.error(`\nFailed to rebase ${desc}`);
+      // Indirect descendants will be rebased when their direct parent is processed
+      const children = getChildren(stack, b).filter((d) => toCompress.includes(d));
+      if (children.length > 0) {
+        console.log(`${DIM}  Rebasing ${children.length} child(ren)...${RESET}`);
+        for (const child of children) {
+          git(`checkout ${child}`);
+          if (!gitTry(`rebase --onto ${newHead} ${oldHead} ${child}`)) {
+            console.error(`\nFailed to rebase ${child}`);
             console.error(`Resolve conflicts, then re-run compress.`);
             process.exit(1);
           }
