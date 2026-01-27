@@ -4,3 +4,4 @@ export * from "./state.ts";
 export * from "./config.ts";
 export * from "./graph.ts";
 export * from "./changes.ts";
+export * from "./drift.ts";

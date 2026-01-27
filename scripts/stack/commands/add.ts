@@ -41,6 +41,15 @@ export const command: Command = {
       process.exit(1);
     }
 
+    // Enforce linked list structure: no branching allowed
+    const existingChildren = getChildren(stack, parent);
+    if (existingChildren.length > 0 && !existingChildren.includes(branch) && !values.reparent) {
+      console.error(`Cannot add: '${parent}' already has child '${existingChildren[0]}'`);
+      console.error(`Stack must be a linked list (no branching).`);
+      console.error(`Use --reparent to insert this branch into the chain.`);
+      process.exit(1);
+    }
+
     stack[branch] = parent;
     console.log(`Added: ${branch} -> ${parent}`);
 
