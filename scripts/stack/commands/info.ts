@@ -56,9 +56,9 @@ function getTsLoc(parent: string, child: string, filter: FileFilter): number {
   }
 }
 
-// ============ Drift helpers ============
+// ============ Churn helpers ============
 
-// Check if a file diff has deletions (real drift) vs just additions (acceptable growth)
+// Check if a file diff has deletions (churn) vs just additions (acceptable growth)
 function hasMinusLines(parent: string, child: string, file: string): boolean {
   try {
     const diff = git(`diff ${parent}...${child} -- "${file}"`);
@@ -68,16 +68,16 @@ function hasMinusLines(parent: string, child: string, file: string): boolean {
   }
 }
 
-type DriftInfo = { file: string; introducedIn: string; modifiedIn: string[] };
-type BranchDriftInfo = {
-  fileDrifts: DriftInfo[];
-  // Per-branch: how many files from this branch are edited downstream
-  branchHealth: Map<string, { clean: boolean; driftedFiles: number; driftedFileList: string[]; totalFiles: number }>;
+type ChurnInfo = { file: string; introducedIn: string; churnedIn: string[] };
+type BranchChurnInfo = {
+  fileChurns: ChurnInfo[];
+  // Per-branch: how many files from this branch have churn (deletions) downstream
+  branchHealth: Map<string, { clean: boolean; churnedFiles: number; churnedFileList: string[]; totalFiles: number }>;
 };
 
-function getDrifts(orderedBranches: string[], stack: Record<string, string>, filter: FileFilter): BranchDriftInfo {
+function getChurns(orderedBranches: string[], stack: Record<string, string>, filter: FileFilter): BranchChurnInfo {
   const fileIntroducedIn = new Map<string, string>();
-  const fileDrifts: DriftInfo[] = [];
+  const fileChurns: ChurnInfo[] = [];
   const filesPerBranch = new Map<string, Set<string>>();
 
   // First pass: track which files each branch introduces
@@ -99,15 +99,15 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>, fil
           }
           filesPerBranch.get(child)!.add(file);
         } else {
-          // Only count as drift if there are deletions (not just additions)
+          // Only count as churn if there are deletions (not just additions)
           if (hasMinusLines(parent, child, file)) {
             const introducedIn = fileIntroducedIn.get(file)!;
-            let drift = fileDrifts.find((d) => d.file === file);
-            if (!drift) {
-              drift = { file, introducedIn, modifiedIn: [] };
-              fileDrifts.push(drift);
+            let churn = fileChurns.find((c) => c.file === file);
+            if (!churn) {
+              churn = { file, introducedIn, churnedIn: [] };
+              fileChurns.push(churn);
             }
-            drift.modifiedIn.push(child);
+            churn.churnedIn.push(child);
           }
         }
       }
@@ -117,20 +117,20 @@ function getDrifts(orderedBranches: string[], stack: Record<string, string>, fil
   }
 
   // Second pass: compute per-branch health
-  const branchHealth = new Map<string, { clean: boolean; driftedFiles: number; driftedFileList: string[]; totalFiles: number }>();
+  const branchHealth = new Map<string, { clean: boolean; churnedFiles: number; churnedFileList: string[]; totalFiles: number }>();
 
   for (const branch of orderedBranches) {
     const files = filesPerBranch.get(branch) || new Set();
-    const driftedFilesInfo = fileDrifts.filter((d) => d.introducedIn === branch);
+    const churnedFilesInfo = fileChurns.filter((c) => c.introducedIn === branch);
     branchHealth.set(branch, {
-      clean: driftedFilesInfo.length === 0,
-      driftedFiles: driftedFilesInfo.length,
-      driftedFileList: driftedFilesInfo.map((d) => d.file),
+      clean: churnedFilesInfo.length === 0,
+      churnedFiles: churnedFilesInfo.length,
+      churnedFileList: churnedFilesInfo.map((c) => c.file),
       totalFiles: files.size,
     });
   }
 
-  return { fileDrifts, branchHealth };
+  return { fileChurns, branchHealth };
 }
 
 // ============ Conflicts helpers ============
@@ -158,12 +158,12 @@ function getConflicts(stack: Record<string, string>, branches: string[]): Confli
 export const command: Command = {
   category: "util",
   name: "info",
-  args: "[-s|--size] [-d|--drift] [-c|--conflicts] [-p|--plan] [--tsx] [--tests]",
-  help: "Show stack info (flags: size, drift, conflicts, plan, tsx, tests)",
+  args: "[-s|--size] [-u|--churn] [-c|--conflicts] [-p|--plan] [--tsx] [--tests]",
+  help: "Show stack info (flags: size, churn, conflicts, plan, tsx, tests)",
   run(args: string[]) {
     const { values } = parseArgs(args, {
       size: { type: "boolean", short: "s" },
-      drift: { type: "boolean", short: "d" },
+      churn: { type: "boolean", short: "u" },
       conflicts: { type: "boolean", short: "c" },
       plan: { type: "boolean", short: "p" },
       all: { type: "boolean", short: "a" },
@@ -194,11 +194,11 @@ export const command: Command = {
     const orderedBranches = [root, ...currentStackBranches];
 
     // If no flags, show overview
-    const showOverview = !values.size && !values.drift && !values.conflicts && !values.plan;
+    const showOverview = !values.size && !values.churn && !values.conflicts && !values.plan;
 
     // Gather data based on flags
     const sizeData = (values.size || showOverview) ? new Map<string, number>() : null;
-    const driftResult = (values.drift || showOverview) ? getDrifts(orderedBranches, stack, fileFilter) : null;
+    const churnResult = (values.churn || showOverview) ? getChurns(orderedBranches, stack, fileFilter) : null;
     const conflictData = (values.conflicts || showOverview) ? getConflicts(stack, currentStackBranches) : null;
 
     if (sizeData) {
@@ -212,7 +212,7 @@ export const command: Command = {
 
     // Print stack with annotations
     console.log();
-    printTree(root, "", "", stack, branch, currentStackBranches, sizeData, driftResult?.branchHealth || null, conflictData, showOverview);
+    printTree(root, "", "", stack, branch, currentStackBranches, sizeData, churnResult?.branchHealth || null, conflictData, showOverview);
 
     // Size summary
     if (values.size || showOverview) {
@@ -223,15 +223,15 @@ export const command: Command = {
       }
     }
 
-    // Drift details
-    if (values.drift && driftResult && driftResult.fileDrifts.length > 0) {
-      console.log(`\nDrifted files (${driftResult.fileDrifts.length}):\n`);
-      for (const { file, introducedIn, modifiedIn } of driftResult.fileDrifts) {
+    // Churn details
+    if (values.churn && churnResult && churnResult.fileChurns.length > 0) {
+      console.log(`\nChurned files (${churnResult.fileChurns.length}):\n`);
+      for (const { file, introducedIn, churnedIn } of churnResult.fileChurns) {
         console.log(`  ${file}`);
-        console.log(`    added: ${introducedIn} -> modified: ${modifiedIn.join(", ")}`);
+        console.log(`    added: ${introducedIn} -> churned: ${churnedIn.join(", ")}`);
       }
-    } else if (showOverview && driftResult && driftResult.fileDrifts.length > 0) {
-      console.log(`\n${driftResult.fileDrifts.length} file(s) drifted (use -d for details)`);
+    } else if (showOverview && churnResult && churnResult.fileChurns.length > 0) {
+      console.log(`\n${churnResult.fileChurns.length} file(s) churned (use -u for details)`);
     }
 
     // Conflict details
@@ -258,7 +258,7 @@ export const command: Command = {
   },
 };
 
-type BranchHealth = { clean: boolean; driftedFiles: number; driftedFileList: string[]; totalFiles: number };
+type BranchHealth = { clean: boolean; churnedFiles: number; churnedFileList: string[]; totalFiles: number };
 
 function printTree(
   b: string,
@@ -277,23 +277,23 @@ function printTree(
 
   let annotations: string[] = [];
 
-  // Health indicator: ✅ only if no drift AND not large
+  // Health indicator: ✅ only if no churn AND not large
   const health = branchHealth?.get(b);
   const loc = sizeData?.get(b) || 0;
-  const isDrifted = health && health.driftedFiles > 0;
+  const hasChurn = health && health.churnedFiles > 0;
   const isLarge = loc > 150;
-  const isClean = !isDrifted && !isLarge;
+  const isClean = !hasChurn && !isLarge;
 
   if (isClean && loc > 0) {
     annotations.push(`✅ ${loc}`);
   } else {
-    if (isDrifted) {
-      annotations.push(`⚠️${health!.driftedFiles}`);
+    if (hasChurn) {
+      annotations.push(`⚠️${health!.churnedFiles}`);
     }
     if (isLarge) {
       annotations.push(`🔴${loc}`);
-    } else if (loc > 0 && isDrifted) {
-      // Show LOC after drift indicator if not large
+    } else if (loc > 0 && hasChurn) {
+      // Show LOC after churn indicator if not large
       annotations.push(`${loc}`);
     }
   }
@@ -320,16 +320,16 @@ function printTree(
     console.log(`${changeIndent}${changes.join(", ")}`);
   }
 
-  // Print drifted files inline
-  if (showOverview && health && health.driftedFileList.length > 0) {
-    const driftIndent = contentPrefix + (children.length > 0 ? "│  " : "   ");
+  // Print churned files inline
+  if (showOverview && health && health.churnedFileList.length > 0) {
+    const churnIndent = contentPrefix + (children.length > 0 ? "│  " : "   ");
     const maxFiles = 3;
-    const fileNames = health.driftedFileList.slice(0, maxFiles).map((f) => f.split("/").pop());
-    let driftLine = `↳ drift: ${fileNames.join(", ")}`;
-    if (health.driftedFileList.length > maxFiles) {
-      driftLine += ` + ${health.driftedFileList.length - maxFiles} more`;
+    const fileNames = health.churnedFileList.slice(0, maxFiles).map((f) => f.split("/").pop());
+    let churnLine = `↳ churn: ${fileNames.join(", ")}`;
+    if (health.churnedFileList.length > maxFiles) {
+      churnLine += ` + ${health.churnedFileList.length - maxFiles} more`;
     }
-    console.log(`${driftIndent}${driftLine}`);
+    console.log(`${churnIndent}${churnLine}`);
   }
 
   children.forEach((child, i) => {
