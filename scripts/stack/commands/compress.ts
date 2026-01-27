@@ -68,10 +68,11 @@ export const command: Command = {
   category: "git",
   name: "compress",
   help: "Squash all commits on each branch in the stack into one",
-  args: "[--all] [--first-only]",
+  args: "[--all] [--dry-run] [--first-only]",
   run(args) {
     const { values } = parseArgs(args, {
       all: { type: "boolean", short: "a" },
+      "dry-run": { type: "boolean", short: "d" },
       "first-only": { type: "boolean", short: "f" },
     });
 
@@ -127,6 +128,11 @@ export const command: Command = {
 
     if (compressionPlan.length === 0) {
       console.log("\nAll branches already have single commits. Nothing to do.");
+      return;
+    }
+
+    if (values["dry-run"]) {
+      console.log(`\n${compressionPlan.length} branch(es) can be compressed.`);
       return;
     }
 
