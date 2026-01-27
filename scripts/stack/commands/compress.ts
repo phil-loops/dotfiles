@@ -5,6 +5,7 @@ import type { Command } from "../types.ts";
 import {
   currentBranch,
   getCurrentStack,
+  getDescendants,
   git,
   gitTry,
   loadStack,
@@ -142,34 +143,70 @@ export const command: Command = {
     const allBranches = Object.keys(stack);
     saveSnapshot("compress", allBranches);
 
-    // Compress each branch
-    for (const { branch: b, parent, commitCount, messages } of compressionPlan) {
+    // Compress each branch (root-to-leaf order)
+    // After squashing each branch, rebase its descendants onto the new HEAD
+    let compressedCount = 0;
+    for (const b of toCompress) {
+      const parent = stack[b];
+      if (!parent) continue;
+
+      // Get current commit count (may have changed after earlier rebases)
+      const commitCount = getCommitCount(parent, b);
+
+      if (commitCount === 0) {
+        console.log(`${DIM}${b}: no changes vs parent (skipping)${RESET}`);
+        continue;
+      }
+
+      if (commitCount === 1) {
+        console.log(`${DIM}${b}: already 1 commit (skipping)${RESET}`);
+        continue;
+      }
+
+      // Get messages fresh (in case rebasing changed things)
+      const messages = getCommitMessages(parent, b);
+
       // Build commit message
       let finalMessage: string;
       if (values["first-only"]) {
-        // Use only the first commit message
         finalMessage = messages[0] || "Squashed commits";
       } else {
-        // Combine all messages, deduped and filtered
         const uniqueMessages = [...new Set(messages)];
         finalMessage = uniqueMessages.join("\n\n");
       }
 
       console.log(`Compressing ${b} (${commitCount} commits -> 1)...`);
 
-      if (squashBranch(b, parent, finalMessage)) {
-        console.log(`${GREEN}Done: ${b}${RESET}\n`);
-      } else {
+      if (!squashBranch(b, parent, finalMessage)) {
         console.error(`\nFailed to compress ${b}`);
         console.error(`Use 'git reflog' to find previous state if needed.`);
         process.exit(1);
       }
+
+      console.log(`${GREEN}Done: ${b}${RESET}`);
+      compressedCount++;
+
+      // Rebase all descendants onto the new squashed branch
+      const descendants = getDescendants(stack, b).filter((d) => toCompress.includes(d));
+      if (descendants.length > 0) {
+        console.log(`${DIM}  Rebasing ${descendants.length} descendant(s)...${RESET}`);
+        for (const desc of descendants) {
+          const descParent = stack[desc];
+          git(`checkout ${desc}`);
+          if (!gitTry(`rebase ${descParent}`)) {
+            console.error(`\nFailed to rebase ${desc} onto ${descParent}`);
+            console.error(`Resolve conflicts, then re-run compress.`);
+            process.exit(1);
+          }
+        }
+      }
+      console.log("");
     }
 
     // Return to original branch
     git(`checkout ${branch}`);
 
-    console.log(`\n${GREEN}Compressed ${compressionPlan.length} branch(es)!${RESET}`);
+    console.log(`\n${GREEN}Compressed ${compressedCount} branch(es)!${RESET}`);
     console.log(`${DIM}Run 'loops stack push-all --force' to update remotes${RESET}`);
   },
 };
