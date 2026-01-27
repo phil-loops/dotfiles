@@ -78,7 +78,7 @@ export const command: Command = {
     let checked = 0;
 
     for (const exp of allExports) {
-      const count = countUsages(exp.name, exp.file, exp.isDefault);
+      const count = countUsages(exp.name, exp.file);
       results.push({ symbol: exp, usageCount: count });
       checked++;
 
@@ -228,19 +228,17 @@ function shouldSkip(name: string, file: string): boolean {
   return false;
 }
 
-function countUsages(symbolName: string, definitionFile: string, _isDefault: boolean): number {
+function countUsages(symbolName: string, definitionFile: string): number {
   try {
-    // Simple word-boundary search for the symbol name
-    // Escape any regex special chars in the symbol name
-    const escapedName = symbolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Use ripgrep with word boundaries via -w flag
+    // Specify common source directories to avoid scanning node_modules etc.
+    const safeName = symbolName.replace(/'/g, "'\\''");
+    const dirs = "lib/ components/ pages/ hooks/ store/ types/ queries/ trpc/ jobs/ sqs-jobs/ models/ testing/";
+    const cmd = `rg -c -w -F '${safeName}' ${dirs} --type ts --type-add 'ts:*.tsx' 2>/dev/null || true`;
 
-    const result = execSync(
-      `rg -c -g '*.ts' -g '*.tsx' '\\b${escapedName}\\b' 2>/dev/null || true`,
-      { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 }
-    );
+    const result = execSync(cmd, { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 });
 
     let totalCount = 0;
-    const defFileBase = definitionFile.replace(/\.[^.]+$/, ""); // Remove extension
 
     for (const line of result.split("\n").filter(Boolean)) {
       const match = line.match(/^(.+):(\d+)$/);
@@ -249,7 +247,7 @@ function countUsages(symbolName: string, definitionFile: string, _isDefault: boo
         const count = parseInt(match[2], 10);
 
         // Don't count usages in the definition file itself
-        if (file === definitionFile || file.replace(/\.[^.]+$/, "") === defFileBase) {
+        if (file === definitionFile || file.endsWith("/" + definitionFile)) {
           continue;
         }
 
