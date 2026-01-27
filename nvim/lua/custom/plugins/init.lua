@@ -46,6 +46,23 @@ vim.keymap.set('n', '<leader>st', function()
   stack_whatchanged.trace()
 end, { desc = 'Stack: Trace current file' })
 
+vim.keymap.set('n', '<leader>su', function()
+  local state = require('custom.stack-review-state')
+  vim.notify('Updating stack...', vim.log.levels.INFO)
+  vim.fn.jobstart('loops stack update', {
+    on_exit = function(_, exit_code)
+      vim.schedule(function()
+        if exit_code == 0 then
+          state.refresh_cache()
+          vim.notify('Stack updated', vim.log.levels.INFO)
+        else
+          vim.notify('Stack update failed', vim.log.levels.ERROR)
+        end
+      end)
+    end,
+  })
+end, { desc = 'Stack: Update (pull + refresh)' })
+
 return {
   {
     'phil-loops/diffview.nvim',
