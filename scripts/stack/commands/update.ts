@@ -33,7 +33,7 @@ function checkForDrift(): number {
 export const command: Command = {
   category: "git",
   name: "update",
-  help: "Rebase current branch + descendants (--all for entire tree)",
+  help: "Rebase current branch + descendants (--all for entire stack)",
   args: "[--all] [--force]",
   run(args) {
     const { values } = parseArgs(args, {

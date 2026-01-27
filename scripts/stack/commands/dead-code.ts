@@ -4,291 +4,262 @@ import { execSync } from "child_process";
 
 interface ExportedSymbol {
   name: string;
-  type: "function" | "const" | "class" | "type" | "interface" | "enum";
   file: string;
   line: number;
+  isDefault: boolean;
 }
 
 interface DeadCodeResult {
   symbol: ExportedSymbol;
   usageCount: number;
-  usageFiles: string[];
 }
 
 export const command: Command = {
   category: "util",
   name: "dead-code",
-  help: "Find potentially unused exports in branch changes",
-  args: "[branch] [--verbose]",
+  help: "Find unused exports (optionally scoped to feature branch)",
+  args: "[--branch] [--all] [--verbose]",
   run(args) {
     const verbose = args.includes("--verbose") || args.includes("-v");
-    const branchArg = args.find((a) => !a.startsWith("-"));
+    const scanAll = args.includes("--all") || args.includes("-a");
+    const branchScoped = args.includes("--branch") || args.includes("-b");
 
-    const stack = loadStack();
-    const branch = branchArg || currentBranch();
+    let filesToScan: string[] = [];
+    let scopeDescription = "codebase";
 
-    if (!stack[branch]) {
-      console.error(`Branch "${branch}" not tracked in stack`);
-      process.exit(1);
+    if (branchScoped) {
+      // Scope to files changed in the feature branch vs main
+      const stack = loadStack();
+      const branch = currentBranch();
+
+      if (!stack[branch]) {
+        console.error(`Branch "${branch}" not tracked in stack`);
+        process.exit(1);
+      }
+
+      // Find the root (main) by walking up the stack
+      let base = stack[branch];
+      while (stack[base]) {
+        base = stack[base];
+      }
+
+      filesToScan = getChangedFiles(base, branch).filter(
+        (f) => f.endsWith(".ts") || f.endsWith(".tsx")
+      );
+      scopeDescription = `feature branch (${branch} vs ${base})`;
+
+      if (filesToScan.length === 0) {
+        console.log("No TypeScript files changed in this feature branch.");
+        return;
+      }
+    } else {
+      // Scan common source directories
+      filesToScan = findTypeScriptFiles();
     }
 
-    // Find the root (main) by walking up the stack
-    let base = stack[branch];
-    while (stack[base]) {
-      base = stack[base];
-    }
-
-    console.log(`\n🔍 Analyzing exports in ${branch} (vs ${base})\n`);
-
-    // Get changed files
-    const changedFiles = getChangedFiles(base, branch);
-    const tsFiles = changedFiles.filter(
-      (f) => f.endsWith(".ts") || f.endsWith(".tsx")
-    );
-
-    if (tsFiles.length === 0) {
-      console.log("No TypeScript files changed in this branch.");
-      return;
-    }
+    console.log(`\n🔍 Scanning for unused exports in ${scopeDescription}\n`);
 
     if (verbose) {
-      console.log(`Changed TS files: ${tsFiles.length}`);
-      tsFiles.forEach((f) => console.log(`  ${f}`));
-      console.log();
+      console.log(`Files to scan: ${filesToScan.length}`);
     }
 
-    // Get the diff and extract new exports
-    const exports = extractNewExports(base, branch, tsFiles);
+    // Extract all exports from the files
+    const allExports = extractExports(filesToScan);
 
-    if (exports.length === 0) {
-      console.log("No new exports detected in this branch.");
+    if (allExports.length === 0) {
+      console.log("No exports found.");
       return;
     }
 
-    console.log(`Found ${exports.length} new export(s):\n`);
+    console.log(`Found ${allExports.length} exports, checking usage...\n`);
 
     // Check each export for usages
     const results: DeadCodeResult[] = [];
+    let checked = 0;
 
-    for (const exp of exports) {
-      const { count, files } = findUsages(exp.name, exp.file);
-      results.push({
-        symbol: exp,
-        usageCount: count,
-        usageFiles: files,
-      });
+    for (const exp of allExports) {
+      const count = countUsages(exp.name, exp.file, exp.isDefault);
+      results.push({ symbol: exp, usageCount: count });
+      checked++;
+
+      // Progress indicator
+      if (checked % 50 === 0) {
+        process.stdout.write(`\r  Checked ${checked}/${allExports.length}...`);
+      }
     }
+    process.stdout.write(`\r  Checked ${allExports.length}/${allExports.length}   \n\n`);
 
-    // Report results
+    // Filter to unused (or limit results if not --all)
     const deadCode = results.filter((r) => r.usageCount === 0);
-    const usedCode = results.filter((r) => r.usageCount > 0);
+    const displayResults = scanAll ? deadCode : deadCode.slice(0, 30);
 
-    if (deadCode.length > 0) {
-      console.log(`⚠️  Potentially unused (${deadCode.length}):\n`);
-      for (const r of deadCode) {
-        console.log(
-          `  ${r.symbol.type} ${r.symbol.name}`
-        );
-        console.log(`    └─ ${r.symbol.file.replace(/^b\//, "")}:${r.symbol.line}`);
-      }
-      console.log();
-    }
-
-    if (usedCode.length > 0) {
-      console.log(`✅ Used exports (${usedCode.length}):\n`);
-      for (const r of usedCode) {
-        const fileList =
-          r.usageFiles.length <= 3
-            ? r.usageFiles.join(", ")
-            : `${r.usageFiles.slice(0, 3).join(", ")} +${r.usageFiles.length - 3} more`;
-        console.log(
-          `  ${r.symbol.type} ${r.symbol.name} (${r.usageCount} usage${r.usageCount === 1 ? "" : "s"})`
-        );
-        if (verbose) {
-          console.log(`    └─ defined: ${r.symbol.file}:${r.symbol.line}`);
-          console.log(`    └─ used in: ${fileList}`);
-        }
-      }
-      console.log();
-    }
-
-    // Summary
     if (deadCode.length === 0) {
-      console.log("🎉 All new exports appear to be used!");
-    } else {
-      console.log(
-        `\n📊 Summary: ${deadCode.length}/${exports.length} exports may be unused`
-      );
+      console.log("🎉 No unused exports detected!");
+      return;
     }
+
+    console.log(`⚠️  Potentially unused exports (${deadCode.length}):\n`);
+
+    for (const r of displayResults) {
+      const defaultMarker = r.symbol.isDefault ? " (default)" : "";
+      console.log(`  ${r.symbol.name}${defaultMarker}`);
+      console.log(`    └─ ${r.symbol.file}:${r.symbol.line}`);
+    }
+
+    if (!scanAll && deadCode.length > 30) {
+      console.log(`\n  ... and ${deadCode.length - 30} more (use --all to see all)`);
+    }
+
+    console.log(`\n📊 Summary: ${deadCode.length} potentially unused exports`);
   },
 };
 
-function getChangedFiles(parent: string, branch: string): string[] {
+function getChangedFiles(base: string, branch: string): string[] {
   try {
-    const output = git(`diff --name-only ${parent}...${branch}`);
+    const output = git(`diff --name-only ${base}...${branch}`);
     return output.split("\n").filter(Boolean);
   } catch {
     return [];
   }
 }
 
-function extractNewExports(
-  parent: string,
-  branch: string,
-  files: string[]
-): ExportedSymbol[] {
+function findTypeScriptFiles(): string[] {
+  try {
+    // Find TS files in common source directories, excluding node_modules, .next, etc.
+    const result = execSync(
+      `find . -type f \\( -name "*.ts" -o -name "*.tsx" \\) \
+        -not -path "*/node_modules/*" \
+        -not -path "*/.next/*" \
+        -not -path "*/dist/*" \
+        -not -path "*/.git/*" \
+        -not -path "*/coverage/*" \
+        -not -name "*.d.ts" \
+        2>/dev/null | head -2000`,
+      { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 }
+    );
+    return result.split("\n").filter(Boolean).map((f) => f.replace(/^\.\//, ""));
+  } catch {
+    return [];
+  }
+}
+
+function extractExports(files: string[]): ExportedSymbol[] {
   const exports: ExportedSymbol[] = [];
 
   // Patterns to match exported symbols
   const patterns = [
-    // export function name
-    {
-      regex: /^export\s+(async\s+)?function\s+(\w+)/,
-      type: "function" as const,
-      nameGroup: 2,
-    },
+    // export function name / export async function name
+    { regex: /^export\s+(async\s+)?function\s+(\w+)/, nameGroup: 2, isDefault: false },
     // export const/let/var name
-    {
-      regex: /^export\s+(?:const|let|var)\s+(\w+)/,
-      type: "const" as const,
-      nameGroup: 1,
-    },
+    { regex: /^export\s+(?:const|let|var)\s+(\w+)/, nameGroup: 1, isDefault: false },
     // export class name
-    {
-      regex: /^export\s+class\s+(\w+)/,
-      type: "class" as const,
-      nameGroup: 1,
-    },
+    { regex: /^export\s+class\s+(\w+)/, nameGroup: 1, isDefault: false },
     // export type name
-    {
-      regex: /^export\s+type\s+(\w+)/,
-      type: "type" as const,
-      nameGroup: 1,
-    },
+    { regex: /^export\s+type\s+(\w+)/, nameGroup: 1, isDefault: false },
     // export interface name
-    {
-      regex: /^export\s+interface\s+(\w+)/,
-      type: "interface" as const,
-      nameGroup: 1,
-    },
+    { regex: /^export\s+interface\s+(\w+)/, nameGroup: 1, isDefault: false },
     // export enum name
-    {
-      regex: /^export\s+enum\s+(\w+)/,
-      type: "enum" as const,
-      nameGroup: 1,
-    },
+    { regex: /^export\s+enum\s+(\w+)/, nameGroup: 1, isDefault: false },
     // export default function name
-    {
-      regex: /^export\s+default\s+(async\s+)?function\s+(\w+)/,
-      type: "function" as const,
-      nameGroup: 2,
-    },
+    { regex: /^export\s+default\s+(async\s+)?function\s+(\w+)/, nameGroup: 2, isDefault: true },
     // export default class name
-    {
-      regex: /^export\s+default\s+class\s+(\w+)/,
-      type: "class" as const,
-      nameGroup: 1,
-    },
+    { regex: /^export\s+default\s+class\s+(\w+)/, nameGroup: 1, isDefault: true },
   ];
 
-  try {
-    const diff = git(`diff ${parent}...${branch} -- ${files.join(" ")}`);
-    const lines = diff.split("\n");
+  for (const file of files) {
+    try {
+      const content = execSync(`cat "${file}" 2>/dev/null`, {
+        encoding: "utf-8",
+        maxBuffer: 5 * 1024 * 1024,
+      });
 
-    let currentFile = "";
-    let currentLineNum = 0;
-    let lineOffset = 0;
-
-    for (const line of lines) {
-      // Track file changes
-      if (line.startsWith("diff --git")) {
-        const match = line.match(/b\/(.+)$/);
-        if (match) currentFile = match[1]; // Already strips the b/ prefix
-        continue;
-      }
-
-      // Track line numbers from hunk headers
-      if (line.startsWith("@@")) {
-        const match = line.match(/@@ .+ \+(\d+)/);
-        if (match) {
-          currentLineNum = parseInt(match[1], 10);
-          lineOffset = 0;
-        }
-        continue;
-      }
-
-      // Only look at added lines
-      if (line.startsWith("+") && !line.startsWith("+++")) {
-        const content = line.slice(1).trim();
+      const lines = content.split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
 
         for (const pattern of patterns) {
-          const match = content.match(pattern.regex);
+          const match = line.match(pattern.regex);
           if (match) {
             const name = match[pattern.nameGroup];
-            // Skip if we already have this export
-            if (!exports.some((e) => e.name === name && e.file === currentFile)) {
-              exports.push({
-                name,
-                type: pattern.type,
-                file: currentFile,
-                line: currentLineNum + lineOffset,
-              });
-            }
+            // Skip common false positives
+            if (shouldSkip(name, file)) continue;
+
+            exports.push({
+              name,
+              file,
+              line: i + 1,
+              isDefault: pattern.isDefault,
+            });
             break;
           }
         }
-        lineOffset++;
-      } else if (line.startsWith(" ")) {
-        lineOffset++;
       }
+    } catch {
+      // Skip files that can't be read
     }
-  } catch (e) {
-    console.error("Error parsing diff:", e);
   }
 
   return exports;
 }
 
-function findUsages(
-  symbolName: string,
-  definitionFile: string
-): { count: number; files: string[] } {
+function shouldSkip(name: string, file: string): boolean {
+  // Skip test files
+  if (file.includes(".test.") || file.includes(".spec.") || file.includes("__tests__")) {
+    return true;
+  }
+
+  // Skip common Next.js page exports
+  if (name === "getServerSideProps" || name === "getStaticProps" || name === "getStaticPaths") {
+    return true;
+  }
+
+  // Skip common React exports that are used by framework
+  if (name === "metadata" || name === "generateMetadata") {
+    return true;
+  }
+
+  // Skip if it's a page/layout default export (used by Next.js routing)
+  if (file.includes("/pages/") || file.includes("/app/")) {
+    if (name.endsWith("Page") || name.endsWith("Layout")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function countUsages(symbolName: string, definitionFile: string, _isDefault: boolean): number {
   try {
-    // Use ripgrep to find usages
-    // Search for the symbol as a word boundary to avoid partial matches
-    // Use glob patterns for ts/tsx files since --type tsx isn't built-in
+    // Simple word-boundary search for the symbol name
+    // Escape any regex special chars in the symbol name
+    const escapedName = symbolName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
     const result = execSync(
-      `rg -l -g '*.ts' -g '*.tsx' "\\b${symbolName}\\b" 2>/dev/null || true`,
+      `rg -c -g '*.ts' -g '*.tsx' '\\b${escapedName}\\b' 2>/dev/null || true`,
       { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 }
     );
 
-    // Clean up the definition file path (remove b/ prefix if present)
-    const cleanDefFile = definitionFile.replace(/^b\//, "");
+    let totalCount = 0;
+    const defFileBase = definitionFile.replace(/\.[^.]+$/, ""); // Remove extension
 
-    const files = result
-      .split("\n")
-      .filter(Boolean)
-      .filter((f) => !f.endsWith(cleanDefFile) && !f.includes(cleanDefFile));
+    for (const line of result.split("\n").filter(Boolean)) {
+      const match = line.match(/^(.+):(\d+)$/);
+      if (match) {
+        const file = match[1];
+        const count = parseInt(match[2], 10);
 
-    // Get actual count of usages (not just files)
-    let count = 0;
-    if (files.length > 0) {
-      try {
-        const countResult = execSync(
-          `rg -c -g '*.ts' -g '*.tsx' "\\b${symbolName}\\b" ${files.map(f => `"${f}"`).join(" ")} 2>/dev/null || true`,
-          { encoding: "utf-8", maxBuffer: 10 * 1024 * 1024 }
-        );
-        for (const line of countResult.split("\n").filter(Boolean)) {
-          const match = line.match(/:(\d+)$/);
-          if (match) count += parseInt(match[1], 10);
+        // Don't count usages in the definition file itself
+        if (file === definitionFile || file.replace(/\.[^.]+$/, "") === defFileBase) {
+          continue;
         }
-      } catch {
-        count = files.length; // Fallback to file count
+
+        totalCount += count;
       }
     }
 
-    return { count, files };
+    return totalCount;
   } catch {
-    return { count: 0, files: [] };
+    return 0;
   }
 }
+

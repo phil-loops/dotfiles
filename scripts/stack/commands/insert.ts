@@ -5,7 +5,7 @@ import { parseArgs } from "../args.ts";
 export const command: Command = {
   category: "stack",
   name: "insert",
-  help: "Insert new branch, reparent children",
+  help: "Insert new branch into the chain",
   args: "<branch> --after <parent>",
   run(args) {
     const { values, positionals } = parseArgs(args, {

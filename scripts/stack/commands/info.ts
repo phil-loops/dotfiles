@@ -210,7 +210,7 @@ export const command: Command = {
       }
     }
 
-    // Print tree with annotations
+    // Print stack with annotations
     console.log();
     printTree(root, "", "", stack, branch, currentStackBranches, sizeData, driftResult?.branchHealth || null, conflictData, showOverview);
 
