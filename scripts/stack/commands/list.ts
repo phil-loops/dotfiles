@@ -4,7 +4,7 @@ import { currentBranch, getChildren, loadStack } from "../lib.ts";
 export const command: Command = {
   category: "nav",
   name: "list",
-  help: "Show the branch tree",
+  help: "Show the stack",
   run() {
     const stack = loadStack();
     const branch = currentBranch();

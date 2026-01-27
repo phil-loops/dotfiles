@@ -32,8 +32,8 @@ export const command: Command = {
 
     const children = getChildren(stack, branch);
     if (children.length > 0 && !values.recursive) {
-      console.error(`Cannot remove: ${branch} has children: ${children.join(", ")}`);
-      console.error("Use --recursive to remove branch and all descendants");
+      console.error(`Cannot remove: ${branch} has a child: ${children[0]}`);
+      console.error("Use --recursive to remove branch and all descendants in the chain");
       process.exit(1);
     }
 
