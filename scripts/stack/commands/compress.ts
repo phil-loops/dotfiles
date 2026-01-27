@@ -177,24 +177,29 @@ export const command: Command = {
 
       console.log(`Compressing ${b} (${commitCount} commits -> 1)...`);
 
+      // Record old HEAD before squashing (needed for --onto rebase)
+      const oldHead = git(`rev-parse ${b}`);
+
       if (!squashBranch(b, parent, finalMessage)) {
         console.error(`\nFailed to compress ${b}`);
         console.error(`Use 'git reflog' to find previous state if needed.`);
         process.exit(1);
       }
 
+      const newHead = git(`rev-parse ${b}`);
       console.log(`${GREEN}Done: ${b}${RESET}`);
       compressedCount++;
 
-      // Rebase all descendants onto the new squashed branch
+      // Rebase all descendants using --onto to avoid replaying parent commits
+      // git rebase --onto <newHead> <oldHead> <descendant>
+      // This takes commits after oldHead and replays them onto newHead
       const descendants = getDescendants(stack, b).filter((d) => toCompress.includes(d));
       if (descendants.length > 0) {
         console.log(`${DIM}  Rebasing ${descendants.length} descendant(s)...${RESET}`);
         for (const desc of descendants) {
-          const descParent = stack[desc];
           git(`checkout ${desc}`);
-          if (!gitTry(`rebase ${descParent}`)) {
-            console.error(`\nFailed to rebase ${desc} onto ${descParent}`);
+          if (!gitTry(`rebase --onto ${newHead} ${oldHead} ${desc}`)) {
+            console.error(`\nFailed to rebase ${desc}`);
             console.error(`Resolve conflicts, then re-run compress.`);
             process.exit(1);
           }
