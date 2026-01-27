@@ -36,6 +36,7 @@ If a `.stack` file exists, use `loops stack` commands instead of raw git:
 - `loops stack go <next|prev|last|root>` - navigate the stack
 - `loops stack edit/return/fixup` - edit ancestor branches safely
 - `loops stack inject` - analyze where uncommitted changes should land in the stack
+- `loops stack compress` - squash all commits on a branch into one (use `--all` for entire stack)
 
 ## Placing Changes in the Stack
 When you have uncommitted changes that might belong on earlier branches:

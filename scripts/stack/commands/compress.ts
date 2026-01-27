@@ -80,13 +80,12 @@ export const command: Command = {
   category: "git",
   name: "compress",
   help: "Squash all commits on each branch in the stack into one",
-  args: "[--all] [--dry-run] [--first-only] [--update]",
+  args: "[--all] [--dry-run] [--first-only]",
   run(args) {
     const { values } = parseArgs(args, {
       all: { type: "boolean", short: "a" },
       "dry-run": { type: "boolean", short: "d" },
       "first-only": { type: "boolean", short: "f" },
-      update: { type: "boolean", short: "u" },
     });
 
     const branch = currentBranch();
@@ -113,41 +112,6 @@ export const command: Command = {
     if (toCompress.length === 0) {
       console.log("Nothing to compress");
       return;
-    }
-
-    // Check alignment - each branch must be based on its parent's HEAD
-    const misaligned: string[] = [];
-    for (const b of toCompress) {
-      const parent = stack[b];
-      if (parent && !isAligned(parent, b)) {
-        misaligned.push(b);
-      }
-    }
-
-    if (misaligned.length > 0) {
-      if (values.update) {
-        console.log(`${YELLOW}${misaligned.length} branch(es) need rebasing first...${RESET}\n`);
-        // Run stack update for each misaligned branch
-        for (const b of misaligned) {
-          const parent = stack[b];
-          console.log(`  Rebasing ${b} onto ${parent}...`);
-          git(`checkout ${b}`);
-          if (!gitTry(`rebase ${parent}`)) {
-            console.error(`\n${YELLOW}Conflict rebasing ${b}. Resolve manually:${RESET}`);
-            console.error(`  1. Fix conflicts and run: git rebase --continue`);
-            console.error(`  2. Then re-run: loops stack compress --all --update`);
-            process.exit(1);
-          }
-        }
-        console.log("");
-      } else {
-        console.error(`${YELLOW}${misaligned.length} branch(es) are not aligned with their parents:${RESET}\n`);
-        for (const b of misaligned) {
-          console.error(`  - ${b}`);
-        }
-        console.error(`\nRun with --update to auto-rebase first, or run 'loops stack update --all' manually.`);
-        process.exit(1);
-      }
     }
 
     // Analyze what will be compressed
@@ -196,6 +160,18 @@ export const command: Command = {
     for (const b of toCompress) {
       const parent = stack[b];
       if (!parent) continue;
+
+      // Ensure branch is aligned with parent before processing
+      // (parent may have been squashed, changing its HEAD)
+      if (!isAligned(parent, b)) {
+        console.log(`${YELLOW}Aligning ${b} with ${parent}...${RESET}`);
+        git(`checkout ${b}`);
+        if (!gitTry(`rebase ${parent}`)) {
+          console.error(`\nFailed to align ${b} with ${parent}`);
+          console.error(`Resolve conflicts and re-run compress.`);
+          process.exit(1);
+        }
+      }
 
       // Get current commit count (may have changed after earlier rebases)
       const commitCount = getCommitCount(parent, b);
