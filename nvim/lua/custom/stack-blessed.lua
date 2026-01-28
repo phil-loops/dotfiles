@@ -230,6 +230,32 @@ function M.stale_files(branch, parent)
   return M.summary(branch, parent).stale_files
 end
 
+-- Cache of branch file counts (populated once via warm_file_counts)
+local file_count_cache = {} -- branch -> number
+
+-- Pre-compute file counts for all branches in the chain (one git call each, but only once)
+---@param chain table[] -- { {branch, parent}, ... }
+function M.warm_file_counts(chain)
+  for _, item in ipairs(chain) do
+    if not file_count_cache[item.branch] and item.parent and item.parent ~= "" then
+      local cmd = string.format("git diff --name-only %s %s 2>/dev/null", item.parent, item.branch)
+      local output = vim.fn.system(cmd):gsub("%s+$", "")
+      local count = 0
+      if output ~= "" then
+        for _ in output:gmatch("[^\n]+") do count = count + 1 end
+      end
+      file_count_cache[item.branch] = count
+    end
+  end
+end
+
+-- Get total file count for a branch (from cache)
+---@param branch string
+---@return number
+function M.file_count(branch)
+  return file_count_cache[branch] or 0
+end
+
 -- Invalidate tip cache (e.g. after pushing)
 function M.invalidate(branch)
   if branch then
