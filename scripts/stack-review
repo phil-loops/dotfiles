@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/zsh
 # Stack Review - opens nvim with diffview for reviewing stacked branches
 # Uses git-town for lineage
 
@@ -6,14 +6,14 @@ set -e
 
 # Get current branch
 BRANCH=$(git branch --show-current 2>/dev/null)
-if [ -z "$BRANCH" ]; then
+if [[ -z "$BRANCH" ]]; then
   echo "Not in a git repository"
   exit 1
 fi
 
 # Check if git-town is configured
 PARENT=$(git config "git-town-branch.${BRANCH}.parent" 2>/dev/null)
-if [ -z "$PARENT" ]; then
+if [[ -z "$PARENT" ]]; then
   echo "Branch '$BRANCH' not tracked by git-town"
   echo "Run: git town append <branch> or git town prepend <branch>"
   exit 1
@@ -23,22 +23,32 @@ fi
 MAIN_BRANCH=$(git config git-town.main-branch 2>/dev/null || echo "main")
 
 # Collect all branches and their parents from git-town config
-declare -A parents
-declare -A children
+typeset -A parents
+typeset -A children
 
+git config --local --list 2>/dev/null | grep "git-town-branch.*\.parent=" | while IFS= read -r line; do
+  if [[ "$line" =~ 'git-town-branch\.(.+)\.parent=(.+)' ]]; then
+    branch="${match[1]}"
+    parent="${match[2]}"
+    parents[$branch]="$parent"
+    children[$parent]+="$branch "
+  fi
+done
+
+# Re-read since the while loop runs in a subshell
 while IFS= read -r line; do
-  if [[ "$line" =~ ^git-town-branch\.(.+)\.parent=(.+)$ ]]; then
-    branch="${BASH_REMATCH[1]}"
-    parent="${BASH_REMATCH[2]}"
-    parents["$branch"]="$parent"
-    children["$parent"]+="$branch "
+  if [[ "$line" =~ 'git-town-branch\.(.+)\.parent=(.+)' ]]; then
+    branch="${match[1]}"
+    parent="${match[2]}"
+    parents[$branch]="$parent"
+    children[$parent]+="$branch "
   fi
 done < <(git config --local --list 2>/dev/null | grep "git-town-branch.*\.parent=")
 
 # Walk up from current branch to main
 chain=()
 current="$BRANCH"
-while [ -n "$current" ] && [ "$current" != "$MAIN_BRANCH" ]; do
+while [[ -n "$current" ]] && [[ "$current" != "$MAIN_BRANCH" ]]; do
   chain=("$current" "${chain[@]}")
   current="${parents[$current]}"
 done
@@ -47,7 +57,7 @@ chain=("$MAIN_BRANCH" "${chain[@]}")
 # Walk down to find descendants of current branch
 find_descendants() {
   local branch="$1"
-  for child in ${children[$branch]}; do
+  for child in ${(s: :)children[$branch]}; do
     chain+=("$child")
     find_descendants "$child"
   done
