@@ -254,6 +254,7 @@ export function getScript(): string {
           + '<input type="checkbox" class="review-check" ' + (reviewed ? 'checked' : '')
           + ' onclick="event.stopPropagation(); toggleReview(' + i + ', this.checked)" />'
           + '<span class="file-name">' + f.name + '</span>'
+          + '<button class="copy-ref-btn" onclick="event.stopPropagation(); copyRef(' + i + ')" title="Copy filepath@branch">⧉</button>'
           + changedBadge
           + '</span>'
           + '<span class="file-stats">'
@@ -378,6 +379,15 @@ export function getScript(): string {
       }
       expanded.add(i);
       diffEl.classList.add('expanded');
+    }
+
+    function copyRef(i) {
+      const b = branches[idx];
+      const f = b.files[i];
+      const ref = f.name + '@' + b.name;
+      navigator.clipboard.writeText(ref);
+      const btn = document.querySelectorAll('.copy-ref-btn')[i];
+      if (btn) { btn.textContent = '✓'; setTimeout(() => btn.textContent = '⧉', 1000); }
     }
 
     function toggle(i) {

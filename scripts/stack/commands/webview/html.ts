@@ -220,6 +220,18 @@ export function generateHtml(branches: BranchData[], churns: ChurnHunk[]): strin
       accent-color: #238636;
     }
     .file-name { color: #58a6ff; }
+    .copy-ref-btn {
+      background: transparent;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      font-size: 11px;
+      padding: 0 4px;
+      border-radius: 3px;
+      cursor: pointer;
+      margin-left: 4px;
+      line-height: 1.4;
+    }
+    .copy-ref-btn:hover { border-color: #58a6ff; color: #58a6ff; }
     .file.reviewed .file-name { color: #3fb950; }
     .file.changed-since-review { border-color: #d29922; }
     .file.changed-since-review .file-header { background: rgba(210, 153, 34, 0.08); }
