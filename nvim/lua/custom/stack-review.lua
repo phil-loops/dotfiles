@@ -258,7 +258,45 @@ function M.setup(data)
     churn.show(churns)
   end, { desc = "Show stack churn" })
 
+  -- Extract filepath from a diffview buffer name
+  -- Format: diffview://<repo>/<context>/<filepath>
+  -- Context is an 11-char sha, :<digit>:, or [custom]
+  local function get_diffview_filepath()
+    local bufname = vim.api.nvim_buf_get_name(0)
+    if not bufname:match("^diffview://") then return nil end
+    -- Strip diffview:// prefix
+    local rest = bufname:gsub("^diffview://", "")
+    -- The repo dir from git-town is the cwd; strip it
+    local cwd = vim.fn.getcwd():gsub("%-", "%%-") .. "/"
+    rest = rest:gsub("^" .. cwd, "")
+    -- Now rest is "<context>/<filepath>" — skip the context segment
+    -- Context: 11-char hex sha, or :<digit>:, or [custom]
+    local filepath = rest:match("^%x+/(.+)")        -- sha/filepath
+      or rest:match("^:%d+:/(.+)")                   -- :stage:/filepath
+      or rest:match("^%[custom%]/(.+)")              -- [custom]/filepath
+    return filepath
+  end
+
   vim.keymap.set("n", "<leader>sb", function()
+    local item = chain[current_idx]
+    if not item then return end
+
+    -- If in a diffview diff buffer, bless just that file
+    local filepath = get_diffview_filepath()
+    if filepath then
+      blessed.bless_file(item.branch, filepath)
+      update_panel()
+      return
+    end
+
+    -- Otherwise bless all files on the branch
+    if item.parent then
+      blessed.bless_branch(item.branch, item.parent)
+      update_panel()
+    end
+  end, { desc = "Bless current file or branch" })
+
+  vim.keymap.set("n", "<leader>sB", function()
     local item = chain[current_idx]
     if item and item.parent then
       blessed.bless_branch(item.branch, item.parent)
@@ -272,7 +310,8 @@ Stack Review Keybindings:
   ]b / [b       next/prev branch
   <leader>sp    toggle stack panel
   <leader>sc    show churn details
-  <leader>sb    bless all files on current branch
+  <leader>sb    bless file (in diff) or all files (elsewhere)
+  <leader>sB    bless all files on current branch
 
   Panel keybindings:
   <CR>          jump to branch
