@@ -310,6 +310,66 @@ function M.setup(data)
     view.panel:redraw()
   end
 
+  vim.keymap.set("n", "<leader>sd", function()
+    local item = chain[current_idx]
+    if not item then return end
+
+    local filepath = get_diffview_filepath()
+    if not filepath then
+      vim.notify("Focus a file first", vim.log.levels.WARN)
+      return
+    end
+
+    local bsha = blessed.get_sha(item.branch, filepath)
+    if not bsha then
+      vim.notify("File not blessed yet", vim.log.levels.WARN)
+      return
+    end
+
+    local fs = blessed.file_status(item.branch, filepath)
+    if fs == "clean" then
+      vim.notify("File unchanged since blessing", vim.log.levels.INFO)
+      return
+    end
+
+    -- Show diff between blessed SHA and current branch tip in a split
+    local cmd = string.format("git diff %s %s -- %s", bsha, item.branch, filepath)
+    local diff = vim.fn.system(cmd)
+    if vim.v.shell_error ~= 0 or diff == "" then
+      vim.notify("No diff found", vim.log.levels.INFO)
+      return
+    end
+
+    -- Open in a scratch buffer
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(diff, "\n"))
+    vim.api.nvim_buf_set_option(buf, "modifiable", false)
+    vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(buf, "filetype", "diff")
+
+    -- Open in a floating window
+    local width = math.min(120, vim.o.columns - 10)
+    local height = math.min(vim.api.nvim_buf_line_count(buf) + 2, vim.o.lines - 10)
+    local win = vim.api.nvim_open_win(buf, true, {
+      relative = "editor",
+      width = width,
+      height = height,
+      row = (vim.o.lines - height) / 2,
+      col = (vim.o.columns - width) / 2,
+      style = "minimal",
+      border = "rounded",
+      title = " Delta since blessed (" .. bsha:sub(1, 8) .. ") ",
+      title_pos = "center",
+    })
+
+    vim.keymap.set("n", "q", function()
+      vim.api.nvim_win_close(win, true)
+    end, { buffer = buf })
+    vim.keymap.set("n", "<Esc>", function()
+      vim.api.nvim_win_close(win, true)
+    end, { buffer = buf })
+  end, { desc = "Show delta since blessed" })
+
   vim.keymap.set("n", "<leader>sb", function()
     local item = chain[current_idx]
     if not item then return end
@@ -350,6 +410,7 @@ Stack Review Keybindings:
   <leader>sc    show churn details
   <leader>sb    bless file (in diff) or all files (elsewhere)
   <leader>sB    bless all files on current branch
+  <leader>sd    show delta since blessed (stale file)
 
   Panel keybindings:
   <CR>          jump to branch
