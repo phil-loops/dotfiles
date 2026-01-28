@@ -144,6 +144,25 @@ _loops_pr_review() {
     nvim -c "DiffviewOpen main"
 }
 
+# Swap git remotes (toggle origin between phil-loops and loops-so)
+git-swap-remote() {
+    local current_origin=$(git remote get-url origin 2>/dev/null)
+
+    if [[ "$current_origin" == *"phil-loops"* ]]; then
+        git remote rename origin phil-loops
+        git remote rename upstream origin
+        echo "Switched: origin → Loops-so (main repo)"
+    elif [[ "$current_origin" == *"Loops-so"* || "$current_origin" == *"loops-so"* ]]; then
+        git remote rename origin upstream
+        git remote rename phil-loops origin
+        echo "Switched: origin → phil-loops (your fork)"
+    else
+        echo "Unknown origin: $current_origin"
+    fi
+
+    git remote -v | grep origin
+}
+
 export GPG_TTY=$(tty)
 export PATH="$HOME/.local/bin:$PATH"
 
