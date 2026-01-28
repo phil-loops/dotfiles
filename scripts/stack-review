@@ -185,6 +185,8 @@ local function update_panel()
   end
 end
 
+local open_panel  -- forward declare
+
 local function open_review(idx)
   local chain = get_chain()
   if not chain or idx < 0 or idx >= #chain then return false end
@@ -200,15 +202,16 @@ local function open_review(idx)
   pcall(vim.cmd, "DiffviewClose")
   vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
 
+  -- Re-open panel after diffview loads (panel gets destroyed on DiffviewClose)
   vim.defer_fn(function()
-    update_panel()
-  end, 100)
+    open_panel()
+  end, 150)
 
   vim.notify(string.format("Reviewing: %s (%d/%d)", item.branch, idx + 1, #chain), vim.log.levels.INFO)
   return true
 end
 
-local function open_panel()
+open_panel = function()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
     update_panel()
     return
