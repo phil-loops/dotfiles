@@ -1,86 +1,120 @@
 -- Stack Navigator
 -- Visual floating window for navigating git branch stacks
--- Designed to be readable by both humans and Claude
+-- Uses git-town for stack management
 
 local M = {}
-
--- The loops stack command (shell function wrapper)
-local STACK_CMD = 'node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts'
 
 -- State
 local state = {
   buf = nil,
   win = nil,
   branches = {},      -- ordered list of branch names
+  parents = {},       -- branch -> parent mapping
   current_idx = 1,    -- which branch we're on
   cursor_idx = 1,     -- which line the cursor is on
-  drift_info = {},    -- { branch = { files = {}, downstream = {} } }
-  size_info = {},     -- { branch = loc }
 }
 
--- Parse stack info output
-local function parse_stack_info()
-  local output = vim.fn.system(STACK_CMD .. ' info 2>/dev/null')
+-- Read git-town lineage from git config
+local function get_git_town_lineage()
+  local output = vim.fn.systemlist('git config --local --list 2>/dev/null')
   if vim.v.shell_error ~= 0 then
+    return {}, {}
+  end
+
+  local parents = {}
+  local main_branch = 'main'
+
+  for _, line in ipairs(output) do
+    -- git-town-branch.<branch>.parent=<parent>
+    local branch, parent = line:match('^git%-town%-branch%.(.+)%.parent=(.+)$')
+    if branch and parent then
+      parents[branch] = parent
+    end
+    -- git-town.main-branch=main
+    local main = line:match('^git%-town%.main%-branch=(.+)$')
+    if main then
+      main_branch = main
+    end
+  end
+
+  return parents, main_branch
+end
+
+-- Build ordered branch list from lineage (root to leaf)
+local function build_branch_chain(parents, main_branch)
+  -- Find all branches in the current stack (ancestors + descendants of current branch)
+  local current = vim.fn.system('git branch --show-current 2>/dev/null'):gsub('%s+$', '')
+
+  -- Build ancestor chain (current -> ... -> main)
+  local ancestors = {}
+  local branch = current
+  while branch and branch ~= main_branch and parents[branch] do
+    table.insert(ancestors, 1, branch)  -- prepend
+    branch = parents[branch]
+  end
+
+  -- Add main at the start if we have ancestors
+  if #ancestors > 0 then
+    table.insert(ancestors, 1, main_branch)
+  elseif current ~= main_branch then
+    -- Current branch has no parent tracked - might be standalone
+    return { current }, 1
+  else
+    return { main_branch }, 1
+  end
+
+  -- Find descendants of current branch
+  local descendants = {}
+  local children = {}  -- parent -> list of children
+
+  for child, parent in pairs(parents) do
+    children[parent] = children[parent] or {}
+    table.insert(children[parent], child)
+  end
+
+  -- BFS from current to find all descendants
+  local queue = { current }
+  while #queue > 0 do
+    local node = table.remove(queue, 1)
+    if children[node] then
+      for _, child in ipairs(children[node]) do
+        table.insert(descendants, child)
+        table.insert(queue, child)
+      end
+    end
+  end
+
+  -- Combine: ancestors (includes main and current) + descendants
+  local all_branches = ancestors
+  for _, desc in ipairs(descendants) do
+    table.insert(all_branches, desc)
+  end
+
+  -- Find current index
+  local current_idx = 1
+  for i, b in ipairs(all_branches) do
+    if b == current then
+      current_idx = i
+      break
+    end
+  end
+
+  return all_branches, current_idx
+end
+
+-- Parse git-town branch output for display
+local function parse_stack_info()
+  local parents, main_branch = get_git_town_lineage()
+  if vim.tbl_isempty(parents) then
     return nil
   end
 
-  local branches = {}
-  local current_branch = vim.fn.system('git branch --show-current 2>/dev/null'):gsub('%s+$', '')
-  local current_idx = 1
-  local size_info = {}
-  local drift_info = {}
-
-  local idx = 0
-  for line in output:gmatch('[^\n]+') do
-    -- Extract branch name (handles tree prefixes like "└─ ", "├─ ", "│  ")
-    local branch = line:match('[└├│─ ]*([%w%-_%.]+)%s*%(')
-    if not branch then
-      branch = line:match('^([%w%-_%.]+)$')  -- root branch (no parens)
-    end
-
-    if branch and branch ~= '' then
-      idx = idx + 1
-      table.insert(branches, branch)
-
-      if branch == current_branch or line:match('<%-%-? you') then
-        current_idx = idx
-      end
-
-      -- Parse size: (✅ 58) or (🔴240) or just number
-      local loc = line:match('(%d+)%)')
-      if loc then
-        size_info[branch] = tonumber(loc)
-      end
-
-      -- Parse drift indicator
-      local drift_count = line:match('⚠️(%d+)')
-      if drift_count then
-        drift_info[branch] = { count = tonumber(drift_count), files = {} }
-      end
-    end
-
-    -- Parse drift file lines: "↳ drift: filename.ts"
-    local drift_file = line:match('↳ drift:%s*(.+)$')
-    if drift_file and #branches > 0 then
-      local last_branch = branches[#branches]
-      if drift_info[last_branch] then
-        -- Split on comma for multiple files
-        for file in drift_file:gmatch('[^,]+') do
-          file = file:match('^%s*(.-)%s*$')  -- trim
-          if file and file ~= '' and not file:match('^%+') then
-            table.insert(drift_info[last_branch].files, file)
-          end
-        end
-      end
-    end
-  end
+  local branches, current_idx = build_branch_chain(parents, main_branch)
 
   return {
     branches = branches,
+    parents = parents,
     current_idx = current_idx,
-    size_info = size_info,
-    drift_info = drift_info,
   }
 end
 
@@ -102,50 +136,24 @@ local function render()
     if i == state.current_idx then
       prefix = '● '
       hl = 'Title'
+      suffix = '  ← you'
     else
       prefix = '○ '
     end
 
-    -- Size indicator
-    local loc = state.size_info[branch]
-    if loc then
-      if loc > 150 then
-        suffix = suffix .. string.format(' 🔴%d', loc)
-      else
-        suffix = suffix .. string.format(' %d', loc)
-      end
-    end
-
-    -- Drift indicator
-    local drift = state.drift_info[branch]
-    if drift and drift.count > 0 then
-      suffix = suffix .. string.format(' ⚠️%d', drift.count)
-      hl = 'WarningMsg'
-    end
-
-    -- You are here
-    if i == state.current_idx then
-      suffix = suffix .. '  ← you'
-    end
-
-    local line = prefix .. branch .. suffix
+    -- Indent based on depth (visual tree)
+    local indent = string.rep('  ', i - 1)
+    local line = indent .. prefix .. branch .. suffix
     table.insert(lines, line)
 
     if hl then
       table.insert(highlights, { line = i, hl = hl })
     end
-
-    -- Show drifted files indented under branch
-    if drift and #drift.files > 0 then
-      local drift_line = '    ↳ ' .. table.concat(drift.files, ', ')
-      table.insert(lines, drift_line)
-      table.insert(highlights, { line = #lines, hl = 'Comment' })
-    end
   end
 
   -- Footer
   table.insert(lines, '')
-  table.insert(lines, ' [j/k] navigate  [enter] goto  [d] drift  [q] quit')
+  table.insert(lines, ' [j/k] navigate  [enter] goto  [q] quit')
   table.insert(highlights, { line = #lines, hl = 'Comment' })
 
   vim.api.nvim_buf_set_option(state.buf, 'modifiable', true)
@@ -200,7 +208,7 @@ local function setup_keymaps()
   -- Navigate (j/k are natural, but we need to track which branch we're on)
   vim.keymap.set('n', 'j', function()
     local pos = vim.api.nvim_win_get_cursor(state.win)
-    local new_row = math.min(pos[1] + 1, vim.api.nvim_buf_line_count(state.buf) - 2)
+    local new_row = math.min(pos[1] + 1, #state.branches)
     vim.api.nvim_win_set_cursor(state.win, { new_row, 0 })
   end, opts)
 
@@ -213,29 +221,14 @@ local function setup_keymaps()
   -- Go to branch under cursor
   vim.keymap.set('n', '<CR>', function()
     local pos = vim.api.nvim_win_get_cursor(state.win)
-    local line = vim.api.nvim_buf_get_lines(state.buf, pos[1] - 1, pos[1], false)[1]
+    local idx = pos[1]
+    local branch = state.branches[idx]
 
-    -- Extract branch name from line
-    local branch = line:match('[●○]%s+([%w%-_%.]+)')
     if branch then
       M.close()
-      vim.fn.system(STACK_CMD .. ' go ' .. branch)
+      vim.fn.system('git checkout ' .. branch .. ' 2>/dev/null')
       vim.cmd('edit!')  -- Reload current buffer
       vim.notify('Switched to ' .. branch)
-    end
-  end, opts)
-
-  -- Show drift details for branch under cursor
-  vim.keymap.set('n', 'd', function()
-    local pos = vim.api.nvim_win_get_cursor(state.win)
-    local line = vim.api.nvim_buf_get_lines(state.buf, pos[1] - 1, pos[1], false)[1]
-    local branch = line:match('[●○]%s+([%w%-_%.]+)')
-
-    if branch and state.drift_info[branch] then
-      M.close()
-      M.show_drift(branch)
-    else
-      vim.notify('No drift on this branch', vim.log.levels.INFO)
     end
   end, opts)
 
@@ -258,14 +251,13 @@ end
 function M.refresh()
   local info = parse_stack_info()
   if not info then
-    vim.notify('Not in a stack', vim.log.levels.WARN)
+    vim.notify('Not in a git-town stack (run: git town init)', vim.log.levels.WARN)
     return false
   end
 
   state.branches = info.branches
+  state.parents = info.parents
   state.current_idx = info.current_idx
-  state.size_info = info.size_info
-  state.drift_info = info.drift_info
 
   if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
     render()
@@ -298,48 +290,16 @@ function M.open()
   vim.api.nvim_win_set_cursor(state.win, { state.current_idx, 0 })
 end
 
--- Show drift details for a specific branch
-function M.show_drift(branch)
-  local output = vim.fn.system(STACK_CMD .. ' info -d 2>/dev/null')
-
-  -- Create a scratch buffer with drift details
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_option(buf, 'bufhidden', 'wipe')
-
-  local lines = {
-    'Drift Details: ' .. branch,
-    string.rep('─', 40),
-    '',
-  }
-
-  -- Parse drift info for this branch
-  local in_drift_section = false
-  for line in output:gmatch('[^\n]+') do
-    if line:match('Drifted files') then
-      in_drift_section = true
-    elseif in_drift_section then
-      table.insert(lines, line)
-    end
+-- Show diff for a specific branch vs its parent
+function M.show_diff(branch)
+  local parent = state.parents[branch]
+  if not parent then
+    vim.notify('No parent for ' .. branch, vim.log.levels.WARN)
+    return
   end
 
-  if #lines == 3 then
-    table.insert(lines, 'No drift details available')
-    table.insert(lines, '')
-    table.insert(lines, 'Run: loops stack info -d')
-  end
-
-  table.insert(lines, '')
-  table.insert(lines, '[q] close')
-
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_buf_set_option(buf, 'modifiable', false)
-
-  -- Open in split
-  vim.cmd('split')
-  vim.api.nvim_win_set_buf(0, buf)
-  vim.api.nvim_win_set_height(0, math.min(#lines + 2, 15))
-
-  vim.keymap.set('n', 'q', ':close<CR>', { buffer = buf, silent = true })
+  -- Open diffview comparing parent to branch
+  vim.cmd('DiffviewOpen ' .. parent .. '..' .. branch)
 end
 
 -- Toggle the navigator
@@ -359,22 +319,26 @@ function M.setup(opts)
   local key = opts.key or '<leader>sv'
   vim.keymap.set('n', key, function() M.toggle() end, { desc = 'Stack: View navigator' })
 
-  -- Also set up [b and ]b for quick navigation without opening the window
+  -- [b and ]b for quick navigation using git-town
   vim.keymap.set('n', '[b', function()
-    vim.fn.system(STACK_CMD .. ' go prev 2>/dev/null')
+    vim.fn.system('git town down 2>/dev/null')
     if vim.v.shell_error == 0 then
       vim.cmd('edit!')
-      vim.notify('← ' .. vim.fn.system('git branch --show-current'):gsub('%s+$', ''))
+      vim.notify('↓ ' .. vim.fn.system('git branch --show-current'):gsub('%s+$', ''))
+    else
+      vim.notify('Already at root', vim.log.levels.INFO)
     end
-  end, { desc = 'Previous branch in stack' })
+  end, { desc = 'Parent branch (git town down)' })
 
   vim.keymap.set('n', ']b', function()
-    vim.fn.system(STACK_CMD .. ' go next 2>/dev/null')
+    vim.fn.system('git town up 2>/dev/null')
     if vim.v.shell_error == 0 then
       vim.cmd('edit!')
-      vim.notify('→ ' .. vim.fn.system('git branch --show-current'):gsub('%s+$', ''))
+      vim.notify('↑ ' .. vim.fn.system('git branch --show-current'):gsub('%s+$', ''))
+    else
+      vim.notify('Already at leaf', vim.log.levels.INFO)
     end
-  end, { desc = 'Next branch in stack' })
+  end, { desc = 'Child branch (git town up)' })
 end
 
 return M

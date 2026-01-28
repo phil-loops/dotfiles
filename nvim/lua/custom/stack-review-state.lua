@@ -93,29 +93,21 @@ local function get_state_path()
   return state_dir .. '/review-state.json'
 end
 
--- Read stack file to get ordered branch list
+-- Read stack from git-town
 local function read_stack_file()
-  local state_dir = get_state_dir()
-  if not state_dir then
+  local git_town = require('custom.stack-git-town')
+  local parents, main_branch = git_town.get_lineage()
+
+  if vim.tbl_isempty(parents) then
     return {}, {}
   end
 
-  local stack_path = state_dir .. '/stack'
-  local file = io.open(stack_path, 'r')
-  if not file then
-    return {}, {}
-  end
-
+  -- Get ordered branch list
+  local all_branches = git_town.get_all_branches()
   local branches = {}
-  local parents = {}
-  for line in file:lines() do
-    local child, parent = line:match('^([^:]+):(.+)$')
-    if child and parent then
-      table.insert(branches, child)
-      parents[child] = parent
-    end
+  for _, item in ipairs(all_branches) do
+    table.insert(branches, item.branch)
   end
-  file:close()
 
   return branches, parents
 end
