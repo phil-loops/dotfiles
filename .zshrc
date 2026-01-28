@@ -87,6 +87,7 @@ loops() {
                     echo "  loops stack snapshot - save current state"
                     echo "  loops stack diff     - show changes since snapshot"
                     echo "  loops stack webview  - open stack viewer in browser"
+                    echo "  loops stack flow     - sync, push, compress, webview"
                     ;;
             esac
             ;;
