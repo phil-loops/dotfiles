@@ -56,6 +56,22 @@ export function getScript(): string {
       }
     }
 
+    // Auto-store baseline: on first load, record every file's diff so we can
+    // detect future changes without requiring a manual check/uncheck cycle.
+    function ensureBaselines() {
+      for (const b of branches) {
+        for (const f of b.files) {
+          const key = reviewKey(b.name, f.name);
+          if (localStorage.getItem(key) === null) {
+            // No review state at all — store just the diff snapshot (not the
+            // hash) so "wasReviewed" remains false but showDelta has data.
+            localStorage.setItem(key + ':diff', f.diff);
+          }
+        }
+      }
+    }
+    ensureBaselines();
+
     function computeDelta(oldDiff, newDiff) {
       const oldLines = new Set(oldDiff.split('\\n'));
       const newLines = newDiff.split('\\n');
@@ -66,6 +82,16 @@ export function getScript(): string {
     function getReviewedCount() {
       const b = branches[idx];
       return b.files.filter(f => isReviewed(b.name, f.name, f.diff)).length;
+    }
+
+    function branchReviewStatus(br) {
+      if (br.files.length === 0) return 'empty';
+      const reviewed = br.files.filter(f => isReviewed(br.name, f.name, f.diff)).length;
+      const changed = br.files.some(f => !isReviewed(br.name, f.name, f.diff) && wasReviewed(br.name, f.name));
+      if (reviewed === br.files.length) return 'done';
+      if (changed) return 'changed';
+      if (reviewed > 0) return 'partial';
+      return 'none';
     }
 
     // --- Diff parsing ---
@@ -163,8 +189,14 @@ export function getScript(): string {
       document.getElementById('branchList').innerHTML = branches.map((br, i) => {
         const cc = churnByBranch[br.name] || 0;
         const churnBadge = cc > 0 ? '<span class="churn-badge" title="' + cc + ' churned lines">~' + cc + '</span>' : '';
-        return '<div class="branch-item ' + (i === idx ? 'active' : '') + '" onclick="go(' + i + ')">'
+        const status = branchReviewStatus(br);
+        const statusIcon = status === 'done' ? '<span class="branch-done" title="All files reviewed">✓</span>'
+          : status === 'changed' ? '<span class="branch-changed" title="Files changed since review">!</span>'
+          : status === 'partial' ? '<span class="branch-partial" title="Partially reviewed">·</span>'
+          : '';
+        return '<div class="branch-item ' + (i === idx ? 'active' : '') + ' branch-' + status + '" onclick="go(' + i + ')">'
           + '<span class="branch-num">' + String(i + 1).padStart(2, '0') + '</span>'
+          + statusIcon
           + '<span class="branch-label">' + br.name.replace(/^goals-v2-\\d+-/, '') + '</span>'
           + churnBadge
           + '<span class="branch-stats">+' + br.insertions + '/-' + br.deletions + '</span>'
@@ -250,16 +282,35 @@ export function getScript(): string {
         document.getElementById('diff-' + i).classList.add('expanded');
       }
       updateReviewCounter();
+      updateSidebarStatus();
+    }
+
+    function updateSidebarStatus() {
+      const items = document.querySelectorAll('.branch-item');
+      items.forEach((el, i) => {
+        const br = branches[i];
+        const status = branchReviewStatus(br);
+        el.className = el.className.replace(/branch-(done|changed|partial|none|empty)/g, '').trim();
+        el.classList.add('branch-' + status);
+        // Update the status icon
+        const existing = el.querySelector('.branch-done, .branch-changed, .branch-partial');
+        if (existing) existing.remove();
+        const icon = status === 'done' ? '<span class="branch-done" title="All files reviewed">✓</span>'
+          : status === 'changed' ? '<span class="branch-changed" title="Files changed since review">!</span>'
+          : status === 'partial' ? '<span class="branch-partial" title="Partially reviewed">·</span>'
+          : '';
+        if (icon) {
+          const num = el.querySelector('.branch-num');
+          if (num) num.insertAdjacentHTML('afterend', icon);
+        }
+      });
     }
 
     function showDelta(i) {
       const b = branches[idx];
       const f = b.files[i];
       const oldDiff = getStoredDiff(b.name, f.name);
-      if (!oldDiff) {
-        alert('No previous diff stored — check and uncheck to establish baseline');
-        return;
-      }
+      if (!oldDiff) return;
       const oldHunkLines = new Set(oldDiff.split('\\n'));
       const newDiffLines = f.diff.split('\\n');
 
