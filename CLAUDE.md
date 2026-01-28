@@ -14,12 +14,24 @@ This ensures nothing is lost if the computer dies.
 
 # Git Branch Stacks
 
-Use **git-town** for stacked PRs. Key commands:
+Use **git-town** for stacked PRs.
+
+**IMPORTANT: Always create branches with git-town, never `git checkout -b`:**
+```bash
+git town append <name>   # Create child of current branch
+git town prepend <name>  # Create parent of current branch
+```
+
+If you accidentally created a branch with `git checkout -b`, fix it:
+```bash
+git town set-parent <parent-branch>
+```
 
 | Task | Command |
 |------|---------|
 | Create child branch | `git town append <name>` |
 | Create parent branch | `git town prepend <name>` |
+| Set parent (fix untracked) | `git town set-parent <branch>` |
 | Sync all branches | `git town sync` |
 | Create PR | `git town propose` |
 | Navigate up/down | `git town up` / `git town down` |
