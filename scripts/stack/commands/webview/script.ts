@@ -21,9 +21,12 @@ export function getScript(): string {
     // --- Review state (localStorage) ---
 
     function hashStr(s) {
+      // Hash only content lines, not @@ headers (which change when line
+      // numbers shift even though the actual diff content is identical).
+      const content = s.split('\\n').filter(l => !l.startsWith('@@')).join('\\n');
       let h = 0;
-      for (let i = 0; i < s.length; i++) {
-        h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+      for (let i = 0; i < content.length; i++) {
+        h = ((h << 5) - h + content.charCodeAt(i)) | 0;
       }
       return h.toString(36);
     }
@@ -58,13 +61,12 @@ export function getScript(): string {
 
     // Auto-store baseline: on first load, record every file's diff so we can
     // detect future changes without requiring a manual check/uncheck cycle.
+    // Only store if there's no diff snapshot at all yet.
     function ensureBaselines() {
       for (const b of branches) {
         for (const f of b.files) {
           const key = reviewKey(b.name, f.name);
-          if (localStorage.getItem(key) === null) {
-            // No review state at all — store just the diff snapshot (not the
-            // hash) so "wasReviewed" remains false but showDelta has data.
+          if (localStorage.getItem(key + ':diff') === null) {
             localStorage.setItem(key + ':diff', f.diff);
           }
         }
