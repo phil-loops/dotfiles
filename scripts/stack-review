@@ -130,6 +130,11 @@ cat > "$LUA_FILE" << 'LUASCRIPT'
 local chain_file = "CHAIN_FILE_PATH"
 local state_file = "STATE_FILE_PATH"
 
+-- Load churn detection module
+local churn_ok, stack_churn = pcall(require, "custom.stack-churn")
+local churn_data = {}
+local churn_by_branch = {}
+
 local function read_json(file)
   local f = io.open(file, "r")
   if not f then return nil end
@@ -147,6 +152,16 @@ end
 local function get_chain() return read_json(chain_file) end
 local function get_state() return read_json(state_file) end
 local function set_state(s) write_json(state_file, s) end
+
+-- Analyze churn on startup
+local function analyze_churn()
+  if not churn_ok then return end
+  local chain = get_chain()
+  if not chain then return end
+
+  churn_data = stack_churn.analyze(chain)
+  churn_by_branch = stack_churn.summarize_by_branch(churn_data)
+end
 
 -- Panel state
 local panel_buf = nil
@@ -171,6 +186,12 @@ local function update_panel()
       else
         health_str = string.format(" ✅%d", item.health.loc)
       end
+    end
+
+    -- Add churn indicator if this branch has churned hunks
+    local churn_count = churn_by_branch[item.branch] or 0
+    if churn_count > 0 then
+      health_str = health_str .. string.format(" 🔄%d", churn_count)
     end
 
     table.insert(lines, string.format("%s%s%s%s", prefix, short_name, health_str, marker))
@@ -313,11 +334,47 @@ Stack Review Keybindings:
   J / K         next/prev (in panel)
   <CR>          jump to branch (in panel)
   <leader>gp    toggle branch panel
+  <leader>gc    show churn details
   q             quit
 ]], vim.log.levels.INFO)
 end, { desc = "Help" })
 
+-- Churn details command
+vim.keymap.set("n", "<leader>gc", function()
+  if not churn_ok then
+    vim.notify("Churn module not loaded", vim.log.levels.WARN)
+    return
+  end
+  if #churn_data == 0 then
+    vim.notify("No churn detected - clean stack!", vim.log.levels.INFO)
+    return
+  end
+
+  local report = stack_churn.format_report(churn_data)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(report, "\n"))
+  vim.bo[buf].modifiable = false
+
+  local width = 70
+  local height = math.min(#churn_data * 5 + 4, 30)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = (vim.o.lines - height) / 2,
+    col = (vim.o.columns - width) / 2,
+    style = "minimal",
+    border = "rounded",
+    title = " Stack Churn ",
+    title_pos = "center",
+  })
+
+  vim.keymap.set("n", "q", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+  vim.keymap.set("n", "<Esc>", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+end, { desc = "Show churn details" })
+
 -- Start review
+analyze_churn()  -- Calculate churn first
 local state = get_state()
 open_review(state.index)
 vim.defer_fn(open_panel, 200)
