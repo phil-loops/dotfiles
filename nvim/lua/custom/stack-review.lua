@@ -15,42 +15,54 @@ local function update_panel()
   if not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
 
   local lines = {}
+  local summaries = {} -- cache per-branch summary for reuse in highlights
   for i, item in ipairs(chain) do
     local marker = (i == current_idx) and " ◀" or ""
     local prefix = (i == current_idx) and "▶ " or "  "
-    -- Shorten branch names (remove common prefixes)
     local short_name = item.branch:gsub("goals%-v%d+%-", "")
 
-    -- Blessed status indicator
-    local bstatus = blessed.branch_status(item.branch, item.parent or "")
-    local bicon = bstatus == "clean" and "✓ "
-      or bstatus == "stale" and "! "
-      or "  "
+    local bsum = blessed.summary(item.branch, item.parent or "")
+    summaries[i] = bsum
+    local bicon, bcount
+    if bsum.total == 0 then
+      bicon = "  "
+      bcount = ""
+    elseif bsum.status == "clean" then
+      bicon = "✓ "
+      bcount = ""
+    elseif bsum.status == "unblessed" then
+      bicon = "  "
+      bcount = ""
+    else
+      bicon = bsum.stale_count > 0 and "! " or "· "
+      bcount = string.format(" %d/%d", bsum.reviewed, bsum.total)
+    end
 
-    -- Churn indicator
     local suffix = ""
     local cc = churn_by_branch[item.branch] or 0
     if cc > 0 then
       suffix = string.format(" ~%d", cc)
     end
 
-    table.insert(lines, string.format("%s%s%s%s%s", prefix, bicon, short_name, suffix, marker))
+    table.insert(lines, string.format("%s%s%s%s%s%s", prefix, bicon, short_name, bcount, suffix, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
   vim.api.nvim_buf_set_lines(panel_buf, 0, -1, false, lines)
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", false)
 
-  -- Apply highlights for blessed status
+  -- Apply highlights for blessed status (reuse cached summaries)
   local ns = vim.api.nvim_create_namespace("stack_blessed")
   vim.api.nvim_buf_clear_namespace(panel_buf, ns, 0, -1)
-  for i, item in ipairs(chain) do
-    local bstatus = blessed.branch_status(item.branch, item.parent or "")
+  for i, _ in ipairs(chain) do
+    local bsum = summaries[i]
     local col = 2 -- after "▶ " or "  " prefix
-    if bstatus == "clean" then
+    if bsum.status == "clean" then
       vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticOk", i - 1, col, col + 4)
-    elseif bstatus == "stale" then
+    elseif bsum.status == "stale" then
       vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticWarn", i - 1, col, col + 2)
+    elseif bsum.status == "partial" then
+      vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticInfo", i - 1, col, col + 3)
     end
   end
 
@@ -75,9 +87,9 @@ local function open_review(idx)
   local bsum = blessed.summary(item.branch, item.parent or "")
   local extra = ""
   if bsum.status == "clean" then
-    extra = " [blessed ✓]"
-  elseif bsum.status == "stale" then
-    extra = string.format(" [%d files stale since review]", bsum.stale_count)
+    extra = string.format(" [%d/%d ✓]", bsum.reviewed, bsum.total)
+  elseif bsum.status == "partial" or bsum.status == "stale" then
+    extra = string.format(" [%d/%d reviewed, %d stale]", bsum.reviewed, bsum.total, bsum.stale_count)
   end
   vim.notify(string.format("Reviewing: %s (%d/%d)%s", item.branch, idx, #chain, extra), vim.log.levels.INFO)
 
@@ -152,8 +164,8 @@ function M.open_panel()
   vim.keymap.set("n", "x", function()
     local line = vim.api.nvim_win_get_cursor(0)[1]
     local item = chain[line]
-    if item then
-      blessed.bless(item.branch)
+    if item and item.parent then
+      blessed.bless_branch(item.branch, item.parent)
       update_panel()
     end
   end, opts)
@@ -162,7 +174,7 @@ function M.open_panel()
     local line = vim.api.nvim_win_get_cursor(0)[1]
     local item = chain[line]
     if item then
-      blessed.unbless(item.branch)
+      blessed.unbless_branch(item.branch)
       vim.notify("Unblessed " .. item.branch, vim.log.levels.INFO)
       update_panel()
     end
@@ -174,13 +186,13 @@ function M.open_panel()
     if not item then return end
     local sum = blessed.summary(item.branch, item.parent or "")
     if sum.status == "unblessed" then
-      vim.notify(item.branch .. ": not yet reviewed", vim.log.levels.INFO)
+      vim.notify(item.branch .. ": no files reviewed yet", vim.log.levels.INFO)
     elseif sum.status == "clean" then
-      vim.notify(item.branch .. ": clean (blessed at " .. sum.sha:sub(1, 8) .. ")", vim.log.levels.INFO)
+      vim.notify(string.format("%s: all %d files clean", item.branch, sum.total), vim.log.levels.INFO)
     else
-      local msg = { item.branch .. ": " .. sum.stale_count .. " stale files (blessed at " .. sum.sha:sub(1, 8) .. "):" }
+      local msg = { string.format("%s: %d/%d reviewed, %d stale:", item.branch, sum.reviewed, sum.total, sum.stale_count) }
       for _, f in ipairs(sum.stale_files) do
-        table.insert(msg, "  " .. f)
+        table.insert(msg, "  ! " .. f)
       end
       vim.notify(table.concat(msg, "\n"), vim.log.levels.WARN)
     end
@@ -248,11 +260,11 @@ function M.setup(data)
 
   vim.keymap.set("n", "<leader>sb", function()
     local item = chain[current_idx]
-    if item then
-      blessed.bless(item.branch)
+    if item and item.parent then
+      blessed.bless_branch(item.branch, item.parent)
       update_panel()
     end
-  end, { desc = "Bless current branch" })
+  end, { desc = "Bless all files on current branch" })
 
   vim.keymap.set("n", "g?", function()
     vim.notify([[
@@ -260,15 +272,18 @@ Stack Review Keybindings:
   ]b / [b       next/prev branch
   <leader>sp    toggle stack panel
   <leader>sc    show churn details
-  <leader>sb    bless current branch
+  <leader>sb    bless all files on current branch
 
   Panel keybindings:
   <CR>          jump to branch
   j / k         move cursor
-  x             bless branch (mark reviewed)
+  x             bless all files on branch
   X             unbless branch
-  s             show stale files
+  s             show file review status
   q             quit
+
+  Blessed = "I reviewed this file at this commit"
+  ✓ = all clean  · = partially reviewed  ! = stale files
 ]], vim.log.levels.INFO)
   end, { desc = "Stack review help" })
 

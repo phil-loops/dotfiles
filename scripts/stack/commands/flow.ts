@@ -1,7 +1,6 @@
 import { execSync } from "child_process";
 import { getStackPrefix } from "../lib/git-town.ts";
 import { push } from "./push.ts";
-import { webview } from "./webview/index.ts";
 
 function run(cmd: string, dryRun: boolean): boolean {
   if (dryRun) {
@@ -19,7 +18,6 @@ function run(cmd: string, dryRun: boolean): boolean {
 
 export function flow(args: string[]) {
   const dryRun = args.includes("--dry-run");
-  const noWebview = args.includes("--no-webview");
   const prefix = getStackPrefix();
 
   if (!prefix) {
@@ -51,18 +49,6 @@ export function flow(args: string[]) {
   if (!run("git town compress --stack", dryRun)) {
     console.error("\nCompress failed.");
     process.exit(1);
-  }
-
-  // 4. Webview
-  if (noWebview) {
-    console.log("\nStep 4: Webview (skipped)");
-  } else {
-    console.log("\nStep 4: Regenerate webview");
-    if (dryRun) {
-      console.log(`  [dry-run] Would regenerate webview for prefix: ${prefix}`);
-    } else {
-      webview([prefix]);
-    }
   }
 
   console.log("\nFlow complete.");
