@@ -314,7 +314,7 @@ function M.show_interactive(churn)
 
   table.insert(lines, "Churn: code added then removed (wasted work)")
   table.insert(lines, "")
-  table.insert(lines, "[<CR>] view code  [o] open file  [d] diff branches  [q] quit")
+  table.insert(lines, "[<CR>] view code  [t] trace evolution  [d] diff  [o] open  [q] quit")
   table.insert(lines, string.rep("─", 60))
 
   for i, c in ipairs(churn) do
@@ -415,6 +415,19 @@ function M.show_interactive(churn)
     if not c then return end
     vim.api.nvim_win_close(win, true)
     vim.cmd("DiffviewOpen " .. c.branch_added .. ".." .. c.branch_removed .. " -- " .. c.file)
+  end, { buffer = buf })
+
+  -- Trace file evolution through entire stack
+  vim.keymap.set("n", "t", function()
+    local c = get_current_churn()
+    if not c then return end
+    vim.api.nvim_win_close(win, true)
+    local ok, inspect = pcall(require, "custom.stack-file-inspect")
+    if ok then
+      inspect.inspect(c.file)
+    else
+      vim.notify("stack-file-inspect not available", vim.log.levels.WARN)
+    end
   end, { buffer = buf })
 
   vim.keymap.set("n", "q", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
