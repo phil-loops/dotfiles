@@ -280,12 +280,12 @@ function printResults(decisions: InjectionDecision[], stack: StackBranch[]) {
     for (const file of files) {
       console.log(`   git apply /tmp/stack-patches/${file.replace(/\//g, "_")}.patch`);
     }
-    console.log(`   git add -A && git commit --amend --no-edit`);
+    console.log(`   git add -A && git commit -m "fix: apply windowKey changes"`);
     step++;
   }
 
-  console.log(`\n${step}. Sync the stack:`);
-  console.log("   loops stack update && loops stack push");
+  console.log(`\n${step}. Sync the stack (rebase downstream branches):`);
+  console.log("   git town sync");
 
   console.log("\nLegend: ● high confidence  ◐ medium  ○ low");
 }
