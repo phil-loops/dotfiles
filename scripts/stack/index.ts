@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execSync } from "child_process";
 import { webview } from "./commands/webview.ts";
+import { inject } from "./commands/inject.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -9,6 +10,10 @@ const commands: Record<string, { run: (args: string[]) => void; desc: string }> 
   webview: {
     run: webview,
     desc: "Open interactive stack viewer in browser (usage: webview [prefix])",
+  },
+  inject: {
+    run: inject,
+    desc: "Analyze changes and suggest injection points in the stack",
   },
 };
 
