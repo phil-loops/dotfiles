@@ -8,7 +8,7 @@ import { push } from "./commands/push.ts";
 const args = process.argv.slice(2);
 const command = args[0];
 
-const commands: Record<string, { run: (args: string[]) => void; desc: string }> = {
+const commands: Record<string, { run: (args: string[]) => void | Promise<void>; desc: string }> = {
   branches: {
     run: branches,
     desc: "List stack branches in order (--json, --names)",
@@ -27,7 +27,7 @@ const commands: Record<string, { run: (args: string[]) => void; desc: string }> 
   },
   inject: {
     run: inject,
-    desc: "Analyze changes and suggest injection points",
+    desc: "AI-powered patch routing (--save, --no-claude)",
   },
 };
 
@@ -51,4 +51,7 @@ if (!cmd) {
   process.exit(1);
 }
 
-cmd.run(args.slice(1));
+Promise.resolve(cmd.run(args.slice(1))).catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

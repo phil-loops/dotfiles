@@ -1,152 +1,231 @@
+import { execSync, spawnSync } from "child_process";
+import { writeFileSync, mkdtempSync, rmSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { git, getStackBranches, type StackBranch } from "../lib/git-town.ts";
 
-interface Hunk {
+interface FilePatch {
   file: string;
-  startLine: number;
-  lineCount: number;
-  header: string;
-  content: string;
-  targetBranch: string | null;
-  confidence: "high" | "medium" | "low";
-  reason: string;
+  patch: string;
+  isNew: boolean;
 }
 
-function parseDiff(diff: string): Hunk[] {
-  const hunks: Hunk[] = [];
-  let currentFile = "";
-  let currentHunk: Partial<Hunk> | null = null;
+interface InjectionDecision {
+  file: string;
+  targetBranch: string;
+  reasoning: string;
+  confidence: "high" | "medium" | "low";
+}
 
-  for (const line of diff.split("\n")) {
-    // New file
-    if (line.startsWith("diff --git")) {
-      const match = line.match(/diff --git a\/(.+) b\//);
-      if (match) currentFile = match[1];
-      continue;
+function getPatches(): FilePatch[] {
+  const patches: FilePatch[] = [];
+
+  // Get list of changed files
+  const status = git("status --porcelain");
+  if (!status) return patches;
+
+  const files = new Set<string>();
+  for (const line of status.split("\n")) {
+    if (!line.trim()) continue;
+    const statusCode = line.substring(0, 2);
+    const file = line.substring(3).trim();
+
+    // Handle renames
+    if (file.includes(" -> ")) {
+      files.add(file.split(" -> ")[1]);
+    } else {
+      files.add(file);
     }
 
-    // Hunk header: @@ -oldStart,oldCount +newStart,newCount @@
-    if (line.startsWith("@@")) {
-      if (currentHunk && currentHunk.file) {
-        hunks.push(currentHunk as Hunk);
+    // Track new files
+    if (statusCode.includes("?") || statusCode.includes("A")) {
+      // For new files, read the content as a "patch"
+      try {
+        const content = execSync(`cat "${file}"`, { encoding: "utf-8" });
+        patches.push({
+          file,
+          patch: `+++ ${file} (new file)\n${content}`,
+          isNew: true,
+        });
+      } catch {
+        // File might not exist or be readable
       }
+    }
+  }
 
-      const match = line.match(/@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
-      if (match) {
-        currentHunk = {
-          file: currentFile,
-          startLine: parseInt(match[1]),
-          lineCount: parseInt(match[2] || "1"),
-          header: line,
-          content: line + "\n",
-          targetBranch: null,
-          confidence: "low",
-          reason: "",
+  // Get diffs for modified files
+  const diff = git("diff");
+  if (diff) {
+    let currentFile = "";
+    let currentPatch = "";
+
+    for (const line of diff.split("\n")) {
+      if (line.startsWith("diff --git")) {
+        // Save previous patch
+        if (currentFile && currentPatch) {
+          // Don't duplicate new files
+          if (!patches.find((p) => p.file === currentFile)) {
+            patches.push({ file: currentFile, patch: currentPatch, isNew: false });
+          }
+        }
+        const match = line.match(/diff --git a\/(.+) b\//);
+        currentFile = match ? match[1] : "";
+        currentPatch = line + "\n";
+      } else {
+        currentPatch += line + "\n";
+      }
+    }
+
+    // Don't forget last file
+    if (currentFile && currentPatch) {
+      if (!patches.find((p) => p.file === currentFile)) {
+        patches.push({ file: currentFile, patch: currentPatch, isNew: false });
+      }
+    }
+  }
+
+  return patches;
+}
+
+function buildStackSummary(stack: StackBranch[]): string {
+  const lines: string[] = ["Branch stack (in order from base to tip):"];
+
+  for (let i = 0; i < stack.length; i++) {
+    const branch = stack[i];
+    // Get commit messages for this branch
+    const parent = i === 0 ? "main" : stack[i - 1].name;
+    const commits = git(`log --oneline ${parent}..${branch.name} 2>/dev/null`) || "(no commits)";
+    const firstCommit = commits.split("\n")[0] || "(empty)";
+
+    lines.push(`  ${String(i + 1).padStart(2, "0")}. ${branch.name}`);
+    lines.push(`      ${firstCommit}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildPatchSummary(patches: FilePatch[]): string {
+  const lines: string[] = ["Files changed:"];
+
+  for (const patch of patches) {
+    const lineCount = patch.patch.split("\n").length;
+    const status = patch.isNew ? "(new)" : "(modified)";
+    lines.push(`  - ${patch.file} ${status} (~${lineCount} lines)`);
+  }
+
+  return lines.join("\n");
+}
+
+async function analyzeWithClaude(
+  patch: FilePatch,
+  allPatches: FilePatch[],
+  stack: StackBranch[],
+  featureDescription: string
+): Promise<InjectionDecision> {
+  const stackSummary = buildStackSummary(stack);
+  const patchSummary = buildPatchSummary(allPatches);
+
+  const prompt = `You are analyzing a code change to determine which branch in a stacked PR workflow it should be applied to.
+
+## Feature Overview
+${featureDescription}
+
+## Branch Stack
+${stackSummary}
+
+## All Patches in This Change Set
+${patchSummary}
+
+## Specific Patch to Analyze
+File: ${patch.file}
+${patch.isNew ? "(This is a NEW file)" : "(This is a MODIFIED file)"}
+
+\`\`\`diff
+${patch.patch.slice(0, 8000)}${patch.patch.length > 8000 ? "\n... (truncated)" : ""}
+\`\`\`
+
+## Task
+Determine which branch this patch should be applied to. Consider:
+1. The file path and what layer it represents (schema, queries, logic, jobs, UI, etc.)
+2. The content of the changes and what they depend on
+3. The branch naming conventions and what each branch likely contains
+
+Respond with ONLY a JSON object (no markdown, no explanation outside the JSON):
+{
+  "targetBranch": "exact-branch-name-from-list",
+  "reasoning": "Brief explanation of why this branch",
+  "confidence": "high" | "medium" | "low"
+}
+
+If the change should go on the CURRENT branch (tip of stack), use the last branch in the list.
+If you're unsure, use "low" confidence and pick the most likely branch.`;
+
+  // Write prompt to temp file
+  const tmpDir = mkdtempSync(join(tmpdir(), "inject-"));
+  const promptFile = join(tmpDir, "prompt.txt");
+  writeFileSync(promptFile, prompt);
+
+  try {
+    // Call Claude CLI
+    const result = spawnSync(
+      "claude",
+      ["-p", prompt, "--output-format", "text"],
+      {
+        encoding: "utf-8",
+        timeout: 60000,
+        maxBuffer: 10 * 1024 * 1024,
+      }
+    );
+
+    if (result.error) {
+      console.error(`  Claude CLI error: ${result.error.message}`);
+      return {
+        file: patch.file,
+        targetBranch: stack[stack.length - 1].name,
+        reasoning: "Claude CLI failed, defaulting to current branch",
+        confidence: "low",
+      };
+    }
+
+    const output = result.stdout?.trim() || "";
+
+    // Try to parse JSON from response
+    try {
+      // Find JSON in the response (might have extra text)
+      const jsonMatch = output.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          file: patch.file,
+          targetBranch: parsed.targetBranch || stack[stack.length - 1].name,
+          reasoning: parsed.reasoning || "No reasoning provided",
+          confidence: parsed.confidence || "low",
         };
       }
-      continue;
+    } catch (parseErr) {
+      console.error(`  Failed to parse Claude response: ${output.slice(0, 200)}`);
     }
 
-    // Accumulate hunk content
-    if (currentHunk && (line.startsWith("+") || line.startsWith("-") || line.startsWith(" "))) {
-      currentHunk.content += line + "\n";
-    }
+    return {
+      file: patch.file,
+      targetBranch: stack[stack.length - 1].name,
+      reasoning: "Could not parse Claude response",
+      confidence: "low",
+    };
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
   }
-
-  // Don't forget last hunk
-  if (currentHunk && currentHunk.file) {
-    hunks.push(currentHunk as Hunk);
-  }
-
-  return hunks;
 }
 
-function findHunkTarget(hunk: Hunk, stack: StackBranch[]): void {
-  // Use git blame to find which commits introduced the lines we're modifying
-  const blameOutput = git(
-    `blame -L ${hunk.startLine},${hunk.startLine + hunk.lineCount} --porcelain "${hunk.file}" 2>/dev/null`
-  );
-
-  if (!blameOutput) {
-    // File might be new or lines are all additions
-    // Check which branch introduced the file
-    const fileIntroCommit = git(`log --diff-filter=A --format=%H -- "${hunk.file}" | head -1`);
-    if (fileIntroCommit) {
-      for (const branch of stack) {
-        if (branch.commits.has(fileIntroCommit)) {
-          hunk.targetBranch = branch.name;
-          hunk.confidence = "high";
-          hunk.reason = `File introduced in this branch`;
-          return;
-        }
-      }
-    }
-    hunk.reason = "Could not determine origin (new file or new lines)";
-    return;
-  }
-
-  // Parse blame output to get commit hashes
-  const commitCounts = new Map<string, number>();
-  for (const line of blameOutput.split("\n")) {
-    const match = line.match(/^([a-f0-9]{40})/);
-    if (match && !match[1].startsWith("0000000")) {
-      commitCounts.set(match[1], (commitCounts.get(match[1]) || 0) + 1);
-    }
-  }
-
-  // Find which branch owns the most blamed commits
-  const branchCounts = new Map<string, number>();
-  for (const [commit, count] of commitCounts) {
-    for (const branch of stack) {
-      if (branch.commits.has(commit)) {
-        branchCounts.set(branch.name, (branchCounts.get(branch.name) || 0) + count);
-        break;
-      }
-    }
-  }
-
-  if (branchCounts.size === 0) {
-    hunk.reason = "Lines originated before the stack (main or earlier)";
-    return;
-  }
-
-  // Pick branch with most ownership
-  let maxBranch = "";
-  let maxCount = 0;
-  let totalCount = 0;
-  for (const [branch, count] of branchCounts) {
-    totalCount += count;
-    if (count > maxCount) {
-      maxCount = count;
-      maxBranch = branch;
-    }
-  }
-
-  hunk.targetBranch = maxBranch;
-  const ownership = Math.round((maxCount / totalCount) * 100);
-
-  if (ownership >= 80) {
-    hunk.confidence = "high";
-  } else if (ownership >= 50) {
-    hunk.confidence = "medium";
-  } else {
-    hunk.confidence = "low";
-  }
-
-  hunk.reason = `${ownership}% of modified lines from this branch`;
-}
-
-function groupByBranch(hunks: Hunk[]): Map<string, Hunk[]> {
-  const groups = new Map<string, Hunk[]>();
-  for (const hunk of hunks) {
-    const key = hunk.targetBranch || "(unknown)";
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(hunk);
-  }
-  return groups;
-}
-
-function printResults(groups: Map<string, Hunk[]>, stack: StackBranch[]) {
+function printResults(decisions: InjectionDecision[], stack: StackBranch[]) {
   const stackOrder = new Map(stack.map((b, i) => [b.name, i]));
+
+  // Group by target branch
+  const groups = new Map<string, InjectionDecision[]>();
+  for (const dec of decisions) {
+    if (!groups.has(dec.targetBranch)) groups.set(dec.targetBranch, []);
+    groups.get(dec.targetBranch)!.push(dec);
+  }
 
   // Sort groups by stack order
   const sortedGroups = [...groups.entries()].sort((a, b) => {
@@ -155,117 +234,132 @@ function printResults(groups: Map<string, Hunk[]>, stack: StackBranch[]) {
     return orderA - orderB;
   });
 
-  console.log("\n=== Injection Analysis ===\n");
+  console.log("\n=== Injection Plan ===\n");
 
-  for (const [branch, hunks] of sortedGroups) {
+  for (const [branch, decs] of sortedGroups) {
     const branchNum = stackOrder.get(branch);
     const label = branchNum !== undefined ? `[${String(branchNum + 1).padStart(2, "0")}]` : "[??]";
 
     console.log(`${label} ${branch}`);
     console.log("─".repeat(60));
 
-    for (const hunk of hunks) {
-      const conf =
-        hunk.confidence === "high" ? "●" : hunk.confidence === "medium" ? "◐" : "○";
-      console.log(`  ${conf} ${hunk.file}:${hunk.startLine} (${hunk.reason})`);
-
-      // Show first few lines of the hunk
-      const preview = hunk.content
-        .split("\n")
-        .slice(0, 6)
-        .map((l) => `      ${l}`)
-        .join("\n");
-      console.log(preview);
-      if (hunk.content.split("\n").length > 6) {
-        console.log(`      ... (${hunk.content.split("\n").length - 6} more lines)`);
-      }
-      console.log();
+    for (const dec of decs) {
+      const conf = dec.confidence === "high" ? "●" : dec.confidence === "medium" ? "◐" : "○";
+      console.log(`  ${conf} ${dec.file}`);
+      console.log(`      ${dec.reasoning}`);
     }
-  }
-
-  // Print suggested workflow
-  console.log("\n=== Suggested Workflow ===\n");
-
-  const branchesNeeded = sortedGroups
-    .filter(([b]) => b !== "(unknown)")
-    .map(([b]) => b);
-
-  if (branchesNeeded.length === 0) {
-    console.log("No clear injection targets found. Changes may need manual review.");
-    return;
-  }
-
-  console.log("1. Stash your changes:");
-  console.log("   git stash -u\n");
-
-  for (let i = 0; i < branchesNeeded.length; i++) {
-    const branch = branchesNeeded[i];
-    const num = i + 2;
-    console.log(`${num}. Inject into ${branch}:`);
-    console.log(`   git checkout ${branch}`);
-    console.log(`   git stash pop`);
-    console.log(`   # Stage only hunks for this branch, then:`);
-    console.log(`   git add -p  # select relevant hunks`);
-    console.log(`   git commit --amend --no-edit`);
-    console.log(`   git stash -u  # re-stash remaining changes`);
     console.log();
   }
 
-  const lastBranch = branchesNeeded[branchesNeeded.length - 1];
-  console.log(`${branchesNeeded.length + 2}. Rebase downstream branches:`);
-  console.log(`   git town sync  # or manually rebase each branch`);
-  console.log();
+  // Print workflow
+  console.log("=== Apply Workflow ===\n");
 
-  console.log("Legend: ● high confidence  ◐ medium  ○ low");
+  const branchesNeeded = sortedGroups.filter(([b]) => stackOrder.has(b)).map(([b]) => b);
+
+  if (branchesNeeded.length === 0) {
+    console.log("No injection targets identified.");
+    return;
+  }
+
+  if (branchesNeeded.length === 1 && branchesNeeded[0] === stack[stack.length - 1].name) {
+    console.log("All changes belong on current branch. Just commit them!");
+    return;
+  }
+
+  console.log("1. Save patches to temp directory:");
+  console.log("   loops stack inject --save\n");
+
+  console.log("2. Reset working directory:");
+  console.log("   git checkout -- .\n");
+
+  let step = 3;
+  for (const branch of branchesNeeded) {
+    const files = groups.get(branch)!.map((d) => d.file);
+    console.log(`${step}. Apply to ${branch}:`);
+    console.log(`   git checkout ${branch}`);
+    for (const file of files) {
+      console.log(`   git apply /tmp/stack-patches/${file.replace(/\//g, "_")}.patch`);
+    }
+    console.log(`   git add -A && git commit --amend --no-edit`);
+    step++;
+  }
+
+  console.log(`\n${step}. Sync the stack:`);
+  console.log("   loops stack update && loops stack push");
+
+  console.log("\nLegend: ● high confidence  ◐ medium  ○ low");
 }
 
-export function inject(args: string[]) {
-  const prefix = args.find((a) => !a.startsWith("-"));
-  const useStaged = args.includes("--staged");
+function savePatches(patches: FilePatch[]) {
+  const dir = "/tmp/stack-patches";
+  execSync(`rm -rf ${dir} && mkdir -p ${dir}`);
 
-  console.log("Analyzing changes for injection points...");
+  for (const patch of patches) {
+    const safeName = patch.file.replace(/\//g, "_") + ".patch";
+    writeFileSync(join(dir, safeName), patch.patch);
+    console.log(`  Saved: ${dir}/${safeName}`);
+  }
+
+  console.log(`\nPatches saved to ${dir}/`);
+}
+
+export async function inject(args: string[]) {
+  const prefix = args.find((a) => !a.startsWith("-"));
+  const shouldSave = args.includes("--save");
+  const skipClaude = args.includes("--no-claude");
+
+  // Get feature description from .goals/docs.md or prompt
+  let featureDescription = "Goals feature - tracking contact conversions via attribution windows";
+  try {
+    const docs = execSync("cat .goals/docs.md 2>/dev/null", { encoding: "utf-8" });
+    if (docs) featureDescription = docs.slice(0, 2000);
+  } catch {
+    // Use default
+  }
+
+  console.log("Analyzing changes for injection...");
   if (prefix) console.log(`Stack prefix: ${prefix}`);
 
   // Get the stack
   const stack = getStackBranches(prefix);
   if (stack.length === 0) {
-    console.error("No stack branches found. Make sure git-town parents are configured.");
+    console.error("No stack branches found.");
     process.exit(1);
   }
-
   console.log(`Found ${stack.length} branches in stack`);
 
-  // Get diff (uncommitted changes)
-  const diffCmd = useStaged ? "diff --cached" : "diff";
-  let diff = git(diffCmd);
-
-  if (!diff) {
-    // Try diff against parent branch
-    const currentBranch = git("branch --show-current");
-    const parent = git(`config git-town-branch.${currentBranch}.parent`);
-    if (parent) {
-      console.log(`No uncommitted changes. Comparing ${currentBranch} to parent ${parent}...`);
-      diff = git(`diff ${parent}..${currentBranch}`);
-    }
-  }
-
-  if (!diff) {
+  // Get patches
+  const patches = getPatches();
+  if (patches.length === 0) {
     console.log("No changes to analyze.");
     process.exit(0);
   }
+  console.log(`Found ${patches.length} file(s) with changes\n`);
 
-  // Parse diff into hunks
-  const hunks = parseDiff(diff);
-  console.log(`Found ${hunks.length} hunks to analyze`);
-
-  // Analyze each hunk
-  for (const hunk of hunks) {
-    process.stdout.write(`  Analyzing ${hunk.file}:${hunk.startLine}...`);
-    findHunkTarget(hunk, stack);
-    console.log(` -> ${hunk.targetBranch || "(unknown)"}`);
+  // Save patches if requested
+  if (shouldSave) {
+    savePatches(patches);
+    return;
   }
 
-  // Group and display
-  const groups = groupByBranch(hunks);
-  printResults(groups, stack);
+  if (skipClaude) {
+    // Just show patches without Claude analysis
+    for (const patch of patches) {
+      console.log(`  ${patch.file} ${patch.isNew ? "(new)" : "(modified)"}`);
+    }
+    console.log("\nRun without --no-claude to get AI-powered injection suggestions.");
+    return;
+  }
+
+  // Analyze each patch with Claude
+  const decisions: InjectionDecision[] = [];
+
+  for (const patch of patches) {
+    process.stdout.write(`  Analyzing ${patch.file}...`);
+    const decision = await analyzeWithClaude(patch, patches, stack, featureDescription);
+    decisions.push(decision);
+    console.log(` -> ${decision.targetBranch} (${decision.confidence})`);
+  }
+
+  printResults(decisions, stack);
 }
