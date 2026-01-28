@@ -450,8 +450,7 @@ vim.keymap.set("n", "<leader>gc", function()
   stack_churn.show_interactive(churn_data)
 end, { desc = "Show churn details" })
 
--- Load diffview (lazy-loaded plugin)
-require("diffview")
+-- Diffview should be available (we defer until after lazy.nvim loads)
 
 -- Start review
 analyze_churn()
@@ -465,10 +464,8 @@ sed -i '' "s|CHAIN_FILE_PATH|$CHAIN_FILE|g" "$LUA_FILE"
 sed -i '' "s|STATE_FILE_PATH|$STATE_FILE|g" "$LUA_FILE"
 sed -i '' "s|DIFF_FILE_PATH|$DIFF_FILE|g" "$LUA_FILE"
 
-# Launch nvim - add diffview to rtp, source its plugin file, then run script
-nvim -c "set rtp+=~/.local/share/nvim/lazy/diffview.nvim" \
-     -c "runtime plugin/diffview.lua" \
-     -c "luafile $LUA_FILE"
+# Launch nvim - defer script execution to after event loop starts
+nvim -c "lua vim.defer_fn(function() vim.cmd('luafile $LUA_FILE') end, 100)"
 
 # Cleanup
 rm -rf "$TMP_DIR"
