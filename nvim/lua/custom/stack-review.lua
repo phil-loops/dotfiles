@@ -310,6 +310,22 @@ function M.setup(data)
     view.panel:redraw()
   end
 
+  vim.keymap.set("n", "go", function()
+    local item = chain[current_idx]
+    if not item then return end
+
+    local filepath = get_diffview_filepath()
+    if not filepath then
+      vim.notify("Focus a file first", vim.log.levels.WARN)
+      return
+    end
+
+    -- Open the real file in a new tab so LSP works
+    local cwd = vim.fn.getcwd()
+    local fullpath = cwd .. "/" .. filepath
+    vim.cmd("tabedit " .. vim.fn.fnameescape(fullpath))
+  end, { desc = "Open file in new tab (with LSP)" })
+
   vim.keymap.set("n", "gd", function()
     local item = chain[current_idx]
     if not item then return end
@@ -406,6 +422,7 @@ Stack Review Keybindings:
   <leader>sc    show churn details
   <leader>sb    bless file (in diff) or all files (elsewhere)
   <leader>sB    bless all files on current branch
+  go            open file in new tab (with LSP)
   gd            show delta since blessed (new tab)
 
   Panel keybindings:
