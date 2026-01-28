@@ -281,7 +281,7 @@ function M.summarize_by_branch(churn)
   return summary
 end
 
--- Format churn report
+-- Format churn report (simple text)
 function M.format_report(churn)
   if #churn == 0 then
     return "No churn detected - clean stack!"
@@ -299,6 +299,129 @@ function M.format_report(churn)
   end
 
   return table.concat(lines, "\n")
+end
+
+-- Show interactive churn browser
+function M.show_interactive(churn)
+  if #churn == 0 then
+    vim.notify("No churn detected - clean stack!", vim.log.levels.INFO)
+    return
+  end
+
+  -- Build display lines with index tracking
+  local lines = {}
+  local line_to_churn = {}  -- line number -> churn index
+
+  table.insert(lines, "Churn: code added then removed (wasted work)")
+  table.insert(lines, "")
+  table.insert(lines, "[<CR>] view code  [o] open file  [d] diff branches  [q] quit")
+  table.insert(lines, string.rep("─", 60))
+
+  for i, c in ipairs(churn) do
+    local start_line = #lines + 1
+    table.insert(lines, string.format("%s", c.file))
+    line_to_churn[#lines] = i
+    table.insert(lines, string.format("  + %s (%d lines)", c.branch_added, c.lines_added))
+    line_to_churn[#lines] = i
+    table.insert(lines, string.format("  - %s (%d lines)", c.branch_removed, c.lines_removed))
+    line_to_churn[#lines] = i
+    table.insert(lines, "")
+  end
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].buftype = "nofile"
+
+  local width = 65
+  local height = math.min(#lines + 2, 35)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = (vim.o.lines - height) / 2,
+    col = (vim.o.columns - width) / 2,
+    style = "minimal",
+    border = "rounded",
+    title = " Stack Churn ",
+    title_pos = "center",
+  })
+
+  vim.wo[win].cursorline = true
+
+  local function get_current_churn()
+    local line = vim.api.nvim_win_get_cursor(win)[1]
+    local idx = line_to_churn[line]
+    if idx then return churn[idx] end
+    -- Try nearby lines
+    for offset = 1, 3 do
+      if line_to_churn[line - offset] then return churn[line_to_churn[line - offset]] end
+      if line_to_churn[line + offset] then return churn[line_to_churn[line + offset]] end
+    end
+    return nil
+  end
+
+  -- View the churned code
+  vim.keymap.set("n", "<CR>", function()
+    local c = get_current_churn()
+    if not c then return end
+
+    -- Show the code in a split
+    local code_buf = vim.api.nvim_create_buf(false, true)
+    local code_lines = {
+      "ADDED in " .. c.branch_added .. ":",
+      string.rep("─", 50),
+    }
+    for line in c.content:gmatch("[^\n]+") do
+      table.insert(code_lines, "+ " .. line)
+    end
+    table.insert(code_lines, "")
+    table.insert(code_lines, "Then REMOVED in " .. c.branch_removed)
+    table.insert(code_lines, "")
+    table.insert(code_lines, "FIX: Move this code to " .. c.branch_removed .. " instead of " .. c.branch_added)
+    table.insert(code_lines, "     Or: keep the code and remove the deletion")
+
+    vim.api.nvim_buf_set_lines(code_buf, 0, -1, false, code_lines)
+    vim.bo[code_buf].modifiable = false
+    vim.bo[code_buf].filetype = "diff"
+
+    local code_win = vim.api.nvim_open_win(code_buf, true, {
+      relative = "editor",
+      width = 70,
+      height = math.min(#code_lines + 2, 30),
+      row = 3,
+      col = (vim.o.columns - 70) / 2,
+      style = "minimal",
+      border = "rounded",
+      title = " " .. c.file .. " ",
+      title_pos = "center",
+    })
+
+    vim.keymap.set("n", "q", function() vim.api.nvim_win_close(code_win, true) end, { buffer = code_buf })
+    vim.keymap.set("n", "<Esc>", function() vim.api.nvim_win_close(code_win, true) end, { buffer = code_buf })
+  end, { buffer = buf })
+
+  -- Open file in the "added" branch
+  vim.keymap.set("n", "o", function()
+    local c = get_current_churn()
+    if not c then return end
+    vim.api.nvim_win_close(win, true)
+    vim.cmd("Gedit " .. c.branch_added .. ":" .. c.file)
+  end, { buffer = buf })
+
+  -- Show diff between the two branches for this file
+  vim.keymap.set("n", "d", function()
+    local c = get_current_churn()
+    if not c then return end
+    vim.api.nvim_win_close(win, true)
+    vim.cmd("DiffviewOpen " .. c.branch_added .. ".." .. c.branch_removed .. " -- " .. c.file)
+  end, { buffer = buf })
+
+  vim.keymap.set("n", "q", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+  vim.keymap.set("n", "<Esc>", function() vim.api.nvim_win_close(win, true) end, { buffer = buf })
+
+  -- Position cursor on first churn item
+  vim.api.nvim_win_set_cursor(win, { 5, 0 })
 end
 
 -- Setup commands
