@@ -260,20 +260,23 @@ function M.setup(data)
 
   -- Extract filepath from a diffview buffer name
   -- Format: diffview://<repo>/<context>/<filepath>
-  -- Context is an 11-char sha, :<digit>:, or [custom]
+  -- Context is an 11-char hex sha, :<digit>:, or [custom]
   local function get_diffview_filepath()
     local bufname = vim.api.nvim_buf_get_name(0)
-    if not bufname:match("^diffview://") then return nil end
+    if not vim.startswith(bufname, "diffview://") then return nil end
     -- Strip diffview:// prefix
-    local rest = bufname:gsub("^diffview://", "")
-    -- The repo dir from git-town is the cwd; strip it
-    local cwd = vim.fn.getcwd():gsub("%-", "%%-") .. "/"
-    rest = rest:gsub("^" .. cwd, "")
-    -- Now rest is "<context>/<filepath>" — skip the context segment
-    -- Context: 11-char hex sha, or :<digit>:, or [custom]
-    local filepath = rest:match("^%x+/(.+)")        -- sha/filepath
-      or rest:match("^:%d+:/(.+)")                   -- :stage:/filepath
-      or rest:match("^%[custom%]/(.+)")              -- [custom]/filepath
+    local rest = bufname:sub(#"diffview://" + 1)
+    -- Strip repo dir (cwd) prefix using plain string comparison
+    local cwd = vim.fn.getcwd()
+    if not cwd:match("/$") then cwd = cwd .. "/" end
+    if vim.startswith(rest, cwd) then
+      rest = rest:sub(#cwd + 1)
+    end
+    -- rest is now "<context>/<filepath>"
+    -- Context: 11-char hex sha, :<digit>:, or [custom]
+    local filepath = rest:match("^%x+/(.+)")
+      or rest:match("^:%d+:/(.+)")
+      or rest:match("^%[custom%]/(.+)")
     return filepath
   end
 
