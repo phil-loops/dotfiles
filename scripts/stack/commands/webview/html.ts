@@ -191,9 +191,18 @@ export function generateHtml(branches: BranchData[], churns: ChurnHunk[]): strin
       border-radius: 8px;
       overflow: hidden;
     }
+    .file.focused {
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 1px #58a6ff;
+    }
     .file.reviewed {
       border-color: #238636;
       opacity: 0.7;
+    }
+    .file.reviewed.focused {
+      border-color: #58a6ff;
+      box-shadow: 0 0 0 1px #58a6ff;
+      opacity: 1;
     }
     .file.reviewed .file-header { background: rgba(35, 134, 54, 0.1); }
     .file-header {
