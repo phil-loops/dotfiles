@@ -465,8 +465,8 @@ sed -i '' "s|CHAIN_FILE_PATH|$CHAIN_FILE|g" "$LUA_FILE"
 sed -i '' "s|STATE_FILE_PATH|$STATE_FILE|g" "$LUA_FILE"
 sed -i '' "s|DIFF_FILE_PATH|$DIFF_FILE|g" "$LUA_FILE"
 
-# Launch nvim - use -c which runs after init.lua
-nvim -c "luafile $LUA_FILE"
+# Launch nvim - use LazyDone event which fires after all plugins loaded
+nvim -c "autocmd User LazyDone ++once luafile $LUA_FILE"
 
 # Cleanup
 rm -rf "$TMP_DIR"
