@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { webview } from "./commands/webview.ts";
+import { webview } from "./commands/webview/index.ts";
 import { inject } from "./commands/inject.ts";
 import { branches } from "./commands/branches.ts";
 import { update } from "./commands/update.ts";
