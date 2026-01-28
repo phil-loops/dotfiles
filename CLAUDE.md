@@ -7,7 +7,6 @@ cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && c
 
 ## Script Placement
 **Never put scripts in ~/bin.** Always place scripts in `~/.dotfiles/` so they're version controlled:
-- CLI commands: `~/.dotfiles/scripts/stack/commands/*.ts` (for `loops stack` subcommands)
 - Shell functions: `~/.dotfiles/.zshrc` or dedicated files sourced from it
 - Standalone scripts: `~/.dotfiles/scripts/`
 
@@ -15,36 +14,20 @@ This ensures nothing is lost if the computer dies.
 
 # Git Branch Stacks
 
-Stacked PRs break large features into small, focused, reviewable changes (~150 LOC each).
+Use **git-town** for stacked PRs. Key commands:
 
-**IMPORTANT:** Before using `git rebase`, `git push`, or `gh pr create`, check for stacks:
-```
-test -f .stack && echo "STACKED REPO" && loops stack
-```
+| Task | Command |
+|------|---------|
+| Create child branch | `git town append <name>` |
+| Create parent branch | `git town prepend <name>` |
+| Sync all branches | `git town sync` |
+| Create PR | `git town propose` |
+| Navigate up/down | `git town up` / `git town down` |
+| View stack | `git town branch` |
+| Squash commits | `git town compress` |
+| Move branch out of stack | `git town detach` |
 
-If a `.stack` file exists, use `loops stack` commands instead of raw git:
-
-| Instead of... | Use... |
-|---------------|--------|
-| `git rebase` | `loops stack update` |
-| `git push` | `loops stack push-all` |
-| `gh pr create` | `loops stack pr` |
-| `git checkout <ancestor>` | `loops stack edit <branch>` |
-
-**Key concepts:**
-- `loops stack info` - overview with size, drift, conflicts (use `-s`, `-d`, `-c` for details)
-- `loops stack go <next|prev|last|root>` - navigate the stack
-- `loops stack edit/return/fixup` - edit ancestor branches safely
-- `loops stack inject` - analyze where uncommitted changes should land in the stack
-- `loops stack compress` - squash all commits on a branch into one (use `--all` for entire stack)
-
-## Placing Changes in the Stack
-When you have uncommitted changes that might belong on earlier branches:
-1. Run `loops stack inject` to analyze where each file logically belongs
-2. It finds where files were introduced/last modified in the stack
-3. Recommends injection points and provides step-by-step instructions
-
-Run `loops stack` for full command reference.
+Run `git town help` for full reference.
 
 # Git Commits
 Never add Co-Authored-By lines. Commits are mine alone.
