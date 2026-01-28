@@ -1,6 +1,7 @@
 -- Stack Review - branch navigation for git-town stacks
 local M = {}
 local churn = require("custom.stack-churn")
+local blessed = require("custom.stack-blessed")
 
 -- State
 local chain = {}      -- { {branch="...", parent="..."}, ... }
@@ -20,6 +21,12 @@ local function update_panel()
     -- Shorten branch names (remove common prefixes)
     local short_name = item.branch:gsub("goals%-v%d+%-", "")
 
+    -- Blessed status indicator
+    local bstatus = blessed.branch_status(item.branch, item.parent or "")
+    local bicon = bstatus == "clean" and "✓ "
+      or bstatus == "stale" and "! "
+      or "  "
+
     -- Churn indicator
     local suffix = ""
     local cc = churn_by_branch[item.branch] or 0
@@ -27,12 +34,25 @@ local function update_panel()
       suffix = string.format(" ~%d", cc)
     end
 
-    table.insert(lines, string.format("%s%s%s%s", prefix, short_name, suffix, marker))
+    table.insert(lines, string.format("%s%s%s%s%s", prefix, bicon, short_name, suffix, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
   vim.api.nvim_buf_set_lines(panel_buf, 0, -1, false, lines)
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", false)
+
+  -- Apply highlights for blessed status
+  local ns = vim.api.nvim_create_namespace("stack_blessed")
+  vim.api.nvim_buf_clear_namespace(panel_buf, ns, 0, -1)
+  for i, item in ipairs(chain) do
+    local bstatus = blessed.branch_status(item.branch, item.parent or "")
+    local col = 2 -- after "▶ " or "  " prefix
+    if bstatus == "clean" then
+      vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticOk", i - 1, col, col + 4)
+    elseif bstatus == "stale" then
+      vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticWarn", i - 1, col, col + 2)
+    end
+  end
 
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
     pcall(vim.api.nvim_win_set_cursor, panel_win, {current_idx, 0})
@@ -52,7 +72,14 @@ local function open_review(idx)
   pcall(vim.cmd, "DiffviewClose")
   vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
 
-  vim.notify(string.format("Reviewing: %s (%d/%d)", item.branch, idx, #chain), vim.log.levels.INFO)
+  local bsum = blessed.summary(item.branch, item.parent or "")
+  local extra = ""
+  if bsum.status == "clean" then
+    extra = " [blessed ✓]"
+  elseif bsum.status == "stale" then
+    extra = string.format(" [%d files stale since review]", bsum.stale_count)
+  end
+  vim.notify(string.format("Reviewing: %s (%d/%d)%s", item.branch, idx, #chain, extra), vim.log.levels.INFO)
 
   -- Reopen panel after diffview loads
   vim.defer_fn(function()
@@ -121,6 +148,44 @@ function M.open_panel()
     vim.cmd("qa")
   end, opts)
 
+  -- Blessed state keymaps
+  vim.keymap.set("n", "x", function()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local item = chain[line]
+    if item then
+      blessed.bless(item.branch)
+      update_panel()
+    end
+  end, opts)
+
+  vim.keymap.set("n", "X", function()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local item = chain[line]
+    if item then
+      blessed.unbless(item.branch)
+      vim.notify("Unblessed " .. item.branch, vim.log.levels.INFO)
+      update_panel()
+    end
+  end, opts)
+
+  vim.keymap.set("n", "s", function()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    local item = chain[line]
+    if not item then return end
+    local sum = blessed.summary(item.branch, item.parent or "")
+    if sum.status == "unblessed" then
+      vim.notify(item.branch .. ": not yet reviewed", vim.log.levels.INFO)
+    elseif sum.status == "clean" then
+      vim.notify(item.branch .. ": clean (blessed at " .. sum.sha:sub(1, 8) .. ")", vim.log.levels.INFO)
+    else
+      local msg = { item.branch .. ": " .. sum.stale_count .. " stale files (blessed at " .. sum.sha:sub(1, 8) .. "):" }
+      for _, f in ipairs(sum.stale_files) do
+        table.insert(msg, "  " .. f)
+      end
+      vim.notify(table.concat(msg, "\n"), vim.log.levels.WARN)
+    end
+  end, opts)
+
   update_panel()
   vim.cmd("wincmd l")
 end
@@ -160,6 +225,9 @@ function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
 
+  -- Load blessed state
+  blessed.load()
+
   -- Run churn analysis
   churns = churn.analyze(chain)
   churn_by_branch = churn.by_branch(churns)
@@ -178,14 +246,28 @@ function M.setup(data)
     churn.show(churns)
   end, { desc = "Show stack churn" })
 
+  vim.keymap.set("n", "<leader>sb", function()
+    local item = chain[current_idx]
+    if item then
+      blessed.bless(item.branch)
+      update_panel()
+    end
+  end, { desc = "Bless current branch" })
+
   vim.keymap.set("n", "g?", function()
     vim.notify([[
 Stack Review Keybindings:
   ]b / [b       next/prev branch
   <leader>sp    toggle stack panel
   <leader>sc    show churn details
-  <CR>          jump to branch (in panel)
-  j / k         move in panel
+  <leader>sb    bless current branch
+
+  Panel keybindings:
+  <CR>          jump to branch
+  j / k         move cursor
+  x             bless branch (mark reviewed)
+  X             unbless branch
+  s             show stale files
   q             quit
 ]], vim.log.levels.INFO)
   end, { desc = "Stack review help" })
