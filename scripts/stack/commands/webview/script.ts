@@ -199,6 +199,7 @@ export function getScript(): string {
 
     function render() {
       const b = branches[idx];
+      if (typeof focusedFile !== 'undefined') focusedFile = -1;
 
       // Sidebar
       document.getElementById('branchList').innerHTML = branches.map((br, i) => {
@@ -453,9 +454,64 @@ export function getScript(): string {
       document.getElementById('churnPanel').classList.toggle('visible');
     }
 
+    let focusedFile = -1;
+
+    function setFileFocus(i) {
+      const b = branches[idx];
+      if (!b.files.length) return;
+      const prev = document.querySelector('.file.focused');
+      if (prev) prev.classList.remove('focused');
+      focusedFile = Math.max(0, Math.min(i, b.files.length - 1));
+      const fileEls = document.querySelectorAll('#files > .file');
+      const el = fileEls[focusedFile];
+      if (el) {
+        el.classList.add('focused');
+        el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
+    }
+
+    function clearFileFocus() {
+      const prev = document.querySelector('.file.focused');
+      if (prev) prev.classList.remove('focused');
+      focusedFile = -1;
+    }
+
     document.addEventListener('keydown', e => {
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nav(-1);
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') nav(1);
+      // Branch nav: left/right
+      if (e.key === 'ArrowLeft') { nav(-1); return; }
+      if (e.key === 'ArrowRight') { nav(1); return; }
+
+      // File nav: up/down (j/k also work)
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault();
+        setFileFocus(focusedFile + 1);
+        return;
+      }
+      if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault();
+        setFileFocus(focusedFile - 1);
+        return;
+      }
+
+      // Toggle review on focused file: space or x
+      if ((e.key === ' ' || e.key === 'x') && focusedFile >= 0) {
+        e.preventDefault();
+        const b = branches[idx];
+        const f = b.files[focusedFile];
+        const reviewed = isReviewed(b.name, f.name, f.diff);
+        toggleReview(focusedFile, !reviewed);
+        const checkbox = document.querySelectorAll('.review-check')[focusedFile];
+        if (checkbox) checkbox.checked = !reviewed;
+        return;
+      }
+
+      // Toggle expand/collapse on focused file: enter
+      if (e.key === 'Enter' && focusedFile >= 0) {
+        e.preventDefault();
+        toggle(focusedFile);
+        return;
+      }
+
       if (e.key === 'e') expandAll();
       if (e.key === 'c') collapseAll();
     });
