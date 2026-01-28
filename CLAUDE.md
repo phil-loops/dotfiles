@@ -46,3 +46,15 @@ Never add Co-Authored-By lines. Commits are mine alone.
 
 # State and Acknowledgment Commands
 Never automatically run commands that acknowledge, dismiss, or clear user state (like `whatchanged --ack`). The user must explicitly request these actions. Always ask before running any command that resets tracked state - don't assume that viewing something means the user wants to dismiss it.
+
+# Loops Project Instructions
+
+## Stack Webview
+
+When asked to open the stack webview, use `loops stack webview` with the current stack prefix to filter branches. For example:
+
+```
+loops stack webview goals-v2
+```
+
+Derive the prefix from the current branch name (e.g., `goals-v2-23-goal-stats` → `goals-v2`).

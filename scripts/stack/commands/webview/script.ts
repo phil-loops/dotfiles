@@ -37,13 +37,30 @@ export function getScript(): string {
       return stored === hashStr(diff);
     }
 
+    function wasReviewed(branch, file) {
+      return localStorage.getItem(reviewKey(branch, file)) !== null;
+    }
+
+    function getStoredDiff(branch, file) {
+      return localStorage.getItem(reviewKey(branch, file) + ':diff');
+    }
+
     function setReviewed(branch, file, diff, reviewed) {
       const key = reviewKey(branch, file);
       if (reviewed) {
         localStorage.setItem(key, hashStr(diff));
+        localStorage.setItem(key + ':diff', diff);
       } else {
         localStorage.removeItem(key);
+        localStorage.removeItem(key + ':diff');
       }
+    }
+
+    function computeDelta(oldDiff, newDiff) {
+      const oldLines = new Set(oldDiff.split('\\n'));
+      const newLines = newDiff.split('\\n');
+      const added = newLines.filter(l => !oldLines.has(l) && (l.startsWith('+') || l.startsWith('-') || l.startsWith('@@')));
+      return added;
     }
 
     function getReviewedCount() {
@@ -178,13 +195,19 @@ export function getScript(): string {
       document.getElementById('files').innerHTML = b.files.map((f, i) => {
         const hunks = parseDiff(f.diff);
         const reviewed = isReviewed(b.name, f.name, f.diff);
+        const changed = !reviewed && wasReviewed(b.name, f.name);
         const isExpanded = expanded.has(i);
-        return '<div class="file' + (reviewed ? ' reviewed' : '') + '">'
+        const changedBadge = changed
+          ? '<span class="changed-badge" title="Changed since last review">changed</span>'
+          + '<button class="delta-btn" onclick="event.stopPropagation(); showDelta(' + i + ')" title="Show only what changed since last review">delta</button>'
+          : '';
+        return '<div class="file' + (reviewed ? ' reviewed' : '') + (changed ? ' changed-since-review' : '') + '">'
           + '<div class="file-header" onclick="toggle(' + i + ')">'
           + '<span class="file-header-left">'
           + '<input type="checkbox" class="review-check" ' + (reviewed ? 'checked' : '')
           + ' onclick="event.stopPropagation(); toggleReview(' + i + ', this.checked)" />'
           + '<span class="file-name">' + f.name + '</span>'
+          + changedBadge
           + '</span>'
           + '<span class="file-stats">'
           + '<span class="additions">+' + f.adds + '</span>'
@@ -227,6 +250,63 @@ export function getScript(): string {
         document.getElementById('diff-' + i).classList.add('expanded');
       }
       updateReviewCounter();
+    }
+
+    function showDelta(i) {
+      const b = branches[idx];
+      const f = b.files[i];
+      const oldDiff = getStoredDiff(b.name, f.name);
+      if (!oldDiff) {
+        alert('No previous diff stored — check and uncheck to establish baseline');
+        return;
+      }
+      const oldHunkLines = new Set(oldDiff.split('\\n'));
+      const newDiffLines = f.diff.split('\\n');
+
+      // Build a filtered diff: keep headers and lines not in old diff
+      const deltaLines = [];
+      let inHunk = false;
+      let hunkHeader = '';
+      let hunkHasNew = false;
+      let hunkBuffer = [];
+
+      for (const line of newDiffLines) {
+        if (line.startsWith('@@')) {
+          if (hunkHasNew && hunkBuffer.length > 0) {
+            deltaLines.push(hunkHeader);
+            deltaLines.push(...hunkBuffer);
+          }
+          hunkHeader = line;
+          hunkBuffer = [];
+          hunkHasNew = false;
+          inHunk = true;
+        } else if (inHunk) {
+          if (!oldHunkLines.has(line)) {
+            hunkHasNew = true;
+            hunkBuffer.push(line);
+          } else if (line.startsWith(' ') || (!line.startsWith('+') && !line.startsWith('-'))) {
+            hunkBuffer.push(line);
+          } else {
+            hunkBuffer.push(line);
+          }
+        }
+      }
+      if (hunkHasNew && hunkBuffer.length > 0) {
+        deltaLines.push(hunkHeader);
+        deltaLines.push(...hunkBuffer);
+      }
+
+      const deltaDiff = deltaLines.join('\\n');
+      const deltaHunks = parseDiff(deltaDiff);
+      const diffEl = document.getElementById('diff-' + i);
+
+      if (deltaHunks.length === 0) {
+        diffEl.innerHTML = '<div class="hunk-header" style="color:#3fb950;padding:12px">No meaningful changes since last review — safe to re-check</div>';
+      } else {
+        diffEl.innerHTML = '<div class="hunk-header" style="color:#d29922;padding:8px">Showing only changes since last review</div>' + renderSideBySide(deltaHunks);
+      }
+      expanded.add(i);
+      diffEl.classList.add('expanded');
     }
 
     function toggle(i) {

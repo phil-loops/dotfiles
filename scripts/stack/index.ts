@@ -4,6 +4,7 @@ import { inject } from "./commands/inject.ts";
 import { branches } from "./commands/branches.ts";
 import { update } from "./commands/update.ts";
 import { push } from "./commands/push.ts";
+import { flow } from "./commands/flow.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -28,6 +29,10 @@ const commands: Record<string, { run: (args: string[]) => void | Promise<void>; 
   inject: {
     run: inject,
     desc: "AI-powered patch routing (--save, --no-claude)",
+  },
+  flow: {
+    run: flow,
+    desc: "Sync, push, compress, webview (--dry-run, --no-webview)",
   },
 };
 
