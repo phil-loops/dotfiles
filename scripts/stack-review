@@ -465,8 +465,10 @@ sed -i '' "s|CHAIN_FILE_PATH|$CHAIN_FILE|g" "$LUA_FILE"
 sed -i '' "s|STATE_FILE_PATH|$STATE_FILE|g" "$LUA_FILE"
 sed -i '' "s|DIFF_FILE_PATH|$DIFF_FILE|g" "$LUA_FILE"
 
-# Launch nvim - add diffview to runtimepath and run script
-nvim -c "set rtp+=~/.local/share/nvim/lazy/diffview.nvim" -c "luafile $LUA_FILE"
+# Launch nvim - add diffview to rtp, source its plugin file, then run script
+nvim -c "set rtp+=~/.local/share/nvim/lazy/diffview.nvim" \
+     -c "runtime plugin/diffview.lua" \
+     -c "luafile $LUA_FILE"
 
 # Cleanup
 rm -rf "$TMP_DIR"
