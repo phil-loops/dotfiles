@@ -258,26 +258,13 @@ function M.setup(data)
     churn.show(churns)
   end, { desc = "Show stack churn" })
 
-  -- Extract filepath from a diffview buffer name
-  -- Format: diffview://<repo>/<context>/<filepath>
-  -- Context is an 11-char hex sha, :<digit>:, or [custom]
+  -- Get the filepath of the currently focused file in diffview
   local function get_diffview_filepath()
-    local bufname = vim.api.nvim_buf_get_name(0)
-    if not vim.startswith(bufname, "diffview://") then return nil end
-    -- Strip diffview:// prefix
-    local rest = bufname:sub(#"diffview://" + 1)
-    -- Strip repo dir (cwd) prefix using plain string comparison
-    local cwd = vim.fn.getcwd()
-    if not cwd:match("/$") then cwd = cwd .. "/" end
-    if vim.startswith(rest, cwd) then
-      rest = rest:sub(#cwd + 1)
-    end
-    -- rest is now "<context>/<filepath>"
-    -- Context: 11-char hex sha, :<digit>:, or [custom]
-    local filepath = rest:match("^%x+/(.+)")
-      or rest:match("^:%d+:/(.+)")
-      or rest:match("^%[custom%]/(.+)")
-    return filepath
+    local ok, lib = pcall(require, "diffview.lib")
+    if not ok then return nil end
+    local view = lib.get_current_view()
+    if not view or not view.panel or not view.panel.cur_file then return nil end
+    return view.panel.cur_file.path
   end
 
   vim.keymap.set("n", "<leader>sb", function()
