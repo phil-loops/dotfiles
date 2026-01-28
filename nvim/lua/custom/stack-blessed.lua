@@ -8,6 +8,7 @@ local blessed = {} -- branch -> { file -> sha }
 local json_path = nil -- resolved on first use
 local tip_cache = {} -- branch -> { sha, time }
 local TIP_TTL = 10 -- seconds
+local file_list_cache = {} -- branch -> string[] (file paths)
 
 local function get_json_path()
   if json_path then return json_path end
@@ -238,9 +239,6 @@ end
 function M.stale_files(branch, parent)
   return M.summary(branch, parent).stale_files
 end
-
--- Cache of branch file lists (populated once via warm_file_counts)
-local file_list_cache = {} -- branch -> string[] (file paths)
 
 -- Pre-compute file lists for all branches in the chain (one git call each, but only once)
 ---@param chain table[] -- { {branch, parent}, ... }
