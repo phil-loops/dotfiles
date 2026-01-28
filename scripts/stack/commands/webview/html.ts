@@ -211,6 +211,30 @@ export function generateHtml(branches: BranchData[], churns: ChurnHunk[]): strin
     }
     .file-name { color: #58a6ff; }
     .file.reviewed .file-name { color: #3fb950; }
+    .file.changed-since-review { border-color: #d29922; }
+    .file.changed-since-review .file-header { background: rgba(210, 153, 34, 0.08); }
+    .changed-badge {
+      background: #d29922;
+      color: #0d1117;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: 10px;
+      margin-left: 8px;
+    }
+    .delta-btn {
+      background: transparent;
+      border: 1px solid #d29922;
+      color: #d29922;
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-left: 4px;
+      font-family: ui-monospace, monospace;
+    }
+    .delta-btn:hover { background: rgba(210, 153, 34, 0.15); }
     .file-stats { display: flex; gap: 10px; font-size: 11px; }
     .review-counter {
       font-size: 12px;

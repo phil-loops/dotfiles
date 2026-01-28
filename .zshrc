@@ -72,6 +72,9 @@ loops() {
                 webview)
                     npx tsx ~/.dotfiles/scripts/stack/index.ts webview "$@"
                     ;;
+                flow)
+                    npx tsx ~/.dotfiles/scripts/stack/index.ts flow "$@"
+                    ;;
                 *)
                     echo "Use git-town for stack management:"
                     echo "  git town sync      - sync all branches"
