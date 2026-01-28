@@ -310,7 +310,13 @@ export function getScript(): string {
       const b = branches[idx];
       const f = b.files[i];
       const oldDiff = getStoredDiff(b.name, f.name);
-      if (!oldDiff) return;
+      const diffEl = document.getElementById('diff-' + i);
+      if (!oldDiff) {
+        diffEl.innerHTML = '<div class="hunk-header" style="color:#d29922;padding:12px">No blessed version stored — check the box to bless the current state</div>';
+        expanded.add(i);
+        diffEl.classList.add('expanded');
+        return;
+      }
       const oldHunkLines = new Set(oldDiff.split('\\n'));
       const newDiffLines = f.diff.split('\\n');
 
@@ -349,7 +355,6 @@ export function getScript(): string {
 
       const deltaDiff = deltaLines.join('\\n');
       const deltaHunks = parseDiff(deltaDiff);
-      const diffEl = document.getElementById('diff-' + i);
 
       if (deltaHunks.length === 0) {
         diffEl.innerHTML = '<div class="hunk-header" style="color:#3fb950;padding:12px">No meaningful changes since last review — safe to re-check</div>';
