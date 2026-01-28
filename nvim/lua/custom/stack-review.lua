@@ -178,6 +178,7 @@ function M.open_panel()
     if item and item.parent then
       blessed.bless_branch(item.branch, item.parent)
       update_panel()
+      refresh_diffview_panel()
     end
   end, opts)
 
@@ -188,6 +189,7 @@ function M.open_panel()
       blessed.unbless_branch(item.branch)
       vim.notify("Unblessed " .. item.branch, vim.log.levels.INFO)
       update_panel()
+      refresh_diffview_panel()
     end
   end, opts)
 
@@ -291,6 +293,23 @@ function M.setup(data)
     return view.panel.cur_file.path
   end
 
+  -- Refresh blessed indicators in diffview's file panel
+  local function refresh_diffview_panel()
+    local ok, lib = pcall(require, "diffview.lib")
+    if not ok then return end
+    local view = lib.get_current_view()
+    if not view or not view.panel then return end
+    -- Re-populate blessed_status on file entries
+    local branch = view.rev_arg and view.rev_arg:match("%.%.(.+)$")
+    if branch then
+      for _, file in view.files:iter() do
+        file.blessed_status = blessed.file_status(branch, file.path)
+      end
+    end
+    view.panel:render()
+    view.panel:redraw()
+  end
+
   vim.keymap.set("n", "<leader>sb", function()
     local item = chain[current_idx]
     if not item then return end
@@ -300,6 +319,7 @@ function M.setup(data)
     if filepath then
       blessed.bless_file(item.branch, filepath)
       update_panel()
+      refresh_diffview_panel()
       return
     end
 
@@ -307,6 +327,7 @@ function M.setup(data)
     if item.parent then
       blessed.bless_branch(item.branch, item.parent)
       update_panel()
+      refresh_diffview_panel()
     end
   end, { desc = "Bless current file or branch" })
 
@@ -315,6 +336,7 @@ function M.setup(data)
     if item and item.parent then
       blessed.bless_branch(item.branch, item.parent)
       update_panel()
+      refresh_diffview_panel()
     end
   end, { desc = "Bless all files on current branch" })
 
