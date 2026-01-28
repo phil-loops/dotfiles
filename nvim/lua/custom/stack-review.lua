@@ -29,20 +29,26 @@ local function update_panel()
     local short_name = item.branch:gsub("goals%-v%d+%-", "")
 
     local bsum = blessed.summary(item.branch, item.parent or "")
+    local total_files = blessed.file_count(item.branch)
     summaries[i] = bsum
+    summaries[i].total_files = total_files
+
     local bicon, bcount
-    if bsum.total == 0 then
+    if total_files == 0 then
       bicon = "  "
       bcount = ""
-    elseif bsum.status == "clean" then
+    elseif bsum.status == "clean" and bsum.reviewed >= total_files then
       bicon = "✓ "
       bcount = ""
-    elseif bsum.status == "unblessed" then
+    elseif bsum.stale_count > 0 then
+      bicon = "! "
+      bcount = string.format(" (%d/%d)", bsum.reviewed, total_files)
+    elseif bsum.reviewed > 0 then
+      bicon = "  "
+      bcount = string.format(" (%d/%d)", bsum.reviewed, total_files)
+    else
       bicon = "  "
       bcount = ""
-    else
-      bicon = bsum.stale_count > 0 and "! " or "· "
-      bcount = string.format(" %d/%d", bsum.reviewed, bsum.total)
     end
 
     local suffix = ""
@@ -64,12 +70,10 @@ local function update_panel()
   for i, _ in ipairs(chain) do
     local bsum = summaries[i]
     local col = 2 -- after "▶ " or "  " prefix
-    if bsum.status == "clean" then
+    if bsum.status == "clean" and bsum.reviewed >= (bsum.total_files or 0) then
       vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticOk", i - 1, col, col + 4)
-    elseif bsum.status == "stale" then
+    elseif bsum.stale_count > 0 then
       vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticWarn", i - 1, col, col + 2)
-    elseif bsum.status == "partial" then
-      vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticInfo", i - 1, col, col + 3)
     end
   end
 
@@ -255,8 +259,9 @@ function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
 
-  -- Load blessed state
+  -- Load blessed state and warm caches
   blessed.load()
+  blessed.warm_file_counts(chain)
 
   -- Run churn analysis
   churns = churn.analyze(chain)
