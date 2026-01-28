@@ -4,6 +4,11 @@
 
 set -e
 
+SCRIPT_DIR="${0:A:h}"
+
+# Get snapshot diff (what changed since last review)
+SNAPSHOT_DIFF=$("$SCRIPT_DIR/stack-snapshot" json 2>/dev/null || echo "{}")
+
 # Get current branch
 BRANCH=$(git branch --show-current 2>/dev/null)
 if [[ -z "$BRANCH" ]]; then
@@ -90,7 +95,11 @@ calc_health() {
 TMP_DIR=$(mktemp -d)
 CHAIN_FILE="$TMP_DIR/chain.json"
 STATE_FILE="$TMP_DIR/state.json"
+DIFF_FILE="$TMP_DIR/snapshot_diff.json"
 LUA_FILE="$TMP_DIR/review.lua"
+
+# Write snapshot diff
+echo "$SNAPSHOT_DIFF" > "$DIFF_FILE"
 
 # Find current branch index
 current_idx=0
@@ -129,6 +138,7 @@ cat > "$LUA_FILE" << 'LUASCRIPT'
 -- Stack Review for git-town
 local chain_file = "CHAIN_FILE_PATH"
 local state_file = "STATE_FILE_PATH"
+local diff_file = "DIFF_FILE_PATH"
 
 -- Load churn detection module
 local churn_ok, stack_churn = pcall(require, "custom.stack-churn")
@@ -152,6 +162,10 @@ end
 local function get_chain() return read_json(chain_file) end
 local function get_state() return read_json(state_file) end
 local function set_state(s) write_json(state_file, s) end
+local function get_snapshot_diff() return read_json(diff_file) or {} end
+
+-- Snapshot diff data (what changed since last review)
+local snapshot_diff = get_snapshot_diff()
 
 -- Analyze churn on startup
 local function analyze_churn()
@@ -192,6 +206,19 @@ local function update_panel()
     local churn_count = churn_by_branch[item.branch] or 0
     if churn_count > 0 then
       health_str = health_str .. string.format(" 🔄%d", churn_count)
+    end
+
+    -- Add snapshot diff indicator (what changed since last review)
+    local branch_diff = snapshot_diff[item.branch]
+    if branch_diff then
+      if branch_diff.status == "new" then
+        health_str = health_str .. " 🆕"
+      elseif branch_diff.status == "modified" then
+        local file_count = branch_diff.files and #branch_diff.files or 0
+        if file_count > 0 then
+          health_str = health_str .. string.format(" 📝%d", file_count)
+        end
+      end
     end
 
     table.insert(lines, string.format("%s%s%s%s", prefix, short_name, health_str, marker))
@@ -335,9 +362,79 @@ Stack Review Keybindings:
   <CR>          jump to branch (in panel)
   <leader>gp    toggle branch panel
   <leader>gc    show churn details
+  <leader>gs    save snapshot (mark as reviewed)
+  <leader>gd    show snapshot diff details
   q             quit
+
+Indicators:
+  🆕 = new branch since last snapshot
+  📝N = N files changed since last snapshot
+  🔄N = N churned hunks (added then removed)
+  ✅N / 🔴N = LOC (green <150, red >150)
 ]], vim.log.levels.INFO)
 end, { desc = "Help" })
+
+-- Save snapshot (mark current state as reviewed)
+vim.keymap.set("n", "<leader>gs", function()
+  local result = vim.fn.system("~/.dotfiles/scripts/stack-snapshot save")
+  vim.notify("Snapshot saved: " .. result, vim.log.levels.INFO)
+  -- Reload diff data
+  snapshot_diff = {}
+  update_panel()
+end, { desc = "Save snapshot" })
+
+-- Show snapshot diff details
+vim.keymap.set("n", "<leader>gd", function()
+  local lines = { "=== Changes Since Last Snapshot ===" }
+  local has_changes = false
+
+  for branch, diff in pairs(snapshot_diff) do
+    if diff.status == "new" then
+      table.insert(lines, "")
+      table.insert(lines, "🆕 " .. branch .. " (new branch)")
+      has_changes = true
+    elseif diff.status == "modified" and diff.files and #diff.files > 0 then
+      table.insert(lines, "")
+      table.insert(lines, "📝 " .. branch)
+      for _, file in ipairs(diff.files) do
+        table.insert(lines, "   • " .. file)
+      end
+      has_changes = true
+    end
+  end
+
+  if not has_changes then
+    table.insert(lines, "")
+    table.insert(lines, "No changes since last snapshot.")
+    table.insert(lines, "Press <leader>gs to save a new snapshot.")
+  end
+
+  -- Show in a floating window
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(buf, "modifiable", false)
+
+  local width = 60
+  local height = math.min(#lines + 2, 30)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    row = (vim.o.lines - height) / 2,
+    col = (vim.o.columns - width) / 2,
+    style = "minimal",
+    border = "rounded",
+    title = " Snapshot Diff ",
+    title_pos = "center",
+  })
+
+  vim.keymap.set("n", "q", function()
+    vim.api.nvim_win_close(win, true)
+  end, { buffer = buf })
+  vim.keymap.set("n", "<Esc>", function()
+    vim.api.nvim_win_close(win, true)
+  end, { buffer = buf })
+end, { desc = "Show snapshot diff" })
 
 -- Churn details command
 vim.keymap.set("n", "<leader>gc", function()
@@ -358,6 +455,7 @@ LUASCRIPT
 # Replace placeholders in Lua script
 sed -i '' "s|CHAIN_FILE_PATH|$CHAIN_FILE|g" "$LUA_FILE"
 sed -i '' "s|STATE_FILE_PATH|$STATE_FILE|g" "$LUA_FILE"
+sed -i '' "s|DIFF_FILE_PATH|$DIFF_FILE|g" "$LUA_FILE"
 
 # Launch nvim
 nvim -c "luafile $LUA_FILE"
