@@ -332,19 +332,38 @@ function M.setup(data)
       return
     end
 
-    -- Open a new tab with the diff between blessed SHA and branch tip
+    -- Open side-by-side diff: blessed version vs current branch version
     vim.cmd("tabnew")
-    local buf = vim.api.nvim_get_current_buf()
-    local cmd = string.format("git diff %s %s -- %s", bsha, item.branch, filepath)
-    local diff = vim.fn.system(cmd)
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(diff, "\n"))
-    vim.api.nvim_buf_set_option(buf, "modifiable", false)
-    vim.api.nvim_buf_set_option(buf, "buftype", "nofile")
-    vim.api.nvim_buf_set_option(buf, "bufhidden", "wipe")
-    vim.api.nvim_buf_set_option(buf, "filetype", "diff")
-    vim.api.nvim_buf_set_name(buf, string.format("delta: %s (%s..%s)", filepath, bsha:sub(1, 8), item.branch))
 
-    vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = buf, desc = "Close delta tab" })
+    -- Left: file at blessed SHA
+    local left_content = vim.fn.systemlist(string.format("git show %s:%s 2>/dev/null", bsha, filepath))
+    local left_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, left_content)
+    vim.api.nvim_buf_set_option(left_buf, "modifiable", false)
+    vim.api.nvim_buf_set_option(left_buf, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(left_buf, "bufhidden", "wipe")
+    local ext = filepath:match("%.(%w+)$") or ""
+    if ext ~= "" then vim.api.nvim_buf_set_option(left_buf, "filetype", ext) end
+    vim.api.nvim_buf_set_name(left_buf, string.format("%s @ %s (blessed)", filepath, bsha:sub(1, 8)))
+    vim.cmd("diffthis")
+
+    -- Right: file at current branch tip
+    vim.cmd("vsplit")
+    local right_buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_win_set_buf(0, right_buf)
+    local right_content = vim.fn.systemlist(string.format("git show %s:%s 2>/dev/null", item.branch, filepath))
+    vim.api.nvim_buf_set_lines(right_buf, 0, -1, false, right_content)
+    vim.api.nvim_buf_set_option(right_buf, "modifiable", false)
+    vim.api.nvim_buf_set_option(right_buf, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(right_buf, "bufhidden", "wipe")
+    if ext ~= "" then vim.api.nvim_buf_set_option(right_buf, "filetype", ext) end
+    vim.api.nvim_buf_set_name(right_buf, string.format("%s @ %s (current)", filepath, item.branch))
+    vim.cmd("diffthis")
+
+    -- q closes the tab from either buffer
+    for _, b in ipairs({ left_buf, right_buf }) do
+      vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, desc = "Close delta tab" })
+    end
   end, { desc = "Show delta since blessed" })
 
   vim.keymap.set("n", "<leader>sb", function()
