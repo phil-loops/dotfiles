@@ -394,6 +394,78 @@ export function generateHtml(branches: BranchData[], churns: ChurnHunk[]): strin
       max-height: 60px;
       overflow-y: auto;
     }
+    .mode-indicator {
+      font-size: 10px;
+      font-weight: 700;
+      font-family: ui-monospace, monospace;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      letter-spacing: 0.5px;
+      cursor: help;
+    }
+    #helpOverlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+    .help-content {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 24px 32px;
+      max-width: 420px;
+      width: 100%;
+      font-family: ui-monospace, monospace;
+    }
+    .help-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #c9d1d9;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #30363d;
+    }
+    .help-section {
+      font-size: 11px;
+      font-weight: 700;
+      color: #8b949e;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 14px;
+      margin-bottom: 6px;
+    }
+    .help-row {
+      font-size: 12px;
+      color: #c9d1d9;
+      padding: 3px 0;
+    }
+    .help-row kbd {
+      display: inline-block;
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
+      color: #f0f6fc;
+      min-width: 20px;
+      text-align: center;
+      margin-right: 2px;
+    }
+    .help-dismiss {
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #30363d;
+      font-size: 11px;
+      color: #484f58;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
@@ -407,6 +479,7 @@ export function generateHtml(branches: BranchData[], churns: ChurnHunk[]): strin
         <div class="header-top">
           <div class="branch-name" id="branchName"></div>
           <div class="nav-buttons">
+            <span class="mode-indicator" id="modeIndicator" onclick="showHelp()" title="Press ? for help">BRANCH</span>
             <span class="review-counter" id="reviewCounter"></span>
             <button class="nav-btn" id="prevBtn" onclick="nav(-1)">&larr; Prev</button>
             <button class="nav-btn" id="nextBtn" onclick="nav(1)">Next &rarr;</button>

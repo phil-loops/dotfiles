@@ -199,7 +199,6 @@ export function getScript(): string {
 
     function render() {
       const b = branches[idx];
-      if (typeof focusedFile !== 'undefined') focusedFile = -1;
 
       // Sidebar
       document.getElementById('branchList').innerHTML = branches.map((br, i) => {
@@ -405,7 +404,7 @@ export function getScript(): string {
       expanded.clear();
       document.querySelectorAll('.diff').forEach(el => el.classList.remove('expanded'));
     }
-    function go(i) { idx = i; expanded.clear(); render(); }
+    function go(i) { idx = i; expanded.clear(); setMode('BRANCH'); render(); }
     function nav(d) { if (idx + d >= 0 && idx + d < branches.length) go(idx + d); }
 
     // --- Churn panel ---
@@ -454,7 +453,22 @@ export function getScript(): string {
       document.getElementById('churnPanel').classList.toggle('visible');
     }
 
+    // --- State machine: BRANCH mode vs FILES mode ---
+    let mode = 'BRANCH'; // 'BRANCH' | 'FILES'
     let focusedFile = -1;
+
+    function setMode(m) {
+      mode = m;
+      updateModeIndicator();
+      if (m === 'BRANCH') clearFileFocus();
+    }
+
+    function updateModeIndicator() {
+      let el = document.getElementById('modeIndicator');
+      if (!el) return;
+      el.textContent = mode === 'BRANCH' ? 'BRANCH' : 'FILES';
+      el.style.color = mode === 'BRANCH' ? '#58a6ff' : '#3fb950';
+    }
 
     function setFileFocus(i) {
       const b = branches[idx];
@@ -476,46 +490,104 @@ export function getScript(): string {
       focusedFile = -1;
     }
 
+    function showHelp() {
+      let overlay = document.getElementById('helpOverlay');
+      if (overlay) { overlay.remove(); return; }
+      overlay = document.createElement('div');
+      overlay.id = 'helpOverlay';
+      overlay.innerHTML = ''
+        + '<div class="help-content">'
+        + '<div class="help-title">Keyboard Shortcuts</div>'
+        + '<div class="help-section">BRANCH mode <span style="color:#58a6ff">(default)</span></div>'
+        + '<div class="help-row"><kbd>j</kbd> <kbd>↓</kbd> next branch</div>'
+        + '<div class="help-row"><kbd>k</kbd> <kbd>↑</kbd> prev branch</div>'
+        + '<div class="help-row"><kbd>l</kbd> <kbd>Enter</kbd> enter FILES mode</div>'
+        + '<div class="help-section">FILES mode <span style="color:#3fb950">(per-file nav)</span></div>'
+        + '<div class="help-row"><kbd>j</kbd> <kbd>↓</kbd> next file</div>'
+        + '<div class="help-row"><kbd>k</kbd> <kbd>↑</kbd> prev file</div>'
+        + '<div class="help-row"><kbd>x</kbd> <kbd>Space</kbd> toggle reviewed</div>'
+        + '<div class="help-row"><kbd>o</kbd> <kbd>Enter</kbd> toggle expand</div>'
+        + '<div class="help-row"><kbd>d</kbd> show delta</div>'
+        + '<div class="help-row"><kbd>y</kbd> copy filepath@branch</div>'
+        + '<div class="help-row"><kbd>h</kbd> <kbd>Esc</kbd> back to BRANCH mode</div>'
+        + '<div class="help-section">Global</div>'
+        + '<div class="help-row"><kbd>e</kbd> expand all</div>'
+        + '<div class="help-row"><kbd>c</kbd> collapse all</div>'
+        + '<div class="help-row"><kbd>?</kbd> toggle this help</div>'
+        + '<div class="help-dismiss">Press any key to dismiss</div>'
+        + '</div>';
+      document.body.appendChild(overlay);
+    }
+
     document.addEventListener('keydown', e => {
-      // Branch nav: left/right
-      if (e.key === 'ArrowLeft') { nav(-1); return; }
-      if (e.key === 'ArrowRight') { nav(1); return; }
+      // Dismiss help overlay on any key
+      const helpEl = document.getElementById('helpOverlay');
+      if (helpEl && e.key !== '?') { helpEl.remove(); return; }
 
-      // File nav: up/down (j/k also work)
-      if (e.key === 'ArrowDown' || e.key === 'j') {
-        e.preventDefault();
-        setFileFocus(focusedFile + 1);
-        return;
-      }
-      if (e.key === 'ArrowUp' || e.key === 'k') {
-        e.preventDefault();
-        setFileFocus(focusedFile - 1);
-        return;
-      }
+      // Toggle help
+      if (e.key === '?') { showHelp(); return; }
 
-      // Toggle review on focused file: space or x
-      if ((e.key === ' ' || e.key === 'x') && focusedFile >= 0) {
-        e.preventDefault();
-        const b = branches[idx];
-        const f = b.files[focusedFile];
-        const reviewed = isReviewed(b.name, f.name, f.diff);
-        toggleReview(focusedFile, !reviewed);
-        const checkbox = document.querySelectorAll('.review-check')[focusedFile];
-        if (checkbox) checkbox.checked = !reviewed;
-        return;
+      if (mode === 'BRANCH') {
+        if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); nav(1); return; }
+        if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); nav(-1); return; }
+        if (e.key === 'l' || e.key === 'ArrowRight' || e.key === 'Enter') {
+          e.preventDefault();
+          if (branches[idx].files.length > 0) {
+            setMode('FILES');
+            setFileFocus(0);
+          }
+          return;
+        }
+        if (e.key === 'h' || e.key === 'ArrowLeft') return; // no-op at top level
       }
 
-      // Toggle expand/collapse on focused file: enter
-      if (e.key === 'Enter' && focusedFile >= 0) {
-        e.preventDefault();
-        toggle(focusedFile);
-        return;
+      if (mode === 'FILES') {
+        if (e.key === 'j' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          setFileFocus(focusedFile + 1);
+          return;
+        }
+        if (e.key === 'k' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          setFileFocus(focusedFile - 1);
+          return;
+        }
+        if (e.key === 'Escape' || e.key === 'h' || e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setMode('BRANCH');
+          return;
+        }
+        if ((e.key === ' ' || e.key === 'x') && focusedFile >= 0) {
+          e.preventDefault();
+          const b = branches[idx];
+          const f = b.files[focusedFile];
+          const reviewed = isReviewed(b.name, f.name, f.diff);
+          toggleReview(focusedFile, !reviewed);
+          const checkbox = document.querySelectorAll('.review-check')[focusedFile];
+          if (checkbox) checkbox.checked = !reviewed;
+          return;
+        }
+        if ((e.key === 'Enter' || e.key === 'o') && focusedFile >= 0) {
+          e.preventDefault();
+          toggle(focusedFile);
+          return;
+        }
+        if (e.key === 'd' && focusedFile >= 0) {
+          showDelta(focusedFile);
+          return;
+        }
+        if (e.key === 'y' && focusedFile >= 0) {
+          copyRef(focusedFile);
+          return;
+        }
       }
 
+      // Global
       if (e.key === 'e') expandAll();
       if (e.key === 'c') collapseAll();
     });
 
     render();
+    updateModeIndicator();
   `;
 }
