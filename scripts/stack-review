@@ -248,7 +248,12 @@ local function open_review(idx)
   set_state({ index = idx })
 
   pcall(vim.cmd, "DiffviewClose")
-  vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+  -- Use pcall in case command isn't ready yet
+  local ok, err = pcall(vim.cmd, "DiffviewOpen " .. item.parent .. ".." .. item.branch)
+  if not ok then
+    vim.notify("DiffviewOpen failed: " .. tostring(err), vim.log.levels.ERROR)
+    return false
+  end
 
   -- Re-open panel after diffview loads (panel gets destroyed on DiffviewClose)
   vim.defer_fn(function()
@@ -445,11 +450,14 @@ vim.keymap.set("n", "<leader>gc", function()
   stack_churn.show_interactive(churn_data)
 end, { desc = "Show churn details" })
 
+-- Force load diffview via lazy.nvim
+require("lazy").load({ plugins = { "diffview.nvim" } })
+
 -- Start review
-analyze_churn()  -- Calculate churn first
+analyze_churn()
 local state = get_state()
 open_review(state.index)
-vim.defer_fn(open_panel, 200)
+vim.defer_fn(open_panel, 200)  -- panel needs diffview window to exist first
 LUASCRIPT
 
 # Replace placeholders in Lua script
