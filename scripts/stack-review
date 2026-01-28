@@ -450,8 +450,8 @@ vim.keymap.set("n", "<leader>gc", function()
   stack_churn.show_interactive(churn_data)
 end, { desc = "Show churn details" })
 
--- Force load diffview via lazy.nvim
-require("lazy").load({ plugins = { "diffview.nvim" } })
+-- Load diffview (lazy-loaded plugin)
+require("diffview")
 
 -- Start review
 analyze_churn()
