@@ -209,6 +209,17 @@ function M.open_panel()
   vim.cmd("wincmd l")
 end
 
+function M.focus_panel()
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    vim.api.nvim_set_current_win(panel_win)
+  else
+    M.open_panel()
+    if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+      vim.api.nvim_set_current_win(panel_win)
+    end
+  end
+end
+
 function M.close_panel()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
     vim.api.nvim_win_close(panel_win, true)
@@ -260,6 +271,7 @@ function M.setup(data)
   vim.keymap.set("n", "]b", M.next_branch, { desc = "Next branch in stack" })
   vim.keymap.set("n", "[b", M.prev_branch, { desc = "Prev branch in stack" })
   vim.keymap.set("n", "<leader>sp", M.toggle_panel, { desc = "Toggle stack panel" })
+  vim.keymap.set("n", "<leader>E", M.focus_panel, { desc = "Focus branch panel" })
 
   vim.keymap.set("n", "<leader>sc", function()
     churn.show(churns)
@@ -305,6 +317,8 @@ function M.setup(data)
     vim.notify([[
 Stack Review Keybindings:
   ]b / [b       next/prev branch
+  <leader>e     focus file panel
+  <leader>E     focus branch panel
   <leader>sp    toggle stack panel
   <leader>sc    show churn details
   <leader>sb    bless file (in diff) or all files (elsewhere)
