@@ -63,6 +63,12 @@ loops() {
                 review)
                     ~/.dotfiles/scripts/stack-review "$@"
                     ;;
+                snapshot)
+                    ~/.dotfiles/scripts/stack-snapshot save
+                    ;;
+                diff)
+                    ~/.dotfiles/scripts/stack-snapshot diff
+                    ;;
                 *)
                     echo "Use git-town for stack management:"
                     echo "  git town sync      - sync all branches"
@@ -71,7 +77,9 @@ loops() {
                     echo "  git town propose   - create PR"
                     echo ""
                     echo "loops stack commands:"
-                    echo "  loops stack review - review stack in nvim"
+                    echo "  loops stack review   - review stack in nvim"
+                    echo "  loops stack snapshot - save current state"
+                    echo "  loops stack diff     - show changes since snapshot"
                     ;;
             esac
             ;;
