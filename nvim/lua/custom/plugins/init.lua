@@ -1,7 +1,7 @@
 -- Custom plugins
 return {
   {
-    "sindrets/diffview.nvim",
+    "phil-loops/diffview.nvim",
     branch = "stack-drift",
     cmd = { "DiffviewOpen", "DiffviewFileHistory", "DiffviewClose" },
   },
