@@ -59,21 +59,17 @@ export function getScript(): string {
       }
     }
 
-    // One-time migration: rehash reviewed files with the new hash algorithm
-    // (which skips @@ headers). Remove this after one run.
-    (function migrateHashes() {
-      if (localStorage.getItem('stack-review:v2-migrated')) return;
-      for (const b of branches) {
-        for (const f of b.files) {
-          const key = reviewKey(b.name, f.name);
-          const storedDiff = localStorage.getItem(key + ':diff');
-          if (storedDiff !== null && localStorage.getItem(key) !== null) {
-            // Re-hash the stored diff with the new algorithm
-            localStorage.setItem(key, hashStr(storedDiff));
-          }
-        }
+    // One-time nuke: clear all stale review state from before the hash
+    // algorithm change + stack reorganization. Remove after one run.
+    (function nukeStaleState() {
+      if (localStorage.getItem('stack-review:v3-reset')) return;
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('stack-review:')) toRemove.push(k);
       }
-      localStorage.setItem('stack-review:v2-migrated', '1');
+      toRemove.forEach(k => localStorage.removeItem(k));
+      localStorage.setItem('stack-review:v3-reset', '1');
     })();
 
     // Auto-store baseline: on first load, record every file's diff so we can
