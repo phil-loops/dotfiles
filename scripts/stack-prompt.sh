@@ -36,4 +36,11 @@ count_stack() {
 }
 count_stack "$root"
 
-echo "${BRANCH} ${pos}/${total}"
+# Detect remote: prefer phil-loops if exists, otherwise origin
+if git remote | grep -q "^phil-loops$" 2>/dev/null; then
+  REMOTE_EMOJI="🔱"
+else
+  REMOTE_EMOJI="🏠"
+fi
+
+echo "${REMOTE_EMOJI} ${BRANCH}🌱 ${pos}/${total}🤿"
