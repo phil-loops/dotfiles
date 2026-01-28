@@ -8,7 +8,7 @@ const command = args[0];
 const commands: Record<string, { run: (args: string[]) => void; desc: string }> = {
   webview: {
     run: webview,
-    desc: "Open interactive stack viewer in browser",
+    desc: "Open interactive stack viewer in browser (usage: webview [prefix])",
   },
 };
 
