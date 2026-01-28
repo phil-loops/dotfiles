@@ -14,6 +14,13 @@ local churn_by_branch = {} -- branch -> count
 local function update_panel()
   if not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
 
+  -- Warm tip cache in a single git call
+  local branch_names = {}
+  for _, item in ipairs(chain) do
+    table.insert(branch_names, item.branch)
+  end
+  blessed.warm_tips(branch_names)
+
   local lines = {}
   local summaries = {} -- cache per-branch summary for reuse in highlights
   for i, item in ipairs(chain) do
