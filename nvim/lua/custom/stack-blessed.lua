@@ -74,31 +74,37 @@ function M.load()
   end
 end
 
+local save_timer = nil
+
 function M.save()
-  local fp = get_json_path()
-  if not fp then return end
-  local f = io.open(fp, "w")
-  if not f then
-    vim.notify("Could not write " .. fp, vim.log.levels.ERROR)
-    return
-  end
-  f:write(vim.json.encode(blessed))
-  f:close()
+  -- Debounce: write at most once per 100ms
+  if save_timer then save_timer:stop() end
+  save_timer = vim.defer_fn(function()
+    local fp = get_json_path()
+    if not fp then return end
+    local content = vim.json.encode(blessed)
+    vim.loop.fs_open(fp, "w", 438, function(err, fd)
+      if err or not fd then return end
+      vim.loop.fs_write(fd, content)
+      vim.loop.fs_close(fd)
+    end)
+    save_timer = nil
+  end, 50)
 end
 
 -- Bless a single file on a branch at the branch's current HEAD
 ---@param branch string
 ---@param filepath string
-function M.bless_file(branch, filepath)
+---@param quiet? boolean
+function M.bless_file(branch, filepath, quiet)
   local sha = get_tip(branch)
-  if not sha then
-    vim.notify("Could not resolve " .. branch, vim.log.levels.ERROR)
-    return
-  end
+  if not sha then return end
   if not blessed[branch] then blessed[branch] = {} end
   blessed[branch][filepath] = sha
   M.save()
-  vim.notify(string.format("Blessed %s @ %s (%s)", filepath, branch, sha:sub(1, 8)), vim.log.levels.INFO)
+  if not quiet then
+    vim.notify(string.format("Blessed %s (%s)", filepath, sha:sub(1, 8)), vim.log.levels.INFO)
+  end
 end
 
 -- Bless all files on a branch at current HEAD
@@ -106,23 +112,26 @@ end
 ---@param parent string
 function M.bless_branch(branch, parent)
   local sha = get_tip(branch)
-  if not sha then
-    vim.notify("Could not resolve " .. branch, vim.log.levels.ERROR)
-    return
+  if not sha then return end
+
+  -- Use cached file list if available, otherwise shell out
+  local files = file_list_cache[branch]
+  if not files then
+    local cmd = string.format("git diff --name-only %s %s 2>/dev/null", parent, branch)
+    local output = vim.fn.system(cmd):gsub("%s+$", "")
+    if output == "" then return end
+    files = {}
+    for filepath in output:gmatch("[^\n]+") do
+      table.insert(files, filepath)
+    end
   end
-  -- Get all files in this branch's diff
-  local cmd = string.format("git diff --name-only %s %s 2>/dev/null", parent, branch)
-  local output = vim.fn.system(cmd):gsub("%s+$", "")
-  if output == "" then return end
 
   if not blessed[branch] then blessed[branch] = {} end
-  local count = 0
-  for filepath in output:gmatch("[^\n]+") do
+  for _, filepath in ipairs(files) do
     blessed[branch][filepath] = sha
-    count = count + 1
   end
   M.save()
-  vim.notify(string.format("Blessed %d files on %s at %s", count, branch, sha:sub(1, 8)), vim.log.levels.INFO)
+  vim.notify(string.format("Blessed %d files (%s)", #files, sha:sub(1, 8)), vim.log.levels.INFO)
 end
 
 -- Unbless a single file
@@ -230,21 +239,23 @@ function M.stale_files(branch, parent)
   return M.summary(branch, parent).stale_files
 end
 
--- Cache of branch file counts (populated once via warm_file_counts)
-local file_count_cache = {} -- branch -> number
+-- Cache of branch file lists (populated once via warm_file_counts)
+local file_list_cache = {} -- branch -> string[] (file paths)
 
--- Pre-compute file counts for all branches in the chain (one git call each, but only once)
+-- Pre-compute file lists for all branches in the chain (one git call each, but only once)
 ---@param chain table[] -- { {branch, parent}, ... }
 function M.warm_file_counts(chain)
   for _, item in ipairs(chain) do
-    if not file_count_cache[item.branch] and item.parent and item.parent ~= "" then
+    if not file_list_cache[item.branch] and item.parent and item.parent ~= "" then
       local cmd = string.format("git diff --name-only %s %s 2>/dev/null", item.parent, item.branch)
       local output = vim.fn.system(cmd):gsub("%s+$", "")
-      local count = 0
+      local files = {}
       if output ~= "" then
-        for _ in output:gmatch("[^\n]+") do count = count + 1 end
+        for f in output:gmatch("[^\n]+") do
+          table.insert(files, f)
+        end
       end
-      file_count_cache[item.branch] = count
+      file_list_cache[item.branch] = files
     end
   end
 end
@@ -253,7 +264,14 @@ end
 ---@param branch string
 ---@return number
 function M.file_count(branch)
-  return file_count_cache[branch] or 0
+  return file_list_cache[branch] and #file_list_cache[branch] or 0
+end
+
+-- Get cached file list for a branch
+---@param branch string
+---@return string[]
+function M.file_list(branch)
+  return file_list_cache[branch] or {}
 end
 
 -- Invalidate tip cache (e.g. after pushing)
