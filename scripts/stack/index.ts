@@ -1,19 +1,33 @@
 #!/usr/bin/env node
-import { execSync } from "child_process";
 import { webview } from "./commands/webview.ts";
 import { inject } from "./commands/inject.ts";
+import { branches } from "./commands/branches.ts";
+import { update } from "./commands/update.ts";
+import { push } from "./commands/push.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
 
 const commands: Record<string, { run: (args: string[]) => void; desc: string }> = {
+  branches: {
+    run: branches,
+    desc: "List stack branches in order (--json, --names)",
+  },
+  update: {
+    run: update,
+    desc: "Rebase downstream branches (--from=<branch>, --dry-run)",
+  },
+  push: {
+    run: push,
+    desc: "Push all stack branches (--force, --remote=<remote>)",
+  },
   webview: {
     run: webview,
-    desc: "Open interactive stack viewer in browser (usage: webview [prefix])",
+    desc: "Open interactive stack viewer in browser",
   },
   inject: {
     run: inject,
-    desc: "Analyze changes and suggest injection points in the stack",
+    desc: "Analyze changes and suggest injection points",
   },
 };
 

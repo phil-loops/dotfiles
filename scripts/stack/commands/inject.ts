@@ -1,12 +1,4 @@
-import { execSync } from "child_process";
-
-function git(cmd: string): string {
-  try {
-    return execSync(`git ${cmd}`, { encoding: "utf-8" }).trim();
-  } catch {
-    return "";
-  }
-}
+import { git, getStackBranches, StackBranch } from "../lib/git-town.ts";
 
 interface Hunk {
   file: string;
@@ -17,46 +9,6 @@ interface Hunk {
   targetBranch: string | null;
   confidence: "high" | "medium" | "low";
   reason: string;
-}
-
-interface StackBranch {
-  name: string;
-  parent: string;
-  commits: Set<string>;
-}
-
-function getStackBranches(prefix?: string): StackBranch[] {
-  const config = git("config --get-regexp git-town-branch");
-  const branches: { name: string; parent: string }[] = [];
-
-  for (const line of config.split("\n")) {
-    const match = line.match(/git-town-branch\.(.+)\.parent\s+(.+)/);
-    if (match) {
-      const name = match[1];
-      if (prefix && !name.startsWith(prefix)) continue;
-      branches.push({ name, parent: match[2] });
-    }
-  }
-
-  // Sort by chain from main
-  const sorted: StackBranch[] = [];
-  const remaining = [...branches];
-  let current = "main";
-
-  while (remaining.length > 0) {
-    const idx = remaining.findIndex((b) => b.parent === current);
-    if (idx === -1) break;
-    const branch = remaining.splice(idx, 1)[0];
-
-    // Get commits unique to this branch (not in parent)
-    const commitList = git(`log ${branch.parent}..${branch.name} --format=%H`);
-    const commits = new Set(commitList.split("\n").filter(Boolean));
-
-    sorted.push({ ...branch, commits });
-    current = branch.name;
-  }
-
-  return sorted;
 }
 
 function parseDiff(diff: string): Hunk[] {
