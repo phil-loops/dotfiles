@@ -13,38 +13,21 @@ local function get_git_root()
   return result
 end
 
--- Get repo name from git root
-local function get_repo_name()
-  local git_root = get_git_root()
-  if not git_root then
-    return nil
-  end
-  return vim.fn.fnamemodify(git_root, ':t')
-end
-
--- Read stack file to get branch list and parent relationships
+-- Read stack from git-town
 local function read_stack_file()
-  local repo_name = get_repo_name()
-  if not repo_name then
+  local git_town = require('custom.stack-git-town')
+  local parents, main_branch = git_town.get_lineage()
+
+  if vim.tbl_isempty(parents) then
     return {}, {}
   end
 
-  local stack_path = vim.fn.expand('~/.local/share/stack/' .. repo_name .. '/stack')
-  local file = io.open(stack_path, 'r')
-  if not file then
-    return {}, {}
-  end
-
+  -- Get ordered branch list
+  local all_branches = git_town.get_all_branches()
   local branches = {}
-  local parents = {}
-  for line in file:lines() do
-    local child, parent = line:match('^([^:]+):(.+)$')
-    if child and parent then
-      table.insert(branches, child)
-      parents[child] = parent
-    end
+  for _, item in ipairs(all_branches) do
+    table.insert(branches, item.branch)
   end
-  file:close()
 
   return branches, parents
 end
@@ -207,7 +190,7 @@ function M.inspect(filepath)
 
   local branches, parents = read_stack_file()
   if #branches == 0 then
-    vim.notify('Not in a stack', vim.log.levels.WARN)
+    vim.notify('Not in a git-town stack', vim.log.levels.WARN)
     return
   end
 
@@ -549,7 +532,7 @@ end
 function M.list_drift_files()
   local branches, parents = read_stack_file()
   if #branches == 0 then
-    vim.notify('Not in a stack', vim.log.levels.WARN)
+    vim.notify('Not in a git-town stack', vim.log.levels.WARN)
     return
   end
 
