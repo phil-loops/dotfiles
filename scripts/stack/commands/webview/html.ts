@@ -112,6 +112,16 @@ export function generateHtml(branches: BranchData[], churns: ChurnHunk[]): strin
       color: #8b949e;
     }
     .branch-item.active .branch-stats { color: rgba(255,255,255,0.7); }
+    .branch-done .branch-num { background: #238636; color: #fff; }
+    .branch-changed .branch-num { background: #9e6a03; color: #fff; }
+    .branch-partial .branch-num { background: #30363d; }
+    .branch-done { color: #3fb950; }
+    .branch-done .branch-label { color: #3fb950; }
+    .branch-item.active.branch-done .branch-label { color: #fff; }
+    .branch-done-icon, .branch-changed-icon, .branch-partial-icon { font-size: 11px; min-width: 14px; text-align: center; }
+    .branch-done { font-size: 11px; }
+    .branch-changed { font-size: 11px; }
+    .branch-partial { font-size: 11px; }
 
     .main {
       display: flex;
