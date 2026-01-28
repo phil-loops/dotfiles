@@ -94,9 +94,9 @@ LUA_FILE="$TMP_DIR/review.lua"
 
 # Find current branch index
 current_idx=0
-for i in "${!chain[@]}"; do
-  if [ "${chain[$i]}" = "$BRANCH" ]; then
-    current_idx=$i
+for i in {1..${#chain[@]}}; do
+  if [[ "${chain[$i]}" = "$BRANCH" ]]; then
+    current_idx=$((i - 1))
     break
   fi
 done
@@ -104,9 +104,9 @@ done
 # Write chain JSON
 echo "[" > "$CHAIN_FILE"
 first=true
-for i in "${!chain[@]}"; do
+for i in {1..${#chain[@]}}; do
   branch="${chain[$i]}"
-  if [ $i -eq 0 ]; then
+  if [[ $i -eq 1 ]]; then
     parent=""
   else
     parent="${chain[$((i-1))]}"
