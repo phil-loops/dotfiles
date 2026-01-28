@@ -59,6 +59,23 @@ export function getScript(): string {
       }
     }
 
+    // One-time migration: rehash reviewed files with the new hash algorithm
+    // (which skips @@ headers). Remove this after one run.
+    (function migrateHashes() {
+      if (localStorage.getItem('stack-review:v2-migrated')) return;
+      for (const b of branches) {
+        for (const f of b.files) {
+          const key = reviewKey(b.name, f.name);
+          const storedDiff = localStorage.getItem(key + ':diff');
+          if (storedDiff !== null && localStorage.getItem(key) !== null) {
+            // Re-hash the stored diff with the new algorithm
+            localStorage.setItem(key, hashStr(storedDiff));
+          }
+        }
+      }
+      localStorage.setItem('stack-review:v2-migrated', '1');
+    })();
+
     // Auto-store baseline: on first load, record every file's diff so we can
     // detect future changes without requiring a manual check/uncheck cycle.
     // Only store if there's no diff snapshot at all yet.
