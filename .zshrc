@@ -69,6 +69,9 @@ loops() {
                 diff)
                     ~/.dotfiles/scripts/stack-snapshot diff
                     ;;
+                webview)
+                    npx tsx ~/.dotfiles/scripts/stack/index.ts webview "$@"
+                    ;;
                 *)
                     echo "Use git-town for stack management:"
                     echo "  git town sync      - sync all branches"
@@ -80,6 +83,7 @@ loops() {
                     echo "  loops stack review   - review stack in nvim"
                     echo "  loops stack snapshot - save current state"
                     echo "  loops stack diff     - show changes since snapshot"
+                    echo "  loops stack webview  - open stack viewer in browser"
                     ;;
             esac
             ;;

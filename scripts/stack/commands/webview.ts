@@ -29,6 +29,86 @@ interface BranchData {
   files: { name: string; adds: number; dels: number; diff: string }[];
 }
 
+interface ChurnHunk {
+  file: string;
+  addedIn: string;
+  removedIn: string;
+  addedIdx: number;
+  removedIdx: number;
+  lines: string[];
+}
+
+function detectChurn(branches: BranchData[]): ChurnHunk[] {
+  // For each branch, collect added/removed lines per file
+  const branchAdds: Map<string, Map<string, Set<string>>>[] = []; // idx -> file -> Set<trimmedLine>
+
+  for (let i = 0; i < branches.length; i++) {
+    const adds = new Map<string, Set<string>>();
+    const b = branches[i];
+
+    for (const f of b.files) {
+      const fileAdds = new Set<string>();
+      for (const rawLine of f.diff.split("\n")) {
+        if (rawLine.startsWith("+") && !rawLine.startsWith("+++")) {
+          const content = rawLine.slice(1).trim();
+          if (content) fileAdds.add(content);
+        }
+      }
+      if (fileAdds.size > 0) adds.set(f.name, fileAdds);
+    }
+
+    branchAdds.push(adds);
+  }
+
+  // Cross-reference: for each removed line in branch[j], check earlier branches
+  const churns: ChurnHunk[] = [];
+
+  for (let j = 1; j < branches.length; j++) {
+    const b = branches[j];
+    const removedByFile = new Map<string, Set<string>>();
+
+    for (const f of b.files) {
+      const fileRemoves = new Set<string>();
+      for (const rawLine of f.diff.split("\n")) {
+        if (rawLine.startsWith("-") && !rawLine.startsWith("---")) {
+          const content = rawLine.slice(1).trim();
+          if (content) fileRemoves.add(content);
+        }
+      }
+      if (fileRemoves.size > 0) removedByFile.set(f.name, fileRemoves);
+    }
+
+    for (const [file, removedLines] of removedByFile) {
+      for (const line of removedLines) {
+        for (let i = 0; i < j; i++) {
+          const earlierAdds = branchAdds[i].get(file);
+          if (earlierAdds?.has(line)) {
+            // Found churn - check if we can merge with existing
+            const existing = churns.find(
+              (c) => c.file === file && c.addedIdx === i && c.removedIdx === j
+            );
+            if (existing) {
+              existing.lines.push(line);
+            } else {
+              churns.push({
+                file,
+                addedIn: branches[i].name,
+                removedIn: branches[j].name,
+                addedIdx: i,
+                removedIdx: j,
+                lines: [line],
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  return churns;
+}
+
 function getBranchesFromGitTown(prefix?: string): { name: string; parent: string }[] {
   const config = git("config --get-regexp git-town-branch");
   const branches: { name: string; parent: string }[] = [];
@@ -93,7 +173,20 @@ function getBranchData(name: string, parent: string): BranchData {
   return { name, parent, filesChanged, insertions, deletions, message, files };
 }
 
-function generateHtml(branches: BranchData[]): string {
+function generateHtml(branches: BranchData[], churns: ChurnHunk[]): string {
+  const churnsJson = churns
+    .map(
+      (c) => `{
+      file: "${escapeJs(c.file)}",
+      addedIn: "${escapeJs(c.addedIn)}",
+      removedIn: "${escapeJs(c.removedIn)}",
+      addedIdx: ${c.addedIdx},
+      removedIdx: ${c.removedIdx},
+      lines: [${c.lines.map((l) => `"${escapeJs(l)}"`).join(",")}]
+    }`
+    )
+    .join(",\n");
+
   const branchesJson = branches
     .map(
       (b) => `{
@@ -330,6 +423,62 @@ function generateHtml(branches: BranchData[]): string {
       display: flex;
       gap: 8px;
     }
+    .churn-badge {
+      background: #d29922;
+      color: #0d1117;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 10px;
+      white-space: nowrap;
+    }
+    .branch-item.active .churn-badge { background: #f0c040; }
+    .churn-panel {
+      display: none;
+      background: #161b22;
+      border: 1px solid #d29922;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      overflow: hidden;
+    }
+    .churn-panel.visible { display: block; }
+    .churn-panel-header {
+      background: rgba(210, 153, 34, 0.15);
+      color: #d29922;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .churn-item {
+      padding: 8px 14px;
+      border-top: 1px solid #30363d;
+      font-size: 12px;
+      font-family: ui-monospace, monospace;
+    }
+    .churn-file { color: #58a6ff; margin-bottom: 4px; }
+    .churn-flow {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: #8b949e;
+      font-size: 11px;
+    }
+    .churn-flow .from { color: #3fb950; }
+    .churn-flow .to { color: #f85149; }
+    .churn-flow .arrow { color: #d29922; }
+    .churn-lines {
+      margin-top: 4px;
+      padding: 4px 8px;
+      background: #0d1117;
+      border-radius: 4px;
+      font-size: 10px;
+      color: #8b949e;
+      max-height: 60px;
+      overflow-y: auto;
+    }
   </style>
 </head>
 <body>
@@ -370,7 +519,9 @@ function generateHtml(branches: BranchData[]): string {
         <div class="expand-all">
           <button class="nav-btn" onclick="expandAll()">Expand All</button>
           <button class="nav-btn" onclick="collapseAll()">Collapse All</button>
+          <button class="nav-btn" id="churnBtn" onclick="toggleChurn()" style="display:none;border-color:#d29922;color:#d29922">Show Churn</button>
         </div>
+        <div class="churn-panel" id="churnPanel"></div>
         <div id="files"></div>
       </div>
     </div>
@@ -378,8 +529,15 @@ function generateHtml(branches: BranchData[]): string {
 
   <script>
     const branches = [${branchesJson}];
+    const churns = [${churnsJson}];
     let idx = 0;
     let expanded = new Set();
+
+    // Build churn counts per branch (where lines were added)
+    const churnByBranch = {};
+    for (const c of churns) {
+      churnByBranch[c.addedIn] = (churnByBranch[c.addedIn] || 0) + c.lines.length;
+    }
 
     function escHtml(s) {
       return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -481,13 +639,16 @@ function generateHtml(branches: BranchData[]): string {
 
     function render() {
       const b = branches[idx];
-      document.getElementById('branchList').innerHTML = branches.map((br, i) =>
-        \`<div class="branch-item \${i === idx ? 'active' : ''}" onclick="go(\${i})">
+      document.getElementById('branchList').innerHTML = branches.map((br, i) => {
+        const cc = churnByBranch[br.name] || 0;
+        const churnBadge = cc > 0 ? \`<span class="churn-badge" title="\${cc} churned lines">~\${cc}</span>\` : '';
+        return \`<div class="branch-item \${i === idx ? 'active' : ''}" onclick="go(\${i})">
           <span class="branch-num">\${String(i + 1).padStart(2, '0')}</span>
           <span class="branch-label">\${br.name.replace(/^goals-v2-\\d+-/, '')}</span>
+          \${churnBadge}
           <span class="branch-stats">+\${br.insertions}/-\${br.deletions}</span>
-        </div>\`
-      ).join('');
+        </div>\`;
+      }).join('');
 
       document.getElementById('branchName').textContent = b.name;
       document.getElementById('filesChanged').textContent = b.filesChanged;
@@ -511,6 +672,8 @@ function generateHtml(branches: BranchData[]): string {
           <div class="diff \${expanded.has(i) ? 'expanded' : ''}" id="diff-\${i}">\${renderSideBySide(hunks)}</div>
         </div>\`;
       }).join('');
+
+      renderChurnPanel();
     }
 
     function toggle(i) {
@@ -529,6 +692,54 @@ function generateHtml(branches: BranchData[]): string {
     }
     function go(i) { idx = i; expanded.clear(); render(); }
     function nav(d) { if (idx + d >= 0 && idx + d < branches.length) go(idx + d); }
+
+    function renderChurnPanel() {
+      const btn = document.getElementById('churnBtn');
+      const panel = document.getElementById('churnPanel');
+
+      // Filter churns relevant to current branch
+      const branchName = branches[idx].name;
+      const relevant = churns.filter(c => c.addedIn === branchName || c.removedIn === branchName);
+
+      if (relevant.length === 0 && churns.length === 0) {
+        btn.style.display = 'none';
+        panel.classList.remove('visible');
+        return;
+      }
+
+      btn.style.display = '';
+      const total = churns.length;
+      btn.textContent = 'Churn (' + total + ' hunks)';
+
+      const items = (relevant.length > 0 ? relevant : churns).map(c => {
+        const fromShort = c.addedIn.replace(/^goals-v2-\\d+-/, '');
+        const toShort = c.removedIn.replace(/^goals-v2-\\d+-/, '');
+        const preview = c.lines.slice(0, 3).map(l => escHtml(l.length > 80 ? l.slice(0, 77) + '...' : l)).join('\\n');
+        const more = c.lines.length > 3 ? '\\n... +' + (c.lines.length - 3) + ' more' : '';
+        return \`<div class="churn-item">
+          <div class="churn-file">\${c.file}</div>
+          <div class="churn-flow">
+            <span class="from">+ \${fromShort}</span>
+            <span class="arrow">→</span>
+            <span class="to">- \${toShort}</span>
+            <span>(\${c.lines.length} lines)</span>
+          </div>
+          <div class="churn-lines">\${preview}\${more}</div>
+        </div>\`;
+      }).join('');
+
+      panel.innerHTML = \`
+        <div class="churn-panel-header">
+          <span>\${relevant.length > 0 ? 'Churn for ' + branchName.replace(/^goals-v2-\\d+-/, '') : 'All churn'} (\${(relevant.length || churns.length)} hunks)</span>
+          <button class="nav-btn" onclick="toggleChurn()" style="padding:2px 8px;font-size:11px">×</button>
+        </div>
+        \${items}\`;
+    }
+
+    function toggleChurn() {
+      const panel = document.getElementById('churnPanel');
+      panel.classList.toggle('visible');
+    }
 
     document.addEventListener('keydown', e => {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') nav(-1);
@@ -568,7 +779,15 @@ export function webview(args: string[]) {
     return data;
   });
 
-  const html = generateHtml(branchData);
+  console.log("Detecting churn...");
+  const churnData = detectChurn(branchData);
+  if (churnData.length > 0) {
+    console.log(`  Found ${churnData.length} churn hunks`);
+  } else {
+    console.log("  No churn detected");
+  }
+
+  const html = generateHtml(branchData, churnData);
   const outPath = join(tmpdir(), "stack-view.html");
   writeFileSync(outPath, html);
 
