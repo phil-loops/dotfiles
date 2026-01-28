@@ -57,7 +57,23 @@ loops() {
 
     case "$cmd" in
         stack)
-            node --no-warnings --experimental-strip-types ~/.dotfiles/scripts/stack/index.ts "$@"
+            local subcmd=$1
+            shift 2>/dev/null
+            case "$subcmd" in
+                review)
+                    ~/.dotfiles/scripts/stack-review "$@"
+                    ;;
+                *)
+                    echo "Use git-town for stack management:"
+                    echo "  git town sync      - sync all branches"
+                    echo "  git town up/down   - navigate stack"
+                    echo "  git town append    - create child branch"
+                    echo "  git town propose   - create PR"
+                    echo ""
+                    echo "loops stack commands:"
+                    echo "  loops stack review - review stack in nvim"
+                    ;;
+            esac
             ;;
         pr-review)
             _loops_pr_review "$@"
@@ -69,7 +85,7 @@ loops() {
             echo "Usage: loops <command>"
             echo ""
             echo "Commands:"
-            echo "  stack             Manage git branch stacks"
+            echo "  stack review      Review stack in nvim (diffview)"
             echo "  pr-review         Review PRs assigned to you"
             echo "  clean-migrations  Remove empty migration folders"
             ;;

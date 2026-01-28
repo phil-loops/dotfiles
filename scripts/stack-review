@@ -1,0 +1,321 @@
+#!/bin/bash
+# Stack Review - opens nvim with diffview for reviewing stacked branches
+# Uses git-town for lineage
+
+set -e
+
+# Get current branch
+BRANCH=$(git branch --show-current 2>/dev/null)
+if [ -z "$BRANCH" ]; then
+  echo "Not in a git repository"
+  exit 1
+fi
+
+# Check if git-town is configured
+PARENT=$(git config "git-town-branch.${BRANCH}.parent" 2>/dev/null)
+if [ -z "$PARENT" ]; then
+  echo "Branch '$BRANCH' not tracked by git-town"
+  echo "Run: git town append <branch> or git town prepend <branch>"
+  exit 1
+fi
+
+# Build the branch chain (walk up to main, then find all descendants)
+MAIN_BRANCH=$(git config git-town.main-branch 2>/dev/null || echo "main")
+
+# Collect all branches and their parents from git-town config
+declare -A parents
+declare -A children
+
+while IFS= read -r line; do
+  if [[ "$line" =~ ^git-town-branch\.(.+)\.parent=(.+)$ ]]; then
+    branch="${BASH_REMATCH[1]}"
+    parent="${BASH_REMATCH[2]}"
+    parents["$branch"]="$parent"
+    children["$parent"]+="$branch "
+  fi
+done < <(git config --local --list 2>/dev/null | grep "git-town-branch.*\.parent=")
+
+# Walk up from current branch to main
+chain=()
+current="$BRANCH"
+while [ -n "$current" ] && [ "$current" != "$MAIN_BRANCH" ]; do
+  chain=("$current" "${chain[@]}")
+  current="${parents[$current]}"
+done
+chain=("$MAIN_BRANCH" "${chain[@]}")
+
+# Walk down to find descendants of current branch
+find_descendants() {
+  local branch="$1"
+  for child in ${children[$branch]}; do
+    chain+=("$child")
+    find_descendants "$child"
+  done
+}
+find_descendants "$BRANCH"
+
+# Calculate health for each branch
+calc_health() {
+  local branch="$1"
+  local parent="$2"
+
+  if [ -z "$parent" ] || [ "$branch" = "$MAIN_BRANCH" ]; then
+    echo '{"loc":0,"files":0,"drifted":0}'
+    return
+  fi
+
+  # Get diff stats
+  local stats=$(git diff --numstat "$parent".."$branch" -- "*.ts" "*.tsx" 2>/dev/null | \
+    awk 'BEGIN{add=0;del=0;files=0} {add+=$1;del+=$2;files++} END{print add+del,files}')
+  local loc=$(echo "$stats" | cut -d' ' -f1)
+  local files=$(echo "$stats" | cut -d' ' -f2)
+
+  [ -z "$loc" ] && loc=0
+  [ -z "$files" ] && files=0
+
+  echo "{\"loc\":$loc,\"files\":$files,\"drifted\":0}"
+}
+
+# Build JSON for nvim
+TMP_DIR=$(mktemp -d)
+CHAIN_FILE="$TMP_DIR/chain.json"
+STATE_FILE="$TMP_DIR/state.json"
+LUA_FILE="$TMP_DIR/review.lua"
+
+# Find current branch index
+current_idx=0
+for i in "${!chain[@]}"; do
+  if [ "${chain[$i]}" = "$BRANCH" ]; then
+    current_idx=$i
+    break
+  fi
+done
+
+# Write chain JSON
+echo "[" > "$CHAIN_FILE"
+first=true
+for i in "${!chain[@]}"; do
+  branch="${chain[$i]}"
+  if [ $i -eq 0 ]; then
+    parent=""
+  else
+    parent="${chain[$((i-1))]}"
+  fi
+
+  health=$(calc_health "$branch" "$parent")
+
+  [ "$first" = true ] && first=false || echo "," >> "$CHAIN_FILE"
+  cat >> "$CHAIN_FILE" << EOF
+  {"branch":"$branch","parent":"$parent","health":$health}
+EOF
+done
+echo "]" >> "$CHAIN_FILE"
+
+# Write state JSON
+echo "{\"index\":$current_idx}" > "$STATE_FILE"
+
+# Write Lua init script
+cat > "$LUA_FILE" << 'LUASCRIPT'
+-- Stack Review for git-town
+local chain_file = "CHAIN_FILE_PATH"
+local state_file = "STATE_FILE_PATH"
+
+local function read_json(file)
+  local f = io.open(file, "r")
+  if not f then return nil end
+  local content = f:read("*a")
+  f:close()
+  return vim.json.decode(content)
+end
+
+local function write_json(file, data)
+  local f = io.open(file, "w")
+  f:write(vim.json.encode(data))
+  f:close()
+end
+
+local function get_chain() return read_json(chain_file) end
+local function get_state() return read_json(state_file) end
+local function set_state(s) write_json(state_file, s) end
+
+-- Panel state
+local panel_buf = nil
+local panel_win = nil
+
+local function update_panel()
+  if not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
+
+  local state = get_state()
+  local chain = get_chain()
+  local lines = {}
+
+  for i, item in ipairs(chain) do
+    local marker = (i - 1 == state.index) and " ◀" or ""
+    local prefix = (i - 1 == state.index) and "▶ " or "  "
+    local short_name = item.branch:gsub("goals%-v%d+%-", "")
+
+    local health_str = ""
+    if item.health and item.health.loc > 0 then
+      if item.health.loc > 150 then
+        health_str = string.format(" 🔴%d", item.health.loc)
+      else
+        health_str = string.format(" ✅%d", item.health.loc)
+      end
+    end
+
+    table.insert(lines, string.format("%s%s%s%s", prefix, short_name, health_str, marker))
+  end
+
+  vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
+  vim.api.nvim_buf_set_lines(panel_buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_option(panel_buf, "modifiable", false)
+
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    pcall(vim.api.nvim_win_set_cursor, panel_win, {state.index + 1, 0})
+  end
+end
+
+local function open_review(idx)
+  local chain = get_chain()
+  if not chain or idx < 0 or idx >= #chain then return false end
+
+  local item = chain[idx + 1]
+  if not item.parent or item.parent == "" then
+    vim.notify("No parent to diff against", vim.log.levels.WARN)
+    return false
+  end
+
+  set_state({ index = idx })
+
+  pcall(vim.cmd, "DiffviewClose")
+  vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+
+  vim.defer_fn(function()
+    update_panel()
+  end, 100)
+
+  vim.notify(string.format("Reviewing: %s (%d/%d)", item.branch, idx + 1, #chain), vim.log.levels.INFO)
+  return true
+end
+
+local function open_panel()
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    update_panel()
+    return
+  end
+
+  -- Find diffview file panel
+  local file_panel_win = nil
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    local bufname = vim.api.nvim_buf_get_name(buf)
+    if bufname:match("DiffviewFilePanel") then
+      file_panel_win = win
+      break
+    end
+  end
+
+  if not file_panel_win then
+    vim.notify("Diffview panel not found", vim.log.levels.WARN)
+    return
+  end
+
+  vim.api.nvim_set_current_win(file_panel_win)
+
+  panel_buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_option(panel_buf, "buftype", "nofile")
+  vim.api.nvim_buf_set_option(panel_buf, "bufhidden", "wipe")
+
+  local chain = get_chain()
+  local height = math.min(#chain + 2, 20)
+  vim.cmd("aboveleft " .. height .. "split")
+  panel_win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(panel_win, panel_buf)
+  vim.api.nvim_win_set_option(panel_win, "number", true)
+  vim.api.nvim_win_set_option(panel_win, "relativenumber", false)
+  vim.api.nvim_win_set_option(panel_win, "cursorline", true)
+  vim.api.nvim_win_set_option(panel_win, "winfixheight", true)
+
+  -- Panel keymaps
+  local opts = { buffer = panel_buf, silent = true }
+  vim.keymap.set("n", "<CR>", function()
+    local line = vim.api.nvim_win_get_cursor(0)[1]
+    open_review(line - 1)
+    vim.cmd("wincmd l")
+  end, opts)
+  vim.keymap.set("n", "J", function()
+    local state = get_state()
+    local chain = get_chain()
+    if state.index + 1 < #chain then
+      open_review(state.index + 1)
+    end
+  end, opts)
+  vim.keymap.set("n", "K", function()
+    local state = get_state()
+    if state.index > 0 then
+      open_review(state.index - 1)
+    end
+  end, opts)
+  vim.keymap.set("n", "q", function()
+    vim.cmd("qa")
+  end, opts)
+
+  update_panel()
+  vim.cmd("wincmd l")
+end
+
+-- Global keymaps
+vim.keymap.set("n", "]b", function()
+  local state = get_state()
+  local chain = get_chain()
+  if state.index + 1 < #chain then
+    open_review(state.index + 1)
+  else
+    vim.notify("Last branch", vim.log.levels.INFO)
+  end
+end, { desc = "Next branch" })
+
+vim.keymap.set("n", "[b", function()
+  local state = get_state()
+  if state.index > 0 then
+    open_review(state.index - 1)
+  else
+    vim.notify("First branch", vim.log.levels.INFO)
+  end
+end, { desc = "Prev branch" })
+
+vim.keymap.set("n", "<leader>gp", function()
+  if panel_win and vim.api.nvim_win_is_valid(panel_win) then
+    vim.api.nvim_win_close(panel_win, true)
+    panel_win = nil
+  else
+    open_panel()
+  end
+end, { desc = "Toggle branch panel" })
+
+vim.keymap.set("n", "g?", function()
+  vim.notify([[
+Stack Review Keybindings:
+  ]b / [b       next/prev branch
+  J / K         next/prev (in panel)
+  <CR>          jump to branch (in panel)
+  <leader>gp    toggle branch panel
+  q             quit
+]], vim.log.levels.INFO)
+end, { desc = "Help" })
+
+-- Start review
+local state = get_state()
+open_review(state.index)
+vim.defer_fn(open_panel, 200)
+LUASCRIPT
+
+# Replace placeholders in Lua script
+sed -i '' "s|CHAIN_FILE_PATH|$CHAIN_FILE|g" "$LUA_FILE"
+sed -i '' "s|STATE_FILE_PATH|$STATE_FILE|g" "$LUA_FILE"
+
+# Launch nvim
+nvim -c "luafile $LUA_FILE"
+
+# Cleanup
+rm -rf "$TMP_DIR"
