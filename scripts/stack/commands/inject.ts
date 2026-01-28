@@ -1,4 +1,4 @@
-import { git, getStackBranches, StackBranch } from "../lib/git-town.ts";
+import { git, getStackBranches, type StackBranch } from "../lib/git-town.ts";
 
 interface Hunk {
   file: string;
