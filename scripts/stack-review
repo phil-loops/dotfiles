@@ -464,8 +464,8 @@ sed -i '' "s|CHAIN_FILE_PATH|$CHAIN_FILE|g" "$LUA_FILE"
 sed -i '' "s|STATE_FILE_PATH|$STATE_FILE|g" "$LUA_FILE"
 sed -i '' "s|DIFF_FILE_PATH|$DIFF_FILE|g" "$LUA_FILE"
 
-# Launch nvim - defer script execution to after event loop starts
-nvim -c "lua vim.defer_fn(function() vim.cmd('luafile $LUA_FILE') end, 100)"
+# Launch nvim with simple DiffviewOpen
+nvim -c "DiffviewOpen ${PARENT}..${BRANCH}"
 
 # Cleanup
 rm -rf "$TMP_DIR"
