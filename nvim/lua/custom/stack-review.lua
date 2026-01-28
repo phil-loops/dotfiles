@@ -1,11 +1,14 @@
 -- Stack Review - branch navigation for git-town stacks
 local M = {}
+local churn = require("custom.stack-churn")
 
 -- State
 local chain = {}      -- { {branch="...", parent="..."}, ... }
 local current_idx = 1
 local panel_buf = nil
 local panel_win = nil
+local churns = {}          -- ChurnHunk[]
+local churn_by_branch = {} -- branch -> count
 
 local function update_panel()
   if not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
@@ -16,7 +19,15 @@ local function update_panel()
     local prefix = (i == current_idx) and "▶ " or "  "
     -- Shorten branch names (remove common prefixes)
     local short_name = item.branch:gsub("goals%-v%d+%-", "")
-    table.insert(lines, string.format("%s%s%s", prefix, short_name, marker))
+
+    -- Churn indicator
+    local suffix = ""
+    local cc = churn_by_branch[item.branch] or 0
+    if cc > 0 then
+      suffix = string.format(" ~%d", cc)
+    end
+
+    table.insert(lines, string.format("%s%s%s%s", prefix, short_name, suffix, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
@@ -149,16 +160,30 @@ function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
 
+  -- Run churn analysis
+  churns = churn.analyze(chain)
+  churn_by_branch = churn.by_branch(churns)
+
+  if #churns > 0 then
+    vim.notify(string.format("Churn detected: %d hunks across %d branches (press <leader>sc to view)",
+      #churns, vim.tbl_count(churn_by_branch)), vim.log.levels.WARN)
+  end
+
   -- Global keymaps
   vim.keymap.set("n", "]b", M.next_branch, { desc = "Next branch in stack" })
   vim.keymap.set("n", "[b", M.prev_branch, { desc = "Prev branch in stack" })
   vim.keymap.set("n", "<leader>sp", M.toggle_panel, { desc = "Toggle stack panel" })
+
+  vim.keymap.set("n", "<leader>sc", function()
+    churn.show(churns)
+  end, { desc = "Show stack churn" })
 
   vim.keymap.set("n", "g?", function()
     vim.notify([[
 Stack Review Keybindings:
   ]b / [b       next/prev branch
   <leader>sp    toggle stack panel
+  <leader>sc    show churn details
   <CR>          jump to branch (in panel)
   j / k         move in panel
   q             quit
