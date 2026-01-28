@@ -11,14 +11,6 @@ function git(cmd: string): string {
   }
 }
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 function escapeJs(text: string): string {
   return text
     .replace(/\\/g, "\\\\")
@@ -38,7 +30,6 @@ interface BranchData {
 }
 
 function getBranchesFromGitTown(prefix?: string): { name: string; parent: string }[] {
-  // Get all branches with git-town parents
   const config = git("config --get-regexp git-town-branch");
   const branches: { name: string; parent: string }[] = [];
 
@@ -46,13 +37,11 @@ function getBranchesFromGitTown(prefix?: string): { name: string; parent: string
     const match = line.match(/git-town-branch\.(.+)\.parent\s+(.+)/);
     if (match) {
       const name = match[1];
-      // Filter by prefix if provided
       if (prefix && !name.startsWith(prefix)) continue;
       branches.push({ name, parent: match[2] });
     }
   }
 
-  // Sort by finding the chain from main
   const sorted: { name: string; parent: string }[] = [];
   const remaining = [...branches];
   let current = "main";
@@ -69,7 +58,8 @@ function getBranchesFromGitTown(prefix?: string): { name: string; parent: string
 }
 
 function getBranchData(name: string, parent: string): BranchData {
-  const stat = git(`diff ${parent}..${name} --stat`);
+  // Use -w to ignore whitespace
+  const stat = git(`diff -w ${parent}..${name} --stat`);
   const lastLine = stat.split("\n").pop() || "";
 
   const filesMatch = lastLine.match(/(\d+) file/);
@@ -82,8 +72,8 @@ function getBranchData(name: string, parent: string): BranchData {
 
   const message = git(`log ${parent}..${name} --format="%s" -1`);
 
-  // Get files with their diffs
-  const numstat = git(`diff ${parent}..${name} --numstat`);
+  // Get files with their diffs (ignoring whitespace)
+  const numstat = git(`diff -w ${parent}..${name} --numstat`);
   const files: BranchData["files"] = [];
 
   for (const line of numstat.split("\n")) {
@@ -91,7 +81,7 @@ function getBranchData(name: string, parent: string): BranchData {
     const [adds, dels, filename] = line.split("\t");
     if (!filename) continue;
 
-    const diff = git(`diff ${parent}..${name} -- "${filename}"`);
+    const diff = git(`diff -w ${parent}..${name} -- "${filename}"`);
     files.push({
       name: filename,
       adds: parseInt(adds) || 0,
@@ -135,7 +125,7 @@ function generateHtml(branches: BranchData[]): string {
     }
     .container {
       display: grid;
-      grid-template-columns: 300px 1fr;
+      grid-template-columns: 280px 1fr;
       height: 100vh;
     }
     .sidebar {
@@ -154,16 +144,16 @@ function generateHtml(branches: BranchData[]): string {
       border-bottom: 1px solid #30363d;
     }
     .branch-item {
-      padding: 12px;
-      margin: 4px 0;
+      padding: 10px 12px;
+      margin: 3px 0;
       border-radius: 6px;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
       font-family: ui-monospace, monospace;
       transition: all 0.15s;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       border: 1px solid transparent;
     }
     .branch-item:hover { background: #21262d; }
@@ -173,11 +163,11 @@ function generateHtml(branches: BranchData[]): string {
     }
     .branch-num {
       background: #30363d;
-      padding: 3px 8px;
+      padding: 2px 6px;
       border-radius: 4px;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
-      min-width: 28px;
+      min-width: 24px;
       text-align: center;
     }
     .branch-item.active .branch-num { background: rgba(255,255,255,0.2); }
@@ -188,7 +178,7 @@ function generateHtml(branches: BranchData[]): string {
       white-space: nowrap;
     }
     .branch-stats {
-      font-size: 11px;
+      font-size: 10px;
       color: #8b949e;
     }
     .branch-item.active .branch-stats { color: rgba(255,255,255,0.7); }
@@ -199,7 +189,7 @@ function generateHtml(branches: BranchData[]): string {
       overflow: hidden;
     }
     .header {
-      padding: 20px 24px;
+      padding: 16px 20px;
       border-bottom: 1px solid #30363d;
       background: #161b22;
     }
@@ -207,10 +197,10 @@ function generateHtml(branches: BranchData[]): string {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
     }
     .branch-name {
-      font-size: 20px;
+      font-size: 18px;
       font-weight: 600;
       font-family: ui-monospace, monospace;
     }
@@ -219,10 +209,10 @@ function generateHtml(branches: BranchData[]): string {
       background: #21262d;
       border: 1px solid #30363d;
       color: #c9d1d9;
-      padding: 8px 16px;
+      padding: 6px 12px;
       border-radius: 6px;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 12px;
       transition: all 0.15s;
     }
     .nav-btn:hover:not(:disabled) { background: #30363d; border-color: #8b949e; }
@@ -230,40 +220,30 @@ function generateHtml(branches: BranchData[]): string {
 
     .meta {
       display: flex;
-      gap: 24px;
+      gap: 20px;
       align-items: center;
+      font-size: 13px;
     }
-    .meta-item {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-    }
-    .meta-value {
-      font-size: 24px;
-      font-weight: 600;
-    }
-    .meta-label { color: #8b949e; font-size: 13px; }
+    .meta-item { display: flex; align-items: baseline; gap: 4px; }
+    .meta-value { font-size: 18px; font-weight: 600; }
+    .meta-label { color: #8b949e; font-size: 12px; }
     .additions { color: #3fb950; }
     .deletions { color: #f85149; }
-    .parent-info {
-      margin-left: auto;
-      color: #8b949e;
-      font-size: 13px;
-    }
+    .parent-info { margin-left: auto; color: #8b949e; font-size: 12px; }
     .parent-info span { color: #58a6ff; font-family: ui-monospace, monospace; }
     .commit-msg {
-      margin-top: 12px;
-      padding: 12px;
+      margin-top: 10px;
+      padding: 10px;
       background: #0d1117;
       border-radius: 6px;
-      font-size: 13px;
+      font-size: 12px;
       color: #8b949e;
     }
 
     .content {
       flex: 1;
       overflow-y: auto;
-      padding: 16px 24px;
+      padding: 16px 20px;
     }
     .file {
       margin-bottom: 16px;
@@ -273,9 +253,9 @@ function generateHtml(branches: BranchData[]): string {
     }
     .file-header {
       background: #161b22;
-      padding: 12px 16px;
+      padding: 10px 14px;
       font-family: ui-monospace, monospace;
-      font-size: 13px;
+      font-size: 12px;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
@@ -284,28 +264,69 @@ function generateHtml(branches: BranchData[]): string {
     }
     .file-header:hover { background: #21262d; }
     .file-name { color: #58a6ff; }
-    .file-stats { display: flex; gap: 12px; }
+    .file-stats { display: flex; gap: 10px; font-size: 11px; }
+
     .diff {
       display: none;
       background: #0d1117;
       font-family: ui-monospace, monospace;
-      font-size: 12px;
-      line-height: 1.6;
+      font-size: 11px;
+      line-height: 1.5;
       overflow-x: auto;
     }
     .diff.expanded { display: block; }
-    .diff-line {
-      padding: 0 16px;
-      white-space: pre;
-      min-height: 1.6em;
+
+    /* Side-by-side layout */
+    .diff-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
     }
-    .diff-add { background: rgba(46, 160, 67, 0.15); color: #3fb950; }
-    .diff-del { background: rgba(248, 81, 73, 0.15); color: #f85149; }
-    .diff-hunk { background: rgba(56, 139, 253, 0.1); color: #58a6ff; padding-top: 8px; padding-bottom: 8px; }
-    .diff-meta { color: #8b949e; }
+    .diff-table td {
+      vertical-align: top;
+      padding: 0;
+    }
+    .diff-side {
+      width: 50%;
+      border-right: 1px solid #30363d;
+    }
+    .diff-side:last-child { border-right: none; }
+    .diff-line {
+      display: flex;
+      min-height: 1.5em;
+    }
+    .line-num {
+      width: 45px;
+      min-width: 45px;
+      padding: 0 8px;
+      text-align: right;
+      color: #484f58;
+      background: #161b22;
+      user-select: none;
+      border-right: 1px solid #30363d;
+    }
+    .line-content {
+      flex: 1;
+      padding: 0 10px;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .line-add { background: rgba(46, 160, 67, 0.15); }
+    .line-add .line-content { color: #3fb950; }
+    .line-del { background: rgba(248, 81, 73, 0.15); }
+    .line-del .line-content { color: #f85149; }
+    .line-empty { background: #161b22; }
+    .line-empty .line-content { background: repeating-linear-gradient(45deg, transparent, transparent 4px, #21262d 4px, #21262d 8px); }
+
+    .hunk-header {
+      background: rgba(56, 139, 253, 0.1);
+      color: #58a6ff;
+      padding: 6px 12px;
+      font-size: 11px;
+    }
 
     .expand-all {
-      margin-bottom: 16px;
+      margin-bottom: 12px;
       display: flex;
       gap: 8px;
     }
@@ -360,6 +381,104 @@ function generateHtml(branches: BranchData[]): string {
     let idx = 0;
     let expanded = new Set();
 
+    function escHtml(s) {
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function parseDiff(diff) {
+      if (!diff) return [];
+      const lines = diff.split('\\n');
+      const hunks = [];
+      let currentHunk = null;
+
+      for (const line of lines) {
+        if (line.startsWith('@@')) {
+          // Parse hunk header: @@ -oldStart,oldCount +newStart,newCount @@
+          const match = line.match(/@@ -(\\d+)(?:,\\d+)? \\+(\\d+)(?:,\\d+)? @@(.*)$/);
+          if (match) {
+            currentHunk = {
+              oldStart: parseInt(match[1]),
+              newStart: parseInt(match[2]),
+              context: match[3] || '',
+              oldLines: [],
+              newLines: []
+            };
+            hunks.push(currentHunk);
+          }
+        } else if (currentHunk) {
+          if (line.startsWith('+') && !line.startsWith('+++')) {
+            currentHunk.newLines.push({ type: 'add', content: line.slice(1) });
+          } else if (line.startsWith('-') && !line.startsWith('---')) {
+            currentHunk.oldLines.push({ type: 'del', content: line.slice(1) });
+          } else if (!line.startsWith('diff ') && !line.startsWith('index ') && !line.startsWith('---') && !line.startsWith('+++')) {
+            // Context line - goes in both
+            const content = line.startsWith(' ') ? line.slice(1) : line;
+            currentHunk.oldLines.push({ type: 'ctx', content });
+            currentHunk.newLines.push({ type: 'ctx', content });
+          }
+        }
+      }
+      return hunks;
+    }
+
+    function renderSideBySide(hunks) {
+      if (hunks.length === 0) return '<div class="hunk-header">(no changes)</div>';
+
+      let html = '<table class="diff-table">';
+
+      for (const hunk of hunks) {
+        html += '<tr><td colspan="2" class="hunk-header">@@ -' + hunk.oldStart + ' +' + hunk.newStart + ' @@' + escHtml(hunk.context) + '</td></tr>';
+
+        // Pair up deletions and additions where possible
+        const oldLines = [...hunk.oldLines];
+        const newLines = [...hunk.newLines];
+
+        let oldIdx = 0, newIdx = 0;
+        let oldLineNum = hunk.oldStart;
+        let newLineNum = hunk.newStart;
+
+        while (oldIdx < oldLines.length || newIdx < newLines.length) {
+          const oldLine = oldLines[oldIdx];
+          const newLine = newLines[newIdx];
+
+          let leftHtml = '', rightHtml = '';
+
+          if (oldLine && newLine && oldLine.type === 'ctx' && newLine.type === 'ctx') {
+            // Both context - show side by side
+            leftHtml = '<div class="diff-line"><span class="line-num">' + oldLineNum + '</span><span class="line-content">' + escHtml(oldLine.content) + '</span></div>';
+            rightHtml = '<div class="diff-line"><span class="line-num">' + newLineNum + '</span><span class="line-content">' + escHtml(newLine.content) + '</span></div>';
+            oldIdx++; newIdx++; oldLineNum++; newLineNum++;
+          } else if (oldLine && oldLine.type === 'del') {
+            // Deletion on left, check if there's a matching addition
+            leftHtml = '<div class="diff-line line-del"><span class="line-num">' + oldLineNum + '</span><span class="line-content">' + escHtml(oldLine.content) + '</span></div>';
+            oldIdx++; oldLineNum++;
+
+            if (newLine && newLine.type === 'add') {
+              rightHtml = '<div class="diff-line line-add"><span class="line-num">' + newLineNum + '</span><span class="line-content">' + escHtml(newLine.content) + '</span></div>';
+              newIdx++; newLineNum++;
+            } else {
+              rightHtml = '<div class="diff-line line-empty"><span class="line-num"></span><span class="line-content"></span></div>';
+            }
+          } else if (newLine && newLine.type === 'add') {
+            // Addition on right only
+            leftHtml = '<div class="diff-line line-empty"><span class="line-num"></span><span class="line-content"></span></div>';
+            rightHtml = '<div class="diff-line line-add"><span class="line-num">' + newLineNum + '</span><span class="line-content">' + escHtml(newLine.content) + '</span></div>';
+            newIdx++; newLineNum++;
+          } else {
+            // Shouldn't happen but handle anyway
+            if (oldLine) { oldIdx++; oldLineNum++; }
+            if (newLine) { newIdx++; newLineNum++; }
+            continue;
+          }
+
+          html += '<tr><td class="diff-side">' + leftHtml + '</td><td class="diff-side">' + rightHtml + '</td></tr>';
+        }
+      }
+
+      html += '</table>';
+      return html;
+    }
+
     function render() {
       const b = branches[idx];
       document.getElementById('branchList').innerHTML = branches.map((br, i) =>
@@ -379,8 +498,9 @@ function generateHtml(branches: BranchData[]): string {
       document.getElementById('prevBtn').disabled = idx === 0;
       document.getElementById('nextBtn').disabled = idx === branches.length - 1;
 
-      document.getElementById('files').innerHTML = b.files.map((f, i) =>
-        \`<div class="file">
+      document.getElementById('files').innerHTML = b.files.map((f, i) => {
+        const hunks = parseDiff(f.diff);
+        return \`<div class="file">
           <div class="file-header" onclick="toggle(\${i})">
             <span class="file-name">\${f.name}</span>
             <span class="file-stats">
@@ -388,24 +508,8 @@ function generateHtml(branches: BranchData[]): string {
               <span class="deletions">-\${f.dels}</span>
             </span>
           </div>
-          <div class="diff \${expanded.has(i) ? 'expanded' : ''}" id="diff-\${i}">\${formatDiff(f.diff)}</div>
-        </div>\`
-      ).join('');
-    }
-
-    function formatDiff(diff) {
-      if (!diff) return '<div class="diff-line diff-meta">(no diff)</div>';
-      return diff.split('\\n').map(line => {
-        const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        if (line.startsWith('+') && !line.startsWith('+++'))
-          return '<div class="diff-line diff-add">' + escaped + '</div>';
-        if (line.startsWith('-') && !line.startsWith('---'))
-          return '<div class="diff-line diff-del">' + escaped + '</div>';
-        if (line.startsWith('@@'))
-          return '<div class="diff-line diff-hunk">' + escaped + '</div>';
-        if (line.startsWith('diff ') || line.startsWith('index ') || line.startsWith('---') || line.startsWith('+++'))
-          return '<div class="diff-line diff-meta">' + escaped + '</div>';
-        return '<div class="diff-line">' + escaped + '</div>';
+          <div class="diff \${expanded.has(i) ? 'expanded' : ''}" id="diff-\${i}">\${renderSideBySide(hunks)}</div>
+        </div>\`;
       }).join('');
     }
 
@@ -440,9 +544,9 @@ function generateHtml(branches: BranchData[]): string {
 }
 
 export function webview(args: string[]) {
-  const prefix = args[0]; // Optional prefix filter, e.g., "goals-v2"
+  const prefix = args[0];
 
-  console.log("Gathering branch data...");
+  console.log("Gathering branch data (ignoring whitespace)...");
   if (prefix) console.log(`Filtering branches with prefix: ${prefix}`);
 
   const branches = getBranchesFromGitTown(prefix);
