@@ -412,6 +412,15 @@ function M.setup(data)
     end
   end, { desc = "Bless all files on current branch" })
 
+  vim.keymap.set("n", "gr", function()
+    blessed.invalidate()
+    blessed.load()
+    blessed.warm_file_counts(chain)
+    blessed.warm_tips(vim.tbl_map(function(item) return item.branch end, chain))
+    open_review(current_idx)
+    vim.notify("Refreshed", vim.log.levels.INFO)
+  end, { desc = "Refresh stack review" })
+
   vim.keymap.set("n", "gy", function()
     local item = chain[current_idx]
     if not item then return end
@@ -440,6 +449,7 @@ Stack Review Keybindings:
   go            open file in new tab (with LSP)
   gd            show delta since blessed (new tab)
   gy            copy branch:file ref to clipboard
+  gr            refresh (after sync/rebase)
 
   Panel keybindings:
   <CR>          jump to branch
