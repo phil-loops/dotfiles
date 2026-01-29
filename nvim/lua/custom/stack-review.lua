@@ -515,12 +515,78 @@ function M.setup(data)
   vim.keymap.set("n", "[u", function() jump_unreviewed("prev") end, { desc = "Prev unreviewed file in stack" })
 
   vim.keymap.set("n", "gr", function()
+    -- Rebuild chain from git-town config (picks up new/removed branches after sync)
+    local main_branch = vim.fn.system("git config git-town.main-branch 2>/dev/null"):gsub("%s+$", "")
+    if main_branch == "" then main_branch = "main" end
+
+    local config_lines = vim.fn.systemlist("git config --local --list 2>/dev/null | grep 'git-town-branch.*\\.parent='")
+    local parents_map = {}
+    local children_map = {}
+    for _, line in ipairs(config_lines) do
+      local branch, parent = line:match("git%-town%-branch%.(.+)%.parent=(.+)")
+      if branch and parent then
+        parents_map[branch] = parent
+        if not children_map[parent] then children_map[parent] = {} end
+        table.insert(children_map[parent], branch)
+      end
+    end
+
+    -- Walk up from current branch to main
+    local cur_branch = chain[current_idx] and chain[current_idx].branch or
+      vim.fn.system("git branch --show-current 2>/dev/null"):gsub("%s+$", "")
+    local ancestors = {}
+    local walk = cur_branch
+    while walk and walk ~= main_branch do
+      table.insert(ancestors, 1, walk)
+      walk = parents_map[walk]
+    end
+    table.insert(ancestors, 1, main_branch)
+
+    -- Walk down from current branch to find descendants
+    local function find_descendants(b, result)
+      for _, child in ipairs(children_map[b] or {}) do
+        table.insert(result, child)
+        find_descendants(child, result)
+      end
+    end
+    local descendants = {}
+    find_descendants(cur_branch, descendants)
+
+    -- Combine into full chain
+    local new_chain = {}
+    local all_branches = {}
+    for _, b in ipairs(ancestors) do table.insert(all_branches, b) end
+    for _, b in ipairs(descendants) do table.insert(all_branches, b) end
+
+    for i, b in ipairs(all_branches) do
+      local parent = (i == 1) and "" or all_branches[i - 1]
+      table.insert(new_chain, { branch = b, parent = parent })
+    end
+
+    -- Find new index for the branch we were reviewing
+    local new_idx = 1
+    for i, item in ipairs(new_chain) do
+      if item.branch == cur_branch then
+        new_idx = i
+        break
+      end
+    end
+
+    chain = new_chain
+    current_idx = new_idx
+
+    -- Refresh blessed state and caches
     blessed.invalidate()
     blessed.load()
     blessed.warm_file_counts(chain)
     blessed.warm_tips(vim.tbl_map(function(item) return item.branch end, chain))
+
+    -- Re-run churn analysis
+    churns = churn.analyze(chain)
+    churn_by_branch = churn.by_branch(churns)
+
     open_review(current_idx)
-    vim.notify("Refreshed", vim.log.levels.INFO)
+    vim.notify(string.format("Refreshed (%d branches)", #chain), vim.log.levels.INFO)
   end, { desc = "Refresh stack review" })
 
   vim.keymap.set("n", "gy", function()
