@@ -351,8 +351,8 @@ function M.setup(data)
     -- Open side-by-side diff: blessed version vs current branch version
     vim.cmd("tabnew")
 
-    -- Left: file at blessed SHA
-    local left_content = vim.fn.systemlist(string.format("git show %s:%s 2>/dev/null", bsha, filepath))
+    -- Left: file at blessed blob hash (content hash, not commit SHA)
+    local left_content = vim.fn.systemlist(string.format("git cat-file blob %s 2>/dev/null", bsha))
     local left_buf = vim.api.nvim_get_current_buf()
     vim.api.nvim_buf_set_lines(left_buf, 0, -1, false, left_content)
     vim.api.nvim_buf_set_option(left_buf, "modifiable", false)
@@ -360,7 +360,7 @@ function M.setup(data)
     vim.api.nvim_buf_set_option(left_buf, "bufhidden", "wipe")
     local ext = filepath:match("%.(%w+)$") or ""
     if ext ~= "" then vim.api.nvim_buf_set_option(left_buf, "filetype", ext) end
-    vim.api.nvim_buf_set_name(left_buf, string.format("%s @ %s (blessed)", filepath, bsha:sub(1, 8)))
+    vim.api.nvim_buf_set_name(left_buf, string.format("%s (blessed %s)", filepath, bsha:sub(1, 8)))
     vim.cmd("diffthis")
 
     -- Right: file at current branch tip
@@ -433,7 +433,7 @@ Stack Review Keybindings:
   s             show file review status
   q             quit
 
-  Blessed = "I reviewed this file at this commit"
+  Blessed = "I reviewed this file's content" (survives rebases)
   ✓ = all clean  · = partially reviewed  ! = stale files
 ]], vim.log.levels.INFO)
   end, { desc = "Stack review help" })
