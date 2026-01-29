@@ -423,53 +423,96 @@ function M.setup(data)
   end, { desc = "Bless all files on current branch" })
 
   -- Jump to next/prev unblessed or stale file in the diffview panel
+  -- Build a flat list of all unreviewed files across the entire stack
+  -- Ordered: branches from root to tip, files alphabetically within each branch
+  local function get_all_unreviewed()
+    local results = {} -- { {chain_idx, branch, filepath}, ... }
+    for ci, item in ipairs(chain) do
+      local files = blessed.file_list(item.branch)
+      if #files > 0 then
+        local sorted = vim.deepcopy(files)
+        table.sort(sorted)
+        for _, fp in ipairs(sorted) do
+          local status = blessed.file_status(item.branch, fp)
+          if status ~= "clean" then
+            table.insert(results, { chain_idx = ci, branch = item.branch, filepath = fp, status = status })
+          end
+        end
+      end
+    end
+    return results
+  end
+
   local function jump_unreviewed(direction)
-    local item = chain[current_idx]
-    if not item then return end
+    local unreviewed = get_all_unreviewed()
+    if #unreviewed == 0 then
+      vim.notify("All files reviewed across stack", vim.log.levels.INFO)
+      return
+    end
 
-    local ok, lib = pcall(require, "diffview.lib")
-    if not ok then return end
-    local view = lib.get_current_view()
-    if not view or not view.panel then return end
-
-    local files = view.panel:ordered_file_list()
-    if not files or #files == 0 then return end
-
-    -- Find current file index
-    local cur_idx = 0
-    local cur_file = view.panel.cur_file
-    if cur_file then
-      for i, f in ipairs(files) do
-        if f == cur_file then
-          cur_idx = i
+    -- Find where we are in the unreviewed list
+    local cur_filepath = get_diffview_filepath()
+    local cur_branch = chain[current_idx] and chain[current_idx].branch
+    local cur_pos = 0
+    if cur_filepath and cur_branch then
+      for i, entry in ipairs(unreviewed) do
+        if entry.branch == cur_branch and entry.filepath == cur_filepath then
+          cur_pos = i
           break
         end
       end
     end
 
-    -- Search in direction, wrapping around
-    local len = #files
-    for offset = 1, len do
-      local i
-      if direction == "next" then
-        i = (cur_idx + offset - 1) % len + 1
-      else
-        i = (cur_idx - offset - 1) % len + 1
-      end
-      local f = files[i]
-      local status = blessed.file_status(item.branch, f.path)
-      if status ~= "clean" then
-        view:set_file(f, false, true)
-        local label = status == "stale" and "stale" or "unreviewed"
-        vim.notify(string.format("[%d/%d] %s (%s)", i, len, f.path, label), vim.log.levels.INFO)
-        return
-      end
+    -- Pick next/prev with wrapping
+    local target_pos
+    if direction == "next" then
+      target_pos = cur_pos % #unreviewed + 1
+    else
+      target_pos = (cur_pos - 2) % #unreviewed + 1
     end
-    vim.notify("All files reviewed", vim.log.levels.INFO)
+
+    local target = unreviewed[target_pos]
+
+    -- Switch branch if needed
+    if target.chain_idx ~= current_idx then
+      open_review(target.chain_idx)
+      -- After open_review, diffview reloads — defer the file jump
+      vim.defer_fn(function()
+        local ok, lib = pcall(require, "diffview.lib")
+        if not ok then return end
+        local view = lib.get_current_view()
+        if not view or not view.panel then return end
+        for _, f in view.files:iter() do
+          if f.path == target.filepath then
+            view:set_file(f, false, true)
+            break
+          end
+        end
+        local label = target.status == "stale" and "stale" or "unreviewed"
+        vim.notify(string.format("[%d/%d] %s @ %s (%s)",
+          target_pos, #unreviewed, target.filepath, target.branch:gsub("goals%-v%d+%-", ""), label),
+          vim.log.levels.INFO)
+      end, 300)
+    else
+      local ok, lib = pcall(require, "diffview.lib")
+      if not ok then return end
+      local view = lib.get_current_view()
+      if not view or not view.panel then return end
+      for _, f in view.files:iter() do
+        if f.path == target.filepath then
+          view:set_file(f, false, true)
+          break
+        end
+      end
+      local label = target.status == "stale" and "stale" or "unreviewed"
+      vim.notify(string.format("[%d/%d] %s (%s)",
+        target_pos, #unreviewed, target.filepath, label),
+        vim.log.levels.INFO)
+    end
   end
 
-  vim.keymap.set("n", "]u", function() jump_unreviewed("next") end, { desc = "Next unreviewed file" })
-  vim.keymap.set("n", "[u", function() jump_unreviewed("prev") end, { desc = "Prev unreviewed file" })
+  vim.keymap.set("n", "]u", function() jump_unreviewed("next") end, { desc = "Next unreviewed file in stack" })
+  vim.keymap.set("n", "[u", function() jump_unreviewed("prev") end, { desc = "Prev unreviewed file in stack" })
 
   vim.keymap.set("n", "gr", function()
     blessed.invalidate()
