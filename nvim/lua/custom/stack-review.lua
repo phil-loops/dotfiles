@@ -450,16 +450,37 @@ function M.setup(data)
       return
     end
 
-    -- Find where we are in the unreviewed list
+    -- Find where we are in the unreviewed list, or the nearest position
+    -- based on current branch/file so we move forward from here, not from the start
     local cur_filepath = get_diffview_filepath()
     local cur_branch = chain[current_idx] and chain[current_idx].branch
-    local cur_pos = 0
+    local cur_pos = nil
+
     if cur_filepath and cur_branch then
+      -- Exact match: we're on an unreviewed file
       for i, entry in ipairs(unreviewed) do
         if entry.branch == cur_branch and entry.filepath == cur_filepath then
           cur_pos = i
           break
         end
+      end
+    end
+
+    if not cur_pos then
+      -- Not on an unreviewed file — find the first unreviewed entry
+      -- at or after our current position in the stack
+      for i, entry in ipairs(unreviewed) do
+        if entry.chain_idx > current_idx then
+          cur_pos = direction == "next" and (i - 1) or i
+          break
+        elseif entry.chain_idx == current_idx and cur_filepath and entry.filepath > cur_filepath then
+          cur_pos = direction == "next" and (i - 1) or i
+          break
+        end
+      end
+      -- Everything is before us — wrap around
+      if not cur_pos then
+        cur_pos = direction == "next" and 0 or 1
       end
     end
 
