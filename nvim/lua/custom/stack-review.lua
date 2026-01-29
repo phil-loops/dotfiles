@@ -425,21 +425,34 @@ function M.setup(data)
 
   -- Jump to next/prev unblessed or stale file in the diffview panel
   -- Build a flat list of all unreviewed files across the entire stack
-  -- Ordered: branches from root to tip, files alphabetically within each branch
+  -- Get file order matching diffview's panel (tree order via git diff)
+  local function get_diff_file_order(branch, parent)
+    -- git diff --name-only gives files in the same tree order as diffview
+    local lines = vim.fn.systemlist(string.format("git diff --name-only %s..%s 2>/dev/null", parent, branch))
+    if vim.v.shell_error ~= 0 then return nil end
+    return lines
+  end
+
+  -- Ordered: branches from root to tip, files in diffview panel order within each branch
   local function get_all_unreviewed()
     local results = {} -- { {chain_idx, branch, filepath}, ... }
     for ci, item in ipairs(chain) do
-      local files = blessed.file_list(item.branch)
-      if #files > 0 then
-        local sorted = vim.deepcopy(files)
-        table.sort(sorted)
-        for _, fp in ipairs(sorted) do
-          local status = blessed.file_status(item.branch, fp)
+      if not item.parent or item.parent == "" then goto continue end
+      local diff_order = get_diff_file_order(item.branch, item.parent)
+      if diff_order then
+        -- Build a set of files blessed knows about for status checks
+        local known = {}
+        for _, fp in ipairs(blessed.file_list(item.branch)) do
+          known[fp] = true
+        end
+        for _, fp in ipairs(diff_order) do
+          local status = known[fp] and blessed.file_status(item.branch, fp) or "unblessed"
           if status ~= "clean" then
             table.insert(results, { chain_idx = ci, branch = item.branch, filepath = fp, status = status })
           end
         end
       end
+      ::continue::
     end
     return results
   end
