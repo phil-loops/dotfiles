@@ -144,7 +144,7 @@ function M.open_panel()
   vim.cmd("aboveleft " .. height .. "split")
   panel_win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(panel_win, panel_buf)
-  vim.api.nvim_win_set_option(panel_win, "number", false)
+  vim.api.nvim_win_set_option(panel_win, "number", true)
   vim.api.nvim_win_set_option(panel_win, "relativenumber", false)
   vim.api.nvim_win_set_option(panel_win, "cursorline", true)
   vim.api.nvim_win_set_option(panel_win, "winfixheight", true)
@@ -553,6 +553,7 @@ Stack Review Keybindings:
   gd            show delta since blessed (new tab)
   gy            copy branch:file ref to clipboard
   gr            refresh (after sync/rebase)
+  g?            show this help
 
   Panel keybindings:
   <CR>          jump to branch
