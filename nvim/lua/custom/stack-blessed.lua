@@ -211,18 +211,27 @@ function M.summary(branch, parent)
     return { status = "unblessed", total = 0, reviewed = 0, stale_count = 0, stale_files = {} }
   end
 
-  -- Count from blessed data, comparing blob hashes
+  -- Count from blessed data, comparing blob hashes.
+  -- Skip files no longer in the current diff (removed from branch).
+  local current_files = file_list_cache[branch]
+  local current_set = {}
+  if current_files then
+    for _, f in ipairs(current_files) do current_set[f] = true end
+  end
+
   local reviewed = 0
   local stale_list = {}
   local total = 0
 
   for filepath, blessed_blob in pairs(branch_blessed) do
-    total = total + 1
-    local current_blob = get_blob_hash(branch, filepath)
-    if current_blob and blessed_blob == current_blob then
-      reviewed = reviewed + 1
-    else
-      table.insert(stale_list, filepath)
+    if not current_files or current_set[filepath] then
+      total = total + 1
+      local current_blob = get_blob_hash(branch, filepath)
+      if current_blob and blessed_blob == current_blob then
+        reviewed = reviewed + 1
+      else
+        table.insert(stale_list, filepath)
+      end
     end
   end
 
@@ -294,7 +303,7 @@ function M.file_list(branch)
   return file_list_cache[branch] or {}
 end
 
--- Invalidate blob cache (e.g. after pushing)
+-- Invalidate blob and file list caches (e.g. after pushing or syncing)
 function M.invalidate(branch)
   if branch then
     -- Clear all blob cache entries for this branch
@@ -304,8 +313,10 @@ function M.invalidate(branch)
         blob_cache[key] = nil
       end
     end
+    file_list_cache[branch] = nil
   else
     blob_cache = {}
+    file_list_cache = {}
   end
 end
 
