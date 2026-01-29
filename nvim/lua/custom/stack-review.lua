@@ -422,22 +422,15 @@ function M.setup(data)
     local item = chain[current_idx]
     if not item then return end
 
-    -- If in a diffview diff buffer, bless just that file
     local filepath = get_diffview_filepath()
     if filepath then
       blessed.bless_file(item.branch, filepath)
       update_panel()
       refresh_diffview_panel()
-      return
+    else
+      vim.notify("Focus a file in the diffview panel first (use <leader>sB to bless entire branch)", vim.log.levels.WARN)
     end
-
-    -- Otherwise bless all files on the branch
-    if item.parent then
-      blessed.bless_branch(item.branch, item.parent)
-      update_panel()
-      refresh_diffview_panel()
-    end
-  end, { desc = "Bless current file or branch" })
+  end, { desc = "Bless current file" })
 
   vim.keymap.set("n", "<leader>sB", function()
     local item = chain[current_idx]
@@ -684,7 +677,7 @@ Stack Review Keybindings:
   <leader>E     focus branch panel
   <leader>sp    toggle stack panel
   <leader>sc    show churn details
-  <leader>sb    bless file (in diff) or all files (elsewhere)
+  <leader>sb    bless current file
   <leader>sB    bless all files on current branch
   go            open file in new tab (with LSP)
   gd            show delta since blessed (new tab)
