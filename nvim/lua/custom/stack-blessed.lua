@@ -1,13 +1,14 @@
 -- Stack Blessed State
--- Tracks which commit SHA each file in a branch was last reviewed at.
--- "Blessed" means "I reviewed this file at this commit."
--- A file is stale if the branch tip has moved since the blessed SHA.
+-- Tracks the blob hash (content hash) of each file when it was reviewed.
+-- "Blessed" means "I reviewed this file's content."
+-- A file is stale if its content has changed since blessing (blob hash differs).
+-- Uses blob hashes so rebases don't invalidate blessings.
 local M = {}
 
-local blessed = {} -- branch -> { file -> sha }
+local blessed = {} -- branch -> { file -> blob_hash }
 local json_path = nil -- resolved on first use
-local tip_cache = {} -- branch -> { sha, time }
-local TIP_TTL = 10 -- seconds
+local blob_cache = {} -- "branch:filepath" -> { hash, time }
+local BLOB_TTL = 10 -- seconds
 local file_list_cache = {} -- branch -> string[] (file paths)
 
 local function get_json_path()
@@ -18,28 +19,36 @@ local function get_json_path()
   return json_path
 end
 
--- Get the current tip SHA for a branch (cached)
-local function get_tip(branch)
-  local cached = tip_cache[branch]
+-- Get the blob hash (content hash) for a file on a branch (cached)
+---@param branch string
+---@param filepath string
+---@return string|nil
+local function get_blob_hash(branch, filepath)
+  local key = branch .. ":" .. filepath
+  local cached = blob_cache[key]
   local now = vim.loop.now()
-  if cached and (now - cached.time) < (TIP_TTL * 1000) then
-    return cached.sha
+  if cached and (now - cached.time) < (BLOB_TTL * 1000) then
+    return cached.hash
   end
-  local sha = vim.fn.system("git rev-parse " .. branch .. " 2>/dev/null"):gsub("%s+$", "")
+  local hash = vim.fn.system("git rev-parse " .. key .. " 2>/dev/null"):gsub("%s+$", "")
   if vim.v.shell_error ~= 0 then return nil end
-  tip_cache[branch] = { sha = sha, time = now }
-  return sha
+  blob_cache[key] = { hash = hash, time = now }
+  return hash
 end
 
--- Warm the tip cache for multiple branches in one git call
----@param branches string[]
-function M.warm_tips(branches)
+-- Warm blob cache for all files on a branch in one git call
+---@param branch string
+---@param filepaths string[]
+function M.warm_blobs(branch, filepaths)
   local now = vim.loop.now()
   local need = {}
-  for _, b in ipairs(branches) do
-    local cached = tip_cache[b]
-    if not cached or (now - cached.time) >= (TIP_TTL * 1000) then
-      table.insert(need, b)
+  local need_keys = {}
+  for _, fp in ipairs(filepaths) do
+    local key = branch .. ":" .. fp
+    local cached = blob_cache[key]
+    if not cached or (now - cached.time) >= (BLOB_TTL * 1000) then
+      table.insert(need, key)
+      table.insert(need_keys, key)
     end
   end
   if #need == 0 then return end
@@ -49,11 +58,22 @@ function M.warm_tips(branches)
   if vim.v.shell_error ~= 0 then return end
 
   local i = 1
-  for sha in output:gmatch("[^\n]+") do
-    if need[i] then
-      tip_cache[need[i]] = { sha = sha, time = now }
+  for hash in output:gmatch("[^\n]+") do
+    if need_keys[i] then
+      blob_cache[need_keys[i]] = { hash = hash, time = now }
     end
     i = i + 1
+  end
+end
+
+-- Compat shim: warm_tips now warms blobs for all cached file lists
+---@param branches string[]
+function M.warm_tips(branches)
+  for _, b in ipairs(branches) do
+    local files = file_list_cache[b]
+    if files and #files > 0 then
+      M.warm_blobs(b, files)
+    end
   end
 end
 
@@ -93,28 +113,25 @@ function M.save()
   end, 50)
 end
 
--- Bless a single file on a branch at the branch's current HEAD
+-- Bless a single file on a branch using the file's blob hash (content hash)
 ---@param branch string
 ---@param filepath string
 ---@param quiet? boolean
 function M.bless_file(branch, filepath, quiet)
-  local sha = get_tip(branch)
-  if not sha then return end
+  local blob = get_blob_hash(branch, filepath)
+  if not blob then return end
   if not blessed[branch] then blessed[branch] = {} end
-  blessed[branch][filepath] = sha
+  blessed[branch][filepath] = blob
   M.save()
   if not quiet then
-    vim.notify(string.format("Blessed %s (%s)", filepath, sha:sub(1, 8)), vim.log.levels.INFO)
+    vim.notify(string.format("Blessed %s (%s)", filepath, blob:sub(1, 8)), vim.log.levels.INFO)
   end
 end
 
--- Bless all files on a branch at current HEAD
+-- Bless all files on a branch using each file's blob hash
 ---@param branch string
 ---@param parent string
 function M.bless_branch(branch, parent)
-  local sha = get_tip(branch)
-  if not sha then return end
-
   -- Use cached file list if available, otherwise shell out
   local files = file_list_cache[branch]
   if not files then
@@ -127,12 +144,20 @@ function M.bless_branch(branch, parent)
     end
   end
 
+  -- Warm the blob cache for all files at once
+  M.warm_blobs(branch, files)
+
   if not blessed[branch] then blessed[branch] = {} end
+  local count = 0
   for _, filepath in ipairs(files) do
-    blessed[branch][filepath] = sha
+    local blob = get_blob_hash(branch, filepath)
+    if blob then
+      blessed[branch][filepath] = blob
+      count = count + 1
+    end
   end
   M.save()
-  vim.notify(string.format("Blessed %d files (%s)", #files, sha:sub(1, 8)), vim.log.levels.INFO)
+  vim.notify(string.format("Blessed %d files", count), vim.log.levels.INFO)
 end
 
 -- Unbless a single file
@@ -162,19 +187,20 @@ function M.get_sha(branch, filepath)
 end
 
 -- Check if a single file is clean/stale/unblessed
--- Pure in-memory check: blessed SHA == branch tip SHA means clean.
+-- Compares blessed blob hash to current blob hash (content-based).
 ---@param branch string
 ---@param filepath string
 ---@return string status "clean" | "stale" | "unblessed"
 function M.file_status(branch, filepath)
-  local bsha = M.get_sha(branch, filepath)
-  if not bsha then return "unblessed" end
-  local tip = get_tip(branch)
-  if not tip then return "unblessed" end
-  return bsha == tip and "clean" or "stale"
+  local blessed_blob = M.get_sha(branch, filepath)
+  if not blessed_blob then return "unblessed" end
+  local current_blob = get_blob_hash(branch, filepath)
+  if not current_blob then return "unblessed" end
+  return blessed_blob == current_blob and "clean" or "stale"
 end
 
--- Branch-level summary — no per-file git calls, all in-memory.
+-- Branch-level summary — compares blessed blob hashes to current blob hashes.
+-- Requires warm_blobs() to have been called first for performance.
 -- Returns: { status, total, reviewed, stale_count, stale_files }
 ---@param branch string
 ---@param parent string
@@ -185,19 +211,15 @@ function M.summary(branch, parent)
     return { status = "unblessed", total = 0, reviewed = 0, stale_count = 0, stale_files = {} }
   end
 
-  local tip = get_tip(branch)
-  if not tip then
-    return { status = "unblessed", total = 0, reviewed = 0, stale_count = 0, stale_files = {} }
-  end
-
-  -- Count from blessed data (we know which files were blessed)
+  -- Count from blessed data, comparing blob hashes
   local reviewed = 0
   local stale_list = {}
   local total = 0
 
-  for filepath, sha in pairs(branch_blessed) do
+  for filepath, blessed_blob in pairs(branch_blessed) do
     total = total + 1
-    if sha == tip then
+    local current_blob = get_blob_hash(branch, filepath)
+    if current_blob and blessed_blob == current_blob then
       reviewed = reviewed + 1
     else
       table.insert(stale_list, filepath)
@@ -272,12 +294,18 @@ function M.file_list(branch)
   return file_list_cache[branch] or {}
 end
 
--- Invalidate tip cache (e.g. after pushing)
+-- Invalidate blob cache (e.g. after pushing)
 function M.invalidate(branch)
   if branch then
-    tip_cache[branch] = nil
+    -- Clear all blob cache entries for this branch
+    local prefix = branch .. ":"
+    for key, _ in pairs(blob_cache) do
+      if key:sub(1, #prefix) == prefix then
+        blob_cache[key] = nil
+      end
+    end
   else
-    tip_cache = {}
+    blob_cache = {}
   end
 end
 
