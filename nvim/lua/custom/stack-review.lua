@@ -320,6 +320,16 @@ function M.setup(data)
       return
     end
 
+    -- Checkout the branch so LSP sees the right code
+    local cur_branch = vim.fn.system("git rev-parse --abbrev-ref HEAD 2>/dev/null"):gsub("%s+$", "")
+    if cur_branch ~= item.branch then
+      vim.fn.system("git checkout " .. item.branch .. " 2>/dev/null")
+      if vim.v.shell_error ~= 0 then
+        vim.notify("Failed to checkout " .. item.branch, vim.log.levels.ERROR)
+        return
+      end
+    end
+
     -- Open the real file in a new tab so LSP works
     local cwd = vim.fn.getcwd()
     local fullpath = cwd .. "/" .. filepath
@@ -412,6 +422,55 @@ function M.setup(data)
     end
   end, { desc = "Bless all files on current branch" })
 
+  -- Jump to next/prev unblessed or stale file in the diffview panel
+  local function jump_unreviewed(direction)
+    local item = chain[current_idx]
+    if not item then return end
+
+    local ok, lib = pcall(require, "diffview.lib")
+    if not ok then return end
+    local view = lib.get_current_view()
+    if not view or not view.panel then return end
+
+    local files = view.panel:ordered_file_list()
+    if not files or #files == 0 then return end
+
+    -- Find current file index
+    local cur_idx = 0
+    local cur_file = view.panel.cur_file
+    if cur_file then
+      for i, f in ipairs(files) do
+        if f == cur_file then
+          cur_idx = i
+          break
+        end
+      end
+    end
+
+    -- Search in direction, wrapping around
+    local len = #files
+    for offset = 1, len do
+      local i
+      if direction == "next" then
+        i = (cur_idx + offset - 1) % len + 1
+      else
+        i = (cur_idx - offset - 1) % len + 1
+      end
+      local f = files[i]
+      local status = blessed.file_status(item.branch, f.path)
+      if status ~= "clean" then
+        view:set_file(f, false, true)
+        local label = status == "stale" and "stale" or "unreviewed"
+        vim.notify(string.format("[%d/%d] %s (%s)", i, len, f.path, label), vim.log.levels.INFO)
+        return
+      end
+    end
+    vim.notify("All files reviewed", vim.log.levels.INFO)
+  end
+
+  vim.keymap.set("n", "]u", function() jump_unreviewed("next") end, { desc = "Next unreviewed file" })
+  vim.keymap.set("n", "[u", function() jump_unreviewed("prev") end, { desc = "Prev unreviewed file" })
+
   vim.keymap.set("n", "gr", function()
     blessed.invalidate()
     blessed.load()
@@ -440,6 +499,7 @@ function M.setup(data)
     vim.notify([[
 Stack Review Keybindings:
   ]b / [b       next/prev branch
+  ]u / [u       next/prev unreviewed file
   <leader>e     focus file panel
   <leader>E     focus branch panel
   <leader>sp    toggle stack panel
