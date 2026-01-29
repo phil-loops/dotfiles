@@ -10,6 +10,7 @@ local panel_buf = nil
 local panel_win = nil
 local churns = {}          -- ChurnHunk[]
 local churn_by_branch = {} -- branch -> count
+local last_jump = nil      -- { branch, filepath } from last ]u/[u
 
 local function update_panel()
   if not panel_buf or not vim.api.nvim_buf_is_valid(panel_buf) then return end
@@ -450,16 +451,26 @@ function M.setup(data)
       return
     end
 
-    -- Find where we are in the unreviewed list, or the nearest position
-    -- based on current branch/file so we move forward from here, not from the start
+    -- Find where we are in the unreviewed list
+    -- Check: diffview focused file, then last ]u/[u target, then position in stack
     local cur_filepath = get_diffview_filepath()
     local cur_branch = chain[current_idx] and chain[current_idx].branch
     local cur_pos = nil
 
+    -- Try exact match on currently focused file
     if cur_filepath and cur_branch then
-      -- Exact match: we're on an unreviewed file
       for i, entry in ipairs(unreviewed) do
         if entry.branch == cur_branch and entry.filepath == cur_filepath then
+          cur_pos = i
+          break
+        end
+      end
+    end
+
+    -- Fall back to last jump target (handles cases where diffview couldn't focus the file)
+    if not cur_pos and last_jump then
+      for i, entry in ipairs(unreviewed) do
+        if entry.branch == last_jump.branch and entry.filepath == last_jump.filepath then
           cur_pos = i
           break
         end
@@ -493,6 +504,7 @@ function M.setup(data)
     end
 
     local target = unreviewed[target_pos]
+    last_jump = { branch = target.branch, filepath = target.filepath }
 
     -- Switch branch if needed
     if target.chain_idx ~= current_idx then
