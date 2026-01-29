@@ -412,6 +412,21 @@ function M.setup(data)
     end
   end, { desc = "Bless all files on current branch" })
 
+  vim.keymap.set("n", "gy", function()
+    local item = chain[current_idx]
+    if not item then return end
+
+    local filepath = get_diffview_filepath()
+    if filepath then
+      local ref = item.branch .. ":" .. filepath
+      vim.fn.setreg("+", ref)
+      vim.notify("Copied: " .. ref, vim.log.levels.INFO)
+    else
+      vim.fn.setreg("+", item.branch)
+      vim.notify("Copied: " .. item.branch, vim.log.levels.INFO)
+    end
+  end, { desc = "Copy branch:file ref to clipboard" })
+
   vim.keymap.set("n", "g?", function()
     vim.notify([[
 Stack Review Keybindings:
@@ -424,6 +439,7 @@ Stack Review Keybindings:
   <leader>sB    bless all files on current branch
   go            open file in new tab (with LSP)
   gd            show delta since blessed (new tab)
+  gy            copy branch:file ref to clipboard
 
   Panel keybindings:
   <CR>          jump to branch
