@@ -290,8 +290,33 @@ function M.setup(data)
     local ok, lib = pcall(require, "diffview.lib")
     if not ok then return nil end
     local view = lib.get_current_view()
-    if not view or not view.panel or not view.panel.cur_file then return nil end
-    return view.panel.cur_file.path
+    if not view then return nil end
+
+    -- First try the panel's selected file
+    if view.panel and view.panel.cur_file then
+      return view.panel.cur_file.path
+    end
+
+    -- Fall back: if we're in a diff buffer, find the matching file entry
+    local bufnr = vim.api.nvim_get_current_buf()
+    if view.cur_layout then
+      for _, win in ipairs(view.cur_layout.windows or {}) do
+        if win.file and win.file.bufnr == bufnr then
+          return win.file.path
+        end
+      end
+    end
+
+    -- Last resort: check all file entries for a buffer match
+    if view.files then
+      for _, file in view.files:iter() do
+        if file.left_bufnr == bufnr or file.right_bufnr == bufnr then
+          return file.path
+        end
+      end
+    end
+
+    return nil
   end
 
   -- Refresh blessed indicators in diffview's file panel
