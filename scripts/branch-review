@@ -1,0 +1,33 @@
+#!/bin/zsh
+# Branch Review - opens nvim with diffview for reviewing a branch against main
+# Supports blessing (same UX as stack review, without git-town)
+
+set -e
+
+# Get branch (argument or current)
+BRANCH="${1:-$(git branch --show-current 2>/dev/null)}"
+if [[ -z "$BRANCH" ]]; then
+  echo "Not in a git repository or no branch specified"
+  exit 1
+fi
+
+BASE="main"
+
+# Verify the branch exists
+if ! git rev-parse --verify "$BRANCH" &>/dev/null; then
+  echo "Branch '$BRANCH' does not exist"
+  exit 1
+fi
+
+# Check there are actually changes
+DIFF_COUNT=$(git diff --name-only "${BASE}..${BRANCH}" 2>/dev/null | wc -l | tr -d ' ')
+if [[ "$DIFF_COUNT" -eq 0 ]]; then
+  echo "No changes between $BASE and $BRANCH"
+  exit 0
+fi
+
+echo "Reviewing $BRANCH against $BASE ($DIFF_COUNT files changed)"
+
+# Launch nvim with DiffviewOpen, then setup branch-review module
+nvim -c "DiffviewOpen ${BASE}..${BRANCH}" \
+     -c "lua require('custom.branch-review').setup({branch='${BRANCH}', base='${BASE}'})"
