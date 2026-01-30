@@ -91,6 +91,9 @@ loops() {
                     ;;
             esac
             ;;
+        review-branch)
+            ~/.dotfiles/scripts/branch-review "$@"
+            ;;
         pr-review)
             _loops_pr_review "$@"
             ;;
@@ -102,7 +105,8 @@ loops() {
             echo ""
             echo "Commands:"
             echo "  stack review      Review stack in nvim (diffview)"
-            echo "  pr-review         Review PRs assigned to you"
+            echo "  review-branch     Review branch against main with blessing"
+            echo "  pr-review         Review PRs assigned to you (with blessing)"
             echo "  clean-migrations  Remove empty migration folders"
             ;;
     esac
@@ -149,7 +153,9 @@ _loops_pr_review() {
     local pr_num=$(echo "$pr" | cut -f1)
 
     gh pr checkout --repo loops-so/loops "$pr_num"
-    nvim -c "DiffviewOpen main"
+    local pr_branch=$(git branch --show-current 2>/dev/null)
+    nvim -c "DiffviewOpen main..${pr_branch}" \
+         -c "lua require('custom.branch-review').setup({branch='${pr_branch}', base='main'})"
 }
 
 # Swap git remotes (toggle origin between phil-loops and loops-so)
