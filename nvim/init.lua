@@ -485,10 +485,7 @@ require('lazy').setup({
 
       -- Show files changed from main branch
       vim.keymap.set('n', '<leader>gm', function()
-        builtin.git_files {
-          git_command = { 'git', 'diff', '--name-only', 'main' },
-          prompt_title = 'Files changed from main',
-        }
+        vim.cmd 'DiffviewOpen main'
       end, { desc = '[G]it diff from [M]ain' })
     end,
   },
