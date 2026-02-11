@@ -107,6 +107,16 @@ function M.setup(ctx)
       end
     end
 
+    -- Anchor to the first unreviewed file on/after the current branch
+    if not cur_pos then
+      for i, entry in ipairs(unreviewed) do
+        local eb = entry.branch or cur_branch
+        if eb == cur_branch then
+          cur_pos = direction == "next" and (i - 1) or i
+          break
+        end
+      end
+    end
     if not cur_pos then
       cur_pos = direction == "next" and 0 or 1
     end
@@ -146,6 +156,8 @@ function M.setup(ctx)
       return
     end
 
+    local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+
     local branch = ctx.get_branch()
     local cur = vim.fn.system("git rev-parse --abbrev-ref HEAD 2>/dev/null"):gsub("%s+$", "")
     if cur ~= branch then
@@ -158,6 +170,7 @@ function M.setup(ctx)
 
     local cwd = vim.fn.getcwd()
     vim.cmd("tabedit " .. vim.fn.fnameescape(cwd .. "/" .. filepath))
+    pcall(vim.api.nvim_win_set_cursor, 0, { cursor_line, 0 })
   end, { desc = "Open file in new tab (with LSP)" })
 
   vim.keymap.set("n", "gd", function()
