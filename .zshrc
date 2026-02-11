@@ -180,18 +180,4 @@ git-swap-remote() {
 export GPG_TTY=$(tty)
 export PATH="$HOME/.local/bin:$PATH"
 
-# Dev session: Claude Code + nvim side by side
-dev() {
-    if [[ -n "$TMUX" ]]; then
-        echo "Already in tmux. Use Ctrl-a c for Claude split."
-        return
-    fi
-
-    # Start tmux with two panes: nvim left, claude right
-    tmux new-session -d -s dev -c "$(pwd)"
-    tmux send-keys -t dev "nvim" Enter
-    tmux split-window -h -t dev -c "$(pwd)"
-    tmux send-keys -t dev "claude" Enter
-    tmux select-pane -t dev:0.0  # focus nvim
-    tmux attach -t dev
-}
+alias dev="NGROK=false task dev"
