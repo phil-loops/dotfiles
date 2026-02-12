@@ -1,2 +1,5 @@
 # Project-specific implementation plans (auto-generated location)
 scripts/stack/plans/
+
+# MCP server dependencies
+mcp-servers/*/node_modules/
