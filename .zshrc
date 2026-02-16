@@ -180,4 +180,19 @@ git-swap-remote() {
 export GPG_TTY=$(tty)
 export PATH="$HOME/.local/bin:$PATH"
 
-alias dev="NGROK=false task dev"
+task() {
+    if [[ "$1" == "dev" ]]; then
+        echo "silly! did you reaaaally want to run with ngrok?"
+        echo "  hint: use 'dev' to run without ngrok"
+        read -r "reply?continue with ngrok? [y/N] "
+        if [[ "$reply" =~ ^[Yy]$ ]]; then
+            command task "$@"
+        else
+            echo "ok, bailing out. use 'dev' next time!"
+        fi
+    else
+        command task "$@"
+    fi
+}
+
+alias dev="NGROK=false command task dev"
