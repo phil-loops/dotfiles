@@ -1,0 +1,313 @@
+#!/bin/bash
+# staging - Check staging build/deploy status and optionally deploy
+#
+# Usage:
+#   staging           Show latest build status + what's on staging
+#   staging watch     Watch current build, then prompt to deploy
+#   staging deploy    Deploy latest successful build to staging
+#   staging status    Show what's currently deployed on staging
+
+set -euo pipefail
+
+REPO="loops-so/loops"
+DEPLOY_WORKFLOW="deploy.yml"
+BUILD_WORKFLOW="build-and-test"
+SOUNDS_DIR="$HOME/.dotfiles/sounds"
+
+# Play a sound in the background (non-blocking)
+play_sound() {
+  local sound="$SOUNDS_DIR/$1"
+  [[ -f "$sound" ]] && afplay "$sound" &
+}
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+get_branch() {
+  git rev-parse --abbrev-ref HEAD
+}
+
+get_tag_prefix() {
+  basename "$(get_branch)"
+}
+
+# Get latest build-and-test run for current branch
+get_latest_build() {
+  gh run list \
+    --repo "$REPO" \
+    --branch "$(get_branch)" \
+    --workflow "$BUILD_WORKFLOW" \
+    --limit 1 \
+    --json databaseId,status,conclusion,number,attempt,startedAt,updatedAt \
+    --jq '.[0]'
+}
+
+# Derive tag from a build run
+get_tag_from_build() {
+  local number=$1
+  local attempt=$2
+  echo "$(get_tag_prefix)-${number}-${attempt}"
+}
+
+# Get the latest staging deploy run
+get_latest_staging_deploy() {
+  gh run list \
+    --repo "$REPO" \
+    --workflow "$DEPLOY_WORKFLOW" \
+    --limit 20 \
+    --json databaseId,status,conclusion,displayTitle,startedAt,updatedAt \
+    --jq '[.[] | select(.displayTitle | contains("[staging]"))][0]'
+}
+
+# Format a timestamp as relative time
+relative_time() {
+  local ts=$1
+  local now=$(date +%s)
+  local then
+
+  # Handle both GNU and BSD date
+  # BSD date -jf ignores the Z suffix and parses as local time, so we force UTC
+  if date -d "$ts" +%s &>/dev/null; then
+    then=$(date -d "$ts" +%s)
+  else
+    then=$(TZ=UTC date -jf "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null || echo "$ts")
+  fi
+
+  if [[ "$then" == "$ts" ]]; then
+    echo "$ts"
+    return
+  fi
+
+  local diff=$((now - then))
+  if ((diff < 60)); then
+    echo "${diff}s ago"
+  elif ((diff < 3600)); then
+    echo "$((diff / 60))m ago"
+  elif ((diff < 86400)); then
+    echo "$((diff / 3600))h ago"
+  else
+    echo "$((diff / 86400))d ago"
+  fi
+}
+
+# Print build status with nice formatting
+print_build_status() {
+  local build
+  build=$(get_latest_build)
+
+  if [[ -z "$build" || "$build" == "null" ]]; then
+    echo -e "${DIM}No builds found for $(get_branch)${NC}"
+    return 1
+  fi
+
+  local status=$(echo "$build" | jq -r '.status')
+  local conclusion=$(echo "$build" | jq -r '.conclusion')
+  local number=$(echo "$build" | jq -r '.number')
+  local attempt=$(echo "$build" | jq -r '.attempt')
+  local started=$(echo "$build" | jq -r '.startedAt')
+  local run_id=$(echo "$build" | jq -r '.databaseId')
+  local tag=$(get_tag_from_build "$number" "$attempt")
+
+  echo -e "${BOLD}Build${NC}"
+  echo -e "  Tag:      ${CYAN}${tag}${NC}"
+
+  if [[ "$status" == "completed" ]]; then
+    if [[ "$conclusion" == "success" ]]; then
+      echo -e "  Status:   ${GREEN}✓ passed${NC} $(relative_time "$started")"
+    else
+      echo -e "  Status:   ${RED}✗ ${conclusion}${NC} $(relative_time "$started")"
+    fi
+  elif [[ "$status" == "in_progress" ]]; then
+    echo -e "  Status:   ${YELLOW}⟳ building${NC} (started $(relative_time "$started"))"
+  else
+    echo -e "  Status:   ${DIM}${status}${NC}"
+  fi
+
+  echo -e "  Run:      ${DIM}https://github.com/${REPO}/actions/runs/${run_id}${NC}"
+
+  # Return values for other functions
+  echo "$status|$conclusion|$tag|$run_id" > /tmp/staging_build_info
+}
+
+# Print staging deploy status
+print_deploy_status() {
+  local deploy
+  deploy=$(get_latest_staging_deploy)
+
+  if [[ -z "$deploy" || "$deploy" == "null" ]]; then
+    echo -e "\n${BOLD}Staging${NC}"
+    echo -e "  ${DIM}No recent staging deploys found${NC}"
+    return
+  fi
+
+  local status=$(echo "$deploy" | jq -r '.status')
+  local conclusion=$(echo "$deploy" | jq -r '.conclusion')
+  local title=$(echo "$deploy" | jq -r '.displayTitle')
+  local started=$(echo "$deploy" | jq -r '.startedAt')
+  local run_id=$(echo "$deploy" | jq -r '.databaseId')
+
+  # Extract tag from title like "[staging] deploying some-tag-123-1"
+  local deployed_tag=$(echo "$title" | sed 's/\[staging\] deploying //')
+
+  echo -e "\n${BOLD}Staging${NC}"
+  echo -e "  Tag:      ${CYAN}${deployed_tag}${NC}"
+
+  if [[ "$status" == "completed" ]]; then
+    if [[ "$conclusion" == "success" ]]; then
+      echo -e "  Status:   ${GREEN}✓ deployed${NC} $(relative_time "$started")"
+    else
+      echo -e "  Status:   ${RED}✗ ${conclusion}${NC} $(relative_time "$started")"
+    fi
+  elif [[ "$status" == "in_progress" ]]; then
+    echo -e "  Status:   ${YELLOW}⟳ deploying${NC} (started $(relative_time "$started"))"
+  else
+    echo -e "  Status:   ${DIM}${status}${NC}"
+  fi
+
+  echo -e "  Run:      ${DIM}https://github.com/${REPO}/actions/runs/${run_id}${NC}"
+}
+
+# Watch build, then optionally deploy
+do_watch() {
+  local build
+  build=$(get_latest_build)
+
+  if [[ -z "$build" || "$build" == "null" ]]; then
+    echo -e "${RED}No builds found for $(get_branch)${NC}"
+    exit 1
+  fi
+
+  local status=$(echo "$build" | jq -r '.status')
+  local run_id=$(echo "$build" | jq -r '.databaseId')
+  local number=$(echo "$build" | jq -r '.number')
+  local attempt=$(echo "$build" | jq -r '.attempt')
+  local tag=$(get_tag_from_build "$number" "$attempt")
+
+  if [[ "$status" == "in_progress" || "$status" == "queued" ]]; then
+    echo -e "${YELLOW}⟳ Watching build for ${CYAN}${tag}${NC}...\n"
+    gh run watch "$run_id" --repo "$REPO"
+    echo ""
+  fi
+
+  # Re-check status after watch
+  build=$(get_latest_build)
+  local conclusion=$(echo "$build" | jq -r '.conclusion')
+
+  if [[ "$conclusion" != "success" ]]; then
+    echo -e "${RED}Build failed (${conclusion}). Not deploying.${NC}"
+    exit 1
+  fi
+
+  play_sound "work-complete.mp3"
+  echo -e "${GREEN}✓ Build passed!${NC} Tag: ${CYAN}${tag}${NC}\n"
+  read -p "Deploy to staging? [Y/n] " -n 1 -r
+  echo
+  if [[ $REPLY =~ ^[Yy]?$ ]]; then
+    do_deploy "$tag"
+  fi
+}
+
+# Deploy a tag to staging
+do_deploy() {
+  local tag=${1:-}
+
+  if [[ -z "$tag" ]]; then
+    # Get tag from latest successful build
+    local build
+    build=$(get_latest_build)
+
+    if [[ -z "$build" || "$build" == "null" ]]; then
+      echo -e "${RED}No builds found for $(get_branch)${NC}"
+      exit 1
+    fi
+
+    local conclusion=$(echo "$build" | jq -r '.conclusion')
+    if [[ "$conclusion" != "success" ]]; then
+      echo -e "${RED}Latest build hasn't passed (${conclusion}). Cannot deploy.${NC}"
+      exit 1
+    fi
+
+    local number=$(echo "$build" | jq -r '.number')
+    local attempt=$(echo "$build" | jq -r '.attempt')
+    tag=$(get_tag_from_build "$number" "$attempt")
+  fi
+
+  play_sound "ready-to-work.mp3"
+  echo -e "${YELLOW}Deploying ${CYAN}${tag}${YELLOW} to staging...${NC}\n"
+
+  local ref
+  ref=$(git symbolic-ref HEAD)
+  gh workflow run "$DEPLOY_WORKFLOW" \
+    --repo "$REPO" \
+    -r "$ref" \
+    -F env=staging \
+    -F tag="$tag"
+
+  echo -e "${GREEN}Deploy triggered!${NC} Waiting for workflow to start..."
+  sleep 5
+
+  # Find the deploy run that just started
+  local deploy_run
+  for i in {1..12}; do
+    deploy_run=$(gh run list \
+      --repo "$REPO" \
+      --workflow "$DEPLOY_WORKFLOW" \
+      --limit 5 \
+      --json databaseId,status,displayTitle \
+      --jq "[.[] | select(.displayTitle | contains(\"$tag\"))][0].databaseId")
+
+    if [[ -n "$deploy_run" && "$deploy_run" != "null" ]]; then
+      break
+    fi
+    sleep 5
+  done
+
+  if [[ -z "$deploy_run" || "$deploy_run" == "null" ]]; then
+    echo -e "${YELLOW}Could not find deploy run. Check GitHub Actions.${NC}"
+    exit 1
+  fi
+
+  echo -e "${YELLOW}⟳ Watching deploy...${NC}\n"
+  gh run watch "$deploy_run" --repo "$REPO"
+
+  local deploy_info
+  deploy_info=$(gh run view "$deploy_run" --repo "$REPO" --json conclusion --jq '.conclusion')
+
+  if [[ "$deploy_info" == "success" ]]; then
+    play_sound "work-complete.mp3"
+    echo -e "\n${GREEN}✓ ${CYAN}${tag}${GREEN} is live on staging!${NC}"
+  else
+    echo -e "\n${RED}✗ Deploy failed (${deploy_info})${NC}"
+    exit 1
+  fi
+}
+
+# Main
+case "${1:-}" in
+  watch)
+    do_watch
+    ;;
+  deploy)
+    do_deploy "${2:-}"
+    ;;
+  status|"")
+    print_build_status
+    print_deploy_status
+    ;;
+  *)
+    echo "Usage: staging [watch|deploy|status]"
+    echo ""
+    echo "  staging           Show build & staging status"
+    echo "  staging watch     Watch build, then prompt to deploy"
+    echo "  staging deploy    Deploy latest successful build"
+    echo "  staging deploy TAG  Deploy a specific tag"
+    exit 1
+    ;;
+esac
