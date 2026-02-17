@@ -100,6 +100,9 @@ loops() {
         clean-migrations)
             _loops_clean_migrations "$@"
             ;;
+        staging)
+            ~/.dotfiles/scripts/staging "$@"
+            ;;
         *)
             echo "Usage: loops <command>"
             echo ""
@@ -108,6 +111,7 @@ loops() {
             echo "  review-branch     Review branch against main with blessing"
             echo "  pr-review         Review PRs assigned to you (with blessing)"
             echo "  clean-migrations  Remove empty migration folders"
+            echo "  staging           Check build/deploy status, watch, or deploy"
             ;;
     esac
 }
