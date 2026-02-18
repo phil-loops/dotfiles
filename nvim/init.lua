@@ -483,10 +483,11 @@ require('lazy').setup({
         builtin.find_files { cwd = vim.fn.stdpath 'config' }
       end, { desc = '[S]earch [N]eovim files' })
 
-      -- Show files changed from main branch
+      -- Show files changed since diverging from main
       vim.keymap.set('n', '<leader>gm', function()
-        vim.cmd 'DiffviewOpen main'
-      end, { desc = '[G]it diff from [M]ain' })
+        local base = vim.fn.system('git merge-base main HEAD'):gsub('%s+$', '')
+        vim.cmd('DiffviewOpen ' .. base)
+      end, { desc = '[G]it diff from [M]ain (merge-base)' })
     end,
   },
 
