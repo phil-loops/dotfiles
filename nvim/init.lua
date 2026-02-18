@@ -234,6 +234,7 @@ require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'tpope/vim-sleuth', -- Detect tabstop and shiftwidth automatically
   'tpope/vim-fugitive', -- git integration
+  'tpope/vim-rhubarb', -- GitHub integration for fugitive (:GBrowse)
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
   -- keys can be used to configure plugin behavior/loading/etc.
@@ -488,6 +489,10 @@ require('lazy').setup({
         local base = vim.fn.system('git merge-base main HEAD'):gsub('%s+$', '')
         vim.cmd('DiffviewOpen ' .. base)
       end, { desc = '[G]it diff from [M]ain (merge-base)' })
+
+      -- Open current line/selection on GitHub
+      vim.keymap.set('n', '<leader>go', ':GBrowse<CR>', { desc = '[G]it [O]pen on GitHub' })
+      vim.keymap.set('v', '<leader>go', ':GBrowse<CR>', { desc = '[G]it [O]pen on GitHub (selection)' })
     end,
   },
 
