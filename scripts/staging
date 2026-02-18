@@ -70,17 +70,9 @@ get_latest_staging_deploy() {
 relative_time() {
   local ts=$1
   local now=$(date +%s)
-  local then
+  local then=$(to_epoch "$ts")
 
-  # Handle both GNU and BSD date
-  # BSD date -jf ignores the Z suffix and parses as local time, so we force UTC
-  if date -d "$ts" +%s &>/dev/null; then
-    then=$(date -d "$ts" +%s)
-  else
-    then=$(TZ=UTC date -jf "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null || echo "$ts")
-  fi
-
-  if [[ "$then" == "$ts" ]]; then
+  if [[ "$then" == "0" ]]; then
     echo "$ts"
     return
   fi
@@ -136,6 +128,16 @@ print_build_status() {
   echo "$status|$conclusion|$tag|$run_id" > /tmp/staging_build_info
 }
 
+# Convert ISO timestamp to epoch (UTC-aware)
+to_epoch() {
+  local ts=$1
+  if date -d "$ts" +%s &>/dev/null; then
+    date -d "$ts" +%s
+  else
+    TZ=UTC date -jf "%Y-%m-%dT%H:%M:%SZ" "$ts" +%s 2>/dev/null || echo "0"
+  fi
+}
+
 # Print staging deploy status
 print_deploy_status() {
   local deploy
@@ -152,6 +154,18 @@ print_deploy_status() {
   local title=$(echo "$deploy" | jq -r '.displayTitle')
   local started=$(echo "$deploy" | jq -r '.startedAt')
   local run_id=$(echo "$deploy" | jq -r '.databaseId')
+
+  # Skip completed deploys older than 45 minutes
+  if [[ "$status" == "completed" ]]; then
+    local started_epoch=$(to_epoch "$started")
+    local now=$(date +%s)
+    local age=$((now - started_epoch))
+    if ((age > 2700)); then
+      echo -e "\n${BOLD}Staging${NC}"
+      echo -e "  ${DIM}No active deploys (last deploy was $(relative_time "$started"))${NC}"
+      return
+    fi
+  fi
 
   # Extract tag from title like "[staging] deploying some-tag-123-1"
   local deployed_tag=$(echo "$title" | sed 's/\[staging\] deploying //')
