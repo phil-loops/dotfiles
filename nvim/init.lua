@@ -490,9 +490,12 @@ require('lazy').setup({
         vim.cmd('DiffviewOpen ' .. base)
       end, { desc = '[G]it diff from [M]ain (merge-base)' })
 
-      -- Open current line/selection on GitHub
-      vim.keymap.set('n', '<leader>go', ':GBrowse<CR>', { desc = '[G]it [O]pen on GitHub' })
-      vim.keymap.set('v', '<leader>go', ':GBrowse<CR>', { desc = '[G]it [O]pen on GitHub (selection)' })
+      -- Open current line/selection on GitHub (main branch)
+      vim.keymap.set('n', '<leader>go', ':GBrowse main:%<CR>', { desc = '[G]it [O]pen on GitHub (main)' })
+      vim.keymap.set('v', '<leader>go', ':GBrowse main:%<CR>', { desc = '[G]it [O]pen on GitHub (main)' })
+      -- Open current line/selection on GitHub (current branch)
+      vim.keymap.set('n', '<leader>gO', ':GBrowse<CR>', { desc = '[G]it [O]pen on GitHub (branch)' })
+      vim.keymap.set('v', '<leader>gO', ':GBrowse<CR>', { desc = '[G]it [O]pen on GitHub (branch)' })
     end,
   },
 
