@@ -46,6 +46,16 @@ git town set-parent <parent-branch>
 
 Run `git town help` for full reference.
 
-# Git Commits
+# Git Changes
 
-Never add Co-Authored-By lines. The user will handle cleaning up the commits.
+Never add Co-Authored-By lines. Never commit — the user will handle commits themselves.
+
+Structure changes atomically — each branch/commit should be a single, self-contained change. When working on multi-part changes, decouple them into separate branches in the stack, ordering zero-dependency changes first.
+
+# Git Pushing & PRs
+
+**Never push to origin or open PRs.** The user will handle pushing and opening PRs themselves.
+
+In the loops repo specifically:
+- `origin` is `Loops-so/loops` — **never push here**
+- `phil-loops` is `phil-loops/loops` — only use this remote if pushing is needed
