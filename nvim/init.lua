@@ -967,27 +967,171 @@ require('lazy').setup({
   { -- Highlight, edit, and navigate code
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs', -- Sets main module to use for opts
-    -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
-    opts = {
-      ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
-      -- Autoinstall languages that are not installed
-      auto_install = true,
-      highlight = {
-        enable = true,
-        -- Some languages depend on vim's regex highlighting system (such as Ruby) for indent rules.
-        --  If you are experiencing weird indenting issues, add the language to
-        --  the list of additional_vim_regex_highlighting and disabled languages for indent.
-        additional_vim_regex_highlighting = { 'ruby' },
-      },
-      indent = { enable = true, disable = { 'ruby' } },
+    dependencies = {
+      'nvim-treesitter/nvim-treesitter-textobjects',
     },
-    -- There are additional nvim-treesitter modules that you can use to interact
-    -- with nvim-treesitter. You should go explore a few and see what interests you:
-    --
-    --    - Incremental selection: Included, see `:help nvim-treesitter-incremental-selection-mod`
-    --    - Show your current context: https://github.com/nvim-treesitter/nvim-treesitter-context
-    --    - Treesitter + textobjects: https://github.com/nvim-treesitter/nvim-treesitter-textobjects
+    config = function()
+      -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
+      require('nvim-treesitter.configs').setup {
+        ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc' },
+        -- Autoinstall languages that are not installed
+        auto_install = true,
+        highlight = {
+          enable = true,
+          -- Some languages depend on vim's regex highlighting system (such as Ruby) for indent rules.
+          --  If you are experiencing weird indenting issues, add the language to
+          --  the list of additional_vim_regex_highlighting and disabled languages for indent.
+          additional_vim_regex_highlighting = { 'ruby' },
+        },
+        indent = { enable = true, disable = { 'ruby' } },
+      }
+
+      -- Navigate between function declarations (skipping callback arrow functions)
+      -- Matches: function_declaration, method_definition, and top-level const arrow functions
+      local function is_toplevel_arrow(node)
+        -- Match: arrow_function -> variable_declarator -> lexical_declaration
+        if node:type() ~= 'arrow_function' then return false end
+        local body = nil
+        for child in node:iter_children() do
+          if child:type() == 'statement_block' then body = child; break end
+        end
+        if not body then return false end -- skip single-expression arrows like `x => x + 1`
+        local parent = node:parent()
+        if not parent or parent:type() ~= 'variable_declarator' then return false end
+        local grandparent = parent:parent()
+        if not grandparent then return false end
+        local gtype = grandparent:type()
+        return gtype == 'lexical_declaration' or gtype == 'variable_declaration'
+      end
+
+      local function is_function_node(node)
+        local ntype = node:type()
+        if ntype == 'function_declaration' or ntype == 'method_definition' then return true end
+        return is_toplevel_arrow(node)
+      end
+
+      -- Get the outermost wrapping node for navigation (export_statement or lexical_declaration)
+      local function get_outer_node(node)
+        local target = node
+        local parent = node:parent()
+        if parent and parent:type() == 'variable_declarator' then
+          parent = parent:parent() -- lexical_declaration
+          if parent then target = parent end
+        end
+        if parent and parent:type() == 'export_statement' then
+          target = parent
+        elseif target:parent() and target:parent():type() == 'export_statement' then
+          target = target:parent()
+        end
+        return target
+      end
+
+      local function find_function_node(forward, goto_end)
+        local bufnr = vim.api.nvim_get_current_buf()
+        local parser = vim.treesitter.get_parser(bufnr)
+        if not parser then return end
+        parser:parse(true)
+
+        local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+        row = row - 1 -- 0-indexed
+
+        local best_row, best_col
+
+        parser:for_each_tree(function(tree)
+          local function walk(node)
+            if is_function_node(node) then
+              local outer = get_outer_node(node)
+              local sr, sc, er, ec = outer:range()
+              local tr, tc = sr, sc
+              if goto_end then tr, tc = er, ec > 0 and ec - 1 or 0 end
+              if forward then
+                if tr > row or (tr == row and tc > col) then
+                  if not best_row or tr < best_row or (tr == best_row and tc < best_col) then
+                    best_row, best_col = tr, tc
+                  end
+                end
+              else
+                if tr < row or (tr == row and tc < col) then
+                  if not best_row or tr > best_row or (tr == best_row and tc > best_col) then
+                    best_row, best_col = tr, tc
+                  end
+                end
+              end
+              return -- don't recurse into function bodies
+            end
+            for child in node:iter_children() do
+              walk(child)
+            end
+          end
+          walk(tree:root())
+        end)
+
+        if best_row then
+          vim.cmd("normal! m'")
+          vim.api.nvim_win_set_cursor(0, { best_row + 1, best_col })
+        end
+      end
+
+      local function select_function(outer)
+        local bufnr = vim.api.nvim_get_current_buf()
+        local parser = vim.treesitter.get_parser(bufnr)
+        if not parser then return end
+        parser:parse(true)
+
+        local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+        row = row - 1
+
+        local best_node, best_len
+
+        parser:for_each_tree(function(tree)
+          local function walk(node)
+            if is_function_node(node) then
+              local check = get_outer_node(node)
+              local sr, _, er, _ = check:range()
+              if row >= sr and row <= er then
+                local len = er - sr
+                if not best_len or len < best_len then
+                  best_node = node
+                  best_len = len
+                end
+              end
+              return
+            end
+            for child in node:iter_children() do
+              walk(child)
+            end
+          end
+          walk(tree:root())
+        end)
+
+        if best_node then
+          local target = outer and get_outer_node(best_node) or best_node
+          local sr, sc, er, ec = target:range()
+          -- For 'if', select just the body
+          if not outer then
+            for child in best_node:iter_children() do
+              if child:type() == 'statement_block' then
+                sr, sc, er, ec = child:range()
+                sc = sc + 1
+                ec = ec - 1
+                break
+              end
+            end
+          end
+          vim.api.nvim_win_set_cursor(0, { sr + 1, sc })
+          local mode = vim.api.nvim_get_mode().mode
+          if mode ~= 'v' and mode ~= 'V' then vim.cmd('normal! v') end
+          vim.api.nvim_win_set_cursor(0, { er + 1, math.max(ec - 1, 0) })
+        end
+      end
+
+      vim.keymap.set({ 'n', 'x', 'o' }, ']f', function() find_function_node(true, false) end, { desc = 'Next function start' })
+      vim.keymap.set({ 'n', 'x', 'o' }, '[f', function() find_function_node(false, false) end, { desc = 'Prev function start' })
+      vim.keymap.set({ 'n', 'x', 'o' }, ']F', function() find_function_node(true, true) end, { desc = 'Next function end' })
+      vim.keymap.set({ 'n', 'x', 'o' }, '[F', function() find_function_node(false, true) end, { desc = 'Prev function end' })
+      vim.keymap.set({ 'x', 'o' }, 'af', function() select_function(true) end, { desc = 'around function' })
+      vim.keymap.set({ 'x', 'o' }, 'if', function() select_function(false) end, { desc = 'inside function' })
+    end,
   },
 
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
