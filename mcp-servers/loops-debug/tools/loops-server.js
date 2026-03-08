@@ -107,7 +107,7 @@ async function start() {
   const loopsDir = getLoopsDir();
   logBuffer = [];
 
-  serverProcess = spawn("npx", ["next", "dev", "-p", String(port)], {
+  serverProcess = spawn("node_modules/.bin/next", ["dev", "--webpack", "-p", String(port)], {
     cwd: loopsDir,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, NODE_ENV: "development" },

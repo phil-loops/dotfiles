@@ -46,6 +46,16 @@ git town set-parent <parent-branch>
 
 Run `git town help` for full reference.
 
+# Code Layering
+
+Follow a strict layering pattern: **queries → models → wiring**.
+
+- **Queries** are thin data-access wrappers — one DB call per function, no business logic, no authorization, no cross-table joins or transactions
+- **Models** contain business logic with dependency injection — validation, authorization, cross-entity operations, cascading deletes
+- **Wiring** integrates models into handlers/routers/jobs — minimal glue code
+- tRPC routers, API routes, and job handlers are all **wiring** — they call models, not queries directly
+- If a function touches multiple tables, has conditional logic, or does authorization checks, it belongs in models, not queries
+
 # Git Changes
 
 Never add Co-Authored-By lines. Never commit — the user will handle commits themselves.

@@ -4,7 +4,7 @@ const { query } = require("../lib/db");
 const schema = {
   name: "loops_db",
   description:
-    "Execute SQL queries against the local Loops Postgres database. Use parameterized queries ($1, $2, ...) for safety.",
+    "Execute SQL queries against the local Loops Postgres database. Use parameterized queries ($1, $2, ...) for safety. Note: The API key used for Bearer auth is the ApiKey.id column (not Team.id). Look up with: SELECT id FROM \"ApiKey\" WHERE \"teamId\" = $1",
   inputSchema: {
     query: z.string().describe("SQL query to execute"),
     params: z
