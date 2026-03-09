@@ -1,78 +1,67 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 # Show git-town branch stacks and fuzzy-select a branch to check out.
 # Usage: git-stacks        (interactive picker)
 #        git-stacks --list  (just print stacks)
 
-LIST_ONLY=false
-if [[ "$1" == "--list" ]]; then
-  LIST_ONLY=true
-fi
+set -uo pipefail
 
-stacks=$(git town branch 2>/dev/null | awk '
-  {
-    raw = $0
-    gsub(/\033\[[0-9;]*m/, "")
-    sub(/\*/, " ")
-    match($0, /^[ ]*/)
-    d = RLENGTH
+local list_only=false
+[[ "${1:-}" == "--list" ]] && list_only=true
 
-    lines[NR] = raw
-    depths[NR] = d
-    total = NR
-  }
-  END {
-    main_depth = -1
-    for (i = 1; i <= total; i++) {
-      tmp = lines[i]
-      gsub(/\033\[[0-9;]*m/, "", tmp)
-      gsub(/^[ *]+/, "", tmp)
-      if (tmp == "main") { main_depth = depths[i]; break }
-    }
-    if (main_depth < 0) exit
+local current_branch=$(git branch --show-current 2>/dev/null)
 
-    child_depth = main_depth + 2
-    first = 1
+# Build parent map from git-town config
+typeset -A parent_of
+typeset -A children_of
 
-    i = 1
-    while (i <= total) {
-      if (depths[i] == child_depth) {
-        j = i + 1
-        while (j <= total && depths[j] > child_depth) j++
-        subtree_end = j - 1
+local line branch parent
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  branch="${line#git-town-branch.}"
+  branch="${branch%.parent *}"
+  parent="${line##*.parent }"
+  parent_of[$branch]="$parent"
+  children_of[$parent]="${children_of[$parent]:-} $branch"
+done < <(git config --local --get-regexp 'git-town-branch\..*\.parent' 2>/dev/null)
 
-        if (subtree_end > i) {
-          if (!first) print ""
-          first = 0
-          for (k = i; k <= subtree_end; k++) print lines[k]
-        }
-        i = j
-      } else {
-        i++
-      }
-    }
-  }
-')
+# Find stack roots: children of main that themselves have children
+local roots=()
+for branch in ${(z)children_of[main]:-}; do
+  [[ -n "${children_of[$branch]:-}" ]] && roots+=("$branch")
+done
 
-if [[ -z "$stacks" ]]; then
+if [[ ${#roots[@]} -eq 0 ]]; then
   echo "No stacks found."
   exit 0
 fi
 
-if $LIST_ONLY; then
-  echo "$stacks"
+# Print a stack recursively
+print_stack() {
+  local branch="$1" indent="$2" marker="  "
+  [[ "$branch" == "$current_branch" ]] && marker="* "
+  printf "%s%s%s\n" "$indent" "$marker" "$branch"
+  local child
+  for child in ${(z)children_of[$branch]:-}; do
+    print_stack "$child" "  $indent"
+  done
+}
+
+local output="" first=true
+for root in ${(o)roots}; do
+  $first || output+=$'\n'
+  first=false
+  output+="$(print_stack "$root" "")"
+done
+
+if $list_only; then
+  echo "$output"
   exit 0
 fi
 
-selected=$(echo "$stacks" | fzf --ansi --reverse --height=40% --prompt="stack> " \
+local selected=$(echo "$output" | fzf --reverse --height=40% --prompt="stack> " \
   --preview-window=hidden)
 
-if [[ -z "$selected" ]]; then
-  exit 0
-fi
+[[ -z "$selected" ]] && exit 0
 
-# Extract branch name from the selected line
-branch=$(echo "$selected" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[* ]*//')
-
-if [[ -n "$branch" && "$branch" != "" ]]; then
-  git checkout "$branch"
-fi
+local target="${selected##*[* ]}"
+[[ -n "$target" ]] && git checkout "$target"
