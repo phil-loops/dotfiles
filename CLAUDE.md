@@ -56,6 +56,34 @@ Follow a strict layering pattern: **queries → models → wiring**.
 - tRPC routers, API routes, and job handlers are all **wiring** — they call models, not queries directly
 - If a function touches multiple tables, has conditional logic, or does authorization checks, it belongs in models, not queries
 
+# Stacked PR Design
+
+Each branch in a stack should be **one reviewable unit** — a single concern that compiles and makes sense on its own.
+
+## Branch ordering
+
+Stack branches bottom-up by dependency, not by feature area:
+
+1. **Schema / migrations** — table changes land first, everything else builds on them
+2. **Queries** — thin DB wrappers for the new tables, one branch per entity or closely-related group
+3. **Models** — business logic that composes queries, one branch per domain operation
+4. **Wiring** — plug models into handlers/routers/jobs, one branch per integration point
+5. **Refactors / fixes** — clean up layering violations or tech debt on top
+
+## Branch boundaries
+
+- A branch should touch **one layer** (query, model, or wiring) for **one entity or concern**
+- Test files and factories land alongside the code they test — `createX` with queries, `fakeX` with models
+- UI branches are separate from API branches even if they're for the same feature
+- If a branch has changes across 3+ unrelated directories, it's probably too big — split it
+- A branch that only makes sense *with* its child should be merged into the child
+
+## What NOT to do
+
+- Don't put business logic in query branches (status checks, authorization, cross-entity cascades)
+- Don't mix query expansions + tRPC endpoints + UI components in one branch
+- Don't add a column/migration in a middle branch if the schema branch already exists — amend the schema branch or prepend a new one
+
 # Git Changes
 
 Never add Co-Authored-By lines. Never commit — the user will handle commits themselves.
@@ -67,5 +95,5 @@ Structure changes atomically — each branch/commit should be a single, self-con
 **Never push to origin or open PRs.** The user will handle pushing and opening PRs themselves.
 
 In the loops repo specifically:
-- `origin` is `Loops-so/loops` — **never push here**
-- `phil-loops` is `phil-loops/loops` — only use this remote if pushing is needed
+- `phil-loops` (`phil-loops/loops`) — Phil's fork. This is our workspace for branches, PRs, and experimentation. Push here freely when needed.
+- `origin` (`Loops-so/loops`) — Shared team repo. **Never push here or open PRs** unless the action is 100% unambiguous and explicitly requested. Treat as read-only.
