@@ -1,4 +1,5 @@
 -- Stack Review - branch navigation for git-town stacks
+-- Uses pre-opened tabs for instant ]b/[b switching
 local M = {}
 local churn = require("custom.stack-churn")
 local blessed = require("custom.stack-blessed")
@@ -11,6 +12,8 @@ local panel_buf = nil
 local panel_win = nil
 local churns = {}          -- ChurnHunk[]
 local churn_by_branch = {} -- branch -> count
+local tab_by_idx = {}      -- chain index -> tabpage handle
+local loading = false      -- true during initial tab setup
 
 local function refresh_all()
   bindings.refresh_diffview_panel(chain[current_idx] and chain[current_idx].branch or "")
@@ -97,8 +100,17 @@ local function open_review(idx)
   end
 
   current_idx = idx
-  pcall(vim.cmd, "DiffviewClose")
-  vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+
+  -- If we have a pre-opened tab, just switch to it (instant)
+  local target_tab = tab_by_idx[idx]
+  if target_tab and vim.api.nvim_tabpage_is_valid(target_tab) then
+    vim.api.nvim_set_current_tabpage(target_tab)
+  else
+    -- Fallback: open a new diffview (shouldn't happen after setup)
+    pcall(vim.cmd, "DiffviewClose")
+    vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+    tab_by_idx[idx] = vim.api.nvim_get_current_tabpage()
+  end
 
   local bsum = blessed.summary(item.branch, item.parent or "")
   local extra = ""
@@ -109,50 +121,44 @@ local function open_review(idx)
   end
   vim.notify(string.format("Reviewing: %s (%d/%d)%s", item.branch, idx, #chain, extra), vim.log.levels.INFO)
 
-  -- Reopen panel after diffview loads
-  vim.defer_fn(function()
-    M.open_panel()
-  end, 150)
+  update_panel()
+  refresh_all()
 
   return true
 end
 
+-- Open the stack panel as a floating window (persists across tab switches)
 function M.open_panel()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
     update_panel()
     return
   end
 
-  -- Find diffview file panel
-  local file_panel_win = nil
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local bufname = vim.api.nvim_buf_get_name(buf)
-    if bufname:match("DiffviewFilePanel") then
-      file_panel_win = win
-      break
-    end
-  end
-
-  if not file_panel_win then
-    vim.notify("Diffview panel not found", vim.log.levels.WARN)
-    return
-  end
-
-  vim.api.nvim_set_current_win(file_panel_win)
-
   panel_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_option(panel_buf, "buftype", "nofile")
-  vim.api.nvim_buf_set_option(panel_buf, "bufhidden", "wipe")
+  vim.api.nvim_buf_set_option(panel_buf, "bufhidden", "hide")
 
   local height = math.min(#chain + 2, 20)
-  vim.cmd("aboveleft " .. height .. "split")
-  panel_win = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(panel_win, panel_buf)
-  vim.api.nvim_win_set_option(panel_win, "number", true)
-  vim.api.nvim_win_set_option(panel_win, "relativenumber", false)
+  local width = 40
+  local ui = vim.api.nvim_list_uis()[1]
+  local row = 1
+  local col = ui and (ui.width - width - 2) or 80
+
+  panel_win = vim.api.nvim_open_win(panel_buf, false, {
+    relative = "editor",
+    row = row,
+    col = col,
+    width = width,
+    height = height,
+    style = "minimal",
+    border = "rounded",
+    title = " Stack ",
+    title_pos = "center",
+    zindex = 50,
+  })
+
   vim.api.nvim_win_set_option(panel_win, "cursorline", true)
-  vim.api.nvim_win_set_option(panel_win, "winfixheight", true)
+  vim.api.nvim_win_set_option(panel_win, "winhighlight", "Normal:NormalFloat,FloatBorder:FloatBorder")
 
   -- Panel keymaps
   local opts = { buffer = panel_buf, silent = true }
@@ -217,7 +223,6 @@ function M.open_panel()
   end, opts)
 
   update_panel()
-  vim.cmd("wincmd l")
 end
 
 function M.focus_panel()
@@ -262,9 +267,47 @@ function M.prev_branch()
   end
 end
 
+-- Pre-open all diffview tabs sequentially
+-- Each DiffviewOpen creates a new tab; we record the tabpage handle.
+-- After all tabs are created, switch to the starting branch.
+local function preopen_tabs(start_idx, on_done)
+  loading = true
+  local to_open = {}
+  for i, item in ipairs(chain) do
+    if item.parent and item.parent ~= "" then
+      table.insert(to_open, i)
+    end
+  end
+
+  local opened = 0
+  local function open_next()
+    opened = opened + 1
+    if opened > #to_open then
+      -- All tabs opened; switch to starting branch
+      loading = false
+      if tab_by_idx[start_idx] and vim.api.nvim_tabpage_is_valid(tab_by_idx[start_idx]) then
+        vim.api.nvim_set_current_tabpage(tab_by_idx[start_idx])
+      end
+      if on_done then on_done() end
+      return
+    end
+
+    local idx = to_open[opened]
+    local item = chain[idx]
+    vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+    tab_by_idx[idx] = vim.api.nvim_get_current_tabpage()
+
+    -- Small delay to let diffview initialize before opening next
+    vim.defer_fn(open_next, 100)
+  end
+
+  open_next()
+end
+
 function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
+  tab_by_idx = {}
 
   -- Load blessed state and warm caches
   blessed.load()
@@ -304,14 +347,14 @@ function M.setup(data)
           local status = known[fp] and blessed.file_status(item.branch, fp) or "unblessed"
           if status ~= "clean" then
             local entry = { branch = item.branch, filepath = fp, status = status }
-            -- Cross-branch jump: switch diffview then defer file focus
+            -- Cross-branch jump: switch tab then defer file focus
             if ci ~= current_idx then
               local target_idx = ci
               entry.switch_to = function(callback)
                 open_review(target_idx)
                 vim.defer_fn(function()
                   if callback then callback() end
-                end, 300)
+                end, 50) -- much shorter delay now since tab switch is instant
               end
             end
             table.insert(results, entry)
@@ -334,7 +377,7 @@ function M.setup(data)
     end,
     help_text = [[
 Stack Review Keybindings:
-  ]b / [b       next/prev branch
+  ]b / [b       next/prev branch (instant tab switch)
   ]u / [u       next/prev unreviewed file
   <leader>e     focus file panel
   <leader>E     focus branch panel
@@ -415,8 +458,17 @@ Stack Review Keybindings:
       end
     end
 
+    -- Close all existing diffview tabs
+    for _, tab in pairs(tab_by_idx) do
+      if vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, "DiffviewClose")
+      end
+    end
+
     chain = new_chain
     current_idx = new_idx
+    tab_by_idx = {}
 
     blessed.invalidate()
     blessed.load()
@@ -426,12 +478,23 @@ Stack Review Keybindings:
     churns = churn.analyze(chain)
     churn_by_branch = churn.by_branch(churns)
 
-    open_review(current_idx)
-    vim.notify(string.format("Refreshed (%d branches)", #chain), vim.log.levels.INFO)
+    -- Re-open all tabs
+    preopen_tabs(new_idx, function()
+      M.open_panel()
+      refresh_all()
+      vim.notify(string.format("Refreshed (%d branches)", #chain), vim.log.levels.INFO)
+    end)
   end, { desc = "Refresh stack review" })
 
-  -- Open panel after a short delay
-  vim.defer_fn(M.open_panel, 200)
+  -- Pre-open all tabs, then show panel
+  vim.notify(string.format("Opening %d branches...", #chain), vim.log.levels.INFO)
+  preopen_tabs(current_idx, function()
+    vim.defer_fn(function()
+      M.open_panel()
+      refresh_all()
+      vim.notify(string.format("Stack ready (%d branches, ]b/[b to navigate)", #chain), vim.log.levels.INFO)
+    end, 200)
+  end)
 end
 
 return M
