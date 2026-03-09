@@ -182,7 +182,7 @@ git-swap-remote() {
 }
 
 export GPG_TTY=$(tty)
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.dotfiles/scripts:$PATH"
 
 task() {
     if [[ "$1" == "dev" ]]; then
