@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# Show only git-town branch stacks (chains of 2+ branches), hiding lone branches.
+# Show git-town branch stacks and fuzzy-select a branch to check out.
+# Usage: git-stacks        (interactive picker)
+#        git-stacks --list  (just print stacks)
 
-git town branch 2>/dev/null | awk '
+LIST_ONLY=false
+if [[ "$1" == "--list" ]]; then
+  LIST_ONLY=true
+fi
+
+stacks=$(git town branch 2>/dev/null | awk '
   {
     raw = $0
-    # Strip ANSI codes
     gsub(/\033\[[0-9;]*m/, "")
-    # Replace * marker with space to normalize indentation
     sub(/\*/, " ")
-    # Count leading spaces
     match($0, /^[ ]*/)
     d = RLENGTH
 
@@ -17,7 +21,6 @@ git town branch 2>/dev/null | awk '
     total = NR
   }
   END {
-    # Find the depth of "main" — direct children of main are at main_depth + 2
     main_depth = -1
     for (i = 1; i <= total; i++) {
       tmp = lines[i]
@@ -27,21 +30,19 @@ git town branch 2>/dev/null | awk '
     }
     if (main_depth < 0) exit
 
-    child_depth = main_depth + 2  # direct children of main
+    child_depth = main_depth + 2
+    first = 1
 
-    # For each direct child of main, check if it has any descendants
-    # If yes, print the whole subtree
     i = 1
     while (i <= total) {
       if (depths[i] == child_depth) {
-        # Find the end of this subtree
         j = i + 1
         while (j <= total && depths[j] > child_depth) j++
         subtree_end = j - 1
 
-        # Only print if subtree has children (more than just the root)
         if (subtree_end > i) {
-          if (NR > 0) print ""
+          if (!first) print ""
+          first = 0
           for (k = i; k <= subtree_end; k++) print lines[k]
         }
         i = j
@@ -50,4 +51,28 @@ git town branch 2>/dev/null | awk '
       }
     }
   }
-'
+')
+
+if [[ -z "$stacks" ]]; then
+  echo "No stacks found."
+  exit 0
+fi
+
+if $LIST_ONLY; then
+  echo "$stacks"
+  exit 0
+fi
+
+selected=$(echo "$stacks" | fzf --ansi --reverse --height=40% --prompt="stack> " \
+  --preview-window=hidden)
+
+if [[ -z "$selected" ]]; then
+  exit 0
+fi
+
+# Extract branch name from the selected line
+branch=$(echo "$selected" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^[* ]*//')
+
+if [[ -n "$branch" && "$branch" != "" ]]; then
+  git checkout "$branch"
+fi
