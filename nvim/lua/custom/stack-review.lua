@@ -1,5 +1,5 @@
 -- Stack Review - branch navigation for git-town stacks
--- Uses LRU tab cache for fast ]b/[b switching
+-- Pre-opens all diffview tabs in background for instant ]b/[b
 local M = {}
 local churn = require("custom.stack-churn")
 local blessed = require("custom.stack-blessed")
@@ -12,67 +12,8 @@ local panel_buf = nil
 local panel_win = nil
 local churns = {}          -- ChurnHunk[]
 local churn_by_branch = {} -- branch -> count
-
--- LRU tab cache: keeps up to MAX_CACHED_TABS diffview tabs alive
-local MAX_CACHED_TABS = 3
-local tab_cache = {}       -- { {idx=N, tab=tabpage_handle}, ... } ordered by recency (most recent first)
-
-local function cache_get(idx)
-  for i, entry in ipairs(tab_cache) do
-    if entry.idx == idx and vim.api.nvim_tabpage_is_valid(entry.tab) then
-      -- Move to front (most recently used)
-      table.remove(tab_cache, i)
-      table.insert(tab_cache, 1, entry)
-      return entry.tab
-    end
-  end
-  return nil
-end
-
-local function cache_put(idx, tab)
-  -- Remove existing entry for this idx if any
-  for i, entry in ipairs(tab_cache) do
-    if entry.idx == idx then
-      table.remove(tab_cache, i)
-      break
-    end
-  end
-
-  -- Add to front
-  table.insert(tab_cache, 1, { idx = idx, tab = tab })
-
-  -- Evict LRU if over limit
-  while #tab_cache > MAX_CACHED_TABS do
-    local evicted = table.remove(tab_cache)
-    if evicted.tab and vim.api.nvim_tabpage_is_valid(evicted.tab) then
-      -- Switch to it, close diffview (which closes the tab), switch back
-      local cur_tab = vim.api.nvim_get_current_tabpage()
-      vim.api.nvim_set_current_tabpage(evicted.tab)
-      pcall(vim.cmd, "DiffviewClose")
-      if vim.api.nvim_tabpage_is_valid(cur_tab) then
-        vim.api.nvim_set_current_tabpage(cur_tab)
-      end
-    end
-  end
-end
-
-local function cache_clear()
-  for _, entry in ipairs(tab_cache) do
-    if entry.tab and vim.api.nvim_tabpage_is_valid(entry.tab) then
-      vim.api.nvim_set_current_tabpage(entry.tab)
-      pcall(vim.cmd, "DiffviewClose")
-    end
-  end
-  tab_cache = {}
-end
-
--- Check if the current tabpage has a diffview
-local function current_tab_has_diffview()
-  local ok, lib = pcall(require, "diffview.lib")
-  if not ok then return false end
-  local view = lib.get_current_view()
-  return view ~= nil and view.tabpage == vim.api.nvim_get_current_tabpage()
-end
+local tab_by_idx = {}      -- chain index -> tabpage handle
+local warming = false      -- true while background tabs are being opened
 
 local function refresh_all()
   bindings.refresh_diffview_panel(chain[current_idx] and chain[current_idx].branch or "")
@@ -89,7 +30,7 @@ local function update_panel()
   blessed.warm_tips(branch_names)
 
   local lines = {}
-  local summaries = {} -- cache per-branch summary for reuse in highlights
+  local summaries = {}
   for i, item in ipairs(chain) do
     local marker = (i == current_idx) and " ◀" or ""
     local prefix = (i == current_idx) and "▶ " or "  "
@@ -118,25 +59,31 @@ local function update_panel()
       bcount = ""
     end
 
+    -- Show loading indicator for tabs not yet ready
+    local ready = tab_by_idx[i] and vim.api.nvim_tabpage_is_valid(tab_by_idx[i])
+    local loading_mark = ""
+    if not ready and item.parent and item.parent ~= "" then
+      loading_mark = " …"
+    end
+
     local suffix = ""
     local cc = churn_by_branch[item.branch] or 0
     if cc > 0 then
       suffix = string.format(" ~%d", cc)
     end
 
-    table.insert(lines, string.format("%s%s%s%s%s%s", prefix, bicon, short_name, bcount, suffix, marker))
+    table.insert(lines, string.format("%s%s%s%s%s%s%s", prefix, bicon, short_name, bcount, suffix, loading_mark, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
   vim.api.nvim_buf_set_lines(panel_buf, 0, -1, false, lines)
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", false)
 
-  -- Apply highlights for blessed status (reuse cached summaries)
   local ns = vim.api.nvim_create_namespace("stack_blessed")
   vim.api.nvim_buf_clear_namespace(panel_buf, ns, 0, -1)
   for i, _ in ipairs(chain) do
     local bsum = summaries[i]
-    local col = 2 -- after "▶ " or "  " prefix
+    local col = 2
     if bsum.status == "clean" and bsum.reviewed >= (bsum.total_files or 0) then
       vim.api.nvim_buf_add_highlight(panel_buf, ns, "DiagnosticOk", i - 1, col, col + 4)
     elseif bsum.stale_count > 0 then
@@ -160,11 +107,10 @@ local function open_review(idx)
 
   current_idx = idx
 
-  -- Check LRU cache first (instant tab switch)
-  local cached_tab = cache_get(idx)
-  if cached_tab then
-    vim.api.nvim_set_current_tabpage(cached_tab)
-    -- Panel is per-tab, needs recreation
+  local target_tab = tab_by_idx[idx]
+  if target_tab and vim.api.nvim_tabpage_is_valid(target_tab) then
+    -- Instant switch
+    vim.api.nvim_set_current_tabpage(target_tab)
     panel_win = nil
     panel_buf = nil
     vim.defer_fn(function()
@@ -172,11 +118,10 @@ local function open_review(idx)
       refresh_all()
     end, 50)
   else
-    -- Cache miss: close current diffview, open new one
-    -- DiffviewClose closes the current tab; DiffviewOpen creates a new one
+    -- Not ready yet — open it now (blocking)
     pcall(vim.cmd, "DiffviewClose")
     vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
-    cache_put(idx, vim.api.nvim_get_current_tabpage())
+    tab_by_idx[idx] = vim.api.nvim_get_current_tabpage()
     panel_win = nil
     panel_buf = nil
     vim.defer_fn(function()
@@ -197,13 +142,64 @@ local function open_review(idx)
   return true
 end
 
+-- Background-open remaining tabs one at a time, returning to the user's tab after each
+local function warm_remaining_tabs(start_idx)
+  warming = true
+  local to_open = {}
+  for i, item in ipairs(chain) do
+    if i ~= start_idx and item.parent and item.parent ~= "" and not tab_by_idx[i] then
+      table.insert(to_open, i)
+    end
+  end
+
+  local opened = 0
+  local function open_next()
+    opened = opened + 1
+    if opened > #to_open then
+      warming = false
+      -- Return to the user's branch
+      local user_tab = tab_by_idx[current_idx]
+      if user_tab and vim.api.nvim_tabpage_is_valid(user_tab) then
+        vim.api.nvim_set_current_tabpage(user_tab)
+      end
+      update_panel()
+      return
+    end
+
+    local idx = to_open[opened]
+    -- Skip if user already navigated here (they triggered a blocking open)
+    if tab_by_idx[idx] then
+      vim.defer_fn(open_next, 10)
+      return
+    end
+
+    local item = chain[idx]
+    local user_tab = tab_by_idx[current_idx]
+
+    -- Open the diffview (creates a new tab)
+    vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+    tab_by_idx[idx] = vim.api.nvim_get_current_tabpage()
+
+    -- Immediately switch back to the user's tab
+    if user_tab and vim.api.nvim_tabpage_is_valid(user_tab) then
+      vim.api.nvim_set_current_tabpage(user_tab)
+    end
+
+    update_panel()
+
+    -- Small delay before opening next to avoid freezing the UI
+    vim.defer_fn(open_next, 200)
+  end
+
+  open_next()
+end
+
 function M.open_panel()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
     update_panel()
     return
   end
 
-  -- Find diffview file panel
   local file_panel_win = nil
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     local buf = vim.api.nvim_win_get_buf(win)
@@ -234,7 +230,6 @@ function M.open_panel()
   vim.api.nvim_win_set_option(panel_win, "cursorline", true)
   vim.api.nvim_win_set_option(panel_win, "winfixheight", true)
 
-  -- Panel keymaps
   local opts = { buffer = panel_buf, silent = true }
   vim.keymap.set("n", "<CR>", function()
     local line = vim.api.nvim_win_get_cursor(0)[1]
@@ -256,7 +251,6 @@ function M.open_panel()
     vim.cmd("qa")
   end, opts)
 
-  -- Blessed state keymaps (panel-specific)
   vim.keymap.set("n", "x", function()
     local line = vim.api.nvim_win_get_cursor(0)[1]
     local item = chain[line]
@@ -345,13 +339,11 @@ end
 function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
-  tab_cache = {}
+  tab_by_idx = {}
 
-  -- Load blessed state and warm caches
   blessed.load()
   blessed.warm_file_counts(chain)
 
-  -- Run churn analysis
   churns = churn.analyze(chain)
   churn_by_branch = churn.by_branch(churns)
 
@@ -360,7 +352,6 @@ function M.setup(data)
       #churns, vim.tbl_count(churn_by_branch)), vim.log.levels.WARN)
   end
 
-  -- Stack-specific keymaps
   vim.keymap.set("n", "]b", M.next_branch, { desc = "Next branch in stack" })
   vim.keymap.set("n", "[b", M.prev_branch, { desc = "Prev branch in stack" })
   vim.keymap.set("n", "<leader>sp", M.toggle_panel, { desc = "Toggle stack panel" })
@@ -370,7 +361,6 @@ function M.setup(data)
     churn.show(churns)
   end, { desc = "Show stack churn" })
 
-  -- Build cross-branch unreviewed list for ]u/[u navigation
   local function get_all_unreviewed()
     local results = {}
     for ci, item in ipairs(chain) do
@@ -385,14 +375,13 @@ function M.setup(data)
           local status = known[fp] and blessed.file_status(item.branch, fp) or "unblessed"
           if status ~= "clean" then
             local entry = { branch = item.branch, filepath = fp, status = status }
-            -- Cross-branch jump: switch diffview then defer file focus
             if ci ~= current_idx then
               local target_idx = ci
               entry.switch_to = function(callback)
                 open_review(target_idx)
                 vim.defer_fn(function()
                   if callback then callback() end
-                end, 300)
+                end, 100)
               end
             end
             table.insert(results, entry)
@@ -404,7 +393,6 @@ function M.setup(data)
     return results
   end
 
-  -- Shared keybindings (sb, sB, ]u, [u, go, gd, gy, g?)
   bindings.setup({
     get_branch = function() return chain[current_idx] and chain[current_idx].branch or "" end,
     get_base = function() return chain[current_idx] and chain[current_idx].parent or "" end,
@@ -415,7 +403,7 @@ function M.setup(data)
     end,
     help_text = [[
 Stack Review Keybindings:
-  ]b / [b       next/prev branch (cached for instant revisit)
+  ]b / [b       next/prev branch (instant after warmup)
   ]u / [u       next/prev unreviewed file
   <leader>e     focus file panel
   <leader>E     focus branch panel
@@ -442,7 +430,6 @@ Stack Review Keybindings:
 ]],
   })
 
-  -- Stack-specific: refresh from git-town config
   vim.keymap.set("n", "gr", function()
     local main_branch = vim.fn.system("git config git-town.main-branch 2>/dev/null"):gsub("%s+$", "")
     if main_branch == "" then main_branch = "main" end
@@ -496,10 +483,17 @@ Stack Review Keybindings:
       end
     end
 
-    cache_clear()
+    -- Close all existing tabs
+    for _, tab in pairs(tab_by_idx) do
+      if tab and vim.api.nvim_tabpage_is_valid(tab) then
+        vim.api.nvim_set_current_tabpage(tab)
+        pcall(vim.cmd, "DiffviewClose")
+      end
+    end
 
     chain = new_chain
     current_idx = new_idx
+    tab_by_idx = {}
 
     blessed.invalidate()
     blessed.load()
@@ -509,15 +503,31 @@ Stack Review Keybindings:
     churns = churn.analyze(chain)
     churn_by_branch = churn.by_branch(churns)
 
-    open_review(current_idx)
+    -- Open current branch, then warm the rest in background
+    local item = chain[current_idx]
+    if item and item.parent and item.parent ~= "" then
+      vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
+      tab_by_idx[current_idx] = vim.api.nvim_get_current_tabpage()
+      panel_win = nil
+      panel_buf = nil
+      vim.defer_fn(function()
+        M.open_panel()
+        refresh_all()
+        warm_remaining_tabs(current_idx)
+      end, 200)
+    end
+
     vim.notify(string.format("Refreshed (%d branches)", #chain), vim.log.levels.INFO)
   end, { desc = "Refresh stack review" })
 
-  -- Cache the initial diffview tab (the one opened by the shell script)
-  cache_put(current_idx, vim.api.nvim_get_current_tabpage())
+  -- Cache the initial tab (opened by the shell script)
+  tab_by_idx[current_idx] = vim.api.nvim_get_current_tabpage()
 
-  -- Open panel after a short delay
-  vim.defer_fn(M.open_panel, 200)
+  -- Open panel, then start warming remaining tabs in background
+  vim.defer_fn(function()
+    M.open_panel()
+    warm_remaining_tabs(current_idx)
+  end, 200)
 end
 
 return M
