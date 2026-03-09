@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Show only git-town branch stacks (chains of 2+ branches), hiding lone branches.
+
+git town branch 2>/dev/null | awk '
+  {
+    raw = $0
+    # Strip ANSI codes
+    gsub(/\033\[[0-9;]*m/, "")
+    # Replace * marker with space to normalize indentation
+    sub(/\*/, " ")
+    # Count leading spaces
+    match($0, /^[ ]*/)
+    d = RLENGTH
+
+    lines[NR] = raw
+    depths[NR] = d
+    total = NR
+  }
+  END {
+    # Find the depth of "main" — direct children of main are at main_depth + 2
+    main_depth = -1
+    for (i = 1; i <= total; i++) {
+      tmp = lines[i]
+      gsub(/\033\[[0-9;]*m/, "", tmp)
+      gsub(/^[ *]+/, "", tmp)
+      if (tmp == "main") { main_depth = depths[i]; break }
+    }
+    if (main_depth < 0) exit
+
+    child_depth = main_depth + 2  # direct children of main
+
+    # For each direct child of main, check if it has any descendants
+    # If yes, print the whole subtree
+    i = 1
+    while (i <= total) {
+      if (depths[i] == child_depth) {
+        # Find the end of this subtree
+        j = i + 1
+        while (j <= total && depths[j] > child_depth) j++
+        subtree_end = j - 1
+
+        # Only print if subtree has children (more than just the root)
+        if (subtree_end > i) {
+          if (NR > 0) print ""
+          for (k = i; k <= subtree_end; k++) print lines[k]
+        }
+        i = j
+      } else {
+        i++
+      }
+    }
+  }
+'
