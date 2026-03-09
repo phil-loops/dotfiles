@@ -45,8 +45,13 @@ local function cache_put(idx, tab)
   while #tab_cache > MAX_CACHED_TABS do
     local evicted = table.remove(tab_cache)
     if evicted.tab and vim.api.nvim_tabpage_is_valid(evicted.tab) then
+      -- Switch to it, close diffview (which closes the tab), switch back
+      local cur_tab = vim.api.nvim_get_current_tabpage()
       vim.api.nvim_set_current_tabpage(evicted.tab)
       pcall(vim.cmd, "DiffviewClose")
+      if vim.api.nvim_tabpage_is_valid(cur_tab) then
+        vim.api.nvim_set_current_tabpage(cur_tab)
+      end
     end
   end
 end
@@ -59,6 +64,14 @@ local function cache_clear()
     end
   end
   tab_cache = {}
+end
+
+-- Check if the current tabpage has a diffview
+local function current_tab_has_diffview()
+  local ok, lib = pcall(require, "diffview.lib")
+  if not ok then return false end
+  local view = lib.get_current_view()
+  return view ~= nil and view.tabpage == vim.api.nvim_get_current_tabpage()
 end
 
 local function refresh_all()
@@ -151,15 +164,25 @@ local function open_review(idx)
   local cached_tab = cache_get(idx)
   if cached_tab then
     vim.api.nvim_set_current_tabpage(cached_tab)
-    -- Panel lives on a per-tab basis; invalidate so it gets recreated
+    -- Panel is per-tab, needs recreation
     panel_win = nil
     panel_buf = nil
+    vim.defer_fn(function()
+      M.open_panel()
+      refresh_all()
+    end, 50)
   else
-    -- Cache miss: open new diffview (creates its own tab)
+    -- Cache miss: close current diffview, open new one
+    -- DiffviewClose closes the current tab; DiffviewOpen creates a new one
+    pcall(vim.cmd, "DiffviewClose")
     vim.cmd("DiffviewOpen " .. item.parent .. ".." .. item.branch)
     cache_put(idx, vim.api.nvim_get_current_tabpage())
     panel_win = nil
     panel_buf = nil
+    vim.defer_fn(function()
+      M.open_panel()
+      refresh_all()
+    end, 150)
   end
 
   local bsum = blessed.summary(item.branch, item.parent or "")
@@ -170,12 +193,6 @@ local function open_review(idx)
     extra = string.format(" [%d/%d reviewed, %d stale]", bsum.reviewed, bsum.total, bsum.stale_count)
   end
   vim.notify(string.format("Reviewing: %s (%d/%d)%s", item.branch, idx, #chain, extra), vim.log.levels.INFO)
-
-  -- Reopen panel after diffview loads
-  vim.defer_fn(function()
-    M.open_panel()
-    refresh_all()
-  end, cached_tab and 50 or 150)
 
   return true
 end
@@ -479,7 +496,6 @@ Stack Review Keybindings:
       end
     end
 
-    -- Clear tab cache (closes all cached diffview tabs)
     cache_clear()
 
     chain = new_chain
@@ -497,8 +513,10 @@ Stack Review Keybindings:
     vim.notify(string.format("Refreshed (%d branches)", #chain), vim.log.levels.INFO)
   end, { desc = "Refresh stack review" })
 
-  -- Cache the initial tab and open panel after a short delay
+  -- Cache the initial diffview tab (the one opened by the shell script)
   cache_put(current_idx, vim.api.nvim_get_current_tabpage())
+
+  -- Open panel after a short delay
   vim.defer_fn(M.open_panel, 200)
 end
 
