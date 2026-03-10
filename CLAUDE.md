@@ -46,6 +46,20 @@ git town set-parent <parent-branch>
 
 Run `git town help` for full reference.
 
+# Loops Script Runner
+
+The loops repo has a centralized script runner at `script-runner/`.
+
+```bash
+# Run a script (DRY_RUN=true by default)
+npm run script-runner <scriptName> -- <args...>
+
+# Run for real
+DRY_RUN=false npm run script-runner <scriptName> -- <args...>
+```
+
+Each script exports `(dryRun: boolean, ...args: string[]) => Promise<void>` and is registered in `script-runner/index.ts`.
+
 # Code Layering
 
 Follow a strict layering pattern: **queries → models → wiring**.
