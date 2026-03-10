@@ -106,8 +106,8 @@ Structure changes atomically — each branch/commit should be a single, self-con
 
 # Git Pushing & PRs
 
-**Never push to origin or open PRs.** The user will handle pushing and opening PRs themselves.
+**Never push to origin or open PRs on origin.** The user will handle pushing and opening PRs themselves.
 
 In the loops repo specifically:
-- `phil-loops` (`phil-loops/loops`) — Phil's fork. This is our workspace for branches, PRs, and experimentation. Push here freely when needed.
-- `origin` (`Loops-so/loops`) — Shared team repo. **Never push here or open PRs** unless the action is 100% unambiguous and explicitly requested. Treat as read-only.
+- `phil-loops` (`phil-loops/loops`) — Phil's fork. This is our workspace for branches, PRs, and experimentation. Push here freely when needed. **Only open PRs on this remote.**
+- `origin` (`Loops-so/loops`) — Shared team repo. **Never push here. Never open PRs here.** Treat as read-only.
