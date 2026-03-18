@@ -311,17 +311,43 @@ case "${1:-}" in
   deploy)
     do_deploy "${2:-}"
     ;;
+  what)
+    # Show what's on staging right now, regardless of branch or age
+    local deploy
+    deploy=$(gh run list \
+      --repo "$REPO" \
+      --workflow "$DEPLOY_WORKFLOW" \
+      --limit 20 \
+      --json databaseId,status,conclusion,displayTitle,startedAt,updatedAt \
+      --jq '[.[] | select(.displayTitle | contains("[staging]")) | select(.conclusion == "success")][0]')
+
+    if [[ -z "$deploy" || "$deploy" == "null" ]]; then
+      echo -e "${DIM}No successful staging deploys found${NC}"
+      exit 0
+    fi
+
+    local title=$(echo "$deploy" | jq -r '.displayTitle')
+    local started=$(echo "$deploy" | jq -r '.startedAt')
+    local run_id=$(echo "$deploy" | jq -r '.databaseId')
+    local deployed_tag=$(echo "$title" | sed 's/\[staging\] deploying //')
+
+    echo -e "${BOLD}Staging${NC}"
+    echo -e "  Tag:      ${CYAN}${deployed_tag}${NC}"
+    echo -e "  Deployed: ${GREEN}$(relative_time "$started")${NC}"
+    echo -e "  Run:      ${DIM}https://github.com/${REPO}/actions/runs/${run_id}${NC}"
+    ;;
   status|"")
     print_build_status
     print_deploy_status
     ;;
   *)
-    echo "Usage: staging [watch|deploy|status]"
+    echo "Usage: staging [watch|deploy|status|what]"
     echo ""
-    echo "  staging           Show build & staging status"
+    echo "  staging           Show build & staging status (current branch)"
     echo "  staging watch     Watch build, then prompt to deploy"
     echo "  staging deploy    Deploy latest successful build"
     echo "  staging deploy TAG  Deploy a specific tag"
+    echo "  staging what      Show what's currently on staging"
     exit 1
     ;;
 esac
