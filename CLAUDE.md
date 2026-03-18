@@ -70,6 +70,11 @@ Follow a strict layering pattern: **queries → models → wiring**.
 - tRPC routers, API routes, and job handlers are all **wiring** — they call models, not queries directly
 - If a function touches multiple tables, has conditional logic, or does authorization checks, it belongs in models, not queries
 
+## Naming conventions
+
+- **File names** follow the team's kebab-case convention: `goal-contact-window.ts`, not `goalContactWindow.ts`
+- **Query imports** use namespace imports with the full descriptive name: `import * as GoalContactWindowQueries from "..."` — not shorthand like `GCWQueries`. In tests the bare function name (`insert`, `findActiveByContact`) is obvious from context, but in model/wiring code the qualified name (`GoalContactWindowQueries.insert`) improves legibility.
+
 # Stacked PR Design
 
 Each branch in a stack should be **one reviewable unit** — a single concern that compiles and makes sense on its own.
@@ -97,6 +102,18 @@ Stack branches bottom-up by dependency, not by feature area:
 - Don't put business logic in query branches (status checks, authorization, cross-entity cascades)
 - Don't mix query expansions + tRPC endpoints + UI components in one branch
 - Don't add a column/migration in a middle branch if the schema branch already exists — amend the schema branch or prepend a new one
+
+# Taskfile
+
+The loops repo uses [go-task](https://taskfile.dev/) for project commands. **Always prefer Taskfile tasks over raw commands** (npm, npx, etc.):
+
+```bash
+task lint              # oxlint + oxfmt + prisma format
+task clickhouse:migrate  # run ClickHouse migrations (uses correct URL)
+task ci:run            # full CI pipeline locally
+```
+
+Run `task --list` to see all available tasks. Use the team's tools — don't reinvent with raw commands.
 
 # Git Changes
 
