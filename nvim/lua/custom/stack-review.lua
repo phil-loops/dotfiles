@@ -307,6 +307,16 @@ function M.prev_branch()
   end
 end
 
+function M.checkout_current()
+  local item = chain[current_idx]
+  if not item then
+    vim.notify("No branch selected", vim.log.levels.WARN)
+    return
+  end
+  vim.fn.system("git checkout " .. item.branch)
+  vim.notify("Checked out " .. item.branch, vim.log.levels.INFO)
+end
+
 function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
@@ -328,6 +338,8 @@ function M.setup(data)
   vim.keymap.set("n", "<leader><", M.prev_branch, { desc = "Prev branch in stack" })
   vim.keymap.set("n", "<leader>sp", M.toggle_panel, { desc = "Toggle stack panel" })
   vim.keymap.set("n", "<leader>E", M.focus_panel, { desc = "Focus branch panel" })
+
+  vim.keymap.set("n", "<leader>gc", M.checkout_current, { desc = "[G]it [C]heckout current branch" })
 
   vim.keymap.set("n", "<leader>sc", function()
     churn.show(churns)

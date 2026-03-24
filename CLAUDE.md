@@ -117,7 +117,7 @@ Run `task --list` to see all available tasks. Use the team's tools — don't rei
 
 # Git Changes
 
-Never add Co-Authored-By lines. Never commit — the user will handle commits themselves.
+Never add Co-Authored-By lines. Never amend commits — always create new commits. History doesn't matter since PRs are squash-merged. Never commit — the user will handle commits themselves.
 
 Structure changes atomically — each branch/commit should be a single, self-contained change. When working on multi-part changes, decouple them into separate branches in the stack, ordering zero-dependency changes first.
 

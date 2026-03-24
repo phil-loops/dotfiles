@@ -149,7 +149,7 @@ function M.setup(ctx)
   vim.keymap.set("n", "]u", function() jump_unreviewed("next") end, { desc = "Next unreviewed file" })
   vim.keymap.set("n", "[u", function() jump_unreviewed("prev") end, { desc = "Prev unreviewed file" })
 
-  vim.keymap.set("n", "go", function()
+  vim.keymap.set("n", "<leader>gf", function()
     local filepath = M.get_diffview_filepath()
     if not filepath then
       vim.notify("Focus a file first", vim.log.levels.WARN)
@@ -171,9 +171,9 @@ function M.setup(ctx)
     local cwd = vim.fn.getcwd()
     vim.cmd("tabedit " .. vim.fn.fnameescape(cwd .. "/" .. filepath))
     pcall(vim.api.nvim_win_set_cursor, 0, { cursor_line, 0 })
-  end, { desc = "Open file in new tab (with LSP)" })
+  end, { desc = "[G]it go to [F]ile (new tab, with LSP)" })
 
-  vim.keymap.set("n", "gd", function()
+  vim.keymap.set("n", "<leader>gd", function()
     local branch = ctx.get_branch()
     local filepath = M.get_diffview_filepath()
     if not filepath then
@@ -220,9 +220,15 @@ function M.setup(ctx)
     for _, b in ipairs({ left_buf, right_buf }) do
       vim.keymap.set("n", "q", "<cmd>tabclose<cr>", { buffer = b, desc = "Close delta tab" })
     end
-  end, { desc = "Show delta since blessed" })
+  end, { desc = "[G]it [D]elta since blessed" })
 
-  vim.keymap.set("n", "gy", function()
+  vim.keymap.set("n", "<leader>gy", function()
+    local branch = ctx.get_branch()
+    vim.fn.setreg("+", branch)
+    vim.notify("Copied: " .. branch, vim.log.levels.INFO)
+  end, { desc = "[G]it [Y]ank branch name" })
+
+  vim.keymap.set("n", "<leader>gY", function()
     local branch = ctx.get_branch()
     local filepath = M.get_diffview_filepath()
     if filepath then
@@ -231,9 +237,9 @@ function M.setup(ctx)
       vim.notify("Copied: " .. ref, vim.log.levels.INFO)
     else
       vim.fn.setreg("+", branch)
-      vim.notify("Copied: " .. branch, vim.log.levels.INFO)
+      vim.notify("Copied branch (no file focused): " .. branch, vim.log.levels.INFO)
     end
-  end, { desc = "Copy branch:file ref to clipboard" })
+  end, { desc = "[G]it [Y]ank branch:file ref" })
 
   vim.keymap.set("n", "g?", function()
     local help = ctx.help_text or [[
@@ -241,9 +247,10 @@ Review Keybindings:
   ]u / [u       next/prev unreviewed file
   <leader>sb    bless current file
   <leader>sB    bless all files on branch
-  go            open file in new tab (with LSP)
-  gd            show delta since blessed (new tab)
-  gy            copy branch:file ref to clipboard
+  <leader>gf    go to file in new tab (with LSP)
+  <leader>gd    show delta since blessed (new tab)
+  <leader>gy    copy branch name to clipboard
+  <leader>gY    copy branch:file ref to clipboard
   g?            show this help
 
   Blessed = "I reviewed this file's content" (survives rebases)
