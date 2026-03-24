@@ -200,3 +200,11 @@ task() {
 }
 
 alias dev="NGROK=false command task dev"
+hold() {
+    if [[ "$1 $2" == "my beer" ]]; then
+        shift 2
+        claude --dangerously-skip-permissions "$@"
+    else
+        echo "🍺 Usage: hold my beer"
+    fi
+}
