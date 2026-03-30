@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# Only format-check files that differ from main
+files=$(git diff --name-only main --diff-filter=ACMR -- '*.ts' '*.tsx')
+
+if [ -z "$files" ]; then
+  exit 0
+fi
+
+echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
+echo "$files" | xargs npx oxfmt --check

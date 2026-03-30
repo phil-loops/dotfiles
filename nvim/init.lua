@@ -166,6 +166,11 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
+-- Yank relative file path to clipboard
+vim.keymap.set('n', '<leader>yf', function()
+  vim.fn.setreg('+', vim.fn.fnamemodify(vim.fn.expand '%', ':.'))
+end, { desc = '[Y]ank [F]ile path (relative to project root)' })
+
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
@@ -489,6 +494,11 @@ require('lazy').setup({
         local base = vim.fn.system('git merge-base main HEAD'):gsub('%s+$', '')
         vim.cmd('DiffviewOpen ' .. base)
       end, { desc = '[G]it diff from [M]ain (merge-base)' })
+
+      -- Show working tree status (staged, unstaged, untracked)
+      vim.keymap.set('n', '<leader>gs', function()
+        vim.cmd('DiffviewOpen')
+      end, { desc = '[G]it [S]tatus (working tree)' })
 
       -- Open current line/selection on GitHub (main branch)
       vim.keymap.set('n', '<leader>go', ':GBrowse main:%<CR>', { desc = '[G]it [O]pen on GitHub (main)' })

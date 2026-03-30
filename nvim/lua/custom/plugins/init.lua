@@ -4,6 +4,7 @@ return {
     "phil-loops/diffview.nvim",
     branch = "stack-drift",
     cmd = { "DiffviewOpen", "DiffviewFileHistory", "DiffviewClose" },
+    opts = { use_icons = false },
   },
   {
     "folke/persistence.nvim",
