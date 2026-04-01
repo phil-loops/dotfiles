@@ -161,15 +161,20 @@ function M.setup(ctx)
     local branch = ctx.get_branch()
     local cur = vim.fn.system("git rev-parse --abbrev-ref HEAD 2>/dev/null"):gsub("%s+$", "")
     if cur ~= branch then
-      vim.fn.system("git checkout " .. branch .. " 2>/dev/null")
+      local out = vim.fn.system("git checkout " .. branch .. " 2>&1")
       if vim.v.shell_error ~= 0 then
-        vim.notify("Failed to checkout " .. branch, vim.log.levels.ERROR)
+        vim.notify("Failed to checkout " .. branch .. ": " .. out, vim.log.levels.ERROR)
         return
       end
     end
 
     local cwd = vim.fn.getcwd()
-    vim.cmd("tabedit " .. vim.fn.fnameescape(cwd .. "/" .. filepath))
+    local full_path = cwd .. "/" .. filepath
+    if vim.fn.filereadable(full_path) == 0 then
+      vim.notify("File not on disk after checkout: " .. filepath, vim.log.levels.ERROR)
+      return
+    end
+    vim.cmd("tabedit " .. vim.fn.fnameescape(full_path))
     pcall(vim.api.nvim_win_set_cursor, 0, { cursor_line, 0 })
   end, { desc = "[G]it go to [F]ile (new tab, with LSP)" })
 
