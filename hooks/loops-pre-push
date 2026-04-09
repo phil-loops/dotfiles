@@ -4,6 +4,24 @@
 behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
 if [ "$behind" -gt 0 ] 2>/dev/null; then
   echo "⚠️  Branch is $behind commits behind origin/main. Consider: git town sync"
+
+  # Check for deploy-critical changes missed from main
+  critical=$(git diff HEAD..origin/main --name-only -- \
+    'k8s/charts/loops/values.staging.yaml' \
+    'k8s/charts/loops/values.production.yaml' \
+    'prisma/migrations/*' \
+    'clickhouse/migrations/*' \
+    'jobs.ts' \
+    'jobs/index.ts' \
+    '.env.template' \
+    2>/dev/null)
+
+  if [ -n "$critical" ]; then
+    echo "🚨 Main has changes to deploy-critical files you're missing:"
+    echo "$critical" | sed 's/^/   /'
+    echo "   Run: git town sync"
+    exit 1
+  fi
 fi
 
 # Only format-check files that differ from main
