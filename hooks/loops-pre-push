@@ -8,4 +8,7 @@ if [ -z "$files" ]; then
 fi
 
 echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
-echo "$files" | xargs npx oxfmt --check
+echo "$files" | xargs npx oxfmt --check || exit 1
+
+echo "tsc: type-checking..."
+npx tsc --noEmit || exit 1
