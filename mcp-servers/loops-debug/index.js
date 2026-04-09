@@ -9,6 +9,7 @@ const tools = [
   require("./tools/loops-api"),
   require("./tools/loops-contact"),
   require("./tools/loops-server"),
+  require("./tools/loops-ses-event"),
 ];
 
 const server = new McpServer({
