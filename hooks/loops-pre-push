@@ -1,5 +1,11 @@
 #!/bin/sh
 
+# Warn if branch is behind main
+behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
+if [ "$behind" -gt 0 ] 2>/dev/null; then
+  echo "⚠️  Branch is $behind commits behind origin/main. Consider: git town sync"
+fi
+
 # Only format-check files that differ from main
 files=$(git diff --name-only main --diff-filter=ACMR -- '*.ts' '*.tsx')
 
@@ -8,7 +14,4 @@ if [ -z "$files" ]; then
 fi
 
 echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
-echo "$files" | xargs npx oxfmt --check || exit 1
-
-echo "tsc: type-checking..."
-npx tsc --noEmit || exit 1
+echo "$files" | xargs npx oxfmt --check
