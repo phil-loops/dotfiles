@@ -41,6 +41,15 @@ local function swap_diffview_range(parent, branch)
     view.panel.rev_pretty_name = view.adapter:rev_to_pretty_string(left, right)
   end
 
+  -- Invalidate cached file entries so diffs are recomputed
+  if view.files then
+    for _, kind in ipairs({ "working", "staged", "conflicting" }) do
+      if view.files[kind] then
+        view.files[kind] = {}
+      end
+    end
+  end
+
   view:update_files()
   return true
 end
