@@ -1,6 +1,7 @@
 import { execSync } from "child_process";
 import { getStackPrefix } from "../lib/git-town.ts";
 import { push } from "./push.ts";
+import { sync } from "./sync.ts";
 
 function run(cmd: string, dryRun: boolean): boolean {
   if (dryRun) {
@@ -16,7 +17,7 @@ function run(cmd: string, dryRun: boolean): boolean {
   }
 }
 
-export function flow(args: string[]) {
+export async function flow(args: string[]) {
   const dryRun = args.includes("--dry-run");
   const prefix = getStackPrefix();
 
@@ -31,8 +32,12 @@ export function flow(args: string[]) {
 
   // 1. Sync
   console.log("Step 1: Sync stack");
-  if (!run("git town sync --stack", dryRun)) {
-    console.error("\nSync failed — check for conflicts and resolve them, then re-run.");
+  const syncArgs = [prefix];
+  if (dryRun) syncArgs.push("--dry-run");
+  try {
+    await sync(syncArgs);
+  } catch (e: any) {
+    console.error(`\nSync failed: ${e.message}`);
     process.exit(1);
   }
 

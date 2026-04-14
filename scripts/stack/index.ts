@@ -5,6 +5,7 @@ import { branches } from "./commands/branches.ts";
 import { update } from "./commands/update.ts";
 import { push } from "./commands/push.ts";
 import { flow } from "./commands/flow.ts";
+import { sync } from "./commands/sync.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -33,6 +34,10 @@ const commands: Record<string, { run: (args: string[]) => void | Promise<void>; 
   flow: {
     run: flow,
     desc: "Sync, push, compress, webview (--dry-run, --no-webview)",
+  },
+  sync: {
+    run: sync,
+    desc: "Rebase stack onto trunk, prune merged, push (--continue, --abort, --dry-run, --no-auto-resolve, --no-prune, --all, --remote=)",
   },
 };
 
