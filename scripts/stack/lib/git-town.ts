@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import { gitRun } from "./git.ts";
 
 export function git(cmd: string): string {
   try {
@@ -86,4 +87,82 @@ export function getStackPrefix(): string | undefined {
 
   // Could also read from .stack file if it exists
   return undefined;
+}
+
+/**
+ * Read a branch's parent from git-town config. Returns null if not tracked.
+ */
+export function getParent(branch: string): string | null {
+  const r = gitRun(["config", "--local", `git-town-branch.${branch}.parent`]);
+  return r.exitCode === 0 && r.stdout ? r.stdout : null;
+}
+
+/** Write (or overwrite) a branch's parent pointer. */
+export function setParent(branch: string, parent: string): void {
+  const r = gitRun(["config", "--local", `git-town-branch.${branch}.parent`, parent]);
+  if (r.exitCode !== 0) {
+    throw new Error(`failed to set parent for ${branch}: ${r.stderr}`);
+  }
+}
+
+/** Remove a branch's git-town config entries entirely. */
+export function clearBranchConfig(branch: string): void {
+  gitRun(["config", "--local", "--remove-section", `git-town-branch.${branch}`]);
+}
+
+/**
+ * Return every tracked branch->parent pair, no prefix filtering.
+ */
+export function getAllParentPointers(): { name: string; parent: string }[] {
+  const config = git("config --get-regexp git-town-branch");
+  const out: { name: string; parent: string }[] = [];
+  for (const line of config.split("\n")) {
+    const m = line.match(/git-town-branch\.(.+)\.parent\s+(.+)/);
+    if (m) {
+      out.push({ name: m[1], parent: m[2] });
+    }
+  }
+  return out;
+}
+
+export interface StackTreeNode {
+  name: string;
+  parent: string;
+  children: StackTreeNode[];
+}
+
+/**
+ * Build a tree (or forest) of tracked branches. Roots are branches whose parents
+ * are not themselves tracked (typically `main`). If `prefix` is given, only
+ * branches matching it are included, and the tree may be pruned.
+ */
+export function getStackTree(prefix?: string): StackTreeNode[] {
+  const all = getAllParentPointers();
+  const filtered = prefix ? all.filter((b) => b.name.startsWith(prefix)) : all;
+  const byName = new Map<string, StackTreeNode>();
+  for (const b of filtered) {
+    byName.set(b.name, { name: b.name, parent: b.parent, children: [] });
+  }
+  const roots: StackTreeNode[] = [];
+  for (const node of byName.values()) {
+    const parent = byName.get(node.parent);
+    if (parent) {
+      parent.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
+
+/** Walk a forest top-down (root-first, then BFS-ish by insertion order). */
+export function walkTopDown(roots: StackTreeNode[]): StackTreeNode[] {
+  const out: StackTreeNode[] = [];
+  const queue = [...roots];
+  while (queue.length > 0) {
+    const node = queue.shift()!;
+    out.push(node);
+    queue.push(...node.children);
+  }
+  return out;
 }

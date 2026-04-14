@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Drop-in replacement for `git-town`. Routes known subcommands to our local
+# TypeScript dispatcher and falls through to the real git-town binary for
+# anything we haven't implemented yet.
+
+set -euo pipefail
+
+REAL_GIT_TOWN="/opt/homebrew/bin/git-town"
+DISPATCHER="$HOME/.dotfiles/scripts/stack/index.ts"
+
+run_ts() {
+  # npx tsx invocation matches the pattern used elsewhere in dotfiles (see
+  # `loops stack` in ~/.zshrc and scripts/stack/commands/inject.ts).
+  exec npx --yes tsx "$DISPATCHER" "$@"
+}
+
+run_real() {
+  if [ ! -x "$REAL_GIT_TOWN" ]; then
+    echo "git-town shim: real git-town not found at $REAL_GIT_TOWN" >&2
+    exit 127
+  fi
+  exec "$REAL_GIT_TOWN" "$@"
+}
+
+if [ $# -eq 0 ]; then
+  run_real
+fi
+
+sub="$1"
+shift
+
+case "$sub" in
+  sync)
+    run_ts sync "$@"
+    ;;
+  --help|-h|help|--version|-V|version)
+    run_real "$sub" "$@"
+    ;;
+  *)
+    run_real "$sub" "$@"
+    ;;
+esac
