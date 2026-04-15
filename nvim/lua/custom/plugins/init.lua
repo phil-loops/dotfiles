@@ -17,4 +17,10 @@ return {
       { "<leader>qd", function() require("persistence").stop() end, desc = "Don't save current session" },
     },
   },
+  {
+    "MeanderingProgrammer/render-markdown.nvim",
+    dependencies = { "nvim-treesitter/nvim-treesitter", "nvim-tree/nvim-web-devicons" },
+    ft = { "markdown" },
+    opts = {},
+  },
 }
