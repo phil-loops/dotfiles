@@ -17,34 +17,40 @@ This ensures nothing is lost if the computer dies.
 
 # Git Branch Stacks
 
-Use **git-town** for stacked PRs.
+Use plain git for stacked PRs. Claude manages parent relationships — the user delegates stack plumbing and does not need to know or run any stack-specific commands.
 
-**IMPORTANT: Always create branches with git-town, never `git checkout -b`:**
+## Creating branches
 
-```bash
-git town append <name>   # Create child of current branch
-git town prepend <name>  # Create parent of current branch
-```
-
-If you accidentally created a branch with `git checkout -b`, fix it:
+Always create from the intended parent (the branch this one stacks on top of). Use plain `git checkout -b`:
 
 ```bash
-git town set-parent <parent-branch>
+git checkout <parent-branch>           # switch to the intended parent first
+git checkout -b <new-branch-name>      # child branch forks from current HEAD
 ```
 
-| Task                       | Command                         |
-| -------------------------- | ------------------------------- |
-| Create child branch        | `git town append <name>`        |
-| Create parent branch       | `git town prepend <name>`       |
-| Set parent (fix untracked) | `git town set-parent <branch>`  |
-| Sync all branches          | `git town sync`                 |
-| Create PR                  | `git town propose`              |
-| Navigate up/down           | `git town up` / `git town down` |
-| View stack                 | `git town branch`               |
-| Squash commits             | `git town compress`             |
-| Move branch out of stack   | `git town detach`               |
+The parent relationship is **implicit in the fork point** — git does not track it natively. Two places need to know the parent explicitly:
 
-Run `git town help` for full reference.
+1. **PRs**: pass `--base <parent>` to `gh pr create` so GitHub shows only this branch's diff, not the whole stack.
+2. **Rebase after parent changes**: `git rebase <parent>` (or `git rebase --onto <new-parent> <old-parent>` when moving a branch).
+
+Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order.
+
+## Common tasks
+
+| Task                       | Command                                                     |
+| -------------------------- | ----------------------------------------------------------- |
+| Create child branch        | `git checkout <parent> && git checkout -b <name>`           |
+| View stack                 | `git log --graph --oneline <main>..HEAD` on the tip branch  |
+| Update branch after parent change | `git rebase <parent>`                                |
+| Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
+| Create PR                  | `gh pr create --base <parent> --head <branch>`              |
+| Squash commits             | `git reset --soft <parent> && git commit`                   |
+
+## Stack hygiene
+
+- When the bottom branch of a stack merges, rebase every downstream branch onto the new `main` in order (lowest → highest). Resolve conflicts once per branch.
+- When PRs squash-merge, the commit on `main` won't match the branch's commits — this is expected. `git rebase main` will drop the now-redundant commits cleanly.
+- Keep the stack linear — no merge commits between branches in the same stack.
 
 # Loops Script Runner
 
