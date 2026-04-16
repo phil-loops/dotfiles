@@ -116,13 +116,15 @@ export async function sync(args: string[]): Promise<void> {
     gitRun(["fetch", "--prune", "origin"]);
   }
 
-  // Update trunk locally from origin (we never push trunk, but it needs to be fresh).
+  // Update trunk locally from origin, then mirror it to the fork so `${remote}/${trunk}`
+  // never falls behind origin (keeps `gh pr create --base <trunk>` diffs honest).
   const trunk = detectTrunk();
   if (!dryRun && trunk) {
     const onTrunk = original === trunk;
     if (!onTrunk) gitRun(["checkout", trunk]);
     gitRun(["merge", "--ff-only", `origin/${trunk}`]);
     if (!onTrunk) gitRun(["checkout", original]);
+    mirrorTrunkToFork(trunk, remote);
   }
 
   if (!noPrune) {
@@ -411,6 +413,31 @@ async function pruneMerged(opts: {
   }
 
   return merged.map((m) => m.name);
+}
+
+/** Fast-forward `${remote}/${trunk}` to match `origin/${trunk}`. No-op if already in sync
+ * or if the fork has commits origin doesn't (don't want to clobber work). */
+function mirrorTrunkToFork(trunk: string, remote: string): void {
+  if (remote === "origin") return;
+  if (!hasRemoteBranch("origin", trunk)) return;
+  if (!hasRemoteBranch(remote, trunk)) return;
+
+  const ahead = gitRun(["rev-list", "--count", `origin/${trunk}..${remote}/${trunk}`]);
+  const behind = gitRun(["rev-list", "--count", `${remote}/${trunk}..origin/${trunk}`]);
+  const aheadN = parseInt(ahead.stdout, 10) || 0;
+  const behindN = parseInt(behind.stdout, 10) || 0;
+
+  if (behindN === 0 && aheadN === 0) return;
+  if (aheadN > 0) {
+    warn(`${remote}/${trunk} has ${aheadN} commit(s) not on origin/${trunk} — skipping mirror.`);
+    return;
+  }
+
+  log(`Mirroring origin/${trunk} → ${remote}/${trunk} (+${behindN})`);
+  const r = gitRun(["push", remote, `origin/${trunk}:refs/heads/${trunk}`]);
+  if (r.exitCode !== 0) {
+    warn(`  push failed: ${r.stderr}`);
+  }
 }
 
 function detectTrunk(): string {
