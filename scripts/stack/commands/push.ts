@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { getStackBranchNames, getStackPrefix, git } from "../lib/git-town.ts";
+import { getStackBranchNames, getStackPrefix, git } from "../lib/stack-config.ts";
 
 export function push(args: string[]) {
   const prefix = args.find(a => !a.startsWith("-")) || getStackPrefix();

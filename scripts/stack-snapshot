@@ -13,21 +13,31 @@ mkdir -p "$REPO_CACHE"
 
 # Get current branch
 BRANCH=$(git branch --show-current 2>/dev/null)
-MAIN_BRANCH=$(git config git-town.main-branch 2>/dev/null || echo "main")
+MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null \
+           || git config git-town.main-branch 2>/dev/null \
+           || echo "main")
 
-# Collect all git-town tracked branches
+# Collect all stack-tracked branches (new stack-branch.* and legacy git-town-branch.*)
 get_stack_branches() {
-  git config --local --list 2>/dev/null | grep "git-town-branch.*\.parent=" | while IFS= read -r line; do
-    if [[ "$line" =~ 'git-town-branch\.(.+)\.parent=(.+)' ]]; then
-      echo "${match[1]}"
-    fi
-  done | sort
+  git config --local --list 2>/dev/null \
+    | grep -E "^(stack-branch|git-town-branch)\..*\.parent=" \
+    | while IFS= read -r line; do
+        if [[ "$line" =~ '(stack-branch|git-town-branch)\.(.+)\.parent=(.+)' ]]; then
+          echo "${match[2]}"
+        fi
+      done | sort -u
+}
+
+lookup_parent() {
+  local b="$1"
+  git config "stack-branch.${b}.parent" 2>/dev/null \
+    || git config "git-town-branch.${b}.parent" 2>/dev/null
 }
 
 # Get file hashes for a branch diff against its parent
 get_branch_files() {
   local branch="$1"
-  local parent=$(git config "git-town-branch.${branch}.parent" 2>/dev/null)
+  local parent=$(lookup_parent "$branch")
   [[ -z "$parent" ]] && return
 
   git diff --name-only "$parent".."$branch" -- "*.ts" "*.tsx" 2>/dev/null | while read file; do
@@ -50,7 +60,7 @@ save_snapshot() {
   local first=true
   get_stack_branches | while read branch; do
     local sha=$(git rev-parse "$branch" 2>/dev/null)
-    local parent=$(git config "git-town-branch.${branch}.parent" 2>/dev/null)
+    local parent=$(lookup_parent "$branch")
 
     [[ "$first" == "true" ]] && first=false || echo "," >> "$snapshot_file"
 

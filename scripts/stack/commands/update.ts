@@ -1,5 +1,5 @@
 import { execSync } from "child_process";
-import { getStackBranches, getCurrentBranch, getStackPrefix, git, gitOrFail } from "../lib/git-town.ts";
+import { getStackBranches, getCurrentBranch, getStackPrefix, git, gitOrFail } from "../lib/stack-config.ts";
 
 export function update(args: string[]) {
   const prefix = args.find(a => !a.startsWith("-") && !a.startsWith("--from")) || getStackPrefix();

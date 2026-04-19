@@ -1,21 +1,6 @@
-import { execSync } from "child_process";
-import { getStackPrefix } from "../lib/git-town.ts";
+import { getStackPrefix } from "../lib/stack-config.ts";
 import { push } from "./push.ts";
 import { sync } from "./sync.ts";
-
-function run(cmd: string, dryRun: boolean): boolean {
-  if (dryRun) {
-    console.log(`  [dry-run] Would run: ${cmd}`);
-    return true;
-  }
-  console.log(`  Running: ${cmd}`);
-  try {
-    execSync(cmd, { stdio: "inherit" });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export async function flow(args: string[]) {
   const dryRun = args.includes("--dry-run");
@@ -47,13 +32,6 @@ export async function flow(args: string[]) {
     console.log(`  [dry-run] Would push all branches with --force`);
   } else {
     push(["--force"]);
-  }
-
-  // 3. Compress
-  console.log("\nStep 3: Compress stack");
-  if (!run("git town compress --stack", dryRun)) {
-    console.error("\nCompress failed.");
-    process.exit(1);
   }
 
   console.log("\nFlow complete.");
