@@ -1,4 +1,5 @@
--- Stack Review - branch navigation for git-town stacks
+-- Stack Review - branch navigation for stack-tracked branches
+-- Reads stack-branch.*.parent (legacy git-town-branch.* supported).
 -- Single diffview tab, swap range via internal API on ]b/[b
 local M = {}
 local churn = require("custom.stack-churn")
@@ -424,19 +425,28 @@ Stack Review Keybindings:
   })
 
   vim.keymap.set("n", "gr", function()
-    local main_branch = vim.fn.system("git config git-town.main-branch 2>/dev/null"):gsub("%s+$", "")
+    local main_branch = vim.fn.system("git config stack.main-branch 2>/dev/null || git config git-town.main-branch 2>/dev/null"):gsub("%s+$", "")
     if main_branch == "" then main_branch = "main" end
 
-    local config_lines = vim.fn.systemlist("git config --local --list 2>/dev/null | grep 'git-town-branch.*\\.parent='")
+    local config_lines = vim.fn.systemlist("git config --local --list 2>/dev/null | grep -E '^(stack-branch|git-town-branch)\\..*\\.parent='")
     local parents_map = {}
     local children_map = {}
+    -- New key wins if both are present.
     for _, line in ipairs(config_lines) do
-      local branch, parent = line:match("git%-town%-branch%.(.+)%.parent=(.+)")
+      local section, branch, parent = line:match("(stack%-branch)%.(.+)%.parent=(.+)")
       if branch and parent then
         parents_map[branch] = parent
-        if not children_map[parent] then children_map[parent] = {} end
-        table.insert(children_map[parent], branch)
       end
+    end
+    for _, line in ipairs(config_lines) do
+      local branch, parent = line:match("git%-town%-branch%.(.+)%.parent=(.+)")
+      if branch and parent and not parents_map[branch] then
+        parents_map[branch] = parent
+      end
+    end
+    for branch, parent in pairs(parents_map) do
+      if not children_map[parent] then children_map[parent] = {} end
+      table.insert(children_map[parent], branch)
     end
 
     local cur_branch = chain[current_idx] and chain[current_idx].branch or

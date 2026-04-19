@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Branch Review - opens nvim with diffview for reviewing a branch against main
-# Supports blessing (same UX as stack review, without git-town)
+# Supports blessing (same UX as stack review, without stack parent tracking)
 
 set -e
 

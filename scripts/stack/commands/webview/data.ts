@@ -1,4 +1,5 @@
 import { execSync } from "child_process";
+import { getAllParentPointers } from "../../lib/stack-config.ts";
 
 function git(cmd: string): string {
   try {
@@ -35,17 +36,13 @@ export interface ChurnHunk {
   lines: string[];
 }
 
-export function getBranchesFromGitTown(prefix?: string): { name: string; parent: string }[] {
-  const config = git("config --get-regexp git-town-branch");
+export function getStackBranchesForWebview(prefix?: string): { name: string; parent: string }[] {
+  const all = getAllParentPointers();
   const branches: { name: string; parent: string }[] = [];
 
-  for (const line of config.split("\n")) {
-    const match = line.match(/git-town-branch\.(.+)\.parent\s+(.+)/);
-    if (match) {
-      const name = match[1];
-      if (prefix && !name.startsWith(prefix)) continue;
-      branches.push({ name, parent: match[2] });
-    }
+  for (const { name, parent } of all) {
+    if (prefix && !name.startsWith(prefix)) continue;
+    branches.push({ name, parent });
   }
 
   const sorted: { name: string; parent: string }[] = [];

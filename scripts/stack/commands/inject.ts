@@ -2,7 +2,7 @@ import { execSync, spawnSync } from "child_process";
 import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { git, getStackBranches, type StackBranch } from "../lib/git-town.ts";
+import { git, getStackBranches, type StackBranch } from "../lib/stack-config.ts";
 
 interface FilePatch {
   file: string;
@@ -285,7 +285,7 @@ function printResults(decisions: InjectionDecision[], stack: StackBranch[]) {
   }
 
   console.log(`\n${step}. Sync the stack (rebase downstream branches):`);
-  console.log("   git town sync");
+  console.log("   loops stack sync");
 
   console.log("\nLegend: ● high confidence  ◐ medium  ○ low");
 }

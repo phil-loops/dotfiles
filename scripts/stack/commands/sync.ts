@@ -20,9 +20,10 @@ import {
   getAllParentPointers,
   getStackPrefix,
   getStackTree,
+  getTrunkBranch,
   setParent,
   walkTopDown,
-} from "../lib/git-town.ts";
+} from "../lib/stack-config.ts";
 import { findMergedPR } from "../lib/gh.ts";
 import { resolveWithClaude } from "../lib/claude-resolver.ts";
 
@@ -96,7 +97,7 @@ export async function sync(args: string[]): Promise<void> {
     process.exit(1);
   }
   if (inRebase()) {
-    warn("A rebase is already in progress. Resolve it, then run `git town sync --continue`.");
+    warn("A rebase is already in progress. Resolve it, then run `loops stack sync --continue`.");
     process.exit(1);
   }
 
@@ -106,8 +107,8 @@ export async function sync(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // --all sync every tracked branch; otherwise filter by positional or inferred prefix.
-  // If no prefix can be inferred, fall through to everything (matches git-town's default).
+  // --all syncs every tracked branch; otherwise filter by positional or inferred prefix.
+  // If no prefix can be inferred, fall through to everything.
   const prefix = syncAll ? undefined : positional || getStackPrefix();
 
   log(`\nFetching from ${remote} and origin...`);
@@ -182,11 +183,11 @@ async function resume(): Promise<void> {
       if (!state.noAutoResolve) {
         const resolved = await tryClaudeOnCurrentConflict(state);
         if (!resolved) {
-          warn("Conflicts remain. Resolve manually, `git add`, then `git town sync --continue`.");
+          warn("Conflicts remain. Resolve manually, `git add`, then `loops stack sync --continue`.");
           process.exit(1);
         }
       } else {
-        warn("Conflicts remain. Resolve manually, `git add`, then `git town sync --continue`.");
+        warn("Conflicts remain. Resolve manually, `git add`, then `loops stack sync --continue`.");
         process.exit(1);
       }
     }
@@ -295,8 +296,8 @@ async function handleConflict(opts: {
 
   if (opts.state.noAutoResolve) {
     warn(`\nResolve the files, run \`git add\` + \`git rebase --continue\`, then:`);
-    warn(`    git town sync --continue`);
-    warn(`Or abort with: git town sync --abort`);
+    warn(`    loops stack sync --continue`);
+    warn(`Or abort with: loops stack sync --abort`);
     process.exit(1);
   }
 
@@ -329,8 +330,8 @@ async function handleConflict(opts: {
     warn(`\nClaude handoff failed: ${result.reason}`);
   }
   warn(`\nResolve manually, \`git add\`, then:`);
-  warn(`    git town sync --continue`);
-  warn(`Or abort with: git town sync --abort`);
+  warn(`    loops stack sync --continue`);
+  warn(`Or abort with: loops stack sync --abort`);
   process.exit(1);
 }
 
@@ -441,17 +442,15 @@ function mirrorTrunkToFork(trunk: string, remote: string): void {
 }
 
 function detectTrunk(): string {
-  const configured = gitRun(["config", "--local", "git-town.main-branch"]);
-  if (configured.exitCode === 0 && configured.stdout) return configured.stdout;
-  // git-town's modern config key
-  const main = gitRun(["config", "--local", "git-town.main"]);
-  if (main.exitCode === 0 && main.stdout) return main.stdout;
-  // Fall back to whatever origin/HEAD points at
+  const trunk = getTrunkBranch();
+  if (trunk !== "main") return trunk;
+  // getTrunkBranch defaults to "main" if nothing configured; verify against origin/HEAD
+  // before trusting it, so repos with a non-"main" trunk and no config still work.
   const head = gitRun(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
   if (head.exitCode === 0 && head.stdout) {
     return head.stdout.replace(/^origin\//, "");
   }
-  return "main";
+  return trunk;
 }
 
 function checkout(branch: string): void {

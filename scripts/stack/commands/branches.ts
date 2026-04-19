@@ -1,4 +1,4 @@
-import { getStackBranches, getCurrentBranch, getStackPrefix } from "../lib/git-town.ts";
+import { getStackBranches, getCurrentBranch, getStackPrefix } from "../lib/stack-config.ts";
 
 export function branches(args: string[]) {
   const prefix = args.find(a => !a.startsWith("-")) || getStackPrefix();
@@ -9,7 +9,7 @@ export function branches(args: string[]) {
 
   if (stack.length === 0) {
     console.error("No stack branches found.");
-    console.error("Make sure git-town parents are configured.");
+    console.error("Make sure stack parents are configured.");
     process.exit(1);
   }
 

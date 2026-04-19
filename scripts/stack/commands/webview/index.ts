@@ -2,7 +2,7 @@ import { execSync } from "child_process";
 import { writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { getBranchesFromGitTown, getBranchData, detectChurn } from "./data.ts";
+import { getStackBranchesForWebview, getBranchData, detectChurn } from "./data.ts";
 import { generateHtml } from "./html.ts";
 
 export function webview(args: string[]) {
@@ -11,13 +11,13 @@ export function webview(args: string[]) {
   console.log("Gathering branch data (ignoring whitespace)...");
   if (prefix) console.log(`Filtering branches with prefix: ${prefix}`);
 
-  const branches = getBranchesFromGitTown(prefix);
+  const branches = getStackBranchesForWebview(prefix);
   if (branches.length === 0) {
-    console.error("No branches found with git-town parent config.");
+    console.error("No branches found with stack parent config.");
     if (prefix) {
       console.error(`No branches found matching prefix: ${prefix}`);
     }
-    console.error("Make sure branches have parents set via: git config git-town-branch.<branch>.parent <parent>");
+    console.error("Make sure branches have parents set via: git config stack-branch.<branch>.parent <parent>");
     process.exit(1);
   }
 

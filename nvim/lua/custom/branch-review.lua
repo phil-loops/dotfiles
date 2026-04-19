@@ -1,5 +1,5 @@
 -- Branch Review - review a single branch against main with blessing support
--- Simpler version of stack-review without git-town dependencies
+-- Simpler version of stack-review without stack parent tracking
 local M = {}
 local blessed = require("custom.stack-blessed")
 local bindings = require("custom.review-bindings")

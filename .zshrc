@@ -75,19 +75,21 @@ loops() {
                 flow)
                     npx tsx ~/.dotfiles/scripts/stack/index.ts flow "$@"
                     ;;
+                sync)
+                    npx tsx ~/.dotfiles/scripts/stack/index.ts sync "$@"
+                    ;;
+                migrate)
+                    npx tsx ~/.dotfiles/scripts/stack/index.ts migrate "$@"
+                    ;;
                 *)
-                    echo "Use git-town for stack management:"
-                    echo "  git town sync      - sync all branches"
-                    echo "  git town up/down   - navigate stack"
-                    echo "  git town append    - create child branch"
-                    echo "  git town propose   - create PR"
-                    echo ""
                     echo "loops stack commands:"
                     echo "  loops stack review   - review stack in nvim"
                     echo "  loops stack snapshot - save current state"
                     echo "  loops stack diff     - show changes since snapshot"
                     echo "  loops stack webview  - open stack viewer in browser"
-                    echo "  loops stack flow     - sync, push, compress, webview"
+                    echo "  loops stack sync     - rebase stack onto trunk, prune merged, push"
+                    echo "  loops stack flow     - sync + push"
+                    echo "  loops stack migrate  - migrate legacy git-town config keys to stack.* keys (one-shot)"
                     ;;
             esac
             ;;
