@@ -21,6 +21,9 @@ return {
     "MeanderingProgrammer/render-markdown.nvim",
     dependencies = { "nvim-treesitter/nvim-treesitter", "nvim-tree/nvim-web-devicons" },
     ft = { "markdown" },
+    init = function()
+      vim.filetype.add({ extension = { mdx = "markdown" } })
+    end,
     opts = {},
   },
 }
