@@ -695,13 +695,7 @@ require('lazy').setup({
         -- rust_analyzer = {},
         -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
         --
-        -- Some languages (like typescript) have entire language plugins that can be useful:
-        --    https://github.com/pmizio/typescript-tools.nvim
-        --
-        -- But for many setups, the LSP (`ts_ls`) will work just fine
-        ts_ls = {},
-        --
-
+        -- TypeScript is handled by tsgo (registered manually below) — not in mason.
         lua_ls = {
           -- cmd = { ... },
           -- filetypes = { ... },
@@ -748,6 +742,31 @@ require('lazy').setup({
             require('lspconfig')[server_name].setup(server)
           end,
         },
+      }
+
+      -- tsgo (TypeScript native preview) — not in mason or lspconfig presets yet,
+      -- so register manually. Install with `npm i -g @typescript/native-preview`.
+      local lsp_configs = require('lspconfig.configs')
+      local lspconfig_util = require('lspconfig.util')
+      if not lsp_configs.tsgo then
+        lsp_configs.tsgo = {
+          default_config = {
+            cmd = { 'tsgo', '--lsp', '-stdio' },
+            filetypes = {
+              'javascript',
+              'javascriptreact',
+              'javascript.jsx',
+              'typescript',
+              'typescriptreact',
+              'typescript.tsx',
+            },
+            root_dir = lspconfig_util.root_pattern('tsconfig.json', 'jsconfig.json', 'package.json', '.git'),
+            single_file_support = true,
+          },
+        }
+      end
+      require('lspconfig').tsgo.setup {
+        capabilities = capabilities,
       }
     end,
   },
