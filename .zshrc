@@ -201,7 +201,7 @@ task() {
     fi
 }
 
-alias dev="NGROK=false command task dev"
+alias dev="NGROK=false command task dev 2>&1 | tee /tmp/loops-dev.log"
 hold() {
     if [[ "$1 $2" == "my beer" ]]; then
         shift 2
