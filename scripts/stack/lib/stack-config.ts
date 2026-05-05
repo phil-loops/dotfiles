@@ -4,12 +4,9 @@ import { gitRun } from "./git.ts";
 // Parent pointers live in `.git/config`:
 //   [stack-branch "<name>"]
 //       parent = <parent-branch>
-// Legacy installs used `git-town-branch.<name>.parent`; we still read those as
-// a fallback so code keeps working for repos that haven't run `loops stack migrate`.
 
 const PARENT_SECTION = "stack-branch";
-const LEGACY_PARENT_SECTION = "git-town-branch";
-const PARENT_REGEX = new RegExp(`^(?:${PARENT_SECTION}|${LEGACY_PARENT_SECTION})\\.(.+)\\.parent\\s+(.+)$`);
+const PARENT_REGEX = new RegExp(`^${PARENT_SECTION}\\.(.+)\\.parent\\s+(.+)$`);
 
 export function git(cmd: string): string {
   try {
@@ -30,17 +27,13 @@ export interface StackBranch {
 }
 
 function readAllRawPointers(): { name: string; parent: string }[] {
-  const config = git(`config --get-regexp "^(${PARENT_SECTION}|${LEGACY_PARENT_SECTION})\\."`);
-  const byName = new Map<string, string>();
+  const config = git(`config --get-regexp "^${PARENT_SECTION}\\."`);
+  const result: { name: string; parent: string }[] = [];
   for (const line of config.split("\n")) {
     const match = line.match(PARENT_REGEX);
-    if (!match) continue;
-    // New key wins if both are present.
-    if (line.startsWith(`${PARENT_SECTION}.`) || !byName.has(match[1])) {
-      byName.set(match[1], match[2]);
-    }
+    if (match) result.push({ name: match[1], parent: match[2] });
   }
-  return [...byName.entries()].map(([name, parent]) => ({ name, parent }));
+  return result;
 }
 
 /**
@@ -93,13 +86,10 @@ export function getStackPrefix(): string | undefined {
 
 /**
  * Read a branch's parent. Returns null if not tracked.
- * Prefers the new `stack-branch` key; falls back to legacy `git-town-branch`.
  */
 export function getParent(branch: string): string | null {
-  const newKey = gitRun(["config", "--local", `${PARENT_SECTION}.${branch}.parent`]);
-  if (newKey.exitCode === 0 && newKey.stdout) return newKey.stdout;
-  const legacyKey = gitRun(["config", "--local", `${LEGACY_PARENT_SECTION}.${branch}.parent`]);
-  if (legacyKey.exitCode === 0 && legacyKey.stdout) return legacyKey.stdout;
+  const r = gitRun(["config", "--local", `${PARENT_SECTION}.${branch}.parent`]);
+  if (r.exitCode === 0 && r.stdout) return r.stdout;
   return null;
 }
 
@@ -111,10 +101,9 @@ export function setParent(branch: string, parent: string): void {
   }
 }
 
-/** Remove a branch's parent pointer (both new and legacy keys). */
+/** Remove a branch's parent pointer. */
 export function clearBranchConfig(branch: string): void {
   gitRun(["config", "--local", "--remove-section", `${PARENT_SECTION}.${branch}`]);
-  gitRun(["config", "--local", "--remove-section", `${LEGACY_PARENT_SECTION}.${branch}`]);
 }
 
 /**
@@ -167,13 +156,10 @@ export function walkTopDown(roots: StackTreeNode[]): StackTreeNode[] {
 }
 
 /**
- * Resolve the trunk branch name. Prefers `stack.main-branch`; falls back to
- * legacy `git-town.main-branch` / `git-town.main`; defaults to "main".
+ * Resolve the trunk branch name from `stack.main-branch`; defaults to "main".
  */
 export function getTrunkBranch(): string {
-  for (const key of ["stack.main-branch", "git-town.main-branch", "git-town.main"]) {
-    const r = gitRun(["config", "--local", key]);
-    if (r.exitCode === 0 && r.stdout) return r.stdout;
-  }
+  const r = gitRun(["config", "--local", "stack.main-branch"]);
+  if (r.exitCode === 0 && r.stdout) return r.stdout;
   return "main";
 }

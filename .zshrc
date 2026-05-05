@@ -78,9 +78,6 @@ loops() {
                 sync)
                     npx tsx ~/.dotfiles/scripts/stack/index.ts sync "$@"
                     ;;
-                migrate)
-                    npx tsx ~/.dotfiles/scripts/stack/index.ts migrate "$@"
-                    ;;
                 *)
                     echo "loops stack commands:"
                     echo "  loops stack review   - review stack in nvim"
@@ -89,7 +86,6 @@ loops() {
                     echo "  loops stack webview  - open stack viewer in browser"
                     echo "  loops stack sync     - rebase stack onto trunk, prune merged, push"
                     echo "  loops stack flow     - sync + push"
-                    echo "  loops stack migrate  - migrate legacy git-town config keys to stack.* keys (one-shot)"
                     ;;
             esac
             ;;

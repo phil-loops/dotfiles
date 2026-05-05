@@ -81,6 +81,10 @@ Follow a strict layering pattern: **queries → models → wiring**.
 - **File names** follow the team's kebab-case convention: `goal-contact-window.ts`, not `goalContactWindow.ts`
 - **Query imports** use namespace imports with the full descriptive name: `import * as GoalContactWindowQueries from "..."` — not shorthand like `GCWQueries`. In tests the bare function name (`insert`, `findActiveByContact`) is obvious from context, but in model/wiring code the qualified name (`GoalContactWindowQueries.insert`) improves legibility.
 
+## Type style
+
+- **Inline object-parameter type literals in function signatures.** Don't declare a separate named type alias just to name the input shape. Example: `function update(input: { id: string; name?: string })` — not `type UpdateInput = { ... }; function update(input: UpdateInput)`. Standalone aliases pollute the file's mental context: readers have to scroll up to resolve the alias to understand the contract. Inlining keeps the contract at the call site, even with 5+ fields. Test code that uses `Deps<typeof fn>` / `Parameters<typeof fn>` extracts from the function itself, so inline types don't break it. Don't refactor pre-existing standalone types unless asked.
+
 # Stacked PR Design
 
 Each branch in a stack should be **one reviewable unit** — a single concern that compiles and makes sense on its own.

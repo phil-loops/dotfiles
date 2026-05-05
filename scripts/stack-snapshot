@@ -13,25 +13,20 @@ mkdir -p "$REPO_CACHE"
 
 # Get current branch
 BRANCH=$(git branch --show-current 2>/dev/null)
-MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null \
-           || git config git-town.main-branch 2>/dev/null \
-           || echo "main")
+MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 
-# Collect all stack-tracked branches (new stack-branch.* and legacy git-town-branch.*)
 get_stack_branches() {
   git config --local --list 2>/dev/null \
-    | grep -E "^(stack-branch|git-town-branch)\..*\.parent=" \
+    | grep -E "^stack-branch\..*\.parent=" \
     | while IFS= read -r line; do
-        if [[ "$line" =~ '(stack-branch|git-town-branch)\.(.+)\.parent=(.+)' ]]; then
-          echo "${match[2]}"
+        if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
+          echo "${match[1]}"
         fi
       done | sort -u
 }
 
 lookup_parent() {
-  local b="$1"
-  git config "stack-branch.${b}.parent" 2>/dev/null \
-    || git config "git-town-branch.${b}.parent" 2>/dev/null
+  git config "stack-branch.$1.parent" 2>/dev/null
 }
 
 # Get file hashes for a branch diff against its parent
