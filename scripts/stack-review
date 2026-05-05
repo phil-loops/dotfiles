@@ -1,6 +1,6 @@
 #!/bin/zsh
 # Stack Review - opens nvim with diffview for reviewing stacked branches
-# Reads parent pointers from stack-branch.<name>.parent (legacy: git-town-branch.*)
+# Reads parent pointers from stack-branch.<name>.parent
 
 set -e
 
@@ -11,9 +11,7 @@ if [[ -z "$BRANCH" ]]; then
   exit 1
 fi
 
-# Look up the parent (prefer new key, fall back to legacy)
-PARENT=$(git config "stack-branch.${BRANCH}.parent" 2>/dev/null \
-      || git config "git-town-branch.${BRANCH}.parent" 2>/dev/null)
+PARENT=$(git config "stack-branch.${BRANCH}.parent" 2>/dev/null)
 if [[ -z "$PARENT" ]]; then
   echo "Branch '$BRANCH' has no parent recorded."
   echo "Run: git config stack-branch.$BRANCH.parent <parent-branch>"
@@ -21,24 +19,16 @@ if [[ -z "$PARENT" ]]; then
 fi
 
 # Build the branch chain (walk up to main, then find all descendants)
-MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null \
-           || git config git-town.main-branch 2>/dev/null \
-           || echo "main")
+MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 
-# Collect all branches and their parents (both new and legacy keys; new wins)
 typeset -A parents
 typeset -A children
 
 while IFS= read -r line; do
-  if [[ "$line" =~ '(stack-branch|git-town-branch)\.(.+)\.parent=(.+)' ]]; then
-    branch="${match[2]}"
-    parent="${match[3]}"
-    # New key wins; don't overwrite with legacy value if we've already seen new
-    if [[ "${match[1]}" == "stack-branch" || -z "${parents[$branch]}" ]]; then
-      parents[$branch]="$parent"
-    fi
+  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
+    parents[${match[1]}]="${match[2]}"
   fi
-done < <(git config --local --list 2>/dev/null | grep -E "^(stack-branch|git-town-branch)\..*\.parent=")
+done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
 
 # Rebuild children map from final parents map (so legacy/new dedup is reflected)
 for branch in "${(@k)parents}"; do

@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 # Show branch stacks and fuzzy-select a branch to check out.
-# Reads parent pointers from stack-branch.*.parent (legacy git-town-branch.* supported).
+# Reads parent pointers from stack-branch.*.parent.
 # Usage: git-stacks        (interactive picker)
 #        git-stacks --list  (just print stacks)
 
@@ -11,23 +11,16 @@ local list_only=false
 
 local current_branch=$(git branch --show-current 2>/dev/null)
 
-# Build parent map from config (new + legacy; new wins if both set)
 typeset -A parent_of
 typeset -A children_of
 
-local line section branch parent
+local line branch parent
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
-  if [[ "$line" =~ '^(stack-branch|git-town-branch)\.(.+)\.parent (.+)$' ]]; then
-    section="${match[1]}"
-    branch="${match[2]}"
-    parent="${match[3]}"
-    # New key wins; skip legacy if we've already recorded from new
-    if [[ "$section" == "stack-branch" || -z "${parent_of[$branch]:-}" ]]; then
-      parent_of[$branch]="$parent"
-    fi
+  if [[ "$line" =~ '^stack-branch\.(.+)\.parent (.+)$' ]]; then
+    parent_of[${match[1]}]="${match[2]}"
   fi
-done < <(git config --local --get-regexp '^(stack-branch|git-town-branch)\..*\.parent$' 2>/dev/null)
+done < <(git config --local --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null)
 
 # Rebuild children map from final parent map
 for branch in "${(@k)parent_of}"; do
