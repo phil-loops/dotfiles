@@ -4,7 +4,10 @@ return {
     "phil-loops/diffview.nvim",
     branch = "stack-drift",
     cmd = { "DiffviewOpen", "DiffviewFileHistory", "DiffviewClose" },
-    opts = { use_icons = false },
+    opts = {
+      use_icons = false,
+      file_panel = { listing_style = "list" },
+    },
   },
   {
     "folke/persistence.nvim",
