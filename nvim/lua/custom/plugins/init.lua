@@ -4,10 +4,21 @@ return {
     "phil-loops/diffview.nvim",
     branch = "stack-drift",
     cmd = { "DiffviewOpen", "DiffviewFileHistory", "DiffviewClose" },
-    opts = {
-      use_icons = false,
-      file_panel = { listing_style = "list" },
-    },
+    opts = function()
+      local actions = require("diffview.actions")
+      return {
+        use_icons = false,
+        file_panel = {
+          listing_style = "tree",
+          tree_options = { flatten_dirs = false, folder_statuses = "always" },
+        },
+        keymaps = {
+          file_panel = {
+            { "n", "<tab>", actions.listing_style, { desc = "Toggle file panel listing style" } },
+          },
+        },
+      }
+    end,
   },
   {
     "folke/persistence.nvim",
