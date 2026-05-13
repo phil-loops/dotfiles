@@ -21,6 +21,11 @@ fi
 # Build the branch chain (walk up to main, then find all descendants)
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 
+# Keep the review base fresh: fast-forward the trunk from origin so the bottom
+# branch isn't diffed against a stale local main (best effort; FF-only).
+git fetch --quiet origin "${MAIN_BRANCH}:${MAIN_BRANCH}" 2>/dev/null \
+  || echo "  (couldn't fast-forward ${MAIN_BRANCH} from origin — review base may be stale)"
+
 typeset -A parents
 typeset -A children
 

@@ -23,6 +23,7 @@ import {
   getTrunkBranch,
   setParent,
   walkTopDown,
+  type StackTreeNode,
 } from "../lib/stack-config.ts";
 import { findMergedPR } from "../lib/gh.ts";
 import { resolveWithClaude } from "../lib/claude-resolver.ts";
@@ -77,9 +78,10 @@ export async function sync(args: string[]): Promise<void> {
   const dryRun = args.includes("--dry-run");
   const noAutoResolve = args.includes("--no-auto-resolve");
   const noPrune = args.includes("--no-prune");
+  const noPush = args.includes("--no-push");
   const syncAll = args.includes("--all");
-  const remote =
-    args.find((a) => a.startsWith("--remote="))?.split("=")[1] || "phil-loops";
+  const explicitRemote = args.find((a) => a.startsWith("--remote="))?.split("=")[1];
+  const remote = explicitRemote || (noPush ? "origin" : "phil-loops");
   const positional = args.find(
     (a) => !a.startsWith("-"),
   );
@@ -125,16 +127,28 @@ export async function sync(args: string[]): Promise<void> {
     if (!onTrunk) gitRun(["checkout", trunk]);
     gitRun(["merge", "--ff-only", `origin/${trunk}`]);
     if (!onTrunk) gitRun(["checkout", original]);
-    mirrorTrunkToFork(trunk, remote);
+    if (!noPush) mirrorTrunkToFork(trunk, remote);
   }
 
-  if (!noPrune) {
-    await pruneMerged({ remote, prefix, dryRun, originalBranch: original });
+  // --no-push is for "update just this branch" — skip prune entirely and scope
+  // the rebase to the current branch + descendants.
+  if (!noPrune && !noPush) {
+    await pruneMerged({ remote, prefix, dryRun, originalBranch: original, noPush });
   }
 
-  // Re-read stack after pruning may have removed entries.
-  const roots = prefix ? getStackTree(prefix) : getStackTree();
-  const ordered = walkTopDown(roots);
+  let ordered: StackTreeNode[];
+  if (noPush) {
+    // Always rebase the current branch onto trunk directly — ignore its
+    // configured parent (it may have been pruned). Descendants keep their
+    // existing parents since they're stacked on top of `here`.
+    const here = findHere(original, trunk || "main");
+    here.parent = trunk || "main";
+    ordered = walkTopDown([here]);
+  } else {
+    // Re-read stack after pruning may have removed entries.
+    const roots = prefix ? getStackTree(prefix) : getStackTree();
+    ordered = walkTopDown(roots);
+  }
 
   if (ordered.length === 0) {
     log("No tracked branches to sync.");
@@ -151,11 +165,14 @@ export async function sync(args: string[]): Promise<void> {
     return;
   }
 
-  const pending: Pending[] = ordered.flatMap((n) => [
-    { name: n.name, parent: n.parent, phase: "remote" as const },
-    { name: n.name, parent: n.parent, phase: "parent" as const },
-    { name: n.name, parent: n.parent, phase: "push" as const },
-  ]);
+  const pending: Pending[] = ordered.flatMap((n) => {
+    const steps: Pending[] = [
+      { name: n.name, parent: n.parent, phase: "remote" as const },
+      { name: n.name, parent: n.parent, phase: "parent" as const },
+    ];
+    if (!noPush) steps.push({ name: n.name, parent: n.parent, phase: "push" as const });
+    return steps;
+  });
 
   const state: SyncState = {
     original: hasLocalBranch(original) ? original : trunk || "main",
@@ -358,6 +375,7 @@ async function pruneMerged(opts: {
   prefix?: string;
   dryRun: boolean;
   originalBranch: string;
+  noPush?: boolean;
 }): Promise<string[]> {
   const repo = repoSlugFromRemote(opts.remote);
   if (!repo) {
@@ -407,7 +425,7 @@ async function pruneMerged(opts: {
       warn(`  failed to delete local ${m.name}: ${del.stderr}`);
     }
     clearBranchConfig(m.name);
-    if (hasRemoteBranch(opts.remote, m.name)) {
+    if (!opts.noPush && hasRemoteBranch(opts.remote, m.name)) {
       const r = gitRun(["push", opts.remote, "--delete", m.name]);
       if (r.exitCode === 0) log(`  deleted ${opts.remote}/${m.name}`);
     }
@@ -439,6 +457,22 @@ function mirrorTrunkToFork(trunk: string, remote: string): void {
   if (r.exitCode !== 0) {
     warn(`  push failed: ${r.stderr}`);
   }
+}
+
+/** Build a subtree rooted at `branchName` from tracked parent pointers.
+ * If the branch isn't tracked, returns a leaf node parented to `fallbackParent`
+ * so the caller can still rebase it as a one-off. */
+function findHere(branchName: string, fallbackParent: string): StackTreeNode {
+  const all = getAllParentPointers();
+  const byName = new Map<string, StackTreeNode>();
+  for (const b of all) {
+    byName.set(b.name, { name: b.name, parent: b.parent, children: [] });
+  }
+  for (const node of byName.values()) {
+    const p = byName.get(node.parent);
+    if (p) p.children.push(node);
+  }
+  return byName.get(branchName) ?? { name: branchName, parent: fallbackParent, children: [] };
 }
 
 function detectTrunk(): string {
