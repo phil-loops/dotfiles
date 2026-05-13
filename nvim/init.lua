@@ -171,6 +171,28 @@ vim.keymap.set('n', '<leader>yf', function()
   vim.fn.setreg('+', vim.fn.fnamemodify(vim.fn.expand '%', ':.'))
 end, { desc = '[Y]ank [F]ile path (relative to project root)' })
 
+-- Run `task test -- <current file>` async, populate quickfix on failure
+vim.keymap.set('n', '<leader>tt', function()
+  local file = vim.fn.fnamemodify(vim.fn.expand '%', ':.')
+  vim.notify('task test -- ' .. file)
+  vim.system({ 'task', 'test', '--', file }, { text = true }, function(obj)
+    vim.schedule(function()
+      local out = (obj.stdout or '') .. (obj.stderr or '')
+      vim.fn.setqflist({}, ' ', {
+        title = 'task test ' .. file,
+        lines = vim.split(out, '\n'),
+        efm = [[%.%#at\ %.%#(%f:%l:%c)]],
+      })
+      if obj.code == 0 then
+        vim.notify '✓ tests passed'
+        vim.cmd 'cclose'
+      else
+        vim.cmd 'copen'
+      end
+    end)
+  end)
+end, { desc = '[T]ask [T]est current file' })
+
 -- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
 -- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
 -- is not what someone will guess without a bit more experience.
@@ -493,6 +515,14 @@ require('lazy').setup({
       vim.keymap.set('n', '<leader>gm', function()
         vim.fn.system('git fetch origin main --quiet')
         local base = vim.fn.system('git merge-base origin/main HEAD'):gsub('%s+$', '')
+        local cur = vim.fn.system('git rev-parse --abbrev-ref HEAD'):gsub('%s+$', '')
+        -- Re-target review-bindings to current HEAD so <leader>gf doesn't try to
+        -- checkout a stale branch from a previous review session in this nvim session.
+        require('custom.review-bindings').setup({
+          get_branch = function() return cur end,
+          get_base = function() return base end,
+          get_unreviewed = function() return {} end,
+        })
         vim.cmd('DiffviewOpen ' .. base)
       end, { desc = '[G]it diff from [M]ain (merge-base)' })
 

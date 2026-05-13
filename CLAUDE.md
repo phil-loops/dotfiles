@@ -125,6 +125,16 @@ task ci:run            # full CI pipeline locally
 
 Run `task --list` to see all available tasks. Use the team's tools — don't reinvent with raw commands.
 
+# Typecheck
+
+Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done:
+
+```bash
+tsgo --project tsconfig.node.json --noEmit
+```
+
+tsgo (the Go-native TypeScript port) does the whole loops project in ~1.5s vs tsc's 30s+. Same error coverage. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
+
 # Git Changes
 
 Never add Co-Authored-By lines. Never amend commits — always create new commits. History doesn't matter since PRs are squash-merged. Never commit — the user will handle commits themselves.

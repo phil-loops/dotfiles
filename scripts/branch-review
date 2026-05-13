@@ -11,7 +11,12 @@ if [[ -z "$BRANCH" ]]; then
   exit 1
 fi
 
-BASE="main"
+BASE=$(git config stack.main-branch 2>/dev/null || echo "main")
+
+# Keep the review base fresh: fast-forward the trunk from origin so we don't
+# diff against a stale local main (best effort; FF-only).
+git fetch --quiet origin "${BASE}:${BASE}" 2>/dev/null \
+  || echo "  (couldn't fast-forward ${BASE} from origin — review base may be stale)"
 
 # Verify the branch exists
 if ! git rev-parse --verify "$BRANCH" &>/dev/null; then

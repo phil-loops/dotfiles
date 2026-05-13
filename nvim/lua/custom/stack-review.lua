@@ -203,21 +203,24 @@ local function setup_panel_keymaps()
   end, opts)
 end
 
+-- Find the diffview file-panel window in the current tabpage (if any)
+local function find_diffview_file_panel_win()
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(vim.api.nvim_get_current_tabpage())) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    if vim.api.nvim_buf_get_name(buf):match("DiffviewFilePanel") then
+      return win
+    end
+  end
+  return nil
+end
+
 function M.open_panel()
   if panel_win and vim.api.nvim_win_is_valid(panel_win) then
     update_panel()
     return
   end
 
-  local file_panel_win = nil
-  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(vim.api.nvim_get_current_tabpage())) do
-    local buf = vim.api.nvim_win_get_buf(win)
-    local bufname = vim.api.nvim_buf_get_name(buf)
-    if bufname:match("DiffviewFilePanel") then
-      file_panel_win = win
-      break
-    end
-  end
+  local file_panel_win = find_diffview_file_panel_win()
 
   if not file_panel_win then
     vim.notify("Diffview panel not found", vim.log.levels.WARN)
@@ -262,6 +265,13 @@ function M.open_review(idx)
 
   update_panel()
   refresh_all()
+
+  -- If we triggered this from the branch panel (e.g. <leader>E then <CR>/]b),
+  -- hop into the diffview file panel so its keymaps (<tab> = next file) work.
+  if panel_win and vim.api.nvim_get_current_win() == panel_win then
+    local fp_win = find_diffview_file_panel_win()
+    if fp_win then vim.api.nvim_set_current_win(fp_win) end
+  end
 
   local bsum = blessed.summary(item.branch, item.parent or "")
   local extra = ""
