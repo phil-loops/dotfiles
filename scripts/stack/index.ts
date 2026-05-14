@@ -6,6 +6,8 @@ import { update } from "./commands/update.ts";
 import { push } from "./commands/push.ts";
 import { flow } from "./commands/flow.ts";
 import { sync } from "./commands/sync.ts";
+import { project } from "./commands/project.ts";
+import { home } from "./commands/home.ts";
 
 const args = process.argv.slice(2);
 const command = args[0];
@@ -38,6 +40,14 @@ const commands: Record<string, { run: (args: string[]) => void | Promise<void>; 
   sync: {
     run: sync,
     desc: "Rebase stack onto trunk, prune merged, push (--continue, --abort, --dry-run, --no-auto-resolve, --no-prune, --all, --remote=)",
+  },
+  project: {
+    run: project,
+    desc: "Manage projects (list, show, create, delete, add, remove, set-memory)",
+  },
+  home: {
+    run: home,
+    desc: "Open the work-in-progress dashboard in a browser",
   },
 };
 

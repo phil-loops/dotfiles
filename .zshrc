@@ -78,6 +78,9 @@ loops() {
                 sync)
                     npx tsx ~/.dotfiles/scripts/stack/index.ts sync "$@"
                     ;;
+                project|home|branches|update|push|inject)
+                    npx tsx ~/.dotfiles/scripts/stack/index.ts "$subcmd" "$@"
+                    ;;
                 *)
                     echo "loops stack commands:"
                     echo "  loops stack review   - review stack in nvim"
@@ -86,6 +89,8 @@ loops() {
                     echo "  loops stack webview  - open stack viewer in browser"
                     echo "  loops stack sync     - rebase stack onto trunk, prune merged, push"
                     echo "  loops stack flow     - sync + push"
+                    echo "  loops stack home     - work-in-progress dashboard"
+                    echo "  loops stack project  - manage projects"
                     ;;
             esac
             ;;
