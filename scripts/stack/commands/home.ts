@@ -42,6 +42,40 @@ function branchExists(name: string): boolean {
   return r.status === 0;
 }
 
+const STALE_DAYS = 30;
+
+function branchLastCommitDate(branch: string): Date | null {
+  const r = spawnSync("git", ["log", "-1", "--format=%cI", branch], { encoding: "utf-8" });
+  if (r.status !== 0 || !r.stdout.trim()) return null;
+  const d = new Date(r.stdout.trim());
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function branchHasUniqueCommits(trunk: string, branch: string): boolean {
+  // Counts how many commits are in `branch` but not in `trunk`. Empty → fully
+  // merged (or branch matches trunk identically). Uses --count for speed.
+  const r = spawnSync("git", ["rev-list", "--count", `${trunk}..${branch}`], { encoding: "utf-8" });
+  if (r.status !== 0) return true; // err on the side of "not safe to delete"
+  const n = parseInt(r.stdout.trim(), 10);
+  return Number.isFinite(n) ? n > 0 : true;
+}
+
+function buildLifecycle(branches: string[], trunk: string): BranchLifecycle {
+  const fullyMerged = new Set<string>();
+  const stale = new Set<string>();
+  const trunkExists = branchExists(trunk);
+  const cutoff = Date.now() - STALE_DAYS * 24 * 60 * 60 * 1000;
+  for (const branch of branches) {
+    if (!branchExists(branch)) continue;
+    if (trunkExists && !branchHasUniqueCommits(trunk, branch)) {
+      fullyMerged.add(branch);
+    }
+    const last = branchLastCommitDate(branch);
+    if (last && last.getTime() < cutoff) stale.add(branch);
+  }
+  return { fullyMerged, stale };
+}
+
 function buildTriage(
   projects: ProjectView[],
   prs: Map<string, PullRequestInfo>,
@@ -152,6 +186,15 @@ interface ProjectView {
   memory: string | null;
   forest: StackTreeNode[];
   containsCurrent: boolean;
+  /** Branches whose diff against trunk is empty — safe to delete. */
+  fullyMerged: string[];
+}
+
+interface BranchLifecycle {
+  /** Empty diff vs trunk — i.e. nothing new in this branch. */
+  fullyMerged: Set<string>;
+  /** Last-commit date < 30 days ago. Just the staleness flag, not the date. */
+  stale: Set<string>;
 }
 
 function escHtml(s: string): string {
@@ -206,18 +249,32 @@ function renderTreeNode(
   currentBranch: string,
   depth: number,
   prs: Map<string, PullRequestInfo>,
+  lifecycle: BranchLifecycle,
 ): string {
   const isCurrent = node.name === currentBranch;
-  const cls = `tree-node${isCurrent ? " tree-node-current" : ""}`;
+  const isStale = lifecycle.stale.has(node.name);
+  const isMerged = lifecycle.fullyMerged.has(node.name);
+  const cls = [
+    "tree-node",
+    isCurrent ? "tree-node-current" : "",
+    isStale ? "tree-node-stale" : "",
+    isMerged ? "tree-node-merged" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
   const indent = `padding-left:${depth * 18}px`;
   const badges = renderPRBadges(prs.get(node.name));
+  const lifecycleBadges = [
+    isStale ? '<span class="badge badge-stale" title="No commits in 30+ days">stale</span>' : "",
+    isMerged ? '<span class="badge badge-merged-local" title="Diff vs main is empty">merged locally</span>' : "",
+  ].join("");
   const children = node.children
-    .map((c) => renderTreeNode(c, currentBranch, depth + 1, prs))
+    .map((c) => renderTreeNode(c, currentBranch, depth + 1, prs, lifecycle))
     .join("");
   return `<div class="${cls}" style="${indent}">
     <span class="tree-bullet">${depth === 0 ? "●" : "└"}</span>
     <span class="tree-branch">${escHtml(node.name)}</span>
-    ${badges}
+    ${badges}${lifecycleBadges}
   </div>${children}`;
 }
 
@@ -230,13 +287,22 @@ function renderProjectSection(
   view: ProjectView,
   currentBranch: string,
   prs: Map<string, PullRequestInfo>,
+  lifecycle: BranchLifecycle,
 ): string {
   const openAttr = view.containsCurrent ? " open" : "";
   const memoryLine = view.memory
     ? `<div class="project-memory">memory: <code>${escHtml(view.memory)}</code></div>`
     : "";
-  const tree = view.forest.map((n) => renderTreeNode(n, currentBranch, 0, prs)).join("");
+  const tree = view.forest
+    .map((n) => renderTreeNode(n, currentBranch, 0, prs, lifecycle))
+    .join("");
   const branchCount = view.branches.length;
+  const cleanup = view.fullyMerged.length === 0
+    ? ""
+    : `<div class="cleanup">
+        <div class="cleanup-title">Cleanup — ${view.fullyMerged.length} branch${view.fullyMerged.length === 1 ? "" : "es"} fully merged into main</div>
+        <pre class="cleanup-cmd">git branch -D ${view.fullyMerged.map((b) => b.replace(/'/g, "")).join(" ")}</pre>
+      </div>`;
   const prompt = buildCatchUpPrompt(view.name, view.memory);
   // Encode for the data-attribute: HTML-escape so the attribute is valid, the
   // click handler reads it back via dataset (so no JS-encoding concerns).
@@ -251,6 +317,7 @@ function renderProjectSection(
     </summary>
     ${memoryLine}
     <div class="project-tree">${tree}</div>
+    ${cleanup}
   </details>`;
 }
 
@@ -270,11 +337,12 @@ function renderHtml(
   projects: ProjectView[],
   prs: Map<string, PullRequestInfo>,
   triage: Triage,
+  lifecycle: BranchLifecycle,
 ): string {
   const projectsForCurrent = projects.filter((p) => p.containsCurrent).map((p) => p.name);
   const projectSections = projects.length === 0
     ? '<div class="empty">No projects defined. Create one with <code>stack project create &lt;name&gt;</code>.</div>'
-    : projects.map((p) => renderProjectSection(p, currentBranch, prs)).join("\n");
+    : projects.map((p) => renderProjectSection(p, currentBranch, prs, lifecycle)).join("\n");
   const triageHtml = renderTriageSection(triage);
 
   return `<!DOCTYPE html>
@@ -506,6 +574,35 @@ function renderHtml(
     }
     .catchup-btn:hover { border-color: #58a6ff; background: #1f6feb22; }
     .catchup-btn.copied { color: #3fb950; border-color: #3fb950; }
+    .tree-node-stale { opacity: 0.55; }
+    .tree-node-stale .tree-branch { font-style: italic; }
+    .badge-stale { background: #21262d; color: #8b949e; }
+    .badge-merged-local { background: rgba(163, 113, 247, 0.15); color: #a371f7; }
+    .tree-node-merged .tree-branch { text-decoration: line-through; }
+    .cleanup {
+      margin: 16px 20px 0;
+      padding: 12px 14px;
+      background: rgba(163, 113, 247, 0.08);
+      border: 1px solid rgba(163, 113, 247, 0.3);
+      border-radius: 8px;
+    }
+    .cleanup-title {
+      font-size: 12px;
+      color: #a371f7;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+    .cleanup-cmd {
+      background: #0d1117;
+      padding: 8px 10px;
+      border-radius: 6px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      color: #c9d1d9;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
   </style>
 </head>
 <body>
@@ -569,6 +666,13 @@ export function home(args: string[]): void {
   const currentBranch = getCurrentBranch();
   const projectNames = getProjects();
 
+  const trunkEarly = getTrunkBranch();
+  const allBranches = new Set<string>();
+  for (const name of projectNames) {
+    for (const b of getProjectBranches(name)) allBranches.add(b);
+  }
+  const lifecycle = buildLifecycle([...allBranches], trunkEarly);
+
   const projects: ProjectView[] = projectNames.map((name) => {
     const branches = getProjectBranches(name);
     return {
@@ -577,6 +681,7 @@ export function home(args: string[]): void {
       memory: getProjectMemory(name),
       forest: buildProjectForest(branches),
       containsCurrent: branches.includes(currentBranch),
+      fullyMerged: branches.filter((b) => lifecycle.fullyMerged.has(b)),
     };
   });
 
@@ -604,9 +709,8 @@ export function home(args: string[]): void {
     }
   }
 
-  const trunk = getTrunkBranch();
-  const triage = buildTriage(projects, prs, trunk);
-  const html = renderHtml(currentBranch, projects, prs, triage);
+  const triage = buildTriage(projects, prs, trunkEarly);
+  const html = renderHtml(currentBranch, projects, prs, triage, lifecycle);
   const outPath = join(tmpdir(), "stack-home.html");
   writeFileSync(outPath, html);
   console.log(`Opening ${outPath}`);
