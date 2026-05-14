@@ -221,6 +221,11 @@ function renderTreeNode(
   </div>${children}`;
 }
 
+function buildCatchUpPrompt(project: string, memory: string | null): string {
+  const memoryLine = memory ? ` Memory file: ${memory}. Read it, then` : "";
+  return `Catch me up on the ${project} project.${memoryLine} summarize where things stand.`;
+}
+
 function renderProjectSection(
   view: ProjectView,
   currentBranch: string,
@@ -232,11 +237,17 @@ function renderProjectSection(
     : "";
   const tree = view.forest.map((n) => renderTreeNode(n, currentBranch, 0, prs)).join("");
   const branchCount = view.branches.length;
+  const prompt = buildCatchUpPrompt(view.name, view.memory);
+  // Encode for the data-attribute: HTML-escape so the attribute is valid, the
+  // click handler reads it back via dataset (so no JS-encoding concerns).
+  const catchUpBtn = `<button class="catchup-btn" type="button" data-prompt="${escHtml(prompt)}" onclick="copyCatchUp(this)">Catch Claude up</button>`;
   return `<details class="project"${openAttr}>
     <summary class="project-summary">
       <span class="project-name">${escHtml(view.name)}</span>
       <span class="project-count">${branchCount} branch${branchCount === 1 ? "" : "es"}</span>
       ${view.containsCurrent ? '<span class="project-here">you are here</span>' : ""}
+      <span class="project-summary-spacer"></span>
+      ${catchUpBtn}
     </summary>
     ${memoryLine}
     <div class="project-tree">${tree}</div>
@@ -481,6 +492,20 @@ function renderHtml(
       font-size: 10px;
     }
     .triage-reason { color: #8b949e; font-size: 11px; }
+    .project-summary-spacer { flex: 1; }
+    .catchup-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #79c0ff;
+      font-size: 11px;
+      font-family: ui-monospace, monospace;
+      padding: 4px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .catchup-btn:hover { border-color: #58a6ff; background: #1f6feb22; }
+    .catchup-btn.copied { color: #3fb950; border-color: #3fb950; }
   </style>
 </head>
 <body>
@@ -489,6 +514,52 @@ function renderHtml(
   <div class="projects">
     ${projectSections}
   </div>
+  <script>
+    // The Catch Claude up button copies a prompt to the clipboard. Prevent the
+    // <summary> click from also toggling the <details> when the button itself
+    // is clicked, then fall back through clipboard API -> execCommand for
+    // older browser permissions.
+    function copyCatchUp(btn) {
+      event.stopPropagation();
+      event.preventDefault();
+      var prompt = btn.dataset.prompt || "";
+      var done = function () {
+        var orig = btn.textContent;
+        btn.classList.add("copied");
+        btn.textContent = "Copied";
+        setTimeout(function () {
+          btn.classList.remove("copied");
+          btn.textContent = orig;
+        }, 1500);
+      };
+      var fail = function () {
+        btn.textContent = "Copy failed";
+        setTimeout(function () { btn.textContent = "Catch Claude up"; }, 1500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(prompt).then(done, function () {
+          legacyCopy(prompt) ? done() : fail();
+        });
+      } else {
+        legacyCopy(prompt) ? done() : fail();
+      }
+    }
+    function legacyCopy(text) {
+      try {
+        var ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        var ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        return ok;
+      } catch (e) {
+        return false;
+      }
+    }
+  </script>
 </body>
 </html>`;
 }
