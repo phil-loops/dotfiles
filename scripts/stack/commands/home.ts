@@ -1,16 +1,150 @@
-import { execSync } from "child_process";
+import { execSync, spawnSync } from "child_process";
 import { writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
   getCurrentBranch,
+  getParent,
   getProjectBranches,
   getProjectMemory,
   getProjects,
+  getTrunkBranch,
   type StackTreeNode,
 } from "../lib/stack-config.ts";
 import { detectPRRepo, fetchPullRequestsForBranches, type PullRequestInfo } from "../lib/gh.ts";
 import { buildProjectForest } from "./project.ts";
+
+interface TriageRow {
+  branch: string;
+  project: string;
+  pr: PullRequestInfo;
+  reason: string;
+}
+
+interface Triage {
+  readyToMerge: TriageRow[];
+  reviewDue: TriageRow[];
+  rebaseNeeded: TriageRow[];
+  ciBroken: TriageRow[];
+}
+
+function countBehind(base: string, branch: string): number {
+  const r = spawnSync("git", ["rev-list", "--count", `${branch}..${base}`], {
+    encoding: "utf-8",
+  });
+  if (r.status !== 0) return 0;
+  const n = parseInt(r.stdout.trim(), 10);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function branchExists(name: string): boolean {
+  const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", name], { encoding: "utf-8" });
+  return r.status === 0;
+}
+
+function buildTriage(
+  projects: ProjectView[],
+  prs: Map<string, PullRequestInfo>,
+  trunk: string,
+): Triage {
+  const seen = new Set<string>();
+  const out: Triage = { readyToMerge: [], reviewDue: [], rebaseNeeded: [], ciBroken: [] };
+
+  for (const project of projects) {
+    for (const branch of project.branches) {
+      // Dedup: a branch can appear in multiple projects; attribute to the
+      // first project we see so each triage row points somewhere stable.
+      if (seen.has(branch)) continue;
+      seen.add(branch);
+      const pr = prs.get(branch);
+      if (!pr || pr.state !== "OPEN") continue;
+
+      if (pr.checkState === "FAILURE") {
+        out.ciBroken.push({ branch, project: project.name, pr, reason: "CI failing" });
+      }
+      if (pr.reviewDecision === "CHANGES_REQUESTED") {
+        out.reviewDue.push({
+          branch,
+          project: project.name,
+          pr,
+          reason: "Changes requested",
+        });
+      }
+      // Rebase: behind trunk OR behind tracked parent (in stack-branch config).
+      const trunkBehind = branchExists(trunk) && branchExists(branch)
+        ? countBehind(trunk, branch)
+        : 0;
+      const parent = getParent(branch);
+      const parentBehind = parent && parent !== trunk && branchExists(parent) && branchExists(branch)
+        ? countBehind(parent, branch)
+        : 0;
+      if (trunkBehind > 0 || parentBehind > 0) {
+        const parts: string[] = [];
+        if (trunkBehind > 0) parts.push(`${trunkBehind} behind ${trunk}`);
+        if (parentBehind > 0) parts.push(`${parentBehind} behind ${parent}`);
+        out.rebaseNeeded.push({
+          branch,
+          project: project.name,
+          pr,
+          reason: parts.join(", "),
+        });
+      }
+      // Ready: approved + passing + mergeable (and not also flagged elsewhere).
+      const isReady =
+        pr.reviewDecision === "APPROVED" &&
+        (pr.checkState === "PASS" || pr.checkState === "NONE") &&
+        pr.mergeable !== "CONFLICTING" &&
+        !pr.isDraft;
+      if (isReady && trunkBehind === 0 && parentBehind === 0) {
+        out.readyToMerge.push({
+          branch,
+          project: project.name,
+          pr,
+          reason: pr.checkState === "PASS" ? "Approved, CI green" : "Approved",
+        });
+      }
+    }
+  }
+  return out;
+}
+
+function renderTriageSection(triage: Triage): string {
+  const cats: { title: string; rows: TriageRow[]; cls: string }[] = [
+    { title: "Ready to merge", rows: triage.readyToMerge, cls: "triage-ready" },
+    { title: "Review due", rows: triage.reviewDue, cls: "triage-review" },
+    { title: "Rebase needed", rows: triage.rebaseNeeded, cls: "triage-rebase" },
+    { title: "CI broken", rows: triage.ciBroken, cls: "triage-ci" },
+  ];
+  const populated = cats.filter((c) => c.rows.length > 0);
+  if (populated.length === 0) {
+    return `<section class="triage triage-empty">
+      <h2 class="triage-heading">Today</h2>
+      <div class="triage-empty-msg">Nothing actionable. Inbox zero. </div>
+    </section>`;
+  }
+  const blocks = populated
+    .map((c) => {
+      const rows = c.rows
+        .map(
+          (r) => `<li class="triage-row">
+        <a class="triage-pr" href="${escHtml(r.pr.url)}" target="_blank" rel="noopener">#${r.pr.number}</a>
+        <span class="triage-branch">${escHtml(r.branch)}</span>
+        <span class="triage-project">${escHtml(r.project)}</span>
+        <span class="triage-reason">${escHtml(r.reason)}</span>
+      </li>`,
+        )
+        .join("");
+      return `<div class="triage-cat ${c.cls}">
+        <h3 class="triage-cat-title">${escHtml(c.title)} <span class="triage-cat-count">${c.rows.length}</span></h3>
+        <ul class="triage-list">${rows}</ul>
+      </div>`;
+    })
+    .join("");
+  return `<section class="triage">
+    <h2 class="triage-heading">Today</h2>
+    ${blocks}
+  </section>`;
+}
 
 interface ProjectView {
   name: string;
@@ -124,11 +258,13 @@ function renderHtml(
   currentBranch: string,
   projects: ProjectView[],
   prs: Map<string, PullRequestInfo>,
+  triage: Triage,
 ): string {
   const projectsForCurrent = projects.filter((p) => p.containsCurrent).map((p) => p.name);
   const projectSections = projects.length === 0
     ? '<div class="empty">No projects defined. Create one with <code>stack project create &lt;name&gt;</code>.</div>'
     : projects.map((p) => renderProjectSection(p, currentBranch, prs)).join("\n");
+  const triageHtml = renderTriageSection(triage);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -279,10 +415,77 @@ function renderHtml(
       border: 1px solid #30363d;
       border-radius: 12px;
     }
+    .triage {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 16px 20px 20px;
+      margin-bottom: 24px;
+    }
+    .triage-heading {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8b949e;
+      margin-bottom: 12px;
+    }
+    .triage-empty-msg { color: #8b949e; font-size: 13px; }
+    .triage-cat { margin-bottom: 16px; }
+    .triage-cat:last-child { margin-bottom: 0; }
+    .triage-cat-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #f0f6fc;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .triage-ready .triage-cat-title { color: #3fb950; }
+    .triage-review .triage-cat-title { color: #f85149; }
+    .triage-rebase .triage-cat-title { color: #d29922; }
+    .triage-ci .triage-cat-title { color: #f85149; }
+    .triage-cat-count {
+      background: #21262d;
+      color: #8b949e;
+      font-size: 10px;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-weight: 600;
+    }
+    .triage-list { list-style: none; }
+    .triage-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      transition: background 0.1s;
+    }
+    .triage-row:hover { background: #21262d; }
+    .triage-pr {
+      color: #79c0ff;
+      font-weight: 600;
+      text-decoration: none;
+      min-width: 50px;
+    }
+    .triage-pr:hover { text-decoration: underline; }
+    .triage-branch { flex: 1; color: #c9d1d9; overflow: hidden; text-overflow: ellipsis; }
+    .triage-project {
+      color: #8b949e;
+      background: #21262d;
+      padding: 1px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+    }
+    .triage-reason { color: #8b949e; font-size: 11px; }
   </style>
 </head>
 <body>
   ${renderHeader(currentBranch, projectsForCurrent)}
+  ${triageHtml}
   <div class="projects">
     ${projectSections}
   </div>
@@ -330,7 +533,9 @@ export function home(args: string[]): void {
     }
   }
 
-  const html = renderHtml(currentBranch, projects, prs);
+  const trunk = getTrunkBranch();
+  const triage = buildTriage(projects, prs, trunk);
+  const html = renderHtml(currentBranch, projects, prs, triage);
   const outPath = join(tmpdir(), "stack-home.html");
   writeFileSync(outPath, html);
   console.log(`Opening ${outPath}`);
