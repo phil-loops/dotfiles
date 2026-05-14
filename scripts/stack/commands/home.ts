@@ -7,9 +7,9 @@ import {
   getProjectBranches,
   getProjectMemory,
   getProjects,
-  getProjectsForBranch,
   type StackTreeNode,
 } from "../lib/stack-config.ts";
+import { detectPRRepo, fetchPullRequestsForBranches, type PullRequestInfo } from "../lib/gh.ts";
 import { buildProjectForest } from "./project.ts";
 
 interface ProjectView {
@@ -28,25 +28,75 @@ function escHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderTreeNode(node: StackTreeNode, currentBranch: string, depth: number): string {
+function renderPRBadges(info: PullRequestInfo | undefined): string {
+  if (!info) return "";
+  const stateBadge = (() => {
+    if (info.state === "MERGED") return '<span class="badge badge-merged">merged</span>';
+    if (info.state === "CLOSED") return '<span class="badge badge-closed">closed</span>';
+    if (info.isDraft) return '<span class="badge badge-draft">draft</span>';
+    return '<span class="badge badge-open">open</span>';
+  })();
+  const ciBadge = (() => {
+    switch (info.checkState) {
+      case "PASS":
+        return '<span class="badge badge-ci-pass" title="CI passing">CI ✓</span>';
+      case "FAILURE":
+        return '<span class="badge badge-ci-fail" title="CI failing">CI ✗</span>';
+      case "PENDING":
+        return '<span class="badge badge-ci-pending" title="CI pending">CI …</span>';
+      default:
+        return "";
+    }
+  })();
+  const reviewBadge = (() => {
+    switch (info.reviewDecision) {
+      case "APPROVED":
+        return '<span class="badge badge-rev-approved" title="approved">approved</span>';
+      case "CHANGES_REQUESTED":
+        return '<span class="badge badge-rev-changes" title="changes requested">changes</span>';
+      case "REVIEW_REQUIRED":
+        return '<span class="badge badge-rev-pending" title="review required">review</span>';
+      default:
+        return "";
+    }
+  })();
+  const threadsBadge = info.openReviewThreads > 0
+    ? `<span class="badge badge-threads" title="open review threads">${info.openReviewThreads} thread${info.openReviewThreads === 1 ? "" : "s"}</span>`
+    : "";
+  const prLink = `<a class="badge badge-pr" href="${escHtml(info.url)}" target="_blank" rel="noopener" title="${escHtml(info.title)}">#${info.number}</a>`;
+  return `<span class="badges">${prLink}${stateBadge}${ciBadge}${reviewBadge}${threadsBadge}</span>`;
+}
+
+function renderTreeNode(
+  node: StackTreeNode,
+  currentBranch: string,
+  depth: number,
+  prs: Map<string, PullRequestInfo>,
+): string {
   const isCurrent = node.name === currentBranch;
   const cls = `tree-node${isCurrent ? " tree-node-current" : ""}`;
   const indent = `padding-left:${depth * 18}px`;
+  const badges = renderPRBadges(prs.get(node.name));
   const children = node.children
-    .map((c) => renderTreeNode(c, currentBranch, depth + 1))
+    .map((c) => renderTreeNode(c, currentBranch, depth + 1, prs))
     .join("");
   return `<div class="${cls}" style="${indent}">
     <span class="tree-bullet">${depth === 0 ? "●" : "└"}</span>
     <span class="tree-branch">${escHtml(node.name)}</span>
+    ${badges}
   </div>${children}`;
 }
 
-function renderProjectSection(view: ProjectView, currentBranch: string): string {
+function renderProjectSection(
+  view: ProjectView,
+  currentBranch: string,
+  prs: Map<string, PullRequestInfo>,
+): string {
   const openAttr = view.containsCurrent ? " open" : "";
   const memoryLine = view.memory
     ? `<div class="project-memory">memory: <code>${escHtml(view.memory)}</code></div>`
     : "";
-  const tree = view.forest.map((n) => renderTreeNode(n, currentBranch, 0)).join("");
+  const tree = view.forest.map((n) => renderTreeNode(n, currentBranch, 0, prs)).join("");
   const branchCount = view.branches.length;
   return `<details class="project"${openAttr}>
     <summary class="project-summary">
@@ -70,11 +120,15 @@ function renderHeader(currentBranch: string, projectsForCurrent: string[]): stri
   </header>`;
 }
 
-function renderHtml(currentBranch: string, projects: ProjectView[]): string {
+function renderHtml(
+  currentBranch: string,
+  projects: ProjectView[],
+  prs: Map<string, PullRequestInfo>,
+): string {
   const projectsForCurrent = projects.filter((p) => p.containsCurrent).map((p) => p.name);
   const projectSections = projects.length === 0
     ? '<div class="empty">No projects defined. Create one with <code>stack project create &lt;name&gt;</code>.</div>'
-    : projects.map((p) => renderProjectSection(p, currentBranch)).join("\n");
+    : projects.map((p) => renderProjectSection(p, currentBranch, prs)).join("\n");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -193,6 +247,30 @@ function renderHtml(currentBranch: string, projects: ProjectView[]): string {
     }
     .tree-bullet { color: #484f58; min-width: 12px; }
     .tree-branch { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+    .badges { display: inline-flex; gap: 6px; align-items: center; flex-shrink: 0; }
+    .badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 10px;
+      font-family: ui-monospace, monospace;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      text-decoration: none;
+    }
+    .badge-pr { background: #21262d; color: #79c0ff; }
+    .badge-pr:hover { background: #30363d; }
+    .badge-open { background: rgba(63, 185, 80, 0.18); color: #3fb950; }
+    .badge-merged { background: rgba(163, 113, 247, 0.2); color: #a371f7; }
+    .badge-closed { background: rgba(248, 81, 73, 0.18); color: #f85149; }
+    .badge-draft { background: #21262d; color: #8b949e; }
+    .badge-ci-pass { background: rgba(63, 185, 80, 0.15); color: #3fb950; }
+    .badge-ci-fail { background: rgba(248, 81, 73, 0.18); color: #f85149; }
+    .badge-ci-pending { background: rgba(210, 153, 34, 0.18); color: #d29922; }
+    .badge-rev-approved { background: rgba(63, 185, 80, 0.15); color: #3fb950; }
+    .badge-rev-changes { background: rgba(248, 81, 73, 0.18); color: #f85149; }
+    .badge-rev-pending { background: rgba(210, 153, 34, 0.15); color: #d29922; }
+    .badge-threads { background: rgba(88, 166, 255, 0.15); color: #58a6ff; }
     .empty {
       padding: 32px;
       text-align: center;
@@ -212,7 +290,8 @@ function renderHtml(currentBranch: string, projects: ProjectView[]): string {
 </html>`;
 }
 
-export function home(_args: string[]): void {
+export function home(args: string[]): void {
+  const skipPRs = args.includes("--no-prs");
   const currentBranch = getCurrentBranch();
   const projectNames = getProjects();
 
@@ -233,7 +312,25 @@ export function home(_args: string[]): void {
     return a.name.localeCompare(b.name);
   });
 
-  const html = renderHtml(currentBranch, projects);
+  const prs = new Map<string, PullRequestInfo>();
+  if (!skipPRs) {
+    const uniqueBranches = new Set<string>();
+    for (const p of projects) {
+      for (const b of p.branches) uniqueBranches.add(b);
+    }
+    const branchList = [...uniqueBranches];
+    if (branchList.length > 0) {
+      console.log(`Resolving PR repo...`);
+      const repo = detectPRRepo(branchList.slice(0, 3));
+      if (repo) console.log(`  Using ${repo}.`);
+      console.log(`Fetching PR data for ${branchList.length} branches...`);
+      const fetched = fetchPullRequestsForBranches(branchList, { repo });
+      for (const [k, v] of fetched) prs.set(k, v);
+      console.log(`  Found ${prs.size} PR(s).`);
+    }
+  }
+
+  const html = renderHtml(currentBranch, projects, prs);
   const outPath = join(tmpdir(), "stack-home.html");
   writeFileSync(outPath, html);
   console.log(`Opening ${outPath}`);
