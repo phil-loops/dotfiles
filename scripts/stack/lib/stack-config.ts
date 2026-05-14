@@ -163,3 +163,88 @@ export function getTrunkBranch(): string {
   if (r.exitCode === 0 && r.stdout) return r.stdout;
   return "main";
 }
+
+// =====================================================================
+// Project membership (stack-project.<name>.branch = <branch>, multi-value;
+// optional stack-project.<name>.memory = <path>, single-value).
+// =====================================================================
+
+const PROJECT_SECTION = "stack-project";
+const PROJECT_BRANCH_REGEX = new RegExp(`^${PROJECT_SECTION}\\.(.+)\\.branch\\s+(.+)$`);
+
+/** List all known project names. */
+export function getProjects(): string[] {
+  const config = git(`config --get-regexp "^${PROJECT_SECTION}\\."`);
+  const names = new Set<string>();
+  for (const line of config.split("\n")) {
+    const match = line.match(/^stack-project\.(.+)\.(branch|memory)\s+/);
+    if (match) names.add(match[1]);
+  }
+  return [...names].sort();
+}
+
+/** Branches that belong to a project, in config order. */
+export function getProjectBranches(project: string): string[] {
+  const r = gitRun(["config", "--local", "--get-all", `${PROJECT_SECTION}.${project}.branch`]);
+  if (r.exitCode !== 0 || !r.stdout) return [];
+  return r.stdout.split("\n").filter(Boolean);
+}
+
+/** Reverse lookup: which projects contain a given branch. */
+export function getProjectsForBranch(branch: string): string[] {
+  const config = git(`config --get-regexp "^${PROJECT_SECTION}\\..+\\.branch$"`);
+  const out = new Set<string>();
+  for (const line of config.split("\n")) {
+    const match = line.match(PROJECT_BRANCH_REGEX);
+    if (match && match[2] === branch) out.add(match[1]);
+  }
+  return [...out].sort();
+}
+
+/** Add a branch to a project (no-op if already a member). */
+export function addProjectBranch(project: string, branch: string): void {
+  const existing = getProjectBranches(project);
+  if (existing.includes(branch)) return;
+  const r = gitRun(["config", "--local", "--add", `${PROJECT_SECTION}.${project}.branch`, branch]);
+  if (r.exitCode !== 0) {
+    throw new Error(`failed to add ${branch} to project ${project}: ${r.stderr}`);
+  }
+}
+
+/** Remove a single branch from a project. */
+export function removeProjectBranch(project: string, branch: string): void {
+  const r = gitRun([
+    "config",
+    "--local",
+    "--unset-all",
+    `${PROJECT_SECTION}.${project}.branch`,
+    `^${branch}$`,
+  ]);
+  // exit 5 = key not present, which is fine
+  if (r.exitCode !== 0 && r.exitCode !== 5) {
+    throw new Error(`failed to remove ${branch} from project ${project}: ${r.stderr}`);
+  }
+}
+
+/** Remove a project entirely (drops every key under stack-project.<name>). */
+export function removeProject(project: string): void {
+  const r = gitRun(["config", "--local", "--remove-section", `${PROJECT_SECTION}.${project}`]);
+  if (r.exitCode !== 0 && r.exitCode !== 128) {
+    throw new Error(`failed to remove project ${project}: ${r.stderr}`);
+  }
+}
+
+/** Set or replace a project's memory-file path. */
+export function setProjectMemory(project: string, path: string): void {
+  const r = gitRun(["config", "--local", `${PROJECT_SECTION}.${project}.memory`, path]);
+  if (r.exitCode !== 0) {
+    throw new Error(`failed to set memory for project ${project}: ${r.stderr}`);
+  }
+}
+
+/** Read a project's memory-file path, or null if unset. */
+export function getProjectMemory(project: string): string | null {
+  const r = gitRun(["config", "--local", `${PROJECT_SECTION}.${project}.memory`]);
+  if (r.exitCode === 0 && r.stdout) return r.stdout;
+  return null;
+}
