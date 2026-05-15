@@ -10,7 +10,10 @@ const PARENT_REGEX = new RegExp(`^${PARENT_SECTION}\\.(.+)\\.parent\\s+(.+)$`);
 
 export function git(cmd: string): string {
   try {
-    return execSync(`git ${cmd}`, { encoding: "utf-8" }).trim();
+    return execSync(`git ${cmd}`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
   } catch {
     return "";
   }
@@ -37,33 +40,70 @@ function readAllRawPointers(): { name: string; parent: string }[] {
 }
 
 /**
- * Get ordered stack branches.
- * @param prefix Optional prefix to filter branches (e.g., "goals-v2")
- * @returns Branches in stack order (root to tip)
+ * Get ordered stack branches along the current branch's lineage.
+ *
+ * Returns the linear chain that runs from the current branch's stack root,
+ * through the current branch, and down the longest descendant path. Branches
+ * in sibling stacks (and sibling forks within the same root) are excluded.
+ *
+ * If the current branch is not tracked, falls back to the first config-order
+ * tracked root (the legacy "pick something reasonable" behavior).
+ *
+ * @param prefix Optional prefix to restrict the universe of tracked branches.
+ * @returns Branches in stack order (root to tip).
  */
 export function getStackBranches(prefix?: string): StackBranch[] {
   const all = readAllRawPointers();
-  const branches = prefix ? all.filter((b) => b.name.startsWith(prefix)) : all;
+  const filtered = prefix ? all.filter((b) => b.name.startsWith(prefix)) : all;
+  if (filtered.length === 0) return [];
 
-  const sorted: StackBranch[] = [];
-  const remaining = [...branches];
-
-  const branchNames = new Set(branches.map((b) => b.name));
-  let current = branches.find((b) => !branchNames.has(b.parent))?.parent || "main";
-
-  while (remaining.length > 0) {
-    const idx = remaining.findIndex((b) => b.parent === current);
-    if (idx === -1) break;
-    const branch = remaining.splice(idx, 1)[0];
-
-    const commitList = git(`log ${branch.parent}..${branch.name} --format=%H`);
-    const commits = new Set(commitList.split("\n").filter(Boolean));
-
-    sorted.push({ ...branch, commits });
-    current = branch.name;
+  const byName = new Map(filtered.map((b) => [b.name, b]));
+  const childrenOf = new Map<string, { name: string; parent: string }[]>();
+  for (const b of filtered) {
+    const arr = childrenOf.get(b.parent) ?? [];
+    arr.push(b);
+    childrenOf.set(b.parent, arr);
   }
 
-  return sorted;
+  // Anchor on the current branch if it's tracked; otherwise fall back to the
+  // first tracked branch whose parent is untracked (a root).
+  const currentBranch = getCurrentBranch();
+  let anchor: string;
+  if (byName.has(currentBranch)) {
+    anchor = currentBranch;
+  } else {
+    const root = filtered.find((b) => !byName.has(b.parent));
+    if (!root) return [];
+    anchor = root.name;
+  }
+
+  // Walk up from anchor to root within the tracked set.
+  const lineage: string[] = [anchor];
+  let n = anchor;
+  while (true) {
+    const p = byName.get(n)?.parent;
+    if (!p || !byName.has(p)) break;
+    lineage.unshift(p);
+    n = p;
+  }
+
+  // Walk down from anchor along the longest descendant path.
+  const longestPath = (b: string): string[] => {
+    let best: string[] = [];
+    for (const c of childrenOf.get(b) ?? []) {
+      const sub = [c.name, ...longestPath(c.name)];
+      if (sub.length > best.length) best = sub;
+    }
+    return best;
+  };
+  lineage.push(...longestPath(anchor));
+
+  return lineage.map((name) => {
+    const b = byName.get(name)!;
+    const commitList = git(`log ${b.parent}..${b.name} --format=%H`);
+    const commits = new Set(commitList.split("\n").filter(Boolean));
+    return { ...b, commits };
+  });
 }
 
 export function getStackBranchNames(prefix?: string): string[] {
