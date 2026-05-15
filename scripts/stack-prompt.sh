@@ -36,16 +36,22 @@ done
 # If we didn't find a stack root, not in a proper stack
 [ -z "$stack_root" ] && { echo "$BRANCH"; exit 0; }
 
-# Count total by walking down from stack root (not main)
-total=1  # count the root itself
-count_stack() {
+# Total = current depth + longest descendant chain from current branch.
+# Walking the root's full subtree conflates sibling stacks that share a root
+# (e.g. two projects rooted at goals/shared-validators) into one total.
+max_descend_depth() {
   local b="$1"
+  local max=0
   for child in $(echo "$ALL_PARENTS" | grep " ${b}$" | sed -E 's/stack-branch\.(.*)\.parent.*/\1/'); do
-    ((total++))
-    count_stack "$child"
+    local d
+    d=$(max_descend_depth "$child")
+    d=$((d + 1))
+    [ $d -gt $max ] && max=$d
   done
+  echo $max
 }
-count_stack "$stack_root"
+descend=$(max_descend_depth "$BRANCH")
+total=$((pos + descend))
 
 # Detect remote
 if git remote 2>/dev/null | grep -q "^phil-loops$"; then
