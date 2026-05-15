@@ -132,6 +132,12 @@ export async function sync(args: string[]): Promise<void> {
     if (!noPush) mirrorTrunkToFork(trunk, remote);
   }
 
+  // Drop stale `stack-branch.*.parent` entries (purely local — independent of
+  // remote/push state, so not gated on noPush).
+  if (!noPrune) {
+    pruneOrphanedConfigs({ dryRun });
+  }
+
   // --no-push is for "update just this branch" — skip prune entirely and scope
   // the rebase to the current branch + descendants.
   if (!noPrune && !noPush) {
@@ -398,6 +404,43 @@ async function tryClaudeOnCurrentConflict(state: SyncState): Promise<boolean> {
   gitRun(["add", ...result.files]);
   const cont = gitRun(["-c", "core.editor=true", "rebase", "--continue"]);
   return cont.exitCode === 0;
+}
+
+/**
+ * Drop `stack-branch.<name>.parent` entries whose branch no longer exists
+ * locally, and warn about entries whose parent is gone but child is still
+ * alive (user judgment call — don't auto-delete active work).
+ */
+function pruneOrphanedConfigs(opts: { dryRun: boolean }): void {
+  const all = getAllParentPointers();
+  const trunk = detectTrunk();
+  const isTrunk = (n: string) => n === trunk || n === "main" || n === "master";
+
+  const branchGone: { name: string; parent: string }[] = [];
+  const parentGone: { name: string; parent: string }[] = [];
+  for (const b of all) {
+    if (!hasLocalBranch(b.name)) {
+      branchGone.push(b);
+    } else if (!isTrunk(b.parent) && !hasLocalBranch(b.parent)) {
+      parentGone.push(b);
+    }
+  }
+
+  if (branchGone.length > 0) {
+    log(`\nOrphaned config entries (branch deleted, ${branchGone.length}):`);
+    for (const o of branchGone) log(`  ${o.name} → ${o.parent}`);
+    if (!opts.dryRun) {
+      for (const o of branchGone) clearBranchConfig(o.name);
+      log(`  cleared ${branchGone.length} entr${branchGone.length === 1 ? "y" : "ies"}`);
+    }
+  }
+
+  if (parentGone.length > 0) {
+    warn(`\nDangling parent pointers (parent deleted, child still alive, ${parentGone.length}):`);
+    for (const o of parentGone) warn(`  ${o.name} → ${o.parent}  (parent gone)`);
+    warn(`  Leaving as-is. To drop tracking: git config --remove-section stack-branch.<name>`);
+    warn(`  To re-parent to trunk: git config stack-branch.<name>.parent ${trunk}`);
+  }
 }
 
 async function pruneMerged(opts: {
