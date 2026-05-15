@@ -1,0 +1,44 @@
+diff --git a/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Bl-_61JQ.d.mts b/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Bl-_61JQ.d.mts
+index e862d83..5a30a1d 100644
+--- a/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Bl-_61JQ.d.mts
++++ b/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Bl-_61JQ.d.mts
+@@ -692,7 +692,7 @@ type AnySubscriptionProcedure = SubscriptionProcedure<any> | LegacyObservableSub
+ type AnyProcedure = AnyQueryProcedure | AnyMutationProcedure | AnySubscriptionProcedure;
+ type inferProcedureInput<TProcedure extends AnyProcedure> = undefined extends inferProcedureParams<TProcedure>['$types']['input'] ? void | inferProcedureParams<TProcedure>['$types']['input'] : inferProcedureParams<TProcedure>['$types']['input'];
+ type inferProcedureParams<TProcedure> = TProcedure extends AnyProcedure ? TProcedure['_def'] : never;
+-type inferProcedureOutput<TProcedure> = inferProcedureParams<TProcedure>['$types']['output'];
++type inferProcedureOutput<TProcedure> = TProcedure extends { _def: { $types: { output: infer O } } } ? O : never;
+ /**
+  * @internal
+  */
+@@ -1573,7 +1573,7 @@ type UndefinedToOptional<T extends object> = Pick<WithoutIndexSignature<T>, Filt
+ /**
+  * @internal
+  */
+-type inferTransformedProcedureOutput<TInferrable extends InferrableClientTypes, TProcedure extends AnyProcedure> = inferClientTypes<TInferrable>['transformer'] extends false ? Serialize<inferProcedureOutput<TProcedure>> : inferProcedureOutput<TProcedure>;
++type inferTransformedProcedureOutput<TInferrable extends InferrableClientTypes, TProcedure extends AnyProcedure> = TProcedure extends { _def: { $types: { output: infer O } } } ? O : never;
+ /** @internal */
+ type inferTransformedSubscriptionOutput<TInferrable extends InferrableClientTypes, TProcedure extends AnyProcedure> = inferClientTypes<TInferrable>['transformer'] extends false ? Serialize<inferObservableValue<inferProcedureOutput<TProcedure>>> : inferObservableValue<inferProcedureOutput<TProcedure>>;
+ type GetInferenceHelpers<TType extends 'input' | 'output', TRoot extends AnyClientTypes, TRecord extends RouterRecord> = { [TKey in keyof TRecord]: TRecord[TKey] extends infer $Value ? $Value extends AnyProcedure ? TType extends 'input' ? inferProcedureInput<$Value> : inferTransformedProcedureOutput<TRoot, $Value> : $Value extends RouterRecord ? GetInferenceHelpers<TType, TRoot, $Value> : never : never };
+diff --git a/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Dm2ii-ih.d.cts b/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Dm2ii-ih.d.cts
+index e5d7a7b..c76b90f 100644
+--- a/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Dm2ii-ih.d.cts
++++ b/node_modules/@trpc/server/dist/unstable-core-do-not-import.d-Dm2ii-ih.d.cts
+@@ -692,7 +692,7 @@ type AnySubscriptionProcedure = SubscriptionProcedure<any> | LegacyObservableSub
+ type AnyProcedure = AnyQueryProcedure | AnyMutationProcedure | AnySubscriptionProcedure;
+ type inferProcedureInput<TProcedure extends AnyProcedure> = undefined extends inferProcedureParams<TProcedure>['$types']['input'] ? void | inferProcedureParams<TProcedure>['$types']['input'] : inferProcedureParams<TProcedure>['$types']['input'];
+ type inferProcedureParams<TProcedure> = TProcedure extends AnyProcedure ? TProcedure['_def'] : never;
+-type inferProcedureOutput<TProcedure> = inferProcedureParams<TProcedure>['$types']['output'];
++type inferProcedureOutput<TProcedure> = TProcedure extends { _def: { $types: { output: infer O } } } ? O : never;
+ /**
+  * @internal
+  */
+@@ -1573,7 +1573,7 @@ type UndefinedToOptional<T extends object> = Pick<WithoutIndexSignature<T>, Filt
+ /**
+  * @internal
+  */
+-type inferTransformedProcedureOutput<TInferrable extends InferrableClientTypes, TProcedure extends AnyProcedure> = inferClientTypes<TInferrable>['transformer'] extends false ? Serialize<inferProcedureOutput<TProcedure>> : inferProcedureOutput<TProcedure>;
++type inferTransformedProcedureOutput<TInferrable extends InferrableClientTypes, TProcedure extends AnyProcedure> = TProcedure extends { _def: { $types: { output: infer O } } } ? O : never;
+ /** @internal */
+ type inferTransformedSubscriptionOutput<TInferrable extends InferrableClientTypes, TProcedure extends AnyProcedure> = inferClientTypes<TInferrable>['transformer'] extends false ? Serialize<inferObservableValue<inferProcedureOutput<TProcedure>>> : inferObservableValue<inferProcedureOutput<TProcedure>>;
+ type GetInferenceHelpers<TType extends 'input' | 'output', TRoot extends AnyClientTypes, TRecord extends RouterRecord> = { [TKey in keyof TRecord]: TRecord[TKey] extends infer $Value ? $Value extends AnyProcedure ? TType extends 'input' ? inferProcedureInput<$Value> : inferTransformedProcedureOutput<TRoot, $Value> : $Value extends RouterRecord ? GetInferenceHelpers<TType, TRoot, $Value> : never : never };
