@@ -10,10 +10,12 @@ import {
   hasRemoteBranch,
   inRebase,
   isDirty,
+  isGhostCommit,
   pushForceWithLease,
   rebaseAbort,
   repoRoot,
   repoSlugFromRemote,
+  stoppedSha,
 } from "../lib/git.ts";
 import {
   clearBranchConfig,
@@ -307,6 +309,23 @@ async function handleConflict(opts: {
   branch: string;
   onto: string;
 }): Promise<void> {
+  // Squash-merge ghost detection: if the conflicting commit's entire diff is
+  // already present on HEAD (typical for squash-merged parent commits), skip
+  // it. The Claude resolver would otherwise burn tokens re-merging changes
+  // that aren't actually missing.
+  const sha = stoppedSha();
+  if (sha && isGhostCommit(sha)) {
+    log(`[${opts.branch}] ghost ${sha.slice(0, 7)} already on ${opts.onto}, skipping`);
+    const r = gitRun(["rebase", "--skip"]);
+    if (r.exitCode === 0) return;
+    // --skip stopped on another conflict; recurse to test that one too.
+    if (conflictFiles().length > 0) {
+      return handleConflict(opts);
+    }
+    warn(`rebase --skip failed: ${r.stderr}`);
+    process.exit(1);
+  }
+
   const files = conflictFiles();
   warn(`\nConflict rebasing ${opts.branch} onto ${opts.onto}:`);
   for (const f of files) warn(`  ${f}`);
@@ -355,6 +374,17 @@ async function handleConflict(opts: {
 async function tryClaudeOnCurrentConflict(state: SyncState): Promise<boolean> {
   const step = state.pending[0];
   if (!step) return false;
+
+  // Ghost-skip if applicable, same as handleConflict — see notes there.
+  const sha = stoppedSha();
+  if (sha && isGhostCommit(sha)) {
+    log(`[${step.name}] ghost ${sha.slice(0, 7)}, skipping`);
+    const r = gitRun(["rebase", "--skip"]);
+    if (r.exitCode === 0) return true;
+    if (conflictFiles().length > 0) return tryClaudeOnCurrentConflict(state);
+    return false;
+  }
+
   const files = conflictFiles();
   if (files.length === 0) return true;
   const onto = step.phase === "remote" ? `${state.remote}/${step.name}` : step.parent;

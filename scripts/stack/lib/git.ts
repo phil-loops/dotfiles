@@ -1,5 +1,5 @@
 import { execSync, spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 export interface GitResult {
@@ -95,6 +95,36 @@ export function conflictFiles(): string[] {
 
 export function rebaseAbort(): void {
   gitRun(["rebase", "--abort"]);
+}
+
+/** SHA of the commit the in-progress rebase is currently stopped on, or null. */
+export function stoppedSha(): string | null {
+  const dir = gitDir();
+  const merge = join(dir, "rebase-merge", "stopped-sha");
+  if (existsSync(merge)) return readFileSync(merge, "utf-8").trim();
+  const apply = join(dir, "rebase-apply", "original-commit");
+  if (existsSync(apply)) return readFileSync(apply, "utf-8").trim();
+  return null;
+}
+
+/** True iff every hunk of `sha`'s patch is already present on HEAD.
+ *
+ * The check is `git apply --check --reverse` on the commit's diff: succeeds
+ * only when reverse-applying every hunk works, which means every hunk is
+ * currently in the tree. If any hunk is new (local fixups that didn't make
+ * it into the squash-merge), `--reverse --check` fails. */
+export function isGhostCommit(sha: string): boolean {
+  const patch = gitRun(["show", "--patch", "--no-color", sha]);
+  if (patch.exitCode !== 0 || !patch.stdout) return false;
+
+  // Clear conflict markers so `git apply --check` operates on a clean tree.
+  gitRun(["checkout", "--", "."]);
+
+  const apply = spawnSync("git", ["apply", "--check", "--reverse", "-"], {
+    input: patch.stdout,
+    encoding: "utf-8",
+  });
+  return apply.status === 0;
 }
 
 export function pushForceWithLease(remote: string, branch: string): void {
