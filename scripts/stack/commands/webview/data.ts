@@ -36,12 +36,17 @@ export interface ChurnHunk {
   lines: string[];
 }
 
-export function getStackBranchesForWebview(prefix?: string): { name: string; parent: string }[] {
+export function getStackBranchesForWebview(filter?: {
+  prefix?: string;
+  names?: string[];
+}): { name: string; parent: string }[] {
   const all = getAllParentPointers();
+  const nameSet = filter?.names ? new Set(filter.names) : undefined;
   const branches: { name: string; parent: string }[] = [];
 
   for (const { name, parent } of all) {
-    if (prefix && !name.startsWith(prefix)) continue;
+    if (filter?.prefix && !name.startsWith(filter.prefix)) continue;
+    if (nameSet && !nameSet.has(name)) continue;
     branches.push({ name, parent });
   }
 

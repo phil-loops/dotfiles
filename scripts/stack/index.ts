@@ -27,7 +27,7 @@ const commands: Record<string, { run: (args: string[]) => void | Promise<void>; 
   },
   webview: {
     run: webview,
-    desc: "Open interactive stack viewer in browser",
+    desc: "Open interactive stack viewer in browser (<prefix> or --project <name>)",
   },
   inject: {
     run: inject,
