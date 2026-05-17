@@ -48,44 +48,42 @@ export function getScript(): string {
       return localStorage.getItem(reviewKey(branch, file) + ':diff');
     }
 
+    function safeSetItem(key, value) {
+      try {
+        localStorage.setItem(key, value);
+        return true;
+      } catch (e) {
+        console.warn('stack-view: localStorage write failed (quota?)', key, e.message);
+        return false;
+      }
+    }
+
     function setReviewed(branch, file, diff, reviewed) {
       const key = reviewKey(branch, file);
       if (reviewed) {
-        localStorage.setItem(key, hashStr(diff));
-        localStorage.setItem(key + ':diff', diff);
+        safeSetItem(key, hashStr(diff));
+        // :diff baseline powers showDelta; best-effort, OK if quota refuses.
+        safeSetItem(key + ':diff', diff);
       } else {
         localStorage.removeItem(key);
         localStorage.removeItem(key + ':diff');
       }
     }
 
-    // One-time nuke: clear all stale review state from before the hash
-    // algorithm change + stack reorganization. Remove after one run.
+    // One-time nuke: clear stale review state. v3 cleared the original hash
+    // format; v4 evicts the auto-baseline :diff entries that the removed
+    // ensureBaselines() used to pour in (these were bloating quota across
+    // multi-project sessions and crashing page-load).
     (function nukeStaleState() {
-      if (localStorage.getItem('stack-review:v3-reset')) return;
+      if (localStorage.getItem('stack-review:v4-reset')) return;
       const toRemove = [];
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
         if (k && k.startsWith('stack-review:')) toRemove.push(k);
       }
       toRemove.forEach(k => localStorage.removeItem(k));
-      localStorage.setItem('stack-review:v3-reset', '1');
+      localStorage.setItem('stack-review:v4-reset', '1');
     })();
-
-    // Auto-store baseline: on first load, record every file's diff so we can
-    // detect future changes without requiring a manual check/uncheck cycle.
-    // Only store if there's no diff snapshot at all yet.
-    function ensureBaselines() {
-      for (const b of branches) {
-        for (const f of b.files) {
-          const key = reviewKey(b.name, f.name);
-          if (localStorage.getItem(key + ':diff') === null) {
-            localStorage.setItem(key + ':diff', f.diff);
-          }
-        }
-      }
-    }
-    ensureBaselines();
 
     function computeDelta(oldDiff, newDiff) {
       const oldLines = new Set(oldDiff.split('\\n'));
