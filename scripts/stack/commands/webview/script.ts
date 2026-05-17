@@ -44,10 +44,6 @@ export function getScript(): string {
       return localStorage.getItem(reviewKey(branch, file)) !== null;
     }
 
-    function getStoredDiff(branch, file) {
-      return localStorage.getItem(reviewKey(branch, file) + ':diff');
-    }
-
     function safeSetItem(key, value) {
       try {
         localStorage.setItem(key, value);
@@ -85,18 +81,6 @@ export function getScript(): string {
       localStorage.setItem('stack-review:v4-reset', '1');
     })();
 
-    function computeDelta(oldDiff, newDiff) {
-      const oldLines = new Set(oldDiff.split('\\n'));
-      const newLines = newDiff.split('\\n');
-      const added = newLines.filter(l => !oldLines.has(l) && (l.startsWith('+') || l.startsWith('-') || l.startsWith('@@')));
-      return added;
-    }
-
-    function getReviewedCount() {
-      const b = branches[idx];
-      return b.files.filter(f => isReviewed(b.name, f.name, f.diff)).length;
-    }
-
     function branchReviewStatus(br) {
       if (br.files.length === 0) return 'empty';
       const reviewed = br.files.filter(f => isReviewed(br.name, f.name, f.diff)).length;
@@ -105,6 +89,26 @@ export function getScript(): string {
       if (changed) return 'changed';
       if (reviewed > 0) return 'partial';
       return 'none';
+    }
+
+    function statusIconHtml(status) {
+      if (status === 'done') return '<span class="branch-done" title="All files reviewed">✓</span>';
+      if (status === 'changed') return '<span class="branch-changed" title="Files changed since review">!</span>';
+      if (status === 'partial') return '<span class="branch-partial" title="Partially reviewed">·</span>';
+      return '';
+    }
+
+    function sidebarItemHtml(br, i) {
+      const status = branchReviewStatus(br);
+      const cc = churnByBranch[br.name] || 0;
+      const churnBadge = cc > 0 ? '<span class="churn-badge" title="' + cc + ' churned lines">~' + cc + '</span>' : '';
+      return '<div class="branch-item ' + (i === idx ? 'active' : '') + ' branch-' + status + '" onclick="go(' + i + ')">'
+        + '<span class="branch-num">' + String(i + 1).padStart(2, '0') + '</span>'
+        + statusIconHtml(status)
+        + '<span class="branch-label">' + br.name + '</span>'
+        + churnBadge
+        + '<span class="branch-stats">+' + br.insertions + '/-' + br.deletions + '</span>'
+        + '</div>';
     }
 
     // --- Diff parsing ---
@@ -199,22 +203,7 @@ export function getScript(): string {
       const b = branches[idx];
 
       // Sidebar
-      document.getElementById('branchList').innerHTML = branches.map((br, i) => {
-        const cc = churnByBranch[br.name] || 0;
-        const churnBadge = cc > 0 ? '<span class="churn-badge" title="' + cc + ' churned lines">~' + cc + '</span>' : '';
-        const status = branchReviewStatus(br);
-        const statusIcon = status === 'done' ? '<span class="branch-done" title="All files reviewed">✓</span>'
-          : status === 'changed' ? '<span class="branch-changed" title="Files changed since review">!</span>'
-          : status === 'partial' ? '<span class="branch-partial" title="Partially reviewed">·</span>'
-          : '';
-        return '<div class="branch-item ' + (i === idx ? 'active' : '') + ' branch-' + status + '" onclick="go(' + i + ')">'
-          + '<span class="branch-num">' + String(i + 1).padStart(2, '0') + '</span>'
-          + statusIcon
-          + '<span class="branch-label">' + br.name.replace(/^goals-v2-\\d+-/, '') + '</span>'
-          + churnBadge
-          + '<span class="branch-stats">+' + br.insertions + '/-' + br.deletions + '</span>'
-          + '</div>';
-      }).join('');
+      document.getElementById('branchList').innerHTML = branches.map(sidebarItemHtml).join('');
 
       // Header
       document.getElementById('branchName').textContent = b.name;
@@ -271,13 +260,11 @@ export function getScript(): string {
 
     function updateReviewCounter() {
       const b = branches[idx];
-      const reviewed = getReviewedCount();
+      const reviewed = b.files.filter(f => isReviewed(b.name, f.name, f.diff)).length;
       const total = b.files.length;
       const el = document.getElementById('reviewCounter');
-      if (el) {
-        el.textContent = reviewed + '/' + total + ' reviewed';
-        el.style.color = reviewed === total ? '#3fb950' : '#8b949e';
-      }
+      el.textContent = reviewed + '/' + total + ' reviewed';
+      el.style.color = reviewed === total ? '#3fb950' : '#8b949e';
     }
 
     function toggleReview(i, checked) {
@@ -300,30 +287,13 @@ export function getScript(): string {
     }
 
     function updateSidebarStatus() {
-      const items = document.querySelectorAll('.branch-item');
-      items.forEach((el, i) => {
-        const br = branches[i];
-        const status = branchReviewStatus(br);
-        el.className = el.className.replace(/branch-(done|changed|partial|none|empty)/g, '').trim();
-        el.classList.add('branch-' + status);
-        // Update the status icon
-        const existing = el.querySelector('.branch-done, .branch-changed, .branch-partial');
-        if (existing) existing.remove();
-        const icon = status === 'done' ? '<span class="branch-done" title="All files reviewed">✓</span>'
-          : status === 'changed' ? '<span class="branch-changed" title="Files changed since review">!</span>'
-          : status === 'partial' ? '<span class="branch-partial" title="Partially reviewed">·</span>'
-          : '';
-        if (icon) {
-          const num = el.querySelector('.branch-num');
-          if (num) num.insertAdjacentHTML('afterend', icon);
-        }
-      });
+      document.getElementById('branchList').innerHTML = branches.map(sidebarItemHtml).join('');
     }
 
     function showDelta(i) {
       const b = branches[idx];
       const f = b.files[i];
-      const oldDiff = getStoredDiff(b.name, f.name);
+      const oldDiff = localStorage.getItem(reviewKey(b.name, f.name) + ':diff');
       const diffEl = document.getElementById('diff-' + i);
       if (!oldDiff) {
         diffEl.innerHTML = '<div class="hunk-header" style="color:#d29922;padding:12px">No blessed version stored — check the box to bless the current state</div>';
@@ -411,10 +381,7 @@ export function getScript(): string {
       const btn = document.getElementById('churnBtn');
       const panel = document.getElementById('churnPanel');
 
-      const branchName = branches[idx].name;
-      const relevant = churns.filter(c => c.addedIn === branchName || c.removedIn === branchName);
-
-      if (relevant.length === 0 && churns.length === 0) {
+      if (churns.length === 0) {
         btn.style.display = 'none';
         panel.classList.remove('visible');
         return;
@@ -423,26 +390,30 @@ export function getScript(): string {
       btn.style.display = '';
       btn.textContent = 'Churn (' + churns.length + ' hunks)';
 
-      const items = (relevant.length > 0 ? relevant : churns).map(c => {
-        const fromShort = c.addedIn.replace(/^goals-v2-\\d+-/, '');
-        const toShort = c.removedIn.replace(/^goals-v2-\\d+-/, '');
+      const branchName = branches[idx].name;
+      const relevant = churns.filter(c => c.addedIn === branchName || c.removedIn === branchName);
+
+      const items = relevant.map(c => {
         const preview = c.lines.slice(0, 3).map(l => escHtml(l.length > 80 ? l.slice(0, 77) + '...' : l)).join('\\n');
         const more = c.lines.length > 3 ? '\\n... +' + (c.lines.length - 3) + ' more' : '';
         return '<div class="churn-item">'
           + '<div class="churn-file">' + c.file + '</div>'
           + '<div class="churn-flow">'
-          + '<span class="from">+ ' + fromShort + '</span>'
+          + '<span class="from">+ ' + c.addedIn + '</span>'
           + '<span class="arrow">→</span>'
-          + '<span class="to">- ' + toShort + '</span>'
+          + '<span class="to">- ' + c.removedIn + '</span>'
           + '<span>(' + c.lines.length + ' lines)</span>'
           + '</div>'
           + '<div class="churn-lines">' + preview + more + '</div>'
           + '</div>';
       }).join('');
 
+      const headerLabel = relevant.length > 0
+        ? 'Churn for ' + branchName + ' (' + relevant.length + ' hunks)'
+        : 'No churn touches this branch';
+
       panel.innerHTML = '<div class="churn-panel-header">'
-        + '<span>' + (relevant.length > 0 ? 'Churn for ' + branchName.replace(/^goals-v2-\\d+-/, '') : 'All churn')
-        + ' (' + (relevant.length || churns.length) + ' hunks)</span>'
+        + '<span>' + headerLabel + '</span>'
         + '<button class="nav-btn" onclick="toggleChurn()" style="padding:2px 8px;font-size:11px">×</button>'
         + '</div>' + items;
     }
