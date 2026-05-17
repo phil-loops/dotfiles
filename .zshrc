@@ -89,7 +89,7 @@ loops() {
                     echo "  loops stack branches - list stack branches in order (--json, --names)"
                     echo "  loops stack update   - rebase downstream branches (--from=<branch>, --dry-run)"
                     echo "  loops stack push     - push all stack branches (--force, --remote=<remote>)"
-                    echo "  loops stack webview  - open stack viewer in browser"
+                    echo "  loops stack webview  - open stack viewer in browser (<prefix> or --project <name>)"
                     echo "  loops stack inject   - AI-powered patch routing (--save, --no-claude)"
                     echo "  loops stack flow     - sync + push (--dry-run)"
                     echo "  loops stack sync     - rebase stack onto trunk, prune merged, push"
