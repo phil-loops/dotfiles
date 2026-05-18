@@ -9,6 +9,10 @@ export PATH="$VOLTA_HOME/bin:$PATH"
 
 eval "$(starship init zsh)"
 
+# Load zsh completion system so `compdef` works for custom completions below.
+# -C skips the cache integrity check for faster startup.
+autoload -Uz compinit && compinit -C
+
 alias kcup="kubectl config use-context production"
 alias kcus="kubectl config use-context staging"
 alias zconfig="nvim ~/.zshrc"
@@ -93,6 +97,24 @@ loops() {
             ;;
     esac
 }
+
+_loops() {
+    local -a branches
+    if (( CURRENT == 2 )); then
+        _values 'subcommand' \
+            'stack[branch stack tools]' \
+            'review-branch[review current branch vs main]' \
+            'pr-review[review PRs assigned to you]' \
+            'clean-migrations[remove empty migration folders]' \
+            'staging[staging build/deploy status]'
+    elif (( CURRENT == 3 )) && [[ "${words[2]}" == "stack" ]]; then
+        _values 'stack subcommand' 'review[review stack in nvim diffview]'
+    elif (( CURRENT == 4 )) && [[ "${words[2]}" == "stack" ]] && [[ "${words[3]}" == "review" ]]; then
+        branches=("${(@f)$(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)}")
+        _describe 'branch' branches
+    fi
+}
+compdef _loops loops
 
 _loops_clean_migrations() {
     local migrations_dir="prisma/migrations"
