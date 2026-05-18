@@ -5,7 +5,7 @@ export PATH="$HOME/.volta/bin:$PATH"
 # Warn if branch is behind main
 behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
 if [ "$behind" -gt 0 ] 2>/dev/null; then
-  echo "⚠️  Branch is $behind commits behind origin/main. Consider: loops stack sync --no-push --remote=origin"
+  echo "⚠️  Branch is $behind commits behind origin/main. Consider: git rebase origin/main"
 
   # Check for deploy-critical changes missed from main
   critical=$(git diff HEAD..origin/main --name-only -- \
@@ -21,7 +21,7 @@ if [ "$behind" -gt 0 ] 2>/dev/null; then
   if [ -n "$critical" ]; then
     echo "🚨 Main has changes to deploy-critical files you're missing:"
     echo "$critical" | sed 's/^/   /'
-    echo "   Run: loops stack sync --no-push --remote=origin"
+    echo "   Run: git rebase origin/main"
     exit 1
   fi
 fi

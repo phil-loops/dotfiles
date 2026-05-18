@@ -63,38 +63,9 @@ loops() {
                 review)
                     ~/.dotfiles/scripts/stack-review "$@"
                     ;;
-                snapshot)
-                    ~/.dotfiles/scripts/stack-snapshot save
-                    ;;
-                diff)
-                    ~/.dotfiles/scripts/stack-snapshot diff
-                    ;;
-                webview)
-                    npx tsx ~/.dotfiles/scripts/stack/index.ts webview "$@"
-                    ;;
-                flow)
-                    npx tsx ~/.dotfiles/scripts/stack/index.ts flow "$@"
-                    ;;
-                sync)
-                    npx tsx ~/.dotfiles/scripts/stack/index.ts sync "$@"
-                    ;;
-                project|home|branches|update|push|inject)
-                    npx tsx ~/.dotfiles/scripts/stack/index.ts "$subcmd" "$@"
-                    ;;
                 *)
                     echo "loops stack commands:"
-                    echo "  loops stack review   - review stack in nvim"
-                    echo "  loops stack snapshot - save current state"
-                    echo "  loops stack diff     - show changes since snapshot"
-                    echo "  loops stack branches - list stack branches in order (--json, --names)"
-                    echo "  loops stack update   - rebase downstream branches (--from=<branch>, --dry-run)"
-                    echo "  loops stack push     - push all stack branches (--force, --remote=<remote>)"
-                    echo "  loops stack webview  - open stack viewer in browser (<prefix> or --project <name>)"
-                    echo "  loops stack inject   - AI-powered patch routing (--save, --no-claude)"
-                    echo "  loops stack flow     - sync + push (--dry-run)"
-                    echo "  loops stack sync     - rebase stack onto trunk, prune merged, push"
-                    echo "  loops stack home     - work-in-progress dashboard"
-                    echo "  loops stack project  - manage projects (list, show, create, delete, add, remove, set-memory)"
+                    echo "  loops stack review   - review stack in nvim diffview"
                     ;;
             esac
             ;;
