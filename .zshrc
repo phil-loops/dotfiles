@@ -110,8 +110,34 @@ _loops() {
     elif (( CURRENT == 3 )) && [[ "${words[2]}" == "stack" ]]; then
         _values 'stack subcommand' 'review[review stack in nvim diffview]'
     elif (( CURRENT == 4 )) && [[ "${words[2]}" == "stack" ]] && [[ "${words[3]}" == "review" ]]; then
-        branches=("${(@f)$(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)}")
-        _describe 'branch' branches
+        # Build branch → projects map from `stack-project.<proj>.branch <branch>` config.
+        local -A branch_projects
+        local line proj branch
+        while IFS= read -r line; do
+            [[ "$line" =~ ^stack-project\.(.+)\.branch[[:space:]]+(.+)$ ]] || continue
+            proj="${match[1]}"
+            branch="${match[2]}"
+            if [[ -n "${branch_projects[$branch]}" ]]; then
+                branch_projects[$branch]+=",${proj}"
+            else
+                branch_projects[$branch]="$proj"
+            fi
+        done < <(git config --get-regexp '^stack-project\..+\.branch$' 2>/dev/null)
+
+        # Split local branches into project members and others.
+        local -a project_entries other_entries
+        local b
+        for b in "${(@f)$(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)}"; do
+            if [[ -n "${branch_projects[$b]}" ]]; then
+                project_entries+=("${b}:${branch_projects[$b]}")
+            else
+                other_entries+=("$b")
+            fi
+        done
+
+        # Project branches shown first (with project name as description), then the rest.
+        _describe -t project-branches 'project branch' project_entries
+        _describe -t other-branches 'other branch' other_entries
     fi
 }
 compdef _loops loops
