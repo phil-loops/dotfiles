@@ -124,20 +124,16 @@ _loops() {
             fi
         done < <(git config --get-regexp '^stack-project\..+\.branch$' 2>/dev/null)
 
-        # Split local branches into project members and others.
-        local -a project_entries other_entries
+        # Only complete branches in a registered stack-project. Avoids drowning
+        # the menu in the long tail of local branches. To review a non-project
+        # branch, type its name fully, or add it to a project first:
+        #   git config --add stack-project.<name>.branch <branch>
+        local -a project_entries
         local b
-        for b in "${(@f)$(git for-each-ref --format='%(refname:short)' refs/heads/ 2>/dev/null)}"; do
-            if [[ -n "${branch_projects[$b]}" ]]; then
-                project_entries+=("${b}:${branch_projects[$b]}")
-            else
-                other_entries+=("$b")
-            fi
+        for b in "${(@k)branch_projects}"; do
+            project_entries+=("${b}:${branch_projects[$b]}")
         done
-
-        # Project branches shown first (with project name as description), then the rest.
-        _describe -t project-branches 'project branch' project_entries
-        _describe -t other-branches 'other branch' other_entries
+        _describe 'project branch' project_entries
     fi
 }
 compdef _loops loops
