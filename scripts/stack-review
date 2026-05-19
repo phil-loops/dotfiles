@@ -5,12 +5,41 @@
 set -e
 
 # Branch to review: explicit arg, else current branch.
-BRANCH="${1:-$(git branch --show-current 2>/dev/null)}"
-if [[ -z "$BRANCH" ]]; then
+TARGET="${1:-$(git branch --show-current 2>/dev/null)}"
+if [[ -z "$TARGET" ]]; then
   echo "No branch given and no current branch (detached HEAD?)"
-  echo "Usage: loops stack review [<branch>]"
+  echo "Usage: loops stack review [<branch>|<project>]"
   exit 1
 fi
+
+# If TARGET names a registered stack-project, resolve to that project's tip.
+# Tip = the project branch that no other project branch has as parent.
+typeset -a project_members
+while IFS= read -r member; do
+  [[ -n "$member" ]] && project_members+=("$member")
+done < <(git config --get-all "stack-project.${TARGET}.branch" 2>/dev/null || true)
+
+if (( ${#project_members[@]} > 0 )); then
+  tip=""
+  for candidate in "${project_members[@]}"; do
+    has_child=0
+    for other in "${project_members[@]}"; do
+      [[ "$other" == "$candidate" ]] && continue
+      other_parent=$(git config "stack-branch.${other}.parent" 2>/dev/null)
+      if [[ "$other_parent" == "$candidate" ]]; then has_child=1; break; fi
+    done
+    if (( has_child == 0 )); then tip="$candidate"; break; fi
+  done
+  if [[ -z "$tip" ]]; then
+    echo "Project '${TARGET}' has no tip (cycle or empty?)"
+    exit 1
+  fi
+  echo "Project '${TARGET}' → tip ${tip}"
+  BRANCH="$tip"
+else
+  BRANCH="$TARGET"
+fi
+
 if ! git rev-parse --verify "refs/heads/${BRANCH}" >/dev/null 2>&1; then
   echo "Branch '${BRANCH}' does not exist"
   exit 1
