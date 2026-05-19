@@ -124,16 +124,26 @@ _loops() {
             fi
         done < <(git config --get-regexp '^stack-project\..+\.branch$' 2>/dev/null)
 
-        # Only complete branches in a registered stack-project. Avoids drowning
-        # the menu in the long tail of local branches. To review a non-project
-        # branch, type its name fully, or add it to a project first:
+        # Complete on project NAMES (resolves to the project's tip) and on
+        # project member branches. Skips the long tail of unstacked local
+        # branches; for those, type the name fully or add to a project first:
         #   git config --add stack-project.<name>.branch <branch>
-        local -a project_entries
-        local b
+        local -A projects_seen
+        local -a project_names_entries project_branch_entries
+        local b proj
+        # Count branches per project for description
         for b in "${(@k)branch_projects}"; do
-            project_entries+=("${b}:${branch_projects[$b]}")
+            for proj in ${(s:,:)branch_projects[$b]}; do
+                projects_seen[$proj]=$((${projects_seen[$proj]:-0} + 1))
+            done
+            project_branch_entries+=("${b}:${branch_projects[$b]}")
         done
-        _describe 'project branch' project_entries
+        for proj in "${(@k)projects_seen}"; do
+            project_names_entries+=("${proj}:project (${projects_seen[$proj]} branches)")
+        done
+
+        _describe -t projects 'project' project_names_entries
+        _describe -t project-branches 'project branch' project_branch_entries
     fi
 }
 compdef _loops loops
