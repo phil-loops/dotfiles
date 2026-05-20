@@ -194,6 +194,43 @@ _loops_pr_review() {
          -c "lua require('custom.branch-review').setup({branch='${pr_branch}', base='main'})"
 }
 
+# Inspect a sibling git worktree's diff in nvim (read-only) without touching the current checkout.
+# Usage: wt [base-branch]   (base defaults to main)
+wt() {
+    local base="${1:-main}"
+    local current_top=$(git rev-parse --show-toplevel 2>/dev/null)
+    if [[ -z "$current_top" ]]; then
+        echo "Not in a git repository"
+        return 1
+    fi
+
+    # Skip the current checkout and the harness-internal .claude/worktrees/* agent trees.
+    local worktrees=$(git worktree list --porcelain | awk -v cur="$current_top" '
+        /^worktree / { path = $2 }
+        /^branch /   {
+            sub("refs/heads/", "", $2)
+            if (path != cur && path !~ /\/\.claude\/worktrees\//) print path "\t" $2
+        }
+    ')
+
+    if [[ -z "$worktrees" ]]; then
+        echo "No other worktrees (only the current checkout: $current_top)"
+        return
+    fi
+
+    local selection=$(echo "$worktrees" \
+        | fzf --delimiter='\t' --with-nth=2 \
+            --preview "git -C {1} diff ${base}...HEAD --stat 2>/dev/null || echo 'no diff vs ${base}'")
+
+    [[ -z "$selection" ]] && return
+
+    local wt_path=$(echo "$selection" | cut -f1)
+    local wt_branch=$(echo "$selection" | cut -f2)
+
+    (cd "$wt_path" && nvim -c "DiffviewOpen ${base}...HEAD" \
+        -c "lua require('custom.branch-review').setup({branch='${wt_branch}', base='${base}'})")
+}
+
 # Swap git remotes (toggle origin between phil-loops and loops-so)
 git-swap-remote() {
     local current_origin=$(git remote get-url origin 2>/dev/null)
