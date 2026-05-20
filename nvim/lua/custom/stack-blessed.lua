@@ -135,7 +135,7 @@ function M.bless_branch(branch, parent)
   -- Use cached file list if available, otherwise shell out
   local files = file_list_cache[branch]
   if not files then
-    local cmd = string.format("git diff --name-only %s %s 2>/dev/null", parent, branch)
+    local cmd = string.format("git diff --name-only %s...%s 2>/dev/null", parent, branch)
     local output = vim.fn.system(cmd):gsub("%s+$", "")
     if output == "" then return end
     files = {}
@@ -276,7 +276,7 @@ end
 function M.warm_file_counts(chain)
   for _, item in ipairs(chain) do
     if not file_list_cache[item.branch] and item.parent and item.parent ~= "" then
-      local cmd = string.format("git diff --name-only %s %s 2>/dev/null", item.parent, item.branch)
+      local cmd = string.format("git diff --name-only %s...%s 2>/dev/null", item.parent, item.branch)
       local output = vim.fn.system(cmd):gsub("%s+$", "")
       local files = {}
       if output ~= "" then

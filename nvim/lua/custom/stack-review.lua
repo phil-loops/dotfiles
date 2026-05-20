@@ -26,18 +26,28 @@ local function resolve_rev(name)
   return GitRev(RevType.COMMIT, sha)
 end
 
+-- Resolve the merge-base of two refs to a GitRev(COMMIT, sha). Three-dot
+-- semantics: show only what `branch` added since it forked from `parent`, never
+-- commits that landed on `parent` afterward (else a stale base floods the
+-- review with upstream files that vanish on rebase).
+local function resolve_merge_base(a, b)
+  local sha = vim.fn.system(string.format("git merge-base %s %s 2>/dev/null", a, b)):gsub("%s+$", "")
+  if vim.v.shell_error ~= 0 or sha == "" then return nil end
+  return GitRev(RevType.COMMIT, sha)
+end
+
 -- Swap the current diffview's range without closing/reopening
 local function swap_diffview_range(parent, branch)
   local view = diffview_lib.get_current_view()
   if not view then return false end
 
-  local left = resolve_rev(parent)
+  local left = resolve_merge_base(parent, branch) or resolve_rev(parent)
   local right = resolve_rev(branch)
   if not left or not right then return false end
 
   view.left = left
   view.right = right
-  view.rev_arg = parent .. ".." .. branch
+  view.rev_arg = parent .. "..." .. branch
   if view.panel then
     view.panel.rev_pretty_name = view.adapter:rev_to_pretty_string(left, right)
   end
@@ -266,12 +276,10 @@ function M.open_review(idx)
   update_panel()
   refresh_all()
 
-  -- If we triggered this from the branch panel (e.g. <leader>E then <CR>/]b),
-  -- hop into the diffview file panel so its keymaps (<tab> = next file) work.
-  if panel_win and vim.api.nvim_get_current_win() == panel_win then
-    local fp_win = find_diffview_file_panel_win()
-    if fp_win then vim.api.nvim_set_current_win(fp_win) end
-  end
+  -- Hop into the diffview file panel so its keymaps (<tab> = next file) work,
+  -- regardless of where we triggered the review from.
+  local fp_win = find_diffview_file_panel_win()
+  if fp_win then vim.api.nvim_set_current_win(fp_win) end
 
   local bsum = blessed.summary(item.branch, item.parent or "")
   local extra = ""
@@ -369,7 +377,7 @@ function M.setup(data)
     local results = {}
     for ci, item in ipairs(chain) do
       if not item.parent or item.parent == "" then goto continue end
-      local diff_lines = vim.fn.systemlist(string.format("git diff --name-only %s..%s 2>/dev/null", item.parent, item.branch))
+      local diff_lines = vim.fn.systemlist(string.format("git diff --name-only %s...%s 2>/dev/null", item.parent, item.branch))
       if vim.v.shell_error == 0 and diff_lines then
         local known = {}
         for _, fp in ipairs(blessed.file_list(item.branch)) do

@@ -59,7 +59,7 @@ function M.analyze(chain)
 
   for i, item in ipairs(chain) do
     if item.parent and item.parent ~= "" then
-      local cmd = string.format("git diff %s..%s 2>/dev/null", item.parent, item.branch)
+      local cmd = string.format("git diff %s...%s 2>/dev/null", item.parent, item.branch)
       local output = vim.fn.system(cmd)
       local adds, removes = parse_diff(output)
       table.insert(branch_diffs, {
