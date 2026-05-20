@@ -218,17 +218,20 @@ wt() {
         return
     fi
 
-    # Single-rev (no .../HEAD) so the diff includes UNCOMMITTED working-tree changes,
-    # not just committed range — the common case when inspecting a tree mid-edit.
+    # Diff against the MERGE-BASE with base (not base's tip), so a branch that's
+    # merely behind main doesn't show all of main's advancement as "changes".
+    # Preview/diff against $(merge-base) includes uncommitted working-tree changes.
     local selection=$(echo "$worktrees" \
         | fzf --delimiter='\t' --with-nth=2 \
-            --preview "git -C {1} diff ${base} --stat 2>/dev/null || echo 'no diff vs ${base}'")
+            --preview "mb=\$(git -C {1} merge-base ${base} HEAD 2>/dev/null); git -C {1} diff \$mb --stat 2>/dev/null || echo 'no diff vs ${base}'")
 
     [[ -z "$selection" ]] && return
 
     local wt_path=$(echo "$selection" | cut -f1)
 
-    (cd "$wt_path" && nvim -c "DiffviewOpen ${base}")
+    # --imply-local: right side of the A...B range shows the local working tree
+    # (incl. uncommitted), while A is the merge-base.
+    (cd "$wt_path" && nvim -c "DiffviewOpen ${base}...HEAD --imply-local")
 }
 
 # Swap git remotes (toggle origin between phil-loops and loops-so)
