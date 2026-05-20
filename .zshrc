@@ -218,17 +218,17 @@ wt() {
         return
     fi
 
+    # Single-rev (no .../HEAD) so the diff includes UNCOMMITTED working-tree changes,
+    # not just committed range — the common case when inspecting a tree mid-edit.
     local selection=$(echo "$worktrees" \
         | fzf --delimiter='\t' --with-nth=2 \
-            --preview "git -C {1} diff ${base}...HEAD --stat 2>/dev/null || echo 'no diff vs ${base}'")
+            --preview "git -C {1} diff ${base} --stat 2>/dev/null || echo 'no diff vs ${base}'")
 
     [[ -z "$selection" ]] && return
 
     local wt_path=$(echo "$selection" | cut -f1)
-    local wt_branch=$(echo "$selection" | cut -f2)
 
-    (cd "$wt_path" && nvim -c "DiffviewOpen ${base}...HEAD" \
-        -c "lua require('custom.branch-review').setup({branch='${wt_branch}', base='${base}'})")
+    (cd "$wt_path" && nvim -c "DiffviewOpen ${base}")
 }
 
 # Swap git remotes (toggle origin between phil-loops and loops-so)
