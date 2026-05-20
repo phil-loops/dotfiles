@@ -118,5 +118,5 @@ done
 lua_chain+="}"
 
 # Launch nvim with DiffviewOpen, then setup stack-review module
-nvim -c "DiffviewOpen ${PARENT}..${BRANCH}" \
+nvim -c "DiffviewOpen ${PARENT}...${BRANCH}" \
      -c "lua require('custom.stack-review').setup({chain=${lua_chain},start_idx=${start_idx}})"

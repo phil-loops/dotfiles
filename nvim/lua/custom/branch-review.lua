@@ -32,7 +32,7 @@ function M.setup(data)
   -- Build unreviewed list for this single branch
   local function get_unreviewed()
     local results = {}
-    local lines = vim.fn.systemlist(string.format("git diff --name-only %s..%s 2>/dev/null", base_name, branch_name))
+    local lines = vim.fn.systemlist(string.format("git diff --name-only %s...%s 2>/dev/null", base_name, branch_name))
     if vim.v.shell_error ~= 0 then return results end
 
     local known = {}

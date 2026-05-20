@@ -25,7 +25,7 @@ if ! git rev-parse --verify "$BRANCH" &>/dev/null; then
 fi
 
 # Check there are actually changes
-DIFF_COUNT=$(git diff --name-only "${BASE}..${BRANCH}" 2>/dev/null | wc -l | tr -d ' ')
+DIFF_COUNT=$(git diff --name-only "${BASE}...${BRANCH}" 2>/dev/null | wc -l | tr -d ' ')
 if [[ "$DIFF_COUNT" -eq 0 ]]; then
   echo "No changes between $BASE and $BRANCH"
   exit 0
@@ -34,5 +34,5 @@ fi
 echo "Reviewing $BRANCH against $BASE ($DIFF_COUNT files changed)"
 
 # Launch nvim with DiffviewOpen, then setup branch-review module
-nvim -c "DiffviewOpen ${BASE}..${BRANCH}" \
+nvim -c "DiffviewOpen ${BASE}...${BRANCH}" \
      -c "lua require('custom.branch-review').setup({branch='${BRANCH}', base='${BASE}'})"
