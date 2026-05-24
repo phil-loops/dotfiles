@@ -1,8 +1,19 @@
 #!/bin/zsh
 # Stack Review - opens nvim with diffview for reviewing stacked branches
 # Reads parent pointers from stack-branch.<name>.parent
+# Usage: loops stack review [<branch>|<project>] [--html|-H]
 
 set -e
+
+HTML=0
+ARGS=()
+for arg in "$@"; do
+  case "$arg" in
+    --html|-H) HTML=1 ;;
+    *) ARGS+=("$arg") ;;
+  esac
+done
+set -- "${ARGS[@]}"
 
 # Branch to review: explicit arg, else current branch.
 TARGET="${1:-$(git branch --show-current 2>/dev/null)}"
@@ -116,6 +127,23 @@ for i in {1..${#chain[@]}}; do
   lua_chain+="{branch=\"$branch\",parent=\"$p\"}"
 done
 lua_chain+="}"
+
+if (( HTML )); then
+  files=()
+  for i in {2..${#chain[@]}}; do
+    parent="${chain[$((i-1))]}"
+    child="${chain[$i]}"
+    slug="${child//\//-}"
+    patch="/tmp/stack-review-${i}-${slug}.patch"
+    html_file="/tmp/stack-review-${i}-${slug}.html"
+    git diff "${parent}...${child}" > "$patch"
+    npx --yes diff2html-cli -i file -s side -F "$html_file" -- "$patch" >/dev/null
+    files+=("$html_file")
+    echo "→ ${parent} → ${child}: $html_file"
+  done
+  [[ ${#files[@]} -gt 0 ]] && open "${files[@]}"
+  exit 0
+fi
 
 # Launch nvim with DiffviewOpen, then setup stack-review module
 nvim -c "DiffviewOpen ${PARENT}...${BRANCH}" \
