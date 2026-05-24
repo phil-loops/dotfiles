@@ -40,11 +40,18 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Task                       | Command                                                     |
 | -------------------------- | ----------------------------------------------------------- |
 | Create child branch        | `git checkout <parent> && git checkout -b <name>`           |
-| View stack                 | `git log --graph --oneline <main>..HEAD` on the tip branch  |
+| Print stack as tree        | `stack-print [<tip>]` (walks `stack-branch.<name>.parent`)  |
+| Review stack in nvim       | `loops stack review [<branch>]`                             |
+| Review stack as HTML       | `loops stack review [<branch>] --html` (one tab per link)   |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
 | Create PR                  | `gh pr create --base <parent> --head <branch>`              |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
+
+## Reviewing changes
+
+- `loops stack review` — opens nvim diffview and steps through each branch's incremental diff (`parent...child`) in stack order. Add `--html` to render each link as a side-by-side HTML diff and open them all in browser tabs (useful when sharing or scanning quickly).
+- `wt [base-branch] [--html|-H]` — fzf-picks a sibling worktree and shows its full diff vs `base` (default `main`). Not stack-aware; use `loops stack review` for per-link stepping. `--html` mode renders one HTML and opens it.
 
 ## Stack hygiene
 
