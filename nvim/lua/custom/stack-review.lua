@@ -64,13 +64,23 @@ local function swap_diffview_range(parent, branch)
   view:update_files()
 
   -- After replacing the file list, view.cur_entry still points at a file from
-  -- the previous range — so select_next_entry (<Tab>) can't find it and no-ops.
-  -- update_files is async; defer the anchor so it runs after the new list
-  -- is populated.
+  -- the previous range. update_files is async; once the new list is populated,
+  -- explicitly open the first file so cur_entry is set and <Tab> has an anchor.
   view.cur_entry = nil
   vim.defer_fn(function()
-    pcall(function() require("diffview.actions").select_first_entry() end)
-  end, 100)
+    pcall(function()
+      local v = diffview_lib.get_current_view()
+      if not v then return end
+      local first = v.files and v.files.working and v.files.working[1]
+      if not first then return end
+      if type(v.set_file) == "function" then
+        v:set_file(first, false)
+      else
+        v.cur_entry = first
+        if v.panel and type(v.panel.render) == "function" then v.panel:render() end
+      end
+    end)
+  end, 150)
 
   return true
 end
