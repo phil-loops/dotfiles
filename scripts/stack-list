@@ -1,0 +1,71 @@
+#!/bin/zsh
+# Stack List - print all registered stack-projects in this repo, optionally fzf-pick.
+# Usage: loops stack list           # print
+#        loops stack list --pick    # print, prompt with fzf, echo chosen name
+#        loops stack list --names   # one name per line (for completion/scripts)
+
+set -e
+
+PICK=0
+NAMES_ONLY=0
+for arg in "$@"; do
+  case "$arg" in
+    --pick|-p) PICK=1 ;;
+    --names) NAMES_ONLY=1 ;;
+  esac
+done
+
+# Collect projects: name -> array of branches.
+typeset -A project_branches
+typeset -a project_order
+
+while IFS=' ' read -r key value; do
+  [[ -z "$key" ]] && continue
+  # key format: stack-project.<name>.branch
+  name="${key#stack-project.}"
+  name="${name%.branch}"
+  if [[ -z "${project_branches[$name]+_}" ]]; then
+    project_order+=("$name")
+    project_branches[$name]="$value"
+  else
+    project_branches[$name]+=$'\n'"$value"
+  fi
+done < <(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null || true)
+
+if (( ${#project_order[@]} == 0 )); then
+  echo "No stack-projects registered in this repo." >&2
+  echo "  (set with: git config --add stack-project.<name>.branch <branch>)" >&2
+  exit 1
+fi
+
+if (( NAMES_ONLY )); then
+  printf '%s\n' "${project_order[@]}"
+  exit 0
+fi
+
+if (( PICK )); then
+  # Build fzf input: one project per line, preview = its branch list.
+  chosen=$(
+    for name in "${project_order[@]}"; do
+      count=$(printf '%s\n' "${project_branches[$name]}" | wc -l | tr -d ' ')
+      printf '%s\t%s branch(es)\n' "$name" "$count"
+    done | fzf \
+      --with-nth=1,2 \
+      --delimiter=$'\t' \
+      --preview="echo {1} | xargs -I{} git config --get-all stack-project.{}.branch" \
+      --preview-window=right:60% \
+      --prompt="stack project> " \
+      --height=40% \
+      --reverse
+  ) || exit 130
+  echo "${chosen%%$'\t'*}"
+  exit 0
+fi
+
+# Default: pretty print.
+for name in "${project_order[@]}"; do
+  printf '\033[1m%s\033[0m\n' "$name"
+  while IFS= read -r b; do
+    [[ -n "$b" ]] && printf '  %s\n' "$b"
+  done <<<"${project_branches[$name]}"
+done
