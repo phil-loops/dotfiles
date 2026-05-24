@@ -45,32 +45,7 @@ local function swap_diffview_range(parent, branch)
   local right = resolve_rev(branch)
   if not left or not right then return false end
 
-  view.left = left
-  view.right = right
-  view.rev_arg = parent .. "..." .. branch
-  if view.panel then
-    view.panel.rev_pretty_name = view.adapter:rev_to_pretty_string(left, right)
-  end
-
-  -- Invalidate cached file entries so diffs are recomputed.
-  -- IMPORTANT: clear in place rather than reassigning. FileDict.sets holds
-  -- references to the original working/staged/conflicting tables; replacing
-  -- view.files.working with a new {} leaves sets pointing at the old table,
-  -- so FileDict:len() returns the stale count and DiffView:next_file's
-  -- `len() > 1` safeguard wrongly bails out after swapping into a new range.
-  if view.files then
-    for _, kind in ipairs({ "working", "staged", "conflicting" }) do
-      local t = view.files[kind]
-      if t then
-        for i = #t, 1, -1 do t[i] = nil end
-      end
-    end
-    -- Defensively rewire sets to the current tables in case anything else
-    -- broke the references (e.g. older versions of this code did so).
-    view.files.sets = { view.files.conflicting, view.files.working, view.files.staged }
-  end
-
-  view:update_files()
+  view:change_range(left, right, parent .. "..." .. branch)
   return true
 end
 
