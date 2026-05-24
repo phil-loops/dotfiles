@@ -194,6 +194,23 @@ _loops_pr_review() {
          -c "lua require('custom.branch-review').setup({branch='${pr_branch}', base='main'})"
 }
 
+# Print a stack as a tree, walking up `stack-branch.<name>.parent` from the tip.
+# Usage: stack-print [tip-branch]   (defaults to current branch)
+stack-print() {
+    local tip="${1:-$(git rev-parse --abbrev-ref HEAD)}"
+    local chain=() b="$tip"
+    while [[ -n "$b" && "$b" != "main" ]]; do
+        chain=("$b" "${chain[@]}")
+        b=$(git config --get "stack-branch.$b.parent")
+    done
+    printf 'main\n'
+    local depth=1
+    for b in "${chain[@]}"; do
+        printf '%*s└─ %s   (%s)\n' $((depth*2)) "" "$b" "$(git log -1 --format=%s "$b" 2>/dev/null | cut -c1-70)"
+        depth=$((depth+1))
+    done
+}
+
 # Inspect a sibling git worktree's diff without touching the current checkout.
 # Default: open in nvim (DiffviewOpen). --html: render as side-by-side HTML and open in the browser.
 # Usage: wt [base-branch] [--html|-H]   (base defaults to main)
