@@ -65,11 +65,26 @@ loops() {
             shift 2>/dev/null
             case "$subcmd" in
                 review)
+                    # No arg + current branch isn't a project member → fzf-pick.
+                    if (( $# == 0 )); then
+                        local cur=$(git branch --show-current 2>/dev/null)
+                        local in_project=$(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk -v b="$cur" '$2==b{print;exit}')
+                        if [[ -z "$in_project" ]]; then
+                            local picked=$(~/.dotfiles/scripts/stack-list --pick) || return $?
+                            [[ -z "$picked" ]] && return 130
+                            ~/.dotfiles/scripts/stack-review "$picked"
+                            return $?
+                        fi
+                    fi
                     ~/.dotfiles/scripts/stack-review "$@"
+                    ;;
+                list|ls)
+                    ~/.dotfiles/scripts/stack-list "$@"
                     ;;
                 *)
                     echo "loops stack commands:"
-                    echo "  loops stack review   - review stack in nvim diffview"
+                    echo "  loops stack review [project|branch]   review stack in nvim diffview"
+                    echo "  loops stack list                       list registered stack-projects"
                     ;;
             esac
             ;;
