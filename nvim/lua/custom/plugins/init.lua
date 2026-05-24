@@ -4,30 +4,13 @@ return {
     "phil-loops/diffview.nvim",
     branch = "stack-drift",
     cmd = { "DiffviewOpen", "DiffviewFileHistory", "DiffviewClose" },
-    opts = function()
-      local actions = require("diffview.actions")
-      return {
-        use_icons = false,
-        file_panel = {
-          listing_style = "tree",
-          tree_options = { flatten_dirs = false, folder_statuses = "always" },
-        },
-        keymaps = {
-          file_panel = {
-            { "n", "<Tab>",   actions.select_next_entry, { desc = "Open next file" } },
-            { "n", "<S-Tab>", actions.select_prev_entry, { desc = "Open prev file" } },
-            { "n", "<CR>",    actions.select_entry,     { desc = "Open selected file" } },
-            { "n", "o",       actions.select_entry,     { desc = "Open selected file" } },
-            { "n", "j",       actions.next_entry,       { desc = "Move cursor to next entry" } },
-            { "n", "k",       actions.prev_entry,       { desc = "Move cursor to prev entry" } },
-          },
-          view = {
-            { "n", "<Tab>",   actions.select_next_entry, { desc = "Open next file" } },
-            { "n", "<S-Tab>", actions.select_prev_entry, { desc = "Open prev file" } },
-          },
-        },
-      }
-    end,
+    opts = {
+      use_icons = false,
+      file_panel = {
+        listing_style = "tree",
+        tree_options = { flatten_dirs = false, folder_statuses = "always" },
+      },
+    },
   },
   {
     "folke/persistence.nvim",
