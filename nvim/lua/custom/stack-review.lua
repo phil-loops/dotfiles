@@ -277,8 +277,14 @@ function M.open_review(idx)
   refresh_all()
 
   -- Hop into the diffview file panel so its keymaps (<tab> = next file) work,
-  -- regardless of where we triggered the review from.
+  -- regardless of where we triggered the review from. If diffview launched
+  -- on a single-file range, the panel may not have been rendered — toggle it
+  -- open in that case so subsequent swaps to multi-file branches are navigable.
   local fp_win = find_diffview_file_panel_win()
+  if not fp_win then
+    pcall(vim.cmd, "DiffviewToggleFiles")
+    fp_win = find_diffview_file_panel_win()
+  end
   if fp_win then vim.api.nvim_set_current_win(fp_win) end
 
   local bsum = blessed.summary(item.branch, item.parent or "")
