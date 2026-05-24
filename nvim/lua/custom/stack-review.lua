@@ -52,36 +52,25 @@ local function swap_diffview_range(parent, branch)
     view.panel.rev_pretty_name = view.adapter:rev_to_pretty_string(left, right)
   end
 
-  -- Invalidate cached file entries so diffs are recomputed
+  -- Invalidate cached file entries so diffs are recomputed.
+  -- IMPORTANT: clear in place rather than reassigning. FileDict.sets holds
+  -- references to the original working/staged/conflicting tables; replacing
+  -- view.files.working with a new {} leaves sets pointing at the old table,
+  -- so FileDict:len() returns the stale count and DiffView:next_file's
+  -- `len() > 1` safeguard wrongly bails out after swapping into a new range.
   if view.files then
     for _, kind in ipairs({ "working", "staged", "conflicting" }) do
-      if view.files[kind] then
-        view.files[kind] = {}
+      local t = view.files[kind]
+      if t then
+        for i = #t, 1, -1 do t[i] = nil end
       end
     end
+    -- Defensively rewire sets to the current tables in case anything else
+    -- broke the references (e.g. older versions of this code did so).
+    view.files.sets = { view.files.conflicting, view.files.working, view.files.staged }
   end
 
   view:update_files()
-
-  -- After replacing the file list, view.cur_entry still points at a file from
-  -- the previous range. update_files is async; once the new list is populated,
-  -- explicitly open the first file so cur_entry is set and <Tab> has an anchor.
-  view.cur_entry = nil
-  vim.defer_fn(function()
-    pcall(function()
-      local v = diffview_lib.get_current_view()
-      if not v then return end
-      local first = v.files and v.files.working and v.files.working[1]
-      if not first then return end
-      if type(v.set_file) == "function" then
-        v:set_file(first, false)
-      else
-        v.cur_entry = first
-        if v.panel and type(v.panel.render) == "function" then v.panel:render() end
-      end
-    end)
-  end, 150)
-
   return true
 end
 
