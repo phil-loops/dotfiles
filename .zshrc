@@ -194,10 +194,19 @@ _loops_pr_review() {
          -c "lua require('custom.branch-review').setup({branch='${pr_branch}', base='main'})"
 }
 
-# Inspect a sibling git worktree's diff in nvim (read-only) without touching the current checkout.
-# Usage: wt [base-branch]   (base defaults to main)
+# Inspect a sibling git worktree's diff without touching the current checkout.
+# Default: open in nvim (DiffviewOpen). --html: render as side-by-side HTML and open in the browser.
+# Usage: wt [base-branch] [--html|-H]   (base defaults to main)
 wt() {
-    local base="${1:-main}"
+    local base="main"
+    local html=0
+    for arg in "$@"; do
+        case "$arg" in
+            --html|-H) html=1 ;;
+            *) base="$arg" ;;
+        esac
+    done
+
     local current_top=$(git rev-parse --show-toplevel 2>/dev/null)
     if [[ -z "$current_top" ]]; then
         echo "Not in a git repository"
@@ -228,6 +237,18 @@ wt() {
     [[ -z "$selection" ]] && return
 
     local wt_path=$(echo "$selection" | cut -f1)
+    local wt_branch=$(echo "$selection" | cut -f2)
+
+    if (( html )); then
+        local slug=$(echo "$wt_branch" | tr '/' '-')
+        local patch="/tmp/wt-${slug}.patch"
+        local html_file="/tmp/wt-${slug}.html"
+        (cd "$wt_path" && git diff "${base}...HEAD" > "$patch") || return
+        npx --yes diff2html-cli -i file -s side -F "$html_file" -- "$patch" >/dev/null || return
+        open "$html_file"
+        echo "→ $html_file"
+        return
+    fi
 
     # --imply-local: right side of the A...B range shows the local working tree
     # (incl. uncommitted), while A is the merge-base.
