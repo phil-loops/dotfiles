@@ -213,17 +213,14 @@ stack-print() {
 
 # Inspect a sibling git worktree's diff without touching the current checkout.
 # Default: open in nvim (DiffviewOpen). --html: render as side-by-side HTML and open in the browser.
-# --stack: walk the picked branch's stack-branch.<name>.parent chain and step through each
-#          branch's incremental diff (browser tabs in --html mode, sequential nvim otherwise).
-# Usage: wt [base-branch] [--html|-H] [--stack|-s]   (base defaults to main)
+# Usage: wt [base-branch] [--html|-H]   (base defaults to main)
+# For stack-aware review, use `loops stack review` (which also accepts --html).
 wt() {
     local base="main"
     local html=0
-    local stack=0
     for arg in "$@"; do
         case "$arg" in
             --html|-H) html=1 ;;
-            --stack|-s) stack=1 ;;
             *) base="$arg" ;;
         esac
     done
@@ -259,41 +256,6 @@ wt() {
 
     local wt_path=$(echo "$selection" | cut -f1)
     local wt_branch=$(echo "$selection" | cut -f2)
-
-    if (( stack )); then
-        # Walk up via stack-branch.<name>.parent until we hit base (or nothing).
-        local chain=("$wt_branch") b="$wt_branch"
-        while true; do
-            b=$(git -C "$wt_path" config --get "stack-branch.$b.parent")
-            [[ -z "$b" || "$b" == "$base" ]] && break
-            chain=("$b" "${chain[@]}")
-        done
-
-        if (( html )); then
-            local files=() i=1 parent="$base"
-            for child in "${chain[@]}"; do
-                local slug=$(echo "$child" | tr '/' '-')
-                local patch="/tmp/wt-stack-${i}-${slug}.patch"
-                local html_file="/tmp/wt-stack-${i}-${slug}.html"
-                (cd "$wt_path" && git diff "${parent}...${child}" > "$patch") || return
-                npx --yes diff2html-cli -i file -s side -F "$html_file" -- "$patch" >/dev/null || return
-                files+=("$html_file")
-                echo "→ ${i}. ${parent} → ${child}: $html_file"
-                parent="$child"
-                i=$((i+1))
-            done
-            open "${files[@]}"
-            return
-        fi
-
-        local parent="$base"
-        for child in "${chain[@]}"; do
-            echo "→ ${parent} → ${child}  (:q to advance)"
-            (cd "$wt_path" && nvim -c "DiffviewOpen ${parent}...${child} --imply-local")
-            parent="$child"
-        done
-        return
-    fi
 
     if (( html )); then
         local slug=$(echo "$wt_branch" | tr '/' '-')
