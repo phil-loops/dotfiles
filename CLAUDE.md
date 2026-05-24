@@ -50,8 +50,15 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 
 ## Reviewing changes
 
-- `loops stack review` — opens nvim diffview and steps through each branch's incremental diff (`parent...child`) in stack order. Add `--html` to render each link as a side-by-side HTML diff and open them all in browser tabs (useful when sharing or scanning quickly).
-- `wt [base-branch] [--html|-H]` — fzf-picks a sibling worktree and shows its full diff vs `base` (default `main`). Not stack-aware; use `loops stack review` for per-link stepping. `--html` mode renders one HTML and opens it.
+Two tools, different jobs — don't conflate them:
+
+- **`loops stack review [<branch>]`** — solves the **stack-stepping** problem. Walks `stack-branch.<name>.parent` and shows each branch's incremental diff (`parent...child`) one link at a time in nvim diffview. Add `--html` to render each link as a side-by-side HTML and open them all in browser tabs. Doesn't know worktrees exist.
+- **`wt [base-branch] [--html|-H]`** — solves the **worktree-discovery** problem. fzf-picks across sibling worktrees and shows the picked branch's *full* cumulative diff vs `base` (default `main`), including uncommitted working-tree changes (`--imply-local`). Not stack-aware — a 6-branch stack shows as one giant diff.
+
+Decision rule:
+- Branch is a stack, you know which one → `loops stack review`
+- Single-branch feature, or scanning across many worktrees → `wt`
+- Stacked branch lives in a sibling worktree → `cd` into it, then `loops stack review` (use both)
 
 ## Stack hygiene
 
