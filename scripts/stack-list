@@ -1,6 +1,7 @@
 #!/bin/zsh
 # Stack List - print all registered stack-projects in this repo, optionally fzf-pick.
-# Usage: loops stack list                 # pretty-print
+# Usage: loops stack list                 # pretty-print all projects
+#        loops stack list <project>       # print dependency tree for one project
 #        loops stack list --pick          # fzf-pick, open in stack review
 #        loops stack list --pick --echo   # fzf-pick, print chosen name (no open)
 #        loops stack list --names         # one name per line (for completion/scripts)
@@ -11,13 +12,15 @@ set -e
 PICK=0
 NAMES_ONLY=0
 ECHO_ONLY=0
+TARGET=""
 FORWARD=()
 for arg in "$@"; do
   case "$arg" in
     --pick|-p) PICK=1 ;;
     --names) NAMES_ONLY=1 ;;
     --echo) ECHO_ONLY=1 ;;
-    *) FORWARD+=("$arg") ;;
+    --*) FORWARD+=("$arg") ;;
+    *) [[ -z "$TARGET" ]] && TARGET="$arg" || FORWARD+=("$arg") ;;
   esac
 done
 
@@ -46,6 +49,57 @@ fi
 
 if (( NAMES_ONLY )); then
   printf '%s\n' "${project_order[@]}"
+  exit 0
+fi
+
+# Single-project tree view.
+if [[ -n "$TARGET" ]]; then
+  if [[ -z "${project_branches[$TARGET]+_}" ]]; then
+    echo "No stack-project '$TARGET' registered." >&2
+    echo "Known: ${project_order[*]}" >&2
+    exit 1
+  fi
+  current_branch=$(git branch --show-current 2>/dev/null)
+  typeset -A is_member parent_of
+  typeset -a members
+  while IFS= read -r b; do
+    [[ -z "$b" ]] && continue
+    members+=("$b")
+    is_member[$b]=1
+    p=$(git config "stack-branch.${b}.parent" 2>/dev/null || true)
+    parent_of[$b]="$p"
+  done <<<"${project_branches[$TARGET]}"
+
+  # Find roots: members whose parent is not a project member (typically `main`).
+  typeset -a roots
+  for b in "${members[@]}"; do
+    p="${parent_of[$b]}"
+    if [[ -z "${is_member[$p]+_}" ]]; then roots+=("$b"); fi
+  done
+
+  print_subtree() {
+    local b="$1" indent="$2" marker="  "
+    [[ "$b" == "$current_branch" ]] && marker="* "
+    # children: project members whose parent == b
+    local children=()
+    for cand in "${members[@]}"; do
+      [[ "${parent_of[$cand]}" == "$b" ]] && children+=("$cand")
+    done
+    local child_count=${#children[@]}
+    local leaf_tag=""
+    (( child_count == 0 )) && leaf_tag=" \033[2m(leaf)\033[0m"
+    printf "%s%s\033[1m%s\033[0m%b\n" "$indent" "$marker" "$b" "$leaf_tag"
+    for c in "${children[@]}"; do
+      print_subtree "$c" "  $indent"
+    done
+  }
+
+  printf '\033[1m%s\033[0m\n' "$TARGET"
+  for r in "${roots[@]}"; do
+    parent_label="${parent_of[$r]:-?}"
+    printf '  \033[2m(on %s)\033[0m\n' "$parent_label"
+    print_subtree "$r" "  "
+  done
   exit 0
 fi
 
