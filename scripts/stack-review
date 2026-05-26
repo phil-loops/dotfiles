@@ -31,7 +31,8 @@ while IFS= read -r member; do
 done < <(git config --get-all "stack-project.${TARGET}.branch" 2>/dev/null || true)
 
 if (( ${#project_members[@]} > 0 )); then
-  tip=""
+  # Collect all leaves (project members with no project-member child).
+  typeset -a tips
   for candidate in "${project_members[@]}"; do
     has_child=0
     for other in "${project_members[@]}"; do
@@ -39,14 +40,19 @@ if (( ${#project_members[@]} > 0 )); then
       other_parent=$(git config "stack-branch.${other}.parent" 2>/dev/null)
       if [[ "$other_parent" == "$candidate" ]]; then has_child=1; break; fi
     done
-    if (( has_child == 0 )); then tip="$candidate"; break; fi
+    (( has_child == 0 )) && tips+=("$candidate")
   done
-  if [[ -z "$tip" ]]; then
+  if (( ${#tips[@]} == 0 )); then
     echo "Project '${TARGET}' has no tip (cycle or empty?)"
     exit 1
+  elif (( ${#tips[@]} == 1 )); then
+    BRANCH="${tips[1]}"
+    echo "Project '${TARGET}' → tip ${BRANCH}"
+  else
+    echo "Project '${TARGET}' has ${#tips[@]} leaves (non-linear stack); pick one to walk:" >&2
+    BRANCH=$(printf '%s\n' "${tips[@]}" | fzf --prompt="leaf to walk> " --height=40% --reverse) || exit 130
+    [[ -z "$BRANCH" ]] && exit 130
   fi
-  echo "Project '${TARGET}' → tip ${tip}"
-  BRANCH="$tip"
 else
   BRANCH="$TARGET"
 fi
