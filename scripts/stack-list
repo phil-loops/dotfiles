@@ -85,10 +85,7 @@ if [[ -n "$TARGET" ]]; then
     for cand in "${members[@]}"; do
       [[ "${parent_of[$cand]}" == "$b" ]] && children+=("$cand")
     done
-    local child_count=${#children[@]}
-    local leaf_tag=""
-    (( child_count == 0 )) && leaf_tag=" \033[2m(leaf)\033[0m"
-    printf "%s%s\033[1m%s\033[0m%b\n" "$indent" "$marker" "$b" "$leaf_tag"
+    printf "%s%s\033[1m%s\033[0m\n" "$indent" "$marker" "$b"
     for c in "${children[@]}"; do
       print_subtree "$c" "  $indent"
     done

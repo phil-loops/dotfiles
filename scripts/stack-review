@@ -23,36 +23,27 @@ if [[ -z "$TARGET" ]]; then
   exit 1
 fi
 
-# If TARGET names a registered stack-project, resolve to that project's tip.
-# Tip = the project branch that no other project branch has as parent.
+# If TARGET names a registered stack-project, we load ALL its branches into the
+# panel (tree view). Otherwise treat it as a single branch and walk its
+# ancestors+descendants. PROJECT_MODE controls which.
 typeset -a project_members
 while IFS= read -r member; do
   [[ -n "$member" ]] && project_members+=("$member")
 done < <(git config --get-all "stack-project.${TARGET}.branch" 2>/dev/null || true)
 
+PROJECT_MODE=0
 if (( ${#project_members[@]} > 0 )); then
-  # Collect all leaves (project members with no project-member child).
-  typeset -a tips
-  for candidate in "${project_members[@]}"; do
-    has_child=0
-    for other in "${project_members[@]}"; do
-      [[ "$other" == "$candidate" ]] && continue
-      other_parent=$(git config "stack-branch.${other}.parent" 2>/dev/null)
-      if [[ "$other_parent" == "$candidate" ]]; then has_child=1; break; fi
-    done
-    (( has_child == 0 )) && tips+=("$candidate")
+  PROJECT_MODE=1
+  PROJECT_NAME="$TARGET"
+  # BRANCH is just used for the initial DiffviewOpen and start_idx; the panel
+  # will list every project member. Pick the first member with a parent
+  # (i.e. the first non-root) so we open on something reviewable.
+  BRANCH=""
+  for m in "${project_members[@]}"; do
+    p=$(git config "stack-branch.${m}.parent" 2>/dev/null || true)
+    if [[ -n "$p" ]]; then BRANCH="$m"; break; fi
   done
-  if (( ${#tips[@]} == 0 )); then
-    echo "Project '${TARGET}' has no tip (cycle or empty?)"
-    exit 1
-  elif (( ${#tips[@]} == 1 )); then
-    BRANCH="${tips[1]}"
-    echo "Project '${TARGET}' → tip ${BRANCH}"
-  else
-    echo "Project '${TARGET}' has ${#tips[@]} leaves (non-linear stack); pick one to walk:" >&2
-    BRANCH=$(printf '%s\n' "${tips[@]}" | fzf --prompt="leaf to walk> " --height=40% --reverse) || exit 130
-    [[ -z "$BRANCH" ]] && exit 130
-  fi
+  [[ -z "$BRANCH" ]] && BRANCH="${project_members[1]}"
 else
   BRANCH="$TARGET"
 fi
@@ -92,26 +83,67 @@ for branch in "${(@k)parents}"; do
   children[$parent]+="$branch "
 done
 
-# Walk up from current branch to main
+# Build the ordered chain. Two modes:
+#   PROJECT_MODE=1: include every project member, DFS topologically from project
+#     roots; depth tracked per branch.
+#   single-branch:  walk up to main from BRANCH, then DFS descendants (just that
+#     subtree); depth tracked too.
 chain=()
-current="$BRANCH"
-while [[ -n "$current" ]] && [[ "$current" != "$MAIN_BRANCH" ]]; do
-  chain=("$current" "${chain[@]}")
-  current="${parents[$current]}"
-done
-chain=("$MAIN_BRANCH" "${chain[@]}")
+typeset -A depth_of
 
-# Walk down to find descendants of current branch
-find_descendants() {
-  local branch="$1"
-  for child in ${(s: :)children[$branch]}; do
-    chain+=("$child")
-    find_descendants "$child"
+if (( PROJECT_MODE )); then
+  # Determine which members are "project roots" (parent not in project set).
+  typeset -A is_member
+  for m in "${project_members[@]}"; do is_member[$m]=1; done
+
+  typeset -a project_roots
+  for m in "${project_members[@]}"; do
+    p="${parents[$m]:-}"
+    [[ -z "${is_member[$p]:-}" ]] && project_roots+=("$m")
   done
-}
-find_descendants "$BRANCH"
 
-# Find current branch index (1-based for lua)
+  # Start the chain with MAIN_BRANCH at depth 0 (read-only base).
+  chain+=("$MAIN_BRANCH"); depth_of[$MAIN_BRANCH]=0
+
+  # DFS visit, in `git config --get-all` order (preserves user's intent).
+  visit() {
+    local b="$1" d="$2"
+    chain+=("$b"); depth_of[$b]=$d
+    for child in ${(s: :)children[$b]}; do
+      [[ -n "${is_member[$child]:-}" ]] && visit "$child" $((d + 1))
+    done
+  }
+  for r in "${project_roots[@]}"; do
+    visit "$r" 1
+  done
+else
+  # Single-branch mode: walk up to main.
+  ancestors=()
+  current="$BRANCH"
+  while [[ -n "$current" ]] && [[ "$current" != "$MAIN_BRANCH" ]]; do
+    ancestors=("$current" "${ancestors[@]}")
+    current="${parents[$current]:-}"
+  done
+  chain+=("$MAIN_BRANCH"); depth_of[$MAIN_BRANCH]=0
+  d=1
+  for a in "${ancestors[@]}"; do
+    chain+=("$a"); depth_of[$a]=$d
+    d=$((d + 1))
+  done
+  # Plus descendants of BRANCH.
+  d_descend=${depth_of[$BRANCH]}
+  find_descendants() {
+    local b="$1" d="$2"
+    for child in ${(s: :)children[$b]}; do
+      chain+=("$child"); depth_of[$child]=$d
+      find_descendants "$child" $((d + 1))
+    done
+  }
+  find_descendants "$BRANCH" $((d_descend + 1))
+fi
+
+# Find start_idx (1-based for lua) — first non-root member in project mode,
+# else BRANCH.
 start_idx=1
 for i in {1..${#chain[@]}}; do
   if [[ "${chain[$i]}" = "$BRANCH" ]]; then
@@ -120,17 +152,19 @@ for i in {1..${#chain[@]}}; do
   fi
 done
 
-# Build chain as lua table string
+# Build lua chain: use REAL parents from stack-branch.<x>.parent, never array
+# position (which lies on non-linear stacks).
 lua_chain="{"
 for i in {1..${#chain[@]}}; do
   branch="${chain[$i]}"
-  if [[ $i -eq 1 ]]; then
+  if [[ "$branch" = "$MAIN_BRANCH" ]]; then
     p=""
   else
-    p="${chain[$((i-1))]}"
+    p="${parents[$branch]:-}"
   fi
+  d="${depth_of[$branch]:-0}"
   [[ $i -gt 1 ]] && lua_chain+=","
-  lua_chain+="{branch=\"$branch\",parent=\"$p\"}"
+  lua_chain+="{branch=\"$branch\",parent=\"$p\",depth=${d}}"
 done
 lua_chain+="}"
 
