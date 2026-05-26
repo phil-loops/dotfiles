@@ -85,6 +85,7 @@ loops() {
                     echo "loops stack commands:"
                     echo "  loops stack review [project|branch]   review stack in nvim diffview"
                     echo "  loops stack list                       list registered stack-projects"
+                    echo "  loops stack list --pick                fzf-pick a stack and open in review"
                     ;;
             esac
             ;;

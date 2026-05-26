@@ -1,17 +1,23 @@
 #!/bin/zsh
 # Stack List - print all registered stack-projects in this repo, optionally fzf-pick.
-# Usage: loops stack list           # print
-#        loops stack list --pick    # print, prompt with fzf, echo chosen name
-#        loops stack list --names   # one name per line (for completion/scripts)
+# Usage: loops stack list                 # pretty-print
+#        loops stack list --pick          # fzf-pick, open in stack review
+#        loops stack list --pick --echo   # fzf-pick, print chosen name (no open)
+#        loops stack list --names         # one name per line (for completion/scripts)
+# Any extra args (e.g. --html) after --pick are forwarded to `loops stack review`.
 
 set -e
 
 PICK=0
 NAMES_ONLY=0
+ECHO_ONLY=0
+FORWARD=()
 for arg in "$@"; do
   case "$arg" in
     --pick|-p) PICK=1 ;;
     --names) NAMES_ONLY=1 ;;
+    --echo) ECHO_ONLY=1 ;;
+    *) FORWARD+=("$arg") ;;
   esac
 done
 
@@ -58,8 +64,12 @@ if (( PICK )); then
       --height=40% \
       --reverse
   ) || exit 130
-  echo "${chosen%%$'\t'*}"
-  exit 0
+  name="${chosen%%$'\t'*}"
+  if (( ECHO_ONLY )); then
+    echo "$name"
+    exit 0
+  fi
+  exec ~/.dotfiles/scripts/stack-review "$name" "${FORWARD[@]}"
 fi
 
 # Default: pretty print.
