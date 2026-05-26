@@ -6,10 +6,12 @@
 set -e
 
 HTML=0
+PRINT_CHAIN=0
 ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --html|-H) HTML=1 ;;
+    --print-chain) PRINT_CHAIN=1 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
@@ -253,6 +255,13 @@ EOF
   exit 0
 fi
 
-# Launch nvim with DiffviewOpen, then setup stack-review module
+# --print-chain: emit just the lua chain (for nvim's gr refresh to re-call).
+if (( PRINT_CHAIN )); then
+  echo "${lua_chain}"
+  exit 0
+fi
+
+# Launch nvim with DiffviewOpen, then setup stack-review module. Pass TARGET so
+# gr can call back with --print-chain to refresh in the same mode.
 nvim -c "DiffviewOpen ${PARENT}...${BRANCH}" \
-     -c "lua require('custom.stack-review').setup({chain=${lua_chain},start_idx=${start_idx}})"
+     -c "lua require('custom.stack-review').setup({chain=${lua_chain},start_idx=${start_idx},target=\"${TARGET}\"})"
