@@ -74,6 +74,7 @@ local function update_panel()
   local summaries = {}
   for i, item in ipairs(chain) do
     local marker = (i == current_idx) and " ◀" or ""
+    local indent = string.rep("  ", item.depth or 0)
     local prefix = (i == current_idx) and "▶ " or "  "
     local short_name = item.branch:gsub("goals%-v%d+%-", "")
 
@@ -106,7 +107,7 @@ local function update_panel()
       suffix = string.format(" ~%d", cc)
     end
 
-    table.insert(lines, string.format("%s%s%s%s%s%s", prefix, bicon, short_name, bcount, suffix, marker))
+    table.insert(lines, string.format("%s%s%s%s%s%s%s", indent, prefix, bicon, short_name, bcount, suffix, marker))
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
