@@ -152,6 +152,22 @@ for i in {1..${#chain[@]}}; do
   fi
 done
 
+# In project mode, identify leaves (members with no project-member child) and
+# flag them for the panel — they get a → arrow showing the virtual edge to the
+# feature node, which is appended below as a virtual entry.
+typeset -A is_leaf
+if (( PROJECT_MODE )); then
+  for m in "${project_members[@]}"; do
+    has_child=0
+    for other in "${project_members[@]}"; do
+      [[ "$other" == "$m" ]] && continue
+      op="${parents[$other]:-}"
+      if [[ "$op" == "$m" ]]; then has_child=1; break; fi
+    done
+    (( has_child == 0 )) && is_leaf[$m]=1
+  done
+fi
+
 # Build lua chain: use REAL parents from stack-branch.<x>.parent, never array
 # position (which lies on non-linear stacks).
 lua_chain="{"
@@ -163,9 +179,18 @@ for i in {1..${#chain[@]}}; do
     p="${parents[$branch]:-}"
   fi
   d="${depth_of[$branch]:-0}"
+  leaf_flag="false"
+  [[ -n "${is_leaf[$branch]:-}" ]] && leaf_flag="true"
   [[ $i -gt 1 ]] && lua_chain+=","
-  lua_chain+="{branch=\"$branch\",parent=\"$p\",depth=${d}}"
+  lua_chain+="{branch=\"$branch\",parent=\"$p\",depth=${d},is_leaf=${leaf_flag}}"
 done
+
+# Append virtual feature node in project mode.
+if (( PROJECT_MODE )); then
+  feature_label="[${PROJECT_NAME} — integrated]"
+  lua_chain+=",{branch=\"${feature_label}\",parent=\"${MAIN_BRANCH}\",depth=0,is_feature=true,project_name=\"${PROJECT_NAME}\"}"
+fi
+
 lua_chain+="}"
 
 if (( HTML )); then

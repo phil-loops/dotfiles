@@ -81,11 +81,16 @@ loops() {
                 list|ls)
                     ~/.dotfiles/scripts/stack-list "$@"
                     ;;
+                integrate)
+                    ~/.dotfiles/scripts/stack-integrate "$@"
+                    ;;
                 *)
                     echo "loops stack commands:"
                     echo "  loops stack review [project|branch]   review stack in nvim diffview"
                     echo "  loops stack list                       list registered stack-projects"
                     echo "  loops stack list --pick                fzf-pick a stack and open in review"
+                    echo "  loops stack integrate <project>        build virtual integration ref (octopus of leaves)"
+                    echo "  loops stack integrate <project> --check  exit 1 if leaves conflict"
                     ;;
             esac
             ;;

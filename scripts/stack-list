@@ -97,6 +97,8 @@ if [[ -n "$TARGET" ]]; then
     printf '  \033[2m(on %s)\033[0m\n' "$parent_label"
     print_subtree "$r" "  "
   done
+  # Virtual feature node — what main looks like when the whole project ships.
+  printf '  \033[2m└─→\033[0m \033[1;36m[%s — integrated]\033[0m \033[2m(virtual)\033[0m\n' "$TARGET"
   exit 0
 fi
 

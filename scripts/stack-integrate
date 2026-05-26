@@ -1,0 +1,156 @@
+#!/bin/zsh
+# Stack Integrate - build an ephemeral integration ref that octopus-merges all
+# leaves of a stack-project on top of main. Represents the virtual "feature"
+# node: what main looks like when the whole project ships.
+#
+# Usage: loops stack integrate <project>            # build, print ref name
+#        loops stack integrate <project> --check    # exit 0 if clean, 1 if conflicts
+#        loops stack integrate --all                # build for every project
+#
+# Ref name: refs/stack/<project>-integration  (under refs/stack/, not refs/heads/
+# — invisible to `git branch`, ephemeral, never pushed). Refreshed on every call.
+#
+# On conflict, exits 1 and prints which leaves conflict. Caller can then review
+# leaves individually instead.
+
+set -e
+
+MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
+CHECK_ONLY=0
+ALL=0
+PROJECT=""
+for arg in "$@"; do
+  case "$arg" in
+    --check) CHECK_ONLY=1 ;;
+    --all) ALL=1 ;;
+    --*) echo "unknown flag: $arg" >&2; exit 2 ;;
+    *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
+  esac
+done
+
+build_integration() {
+  local project="$1"
+
+  # Collect project members.
+  local -a members
+  while IFS= read -r m; do
+    [[ -n "$m" ]] && members+=("$m")
+  done < <(git config --get-all "stack-project.${project}.branch" 2>/dev/null || true)
+
+  if (( ${#members[@]} == 0 )); then
+    echo "no such project: $project" >&2
+    return 2
+  fi
+
+  # Build is_member lookup.
+  local -A is_member
+  for m in "${members[@]}"; do is_member[$m]=1; done
+
+  # Leaves = project members with no project-member child.
+  local -a leaves
+  for m in "${members[@]}"; do
+    local has_child=0
+    for other in "${members[@]}"; do
+      [[ "$other" == "$m" ]] && continue
+      local op=$(git config "stack-branch.${other}.parent" 2>/dev/null || true)
+      if [[ "$op" == "$m" ]]; then has_child=1; break; fi
+    done
+    (( has_child == 0 )) && leaves+=("$m")
+  done
+
+  if (( ${#leaves[@]} == 0 )); then
+    echo "$project: no leaves (cycle in stack metadata?)" >&2
+    return 2
+  fi
+
+  local ref="refs/stack/${project}-integration"
+
+  # Single leaf: integration ref = leaf tip itself. No merge needed.
+  if (( ${#leaves[@]} == 1 )); then
+    git update-ref "$ref" "refs/heads/${leaves[1]}"
+    if (( CHECK_ONLY )); then return 0; fi
+    echo "$ref"
+    return 0
+  fi
+
+  # Multiple leaves: octopus merge them on top of main.
+  # Done in a temp worktree to avoid disturbing user's checkout. Worktree at
+  # detached HEAD on main; we merge leaves in, then capture the resulting tree.
+  local repo_root=$(git rev-parse --show-toplevel)
+  local tmp_wt=$(mktemp -d -t stack-integrate-XXXXXX)
+  rmdir "$tmp_wt"   # git worktree add wants a non-existent path
+
+  git worktree add --detach "$tmp_wt" "$MAIN_BRANCH" >/dev/null 2>&1
+
+  local merge_msg="stack: integrate ${project} (${leaves[*]})"
+  if ! git -C "$tmp_wt" merge --no-ff --no-edit -m "$merge_msg" "${leaves[@]}" >/dev/null 2>&1; then
+    # Capture conflicting files before aborting.
+    local -a conflict_files
+    while IFS= read -r f; do
+      [[ -n "$f" ]] && conflict_files+=("$f")
+    done < <(git -C "$tmp_wt" diff --name-only --diff-filter=U 2>/dev/null)
+
+    git -C "$tmp_wt" merge --abort 2>/dev/null || true
+
+    # For each conflicting file, list the leaves that modify it (vs main).
+    {
+      echo "$project: octopus merge failed — leaves modify overlapping files."
+      for f in "${conflict_files[@]}"; do
+        echo "  $f"
+        for leaf in "${leaves[@]}"; do
+          if ! git -C "$tmp_wt" diff --quiet "$MAIN_BRANCH" "$leaf" -- "$f" 2>/dev/null; then
+            echo "    • $leaf"
+          fi
+        done
+      done
+      echo "Resolve by linearizing the conflicting leaves (rebase one onto the other), or review them separately."
+    } >&2
+
+    git worktree remove --force "$tmp_wt" >/dev/null 2>&1 || true
+    return 1
+  fi
+
+  local integration_sha=$(git -C "$tmp_wt" rev-parse HEAD)
+  git update-ref "$ref" "$integration_sha"
+
+  git worktree remove --force "$tmp_wt" >/dev/null 2>&1 || true
+
+  if (( CHECK_ONLY )); then return 0; fi
+  echo "$ref"
+  return 0
+}
+
+if (( ALL )); then
+  typeset -a all_projects
+  while IFS=' ' read -r key _; do
+    [[ -z "$key" ]] && continue
+    name="${key#stack-project.}"
+    name="${name%.branch}"
+    if [[ ! " ${all_projects[*]} " == *" $name "* ]]; then
+      all_projects+=("$name")
+    fi
+  done < <(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null || true)
+
+  if (( ${#all_projects[@]} == 0 )); then
+    echo "no stack-projects registered" >&2
+    exit 1
+  fi
+
+  rc=0
+  for p in "${all_projects[@]}"; do
+    if build_integration "$p"; then
+      :
+    else
+      rc=1
+    fi
+  done
+  exit $rc
+fi
+
+if [[ -z "$PROJECT" ]]; then
+  echo "Usage: loops stack integrate <project> [--check]" >&2
+  echo "       loops stack integrate --all" >&2
+  exit 2
+fi
+
+build_integration "$PROJECT"

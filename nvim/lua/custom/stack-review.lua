@@ -78,6 +78,14 @@ local function update_panel()
     local prefix = (i == current_idx) and "▶ " or "  "
     local short_name = item.branch:gsub("goals%-v%d+%-", "")
 
+    -- Virtual feature entry: render in a dedicated style, skip blessed lookup
+    -- (the label isn't a real ref).
+    if item.is_feature then
+      summaries[i] = { status = "feature", reviewed = 0, total = 0, stale_count = 0, total_files = 0 }
+      table.insert(lines, string.format("%s%s%s%s", indent, prefix, short_name, marker))
+      goto continue
+    end
+
     local bsum = blessed.summary(item.branch, item.parent or "")
     local total_files = blessed.file_count(item.branch)
     summaries[i] = bsum
@@ -107,7 +115,11 @@ local function update_panel()
       suffix = string.format(" ~%d", cc)
     end
 
-    table.insert(lines, string.format("%s%s%s%s%s%s%s", indent, prefix, bicon, short_name, bcount, suffix, marker))
+    -- Leaf branches get a → arrow showing the virtual edge to the feature.
+    local leaf_arrow = item.is_leaf and "  →" or ""
+
+    table.insert(lines, string.format("%s%s%s%s%s%s%s%s", indent, prefix, bicon, short_name, bcount, suffix, leaf_arrow, marker))
+    ::continue::
   end
 
   vim.api.nvim_buf_set_option(panel_buf, "modifiable", true)
@@ -251,8 +263,26 @@ function M.open_review(idx)
 
   current_idx = idx
 
+  -- Virtual feature entry: build integration ref on demand, then diff main..ref.
+  -- Integration may fail (overlapping leaves) — surface the bash error to the
+  -- user and bail without swapping the diff.
+  local diff_right = item.branch
+  if item.is_feature and item.project_name then
+    local result = vim.fn.system("loops stack integrate " .. vim.fn.shellescape(item.project_name) .. " 2>&1")
+    local rc = vim.v.shell_error
+    if rc ~= 0 then
+      vim.notify("Integration failed:\n" .. result, vim.log.levels.WARN)
+      return false
+    end
+    diff_right = vim.trim(result)
+    if diff_right == "" then
+      vim.notify("stack-integrate returned empty ref", vim.log.levels.ERROR)
+      return false
+    end
+  end
+
   -- Swap the diffview range in-place (no tab close/reopen)
-  local ok = swap_diffview_range(item.parent, item.branch)
+  local ok = swap_diffview_range(item.parent, diff_right)
   if not ok then
     vim.notify("Failed to swap diffview range", vim.log.levels.ERROR)
     return false
