@@ -369,6 +369,7 @@ end
 function M.setup(data)
   chain = data.chain or {}
   current_idx = data.start_idx or 1
+  M._target = data.target  -- project name or branch, for gr refresh
 
   blessed.load()
   blessed.warm_file_counts(chain)
@@ -464,62 +465,40 @@ Stack Review Keybindings:
   })
 
   vim.keymap.set("n", "gr", function()
-    local main_branch = vim.fn.system("git config stack.main-branch 2>/dev/null"):gsub("%s+$", "")
-    if main_branch == "" then main_branch = "main" end
-
-    local config_lines = vim.fn.systemlist("git config --local --list 2>/dev/null | grep -E '^stack-branch\\..*\\.parent='")
-    local parents_map = {}
-    local children_map = {}
-    for _, line in ipairs(config_lines) do
-      local branch, parent = line:match("stack%-branch%.(.+)%.parent=(.+)")
-      if branch and parent then
-        parents_map[branch] = parent
-      end
+    -- Re-derive the chain by shelling out to stack-review --print-chain, which
+    -- handles project vs single-branch mode identically to the initial launch
+    -- (real parents, depth, is_leaf, virtual feature node).
+    local target = M._target or (chain[current_idx] and chain[current_idx].branch) or ""
+    if target == "" then
+      vim.notify("gr: no refresh target", vim.log.levels.WARN)
+      return
     end
-    for branch, parent in pairs(parents_map) do
-      if not children_map[parent] then children_map[parent] = {} end
-      table.insert(children_map[parent], branch)
+    local cmd = string.format("loops stack review --print-chain %s 2>&1", vim.fn.shellescape(target))
+    local out = vim.fn.system(cmd)
+    if vim.v.shell_error ~= 0 then
+      vim.notify("gr: refresh failed:\n" .. out, vim.log.levels.ERROR)
+      return
     end
 
-    local cur_branch = chain[current_idx] and chain[current_idx].branch or
-      vim.fn.system("git branch --show-current 2>/dev/null"):gsub("%s+$", "")
-    local ancestors = {}
-    local walk = cur_branch
-    while walk and walk ~= main_branch do
-      table.insert(ancestors, 1, walk)
-      walk = parents_map[walk]
+    -- The output is a lua table literal; eval it.
+    local loader, err = loadstring("return " .. out)
+    if not loader then
+      vim.notify("gr: failed to parse chain: " .. tostring(err), vim.log.levels.ERROR)
+      return
     end
-    table.insert(ancestors, 1, main_branch)
-
-    local function find_descendants(b, result)
-      for _, child in ipairs(children_map[b] or {}) do
-        table.insert(result, child)
-        find_descendants(child, result)
-      end
-    end
-    local descendants = {}
-    find_descendants(cur_branch, descendants)
-
-    local new_chain = {}
-    local all_branches = {}
-    for _, b in ipairs(ancestors) do table.insert(all_branches, b) end
-    for _, b in ipairs(descendants) do table.insert(all_branches, b) end
-
-    for i, b in ipairs(all_branches) do
-      local p = (i == 1) and "" or all_branches[i - 1]
-      table.insert(new_chain, { branch = b, parent = p })
+    local ok, new_chain = pcall(loader)
+    if not ok or type(new_chain) ~= "table" then
+      vim.notify("gr: chain payload invalid", vim.log.levels.ERROR)
+      return
     end
 
-    local new_idx = 1
-    for i, item in ipairs(new_chain) do
-      if item.branch == cur_branch then
-        new_idx = i
-        break
-      end
-    end
-
+    -- Preserve cursor position by branch name where possible.
+    local prev_branch = chain[current_idx] and chain[current_idx].branch or ""
     chain = new_chain
-    current_idx = new_idx
+    current_idx = 1
+    for i, item in ipairs(chain) do
+      if item.branch == prev_branch then current_idx = i; break end
+    end
 
     blessed.invalidate()
     blessed.load()
@@ -529,15 +508,15 @@ Stack Review Keybindings:
     churns = churn.analyze(chain)
     churn_by_branch = churn.by_branch(churns)
 
-    -- Swap range on existing view
+    -- Swap range on existing view (skip virtual feature entries).
     local item = chain[current_idx]
-    if item and item.parent and item.parent ~= "" then
+    if item and item.parent and item.parent ~= "" and not item.is_feature then
       swap_diffview_range(item.parent, item.branch)
     end
 
     update_panel()
     refresh_all()
-    vim.notify(string.format("Refreshed (%d branches)", #chain), vim.log.levels.INFO)
+    vim.notify(string.format("Refreshed (%d entries)", #chain), vim.log.levels.INFO)
   end, { desc = "Refresh stack review" })
 
   -- Open panel on the initial diffview tab (already opened by shell script)
