@@ -619,7 +619,9 @@ require('lazy').setup({
           -- Jump to the definition of the word under your cursor.
           --  This is where a variable was first declared, or where a function is defined, etc.
           --  To jump back, press <C-t>.
-          map('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
+          --  tRPC-aware: when GTD lands at the aggregator (trpc/root.ts or
+          --  .gen/trpc-types/), trpc_gtd narrows to the actual procedure.
+          map('gd', function() require('custom.trpc_gtd').go() end, '[G]oto [D]efinition')
 
           -- Find references for the word under your cursor.
           map('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
