@@ -45,8 +45,33 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Review stack as HTML       | `loops stack review [<branch>] --html` (one tab per link)   |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
+| Restack whole project after a merge | `loops stack restack <project>` (see below)           |
 | Create PR                  | `gh pr create --base <parent> --head <branch>`              |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
+
+## Restacking after a merge — `loops stack restack`
+
+When the bottom of a stack merges, `loops stack restack <project>` rebases every
+member onto fresh `origin/main`, bottom-up (topological), snapshotting SHAs so
+descendants land on their moved parents. After the walk it drops branches that
+became empty/merged and rewires children's parent metadata.
+
+**Conflict handling is automated via headless `claude` (conservative bar).** On a
+conflict the script invokes `claude -p` to attempt resolution and auto-resolves
+*only* mechanically-certain cases — redundant squash-merged commits, generated
+files / lockfiles, non-overlapping add/add — then continues the rebase. Anything
+touching hand-written logic, delete/modify, or overlapping edits is **escalated**:
+the script pauses, saves state, and prints a ready-to-run interactive `claude`
+command (plus the manual git steps). Resolve, then `--continue` resumes the walk.
+
+- `loops stack restack <project> --plan` — dry-run: topo order + parent map, no mutations
+- `loops stack restack <project> --continue` — resume after a manual/escalated resolve
+- `loops stack restack <project> --abort` — discard saved restack state
+- `loops stack restack <project> --no-claude` — disable auto-resolve, always pause for a human
+- Tunables: `CLAUDE_BIN` (default `claude`), `STACK_RESTACK_BUDGET_USD` (default 2)
+
+Script: `~/.dotfiles/scripts/stack-restack`. Requires the project registered via
+`stack-project.<name>.branch` config (not just the `stack-branch.*.parent` pointers).
 
 ## Reviewing changes
 

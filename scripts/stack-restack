@@ -1,10 +1,11 @@
 #!/bin/zsh
 # Stack Restack - rebase every branch in a stack-project onto fresh origin/main.
 #
-# Usage: loops stack restack <project>           # start fresh
-#        loops stack restack <project> --continue # resume after manual conflict resolve
-#        loops stack restack <project> --abort   # discard saved state
-#        loops stack restack <project> --plan    # dry-run: show topo order + parent map, no mutations
+# Usage: loops stack restack <project>            # start fresh
+#        loops stack restack <project> --continue # resume after a manual resolve
+#        loops stack restack <project> --abort    # discard saved state
+#        loops stack restack <project> --plan     # dry-run: topo order + parent map
+#        loops stack restack <project> --no-claude# disable auto-resolve (manual only)
 #
 # What it does:
 #   1. Fetch origin; fast-forward local main
@@ -18,10 +19,16 @@
 #   5. Print summary
 #
 # Conflict handling:
-#   When a `git rebase` hits a conflict, the script saves state to
-#   .git/stack-restack-state and exits 1 with instructions. You resolve, finish
-#   the rebase (`git add`, `git rebase --continue`), then call this script
-#   again with --continue and it resumes the topo walk.
+#   On a conflict, headless `claude` is invoked (conservative bar) to attempt a
+#   resolution. It auto-resolves only mechanically-certain cases — redundant
+#   squash-merged commits, generated/lockfiles, non-overlapping add/add — and
+#   stages them so the rebase continues. Anything touching hand-written logic,
+#   delete/modify, or overlapping edits is escalated: the script saves state to
+#   <git-common-dir>/stack-restack-state and exits 1 with a ready-to-run
+#   interactive `claude` command (and the manual git steps). Resolve, then
+#   `loops stack restack <project> --continue` resumes the topo walk.
+#   `--no-claude` skips the auto step and always pauses for a human.
+#   Tunables: CLAUDE_BIN (default `claude`), STACK_RESTACK_BUDGET_USD (default 2).
 #
 # Worktree awareness:
 #   If a branch is checked out in another worktree, the rebase runs there.
@@ -39,17 +46,23 @@ Usage: loops stack restack <project>
        loops stack restack <project> --continue
        loops stack restack <project> --abort
        loops stack restack <project> --plan
+       loops stack restack <project> --no-claude
 EOF
   exit 2
 }
 
 PROJECT=""
 MODE="start"
+# Auto-resolve conflicts via headless claude (conservative bar). On by default;
+# --no-claude reverts to the old behavior (pause + manual resolve + --continue).
+USE_CLAUDE=1
+CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 for arg in "$@"; do
   case "$arg" in
     --continue) MODE="continue" ;;
     --abort) MODE="abort" ;;
     --plan) MODE="plan" ;;
+    --no-claude|--manual) USE_CLAUDE=0 ;;
     --*) echo "unknown flag: $arg" >&2; usage ;;
     *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
   esac
@@ -122,6 +135,99 @@ in_branch_place() {
 # Is `a` an ancestor of `b`?
 is_ancestor() {
   git merge-base --is-ancestor "$1" "$2" 2>/dev/null
+}
+
+# Where a branch's rebase actually runs (its worktree, or the current repo
+# after in_branch_place checked it out here).
+rebase_dir_for() {
+  local branch="$1"
+  local wt=$(worktree_of "$branch")
+  if [[ -n "$wt" ]]; then echo "$wt"; else git rev-parse --show-toplevel; fi
+}
+
+# True while a rebase is paused/in-progress in $1.
+rebase_in_progress() {
+  local gitdir
+  gitdir=$(git -C "$1" rev-parse --git-dir 2>/dev/null) || return 1
+  [[ "$gitdir" != /* ]] && gitdir="$1/$gitdir"
+  [[ -d "$gitdir/rebase-merge" || -d "$gitdir/rebase-apply" ]]
+}
+
+# Ask headless claude to resolve the current rebase conflict in $1, conservatively.
+# Stages a resolution and returns 0, or returns 1 to escalate to a human.
+# $1=dir  $2=branch  $3=parent
+claude_attempt_resolve() {
+  local dir="$1" branch="$2" parent="$3"
+  (( USE_CLAUDE )) || return 1
+  command -v "$CLAUDE_BIN" >/dev/null 2>&1 || {
+    echo "    (claude not found on PATH — escalating)" >&2; return 1; }
+
+  local conflicted
+  conflicted=$(git -C "$dir" diff --name-only --diff-filter=U)
+  [[ -z "$conflicted" ]] && return 0  # nothing unmerged; caller can --continue
+
+  echo "    conflicts: $(echo "$conflicted" | tr '\n' ' ')" >&2
+  echo "    → claude (conservative auto-resolve)…" >&2
+
+  local prompt
+  prompt=$(cat <<EOF
+You are resolving a git rebase conflict during an automated stack restack.
+Branch being rebased: ${branch}
+Rebasing onto: ${parent}
+
+The rebase is PAUSED with conflicts. Unmerged files:
+${conflicted}
+
+Resolve ONLY when the resolution is mechanically certain. Be conservative —
+when in doubt, escalate. It is always safe to escalate; a wrong auto-merge is not.
+
+AUTO-RESOLVE (edit to final content, then \`git add <file>\`) only when:
+  - The conflicting commit is already in the new base (a squash-merged commit
+    being replayed) — the change is redundant; take the new base's version.
+  - The file is generated / a lockfile (*.gen, .gen/*, package-lock.json,
+    pnpm-lock.yaml, clickhouse/schema.sql, prisma generated client). Take the
+    new-base side; it gets regenerated later.
+  - Pure add/add with non-overlapping additions — keep both.
+
+ESCALATE (do NOT edit; just explain) for everything else:
+  - Conflicts in hand-written .ts/.tsx/.go/.sql logic
+  - delete/modify conflicts
+  - Overlapping edits to the same lines
+  - Anything where you are not certain intent is preserved
+
+Use git (git diff, git log, git show <ref>:<path>) to understand each side.
+Read files as needed. Do NOT run \`git rebase --continue\`, push, reset, or
+rebase — the caller drives the rebase. Only edit + \`git add\`.
+
+Finish by printing EXACTLY ONE line:
+  RESTACK_RESOLVED            — all conflicts staged, mechanically certain
+  RESTACK_ESCALATE: <reason>  — left for a human, with a one-line reason
+EOF
+)
+
+  local out
+  out=$(cd "$dir" && "$CLAUDE_BIN" -p "$prompt" \
+        --permission-mode default \
+        --allowed-tools "Edit" "Read" "Grep" "Glob" \
+          "Bash(git add:*)" "Bash(git diff:*)" "Bash(git status:*)" \
+          "Bash(git log:*)" "Bash(git show:*)" "Bash(git checkout:*)" \
+        --output-format text \
+        --max-budget-usd "${STACK_RESTACK_BUDGET_USD:-2}" \
+        2>&1)
+
+  if echo "$out" | grep -q "RESTACK_RESOLVED"; then
+    if [[ -n "$(git -C "$dir" diff --name-only --diff-filter=U)" ]]; then
+      echo "    claude reported resolved but unmerged paths remain — escalating" >&2
+      return 1
+    fi
+    echo "    ✓ claude resolved" >&2
+    return 0
+  fi
+
+  local reason
+  reason=$(echo "$out" | grep -m1 "RESTACK_ESCALATE" | sed 's/.*RESTACK_ESCALATE: *//')
+  echo "    ⚑ claude escalated: ${reason:-no clear decision}" >&2
+  return 1
 }
 
 # ---------- state file (used by --continue) ----------
@@ -272,23 +378,44 @@ while (( ${#PENDING[@]} > 0 )); do
 
   echo "→ Rebasing ${BRANCH} onto ${PARENT_NAME}"
 
-  if ! in_branch_place "$BRANCH" rebase --onto "$PARENT_NAME" "$OLD_PARENT_SHA" "$BRANCH" 2>&1 | sed 's/^/    /'; then
+  # Kick off the rebase. Don't gate on the pipeline exit code (piping through
+  # sed would mask git's status); detect conflicts via the on-disk rebase
+  # state in the dir where it actually runs.
+  in_branch_place "$BRANCH" rebase --onto "$PARENT_NAME" "$OLD_PARENT_SHA" "$BRANCH" 2>&1 | sed 's/^/    /'
+  REBASE_DIR=$(rebase_dir_for "$BRANCH")
+
+  # Resolution loop: a single rebase can stop on multiple commits. Each stop,
+  # try claude (conservative); if it resolves, --continue and re-check; if it
+  # escalates, pause for a human.
+  while rebase_in_progress "$REBASE_DIR"; do
+    if claude_attempt_resolve "$REBASE_DIR" "$BRANCH" "$PARENT_NAME"; then
+      # Advance past the now-staged commit. core.editor=true avoids opening an
+      # editor for the commit message.
+      git -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
+      continue
+    fi
+
+    save_state
     cat >&2 <<EOF
 
-Conflict during restack of ${BRANCH}.
+Conflict during restack of ${BRANCH} — needs a human.
+  Rebase paused in: ${REBASE_DIR}
 
-  Resolve the conflict in the worktree where the rebase is paused, then:
-    git add <resolved-files>
-    git rebase --continue
-  Then resume:
+  Resolve together (interactive claude in that dir):
+    (cd ${REBASE_DIR} && claude "finish resolving this paused rebase of ${BRANCH} onto ${PARENT_NAME}, then run git rebase --continue")
+
+  Or by hand:
+    git -C ${REBASE_DIR} add <resolved-files>
+    git -C ${REBASE_DIR} rebase --continue
+  Then resume the cascade:
     loops stack restack ${PROJECT} --continue
 
   To bail out instead:
-    git rebase --abort
+    git -C ${REBASE_DIR} rebase --abort
     loops stack restack ${PROJECT} --abort
 EOF
     exit 1
-  fi
+  done
 
   CURRENT=""
   COMPLETED+=("$BRANCH")
