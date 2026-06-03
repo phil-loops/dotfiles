@@ -336,6 +336,11 @@ task() {
 }
 
 alias dev="NGROK=false command task dev 2>&1 | tee /tmp/loops-dev.log"
+
+# Daily work log (~/daily-log/YYYY-MM-DD.md, organized by Linear ticket)
+alias eod="~/.dotfiles/scripts/daily-log show"
+alias log-show="~/.dotfiles/scripts/daily-log show"
+alias log-edit="~/.dotfiles/scripts/daily-log edit"
 hold() {
     if [[ "$1 $2" == "my beer" ]]; then
         shift 2
