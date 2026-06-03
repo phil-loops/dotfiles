@@ -1,0 +1,128 @@
+#!/usr/bin/env python3
+"""Daily work log organized by Linear ticket.
+
+Logs live at ~/daily-log/YYYY-MM-DD.md (local, not in dotfiles).
+
+Usage:
+  daily-log add <TICKET|-> <text...>   # append a bullet under that ticket
+  daily-log show [YYYY-MM-DD]          # print a day's log (default: today)
+  daily-log path [YYYY-MM-DD]          # print path to the log file
+  daily-log edit [YYYY-MM-DD]          # open the day's log in $EDITOR
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
+LOG_DIR = Path.home() / "daily-log"
+
+
+def file_for(date_str: str) -> Path:
+    return LOG_DIR / f"{date_str}.md"
+
+
+def today_str() -> str:
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def now_hm() -> str:
+    return datetime.now().strftime("%H:%M")
+
+
+def normalize_ticket(raw: str | None) -> str:
+    if not raw or raw == "-":
+        return "(no ticket)"
+    m = re.search(r"loo-?(\d+)", raw, re.IGNORECASE)
+    if m:
+        return f"LOO-{m.group(1)}"
+    return raw.upper()
+
+
+def add(ticket_raw: str | None, text: str) -> None:
+    if not text.strip():
+        print("daily-log: empty entry, skipping", file=sys.stderr)
+        sys.exit(1)
+    LOG_DIR.mkdir(exist_ok=True)
+    date = today_str()
+    f = file_for(date)
+    if not f.exists():
+        f.write_text(f"# {date}\n")
+
+    ticket = normalize_ticket(ticket_raw)
+    header = f"## {ticket}"
+    bullet = f"- {now_hm()} {text.strip()}"
+
+    lines = f.read_text().splitlines()
+    if header in lines:
+        idx = lines.index(header)
+        # find end of section (next "## " header or EOF)
+        end = idx + 1
+        while end < len(lines) and not lines[end].startswith("## "):
+            end += 1
+        # trim trailing blanks inside section
+        insert_at = end
+        while insert_at - 1 > idx and lines[insert_at - 1].strip() == "":
+            insert_at -= 1
+        lines.insert(insert_at, bullet)
+    else:
+        if lines and lines[-1].strip() != "":
+            lines.append("")
+        lines.append(header)
+        lines.append(bullet)
+
+    f.write_text("\n".join(lines) + "\n")
+    print(f"[{ticket}] {bullet[2:]}  →  {f}")
+
+
+def show(date: str | None) -> None:
+    date = date or today_str()
+    f = file_for(date)
+    if not f.exists():
+        print(f"daily-log: no entries for {date}")
+        return
+    sys.stdout.write(f.read_text())
+
+
+def path(date: str | None) -> None:
+    date = date or today_str()
+    print(file_for(date))
+
+
+def edit(date: str | None) -> None:
+    date = date or today_str()
+    LOG_DIR.mkdir(exist_ok=True)
+    f = file_for(date)
+    if not f.exists():
+        f.write_text(f"# {date}\n")
+    editor = os.environ.get("EDITOR", "nvim")
+    os.execvp(editor, [editor, str(f)])
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    if not args:
+        show(None)
+        return
+    cmd, rest = args[0], args[1:]
+    if cmd == "add":
+        if len(rest) < 2:
+            print("usage: daily-log add <TICKET|-> <text...>", file=sys.stderr)
+            sys.exit(2)
+        add(rest[0], " ".join(rest[1:]))
+    elif cmd == "show":
+        show(rest[0] if rest else None)
+    elif cmd == "path":
+        path(rest[0] if rest else None)
+    elif cmd == "edit":
+        edit(rest[0] if rest else None)
+    else:
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
+
+
+if __name__ == "__main__":
+    main()
