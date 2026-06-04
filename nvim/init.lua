@@ -519,6 +519,27 @@ require('lazy').setup({
         vim.fn.system('git fetch origin main --quiet')
         local base = vim.fn.system('git merge-base origin/main HEAD'):gsub('%s+$', '')
         local cur = vim.fn.system('git rev-parse --abbrev-ref HEAD'):gsub('%s+$', '')
+
+        -- Diffview only lists untracked files in its index→worktree view; it
+        -- hard-codes that they're never shown when diffing against a base rev
+        -- (so the `--untracked-files` flag does nothing here). To get net-new
+        -- files into the merge-base diff we intent-to-add them (`git add -N`),
+        -- which makes them appear as added without staging their contents. We
+        -- undo it (scoped to exactly those paths) when the view is closed, so the
+        -- index is left clean -- a lingering `-N` entry makes `git rebase` abort
+        -- with "unstaged changes", which would break the stack workflow.
+        local untracked = vim.fn.systemlist({ 'git', 'ls-files', '--others', '--exclude-standard' })
+        if #untracked > 0 then
+          vim.fn.system(vim.list_extend({ 'git', 'add', '-N', '--' }, untracked))
+          vim.api.nvim_create_autocmd('User', {
+            pattern = 'DiffviewViewClosed',
+            once = true,
+            callback = function()
+              vim.fn.system(vim.list_extend({ 'git', 'reset', '-q', '--' }, untracked))
+            end,
+          })
+        end
+
         -- Re-target review-bindings to current HEAD so <leader>gf doesn't try to
         -- checkout a stale branch from a previous review session in this nvim session.
         require('custom.review-bindings').setup({
@@ -526,9 +547,7 @@ require('lazy').setup({
           get_base = function() return base end,
           get_unreviewed = function() return {} end,
         })
-        -- `--untracked-files=all` so net-new (untracked) files show up too, not
-        -- just tracked changes since the merge-base.
-        vim.cmd('DiffviewOpen ' .. base .. ' --untracked-files=all')
+        vim.cmd('DiffviewOpen ' .. base)
       end, { desc = '[G]it diff from [M]ain (merge-base)' })
 
       -- Show working tree status (staged, unstaged, untracked)
