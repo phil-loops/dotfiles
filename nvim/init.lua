@@ -526,7 +526,9 @@ require('lazy').setup({
           get_base = function() return base end,
           get_unreviewed = function() return {} end,
         })
-        vim.cmd('DiffviewOpen ' .. base)
+        -- `--untracked-files=all` so net-new (untracked) files show up too, not
+        -- just tracked changes since the merge-base.
+        vim.cmd('DiffviewOpen ' .. base .. ' --untracked-files=all')
       end, { desc = '[G]it diff from [M]ain (merge-base)' })
 
       -- Show working tree status (staged, unstaged, untracked)
