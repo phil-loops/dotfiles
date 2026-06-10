@@ -65,11 +65,13 @@ loops() {
             shift 2>/dev/null
             case "$subcmd" in
                 review)
-                    # No arg + current branch isn't a project member → fzf-pick.
+                    # No arg: if the current branch is part of a stack (has a
+                    # recorded parent), let stack-review auto-resolve it — it
+                    # upgrades any member branch to its project view. Only when
+                    # we're not on a stack at all (e.g. main) do we fzf-pick.
                     if (( $# == 0 )); then
                         local cur=$(git branch --show-current 2>/dev/null)
-                        local in_project=$(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk -v b="$cur" '$2==b{print;exit}')
-                        if [[ -z "$in_project" ]]; then
+                        if [[ -z "$(git config stack-branch.${cur}.parent 2>/dev/null)" ]]; then
                             local picked=$(~/.dotfiles/scripts/stack-list --pick) || return $?
                             [[ -z "$picked" ]] && return 130
                             ~/.dotfiles/scripts/stack-review "$picked"
