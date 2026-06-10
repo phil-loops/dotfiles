@@ -1079,6 +1079,20 @@ require('lazy').setup({
           additional_vim_regex_highlighting = { 'ruby' },
         },
         indent = { enable = true, disable = { 'ruby' } },
+        textobjects = {
+          select = {
+            enable = true,
+            -- Jump forward to the next comment if the cursor isn't already in one.
+            lookahead = true,
+            keymaps = {
+              -- Comment block text object (e.g. JSDoc /** ... */). Only
+              -- @comment.outer is defined in the queries, so inner falls back
+              -- to outer. Use: dac (delete), cac (change), vac (select), yac (yank).
+              ['ac'] = '@comment.outer',
+              ['ic'] = '@comment.outer',
+            },
+          },
+        },
       }
 
       -- Navigate between function declarations (skipping callback arrow functions)
