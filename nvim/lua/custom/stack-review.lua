@@ -268,7 +268,10 @@ function M.open_review(idx)
   -- user and bail without swapping the diff.
   local diff_right = item.branch
   if item.is_feature and item.project_name then
-    local result = vim.fn.system("loops stack integrate " .. vim.fn.shellescape(item.project_name) .. " 2>&1")
+    -- Call the script directly, not the `loops` wrapper: vim.fn.system runs under
+    -- /bin/sh where the zsh `loops` function doesn't exist, so `loops` would
+    -- resolve to the Homebrew Loops.so CLI (no `stack` subcommand) and fail.
+    local result = vim.fn.system(vim.fn.expand("~/.dotfiles/scripts/stack-integrate") .. " " .. vim.fn.shellescape(item.project_name) .. " 2>&1")
     local rc = vim.v.shell_error
     if rc ~= 0 then
       vim.notify("Integration failed:\n" .. result, vim.log.levels.WARN)
@@ -473,7 +476,10 @@ Stack Review Keybindings:
       vim.notify("gr: no refresh target", vim.log.levels.WARN)
       return
     end
-    local cmd = string.format("loops stack review --print-chain %s 2>&1", vim.fn.shellescape(target))
+    -- Call the script directly (not the `loops` wrapper) — see note in the
+    -- integrate path above: under /bin/sh, `loops` is the Homebrew CLI, not the
+    -- zsh function, so it has no `stack` subcommand.
+    local cmd = string.format("%s --print-chain %s 2>&1", vim.fn.expand("~/.dotfiles/scripts/stack-review"), vim.fn.shellescape(target))
     local out = vim.fn.system(cmd)
     if vim.v.shell_error ~= 0 then
       vim.notify("gr: refresh failed:\n" .. out, vim.log.levels.ERROR)
