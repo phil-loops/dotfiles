@@ -25,29 +25,88 @@ if [[ -z "$TARGET" ]]; then
   exit 1
 fi
 
-# If TARGET names a registered stack-project, we load ALL its branches into the
-# panel (tree view). Otherwise treat it as a single branch and walk its
-# ancestors+descendants. PROJECT_MODE controls which.
-typeset -a project_members
-while IFS= read -r member; do
-  [[ -n "$member" ]] && project_members+=("$member")
-done < <(git config --get-all "stack-project.${TARGET}.branch" 2>/dev/null || true)
+MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 
+# Build global parent/children maps from ALL stack-branch.<x>.parent config.
+# These drive both project-member expansion (below) and chain-building (later),
+# so they must exist before we resolve PROJECT_MODE.
+typeset -A parents
+typeset -A children
+while IFS= read -r line; do
+  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
+    parents[${match[1]}]="${match[2]}"
+  fi
+done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
+for branch in "${(@k)parents}"; do
+  parent="${parents[$branch]}"
+  children[$parent]+="$branch "
+done
+
+# Registered projects: name -> space-joined seed branches. A project only needs
+# ONE seed registered (e.g. its tip) — the full member set is derived by walking
+# the parent/children pointers, so partially-registered projects still resolve.
+typeset -A project_seeds
+while IFS= read -r line; do
+  if [[ "$line" =~ 'stack-project\.(.+)\.branch=(.+)' ]]; then
+    project_seeds[${match[1]}]+="${match[2]} "
+  fi
+done < <(git config --local --list 2>/dev/null | grep -E "^stack-project\..*\.branch=")
+
+# Expand seed branches into the full stack: each seed's ancestors (up to but
+# excluding main) plus all its descendants. Result lands in the global
+# `expand_seen` assoc (keys = member branches).
+typeset -A expand_seen
+_expand_descend() {
+  local b="$1" child
+  for child in ${(s: :)children[$b]}; do
+    expand_seen[$child]=1
+    _expand_descend "$child"
+  done
+}
+expand_members() {
+  expand_seen=()
+  local seed cur
+  for seed in "$@"; do
+    cur="$seed"
+    while [[ -n "$cur" && "$cur" != "$MAIN_BRANCH" ]]; do
+      expand_seen[$cur]=1
+      cur="${parents[$cur]:-}"
+    done
+    _expand_descend "$seed"
+  done
+}
+
+# Resolve mode. TARGET is either a registered project NAME or a branch.
+# If it's a branch that belongs to a registered project's expanded member set,
+# upgrade to that project's view so you get the whole stack + integration node
+# even when standing on a middle branch.
+typeset -a project_members
 PROJECT_MODE=0
-if (( ${#project_members[@]} > 0 )); then
+PROJECT_NAME=""
+
+if [[ -n "${project_seeds[$TARGET]:-}" ]]; then
   PROJECT_MODE=1
   PROJECT_NAME="$TARGET"
-  # BRANCH is just used for the initial DiffviewOpen and start_idx; the panel
-  # will list every project member. Pick the first member with a parent
-  # (i.e. the first non-root) so we open on something reviewable.
+  expand_members ${(s: :)project_seeds[$TARGET]}
+  project_members=("${(@k)expand_seen}")
+  # Open on the first member with a parent (first non-root) so the initial
+  # DiffviewOpen lands on something reviewable.
   BRANCH=""
   for m in "${project_members[@]}"; do
-    p=$(git config "stack-branch.${m}.parent" 2>/dev/null || true)
-    if [[ -n "$p" ]]; then BRANCH="$m"; break; fi
+    [[ -n "${parents[$m]:-}" ]] && { BRANCH="$m"; break; }
   done
   [[ -z "$BRANCH" ]] && BRANCH="${project_members[1]}"
 else
   BRANCH="$TARGET"
+  for name in "${(@k)project_seeds}"; do
+    expand_members ${(s: :)project_seeds[$name]}
+    if [[ -n "${expand_seen[$TARGET]:-}" ]]; then
+      PROJECT_MODE=1
+      PROJECT_NAME="$name"
+      project_members=("${(@k)expand_seen}")
+      break
+    fi
+  done
 fi
 
 if ! git rev-parse --verify "refs/heads/${BRANCH}" >/dev/null 2>&1; then
@@ -62,28 +121,10 @@ if [[ -z "$PARENT" ]]; then
   exit 1
 fi
 
-# Build the branch chain (walk up to main, then find all descendants)
-MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
-
 # Keep the review base fresh: fast-forward the trunk from origin so the bottom
 # branch isn't diffed against a stale local main (best effort; FF-only).
 git fetch --quiet origin "${MAIN_BRANCH}:${MAIN_BRANCH}" 2>/dev/null \
   || echo "  (couldn't fast-forward ${MAIN_BRANCH} from origin — review base may be stale)"
-
-typeset -A parents
-typeset -A children
-
-while IFS= read -r line; do
-  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
-    parents[${match[1]}]="${match[2]}"
-  fi
-done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
-
-# Rebuild children map from final parents map (so legacy/new dedup is reflected)
-for branch in "${(@k)parents}"; do
-  parent="${parents[$branch]}"
-  children[$parent]+="$branch "
-done
 
 # Build the ordered chain. Two modes:
 #   PROJECT_MODE=1: include every project member, DFS topologically from project
