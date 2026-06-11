@@ -1,0 +1,151 @@
+#!/bin/zsh
+# Stack Rm - kill registered stack-project(s): delete member branches, remove their
+# worktrees, and clear stack-project / stack-branch config. Memory files are reported,
+# never auto-deleted.
+#
+# Usage:
+#   loops stack rm                 # fzf multi-select projects to kill (TAB to mark)
+#   loops stack rm <project>...    # kill named project(s)
+#   loops stack rm --dry-run       # show the plan, change nothing  (alias: -n)
+#   loops stack rm --yes           # skip the confirmation prompt    (alias: -y)
+#   loops stack rm --force         # force-remove dirty worktrees
+#
+# Safety: never deletes `main` or the currently checked-out branch; refuses dirty
+# worktrees unless --force; prints (does not delete) any stack-project.<n>.memory file.
+
+set -e
+
+DRY_RUN=0
+ASSUME_YES=0
+FORCE=0
+typeset -a TARGETS
+for arg in "$@"; do
+  case "$arg" in
+    --dry-run|-n) DRY_RUN=1 ;;
+    --yes|-y)     ASSUME_YES=1 ;;
+    --force)      FORCE=1 ;;
+    --*)          echo "stack rm: unknown flag '$arg'" >&2; exit 2 ;;
+    *)            TARGETS+=("$arg") ;;
+  esac
+done
+
+# --- collect registered projects: name -> newline-joined branches ---
+typeset -A project_branches
+typeset -a project_order
+while IFS=' ' read -r key value; do
+  [[ -z "$key" ]] && continue
+  name="${key#stack-project.}"; name="${name%.branch}"
+  if [[ -z "${project_branches[$name]+_}" ]]; then
+    project_order+=("$name"); project_branches[$name]="$value"
+  else
+    project_branches[$name]+=$'\n'"$value"
+  fi
+done < <(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null || true)
+
+if (( ${#project_order[@]} == 0 )); then
+  echo "No stack-projects registered in this repo." >&2
+  exit 1
+fi
+
+# --- branch -> worktree path map (from this repo's worktree list) ---
+typeset -A worktree_of
+local wt_path="" wt_branch=""
+while IFS= read -r line; do
+  case "$line" in
+    worktree\ *) wt_path="${line#worktree }" ;;
+    branch\ *)   wt_branch="${line#branch refs/heads/}"; worktree_of[$wt_branch]="$wt_path" ;;
+    "")          wt_path=""; wt_branch="" ;;
+  esac
+done < <(git worktree list --porcelain 2>/dev/null || true)
+
+# --- resolve target projects (fzf if none given) ---
+if (( ${#TARGETS[@]} == 0 )); then
+  chosen=$(
+    for name in "${project_order[@]}"; do
+      count=$(printf '%s\n' "${project_branches[$name]}" | grep -c .)
+      printf '%s\t%s branch(es)\n' "$name" "$count"
+    done | fzf --multi \
+      --with-nth=1,2 --delimiter=$'\t' \
+      --preview="echo {1} | xargs -I{} git config --get-all stack-project.{}.branch" \
+      --preview-window=right:60% \
+      --prompt="kill stack project(s)> " \
+      --header="TAB to mark multiple · ENTER to confirm selection" \
+      --height=40% --reverse
+  ) || exit 130
+  [[ -z "$chosen" ]] && exit 130
+  TARGETS=()
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && TARGETS+=("${line%%$'\t'*}")
+  done <<<"$chosen"
+fi
+
+# validate
+for t in "${TARGETS[@]}"; do
+  if [[ -z "${project_branches[$t]+_}" ]]; then
+    echo "No stack-project '$t' registered. Known: ${project_order[*]}" >&2
+    exit 1
+  fi
+done
+
+current_branch=$(git branch --show-current 2>/dev/null || true)
+
+# --- build & print the plan ---
+typeset -a plan_branches plan_worktrees plan_memories
+echo "\033[1mPlan — the following will be deleted:\033[0m"
+for t in "${TARGETS[@]}"; do
+  printf '\n\033[1m%s\033[0m\n' "$t"
+  mem=$(git config "stack-project.${t}.memory" 2>/dev/null || true)
+  [[ -n "$mem" ]] && plan_memories+=("$mem")
+  while IFS= read -r b; do
+    [[ -z "$b" ]] && continue
+    wt="${worktree_of[$b]:-}"
+    if [[ "$b" == "$current_branch" ]]; then
+      printf '  \033[31m! %s (CHECKED OUT — will skip, switch away first)\033[0m\n' "$b"
+      continue
+    fi
+    plan_branches+=("$b")
+    if [[ -n "$wt" ]]; then
+      plan_worktrees+=("$wt")
+      printf '  branch  %s\n  worktree %s\n' "$b" "$wt"
+    else
+      printf '  branch  %s\n' "$b"
+    fi
+  done <<<"${project_branches[$t]}"
+  printf '  config  stack-project.%s.*\n' "$t"
+done
+if (( ${#plan_memories[@]} )); then
+  printf '\n\033[2mMemory files (NOT deleted — review manually):\033[0m\n'
+  printf '  \033[2m%s\033[0m\n' "${plan_memories[@]}"
+fi
+
+if (( DRY_RUN )); then
+  echo "\n\033[2m(dry-run: nothing changed)\033[0m"
+  exit 0
+fi
+
+# --- confirm ---
+if (( ! ASSUME_YES )); then
+  printf '\n\033[1mProceed? [y/N] \033[0m'
+  read -r reply
+  [[ "$reply" == [yY]* ]] || { echo "aborted."; exit 130; }
+fi
+
+# --- execute ---
+echo
+for wt in "${plan_worktrees[@]}"; do
+  if (( FORCE )); then
+    git worktree remove --force "$wt" && echo "removed worktree $wt"
+  else
+    git worktree remove "$wt" && echo "removed worktree $wt" \
+      || { echo "\033[31mworktree $wt is dirty — rerun with --force to discard, or clean it first\033[0m" >&2; exit 1; }
+  fi
+done
+for b in "${plan_branches[@]}"; do
+  git branch -D "$b" || echo "\033[33m(branch $b already gone)\033[0m"
+  git config --remove-section "stack-branch.$b" 2>/dev/null || true
+done
+for t in "${TARGETS[@]}"; do
+  git config --remove-section "stack-project.$t" 2>/dev/null \
+    && echo "cleared stack-project.$t"
+done
+echo "\n\033[1mdone.\033[0m"

@@ -89,6 +89,9 @@ loops() {
                 restack)
                     ~/.dotfiles/scripts/stack-restack "$@"
                     ;;
+                rm|kill)
+                    ~/.dotfiles/scripts/stack-rm "$@"
+                    ;;
                 *)
                     echo "loops stack commands:"
                     echo "  loops stack review [project|branch]   review stack in nvim diffview"
@@ -97,6 +100,8 @@ loops() {
                     echo "  loops stack integrate <project>        build virtual integration ref"
                     echo "  loops stack restack <project>          rebase whole project onto fresh origin/main"
                     echo "  loops stack restack <project> --plan   dry-run: show planned topo order"
+                    echo "  loops stack rm [project...]            fzf multi-select & kill project(s): branches+worktrees+config"
+                    echo "  loops stack rm --dry-run               show the kill plan, change nothing"
                     ;;
             esac
             ;;
