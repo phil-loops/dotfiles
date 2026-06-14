@@ -122,6 +122,34 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .d2h-info{background:var(--raised)!important;color:var(--faint)!important}
 .hljs{background:transparent!important}
 ::selection{background:#e0ad4e44}
+
+/* ── graph canvas overlay ───────────────────────────── */
+.mapbtn{margin:13px 22px 2px;font:inherit;font-size:11px;color:var(--gold);background:none;
+  border:1px solid var(--gold-soft);padding:5px 12px;border-radius:7px;cursor:pointer;letter-spacing:.06em;transition:.15s}
+.mapbtn:hover{background:var(--gold-soft);box-shadow:0 0 14px #e0ad4e22}
+.mapwrap{position:fixed;inset:0;z-index:200;display:none;overflow:auto;padding:26px 34px;
+  background:radial-gradient(130% 90% at 28% -5%,#1d180f 0%,#100d08 70%)}
+.mapwrap.on{display:block;animation:fadein .28s ease}
+@keyframes fadein{from{opacity:0}to{opacity:1}}
+.maphd{display:flex;align-items:baseline;gap:16px;margin-bottom:10px}
+.maphd h3{font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:23px;margin:0;color:var(--ink)}
+.maphd .mapclose{color:var(--faint);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+svg.graph{display:block;overflow:visible}
+.ge{fill:none;stroke:var(--line);stroke-width:1.6;opacity:.85;stroke-dasharray:1;
+  animation:flow .9s ease forwards}
+@keyframes flow{from{stroke-dashoffset:1;opacity:0}to{stroke-dashoffset:0;opacity:.85}}
+.ge.clean{stroke:#e0ad4e66} .ge.stale{stroke:#d36a3666} .ge.partial{stroke:#d36a3644} .ge.unblessed{stroke:var(--line)}
+.gn{cursor:pointer;opacity:0;animation:rise .45s ease forwards}
+.gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2;transition:.15s}
+.gn:hover rect{stroke:var(--dim);fill:var(--raised)}
+.gn.sel rect{stroke:var(--gold);filter:drop-shadow(0 0 9px #e0ad4e55)}
+.gn text{font-family:'IBM Plex Mono',monospace;font-size:11.5px;fill:var(--ink)}
+.gn .cnt{fill:var(--faint);font-size:10px;text-anchor:end}
+.gn .d{stroke:none}
+.gn.clean .d{fill:var(--gold);filter:drop-shadow(0 0 5px #e0ad4eaa)} .gn.clean rect{stroke:#e0ad4e44}
+.gn.stale .d{fill:var(--ember)} .gn.unblessed .d{fill:var(--unbl)} .gn.partial .d{fill:var(--ember)}
+.gn.main circle{fill:var(--gold);filter:drop-shadow(0 0 7px #e0ad4e)}
+.gn.main text{fill:var(--gold);font-family:'Fraunces',serif;font-style:italic;font-size:15px}
 .main::-webkit-scrollbar,.links::-webkit-scrollbar{width:9px}
 .main::-webkit-scrollbar-thumb,.links::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
 </style>
@@ -131,12 +159,14 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
   <div class="brand">
     <h1>blessed</h1>
     <div class="sub" id="leaf"></div>
+    <button class="mapbtn" id="mapbtn">◇ graph view &nbsp;<span style="opacity:.6">m</span></button>
   </div>
   <div class="progress"><div class="bar"><i id="bar"></i></div></div>
   <div class="tally" id="tally"></div>
   <ul class="links" id="rail"></ul>
 </nav>
 <main class="main" id="main"></main>
+<div class="mapwrap" id="map"></div>
 <div id="toast"></div>
 
 <script>
@@ -195,6 +225,45 @@ function subtree(id){
   return r;
 }
 function rollStatus(r){ return r.stale>0?'stale':(r.clean+r.stale===0?'unblessed':(r.unblessed>0?'partial':'clean')); }
+
+// ── graph canvas ──────────────────────────────────────
+// unify both shapes into a {nodes, roots} adjacency for the diagram
+function graphModel(){
+  if(MODEL.nodes) return {nodes:MODEL.nodes, roots:MODEL.roots||[]};
+  const nodes={}, links=MODEL.links||[];
+  links.forEach((l,i)=>{ nodes[l.branch]=Object.assign({}, l, {children: i+1<links.length?[links[i+1].branch]:[]}); });
+  return {nodes, roots: links.length?[links[0].branch]:[]};
+}
+function edge(x1,y1,x2,y2,st,i){ const mx=(x1+x2)/2; return `<path class="ge ${st}" style="animation-delay:${i*40}ms" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`; }
+function renderGraph(){
+  const gm=graphModel(), N=gm.nodes;
+  if(!Object.keys(N).length){ $('#map').innerHTML='<p style="color:var(--faint);margin:50px">nothing to graph</p>'; return; }
+  const GAPY=58, GAPX=215, PADX=130, PADY=48;
+  let leafY=0; const pos={}, sub={};
+  const roll=b=>{ if(sub[b])return sub[b]; const n=N[b]||{}; const r={clean:n.clean||0,stale:n.stale||0,unblessed:n.unblessed||0,total:n.total||0};
+    (n.children||[]).forEach(c=>{const s=roll(c); r.clean+=s.clean;r.stale+=s.stale;r.unblessed+=s.unblessed;r.total+=s.total;}); return sub[b]=r; };
+  const place=(b,d)=>{ const kids=(N[b]&&N[b].children)||[]; let y;
+    if(!kids.length){ y=leafY*GAPY; leafY++; } else { const ys=kids.map(c=>place(c,d+1)); y=(ys[0]+ys[ys.length-1])/2; }
+    pos[b]={x:PADX+d*GAPX, y:PADY+y, depth:d}; return y; };
+  gm.roots.forEach(r=>place(r,1));
+  const rootYs=gm.roots.map(r=>pos[r]?pos[r].y:PADY);
+  const mainY=rootYs.length? rootYs.reduce((a,b)=>a+b,0)/rootYs.length : PADY;
+  const maxD=Math.max(1, ...Object.values(pos).map(p=>p.depth));
+  const W=PADX+(maxD+1)*GAPX, H=PADY*2+Math.max(1,leafY)*GAPY;
+  const nodeW=b=>{ const lbl=b.split('/').pop(); return 50+lbl.length*7.2+34; };
+  let E='', G='', ei=0, gi=0;
+  gm.roots.forEach(r=>{ if(pos[r]) E+=edge(54,mainY,pos[r].x,pos[r].y,rollStatus(roll(r)),ei++); });
+  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].children)||[]).forEach(c=>{ if(pos[c]) E+=edge(p.x+nodeW(b),p.y,pos[c].x,pos[c].y,rollStatus(roll(c)),ei++); }); });
+  G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(40,${mainY})"><circle r="6"/><text x="16" y="4">main</text></g>`;
+  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=roll(b), w=nodeW(b);
+    G+=`<g class="gn ${rollStatus(r)}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
+      <rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
+      <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${r.clean}/${r.total}</text></g>`; });
+  $('#map').innerHTML=`<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3><span class="mapclose">click a node · esc to close</span></div>
+    <svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${E}${G}</svg>`;
+  $('#map').querySelectorAll('.gn[data-b]').forEach(g=>g.onclick=()=>{ active=g.getAttribute('data-b'); toggleMap(false); render(); });
+}
+function toggleMap(on){ const m=$('#map'); const show = on===undefined ? !m.classList.contains('on') : on; if(show) renderGraph(); m.classList.toggle('on',show); }
 function curObj(){ return NODES.find(n=>n.id===active) || NODES[NODES.length-1] || {branch:'',parent:'',files:[]}; }
 function pickInitial(){ const bad=NODES.find(n=>n.stale+n.unblessed>0); return (bad||NODES[NODES.length-1]||{}).id; }
 
@@ -268,8 +337,10 @@ function render(){
   if(shown===0) main.appendChild(el('div',null,'<p style="color:var(--faint);margin-top:30px">nothing '+filter+' here — all blessed ✦</p>'));
 }
 
-// keyboard: ]/[ walk the tree, s → next stale/new node
+// keyboard: m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
 addEventListener('keydown',e=>{
+  if(e.key==='m'){ toggleMap(); e.preventDefault(); return; }
+  if(e.key==='Escape'){ toggleMap(false); return; }
   const idx=NODES.findIndex(n=>n.id===active);
   if(e.key===']'){active=(NODES[Math.min(idx+1,NODES.length-1)]||{}).id;render();}
   else if(e.key==='['){active=(NODES[Math.max(idx-1,0)]||{}).id;render();}
@@ -282,6 +353,7 @@ async function boot(){
   try{
     if(!MODEL) MODEL = await fetchModel();
     NODES=flatten(); active=pickInitial(); render();
+    $('#mapbtn').onclick=()=>toggleMap();
     if(LIVE) setInterval(()=>fetch('/heartbeat',{method:'POST'}).catch(()=>{}), 5000);
   }catch(e){ document.body.innerHTML = '<p style="margin:40px;color:#cf6a3a">could not load model: '+e+'</p>'; }
 }
