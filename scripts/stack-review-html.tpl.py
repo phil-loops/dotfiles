@@ -76,6 +76,7 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .blessall{margin-left:auto;font:inherit;font-size:11.5px;color:var(--gold);background:none;border:1px solid var(--gold-soft);
   padding:5px 13px;border-radius:7px;cursor:pointer;transition:.15s;letter-spacing:.04em}
 .blessall:hover{background:var(--gold-soft);box-shadow:0 0 16px #e0ad4e33}
+.ro-badge{margin-left:auto;color:var(--faint);font-size:11px;letter-spacing:.12em;text-transform:uppercase;border:1px solid var(--line);padding:4px 11px;border-radius:7px}
 
 /* file card */
 .file{border:1px solid var(--line);border-radius:11px;margin:11px 0;background:var(--panel);overflow:hidden;
@@ -189,10 +190,7 @@ async function fetchModel(){
 }
 // bless: live → POST then re-fetch (staleness recomputed server-side); static → copy the command
 async function doBless(branch, file){
-  if(!LIVE){
-    const cmd = `loops bless ${branch}${file==='.'?'':' --file '+file}`;
-    navigator.clipboard?.writeText(cmd); toast(`copied &nbsp;<b>${cmd}</b>`); return;
-  }
+  if(!LIVE){ toast('read-only snapshot — open via <b>loops stack review --html</b> to bless'); return; }
   toast('blessing…');
   await fetch('/bless',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch,file})});
   MODEL = await fetchModel();
@@ -297,7 +295,8 @@ function render(){
   const sub=el('div','sub2');
   [['all','all '+l.total],['stale','stale '+l.stale],['unblessed','new '+l.unblessed]].forEach(([k,lab])=>{
     const p=el('span','pill'+(filter===k?' on':''),lab); p.onclick=()=>{filter=k;render();}; sub.appendChild(p);});
-  const ba=el('button','blessall','✦ bless all remaining'); ba.onclick=()=>doBless(l.branch,'.'); sub.appendChild(ba);
+  if(LIVE){ const ba=el('button','blessall','✦ bless all remaining'); ba.onclick=()=>doBless(l.branch,'.'); sub.appendChild(ba); }
+  else { sub.appendChild(el('span','ro-badge','snapshot · read-only')); }
   main.appendChild(sub);
 
   let shown=0;
@@ -310,10 +309,11 @@ function render(){
     const tag=f.status==='stale'?'<span class="tag stale">changed since blessed</span>'
             :f.status==='clean'?'<span class="tag clean">blessed</span>'
             :'<span class="tag">unreviewed</span>';
+    const blessBtn = LIVE ? `<button class="bless">${f.status==='stale'?'re-bless':'bless'}</button>` : '';
     const row=el('div','frow',
       `<span class="chip ${f.status}">${sym}</span>
        <span class="fpath">${segPath(f.path)}</span>${tag}
-       <button class="bless">${f.status==='stale'?'re-bless':'bless'}</button>
+       ${blessBtn}
        <span class="caret">›</span>`);
     const body=el('div','body'); card.append(row,body);
     let drawn=false;
@@ -329,7 +329,7 @@ function render(){
       } else { body.appendChild(el('div','d2h-wrap','<p style="color:var(--faint);padding:12px">no textual diff</p>')); }
     };
     row.onclick=(e)=>{ if(e.target.closest('.bless'))return; card.classList.toggle('open'); if(card.classList.contains('open'))draw(); };
-    row.querySelector('.bless').onclick=()=>doBless(l.branch,f.path);
+    const bb=row.querySelector('.bless'); if(bb) bb.onclick=()=>doBless(l.branch,f.path);
     if(f.status!=='clean' && filter==='all'){ card.classList.add('open'); draw(); }
     main.appendChild(card);
   });
