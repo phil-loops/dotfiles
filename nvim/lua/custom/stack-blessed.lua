@@ -13,7 +13,7 @@ local file_list_cache = {} -- branch -> string[] (file paths)
 
 local function get_json_path()
   if json_path then return json_path end
-  local git_dir = vim.fn.system("git rev-parse --git-dir 2>/dev/null"):gsub("%s+$", "")
+  local git_dir = vim.fn.system("git rev-parse --path-format=absolute --git-common-dir 2>/dev/null"):gsub("%s+$", "")
   if vim.v.shell_error ~= 0 then return nil end
   json_path = git_dir .. "/stack-blessed.json"
   return json_path

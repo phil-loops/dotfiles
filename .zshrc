@@ -65,6 +65,17 @@ loops() {
             shift 2>/dev/null
             case "$subcmd" in
                 review)
+                    # --html → LIVE blessing-aware browser review (illuminated
+                    # ledger): per-file ✓/△/· chips, since-blessed deltas, live
+                    # bless buttons. --snapshot → frozen static file:// version.
+                    if [[ " $* " == *" --html "* || " $* " == *" -H "* || " $* " == *" --snapshot "* ]]; then
+                        local snap=0; [[ " $* " == *" --snapshot "* ]] && snap=1
+                        local rest=("${(@)argv:#(--html|-H|--snapshot)}")
+                        local b="${rest[1]:-$(git branch --show-current 2>/dev/null)}"
+                        if (( snap )); then ~/.dotfiles/scripts/stack-review-html "$b"
+                        else ~/.dotfiles/scripts/stack-review-serve "$b"; fi
+                        return $?
+                    fi
                     # No arg: if the current branch is part of a stack (has a
                     # recorded parent), let stack-review auto-resolve it — it
                     # upgrades any member branch to its project view. Only when

@@ -1,0 +1,28 @@
+#!/bin/zsh
+# stack-review-serve [<branch>] — launch the LIVE blessing review in the browser.
+#
+# Starts a tiny 127.0.0.1 server that serves the shell and recomputes the model
+# (status + diffs + stale deltas) per request, so the view is never a stale
+# snapshot. Bless buttons POST back, the page re-fetches, staleness updates. The
+# server self-reaps a short while after you close the tab (heartbeat).
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+branch="${1:-$(git branch --show-current 2>/dev/null)}"
+[[ -n "$branch" ]] || { echo "stack-review-serve: no branch" >&2; exit 1; }
+here="${0:A:h}"
+repo="$(pwd)"
+servedir="$(mktemp -d)"
+
+# build the shell once in LIVE mode (model = null → the page fetches /model)
+echo 'null' > "$servedir/model.json"
+python3 "$here/stack-review-html.tpl.py" "$servedir/model.json" "$servedir/index.html"
+
+# start the server detached; it prints its chosen port on the first line
+python3 "$here/stack-review-server.py" "$servedir" "$here" "$repo" > "$servedir/port" 2>"$servedir/log" &!
+for i in {1..60}; do port=$(cat "$servedir/port" 2>/dev/null); [[ -n "$port" ]] && break; sleep 0.1; done
+[[ -n "${port:-}" ]] || { echo "stack-review-serve: server didn't start"; cat "$servedir/log"; exit 1; }
+
+open "http://127.0.0.1:${port}/?branch=${branch}"
+echo "✦ live review → http://127.0.0.1:${port}  (branch ${branch})"
+echo "  closes itself ~90s after you close the tab"
