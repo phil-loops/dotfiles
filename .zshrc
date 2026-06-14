@@ -117,6 +117,19 @@ loops() {
         staging)
             ~/.dotfiles/scripts/staging "$@"
             ;;
+        bless)
+            # Record per-file blob hashes as reviewed (same ledger nvim uses).
+            # Defaults to the current branch when no branch arg is given.
+            local b="$1"
+            if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
+            ~/.dotfiles/scripts/stack-bless "$b" "$@"
+            ;;
+        blessed)
+            # Show clean/stale/unblessed status for a stack link.
+            local b="$1"
+            if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
+            ~/.dotfiles/scripts/stack-blessed-status "$b" --pretty "$@"
+            ;;
         *)
             echo "Usage: loops <command>"
             echo ""
@@ -124,6 +137,8 @@ loops() {
             echo "  stack review      Review stack in nvim (diffview)"
             echo "  review-branch     Review branch against main with blessing"
             echo "  pr-review         Review PRs assigned to you (with blessing)"
+            echo "  bless [branch]    Bless (mark reviewed) a branch's files"
+            echo "  blessed [branch]  Show clean/stale/unblessed status for a branch"
             echo "  clean-migrations  Remove empty migration folders"
             echo "  staging           Check build/deploy status, watch, or deploy"
             ;;

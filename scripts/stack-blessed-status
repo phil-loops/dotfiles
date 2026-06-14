@@ -1,0 +1,66 @@
+#!/bin/zsh
+# stack-blessed-status — classify each file in a stack link as clean/stale/unblessed
+# against the shared ledger ($GIT_DIR/stack-blessed.json), the same model nvim uses.
+#
+#   clean      current blob == blessed blob   (reviewed, unchanged)
+#   stale      blessed but blob changed        (re-review needed)
+#   unblessed  no bless recorded               (never reviewed)
+#
+# Per-file status is the source of truth and matches nvim exactly. The rolled-up
+# `status` is the honest viewer label: stale > unblessed(none) > partial > clean.
+#
+# Usage: stack-blessed-status <branch> [--parent <p>] [--pretty]
+# Default output is JSON (for the html viewer / localhost server).
+set -euo pipefail
+
+branch=""; parent=""; pretty=0
+while (( $# )); do
+  case "$1" in
+    --parent) parent="$2"; shift 2;;
+    --pretty) pretty=1; shift;;
+    -*) echo "stack-blessed-status: unknown flag $1" >&2; exit 2;;
+    *)  if [[ -z "$branch" ]]; then branch="$1"; shift; else shift; fi;;
+  esac
+done
+[[ -n "$branch" ]] || { echo "usage: stack-blessed-status <branch> [--parent p] [--pretty]" >&2; exit 2; }
+
+[[ -n "$parent" ]] || parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+[[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
+
+git_dir=$(git rev-parse --git-dir)
+ledger="$git_dir/stack-blessed.json"
+[[ -f "$ledger" ]] || echo '{}' > "$ledger"
+
+files_json='[]'; clean=0; stale=0; unblessed=0; total=0
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  total=$((total + 1))
+  cur=$(git rev-parse "${branch}:${f}" 2>/dev/null || echo "")
+  bl=$(jq -r --arg b "$branch" --arg f "$f" '.[$b][$f] // ""' "$ledger")
+  if   [[ -z "$bl" ]];        then st="unblessed"; unblessed=$((unblessed + 1))
+  elif [[ "$bl" == "$cur" ]]; then st="clean";     clean=$((clean + 1))
+  else                             st="stale";     stale=$((stale + 1)); fi
+  files_json=$(jq --arg f "$f" --arg s "$st" --arg bl "$bl" --arg cur "$cur" \
+    '. + [{path:$f, status:$s, blessed_blob:$bl, current_blob:$cur}]' <<< "$files_json")
+done < <(git diff --name-only "${parent}...${branch}")
+
+if   (( stale > 0 ));          then roll="stale"
+elif (( clean + stale == 0 )); then roll="unblessed"
+elif (( unblessed > 0 ));      then roll="partial"
+else                                roll="clean"; fi
+
+out=$(jq -n \
+  --arg branch "$branch" --arg parent "$parent" --arg status "$roll" \
+  --argjson total "$total" --argjson clean "$clean" --argjson stale "$stale" --argjson unblessed "$unblessed" \
+  --argjson files "$files_json" \
+  '{branch:$branch, parent:$parent, status:$status,
+    diff_total:$total, clean:$clean, stale:$stale, unblessed:$unblessed, files:$files}')
+
+if (( pretty )); then
+  jq -r '
+    "\(.branch)  [\(.status)]  \(.clean)/\(.diff_total) clean · \(.stale) stale · \(.unblessed) unblessed",
+    (.files[] | "  \(if .status=="clean" then "✓" elif .status=="stale" then "△" else "·" end) \(.path)")
+  ' <<< "$out"
+else
+  echo "$out"
+fi
