@@ -1,0 +1,75 @@
+#!/bin/zsh
+# stack-bless — record per-file blob hashes as "blessed" (reviewed) for a branch.
+#
+# Shares the EXACT ledger + model used by nvim's custom/stack-blessed.lua:
+#   store:  $GIT_DIR/stack-blessed.json   shape { branch: { path: blobhash } }
+#   model:  a file is "blessed" at the blob hash (git rev-parse <branch>:<path>)
+#           you reviewed. Blob hashes are content, so they survive rebases —
+#           a file goes "stale" only when its content actually changes.
+# Blessing here (CLI / website) and blessing in nvim write the same ledger, so
+# there is exactly one blessing concept.
+#
+# Usage:
+#   stack-bless <branch> [--parent <p>]             bless every file in <p>...<branch>
+#   stack-bless <branch> --file <path>               bless a single file
+#   stack-bless <branch> --unbless [--file <path>]   remove a bless (file, or whole branch)
+#
+# Parent defaults to stack-branch.<branch>.parent, then stack.main-branch, then main.
+set -euo pipefail
+
+branch=""; parent=""; file=""; unbless=0
+while (( $# )); do
+  case "$1" in
+    --parent)  parent="$2"; shift 2;;
+    --file)    file="$2"; shift 2;;
+    --unbless) unbless=1; shift;;
+    -*) echo "stack-bless: unknown flag $1" >&2; exit 2;;
+    *)  if [[ -z "$branch" ]]; then branch="$1"; shift
+        else echo "stack-bless: unexpected arg $1" >&2; exit 2; fi;;
+  esac
+done
+[[ -n "$branch" ]] || { echo "usage: stack-bless <branch> [--parent p] [--file path] [--unbless]" >&2; exit 2; }
+git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null \
+  || { echo "stack-bless: no such branch: $branch" >&2; exit 1; }
+
+git_dir=$(git rev-parse --git-dir)
+ledger="$git_dir/stack-blessed.json"
+[[ -f "$ledger" ]] || echo '{}' > "$ledger"
+tmp="$(mktemp)"
+
+if (( unbless )); then
+  if [[ -n "$file" ]]; then
+    jq --arg b "$branch" --arg f "$file" '
+      (if .[$b] then .[$b] |= del(.[$f]) else . end)
+      | (if (.[$b] // {}) == {} then del(.[$b]) else . end)' "$ledger" > "$tmp"
+    mv "$tmp" "$ledger"; echo "unblessed $file on $branch"
+  else
+    jq --arg b "$branch" 'del(.[$b])' "$ledger" > "$tmp"
+    mv "$tmp" "$ledger"; echo "unblessed all of $branch"
+  fi
+  exit 0
+fi
+
+# resolve parent for the file list
+[[ -n "$parent" ]] || parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+[[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
+
+if [[ -n "$file" ]]; then
+  files=("$file")
+else
+  files=("${(@f)$(git diff --name-only "${parent}...${branch}")}")
+fi
+
+# build { path: blob } for files that still exist on the branch
+updates='{}'; count=0
+for f in "${files[@]}"; do
+  [[ -n "$f" ]] || continue
+  blob=$(git rev-parse "${branch}:${f}" 2>/dev/null) || continue
+  updates=$(jq --arg f "$f" --arg b "$blob" '. + {($f): $b}' <<< "$updates")
+  count=$((count + 1))
+done
+
+jq --arg b "$branch" --argjson upd "$updates" \
+  '.[$b] = ((.[$b] // {}) + $upd)' "$ledger" > "$tmp"
+mv "$tmp" "$ledger"
+echo "blessed $count file(s) on $branch (vs $parent)"
