@@ -12,6 +12,7 @@
 # Usage: stack-blessed-status <branch> [--parent <p>] [--pretty]
 # Default output is JSON (for the html viewer / localhost server).
 set -euo pipefail
+command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 branch=""; parent=""; pretty=0
 while (( $# )); do
@@ -27,7 +28,7 @@ done
 [[ -n "$parent" ]] || parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 
-git_dir=$(git rev-parse --git-dir)
+git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 ledger="$git_dir/stack-blessed.json"
 [[ -f "$ledger" ]] || echo '{}' > "$ledger"
 

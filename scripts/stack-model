@@ -1,0 +1,55 @@
+#!/bin/zsh
+# stack-model <branch> — emit the JSON review model for a stack (root→leaf).
+#
+# For every file in every link: { status, patch, since-blessed delta } against
+# the shared blessing ledger. Shared by the static snapshot generator and the
+# live server, so both compute an IDENTICAL model — the only difference is WHEN
+# (bake-time vs per-request). Staleness is always current because it is
+# recomputed here, against the live ledger + current blobs, every call.
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+branch="${1:-$(git branch --show-current 2>/dev/null)}"
+[[ -n "$branch" ]] || { echo "stack-model: no branch" >&2; exit 1; }
+MAIN=$(git config stack.main-branch 2>/dev/null || echo main)
+here="${0:A:h}"
+
+chain=("$branch"); b="$branch"
+while :; do
+  p=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "")
+  [[ -z "$p" || "$p" == "$MAIN" ]] && break
+  chain=("$p" "${chain[@]}"); b="$p"
+done
+
+links_json='[]'
+for child in "${chain[@]}"; do
+  parent=$(git config "stack-branch.${child}.parent" 2>/dev/null || echo "$MAIN")
+  state=$("$here/stack-blessed-status" "$child" --parent "$parent")
+  files_json='[]'
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    fp=$(jq -r '.path' <<< "$row")
+    st=$(jq -r '.status' <<< "$row")
+    bblob=$(jq -r '.blessed_blob' <<< "$row")
+    cblob=$(jq -r '.current_blob' <<< "$row")
+    patch=$(git diff "${parent}...${child}" -- "$fp" 2>/dev/null || echo "")
+    stale=""
+    if [[ "$st" == "stale" && -n "$bblob" && -n "$cblob" ]]; then
+      stale=$(git diff "$bblob" "$cblob" 2>/dev/null || echo "")
+    fi
+    files_json=$(jq --arg p "$fp" --arg s "$st" --arg d "$patch" --arg sd "$stale" \
+      '. + [{path:$p, status:$s, patch:$d, stale:$sd}]' <<< "$files_json")
+  done < <(jq -c '.files[]' <<< "$state")
+  links_json=$(jq \
+    --arg b "$child" --arg parent "$parent" \
+    --arg status "$(jq -r '.status' <<< "$state")" \
+    --argjson clean "$(jq '.clean' <<< "$state")" \
+    --argjson stale "$(jq '.stale' <<< "$state")" \
+    --argjson unblessed "$(jq '.unblessed' <<< "$state")" \
+    --argjson total "$(jq '.diff_total' <<< "$state")" \
+    --argjson files "$files_json" \
+    '. + [{branch:$b, parent:$parent, status:$status, clean:$clean, stale:$stale, unblessed:$unblessed, total:$total, files:$files}]' \
+    <<< "$links_json")
+done
+
+jq -n --arg leaf "$branch" --argjson links "$links_json" '{leaf:$leaf, links:$links}'
