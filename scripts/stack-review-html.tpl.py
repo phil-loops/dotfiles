@@ -135,11 +135,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .maphd h3{font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:23px;margin:0;color:var(--ink)}
 .maphd .mapclose{color:var(--faint);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
 svg.graph{display:block;overflow:visible}
-.ge{fill:none;stroke:var(--line);stroke-width:1.6;opacity:.85;stroke-dasharray:1;
-  animation:flow .9s ease forwards}
-@keyframes flow{from{stroke-dashoffset:1;opacity:0}to{stroke-dashoffset:0;opacity:.85}}
+.ge{fill:none;stroke:var(--line);stroke-width:1.6;opacity:0;animation:gfade .8s ease forwards}
+@keyframes gfade{to{opacity:1}}  /* transform-free — must NOT clobber the SVG translate */
 .ge.clean{stroke:#e0ad4e66} .ge.stale{stroke:#d36a3666} .ge.partial{stroke:#d36a3644} .ge.unblessed{stroke:var(--line)}
-.gn{cursor:pointer;opacity:0;animation:rise .45s ease forwards}
+.gn{cursor:pointer;opacity:0;animation:gfade .45s ease forwards}
 .gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2;transition:.15s}
 .gn:hover rect{stroke:var(--dim);fill:var(--raised)}
 .gn.sel rect{stroke:var(--gold);filter:drop-shadow(0 0 9px #e0ad4e55)}
