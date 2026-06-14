@@ -14,7 +14,7 @@ here="${0:A:h}"
 
 out="/tmp/stack-review-$(echo "$branch" | tr '/' '-').html"
 modelf="$(mktemp)"
-"$here/stack-model" "$branch" > "$modelf"
+"$here/stack-forest" "$branch" > "$modelf"
 python3 "$here/stack-review-html.tpl.py" "$modelf" "$out"
 rm -f "$modelf"
 echo "→ $out"

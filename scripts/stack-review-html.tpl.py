@@ -56,7 +56,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .lk.on::before{content:"";position:absolute;left:-12px;top:14px;bottom:14px;width:2px;
   background:var(--gold);border-radius:2px;box-shadow:0 0 10px var(--gold)}
 .lk .nm{font-size:12.5px;color:var(--ink);word-break:break-all}
-.lk .pr{font-size:10.5px;color:var(--faint)}
+.lk .guide{color:var(--faint);opacity:.6}
+.lk .pr{font-size:10.5px;color:var(--faint);padding-left:2px}
 .lk .meter{display:flex;gap:3px;margin-top:3px}
 .lk .meter i{height:4px;flex:1;border-radius:2px;background:var(--line)}
 .lk .meter i.c{background:var(--gold)} .lk .meter i.s{background:var(--ember)} .lk .meter i.u{background:var(--unbl)}
@@ -152,7 +153,7 @@ const segPath = p => p.replace(/(.*\/)([^/]+)$/, '<span class="seg">$1</span>$2'
 function toast(html){const t=$('#toast'); t.innerHTML=html; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1900);}
 
 async function fetchModel(){
-  const b = (MODEL && MODEL.leaf) || Q.get('branch') || '';
+  const b = Q.get('branch') || (MODEL && (MODEL.project||MODEL.leaf)) || '';
   const r = await fetch('/model?branch=' + encodeURIComponent(b));
   if(!r.ok) throw new Error('model fetch failed');
   return r.json();
@@ -166,101 +167,121 @@ async function doBless(branch, file){
   toast('blessing…');
   await fetch('/bless',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch,file})});
   MODEL = await fetchModel();
-  if(active >= MODEL.links.length) active = MODEL.links.length-1;
   render(); toast('✦ blessed');
 }
 
-function overall(){
-  let c=0,s=0,u=0,t=0;
-  MODEL.links.forEach(l=>{c+=l.clean;s+=l.stale;u+=l.unblessed;t+=l.total;});
-  return {c,s,u,t};
+// normalize either shape — forest {nodes,roots} OR linear {links} — into a flat,
+// depth-tagged list in tree order. Rail + keyboard walk this uniformly.
+let NODES = [];
+function flatten(){
+  if(MODEL.nodes){
+    const out=[], seen=new Set();
+    const walk=(b,d)=>{ if(seen.has(b))return; seen.add(b);
+      const n=MODEL.nodes[b]; if(!n)return;
+      out.push(Object.assign({}, n, {depth:d, id:b}));
+      (n.children||[]).forEach(c=>walk(c,d+1)); };
+    (MODEL.roots||[]).forEach(r=>walk(r,0));
+    Object.keys(MODEL.nodes).forEach(b=>{ if(!seen.has(b)) walk(b,0); });
+    return out;
+  }
+  return (MODEL.links||[]).map(l=>Object.assign({}, l, {depth:0, id:l.branch}));
 }
+// rollup over a node + all its descendants
+function subtree(id){
+  const n = MODEL.nodes ? MODEL.nodes[id] : NODES.find(x=>x.id===id);
+  if(!n) return {clean:0,stale:0,unblessed:0,total:0};
+  const r={clean:n.clean,stale:n.stale,unblessed:n.unblessed,total:n.total};
+  (n.children||[]).forEach(c=>{const s=subtree(c); r.clean+=s.clean;r.stale+=s.stale;r.unblessed+=s.unblessed;r.total+=s.total;});
+  return r;
+}
+function rollStatus(r){ return r.stale>0?'stale':(r.clean+r.stale===0?'unblessed':(r.unblessed>0?'partial':'clean')); }
+function curObj(){ return NODES.find(n=>n.id===active) || NODES[NODES.length-1] || {branch:'',parent:'',files:[]}; }
+function pickInitial(){ const bad=NODES.find(n=>n.stale+n.unblessed>0); return (bad||NODES[NODES.length-1]||{}).id; }
 
 function renderRail(){
-  $('#leaf').textContent = MODEL.leaf;
-  const o = overall();
-  $('#bar').style.width = (o.t? Math.round(100*o.c/o.t):0)+'%';
-  $('#tally').innerHTML = `<span><b>${o.c}</b> blessed</span><span><b>${o.s}</b> stale</span><span><b>${o.u}</b> new</span>`;
-  const rail = $('#rail'); rail.innerHTML='';
-  MODEL.links.forEach((l,i)=>{
-    const li = el('li','lk'+(i===active?' on':''));
-    const meter = l.total? `<div class="meter">${'<i class="c"></i>'.repeat(l.clean)}${'<i class="s"></i>'.repeat(l.stale)}${'<i class="u"></i>'.repeat(l.unblessed)}</div>`:'';
-    li.innerHTML = `<div class="nm"><span class="dot ${l.status}"></span> ${l.branch.split('/').pop()}</div>
-      <div class="pr">◂ ${l.parent} · ${l.clean}/${l.total}</div>${meter}`;
-    li.onclick=()=>{active=i; render();};
+  $('#leaf').textContent = MODEL.project || MODEL.leaf || '';
+  const tot=NODES.reduce((a,n)=>{a.c+=n.clean;a.s+=n.stale;a.u+=n.unblessed;a.t+=n.total;return a;},{c:0,s:0,u:0,t:0});
+  $('#bar').style.width=(tot.t?Math.round(100*tot.c/tot.t):0)+'%';
+  $('#tally').innerHTML=`<span><b>${tot.c}</b> blessed</span><span><b>${tot.s}</b> stale</span><span><b>${tot.u}</b> new</span>`;
+  const rail=$('#rail'); rail.innerHTML='';
+  NODES.forEach(n=>{
+    const sub=subtree(n.id);
+    const li=el('li','lk'+(n.id===active?' on':''));
+    li.style.paddingLeft=(12+n.depth*16)+'px';
+    const meter = n.total? `<div class="meter">${'<i class="c"></i>'.repeat(n.clean)}${'<i class="s"></i>'.repeat(n.stale)}${'<i class="u"></i>'.repeat(n.unblessed)}</div>`:'';
+    const guide = n.depth>0 ? '<span class="guide">└&nbsp;</span>' : '';
+    const kids = (n.children&&n.children.length)? ` · ${n.children.length}▾` : '';
+    li.innerHTML=`<div class="nm">${guide}<span class="dot ${rollStatus(sub)}"></span> ${n.branch.split('/').pop()}</div>
+      <div class="pr">${sub.clean}/${sub.total} blessed${kids}</div>${meter}`;
+    li.onclick=()=>{active=n.id; render();};
     rail.appendChild(li);
   });
 }
 
 function render(){
+  NODES = flatten();
+  if(!active || !NODES.some(n=>n.id===active)) active = pickInitial();
   renderRail();
-  const l = MODEL.links[active];
-  const main = $('#main'); main.innerHTML='';
-  const hd = el('div','hd', `<h2>${l.branch.split('/').pop()}</h2><span class="arrow">◂</span><span class="par">${l.parent}</span>`);
-  main.appendChild(hd);
+  const l = curObj();
+  const main=$('#main'); main.innerHTML='';
+  main.appendChild(el('div','hd', `<h2>${l.branch.split('/').pop()}</h2><span class="arrow">◂</span><span class="par">${l.parent}</span>`));
 
-  const sub = el('div','sub2');
-  const pills = [['all','all '+l.total],['stale','stale '+l.stale],['unblessed','new '+l.unblessed]];
-  pills.forEach(([k,lab])=>{const p=el('span','pill'+(filter===k?' on':''),lab); p.onclick=()=>{filter=k;render();}; sub.appendChild(p);});
-  const ba = el('button','blessall','✦ bless all remaining'); ba.onclick=()=>doBless(l.branch,'.'); sub.appendChild(ba);
+  const sub=el('div','sub2');
+  [['all','all '+l.total],['stale','stale '+l.stale],['unblessed','new '+l.unblessed]].forEach(([k,lab])=>{
+    const p=el('span','pill'+(filter===k?' on':''),lab); p.onclick=()=>{filter=k;render();}; sub.appendChild(p);});
+  const ba=el('button','blessall','✦ bless all remaining'); ba.onclick=()=>doBless(l.branch,'.'); sub.appendChild(ba);
   main.appendChild(sub);
 
   let shown=0;
-  l.files.forEach((f,idx)=>{
+  (l.files||[]).forEach(f=>{
     if(filter==='stale' && f.status!=='stale') return;
     if(filter==='unblessed' && f.status!=='unblessed') return;
     shown++;
-    const card = el('div','file '+f.status); card.style.animationDelay=(shown*28)+'ms';
-    const sym = f.status==='clean'?'✓':f.status==='stale'?'△':'·';
-    const tag = f.status==='stale'?'<span class="tag stale">changed since blessed</span>'
-              : f.status==='clean'?'<span class="tag clean">blessed</span>'
-              : '<span class="tag">unreviewed</span>';
-    const row = el('div','frow',
+    const card=el('div','file '+f.status); card.style.animationDelay=(shown*28)+'ms';
+    const sym=f.status==='clean'?'✓':f.status==='stale'?'△':'·';
+    const tag=f.status==='stale'?'<span class="tag stale">changed since blessed</span>'
+            :f.status==='clean'?'<span class="tag clean">blessed</span>'
+            :'<span class="tag">unreviewed</span>';
+    const row=el('div','frow',
       `<span class="chip ${f.status}">${sym}</span>
        <span class="fpath">${segPath(f.path)}</span>${tag}
        <button class="bless">${f.status==='stale'?'re-bless':'bless'}</button>
        <span class="caret">›</span>`);
-    const body = el('div','body');
-    card.append(row,body);
+    const body=el('div','body'); card.append(row,body);
     let drawn=false;
-    const draw=()=>{
-      if(drawn) return; drawn=true;
+    const draw=()=>{ if(drawn)return; drawn=true;
       if(f.status==='stale' && f.stale){
         body.appendChild(el('p','since','✦ since you blessed'));
         const w=el('div','d2h-wrap'); body.appendChild(w);
-        new Diff2HtmlUI(w, f.stale, {drawFileList:false, outputFormat:'line-by-line', matching:'lines'}).draw();
+        new Diff2HtmlUI(w,f.stale,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw();
         body.appendChild(el('p','since','full change in this link'));
       }
-      if(f.patch){
-        const w=el('div','d2h-wrap'); body.appendChild(w);
-        new Diff2HtmlUI(w, f.patch, {drawFileList:false, outputFormat:'line-by-line', matching:'lines'}).draw();
+      if(f.patch){ const w=el('div','d2h-wrap'); body.appendChild(w);
+        new Diff2HtmlUI(w,f.patch,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw();
       } else { body.appendChild(el('div','d2h-wrap','<p style="color:var(--faint);padding:12px">no textual diff</p>')); }
     };
-    row.onclick=(e)=>{ if(e.target.closest('.bless')) return; card.classList.toggle('open'); if(card.classList.contains('open')) draw(); };
+    row.onclick=(e)=>{ if(e.target.closest('.bless'))return; card.classList.toggle('open'); if(card.classList.contains('open'))draw(); };
     row.querySelector('.bless').onclick=()=>doBless(l.branch,f.path);
-    // auto-open what needs attention
     if(f.status!=='clean' && filter==='all'){ card.classList.add('open'); draw(); }
     main.appendChild(card);
   });
   if(shown===0) main.appendChild(el('div',null,'<p style="color:var(--faint);margin-top:30px">nothing '+filter+' here — all blessed ✦</p>'));
 }
 
-// keyboard: ]/[ link, s next stale/new, j/k scroll
+// keyboard: ]/[ walk the tree, s → next stale/new node
 addEventListener('keydown',e=>{
-  if(e.key===']'){active=Math.min(active+1,MODEL.links.length-1);render();}
-  else if(e.key==='['){active=Math.max(active-1,0);render();}
-  else if(e.key==='s'){
-    for(let i=0;i<MODEL.links.length;i++){const j=(active+i)%MODEL.links.length; if(MODEL.links[j].stale+MODEL.links[j].unblessed>0){active=j;filter=MODEL.links[j].stale?'stale':'unblessed';render();break;}}
-  } else return;
+  const idx=NODES.findIndex(n=>n.id===active);
+  if(e.key===']'){active=(NODES[Math.min(idx+1,NODES.length-1)]||{}).id;render();}
+  else if(e.key==='['){active=(NODES[Math.max(idx-1,0)]||{}).id;render();}
+  else if(e.key==='s'){const nx=NODES.find((n,i)=>i>idx&&n.stale+n.unblessed>0)||NODES.find(n=>n.stale+n.unblessed>0); if(nx){active=nx.id;filter=nx.stale?'stale':'unblessed';render();}}
+  else return;
   e.preventDefault();
 });
 
-// boot: use the baked model, or fetch it live; keep a heartbeat so the server self-reaps on tab close
 async function boot(){
   try{
     if(!MODEL) MODEL = await fetchModel();
-    active = MODEL.links.length - 1;
-    render();
+    NODES=flatten(); active=pickInitial(); render();
     if(LIVE) setInterval(()=>fetch('/heartbeat',{method:'POST'}).catch(()=>{}), 5000);
   }catch(e){ document.body.innerHTML = '<p style="margin:40px;color:#cf6a3a">could not load model: '+e+'</p>'; }
 }
