@@ -1,0 +1,116 @@
+#!/bin/zsh
+# stack-forest <project|branch> — emit the project-scoped dependency TREE model.
+#
+# Reuses stack-review's resolution verbatim: build parents/children from
+# stack-branch.*.parent, seed from stack-project.*.branch, expand along the
+# pointers (partial registration still resolves). Bounded to the project's
+# connected component — NOT everything off main. Unlike stack-model it does not
+# flatten: every node keeps its children, so a project that forks renders as a
+# tree (DAG-ready — a node may list multiple parents upstream).
+#
+# Output: { project, roots:[branch], nodes:{ branch: {branch,parent,status,
+#   clean,stale,unblessed,total, files:[{path,status,patch,stale}], children:[]} } }
+# Subtree rollups are computed client-side from roots+children.
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+TARGET="${1:-$(git branch --show-current 2>/dev/null)}"
+[[ -n "$TARGET" ]] || { echo "stack-forest: no target" >&2; exit 1; }
+MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo main)
+here="${0:A:h}"
+
+typeset -A parents children
+while IFS= read -r line; do
+  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
+    parents[${match[1]}]="${match[2]}"
+  fi
+done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
+for branch in "${(@k)parents}"; do children[${parents[$branch]}]+="$branch "; done
+
+typeset -A project_seeds
+while IFS= read -r line; do
+  if [[ "$line" =~ 'stack-project\.(.+)\.branch=(.+)' ]]; then
+    project_seeds[${match[1]}]+="${match[2]} "
+  fi
+done < <(git config --local --list 2>/dev/null | grep -E "^stack-project\..*\.branch=")
+
+typeset -A expand_seen
+_expand_descend() {
+  local b="$1" child
+  for child in ${(s: :)children[$b]:-}; do
+    expand_seen[$child]=1
+    _expand_descend "$child"
+  done
+}
+expand_members() {
+  expand_seen=()
+  local seed cur
+  for seed in "$@"; do
+    cur="$seed"
+    while [[ -n "$cur" && "$cur" != "$MAIN_BRANCH" ]]; do
+      expand_seen[$cur]=1
+      cur="${parents[$cur]:-}"
+    done
+    _expand_descend "$seed"
+  done
+}
+
+typeset -a project_members
+PROJECT_NAME=""
+if [[ -n "${project_seeds[$TARGET]:-}" ]]; then
+  PROJECT_NAME="$TARGET"
+  expand_members ${(s: :)project_seeds[$TARGET]}
+  project_members=("${(@k)expand_seen}")
+else
+  for name in "${(@k)project_seeds}"; do
+    expand_members ${(s: :)project_seeds[$name]}
+    if [[ -n "${expand_seen[$TARGET]:-}" ]]; then
+      PROJECT_NAME="$name"; project_members=("${(@k)expand_seen}"); break
+    fi
+  done
+  # lone branch in no project → its own connected component
+  if (( ${#project_members} == 0 )); then
+    expand_members "$TARGET"
+    project_members=("${(@k)expand_seen}")
+    PROJECT_NAME="$TARGET"
+  fi
+fi
+
+# membership lookup
+typeset -A is_member
+for m in "${project_members[@]}"; do is_member[$m]=1; done
+
+nodes_json='{}'; roots_json='[]'
+for m in "${project_members[@]}"; do
+  parent="${parents[$m]:-$MAIN_BRANCH}"
+  [[ -n "${is_member[$parent]:-}" ]] || roots_json=$(jq --arg b "$m" '. + [$b]' <<< "$roots_json")
+
+  kids_json='[]'
+  for c in ${(s: :)children[$m]:-}; do
+    [[ -n "${is_member[$c]:-}" ]] && kids_json=$(jq --arg c "$c" '. + [$c]' <<< "$kids_json")
+  done
+
+  state=$("$here/stack-blessed-status" "$m" --parent "$parent")
+  files_json='[]'
+  while IFS= read -r row; do
+    [[ -n "$row" ]] || continue
+    fp=$(jq -r '.path' <<< "$row"); st=$(jq -r '.status' <<< "$row")
+    bblob=$(jq -r '.blessed_blob' <<< "$row"); cblob=$(jq -r '.current_blob' <<< "$row")
+    patch=$(git diff "${parent}...${m}" -- "$fp" 2>/dev/null || echo "")
+    stale=""
+    [[ "$st" == "stale" && -n "$bblob" && -n "$cblob" ]] && stale=$(git diff "$bblob" "$cblob" 2>/dev/null || echo "")
+    files_json=$(jq --arg p "$fp" --arg s "$st" --arg d "$patch" --arg sd "$stale" \
+      '. + [{path:$p,status:$s,patch:$d,stale:$sd}]' <<< "$files_json")
+  done < <(jq -c '.files[]' <<< "$state")
+
+  node=$(jq -n --arg b "$m" --arg parent "$parent" \
+    --arg status "$(jq -r '.status' <<< "$state")" \
+    --argjson clean "$(jq '.clean' <<< "$state")" --argjson stale "$(jq '.stale' <<< "$state")" \
+    --argjson unblessed "$(jq '.unblessed' <<< "$state")" --argjson total "$(jq '.diff_total' <<< "$state")" \
+    --argjson files "$files_json" --argjson children "$kids_json" \
+    '{branch:$b,parent:$parent,status:$status,clean:$clean,stale:$stale,unblessed:$unblessed,total:$total,files:$files,children:$children}')
+  nodes_json=$(jq --arg b "$m" --argjson n "$node" '. + {($b):$n}' <<< "$nodes_json")
+done
+
+jq -n --arg project "$PROJECT_NAME" --argjson roots "$roots_json" --argjson nodes "$nodes_json" \
+  '{project:$project, roots:$roots, nodes:$nodes}'

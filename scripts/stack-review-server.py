@@ -42,7 +42,7 @@ class H(BaseHTTPRequestHandler):
                        "text/html; charset=utf-8")
         elif u.path == "/model":
             branch = parse_qs(u.query).get("branch", [""])[0]
-            r = run([os.path.join(SCRIPTS, "stack-model"), branch])
+            r = run([os.path.join(SCRIPTS, "stack-forest"), branch])
             if r.returncode != 0:
                 self._send(500, json.dumps({"error": r.stderr}))
             else:
