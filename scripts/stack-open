@@ -65,8 +65,9 @@ case "${1:-}" in
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
 esac
 
-branch="${1:?usage: stack-open <branch> <path>}"
-rel="${2:?usage: stack-open <branch> <path>}"   # NOT `path` — that's zsh's $PATH array
+branch="${1:?usage: stack-open <branch> <path> [<line>]}"
+rel="${2:?usage: stack-open <branch> <path> [<line>]}"   # NOT `path` — that's zsh's $PATH array
+line="${3:-}"   # optional 1-based line to land on
 ( prune_old 3 ) &!                       # lazy self-clean, non-blocking
 dir=$(ensure_worktree "$branch")
 file="$dir/$rel"
@@ -74,10 +75,12 @@ file="$dir/$rel"
 
 if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
   nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
+  [[ -n "$line" ]] && nvim --server "$SOCK" --remote-send ":${line}<CR>zz" >/dev/null 2>&1 || true   # jump + center
   tmux select-window -t "${SESSION}:review-nvim" 2>/dev/null || true
 else
   rm -f "$SOCK"
-  tmux new-window -t "$SESSION" -n review-nvim "nvim --listen '$SOCK' '$file'" \
+  plus=""; [[ -z "$line" ]] || plus="+$line"       # +N lands the launch on the line
+  tmux new-window -t "$SESSION" -n review-nvim "nvim --listen '$SOCK' $plus '$file'" \
     || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
 fi
 focus_terminal
