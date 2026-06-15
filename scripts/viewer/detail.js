@@ -88,9 +88,17 @@ function render(){
     const body=el('div','body'); card.append(row,body);
     let drawn=false;
     const draw=async()=>{ if(drawn)return; drawn=true;
+      body.innerHTML='';   // idempotent: a retry re-runs draw() cleanly
       // diffs load per node on demand; the link diff isn't on the critical path
       const w=el('div','d2h-wrap','<p style="color:var(--faint);padding:11px">loading diff…</p>'); body.appendChild(w);
-      const pd=(await ensureNode(l.branch, baseRef))[f.path] || {};
+      let pd;
+      try { pd=(await ensureNode(l.branch, baseRef))[f.path] || {}; }
+      catch(e){   // fetch failed (server restart / port change) — offer a retry, don't latch
+        drawn=false;
+        w.innerHTML='<p style="padding:11px;color:#cf6a3a">couldn’t load diff (server restarting?) — <a href="#" class="retry" style="color:var(--gold)">retry</a></p>';
+        w.querySelector('.retry').onclick=ev=>{ ev.preventDefault(); draw(); };
+        return;
+      }
       const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'side-by-side',matching:'lines'}).draw(); };
       w.innerHTML='';
       // smart default — the minimum you must re-read:
