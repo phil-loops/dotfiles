@@ -173,6 +173,17 @@ svg.graph{display:block;overflow:visible}
 .gn.stale .d{fill:var(--ember)} .gn.unblessed .d{fill:var(--unbl)} .gn.partial .d{fill:var(--ember)}
 .gn.main circle{fill:var(--gold);filter:drop-shadow(0 0 7px #e0ad4e)}
 .gn.main text{fill:var(--gold);font-family:'Fraunces',serif;font-style:italic;font-size:15px}
+/* open-PR badge on a node's top-right corner; click opens the PR */
+.prbadge{cursor:pointer}
+.prbadge circle{stroke-width:1.4}
+.prbadge text{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;text-anchor:middle;pointer-events:none}
+.prbadge.tomain circle{fill:#2f7d4f;stroke:#6fce96;filter:drop-shadow(0 0 5px #4fae7a88)} .prbadge.tomain text{fill:#eafff2}
+.prbadge.offbase circle{fill:#7c5018;stroke:#d79a44} .prbadge.offbase text{fill:#fff1dc}  /* PR not into main — anti-pattern */
+.prbadge.draft circle{fill:var(--panel);stroke:#8a8a86;stroke-dasharray:2 2} .prbadge.draft text{fill:#aaa}
+/* review state (glyph carries it too): approved = brighter ring, changes-requested = ember override */
+.prbadge.approved circle{stroke-width:2.1;filter:drop-shadow(0 0 6px #4fae7abb)}
+.prbadge.changes circle{stroke:var(--ember)!important;filter:drop-shadow(0 0 5px #cf6a3a88)} .prbadge.changes text{fill:#ffdccd}
+.prbadge:hover circle{filter:brightness(1.2)}
 .main::-webkit-scrollbar,.links::-webkit-scrollbar{width:9px}
 .main::-webkit-scrollbar-thumb,.links::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
 /* ── CMD+K command palette ─────────────────────────────────── */
