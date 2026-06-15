@@ -305,33 +305,56 @@ svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stro
   border:1px solid var(--line);padding:5px 12px;border-radius:7px;cursor:pointer;transition:.15s;white-space:nowrap}
 .commitsbtn:hover,.checkouthere:hover{color:var(--gold);border-color:var(--gold-soft);background:var(--gold-soft)}
 .checkouthere:disabled{opacity:.5;cursor:default}
+/* prep-for-push is the "ready to ship" action — gold-forward so it reads as the primary */
+.prepbtn{font:inherit;font-size:11.5px;color:var(--gold);background:none;border:1px solid var(--gold-soft);
+  padding:5px 12px;border-radius:7px;cursor:pointer;transition:.15s;white-space:nowrap}
+.prepbtn:hover{background:var(--gold-soft);box-shadow:0 0 12px #e0ad4e22}
+/* fork-staleness badge "↺ N behind" origin/main. inert (published/stacked) = muted,
+   non-interactive, hover-title explains why. syncable (unpublished root) = gold pill
+   with a soft attention-pulse — one click rebases onto fresh origin/main. */
+.syncbadge{font:inherit;font-size:11.5px;color:var(--dim);background:none;border:1px solid var(--line);
+  padding:5px 12px;border-radius:7px;cursor:default;transition:.15s;white-space:nowrap;opacity:.7}
+.syncbadge.syncable{color:var(--gold);border-color:var(--gold-soft);background:var(--gold-soft);
+  cursor:pointer;opacity:1;animation:syncpulse 2.4s ease-in-out infinite}
+.syncbadge.syncable:hover{border-color:var(--gold);box-shadow:0 0 14px #e0ad4e3a;animation:none}
+.syncbadge.syncable:disabled{animation:none;opacity:.6;cursor:default}
+@keyframes syncpulse{0%,100%{box-shadow:0 0 0 #e0ad4e00}50%{box-shadow:0 0 11px #e0ad4e2e}}
+#preppop{position:fixed;z-index:320;display:none;min-width:300px;max-width:430px;
+  background:var(--raised);border:1px solid var(--line);border-radius:10px;
+  box-shadow:0 14px 40px #000a;padding:10px;font:12px 'IBM Plex Mono',monospace}
+#preppop.on{display:block}
+#preppop .pp-h{color:var(--ink);font-size:12.5px;margin-bottom:7px}
+#preppop .pp-steps{list-style:none;margin:0 0 7px;padding:0;color:var(--dim);font-size:11.5px;line-height:1.6}
+#preppop .pp-steps li::before{content:"›";color:var(--gold);margin-right:6px}
+#preppop .pp-steps b{color:var(--ink)}
+#preppop .pp-note{color:var(--faint);font-size:10.5px;line-height:1.5;margin-bottom:6px}
 #commitspop{position:fixed;z-index:320;display:none;min-width:300px;max-width:560px;
   background:var(--raised);border:1px solid var(--line);border-radius:10px;
   box-shadow:0 14px 40px #000a;padding:8px;font:12px 'IBM Plex Mono',monospace}
 #commitspop.on{display:block}
-#commitspop .cp-h{color:var(--faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px 8px}
-#commitspop .cp-load{color:var(--faint);padding:10px 8px}
-#commitspop .cp-list{list-style:none;margin:0;padding:0;max-height:52vh;overflow:auto}
-#commitspop .cp-it{display:flex;gap:10px;align-items:baseline;padding:5px 7px;border-radius:6px}
-#commitspop .cp-it:hover{background:var(--panel)}
-#commitspop .cp-sha{color:var(--gold);flex:none;font-size:11px}
-#commitspop .cp-sub{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-#commitspop .cp-date{color:var(--faint);flex:none;font-size:10px}
+:is(#commitspop,#preppop) .cp-h{color:var(--faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px 8px}
+:is(#commitspop,#preppop) .cp-load{color:var(--faint);padding:10px 8px}
+:is(#commitspop,#preppop) .cp-list{list-style:none;margin:0;padding:0;max-height:52vh;overflow:auto}
+:is(#commitspop,#preppop) .cp-it{display:flex;gap:10px;align-items:baseline;padding:5px 7px;border-radius:6px}
+:is(#commitspop,#preppop) .cp-it:hover{background:var(--panel)}
+:is(#commitspop,#preppop) .cp-sha{color:var(--gold);flex:none;font-size:11px}
+:is(#commitspop,#preppop) .cp-sub{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+:is(#commitspop,#preppop) .cp-date{color:var(--faint);flex:none;font-size:10px}
 /* squash footer: idle button → confirm (with orphan warning) → done + restack handoff */
-#commitspop .cp-foot{border-top:1px solid var(--line);margin-top:6px;padding:8px 6px 2px}
-#commitspop .cp-note{color:var(--faint);font-size:11px}
-#commitspop .cp-warn{color:var(--ink);font-size:11.5px;line-height:1.5;margin-bottom:8px}
-#commitspop .cp-orphan{color:var(--ember)}
-#commitspop .cp-done{color:#56d090;font-size:11.5px;line-height:1.5;margin-bottom:8px}
-#commitspop .cp-done em{color:var(--faint);font-style:normal}
-#commitspop .cp-actions{display:flex;gap:8px}
-#commitspop .cp-squash,#commitspop .cp-go,#commitspop .cp-cancel{font:inherit;font-size:11px;
+:is(#commitspop,#preppop) .cp-foot{border-top:1px solid var(--line);margin-top:6px;padding:8px 6px 2px}
+:is(#commitspop,#preppop) .cp-note{color:var(--faint);font-size:11px}
+:is(#commitspop,#preppop) .cp-warn{color:var(--ink);font-size:11.5px;line-height:1.5;margin-bottom:8px}
+:is(#commitspop,#preppop) .cp-orphan{color:var(--ember)}
+:is(#commitspop,#preppop) .cp-done{color:#56d090;font-size:11.5px;line-height:1.5;margin-bottom:8px}
+:is(#commitspop,#preppop) .cp-done em{color:var(--faint);font-style:normal}
+:is(#commitspop,#preppop) .cp-actions{display:flex;gap:8px}
+:is(#commitspop,#preppop) .cp-squash,:is(#commitspop,#preppop) .cp-go,:is(#commitspop,#preppop) .cp-cancel{font:inherit;font-size:11px;
   border-radius:7px;padding:5px 12px;cursor:pointer;transition:.15s;white-space:nowrap}
-#commitspop .cp-squash,#commitspop .cp-go{color:var(--gold);background:none;border:1px solid var(--gold-soft)}
-#commitspop .cp-squash:hover,#commitspop .cp-go:hover{background:var(--gold-soft);box-shadow:0 0 12px #e0ad4e22}
-#commitspop .cp-go:disabled{opacity:.5;cursor:default;box-shadow:none}
-#commitspop .cp-cancel{color:var(--dim);background:none;border:1px solid var(--line)}
-#commitspop .cp-cancel:hover{color:var(--ink);border-color:var(--dim)}
+:is(#commitspop,#preppop) .cp-squash,:is(#commitspop,#preppop) .cp-go{color:var(--gold);background:none;border:1px solid var(--gold-soft)}
+:is(#commitspop,#preppop) .cp-squash:hover,:is(#commitspop,#preppop) .cp-go:hover{background:var(--gold-soft);box-shadow:0 0 12px #e0ad4e22}
+:is(#commitspop,#preppop) .cp-go:disabled{opacity:.5;cursor:default;box-shadow:none}
+:is(#commitspop,#preppop) .cp-cancel{color:var(--dim);background:none;border:1px solid var(--line)}
+:is(#commitspop,#preppop) .cp-cancel:hover{color:var(--ink);border-color:var(--dim)}
 
 /* hover+o now opens a diff line in nvim, so the per-file "open in nvim" button is
    redundant — hide it (full-file toggle stays; it shows content, not an nvim jump).

@@ -106,6 +106,82 @@
     btn.textContent=t; btn.disabled=false;
   }
 
+  // ---- prep for push (squash UNPUSHED commits → one, then oxfmt) -------------
+  let prepPop=null, prepAnchor=null;
+  function prepEl(){
+    if(!prepPop){ prepPop=el('div'); prepPop.id='preppop';
+      prepPop.addEventListener('mousedown',e=>e.stopPropagation());
+      document.body.appendChild(prepPop); }
+    return prepPop;
+  }
+  function hidePrep(){ if(prepPop) prepPop.classList.remove('on'); }
+  function placePrep(){ if(!prepPop||!prepAnchor) return; const r=prepAnchor.getBoundingClientRect();
+    prepPop.style.left=Math.max(8, Math.min(r.left, innerWidth-prepPop.offsetWidth-8))+'px';
+    prepPop.style.top =Math.min(r.bottom+6, innerHeight-prepPop.offsetHeight-8)+'px'; }
+  function showPrep(anchor){
+    const branch=branchOf(); if(!branch) return;
+    prepAnchor=anchor; const p=prepEl(); const desc=descendantsOf(branch);
+    p.innerHTML='<div class="pp-h">prep <b>'+esc(branch.split('/').pop())+'</b> for push</div>'
+      +'<ul class="pp-steps"><li>squash <b>unpushed</b> commits → one (voiced message)</li>'
+      +'<li>run oxfmt, fold formatting into that commit</li></ul>'
+      +'<div class="pp-note">only unpushed history is rewritten — a plain push works, no force-push.</div>'
+      +(desc.length?'<div class="cp-warn"><span class="cp-orphan">⚠ reparents '+desc.length+' descendant'+(desc.length>1?'s':'')+' ('+desc.map(d=>esc(d.split('/').pop())).join(', ')+') — they’ll need a restack.</span></div>':'')
+      +'<div class="cp-foot"></div>';
+    const f=p.querySelector('.cp-foot');
+    const go=el('button','cp-go','prep & format'); go.onclick=()=>doPrep(branch, desc, f);
+    const cx=el('button','cp-cancel','cancel'); cx.onclick=hidePrep;
+    const bar=el('div','cp-actions'); bar.append(go, cx); f.appendChild(bar);
+    p.classList.add('on'); placePrep();
+  }
+  async function doPrep(branch, desc, f){
+    f.innerHTML='<span class="cp-note">drafting message · squashing · oxfmt…</span>';
+    let r;
+    try{ r=await (await fetch('/prep',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})})).json(); }
+    catch(e){ f.innerHTML='<span class="cp-warn">prep failed — server unreachable</span>'; return; }
+    if(!r || !r.ok){ f.innerHTML='<span class="cp-warn">prep failed: '+esc((r&&r.err)||'see server')+'</span>'; return; }
+    const fmtnote = r.formatted ? (' · oxfmt fixed '+r.formatted+' file'+(r.formatted>1?'s':'')) : ' · already formatted';
+    toast('⇡ prepped <b>'+esc(branch.split('/').pop())+'</b> → '+esc(r.header)+(r.voiced?'':' (fallback msg)'));
+    f.innerHTML='<div class="cp-done">✓ '+esc(r.sha||'')+' '+esc(r.header)+fmtnote+(r.voiced?'':' · <em>fallback message</em>')+'</div>'
+      +'<div class="cp-note">ready to push (no force needed).</div>';
+    if(desc.length){
+      const proj=(typeof MODEL!=='undefined' && MODEL && MODEL.project) || '';
+      const hb=el('button','cp-go','⤳ hand off restack to Claude'); hb.onclick=()=>doRestack(proj, hb, desc.length);
+      f.appendChild(hb);
+    }
+  }
+  document.addEventListener('mousedown',e=>{ if(prepPop && !prepPop.contains(e.target) && !(e.target.closest&&e.target.closest('.prepbtn'))) hidePrep(); });
+  document.addEventListener('scroll', hidePrep, true);
+
+  // ---- fork-staleness badge (behind origin/main) -----------------------------
+  // a branch whose fork point lags origin/main shows "↺ N behind". When it's a
+  // root off main AND unpublished, the badge is a live button: one click rebases
+  // it onto fresh origin/main (safe — no force-push, no parent to detach). When
+  // it's published or stacked, the badge is inert and explains why on hover.
+  // styled via .syncbadge in styles.css to match the sibling toolbar buttons.
+  async function doSync(btn, branch){
+    const t=btn.textContent; btn.textContent='rebasing…'; btn.disabled=true;
+    try{
+      const r=await fetch('/sync',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})}).then(x=>x.json());
+      if(r.ok){ toast('↺ synced <b>'+esc(branch.split('/').pop())+'</b> onto fresh origin/main'); btn.remove(); }
+      else { toast('↺ sync failed: '+esc(lastLine(r.err))); btn.textContent=t; btn.disabled=false; }
+    }catch(e){ toast('↺ sync failed — server unreachable'); btn.textContent=t; btn.disabled=false; }
+  }
+  async function syncBadge(sub, branch){
+    let s;
+    try{ s=await (await fetch('/sync?branch='+encodeURIComponent(branch))).json(); }
+    catch(e){ return; }
+    if(!s || !s.behind) return;   // up to date with origin/main → no badge
+    const b=el('button','syncbadge'+(s.syncable?' syncable':''),'↺ '+s.behind+' behind');
+    if(s.syncable){
+      b.title='rebase onto fresh origin/main — unpublished root branch, no force-push';
+      b.onclick=()=>doSync(b, branch);
+    } else {
+      b.disabled=true;
+      b.title=s.why||'fork point is behind origin/main';
+    }
+    sub.appendChild(b);
+  }
+
   // ---- inject into the toolbar ----------------------------------------------
   function inject(sub){
     if(typeof LIVE!=='undefined' && !LIVE) return;   // actions need the live repo
@@ -114,7 +190,10 @@
     ci.onclick=()=>{ (pop && pop.classList.contains('on')) ? hidePop() : showCommits(ci); };
     const co=el('button','checkouthere','⤓ check out here'); co.title='git checkout this branch in your working tree';
     co.onclick=()=>doCheckout(co);
-    sub.append(ci, co);   // after "bless all remaining" (which carries margin-left:auto → right group)
+    const pp=el('button','prepbtn','⇡ prep for push'); pp.title='squash unpushed commits into one + oxfmt, ready to push';
+    pp.onclick=()=>{ (prepPop && prepPop.classList.contains('on')) ? hidePrep() : showPrep(pp); };
+    sub.append(ci, co, pp);   // after "bless all remaining" (which carries margin-left:auto → right group)
+    const branch=branchOf(); if(branch) syncBadge(sub, branch);   // async; appends iff behind origin/main
   }
   function scan(n){ if(n.nodeType!==1) return;
     if(n.matches&&n.matches('.sub2')) inject(n);
