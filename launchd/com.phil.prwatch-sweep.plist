@@ -14,9 +14,14 @@
   </array>
 
   <key>StartInterval</key>
-  <integer>60</integer>
+  <integer>120</integer>
   <key>RunAtLoad</key>
   <true/>
+
+  <!-- run inside the repo so `git config prwatch.sweep-repos` / stack.pr-repos
+       are read locally (scope the sweep to just the CI repo to halve the cost) -->
+  <key>WorkingDirectory</key>
+  <string>/Users/philbrockman/coding/loops</string>
 
   <!-- gh + jq live in homebrew; gh reads its auth from ~/.config/gh -->
   <key>EnvironmentVariables</key>
