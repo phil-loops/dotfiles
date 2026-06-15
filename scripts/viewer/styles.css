@@ -60,6 +60,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .sub2 .pill{padding:2px 9px;border:1px solid var(--line);border-radius:20px;cursor:pointer;color:var(--dim);transition:.15s}
 .sub2 .pill:hover{color:var(--ink);border-color:var(--dim)}
 .sub2 .pill.on{color:var(--gold);border-color:var(--gold-soft);background:var(--gold-soft)}
+.basepick{display:flex;gap:8px;align-items:center;margin:-8px 0 16px;font-size:11px}
+.basepick .bplabel{letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.basepick .bp{padding:2px 10px;border:1px solid var(--line);border-radius:20px;cursor:pointer;color:var(--dim);transition:.15s}
+.basepick .bp:hover{color:var(--ink);border-color:var(--dim)}
+.basepick .bp.on{color:var(--gold);border-color:var(--gold-soft);background:var(--gold-soft)}
 .purpose{display:flex;gap:9px;align-items:baseline;margin:0 0 18px;padding:11px 15px;
   border-left:2px solid var(--gold);background:linear-gradient(90deg,#e0ad4e12,transparent);
   border-radius:0 9px 9px 0;font-size:13px;line-height:1.55}
@@ -201,7 +206,7 @@ svg.graph{display:block;overflow:visible}
 #ntip li.us.approved .us-g{color:#56d090} #ntip li.us.changes .us-g{color:var(--ember)} #ntip li.us.pending .us-g{color:var(--gold)}
 #ntip li.us.none .us-g,#ntip li.us.none .us-b{color:var(--dim)}
 #ntip .tip-v{margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:11px}
-#ntip .tip-v.ready{color:#56d090} #ntip .tip-v.blocked{color:var(--gold)}
+#ntip .tip-v.ready{color:#56d090} #ntip .tip-v.blocked{color:var(--gold)} #ntip .tip-v.changes{color:var(--ember)}
 .main::-webkit-scrollbar,.links::-webkit-scrollbar{width:9px}
 .main::-webkit-scrollbar-thumb,.links::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
 /* ── CMD+K command palette ─────────────────────────────────── */
