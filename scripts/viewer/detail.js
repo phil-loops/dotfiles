@@ -113,7 +113,7 @@ function render(){
     if(filter==='stale' && f.status!=='stale') return;
     if(filter==='unblessed' && f.status!=='unblessed') return;
     shown++;
-    const card=el('div','file '+f.status); card.style.animationDelay=(shown*28)+'ms';
+    const card=el('div','file '+f.status); card.dataset.path=f.path; card.style.animationDelay=(shown*28)+'ms';
     const sym=f.status==='clean'?'✓':f.status==='stale'?'△':'·';
     const tag=f.status==='stale'?'<span class="tag stale">changed since blessed</span>'
             :f.status==='clean'?'<span class="tag clean">blessed</span>'
@@ -240,6 +240,41 @@ async function renderPicker(){
     list.appendChild(b); });
   ov.querySelector('.pk-all').onclick=()=>{ location.search='branch=--all'; };
 }
+// preserve scroll across a live re-render. The render remounts every card and the
+// open diffs re-fetch async, so a naive scrollY (or even card-top) anchor drops you
+// at the top of the changed file. Instead anchor on the exact DIFF LINE nearest the
+// top of the viewport — its new-side line number — and re-find that line after the
+// redraw, so you stay where your cursor was. Falls back to the card top, then scrollY.
+function rightRows(card){   // the new-side (right) diff rows of a side-by-side render
+  const panels=card.querySelectorAll('.d2h-file-side-diff'); const right=panels[panels.length-1];
+  return right ? right.querySelectorAll('tr') : [];
+}
+function lineNo(tr){ const c=tr.querySelector('.d2h-code-side-linenumber'); const n=c&&parseInt((c.textContent||'').trim(),10); return n||0; }
+function captureScroll(){
+  const card=[...document.querySelectorAll('.file')].find(c=>c.getBoundingClientRect().bottom>0);
+  if(!card) return {path:null, y:window.scrollY};
+  const path=card.dataset.path, cardTop=card.getBoundingClientRect().top;
+  for(const tr of rightRows(card)){
+    const n=lineNo(tr), r=tr.getBoundingClientRect();
+    if(n && r.bottom>4) return {path, n, off:r.top, cardTop, y:window.scrollY};   // first real line at/below the top
+  }
+  return {path, n:null, cardTop, off:cardTop, y:window.scrollY};
+}
+function restoreScroll(a){
+  if(!a) return;
+  let tries=0;
+  const apply=()=>{
+    const card=a.path && document.querySelector('.file[data-path="'+CSS.escape(a.path)+'"]');
+    let row=null;
+    if(card && a.n) for(const tr of rightRows(card)){ if(lineNo(tr)===a.n){ row=tr; break; } }
+    if(row)       window.scrollBy(0, row.getBoundingClientRect().top  - a.off);
+    else if(card) window.scrollBy(0, card.getBoundingClientRect().top - a.cardTop);
+    else          window.scrollTo(0, a.y);
+    // the diff redraws async after remount — keep retrying until the anchored line lands
+    if(++tries<8 && a.n && !row) setTimeout(apply, 80);
+  };
+  requestAnimationFrame(apply);
+}
 async function boot(){
   try{
     if(LIVE && !Q.get('branch')){ renderPicker(); return; }   // no project chosen → show the picker
@@ -258,10 +293,12 @@ async function boot(){
           if(lastSig===null){ lastSig=sig; return; }
           if(sig===lastSig) return;
           lastSig=sig;
+          const anchor=captureScroll();
           MODEL=await fetchModel();
           for(const k in NODEPATCH) delete NODEPATCH[k];   // diffs may have moved
           render(); buildDock();
           if($('#map').classList.contains('on')) renderGraph('#map');
+          restoreScroll(anchor);
           toast('↻ forest updated');
         }catch(e){}
       }, 3000);
