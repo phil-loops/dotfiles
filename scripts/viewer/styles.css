@@ -125,6 +125,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .file.open .body{display:block}
 .since{margin:0;padding:10px 16px;background:var(--ember-soft);border-bottom:1px solid var(--line);
   color:var(--ember);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase}
+/* per-card diff toggle (since-blessed ↔ vs-parent) — same ember banner, now interactive */
+.sincetoggle{display:flex;gap:8px;align-items:center;margin:0;padding:6px 14px;
+  background:var(--ember-soft);border-bottom:1px solid var(--line)}
+.sincetoggle .segopt{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;cursor:pointer;
+  color:var(--faint);padding:2px 10px;border:1px solid transparent;border-radius:20px;transition:.15s}
+.sincetoggle .segopt:hover{color:var(--ink)}
+.sincetoggle .segopt.on{color:var(--ember);border-color:var(--ember);background:#0003}
 .d2h-wrap{padding:2px 4px}
 .caret{color:var(--faint);transition:transform .2s;flex:none}
 .fulltoggle{display:block;margin:4px 16px 14px;font:inherit;font-size:11px;color:var(--dim);
