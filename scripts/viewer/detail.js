@@ -173,15 +173,11 @@ function render(){
         });
       };
       w.innerHTML='';
-      // smart default — the minimum you must re-read:
-      //   stale → ONLY the diff since you last blessed; else → the full link diff
-      if(blessedMode){
-        if(pd.stale){ body.insertBefore(el('p','since','✦ since you blessed'), w); d2h(pd.stale); }
-        else if(f.status==='clean'){ w.innerHTML='<p style="color:var(--faint);padding:11px">unchanged since you blessed ✓</p>'; }
-        else { w.innerHTML='<p style="color:var(--faint);padding:11px">never blessed — nothing to compare</p>'; }
-      } else if(f.status==='stale' && pd.stale){
-        // per-card toggle: "since blessed" (default — the minimum you must re-read) ↔
-        // "vs parent" (the whole file diff, how GitHub shows it). Both came in one fetch.
+      // per-card toggle for a stale file: "since blessed" (default — the minimum you
+      // must re-read) ↔ "vs parent" (the whole file diff, how GitHub shows it). Both
+      // diffs come in one fetch, so flipping is instant. Used by the last-blessed view
+      // AND the parent/main view — anywhere a stale file has a since-blessed delta.
+      const staleToggle=()=>{
         let view='stale';
         const seg=el('div','sincetoggle');
         const pick=()=>{
@@ -196,6 +192,15 @@ function render(){
         };
         body.insertBefore(seg, w);
         pick();
+      };
+      // smart default — the minimum you must re-read:
+      //   stale → ONLY the diff since you last blessed; else → the full link diff
+      if(blessedMode){
+        if(pd.stale){ staleToggle(); }
+        else if(f.status==='clean'){ w.innerHTML='<p style="color:var(--faint);padding:11px">unchanged since you blessed ✓</p>'; }
+        else { w.innerHTML='<p style="color:var(--faint);padding:11px">never blessed — nothing to compare</p>'; }
+      } else if(f.status==='stale' && pd.stale){
+        staleToggle();
       } else if(pd.patch){ d2h(pd.patch); }
       else { w.innerHTML='<p style="color:var(--faint);padding:11px">no textual diff</p>'; }
       // full-file toggle (live only — needs the server to read the blob)
