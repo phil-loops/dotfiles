@@ -29,11 +29,33 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .pk-card h1{font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:34px;color:var(--ink);margin:0}
 .pk-sub{color:var(--faint);letter-spacing:.18em;text-transform:uppercase;font-size:11px;margin:6px 0 26px}
 .pk-list{display:flex;flex-direction:column;gap:10px}
-.pk-btn{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;font:inherit;
+.pk-btn{display:flex;flex-direction:column;gap:9px;width:100%;font:inherit;
   text-align:left;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel);
   color:var(--ink);cursor:pointer;transition:.15s}
 .pk-btn:hover{border-color:var(--gold);background:var(--raised);box-shadow:0 0 22px #e0ad4e22;transform:translateY(-1px)}
+.pk-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .pk-name{font-size:15px} .pk-meta{color:var(--faint);font-size:12px}
+.pk-ready{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.pk-ready-h{color:#56d090;font-size:11px;letter-spacing:.02em;margin-right:2px}
+.pk-ready-b{color:#cfe9d8;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  background:#2c9a591f;border:1px solid #2c9a5944;border-radius:999px;padding:1px 8px;
+  cursor:pointer;transition:.12s}   /* click → open that branch's diff */
+.pk-ready-b:hover{filter:brightness(1.25);box-shadow:0 0 10px #2c9a5933}
+.pk-cand .pk-ready-b:hover{box-shadow:0 0 10px #e0ad4e33}
+/* candidate row: topologically clear to merge but no PR yet — gold/dim, not the
+   confident green, so "ready (has PR)" still reads as the stronger signal. */
+.pk-cand .pk-ready-h{color:var(--faint)}
+.pk-cand .pk-ready-b{color:var(--dim);background:#e0ad4e14;border-color:var(--gold-soft)}
+/* instant hover tooltip for the merge-candidate chips: full branch + its purpose */
+.pk-tip{position:fixed;z-index:80;max-width:340px;pointer-events:none;opacity:0;transform:translateY(3px);
+  transition:opacity .12s ease,transform .12s ease;background:var(--raised);border:1px solid var(--line);
+  border-radius:9px;padding:8px 11px;box-shadow:0 10px 30px #000a;font-size:12px;line-height:1.45;color:var(--ink)}
+.pk-tip.on{opacity:1;transform:none}
+.pk-tip .pk-tip-b{display:block;color:var(--faint);font-size:10.5px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:4px;word-break:break-all}
+.pk-tip .pk-tip-why{color:var(--ink)}
+.pk-tip .pk-tip-why .x{color:#56d090;margin-right:5px}
+.pk-tip .pk-tip-why.empty{color:var(--faint)}
 .pk-all{margin-top:22px;font:inherit;font-size:12px;color:var(--faint);background:none;border:none;
   cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .pk-all:hover{color:var(--gold)}
@@ -295,6 +317,21 @@ svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stro
 #commitspop .cp-sha{color:var(--gold);flex:none;font-size:11px}
 #commitspop .cp-sub{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
 #commitspop .cp-date{color:var(--faint);flex:none;font-size:10px}
+/* squash footer: idle button → confirm (with orphan warning) → done + restack handoff */
+#commitspop .cp-foot{border-top:1px solid var(--line);margin-top:6px;padding:8px 6px 2px}
+#commitspop .cp-note{color:var(--faint);font-size:11px}
+#commitspop .cp-warn{color:var(--ink);font-size:11.5px;line-height:1.5;margin-bottom:8px}
+#commitspop .cp-orphan{color:var(--ember)}
+#commitspop .cp-done{color:#56d090;font-size:11.5px;line-height:1.5;margin-bottom:8px}
+#commitspop .cp-done em{color:var(--faint);font-style:normal}
+#commitspop .cp-actions{display:flex;gap:8px}
+#commitspop .cp-squash,#commitspop .cp-go,#commitspop .cp-cancel{font:inherit;font-size:11px;
+  border-radius:7px;padding:5px 12px;cursor:pointer;transition:.15s;white-space:nowrap}
+#commitspop .cp-squash,#commitspop .cp-go{color:var(--gold);background:none;border:1px solid var(--gold-soft)}
+#commitspop .cp-squash:hover,#commitspop .cp-go:hover{background:var(--gold-soft);box-shadow:0 0 12px #e0ad4e22}
+#commitspop .cp-go:disabled{opacity:.5;cursor:default;box-shadow:none}
+#commitspop .cp-cancel{color:var(--dim);background:none;border:1px solid var(--line)}
+#commitspop .cp-cancel:hover{color:var(--ink);border-color:var(--dim)}
 
 /* hover+o now opens a diff line in nvim, so the per-file "open in nvim" button is
    redundant — hide it (full-file toggle stays; it shows content, not an nvim jump).

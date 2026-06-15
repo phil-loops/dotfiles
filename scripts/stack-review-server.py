@@ -14,11 +14,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
-IDLE = 90
+IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
+             # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
 _mcache = {}  # (branch, sig) -> model json — recompute only when something changed
 _render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
+_index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
 
 
 def run(args):
@@ -68,6 +70,35 @@ def pulse():
         time.sleep(1.0)
 
 
+def _ref_exists(b):
+    return run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{b}"]).returncode == 0
+
+
+def _ready_to_merge(project, prs):
+    """Member branches legal to merge into main right now, split by PR state.
+
+    The topology test mirrors viewer/graph.js `mergeable`: nothing upstream is
+    still in the forest. Upstream = the parent chain back to main plus the fan-in
+    `requires`; a link blocks only while its branch ref still exists (a merged base
+    is dropped by restack, so its ref is gone). Kept in config order (nearest-main-
+    first). Among the unblocked branches we split two ways:
+      ready      — an open PR already exists (the green into-main edge-bar set)
+      candidates — no PR yet, but topologically clear: local branches you could
+                   open a PR for / merge straight into main.
+    Returns (ready, candidates)."""
+    members = run(["git", "config", "--get-all",
+                   f"stack-project.{project}.branch"]).stdout.split()
+    ready, candidates = [], []
+    for b in members:
+        parent = run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip() or "main"
+        reqs = run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.split()
+        upstream = ([parent] if parent != "main" else []) + reqs
+        if any(_ref_exists(u) for u in upstream):
+            continue   # an unmerged upstream branch still blocks it
+        (ready if b in prs else candidates).append(b)
+    return ready, candidates
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -85,16 +116,22 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
-            # page-hot: rebuild index.html from the template so tpl.py edits
-            # show on a plain browser refresh (only on page loads, not API calls)
+            # page-hot, but cached: rebuild index.html only when a viewer source file
+            # actually changed (asset_sig), else serve the cached bytes — skips a python
+            # subprocess + 8 file reads on every page load. The live shell is model-
+            # independent (model.json is always "null" here), so asset_sig alone keys it.
+            sig = asset_sig()
             with _render_lock:
-                try:
-                    subprocess.run([sys.executable, os.path.join(SCRIPTS, "stack-review-html.tpl.py"),
-                                    os.path.join(ROOT, "model.json"), os.path.join(ROOT, "index.html")],
-                                   cwd=CWD, capture_output=True, timeout=20)
-                except Exception:
-                    pass
-                body = open(os.path.join(ROOT, "index.html"), "rb").read()
+                if _index_cache["html"] is None or _index_cache["asset"] != sig:
+                    try:
+                        subprocess.run([sys.executable, os.path.join(SCRIPTS, "stack-review-html.tpl.py"),
+                                        os.path.join(ROOT, "model.json"), os.path.join(ROOT, "index.html")],
+                                       cwd=CWD, capture_output=True, timeout=20)
+                    except Exception:
+                        pass
+                    _index_cache["html"] = open(os.path.join(ROOT, "index.html"), "rb").read()
+                    _index_cache["asset"] = sig
+                body = _index_cache["html"]
             self._send(200, body, "text/html; charset=utf-8")
         elif u.path == "/model":
             branch = parse_qs(u.query).get("branch", [""])[0]
@@ -143,9 +180,20 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/prs":   # branch → open-PR map; stack-prs disk-caches, so GH isn't hammered
             r = run([os.path.join(SCRIPTS, "stack-prs")])
             self._send(200, r.stdout or "{}")
-        elif u.path == "/projects":   # the picker: [{name, branches}] — choose a project to view
+        elif u.path == "/projects":   # the picker: [{name, branches, ready:[…]}] — choose a project to view
             r = run([os.path.join(SCRIPTS, "stack-forest"), "--projects"])
-            self._send(200, r.stdout or "[]")
+            try:
+                projs = json.loads(r.stdout or "[]")
+            except Exception:
+                projs = []
+            prs = run([os.path.join(SCRIPTS, "stack-prs")])
+            try:
+                prmap = json.loads(prs.stdout or "{}")
+            except Exception:
+                prmap = {}
+            for p in projs:
+                p["ready"], p["candidates"] = _ready_to_merge(p.get("name", ""), prmap)
+            self._send(200, json.dumps(projs))
         elif u.path == "/node":
             q = parse_qs(u.query)
             branch = q.get("branch", [""])[0]
@@ -230,6 +278,25 @@ class H(BaseHTTPRequestHandler):
             r = run(["git", "checkout", d.get("branch", "")])
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
+            return
+        if self.path == "/squash":   # collapse parent..branch into one voiced commit (headless claude)
+            d = json.loads(raw or "{}")
+            r = run([os.path.join(SCRIPTS, "stack-squash"), d.get("branch", "")])
+            # stack-squash always prints a JSON report (on success AND handled failure)
+            self._send(200 if r.returncode == 0 else 500,
+                       r.stdout or json.dumps({"ok": False, "err": r.stderr or "squash crashed"}))
+            return
+        if self.path == "/restack":   # hand off: re-rebase descendants onto the squashed SHA (background)
+            d = json.loads(raw or "{}")
+            project = d.get("project", "")
+            if not project or project in ("whole forest", "--all"):
+                self._send(400, json.dumps({"ok": False, "err": "no registered project to restack"}))
+                return
+            logpath = os.path.join(ROOT, "restack.log")
+            with open(logpath, "ab") as lf:
+                subprocess.Popen([os.path.join(SCRIPTS, "stack-restack"), project],
+                                 cwd=CWD, stdout=lf, stderr=lf)
+            self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
             return
         self._send(404, "{}")
 

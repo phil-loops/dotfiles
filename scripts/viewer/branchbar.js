@@ -38,8 +38,58 @@
       +'<ul class="cp-list">'+list.map(c=>
         '<li class="cp-it"><span class="cp-sha">'+esc(c.sha)+'</span>'
         +'<span class="cp-sub">'+esc(c.subject)+'</span>'
-        +(c.date?'<span class="cp-date">'+esc(c.date)+'</span>':'')+'</li>').join('')+'</ul>';
+        +(c.date?'<span class="cp-date">'+esc(c.date)+'</span>':'')+'</li>').join('')+'</ul>'
+      +'<div class="cp-foot"></div>';
+    squashIdle(branch, list.length);
     place();
+  }
+  // transitive children of a branch within the loaded forest model — these get
+  // reparented by a squash and need a restack afterward.
+  function descendantsOf(b){
+    const N=(typeof MODEL!=='undefined' && MODEL && MODEL.nodes)||{}, out=[], seen=new Set();
+    (function walk(x){ ((N[x]&&N[x].children)||[]).forEach(c=>{ if(N[c]&&!seen.has(c)){ seen.add(c); out.push(c); walk(c); } }); })(b);
+    return out;
+  }
+  function foot(){ return pop && pop.querySelector('.cp-foot'); }
+  function squashIdle(branch, n){
+    const f=foot(); if(!f) return;
+    if(n<=1){ f.innerHTML='<span class="cp-note">1 commit — nothing to squash</span>'; return; }
+    f.innerHTML=''; const b=el('button','cp-squash','⤿ squash into one');
+    b.onclick=()=>squashConfirm(branch, n); f.appendChild(b);
+  }
+  function squashConfirm(branch, n){
+    const f=foot(); if(!f) return;
+    const desc=descendantsOf(branch);
+    f.innerHTML='<div class="cp-warn">squash <b>'+n+'</b> commits into one, message drafted in your voice.'
+      +(desc.length?' <span class="cp-orphan">⚠ reparents '+desc.length+' descendant'+(desc.length>1?'s':'')+' ('+desc.map(d=>esc(d.split('/').pop())).join(', ')+') — they’ll need a restack.</span>':'')+'</div>';
+    const go=el('button','cp-go','squash & commit'); go.onclick=()=>doSquash(branch, desc);
+    const cx=el('button','cp-cancel','cancel'); cx.onclick=()=>squashIdle(branch, n);
+    const bar=el('div','cp-actions'); bar.append(go, cx); f.appendChild(bar);
+  }
+  async function doSquash(branch, desc){
+    const f=foot(); if(!f) return;
+    f.innerHTML='<span class="cp-note">drafting message + squashing…</span>';
+    let r;
+    try{ r=await (await fetch('/squash',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})})).json(); }
+    catch(e){ f.innerHTML='<span class="cp-warn">squash failed — server unreachable</span>'; return; }
+    if(!r || !r.ok){ f.innerHTML='<span class="cp-warn">squash failed: '+esc((r&&r.err)||'see server')+'</span>'; return; }
+    toast('⤿ squashed <b>'+esc(branch.split('/').pop())+'</b> → '+esc(r.header)+(r.voiced?'':' <span style="opacity:.7">(fallback msg — claude unavailable)</span>'));
+    f.innerHTML='<div class="cp-done">✓ '+esc(r.sha||'')+' '+esc(r.header)+(r.voiced?'':' · <em>fallback message</em>')+'</div>';
+    if(desc.length){
+      const proj=(typeof MODEL!=='undefined' && MODEL && MODEL.project) || '';
+      const hb=el('button','cp-go','⤳ hand off restack to Claude');
+      hb.onclick=()=>doRestack(proj, hb, desc.length);
+      f.appendChild(hb);
+    }
+  }
+  async function doRestack(project, btn, n){
+    btn.textContent='handing off…'; btn.disabled=true;
+    try{
+      const r=await (await fetch('/restack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project})})).json();
+      toast(r.ok ? '⤳ restack of '+n+' descendant'+(n>1?'s':'')+' handed off to Claude — tailing restack.log'
+                 : '⤳ restack not started: '+esc(r.err||'no project'));
+    }catch(e){ toast('⤳ restack handoff failed — server unreachable'); }
+    btn.textContent='⤳ restack handed off';
   }
   document.addEventListener('mousedown',e=>{ if(pop && !pop.contains(e.target) && !(e.target.closest&&e.target.closest('.commitsbtn'))) hidePop(); });
   document.addEventListener('scroll', hidePop, true);
