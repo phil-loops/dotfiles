@@ -18,6 +18,7 @@ IDLE = 90
 last = [time.time()]
 _mcache = {}  # (branch, sig) -> model json — recompute only when something changed
 _render_lock = threading.Lock()
+_pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
 
 
 def run(args):
@@ -37,6 +38,34 @@ def model_sig():
             return 0
     stamp = refs + str(mt(os.path.join(gd, "config"))) + str(mt(os.path.join(gd, "stack-blessed.json")))
     return hashlib.sha1(stamp.encode()).hexdigest()
+
+
+def asset_sig():
+    # fingerprint the viewer source the page is assembled from (tpl + shell + css/js).
+    # a change here means a code edit, so open tabs should reload the reassembled page.
+    parts = [os.path.join(SCRIPTS, "stack-review-html.tpl.py")]
+    v = os.path.join(SCRIPTS, "viewer")
+    for f in ("shell.html", "styles.css", "data.js", "graph.js", "detail.js", "palette.js"):
+        parts.append(os.path.join(v, f))
+
+    def mt(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0
+    return hashlib.sha1(",".join(str(mt(p)) for p in parts).encode()).hexdigest()
+
+
+def pulse():
+    # one shared thread recomputes both fingerprints ~1/s; every open /events stream
+    # reads these in-process, so N tabs cost one git check total, not N polling tabs.
+    while True:
+        try:
+            _pulse["sig"] = model_sig()
+            _pulse["asset"] = asset_sig()
+        except Exception:
+            pass
+        time.sleep(1.0)
 
 
 class H(BaseHTTPRequestHandler):
@@ -82,6 +111,35 @@ class H(BaseHTTPRequestHandler):
                 self._send(200, r.stdout)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": model_sig()}))
+        elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            seen_sig, seen_asset = _pulse["sig"], _pulse["asset"]
+            beat = 0
+            try:
+                self.wfile.write(b": connected\n\n")
+                self.wfile.flush()
+                while True:
+                    time.sleep(1.0)
+                    last[0] = time.time()   # an open tab keeps the server alive (replaces /heartbeat)
+                    if _pulse["asset"] != seen_asset:   # code changed → reload for the new page
+                        seen_asset = _pulse["asset"]
+                        self.wfile.write(b"event: reload\ndata: 1\n\n")
+                        self.wfile.flush()
+                    if _pulse["sig"] != seen_sig:        # forest changed → refetch in place
+                        seen_sig = _pulse["sig"]
+                        self.wfile.write(b"event: update\ndata: 1\n\n")
+                        self.wfile.flush()
+                    beat = (beat + 1) % 5
+                    if beat == 0:   # periodic comment: keep-alive + detect a closed tab (write then fails)
+                        self.wfile.write(b": ping\n\n")
+                        self.wfile.flush()
+            except OSError:
+                pass   # client closed the tab → the write fails, this thread ends
+            return
         elif u.path == "/prs":   # branch → open-PR map; stack-prs disk-caches, so GH isn't hammered
             r = run([os.path.join(SCRIPTS, "stack-prs")])
             self._send(200, r.stdout or "{}")
@@ -195,6 +253,8 @@ def watcher():
             pass
 
 
+_pulse["sig"], _pulse["asset"] = model_sig(), asset_sig()   # seed so the first /events stream sees real values
 threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
+threading.Thread(target=pulse, daemon=True).start()
 httpd.serve_forever()
