@@ -77,8 +77,20 @@ function verdictOf(b, up){   // can b merge into main now? gates on upstream AND
   return {cls, txt:'blocked: '+blockers.join(' · ')};
 }
 function nodeTip(){ let t=$('#ntip'); if(!t){ t=el('div'); t.id='ntip'; document.body.appendChild(t); } return t; }
+let _tipBranch=null; const _purposeFetching=new Set();
 function showTip(b, anchorEl){
+  _tipBranch=b;
   const up=upstreamOf(b), self=prState(b), t=nodeTip();
+  // lead with the WHY — the branch purpose. read-only, cached; lazy-fetch + re-render if missing.
+  const pp = (typeof PURPOSE!=='undefined') ? PURPOSE[b] : null;
+  let why='';
+  if(pp && pp.thesis){ why=`<div class="tip-why"><span class="pwhy">✦</span> ${pp.thesis}</div>`; }
+  else if(!pp && typeof LIVE!=='undefined' && LIVE && !_purposeFetching.has(b)){
+    _purposeFetching.add(b);
+    fetch('/purpose?branch='+encodeURIComponent(b)).then(r=>r.json()).then(p=>{
+      PURPOSE[b]=p; _purposeFetching.delete(b); if(_tipBranch===b) showTip(b, anchorEl);
+    }).catch(()=>_purposeFetching.delete(b));
+  }
   const rows = up.map(u=>{ const s=prState(u.branch);
     return `<li class="us ${s.cls}"><span class="us-g">${s.glyph}</span>
       <span class="us-b">${u.branch}</span>${u.fanin?'<span class="us-tag">fan-in</span>':''}
@@ -86,7 +98,7 @@ function showTip(b, anchorEl){
   const v = verdictOf(b, up);
   const verdict = `<div class="tip-v ${v.cls}">${v.txt}</div>`;
   t.innerHTML = `<div class="tip-h"><b>${b.split('/').pop()}</b>
-      <span class="tip-self ${self.cls}">${self.glyph} ${self.meta}</span></div>
+      <span class="tip-self ${self.cls}">${self.glyph} ${self.meta}</span></div>${why}
     ${up.length?`<div class="tip-sec">must merge first · merge order ↓</div><ul class="tip-up">${rows}</ul>`:''}
     ${verdict}`;
   const r=anchorEl.getBoundingClientRect();
@@ -112,7 +124,7 @@ function unspotlight(){
   document.querySelectorAll('svg.graph').forEach(svg=>{ svg.classList.remove('focusing');
     svg.querySelectorAll('.lit,.up').forEach(x=>x.classList.remove('lit','up')); });
 }
-function hideTip(){ const t=$('#ntip'); if(t) t.classList.remove('on'); unspotlight(); }
+function hideTip(){ _tipBranch=null; const t=$('#ntip'); if(t) t.classList.remove('on'); unspotlight(); }
 function renderGraph(sel){
   ensurePRs();   // kick off the one-time PR fetch (re-renders the rail when it arrives)
   const tgt=$(sel); if(!tgt) return;   // #dock is gone — only the fullscreen map (#map) renders here
