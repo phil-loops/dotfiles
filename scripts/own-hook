@@ -1,0 +1,22 @@
+#!/bin/zsh
+# own-hook — Claude Code PreToolUse hook (matcher: Edit|Write|MultiEdit).
+# Routes each edited file through `own guard` so a session auto-claims the lane
+# it edits (adoption without remembering) and gets warned on cross-session
+# collisions. WARN-ONLY: this always exits 0, never blocks a tool call.
+#
+# Claude Code feeds the hook a JSON payload on stdin: {session_id, tool_input:{file_path}}.
+emulate -L zsh; set -uo pipefail
+input=$(cat)
+[[ "$input" == *"/.dotfiles/"* ]] || exit 0          # fast path: only dotfiles edits are laned — skip everything else
+eval "$(print -r -- "$input" | python3 -c '
+import sys, json, shlex
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+sid = d.get("session_id", "")
+fp  = (d.get("tool_input") or {}).get("file_path", "")
+print("sid=" + shlex.quote(sid))
+print("fp="  + shlex.quote(fp))
+' 2>/dev/null)"
+[[ -n "${fp:-}" ]] || exit 0
+OWN_SESSION="${sid:-}" "${0:A:h}/own" guard "$fp"
+exit 0
