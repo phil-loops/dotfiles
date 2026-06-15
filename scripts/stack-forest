@@ -141,6 +141,15 @@ def file_status(branch, parent):
         else:
             s = "stale"; stale += 1
         rows.append({"path": p, "status": s, "blessed": bl, "current": cu})
+    # per-file +/- deltas (one numstat call) — for the node popover's file list
+    nst = {}
+    for ln in git_out(["diff", "--numstat", f"{parent}...{branch}"]).splitlines():
+        parts = ln.split("\t")
+        if len(parts) == 3:
+            a, d, p = parts
+            nst[p] = (0 if a == "-" else int(a or 0), 0 if d == "-" else int(d or 0))
+    for r in rows:
+        r["add"], r["del"] = nst.get(r["path"], (0, 0))
     return rows, clean, stale, unbl
 
 
@@ -170,7 +179,7 @@ if node_mode:
         stale = ""
         if r["status"] == "stale" and r["blessed"] and r["current"]:
             stale = git_out(["diff", r["blessed"], r["current"]])
-        files.append({"path": r["path"], "status": r["status"],
+        files.append({"path": r["path"], "status": r["status"], "add": r["add"], "del": r["del"],
                       "patch": chunks.get(r["path"], ""), "stale": stale})
     print(json.dumps({"branch": branch, "files": files}))
     sys.exit(0)
@@ -223,7 +232,7 @@ def build(branch):
     return branch, {
         "branch": branch, "parent": parent, "status": roll,
         "clean": clean, "stale": stale, "unblessed": unbl, "total": len(rows),
-        "files": [{"path": r["path"], "status": r["status"]} for r in rows],
+        "files": [{"path": r["path"], "status": r["status"], "add": r["add"], "del": r["del"]} for r in rows],
         "children": [c for c in children.get(branch, []) if c in members],
         "requires": [r for r in requires.get(branch, []) if r in members],
     }

@@ -1,18 +1,56 @@
+// the left rail IS the dependency graph now — a vertical tree (main → roots →
+// children) with connector lines, per-node status + PR badge + N/N count. The
+// horizontal flowchart with edges/spotlight lives in the fullscreen map (m).
 function renderRail(){
   $('#leaf').textContent = MODEL.project || MODEL.leaf || '';
   const tot=NODES.reduce((a,n)=>{a.c+=n.clean;a.s+=n.stale;a.u+=n.unblessed;a.t+=n.total;return a;},{c:0,s:0,u:0,t:0});
   $('#bar').style.width=(tot.t?Math.round(100*tot.c/tot.t):0)+'%';
   $('#tally').innerHTML=`<span><b>${tot.c}</b> blessed</span><span><b>${tot.s}</b> stale</span><span><b>${tot.u}</b> new</span>`;
   const rail=$('#rail'); rail.innerHTML='';
-  // flat, honest list — structure lives in the docked graph, not fake indentation
-  NODES.forEach(n=>{
-    const li=el('li','lk'+(n.id===active?' on':''));
-    li.innerHTML=`<div class="nm"><span class="dot ${n.status}"></span> ${n.branch.split('/').pop()}</div>
-      <div class="pr">${n.clean}/${n.total} blessed</div>`;
-    li.onclick=()=>{active=n.id; render();};
+  const N = MODEL.nodes;
+  const row=(b,n,connector)=>{
+    const done = n.total>0 && n.clean===n.total && n.stale===0;
+    const li=el('li','lk'+(b===active?' on':'')+(done?' done':''));
+    li.dataset.b=b;
+    const pr=(typeof GPRS!=='undefined') ? GPRS[b] : null;
+    const ps=(pr && typeof prState==='function') ? prState(b) : null;
+    const badge = ps ? `<span class="rdot ${ps.cls}" title="${ps.meta}">${ps.glyph}</span>` : '';
+    li.innerHTML=`<span class="tw">${connector}</span><span class="dot ${n.status}"></span>`
+      +`<span class="nm">${b.split('/').pop()}</span>${badge}<span class="cnt2">${n.clean}/${n.total}</span>`;
+    li.onclick=()=>{ active=b; render(); };
+    li.addEventListener('mouseenter',()=>{ if(typeof showTip==='function') showTip(b, li); railSpot(b); });
+    li.addEventListener('mouseleave',()=>{ if(typeof hideTip==='function') hideTip(); railUnspot(); });
     rail.appendChild(li);
-  });
+  };
+  if(N){
+    const trunk=el('li','lk trunk');
+    trunk.innerHTML='<span class="tw"> </span><span class="dot clean"></span><span class="nm main">main</span>';
+    rail.appendChild(trunk);
+    const seen=new Set();
+    const walk=(b,anc,isLast)=>{
+      if(seen.has(b))return; seen.add(b);
+      const n=N[b]; if(!n)return;
+      row(b,n, anc.map(v=>v?'│ ':'  ').join('')+(isLast?'└ ':'├ '));
+      const kids=(n.children||[]).filter(c=>N[c] && !seen.has(c));
+      kids.forEach((c,i)=>walk(c, anc.concat(!isLast), i===kids.length-1));
+    };
+    const roots=(MODEL.roots||[]).filter(r=>N[r]);
+    roots.forEach((r,i)=>walk(r, [], i===roots.length-1));
+    Object.keys(N).forEach(b=>{ if(!seen.has(b)) walk(b, [], true); });   // any orphans
+  } else {
+    NODES.forEach(n=>row(n.id, n, ''));   // linear snapshot fallback
+  }
 }
+// hover spotlight in the tree: light the hovered row + its upstream blockers, dim the rest
+function railSpot(b){
+  if(typeof upstreamOf!=='function')return;
+  const up=new Set(upstreamOf(b).map(u=>u.branch)), lit=new Set([b,...up]);
+  const rail=$('#rail'); if(!rail)return; rail.classList.add('spotting');
+  rail.querySelectorAll('li.lk[data-b]').forEach(li=>{ const id=li.dataset.b;
+    li.classList.toggle('lit', lit.has(id)); li.classList.toggle('up', up.has(id)); });
+}
+function railUnspot(){ const rail=$('#rail'); if(!rail)return; rail.classList.remove('spotting');
+  rail.querySelectorAll('li.lit,li.up').forEach(li=>li.classList.remove('lit','up')); }
 
 // diff base: view a node's diff vs an upstream ref (null = its parent). resets per node.
 let diffBase=null, diffBaseFor=null;
@@ -59,10 +97,11 @@ function render(){
   else { sub.appendChild(el('span','ro-badge','snapshot · read-only')); }
   main.appendChild(sub);
 
-  // diff base picker — view this node's diff against an upstream ref (default = parent)
-  const baseRef = (diffBase && diffBase!==l.parent) ? diffBase : null;
+  // diff base picker — view this node's diff vs an upstream ref OR vs the last blessed blob
+  const blessedMode = diffBase==='blessed';
+  const baseRef = (diffBase && diffBase!=='blessed' && diffBase!==l.parent) ? diffBase : null;
   const bp=el('div','basepick'); bp.appendChild(el('span','bplabel','diff vs'));
-  [['','parent'],['main','main']].forEach(([ref,lab])=>{
+  [['','parent'],['main','main'],['blessed','last blessed']].forEach(([ref,lab])=>{
     const c=el('span','bp'+(((diffBase||'')===ref)?' on':''),lab);
     c.onclick=()=>{ diffBase=ref||null; render(); }; bp.appendChild(c); });
   main.appendChild(bp);
@@ -103,7 +142,11 @@ function render(){
       w.innerHTML='';
       // smart default — the minimum you must re-read:
       //   stale → ONLY the diff since you last blessed; else → the full link diff
-      if(f.status==='stale' && pd.stale){
+      if(blessedMode){
+        if(pd.stale){ body.insertBefore(el('p','since','✦ since you blessed'), w); d2h(pd.stale); }
+        else if(f.status==='clean'){ w.innerHTML='<p style="color:var(--faint);padding:11px">unchanged since you blessed ✓</p>'; }
+        else { w.innerHTML='<p style="color:var(--faint);padding:11px">never blessed — nothing to compare</p>'; }
+      } else if(f.status==='stale' && pd.stale){
         body.insertBefore(el('p','since','✦ since you blessed'), w);
         d2h(pd.stale);
       } else if(pd.patch){ d2h(pd.patch); }
