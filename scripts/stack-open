@@ -7,7 +7,8 @@
 # "review-nvim" via its --listen socket — warm tsserver, instant, full LSP.
 # Launches the nvim (in the tmux 'loops' session) if it isn't already running.
 #
-#   stack-open <branch> <path>     ensure worktree + open <path> in the warm nvim
+#   stack-open <branch> <path> [<pos>]  ensure worktree + open <path> in the warm nvim;
+#                                       <pos> lands the cursor: "<line>" or "<line>:<col>"
 #   stack-open --prepare <branch>  create/refresh the worktree only (prefetch)
 #   stack-open --prune [<days>]    remove scratch worktrees idle > days (default 3)
 #
@@ -65,22 +66,36 @@ case "${1:-}" in
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
 esac
 
-branch="${1:?usage: stack-open <branch> <path> [<line>]}"
-rel="${2:?usage: stack-open <branch> <path> [<line>]}"   # NOT `path` — that's zsh's $PATH array
-line="${3:-}"   # optional 1-based line to land on
+branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
+rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
+pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
 ( prune_old 3 ) &!                       # lazy self-clean, non-blocking
 dir=$(ensure_worktree "$branch")
 file="$dir/$rel"
 [[ -f "$file" ]] || { echo "stack-open: '$rel' not on $branch" >&2; exit 1; }
 
+# Resolve the opaque <pos> into nvim locators — THE one place the grammar lives.
+# Grow it here (patterns, ranges) and callers/server never change.
+#   warm_jump = keys sent to a live instance after :edit;  launch_arg = a +cmd for a cold launch.
+warm_jump=""; launch_arg=""
+case "$pos" in
+  "")        ;;                                                  # no position — open at top
+  <->)       warm_jump=":${pos}";                  launch_arg="+${pos}" ;;          # line
+  <->:<->)   warm_jump=":call cursor(${pos%%:*},${pos##*:})"
+             launch_arg="+call cursor(${pos%%:*},${pos##*:})" ;;                    # line:col
+  *)         echo "stack-open: unrecognized <pos> '$pos' — opening at top" >&2 ;;
+esac
+
 if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
   nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
-  [[ -n "$line" ]] && nvim --server "$SOCK" --remote-send ":${line}<CR>zz" >/dev/null 2>&1 || true   # jump + center
+  [[ -n "$warm_jump" ]] && nvim --server "$SOCK" --remote-send "${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
   tmux select-window -t "${SESSION}:review-nvim" 2>/dev/null || true
 else
   rm -f "$SOCK"
-  plus=""; [[ -z "$line" ]] || plus="+$line"       # +N lands the launch on the line
-  tmux new-window -t "$SESSION" -n review-nvim "nvim --listen '$SOCK' $plus '$file'" \
+  cmd="nvim --listen ${(q)SOCK}"                   # single-string form (proven); (q) keeps spaces/parens intact
+  [[ -n "$launch_arg" ]] && cmd+=" ${(q)launch_arg}"
+  cmd+=" ${(q)file}"
+  tmux new-window -t "$SESSION" -n review-nvim "$cmd" \
     || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
 fi
 focus_terminal

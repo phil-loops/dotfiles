@@ -142,9 +142,9 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/open":   # open the file ON that branch in the warm review-nvim (full LSP)
             d = json.loads(raw or "{}")
             args = [os.path.join(SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")]
-            ln = d.get("line")     # optional: land the cursor on this 1-based line
-            if ln:
-                args.append(str(ln))
+            pos = d.get("pos") or d.get("line")   # opaque locator ("<line>" / "<line>:<col>" / …) — forwarded
+            if pos:                               # verbatim; this wiring layer never parses it. stack-open owns
+                args.append(str(pos))             # the grammar, so new locator kinds cost zero change HERE.
             r = run(args)
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
