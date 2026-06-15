@@ -102,6 +102,13 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
   color:var(--ember);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase}
 .d2h-wrap{padding:2px 4px}
 .caret{color:var(--faint);transition:transform .2s;flex:none}
+.fulltoggle{display:block;margin:4px 16px 14px;font:inherit;font-size:11px;color:var(--dim);
+  background:none;border:1px solid var(--line);padding:4px 11px;border-radius:7px;cursor:pointer;transition:.15s}
+.fulltoggle:hover{color:var(--gold);border-color:var(--gold-soft)}
+.fullfile{padding:0 12px 12px}
+.ff-pre{margin:0;padding:13px 15px;background:var(--bg);border:1px solid var(--line);border-radius:9px;
+  overflow:auto;max-height:72vh;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.6;color:var(--ink)}
+.ff-pre code{font-family:inherit;background:transparent}
 .file.open .caret{transform:rotate(90deg)}
 
 /* toast */
@@ -318,15 +325,29 @@ function render(){
     const body=el('div','body'); card.append(row,body);
     let drawn=false;
     const draw=()=>{ if(drawn)return; drawn=true;
+      // smart default — the minimum you must re-read:
+      //   stale → ONLY the diff since you last blessed; else → the full link diff
+      const d2h=(diff)=>{ const w=el('div','d2h-wrap'); body.appendChild(w);
+        new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw(); };
       if(f.status==='stale' && f.stale){
         body.appendChild(el('p','since','✦ since you blessed'));
-        const w=el('div','d2h-wrap'); body.appendChild(w);
-        new Diff2HtmlUI(w,f.stale,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw();
-        body.appendChild(el('p','since','full change in this link'));
+        d2h(f.stale);
+      } else if(f.patch){ d2h(f.patch); }
+      else { body.appendChild(el('div','d2h-wrap','<p style="color:var(--faint);padding:12px">no textual diff</p>')); }
+      // full-file toggle (live only — needs the server to read the blob)
+      if(LIVE){
+        const ff=el('button','fulltoggle','⤢ full file'); let box=null, loaded=false;
+        ff.onclick=async()=>{
+          if(loaded){ const vis=box.style.display!=='none'; box.style.display=vis?'none':'block'; ff.textContent=vis?'⤢ full file':'⤢ hide full file'; return; }
+          ff.textContent='loading…';
+          const r=await fetch('/file?branch='+encodeURIComponent(l.branch)+'&path='+encodeURIComponent(f.path));
+          box=el('div','fullfile'); const pre=el('pre','ff-pre'); const code=document.createElement('code');
+          code.textContent=await r.text(); pre.appendChild(code); box.appendChild(pre); body.appendChild(box);
+          if(window.hljs) try{ hljs.highlightElement(code); }catch(e){}
+          loaded=true; ff.textContent='⤢ hide full file';
+        };
+        body.appendChild(ff);
       }
-      if(f.patch){ const w=el('div','d2h-wrap'); body.appendChild(w);
-        new Diff2HtmlUI(w,f.patch,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw();
-      } else { body.appendChild(el('div','d2h-wrap','<p style="color:var(--faint);padding:12px">no textual diff</p>')); }
     };
     row.onclick=(e)=>{ if(e.target.closest('.bless'))return; card.classList.toggle('open'); if(card.classList.contains('open'))draw(); };
     const bb=row.querySelector('.bless'); if(bb) bb.onclick=()=>doBless(l.branch,f.path);

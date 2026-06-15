@@ -47,6 +47,13 @@ class H(BaseHTTPRequestHandler):
                 self._send(500, json.dumps({"error": r.stderr}))
             else:
                 self._send(200, r.stdout)
+        elif u.path == "/file":
+            q = parse_qs(u.query)
+            branch, path = q.get("branch", [""])[0], q.get("path", [""])[0]
+            r = run(["git", "show", f"{branch}:{path}"])
+            self._send(200 if r.returncode == 0 else 404,
+                       r.stdout if r.returncode == 0 else "(file not found on this ref)",
+                       "text/plain; charset=utf-8")
         else:
             self._send(404, "{}")
 

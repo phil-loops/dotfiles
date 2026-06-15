@@ -65,17 +65,6 @@ loops() {
             shift 2>/dev/null
             case "$subcmd" in
                 review)
-                    # --html → LIVE blessing-aware browser review (illuminated
-                    # ledger): per-file ✓/△/· chips, since-blessed deltas, live
-                    # bless buttons. --snapshot → frozen static file:// version.
-                    if [[ " $* " == *" --html "* || " $* " == *" -H "* || " $* " == *" --snapshot "* ]]; then
-                        local snap=0; [[ " $* " == *" --snapshot "* ]] && snap=1
-                        local rest=("${(@)argv:#(--html|-H|--snapshot)}")
-                        local b="${rest[1]:-$(git branch --show-current 2>/dev/null)}"
-                        if (( snap )); then ~/.dotfiles/scripts/stack-review-html "$b"
-                        else ~/.dotfiles/scripts/stack-review-serve "$b"; fi
-                        return $?
-                    fi
                     # No arg: if the current branch is part of a stack (has a
                     # recorded parent), let stack-review auto-resolve it — it
                     # upgrades any member branch to its project view. Only when
@@ -90,6 +79,11 @@ loops() {
                         fi
                     fi
                     ~/.dotfiles/scripts/stack-review "$@"
+                    ;;
+                web)
+                    # live blessing-aware browser review of a project (illuminated
+                    # ledger): tree-rail, graph map, since-blessed deltas, live bless.
+                    ~/.dotfiles/scripts/stack-review-serve "${1:-$(git branch --show-current 2>/dev/null)}"
                     ;;
                 list|ls)
                     ~/.dotfiles/scripts/stack-list "$@"
@@ -106,6 +100,7 @@ loops() {
                 *)
                     echo "loops stack commands:"
                     echo "  loops stack review [project|branch]   review stack in nvim diffview"
+                    echo "  loops stack web [project|branch]       live blessing review in the browser"
                     echo "  loops stack list                       list registered stack-projects"
                     echo "  loops stack list --pick                fzf-pick a stack and open in review"
                     echo "  loops stack integrate <project>        build virtual integration ref"
