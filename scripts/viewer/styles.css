@@ -184,6 +184,24 @@ svg.graph{display:block;overflow:visible}
 .prbadge.approved circle{stroke-width:2.3}
 .prbadge.changes circle{fill:#bf4b29!important;stroke:#ff9b76!important;filter:drop-shadow(0 0 6px #cf6a3aaa)} .prbadge.changes text{fill:#fff}
 .prbadge:hover circle{filter:brightness(1.22)}
+/* hover tooltip: a node's upstream merge requirements (what must merge first) */
+#ntip{position:fixed;z-index:90;max-width:360px;min-width:236px;pointer-events:none;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:10px 12px;box-shadow:0 12px 32px #000a;opacity:0;transform:translateY(-4px);transition:opacity .12s,transform .12s;font-family:'IBM Plex Mono',monospace}
+#ntip.on{opacity:1;transform:none}
+#ntip .tip-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px}
+#ntip .tip-h b{font-family:'Fraunces',serif;font-style:italic;font-size:15px;color:var(--ink)}
+#ntip .tip-self{font-size:10.5px;white-space:nowrap;color:var(--faint)}
+#ntip .tip-self.approved{color:#56d090} #ntip .tip-self.changes{color:var(--ember)} #ntip .tip-self.pending{color:var(--gold)}
+#ntip .tip-sec{font-size:9px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);margin:8px 0 5px}
+#ntip ul.tip-up{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px}
+#ntip li.us{display:flex;align-items:center;gap:6px;font-size:11px;line-height:1.35}
+#ntip li.us .us-g{width:13px;flex:none;text-align:center;font-weight:800;color:var(--faint)}
+#ntip li.us .us-b{color:var(--ink);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ntip li.us .us-tag{flex:none;font-size:8px;letter-spacing:.04em;text-transform:uppercase;color:var(--gold);border:1px solid var(--gold);opacity:.6;border-radius:4px;padding:0 3px}
+#ntip li.us .us-m{flex:none;margin-left:auto;color:var(--faint);font-size:9.5px;white-space:nowrap}
+#ntip li.us.approved .us-g{color:#56d090} #ntip li.us.changes .us-g{color:var(--ember)} #ntip li.us.pending .us-g{color:var(--gold)}
+#ntip li.us.none .us-g,#ntip li.us.none .us-b{color:var(--dim)}
+#ntip .tip-v{margin-top:8px;padding-top:6px;border-top:1px solid var(--line);font-size:11px}
+#ntip .tip-v.ready{color:#56d090} #ntip .tip-v.blocked{color:var(--gold)}
 .main::-webkit-scrollbar,.links::-webkit-scrollbar{width:9px}
 .main::-webkit-scrollbar-thumb,.links::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
 /* ── CMD+K command palette ─────────────────────────────────── */
