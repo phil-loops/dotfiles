@@ -23,13 +23,16 @@ repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
 #  check type — conclusion for completed, status/state while in flight.)
 ROLL_JQ='
 def f: ["FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED"];
-def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED",""];
+def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
 .[] | [
   (.number|tostring),
-  ( [.statusCheckRollup[]? | (.conclusion // .status // .state // "PENDING")] as $st
+  ( [.statusCheckRollup[]?
+      # conclusion (CheckRun, when finished) → status (CheckRun, in flight) → state (StatusContext).
+      # an empty-string conclusion means "not finished" — fall through to status.
+      | ((.conclusion | select(. != "")) // .status // .state // "PENDING")] as $st
     | ($st|length) as $n
-    | ([$st[]|select((f|index(.)) != null)]|length) as $nf
-    | ([$st[]|select((p|index(.)) != null)]|length) as $np
+    | ([$st[] | select(. as $x | f | index($x))] | length) as $nf   # bind $x; f|index(.) would rebind . to f
+    | ([$st[] | select(. as $x | p | index($x))] | length) as $np
     | if   $n==0  then "○ no checks"
       elif $nf>0  then "✗ \($nf) failing"
       elif $np>0  then "● \($np) running"
