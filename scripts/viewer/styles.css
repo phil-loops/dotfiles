@@ -169,6 +169,7 @@ svg.graph{display:block;overflow:visible}
 .gn .cnt{fill:var(--faint);font-size:10px;text-anchor:end}
 .gn .d{stroke:none}
 .gn.clean .d{fill:var(--gold);filter:drop-shadow(0 0 5px #e0ad4eaa)} .gn.clean rect{stroke:#e0ad4e44}
+.gn.done rect{stroke:var(--gold);stroke-width:1.7;filter:drop-shadow(0 0 7px #e0ad4e55)} .gn.done .cnt{fill:var(--gold);font-weight:600}
 .gn.stale .d{fill:var(--ember)} .gn.unblessed .d{fill:var(--unbl)} .gn.partial .d{fill:var(--ember)}
 .gn.main circle{fill:var(--gold);filter:drop-shadow(0 0 7px #e0ad4e)}
 .gn.main text{fill:var(--gold);font-family:'Fraunces',serif;font-style:italic;font-size:15px}

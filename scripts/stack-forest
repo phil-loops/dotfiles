@@ -31,6 +31,12 @@ node_mode = False
 if argv and argv[0] == "--node":
     node_mode = True
     argv = argv[1:]
+# WAVE 2 can diff against an arbitrary upstream ref (default = the node's parent)
+base = None
+if "--base" in argv:
+    i = argv.index("--base")
+    base = argv[i + 1] if i + 1 < len(argv) else None
+    del argv[i:i + 2]
 target = (argv[0] if argv else git_out(["branch", "--show-current"])).strip()
 if not target:
     print(json.dumps({"project": "", "roots": [], "nodes": {}}))
@@ -142,16 +148,18 @@ def file_status(branch, parent):
 if node_mode:
     branch = target
     parent = parents.get(branch, MAIN)
-    rows, *_ = file_status(branch, parent)
-    # fan-in: drop carried `requires` files so the diff view shows only own work
-    reqs = requires.get(branch, [])
+    diff_base = base or parent            # diff vs any upstream node; default = parent
+    rows, *_ = file_status(branch, diff_base)
+    # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
+    # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
+    reqs = requires.get(branch, []) if diff_base == parent else []
     if reqs:
         carried = set()
         for r in reqs:
             carried.update(git_out(["diff", "--name-only", f"{MAIN}...{r}"]).split())
         rows = [row for row in rows if row["path"] not in carried]
     chunks = {}
-    full = git_out(["diff", "-p", f"{parent}...{branch}"])
+    full = git_out(["diff", "-p", f"{diff_base}...{branch}"])
     for ch in re.split(r"(?m)^(?=diff --git )", full):
         if ch.startswith("diff --git "):
             m = DIFF_HDR.match(ch.splitlines()[0])
