@@ -16,7 +16,7 @@
 #
 # Parent defaults to stack-branch.<branch>.parent, then stack.main-branch, then main.
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 branch=""; parent=""; file=""; unbless=0
 while (( $# )); do

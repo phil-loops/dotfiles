@@ -14,7 +14,7 @@
 # A branch already checked out in a real worktree is opened there (editable);
 # otherwise a scratch worktree under $STACK_OPEN_DIR is used.
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 SCRATCH="${STACK_OPEN_DIR:-/tmp/stack-study}"
 SOCK="${STACK_OPEN_SOCK:-/tmp/stack-review-nvim.sock}"

@@ -6,7 +6,7 @@
 # snapshot. Bless buttons POST back, the page re-fetches, staleness updates. The
 # server self-reaps a short while after you close the tab (heartbeat).
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 branch="${1:-$(git branch --show-current 2>/dev/null)}"
 [[ -n "$branch" ]] || { echo "stack-review-serve: no branch" >&2; exit 1; }
