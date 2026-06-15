@@ -12,6 +12,8 @@
 emulate -L zsh; set -uo pipefail
 ROOT="${0:A:h:h}"; OWNERS="$ROOT/OWNERS"; NOW=$(date +%s); FRESH=900
 gc(){ git -C "$ROOT" config "$@"; }   # always the dotfiles repo, regardless of cwd
+SID="${OWN_SESSION:-}"                 # caller's session id (the PreToolUse hook passes it); "" for manual CLI
+_setsession(){ [[ -n "$SID" ]] && gc "own.$1.session" "$SID" || gc --unset "own.$1.session" 2>/dev/null; }
 _lane_for(){ local p="$1" best="" blen=0 line lane globs g
   while IFS= read -r line; do
     [[ "$line" == \#* || -z "${line// /}" ]] && continue
@@ -25,13 +27,13 @@ _lanes(){ grep -v '^#' "$OWNERS" | awk 'NF{print $1}'; }
 _is_lane(){ grep -q "^$1 " "$OWNERS"; }
 case "${1:-list}" in
   claim) [[ -n "${2:-}" ]] || { print "usage: own claim <lane>" >&2; exit 2; }
-    gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null
+    gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setsession "$2"
     print "you hold [$2] — edit these directly; patch anything else:"; _paths "$2" ;;
   slice) [[ $# -ge 3 ]] || { print "usage: own slice <name> <lane> [<lane>...]" >&2; exit 2; }
     local name="$2"; shift 2; local ln
     for ln in "$@"; do _is_lane "$ln" || { print "no such lane: $ln (see 'own list')" >&2; exit 2; }; done
     for ln in "$@"; do
-      gc "own.$ln.held" "$NOW"; gc "own.$ln.slice" "$name"; gc --unset "own.$ln.req" 2>/dev/null
+      gc "own.$ln.held" "$NOW"; gc "own.$ln.slice" "$name"; gc --unset "own.$ln.req" 2>/dev/null; _setsession "$ln"
     done
     print "holding [${(j:, :)@}] for slice:$name — one feature across these lanes."
     print "the other session's 'own list' now shows WHY they're held. edit these directly; patch anything else." ;;
@@ -42,7 +44,7 @@ case "${1:-list}" in
       print "[$2] is actively held (${a}s ago) — request registered."
       print "  the holder sees it on 'own list' and runs 'own release $2' to hand off; then 'own claim $2'."
     else
-      gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null
+      gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setsession "$2"
       print "[$2] was free/stale — claimed it. you hold it now:"; _paths "$2"
     fi ;;
   who) [[ -n "${2:-}" ]] || { print "usage: own who <path>" >&2; exit 2; }
@@ -70,5 +72,17 @@ case "${1:-list}" in
       done
       [[ $any -eq 1 ]] || { print "no lane or slice named '$arg'" >&2; exit 1; }
     fi ;;
+  guard) local p="${2:-}"; [[ -n "$p" ]] || exit 0      # PreToolUse hook entry — warn-only, NEVER blocks
+    case "$p" in "$ROOT"/*) ;; *) exit 0 ;; esac          # only dotfiles paths are laned
+    local rel="${p#$ROOT/}" lane=$(_lane_for "${p#$ROOT/}")
+    [[ -n "$lane" ]] || exit 0
+    local holder=$(gc "own.$lane.session" 2>/dev/null) age
+    if age=$(_age "$lane") && (( age < FRESH )) && [[ -n "$holder" && "$holder" != "$SID" ]]; then
+      local sl=$(gc "own.$lane.slice" 2>/dev/null)
+      print -u2 "⚠ own: [$lane]${sl:+ (slice:$sl)} is actively held by another session (${age}s ago)."
+      print -u2 "   editing $rel — prefer the patch protocol (worktree → git diff → git apply --3way). See ~/.dotfiles/OWNERS."
+    fi
+    gc "own.$lane.held" "$NOW"; _setsession "$lane"       # auto-claim: register THIS session's activity
+    exit 0 ;;
   *) print "usage: own {claim <lane>|slice <name> <lane>...|request <lane>|who <path>|list|release <lane|slice>}" >&2; exit 2 ;;
 esac
