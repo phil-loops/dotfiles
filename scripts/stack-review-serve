@@ -11,7 +11,11 @@ command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$
 branch="${1:-$(git branch --show-current 2>/dev/null)}"
 [[ -n "$branch" ]] || { echo "stack-review-serve: no branch" >&2; exit 1; }
 here="${0:A:h}"
-repo="$(pwd)"
+# pin the server's git context to the repo ROOT, not raw $(pwd) — launching from
+# a subdir still scopes right, and launching outside a repo errors loudly instead
+# of silently binding to the wrong place (the empty-/model footgun).
+repo=$(git rev-parse --show-toplevel 2>/dev/null) \
+  || { echo "stack-review-serve: not inside a git repo" >&2; exit 1; }
 servedir="$(mktemp -d)"
 
 # build the shell once in LIVE mode (model = null → the page fetches /model)
