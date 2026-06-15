@@ -155,6 +155,7 @@ svg.graph{display:block;overflow:visible}
 .ge{fill:none;stroke:var(--line);stroke-width:1.6;opacity:0;animation:gfade .8s ease forwards}
 @keyframes gfade{to{opacity:1}}  /* transform-free — must NOT clobber the SVG translate */
 .ge.clean{stroke:#e0ad4e66} .ge.stale{stroke:#d36a3666} .ge.partial{stroke:#d36a3644} .ge.unblessed{stroke:var(--line)}
+.ge.fanin{stroke:var(--gold);stroke-dasharray:5 4}
 .gn{cursor:pointer;opacity:0;animation:gfade .45s ease forwards}
 .gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2;transition:.15s}
 .gn:hover rect{stroke:var(--dim);fill:var(--raised)}
@@ -278,6 +279,8 @@ function renderGraph(){
   let E='', G='', ei=0, gi=0;
   gm.roots.forEach(r=>{ if(pos[r]) E+=edge(54,mainY,pos[r].x,pos[r].y,rollStatus(roll(r)),ei++); });
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].children)||[]).forEach(c=>{ if(pos[c]) E+=edge(p.x+nodeW(b),p.y,pos[c].x,pos[c].y,rollStatus(roll(c)),ei++); }); });
+  // fan-in: dashed inbound edge from each `requires` dep into the node that carries it
+  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq]) E+=edge(pos[rq].x+nodeW(rq),pos[rq].y,p.x,p.y,'fanin',ei++); }); });
   G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(40,${mainY})"><circle r="6"/><text x="16" y="4">main</text></g>`;
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=roll(b), w=nodeW(b);
     G+=`<g class="gn ${rollStatus(r)}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
@@ -423,7 +426,25 @@ async function boot(){
     if(!MODEL) MODEL = await fetchModel();
     NODES=flatten(); active=pickInitial(); render();
     $('#mapbtn').onclick=()=>toggleMap();
-    if(LIVE) setInterval(()=>fetch('/heartbeat',{method:'POST'}).catch(()=>{}), 5000);
+    if(LIVE){
+      setInterval(()=>fetch('/heartbeat',{method:'POST'}).catch(()=>{}), 5000);
+      // live: poll a cheap signature; when refs/config/ledger change (re-root,
+      // rebase, bless) re-fetch and re-render so the forest updates in place.
+      let lastSig=null;
+      setInterval(async()=>{
+        try{
+          const {sig}=await (await fetch('/sig')).json();
+          if(lastSig===null){ lastSig=sig; return; }
+          if(sig===lastSig) return;
+          lastSig=sig;
+          MODEL=await fetchModel();
+          for(const k in NODEPATCH) delete NODEPATCH[k];   // diffs may have moved
+          render();
+          if($('#map').classList.contains('on')) renderGraph();
+          toast('↻ forest updated');
+        }catch(e){}
+      }, 3000);
+    }
   }catch(e){ document.body.innerHTML = '<p style="margin:40px;color:#cf6a3a">could not load model: '+e+'</p>'; }
 }
 boot();
