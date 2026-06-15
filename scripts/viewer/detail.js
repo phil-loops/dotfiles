@@ -149,6 +149,10 @@ function render(){
           numCell.onclick=async(e)=>{ e.stopPropagation();
             const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path,pos:String(n)})}).then(x=>x.json()).catch(()=>({ok:false}));
             toast(r.ok ? '⌁ '+f.path.split('/').pop()+':'+n+' → review-nvim' : '⌁ open failed: '+((r.err||'').trim()||'see server')); };
+          // hover anywhere on the row → press `o` to open that line in nvim (same as clicking the gutter #)
+          tr.title='press o to open line '+n+' in nvim';
+          tr.onmouseenter=()=>{ _hoverLine={branch:l.branch,path:f.path,n}; tr.classList.add('linehover'); };
+          tr.onmouseleave=()=>{ if(_hoverLine&&_hoverLine.n===n&&_hoverLine.path===f.path)_hoverLine=null; tr.classList.remove('linehover'); };
         });
       };
       w.innerHTML='';
@@ -199,8 +203,16 @@ function render(){
   }
 }
 
-// keyboard: m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
+// the diff line under the mouse (set by the d2h hover handlers) — press `o` to open it
+let _hoverLine = null;
+// keyboard: o → open hovered diff line in nvim; m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
 addEventListener('keydown',e=>{
+  if(e.key==='o' && _hoverLine){ const ae=document.activeElement;
+    if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;   // don't fire while typing
+    e.preventDefault(); const h=_hoverLine;
+    fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:h.branch,path:h.path,pos:String(h.n)})})
+      .then(x=>x.json()).then(r=>toast(r.ok?'⌁ '+h.path.split('/').pop()+':'+h.n+' → review-nvim':'⌁ open failed')).catch(()=>{});
+    return; }
   if(e.key==='m'){ toggleMap(); e.preventDefault(); return; }
   if(e.key==='f'){ document.body.classList.toggle('focus'); e.preventDefault(); return; }
   if(e.key==='Escape'){ if($('#map').classList.contains('on')) toggleMap(false); else document.body.classList.remove('focus'); return; }
