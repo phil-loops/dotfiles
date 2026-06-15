@@ -1074,7 +1074,10 @@ require('lazy').setup({
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
     dependencies = {
-      'nvim-treesitter/nvim-treesitter-textobjects',
+      -- pin to `master`: it's the branch whose API integrates via
+      -- `nvim-treesitter.configs.setup{ textobjects = … }` (matching core, also on
+      -- master). The default `main` branch is a rewrite that ignores that config.
+      { 'nvim-treesitter/nvim-treesitter-textobjects', branch = 'master' },
     },
     config = function()
       -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
