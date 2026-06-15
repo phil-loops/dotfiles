@@ -69,7 +69,7 @@ git checkout -b <new-branch-name>      # child branch forks from current HEAD
 
 The parent relationship is **implicit in the fork point** — git does not track it natively. Two places need to know the parent explicitly:
 
-1. **PRs**: pass `--base <parent>` to `gh pr create` so GitHub shows only this branch's diff, not the whole stack.
+1. **PRs**: always `gh pr create --base main` — every branch merges into main, never onto its parent. Independent bases (forked off main) keep each PR's diff to its own work; a genuinely-dependent branch merges in order after its base lands. (Never let tooling open PRs — that's manual.)
 2. **Rebase after parent changes**: `git rebase <parent>` (or `git rebase --onto <new-parent> <old-parent>` when moving a branch).
 
 Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order. And **set the branch's purpose right after creating it** — `loops purpose <new-branch-name> "<one-line thesis>"` — so the intent is captured while it's fresh.
@@ -86,7 +86,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
 | Restack whole project after a merge | `loops stack restack <project>` (see below)           |
-| Create PR                  | `gh pr create --base <parent> --head <branch>`              |
+| Create PR                  | `gh pr create --base main --head <branch>`                  |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
 
 ## Restacking after a merge — `loops stack restack`
