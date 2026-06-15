@@ -180,8 +180,22 @@ function render(){
         else if(f.status==='clean'){ w.innerHTML='<p style="color:var(--faint);padding:11px">unchanged since you blessed ✓</p>'; }
         else { w.innerHTML='<p style="color:var(--faint);padding:11px">never blessed — nothing to compare</p>'; }
       } else if(f.status==='stale' && pd.stale){
-        body.insertBefore(el('p','since','✦ since you blessed'), w);
-        d2h(pd.stale);
+        // per-card toggle: "since blessed" (default — the minimum you must re-read) ↔
+        // "vs parent" (the whole file diff, how GitHub shows it). Both came in one fetch.
+        let view='stale';
+        const seg=el('div','sincetoggle');
+        const pick=()=>{
+          seg.innerHTML='';
+          [['stale','✦ since blessed'],['parent','vs parent']].forEach(([k,lab])=>{
+            const o=el('span','segopt'+(view===k?' on':''),lab);
+            o.onclick=()=>{ if(view!==k){ view=k; pick(); } };
+            seg.appendChild(o);
+          });
+          w.innerHTML='';
+          d2h(view==='stale' ? pd.stale : (pd.patch||pd.stale));
+        };
+        body.insertBefore(seg, w);
+        pick();
       } else if(pd.patch){ d2h(pd.patch); }
       else { w.innerHTML='<p style="color:var(--faint);padding:11px">no textual diff</p>'; }
       // full-file toggle (live only — needs the server to read the blob)
