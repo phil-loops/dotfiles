@@ -1,0 +1,32 @@
+#!/bin/zsh
+# own — per-session file-ownership for concurrent Claude sessions (see ~/.dotfiles/OWNERS).
+#   own claim <lane>     this session holds <lane> (records a fresh timestamp)
+#   own who <path>       which lane owns <path>, and whether it's actively held
+#   own list             every lane: held-age + its paths
+#   own release [<lane>] drop this session's claim
+# Claims live in git config (own.<lane>.held = epoch); "active" = held < 15 min ago.
+emulate -L zsh; set -uo pipefail
+ROOT="${0:A:h:h}"; OWNERS="$ROOT/OWNERS"; NOW=$(date +%s); FRESH=900
+_lane_for(){ local p="$1" best="" blen=0 line lane globs g
+  while IFS= read -r line; do
+    [[ "$line" == \#* || -z "${line// /}" ]] && continue
+    lane="${line%% *}"; globs="${line#* }"
+    for g in ${(s: :)globs}; do [[ "$p" == ${g}* && ${#g} -gt $blen ]] && { best="$lane"; blen=${#g}; }; done
+  done < "$OWNERS"; print -r -- "$best"; }
+_age(){ local h; h=$(git config "own.$1.held" 2>/dev/null) || return 1; [[ -n "$h" ]] && print -r -- $((NOW-h)) || return 1; }
+case "${1:-list}" in
+  claim) [[ -n "${2:-}" ]] || { print "usage: own claim <lane>" >&2; exit 2; }
+    git config "own.$2.held" "$NOW"
+    print "you hold [$2] — edit these directly; patch anything else:"
+    grep "^$2 " "$OWNERS" | cut -d' ' -f2- | tr ' ' '\n' | sed '/^$/d;s/^/  /' ;;
+  who) [[ -n "${2:-}" ]] || { print "usage: own who <path>" >&2; exit 2; }
+    local l=$(_lane_for "$2"); [[ -z "$l" ]] && { print "$2 → (unowned)"; exit 0; }
+    local a; if a=$(_age "$l"); then print "$2 → [$l] · held ${a}s ago$([[ $a -lt $FRESH ]] && print ' ⚠ ACTIVE — use the patch protocol')"
+    else print "$2 → [$l] · unclaimed"; fi ;;
+  list) local line lane a
+    while IFS= read -r line; do [[ "$line" == \#* || -z "${line// /}" ]] && continue
+      lane="${line%% *}"; if a=$(_age "$lane"); then h="held ${a}s ago"; else h="—"; fi
+      printf '  %-9s %-15s %s\n' "$lane" "$h" "${line#* }"; done < "$OWNERS" ;;
+  release) [[ -n "${2:-}" ]] && { git config --unset "own.$2.held" 2>/dev/null; print "released [$2]"; } || print "usage: own release <lane>" >&2 ;;
+  *) print "usage: own {claim <lane>|who <path>|list|release <lane>}" >&2; exit 2 ;;
+esac
