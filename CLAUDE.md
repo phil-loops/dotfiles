@@ -1,10 +1,18 @@
 # Dotfiles
 
-When updating dotfiles (scripts, zshrc, CLAUDE.md, etc), use `zsource` to commit and reload:
+When updating dotfiles (scripts, zshrc, CLAUDE.md, etc), `zsource` commits + pushes + reloads:
 
 ```
 cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && cd - && source ~/.zshrc
 ```
+
+**Claude: do NOT use `zsource` / `git add -A` here.** Phil often has concurrent in-progress
+dotfiles work, and `-A` sweeps his uncommitted WIP into your commit (it once bundled his ledger
+scripts into an unrelated `.zshrc` commit). Instead: run `git status` as its own step, then stage
+**explicit paths** (`git add .zshrc`), commit, push. **Never `git push --force` a branch another
+session may be live on** — that clobbers pushed work; leave a cosmetically-wrong commit message
+alone rather than rewrite shared history. The reload (`source ~/.zshrc`) only affects your own
+subshell, so tell Phil to source it in his terminal to pick up the change.
 
 ## Script Placement
 
@@ -15,9 +23,18 @@ cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && c
 
 This ensures nothing is lost if the computer dies.
 
-# Git Branch Stacks
+# Git Branch Forests
 
-Use plain git for stacked PRs. Claude manages parent relationships — the user delegates stack plumbing and does not need to know or run any stack-specific commands.
+Think in **forests, not stacks** — a linear chain is just the degenerate case. Branches form a DAG: each has one git `parent` (its rebase base), and may **fan out** (many children) or **fan in** (carry several independent base branches at once). Claude manages this plumbing — the user delegates it and runs no stack-specific commands.
+
+**The aim: maximize independently-mergeable base PRs, then converge them with fan-in.** If two capabilities don't depend on each other (e.g. a Valkey cache vs. a JobStatus query change), each forks off `main` and merges on its own schedule — do NOT chain one behind the other just to make a line. Linearizing independent work forces a false merge order and blocks each PR on the others. The integrator that needs both records them as fan-in deps.
+
+## Two relationships per branch
+
+- **`parent`** (single) — the git base this branch is rebased onto. `git config stack-branch.<name>.parent <parent>`.
+- **`requires`** (multivar, optional) — fan-in deps: branches this one *carries* (cherry-picked) beyond its `parent`. Metadata only — the `parent...child` review diff is unchanged; `requires` drives the forest viewer's inbound edges and restack re-sync. `git config --add stack-branch.<name>.requires <dep>`.
+
+A pure line uses only `parent`; fan-in adds `requires`. **Never any git merge commits** — fan-in is metadata over linear history (carried cherry-picks), so squash-merge still drops redundant commits cleanly on rebase.
 
 ## Creating branches
 
@@ -40,9 +57,9 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Task                       | Command                                                     |
 | -------------------------- | ----------------------------------------------------------- |
 | Create child branch        | `git checkout <parent> && git checkout -b <name>`           |
-| Print stack as tree        | `stack-print [<tip>]` (walks `stack-branch.<name>.parent`)  |
-| Review stack in nvim       | `loops stack review [<branch>]`                             |
-| Review stack as HTML       | `loops stack review [<branch>] --html` (one tab per link)   |
+| Fork an independent base off main | `git checkout main && git checkout -b <name>` (no parent → roots off main) |
+| Add a fan-in dep           | `git config --add stack-branch.<name>.requires <dep>`       |
+| Review the forest (live)   | `loops stack review [<branch>]` (blessing-ledger server, reads git config per request) |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
 | Restack whole project after a merge | `loops stack restack <project>` (see below)           |
@@ -85,11 +102,11 @@ Decision rule:
 - Single-branch feature, or scanning across many worktrees → `wt`
 - Stacked branch lives in a sibling worktree → `cd` into it, then `loops stack review` (use both)
 
-## Stack hygiene
+## Forest hygiene
 
-- When the bottom branch of a stack merges, rebase every downstream branch onto the new `main` in order (lowest → highest). Resolve conflicts once per branch.
-- When PRs squash-merge, the commit on `main` won't match the branch's commits — this is expected. `git rebase main` will drop the now-redundant commits cleanly.
-- Keep the stack linear — no merge commits between branches in the same stack.
+- When a base branch merges, `loops stack restack <project>` rebases the forest onto fresh `main`, drops the now-redundant branch, and rewires its children. **The graph contracts by that node** — and keeps contracting as each independent base PR lands.
+- When PRs squash-merge, the commit on `main` won't match the branch's commits — expected. `git rebase main` drops the now-redundant commits cleanly (holds for both `parent` and carried `requires`).
+- **Git history stays linear — no merge commits**, even with fan-in. Fan-in lives in `requires` metadata + carried cherry-picks, not a git merge. (`stack-integrate` builds an *ephemeral* octopus-merge ref only as a "whole-feature-merged" preview, never as a branch base.)
 
 # Loops Script Runner
 
@@ -124,33 +141,31 @@ Follow a strict layering pattern: **queries → models → wiring**.
 
 - **Inline object-parameter type literals in function signatures.** Don't declare a separate named type alias just to name the input shape. Example: `function update(input: { id: string; name?: string })` — not `type UpdateInput = { ... }; function update(input: UpdateInput)`. Standalone aliases pollute the file's mental context: readers have to scroll up to resolve the alias to understand the contract. Inlining keeps the contract at the call site, even with 5+ fields. Test code that uses `Deps<typeof fn>` / `Parameters<typeof fn>` extracts from the function itself, so inline types don't break it. Don't refactor pre-existing standalone types unless asked.
 
-# Stacked PR Design
+# Forest PR Design
 
-Each branch in a stack should be **one reviewable unit** — a single concern that compiles and makes sense on its own.
+Each branch is **one reviewable unit — a single capability that compiles on its own**, named with one verb (`add X`, `record X`, `emit X`, `use X in Y`, `remove X`). Size tracks concern-count, not a line budget: prefer 3× 80-line PRs over 1× 200-line PR — but a cohesive primitive + its tests is fine even at ~250. The reference standard is **nalanj's PRs**: a feature shipped as ~7 single-verb stacked PRs, tests co-located, each metric its own tiny PR.
 
-## Branch ordering
+## Ordering & shape
 
-Stack branches bottom-up by dependency, not by feature area:
+- **Bottom-up by dependency**: schema/migration → queries → models → wiring → refactors/cleanup.
+- **Independent capabilities fork off `main` as siblings**, not chained — each independently mergeable. Only chain on a real dependency.
+- **Integrators fan in**: a branch that needs several independent bases sets `requires` on them (and carries their commits), rather than forcing the bases into a false line.
+- **Tests co-locate** with the code they test (`createX` with queries, `fakeX` with models).
+- **Observability/metrics get their own small PRs.**
 
-1. **Schema / migrations** — table changes land first, everything else builds on them
-2. **Queries** — thin DB wrappers for the new tables, one branch per entity or closely-related group
-3. **Models** — business logic that composes queries, one branch per domain operation
-4. **Wiring** — plug models into handlers/routers/jobs, one branch per integration point
-5. **Refactors / fixes** — clean up layering violations or tech debt on top
+## Boundaries
 
-## Branch boundaries
-
-- A branch should touch **one layer** (query, model, or wiring) for **one entity or concern**
-- Test files and factories land alongside the code they test — `createX` with queries, `fakeX` with models
-- UI branches are separate from API branches even if they're for the same feature
-- If a branch has changes across 3+ unrelated directories, it's probably too big — split it
-- A branch that only makes sense *with* its child should be merged into the child
+- One layer (query / model / wiring) for one entity or concern per branch.
+- UI branches separate from API branches, even for the same feature.
+- Changes across 3+ unrelated directories → too big, split it.
+- A branch that only makes sense *with* its child → merge it into the child.
 
 ## What NOT to do
 
-- Don't put business logic in query branches (status checks, authorization, cross-entity cascades)
-- Don't mix query expansions + tRPC endpoints + UI components in one branch
-- Don't add a column/migration in a middle branch if the schema branch already exists — amend the schema branch or prepend a new one
+- Don't put business logic in query branches (status checks, authorization, cross-entity cascades).
+- Don't mix query expansions + tRPC endpoints + UI components in one branch.
+- **Don't chain independent base capabilities into a line just to avoid fan-in** — that blocks each PR on the others' merge order.
+- Don't add a column/migration in a middle branch when a schema branch exists — prepend/extend the schema branch.
 
 # Taskfile
 
