@@ -27,13 +27,18 @@ html,body{margin:0;height:100%}
 body{
   background:var(--bg); color:var(--ink);
   font-family:'IBM Plex Mono',ui-monospace,monospace; font-size:13px; line-height:1.6;
-  display:grid; grid-template-columns:296px 1fr; height:100vh; overflow:hidden;
+  display:grid; grid-template-columns:300px 1fr; grid-template-rows:minmax(0,34vh) 1fr; height:100vh; overflow:hidden;
 }
-/* grain + vignette atmosphere */
-body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
-  background:radial-gradient(120% 100% at 50% -10%,transparent 55%,#0000 0,#00000066 100%);
-  mix-blend-mode:multiply}
-body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opacity:.035;
+/* graph docked on top (full width); list + detail below; focus = study full-width */
+.graphdock{grid-column:1/-1;grid-row:1;overflow:auto;border-bottom:1px solid var(--line);
+  background:radial-gradient(130% 140% at 22% -25%,#1d180f 0%,#100d08 80%);padding:12px 18px}
+.rail{grid-row:2;grid-column:1}
+.main{grid-row:2;grid-column:2}
+body.focus{grid-template-columns:1fr;grid-template-rows:1fr}
+body.focus .graphdock,body.focus .rail{display:none}
+body.focus .main{grid-column:1;grid-row:1;padding:24px 8vw 120px}
+/* subtle grain only — no vignette (it bled a distracting gradient over diffs) */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opacity:.03;
   background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>")}
 
 /* ── rail ───────────────────────────────────────────── */
@@ -114,6 +119,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .fulltoggle{display:block;margin:4px 16px 14px;font:inherit;font-size:11px;color:var(--dim);
   background:none;border:1px solid var(--line);padding:4px 11px;border-radius:7px;cursor:pointer;transition:.15s}
 .fulltoggle:hover{color:var(--gold);border-color:var(--gold-soft)}
+.fulltoggle.nvim{color:var(--ember)} .fulltoggle.nvim:hover{color:var(--ember);border-color:#d36a3644;background:var(--ember-soft)}
+#focusbtn{position:fixed;bottom:20px;right:22px;z-index:130;width:38px;height:38px;border-radius:50%;
+  background:var(--raised);border:1px solid var(--gold-soft);color:var(--gold);font-size:15px;cursor:pointer;
+  box-shadow:0 8px 24px #0007;transition:.15s}
+#focusbtn:hover,body.focus #focusbtn{background:var(--gold-soft)}
 .fullfile{padding:0 12px 12px}
 .ff-pre{margin:0;padding:13px 15px;background:var(--bg);border:1px solid var(--line);border-radius:9px;
   overflow:auto;max-height:72vh;font-family:'IBM Plex Mono',monospace;font-size:12px;line-height:1.6;color:var(--ink)}
@@ -127,18 +137,31 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 #toast.show{opacity:1;transform:translateX(-50%)}
 #toast b{color:var(--gold)}
 
-/* diff2html dark retune */
+/* diff2html — dark retune (readable inline highlights + dark hljs tokens) */
 .d2h-file-wrapper{border:none!important;margin:0!important;border-radius:0!important;background:transparent!important}
 .d2h-file-header{display:none!important}
 .d2h-code-line,.d2h-code-side-line{font-family:'IBM Plex Mono',monospace!important;font-size:12px!important}
 .d2h-diff-table{background:transparent!important}
 .d2h-code-linenumber,.d2h-code-side-linenumber{background:var(--panel)!important;color:var(--faint)!important;border-color:var(--line)!important}
-.d2h-ins{background:#1c2616!important} .d2h-ins .d2h-code-line-ctn{color:#bcd9a3!important}
-.d2h-del{background:#2a1714!important} .d2h-del .d2h-code-line-ctn{color:#e0a59c!important}
+.d2h-code-line-ctn{color:var(--ink)!important}
 .d2h-cntx .d2h-code-line-ctn{color:var(--dim)!important}
+.d2h-ins{background:#15240f!important} .d2h-del{background:#251210!important}
 .d2h-info{background:var(--raised)!important;color:var(--faint)!important}
-.hljs{background:transparent!important}
-::selection{background:#e0ad4e44}
+.d2h-emptyplaceholder,.d2h-code-side-emptyplaceholder{background:#120f0a!important;border-color:var(--line)!important}
+/* inline word-level changes — bright on saturated (this was the unreadable part) */
+.d2h-code-line ins,.d2h-code-side-line ins,ins.d2h-change{background:#37692f!important;color:#f4ffe6!important;text-decoration:none!important;border-radius:2px;padding:0 1px}
+.d2h-code-line del,.d2h-code-side-line del,del.d2h-change{background:#7e302b!important;color:#ffe7e2!important;text-decoration:none!important;border-radius:2px;padding:0 1px}
+/* dark hljs token palette (warm, matches the ledger) */
+.hljs{background:transparent!important;color:var(--ink)}
+.hljs-keyword,.hljs-built_in{color:#cf8b5e!important}
+.hljs-type,.hljs-class .hljs-title{color:#d8a94b!important}
+.hljs-string,.hljs-regexp,.hljs-meta .hljs-string{color:#9fb86a!important}
+.hljs-number,.hljs-literal{color:#caa84e!important}
+.hljs-comment,.hljs-quote{color:var(--faint)!important;font-style:italic}
+.hljs-title,.hljs-section,.hljs-name{color:#e0ad4e!important}
+.hljs-attr,.hljs-variable,.hljs-property,.hljs-params{color:#cdbf9a!important}
+.hljs-tag,.hljs-symbol{color:#c2693b!important} .hljs-meta{color:var(--dim)!important}
+::selection{background:#e0ad4e55}
 
 /* ── graph canvas overlay ───────────────────────────── */
 .mapbtn{margin:13px 22px 2px;font:inherit;font-size:11px;color:var(--gold);background:none;
@@ -172,11 +195,12 @@ svg.graph{display:block;overflow:visible}
 </style>
 </head>
 <body>
+<div class="graphdock" id="dock"></div>
 <nav class="rail">
   <div class="brand">
     <h1>blessed</h1>
     <div class="sub" id="leaf"></div>
-    <button class="mapbtn" id="mapbtn">◇ graph view &nbsp;<span style="opacity:.6">m</span></button>
+    <button class="mapbtn" id="mapbtn">⤢ fullscreen &nbsp;<span style="opacity:.6">m</span></button>
   </div>
   <div class="progress"><div class="bar"><i id="bar"></i></div></div>
   <div class="tally" id="tally"></div>
@@ -184,6 +208,7 @@ svg.graph{display:block;overflow:visible}
 </nav>
 <main class="main" id="main"></main>
 <div class="mapwrap" id="map"></div>
+<button id="focusbtn" title="focus mode (f)">⛶</button>
 <div id="toast"></div>
 
 <script>
@@ -260,10 +285,10 @@ function graphModel(){
   return {nodes, roots: links.length?[links[0].branch]:[]};
 }
 function edge(x1,y1,x2,y2,st,i){ const mx=(x1+x2)/2; return `<path class="ge ${st}" style="animation-delay:${i*40}ms" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`; }
-function renderGraph(){
-  const gm=graphModel(), N=gm.nodes;
-  if(!Object.keys(N).length){ $('#map').innerHTML='<p style="color:var(--faint);margin:50px">nothing to graph</p>'; return; }
-  const GAPY=58, GAPX=215, PADX=130, PADY=48;
+function renderGraph(sel){
+  const tgt=$(sel), gm=graphModel(), N=gm.nodes;
+  if(!Object.keys(N).length){ tgt.innerHTML='<p style="color:var(--faint);margin:30px">nothing to graph</p>'; return; }
+  const GAPY=52, GAPX=205, PADX=116, PADY=36;
   let leafY=0; const pos={}, sub={};
   const roll=b=>{ if(sub[b])return sub[b]; const n=N[b]||{}; const r={clean:n.clean||0,stale:n.stale||0,unblessed:n.unblessed||0,total:n.total||0};
     (n.children||[]).forEach(c=>{const s=roll(c); r.clean+=s.clean;r.stale+=s.stale;r.unblessed+=s.unblessed;r.total+=s.total;}); return sub[b]=r; };
@@ -286,11 +311,13 @@ function renderGraph(){
     G+=`<g class="gn ${rollStatus(r)}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
       <rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
       <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${r.clean}/${r.total}</text></g>`; });
-  $('#map').innerHTML=`<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3><span class="mapclose">click a node · esc to close</span></div>
-    <svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${E}${G}</svg>`;
-  $('#map').querySelectorAll('.gn[data-b]').forEach(g=>g.onclick=()=>{ active=g.getAttribute('data-b'); toggleMap(false); render(); });
+  const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3><span class="mapclose">click a node · esc to close</span></div>` : '';
+  tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${E}${G}</svg>`;
+  tgt.querySelectorAll('.gn[data-b]').forEach(g=>g.onclick=()=>{ active=g.getAttribute('data-b'); if(sel==='#map') toggleMap(false); render(); });
 }
-function toggleMap(on){ const m=$('#map'); const show = on===undefined ? !m.classList.contains('on') : on; if(show) renderGraph(); m.classList.toggle('on',show); }
+function buildDock(){ renderGraph('#dock'); }
+function updateDockSel(){ document.querySelectorAll('#dock .gn[data-b]').forEach(g=>g.classList.toggle('sel', g.getAttribute('data-b')===active)); }
+function toggleMap(on){ const m=$('#map'); const show = on===undefined ? !m.classList.contains('on') : on; if(show) renderGraph('#map'); m.classList.toggle('on',show); }
 function curObj(){ return NODES.find(n=>n.id===active) || NODES[NODES.length-1] || {branch:'',parent:'',files:[]}; }
 function pickInitial(){ const bad=NODES.find(n=>n.stale+n.unblessed>0); return (bad||NODES[NODES.length-1]||{}).id; }
 
@@ -300,15 +327,11 @@ function renderRail(){
   $('#bar').style.width=(tot.t?Math.round(100*tot.c/tot.t):0)+'%';
   $('#tally').innerHTML=`<span><b>${tot.c}</b> blessed</span><span><b>${tot.s}</b> stale</span><span><b>${tot.u}</b> new</span>`;
   const rail=$('#rail'); rail.innerHTML='';
+  // flat, honest list — structure lives in the docked graph, not fake indentation
   NODES.forEach(n=>{
-    const sub=subtree(n.id);
     const li=el('li','lk'+(n.id===active?' on':''));
-    li.style.paddingLeft=(12+n.depth*16)+'px';
-    const meter = n.total? `<div class="meter">${'<i class="c"></i>'.repeat(n.clean)}${'<i class="s"></i>'.repeat(n.stale)}${'<i class="u"></i>'.repeat(n.unblessed)}</div>`:'';
-    const guide = n.depth>0 ? '<span class="guide">└&nbsp;</span>' : '';
-    const kids = (n.children&&n.children.length)? ` · ${n.children.length}▾` : '';
-    li.innerHTML=`<div class="nm">${guide}<span class="dot ${rollStatus(sub)}"></span> ${n.branch.split('/').pop()}</div>
-      <div class="pr">${sub.clean}/${sub.total} blessed${kids}</div>${meter}`;
+    li.innerHTML=`<div class="nm"><span class="dot ${n.status}"></span> ${n.branch.split('/').pop()}</div>
+      <div class="pr">${n.clean}/${n.total} blessed</div>`;
     li.onclick=()=>{active=n.id; render();};
     rail.appendChild(li);
   });
@@ -318,6 +341,7 @@ function render(){
   NODES = flatten();
   if(!active || !NODES.some(n=>n.id===active)) active = pickInitial();
   renderRail();
+  updateDockSel();   // highlight the selected node in the docked graph (no rebuild)
   const l = curObj();
   if(LIVE) ensureNode(l.branch);   // priority: prefetch the node you just landed on
   const main=$('#main'); main.innerHTML='';
@@ -377,7 +401,7 @@ function render(){
       // diffs load per node on demand; the link diff isn't on the critical path
       const w=el('div','d2h-wrap','<p style="color:var(--faint);padding:11px">loading diff…</p>'); body.appendChild(w);
       const pd=(await ensureNode(l.branch))[f.path] || {};
-      const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw(); };
+      const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'side-by-side',matching:'lines'}).draw(); };
       w.innerHTML='';
       // smart default — the minimum you must re-read:
       //   stale → ONLY the diff since you last blessed; else → the full link diff
@@ -399,6 +423,11 @@ function render(){
           loaded=true; ff.textContent='⤢ hide full file';
         };
         body.appendChild(ff);
+        const nv=el('button','fulltoggle nvim','⌁ open in nvim');
+        nv.onclick=async()=>{ nv.textContent='opening…';
+          await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path})}).catch(()=>{});
+          nv.textContent='⌁ open in nvim'; toast('⌁ '+f.path.split('/').pop()+' → nvim (new tmux window)'); };
+        body.appendChild(nv);
       }
     };
     row.onclick=(e)=>{ if(e.target.closest('.bless'))return; card.classList.toggle('open'); if(card.classList.contains('open'))draw(); };
@@ -412,7 +441,8 @@ function render(){
 // keyboard: m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
 addEventListener('keydown',e=>{
   if(e.key==='m'){ toggleMap(); e.preventDefault(); return; }
-  if(e.key==='Escape'){ toggleMap(false); return; }
+  if(e.key==='f'){ document.body.classList.toggle('focus'); e.preventDefault(); return; }
+  if(e.key==='Escape'){ if($('#map').classList.contains('on')) toggleMap(false); else document.body.classList.remove('focus'); return; }
   const idx=NODES.findIndex(n=>n.id===active);
   if(e.key===']'){active=(NODES[Math.min(idx+1,NODES.length-1)]||{}).id;render();}
   else if(e.key==='['){active=(NODES[Math.max(idx-1,0)]||{}).id;render();}
@@ -424,8 +454,9 @@ addEventListener('keydown',e=>{
 async function boot(){
   try{
     if(!MODEL) MODEL = await fetchModel();
-    NODES=flatten(); active=pickInitial(); render();
+    NODES=flatten(); active=pickInitial(); render(); buildDock();
     $('#mapbtn').onclick=()=>toggleMap();
+    $('#focusbtn').onclick=()=>document.body.classList.toggle('focus');
     if(LIVE){
       setInterval(()=>fetch('/heartbeat',{method:'POST'}).catch(()=>{}), 5000);
       // live: poll a cheap signature; when refs/config/ledger change (re-root,
@@ -439,8 +470,8 @@ async function boot(){
           lastSig=sig;
           MODEL=await fetchModel();
           for(const k in NODEPATCH) delete NODEPATCH[k];   // diffs may have moved
-          render();
-          if($('#map').classList.contains('on')) renderGraph();
+          render(); buildDock();
+          if($('#map').classList.contains('on')) renderGraph('#map');
           toast('↻ forest updated');
         }catch(e){}
       }, 3000);
