@@ -70,9 +70,11 @@ collect() {
 }
 
 # --- direct: prwatch <number> -------------------------------------------------
+# Use the REST API (repos/<owner>/<repo>/pulls/<n>) — strictly repo-scoped, so a
+# fork won't cross-resolve the number to its upstream the way `gh pr view` does.
 if [[ "${1:-}" == <-> ]]; then
   for repo in $repos; do
-    if gh pr view "$1" --repo "$repo" --json number >/dev/null 2>&1; then
+    if gh api "repos/$repo/pulls/$1" --jq .number >/dev/null 2>&1; then
       watch_pr "$repo" "$1"; exit 0
     fi
   done
