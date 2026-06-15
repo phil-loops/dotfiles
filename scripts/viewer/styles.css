@@ -221,7 +221,7 @@ svg.graph .gn.sel .cnt{fill:var(--ink)}
 .prbadge.changes circle{fill:#bf4b29!important;stroke:#ff9b76!important;filter:drop-shadow(0 0 6px #cf6a3aaa)} .prbadge.changes text{fill:#fff}
 .prbadge:hover circle{filter:brightness(1.22)}
 /* hover tooltip: a node's upstream merge requirements (what must merge first) */
-#ntip{position:fixed;z-index:90;max-width:360px;min-width:236px;pointer-events:none;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:10px 12px;box-shadow:0 12px 32px #000a;opacity:0;transform:translateY(-4px);transition:opacity .12s,transform .12s;font-family:'IBM Plex Mono',monospace}
+#ntip{position:fixed;z-index:300;max-width:360px;min-width:236px;pointer-events:none;background:var(--raised);border:1px solid var(--line);border-radius:10px;padding:10px 12px;box-shadow:0 12px 32px #000a;opacity:0;transform:translateY(-4px);transition:opacity .12s,transform .12s;font-family:'IBM Plex Mono',monospace}
 #ntip.on{opacity:1;transform:none}
 #ntip .tip-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px}
 #ntip .tip-h b{font-family:'Fraunces',serif;font-style:italic;font-size:15px;color:var(--ink)}
