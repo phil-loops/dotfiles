@@ -141,7 +141,11 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/open":   # open the file ON that branch in the warm review-nvim (full LSP)
             d = json.loads(raw or "{}")
-            r = run([os.path.join(SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")])
+            args = [os.path.join(SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")]
+            ln = d.get("line")     # optional: land the cursor on this 1-based line
+            if ln:
+                args.append(str(ln))
+            r = run(args)
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return
