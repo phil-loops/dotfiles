@@ -200,8 +200,25 @@ addEventListener('keydown',e=>{
   e.preventDefault();
 });
 
+// project picker — the landing screen. Lists configured projects as buttons
+// (like the terminal fzf); clicking one opens ?branch=<project name>.
+async function renderPicker(){
+  let projs=[]; try{ projs=await (await fetch('/projects')).json(); }catch(e){}
+  const ov=el('div'); ov.id='picker';
+  ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><p class="pk-sub">choose a project</p>`
+    +`<div class="pk-list"></div><button class="pk-all">view the whole forest</button></div>`;
+  document.body.appendChild(ov);
+  const list=ov.querySelector('.pk-list');
+  if(!projs.length){ list.innerHTML='<p style="color:var(--faint);font-size:12px">no projects configured (stack-project.*.branch)</p>'; }
+  projs.forEach(p=>{ const b=el('button','pk-btn');
+    b.innerHTML=`<span class="pk-name">${p.name}</span><span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span>`;
+    b.onclick=()=>{ location.search='branch='+encodeURIComponent(p.name); };
+    list.appendChild(b); });
+  ov.querySelector('.pk-all').onclick=()=>{ location.search='branch=--all'; };
+}
 async function boot(){
   try{
+    if(LIVE && !Q.get('branch')){ renderPicker(); return; }   // no project chosen → show the picker
     if(!MODEL) MODEL = await fetchModel();
     NODES=flatten(); active=pickInitial(); render(); buildDock();
     $('#mapbtn').onclick=()=>toggleMap();

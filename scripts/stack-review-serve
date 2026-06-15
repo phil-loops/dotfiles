@@ -8,8 +8,10 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
-branch="${1:-$(git branch --show-current 2>/dev/null)}"
-[[ -n "$branch" ]] || { echo "stack-review-serve: no branch" >&2; exit 1; }
+# No arg → land on the project picker (no ?branch). An explicit branch/project
+# name (or `--all`) opens straight into that view.
+branch="${1:-}"
+qs=""; [[ -n "$branch" ]] && qs="?branch=${branch}"
 here="${0:A:h}"
 # pin the server's git context to the repo ROOT, not raw $(pwd) — launching from
 # a subdir still scopes right, and launching outside a repo errors loudly instead
@@ -21,8 +23,8 @@ STABLE_PORT="${STACK_REVIEW_PORT:-62333}"
 # Reuse a review server already live on the stable port instead of spawning a
 # second one on a new port (which would strand any open tab on a dead port).
 if curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1; then
-  open "http://127.0.0.1:${STABLE_PORT}/?branch=${branch}"
-  echo "✦ reusing live review → http://127.0.0.1:${STABLE_PORT}  (branch ${branch})"
+  open "http://127.0.0.1:${STABLE_PORT}/${qs}"
+  echo "✦ reusing live review → http://127.0.0.1:${STABLE_PORT}  (${branch:-project picker})"
   exit 0
 fi
 
@@ -38,6 +40,6 @@ python3 "$here/stack-review-server.py" "$servedir" "$here" "$repo" > "$servedir/
 for i in {1..60}; do port=$(cat "$servedir/port" 2>/dev/null); [[ -n "$port" ]] && break; sleep 0.1; done
 [[ -n "${port:-}" ]] || { echo "stack-review-serve: server didn't start"; cat "$servedir/log"; exit 1; }
 
-open "http://127.0.0.1:${port}/?branch=${branch}"
-echo "✦ live review → http://127.0.0.1:${port}  (branch ${branch})"
+open "http://127.0.0.1:${port}/${qs}"
+echo "✦ live review → http://127.0.0.1:${port}  (${branch:-project picker})"
 echo "  closes itself ~90s after you close the tab"

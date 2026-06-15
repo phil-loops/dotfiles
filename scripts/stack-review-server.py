@@ -85,6 +85,9 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/prs":   # branch → open-PR map; stack-prs disk-caches, so GH isn't hammered
             r = run([os.path.join(SCRIPTS, "stack-prs")])
             self._send(200, r.stdout or "{}")
+        elif u.path == "/projects":   # the picker: [{name, branches}] — choose a project to view
+            r = run([os.path.join(SCRIPTS, "stack-forest"), "--projects"])
+            self._send(200, r.stdout or "[]")
         elif u.path == "/node":
             q = parse_qs(u.query)
             branch = q.get("branch", [""])[0]
