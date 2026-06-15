@@ -182,6 +182,7 @@ const LIVE = !BAKED;                           // live mode → fetch /model, bl
 const Q = new URLSearchParams(location.search);
 let MODEL = BAKED || null;
 let active = 0, filter = 'all';
+const PURPOSE = {};   // branch → {thesis, enables} (lazy, live-only)
 
 const $ = (s,r=document)=>r.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;};
@@ -298,6 +299,18 @@ function render(){
   const l = curObj();
   const main=$('#main'); main.innerHTML='';
   main.appendChild(el('div','hd', `<h2>${l.branch.split('/').pop()}</h2><span class="arrow">◂</span><span class="par">${l.parent}</span>`));
+
+  // "what's the point" — lazy-generated thesis + what it lays groundwork for (live only)
+  if(LIVE){
+    const pc=el('div','purpose','<span class="pdot">✦</span><span class="ptext" style="color:var(--faint)">reading the diff…</span>');
+    main.appendChild(pc);
+    const fill=p=>{ const t=pc.querySelector('.ptext'); t.style.color='var(--ink)';
+      t.innerHTML=(p.thesis||'(no summary)')+(p.enables?` <span class="penables">→ groundwork for ${p.enables}</span>`:''); };
+    if(PURPOSE[l.branch]) fill(PURPOSE[l.branch]);
+    else fetch('/purpose?branch='+encodeURIComponent(l.branch)).then(r=>r.json())
+      .then(p=>{ PURPOSE[l.branch]=p; if(curObj().branch===l.branch) fill(p); })
+      .catch(()=>fill({thesis:'(no summary)'}));
+  }
 
   const sub=el('div','sub2');
   [['all','all '+l.total],['stale','stale '+l.stale],['unblessed','new '+l.unblessed]].forEach(([k,lab])=>{
