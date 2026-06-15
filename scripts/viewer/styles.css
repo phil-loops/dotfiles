@@ -266,3 +266,7 @@ svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stro
 .cmdk-it.on.k-jump{color:var(--ink)}
 .cmdk-empty{padding:12px;color:var(--faint);font:13px 'IBM Plex Mono',monospace}
 .cmdk-hint{padding:8px 14px;border-top:1px solid var(--line);color:var(--faint);font-size:10.5px;letter-spacing:.04em}
+
+/* hover a diff line → press `o` to open it in nvim (same as clicking the gutter #) */
+tr.linehover{background:var(--raised)}
+tr.linehover .d2h-code-side-linenumber{color:var(--gold);font-weight:600}
