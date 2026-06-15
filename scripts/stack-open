@@ -1,0 +1,69 @@
+#!/bin/zsh
+# stack-open — open a file ON a branch in a warm, LSP-ready nvim.
+#
+# Materializes a per-branch scratch worktree (git objects shared with the main
+# repo, node_modules symlinked, reset to the branch's current tip) so relative
+# AND package imports resolve, then opens the file as a buffer in ONE persistent
+# "review-nvim" via its --listen socket — warm tsserver, instant, full LSP.
+# Launches the nvim (in the tmux 'loops' session) if it isn't already running.
+#
+#   stack-open <branch> <path>     ensure worktree + open <path> in the warm nvim
+#   stack-open --prepare <branch>  create/refresh the worktree only (prefetch)
+#   stack-open --prune [<days>]    remove scratch worktrees idle > days (default 3)
+#
+# A branch already checked out in a real worktree is opened there (editable);
+# otherwise a scratch worktree under $STACK_OPEN_DIR is used.
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+SCRATCH="${STACK_OPEN_DIR:-/tmp/stack-study}"
+SOCK="${STACK_OPEN_SOCK:-/tmp/stack-review-nvim.sock}"
+SESSION="${STACK_OPEN_TMUX:-loops}"
+
+main_root=$(git rev-parse --show-toplevel)
+
+existing_worktree(){   # echo the path of a real worktree holding <branch>, if any
+  git worktree list --porcelain | awk -v ref="refs/heads/$1" '
+    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}'
+}
+prune_old(){ [[ -d "$SCRATCH" ]] || return 0
+  find "$SCRATCH" -maxdepth 1 -mindepth 1 -type d -mtime +"${1:-3}" 2>/dev/null | while read -r d; do
+    git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
+  done
+  git worktree prune 2>/dev/null || true
+}
+ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
+  local b="$1" ex dir
+  ex=$(existing_worktree "$b"); if [[ -n "$ex" ]]; then echo "$ex"; return; fi
+  mkdir -p "$SCRATCH"; dir="$SCRATCH/${b//\//_}"
+  if [[ -d "$dir" ]]; then
+    git -C "$dir" checkout --detach "$b" -q 2>/dev/null \
+      || git -C "$dir" reset --hard "$b" -q 2>/dev/null || true
+  else
+    git worktree add --detach "$dir" "$b" -q
+  fi
+  [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
+  touch "$dir"; echo "$dir"
+}
+
+case "${1:-}" in
+  --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
+  --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
+esac
+
+branch="${1:?usage: stack-open <branch> <path>}"
+path="${2:?usage: stack-open <branch> <path>}"
+( prune_old 3 ) &!                       # lazy self-clean, non-blocking
+dir=$(ensure_worktree "$branch")
+file="$dir/$path"
+[[ -f "$file" ]] || { echo "stack-open: '$path' not on $branch" >&2; exit 1; }
+
+if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
+  nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
+  tmux select-window -t "${SESSION}:review-nvim" 2>/dev/null || true
+else
+  rm -f "$SOCK"
+  tmux new-window -t "$SESSION" -n review-nvim "nvim --listen '$SOCK' '$file'" \
+    || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
+fi
+echo "opened $path on $branch → review-nvim ($dir)"

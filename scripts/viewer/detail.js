@@ -102,8 +102,9 @@ function render(){
         body.appendChild(ff);
         const nv=el('button','fulltoggle nvim','⌁ open in nvim');
         nv.onclick=async()=>{ nv.textContent='opening…';
-          await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path})}).catch(()=>{});
-          nv.textContent='⌁ open in nvim'; toast('⌁ '+f.path.split('/').pop()+' → nvim (new tmux window)'); };
+          const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path})}).then(x=>x.json()).catch(()=>({ok:false}));
+          nv.textContent='⌁ open in nvim';
+          toast(r.ok ? '⌁ '+f.path.split('/').pop()+' → review-nvim (warm LSP)' : '⌁ open failed: '+((r.err||'').trim()||'see server')); };
         body.appendChild(nv);
       }
     };
