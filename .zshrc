@@ -83,7 +83,13 @@ loops() {
                 web)
                     # live blessing-aware browser review of a project (illuminated
                     # ledger): tree-rail, graph map, since-blessed deltas, live bless.
-                    ~/.dotfiles/scripts/stack-review-serve "${1:-$(git branch --show-current 2>/dev/null)}"
+                    # No arg → fzf-pick a registered project.
+                    local web_target="$1"
+                    if [[ -z "$web_target" ]]; then
+                        web_target=$(~/.dotfiles/scripts/stack-list --pick --echo) || return $?
+                        [[ -z "$web_target" ]] && return 130
+                    fi
+                    ~/.dotfiles/scripts/stack-review-serve "$web_target"
                     ;;
                 list|ls)
                     ~/.dotfiles/scripts/stack-list "$@"
