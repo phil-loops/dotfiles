@@ -52,11 +52,11 @@ case "${1:-}" in
 esac
 
 branch="${1:?usage: stack-open <branch> <path>}"
-path="${2:?usage: stack-open <branch> <path>}"
+rel="${2:?usage: stack-open <branch> <path>}"   # NOT `path` — that's zsh's $PATH array
 ( prune_old 3 ) &!                       # lazy self-clean, non-blocking
 dir=$(ensure_worktree "$branch")
-file="$dir/$path"
-[[ -f "$file" ]] || { echo "stack-open: '$path' not on $branch" >&2; exit 1; }
+file="$dir/$rel"
+[[ -f "$file" ]] || { echo "stack-open: '$rel' not on $branch" >&2; exit 1; }
 
 if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
   nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
@@ -66,4 +66,4 @@ else
   tmux new-window -t "$SESSION" -n review-nvim "nvim --listen '$SOCK' '$file'" \
     || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
 fi
-echo "opened $path on $branch → review-nvim ($dir)"
+echo "opened $rel on $branch → review-nvim ($dir)"
