@@ -4,20 +4,31 @@ const Q = new URLSearchParams(location.search);
 let MODEL = BAKED || null;
 let active = 0, filter = 'all';
 const PURPOSE = {};   // branch → {thesis, enables} (lazy, live-only)
-const NODEPATCH = {}; // branch → Promise<{path:{patch,stale}}> — diffs load per node, on demand
+const NODEPATCH = {}; // branch[@base] → Promise<{files:[{path,status,patch,stale}]}> (raw /node)
 const WTPREP = {};    // branch → true once we've asked the server to warm its worktree
 function prepareWorktree(branch){   // fire-and-forget: build the branch's nvim worktree ahead of "open"
   if(!LIVE || WTPREP[branch]) return; WTPREP[branch]=true;
   fetch('/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})}).catch(()=>{});
 }
-function ensureNode(branch){
-  if(NODEPATCH[branch]) return NODEPATCH[branch];
-  if(!LIVE) return NODEPATCH[branch] = Promise.resolve({});   // static snapshot: structure only
+// fetch one node's diffs vs `base` (default = parent). cache key folds in the base
+// so "vs parent" and "vs main" are cached separately. Returns the raw {files:[…]}.
+function fetchNode(branch, base){
+  const key = base ? branch + '@' + base : branch;
+  if(NODEPATCH[key]) return NODEPATCH[key];
+  if(!LIVE) return NODEPATCH[key] = Promise.resolve({files:[]});   // static snapshot: structure only
   prepareWorktree(branch);   // prefetch the worktree so "open in nvim" is instant for this node
-  NODEPATCH[branch] = fetch('/node?branch=' + encodeURIComponent(branch)).then(r=>r.json())
-    .then(d=>{ const m={}; (d.files||[]).forEach(f=>{ m[f.path]={patch:f.patch, stale:f.stale}; }); return m; })
-    .catch(()=>({}));
-  return NODEPATCH[branch];
+  const q = '/node?branch=' + encodeURIComponent(branch) + (base ? '&base=' + encodeURIComponent(base) : '');
+  // IMPORTANT: never cache a FAILED fetch. A transient error (e.g. the server
+  // reaped + relaunched on a new port) must not poison this node into a permanent
+  // "no textual diff" — clear the cache entry so the next render retries.
+  NODEPATCH[key] = fetch(q)
+    .then(r=>{ if(!r.ok) throw new Error('node '+r.status); return r.json(); })
+    .catch(e=>{ delete NODEPATCH[key]; throw e; });
+  return NODEPATCH[key];
+}
+// patch map {path:{patch,stale}} for the per-file diff renderer (shares fetchNode's cache)
+function ensureNode(branch, base){
+  return fetchNode(branch, base).then(d=>{ const m={}; (d.files||[]).forEach(f=>{ m[f.path]={patch:f.patch, stale:f.stale}; }); return m; });
 }
 
 const $ = (s,r=document)=>r.querySelector(s);
@@ -37,7 +48,7 @@ async function doBless(branch, file){
   if(!LIVE){ toast('read-only snapshot — open via <b>loops stack review --html</b> to bless'); return; }
   toast('blessing…');
   await fetch('/bless',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch,file})});
-  delete NODEPATCH[branch];   // status/stale-delta changed → refetch this node's diffs
+  Object.keys(NODEPATCH).forEach(k=>{ if(k===branch || k.startsWith(branch+'@')) delete NODEPATCH[k]; });  // all base-variants stale
   MODEL = await fetchModel();
   render(); toast('✦ blessed');
 }
