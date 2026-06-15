@@ -240,46 +240,74 @@ async function renderPicker(){
     list.appendChild(b); });
   ov.querySelector('.pk-all').onclick=()=>{ location.search='branch=--all'; };
 }
-// preserve scroll across a live re-render. The render remounts every card and the
-// open diffs re-fetch async, so a naive scrollY (or even card-top) anchor drops you
-// at the top of the changed file. Instead anchor on the exact DIFF LINE nearest the
-// top of the viewport — its new-side line number — and re-find that line after the
-// redraw, so you stay where your cursor was. Falls back to the card top, then scrollY.
+// preserve scroll across a live re-render. NB the scroller is `.main` (the body is
+// height:100vh/overflow:hidden) — driving window.scroll* is a no-op, which is why a
+// refresh always snapped to the file top. We anchor on the exact DIFF LINE nearest
+// the top of the viewport (its new-side line number) and re-find that line after the
+// redraw, scrolling `.main` so it lands at the same offset — so you stay where your
+// cursor was. The render remounts cards and the open diffs re-fetch async, so we
+// re-apply on a schedule (~1.4s) to absorb late layout shifts. Falls back to the card
+// top, then absolute scrollTop.
+function scroller(){ return document.querySelector('.main'); }
 function rightRows(card){   // the new-side (right) diff rows of a side-by-side render
   const panels=card.querySelectorAll('.d2h-file-side-diff'); const right=panels[panels.length-1];
   return right ? right.querySelectorAll('tr') : [];
 }
 function lineNo(tr){ const c=tr.querySelector('.d2h-code-side-linenumber'); const n=c&&parseInt((c.textContent||'').trim(),10); return n||0; }
 function captureScroll(){
-  const card=[...document.querySelectorAll('.file')].find(c=>c.getBoundingClientRect().bottom>0);
-  if(!card) return {path:null, y:window.scrollY};
-  const path=card.dataset.path, cardTop=card.getBoundingClientRect().top;
+  const sc=scroller(); if(!sc) return null;
+  const top=sc.getBoundingClientRect().top, st=sc.scrollTop;   // offsets measured relative to the scroller's top edge
+  const card=[...sc.querySelectorAll('.file')].find(c=>c.getBoundingClientRect().bottom>top);
+  if(!card) return {st};
+  const path=card.dataset.path, cardOff=card.getBoundingClientRect().top - top;
   for(const tr of rightRows(card)){
     const n=lineNo(tr), r=tr.getBoundingClientRect();
-    if(n && r.bottom>4) return {path, n, off:r.top, cardTop, y:window.scrollY};   // first real line at/below the top
+    if(n && r.bottom>top+4) return {path, n, off:r.top-top, cardOff, st};   // first real line at/below the top edge
   }
-  return {path, n:null, cardTop, off:cardTop, y:window.scrollY};
+  return {path, n:null, cardOff, st};
 }
 function restoreScroll(a){
   if(!a) return;
-  let tries=0;
-  const apply=()=>{
-    const card=a.path && document.querySelector('.file[data-path="'+CSS.escape(a.path)+'"]');
+  const sc=scroller(); if(!sc) return;
+  const start=document.timeline?document.timeline.currentTime:0;   // monotonic, no Date.now
+  let stable=0, aborted=false;
+  const bail=()=>{ aborted=true; };
+  sc.addEventListener('wheel', bail, {once:true, passive:true});   // the moment you scroll, stop fighting you
+  const tick=now=>{
+    if(aborted) return;
+    const top=sc.getBoundingClientRect().top;
+    const card=a.path && sc.querySelector('.file[data-path="'+CSS.escape(a.path)+'"]');
     let row=null;
     if(card && a.n) for(const tr of rightRows(card)){ if(lineNo(tr)===a.n){ row=tr; break; } }
-    if(row)       window.scrollBy(0, row.getBoundingClientRect().top  - a.off);
-    else if(card) window.scrollBy(0, card.getBoundingClientRect().top - a.cardTop);
-    else          window.scrollTo(0, a.y);
-    // the diff redraws async after remount — keep retrying until the anchored line lands
-    if(++tries<8 && a.n && !row) setTimeout(apply, 80);
+    const delta = row  ? (row.getBoundingClientRect().top  - top) - a.off
+                : card ? (card.getBoundingClientRect().top - top) - a.cardOff
+                : (a.st!=null ? a.st - sc.scrollTop : 0);
+    if(Math.abs(delta)>1){ sc.scrollTop += delta; stable=0; } else stable++;
+    // keep correcting every frame until the anchored line is found AND has held still
+    // a few frames (the diff mounts async, cards above can still grow) — cap at ~2s.
+    if((now-start)<2000 && (!row || stable<4)) requestAnimationFrame(tick);
+    else sc.removeEventListener('wheel', bail);
   };
-  requestAnimationFrame(apply);
+  requestAnimationFrame(tick);
 }
+// persist the anchor across a FULL page reload (manual refresh, or a future hot-reload)
+// via sessionStorage, so reloading to pick up new viewer code doesn't bounce you to the
+// top. pagehide fires on both reload and tab-close (more reliable than beforeunload).
+const SCROLL_KEY='blessed:scroll';
+function saveScroll(){
+  try{ const a=captureScroll(); if(a) sessionStorage.setItem(SCROLL_KEY, JSON.stringify({branch:Q.get('branch'), active, a})); }catch(e){}
+}
+function loadScroll(){
+  try{ const s=JSON.parse(sessionStorage.getItem(SCROLL_KEY)||'null');
+    return (s && s.branch===Q.get('branch') && s.active===active) ? s.a : null; }catch(e){ return null; }
+}
+addEventListener('pagehide', saveScroll);
 async function boot(){
   try{
     if(LIVE && !Q.get('branch')){ renderPicker(); return; }   // no project chosen → show the picker
     if(!MODEL) MODEL = await fetchModel();
     NODES=flatten(); active=pickInitial(); render(); buildDock();
+    restoreScroll(loadScroll());   // refresh-safe: land back where you were, not at the top
     $('#mapbtn').onclick=()=>toggleMap();
     $('#focusbtn').onclick=()=>document.body.classList.toggle('focus');
     if(LIVE){
@@ -302,6 +330,24 @@ async function boot(){
           toast('↻ forest updated');
         }catch(e){}
       }, 3000);
+      // hot-reload: the server rebuilds index.html from the viewer source on every GET,
+      // so editing detail.js/styles.css/tpl.py changes the assembled page. Fingerprint it;
+      // on change, reload to pick up new code — seamless via the sessionStorage restore.
+      // The page also inlines the model (__MODEL__), so a page change can mean DATA not
+      // code; we disambiguate with /sig and only reload when the page moved but the model
+      // sig didn't (pure code edit). Data changes fall through to the in-place poll above.
+      const fp=s=>{ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return s.length+':'+h; };
+      let pageFp=null, fpSig=null;
+      setInterval(async()=>{
+        if(document.hidden) return;
+        try{ const f=fp(await (await fetch('/?_hot=1')).text());
+          if(f===pageFp) return;
+          const {sig}=await (await fetch('/sig')).json();
+          if(pageFp===null){ pageFp=f; fpSig=sig; return; }   // first poll → baseline
+          if(sig===fpSig){ saveScroll(); location.reload(); return; }   // page moved, data didn't → code edit
+          pageFp=f; fpSig=sig;   // data changed → adopt new baseline, no reload
+        }catch(e){}
+      }, 4000);
     }
   }catch(e){ document.body.innerHTML = '<p style="margin:40px;color:#cf6a3a">could not load model: '+e+'</p>'; }
 }
