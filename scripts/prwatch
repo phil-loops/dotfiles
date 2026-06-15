@@ -1,0 +1,101 @@
+#!/bin/zsh
+# prwatch — your open PRs at a glance, and watch a PR's CI checks till they settle.
+#
+#   prwatch              list your open PRs (with a live check rollup) and fzf-pick
+#                        one to watch
+#   prwatch <number>     watch that PR's checks directly (searches your repos)
+#   prwatch -l|--list    just list; don't watch
+#
+# "Watch" streams gh's check status until every check passes or one fails, then
+# fires a desktop notification (+ a terminal bell). It scans your fork AND the
+# team repo, since CI usually runs on the team-repo PR — override the set with
+#   git config stack.pr-repos "owner/repo owner/repo"
+#
+# Rollup glyphs:  ✓ all pass   ● running   ✗ failing   ○ no checks reported
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
+(( ${#repos} )) || repos=(phil-loops/loops Loops-so/loops)
+
+# jq program: one open PR → "number<TAB>rollup<TAB>title<TAB>branch"
+# (single-quoted so no shell interpolation; statusCheckRollup states vary by
+#  check type — conclusion for completed, status/state while in flight.)
+ROLL_JQ='
+def f: ["FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED"];
+def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED",""];
+.[] | [
+  (.number|tostring),
+  ( [.statusCheckRollup[]? | (.conclusion // .status // .state // "PENDING")] as $st
+    | ($st|length) as $n
+    | ([$st[]|select((f|index(.)) != null)]|length) as $nf
+    | ([$st[]|select((p|index(.)) != null)]|length) as $np
+    | if   $n==0  then "○ no checks"
+      elif $nf>0  then "✗ \($nf) failing"
+      elif $np>0  then "● \($np) running"
+      else             "✓ all pass" end ),
+  .title,
+  .headRefName
+] | @tsv'
+
+notify() {  # $1 short status, $2 detail — macOS toast + bell
+  print -n '\a'
+  osascript -e "display notification \"${2:-}\" with title \"prwatch · $1\" sound name \"Glass\"" \
+    >/dev/null 2>&1 || true
+}
+
+watch_pr() {  # $1 repo  $2 number
+  local repo="$1" num="$2"
+  print -P "%F{yellow}⟳%f watching ${repo}#${num} — ctrl-c to stop"
+  if gh pr checks "$num" --repo "$repo" --watch; then
+    print -P "%F{green}✓ ${repo}#${num} — all checks passed%f"
+    notify "✓ passed" "${repo}#${num} — all checks green"
+  else
+    print -P "%F{red}✗ ${repo}#${num} — a check failed (or none reported)%f"
+    notify "✗ failed" "${repo}#${num} — a check failed"
+  fi
+}
+
+# rows: "repo<TAB>number<TAB>rollup<TAB>title<TAB>branch" across all repos
+collect() {
+  local repo
+  for repo in $repos; do
+    gh pr list --repo "$repo" --author @me --state open \
+      --json number,title,headRefName,statusCheckRollup --jq "$ROLL_JQ" 2>/dev/null \
+      | awk -v r="$repo" 'NF{print r"\t"$0}'   # awk \t = a real tab (BSD sed won't)
+  done
+}
+
+# --- direct: prwatch <number> -------------------------------------------------
+if [[ "${1:-}" == <-> ]]; then
+  for repo in $repos; do
+    if gh pr view "$1" --repo "$repo" --json number >/dev/null 2>&1; then
+      watch_pr "$repo" "$1"; exit 0
+    fi
+  done
+  echo "prwatch: PR #$1 not found in: ${repos[*]}" >&2; exit 1
+fi
+
+# surface the PRs worth monitoring: failing → running → passing → no-checks
+rows=$(collect | awk -F'\t' '
+  { pri = ($3 ~ /✗/) ? 0 : ($3 ~ /●/) ? 1 : ($3 ~ /✓/) ? 2 : 3; print pri "\t" $0 }' \
+  | sort -t$'\t' -k1,1n -s | cut -f2-)
+[[ -n "$rows" ]] || { echo "no open PRs authored by you in: ${repos[*]}"; exit 0; }
+
+# printed table (also the fzf source)
+print -P "%F{yellow}your open PRs%f"
+printf '%s\n' "$rows" | awk -F'\t' '{printf "  %-16s #%-4s %-12s %s\n", $1, $2, $3, $4}'
+
+[[ "${1:-}" == "-l" || "${1:-}" == "--list" ]] && exit 0
+command -v fzf >/dev/null 2>&1 || { echo "(fzf not found — watch one with: prwatch <number>)"; exit 0; }
+
+# fzf input: "repo<TAB>num<TAB>display"; show only the display, but {1}/{2} carry
+# repo/number for the preview + selection.
+sel=$(printf '%s\n' "$rows" \
+  | awk -F'\t' '{printf "%s\t%s\t%-12s #%-5s %s\n", $1, $2, $3, $2, $4}' \
+  | fzf --delimiter='\t' --with-nth=3.. --prompt='watch checks › ' \
+        --height=45% --reverse --header='pick a PR → watch its CI checks (esc to cancel)' \
+        --preview-window='down,9,wrap' \
+        --preview='gh pr checks {2} --repo {1} 2>/dev/null | head -40')
+[[ -n "$sel" ]] || exit 0
+watch_pr "$(printf '%s' "$sel" | cut -f1)" "$(printf '%s' "$sel" | cut -f2)"
