@@ -169,7 +169,10 @@ svg.graph{display:block;overflow:visible}
 .gn{cursor:pointer;opacity:0;animation:gfade .45s ease forwards}
 .gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2;transition:.15s}
 .gn:hover rect{stroke:var(--dim);fill:var(--raised)}
-.gn.sel rect{stroke:var(--gold);filter:drop-shadow(0 0 9px #e0ad4e55)}
+/* selection = cream ring (you-are-here); gold border is reserved for "all blessed" (.done).
+   higher specificity (svg.graph …) so selection wins when a node is both done + selected. */
+svg.graph .gn.sel rect{stroke:var(--ink);stroke-width:2;filter:drop-shadow(0 0 9px #ece2cf99)}
+svg.graph .gn.sel .cnt{fill:var(--ink)}
 .gn text{font-family:'IBM Plex Mono',monospace;font-size:11.5px;fill:var(--ink)}
 .gn .cnt{fill:var(--faint);font-size:10px;text-anchor:end}
 .gn .d{stroke:none}
