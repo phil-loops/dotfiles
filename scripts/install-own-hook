@@ -1,0 +1,25 @@
+#!/bin/zsh
+# install-own-hook — register the own PreToolUse hook in GLOBAL ~/.claude/settings.json.
+# Global (not project-scoped) so it catches dotfiles edits from ANY session cwd. The
+# registration lives in an untracked file, so this tracked installer is its source of
+# truth — re-run it on a fresh machine. Idempotent: a no-op if already present.
+emulate -L zsh; set -euo pipefail
+HOOK="${0:A:h}/own-hook"
+python3 - "$HOME/.claude/settings.json" "$HOOK" <<'PY'
+import json, sys, os
+path, hook = sys.argv[1], sys.argv[2]
+os.makedirs(os.path.dirname(path), exist_ok=True)
+try:
+    cfg = json.load(open(path))
+except Exception:
+    cfg = {}
+blocks = cfg.setdefault("hooks", {}).setdefault("PreToolUse", [])
+if any(h.get("command") == hook for blk in blocks for h in blk.get("hooks", [])):
+    print("✓ own-hook already registered in", path)
+else:
+    blocks.append({"matcher": "Edit|Write|MultiEdit",
+                   "hooks": [{"type": "command", "command": hook}]})
+    json.dump(cfg, open(path, "w"), indent=2)
+    open(path, "a").write("\n")
+    print("✓ registered own-hook in", path)
+PY
