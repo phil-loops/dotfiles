@@ -7,8 +7,6 @@
 (function () {
   const REPO = "phil-loops/loops";
   const proj = () => (MODEL && (MODEL.project || MODEL.leaf)) || "";
-  const ghCompare = (b) =>
-    `https://github.com/${REPO}/compare/main...${encodeURIComponent(b)}?expand=1`;
   const ghTree = (b) =>
     `https://github.com/${REPO}/tree/${encodeURIComponent(b)}`;
   let PRS = null;
@@ -62,13 +60,6 @@
     });
     if (node) {
       const s = node.split("/").pop();
-      c.push({
-        k: "node",
-        label: `⊕  Open PR → main · ${s}`,
-        run() {
-          window.open(ghCompare(node), "_blank");
-        },
-      });
       c.push({
         k: "node",
         label: `↗  Open on GitHub · ${s}`,
