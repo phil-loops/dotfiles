@@ -267,7 +267,11 @@ async function renderPicker(){
 // cursor was. The render remounts cards and the open diffs re-fetch async, so we
 // re-apply on a schedule (~1.4s) to absorb late layout shifts. Falls back to the card
 // top, then absolute scrollTop.
-function scroller(){ return document.querySelector('.main'); }
+// the scroll container is <main id="main"> (overflow:auto; body is overflow:hidden).
+// MUST select by id — `.main` also matches the rail's <span class="nm main"> trunk
+// label, which sits earlier in the DOM, so querySelector('.main') returned THAT span
+// (scrollTop always 0) and every restore silently no-op'd to the top.
+function scroller(){ return document.getElementById('main'); }
 function rightRows(card){   // the new-side (right) diff rows of a side-by-side render
   const panels=card.querySelectorAll('.d2h-file-side-diff'); const right=panels[panels.length-1];
   return right ? right.querySelectorAll('tr') : [];
