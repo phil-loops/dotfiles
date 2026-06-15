@@ -188,6 +188,15 @@ const Q = new URLSearchParams(location.search);
 let MODEL = BAKED || null;
 let active = 0, filter = 'all';
 const PURPOSE = {};   // branch → {thesis, enables} (lazy, live-only)
+const NODEPATCH = {}; // branch → Promise<{path:{patch,stale}}> — diffs load per node, on demand
+function ensureNode(branch){
+  if(NODEPATCH[branch]) return NODEPATCH[branch];
+  if(!LIVE) return NODEPATCH[branch] = Promise.resolve({});   // static snapshot: structure only
+  NODEPATCH[branch] = fetch('/node?branch=' + encodeURIComponent(branch)).then(r=>r.json())
+    .then(d=>{ const m={}; (d.files||[]).forEach(f=>{ m[f.path]={patch:f.patch, stale:f.stale}; }); return m; })
+    .catch(()=>({}));
+  return NODEPATCH[branch];
+}
 
 const $ = (s,r=document)=>r.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;};
@@ -206,6 +215,7 @@ async function doBless(branch, file){
   if(!LIVE){ toast('read-only snapshot — open via <b>loops stack review --html</b> to bless'); return; }
   toast('blessing…');
   await fetch('/bless',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch,file})});
+  delete NODEPATCH[branch];   // status/stale-delta changed → refetch this node's diffs
   MODEL = await fetchModel();
   render(); toast('✦ blessed');
 }
@@ -302,6 +312,7 @@ function render(){
   if(!active || !NODES.some(n=>n.id===active)) active = pickInitial();
   renderRail();
   const l = curObj();
+  if(LIVE) ensureNode(l.branch);   // priority: prefetch the node you just landed on
   const main=$('#main'); main.innerHTML='';
   main.appendChild(el('div','hd', `<h2>${l.branch.split('/').pop()}</h2><span class="arrow">◂</span><span class="par">${l.parent}</span>`));
 
@@ -342,16 +353,19 @@ function render(){
        <span class="caret">›</span>`);
     const body=el('div','body'); card.append(row,body);
     let drawn=false;
-    const draw=()=>{ if(drawn)return; drawn=true;
+    const draw=async()=>{ if(drawn)return; drawn=true;
+      // diffs load per node on demand; the link diff isn't on the critical path
+      const w=el('div','d2h-wrap','<p style="color:var(--faint);padding:11px">loading diff…</p>'); body.appendChild(w);
+      const pd=(await ensureNode(l.branch))[f.path] || {};
+      const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw(); };
+      w.innerHTML='';
       // smart default — the minimum you must re-read:
       //   stale → ONLY the diff since you last blessed; else → the full link diff
-      const d2h=(diff)=>{ const w=el('div','d2h-wrap'); body.appendChild(w);
-        new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'line-by-line',matching:'lines'}).draw(); };
-      if(f.status==='stale' && f.stale){
-        body.appendChild(el('p','since','✦ since you blessed'));
-        d2h(f.stale);
-      } else if(f.patch){ d2h(f.patch); }
-      else { body.appendChild(el('div','d2h-wrap','<p style="color:var(--faint);padding:12px">no textual diff</p>')); }
+      if(f.status==='stale' && pd.stale){
+        body.insertBefore(el('p','since','✦ since you blessed'), w);
+        d2h(pd.stale);
+      } else if(pd.patch){ d2h(pd.patch); }
+      else { w.innerHTML='<p style="color:var(--faint);padding:11px">no textual diff</p>'; }
       // full-file toggle (live only — needs the server to read the blob)
       if(LIVE){
         const ff=el('button','fulltoggle','⤢ full file'); let box=null, loaded=false;

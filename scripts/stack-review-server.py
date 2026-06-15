@@ -79,6 +79,11 @@ class H(BaseHTTPRequestHandler):
                 _mcache.clear()
                 _mcache[ck] = r.stdout
                 self._send(200, r.stdout)
+        elif u.path == "/node":
+            branch = parse_qs(u.query).get("branch", [""])[0]
+            r = run([os.path.join(SCRIPTS, "stack-forest"), "--node", branch])
+            self._send(200 if r.returncode == 0 else 500,
+                       r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
         elif u.path == "/purpose":
             branch = parse_qs(u.query).get("branch", [""])[0]
             r = run([os.path.join(SCRIPTS, "stack-purpose"), branch])
