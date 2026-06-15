@@ -354,16 +354,17 @@ async function boot(){
     $('#mapbtn').onclick=()=>toggleMap();
     $('#focusbtn').onclick=()=>document.body.classList.toggle('focus');
     if(LIVE){
-      setInterval(()=>fetch('/heartbeat',{method:'POST'}).catch(()=>{}), 5000);
-      // live: poll a cheap signature; when refs/config/ledger change (re-root,
-      // rebase, bless) re-fetch and re-render so the forest updates in place.
-      let lastSig=null;
-      setInterval(async()=>{
+      // one server-pushed stream (SSE) replaces the old per-tab heartbeat + /sig + /?_hot
+      // polls, so N open tabs cost N idle connections instead of a 3-timer fan-out + a
+      // reload stampede when source changes. The server pushes two event kinds:
+      //   `update` → the forest moved (re-root, rebase, bless): refetch + re-render in place.
+      //   `reload` → the viewer source changed (code edit): reload the reassembled page, after
+      //              a small random delay so many tabs don't all hit the render path at once.
+      // EventSource auto-reconnects on drop (e.g. the server's self-reexec), so no manual retry.
+      const es=new EventSource('/events');
+      window.__events=es;   // shared so accessories (freshness chip) ride one stream, not their own
+      es.addEventListener('update', async()=>{
         try{
-          const {sig}=await (await fetch('/sig')).json();
-          if(lastSig===null){ lastSig=sig; return; }
-          if(sig===lastSig) return;
-          lastSig=sig;
           const anchor=captureScroll();
           MODEL=await fetchModel();
           for(const k in NODEPATCH) delete NODEPATCH[k];   // diffs may have moved
@@ -372,25 +373,8 @@ async function boot(){
           restoreScroll(anchor);
           toast('↻ forest updated');
         }catch(e){}
-      }, 3000);
-      // hot-reload: the server rebuilds index.html from the viewer source on every GET,
-      // so editing detail.js/styles.css/tpl.py changes the assembled page. Fingerprint it;
-      // on change, reload to pick up new code — seamless via the sessionStorage restore.
-      // The page also inlines the model (__MODEL__), so a page change can mean DATA not
-      // code; we disambiguate with /sig and only reload when the page moved but the model
-      // sig didn't (pure code edit). Data changes fall through to the in-place poll above.
-      const fp=s=>{ let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))|0; return s.length+':'+h; };
-      let pageFp=null, fpSig=null;
-      setInterval(async()=>{
-        if(document.hidden) return;
-        try{ const f=fp(await (await fetch('/?_hot=1')).text());
-          if(f===pageFp) return;
-          const {sig}=await (await fetch('/sig')).json();
-          if(pageFp===null){ pageFp=f; fpSig=sig; return; }   // first poll → baseline
-          if(sig===fpSig){ saveScroll(); location.reload(); return; }   // page moved, data didn't → code edit
-          pageFp=f; fpSig=sig;   // data changed → adopt new baseline, no reload
-        }catch(e){}
-      }, 4000);
+      });
+      es.addEventListener('reload', ()=>{ saveScroll(); setTimeout(()=>location.reload(), 150+Math.random()*1200); });
     }
   }catch(e){ document.body.innerHTML = '<p style="margin:40px;color:#cf6a3a">could not load model: '+e+'</p>'; }
 }
