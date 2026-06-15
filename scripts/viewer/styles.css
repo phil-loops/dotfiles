@@ -216,6 +216,10 @@ svg.graph .gn.sel .cnt{fill:var(--ink)}
 .gn.stale .d{fill:var(--ember)} .gn.unblessed .d{fill:var(--unbl)} .gn.partial .d{fill:var(--ember)}
 .gn.main circle{fill:var(--gold);filter:drop-shadow(0 0 7px #e0ad4e)}
 .gn.main text{fill:var(--gold);font-family:'Fraunces',serif;font-style:italic;font-size:15px}
+/* legal-to-merge marker: a green edge-bar flush on the node's left, marking branches
+   whose path to main is clear (parent is main + all fan-in deps landed). green = "ready
+   to flow into main", echoing the green PR-into-main badge. */
+.gn.mergeable .mbar{fill:#2c9a59;stroke:none;filter:drop-shadow(0 0 5px #3fbf7faa)}
 /* open-PR badge on a node's top-right corner; click opens the PR */
 .prbadge{cursor:pointer}
 .prbadge circle{stroke-width:1.6}
