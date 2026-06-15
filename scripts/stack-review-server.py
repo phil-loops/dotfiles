@@ -17,6 +17,7 @@ ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 90
 last = [time.time()]
 _mcache = {}  # (branch, sig) -> model json — recompute only when something changed
+_render_lock = threading.Lock()
 
 
 def run(args):
@@ -54,8 +55,17 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
-            self._send(200, open(os.path.join(ROOT, "index.html"), "rb").read(),
-                       "text/html; charset=utf-8")
+            # page-hot: rebuild index.html from the template so tpl.py edits
+            # show on a plain browser refresh (only on page loads, not API calls)
+            with _render_lock:
+                try:
+                    subprocess.run([sys.executable, os.path.join(SCRIPTS, "stack-review-html.tpl.py"),
+                                    os.path.join(ROOT, "model.json"), os.path.join(ROOT, "index.html")],
+                                   cwd=CWD, capture_output=True, timeout=20)
+                except Exception:
+                    pass
+                body = open(os.path.join(ROOT, "index.html"), "rb").read()
+            self._send(200, body, "text/html; charset=utf-8")
         elif u.path == "/model":
             branch = parse_qs(u.query).get("branch", [""])[0]
             ck = (branch, model_sig())
@@ -111,7 +121,30 @@ def reaper():
             os._exit(0)
 
 
-httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
-print(httpd.server_address[1], flush=True)
+# optional 4th arg = port to rebind on self-reload, so the URL survives a restart
+PORT = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+ThreadingHTTPServer.allow_reuse_address = True
+httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+PORT = httpd.server_address[1]
+if len(sys.argv) <= 4:
+    print(PORT, flush=True)  # announce the port only on the first launch
+
+
+def watcher():
+    # server-hot: re-exec (same port) when this file changes. The shell scripts
+    # it shells out to are already hot (run per request); only server.py needs this.
+    src = os.path.abspath(__file__)
+    m0 = os.path.getmtime(src)
+    while True:
+        time.sleep(1.0)
+        try:
+            if os.path.getmtime(src) != m0:
+                httpd.socket.close()
+                os.execv(sys.executable, [sys.executable, src, ROOT, SCRIPTS, CWD, str(PORT)])
+        except OSError:
+            pass
+
+
 threading.Thread(target=reaper, daemon=True).start()
+threading.Thread(target=watcher, daemon=True).start()
 httpd.serve_forever()
