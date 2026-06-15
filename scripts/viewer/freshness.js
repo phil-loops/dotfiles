@@ -1,15 +1,12 @@
 // ── freshness chip ─────────────────────────────────────
-// "is this live / when did it last change" indicator. Self-contained: polls the
-// cheap /sig hash on its own cadence (no coupling to the model poll in detail.js),
-// tracks the last change + last successful contact, and renders a ticking chip in
-// the brand. Pulses on a real change so you can see it update while watching.
+// "is this live / when did it last change" indicator. Rides the shared SSE /events
+// stream that detail.js opens (exposed as window.__events) — no independent polling.
+// Connection state comes straight from the EventSource (readyState), and an `update`
+// event marks a real forest change. Falls back to its own stream if the shared one
+// isn't there, so it can't break. Pulses on change.
 (function () {
   if (typeof LIVE !== "undefined" && !LIVE) return; // static snapshot → no server
-  const POLL_MS = 2000,
-    STALE_MS = 8000;
-  let lastSig = null,
-    lastChange = 0,
-    lastOk = 0;
+  let lastChange = 0;
 
   const chip = el("div", "freshness");
   chip.id = "freshness";
@@ -26,39 +23,28 @@
     return m < 60 ? m + "m ago" : Math.round(m / 60) + "h ago";
   };
 
-  async function poll() {
-    try {
-      const { sig } = await (await fetch("/sig")).json();
-      lastOk = Date.now();
-      if (lastSig === null) {
-        lastSig = sig;
-        lastChange = Date.now();
-      } else if (sig !== lastSig) {
-        lastSig = sig;
-        lastChange = Date.now();
-        chip.classList.add("pulse");
-        setTimeout(() => chip.classList.remove("pulse"), 600);
-      }
-    } catch (e) {
-      /* network blip — paint() reflects it as disconnected */
-    }
-  }
-
+  // EventSource.readyState: 0 CONNECTING · 1 OPEN · 2 CLOSED
+  const es = window.__events || new EventSource("/events");
   function paint() {
-    const now = Date.now();
-    const live = now - lastOk < STALE_MS;
-    chip.classList.toggle("stale", !live);
-    txt.textContent = !lastOk
-      ? "connecting…"
-      : !live
+    const st = es.readyState;
+    chip.classList.toggle("stale", st === 2);
+    txt.textContent =
+      st === 2
         ? "disconnected"
-        : lastChange
-          ? "updated " + ago(now - lastChange)
-          : "live";
+        : st !== 1
+          ? "connecting…"
+          : lastChange
+            ? "updated " + ago(Date.now() - lastChange)
+            : "live";
   }
 
-  poll();
+  es.addEventListener("update", () => {
+    lastChange = Date.now();
+    chip.classList.add("pulse");
+    setTimeout(() => chip.classList.remove("pulse"), 600);
+    paint();
+  });
+
   paint();
-  setInterval(poll, POLL_MS);
-  setInterval(paint, 1000);
+  setInterval(paint, 1000); // keep the "updated Ns ago" label ticking
 })();
