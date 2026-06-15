@@ -46,16 +46,16 @@ def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
   .headRefName
 ] | @tsv'
 
-notify() {  # $1 short status (starts ✓/✗), $2 detail — PERSISTENT dialog that
-            # hangs around until you click OK (not a temporary banner). Backgrounded
-            # so it never blocks the watch/sweep; bell for good measure.
+notify() {  # $1 short status, $2 detail — a banner that lands in Notification
+            # Center (not a modal dialog). It accumulates there until you clear it;
+            # to keep the on-screen banner from auto-fading, set this app's style to
+            # "Alerts" in System Settings → Notifications.
   print -n '\a'
-  local title="prwatch · $1" msg="${2:-$1}" icon="note"
-  [[ "$1" == *✗* ]] && icon="stop"
+  local title="prwatch · $1" msg="${2:-$1}"
   title=${title//\\/\\\\}; title=${title//\"/\\\"}     # escape for AppleScript
   msg=${msg//\\/\\\\};     msg=${msg//\"/\\\"}
   osascript >/dev/null 2>&1 \
-    -e "display dialog \"$msg\" with title \"$title\" buttons {\"OK\"} default button \"OK\" with icon $icon" &!
+    -e "display notification \"$msg\" with title \"$title\" sound name \"Glass\"" || true
 }
 
 watch_pr() {  # $1 repo  $2 number
