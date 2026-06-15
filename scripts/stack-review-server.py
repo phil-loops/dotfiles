@@ -45,7 +45,7 @@ def asset_sig():
     # a change here means a code edit, so open tabs should reload the reassembled page.
     parts = [os.path.join(SCRIPTS, "stack-review-html.tpl.py")]
     v = os.path.join(SCRIPTS, "viewer")
-    for f in ("shell.html", "styles.css", "data.js", "graph.js", "detail.js", "palette.js", "freshness.js", "select.js"):
+    for f in ("shell.html", "styles.css", "data.js", "graph.js", "detail.js", "palette.js", "freshness.js", "branchbar.js"):
         parts.append(os.path.join(v, f))
 
     def mt(p):
@@ -172,6 +172,18 @@ class H(BaseHTTPRequestHandler):
             self._send(200 if r.returncode == 0 else 404,
                        r.stdout if r.returncode == 0 else "(file not found on this ref)",
                        "text/plain; charset=utf-8")
+        elif u.path == "/commits":   # this branch's own commits: parent..branch, newest first
+            branch = parse_qs(u.query).get("branch", [""])[0]
+            parent = run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+            fmt = "%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
+            out = run(["git", "log", f"{parent}..{branch}", f"--format={fmt}", "--date=short"]).stdout
+            commits = []
+            for ln in out.splitlines():
+                p = ln.split("\x1f")
+                if len(p) >= 2:
+                    commits.append({"sha": p[0], "subject": p[1],
+                                    "author": p[2] if len(p) > 2 else "", "date": p[3] if len(p) > 3 else ""})
+            self._send(200, json.dumps(commits))
         else:
             self._send(404, "{}")
 
@@ -212,6 +224,12 @@ class H(BaseHTTPRequestHandler):
             subprocess.Popen([os.path.join(SCRIPTS, "stack-open"), "--prepare", d.get("branch", "")],
                              cwd=CWD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self._send(200, '{"ok":true}')
+            return
+        if self.path == "/checkout":   # move the working tree onto this branch (git refuses if dirty)
+            d = json.loads(raw or "{}")
+            r = run(["git", "checkout", d.get("branch", "")])
+            self._send(200 if r.returncode == 0 else 500,
+                       json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return
         self._send(404, "{}")
 
