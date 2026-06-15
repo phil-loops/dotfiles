@@ -58,6 +58,28 @@
         checkPRs();
       },
     });
+    c.push({
+      k: "forest",
+      label: "↪  Jump to current checkout (HEAD)",
+      async run() {
+        let b = "";
+        try {
+          b = ((await (await fetch("/head")).json()).branch || "").trim();
+        } catch (e) {}
+        if (!b) {
+          toast("couldn’t read the checkout’s branch");
+          return;
+        }
+        const n = (NODES || []).find((x) => x.branch === b);
+        if (!n) {
+          toast(`checkout is on <b>${b}</b> — not a node in this forest`);
+          return;
+        }
+        active = n.id;
+        render();
+        toast(`↪ jumped to <b>${b.split("/").pop()}</b> (current checkout)`);
+      },
+    });
     if (node) {
       const s = node.split("/").pop();
       c.push({
