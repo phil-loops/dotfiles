@@ -147,7 +147,7 @@ function render(){
           const n=parseInt((numCell.textContent||'').trim(),10); if(!n) return;   // blank gutter (deleted/gap) — skip
           numCell.classList.add('lineopen'); numCell.title='⌁ open line '+n+' in nvim';
           numCell.onclick=async(e)=>{ e.stopPropagation();
-            const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path,line:n})}).then(x=>x.json()).catch(()=>({ok:false}));
+            const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path,pos:String(n)})}).then(x=>x.json()).catch(()=>({ok:false}));
             toast(r.ok ? '⌁ '+f.path.split('/').pop()+':'+n+' → review-nvim' : '⌁ open failed: '+((r.err||'').trim()||'see server')); };
         });
       };
