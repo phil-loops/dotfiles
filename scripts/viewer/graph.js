@@ -134,10 +134,30 @@ function renderGraph(sel){
   let leafY=0; const pos={};
   // each node reflects its OWN changes only — never a subtree rollup
   const own=b=>{ const n=N[b]||{}; return {clean:n.clean||0,stale:n.stale||0,unblessed:n.unblessed||0,total:n.total||0}; };
-  const place=(b,d)=>{ const kids=(N[b]&&N[b].children)||[]; let y;
-    if(!kids.length){ y=leafY*GAPY; leafY++; } else { const ys=kids.map(c=>place(c,d+1)); y=(ys[0]+ys[ys.length-1])/2; }
-    pos[b]={x:PADX+d*GAPX, y:PADY+y, depth:d}; return y; };
-  gm.roots.forEach(r=>place(r,1));
+  // ── columns (x): a node sits to the RIGHT of everything it depends on — its
+  // git parent chain AND its fan-in `requires`. So a fan-in integrator lands
+  // one column past the deps it carries and the dashed edges flow forward.
+  const depth={}; const depthOf=(b,g)=>{ if(depth[b]!=null) return depth[b]; if(g>64) return depth[b]=1;
+    const n=N[b]||{}; let d=1;
+    if(n.parent && n.parent!=='main' && N[n.parent]) d=Math.max(d, depthOf(n.parent,g+1)+1);
+    (n.requires||[]).forEach(r=>{ if(N[r]) d=Math.max(d, depthOf(r,g+1)+1); });
+    return depth[b]=d; };
+  Object.keys(N).forEach(b=>depthOf(b,0));
+  // ── rows (y): tidy-tree over a layout spine. A node hangs under its git
+  // parent; a dep that only forks off main is ADOPTED under the (first) fan-in
+  // node that requires it, so requires-deps cluster beneath the node that
+  // carries them instead of scattering down the column.
+  const lkids={}; Object.keys(N).forEach(b=>lkids[b]=[]); const lpar={};
+  Object.keys(N).forEach(b=>{ const p=N[b].parent; if(p && p!=='main' && N[p]) lpar[b]=p; });
+  Object.keys(N).forEach(f=>{ (N[f].requires||[]).forEach(r=>{ if(N[r] && r!==f && lpar[r]==null) lpar[r]=f; }); });
+  Object.keys(lpar).forEach(b=>{ if(lkids[lpar[b]]) lkids[lpar[b]].push(b); });
+  const lroots=Object.keys(N).filter(b=>lpar[b]==null);
+  const place=(b,g)=>{ const kids=(g>64?[]:lkids[b])||[]; let y;
+    if(!kids.length){ y=leafY*GAPY; leafY++; } else { const ys=kids.map(c=>place(c,g+1)); y=(ys[0]+ys[ys.length-1])/2; }
+    pos[b]={x:PADX+depth[b]*GAPX, y:PADY+y, depth:depth[b]}; return y; };
+  lroots.forEach(r=>place(r,0));
+  // safety: any node missed (e.g. a requires-cycle) still gets its own row
+  Object.keys(N).forEach(b=>{ if(!pos[b]){ pos[b]={x:PADX+depth[b]*GAPX, y:PADY+leafY*GAPY, depth:depth[b]}; leafY++; } });
   const rootYs=gm.roots.map(r=>pos[r]?pos[r].y:PADY);
   const mainY=rootYs.length? rootYs.reduce((a,b)=>a+b,0)/rootYs.length : PADY;
   const maxD=Math.max(1, ...Object.values(pos).map(p=>p.depth));
