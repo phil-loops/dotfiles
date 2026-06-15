@@ -1022,7 +1022,18 @@ require('lazy').setup({
       --  - va)  - [V]isually select [A]round [)]paren
       --  - yinq - [Y]ank [I]nside [N]ext [Q]uote
       --  - ci'  - [C]hange [I]nside [']quote
-      require('mini.ai').setup { n_lines = 500 }
+      local ai = require 'mini.ai'
+      ai.setup {
+        n_lines = 500,
+        custom_textobjects = {
+          -- `c` = a comment block (e.g. JSDoc /** ... */), via the @comment.outer
+          -- treesitter query. Makes dac/cac/vac/yac work in JS/TS. mini.ai owns a/i,
+          -- so the old nvim-treesitter-textobjects `['ac']` keymap never fired (and
+          -- that plugin is pinned to its rewritten `main` branch anyway) — register it
+          -- here instead so it goes through the engine that actually handles a/i.
+          c = ai.gen_spec.treesitter { a = '@comment.outer', i = '@comment.outer' },
+        },
+      }
 
       -- Add/delete/replace surroundings (brackets, quotes, etc.)
       -- - ssaiw) - [S]urround [A]dd [I]nner [W]ord [)]Paren
