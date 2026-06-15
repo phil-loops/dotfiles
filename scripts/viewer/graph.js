@@ -15,7 +15,7 @@ function ensurePRs(){
   if(_gprsLoading || typeof LIVE==='undefined' || !LIVE) return;
   _gprsLoading = true;
   fetch('/prs').then(r=>r.ok?r.json():{}).then(p=>{ GPRS = p||{};
-    if($('#dock')) renderGraph('#dock');
+    if(typeof renderRail==='function') renderRail();   // rail PR badges
     const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map');
   }).catch(()=>{});
 }
@@ -114,8 +114,9 @@ function unspotlight(){
 }
 function hideTip(){ const t=$('#ntip'); if(t) t.classList.remove('on'); unspotlight(); }
 function renderGraph(sel){
-  ensurePRs();   // kick off the one-time PR fetch (re-renders when it arrives)
-  const tgt=$(sel), gm=graphModel(), N=gm.nodes;
+  ensurePRs();   // kick off the one-time PR fetch (re-renders the rail when it arrives)
+  const tgt=$(sel); if(!tgt) return;   // #dock is gone — only the fullscreen map (#map) renders here
+  const gm=graphModel(), N=gm.nodes;
   if(!Object.keys(N).length){ tgt.innerHTML='<p style="color:var(--faint);margin:30px">nothing to graph</p>'; return; }
   const GAPY=52, GAPX=205, PADX=116, PADY=36;
   let leafY=0; const pos={};

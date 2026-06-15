@@ -95,6 +95,14 @@ def expand(seedlist):
     return seen
 
 
+# ---- project list (the picker) -------------------------------------------
+# names + branch counts only, no git diffs — instant. The browser shows these as
+# buttons; clicking one opens ?branch=<name> (a project name resolves below).
+if not node_mode and target == "--projects":
+    print(json.dumps([{"name": n, "branches": len(expand(seeds[n]))} for n in sorted(seeds)]))
+    sys.exit(0)
+
+
 # ---- the blessing ledger, read once --------------------------------------
 gd = git_out(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
 try:
