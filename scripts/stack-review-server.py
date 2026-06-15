@@ -45,7 +45,7 @@ def asset_sig():
     # a change here means a code edit, so open tabs should reload the reassembled page.
     parts = [os.path.join(SCRIPTS, "stack-review-html.tpl.py")]
     v = os.path.join(SCRIPTS, "viewer")
-    for f in ("shell.html", "styles.css", "data.js", "graph.js", "detail.js", "palette.js"):
+    for f in ("shell.html", "styles.css", "data.js", "graph.js", "detail.js", "palette.js", "freshness.js", "select.js"):
         parts.append(os.path.join(v, f))
 
     def mt(p):
