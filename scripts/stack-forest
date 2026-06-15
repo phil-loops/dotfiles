@@ -37,8 +37,8 @@ if not target:
     sys.exit(0)
 MAIN = git_out(["config", "stack.main-branch"]).strip() or "main"
 
-# ---- one config read → parents / children / project seeds ----------------
-parents, children, seeds = {}, {}, {}
+# ---- one config read → parents / children / requires / project seeds ------
+parents, children, seeds, requires = {}, {}, {}, {}
 for line in git_out(["config", "--local", "--list"]).splitlines():
     if "=" not in line:
         continue
@@ -46,6 +46,11 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     m = re.match(r"^stack-branch\.(.+)\.parent$", k)
     if m:
         parents[m.group(1)] = v
+        continue
+    # fan-in deps (multivar): branches a node carries beyond its single parent
+    m = re.match(r"^stack-branch\.(.+)\.requires$", k)
+    if m:
+        requires.setdefault(m.group(1), []).append(v)
         continue
     m = re.match(r"^stack-project\.(.+)\.branch$", k)
     if m:
@@ -68,6 +73,19 @@ def expand(seedlist):
             seen.add(cur)
             cur = parents.get(cur, "")
         descend(s)
+    # pull in `requires` deps (fan-in) + their chains until stable
+    changed = True
+    while changed:
+        changed = False
+        for b in list(seen):
+            for req in requires.get(b, []):
+                if req not in seen:
+                    cur = req
+                    while cur and cur != MAIN:
+                        seen.add(cur)
+                        cur = parents.get(cur, "")
+                    descend(req)
+                    changed = True
     return seen
 
 
@@ -125,6 +143,13 @@ if node_mode:
     branch = target
     parent = parents.get(branch, MAIN)
     rows, *_ = file_status(branch, parent)
+    # fan-in: drop carried `requires` files so the diff view shows only own work
+    reqs = requires.get(branch, [])
+    if reqs:
+        carried = set()
+        for r in reqs:
+            carried.update(git_out(["diff", "--name-only", f"{MAIN}...{r}"]).split())
+        rows = [row for row in rows if row["path"] not in carried]
     chunks = {}
     full = git_out(["diff", "-p", f"{parent}...{branch}"])
     for ch in re.split(r"(?m)^(?=diff --git )", full):
@@ -159,6 +184,18 @@ else:
 def build(branch):
     parent = parents.get(branch, MAIN)
     rows, clean, stale, unbl = file_status(branch, parent)
+    # fan-in: a node CARRIES its `requires` deps' files (cherry-picked). Subtract
+    # those paths so the node shows only its OWN work — clean counts, not the
+    # carried content. (Path-level; the forest keeps one provider per file.)
+    reqs = requires.get(branch, [])
+    if reqs:
+        carried = set()
+        for r in reqs:
+            carried.update(git_out(["diff", "--name-only", f"{MAIN}...{r}"]).split())
+        rows = [row for row in rows if row["path"] not in carried]
+        clean = sum(1 for r in rows if r["status"] == "clean")
+        stale = sum(1 for r in rows if r["status"] == "stale")
+        unbl = sum(1 for r in rows if r["status"] == "unblessed")
     if stale:
         roll = "stale"
     elif clean + stale == 0:
@@ -172,6 +209,7 @@ def build(branch):
         "clean": clean, "stale": stale, "unblessed": unbl, "total": len(rows),
         "files": [{"path": r["path"], "status": r["status"]} for r in rows],
         "children": [c for c in children.get(branch, []) if c in members],
+        "requires": [r for r in requires.get(branch, []) if r in members],
     }
 
 
