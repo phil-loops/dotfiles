@@ -2,7 +2,10 @@
 # stack-prs [--refresh] — open PRs keyed by head branch, for the forest viewer to
 # badge nodes + highlight edges with a live PR into main.
 #
-#   { "<branch>": { num, url, draft, base, toMain } }
+#   { "<branch>": { num, url, draft, base, toMain, review } }
+#
+# `review` is GitHub's reviewDecision: "APPROVED" | "CHANGES_REQUESTED" |
+# "REVIEW_REQUIRED" | "" (none required / not yet reviewed).
 #
 # `toMain` is true iff the PR's base is main. The forest aim is that every PR
 # merges into main, so the viewer highlights toMain edges and flags the rest
@@ -17,7 +20,11 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
-CACHE="${TMPDIR:-/tmp}/stack-prs.json"
+# Persist the PR map alongside the blessing ledger in the repo's COMMON git dir —
+# so it survives reload AND server restarts (and reboots, unlike $TMPDIR), and is
+# shared across all worktrees of the forest. Falls back to $TMPDIR outside a repo.
+gitdir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+CACHE="${gitdir:-${TMPDIR:-/tmp}}/stack-prs.json"
 TTL=${STACK_PRS_TTL:-300}
 [[ "${1:-}" == "--refresh" ]] && rm -f "$CACHE"
 
@@ -34,7 +41,7 @@ repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
 merged='{}'; ok=1
 for repo in $repos; do
   rows=$(gh pr list --repo "$repo" --state open -L 300 \
-           --json number,url,headRefName,baseRefName,isDraft 2>/dev/null) || { ok=0; break; }
+           --json number,url,headRefName,baseRefName,isDraft,reviewDecision 2>/dev/null) || { ok=0; break; }
   merged=$(jq -n --arg main "$MAIN" --argjson acc "$merged" --argjson rows "$rows" '
     $acc + (reduce $rows[] as $p ({};
       .[$p.headRefName] = {
@@ -42,7 +49,8 @@ for repo in $repos; do
         url:    $p.url,
         draft:  $p.isDraft,
         base:   $p.baseRefName,
-        toMain: ($p.baseRefName == $main)
+        toMain: ($p.baseRefName == $main),
+        review: ($p.reviewDecision // "")
       }))')
 done
 
