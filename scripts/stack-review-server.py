@@ -127,6 +127,25 @@ class H(BaseHTTPRequestHandler):
             r = run([os.path.join(SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
             self._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
             return
+        if self.path == "/open":   # open the file's content ON that branch in nvim (new tmux window)
+            d = json.loads(raw or "{}")
+            branch, path = d.get("branch", ""), d.get("path", "")
+            show = run(["git", "show", f"{branch}:{path}"])
+            if show.returncode != 0:
+                self._send(404, '{"ok":false}')
+                return
+            odir = "/tmp/stack-review-open"
+            os.makedirs(odir, exist_ok=True)
+            fp = os.path.join(odir, (branch + "__" + path).replace("/", "_"))  # keeps extension → filetype
+            with open(fp, "w") as fh:
+                fh.write(show.stdout)
+            try:   # open in the user's tmux 'loops' session; harmless if tmux/session absent
+                subprocess.run(["tmux", "new-window", "-t", "loops", "-n", os.path.basename(path), f"nvim '{fp}'"],
+                               capture_output=True)
+            except FileNotFoundError:
+                pass
+            self._send(200, '{"ok":true}')
+            return
         self._send(404, "{}")
 
 
