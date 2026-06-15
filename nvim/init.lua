@@ -1093,20 +1093,9 @@ require('lazy').setup({
           additional_vim_regex_highlighting = { 'ruby' },
         },
         indent = { enable = true, disable = { 'ruby' } },
-        textobjects = {
-          select = {
-            enable = true,
-            -- Jump forward to the next comment if the cursor isn't already in one.
-            lookahead = true,
-            keymaps = {
-              -- Comment block text object (e.g. JSDoc /** ... */). Only
-              -- @comment.outer is defined in the queries, so inner falls back
-              -- to outer. Use: dac (delete), cac (change), vac (select), yac (yank).
-              ['ac'] = '@comment.outer',
-              ['ic'] = '@comment.outer',
-            },
-          },
-        },
+        -- NB: comment textobjects (dac/cac/vac/yac for /** … */) are owned by
+        -- mini.ai's custom `c` object (see its setup), not by a textobjects.select
+        -- block here — mini.ai owns a/i, so a select keymap would just shadow-conflict.
       }
 
       -- Navigate between function declarations (skipping callback arrow functions)
