@@ -42,4 +42,4 @@ for i in {1..60}; do port=$(cat "$servedir/port" 2>/dev/null); [[ -n "$port" ]] 
 
 open "http://127.0.0.1:${port}/${qs}"
 echo "✦ live review → http://127.0.0.1:${port}  (${branch:-project picker})"
-echo "  closes itself ~90s after you close the tab"
+echo "  closes itself ~15min after you close the tab"

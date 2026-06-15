@@ -108,8 +108,6 @@ function render(){
   }
 
   const sub=el('div','sub2');
-  [['all','all '+l.total],['stale','stale '+l.stale],['unblessed','new '+l.unblessed]].forEach(([k,lab])=>{
-    const p=el('span','pill'+(filter===k?' on':''),lab); p.onclick=()=>{filter=k;render();}; sub.appendChild(p);});
   if(LIVE){ const ba=el('button','blessall','✦ bless all remaining'); ba.onclick=()=>doBless(l.branch,'.'); sub.appendChild(ba); }
   else { sub.appendChild(el('span','ro-badge','snapshot · read-only')); }
   main.appendChild(sub);
@@ -272,10 +270,46 @@ async function renderPicker(){
   document.body.appendChild(ov);
   const list=ov.querySelector('.pk-list');
   if(!projs.length){ list.innerHTML='<p style="color:var(--faint);font-size:12px">no projects configured (stack-project.*.branch)</p>'; }
+  const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const leaf=s=>esc(String(s).split('/').pop());
+  const PK=renderPicker._p||(renderPicker._p={});   // branch → thesis cache, survives re-render
   projs.forEach(p=>{ const b=el('button','pk-btn');
-    b.innerHTML=`<span class="pk-name">${p.name}</span><span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span>`;
+    const ready=p.ready||[], cands=p.candidates||[];
+    // hover shows the branch purpose via a styled tooltip (below); click opens the node.
+    const chips=arr=>arr.map(r=>`<span class="pk-ready-b" data-b="${esc(r)}" data-p="${esc(p.name)}">${leaf(r)}</span>`).join('');
+    // ready = no upstream blockers AND an open PR (the graph's legal-to-merge set).
+    const readyRow = ready.length
+      ? `<div class="pk-ready"><span class="pk-ready-h">✓ ready to merge</span>${chips(ready)}</div>` : '';
+    // candidates = no upstream blockers but NO PR yet — local branches you could open
+    // a PR for / merge straight into main.
+    const candRow = cands.length
+      ? `<div class="pk-ready pk-cand"><span class="pk-ready-h">○ candidate · no PR</span>${chips(cands)}</div>` : '';
+    b.innerHTML=`<div class="pk-top"><span class="pk-name">${esc(p.name)}</span>`
+      +`<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></div>`
+      +readyRow+candRow;
     b.onclick=()=>{ location.search='branch='+encodeURIComponent(p.name); };
     list.appendChild(b); });
+  // merge-candidate chips: hover → styled tooltip with the branch purpose; click → open its
+  // node. purpose is read-only /purpose (no token spend), cached in PK across re-renders.
+  const pkTipEl=()=>{ let t=document.getElementById('pktip'); if(!t){ t=el('div','pk-tip'); t.id='pktip'; document.body.appendChild(t); } return t; };
+  const showPkTip=(chip,br)=>{ const t=pkTipEl();
+    const why = PK[br] ? `<span class="pk-tip-why"><span class="x">✦</span>${esc(PK[br])}</span>`
+                       : `<span class="pk-tip-why empty">no purpose set</span>`;
+    t.innerHTML=`<span class="pk-tip-b">${esc(br)}</span>`+why; t.classList.add('on');
+    const r=chip.getBoundingClientRect();
+    t.style.left=Math.max(8, Math.min(r.left, innerWidth-t.offsetWidth-8))+'px';
+    const above=r.top-t.offsetHeight-8; t.style.top=(above>8 ? above : r.bottom+8)+'px'; };
+  const hidePkTip=()=>{ const t=document.getElementById('pktip'); if(t) t.classList.remove('on'); };
+  list.querySelectorAll('.pk-ready-b[data-b]').forEach(chip=>{
+    const br=chip.getAttribute('data-b');
+    chip.onclick=e=>{ e.stopPropagation();   // open the branch's node; don't also fire the project nav
+      location.href='?branch='+encodeURIComponent(chip.getAttribute('data-p'))+'#node='+encodeURIComponent(br); };
+    const ensure=()=> (br in PK) ? Promise.resolve()
+      : fetch('/purpose?branch='+encodeURIComponent(br)).then(r=>r.json())
+          .then(p=>{ PK[br]=(p&&p.thesis)||''; }).catch(()=>{ PK[br]=''; });
+    chip.addEventListener('mouseenter',()=>{ ensure().then(()=>{ if(chip.matches(':hover')) showPkTip(chip,br); }); });
+    chip.addEventListener('mouseleave',hidePkTip);
+  });
   ov.querySelector('.pk-all').onclick=()=>{ location.search='branch=--all'; };
 }
 // preserve scroll across a live re-render. NB the scroller is `.main` (the body is
