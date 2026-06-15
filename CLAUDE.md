@@ -36,6 +36,14 @@ Think in **forests, not stacks** — a linear chain is just the degenerate case.
 
 A pure line uses only `parent`; fan-in adds `requires`. **Never any git merge commits** — fan-in is metadata over linear history (carried cherry-picks), so squash-merge still drops redundant commits cleanly on rebase.
 
+## Branch purpose
+
+Every branch carries a one-line **purpose** — what it's for / what it lays the foundation for — stored as git's native **branch description** (`git config branch.<name>.description`, a.k.a. `git branch --edit-description`). Git owns it, it's free to read, and it shows in the forest viewer under each node.
+
+- **Set it as you create or edit a branch** — `loops purpose <branch> "<thesis>"`. Capturing intent at creation is the whole point; don't leave branches purposeless. When Claude creates branches for a stack, it sets each one's purpose.
+- **Keep it current** — when a branch is repurposed, rebased onto different work, or its scope shifts, update the description. A stale purpose is worse than none.
+- The viewer reads the description for **free** (no LLM). A "suggest" button can draft one from the diff (opt-in, haiku) which you then save as the description — **generation never runs automatically**, nothing burns tokens on its own.
+
 ## Creating branches
 
 Always create from the intended parent (the branch this one stacks on top of). Use plain `git checkout -b`:
@@ -50,7 +58,7 @@ The parent relationship is **implicit in the fork point** — git does not track
 1. **PRs**: pass `--base <parent>` to `gh pr create` so GitHub shows only this branch's diff, not the whole stack.
 2. **Rebase after parent changes**: `git rebase <parent>` (or `git rebase --onto <new-parent> <old-parent>` when moving a branch).
 
-Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order.
+Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order. And **set the branch's purpose right after creating it** — `loops purpose <new-branch-name> "<one-line thesis>"` — so the intent is captured while it's fresh.
 
 ## Common tasks
 
@@ -59,6 +67,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Create child branch        | `git checkout <parent> && git checkout -b <name>`           |
 | Fork an independent base off main | `git checkout main && git checkout -b <name>` (no parent → roots off main) |
 | Add a fan-in dep           | `git config --add stack-branch.<name>.requires <dep>`       |
+| Set/update a branch's purpose | `loops purpose <name> "<thesis>"` (git branch description) |
 | Review the forest (live)   | `loops stack review [<branch>]` (blessing-ledger server, reads git config per request) |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
