@@ -54,6 +54,23 @@ function railUnspot(){ const rail=$('#rail'); if(!rail)return; rail.classList.re
 
 // diff base: view a node's diff vs an upstream ref (null = its parent). resets per node.
 let diffBase=null, diffBaseFor=null;
+
+// ── view state ↔ URL hash ──────────────────────────────────────────────────
+// keep the selected node, file filter, diff base, and graph-open flag in the
+// location hash so a plain refresh restores the exact view you were looking at.
+// (the project stays in ?branch=, which intentionally reloads; the hash updates
+// silently via replaceState so it never spams browser history.)
+function readView(){ const h=new URLSearchParams(location.hash.slice(1));
+  return { node:h.get('node')||'', filter:h.get('filter')||'', base:h.get('base')||'', map:h.get('map')==='1' }; }
+function writeView(){
+  const p=new URLSearchParams();
+  if(typeof active==='string' && active) p.set('node', active);
+  if(filter && filter!=='all') p.set('filter', filter);
+  if(diffBase) p.set('base', diffBase);
+  const m=$('#map'); if(m && m.classList.contains('on')) p.set('map','1');
+  const h=p.toString();
+  history.replaceState(null, '', location.pathname + location.search + (h?'#'+h:''));
+}
 function render(){
   NODES = flatten();
   if(!active || !NODES.some(n=>n.id===active)) active = pickInitial();
@@ -201,12 +218,14 @@ function render(){
     host.innerHTML='<p style="color:var(--faint);margin-top:18px">loading diff vs '+baseRef.split('/').pop()+'…</p>';
     fetchNode(l.branch, baseRef).then(d=>{ if(curObj().id!==l.id) return; host.innerHTML=''; renderCards(d.files||[]); });
   }
+  writeView();   // mirror the current view (node/filter/base) into the URL hash
 }
 
 // the diff line under the mouse (set by the d2h hover handlers) — press `o` to open it
 let _hoverLine = null;
 // keyboard: o → open hovered diff line in nvim; m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
 addEventListener('keydown',e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey) return;   // let ⌘F / ⌘O / etc. reach the browser — these are bare-key shortcuts
   if(e.key==='o' && _hoverLine){ const ae=document.activeElement;
     if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;   // don't fire while typing
     e.preventDefault(); const h=_hoverLine;
@@ -306,8 +325,14 @@ async function boot(){
   try{
     if(LIVE && !Q.get('branch')){ renderPicker(); return; }   // no project chosen → show the picker
     if(!MODEL) MODEL = await fetchModel();
-    NODES=flatten(); active=pickInitial(); render(); buildDock();
+    NODES=flatten();
+    const V=readView();   // restore the view from the URL hash (refresh-safe)
+    active=(V.node && NODES.some(n=>n.id===V.node)) ? V.node : pickInitial();
+    if(V.filter) filter=V.filter;
+    if(V.base){ diffBase=V.base; diffBaseFor=active; }   // keep the saved diff base for the restored node
+    render(); buildDock();
     restoreScroll(loadScroll());   // refresh-safe: land back where you were, not at the top
+    if(V.map) toggleMap(true);
     $('#mapbtn').onclick=()=>toggleMap();
     $('#focusbtn').onclick=()=>document.body.classList.toggle('focus');
     if(LIVE){
