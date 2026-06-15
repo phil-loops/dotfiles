@@ -4,7 +4,12 @@
 #   prwatch              list your open PRs (with a live check rollup) and fzf-pick
 #                        one to watch
 #   prwatch <number>     watch that PR's checks directly (searches your repos)
+#   prwatch <url>        watch a .../pull/<n> URL's checks, or a .../actions/runs/<id>
+#                        Actions-run URL to completion
 #   prwatch -l|--list    just list; don't watch
+#   prwatch --sweep      one quiet polling pass (for launchd): notify only on PRs
+#                        that newly fail or recover — a source-agnostic "PR opened"
+#                        monitor (catches PRs opened on the web). See prwatch.plist.
 #
 # "Watch" streams gh's check status until every check passes or one fails, then
 # fires a desktop notification (+ a terminal bell). It scans your fork AND the
@@ -59,6 +64,18 @@ watch_pr() {  # $1 repo  $2 number
   fi
 }
 
+watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
+  local repo="$1" rid="$2"
+  print -P "%F{yellow}⟳%f watching run ${repo} #${rid} — ctrl-c to stop"
+  if gh run watch "$rid" --repo "$repo" --exit-status; then
+    print -P "%F{green}✓ run ${rid} — succeeded%f"
+    notify "✓ run passed" "${repo} run ${rid} succeeded"
+  else
+    print -P "%F{red}✗ run ${rid} — failed%f"
+    notify "✗ run failed" "${repo} run ${rid} failed"
+  fi
+}
+
 # rows: "repo<TAB>number<TAB>rollup<TAB>title<TAB>branch" across all repos
 collect() {
   local repo
@@ -68,6 +85,23 @@ collect() {
       | awk -v r="$repo" 'NF{print r"\t"$0}'   # awk \t = a real tab (BSD sed won't)
   done
 }
+
+# --- direct: prwatch <github-url> ---------------------------------------------
+# An Actions run URL → watch that run; a pull URL → watch that PR's checks.
+#   https://github.com/<owner>/<repo>/actions/runs/<id>[/job/<id>]
+#   https://github.com/<owner>/<repo>/pull/<n>
+if [[ "${1:-}" == http(s|)://github.com/* ]]; then
+  url="$1"
+  ownerrepo=$(print -r -- "$url" | sed -E 's#https?://github.com/([^/]+/[^/]+)/.*#\1#')
+  if [[ "$url" == *"/actions/runs/"* ]]; then
+    rid=$(print -r -- "$url" | sed -E 's#.*/actions/runs/([0-9]+).*#\1#')
+    watch_run "$ownerrepo" "$rid"; exit 0
+  elif [[ "$url" == *"/pull/"* ]]; then
+    num=$(print -r -- "$url" | sed -E 's#.*/pull/([0-9]+).*#\1#')
+    watch_pr "$ownerrepo" "$num"; exit 0
+  fi
+  echo "prwatch: unrecognized github URL (want .../actions/runs/<id> or .../pull/<n>)" >&2; exit 1
+fi
 
 # --- direct: prwatch <number> -------------------------------------------------
 # Use the REST API (repos/<owner>/<repo>/pulls/<n>) — strictly repo-scoped, so a
@@ -79,6 +113,33 @@ if [[ "${1:-}" == <-> ]]; then
     fi
   done
   echo "prwatch: PR #$1 not found in: ${repos[*]}" >&2; exit 1
+fi
+
+# --- sweep: one polling pass; notify on PRs that newly FAIL or RECOVER ---------
+# Source-agnostic "PR opened" monitor — works no matter how the PR was opened
+# (web/Desktop/CLI). Meant to run periodically (launchd); it diffs the current
+# check state against the last pass and only pings on transitions, so it's quiet.
+# First run just seeds state (no burst of notifications).
+if [[ "${1:-}" == "--sweep" ]]; then
+  state="${XDG_CACHE_HOME:-$HOME/.cache}/prwatch/state.tsv"
+  mkdir -p "${state:h}"
+  seeded=0; [[ -f "$state" ]] && seeded=1
+  prev=$(cat "$state" 2>/dev/null || true)
+  cur=$(collect)
+  if (( seeded )); then
+    print -r -- "$cur" | while IFS=$'\t' read -r repo num roll title branch; do
+      [[ -z "$num" || "$roll" == *"no checks"* ]] && continue
+      old=$(print -r -- "$prev" | awk -F'\t' -v r="$repo" -v n="$num" '$1==r && $2==n{print $3; exit}')
+      [[ "$roll" == "$old" ]] && continue                       # no change since last sweep
+      case "$roll" in
+        (*failing*)    notify "✗ checks failing" "${repo}#${num} — ${title}" ;;
+        (*"all pass"*) [[ "$old" == *failing* || "$old" == *running* ]] \
+                         && notify "✓ checks passed" "${repo}#${num} — ${title}" ;;
+      esac
+    done
+  fi
+  print -r -- "$cur" > "$state"
+  exit 0
 fi
 
 # surface the PRs worth monitoring: failing → running → passing → no-checks
