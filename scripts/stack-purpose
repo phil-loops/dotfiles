@@ -1,0 +1,65 @@
+#!/bin/zsh
+# stack-purpose <branch> — a one-line "what's the point" for a branch: what it
+# contributes, and what it lays a foundation for.
+#
+# LLM-generated (claude -p, haiku) from the branch's diff + the names of the
+# branches that build on it. Cached content-keyed in $GIT_DIR/stack-purpose.json
+# so it regenerates only when the branch's change actually changes — same
+# freshness model as blessings. Manual override always wins:
+#   git config stack-branch.<branch>.purpose "hand-written thesis"
+#
+# Output: {"thesis": "...", "enables": "...", "source": "manual|generated|cache"}
+set -euo pipefail
+command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+branch="${1:?usage: stack-purpose <branch>}"
+parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+[[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
+
+git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+ledger="$git_dir/stack-purpose.json"
+[[ -f "$ledger" ]] || echo '{}' > "$ledger"
+
+# 1) manual override wins, no LLM
+manual=$(git config "stack-branch.${branch}.purpose" 2>/dev/null || true)
+if [[ -n "$manual" ]]; then
+  jq -n --arg t "$manual" '{thesis:$t, enables:"", source:"manual"}'; exit 0
+fi
+
+# 2) content signature: hash of the diff — regenerate when the change changes
+sig=$(git diff "${parent}...${branch}" | git hash-object --stdin)
+hit=$(jq -c --arg b "$branch" --arg s "$sig" \
+  'if (.[$b].sig == $s) then {thesis:.[$b].thesis, enables:.[$b].enables, source:"cache"} else empty end' "$ledger")
+if [[ -n "$hit" ]]; then echo "$hit"; exit 0; fi
+
+# 3) gather context: capped diff + the branches that build on this one
+diff=$(git diff "${parent}...${branch}" | head -c 12000)
+children=$(git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
+  | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}' | paste -sd', ' -)
+
+read -r -d '' prompt <<EOF || true
+You are summarizing one branch in a stacked-PR series for a teammate skimming a dependency graph.
+Branch: ${branch}  (parent: ${parent})
+Branches that build directly on it: ${children:-none (this is a leaf)}
+
+From the diff below, return STRICT JSON and nothing else:
+{"thesis": "...", "enables": "..."}
+- thesis: ONE plain sentence — what this branch does / why it exists. No filler, no "this branch".
+- enables: a SHORT phrase for what it lays the foundation for, informed by the branches that build on it. Empty string "" if it's a leaf.
+
+DIFF:
+${diff}
+EOF
+
+resp=$(claude -p --model haiku "$prompt" 2>/dev/null || true)
+obj=$(printf '%s' "$resp" | python3 -c 'import sys,re; m=re.search(r"\{.*\}", sys.stdin.read(), re.S); print(m.group(0) if m else "")' || true)
+if ! printf '%s' "$obj" | jq -e '.thesis' >/dev/null 2>&1; then
+  obj='{"thesis":"(could not summarize)","enables":""}'
+fi
+thesis=$(printf '%s' "$obj" | jq -r '.thesis')
+enables=$(printf '%s' "$obj" | jq -r '.enables // ""')
+
+tmp=$(mktemp)
+jq --arg b "$branch" --arg s "$sig" --arg t "$thesis" --arg e "$enables" \
+  '.[$b]={sig:$s, thesis:$t, enables:$e}' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+jq -n --arg t "$thesis" --arg e "$enables" '{thesis:$t, enables:$e, source:"generated"}'
