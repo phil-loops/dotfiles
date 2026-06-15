@@ -148,6 +148,18 @@ loops() {
             if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
             ~/.dotfiles/scripts/stack-blessed-status "$b" --pretty "$@"
             ;;
+        purpose)
+            # View or set a branch's purpose — git's native branch description.
+            #   loops purpose [branch]              → show
+            #   loops purpose [branch] <text...>    → set
+            local b="$1"
+            if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
+            if (( $# )); then
+                ~/.dotfiles/scripts/stack-purpose --set "$*" "$b" >/dev/null && echo "purpose set on $b"
+            else
+                ~/.dotfiles/scripts/stack-purpose "$b" | jq -r '.thesis | if . == "" then "(no purpose set)" else . end'
+            fi
+            ;;
         *)
             echo "Usage: loops <command>"
             echo ""
@@ -157,6 +169,7 @@ loops() {
             echo "  pr-review         Review PRs assigned to you (with blessing)"
             echo "  bless [branch]    Bless (mark reviewed) a branch's files"
             echo "  blessed [branch]  Show clean/stale/unblessed status for a branch"
+            echo "  purpose [branch] [text]  View/set a branch's purpose (git branch description)"
             echo "  clean-migrations  Remove empty migration folders"
             echo "  staging           Check build/deploy status, watch, or deploy"
             ;;

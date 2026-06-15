@@ -78,6 +78,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
   border-radius:0 9px 9px 0;font-size:13px;line-height:1.55}
 .purpose .pdot{color:var(--gold);flex:none}
 .purpose .penables{color:var(--gold);font-style:italic}
+.purpose .ptext{color:var(--ink)}
+.psuggest,.psave{margin-left:auto;flex:none;font:inherit;font-size:11px;color:var(--gold);background:none;
+  border:1px solid var(--gold-soft);padding:3px 11px;border-radius:7px;cursor:pointer;transition:.15s;white-space:nowrap}
+.psuggest:hover,.psave:hover{background:var(--gold-soft)}
 .blessall{margin-left:auto;font:inherit;font-size:11.5px;color:var(--gold);background:none;border:1px solid var(--gold-soft);
   padding:5px 13px;border-radius:7px;cursor:pointer;transition:.15s;letter-spacing:.04em}
 .blessall:hover{background:var(--gold-soft);box-shadow:0 0 16px #e0ad4e33}
@@ -316,16 +320,29 @@ function render(){
   const main=$('#main'); main.innerHTML='';
   main.appendChild(el('div','hd', `<h2>${l.branch.split('/').pop()}</h2><span class="arrow">◂</span><span class="par">${l.parent}</span>`));
 
-  // "what's the point" — lazy-generated thesis + what it lays groundwork for (live only)
+  // "what's the point" — git branch description (free); generation is opt-in, never automatic
   if(LIVE){
-    const pc=el('div','purpose','<span class="pdot">✦</span><span class="ptext" style="color:var(--faint)">reading the diff…</span>');
-    main.appendChild(pc);
-    const fill=p=>{ const t=pc.querySelector('.ptext'); t.style.color='var(--ink)';
-      t.innerHTML=(p.thesis||'(no summary)')+(p.enables?` <span class="penables">→ groundwork for ${p.enables}</span>`:''); };
-    if(PURPOSE[l.branch]) fill(PURPOSE[l.branch]);
-    else fetch('/purpose?branch='+encodeURIComponent(l.branch)).then(r=>r.json())
-      .then(p=>{ PURPOSE[l.branch]=p; if(curObj().branch===l.branch) fill(p); })
-      .catch(()=>fill({thesis:'(no summary)'}));
+    const pc=el('div','purpose'); main.appendChild(pc);
+    const showThesis=(p,saved)=>{
+      pc.innerHTML=`<span class="pdot">✦</span><span class="ptext">${p.thesis}${p.enables?` <span class="penables">→ groundwork for ${p.enables}</span>`:''}</span>`;
+      if(p.source!=='description' && !saved){
+        const save=el('button','psave','save to branch'); pc.appendChild(save);
+        save.onclick=async()=>{ save.textContent='saving…';
+          await fetch('/purpose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,text:p.thesis})});
+          PURPOSE[l.branch]={thesis:p.thesis,enables:p.enables,source:'description'}; showThesis(PURPOSE[l.branch],true); toast('✦ saved to branch description'); };
+      }
+    };
+    const showEmpty=()=>{
+      pc.innerHTML='<span class="pdot" style="opacity:.45">✦</span><span class="ptext" style="color:var(--faint)">no purpose set</span>';
+      const sg=el('button','psuggest','suggest'); pc.appendChild(sg);
+      sg.onclick=async()=>{ sg.textContent='thinking…';
+        const g=await (await fetch('/purpose?generate=1&branch='+encodeURIComponent(l.branch))).json();
+        PURPOSE[l.branch]=g; if(curObj().branch===l.branch) showThesis(g); };
+    };
+    const route=p=>{ (p && p.thesis) ? showThesis(p) : showEmpty(); };
+    if(PURPOSE[l.branch]) route(PURPOSE[l.branch]);
+    else fetch('/purpose?branch='+encodeURIComponent(l.branch)).then(r=>r.json())   // read-only: NO tokens
+      .then(p=>{ PURPOSE[l.branch]=p; if(curObj().branch===l.branch) route(p); }).catch(showEmpty);
   }
 
   const sub=el('div','sub2');
