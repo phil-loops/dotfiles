@@ -1,10 +1,13 @@
 #!/bin/zsh
 # own — per-session file-ownership for concurrent Claude sessions (see ~/.dotfiles/OWNERS).
-#   own claim <lane>     this session holds <lane> (records a fresh timestamp)
-#   own who <path>       which lane owns <path>, and whether it's actively held
-#   own list             every lane: held-age + its paths
-#   own release [<lane>] drop this session's claim
+#   own claim <lane>            this session holds <lane> (records a fresh timestamp)
+#   own slice <name> <lane>...  hold several lanes for ONE vertical feature, tagged <name>
+#   own request <lane>          ask for <lane>: claim it if free/stale, else register a request
+#   own who <path>              which lane owns <path>, and whether it's actively held
+#   own list                    every lane: held-age · slice · pending request · its paths
+#   own release <lane|slice>    drop a lane's claim, or every lane tagged with a slice name
 # Claims live in git config (own.<lane>.held = epoch); "active" = held < 15 min ago.
+# A slice records own.<lane>.slice = <name> so the OTHER session sees WHY a set is held.
 emulate -L zsh; set -uo pipefail
 ROOT="${0:A:h:h}"; OWNERS="$ROOT/OWNERS"; NOW=$(date +%s); FRESH=900
 _lane_for(){ local p="$1" best="" blen=0 line lane globs g
@@ -14,19 +17,56 @@ _lane_for(){ local p="$1" best="" blen=0 line lane globs g
     for g in ${(s: :)globs}; do [[ "$p" == ${g}* && ${#g} -gt $blen ]] && { best="$lane"; blen=${#g}; }; done
   done < "$OWNERS"; print -r -- "$best"; }
 _age(){ local h; h=$(git config "own.$1.held" 2>/dev/null) || return 1; [[ -n "$h" ]] && print -r -- $((NOW-h)) || return 1; }
+_req(){ local r; r=$(git config "own.$1.req" 2>/dev/null) || return 1; [[ -n "$r" ]] && print -r -- $((NOW-r)) || return 1; }
+_paths(){ grep "^$1 " "$OWNERS" | cut -d' ' -f2- | tr ' ' '\n' | sed '/^$/d;s/^/  /'; }
+_lanes(){ grep -v '^#' "$OWNERS" | awk 'NF{print $1}'; }
+_is_lane(){ grep -q "^$1 " "$OWNERS"; }
 case "${1:-list}" in
   claim) [[ -n "${2:-}" ]] || { print "usage: own claim <lane>" >&2; exit 2; }
-    git config "own.$2.held" "$NOW"
-    print "you hold [$2] — edit these directly; patch anything else:"
-    grep "^$2 " "$OWNERS" | cut -d' ' -f2- | tr ' ' '\n' | sed '/^$/d;s/^/  /' ;;
+    git config "own.$2.held" "$NOW"; git config --unset "own.$2.req" 2>/dev/null; git config --unset "own.$2.slice" 2>/dev/null
+    print "you hold [$2] — edit these directly; patch anything else:"; _paths "$2" ;;
+  slice) [[ $# -ge 3 ]] || { print "usage: own slice <name> <lane> [<lane>...]" >&2; exit 2; }
+    local name="$2"; shift 2; local ln
+    for ln in "$@"; do _is_lane "$ln" || { print "no such lane: $ln (see 'own list')" >&2; exit 2; }; done
+    for ln in "$@"; do
+      git config "own.$ln.held" "$NOW"; git config "own.$ln.slice" "$name"; git config --unset "own.$ln.req" 2>/dev/null
+    done
+    print "holding [${(j:, :)@}] for slice:$name — one feature across these lanes."
+    print "the other session's 'own list' now shows WHY they're held. edit these directly; patch anything else." ;;
+  request) [[ -n "${2:-}" ]] || { print "usage: own request <lane>" >&2; exit 2; }
+    local a
+    if a=$(_age "$2") && (( a < FRESH )); then
+      git config "own.$2.req" "$NOW"
+      print "[$2] is actively held (${a}s ago) — request registered."
+      print "  the holder sees it on 'own list' and runs 'own release $2' to hand off; then 'own claim $2'."
+    else
+      git config "own.$2.held" "$NOW"; git config --unset "own.$2.req" 2>/dev/null; git config --unset "own.$2.slice" 2>/dev/null
+      print "[$2] was free/stale — claimed it. you hold it now:"; _paths "$2"
+    fi ;;
   who) [[ -n "${2:-}" ]] || { print "usage: own who <path>" >&2; exit 2; }
     local l=$(_lane_for "$2"); [[ -z "$l" ]] && { print "$2 → (unowned)"; exit 0; }
-    local a; if a=$(_age "$l"); then print "$2 → [$l] · held ${a}s ago$([[ $a -lt $FRESH ]] && print ' ⚠ ACTIVE — use the patch protocol')"
+    local a sl=$(git config "own.$l.slice" 2>/dev/null)
+    if a=$(_age "$l"); then print "$2 → [$l]${sl:+ (slice:$sl)} · held ${a}s ago$([[ $a -lt $FRESH ]] && print ' ⚠ ACTIVE — use the patch protocol')"
     else print "$2 → [$l] · unclaimed"; fi ;;
-  list) local line lane a
+  list) local line lane a rq r sl
     while IFS= read -r line; do [[ "$line" == \#* || -z "${line// /}" ]] && continue
       lane="${line%% *}"; if a=$(_age "$lane"); then h="held ${a}s ago"; else h="—"; fi
-      printf '  %-9s %-15s %s\n' "$lane" "$h" "${line#* }"; done < "$OWNERS" ;;
-  release) [[ -n "${2:-}" ]] && { git config --unset "own.$2.held" 2>/dev/null; print "released [$2]"; } || print "usage: own release <lane>" >&2 ;;
-  *) print "usage: own {claim <lane>|who <path>|list|release <lane>}" >&2; exit 2 ;;
+      r=""; sl=$(git config "own.$lane.slice" 2>/dev/null); [[ -n "$sl" ]] && r=" · slice:$sl"
+      if rq=$(_req "$lane") && (( rq < FRESH )); then r="$r ⟵ requested ${rq}s ago"; fi
+      printf '  %-9s %-15s %s%s\n' "$lane" "$h" "${line#* }" "$r"; done < "$OWNERS" ;;
+  release) local arg="${2:-}"; [[ -n "$arg" ]] || { print "usage: own release <lane|slice>" >&2; exit 2; }
+    if _is_lane "$arg"; then
+      git config --unset "own.$arg.held" 2>/dev/null; git config --unset "own.$arg.req" 2>/dev/null; git config --unset "own.$arg.slice" 2>/dev/null
+      print "released [$arg]"
+    else   # not a lane → treat as a slice name; release every lane tagged with it
+      local any=0 ln
+      for ln in $(_lanes); do
+        if [[ "$(git config "own.$ln.slice" 2>/dev/null)" == "$arg" ]]; then
+          git config --unset "own.$ln.held" 2>/dev/null; git config --unset "own.$ln.req" 2>/dev/null; git config --unset "own.$ln.slice" 2>/dev/null
+          print "released [$ln] (slice:$arg)"; any=1
+        fi
+      done
+      [[ $any -eq 1 ]] || { print "no lane or slice named '$arg'" >&2; exit 1; }
+    fi ;;
+  *) print "usage: own {claim <lane>|slice <name> <lane>...|request <lane>|who <path>|list|release <lane|slice>}" >&2; exit 2 ;;
 esac
