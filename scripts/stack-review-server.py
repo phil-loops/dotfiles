@@ -85,10 +85,14 @@ class H(BaseHTTPRequestHandler):
             self._send(200 if r.returncode == 0 else 500,
                        r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
         elif u.path == "/purpose":
-            branch = parse_qs(u.query).get("branch", [""])[0]
-            r = run([os.path.join(SCRIPTS, "stack-purpose"), branch])
+            q = parse_qs(u.query)
+            args = [os.path.join(SCRIPTS, "stack-purpose")]
+            if q.get("generate", ["0"])[0] == "1":   # opt-in token spend, only on ask
+                args.append("--generate")
+            args.append(q.get("branch", [""])[0])
+            r = run(args)
             self._send(200 if r.returncode == 0 else 500,
-                       r.stdout if r.returncode == 0 else json.dumps({"thesis": "", "enables": ""}))
+                       r.stdout if r.returncode == 0 else json.dumps({"thesis": "", "enables": "", "source": "none"}))
         elif u.path == "/file":
             q = parse_qs(u.query)
             branch, path = q.get("branch", [""])[0], q.get("path", [""])[0]
@@ -115,6 +119,11 @@ class H(BaseHTTPRequestHandler):
             r = run(args)
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
+            return
+        if self.path == "/purpose":   # save a thesis as the git branch description
+            d = json.loads(raw or "{}")
+            r = run([os.path.join(SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
+            self._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
             return
         self._send(404, "{}")
 

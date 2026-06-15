@@ -1,39 +1,69 @@
 #!/bin/zsh
-# stack-purpose <branch> — a one-line "what's the point" for a branch: what it
-# contributes, and what it lays a foundation for.
+# stack-purpose — the "what's the point" of a branch.
 #
-# LLM-generated (claude -p, haiku) from the branch's diff + the names of the
-# branches that build on it. Cached content-keyed in $GIT_DIR/stack-purpose.json
-# so it regenerates only when the branch's change actually changes — same
-# freshness model as blessings. Manual override always wins:
-#   git config stack-branch.<branch>.purpose "hand-written thesis"
+# The authoritative source is git's NATIVE branch description
+# (git config branch.<name>.description) — so git owns it, it travels with the
+# repo's config, and it's free to read. You set it intentionally when you create
+# or edit a branch (`loops purpose <branch> "..."` or `git branch --edit-description`).
 #
-# Output: {"thesis": "...", "enables": "...", "source": "manual|generated|cache"}
+# Generation is OPT-IN and never automatic: it only runs with --generate, and it
+# produces a *suggestion* (haiku) you can choose to save as the description.
+#
+#   stack-purpose <branch>                 read-only — description, else a cached
+#       suggestion matching current content, else nothing. NO LLM, NO tokens.
+#   stack-purpose --generate <branch>      description if set, else LLM-suggest +
+#       cache. The only path that spends tokens, and only on explicit ask.
+#   stack-purpose --set "<text>" <branch>  write the branch description (git-managed).
+#
+# Output: {"thesis","enables","source":"description|cache|generated|none"}
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
-branch="${1:?usage: stack-purpose <branch>}"
+branch=""; gen=0; set_text=""; have_set=0
+while (( $# )); do
+  case "$1" in
+    --generate) gen=1; shift;;
+    --set) set_text="$2"; have_set=1; shift 2;;
+    *) branch="$1"; shift;;
+  esac
+done
+[[ -n "$branch" ]] || { echo "usage: stack-purpose [--generate] [--set <text>] <branch>" >&2; exit 2; }
+
+# --set: hand it to git (the native branch description)
+if (( have_set )); then
+  if [[ -n "$set_text" ]]; then
+    git config "branch.${branch}.description" "$set_text"
+  else
+    git config --unset "branch.${branch}.description" 2>/dev/null || true
+  fi
+  jq -n --arg t "$set_text" '{thesis:$t, enables:"", source:"description"}'; exit 0
+fi
+
+# 1) the branch description — git-managed, free, authoritative
+desc=$(git config "branch.${branch}.description" 2>/dev/null || true)
+if [[ -n "$desc" ]]; then
+  jq -n --arg t "$desc" '{thesis:$t, enables:"", source:"description"}'; exit 0
+fi
+
 parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
-
 git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 ledger="$git_dir/stack-purpose.json"
 [[ -f "$ledger" ]] || echo '{}' > "$ledger"
 
-# 1) manual override wins, no LLM
-manual=$(git config "stack-branch.${branch}.purpose" 2>/dev/null || true)
-if [[ -n "$manual" ]]; then
-  jq -n --arg t "$manual" '{thesis:$t, enables:"", source:"manual"}'; exit 0
-fi
-
-# 2) content signature: hash of the diff — regenerate when the change changes
+# 2) a cached suggestion still matching the current content (free)
 sig=$(git diff "${parent}...${branch}" | git hash-object --stdin)
 hit=$(jq -c --arg b "$branch" --arg s "$sig" \
   'if (.[$b].sig == $s) then {thesis:.[$b].thesis, enables:.[$b].enables, source:"cache"} else empty end' "$ledger")
 if [[ -n "$hit" ]]; then echo "$hit"; exit 0; fi
 
-# 3) gather context: capped diff + the branches that build on this one
-diff=$(git diff "${parent}...${branch}" | head -c 12000)
+# 3) nothing yet — do NOT spend tokens unless explicitly asked
+if (( ! gen )); then
+  jq -n '{thesis:"", enables:"", source:"none"}'; exit 0
+fi
+
+# 4) generate a suggestion (opt-in, the only token path)
+diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,12000]}"
 children=$(git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
   | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}' | paste -sd', ' -)
 
