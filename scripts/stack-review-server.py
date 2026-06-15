@@ -81,9 +81,17 @@ class H(BaseHTTPRequestHandler):
                 self._send(200, r.stdout)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": model_sig()}))
+        elif u.path == "/prs":   # branch → open-PR map; stack-prs disk-caches, so GH isn't hammered
+            r = run([os.path.join(SCRIPTS, "stack-prs")])
+            self._send(200, r.stdout or "{}")
         elif u.path == "/node":
-            branch = parse_qs(u.query).get("branch", [""])[0]
-            r = run([os.path.join(SCRIPTS, "stack-forest"), "--node", branch])
+            q = parse_qs(u.query)
+            branch = q.get("branch", [""])[0]
+            base = q.get("base", [""])[0]
+            args = [os.path.join(SCRIPTS, "stack-forest"), "--node", branch]
+            if base:
+                args += ["--base", base]
+            r = run(args)
             self._send(200 if r.returncode == 0 else 500,
                        r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
         elif u.path == "/purpose":
@@ -149,10 +157,16 @@ def reaper():
             os._exit(0)
 
 
-# optional 4th arg = port to rebind on self-reload, so the URL survives a restart
-PORT = int(sys.argv[4]) if len(sys.argv) > 4 else 0
+# Port: a STABLE default (so reloads + already-open tabs survive a restart) —
+# overridable via $STACK_REVIEW_PORT. The 4th arg is the watcher's rebind port on
+# self-reload. If the stable port is taken (a stale/foreign holder), fall back to
+# an ephemeral one rather than failing to start.
+PORT = int(sys.argv[4]) if len(sys.argv) > 4 else int(os.environ.get("STACK_REVIEW_PORT", "62333"))
 ThreadingHTTPServer.allow_reuse_address = True
-httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+try:
+    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+except OSError:
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
 PORT = httpd.server_address[1]
 if len(sys.argv) <= 4:
     print(PORT, flush=True)  # announce the port only on the first launch

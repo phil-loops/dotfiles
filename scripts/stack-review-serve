@@ -16,13 +16,24 @@ here="${0:A:h}"
 # of silently binding to the wrong place (the empty-/model footgun).
 repo=$(git rev-parse --show-toplevel 2>/dev/null) \
   || { echo "stack-review-serve: not inside a git repo" >&2; exit 1; }
+STABLE_PORT="${STACK_REVIEW_PORT:-62333}"
+
+# Reuse a review server already live on the stable port instead of spawning a
+# second one on a new port (which would strand any open tab on a dead port).
+if curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1; then
+  open "http://127.0.0.1:${STABLE_PORT}/?branch=${branch}"
+  echo "✦ reusing live review → http://127.0.0.1:${STABLE_PORT}  (branch ${branch})"
+  exit 0
+fi
+
 servedir="$(mktemp -d)"
 
 # build the shell once in LIVE mode (model = null → the page fetches /model)
 echo 'null' > "$servedir/model.json"
 python3 "$here/stack-review-html.tpl.py" "$servedir/model.json" "$servedir/index.html"
 
-# start the server detached; it prints its chosen port on the first line
+# start the server detached; it prints its chosen port on the first line (the
+# stable port, or an ephemeral fallback if something else already holds it)
 python3 "$here/stack-review-server.py" "$servedir" "$here" "$repo" > "$servedir/port" 2>"$servedir/log" &!
 for i in {1..60}; do port=$(cat "$servedir/port" 2>/dev/null); [[ -n "$port" ]] && break; sleep 0.1; done
 [[ -n "${port:-}" ]] || { echo "stack-review-serve: server didn't start"; cat "$servedir/log"; exit 1; }
