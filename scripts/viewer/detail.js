@@ -138,7 +138,19 @@ function render(){
         w.querySelector('.retry').onclick=ev=>{ ev.preventDefault(); draw(); };
         return;
       }
-      const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'side-by-side',matching:'lines'}).draw(); };
+      const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'side-by-side',matching:'lines'}).draw();
+        // hover the new-side line-number gutter → click to land the warm nvim on that exact line.
+        // (gutter, not the code cell, so reading/selecting the diff text never fires an open.)
+        const panels=w.querySelectorAll('.d2h-file-side-diff'); const right=panels[panels.length-1];
+        if(right) right.querySelectorAll('tr').forEach(tr=>{
+          const numCell=tr.querySelector('.d2h-code-side-linenumber'); if(!numCell) return;
+          const n=parseInt((numCell.textContent||'').trim(),10); if(!n) return;   // blank gutter (deleted/gap) — skip
+          numCell.classList.add('lineopen'); numCell.title='⌁ open line '+n+' in nvim';
+          numCell.onclick=async(e)=>{ e.stopPropagation();
+            const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path,line:n})}).then(x=>x.json()).catch(()=>({ok:false}));
+            toast(r.ok ? '⌁ '+f.path.split('/').pop()+':'+n+' → review-nvim' : '⌁ open failed: '+((r.err||'').trim()||'see server')); };
+        });
+      };
       w.innerHTML='';
       // smart default — the minimum you must re-read:
       //   stale → ONLY the diff since you last blessed; else → the full link diff

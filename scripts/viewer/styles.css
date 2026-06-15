@@ -154,6 +154,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .d2h-code-line,.d2h-code-side-line{font-family:'IBM Plex Mono',monospace!important;font-size:12px!important}
 .d2h-diff-table{background:transparent!important}
 .d2h-code-linenumber,.d2h-code-side-linenumber{background:var(--panel)!important;color:var(--faint)!important;border-color:var(--line)!important}
+/* new-side line-number gutter is clickable → opens that exact line in the warm nvim */
+.d2h-code-side-linenumber.lineopen{cursor:pointer;position:relative}
+.d2h-code-side-linenumber.lineopen:hover{color:var(--ember)!important;background:var(--ember-soft)!important}
+.d2h-code-side-linenumber.lineopen:hover::after{content:'⌁';position:absolute;right:2px;color:var(--ember);font-size:10px}
 .d2h-code-line-ctn{color:var(--ink)!important}
 .d2h-cntx .d2h-code-line-ctn{color:var(--dim)!important}
 .d2h-ins{background:#15240f!important} .d2h-del{background:#251210!important}
