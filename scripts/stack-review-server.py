@@ -70,31 +70,15 @@ def pulse():
         time.sleep(1.0)
 
 
-def _ref_exists(b):
-    return run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{b}"]).returncode == 0
-
-
-def _ready_to_merge(project, prs):
-    """Member branches legal to merge into main right now, split by PR state.
-
-    The topology test mirrors viewer/graph.js `mergeable`: nothing upstream is
-    still in the forest. Upstream = the parent chain back to main plus the fan-in
-    `requires`; a link blocks only while its branch ref still exists (a merged base
-    is dropped by restack, so its ref is gone). Kept in config order (nearest-main-
-    first). Among the unblocked branches we split two ways:
+def _ready_to_merge(mergeable, prs):
+    """Split stack-forest's topologically-mergeable branches by PR state:
       ready      — an open PR already exists (the green into-main edge-bar set)
-      candidates — no PR yet, but topologically clear: local branches you could
-                   open a PR for / merge straight into main.
-    Returns (ready, candidates)."""
-    members = run(["git", "config", "--get-all",
-                   f"stack-project.{project}.branch"]).stdout.split()
+      candidates — no PR yet, but clear to merge: local branches you could open a
+                   PR for / merge straight into main.
+    The topology walk now lives in stack-forest (`mergeable`), so this is a pure
+    split — no git calls. Returns (ready, candidates), input order preserved."""
     ready, candidates = [], []
-    for b in members:
-        parent = run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip() or "main"
-        reqs = run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.split()
-        upstream = ([parent] if parent != "main" else []) + reqs
-        if any(_ref_exists(u) for u in upstream):
-            continue   # an unmerged upstream branch still blocks it
+    for b in mergeable:
         (ready if b in prs else candidates).append(b)
     return ready, candidates
 
@@ -194,7 +178,7 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 prmap = {}
             for p in projs:
-                p["ready"], p["candidates"] = _ready_to_merge(p.get("name", ""), prmap)
+                p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
             self._send(200, json.dumps(projs))
         elif u.path == "/node":
             q = parse_qs(u.query)
