@@ -270,3 +270,11 @@ svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stro
 /* hover a diff line → press `o` to open it in nvim (same as clicking the gutter #) */
 tr.linehover{background:var(--raised)}
 tr.linehover .d2h-code-side-linenumber{color:var(--gold);font-weight:600}
+
+/* ── freshness chip (live / last-updated) ─────────────────── */
+.freshness{display:inline-flex;align-items:center;gap:6px;margin-top:8px;
+  font:11px 'IBM Plex Mono',monospace;color:var(--faint);letter-spacing:.02em}
+.freshness .fdot{width:6px;height:6px;border-radius:50%;background:#3fb950;box-shadow:0 0 6px #3fb95088;flex:none}
+.freshness.stale{color:var(--ember)} .freshness.stale .fdot{background:var(--ember);box-shadow:none}
+.freshness.pulse .fdot{animation:fpulse .6s ease}
+@keyframes fpulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.9);opacity:.45}100%{transform:scale(1)}}
