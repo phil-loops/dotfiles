@@ -1,152 +1,184 @@
-#!/bin/zsh
-# stack-forest <project|branch> — emit the project-scoped dependency TREE model.
-#
-# Reuses stack-review's resolution verbatim: build parents/children from
-# stack-branch.*.parent, seed from stack-project.*.branch, expand along the
-# pointers (partial registration still resolves). Bounded to the project's
-# connected component — NOT everything off main. Unlike stack-model it does not
-# flatten: every node keeps its children, so a project that forks renders as a
-# tree (DAG-ready — a node may list multiple parents upstream).
-#
-# Output: { project, roots:[branch], nodes:{ branch: {branch,parent,status,
-#   clean,stale,unblessed,total, files:[{path,status,patch,stale}], children:[],
-#   requires:[]} } }
-# Subtree rollups are computed client-side from roots+children. `requires` are
-# fan-in deps (other branches this node carries) — rendered as extra inbound edges.
-set -euo pipefail
-command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+#!/usr/bin/env python3
+"""stack-forest — project-scoped dependency tree model, in one fast process.
 
-TARGET="${1:-$(git branch --show-current 2>/dev/null)}"
-[[ -n "$TARGET" ]] || { echo "stack-forest: no target" >&2; exit 1; }
-MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo main)
-here="${0:A:h}"
+Two modes (the server maps endpoints to them):
 
-typeset -A parents children
-while IFS= read -r line; do
-  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
-    parents[${match[1]}]="${match[2]}"
-  fi
-done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
-for branch in "${(@k)parents}"; do children[${parents[$branch]}]+="$branch "; done
+  stack-forest <project|branch>        WAVE 1 — structure + per-node blessing
+      counts + file rows (path+status), NO diffs. This is what paints the graph
+      and tree-rail; it must be fast, so it does ~2 git calls per node (no diff,
+      no jq) and fans the nodes out through a throttled thread pool.
 
-# Fan-in deps: stack-branch.<name>.requires (multivar). A node may require other
-# branches it carries (cherry-picked) beyond its single git `parent`. Metadata only
-# — used for fan-in edges + membership; the parent...child diff is unchanged.
-typeset -A requires
-while IFS= read -r line; do
-  if [[ "$line" =~ 'stack-branch\.(.+)\.requires=(.+)' ]]; then
-    requires[${match[1]}]+="${match[2]} "
-  fi
-done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.requires=")
+  stack-forest --node <branch>         WAVE 2 — one node's file DIFFS (patch +
+      since-blessed delta). Expensive, but scoped to a single node and fetched
+      lazily when you actually look at it.
 
-typeset -A project_seeds
-while IFS= read -r line; do
-  if [[ "$line" =~ 'stack-project\.(.+)\.branch=(.+)' ]]; then
-    project_seeds[${match[1]}]+="${match[2]} "
-  fi
-done < <(git config --local --list 2>/dev/null | grep -E "^stack-project\..*\.branch=")
+Resolution matches stack-review: parents/children from stack-branch.*.parent,
+seeds from stack-project.*.branch, expand along the pointers. Bounded to the
+project's connected component.
+"""
+import sys, os, re, json, subprocess
+from concurrent.futures import ThreadPoolExecutor
 
-typeset -A expand_seen
-_expand_descend() {
-  local b="$1" child
-  for child in ${(s: :)children[$b]:-}; do
-    expand_seen[$child]=1
-    _expand_descend "$child"
-  done
-}
-expand_members() {
-  expand_seen=()
-  local seed cur
-  for seed in "$@"; do
-    cur="$seed"
-    while [[ -n "$cur" && "$cur" != "$MAIN_BRANCH" ]]; do
-      expand_seen[$cur]=1
-      cur="${parents[$cur]:-}"
-    done
-    _expand_descend "$seed"
-  done
-  # Fix-point in `requires` deps (fan-in): a required branch and its own stack are
-  # pulled into the forest the same way, until stable (handles requires-of-requires).
-  local changed=1 b req
-  while (( changed )); do
-    changed=0
-    for b in "${(@k)expand_seen}"; do
-      for req in ${(s: :)requires[$b]:-}; do
-        [[ -n "${expand_seen[$req]:-}" ]] && continue
-        cur="$req"
-        while [[ -n "$cur" && "$cur" != "$MAIN_BRANCH" ]]; do
-          expand_seen[$cur]=1
-          cur="${parents[$cur]:-}"
-        done
-        _expand_descend "$req"
-        changed=1
-      done
-    done
-  done
-}
 
-typeset -a project_members
-PROJECT_NAME=""
-if [[ -n "${project_seeds[$TARGET]:-}" ]]; then
-  PROJECT_NAME="$TARGET"
-  expand_members ${(s: :)project_seeds[$TARGET]}
-  project_members=("${(@k)expand_seen}")
-else
-  for name in "${(@k)project_seeds}"; do
-    expand_members ${(s: :)project_seeds[$name]}
-    if [[ -n "${expand_seen[$TARGET]:-}" ]]; then
-      PROJECT_NAME="$name"; project_members=("${(@k)expand_seen}"); break
-    fi
-  done
-  # lone branch in no project → its own connected component
-  if (( ${#project_members} == 0 )); then
-    expand_members "$TARGET"
-    project_members=("${(@k)expand_seen}")
-    PROJECT_NAME="$TARGET"
-  fi
-fi
+def git_out(args):
+    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else ""
 
-# membership lookup
-typeset -A is_member
-for m in "${project_members[@]}"; do is_member[$m]=1; done
 
-nodes_json='{}'; roots_json='[]'
-for m in "${project_members[@]}"; do
-  parent="${parents[$m]:-$MAIN_BRANCH}"
-  [[ -n "${is_member[$parent]:-}" ]] || roots_json=$(jq --arg b "$m" '. + [$b]' <<< "$roots_json")
+# ---- args ----------------------------------------------------------------
+argv = sys.argv[1:]
+node_mode = False
+if argv and argv[0] == "--node":
+    node_mode = True
+    argv = argv[1:]
+target = (argv[0] if argv else git_out(["branch", "--show-current"])).strip()
+if not target:
+    print(json.dumps({"project": "", "roots": [], "nodes": {}}))
+    sys.exit(0)
+MAIN = git_out(["config", "stack.main-branch"]).strip() or "main"
 
-  kids_json='[]'
-  for c in ${(s: :)children[$m]:-}; do
-    [[ -n "${is_member[$c]:-}" ]] && kids_json=$(jq --arg c "$c" '. + [$c]' <<< "$kids_json")
-  done
+# ---- one config read → parents / children / project seeds ----------------
+parents, children, seeds = {}, {}, {}
+for line in git_out(["config", "--local", "--list"]).splitlines():
+    if "=" not in line:
+        continue
+    k, v = line.split("=", 1)
+    m = re.match(r"^stack-branch\.(.+)\.parent$", k)
+    if m:
+        parents[m.group(1)] = v
+        continue
+    m = re.match(r"^stack-project\.(.+)\.branch$", k)
+    if m:
+        seeds.setdefault(m.group(1), []).append(v)
+for b, p in parents.items():
+    children.setdefault(p, []).append(b)
 
-  # Fan-in deps this node carries (member-scoped — the inbound edges in the viewer).
-  reqs_json='[]'
-  for r in ${(s: :)requires[$m]:-}; do
-    [[ -n "${is_member[$r]:-}" ]] && reqs_json=$(jq --arg r "$r" '. + [$r]' <<< "$reqs_json")
-  done
 
-  state=$("$here/stack-blessed-status" "$m" --parent "$parent")
-  files_json='[]'
-  while IFS= read -r row; do
-    [[ -n "$row" ]] || continue
-    fp=$(jq -r '.path' <<< "$row"); st=$(jq -r '.status' <<< "$row")
-    bblob=$(jq -r '.blessed_blob' <<< "$row"); cblob=$(jq -r '.current_blob' <<< "$row")
-    patch=$(git diff "${parent}...${m}" -- "$fp" 2>/dev/null || echo "")
-    stale=""
-    [[ "$st" == "stale" && -n "$bblob" && -n "$cblob" ]] && stale=$(git diff "$bblob" "$cblob" 2>/dev/null || echo "")
-    files_json=$(jq --arg p "$fp" --arg s "$st" --arg d "$patch" --arg sd "$stale" \
-      '. + [{path:$p,status:$s,patch:$d,stale:$sd}]' <<< "$files_json")
-  done < <(jq -c '.files[]' <<< "$state")
+def expand(seedlist):
+    seen = set()
 
-  node=$(jq -n --arg b "$m" --arg parent "$parent" \
-    --arg status "$(jq -r '.status' <<< "$state")" \
-    --argjson clean "$(jq '.clean' <<< "$state")" --argjson stale "$(jq '.stale' <<< "$state")" \
-    --argjson unblessed "$(jq '.unblessed' <<< "$state")" --argjson total "$(jq '.diff_total' <<< "$state")" \
-    --argjson files "$files_json" --argjson children "$kids_json" --argjson requires "$reqs_json" \
-    '{branch:$b,parent:$parent,status:$status,clean:$clean,stale:$stale,unblessed:$unblessed,total:$total,files:$files,children:$children,requires:$requires}')
-  nodes_json=$(jq --arg b "$m" --argjson n "$node" '. + {($b):$n}' <<< "$nodes_json")
-done
+    def descend(b):
+        for c in children.get(b, []):
+            if c not in seen:
+                seen.add(c)
+                descend(c)
+    for s in seedlist:
+        cur = s
+        while cur and cur != MAIN:
+            seen.add(cur)
+            cur = parents.get(cur, "")
+        descend(s)
+    return seen
 
-jq -n --arg project "$PROJECT_NAME" --argjson roots "$roots_json" --argjson nodes "$nodes_json" \
-  '{project:$project, roots:$roots, nodes:$nodes}'
+
+# ---- the blessing ledger, read once --------------------------------------
+gd = git_out(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+try:
+    ledger = json.load(open(os.path.join(gd, "stack-blessed.json")))
+except Exception:
+    ledger = {}
+
+DIFF_HDR = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+
+
+def file_status(branch, parent):
+    """(file rows with status, counts) — NO diffs. ~2 git calls."""
+    blessed = ledger.get(branch, {})
+    toks = git_out(["diff", "--name-status", "-z", f"{parent}...{branch}"]).split("\x00")
+    paths, deleted = [], set()
+    i = 0
+    while i < len(toks):
+        st = toks[i]
+        if not st:
+            i += 1
+            continue
+        if st[0] == "R":
+            p = toks[i + 2] if i + 2 < len(toks) else ""
+            i += 3
+        else:
+            p = toks[i + 1] if i + 1 < len(toks) else ""
+            i += 2
+        if p:
+            paths.append(p)
+            if st[0] == "D":
+                deleted.add(p)
+    cur = {}
+    live = [p for p in paths if p not in deleted]
+    if live:
+        cur = dict(zip(live, git_out(["rev-parse", *[f"{branch}:{p}" for p in live]]).split()))
+    rows, clean = [], 0
+    stale = unbl = 0
+    for p in paths:
+        bl, cu = blessed.get(p, ""), cur.get(p, "")
+        if not bl:
+            s = "unblessed"; unbl += 1
+        elif bl == cu:
+            s = "clean"; clean += 1
+        else:
+            s = "stale"; stale += 1
+        rows.append({"path": p, "status": s, "blessed": bl, "current": cu})
+    return rows, clean, stale, unbl
+
+
+# ---- WAVE 2: one node's diffs --------------------------------------------
+if node_mode:
+    branch = target
+    parent = parents.get(branch, MAIN)
+    rows, *_ = file_status(branch, parent)
+    chunks = {}
+    full = git_out(["diff", "-p", f"{parent}...{branch}"])
+    for ch in re.split(r"(?m)^(?=diff --git )", full):
+        if ch.startswith("diff --git "):
+            m = DIFF_HDR.match(ch.splitlines()[0])
+            if m:
+                chunks[m.group(2)] = ch.rstrip("\n") + "\n"
+    files = []
+    for r in rows:
+        stale = ""
+        if r["status"] == "stale" and r["blessed"] and r["current"]:
+            stale = git_out(["diff", r["blessed"], r["current"]])
+        files.append({"path": r["path"], "status": r["status"],
+                      "patch": chunks.get(r["path"], ""), "stale": stale})
+    print(json.dumps({"branch": branch, "files": files}))
+    sys.exit(0)
+
+# ---- WAVE 1: the fast structural model -----------------------------------
+project, members = "", set()
+if target in seeds:
+    project, members = target, expand(seeds[target])
+else:
+    for name, sd in seeds.items():
+        mem = expand(sd)
+        if target in mem:
+            project, members = name, mem
+            break
+    if not members:
+        project, members = target, expand([target])
+
+
+def build(branch):
+    parent = parents.get(branch, MAIN)
+    rows, clean, stale, unbl = file_status(branch, parent)
+    if stale:
+        roll = "stale"
+    elif clean + stale == 0:
+        roll = "unblessed"
+    elif unbl:
+        roll = "partial"
+    else:
+        roll = "clean"
+    return branch, {
+        "branch": branch, "parent": parent, "status": roll,
+        "clean": clean, "stale": stale, "unblessed": unbl, "total": len(rows),
+        "files": [{"path": r["path"], "status": r["status"]} for r in rows],
+        "children": [c for c in children.get(branch, []) if c in members],
+    }
+
+
+# throttled fan-out — subprocess.run releases the GIL while git runs, so threads
+# give real parallelism; the cap keeps a huge graph from spawning everything at once.
+workers = max(1, min(8, (os.cpu_count() or 4), len(members) or 1))
+with ThreadPoolExecutor(max_workers=workers) as ex:
+    nodes = dict(ex.map(build, members))
+roots = [b for b in members if parents.get(b, MAIN) not in members]
+print(json.dumps({"project": project, "roots": roots, "nodes": nodes}))
