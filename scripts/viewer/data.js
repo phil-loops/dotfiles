@@ -5,9 +5,15 @@ let MODEL = BAKED || null;
 let active = 0, filter = 'all';
 const PURPOSE = {};   // branch → {thesis, enables} (lazy, live-only)
 const NODEPATCH = {}; // branch → Promise<{path:{patch,stale}}> — diffs load per node, on demand
+const WTPREP = {};    // branch → true once we've asked the server to warm its worktree
+function prepareWorktree(branch){   // fire-and-forget: build the branch's nvim worktree ahead of "open"
+  if(!LIVE || WTPREP[branch]) return; WTPREP[branch]=true;
+  fetch('/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})}).catch(()=>{});
+}
 function ensureNode(branch){
   if(NODEPATCH[branch]) return NODEPATCH[branch];
   if(!LIVE) return NODEPATCH[branch] = Promise.resolve({});   // static snapshot: structure only
+  prepareWorktree(branch);   // prefetch the worktree so "open in nvim" is instant for this node
   NODEPATCH[branch] = fetch('/node?branch=' + encodeURIComponent(branch)).then(r=>r.json())
     .then(d=>{ const m={}; (d.files||[]).forEach(f=>{ m[f.path]={patch:f.patch, stale:f.stale}; }); return m; })
     .catch(()=>({}));
