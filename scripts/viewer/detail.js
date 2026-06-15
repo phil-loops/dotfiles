@@ -14,12 +14,15 @@ function renderRail(){
   });
 }
 
+// diff base: view a node's diff vs an upstream ref (null = its parent). resets per node.
+let diffBase=null, diffBaseFor=null;
 function render(){
   NODES = flatten();
   if(!active || !NODES.some(n=>n.id===active)) active = pickInitial();
   renderRail();
   updateDockSel();   // highlight the selected node in the docked graph (no rebuild)
   const l = curObj();
+  if(diffBaseFor!==l.id){ diffBase=null; diffBaseFor=l.id; }   // reset base when switching nodes
   if(LIVE) ensureNode(l.branch);   // priority: prefetch the node you just landed on
   const main=$('#main'); main.innerHTML='';
   main.appendChild(el('div','hd', `<h2>${l.branch.split('/').pop()}</h2><span class="arrow">◂</span><span class="par">${l.parent}</span>`));
@@ -56,8 +59,18 @@ function render(){
   else { sub.appendChild(el('span','ro-badge','snapshot · read-only')); }
   main.appendChild(sub);
 
+  // diff base picker — view this node's diff against an upstream ref (default = parent)
+  const baseRef = (diffBase && diffBase!==l.parent) ? diffBase : null;
+  const bp=el('div','basepick'); bp.appendChild(el('span','bplabel','diff vs'));
+  [['','parent'],['main','main']].forEach(([ref,lab])=>{
+    const c=el('span','bp'+(((diffBase||'')===ref)?' on':''),lab);
+    c.onclick=()=>{ diffBase=ref||null; render(); }; bp.appendChild(c); });
+  main.appendChild(bp);
+
+  const host=el('div'); main.appendChild(host);
+  const renderCards=(files)=>{
   let shown=0;
-  (l.files||[]).forEach(f=>{
+  (files||[]).forEach(f=>{
     if(filter==='stale' && f.status!=='stale') return;
     if(filter==='unblessed' && f.status!=='unblessed') return;
     shown++;
@@ -77,7 +90,7 @@ function render(){
     const draw=async()=>{ if(drawn)return; drawn=true;
       // diffs load per node on demand; the link diff isn't on the critical path
       const w=el('div','d2h-wrap','<p style="color:var(--faint);padding:11px">loading diff…</p>'); body.appendChild(w);
-      const pd=(await ensureNode(l.branch))[f.path] || {};
+      const pd=(await ensureNode(l.branch, baseRef))[f.path] || {};
       const d2h=(diff)=>{ new Diff2HtmlUI(w,diff,{drawFileList:false,outputFormat:'side-by-side',matching:'lines'}).draw(); };
       w.innerHTML='';
       // smart default — the minimum you must re-read:
@@ -111,9 +124,16 @@ function render(){
     row.onclick=(e)=>{ if(e.target.closest('.bless'))return; card.classList.toggle('open'); if(card.classList.contains('open'))draw(); };
     const bb=row.querySelector('.bless'); if(bb) bb.onclick=()=>doBless(l.branch,f.path);
     if(f.status!=='clean' && filter==='all'){ card.classList.add('open'); draw(); }
-    main.appendChild(card);
+    host.appendChild(card);
   });
-  if(shown===0) main.appendChild(el('div',null,'<p style="color:var(--faint);margin-top:30px">nothing '+filter+' here — all blessed ✦</p>'));
+  if(shown===0) host.appendChild(el('div',null,'<p style="color:var(--faint);margin-top:30px">nothing '+filter+' here — all blessed ✦</p>'));
+  };
+  // vs parent → file list from the model (sync); vs an upstream base → fetch the cumulative diff
+  if(!baseRef){ renderCards(l.files||[]); }
+  else {
+    host.innerHTML='<p style="color:var(--faint);margin-top:18px">loading diff vs '+baseRef.split('/').pop()+'…</p>';
+    fetchNode(l.branch, baseRef).then(d=>{ if(curObj().id!==l.id) return; host.innerHTML=''; renderCards(d.files||[]); });
+  }
 }
 
 // keyboard: m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
