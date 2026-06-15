@@ -95,11 +95,27 @@ def expand(seedlist):
     return seen
 
 
+# ---- "legal to merge into main" — pure topology, no PR data ---------------
+# A branch is mergeable when nothing upstream still has a live ref: its parent is
+# main (or already merged, so restack dropped the ref) AND every fan-in `requires`
+# dep is likewise gone. One for-each-ref read makes it set membership — no per-
+# branch git calls. This is the single source of truth the server splits by PR
+# state into ready (has PR) vs candidate (no PR yet), and that graph.js marks.
+_existing = set(git_out(["for-each-ref", "--format=%(refname:short)", "refs/heads"]).split())
+
+
+def mergeable(b):
+    upstream = ([parents.get(b, MAIN)] if parents.get(b, MAIN) != MAIN else []) + requires.get(b, [])
+    return not any(u in _existing for u in upstream)
+
+
 # ---- project list (the picker) -------------------------------------------
-# names + branch counts only, no git diffs — instant. The browser shows these as
-# buttons; clicking one opens ?branch=<name> (a project name resolves below).
+# names + branch counts + the mergeable seed branches — no git diffs, instant. The
+# browser shows these as buttons; clicking one opens ?branch=<name> (resolved below).
 if not node_mode and target == "--projects":
-    print(json.dumps([{"name": n, "branches": len(expand(seeds[n]))} for n in sorted(seeds)]))
+    print(json.dumps([{"name": n, "branches": len(expand(seeds[n])),
+                       "mergeable": [b for b in seeds[n] if mergeable(b)]}
+                      for n in sorted(seeds)]))
     sys.exit(0)
 
 
@@ -243,6 +259,7 @@ def build(branch):
         "files": [{"path": r["path"], "status": r["status"], "add": r["add"], "del": r["del"]} for r in rows],
         "children": [c for c in children.get(branch, []) if c in members],
         "requires": [r for r in requires.get(branch, []) if r in members],
+        "mergeable": mergeable(branch),
     }
 
 
