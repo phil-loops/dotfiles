@@ -220,7 +220,7 @@ tsgo (the Go-native TypeScript port) does the whole loops project in ~1.5s vs ts
 
 # Git Changes
 
-Never add Co-Authored-By lines. Never amend commits — always create new commits. History doesn't matter since PRs are squash-merged. Never commit — the user will handle commits themselves.
+Never add Co-Authored-By lines. Never amend commits — always create new commits. History doesn't matter since PRs are squash-merged. Committing locally is fine (make clean, self-contained commits) — but never push or open PRs; the user handles those (see *Git Pushing & PRs*).
 
 Structure changes atomically — each branch/commit should be a single, self-contained change. When working on multi-part changes, decouple them into separate branches in the stack, ordering zero-dependency changes first.
 
