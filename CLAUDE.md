@@ -14,6 +14,20 @@ session may be live on** — that clobbers pushed work; leave a cosmetically-wro
 alone rather than rewrite shared history. The reload (`source ~/.zshrc`) only affects your own
 subshell, so tell Phil to source it in his terminal to pick up the change.
 
+**Editing a file another session is live on → author via patch, never direct.** A file is "live"
+if it's dirty in `git status`, has a recent mtime, or changed between your Read and Edit. Writing it
+directly races/clobbers the other session. Instead:
+
+1. **Author in a throwaway worktree at HEAD** — `git worktree add --detach /tmp/wt HEAD`, edit there
+   (clean surface, zero collision).
+2. **Capture a patch artifact** — `git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch` (durable,
+   reviewable, timing-independent, hand-off-able).
+3. **Land with `git apply --3way`** — merges non-overlapping hunks, leaves conflict markers on
+   overlap, *never* silent-clobbers. `git apply --check` tests it read-only first.
+
+Apply when the file goes quiet, or hand the `.patch` to the session that owns the file. This is the
+standard for any contested file — it turns "two hands on one file" into a clean merge-or-conflict.
+
 ## Script Placement
 
 **Never put scripts in ~/bin.** Always place scripts in `~/.dotfiles/` so they're version controlled:
