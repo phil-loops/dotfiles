@@ -27,6 +27,29 @@ existing_worktree(){   # echo the path of a real worktree holding <branch>, if a
   git worktree list --porcelain | awk -v ref="refs/heads/$1" '
     /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}'
 }
+install_followup_hook(){   # idempotently install the detached-HEAD → branch-follow post-commit hook
+  # Scratch worktrees are DETACHED so they never lock the branch (you can still
+  # rebase it in your main checkout). The cost: a commit here lands on a detached
+  # HEAD and would strand. This hook advances the recorded branch ref to follow
+  # any commit (`:wc` OR a plain `git commit`), so the branch — and the viewer —
+  # keep up. It's a no-op in the main repo (HEAD attached) and in any detached
+  # checkout without a stack-open marker, so it's safe in the shared hooks dir.
+  local dir="$1" hooks hook
+  hooks=$(git -C "$dir" rev-parse --git-path hooks); hook="$hooks/post-commit"
+  [[ -e "$hook" ]] && ! grep -q stack-open-branch "$hook" 2>/dev/null && return 0   # foreign hook — don't clobber
+  mkdir -p "$hooks"
+  cat > "$hook" <<'HOOK'
+#!/bin/sh
+# stack-open: advance a detached scratch review worktree's branch ref to follow
+# commits, so `:wc` / `git commit` here don't strand on a detached HEAD.
+git symbolic-ref -q HEAD >/dev/null 2>&1 && exit 0          # attached → not a scratch commit
+marker="$(git rev-parse --git-dir)/stack-open-branch"
+[ -f "$marker" ] || exit 0                                  # no marker → not a stack-open worktree
+b=$(cat "$marker")
+[ -n "$b" ] && git branch -f "$b" HEAD 2>/dev/null || true  # follow (skip silently if branch is locked elsewhere)
+HOOK
+  chmod +x "$hook"
+}
 prune_old(){ [[ -d "$SCRATCH" ]] || return 0
   find "$SCRATCH" -maxdepth 1 -mindepth 1 -type d -mtime +"${1:-3}" 2>/dev/null | while read -r d; do
     git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
@@ -44,6 +67,10 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
     git worktree add --detach "$dir" "$b" -q
   fi
   [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
+  # record the branch + install the follow-hook so commits here advance the ref
+  # instead of stranding on the detached HEAD (see install_followup_hook).
+  echo "$b" > "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch"
+  install_followup_hook "$dir"
   touch "$dir"; echo "$dir"
 }
 focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actually visible
