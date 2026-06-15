@@ -148,6 +148,8 @@ class H(BaseHTTPRequestHandler):
                 self._send(200, r.stdout)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": model_sig()}))
+        elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
+            self._send(200, json.dumps({"branch": run(["git", "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
