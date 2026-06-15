@@ -46,39 +46,44 @@ def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
   .headRefName
 ] | @tsv'
 
-notify() {  # $1 short status, $2 detail — a banner that lands in Notification
-            # Center (not a modal dialog). It accumulates there until you clear it;
-            # to keep the on-screen banner from auto-fading, set this app's style to
-            # "Alerts" in System Settings → Notifications.
+notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click it)
   print -n '\a'
-  local title="prwatch · $1" msg="${2:-$1}"
-  title=${title//\\/\\\\}; title=${title//\"/\\\"}     # escape for AppleScript
-  msg=${msg//\\/\\\\};     msg=${msg//\"/\\\"}
-  osascript >/dev/null 2>&1 \
-    -e "display notification \"$msg\" with title \"$title\" sound name \"Glass\"" || true
+  # Prefer terminal-notifier: posts under its own identity (clicking opens $3, the
+  # PR/run — not Script Editor) and lands in Notification Center. Fall back to
+  # osascript, whose notifications are owned by "Script Editor", so clicking one
+  # just opens that app (install terminal-notifier to fix: brew install terminal-notifier).
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -title "prwatch · $1" -message "${2:-$1}" -sound Glass \
+      ${3:+-open "$3"} >/dev/null 2>&1
+  else
+    local t="prwatch · $1" m="${2:-$1}"
+    t=${t//\\/\\\\}; t=${t//\"/\\\"}; m=${m//\\/\\\\}; m=${m//\"/\\\"}
+    osascript >/dev/null 2>&1 \
+      -e "display notification \"$m\" with title \"$t\" sound name \"Glass\"" || true
+  fi
 }
 
 watch_pr() {  # $1 repo  $2 number
-  local repo="$1" num="$2"
+  local repo="$1" num="$2" url="https://github.com/$1/pull/$2"
   print -P "%F{yellow}⟳%f watching ${repo}#${num} — ctrl-c to stop"
   if gh pr checks "$num" --repo "$repo" --watch; then
     print -P "%F{green}✓ ${repo}#${num} — all checks passed%f"
-    notify "✓ passed" "${repo}#${num} — all checks green"
+    notify "✓ passed" "${repo}#${num} — all checks green" "$url"
   else
     print -P "%F{red}✗ ${repo}#${num} — a check failed (or none reported)%f"
-    notify "✗ failed" "${repo}#${num} — a check failed"
+    notify "✗ failed" "${repo}#${num} — a check failed" "$url"
   fi
 }
 
 watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
-  local repo="$1" rid="$2"
+  local repo="$1" rid="$2" url="https://github.com/$1/actions/runs/$2"
   print -P "%F{yellow}⟳%f watching run ${repo} #${rid} — ctrl-c to stop"
   if gh run watch "$rid" --repo "$repo" --exit-status; then
     print -P "%F{green}✓ run ${rid} — succeeded%f"
-    notify "✓ run passed" "${repo} run ${rid} succeeded"
+    notify "✓ run passed" "${repo} run ${rid} succeeded" "$url"
   else
     print -P "%F{red}✗ run ${rid} — failed%f"
-    notify "✗ run failed" "${repo} run ${rid} failed"
+    notify "✗ run failed" "${repo} run ${rid} failed" "$url"
   fi
 }
 
@@ -141,10 +146,11 @@ if [[ "${1:-}" == "--sweep" ]]; then
       [[ -z "$num" || "$roll" == *"no checks"* ]] && continue
       old=$(print -r -- "$prev" | awk -F'\t' -v r="$repo" -v n="$num" '$1==r && $2==n{print $3; exit}')
       [[ "$roll" == "$old" ]] && continue                       # no change since last sweep
+      prurl="https://github.com/${repo}/pull/${num}"
       case "$roll" in
-        (*failing*)    notify "✗ checks failing" "${repo}#${num} — ${title}" ;;
+        (*failing*)    notify "✗ checks failing" "${repo}#${num} — ${title}" "$prurl" ;;
         (*"all pass"*) [[ "$old" == *failing* || "$old" == *running* ]] \
-                         && notify "✓ checks passed" "${repo}#${num} — ${title}" ;;
+                         && notify "✓ checks passed" "${repo}#${num} — ${title}" "$prurl" ;;
       esac
     done
   fi
