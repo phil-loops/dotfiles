@@ -6,7 +6,7 @@
 # has gone stale). For the LIVE, blessing-aware view use the server:
 #   loops stack review --html        (→ stack-review-serve)
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 branch="${1:-$(git branch --show-current 2>/dev/null)}"
 [[ -n "$branch" ]] || { echo "stack-review-html: no branch" >&2; exit 1; }

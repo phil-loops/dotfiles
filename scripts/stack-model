@@ -7,7 +7,7 @@
 # (bake-time vs per-request). Staleness is always current because it is
 # recomputed here, against the live ledger + current blobs, every call.
 set -euo pipefail
-command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 branch="${1:-$(git branch --show-current 2>/dev/null)}"
 [[ -n "$branch" ]] || { echo "stack-model: no branch" >&2; exit 1; }

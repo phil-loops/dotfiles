@@ -1,0 +1,56 @@
+#!/bin/zsh
+# stack-prs [--refresh] — open PRs keyed by head branch, for the forest viewer to
+# badge nodes + highlight edges with a live PR into main.
+#
+#   { "<branch>": { num, url, draft, base, toMain } }
+#
+# `toMain` is true iff the PR's base is main. The forest aim is that every PR
+# merges into main, so the viewer highlights toMain edges and flags the rest
+# (a PR against a non-main base is the stacked-PR anti-pattern).
+#
+# Disk-cached (TTL default 300s; STACK_PRS_TTL=0 disables) so GitHub is hit at
+# most once per window across ALL callers/sessions — no hammering. On a failed or
+# offline fetch it reuses the last good cache rather than emit empty or re-query.
+#
+# Scans the fork then the team repo; the team repo wins on conflict (a promoted
+# PR is the real merge target). Override repos via `git config stack.pr-repos`.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+CACHE="${TMPDIR:-/tmp}/stack-prs.json"
+TTL=${STACK_PRS_TTL:-300}
+[[ "${1:-}" == "--refresh" ]] && rm -f "$CACHE"
+
+# Serve a fresh cache without touching GitHub.
+if [[ -f "$CACHE" ]] && (( TTL > 0 )); then
+  age=$(( $(date +%s) - $(stat -f %m "$CACHE" 2>/dev/null || echo 0) ))
+  (( age < TTL )) && { cat "$CACHE"; exit 0; }
+fi
+
+MAIN=$(git config stack.main-branch 2>/dev/null || echo main)
+repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
+(( ${#repos} )) || repos=(phil-loops/loops Loops-so/loops)
+
+merged='{}'; ok=1
+for repo in $repos; do
+  rows=$(gh pr list --repo "$repo" --state open -L 300 \
+           --json number,url,headRefName,baseRefName,isDraft 2>/dev/null) || { ok=0; break; }
+  merged=$(jq -n --arg main "$MAIN" --argjson acc "$merged" --argjson rows "$rows" '
+    $acc + (reduce $rows[] as $p ({};
+      .[$p.headRefName] = {
+        num:    $p.number,
+        url:    $p.url,
+        draft:  $p.isDraft,
+        base:   $p.baseRefName,
+        toMain: ($p.baseRefName == $main)
+      }))')
+done
+
+# Fetch failed (offline / rate-limited): reuse last good cache, don't re-hammer.
+if (( ! ok )); then
+  [[ -f "$CACHE" ]] && { cat "$CACHE"; exit 0; }
+  echo '{}'; exit 0
+fi
+
+printf '%s' "$merged" > "$CACHE.tmp.$$" && mv "$CACHE.tmp.$$" "$CACHE"
+cat "$CACHE"
