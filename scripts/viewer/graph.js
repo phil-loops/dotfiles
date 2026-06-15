@@ -176,7 +176,7 @@ function renderGraph(sel){
     // deps landed) AND an open PR exists — i.e. "this PR is unblocked, go merge it".
     // surfaced persistently as a left edge-bar so the ready bases read without a hover.
     // (PR map loads async; ensurePRs re-renders the map once it lands, lighting these up.)
-    const mergeable = upstreamOf(b).length===0 && !!GPRS[b];
+    const mergeable = !!(N[b] && N[b].mergeable) && !!GPRS[b];   // topology from stack-forest; PR keeps the bar to "ready"
     const mbar = mergeable ? `<rect class="mbar" x="-5" y="-13" width="3.5" height="26" rx="1.75"><title>legal to merge into main — no upstream blockers</title></rect>` : '';
     G+=`<g class="gn ${done?'clean done':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
       ${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
