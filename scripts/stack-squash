@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""stack-squash — collapse a branch's commits into ONE, with a message drafted in
+*your* voice by a headless `claude`, learned from your recent commits on main.
+
+  stack-squash <branch>            squash parent..branch + auto-commit (voiced msg)
+  stack-squash --dry <branch>      draft the message + report, but DON'T rewrite
+  stack-squash --unpushed <b>      squash only UNPUSHED commits (base = upstream if
+                                   the branch is published, else its parent) — so a
+                                   plain push works, never a force-push
+  stack-squash --format <branch>   after committing, run oxfmt on the changed files
+                                   and fold the formatting into the same commit
+
+`--unpushed` + `--format` together is the "prep for push" combo. Flags compose and
+may appear in any order before <branch>.
+
+Safe-by-default: refuses on a dirty working tree. Does NOT restack descendants — the
+caller (viewer) hands that off to `stack-restack`. Emits a JSON report on stdout:
+{ok, branch, parent, base, n, sha, header, message, voiced, formatted, err}. `voiced`
+is false when claude was unavailable and we fell back to a mechanical message.
+
+Env: CLAUDE_BIN (default "claude"), SQUASH_MODEL (optional --model passthrough),
+MAIN_BRANCH (default "main").
+"""
+import sys, os, json, subprocess
+
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+MAIN = os.environ.get("MAIN_BRANCH", "main")
+
+
+def git(args, **kw):
+    return subprocess.run(["git", *args], capture_output=True, text=True, **kw)
+
+
+def out(d):
+    print(json.dumps(d))
+    sys.exit(0 if d.get("ok") else 1)
+
+
+# ---- args ----------------------------------------------------------------
+argv = sys.argv[1:]
+dry = unpushed = fmt = False
+rest = []
+for a in argv:
+    if a == "--dry":
+        dry = True
+    elif a == "--unpushed":
+        unpushed = True
+    elif a == "--format":
+        fmt = True
+    else:
+        rest.append(a)
+branch = (rest[0] if rest else "").strip()
+if not branch:
+    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] <branch>"})
+
+# branch must exist
+if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
+    out({"ok": False, "branch": branch, "err": f"no such branch: {branch}"})
+
+parent = git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN
+
+# squash base: parent by default. --unpushed bases on the branch's upstream (so only
+# never-pushed commits collapse — a plain push lands them, no force-push). If the
+# branch was never published (no upstream, or its tracking ref is gone), fall back to
+# parent: everything on the branch is unpushed anyway.
+base = parent
+if unpushed:
+    up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
+    cand = up.stdout.strip()
+    if up.returncode == 0 and cand and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0:
+        base = cand
+
+# the commits we'd collapse
+log = git(["log", f"{base}..{branch}", "--format=%h %s"]).stdout.strip()
+commits = [ln for ln in log.splitlines() if ln]
+n = len(commits)
+if n == 0:
+    out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": 0,
+         "err": f"{branch} has no {'unpushed ' if unpushed else ''}commits beyond {base} — nothing to squash"})
+
+# ---- draft the message in your voice -------------------------------------
+author = git(["config", "user.name"]).stdout.strip() or "the author"
+# voice corpus: your recent subjects+bodies on main (study the style, don't copy)
+corpus = git(["log", MAIN, f"--author={author}", "-n", "25",
+              "--no-merges", "--format=%s%n%b%n---"]).stdout.strip()
+subjects = "\n".join("  " + c for c in commits)
+diffstat = git(["diff", "--stat", f"{base}...{branch}"]).stdout.strip()
+patch = git(["diff", f"{base}...{branch}"]).stdout
+patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
+
+prompt = f"""You are drafting a single git commit message in {author}'s voice for a squashed branch.
+
+Study {author}'s recent commit messages and match their conventions EXACTLY — prefix
+style (e.g. conventional-commit `type(scope):`), imperative mood, subject length, when
+they write a body vs. not, tone and terseness:
+
+<voice-examples>
+{corpus}
+</voice-examples>
+
+This squash collapses {n} commit(s) on branch `{branch}` (onto `{base}`). The subjects
+are often just "wip" — rely on the DIFF below for what actually changed:
+<commits>
+{subjects}
+</commits>
+
+<diffstat>
+{diffstat}
+</diffstat>
+
+<diff>
+{patch_clip}
+</diff>
+
+Write ONE commit message:
+- A subject line in {author}'s voice (their prefix/scope convention, imperative, terse).
+- Then a blank line, then a SHORT body that summarizes what got folded in: 2-4 terse
+  bullet points, one per distinct change being squashed (derive them from the commits
+  and diff above — e.g. the impl, a refactor, the tests). Keep each bullet to one line,
+  in the author's voice. If only one trivial change is being squashed, the body may be
+  a single line instead of bullets.
+
+Output ONLY the raw commit message — no preface, no explanation, no code fences."""
+
+voiced = False
+message = ""
+try:
+    cmd = [CLAUDE_BIN, "-p"]
+    if os.environ.get("SQUASH_MODEL"):
+        cmd += ["--model", os.environ["SQUASH_MODEL"]]
+    r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=120)
+    draft = (r.stdout or "").strip().strip("`").strip()
+    if draft:
+        message = draft
+        voiced = True
+except Exception:
+    pass
+
+if not message:
+    # mechanical fallback — the newest non-"wip" subject, else the top one, sans hash
+    pick = next((c for c in commits if c.split(" ", 1)[-1].strip().lower() != "wip"), commits[0])
+    top = pick.split(" ", 1)
+    message = top[1] if len(top) > 1 else f"squash {branch}"
+
+header = message.splitlines()[0] if message else f"squash {branch}"
+
+
+def report(**extra):
+    return {"ok": True, "branch": branch, "parent": parent, "base": base, "n": n,
+            "header": header, "message": message, "voiced": voiced, **extra}
+
+
+if dry:
+    out(report(dry=True, unpushed=unpushed))
+
+# ---- squash --------------------------------------------------------------
+def fail(err):
+    out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
+         "header": header, "message": message, "voiced": voiced, "err": err})
+
+
+if git(["status", "--porcelain"]).stdout.strip():
+    fail("working tree is dirty — commit or stash first (squash needs a clean checkout)")
+
+co = git(["checkout", branch])
+if co.returncode != 0:
+    fail("checkout failed: " + co.stderr.strip())
+
+rs = git(["reset", "--soft", base])
+if rs.returncode != 0:
+    fail("reset --soft failed: " + rs.stderr.strip())
+
+ci = git(["commit", "-m", message])
+if ci.returncode != 0:
+    fail("commit failed: " + ci.stderr.strip())
+
+# ---- format (fold oxfmt fixes into the same commit) ----------------------
+formatted = 0
+if fmt:
+    repo = git(["rev-parse", "--show-toplevel"]).stdout.strip()
+    oxfmt = os.path.join(repo, "node_modules", ".bin", "oxfmt")
+    files = [f for f in git(["diff", "--name-only", f"{base}..HEAD"]).stdout.split()
+             if os.path.exists(os.path.join(repo, f))]
+    if files and os.path.exists(oxfmt):
+        subprocess.run([oxfmt, "--write", *files], cwd=repo, capture_output=True, text=True)
+        porc = git(["status", "--porcelain"]).stdout.strip()   # tree was clean → any dirt is oxfmt's
+        if porc:
+            formatted = len(porc.splitlines())
+            git(["add", "-u"])
+            git(["commit", "--amend", "--no-edit"])
+
+new_sha = git(["rev-parse", "--short", "HEAD"]).stdout.strip()
+out(report(sha=new_sha, formatted=formatted, unpushed=unpushed))
