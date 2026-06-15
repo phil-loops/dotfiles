@@ -1,0 +1,10 @@
+# Per-lane file ownership for concurrent Claude sessions in this repo.
+# A session is assigned ONE lane. Edit files in YOUR lane directly; for files in
+# ANOTHER lane use the patch protocol (worktree → patch → apply --3way) — never
+# direct-edit another lane's live file. `own` reads this map (longest-prefix match).
+#
+# lane      paths (space-separated; prefix-matched against the repo-relative path)
+viewer      scripts/viewer/ scripts/stack-review-html.tpl.py scripts/stack-review-server.py scripts/stack-review-serve scripts/stack-prs
+forest      scripts/stack-forest scripts/stack-bless scripts/stack-blessed-status scripts/stack-model scripts/stack-open scripts/stack-purpose
+stack       scripts/stack-restack scripts/stack-integrate scripts/stack-list scripts/stack-rm scripts/git-stacks scripts/stack-prompt.sh
+docs        CLAUDE.md

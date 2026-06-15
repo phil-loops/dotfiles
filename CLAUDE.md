@@ -14,6 +14,12 @@ session may be live on** — that clobbers pushed work; leave a cosmetically-wro
 alone rather than rewrite shared history. The reload (`source ~/.zshrc`) only affects your own
 subshell, so tell Phil to source it in his terminal to pick up the change.
 
+**Concurrent sessions: claim a lane, respect others' (`own` + `OWNERS`).** When multiple Claude
+sessions work this repo in parallel, each takes ONE lane (viewer / forest / stack / docs — see
+`~/.dotfiles/OWNERS`). At the start of dotfiles work run `own claim <your-lane>`; before editing any
+file run `own who <path>` — if it's YOUR lane, edit directly; if it's another lane (especially one
+flagged ⚠ ACTIVE), use the patch protocol below. Explicit lanes keep two sessions out of the same file.
+
 **Editing a file another session is live on → author via patch, never direct.** A file is "live"
 if it's dirty in `git status`, has a recent mtime, or changed between your Read and Edit. Writing it
 directly races/clobbers the other session. Instead:
