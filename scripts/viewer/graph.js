@@ -172,8 +172,14 @@ function renderGraph(sel){
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=own(b), w=nodeW(b);
     const done = r.total>0 && r.clean===r.total && r.stale===0;   // this branch's own files all reviewed
     const cnt = `${r.clean}/${r.total}`;   // always the count — gold border already signals "all blessed"; a 2nd ✓ collided with the PR badge
-    G+=`<g class="gn ${done?'clean done':rollStatus(r)}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
-      <rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
+    // legal-to-merge: nothing upstream still in the forest (parent is main + all fan-in
+    // deps landed) AND an open PR exists — i.e. "this PR is unblocked, go merge it".
+    // surfaced persistently as a left edge-bar so the ready bases read without a hover.
+    // (PR map loads async; ensurePRs re-renders the map once it lands, lighting these up.)
+    const mergeable = upstreamOf(b).length===0 && !!GPRS[b];
+    const mbar = mergeable ? `<rect class="mbar" x="-5" y="-13" width="3.5" height="26" rx="1.75"><title>legal to merge into main — no upstream blockers</title></rect>` : '';
+    G+=`<g class="gn ${done?'clean done':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
+      ${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
       <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}</g>`; });
   const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3><span class="mapclose">click a node · esc to close</span></div>` : '';
   tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${E}${G}</svg>`;
