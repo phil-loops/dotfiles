@@ -9,8 +9,10 @@
 # tree (DAG-ready — a node may list multiple parents upstream).
 #
 # Output: { project, roots:[branch], nodes:{ branch: {branch,parent,status,
-#   clean,stale,unblessed,total, files:[{path,status,patch,stale}], children:[]} } }
-# Subtree rollups are computed client-side from roots+children.
+#   clean,stale,unblessed,total, files:[{path,status,patch,stale}], children:[],
+#   requires:[]} } }
+# Subtree rollups are computed client-side from roots+children. `requires` are
+# fan-in deps (other branches this node carries) — rendered as extra inbound edges.
 set -euo pipefail
 command -v jq >/dev/null 2>&1 || export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
@@ -26,6 +28,16 @@ while IFS= read -r line; do
   fi
 done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
 for branch in "${(@k)parents}"; do children[${parents[$branch]}]+="$branch "; done
+
+# Fan-in deps: stack-branch.<name>.requires (multivar). A node may require other
+# branches it carries (cherry-picked) beyond its single git `parent`. Metadata only
+# — used for fan-in edges + membership; the parent...child diff is unchanged.
+typeset -A requires
+while IFS= read -r line; do
+  if [[ "$line" =~ 'stack-branch\.(.+)\.requires=(.+)' ]]; then
+    requires[${match[1]}]+="${match[2]} "
+  fi
+done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.requires=")
 
 typeset -A project_seeds
 while IFS= read -r line; do
@@ -52,6 +64,24 @@ expand_members() {
       cur="${parents[$cur]:-}"
     done
     _expand_descend "$seed"
+  done
+  # Fix-point in `requires` deps (fan-in): a required branch and its own stack are
+  # pulled into the forest the same way, until stable (handles requires-of-requires).
+  local changed=1 b req
+  while (( changed )); do
+    changed=0
+    for b in "${(@k)expand_seen}"; do
+      for req in ${(s: :)requires[$b]:-}; do
+        [[ -n "${expand_seen[$req]:-}" ]] && continue
+        cur="$req"
+        while [[ -n "$cur" && "$cur" != "$MAIN_BRANCH" ]]; do
+          expand_seen[$cur]=1
+          cur="${parents[$cur]:-}"
+        done
+        _expand_descend "$req"
+        changed=1
+      done
+    done
   done
 }
 
@@ -90,6 +120,12 @@ for m in "${project_members[@]}"; do
     [[ -n "${is_member[$c]:-}" ]] && kids_json=$(jq --arg c "$c" '. + [$c]' <<< "$kids_json")
   done
 
+  # Fan-in deps this node carries (member-scoped — the inbound edges in the viewer).
+  reqs_json='[]'
+  for r in ${(s: :)requires[$m]:-}; do
+    [[ -n "${is_member[$r]:-}" ]] && reqs_json=$(jq --arg r "$r" '. + [$r]' <<< "$reqs_json")
+  done
+
   state=$("$here/stack-blessed-status" "$m" --parent "$parent")
   files_json='[]'
   while IFS= read -r row; do
@@ -107,8 +143,8 @@ for m in "${project_members[@]}"; do
     --arg status "$(jq -r '.status' <<< "$state")" \
     --argjson clean "$(jq '.clean' <<< "$state")" --argjson stale "$(jq '.stale' <<< "$state")" \
     --argjson unblessed "$(jq '.unblessed' <<< "$state")" --argjson total "$(jq '.diff_total' <<< "$state")" \
-    --argjson files "$files_json" --argjson children "$kids_json" \
-    '{branch:$b,parent:$parent,status:$status,clean:$clean,stale:$stale,unblessed:$unblessed,total:$total,files:$files,children:$children}')
+    --argjson files "$files_json" --argjson children "$kids_json" --argjson requires "$reqs_json" \
+    '{branch:$b,parent:$parent,status:$status,clean:$clean,stale:$stale,unblessed:$unblessed,total:$total,files:$files,children:$children,requires:$requires}')
   nodes_json=$(jq --arg b "$m" --argjson n "$node" '. + {($b):$n}' <<< "$nodes_json")
 done
 
