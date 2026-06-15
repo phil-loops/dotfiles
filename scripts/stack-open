@@ -45,6 +45,20 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
   touch "$dir"; echo "$dir"
 }
+focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actually visible
+  local app="${STACK_OPEN_TERMINAL:-}"
+  if [[ -z "$app" ]]; then case "${TERM_PROGRAM:-}" in
+    iTerm.app)       app=iTerm ;;
+    Apple_Terminal)  app=Terminal ;;
+    WezTerm)         app=WezTerm ;;
+    ghostty|Ghostty) app=Ghostty ;;
+    vscode|cursor)   return 0 ;;   # integrated terminal — don't yank focus away
+    # inside tmux TERM_PROGRAM=tmux (useless) — fall back to whichever known GUI terminal is running
+    *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1)
+       [[ -n "$app" ]] || app=Terminal ;;
+  esac; fi
+  [[ -n "$app" ]] && osascript -e "tell application \"$app\" to activate" >/dev/null 2>&1 || true
+}
 
 case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
@@ -66,4 +80,5 @@ else
   tmux new-window -t "$SESSION" -n review-nvim "nvim --listen '$SOCK' '$file'" \
     || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
 fi
+focus_terminal
 echo "opened $rel on $branch → review-nvim ($dir)"
