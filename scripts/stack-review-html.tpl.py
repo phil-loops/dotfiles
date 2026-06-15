@@ -73,6 +73,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .sub2 .pill{padding:2px 9px;border:1px solid var(--line);border-radius:20px;cursor:pointer;color:var(--dim);transition:.15s}
 .sub2 .pill:hover{color:var(--ink);border-color:var(--dim)}
 .sub2 .pill.on{color:var(--gold);border-color:var(--gold-soft);background:var(--gold-soft)}
+.purpose{display:flex;gap:9px;align-items:baseline;margin:0 0 18px;padding:11px 15px;
+  border-left:2px solid var(--gold);background:linear-gradient(90deg,#e0ad4e12,transparent);
+  border-radius:0 9px 9px 0;font-size:13px;line-height:1.55}
+.purpose .pdot{color:var(--gold);flex:none}
+.purpose .penables{color:var(--gold);font-style:italic}
 .blessall{margin-left:auto;font:inherit;font-size:11.5px;color:var(--gold);background:none;border:1px solid var(--gold-soft);
   padding:5px 13px;border-radius:7px;cursor:pointer;transition:.15s;letter-spacing:.04em}
 .blessall:hover{background:var(--gold-soft);box-shadow:0 0 16px #e0ad4e33}
