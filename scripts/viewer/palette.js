@@ -70,14 +70,29 @@
           toast("couldn’t read the checkout’s branch");
           return;
         }
-        const n = (NODES || []).find((x) => x.branch === b);
-        if (!n) {
-          toast(`checkout is on <b>${b}</b> — not a node in this forest`);
+        // already in the loaded forest → select in place, no reload
+        const here = (NODES || []).find((x) => x.branch === b);
+        if (here) {
+          active = here.id;
+          render();
+          toast(`↪ <b>${b.split("/").pop()}</b> (current checkout)`);
           return;
         }
-        active = n.id;
-        render();
-        toast(`↪ jumped to <b>${b.split("/").pop()}</b> (current checkout)`);
+        // else (picker, or a different project): the model expands from ANY member
+        // branch, so look up the forest that contains it and navigate there, selecting
+        // the node via the URL hash. If it's in no forest, say so.
+        let m = null;
+        try {
+          m = await (await fetch("/model?branch=" + encodeURIComponent(b))).json();
+        } catch (e) {}
+        if (!m || !m.nodes || !m.nodes[b]) {
+          toast(`checkout is on <b>${b}</b> — not in any forest`);
+          return;
+        }
+        location.href =
+          location.pathname +
+          "?branch=" + encodeURIComponent(b) +
+          "#node=" + encodeURIComponent(b);
       },
     });
     if (node) {
