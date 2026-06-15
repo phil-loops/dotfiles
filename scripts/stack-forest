@@ -177,7 +177,15 @@ if node_mode:
 
 # ---- WAVE 1: the fast structural model -----------------------------------
 project, members = "", set()
-if target in seeds:
+if target in ("--all", "*", ":forest:"):
+    # the WHOLE forest: every tracked branch across all components, not just the
+    # one reachable from a single leaf. roots = those whose parent is main.
+    members = set(parents) | {b for cl in children.values() for b in cl} \
+            | {r for rs in requires.values() for r in rs} \
+            | {s for sd in seeds.values() for s in sd}
+    members.discard(MAIN)
+    project = "whole forest"
+elif target in seeds:
     project, members = target, expand(seeds[target])
 else:
     for name, sd in seeds.items():
