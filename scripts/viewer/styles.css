@@ -45,6 +45,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .pk-fresh.behind:hover{background:#d36a3633;border-color:var(--ember);box-shadow:0 0 10px #d36a3633}
 .pk-fresh.behind.armed{color:var(--bg);background:var(--ember);border-color:var(--ember);font-weight:600}   /* primed: click again to fire */
 .pk-fresh.ok{color:#56d090;background:#2c9a591a;border:1px solid #2c9a5944}                      /* up to date */
+.pk-fresh.paused{color:#ffb38a;background:#bf4b2933;border:1px solid #ff9b7688;cursor:pointer;font-weight:600;animation:restackpaused 1.6s ease-in-out infinite}   /* restack parked on a conflict → needs a human */
+.pk-fresh.paused:hover{background:#bf4b2955;border-color:#ff9b76}
+@keyframes restackpaused{0%,100%{box-shadow:0 0 0 #bf4b2900}50%{box-shadow:0 0 10px #bf4b2966}}
 .pk-ready{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .pk-ready-h{color:#56d090;font-size:11px;letter-spacing:.02em;margin-right:2px}
 .pk-ready-b{color:#cfe9d8;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
