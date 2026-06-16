@@ -1,10 +1,15 @@
 #!/bin/zsh
-# SwiftBar plugin — todo: a quick parking lot. Jot one-liners to start later
-# without building a branch/stack. Backed by ~/todo.md ("- [ ] item" lines),
-# editable anywhere; click an item to check it off, ➕ to park a new one.
+# SwiftBar plugin — todo: a parking lot for one-liners to pick up later (no stack
+# required). You ADD/REORDER by editing ~/todo.md in nvim (✎ Edit); the menu just
+# lists open items — click one to open its link, "✓ mark done" to check it off.
+#
+# Item formats in todo.md (all render correctly):
+#   - [ ] plain text
+#   - [ ] [label](url)
+#   - [ ] label https://url        (or a bare URL — auto-linked with a readable label)
 #
 # <bitbar.title>todo parking lot</bitbar.title>
-# <bitbar.desc>Park one-line tasks to pick up later. Backed by ~/todo.md.</bitbar.desc>
+# <bitbar.desc>One-line tasks to pick up later; edit ~/todo.md in nvim.</bitbar.desc>
 # <bitbar.author>phil</bitbar.author>
 # <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
@@ -16,65 +21,56 @@ self="$0"
 file="$HOME/todo.md"
 [[ -f "$file" ]] || print -- "# todo — park one-liners to pick up later (no stack required)\n" > "$file"
 
-# A human label for a bare URL, so a pasted link reads as something meaningful:
-#   github PR/issue → "repo#num" · the blessing viewer → "review: branch" · else the host.
+# A human label for a bare URL: github PR/issue → "repo#num" · the viewer →
+# "review: branch" · else the host.
 nice_label() {
   local u="$1" p
   case "$u" in
     *github.com/*/pull/*|*github.com/*/issues/*)
       p="${u#*github.com/}"; local num="${u##*/}"
-      print -r -- "${${p#*/}%%/*}#${num%%[!0-9]*}" ;;            # repo#num
+      print -r -- "${${p#*/}%%/*}#${num%%[!0-9]*}" ;;
     *github.com/*/tree/*)
-      p="${u#*github.com/}"; print -r -- "${${p#*/}%%/*}@${u##*/tree/}" ;;   # repo@branch
-    *branch=*) local b="${u##*branch=}"; print -r -- "review: ${b%%&*}" ;;   # the viewer
-    *) p="${u#*://}"; p="${p#www.}"; print -r -- "${p%%/*}" ;;               # host
+      p="${u#*github.com/}"; print -r -- "${${p#*/}%%/*}@${u##*/tree/}" ;;
+    *branch=*) local b="${u##*branch=}"; print -r -- "review: ${b%%&*}" ;;
+    *) p="${u#*://}"; p="${p#www.}"; print -r -- "${p%%/*}" ;;
   esac
 }
 
-# --- ➕ park a task: dialog (clipboard-prefilled) → store a "- [ ]" line.
-# Rich: type "label https://url" or "[label](url)", or just paste a URL → it becomes
-# a clickable link; plain text stays plain.
-if [[ "$1" == "--add" ]]; then
-  clip=$(pbpaste 2>/dev/null | head -1 | tr '\t\n' '  ')
-  input=$(osascript \
-    -e 'on run argv' \
-    -e 'set d to (display dialog "Park a task (include a URL to make it clickable):" default answer (item 1 of argv) with title "todo" buttons {"Cancel", "Park"} default button "Park")' \
-    -e 'return text returned of d' \
-    -e 'end run' \
-    "$clip" 2>/dev/null) || exit 0
-  input="${input//$'\n'/ }"
-  input="${input#"${input%%[![:space:]]*}"}"; input="${input%"${input##*[![:space:]]}"}"   # trim
-  [[ -n "$input" ]] || exit 0
-  if [[ "$input" == "["*"]("*")" ]]; then
-    line="- [ ] $input"                                              # already a markdown link
-  elif [[ "$input" == *http://* || "$input" == *https://* ]]; then
-    url="http${input#*http}"; url="${url%%[[:space:]]*}"             # first URL token
-    label="${input%%http*}"; label="${label%"${label##*[![:space:]]}"}"   # text before it, rstripped
-    [[ -n "$label" ]] || label="$(nice_label "$url")"              # bare URL → a readable label
-    line="- [ ] [$label]($url)"
+# parse a todo's text into (label, url). echoes "label\turl" (url empty = plain).
+parse_item() {
+  local text="$1" label url=""
+  if [[ "$text" == "["*"]("*")" ]]; then
+    label="${text#"["}"; label="${label%%"]("*}"; url="${text#*"]("}"; url="${url%")"}"
+  elif [[ "$text" == *http://* || "$text" == *https://* ]]; then
+    url="http${text#*http}"; url="${url%%[[:space:]]*}"
+    label="${text%%http*}"; label="${label%"${label##*[![:space:]]}"}"
+    [[ -n "$label" ]] || label="$(nice_label "$url")"
   else
-    line="- [ ] $input"                                             # plain
+    label="$text"
   fi
-  print -r -- "$line" >> "$file"
-  open -g "swiftbar://refreshplugin?name=todo" 2>/dev/null
-  exit 0
-fi
+  print -r -- "${label}"$'\t'"${url}"
+}
 
-# --- ✓ check off: flip line N from "[ ]" to "[x]" (by line number — robust to text) ---
-if [[ "$1" == "--done" ]]; then
-  [[ "$2" == <-> ]] && sed -i '' "${2}s/^- \[ \]/- [x]/" "$file" 2>/dev/null
-  open -g "swiftbar://refreshplugin?name=todo" 2>/dev/null
-  exit 0
-fi
-
-# --- ✎ edit the whole list ---
+# --- ✎ edit ~/todo.md in nvim (loops tmux) — THE way you add/reorder tasks ---
 if [[ "$1" == "--edit" ]]; then
-  open -t "$file" 2>/dev/null
+  session="${TODO_TMUX:-loops}"
+  if tmux has-session -t "$session" 2>/dev/null; then
+    if tmux list-windows -t "$session" -F '#{window_name}' 2>/dev/null | grep -qx todo; then
+      tmux send-keys -t "${session}:todo" Escape ":edit ${file}" Enter 2>/dev/null
+      tmux select-window -t "${session}:todo" 2>/dev/null
+    else
+      tmux new-window -t "$session" -n todo "nvim ${(q)file}"
+    fi
+    app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1)
+    [[ -n "$app" ]] && osascript -e "tell application \"$app\" to activate" >/dev/null 2>&1
+  else
+    open -t "$file" 2>/dev/null   # no tmux → default editor
+  fi
   exit 0
 fi
 
-# --- ↗ open a todo's link. A blessing-viewer URL (127.0.0.1…?branch=X) is routed
-# through stack-review-serve so it reuses-or-starts the server; anything else opens raw.
+# --- ↗ open a todo's link. A blessing-viewer URL (…?branch=X) is routed through
+# stack-review-serve (reuse-or-start the server); anything else opens raw.
 if [[ "$1" == "--open" ]]; then
   url="$2"
   if [[ "$url" == *"127.0.0.1"*"branch="* ]]; then
@@ -86,34 +82,34 @@ if [[ "$1" == "--open" ]]; then
   exit 0
 fi
 
+# --- ✓ check off line N (flip "[ ]" → "[x]" by line number) ---
+if [[ "$1" == "--done" ]]; then
+  [[ "$2" == <-> ]] && sed -i '' "${2}s/^- \[ \]/- [x]/" "$file" 2>/dev/null
+  open -g "swiftbar://refreshplugin?name=todo" 2>/dev/null
+  exit 0
+fi
+
 # --- render ---
-# open items as "lineno:text" (lineno drives check-off; survives reorder between renders).
-# NB build the array only when grep matched — `("${(@f)$(empty)}")` yields a single
-# EMPTY element (count 1), not an empty array.
 items=()
-open_lines=$(grep -nE '^- \[ \] ' "$file" 2>/dev/null)
+open_lines=$(grep -nE '^- \[ \] ' "$file" 2>/dev/null)   # "lineno:- [ ] text"
 [[ -n "$open_lines" ]] && items=("${(@f)open_lines}")
 n=${#items}
 (( n )) && echo "📝 $n" || echo "📝"
 echo "---"
-echo "➕ Park a task… | bash=\"$self\" param1=--add terminal=false refresh=true"
-echo "✎ Edit list | bash=\"$self\" param1=--edit terminal=false"
+echo "✎ Edit in nvim | bash=\"$self\" param1=--edit terminal=false"
 echo "---"
 if (( n == 0 )); then
-  echo "nothing parked | color=gray"
+  echo "nothing parked — ✎ Edit to add | color=gray"
 else
   for it in "${items[@]}"; do
     lineno="${it%%:*}"
     text="${${it#*:}#- \[ \] }"
-    # markdown link "[label](url)" → clicking the item opens the link; plain text is inert.
-    if [[ "$text" == "["*"]("*")" ]]; then
-      label="${text#"["}"; label="${label%%"]("*}"
-      url="${text#*"]("}"; url="${url%")"}"
+    IFS=$'\t' read -r label url <<<"$(parse_item "$text")"
+    if [[ -n "$url" ]]; then
       echo "☐ ${label} | bash=\"$self\" param1=--open param2=\"${url}\" terminal=false"
     else
-      echo "☐ ${text}"
+      echo "☐ ${label}"
     fi
-    # the explicit check-off — its own action, so clicking the item never marks it done by accident
     echo "-- ✓ mark done | bash=\"$self\" param1=--done param2=${lineno} terminal=false refresh=true"
   done
 fi
