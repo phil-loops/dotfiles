@@ -218,11 +218,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .maphd{display:flex;align-items:baseline;gap:16px;margin-bottom:10px}
 .maphd h3{font-family:'Fraunces',serif;font-style:italic;font-weight:600;font-size:23px;margin:0;color:var(--ink)}
 .maphd .mapclose{color:var(--faint);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+/* edge legend: tiny stroke swatches + labels that name the two relationship kinds */
+.maplegend{display:inline-flex;align-items:center;gap:6px;color:var(--dim);font-size:10.5px;letter-spacing:.04em}
+.maplegend .lgsw{flex:none}
+.maplegend .lgl{margin-right:8px}
+.maplegend .lgl:last-child{margin-right:0}
 svg.graph{display:block;overflow:visible}
 .ge{fill:none;stroke:var(--line);stroke-width:1.6;opacity:0;animation:gfade .8s ease forwards}
 @keyframes gfade{to{opacity:1}}  /* transform-free — must NOT clobber the SVG translate */
 .ge.clean{stroke:#e0ad4e66} .ge.stale{stroke:#d36a3666} .ge.partial{stroke:#d36a3644} .ge.unblessed{stroke:var(--line)}
-.ge.fanin{stroke:var(--gold);stroke-dasharray:5 4}
+/* planned (fan-in `requires`) edge: a PHANTOM line — long-dash-dot, the drafting
+   convention for "could be otherwise". Neutral (--dim), not gold, so it reads as a
+   deliberate-but-revisable merge-order rather than a status or a hard logical rail. */
+.ge.fanin{stroke:var(--dim);stroke-width:1.3;stroke-dasharray:11 3 2 3;opacity:0;animation:gfade .8s ease forwards;animation-delay:.25s}
 .gn{cursor:pointer;opacity:0;animation:gfade .45s ease forwards}
 .gn rect{fill:var(--panel);stroke:var(--line);stroke-width:1.2;transition:.15s}
 .gn:hover rect{stroke:var(--dim);fill:var(--raised)}
@@ -319,42 +327,42 @@ svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stro
 .syncbadge.syncable:hover{border-color:var(--gold);box-shadow:0 0 14px #e0ad4e3a;animation:none}
 .syncbadge.syncable:disabled{animation:none;opacity:.6;cursor:default}
 @keyframes syncpulse{0%,100%{box-shadow:0 0 0 #e0ad4e00}50%{box-shadow:0 0 11px #e0ad4e2e}}
-#preppop{position:fixed;z-index:320;display:none;min-width:300px;max-width:430px;
+#preppop,#copop{position:fixed;z-index:320;display:none;min-width:300px;max-width:430px;
   background:var(--raised);border:1px solid var(--line);border-radius:10px;
   box-shadow:0 14px 40px #000a;padding:10px;font:12px 'IBM Plex Mono',monospace}
-#preppop.on{display:block}
-#preppop .pp-h{color:var(--ink);font-size:12.5px;margin-bottom:7px}
+#preppop.on,#copop.on{display:block}
+:is(#preppop,#copop) .pp-h{color:var(--ink);font-size:12.5px;margin-bottom:7px}
 #preppop .pp-steps{list-style:none;margin:0 0 7px;padding:0;color:var(--dim);font-size:11.5px;line-height:1.6}
 #preppop .pp-steps li::before{content:"›";color:var(--gold);margin-right:6px}
 #preppop .pp-steps b{color:var(--ink)}
-#preppop .pp-note{color:var(--faint);font-size:10.5px;line-height:1.5;margin-bottom:6px}
+:is(#preppop,#copop) .pp-note{color:var(--faint);font-size:10.5px;line-height:1.5;margin-bottom:6px}
 #commitspop{position:fixed;z-index:320;display:none;min-width:300px;max-width:560px;
   background:var(--raised);border:1px solid var(--line);border-radius:10px;
   box-shadow:0 14px 40px #000a;padding:8px;font:12px 'IBM Plex Mono',monospace}
 #commitspop.on{display:block}
-:is(#commitspop,#preppop) .cp-h{color:var(--faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px 8px}
-:is(#commitspop,#preppop) .cp-load{color:var(--faint);padding:10px 8px}
-:is(#commitspop,#preppop) .cp-list{list-style:none;margin:0;padding:0;max-height:52vh;overflow:auto}
-:is(#commitspop,#preppop) .cp-it{display:flex;gap:10px;align-items:baseline;padding:5px 7px;border-radius:6px}
-:is(#commitspop,#preppop) .cp-it:hover{background:var(--panel)}
-:is(#commitspop,#preppop) .cp-sha{color:var(--gold);flex:none;font-size:11px}
-:is(#commitspop,#preppop) .cp-sub{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-:is(#commitspop,#preppop) .cp-date{color:var(--faint);flex:none;font-size:10px}
+:is(#commitspop,#preppop,#copop) .cp-h{color:var(--faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:2px 6px 8px}
+:is(#commitspop,#preppop,#copop) .cp-load{color:var(--faint);padding:10px 8px}
+:is(#commitspop,#preppop,#copop) .cp-list{list-style:none;margin:0;padding:0;max-height:52vh;overflow:auto}
+:is(#commitspop,#preppop,#copop) .cp-it{display:flex;gap:10px;align-items:baseline;padding:5px 7px;border-radius:6px}
+:is(#commitspop,#preppop,#copop) .cp-it:hover{background:var(--panel)}
+:is(#commitspop,#preppop,#copop) .cp-sha{color:var(--gold);flex:none;font-size:11px}
+:is(#commitspop,#preppop,#copop) .cp-sub{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+:is(#commitspop,#preppop,#copop) .cp-date{color:var(--faint);flex:none;font-size:10px}
 /* squash footer: idle button → confirm (with orphan warning) → done + restack handoff */
-:is(#commitspop,#preppop) .cp-foot{border-top:1px solid var(--line);margin-top:6px;padding:8px 6px 2px}
-:is(#commitspop,#preppop) .cp-note{color:var(--faint);font-size:11px}
-:is(#commitspop,#preppop) .cp-warn{color:var(--ink);font-size:11.5px;line-height:1.5;margin-bottom:8px}
-:is(#commitspop,#preppop) .cp-orphan{color:var(--ember)}
-:is(#commitspop,#preppop) .cp-done{color:#56d090;font-size:11.5px;line-height:1.5;margin-bottom:8px}
-:is(#commitspop,#preppop) .cp-done em{color:var(--faint);font-style:normal}
-:is(#commitspop,#preppop) .cp-actions{display:flex;gap:8px}
-:is(#commitspop,#preppop) .cp-squash,:is(#commitspop,#preppop) .cp-go,:is(#commitspop,#preppop) .cp-cancel{font:inherit;font-size:11px;
+:is(#commitspop,#preppop,#copop) .cp-foot{border-top:1px solid var(--line);margin-top:6px;padding:8px 6px 2px}
+:is(#commitspop,#preppop,#copop) .cp-note{color:var(--faint);font-size:11px}
+:is(#commitspop,#preppop,#copop) .cp-warn{color:var(--ink);font-size:11.5px;line-height:1.5;margin-bottom:8px}
+:is(#commitspop,#preppop,#copop) .cp-orphan{color:var(--ember)}
+:is(#commitspop,#preppop,#copop) .cp-done{color:#56d090;font-size:11.5px;line-height:1.5;margin-bottom:8px}
+:is(#commitspop,#preppop,#copop) .cp-done em{color:var(--faint);font-style:normal}
+:is(#commitspop,#preppop,#copop) .cp-actions{display:flex;gap:8px}
+:is(#commitspop,#preppop,#copop) .cp-squash,:is(#commitspop,#preppop,#copop) .cp-go,:is(#commitspop,#preppop,#copop) .cp-cancel{font:inherit;font-size:11px;
   border-radius:7px;padding:5px 12px;cursor:pointer;transition:.15s;white-space:nowrap}
-:is(#commitspop,#preppop) .cp-squash,:is(#commitspop,#preppop) .cp-go{color:var(--gold);background:none;border:1px solid var(--gold-soft)}
-:is(#commitspop,#preppop) .cp-squash:hover,:is(#commitspop,#preppop) .cp-go:hover{background:var(--gold-soft);box-shadow:0 0 12px #e0ad4e22}
-:is(#commitspop,#preppop) .cp-go:disabled{opacity:.5;cursor:default;box-shadow:none}
-:is(#commitspop,#preppop) .cp-cancel{color:var(--dim);background:none;border:1px solid var(--line)}
-:is(#commitspop,#preppop) .cp-cancel:hover{color:var(--ink);border-color:var(--dim)}
+:is(#commitspop,#preppop,#copop) .cp-squash,:is(#commitspop,#preppop,#copop) .cp-go{color:var(--gold);background:none;border:1px solid var(--gold-soft)}
+:is(#commitspop,#preppop,#copop) .cp-squash:hover,:is(#commitspop,#preppop,#copop) .cp-go:hover{background:var(--gold-soft);box-shadow:0 0 12px #e0ad4e22}
+:is(#commitspop,#preppop,#copop) .cp-go:disabled{opacity:.5;cursor:default;box-shadow:none}
+:is(#commitspop,#preppop,#copop) .cp-cancel{color:var(--dim);background:none;border:1px solid var(--line)}
+:is(#commitspop,#preppop,#copop) .cp-cancel:hover{color:var(--ink);border-color:var(--dim)}
 
 /* hover+o now opens a diff line in nvim, so the per-file "open in nvim" button is
    redundant — hide it (full-file toggle stays; it shows content, not an nvim jump).
