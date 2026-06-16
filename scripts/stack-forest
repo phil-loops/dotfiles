@@ -57,7 +57,7 @@ if not target:
 MAIN = git_out(["config", "stack.main-branch"]).strip() or "main"
 
 # ---- one config read → parents / children / requires / project seeds ------
-parents, children, seeds, requires = {}, {}, {}, {}
+parents, children, seeds, requires, archived = {}, {}, {}, {}, set()
 for line in git_out(["config", "--local", "--list"]).splitlines():
     if "=" not in line:
         continue
@@ -74,6 +74,12 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     m = re.match(r"^stack-project\.(.+)\.branch$", k)
     if m:
         seeds.setdefault(m.group(1), []).append(v)
+        continue
+    # archived projects (stack-project.<name>.archived=true): registered but
+    # hidden from the picker unless --projects --all asks for them.
+    m = re.match(r"^stack-project\.(.+)\.archived$", k)
+    if m and v.strip().lower() == "true":
+        archived.add(m.group(1))
 for b, p in parents.items():
     children.setdefault(p, []).append(b)
 
@@ -126,9 +132,12 @@ def mergeable(b):
 # names + branch counts + the mergeable seed branches — no git diffs, instant. The
 # browser shows these as buttons; clicking one opens ?branch=<name> (resolved below).
 if not node_mode and target == "--projects":
+    include_archived = "--all" in argv[1:]
     print(json.dumps([{"name": n, "branches": len(expand(seeds[n])),
-                       "mergeable": [b for b in seeds[n] if mergeable(b)]}
-                      for n in sorted(seeds)]))
+                       "mergeable": [b for b in seeds[n] if mergeable(b)],
+                       "archived": n in archived}
+                      for n in sorted(seeds)
+                      if include_archived or n not in archived]))
     sys.exit(0)
 
 
