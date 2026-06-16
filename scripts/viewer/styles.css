@@ -72,6 +72,12 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .pk-tip .pk-tip-why{color:var(--ink)}
 .pk-tip .pk-tip-why .x{color:#56d090;margin-right:5px}
 .pk-tip .pk-tip-why.empty{color:var(--faint)}
+/* header-level "restack all behind" — one click restacks every trailing forest */
+.pk-restack-all{display:inline-block;margin:0 0 22px;font:inherit;font-size:12px;letter-spacing:.02em;
+  color:var(--ember);background:#d36a361f;border:1px solid var(--ember-soft);border-radius:999px;
+  padding:5px 15px;cursor:pointer;transition:.12s}
+.pk-restack-all:hover{background:#d36a3633;border-color:var(--ember);box-shadow:0 0 12px #d36a3633}
+.pk-restack-all.armed{color:var(--bg);background:var(--ember);border-color:var(--ember);font-weight:600}
 .pk-all{margin-top:22px;font:inherit;font-size:12px;color:var(--faint);background:none;border:none;
   cursor:pointer;text-decoration:underline;text-underline-offset:3px}
 .pk-all:hover{color:var(--gold)}
