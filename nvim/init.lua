@@ -1299,6 +1299,7 @@ require('lazy').setup({
 })
 
 require('custom.wc') -- :wc / :Wc — write + commit the current file (ledger review loop)
+require('custom.submit') -- :submit / :Submit — hand a design doc back to the Claude session
 
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et

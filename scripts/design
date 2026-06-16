@@ -1,0 +1,33 @@
+#!/bin/zsh
+# design <file> — open a design doc in nvim for co-authoring with Claude.
+#
+# Claude writes the doc, runs `design <file>`, and it opens in a fresh nvim window
+# in the 'loops' tmux session. You edit; `:submit` (see nvim/lua/custom/submit.lua)
+# hands it back to the Claude session that launched it — recorded here as a
+# `<file>.submit-target` sidecar holding Claude's tmux pane id. Then we iterate.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+file="${1:?usage: design <file>}"
+session="${DESIGN_TMUX:-loops}"
+
+# the pane to hand back to = whoever launched this (the Claude session). TMUX_PANE is
+# inherited from Claude's shell; fall back to the active pane id.
+target="${TMUX_PANE:-$(tmux display-message -p '#{pane_id}' 2>/dev/null || true)}"
+[[ -n "$target" ]] && print -r -- "$target" > "${file}.submit-target"
+
+mkdir -p "${file:h}"
+[[ -f "$file" ]] || : > "$file"
+
+if tmux has-session -t "$session" 2>/dev/null; then
+  # reuse a 'design' window if present, else make one; land on the file
+  if tmux list-windows -t "$session" -F '#{window_name}' 2>/dev/null | grep -qx design; then
+    tmux send-keys -t "${session}:design" Escape ":edit ${file}" Enter 2>/dev/null || true
+    tmux select-window -t "${session}:design" 2>/dev/null || true
+  else
+    tmux new-window -t "$session" -n design "nvim ${(q)file}"
+  fi
+  print -r -- "opened $file in tmux ${session}:design  ·  edit, then :submit  (hand-back → ${target:-?})"
+else
+  print -r -- "no '$session' tmux session — open it yourself: nvim ${(q)file}"
+fi
