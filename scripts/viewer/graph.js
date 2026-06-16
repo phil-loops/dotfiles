@@ -110,6 +110,14 @@ function upstreamOf(b){
     .map(u=>({branch:u, fanin:!chain.has(u), d:distToMain(u)}))
     .sort((a,b2)=> a.d-b2.d || a.branch.localeCompare(b2.branch));
 }
+function downstreamOf(b){   // transitive dependents: branches whose git parent IS b, or that `require` b
+  const N=graphModel().nodes, seen=new Set(), q=[b];
+  while(q.length){ const x=q.shift();
+    Object.keys(N).forEach(c=>{ const n=N[c]; if(seen.has(c)) return;
+      if(n.parent===x || (n.requires||[]).includes(x)){ seen.add(c); q.push(c); } }); }
+  seen.delete(b);
+  return [...seen];
+}
 function prState(b){   // → {cls, glyph, meta} describing b's open PR (or none)
   const pr=GPRS[b];
   if(!pr) return {cls:'none', glyph:'∅', meta:'no PR yet'};
@@ -171,22 +179,29 @@ function showTip(b, anchorEl){
   t.classList.add('on');
   spotlight(b);
 }
-// spotlight the merge path: light the hovered node + its upstream blockers and the
-// edges between them, gold-glow those edges, dim everything else.
+// spotlight the dependency neighborhood: light the hovered node + everything that
+// flows IN (its upstream blockers) AND OUT (its downstream dependents), glow + flow
+// the edges between them, dim everything else. Hovering `main` lights its outbound
+// roots — what flows out of main.
 function spotlight(b){
-  const up=new Set(upstreamOf(b).map(u=>u.branch));
-  const lit=new Set([b, 'main', ...up]);   // 'main' so the root→main edges stay lit
+  const isMain = b==='main';
+  const up   = new Set(isMain ? [] : upstreamOf(b).map(u=>u.branch));
+  const down = new Set(isMain ? graphModel().roots : downstreamOf(b));
+  const lit  = new Set([b, 'main', ...up, ...down]);
   document.querySelectorAll('svg.graph').forEach(svg=>{
     svg.classList.add('focusing');
     svg.querySelectorAll('.gn[data-b]').forEach(g=>{ const id=g.getAttribute('data-b');
-      g.classList.toggle('lit', lit.has(id)); g.classList.toggle('up', up.has(id)); });   // 'up' = a blocker to merge first
+      g.classList.toggle('lit', lit.has(id));
+      g.classList.toggle('hov', id===b);          // the hovered node itself
+      g.classList.toggle('up', up.has(id));        // flows IN  — a blocker to merge first
+      g.classList.toggle('down', down.has(id)); }); // flows OUT — depends on this one
     svg.querySelectorAll('.ge').forEach(e=>{
       e.classList.toggle('lit', lit.has(e.getAttribute('data-from')) && lit.has(e.getAttribute('data-to'))); });
   });
 }
 function unspotlight(){
   document.querySelectorAll('svg.graph').forEach(svg=>{ svg.classList.remove('focusing');
-    svg.querySelectorAll('.lit,.up').forEach(x=>x.classList.remove('lit','up')); });
+    svg.querySelectorAll('.lit,.up,.down,.hov').forEach(x=>x.classList.remove('lit','up','down','hov')); });
 }
 function hideTip(){ _tipBranch=null; const t=$('#ntip'); if(t) t.classList.remove('on'); unspotlight(); }
 function renderGraph(sel){
@@ -266,7 +281,7 @@ function renderGraph(sel){
   // ancestor (the solid chain implies it — drawing it too would be redundant).
   Object.keys(N).forEach(b=>{ if(!pos[b])return; const chain=parentChain(b);
     ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq] && !chain.has(rq)) E+=seg(cx(rq),cy(rq),cx(b),cy(b),'fanin',ei++,rq,b); }); });
-  G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(${mainPos.x},${mainPos.y})"><circle r="6"/><text x="16" y="4">main</text></g>`;
+  G+=`<g class="gn main" data-b="main" style="animation-delay:80ms" transform="translate(${mainPos.x},${mainPos.y})"><circle r="6"/><text x="16" y="4">main</text></g>`;
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=own(b), w=nodeW(b);
     const done = r.total>0 && r.clean===r.total && r.stale===0;   // this branch's own files all reviewed
     const cnt = `${r.clean}/${r.total}`;   // always the count — gold border already signals "all blessed"; a 2nd ✓ collided with the PR badge
@@ -286,10 +301,11 @@ function renderGraph(sel){
   const legend = `<span class="maplegend">${swatch('clean')}<span class="lgl">builds on</span>${swatch('fanin')}<span class="lgl">merge after · planned</span></span>`;
   const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3>${legend}<span class="mapclose">click a node · esc to close</span></div>` : '';
   tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="height:auto;max-height:84vh;display:block">${E}${G}</svg>`;
-  tgt.querySelectorAll('.gn[data-b]').forEach(g=>{ g.onclick=()=>{ active=g.getAttribute('data-b'); if(sel==='#map') toggleMap(false); render(); };
-    // hover → what must merge before this branch is a candidate to merge into main
-    g.addEventListener('mouseenter',()=>showTip(g.getAttribute('data-b'), g));
-    g.addEventListener('mouseleave',hideTip); });
+  tgt.querySelectorAll('.gn[data-b]').forEach(g=>{ const id=g.getAttribute('data-b');
+    if(id!=='main') g.onclick=()=>{ active=id; if(sel==='#map') toggleMap(false); render(); };
+    // hover → light what flows IN (blockers) and OUT (dependents); main → its roots
+    g.addEventListener('mouseenter',()=> id==='main' ? spotlight('main') : showTip(id, g));
+    g.addEventListener('mouseleave',()=> id==='main' ? unspotlight() : hideTip()); });
   // a click on the PR badge opens the PR instead of selecting the node
   tgt.querySelectorAll('.prbadge[data-pr]').forEach(g=>g.addEventListener('click',e=>{ e.stopPropagation(); window.open(g.getAttribute('data-pr'),'_blank'); }));
 }
