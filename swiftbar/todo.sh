@@ -78,9 +78,9 @@ else
     lineno="${it%%:*}"
     text="${${it#*:}#- \[ \] }"
     # markdown link "[label](url)" → clicking the item opens the link; plain text is inert.
-    if [[ "$text" == \[*\]\(*\) ]]; then
-      label="${text#\[}"; label="${label%%\]\(*}"
-      url="${text#*\](}"; url="${url%\)}"
+    if [[ "$text" == "["*"]("*")" ]]; then
+      label="${text#"["}"; label="${label%%"]("*}"
+      url="${text#*"]("}"; url="${url%")"}"
       echo "☐ ${label} | bash=\"$self\" param1=--open param2=\"${url}\" terminal=false"
     else
       echo "☐ ${text}"
