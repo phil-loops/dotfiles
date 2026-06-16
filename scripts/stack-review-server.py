@@ -12,6 +12,7 @@ The page is same-origin with the server, so /model and /bless are plain relative
 import sys, os, json, subprocess, threading, time, hashlib, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
@@ -271,6 +272,13 @@ class H(BaseHTTPRequestHandler):
                                         "running": running, "reason": reason}))
         elif u.path == "/sync":  # fork-staleness vs origin/main: how far behind, and is it safe to auto-rebase?
             self._send(200, json.dumps(_sync_state(parse_qs(u.query).get("branch", [""])[0])))
+        elif u.path == "/syncs":  # BATCH fork-staleness: all branches in ONE round-trip, so the
+            # graph/rail badges don't fan out N per-node /sync requests into the browser's
+            # ~6-connection-per-origin limit (which serializes them into a load waterfall).
+            bs = [b for b in parse_qs(u.query).get("branch", []) if b]
+            with ThreadPoolExecutor(max_workers=8) as ex:   # _sync_state shells git (GIL released) → real parallelism
+                states = dict(zip(bs, ex.map(_sync_state, bs)))
+            self._send(200, json.dumps(states))
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
