@@ -16,6 +16,21 @@ self="$0"
 file="$HOME/todo.md"
 [[ -f "$file" ]] || print -- "# todo — park one-liners to pick up later (no stack required)\n" > "$file"
 
+# A human label for a bare URL, so a pasted link reads as something meaningful:
+#   github PR/issue → "repo#num" · the blessing viewer → "review: branch" · else the host.
+nice_label() {
+  local u="$1" p
+  case "$u" in
+    *github.com/*/pull/*|*github.com/*/issues/*)
+      p="${u#*github.com/}"; local num="${u##*/}"
+      print -r -- "${${p#*/}%%/*}#${num%%[!0-9]*}" ;;            # repo#num
+    *github.com/*/tree/*)
+      p="${u#*github.com/}"; print -r -- "${${p#*/}%%/*}@${u##*/tree/}" ;;   # repo@branch
+    *branch=*) local b="${u##*branch=}"; print -r -- "review: ${b%%&*}" ;;   # the viewer
+    *) p="${u#*://}"; p="${p#www.}"; print -r -- "${p%%/*}" ;;               # host
+  esac
+}
+
 # --- ➕ park a task: dialog (clipboard-prefilled) → store a "- [ ]" line.
 # Rich: type "label https://url" or "[label](url)", or just paste a URL → it becomes
 # a clickable link; plain text stays plain.
@@ -35,7 +50,7 @@ if [[ "$1" == "--add" ]]; then
   elif [[ "$input" == *http://* || "$input" == *https://* ]]; then
     url="http${input#*http}"; url="${url%%[[:space:]]*}"             # first URL token
     label="${input%%http*}"; label="${label%"${label##*[![:space:]]}"}"   # text before it, rstripped
-    [[ -n "$label" ]] || label="$url"                               # bare URL → label = the URL
+    [[ -n "$label" ]] || label="$(nice_label "$url")"              # bare URL → a readable label
     line="- [ ] [$label]($url)"
   else
     line="- [ ] $input"                                             # plain
