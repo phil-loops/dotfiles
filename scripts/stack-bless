@@ -36,17 +36,28 @@ git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null \
 git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 ledger="$git_dir/stack-blessed.json"
 [[ -f "$ledger" ]] || echo '{}' > "$ledger"
+# Sidecar ledger keyed on the branch's CONTRIBUTION identity (rebase-stable patch-id
+# of parent...branch per file) rather than the file blob. The blob ledger above stays
+# the source for nvim + legacy entries; readers prefer this sidecar when present and
+# fall back to the blob otherwise. We write BOTH so a CLI/web bless is visible to nvim.
+contrib="$git_dir/stack-blessed-contrib.json"
+[[ -f "$contrib" ]] || echo '{}' > "$contrib"
 tmp="$(mktemp)"
 
 if (( unbless )); then
   if [[ -n "$file" ]]; then
-    jq --arg b "$branch" --arg f "$file" '
-      (if .[$b] then .[$b] |= del(.[$f]) else . end)
-      | (if (.[$b] // {}) == {} then del(.[$b]) else . end)' "$ledger" > "$tmp"
-    mv "$tmp" "$ledger"; echo "unblessed $file on $branch"
+    for L in "$ledger" "$contrib"; do
+      jq --arg b "$branch" --arg f "$file" '
+        (if .[$b] then .[$b] |= del(.[$f]) else . end)
+        | (if (.[$b] // {}) == {} then del(.[$b]) else . end)' "$L" > "$tmp"
+      mv "$tmp" "$L"
+    done
+    echo "unblessed $file on $branch"
   else
-    jq --arg b "$branch" 'del(.[$b])' "$ledger" > "$tmp"
-    mv "$tmp" "$ledger"; echo "unblessed all of $branch"
+    for L in "$ledger" "$contrib"; do
+      jq --arg b "$branch" 'del(.[$b])' "$L" > "$tmp"; mv "$tmp" "$L"
+    done
+    echo "unblessed all of $branch"
   fi
   exit 0
 fi
@@ -61,16 +72,24 @@ else
   files=("${(@f)$(git diff --name-only "${parent}...${branch}")}")
 fi
 
-# build { path: blob } for files that still exist on the branch
-updates='{}'; count=0
+# build { path: blob } (content) and { path: patch-id } (contribution) for files
+# that still exist on the branch. The patch-id of `git diff -U0 parent...branch`
+# is invariant under rebase — it survives the parent moving underneath the branch,
+# so an inherited upstream edit to the same file no longer reads as "changed".
+updates='{}'; cupdates='{}'; count=0
 for f in "${files[@]}"; do
   [[ -n "$f" ]] || continue
   blob=$(git rev-parse "${branch}:${f}" 2>/dev/null) || continue
   updates=$(jq --arg f "$f" --arg b "$blob" '. + {($f): $b}' <<< "$updates")
+  cid=$(git diff -U0 "${parent}...${branch}" -- "$f" 2>/dev/null | git patch-id --stable | awk '{print $1}')
+  [[ -n "$cid" ]] && cupdates=$(jq --arg f "$f" --arg c "$cid" '. + {($f): $c}' <<< "$cupdates")
   count=$((count + 1))
 done
 
 jq --arg b "$branch" --argjson upd "$updates" \
   '.[$b] = ((.[$b] // {}) + $upd)' "$ledger" > "$tmp"
 mv "$tmp" "$ledger"
+jq --arg b "$branch" --argjson upd "$cupdates" \
+  '.[$b] = ((.[$b] // {}) + $upd)' "$contrib" > "$tmp"
+mv "$tmp" "$contrib"
 echo "blessed $count file(s) on $branch (vs $parent)"
