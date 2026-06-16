@@ -265,8 +265,13 @@ addEventListener('keydown',e=>{
 async function renderPicker(){
   const stale=document.getElementById('picker'); if(stale) stale.remove();   // idempotent: re-invokable to refresh in place
   let projs=[]; try{ projs=await (await fetch('/projects')).json(); }catch(e){}
+  const behindAll=projs.filter(p=>typeof p.behind==='number'&&p.behind>0).map(p=>p.name);
+  const allBtn=behindAll.length
+    ? `<button class="pk-restack-all" title="restack all ${behindAll.length} behind forests onto fresh main, one after another (background, scratch worktree). Stops at the first real conflict for you to resolve, then re-run to finish.">⟳ restack all ${behindAll.length} behind</button>`
+    : '';
   const ov=el('div'); ov.id='picker';
-  ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><p class="pk-sub">choose a project</p>`
+  ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><div class="pk-myprs"></div><p class="pk-sub">choose a project</p>`
+    +allBtn
     +`<div class="pk-list"></div><button class="pk-all">view the whole forest</button>`
     +`<div class="pk-standalone"></div></div>`;
   document.body.appendChild(ov);
@@ -274,6 +279,37 @@ async function renderPicker(){
   if(!projs.length){ list.innerHTML='<p style="color:var(--faint);font-size:12px">no projects configured (stack-project.*.branch)</p>'; }
   const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   const leaf=s=>esc(String(s).split('/').pop());
+  // Your open PRs into origin/main, grouped by their local project — click a row to
+  // hop straight onto that PR's node in the forest (no .project → open it on GitHub).
+  (async()=>{
+    const host=ov.querySelector('.pk-myprs'); if(!host) return;
+    let prs=[]; try{ prs=await (await fetch('/myprs')).json(); }catch(e){}
+    if(!Array.isArray(prs) || !prs.length){ host.remove(); return; }
+    const rv=r=> r==='APPROVED'?'<span class="prr-rv ok" title="approved">✓</span>'
+              : r==='CHANGES_REQUESTED'?'<span class="prr-rv chg" title="changes requested">⚠</span>'
+              : r==='REVIEW_REQUIRED'?'<span class="prr-rv req" title="review required">•</span>':'';
+    const NP='__noproj__', byProj={}, order=[];
+    prs.forEach(p=>{ const k=p.project||NP; if(!(k in byProj)){ byProj[k]=[]; order.push(k); } byProj[k].push(p); });
+    let html='<div class="pk-myprs-h">your open PRs</div>';
+    order.forEach(k=>{
+      const lbl = k===NP ? '<span class="pk-myprs-noproj">no local project</span>' : esc(k);
+      html+=`<div class="pk-myprs-g"><div class="pk-myprs-proj">${lbl}</div>`;
+      byProj[k].forEach(p=>{
+        html+=`<button class="pk-prrow" data-proj="${esc(p.project||'')}" data-br="${esc(p.branch||'')}" data-url="${esc(p.url||'')}">`
+          +`<span class="prr-num">#${esc(String(p.num))}</span>`
+          +`<span class="prr-title">${esc(p.title||'')}</span>`
+          +`${p.draft?'<span class="prr-draft">draft</span>':''}${rv(p.review)}</button>`;
+      });
+      html+='</div>';
+    });
+    host.innerHTML=html;
+    host.querySelectorAll('.pk-prrow').forEach(row=>{
+      row.onclick=()=>{ const pr=row.dataset.proj, br=row.dataset.br;
+        if(pr) location.href='?branch='+encodeURIComponent(pr)+'#node='+encodeURIComponent(br);
+        else if(row.dataset.url) window.open(row.dataset.url,'_blank');
+      };
+    });
+  })();
   const PK=renderPicker._p||(renderPicker._p={});   // branch → thesis cache, survives re-render
   // The picker is a static landing screen (no SSE here), so a handed-off restack
   // would otherwise leave the badge stuck on "⤳ restacking…" forever. stack-restack
@@ -324,6 +360,17 @@ async function renderPicker(){
       renderPicker();   // not running, not paused → finished/stopped: rebuild so freshness re-reads
     };
     setTimeout(tick, 1500);
+  };
+  // restack-all: poll the GLOBAL restack status (no project) until the back-to-back
+  // sequence finishes or parks, then rebuild — the parked project's card shows ⚠ resolve,
+  // the finished ones go ✓ fresh / contract.
+  const watchRestackAll=()=>{ let tries=0;
+    const tick=async()=>{ tries++;
+      let s=null; try{ s=await (await fetch('/restack-status')).json(); }catch(e){}
+      if(s && s.running){ if(tries<400) setTimeout(tick,2500); return; }   // still churning through the chain
+      renderPicker();
+    };
+    setTimeout(tick,1500);
   };
   projs.forEach(p=>{ const b=el('button','pk-btn');
     const ready=p.ready||[], cands=p.candidates||[];

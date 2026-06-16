@@ -547,6 +547,27 @@ class H(BaseHTTPRequestHandler):
                                  cwd=wt, stdout=lf, stderr=lf)
             self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
             return
+        if self.path == "/restack-all":   # restack several projects back-to-back in one background job
+            d = json.loads(raw or "{}")
+            projects = [p for p in d.get("projects", []) if p and p not in ("whole forest", "--all")]
+            if not projects:
+                self._send(400, json.dumps({"ok": False, "err": "no projects"}))
+                return
+            blocked = _restack_blocked()
+            if blocked:
+                self._send(409, json.dumps({"ok": False, "err": blocked}))
+                return
+            wt = _restack_worktree()
+            run(["git", "-C", wt, "checkout", "--detach"])
+            # Chain with `&&` so a conflict-park (non-zero exit) HALTS the sequence —
+            # the parked project surfaces via /restack-status; resolve it, then re-run
+            # to continue with the rest. Each link already detaches the scratch on success.
+            chain = " && ".join(_restack_cmd(p, wt) for p in projects)
+            logpath = os.path.join(ROOT, "restack.log")
+            with open(logpath, "ab") as lf:
+                subprocess.Popen(["zsh", "-c", chain], cwd=wt, stdout=lf, stderr=lf)
+            self._send(200, json.dumps({"ok": True, "projects": projects, "log": logpath}))
+            return
         self._send(404, "{}")
 
 
