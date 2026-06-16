@@ -14,6 +14,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
+from srv import ctx as srvctx, restack
+
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
@@ -77,42 +80,11 @@ def _main_worktree():
 
 MAIN_WT = _main_worktree()
 
-
-def _restack_worktree():
-    # Background restacks run here, NOT in the user's main checkout. stack-restack
-    # checks out each un-worktree'd member branch in its cwd to rebase it; pointing
-    # that at a dedicated detached worktree keeps the bouncing off MAIN_WT. Created
-    # once next to the main checkout, reused thereafter.
-    path = os.path.join(os.path.dirname(MAIN_WT) or ".", ".loops-restack-wt")
-    listing = run(["git", "worktree", "list", "--porcelain"]).stdout
-    if not any(os.path.realpath(line[len("worktree "):]) == os.path.realpath(path)
-               for line in listing.splitlines() if line.startswith("worktree ")):
-        run(["git", "worktree", "add", "--detach", path, "HEAD"])
-    return path
+# wire the shared context for the extracted handler modules (srv/*)
+srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT)
 
 
-def _restack_blocked():
-    # Don't start a restack while one is already running or parked on a conflict —
-    # detaching the scratch worktree under a live/paused rebase would corrupt it.
-    if subprocess.run(["pgrep", "-f", "stack-restack"], capture_output=True).returncode == 0:
-        return "a restack is already running"
-    gitdir = run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
-    if gitdir and not os.path.isabs(gitdir):
-        gitdir = os.path.join(CWD, gitdir)
-    if gitdir and os.path.exists(os.path.join(gitdir, "stack-restack-state", "state")):
-        return "a restack is parked on a conflict — resolve it first"
-    return ""
-
-
-def _restack_cmd(project, wt, handoff=False):
-    # On clean success, detach the scratch worktree so it doesn't keep the last
-    # rebased branch checked out (which would lock that branch from other worktrees).
-    # On a conflict-pause stack-restack exits non-zero and `&&` short-circuits — we
-    # leave the parked rebase intact for /restack-resolve to resume.
-    parts = [shlex.quote(os.path.join(SCRIPTS, "stack-restack")), shlex.quote(project)]
-    if handoff:
-        parts.append("--handoff")
-    return " ".join(parts) + f" && git -C {shlex.quote(wt)} checkout --detach >/dev/null 2>&1"
+# restack helpers + endpoints now live in srv/restack.py (delegated below).
 
 
 def _worktree_of(branch):   # path of the worktree currently holding `branch`, or "" if none
@@ -273,38 +245,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
             self._send(200, json.dumps({"branch": run(["git", "-C", MAIN_WT, "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
-            # stack-restack writes <git-common-dir>/stack-restack-state/state on a conflict
-            # it can't auto-resolve (and removes it on success/abort). Its presence == paused.
-            gitdir = run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
-            if gitdir and not os.path.isabs(gitdir):
-                gitdir = os.path.join(CWD, gitdir)
-            sd = os.path.join(gitdir, "stack-restack-state", "state") if gitdir else ""
-            want = parse_qs(u.query).get("project", [""])[0]
-            paused, proj, cur = False, "", ""
-            if sd and os.path.exists(sd):
-                with open(sd) as fh:
-                    kv = dict(l.rstrip("\n").split("=", 1) for l in fh
-                              if "=" in l and not l.startswith("SNAP"))
-                proj, cur = kv.get("PROJECT", ""), kv.get("CURRENT", "")
-                paused = (not want) or proj == want
-            # still churning? (parent stack-restack stays alive across the whole topo walk;
-            # it exits when it escalates, so running==False + paused==True means "needs you")
-            running = subprocess.run(["pgrep", "-f", "stack-restack"],
-                                     capture_output=True, text=True).returncode == 0
-            # surface WHY it parked: the last escalation reason from restack.log, so the
-            # picker badge can read "limitedCount or countSentPreviews?" instead of just
-            # "resolve". stack-restack logs `⚑ claude escalated: <reason>` per pause.
-            reason = ""
-            if paused:
-                try:
-                    with open(os.path.join(ROOT, "restack.log")) as fh:
-                        for line in fh:
-                            if "claude escalated:" in line:
-                                reason = line.split("claude escalated:", 1)[1].strip()
-                except Exception:
-                    pass
-            self._send(200, json.dumps({"paused": paused, "project": proj, "current": cur,
-                                        "running": running, "reason": reason}))
+            return restack.status(self, u)
         elif u.path == "/sync":  # fork-staleness vs origin/main: how far behind, and is it safe to auto-rebase?
             self._send(200, json.dumps(_sync_state(parse_qs(u.query).get("branch", [""])[0])))
         elif u.path == "/syncs":  # BATCH fork-staleness: all branches in ONE round-trip, so the
@@ -556,57 +497,12 @@ class H(BaseHTTPRequestHandler):
             self._send(200 if r.returncode == 0 else 500,
                        r.stdout or json.dumps({"ok": False, "err": r.stderr or "prep crashed"}))
             return
-        if self.path == "/restack":   # hand off: re-rebase descendants onto the squashed SHA (background)
-            d = json.loads(raw or "{}")
-            project = d.get("project", "")
-            if not project or project in ("whole forest", "--all"):
-                self._send(400, json.dumps({"ok": False, "err": "no registered project to restack"}))
-                return
-            blocked = _restack_blocked()
-            if blocked:
-                self._send(409, json.dumps({"ok": False, "err": blocked}))
-                return
-            wt = _restack_worktree()
-            run(["git", "-C", wt, "checkout", "--detach"])  # release any branch held from a prior run
-            logpath = os.path.join(ROOT, "restack.log")
-            with open(logpath, "ab") as lf:
-                subprocess.Popen(["zsh", "-c", _restack_cmd(project, wt)], cwd=wt, stdout=lf, stderr=lf)
-            self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
-            return
-        if self.path == "/restack-resolve":   # parked on a conflict → hand it to Claude (full-judgment), then resume
-            d = json.loads(raw or "{}")
-            project = d.get("project", "")
-            if not project:
-                self._send(400, json.dumps({"ok": False, "err": "no project"}))
-                return
-            wt = _restack_worktree()
-            logpath = os.path.join(ROOT, "restack.log")
-            with open(logpath, "ab") as lf:
-                subprocess.Popen(["zsh", "-c", _restack_cmd(project, wt, handoff=True)],
-                                 cwd=wt, stdout=lf, stderr=lf)
-            self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
-            return
-        if self.path == "/restack-all":   # restack several projects back-to-back in one background job
-            d = json.loads(raw or "{}")
-            projects = [p for p in d.get("projects", []) if p and p not in ("whole forest", "--all")]
-            if not projects:
-                self._send(400, json.dumps({"ok": False, "err": "no projects"}))
-                return
-            blocked = _restack_blocked()
-            if blocked:
-                self._send(409, json.dumps({"ok": False, "err": blocked}))
-                return
-            wt = _restack_worktree()
-            run(["git", "-C", wt, "checkout", "--detach"])
-            # Chain with `&&` so a conflict-park (non-zero exit) HALTS the sequence —
-            # the parked project surfaces via /restack-status; resolve it, then re-run
-            # to continue with the rest. Each link already detaches the scratch on success.
-            chain = " && ".join(_restack_cmd(p, wt) for p in projects)
-            logpath = os.path.join(ROOT, "restack.log")
-            with open(logpath, "ab") as lf:
-                subprocess.Popen(["zsh", "-c", chain], cwd=wt, stdout=lf, stderr=lf)
-            self._send(200, json.dumps({"ok": True, "projects": projects, "log": logpath}))
-            return
+        if self.path == "/restack":          # restack one project (background, scratch worktree)
+            return restack.restack(self, raw)
+        if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
+            return restack.resolve(self, raw)
+        if self.path == "/restack-all":      # restack several projects back-to-back
+            return restack.restack_all(self, raw)
         self._send(404, "{}")
 
 
