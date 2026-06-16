@@ -7,8 +7,9 @@
 #   prwatch <url>        watch a .../pull/<n> URL's checks, or a .../actions/runs/<id>
 #                        Actions-run URL to completion
 #   prwatch -l|--list    just list; don't watch
-#   prwatch --sweep      one quiet polling pass (for launchd): notify only on PRs
-#                        that newly fail or recover — a source-agnostic "PR opened"
+#   prwatch --sweep      one quiet polling pass (for launchd): notify on PRs that
+#                        newly fail, recover, or first appear already green — a
+#                        source-agnostic "PR opened"
 #                        monitor (catches PRs opened on the web). See prwatch.plist.
 #
 # "Watch" streams gh's check status until every check passes or one fails, then
@@ -126,7 +127,8 @@ if [[ "${1:-}" == <-> ]]; then
   echo "prwatch: PR #$1 not found in: ${repos[*]}" >&2; exit 1
 fi
 
-# --- sweep: one polling pass; notify on PRs that newly FAIL or RECOVER ---------
+# --- sweep: one polling pass; notify on PRs that newly FAIL, RECOVER, or first --
+# --- appear already GREEN (old empty) -----------------------------------------
 # Source-agnostic "PR opened" monitor — works no matter how the PR was opened
 # (web/Desktop/CLI). Meant to run periodically (launchd); it diffs the current
 # check state against the last pass and only pings on transitions, so it's quiet.
@@ -149,7 +151,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
       prurl="https://github.com/${repo}/pull/${num}"
       case "$roll" in
         (*failing*)    notify "✗ checks failing" "${repo}#${num} — ${title}" "$prurl" ;;
-        (*"all pass"*) [[ "$old" == *failing* || "$old" == *running* ]] \
+        (*"all pass"*) [[ -z "$old" || "$old" == *failing* || "$old" == *running* ]] \
                          && notify "✓ checks passed" "${repo}#${num} — ${title}" "$prurl" ;;
       esac
     done
