@@ -342,8 +342,11 @@ svg.graph .gn.sel .cnt{fill:var(--ink)}
 svg.graph.focusing .gn{opacity:.18!important;transition:opacity .14s}
 svg.graph.focusing .ge{opacity:.06!important;transition:opacity .14s}
 svg.graph.focusing .gn.lit,svg.graph.focusing .gn.main{opacity:1!important}
-svg.graph.focusing .gn.up rect{stroke:var(--gold);stroke-width:1.8;filter:drop-shadow(0 0 8px #e0ad4e77)}
-svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stroke-width:2.3;filter:drop-shadow(0 0 4px #e0ad4e88)}
+svg.graph.focusing .gn.up rect{stroke:var(--gold);stroke-width:1.8;filter:drop-shadow(0 0 8px #e0ad4e77)}      /* flows IN  */
+svg.graph.focusing .gn.down rect{stroke:var(--ember);stroke-width:1.8;filter:drop-shadow(0 0 8px #d36a3688)}   /* flows OUT */
+svg.graph.focusing .gn.hov rect{stroke:var(--ink);stroke-width:2;filter:drop-shadow(0 0 10px #ece2cf99)}        /* hovered node */
+svg.graph.focusing .ge.lit{opacity:1!important;stroke:var(--gold)!important;stroke-width:2.3;filter:drop-shadow(0 0 4px #e0ad4e88);stroke-dasharray:6 7;animation:geflow .6s linear infinite}
+@keyframes geflow{to{stroke-dashoffset:-26}}  /* dashes flow toward each edge's target → inflow converges on the node, outflow diverges */
 .main::-webkit-scrollbar,.links::-webkit-scrollbar{width:9px}
 .main::-webkit-scrollbar-thumb,.links::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
 /* ── CMD+K command palette ─────────────────────────────────── */
