@@ -15,8 +15,13 @@ function renderRail(){
     const pr=(typeof GPRS!=='undefined') ? GPRS[b] : null;
     const ps=(pr && typeof prState==='function') ? prState(b) : null;
     const badge = ps ? `<span class="rdot ${ps.cls}" title="${ps.meta}">${ps.glyph}</span>` : '';
+    // fork-staleness ↺N (mirrors the map badge): GSYNC is populated by ensureSync
+    const sy=(typeof GSYNC!=='undefined') ? GSYNC[b] : null;
+    const sbadge = (sy && sy.behind)
+      ? `<span class="rstale${sy.syncable?' syncable':''}" title="${sy.behind} behind origin/main${sy.syncable?' · syncable: clean rebase':(sy.why?' · '+sy.why:' · needs a restack')}">↺${sy.behind}</span>`
+      : '';
     li.innerHTML=`<span class="tw">${connector}</span><span class="dot ${n.status}"></span>`
-      +`<span class="nm">${b.split('/').pop()}</span>${badge}<span class="cnt2">${n.clean}/${n.total}</span>`;
+      +`<span class="nm">${b.split('/').pop()}</span>${badge}${sbadge}<span class="cnt2">${n.clean}/${n.total}</span>`;
     li.onclick=()=>{ active=b; render(); };
     li.addEventListener('mouseenter',()=>{ if(typeof showTip==='function') showTip(b, li); railSpot(b); });
     li.addEventListener('mouseleave',()=>{ if(typeof hideTip==='function') hideTip(); railUnspot(); });

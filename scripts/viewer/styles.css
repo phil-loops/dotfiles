@@ -135,6 +135,10 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .lk .rdot{font-size:10.5px;font-weight:800;flex:none;width:13px;text-align:center}
 .lk .rdot.approved{color:#56d090} .lk .rdot.changes{color:var(--ember)} .lk .rdot.pending{color:var(--gold)}
 .lk .rdot.draft,.lk .rdot.none{color:var(--faint)}
+/* fork-staleness pill in the rail (↺N behind origin/main) — ember = needs a restack, green = syncable */
+.lk .rstale{font-size:9.5px;font-weight:800;flex:none;padding:0 5px;border-radius:8px;color:#fff;
+  background:var(--ember);box-shadow:0 0 5px #d36a3666;white-space:nowrap}
+.lk .rstale.syncable{background:#2c9a59;box-shadow:0 0 5px #3fbf7f66}
 .lk.trunk{opacity:.9;cursor:default} .lk.trunk:hover{background:none}
 /* tree hover-spotlight: light the hovered row + its upstream blockers, dim the rest */
 .links.spotting .lk{opacity:.32;transition:opacity .12s}

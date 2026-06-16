@@ -48,7 +48,10 @@ function ensureSync(){
   Promise.all(Object.keys(graphModel().nodes).map(b =>
     fetch('/sync?branch='+encodeURIComponent(b)).then(r=>r.ok?r.json():null)
       .then(s=>{ if(s) GSYNC[b]=s; }).catch(()=>{})
-  )).then(()=>{ const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map'); });
+  )).then(()=>{
+    if(typeof renderRail==='function') renderRail();   // rail ↺N badges
+    const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map');
+  });
 }
 function staleBadge(b,w){   // a corner badge if this branch's fork point lags origin/main
   const s = GSYNC[b]; if(!s || !s.behind) return '';
