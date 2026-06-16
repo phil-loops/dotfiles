@@ -9,6 +9,7 @@
 # runnable. The branch is registered in the forest (stack-branch.<name>.parent=main).
 #
 #   cw <name> [claude args…]   new branch <name> off main, fresh worktree, launch claude
+#                              (launches with --dangerously-skip-permissions, like `hold my beer`)
 #   cw <existing-branch> …     attach that branch in a worktree (or reuse its tree)
 #   cw                          name defaults to wt-<HHMMSS>
 #   cw -n <name>               make/prepare the worktree but DON'T launch (prints cd path)
@@ -46,9 +47,9 @@ for link in node_modules .env .env.local; do
 done
 
 if (( launch )); then
-  echo "cw: $wt  (branch $name) → launching claude"
-  cd "$wt" && exec claude "$@"
+  echo "cw: $wt  (branch $name) → 🍺 launching claude (dangerously-skip-permissions)"
+  cd "$wt" && exec claude --dangerously-skip-permissions "$@"
 else
   echo "$wt"
-  echo "  cd $wt && claude"
+  echo "  cd $wt && claude --dangerously-skip-permissions"
 fi
