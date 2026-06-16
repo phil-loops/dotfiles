@@ -45,13 +45,16 @@ let GSYNC = {}, _gsyncLoading = false;
 function ensureSync(){
   if(_gsyncLoading || typeof LIVE==='undefined' || !LIVE) return;
   _gsyncLoading = true;
-  Promise.all(Object.keys(graphModel().nodes).map(b =>
-    fetch('/sync?branch='+encodeURIComponent(b)).then(r=>r.ok?r.json():null)
-      .then(s=>{ if(s) GSYNC[b]=s; }).catch(()=>{})
-  )).then(()=>{
-    if(typeof renderRail==='function') renderRail();   // rail ↺N badges
-    const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map');
-  });
+  const bs = Object.keys(graphModel().nodes);
+  if(!bs.length){ _gsyncLoading = false; return; }
+  // ONE batched request instead of one /sync per node — N per-branch fetches
+  // were queuing behind the browser's ~6-connection limit into a load waterfall.
+  fetch('/syncs?'+bs.map(b=>'branch='+encodeURIComponent(b)).join('&'))
+    .then(r=>r.ok?r.json():{}).then(m=>{ if(m) Object.assign(GSYNC, m); }).catch(()=>{})
+    .then(()=>{
+      if(typeof renderRail==='function') renderRail();   // rail ↺N badges
+      const mp=$('#map'); if(mp && mp.classList.contains('on')) renderGraph('#map');
+    });
 }
 function isLanded(b){ const N=(typeof graphModel==='function')&&graphModel().nodes; return !!(N && N[b] && N[b].landed); }
 function landedBadge(b,w){   // branch already merged into origin/main (commits patch-equal) — its ref just lingers
