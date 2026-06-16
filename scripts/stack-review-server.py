@@ -219,6 +219,16 @@ class H(BaseHTTPRequestHandler):
                 prmap = {}
             for p in projs:
                 p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
+                # freshness vs origin/main: how far the project's roots trail. >0 means
+                # origin/main has moved ahead → the forest needs a restack (which also
+                # condenses any now-redundant/squash-merged branches). Measured on the
+                # mergeable roots (they fork off main); pure inspection, no fetch.
+                behind = 0
+                for b in p.get("mergeable", []):
+                    n = run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip()
+                    if n.isdigit():
+                        behind = max(behind, int(n))
+                p["behind"] = behind
             self._send(200, json.dumps(projs))
         elif u.path == "/standalone":   # the pinned watch list — [{branch, commits, add, del}]
             r = run([os.path.join(SCRIPTS, "stack-forest"), "--standalone"])
