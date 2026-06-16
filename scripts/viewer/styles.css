@@ -153,6 +153,19 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .links.spotting .lk{opacity:.32;transition:opacity .12s}
 .links.spotting .lk.lit{opacity:1}
 .links.spotting .lk.up .nm{color:var(--gold)}
+/* per-node file list in the rail: status dot · path · status glyph. clicking a row
+   opens + scrolls to that file's diff card in the main panel. */
+.fk{padding:4px 7px;border-radius:6px;cursor:pointer;border:1px solid transparent;
+  display:flex;align-items:center;gap:6px;transition:.12s;line-height:1.4}
+.fk:hover{background:var(--panel)}
+.fk.on{background:var(--panel);border-color:var(--line)}
+.fk .fnm{font-size:12px;color:var(--ink);flex:1;min-width:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;direction:rtl;unicode-bidi:plaintext}
+.fk .fnm .seg{color:var(--faint)}
+.fk.clean .fnm{color:var(--dim)}
+.fk .fsym{font-size:11px;flex:none;width:12px;text-align:center;color:var(--faint)}
+.fk.stale .fsym{color:var(--ember)} .fk.clean .fsym{color:var(--gold)}
+.rail-empty{color:var(--faint);font-size:12px;padding:12px 9px;list-style:none}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block}
 .dot.clean{background:var(--gold);box-shadow:0 0 7px var(--gold)} .dot.stale{background:var(--ember)} .dot.unblessed{background:var(--unbl)} .dot.partial{background:var(--ember)}
 
