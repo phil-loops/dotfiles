@@ -18,12 +18,20 @@ function fetchNode(branch, base){
   if(!LIVE) return NODEPATCH[key] = Promise.resolve({files:[]});   // static snapshot: structure only
   prepareWorktree(branch);   // prefetch the worktree so "open in nvim" is instant for this node
   const q = '/node?branch=' + encodeURIComponent(branch) + (base ? '&base=' + encodeURIComponent(base) : '');
-  // IMPORTANT: never cache a FAILED fetch. A transient error (e.g. the server
-  // reaped + relaunched on a new port) must not poison this node into a permanent
-  // "no textual diff" — clear the cache entry so the next render retries.
-  NODEPATCH[key] = fetch(q)
-    .then(r=>{ if(!r.ok) throw new Error('node '+r.status); return r.json(); })
-    .catch(e=>{ delete NODEPATCH[key]; throw e; });
+  // A /node fetch that never settles (e.g. the page loaded mid-restack while refs were
+  // moving) must not latch the card on "loading diff…" forever. Bound each attempt with
+  // an AbortController timeout and auto-retry the hang/network cases a few times; a
+  // definitive HTTP error (404/500) skips the retries. On final failure clear the cache
+  // entry so a redraw (or the retry link) starts fresh — never cache a FAILED fetch.
+  const TIMEOUT_MS = 8000, RETRIES = 3;
+  const attempt = (n) => {
+    const ctl = new AbortController();
+    const timer = setTimeout(()=>ctl.abort(), TIMEOUT_MS);
+    return fetch(q, {signal: ctl.signal}).then(
+      r=>{ clearTimeout(timer); if(!r.ok) throw new Error('node '+r.status); return r.json(); },
+      err=>{ clearTimeout(timer); if(n < RETRIES) return attempt(n+1); throw err; });   // hang/network → retry
+  };
+  NODEPATCH[key] = attempt(0).catch(e=>{ delete NODEPATCH[key]; throw e; });
   return NODEPATCH[key];
 }
 // patch map {path:{patch,stale}} for the per-file diff renderer (shares fetchNode's cache)
