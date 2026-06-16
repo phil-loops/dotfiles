@@ -139,6 +139,18 @@ def mergeable(b):
     return not any(u in _existing for u in upstream)
 
 
+def landed(b):
+    """True when the branch already merged into origin/main but its ref lingers.
+    `git cherry` marks each of the branch's commits '-' when a patch-equivalent
+    commit exists upstream. The forest squashes each branch to ONE commit before
+    merge, so the squash commit on main is patch-equal to the branch's lone
+    commit → an all-'-' result means landed. Empty (no commits beyond base) or an
+    absent origin/main → False. Catches what topology-mergeable + behind-count
+    both miss: a squash-merged branch whose ref hasn't been cleaned up yet."""
+    out = git_out(["cherry", "origin/main", b]).strip()
+    return bool(out) and all(ln[:1] == "-" for ln in out.splitlines())
+
+
 # ---- project list (the picker) -------------------------------------------
 # names + branch counts + the mergeable seed branches — no git diffs, instant. The
 # browser shows these as buttons; clicking one opens ?branch=<name> (resolved below).
@@ -345,6 +357,7 @@ def build(branch):
         "children": [c for c in children.get(branch, []) if c in members],
         "requires": [r for r in requires.get(branch, []) if r in members],
         "mergeable": mergeable(branch),
+        "landed": landed(branch),
     }
 
 
