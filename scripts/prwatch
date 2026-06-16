@@ -9,6 +9,8 @@
 #   prwatch -l|--list    just list; don't watch
 #   prwatch --await <b>  wait for branch <b>'s PR, watch its CI to completion, then
 #                        notify & exit — backgrounded by the pre-push hook (on-demand)
+#   prwatch --tracking   list the PRs whose CI is being watched right now (the live
+#                        --await processes); also what the SwiftBar menu badge reads
 #   prwatch --sweep      one quiet polling pass (for launchd): notify on PRs that
 #                        newly fail, recover, or first appear already green — a
 #                        source-agnostic "PR opened"
@@ -162,41 +164,32 @@ if [[ "${1:-}" == "--await" ]]; then
     sleep 10
   done
 
+  # register this watcher so `prwatch --tracking` and the menu badge can see it.
+  # tagged with our PID, so a watcher killed without cleanup self-prunes on read.
+  trackdir="$HOME/.cache/prwatch/tracking"; mkdir -p "$trackdir"
+  marker="$trackdir/${arepo//\//-}-${anum}.tsv"
+  atitle=$(gh pr view "$anum" --repo "$arepo" --json title --jq .title 2>/dev/null)
+  print -r -- "${arepo}"$'\t'"${anum}"$'\t'"${atitle}"$'\t'"${branch}"$'\t'"$(date +%s)"$'\t'"$$" > "$marker"
+  refresh_menu() { open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null }  # no-op until SwiftBar installed
+  trap 'rm -f "$marker"; refresh_menu' EXIT INT TERM
+  refresh_menu
+
   # 3) block until checks resolve, then notify (watch_pr handles both outcomes)
   watch_pr "$arepo" "$anum"
   exit 0
 fi
 
-# --- sweep: one polling pass; notify on PRs that newly FAIL, RECOVER, or first --
-# --- appear already GREEN (old empty) -----------------------------------------
-# Source-agnostic "PR opened" monitor — works no matter how the PR was opened
-# (web/Desktop/CLI). Meant to run periodically (launchd); it diffs the current
-# check state against the last pass and only pings on transitions, so it's quiet.
-# First run just seeds state (no burst of notifications).
-if [[ "${1:-}" == "--sweep" ]]; then
-  # the fork never runs CI, so by default sweep only the repos that do. Override
-  # with `git config prwatch.sweep-repos "owner/repo …"`; empty falls back to all.
-  sweeprepos=(${=$(git config prwatch.sweep-repos 2>/dev/null || true)})
-  (( ${#sweeprepos} )) && repos=($sweeprepos)
-  state="${XDG_CACHE_HOME:-$HOME/.cache}/prwatch/state.tsv"
-  mkdir -p "${state:h}"
-  seeded=0; [[ -f "$state" ]] && seeded=1
-  prev=$(cat "$state" 2>/dev/null || true)
-  cur=$(collect)
-  if (( seeded )); then
-    print -r -- "$cur" | while IFS=$'\t' read -r repo num roll title branch; do
-      [[ -z "$num" || "$roll" == *"no checks"* ]] && continue
-      old=$(print -r -- "$prev" | awk -F'\t' -v r="$repo" -v n="$num" '$1==r && $2==n{print $3; exit}')
-      [[ "$roll" == "$old" ]] && continue                       # no change since last sweep
-      prurl="https://github.com/${repo}/pull/${num}"
-      case "$roll" in
-        (*failing*)    notify "✗ checks failing" "${repo}#${num} — ${title}" "$prurl" ;;
-        (*"all pass"*) [[ -z "$old" || "$old" == *failing* || "$old" == *running* ]] \
-                         && notify "✓ checks passed" "${repo}#${num} — ${title}" "$prurl" ;;
-      esac
-    done
-  fi
-  print -r -- "$cur" > "$state"
+# --- tracking: prwatch --tracking — list PRs whose CI is being watched now -----
+if [[ "${1:-}" == "--tracking" || "${1:-}" == "--watching" ]]; then
+  trackdir="$HOME/.cache/prwatch/tracking"
+  active=0
+  for f in "$trackdir"/*.tsv(N); do
+    IFS=$'\t' read -r repo num title branch started pid <"$f"
+    kill -0 "$pid" 2>/dev/null || { rm -f "$f"; continue }   # watcher gone → prune stale marker
+    active=1
+    print -P "%F{yellow}👁%f ${repo}#${num} — ${title}  %F{8}(${branch})%f"
+  done
+  (( active )) || echo "no PRs are being watched"
   exit 0
 fi
 
