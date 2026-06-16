@@ -26,12 +26,21 @@ if [ "$behind" -gt 0 ] 2>/dev/null; then
   fi
 fi
 
-# Only format-check files that differ from main
+# Format-check files that differ from main; block the push if any are mis-formatted
 files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx')
-
-if [ -z "$files" ]; then
-  exit 0
+if [ -n "$files" ]; then
+  echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
+  if ! echo "$files" | xargs npx oxfmt --check; then
+    exit 1
+  fi
 fi
 
-echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
-echo "$files" | xargs npx oxfmt --check
+# Push is proceeding → kick off a detached, on-demand CI watcher for this branch.
+# It waits for the PR's checks to resolve, notifies once, then exits — so a watcher
+# lives only while CI is in flight (replaces the old always-on launchd sweep).
+branch=$(git rev-parse --abbrev-ref HEAD)
+case "$branch" in
+  main|HEAD) ;;  # never watch main or a detached HEAD
+  *) ( "$HOME/.dotfiles/scripts/prwatch" --await "$branch" >/dev/null 2>&1 </dev/null & ) ;;
+esac
+exit 0
