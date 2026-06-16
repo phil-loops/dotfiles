@@ -87,6 +87,25 @@ focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actua
   esac; fi
   [[ -n "$app" ]] && osascript -e "tell application \"$app\" to activate" >/dev/null 2>&1 || true
 }
+surface_review_window(){   # bring the warm nvim's tmux window to the front, reliably.
+  # Identify it by the socket nvim's PID, not by name: tmux `automatic-rename` (on by
+  # default) renames a window to its running command, so 'review-nvim' silently becomes
+  # 'nvim' and a by-name select-window misses — which leaves you stranded on whatever
+  # window you were on. PID match is rename-proof; then pin the name + turn the rename
+  # off so it stays reliable, and select by index (unambiguous).
+  local npid win
+  npid=$(nvim --server "$SOCK" --remote-expr 'getpid()' 2>/dev/null) || true
+  if [[ -n "${npid:-}" ]]; then
+    win=$(tmux list-panes -s -t "$SESSION" -F '#{window_index} #{pane_pid}' 2>/dev/null | while read -r idx ppid; do
+      { [[ "$ppid" == "$npid" ]] || pgrep -P "$ppid" 2>/dev/null | grep -qx "$npid"; } && { print -r -- "$idx"; break; }
+    done)
+  fi
+  [[ -n "${win:-}" ]] || win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-nvim"{print $1; exit}')
+  [[ -n "${win:-}" ]] || return 0
+  tmux set-window-option -t "${SESSION}:${win}" automatic-rename off 2>/dev/null || true
+  tmux rename-window -t "${SESSION}:${win}" review-nvim 2>/dev/null || true
+  tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
+}
 
 case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
@@ -116,7 +135,6 @@ esac
 if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
   nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
   [[ -n "$warm_jump" ]] && nvim --server "$SOCK" --remote-send "${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
-  tmux select-window -t "${SESSION}:review-nvim" 2>/dev/null || true
 else
   rm -f "$SOCK"
   cmd="nvim --listen ${(q)SOCK}"                   # single-string form (proven); (q) keeps spaces/parens intact
@@ -125,5 +143,6 @@ else
   tmux new-window -t "$SESSION" -n review-nvim "$cmd" \
     || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
 fi
+surface_review_window
 focus_terminal
 echo "opened $rel on $branch → review-nvim ($dir)"
