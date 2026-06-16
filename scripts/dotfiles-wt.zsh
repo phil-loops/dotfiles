@@ -9,9 +9,11 @@
 #   dotwt <slug>   create (or reuse) ~/.dotfiles-wt/<slug> on dot/<slug>, cd into it.
 #                  Do ALL your dotfiles edits + commits here.
 #   dotland        publish the worktree's branch to the live tree (~/.dotfiles):
-#                  rebase onto current main, then push HEAD:main. With
-#                  receive.denyCurrentBranch=updateInstead the live tree updates in
-#                  place when clean, and REFUSES rather than clobber your WIP there.
+#                  rebase onto current main, then fast-forward-merge into it.
+#                  Disjoint WIP in ~/.dotfiles is left untouched — it only refuses
+#                  if a FILE you're landing is itself dirty there. (A push-to-main
+#                  with updateInstead was tried first but refuses on ANY dirty file,
+#                  and the live tree is ~always dirty, so it never landed.)
 #   dotpush        dotland, then push the live main to origin (backup/share).
 #   dotrm          remove the current worktree when you're done (--branch also deletes it).
 #
@@ -44,17 +46,19 @@ dotland() {
   local i out
   for i in 1 2 3 4 5; do
     git rebase main || { print -u2 "dotland: rebase onto main hit conflicts — resolve, then \`dotland\` again"; return 1; }
-    out="$(git push "$DOTROOT" HEAD:main 2>&1)" && {
+    # ff-merge into the live tree. Unlike push-to-checkout, this preserves disjoint
+    # WIP in ~/.dotfiles and only refuses if a file you're landing is dirty there.
+    out="$(git -C "$DOTROOT" merge --ff-only "$br" 2>&1)" && {
       print "✓ landed $br → main (live in ~/.dotfiles)"
       print "  pick it up: \`source ~/.zshrc\` / restart the viewer"
       return 0
     }
-    if print -r -- "$out" | grep -qiE 'uncommitted|unstaged|not uptodate|would be overwritten|working tree'; then
-      print -u2 "dotland: ~/.dotfiles has WIP that this would clobber — commit/stash it there, then \`dotland\`:"
+    if print -r -- "$out" | grep -qi 'overwritten by merge\|local changes'; then
+      print -u2 "dotland: a file you're landing is dirty in ~/.dotfiles — commit/stash it there, then \`dotland\`:"
       print -ru2 -- "$out"; return 1
     fi
-    print -r -- "$out" | grep -qiE 'non-fast-forward|rejected|fetch first' || { print -ru2 -- "$out"; return 1; }
-    # else: main moved under us → loop rebases onto the new main and retries the push
+    print -r -- "$out" | grep -qi 'fast-forward' || { print -ru2 -- "$out"; return 1; }
+    # else: main moved under us → loop rebases onto the new main and retries the merge
   done
   print -u2 "dotland: main kept moving after 5 tries — just run \`dotland\` again"; return 1
 }
