@@ -7,6 +7,24 @@ function graphModel(){
   return {nodes, roots: links.length?[links[0].branch]:[]};
 }
 function edge(x1,y1,x2,y2,st,i,from,to){ const mx=(x1+x2)/2; return `<path class="ge ${st}" data-from="${from||''}" data-to="${to||''}" style="animation-delay:${i*40}ms" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"/>`; }
+// a SKIP-LEVEL parent edge (child is >1 column past its git parent — e.g. it merges
+// after a same-parent sibling that occupies the column between them). Route LOW:
+// drop to the child's row right out of the parent, then run flat to the child, so
+// the rail passes BELOW the intervening sibling instead of sweeping through it.
+function skipEdge(x1,y1,x2,y2,st,i,from,to){ const k=Math.min(48,(x2-x1)/3);
+  return `<path class="ge ${st}" data-from="${from||''}" data-to="${to||''}" style="animation-delay:${i*40}ms" d="M${x1},${y1} C${x1+k},${y2} ${x2-k},${y2} ${x2},${y2}"/>`; }
+// a PLANNED (`requires`) edge. When the carrier sits to the right it flows forward
+// like any edge (source right → target left). But a planned dep often points at a
+// SAME-COLUMN sibling (no structural offset) — there it hugs as a short vertical
+// dashed connector (bottom→top center) instead of looping back across the grid.
+function faninEdge(s,t,sw,tw,i,from,to){
+  if(t.x > s.x+sw+8) return edge(s.x+sw,s.y,t.x,t.y,'fanin',i,from,to);
+  // same-column siblings: hug the LEADING edge (left-third) as a vertical dashed
+  // tie. Anchoring at center would cross the busy right side (a child junction);
+  // riding the node edges (top/bottom, not mid-y) keeps it clear of the parent rail.
+  const lx=Math.min(s.x,t.x)+22, down=t.y>=s.y, y1=s.y+(down?13:-13), y2=t.y+(down?-13:13);
+  return `<path class="ge fanin" data-from="${from}" data-to="${to}" style="animation-delay:${i*40}ms" d="M${lx},${y1} L${lx},${y2}"/>`;
+}
 // open-PR decorations: branch → {num,url,draft,base,toMain}. Fetched ONCE and
 // re-rendered when it lands. stack-prs persists the map in the git dir, so it's
 // already warm on reload + after a server restart (no GitHub round-trip).
@@ -139,19 +157,30 @@ function renderGraph(sel){
   const tgt=$(sel); if(!tgt) return;   // #dock is gone — only the fullscreen map (#map) renders here
   const gm=graphModel(), N=gm.nodes;
   if(!Object.keys(N).length){ tgt.innerHTML='<p style="color:var(--faint);margin:30px">nothing to graph</p>'; return; }
-  const GAPY=52, GAPX=205, PADX=116, PADY=36;
+  const GAPY=64, GAPX=205, PADX=116, PADY=36, HGAP=70;
   let leafY=0; const pos={};
+  const nodeW=b=>{ const lbl=b.split('/').pop(); return 50+lbl.length*7.2+34; };
   // each node reflects its OWN changes only — never a subtree rollup
   const own=b=>{ const n=N[b]||{}; return {clean:n.clean||0,stale:n.stale||0,unblessed:n.unblessed||0,total:n.total||0}; };
-  // ── columns (x): a node sits to the RIGHT of everything it depends on — its
-  // git parent chain AND its fan-in `requires`. So a fan-in integrator lands
-  // one column past the deps it carries and the dashed edges flow forward.
+  // ── columns (x) = MERGE-SEQUENCE position: a node sits one past EVERYTHING that
+  // must merge before it — its git parent chain (logical) AND its `requires`
+  // (planned). So a node that merges after a same-parent sibling lands one column
+  // further out, never in the sibling's column. When that pushes a node >1 column
+  // past its git parent, the parent rail is routed LOW (see skipEdge) so it runs
+  // below the intervening sibling instead of colliding with it.
   const depth={}; const depthOf=(b,g)=>{ if(depth[b]!=null) return depth[b]; if(g>64) return depth[b]=1;
     const n=N[b]||{}; let d=1;
     if(n.parent && n.parent!=='main' && N[n.parent]) d=Math.max(d, depthOf(n.parent,g+1)+1);
     (n.requires||[]).forEach(r=>{ if(N[r]) d=Math.max(d, depthOf(r,g+1)+1); });
     return depth[b]=d; };
   Object.keys(N).forEach(b=>depthOf(b,0));
+  const maxD=Math.max(1, ...Object.values(depth));
+  // variable-width columns: a column's x starts past the WIDEST node in the
+  // previous column + HGAP. Fixed-stride columns let a long branch name overflow
+  // into its child's column (the read-lock-from-flag / wire-and-cleanup overlap);
+  // sizing each column to its content guarantees no node ever overlaps the next.
+  const colMaxW={}; Object.keys(N).forEach(b=>{ const d=depth[b]; colMaxW[d]=Math.max(colMaxW[d]||0, nodeW(b)); });
+  const colX={1:PADX+GAPX}; for(let d=2; d<=maxD; d++){ colX[d]=colX[d-1]+(colMaxW[d-1]||0)+HGAP; }
   // ── rows (y): tidy-tree over a layout spine. A node hangs under its git
   // parent; a dep that only forks off main is ADOPTED under the (first) fan-in
   // node that requires it, so requires-deps cluster beneath the node that
@@ -163,25 +192,25 @@ function renderGraph(sel){
   const lroots=Object.keys(N).filter(b=>lpar[b]==null);
   const place=(b,g)=>{ const kids=(g>64?[]:lkids[b])||[]; let y;
     if(!kids.length){ y=leafY*GAPY; leafY++; } else { const ys=kids.map(c=>place(c,g+1)); y=(ys[0]+ys[ys.length-1])/2; }
-    pos[b]={x:PADX+depth[b]*GAPX, y:PADY+y, depth:depth[b]}; return y; };
+    pos[b]={x:colX[depth[b]], y:PADY+y, depth:depth[b]}; return y; };
   lroots.forEach(r=>place(r,0));
   // safety: any node missed (e.g. a requires-cycle) still gets its own row
-  Object.keys(N).forEach(b=>{ if(!pos[b]){ pos[b]={x:PADX+depth[b]*GAPX, y:PADY+leafY*GAPY, depth:depth[b]}; leafY++; } });
+  Object.keys(N).forEach(b=>{ if(!pos[b]){ pos[b]={x:colX[depth[b]], y:PADY+leafY*GAPY, depth:depth[b]}; leafY++; } });
   const rootYs=gm.roots.map(r=>pos[r]?pos[r].y:PADY);
   const mainY=rootYs.length? rootYs.reduce((a,b)=>a+b,0)/rootYs.length : PADY;
-  const maxD=Math.max(1, ...Object.values(pos).map(p=>p.depth));
-  const W=PADX+(maxD+1)*GAPX, H=PADY*2+Math.max(1,leafY)*GAPY;
-  const nodeW=b=>{ const lbl=b.split('/').pop(); return 50+lbl.length*7.2+34; };
+  const W=colX[maxD]+(colMaxW[maxD]||0)+PADX, H=PADY*2+Math.max(1,leafY)*GAPY;
   let E='', G='', ei=0, gi=0;
   gm.roots.forEach(r=>{ if(pos[r]) E+=edge(54,mainY,pos[r].x,pos[r].y,rollStatus(own(r)),ei++,'main',r); });
-  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].children)||[]).forEach(c=>{ if(pos[c]) E+=edge(p.x+nodeW(b),p.y,pos[c].x,pos[c].y,rollStatus(own(c)),ei++,b,c); }); });
+  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].children)||[]).forEach(c=>{ if(!pos[c])return;
+    const fn = (pos[c].depth - p.depth > 1) ? skipEdge : edge;   // low-route when the child skips a column past its parent
+    E+=fn(p.x+nodeW(b),p.y,pos[c].x,pos[c].y,rollStatus(own(c)),ei++,b,c); }); });
   // fan-in: a "phantom" inbound edge from each `requires` dep into the node that
   // carries it — a PLANNED (deliberate, revisable) merge-order, not a logical
   // build-link, so it reads in a softer/neutral style than the solid parent rail.
   // Edge-case: if the dep is already a parent-ANCESTOR, the solid chain implies
   // it — drawing a dashed edge too would contradict, so skip it as redundant.
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const chain=parentChain(b);
-    ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq] && !chain.has(rq)) E+=edge(pos[rq].x+nodeW(rq),pos[rq].y,p.x,p.y,'fanin',ei++,rq,b); }); });
+    ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq] && !chain.has(rq)) E+=faninEdge(pos[rq],p,nodeW(rq),nodeW(b),ei++,rq,b); }); });
   G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(40,${mainY})"><circle r="6"/><text x="16" y="4">main</text></g>`;
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=own(b), w=nodeW(b);
     const done = r.total>0 && r.clean===r.total && r.stale===0;   // this branch's own files all reviewed
