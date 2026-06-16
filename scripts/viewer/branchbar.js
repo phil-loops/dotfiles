@@ -203,10 +203,12 @@
       else { toast('↺ sync failed: '+esc(lastLine(r.err))); btn.textContent=t; btn.disabled=false; }
     }catch(e){ toast('↺ sync failed — server unreachable'); btn.textContent=t; btn.disabled=false; }
   }
-  async function syncBadge(sub, branch){
-    let s;
-    try{ s=await (await fetch('/sync?branch='+encodeURIComponent(branch))).json(); }
-    catch(e){ return; }
+  function syncBadge(sub, branch){
+    // reuse the staleness the graph already batched into GSYNC (/syncs) — no separate
+    // /sync per selected branch. If the batch hasn't landed yet, kick that one shared
+    // request; ensureSync re-renders the rail when it returns, which re-runs this.
+    const s = (typeof GSYNC!=='undefined') ? GSYNC[branch] : undefined;
+    if(s===undefined){ if(typeof ensureSync==='function') ensureSync(); return; }
     if(!s || !s.behind) return;   // up to date with origin/main → no badge
     const b=el('button','syncbadge'+(s.syncable?' syncable':''),'↺ '+s.behind+' behind');
     if(s.syncable){
