@@ -68,8 +68,25 @@ notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click
   fi
 }
 
+register_watch() {  # $1 key  $2 repo  $3 id  $4 title  $5 url — track a live watch for the badge
+  local d="$HOME/.cache/prwatch/tracking"; mkdir -p "$d"
+  _marker="$d/$1.tsv"   # process-global so the EXIT trap can see it
+  if [[ -f "$_marker" ]]; then                       # dedup: a live watcher on this key → reuse
+    local epid=$(cut -f6 "$_marker" 2>/dev/null)
+    if [[ -n "$epid" ]] && kill -0 "$epid" 2>/dev/null; then
+      open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null
+      echo "prwatch: already watching $2#$3 (pid $epid)"; exit 0
+    fi
+  fi
+  print -r -- "$2"$'\t'"$3"$'\t'"$4"$'\t'"$5"$'\t'"$(date +%s)"$'\t'"$$" > "$_marker"
+  trap 'rm -f "$_marker"; open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null' EXIT INT TERM
+  open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null   # no-op until SwiftBar installed
+}
+
 watch_pr() {  # $1 repo  $2 number
   local repo="$1" num="$2" url="https://github.com/$1/pull/$2"
+  local title=$(gh pr view "$num" --repo "$repo" --json title --jq .title 2>/dev/null)
+  register_watch "${repo//\//-}-${num}" "$repo" "$num" "${title:-PR #$num}" "$url"
   print -P "%F{yellow}⟳%f watching ${repo}#${num} — ctrl-c to stop"
   if gh pr checks "$num" --repo "$repo" --watch; then
     print -P "%F{green}✓ ${repo}#${num} — all checks passed%f"
@@ -82,6 +99,7 @@ watch_pr() {  # $1 repo  $2 number
 
 watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
   local repo="$1" rid="$2" url="https://github.com/$1/actions/runs/$2"
+  register_watch "${repo//\//-}-run-${rid}" "$repo" "$rid" "run $rid" "$url"
   print -P "%F{yellow}⟳%f watching run ${repo} #${rid} — ctrl-c to stop"
   if gh run watch "$rid" --repo "$repo" --exit-status; then
     print -P "%F{green}✓ run ${rid} — succeeded%f"
@@ -164,17 +182,8 @@ if [[ "${1:-}" == "--await" ]]; then
     sleep 10
   done
 
-  # register this watcher so `prwatch --tracking` and the menu badge can see it.
-  # tagged with our PID, so a watcher killed without cleanup self-prunes on read.
-  trackdir="$HOME/.cache/prwatch/tracking"; mkdir -p "$trackdir"
-  marker="$trackdir/${arepo//\//-}-${anum}.tsv"
-  atitle=$(gh pr view "$anum" --repo "$arepo" --json title --jq .title 2>/dev/null)
-  print -r -- "${arepo}"$'\t'"${anum}"$'\t'"${atitle}"$'\t'"${branch}"$'\t'"$(date +%s)"$'\t'"$$" > "$marker"
-  refresh_menu() { open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null }  # no-op until SwiftBar installed
-  trap 'rm -f "$marker"; refresh_menu' EXIT INT TERM
-  refresh_menu
-
-  # 3) block until checks resolve, then notify (watch_pr handles both outcomes)
+  # 3) block until checks resolve, then notify. watch_pr registers the tracking
+  #    marker (badge + --tracking) and prunes it on exit.
   watch_pr "$arepo" "$anum"
   exit 0
 fi
@@ -184,10 +193,10 @@ if [[ "${1:-}" == "--tracking" || "${1:-}" == "--watching" ]]; then
   trackdir="$HOME/.cache/prwatch/tracking"
   active=0
   for f in "$trackdir"/*.tsv(N); do
-    IFS=$'\t' read -r repo num title branch started pid <"$f"
+    IFS=$'\t' read -r repo num title url started pid <"$f"
     kill -0 "$pid" 2>/dev/null || { rm -f "$f"; continue }   # watcher gone → prune stale marker
     active=1
-    print -P "%F{yellow}👁%f ${repo}#${num} — ${title}  %F{8}(${branch})%f"
+    print -P "%F{yellow}👁%f ${repo}#${num} — ${title}  %F{8}${url}%f"
   done
   (( active )) || echo "no PRs are being watched"
   exit 0
