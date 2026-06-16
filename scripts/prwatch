@@ -28,6 +28,13 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PA
 repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
 (( ${#repos} )) || repos=(phil-loops/loops Loops-so/loops)
 
+# Clean up the tracking marker on real shell exit / ctrl-c. Must live at top
+# level: in zsh a `trap ... EXIT` set inside a function is function-local and
+# fires the instant that function returns — which would delete the marker
+# register_watch just wrote. _marker is a process-global set by register_watch.
+_marker=""
+trap '[[ -n "$_marker" ]] && rm -f "$_marker"; open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null' EXIT INT TERM
+
 # jq program: one open PR → "number<TAB>rollup<TAB>title<TAB>branch"
 # (single-quoted so no shell interpolation; statusCheckRollup states vary by
 #  check type — conclusion for completed, status/state while in flight.)
@@ -79,7 +86,8 @@ register_watch() {  # $1 key  $2 repo  $3 id  $4 title  $5 url — track a live 
     fi
   fi
   print -r -- "$2"$'\t'"$3"$'\t'"$4"$'\t'"$5"$'\t'"$(date +%s)"$'\t'"$$" > "$_marker"
-  trap 'rm -f "$_marker"; open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null' EXIT INT TERM
+  # cleanup trap lives at top level (set near the script header) — a function-local
+  # `trap ... EXIT` would fire on return and delete the marker we just wrote.
   open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null   # no-op until SwiftBar installed
 }
 
