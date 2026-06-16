@@ -45,6 +45,19 @@ if [[ "$1" == "--edit" ]]; then
   exit 0
 fi
 
+# --- ↗ open a todo's link. A blessing-viewer URL (127.0.0.1…?branch=X) is routed
+# through stack-review-serve so it reuses-or-starts the server; anything else opens raw.
+if [[ "$1" == "--open" ]]; then
+  url="$2"
+  if [[ "$url" == *"127.0.0.1"*"branch="* ]]; then
+    branch="${url##*branch=}"; branch="${branch%%&*}"
+    ( cd "$HOME/coding/loops" && nohup "$HOME/.dotfiles/scripts/stack-review-serve" "$branch" >/dev/null 2>&1 </dev/null & )
+  else
+    open "$url" 2>/dev/null
+  fi
+  exit 0
+fi
+
 # --- render ---
 # open items as "lineno:text" (lineno drives check-off; survives reorder between renders).
 # NB build the array only when grep matched — `("${(@f)$(empty)}")` yields a single
@@ -64,7 +77,16 @@ else
   for it in "${items[@]}"; do
     lineno="${it%%:*}"
     text="${${it#*:}#- \[ \] }"
-    echo "☐ ${text} | bash=\"$self\" param1=--done param2=${lineno} terminal=false refresh=true"
+    # markdown link "[label](url)" → clicking the item opens the link; plain text is inert.
+    if [[ "$text" == \[*\]\(*\) ]]; then
+      label="${text#\[}"; label="${label%%\]\(*}"
+      url="${text#*\](}"; url="${url%\)}"
+      echo "☐ ${label} | bash=\"$self\" param1=--open param2=\"${url}\" terminal=false"
+    else
+      echo "☐ ${text}"
+    fi
+    # the explicit check-off — its own action, so clicking the item never marks it done by accident
+    echo "-- ✓ mark done | bash=\"$self\" param1=--done param2=${lineno} terminal=false refresh=true"
   done
 fi
 echo "---"
