@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""claude-sessions — which Claude Code session is working on what, right now.
+
+Reads ~/.claude/session-presence/*.json, probes each session's OWNING PROCESS for
+liveness (pid + start-time), reaps dead records, and prints:
+
+  REPO         BRANCH                          STATE       PURPOSE / recent files
+
+Then a `dotfiles lanes` section cross-referencing the `own` claims with real
+liveness — so a lane whose holder has died reads as "holder dead · safe to take",
+which the 15-minute time-based staleness can't tell you.
+
+Liveness model: a session is alive iff its process exists (not a timeout). ACTIVE
+vs idle is a *display* label off the last tool-use heartbeat — idle never releases.
+"""
+import os, json, glob, time, subprocess
+
+DIR = os.path.expanduser("~/.claude/session-presence")
+DOTFILES = os.path.expanduser("~/.dotfiles")
+ACTIVE_WINDOW = 120   # seconds since last tool use → "active", else "idle Nm"
+
+DIM = "\033[2m"; BOLD = "\033[1m"; GRN = "\033[32m"; YEL = "\033[33m"; RED = "\033[31m"; RST = "\033[0m"
+
+
+def sh(args):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def pid_alive(pid, start):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    except Exception:
+        return False
+    return " ".join(sh(["ps", "-o", "lstart=", "-p", str(pid)]).split()) == start
+
+
+def ago(sec):
+    if sec < 90:
+        return "%ds" % sec
+    if sec < 5400:
+        return "%dm" % (sec // 60)
+    return "%dh" % (sec // 3600)
+
+
+def trunc(s, n):
+    s = s or ""
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def load_live():
+    """Return live session records; delete dead ones as we go."""
+    live = []
+    for f in sorted(glob.glob(os.path.join(DIR, "*.json"))):
+        try:
+            r = json.load(open(f))
+        except Exception:
+            continue
+        if pid_alive(r.get("pid"), r.get("start_time", "")):
+            live.append(r)
+        else:
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+    return live
+
+
+def main():
+    live = load_live()
+    now = int(time.time())
+
+    print()
+    if not live:
+        print("  %sno active Claude Code sessions%s" % (DIM, RST))
+    else:
+        live.sort(key=lambda r: (r.get("repo_name", ""), r.get("branch", "")))
+        print("  %s%-2s %-11s %-32s %-11s %s%s" % (BOLD, "", "REPO", "BRANCH", "STATE", "PURPOSE / recent", RST))
+        for r in live:
+            idle = now - r.get("last_active", now)
+            if idle < ACTIVE_WINDOW:
+                state = "%s● active%s" % (GRN, RST)
+                pad = 11 + len(GRN) + len(RST)
+            else:
+                state = "%s○ idle %s%s" % (YEL, ago(idle), RST)
+                pad = 11 + len(YEL) + len(RST)
+            detail = r.get("purpose") or ""
+            files = r.get("files") or []
+            if files:
+                detail = (trunc(detail, 28) + "  " if detail else "") + "%s%s%s" % (DIM, ", ".join(files[-3:]), RST)
+            else:
+                detail = trunc(detail, 60)
+            print("  %-2s %-11s %-32s %-*s %s" % (
+                "", trunc(r.get("repo_name", "?"), 11), trunc(r.get("branch", "?"), 32),
+                pad, state, detail))
+
+    # dotfiles `own` lanes, with REAL liveness of each holder
+    live_sids = {r.get("session_id") for r in live}
+    held = sh(["git", "-C", DOTFILES, "config", "--get-regexp", r"^own\..*\.held"])
+    lanes = []
+    for ln in held.splitlines():
+        try:
+            key, epoch = ln.split()
+            lane = key[len("own."):-len(".held")]
+            lanes.append((lane, int(epoch)))
+        except Exception:
+            pass
+    if lanes:
+        print("\n  %sdotfiles lanes%s" % (BOLD, RST))
+        for lane, epoch in sorted(lanes):
+            # liveness straight from the claim's stored process token (own stamps
+            # pid+start) — self-contained, no dependence on a presence record.
+            pid = sh(["git", "-C", DOTFILES, "config", "own.%s.pid" % lane])
+            start = sh(["git", "-C", DOTFILES, "config", "own.%s.start" % lane])
+            sid = sh(["git", "-C", DOTFILES, "config", "own.%s.session" % lane])
+            if pid:
+                if pid_alive(pid, start):
+                    tag = "%s● holder alive%s" % (GRN, RST)
+                else:
+                    tag = "%s✗ holder process gone · free to take%s" % (RED, RST)
+            elif sid:
+                tag = "%s? legacy claim · no pid (confirm before taking)%s" % (YEL, RST)
+            else:
+                tag = "%smanual claim · %s ago%s" % (DIM, ago(now - epoch), RST)
+            print("    %-9s %s" % (lane, tag))
+
+    print()
+
+
+main()

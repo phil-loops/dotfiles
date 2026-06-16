@@ -4,16 +4,46 @@
 #   own slice <name> <lane>...  hold several lanes for ONE vertical feature, tagged <name>
 #   own request <lane>          ask for <lane>: claim it if free/stale, else register a request
 #   own who <path>              which lane owns <path>, and whether it's actively held
-#   own list                    every lane: held-age · slice · pending request · its paths
+#   own list                    every lane: held-age · liveness · slice · pending request · its paths
 #   own release <lane|slice>    drop a lane's claim, or every lane tagged with a slice name
-# Claims live in the DOTFILES repo's gc(own.<lane>.held = epoch), NOT wherever
-# you invoke from — the lanes describe dotfiles, so the state must too. "active" = held
-# < 15 min ago. A slice records own.<lane>.slice = <name> so the OTHER session sees WHY.
+# Claims live in the DOTFILES repo's git config (own.<lane>.held = epoch), NOT wherever
+# you invoke from — the lanes describe dotfiles, so the state must too. A slice records
+# own.<lane>.slice = <name> so the OTHER session sees WHY.
+#
+# LIVENESS: a claim also records the holder's process (own.<lane>.pid/.start via
+# claude-session-pid). "active" = that process is ALIVE — not a timer — so a crashed/
+# closed session frees its lane the moment anyone looks, while a live-but-idle one
+# keeps it (never yank a claim from someone mid-task). Claims with no pid (a manual
+# claim outside a session) fall back to the 15-min "held recently" heuristic.
 emulate -L zsh; set -uo pipefail
 ROOT="${0:A:h:h}"; OWNERS="$ROOT/OWNERS"; NOW=$(date +%s); FRESH=900
+RESOLVER="${0:A:h}/claude-session-pid"
 gc(){ git -C "$ROOT" config "$@"; }   # always the dotfiles repo, regardless of cwd
 SID="${OWN_SESSION:-}"                 # caller's session id (the PreToolUse hook passes it); "" for manual CLI
-_setsession(){ [[ -n "$SID" ]] && gc "own.$1.session" "$SID" || gc --unset "own.$1.session" 2>/dev/null; }
+# stamp WHO holds a lane: session id + a liveness token (pid + process start-time).
+_setowner(){ local lane="$1" out pid start
+  [[ -n "$SID" ]] && gc "own.$lane.session" "$SID" || gc --unset "own.$lane.session" 2>/dev/null
+  if out=$("$RESOLVER" 2>/dev/null) && [[ -n "$out" ]]; then
+    pid="${out%%	*}"; start="${out#*	}"
+    gc "own.$lane.pid" "$pid"; gc "own.$lane.start" "$start"
+  else   # no claude ancestor (manual claim in a plain shell) → legacy age-based claim
+    gc --unset "own.$lane.pid" 2>/dev/null; gc --unset "own.$lane.start" 2>/dev/null
+  fi }
+_clearowner(){ local lane="$1"   # drop every owner field for a lane
+  local k; for k in held req slice session pid start; do gc --unset "own.$lane.$k" 2>/dev/null; done; }
+# liveness of a lane's holder process: 0=alive, 1=dead, 2=no pid recorded (legacy)
+_alive(){ local lane="$1" pid start cur
+  pid=$(gc "own.$lane.pid" 2>/dev/null) || return 2; [[ -n "$pid" ]] || return 2
+  kill -0 "$pid" 2>/dev/null || return 1
+  start=$(gc "own.$lane.start" 2>/dev/null)
+  cur=$(ps -o lstart= -p "$pid" 2>/dev/null | awk '{$1=$1};1')   # canonical single-spaced (matches claude-session-pid)
+  [[ "$cur" == "$start" ]] || return 1   # start-time mismatch → pid was reused → holder is gone
+  return 0 }
+# "actively held" = holder process alive, OR (no pid recorded AND held within FRESH)
+_active(){ local lane="$1" a; _alive "$lane"; local rc=$?
+  (( rc == 0 )) && return 0
+  (( rc == 2 )) && { a=$(_age "$lane") && (( a < FRESH )) && return 0; }
+  return 1 }
 _lane_for(){ local p="$1" best="" blen=0 line lane globs g
   while IFS= read -r line; do
     [[ "$line" == \#* || -z "${line// /}" ]] && continue
@@ -27,47 +57,54 @@ _lanes(){ grep -v '^#' "$OWNERS" | awk 'NF{print $1}'; }
 _is_lane(){ grep -q "^$1 " "$OWNERS"; }
 case "${1:-list}" in
   claim) [[ -n "${2:-}" ]] || { print "usage: own claim <lane>" >&2; exit 2; }
-    gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setsession "$2"
+    gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setowner "$2"
     print "you hold [$2] — edit these directly; patch anything else:"; _paths "$2" ;;
   slice) [[ $# -ge 3 ]] || { print "usage: own slice <name> <lane> [<lane>...]" >&2; exit 2; }
     local name="$2"; shift 2; local ln
     for ln in "$@"; do _is_lane "$ln" || { print "no such lane: $ln (see 'own list')" >&2; exit 2; }; done
     for ln in "$@"; do
-      gc "own.$ln.held" "$NOW"; gc "own.$ln.slice" "$name"; gc --unset "own.$ln.req" 2>/dev/null; _setsession "$ln"
+      gc "own.$ln.held" "$NOW"; gc "own.$ln.slice" "$name"; gc --unset "own.$ln.req" 2>/dev/null; _setowner "$ln"
     done
     print "holding [${(j:, :)@}] for slice:$name — one feature across these lanes."
     print "the other session's 'own list' now shows WHY they're held. edit these directly; patch anything else." ;;
   request) [[ -n "${2:-}" ]] || { print "usage: own request <lane>" >&2; exit 2; }
-    local a
-    if a=$(_age "$2") && (( a < FRESH )); then
-      gc "own.$2.req" "$NOW"
-      print "[$2] is actively held (${a}s ago) — request registered."
+    if _active "$2"; then
+      gc "own.$2.req" "$NOW"; local a=$(_age "$2")
+      print "[$2] is actively held (live holder${a:+, ${a}s ago}) — request registered."
       print "  the holder sees it on 'own list' and runs 'own release $2' to hand off; then 'own claim $2'."
     else
-      gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setsession "$2"
+      gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setowner "$2"
       print "[$2] was free/stale — claimed it. you hold it now:"; _paths "$2"
     fi ;;
   who) [[ -n "${2:-}" ]] || { print "usage: own who <path>" >&2; exit 2; }
     local l=$(_lane_for "$2"); [[ -z "$l" ]] && { print "$2 → (unowned)"; exit 0; }
-    local a sl=$(gc "own.$l.slice" 2>/dev/null)
-    if a=$(_age "$l"); then print "$2 → [$l]${sl:+ (slice:$sl)} · held ${a}s ago$([[ $a -lt $FRESH ]] && print ' ⚠ ACTIVE — use the patch protocol')"
-    else print "$2 → [$l] · unclaimed"; fi ;;
-  list) local line lane a rq r sl
+    local sl=$(gc "own.$l.slice" 2>/dev/null) a; a=$(_age "$l" 2>/dev/null) || a=""
+    _alive "$l"; local rc=$?
+    if (( rc == 0 )); then
+      print "$2 → [$l]${sl:+ (slice:$sl)} · ● held by a LIVE session${a:+ (${a}s ago)} ⚠ use the patch protocol"
+    elif (( rc == 1 )); then
+      print "$2 → [$l]${sl:+ (slice:$sl)} · ✗ holder process gone — free to take${a:+ (claim was ${a}s old)}"
+    elif [[ -n "$a" ]] && (( a < FRESH )); then
+      print "$2 → [$l]${sl:+ (slice:$sl)} · held ${a}s ago (no pid; legacy) ⚠ likely ACTIVE — use the patch protocol"
+    else
+      print "$2 → [$l] · unclaimed"
+    fi ;;
+  list) local line lane a rq r sl liv
     while IFS= read -r line; do [[ "$line" == \#* || -z "${line// /}" ]] && continue
-      lane="${line%% *}"; if a=$(_age "$lane"); then h="held ${a}s ago"; else h="—"; fi
+      lane="${line%% *}"; _alive "$lane"; local rc=$?
+      if a=$(_age "$lane" 2>/dev/null); then h="held ${a}s ago"; else h="—"; fi
+      liv=""; (( rc == 0 )) && liv=" · ● live"; (( rc == 1 )) && liv=" · ✗ dead (free to take)"
       r=""; sl=$(gc "own.$lane.slice" 2>/dev/null); [[ -n "$sl" ]] && r=" · slice:$sl"
-      if rq=$(_req "$lane") && (( rq < FRESH )); then r="$r ⟵ requested ${rq}s ago"; fi
-      printf '  %-9s %-15s %s%s\n' "$lane" "$h" "${line#* }" "$r"; done < "$OWNERS" ;;
+      if rq=$(_req "$lane" 2>/dev/null) && (( rq < FRESH )); then r="$r ⟵ requested ${rq}s ago"; fi
+      printf '  %-9s %-15s %s%s%s\n' "$lane" "$h" "${line#* }" "$liv" "$r"; done < "$OWNERS" ;;
   release) local arg="${2:-}"; [[ -n "$arg" ]] || { print "usage: own release <lane|slice>" >&2; exit 2; }
     if _is_lane "$arg"; then
-      gc --unset "own.$arg.held" 2>/dev/null; gc --unset "own.$arg.req" 2>/dev/null; gc --unset "own.$arg.slice" 2>/dev/null
-      print "released [$arg]"
+      _clearowner "$arg"; print "released [$arg]"
     else   # not a lane → treat as a slice name; release every lane tagged with it
       local any=0 ln
       for ln in $(_lanes); do
         if [[ "$(gc "own.$ln.slice" 2>/dev/null)" == "$arg" ]]; then
-          gc --unset "own.$ln.held" 2>/dev/null; gc --unset "own.$ln.req" 2>/dev/null; gc --unset "own.$ln.slice" 2>/dev/null
-          print "released [$ln] (slice:$arg)"; any=1
+          _clearowner "$ln"; print "released [$ln] (slice:$arg)"; any=1
         fi
       done
       [[ $any -eq 1 ]] || { print "no lane or slice named '$arg'" >&2; exit 1; }
@@ -76,13 +113,13 @@ case "${1:-list}" in
     case "$p" in "$ROOT"/*) ;; *) exit 0 ;; esac          # only dotfiles paths are laned
     local rel="${p#$ROOT/}" lane=$(_lane_for "${p#$ROOT/}")
     [[ -n "$lane" ]] || exit 0
-    local holder=$(gc "own.$lane.session" 2>/dev/null) age
-    if age=$(_age "$lane") && (( age < FRESH )) && [[ -n "$holder" && "$holder" != "$SID" ]]; then
-      local sl=$(gc "own.$lane.slice" 2>/dev/null)
-      print -u2 "⚠ own: [$lane]${sl:+ (slice:$sl)} is actively held by another session (${age}s ago)."
+    local holder=$(gc "own.$lane.session" 2>/dev/null)
+    if _active "$lane" && [[ -n "$holder" && "$holder" != "$SID" ]]; then
+      local sl=$(gc "own.$lane.slice" 2>/dev/null) a=$(_age "$lane" 2>/dev/null)
+      print -u2 "⚠ own: [$lane]${sl:+ (slice:$sl)} is held by another LIVE session${a:+ (${a}s ago)}."
       print -u2 "   editing $rel — prefer the patch protocol (worktree → git diff → git apply --3way). See ~/.dotfiles/OWNERS."
     fi
-    gc "own.$lane.held" "$NOW"; _setsession "$lane"       # auto-claim: register THIS session's activity
+    gc "own.$lane.held" "$NOW"; _setowner "$lane"        # auto-claim: register THIS session's activity
     exit 0 ;;
   *) print "usage: own {claim <lane>|slice <name> <lane>...|request <lane>|who <path>|list|release <lane|slice>}" >&2; exit 2 ;;
 esac

@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+"""claude-session-track — Claude Code SessionStart + PostToolUse hook.
+
+Maintains a per-session presence record at ~/.claude/session-presence/<sid>.json so
+any session (or the `claude-sessions` reader) can see who is working on what, across
+every repo — not just dotfiles lanes.
+
+Liveness is the OWNING PROCESS's existence (pid + start-time), NOT a timeout: a
+crashed/closed session's record is reaped on sight; an idle-but-alive one is kept.
+That's the distinction the time-based `own` lane staleness can't make.
+
+WARN-ONLY / NEVER BLOCKS: always exits 0 and swallows every error — a presence
+tracker must never break a tool call. Each session owns its own file, so concurrent
+sessions never contend on a write.
+"""
+import sys, os, json, subprocess, time, glob
+
+DIR = os.path.expanduser("~/.claude/session-presence")
+FILES_CAP = 8       # keep only the most-recent N touched files
+GIT_TTL = 20        # re-resolve repo/branch/purpose at most once per N seconds (keeps PostToolUse cheap)
+
+
+def sh(args):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def proc_start(pid):
+    # canonical single-spaced lstart (see claude-session-pid) so reuse-guard compares hold
+    return " ".join(sh(["ps", "-o", "lstart=", "-p", str(pid)]).split())
+
+
+def resolve_owner():
+    """(pid, start_time) of the claude session process, via the shared resolver —
+    the SAME token `own` stamps on a lane claim, so the two systems agree."""
+    helper = os.path.join(os.path.dirname(os.path.realpath(__file__)), "claude-session-pid")
+    out = sh([helper])
+    if out and "\t" in out:
+        p, s = out.split("\t", 1)
+        try:
+            return int(p), s
+        except ValueError:
+            pass
+    ppid = os.getppid()
+    return ppid, proc_start(ppid)   # fallback: at least something process-shaped
+
+
+def pid_alive(pid, start):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass   # alive, just not signalable by us
+    except Exception:
+        return False
+    return proc_start(pid) == start   # start-time match guards against pid reuse
+
+
+def gc_dead():
+    for f in glob.glob(os.path.join(DIR, "*.json")):
+        try:
+            r = json.load(open(f))
+            if not pid_alive(r.get("pid"), r.get("start_time", "")):
+                os.remove(f)
+        except Exception:
+            pass
+
+
+def main():
+    raw = sys.stdin.read()
+    d = json.loads(raw) if raw.strip() else {}
+    sid = d.get("session_id") or "unknown"
+    cwd = d.get("cwd") or os.getcwd()
+    event = d.get("hook_event_name", "")
+
+    os.makedirs(DIR, exist_ok=True)
+    path = os.path.join(DIR, sid + ".json")
+    rec = {}
+    if os.path.exists(path):
+        try:
+            rec = json.load(open(path))
+        except Exception:
+            rec = {}
+
+    now = int(time.time())
+    rec["session_id"] = sid
+    rec["cwd"] = cwd
+    rec["last_active"] = now
+    rec.setdefault("started_at", now)
+
+    # a SessionStart is a fresh process (incl. --resume) → (re)capture the liveness token
+    if event == "SessionStart" or not rec.get("pid"):
+        rec["pid"], rec["start_time"] = resolve_owner()
+
+    # repo/branch/purpose: throttled so PostToolUse doesn't shell out to git every call
+    if event == "SessionStart" or (now - rec.get("_git_at", 0) >= GIT_TTL):
+        repo = sh(["git", "-C", cwd, "rev-parse", "--show-toplevel"])
+        branch = sh(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"])
+        purpose = sh(["git", "-C", cwd, "config", "branch.%s.description" % branch]) if branch else ""
+        rec["repo"] = repo
+        rec["repo_name"] = os.path.basename(repo) if repo else "(no repo)"
+        rec["branch"] = branch
+        rec["purpose"] = purpose
+        rec["_git_at"] = now
+
+    if event == "PostToolUse":
+        rec["last_tool"] = d.get("tool_name", "")
+        fp = (d.get("tool_input") or {}).get("file_path", "")
+        repo = rec.get("repo", "")
+        if fp:
+            rel = fp[len(repo) + 1:] if repo and fp.startswith(repo) else fp
+            files = [x for x in rec.get("files", []) if x != rel]
+            files.append(rel)
+            rec["files"] = files[-FILES_CAP:]
+
+    with open(path, "w") as fh:
+        json.dump(rec, fh)
+
+    if event == "SessionStart":
+        gc_dead()   # reap records whose owning process is gone
+
+
+try:
+    main()
+except Exception:
+    pass
+sys.exit(0)
