@@ -43,7 +43,9 @@ const $ = (s,r=document)=>r.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;};
 const segPath = p => p.replace(/(.*\/)([^/]+)$/, '<span class="seg">$1</span>$2');
 
-function toast(html){const t=$('#toast'); t.innerHTML=html; t.classList.add('show'); clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),1900);}
+function toast(html,sticky){const t=$('#toast'); t.innerHTML=html; t.classList.add('show'); clearTimeout(t._t);
+  t.onclick=()=>{ t.classList.remove('show'); };   // click-to-dismiss (the only way out for a sticky toast)
+  if(!sticky) t._t=setTimeout(()=>t.classList.remove('show'),1900);}
 
 async function fetchModel(){
   const b = Q.get('branch') || (MODEL && (MODEL.project||MODEL.leaf)) || '';

@@ -368,6 +368,12 @@ async function renderPicker(){
     const tick=async()=>{ tries++;
       let s=null; try{ s=await (await fetch('/restack-status')).json(); }catch(e){}
       if(s && s.running){ if(tries<400) setTimeout(tick,2500); return; }   // still churning through the chain
+      if(s && s.paused){   // the chain HALTED on a conflict — make it loud + actionable (one tiny card badge is easy to miss)
+        const pj=s.project||'a forest', br=leaf(s.current||pj);
+        toast('\u26a0 restack-all halted on <b>'+esc(pj)+'</b>'+(s.reason?' \u2014 <i>'+esc(s.reason)+'</i>':'')
+          +'<br>open its card and click <b>\u26a0 resolve '+esc(br)+'</b> to hand it to Claude, or run '
+          +'<code>loops stack restack '+esc(pj)+' --continue</code>  \u00b7  click to dismiss', true);
+      }
       renderPicker();
     };
     setTimeout(tick,1500);
