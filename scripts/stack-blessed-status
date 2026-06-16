@@ -2,12 +2,17 @@
 # stack-blessed-status — classify each file in a stack link as clean/stale/unblessed
 # against the shared ledger ($GIT_DIR/stack-blessed.json), the same model nvim uses.
 #
-#   clean      current blob == blessed blob   (reviewed, unchanged)
-#   stale      blessed but blob changed        (re-review needed)
-#   unblessed  no bless recorded               (never reviewed)
+#   clean      contribution unchanged since blessed   (reviewed, unchanged)
+#   stale      blessed but contribution changed         (re-review needed)
+#   unblessed  no bless recorded                        (never reviewed)
 #
-# Per-file status is the source of truth and matches nvim exactly. The rolled-up
-# `status` is the honest viewer label: stale > unblessed(none) > partial > clean.
+# "Contribution" = patch-id of `git diff -U0 parent...branch -- file`, which is
+# rebase-stable: a file stays clean when the parent moves underneath it (an inherited
+# upstream edit no longer reads as a change). Files blessed before this (or by nvim)
+# only have a blob in the legacy ledger — those fall back to blob comparison.
+#
+# Per-file status is the rolled-up `status` viewer label: stale > unblessed(none) >
+# partial > clean.
 #
 # Usage: stack-blessed-status <branch> [--parent <p>] [--pretty]
 # Default output is JSON (for the html viewer / localhost server).
@@ -31,6 +36,8 @@ done
 git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 ledger="$git_dir/stack-blessed.json"
 [[ -f "$ledger" ]] || echo '{}' > "$ledger"
+contrib="$git_dir/stack-blessed-contrib.json"
+[[ -f "$contrib" ]] || echo '{}' > "$contrib"
 
 files_json='[]'; clean=0; stale=0; unblessed=0; total=0
 while IFS= read -r f; do
@@ -38,8 +45,14 @@ while IFS= read -r f; do
   total=$((total + 1))
   cur=$(git rev-parse "${branch}:${f}" 2>/dev/null || echo "")
   bl=$(jq -r --arg b "$branch" --arg f "$f" '.[$b][$f] // ""' "$ledger")
-  if   [[ -z "$bl" ]];        then st="unblessed"; unblessed=$((unblessed + 1))
-  elif [[ "$bl" == "$cur" ]]; then st="clean";     clean=$((clean + 1))
+  blc=$(jq -r --arg b "$branch" --arg f "$f" '.[$b][$f] // ""' "$contrib")
+  if [[ -n "$blc" ]]; then
+    # blessed with a contribution id → compare the rebase-stable patch-id
+    curc=$(git diff -U0 "${parent}...${branch}" -- "$f" 2>/dev/null | git patch-id --stable | awk '{print $1}')
+    if   [[ -n "$curc" && "$blc" == "$curc" ]]; then st="clean"; clean=$((clean + 1))
+    else                                             st="stale"; stale=$((stale + 1)); fi
+  elif [[ -z "$bl" ]];        then st="unblessed"; unblessed=$((unblessed + 1))
+  elif [[ "$bl" == "$cur" ]]; then st="clean";     clean=$((clean + 1))   # legacy/nvim: blob fallback
   else                             st="stale";     stale=$((stale + 1)); fi
   files_json=$(jq --arg f "$f" --arg s "$st" --arg bl "$bl" --arg cur "$cur" \
     '. + [{path:$f, status:$s, blessed_blob:$bl, current_blob:$cur}]' <<< "$files_json")
