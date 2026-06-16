@@ -207,10 +207,10 @@ branch_wt = next((p for p, b in wts if b == f"refs/heads/{branch}"), None)
 
 if branch_wt:
     _cwd = branch_wt   # all subsequent git() calls run here (read-only ref calls are cwd-agnostic)
-    if git(["status", "--porcelain"]).stdout.strip():
+    if git(["status", "--porcelain", "--untracked-files=no"]).stdout.strip():
         fail(f"working tree is dirty in worktree {branch_wt} — commit or stash first (squash needs a clean checkout)")
 else:
-    if git(["status", "--porcelain"]).stdout.strip():
+    if git(["status", "--porcelain", "--untracked-files=no"]).stdout.strip():
         fail("working tree is dirty — commit or stash first (squash needs a clean checkout)")
     co = git(["checkout", branch])
     if co.returncode != 0:
