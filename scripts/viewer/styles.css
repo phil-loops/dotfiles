@@ -43,6 +43,8 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .pk-fresh{font-size:11px;letter-spacing:.02em;padding:1px 8px;border-radius:999px;white-space:nowrap}
 .pk-fresh.behind{color:var(--ember);background:#d36a361f;border:1px solid var(--ember-soft);cursor:pointer;transition:.12s}   /* trails main → click to restack */
 .pk-fresh.behind:hover{background:#d36a3633;border-color:var(--ember);box-shadow:0 0 10px #d36a3633}
+.pk-fresh.behind.cosmetic{color:#9a9488;background:#9a948814;border-color:#9a948844}   /* trails main but no file overlap → restack is cosmetic, not urgent */
+.pk-fresh.behind.cosmetic:hover{background:#9a948822;border-color:#9a9488;box-shadow:none}
 .pk-fresh.behind.armed{color:var(--bg);background:var(--ember);border-color:var(--ember);font-weight:600}   /* primed: click again to fire */
 .pk-fresh.ok{color:#56d090;background:#2c9a591a;border:1px solid #2c9a5944}                      /* up to date */
 .pk-fresh.paused{color:#ffb38a;background:#bf4b2933;border:1px solid #ff9b7688;cursor:pointer;font-weight:600;animation:restackpaused 1.6s ease-in-out infinite}   /* restack parked on a conflict → needs a human */

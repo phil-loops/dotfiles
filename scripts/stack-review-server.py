@@ -9,7 +9,7 @@
 Args: <servedir> <scriptsdir> <repodir>. Prints the chosen 127.0.0.1 port, then serves.
 The page is same-origin with the server, so /model and /bless are plain relative fetches.
 """
-import sys, os, json, subprocess, threading, time, hashlib
+import sys, os, json, subprocess, threading, time, hashlib, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -40,6 +40,43 @@ def _main_worktree():
 
 
 MAIN_WT = _main_worktree()
+
+
+def _restack_worktree():
+    # Background restacks run here, NOT in the user's main checkout. stack-restack
+    # checks out each un-worktree'd member branch in its cwd to rebase it; pointing
+    # that at a dedicated detached worktree keeps the bouncing off MAIN_WT. Created
+    # once next to the main checkout, reused thereafter.
+    path = os.path.join(os.path.dirname(MAIN_WT) or ".", ".loops-restack-wt")
+    listing = run(["git", "worktree", "list", "--porcelain"]).stdout
+    if not any(os.path.realpath(line[len("worktree "):]) == os.path.realpath(path)
+               for line in listing.splitlines() if line.startswith("worktree ")):
+        run(["git", "worktree", "add", "--detach", path, "HEAD"])
+    return path
+
+
+def _restack_blocked():
+    # Don't start a restack while one is already running or parked on a conflict —
+    # detaching the scratch worktree under a live/paused rebase would corrupt it.
+    if subprocess.run(["pgrep", "-f", "stack-restack"], capture_output=True).returncode == 0:
+        return "a restack is already running"
+    gitdir = run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+    if gitdir and not os.path.isabs(gitdir):
+        gitdir = os.path.join(CWD, gitdir)
+    if gitdir and os.path.exists(os.path.join(gitdir, "stack-restack-state", "state")):
+        return "a restack is parked on a conflict — resolve it first"
+    return ""
+
+
+def _restack_cmd(project, wt, handoff=False):
+    # On clean success, detach the scratch worktree so it doesn't keep the last
+    # rebased branch checked out (which would lock that branch from other worktrees).
+    # On a conflict-pause stack-restack exits non-zero and `&&` short-circuits — we
+    # leave the parked rebase intact for /restack-resolve to resume.
+    parts = [shlex.quote(os.path.join(SCRIPTS, "stack-restack")), shlex.quote(project)]
+    if handoff:
+        parts.append("--handoff")
+    return " ".join(parts) + f" && git -C {shlex.quote(wt)} checkout --detach >/dev/null 2>&1"
 
 
 def _worktree_of(branch):   # path of the worktree currently holding `branch`, or "" if none
@@ -297,6 +334,23 @@ class H(BaseHTTPRequestHandler):
                     if n.isdigit():
                         behind = max(behind, int(n))
                 p["behind"] = behind
+                # "smart glow": is the trailing actually consequential? Only if origin/main's
+                # new commits touch files this project's branches also touch — otherwise the
+                # restack is a clean replay (pure SHA churn + re-bless). Computed only when behind.
+                overlap = False
+                if behind:
+                    for b in p.get("mergeable", []):
+                        mb = run(["git", "merge-base", b, "origin/main"]).stdout.strip()
+                        if not mb:
+                            continue
+                        main_files = set(run(["git", "diff", "--name-only", f"{mb}..origin/main"]).stdout.splitlines())
+                        if not main_files:
+                            continue
+                        branch_files = set(run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
+                        if main_files & branch_files:
+                            overlap = True
+                            break
+                p["overlap"] = overlap
             payload = json.dumps(projs)
             _pcache.clear()
             _pcache[pck] = payload
@@ -459,10 +513,15 @@ class H(BaseHTTPRequestHandler):
             if not project or project in ("whole forest", "--all"):
                 self._send(400, json.dumps({"ok": False, "err": "no registered project to restack"}))
                 return
+            blocked = _restack_blocked()
+            if blocked:
+                self._send(409, json.dumps({"ok": False, "err": blocked}))
+                return
+            wt = _restack_worktree()
+            run(["git", "-C", wt, "checkout", "--detach"])  # release any branch held from a prior run
             logpath = os.path.join(ROOT, "restack.log")
             with open(logpath, "ab") as lf:
-                subprocess.Popen([os.path.join(SCRIPTS, "stack-restack"), project],
-                                 cwd=CWD, stdout=lf, stderr=lf)
+                subprocess.Popen(["zsh", "-c", _restack_cmd(project, wt)], cwd=wt, stdout=lf, stderr=lf)
             self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
             return
         if self.path == "/restack-resolve":   # parked on a conflict → hand it to Claude (full-judgment), then resume
@@ -471,10 +530,11 @@ class H(BaseHTTPRequestHandler):
             if not project:
                 self._send(400, json.dumps({"ok": False, "err": "no project"}))
                 return
+            wt = _restack_worktree()
             logpath = os.path.join(ROOT, "restack.log")
             with open(logpath, "ab") as lf:
-                subprocess.Popen([os.path.join(SCRIPTS, "stack-restack"), project, "--handoff"],
-                                 cwd=CWD, stdout=lf, stderr=lf)
+                subprocess.Popen(["zsh", "-c", _restack_cmd(project, wt, handoff=True)],
+                                 cwd=wt, stdout=lf, stderr=lf)
             self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
             return
         self._send(404, "{}")
