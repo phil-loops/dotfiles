@@ -16,18 +16,31 @@ self="$0"
 file="$HOME/todo.md"
 [[ -f "$file" ]] || print -- "# todo — park one-liners to pick up later (no stack required)\n" > "$file"
 
-# --- ➕ park a task: dialog (clipboard-prefilled) → append a "- [ ]" line ---
+# --- ➕ park a task: dialog (clipboard-prefilled) → store a "- [ ]" line.
+# Rich: type "label https://url" or "[label](url)", or just paste a URL → it becomes
+# a clickable link; plain text stays plain.
 if [[ "$1" == "--add" ]]; then
   clip=$(pbpaste 2>/dev/null | head -1 | tr '\t\n' '  ')
   input=$(osascript \
     -e 'on run argv' \
-    -e 'set d to (display dialog "Park a task:" default answer (item 1 of argv) with title "todo" buttons {"Cancel", "Park"} default button "Park")' \
+    -e 'set d to (display dialog "Park a task (include a URL to make it clickable):" default answer (item 1 of argv) with title "todo" buttons {"Cancel", "Park"} default button "Park")' \
     -e 'return text returned of d' \
     -e 'end run' \
     "$clip" 2>/dev/null) || exit 0
   input="${input//$'\n'/ }"
-  [[ -n "${input// /}" ]] || exit 0
-  print -r -- "- [ ] $input" >> "$file"
+  input="${input#"${input%%[![:space:]]*}"}"; input="${input%"${input##*[![:space:]]}"}"   # trim
+  [[ -n "$input" ]] || exit 0
+  if [[ "$input" == "["*"]("*")" ]]; then
+    line="- [ ] $input"                                              # already a markdown link
+  elif [[ "$input" == *http://* || "$input" == *https://* ]]; then
+    url="http${input#*http}"; url="${url%%[[:space:]]*}"             # first URL token
+    label="${input%%http*}"; label="${label%"${label##*[![:space:]]}"}"   # text before it, rstripped
+    [[ -n "$label" ]] || label="$url"                               # bare URL → label = the URL
+    line="- [ ] [$label]($url)"
+  else
+    line="- [ ] $input"                                             # plain
+  fi
+  print -r -- "$line" >> "$file"
   open -g "swiftbar://refreshplugin?name=todo" 2>/dev/null
   exit 0
 fi
