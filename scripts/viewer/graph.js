@@ -37,6 +37,30 @@ function ensurePRs(){
     const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map');
   }).catch(()=>{});
 }
+// fork-staleness decorations: branch → /sync ({behind, syncable}). One /sync per
+// node (mirrors the branchbar), cached; re-renders when they land. A node whose
+// fork point lags origin/main shows a "↺N" badge so staleness reads on the MAP,
+// not just the selected branch's bar.
+let GSYNC = {}, _gsyncLoading = false;
+function ensureSync(){
+  if(_gsyncLoading || typeof LIVE==='undefined' || !LIVE) return;
+  _gsyncLoading = true;
+  Promise.all(Object.keys(graphModel().nodes).map(b =>
+    fetch('/sync?branch='+encodeURIComponent(b)).then(r=>r.ok?r.json():null)
+      .then(s=>{ if(s) GSYNC[b]=s; }).catch(()=>{})
+  )).then(()=>{ const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map'); });
+}
+function staleBadge(b,w){   // a corner badge if this branch's fork point lags origin/main
+  const s = GSYNC[b]; if(!s || !s.behind) return '';
+  const txt = '↺'+s.behind, pw = 12 + txt.length*7;
+  const note = s.behind+' behind origin/main'
+    + (s.syncable ? ' · syncable: rebase onto fresh origin/main (no force-push)'
+                  : (s.why ? ' · '+s.why : ' · needs a restack'));
+  // proud of the bottom-right corner (mirrors the PR badge at the top-right)
+  return `<g class="stalebadge${s.syncable?' syncable':''}" transform="translate(${w-pw/2+2},14)">
+      <title>${note}</title><rect class="sbp" x="${-pw/2}" y="-8" width="${pw}" height="16" rx="8"/>
+      <text x="0" y="4">${txt}</text></g>`;
+}
 function prBadge(b,w){   // a corner badge if this branch has an open PR
   const pr = GPRS[b]; if(!pr) return '';
   // colour = base correctness (into main / off-base / draft); glyph = review state
@@ -154,6 +178,7 @@ function unspotlight(){
 function hideTip(){ _tipBranch=null; const t=$('#ntip'); if(t) t.classList.remove('on'); unspotlight(); }
 function renderGraph(sel){
   ensurePRs();   // kick off the one-time PR fetch (re-renders the rail when it arrives)
+  ensureSync();  // kick off per-node fork-staleness (re-renders the map when it lands)
   const tgt=$(sel); if(!tgt) return;   // #dock is gone — only the fullscreen map (#map) renders here
   const gm=graphModel(), N=gm.nodes;
   if(!Object.keys(N).length){ tgt.innerHTML='<p style="color:var(--faint);margin:30px">nothing to graph</p>'; return; }
@@ -223,7 +248,7 @@ function renderGraph(sel){
     const mbar = mergeable ? `<rect class="mbar" x="-5" y="-13" width="3.5" height="26" rx="1.75"><title>legal to merge into main — no upstream blockers</title></rect>` : '';
     G+=`<g class="gn ${done?'clean done':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
       ${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
-      <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}</g>`; });
+      <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}${staleBadge(b,w)}</g>`; });
   // legend: name the two edge kinds so the visual language decodes at a glance —
   // solid rail = logical (builds on parent), phantom = planned (merge-after fan-in).
   // swatches reuse the real .ge classes so they never drift from the actual edges.
