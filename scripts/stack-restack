@@ -39,6 +39,7 @@ set -u
 
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 STATE_DIR="$(git rev-parse --git-common-dir)/stack-restack-state"
+SELF_DIR="${0:A:h}"   # script dir, captured at top level ($0 inside a zsh function is the function name, not the script)
 
 usage() {
   cat >&2 <<EOF
@@ -77,9 +78,20 @@ done
 topo_order() {
   local project="$1"
   local -a members
+  # Members = the whole connected forest, EXPANDED from the project's seeds along the
+  # parent/requires graph — the SAME resolution the viewer (stack-forest) uses, so
+  # "view the forest" and "restack the forest" can never disagree. A seed list of just
+  # the root(s) therefore restacks everything; no need to keep it manually complete.
+  local sf="${SELF_DIR}/stack-forest"
   while IFS= read -r m; do
     [[ -n "$m" ]] && members+=("$m")
-  done < <(git config --get-all "stack-project.${project}.branch" 2>/dev/null)
+  done < <("$sf" "$project" 2>/dev/null | jq -r '.nodes // {} | keys[]' 2>/dev/null)
+  # Fallback: if stack-forest is unavailable/errored, use the literal seed list.
+  if (( ${#members[@]} == 0 )); then
+    while IFS= read -r m; do
+      [[ -n "$m" ]] && members+=("$m")
+    done < <(git config --get-all "stack-project.${project}.branch" 2>/dev/null)
+  fi
 
   local -A is_member
   for m in "${members[@]}"; do is_member[$m]=1; done
@@ -479,6 +491,22 @@ if (( ${#TO_DROP[@]} > 0 )); then
     for m in "${remaining[@]}"; do
       git config --add "stack-project.${PROJECT}.branch" "$m"
     done
+  done
+
+  # Safety: a dropped parent's children were rewired up to its parent (often main),
+  # becoming new roots. If the seed list was minimal (didn't list them), seed any
+  # surviving root that isn't seeded yet — so next time expansion still reaches the
+  # whole forest instead of an empty/partial project.
+  typeset -A _seeded _dropped
+  while IFS= read -r m; do [[ -n "$m" ]] && _seeded[$m]=1; done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
+  for b in "${TO_DROP[@]}"; do _dropped[$b]=1; done
+  for b in "${COMPLETED[@]}"; do
+    [[ "$b" == "$MAIN_BRANCH" || -n "${_dropped[$b]:-}" || -n "${_seeded[$b]:-}" ]] && continue
+    pp=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+    if [[ "$pp" == "$MAIN_BRANCH" ]]; then
+      git config --add "stack-project.${PROJECT}.branch" "$b"
+      echo "  re-seed new root: $b"
+    fi
   done
 fi
 
