@@ -540,46 +540,96 @@ for b in "${COMPLETED[@]}"; do
   fi
 done
 
-if (( ${#TO_DROP[@]} > 0 )); then
-  echo "Branches to drop (empty or merged):"
-  for b in "${TO_DROP[@]}"; do echo "  - $b"; done
+# Project members whose branch ref no longer exists — e.g. squash-merged on the
+# remote then branch-deleted — are filtered out of the rebase walk above (no ref
+# to rebase), so they never enter TO_DROP. Detect them straight from the project
+# listing so their stale membership + inbound child links get cleaned up too.
+typeset -a ORPHANS
+ORPHANS=()
+while IFS= read -r m; do
+  [[ -z "$m" ]] && continue
+  git rev-parse --verify --quiet "refs/heads/${m}" >/dev/null 2>&1 || ORPHANS+=("$m")
+done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
 
-  # Rewire children of dropped branches to their dropped parent's parent.
-  for dropped in "${TO_DROP[@]}"; do
-    dropped_parent=$(git config "stack-branch.${dropped}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
-    while IFS=' ' read -r key val; do
-      [[ -z "$key" ]] && continue
-      child="${key#stack-branch.}"
-      child="${child%.parent}"
-      if [[ "$val" == "$dropped" ]]; then
-        echo "  rewire: $child parent → $dropped_parent"
-        git config "stack-branch.${child}.parent" "$dropped_parent"
-      fi
-    done < <(git config --get-regexp '^stack-branch\..*\.parent$')
-  done
+if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
+  # Orphaned members: rewire any inbound children up to the orphan's nearest live
+  # ancestor (or main, never onto another orphan), then strip the orphan's own
+  # parent metadata and project membership.
+  if (( ${#ORPHANS[@]} > 0 )); then
+    echo "Orphaned members (branch ref gone — cleaning stale config):"
+    for b in "${ORPHANS[@]}"; do echo "  - $b"; done
+    for orphan in "${ORPHANS[@]}"; do
+      op=$(git config "stack-branch.${orphan}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      [[ -z "$op" ]] && op="$MAIN_BRANCH"
+      while [[ "$op" != "$MAIN_BRANCH" ]] \
+            && ! git rev-parse --verify --quiet "refs/heads/${op}" >/dev/null 2>&1; do
+        op=$(git config "stack-branch.${op}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+        [[ -z "$op" ]] && op="$MAIN_BRANCH"
+      done
+      while IFS=' ' read -r key val; do
+        [[ -z "$key" ]] && continue
+        child="${key#stack-branch.}"
+        child="${child%.parent}"
+        if [[ "$val" == "$orphan" ]]; then
+          echo "  rewire: $child parent → $op"
+          git config "stack-branch.${child}.parent" "$op"
+        fi
+      done < <(git config --get-regexp '^stack-branch\..*\.parent$')
+      git config --unset "stack-branch.${orphan}.parent" 2>/dev/null || true
 
-  # Delete the dropped branches + their stack-branch.<x>.parent entries +
-  # remove from project listing.
-  for b in "${TO_DROP[@]}"; do
-    wt=$(worktree_of "$b")
-    if [[ -n "$wt" ]]; then
-      echo "  (warning: $b is checked out in $wt — leaving the worktree alone, but the branch ref will be deleted)" >&2
-      git -C "$wt" checkout --detach HEAD >/dev/null 2>&1 || true
-    fi
-    git branch -D "$b" >/dev/null 2>&1 || echo "    (couldn't delete $b)" >&2
-    git config --unset "stack-branch.${b}.parent" 2>/dev/null || true
-
-    # Remove from project listing.
-    typeset -a remaining
-    remaining=()
-    while IFS= read -r m; do
-      [[ -n "$m" ]] && [[ "$m" != "$b" ]] && remaining+=("$m")
-    done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
-    git config --unset-all "stack-project.${PROJECT}.branch" 2>/dev/null || true
-    for m in "${remaining[@]}"; do
-      git config --add "stack-project.${PROJECT}.branch" "$m"
+      typeset -a remaining
+      remaining=()
+      while IFS= read -r m; do
+        [[ -n "$m" ]] && [[ "$m" != "$orphan" ]] && remaining+=("$m")
+      done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
+      git config --unset-all "stack-project.${PROJECT}.branch" 2>/dev/null || true
+      for m in "${remaining[@]}"; do
+        git config --add "stack-project.${PROJECT}.branch" "$m"
+      done
     done
-  done
+  fi
+
+  if (( ${#TO_DROP[@]} > 0 )); then
+    echo "Branches to drop (empty or merged):"
+    for b in "${TO_DROP[@]}"; do echo "  - $b"; done
+
+    # Rewire children of dropped branches to their dropped parent's parent.
+    for dropped in "${TO_DROP[@]}"; do
+      dropped_parent=$(git config "stack-branch.${dropped}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      while IFS=' ' read -r key val; do
+        [[ -z "$key" ]] && continue
+        child="${key#stack-branch.}"
+        child="${child%.parent}"
+        if [[ "$val" == "$dropped" ]]; then
+          echo "  rewire: $child parent → $dropped_parent"
+          git config "stack-branch.${child}.parent" "$dropped_parent"
+        fi
+      done < <(git config --get-regexp '^stack-branch\..*\.parent$')
+    done
+
+    # Delete the dropped branches + their stack-branch.<x>.parent entries +
+    # remove from project listing.
+    for b in "${TO_DROP[@]}"; do
+      wt=$(worktree_of "$b")
+      if [[ -n "$wt" ]]; then
+        echo "  (warning: $b is checked out in $wt — leaving the worktree alone, but the branch ref will be deleted)" >&2
+        git -C "$wt" checkout --detach HEAD >/dev/null 2>&1 || true
+      fi
+      git branch -D "$b" >/dev/null 2>&1 || echo "    (couldn't delete $b)" >&2
+      git config --unset "stack-branch.${b}.parent" 2>/dev/null || true
+
+      # Remove from project listing.
+      typeset -a remaining
+      remaining=()
+      while IFS= read -r m; do
+        [[ -n "$m" ]] && [[ "$m" != "$b" ]] && remaining+=("$m")
+      done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
+      git config --unset-all "stack-project.${PROJECT}.branch" 2>/dev/null || true
+      for m in "${remaining[@]}"; do
+        git config --add "stack-project.${PROJECT}.branch" "$m"
+      done
+    done
+  fi
 
   # Safety: a dropped parent's children were rewired up to its parent (often main),
   # becoming new roots. If the seed list was minimal (didn't list them), seed any
@@ -588,6 +638,7 @@ if (( ${#TO_DROP[@]} > 0 )); then
   typeset -A _seeded _dropped
   while IFS= read -r m; do [[ -n "$m" ]] && _seeded[$m]=1; done < <(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)
   for b in "${TO_DROP[@]}"; do _dropped[$b]=1; done
+  for b in "${ORPHANS[@]}"; do _dropped[$b]=1; done
   for b in "${COMPLETED[@]}"; do
     [[ "$b" == "$MAIN_BRANCH" || -n "${_dropped[$b]:-}" || -n "${_seeded[$b]:-}" ]] && continue
     pp=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
@@ -607,4 +658,7 @@ echo "✓ Restack of ${PROJECT} complete."
 echo "  rebased: ${#COMPLETED[@]} branches"
 if (( ${#TO_DROP[@]} > 0 )); then
   echo "  dropped: ${#TO_DROP[@]} branches"
+fi
+if (( ${#ORPHANS[@]} > 0 )); then
+  echo "  cleaned orphaned members: ${#ORPHANS[@]}"
 fi
