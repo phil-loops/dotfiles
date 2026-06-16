@@ -440,3 +440,21 @@ tr.linehover .d2h-code-side-linenumber{color:var(--gold);font-weight:600}
 .freshness.stale{color:var(--ember)} .freshness.stale .fdot{background:var(--ember);box-shadow:none}
 .freshness.pulse .fdot{animation:fpulse .6s ease}
 @keyframes fpulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.9);opacity:.45}100%{transform:scale(1)}}
+
+/* homepage "your open PRs" — grouped by local project; click a row to hop to its node */
+.pk-myprs{display:flex;flex-direction:column;gap:8px;text-align:left;margin:8px 0 26px}
+.pk-myprs:empty{display:none}
+.pk-myprs-h{color:var(--faint);letter-spacing:.18em;text-transform:uppercase;font-size:11px;margin-bottom:2px}
+.pk-myprs-g{display:flex;flex-direction:column;gap:5px}
+.pk-myprs-proj{color:var(--gold);font-size:11px;letter-spacing:.04em;margin:6px 2px 1px}
+.pk-myprs-noproj{color:var(--faint);font-style:italic;letter-spacing:0;text-transform:none}
+.pk-prrow{display:flex;align-items:center;gap:9px;width:100%;font:inherit;text-align:left;
+  padding:9px 13px;border:1px solid var(--line);border-radius:10px;background:var(--panel);
+  color:var(--ink);cursor:pointer;transition:border-color .12s,background .12s,transform .12s}
+.pk-prrow:hover{border-color:var(--gold);background:var(--raised);box-shadow:0 0 18px #e0ad4e22;transform:translateY(-1px)}
+.prr-num{color:var(--gold);font-size:12px;font-variant-numeric:tabular-nums;flex:none}
+.prr-title{font-size:13px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.prr-draft{flex:none;color:var(--faint);font-size:10px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+.prr-rv{flex:none;font-size:12px}
+.prr-rv.ok{color:#56d090} .prr-rv.chg{color:var(--ember)} .prr-rv.req{color:var(--faint)}

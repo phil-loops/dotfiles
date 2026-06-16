@@ -1,0 +1,91 @@
+#!/bin/zsh
+# my-prs [--refresh] — MY open PRs (gh --author @me) across the fork + team repo,
+# each annotated with its local `stack-branch.<branch>.project` tag, so the viewer
+# homepage can list them and hop straight into the matching forest node.
+#
+# Output: JSON array, newest PR first:
+#   [{ num, title, url, branch, project|null, draft, review }]
+#   review = GitHub reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | ""
+#
+# SWR-cached exactly like stack-prs: a present cache is served instantly (even when
+# stale) and a stale read fires one detached background `gh` refresh for next time —
+# so the homepage is always an instant local read, never blocks on GitHub. Cold start
+# blocks once to populate. MY_PRS_TTL=0 forces a synchronous fresh fetch.
+
+set -u
+
+gitdir=$(git rev-parse --git-common-dir 2>/dev/null)
+CACHE="${gitdir:-${TMPDIR:-/tmp}}/my-prs.json"
+TTL=${MY_PRS_TTL:-300}
+LOCK="$CACHE.refresh.lock"
+LOCK_TTL=120   # steal a refresh lock left behind by a crashed/killed fetch
+
+[[ "${1:-}" == "--refresh" ]] && rm -f "$CACHE"
+
+_now() { date +%s; }
+_age() { echo $(( $(_now) - $(stat -f %m "$1" 2>/dev/null || echo 0) )); }
+
+# Hit GitHub and atomically rewrite $CACHE. Returns 1 on a failed fetch
+# (offline/rate-limited) WITHOUT touching the existing cache.
+_refresh() {
+  local repo rows merged ok projmap
+  # Default to the team repo (origin) only — these are the PRs heading into
+  # origin/main. Override with `git config my-prs.repos "a/b c/d"` to include the fork.
+  local -a repos
+  repos=(${=$(git config my-prs.repos 2>/dev/null || true)})
+  (( ${#repos} )) || repos=(Loops-so/loops)
+
+  # branch → project, from the per-branch .project tags (greedy capture: branch may
+  # contain dots/slashes; the key is always `stack-branch.<branch>.project`).
+  projmap=$(git config --get-regexp '^stack-branch\..*\.project$' 2>/dev/null | jq -R -s '
+    [ splits("\n") | select(length > 0)
+      | capture("^stack-branch\\.(?<b>.*)\\.project (?<p>.*)$") | {(.b): .p} ] | add // {}')
+
+  merged='[]'; ok=1
+  for repo in $repos; do
+    rows=$(gh pr list --repo "$repo" --author "@me" --state open -L 200 \
+             --json number,title,url,headRefName,isDraft,reviewDecision 2>/dev/null) || { ok=0; break; }
+    merged=$(jq -n --argjson acc "$merged" --argjson rows "$rows" --argjson pm "$projmap" '
+      $acc + ( $rows | map({
+        num:     .number,
+        title:   .title,
+        url:     .url,
+        branch:  .headRefName,
+        project: ($pm[.headRefName] // null),
+        draft:   .isDraft,
+        review:  (.reviewDecision // "")
+      }) )')
+  done
+  (( ok )) || return 1
+  # a PR can surface from more than one repo scan → de-dup by url; newest first.
+  merged=$(jq 'unique_by(.url) | sort_by(.num) | reverse' <<<"$merged")
+  printf '%s' "$merged" > "$CACHE.tmp.$$" && mv "$CACHE.tmp.$$" "$CACHE"
+}
+
+_refresh_bg() {
+  if [[ -d "$LOCK" ]] && (( $(_age "$LOCK") > LOCK_TTL )); then rmdir "$LOCK" 2>/dev/null || true; fi
+  mkdir "$LOCK" 2>/dev/null || return 0   # another refresh already running → skip
+  ( _refresh || true; rmdir "$LOCK" 2>/dev/null || true ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
+# TTL=0 → caller wants synchronous fresh data (bypass SWR).
+if (( TTL == 0 )); then
+  if _refresh; then cat "$CACHE"; exit 0; fi
+  [[ -f "$CACHE" ]] && { cat "$CACHE"; exit 0; }
+  echo '[]'; exit 0
+fi
+
+# Fresh cache → serve, no network.
+if [[ -f "$CACHE" ]] && (( $(_age "$CACHE") < TTL )); then
+  cat "$CACHE"; exit 0
+fi
+
+# Stale-but-present → serve stale NOW, revalidate in the background.
+if [[ -f "$CACHE" ]]; then
+  cat "$CACHE"; _refresh_bg; exit 0
+fi
+
+# Cold start → populate once, blocking.
+if _refresh; then cat "$CACHE"; exit 0; fi
+echo '[]'; exit 0
