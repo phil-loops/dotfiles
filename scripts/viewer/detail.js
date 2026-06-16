@@ -263,6 +263,7 @@ addEventListener('keydown',e=>{
 // project picker — the landing screen. Lists configured projects as buttons
 // (like the terminal fzf); clicking one opens ?branch=<project name>.
 async function renderPicker(){
+  const stale=document.getElementById('picker'); if(stale) stale.remove();   // idempotent: re-invokable to refresh in place
   let projs=[]; try{ projs=await (await fetch('/projects')).json(); }catch(e){}
   const ov=el('div'); ov.id='picker';
   ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><p class="pk-sub">choose a project</p>`
@@ -274,6 +275,52 @@ async function renderPicker(){
   const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   const leaf=s=>esc(String(s).split('/').pop());
   const PK=renderPicker._p||(renderPicker._p={});   // branch → thesis cache, survives re-render
+  // The picker is a static landing screen (no SSE here), so a handed-off restack
+  // would otherwise leave the badge stuck on "⤳ restacking…" forever. stack-restack
+  // parks on conflicts it can't auto-resolve (state at <git-dir>/stack-restack-state);
+  // flip the badge to a "needs resolve" prompt so the escalation is visible.
+  const markPaused=(fb, project, br, label, withToast)=>{
+    const PAUSED='⚠ resolve '+leaf(br);
+    fb.classList.remove('armed'); fb.classList.add('paused'); fb.dataset.paused='1';
+    fb.textContent=PAUSED;
+    fb.title='restack paused on a conflict in '+br+' — click to hand it to Claude (resolves with judgment, then resumes the cascade). Manual: `loops stack restack '+project+' --continue`. See restack.log.';
+    // two-click arm: first click asks, second (within 3s) hands the conflict to Claude.
+    fb.onclick=async e=>{ e.stopPropagation();
+      if(fb.dataset.armed!=='1'){ fb.dataset.armed='1'; fb.classList.add('armed'); fb.textContent='⤳ hand '+leaf(br)+' to Claude?';
+        fb._dt=setTimeout(()=>{ fb.dataset.armed=''; fb.classList.remove('armed'); fb.textContent=PAUSED; },3000); return; }
+      clearTimeout(fb._dt); fb.dataset.armed=''; fb.dataset.paused=''; fb.classList.remove('armed','paused'); fb.textContent='⤳ Claude resolving…';
+      try{ const r=await (await fetch('/restack-resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project})})).json();
+        if(r.ok){ toast('⤳ handed conflict in <b>'+esc(leaf(br))+'</b> to Claude — resolving + resuming the cascade. Tailing restack.log.'); watchRestack(fb, project, label); }
+        else { toast('⤳ handoff failed: '+esc(r.err||'?')); markPaused(fb, project, br, label, false); }
+      }catch(err){ toast('⤳ handoff failed — server unreachable'); markPaused(fb, project, br, label, false); }
+    };
+    if(withToast) toast('⚠ restack of <b>'+esc(project)+'</b> hit a conflict on <b>'+esc(leaf(br))+'</b> — click the badge to hand it to Claude. See restack.log.');
+  };
+  // one-shot: a restack may already be parked when the picker renders (e.g. a reload
+  // mid-conflict) — reflect that without waiting for a click.
+  const checkPaused=async(fb, project, label)=>{
+    let s=null; try{ s=await (await fetch('/restack-status?project='+encodeURIComponent(project))).json(); }catch(e){}
+    if(s && s.paused) markPaused(fb, project, s.current||project, label, false);
+  };
+  // after a handoff: poll until it finishes (clear in place) or parks (flag it).
+  // NOTE: while a handoff is actively resolving, the state file still exists
+  // (paused) AND the process is alive (running) — so check `running` FIRST, else
+  // we'd re-flag "needs resolve" mid-resolution. running=false + paused=true is
+  // the real "parked, needs a human" state.
+  const watchRestack=(fb, project, label)=>{
+    let tries=0, sawRunning=false;
+    const tick=async()=>{
+      tries++;
+      let s=null; try{ s=await (await fetch('/restack-status?project='+encodeURIComponent(project))).json(); }catch(e){}
+      if(s && s.running){ sawRunning=true; if(tries<150) setTimeout(tick,2000); return; }   // still working (cap ~5min)
+      if(s && s.paused){
+        if(!sawRunning && tries<3){ setTimeout(tick,1500); return; }   // grace: the job may still be spawning
+        markPaused(fb, project, s.current||project, label, true); return;   // parked → needs a human
+      }
+      renderPicker();   // not running, not paused → finished/stopped: rebuild so freshness re-reads
+    };
+    setTimeout(tick, 1500);
+  };
   projs.forEach(p=>{ const b=el('button','pk-btn');
     const ready=p.ready||[], cands=p.candidates||[];
     // hover shows the branch purpose via a styled tooltip (below); click opens the node.
@@ -301,12 +348,14 @@ async function renderPicker(){
     // (background `stack-restack <project>`, logs to restack.log).
     const fb = b.querySelector('.pk-fresh.behind');
     if(fb){ const label='⟳ '+beh+' behind';
+      checkPaused(fb, p.name, label);   // a restack may already be parked on a conflict — surface it on render
       fb.onclick=async e=>{ e.stopPropagation();
+        if(fb.dataset.paused==='1') return;   // already parked → onclick was reset by markPaused; guard the arm path
         if(fb.dataset.armed!=='1'){ fb.dataset.armed='1'; fb.classList.add('armed'); fb.textContent='↻ restack '+leaf(p.name)+'?';
           fb._dt=setTimeout(()=>{ fb.dataset.armed=''; fb.classList.remove('armed'); fb.textContent=label; },3000); return; }
         clearTimeout(fb._dt); fb.dataset.armed=''; fb.classList.remove('armed'); fb.textContent='handing off…';
         try{ const r=await (await fetch('/restack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:p.name})})).json();
-          if(r.ok){ toast('⤳ restacking <b>'+esc(p.name)+'</b> onto origin/main — tailing restack.log'); fb.textContent='⤳ restacking…'; }
+          if(r.ok){ toast('⤳ restacking <b>'+esc(p.name)+'</b> onto origin/main — tailing restack.log'); fb.textContent='⤳ restacking…'; watchRestack(fb, p.name, label); }
           else { toast('⤳ restack not started: '+esc(r.err||'?')); fb.textContent=label; }
         }catch(err){ toast('⤳ restack failed — server unreachable'); fb.textContent=label; }
       };

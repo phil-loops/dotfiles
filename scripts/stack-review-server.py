@@ -172,6 +172,26 @@ class H(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"sig": model_sig()}))
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
             self._send(200, json.dumps({"branch": run(["git", "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
+        elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
+            # stack-restack writes <git-common-dir>/stack-restack-state/state on a conflict
+            # it can't auto-resolve (and removes it on success/abort). Its presence == paused.
+            gitdir = run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+            if gitdir and not os.path.isabs(gitdir):
+                gitdir = os.path.join(CWD, gitdir)
+            sd = os.path.join(gitdir, "stack-restack-state", "state") if gitdir else ""
+            want = parse_qs(u.query).get("project", [""])[0]
+            paused, proj, cur = False, "", ""
+            if sd and os.path.exists(sd):
+                with open(sd) as fh:
+                    kv = dict(l.rstrip("\n").split("=", 1) for l in fh
+                              if "=" in l and not l.startswith("SNAP"))
+                proj, cur = kv.get("PROJECT", ""), kv.get("CURRENT", "")
+                paused = (not want) or proj == want
+            # still churning? (parent stack-restack stays alive across the whole topo walk;
+            # it exits when it escalates, so running==False + paused==True means "needs you")
+            running = subprocess.run(["pgrep", "-f", "stack-restack"],
+                                     capture_output=True, text=True).returncode == 0
+            self._send(200, json.dumps({"paused": paused, "project": proj, "current": cur, "running": running}))
         elif u.path == "/sync":  # fork-staleness vs origin/main: how far behind, and is it safe to auto-rebase?
             self._send(200, json.dumps(_sync_state(parse_qs(u.query).get("branch", [""])[0])))
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
@@ -378,6 +398,18 @@ class H(BaseHTTPRequestHandler):
             logpath = os.path.join(ROOT, "restack.log")
             with open(logpath, "ab") as lf:
                 subprocess.Popen([os.path.join(SCRIPTS, "stack-restack"), project],
+                                 cwd=CWD, stdout=lf, stderr=lf)
+            self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
+            return
+        if self.path == "/restack-resolve":   # parked on a conflict → hand it to Claude (full-judgment), then resume
+            d = json.loads(raw or "{}")
+            project = d.get("project", "")
+            if not project:
+                self._send(400, json.dumps({"ok": False, "err": "no project"}))
+                return
+            logpath = os.path.join(ROOT, "restack.log")
+            with open(logpath, "ab") as lf:
+                subprocess.Popen([os.path.join(SCRIPTS, "stack-restack"), project, "--handoff"],
                                  cwd=CWD, stdout=lf, stderr=lf)
             self._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
             return

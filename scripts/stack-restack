@@ -45,6 +45,7 @@ usage() {
   cat >&2 <<EOF
 Usage: loops stack restack <project>
        loops stack restack <project> --continue
+       loops stack restack <project> --handoff   # AI-resolve the parked conflict (human-authorized), then resume
        loops stack restack <project> --abort
        loops stack restack <project> --plan
        loops stack restack <project> --no-claude
@@ -58,9 +59,15 @@ MODE="start"
 # --no-claude reverts to the old behavior (pause + manual resolve + --continue).
 USE_CLAUDE=1
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+# Resolution bar for the headless resolver. "conservative" (default) only auto-resolves
+# mechanically-certain conflicts and escalates hand-written logic to a human. "full" is
+# the human-authorized handoff (--handoff): resolve with judgment, still escalate when
+# intent is genuinely ambiguous.
+RESOLVE_BAR="${RESOLVE_BAR:-conservative}"
 for arg in "$@"; do
   case "$arg" in
     --continue) MODE="continue" ;;
+    --handoff|--resolve) MODE="handoff" ;;   # AI-resolve the currently-paused conflict (human-authorized), then resume
     --abort) MODE="abort" ;;
     --plan) MODE="plan" ;;
     --no-claude|--manual) USE_CLAUDE=0 ;;
@@ -179,10 +186,52 @@ claude_attempt_resolve() {
   [[ -z "$conflicted" ]] && return 0  # nothing unmerged; caller can --continue
 
   echo "    conflicts: $(echo "$conflicted" | tr '\n' ' ')" >&2
-  echo "    → claude (conservative auto-resolve)…" >&2
 
-  local prompt
-  prompt=$(cat <<EOF
+  local prompt budget
+  if [[ "$RESOLVE_BAR" == "full" ]]; then
+    echo "    → claude (full-judgment handoff)…" >&2
+    budget="${STACK_RESTACK_HANDOFF_BUDGET_USD:-5}"
+    prompt=$(cat <<EOF
+You are resolving a git rebase conflict during a stack restack. A human has
+explicitly handed this conflict to you to resolve with judgment — the
+conservative auto-pass already escalated it, and the human clicked "hand off to
+Claude". So resolve it properly; do not punt it back unless intent is genuinely
+unrecoverable from the code + history.
+Branch being rebased: ${branch}
+Rebasing onto: ${parent}
+
+The rebase is PAUSED with conflicts. Unmerged files:
+${conflicted}
+
+How to resolve well:
+  - Understand BOTH sides with git: \`git diff\`, \`git log\`, \`git show <ref>:<path>\`,
+    and read the surrounding code. Work out what each side intended.
+  - Common case — squash-merge redundancy: the conflicting commit already landed
+    on the new base (often as a squash-merge), possibly with small wording/impl
+    differences. Take the new base's version; the branch commit is redundant.
+  - Where the branch adds genuinely NEW behavior on top of the base's version,
+    combine them so BOTH intents are preserved — the base's landed form plus the
+    branch's new contribution. Never drop the branch's unique work.
+  - Generated files / lockfiles (*.gen, .gen/*, package-lock.json, pnpm-lock.yaml,
+    clickhouse/schema.sql, prisma client): take the new-base side; regenerated later.
+  - Match the surrounding code's style and keep it compiling.
+
+Only ESCALATE if, after reading both sides and the history, the correct intent is
+truly ambiguous (e.g. two conflicting business-logic changes where picking either
+silently loses behavior and there's no signal which is right).
+
+Edit files to their final content, then \`git add <file>\` each. Do NOT run
+\`git rebase --continue\`, push, reset, or rebase — the caller drives the rebase.
+
+Finish by printing EXACTLY ONE line:
+  RESTACK_RESOLVED            — all conflicts staged
+  RESTACK_ESCALATE: <reason>  — genuinely ambiguous, left for a human (with reason)
+EOF
+)
+  else
+    echo "    → claude (conservative auto-resolve)…" >&2
+    budget="${STACK_RESTACK_BUDGET_USD:-2}"
+    prompt=$(cat <<EOF
 You are resolving a git rebase conflict during an automated stack restack.
 Branch being rebased: ${branch}
 Rebasing onto: ${parent}
@@ -216,6 +265,7 @@ Finish by printing EXACTLY ONE line:
   RESTACK_ESCALATE: <reason>  — left for a human, with a one-line reason
 EOF
 )
+  fi
 
   local out
   out=$(cd "$dir" && "$CLAUDE_BIN" -p "$prompt" \
@@ -224,7 +274,7 @@ EOF
           "Bash(git add:*)" "Bash(git diff:*)" "Bash(git status:*)" \
           "Bash(git log:*)" "Bash(git show:*)" "Bash(git checkout:*)" \
         --output-format text \
-        --max-budget-usd "${STACK_RESTACK_BUDGET_USD:-2}" \
+        --max-budget-usd "$budget" \
         2>&1)
 
   if echo "$out" | grep -q "RESTACK_RESOLVED"; then
@@ -303,6 +353,44 @@ if [[ "$MODE" == "plan" ]]; then
     printf "  %-45s parent=%-40s sha=%s  wt=%s\n" "$b" "$p" "$sha" "${wt:-<unchecked-out>}"
   done < <(topo_order "$PROJECT")
   exit 0
+fi
+
+if [[ "$MODE" == "handoff" ]]; then
+  # Human-authorized handoff: a previous run parked on a conflict it wouldn't auto-
+  # resolve. Re-run the resolver at the full-judgment bar on the still-paused rebase,
+  # then fall through into the normal cascade (the main loop below picks up PENDING).
+  load_state || exit 1
+  RESOLVE_BAR=full
+  if [[ -z "${CURRENT:-}" ]]; then
+    echo "Nothing paused to hand off (no CURRENT in saved state). Use --continue." >&2
+    exit 1
+  fi
+  REBASE_DIR=$(rebase_dir_for "$CURRENT")
+  PARENT_NAME=$(git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
+  if ! rebase_in_progress "$REBASE_DIR"; then
+    echo "No rebase in progress for ${CURRENT} — it may already be resolved. Resuming cascade." >&2
+  fi
+  echo "→ Handoff: Claude resolving the paused rebase of ${CURRENT} onto ${PARENT_NAME}…"
+  while rebase_in_progress "$REBASE_DIR"; do
+    if claude_attempt_resolve "$REBASE_DIR" "$CURRENT" "$PARENT_NAME"; then
+      git -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
+      continue
+    fi
+    save_state
+    cat >&2 <<EOF
+
+Handoff: Claude couldn't safely resolve ${CURRENT} — genuinely ambiguous, still needs a human.
+  Rebase paused in: ${REBASE_DIR}
+  Resolve by hand, then resume:
+    git -C ${REBASE_DIR} add <resolved-files> && git -C ${REBASE_DIR} rebase --continue
+    loops stack restack ${PROJECT} --continue
+EOF
+    exit 1
+  done
+  COMPLETED+=("$CURRENT")
+  CURRENT=""
+  save_state
+  echo "    ✓ ${COMPLETED[-1]} resolved + rebased — resuming the cascade"
 fi
 
 if [[ "$MODE" == "continue" ]]; then
