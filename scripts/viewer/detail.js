@@ -339,8 +339,12 @@ async function renderPicker(){
     // freshness vs origin/main: ⟳ N behind → the forest trails main, restack to
     // refresh & condense; ✓ fresh → up to date. (server omits behind on old builds.)
     const beh = (typeof p.behind==='number') ? p.behind : null;
+    const ov = !!p.overlap;   // does origin/main's drift touch files this forest changed?
+    const behindTitle = ov
+      ? `origin/main is ${beh} commit${beh===1?'':'s'} ahead and changes files this forest also touches — restack to refresh the diffs and head off conflicts. Click to restack ${esc(p.name)} onto fresh main (background → restack.log).`
+      : `origin/main is ${beh} commit${beh===1?'':'s'} ahead but changes no file this forest touches — a restack here is a clean replay (cosmetic: SHA churn + re-bless). Click to restack anyway.`;
     const fresh = beh===null ? ''
-      : beh>0 ? `<span class="pk-fresh behind" title="origin/main is ${beh} commit${beh===1?'':'s'} ahead — click to restack ${esc(p.name)} onto fresh main (runs in background → restack.log)">⟳ ${beh} behind</span>`
+      : beh>0 ? `<span class="pk-fresh behind${ov?'':' cosmetic'}" title="${behindTitle}">⟳ ${beh} behind${ov?'':' · cosmetic'}</span>`
               : `<span class="pk-fresh ok" title="up to date with origin/main">✓ fresh</span>`;
     b.innerHTML=`<div class="pk-top"><span class="pk-name">${esc(p.name)}</span>`
       +`<span class="pk-rt">${fresh}<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></span></div>`
