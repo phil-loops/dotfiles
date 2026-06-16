@@ -161,7 +161,7 @@
     p.innerHTML='<div class="pp-h">prep <b>'+esc(branch.split('/').pop())+'</b> for push</div>'
       +'<ul class="pp-steps"><li>squash <b>unpushed</b> commits → one (voiced message)</li>'
       +'<li>run oxfmt, fold formatting into that commit</li></ul>'
-      +'<div class="pp-note">only unpushed history is rewritten — a plain push works, no force-push.</div>'
+      +'<div class="pp-note">squashes only your unpushed commits. if this branch was rebased, the push needs <b>--force-with-lease</b>.</div>'
       +(desc.length?'<div class="cp-warn"><span class="cp-orphan">⚠ reparents '+desc.length+' descendant'+(desc.length>1?'s':'')+' ('+desc.map(d=>esc(d.split('/').pop())).join(', ')+') — they’ll need a restack.</span></div>':'')
       +'<div class="cp-foot"></div>';
     const f=p.querySelector('.cp-foot');
@@ -179,7 +179,7 @@
     const fmtnote = r.formatted ? (' · oxfmt fixed '+r.formatted+' file'+(r.formatted>1?'s':'')) : ' · already formatted';
     toast('⇡ prepped <b>'+esc(branch.split('/').pop())+'</b> → '+esc(r.header)+(r.voiced?'':' (fallback msg)'));
     f.innerHTML='<div class="cp-done">✓ '+esc(r.sha||'')+' '+esc(r.header)+fmtnote+(r.voiced?'':' · <em>fallback message</em>')+'</div>'
-      +'<div class="cp-note">ready to push (no force needed).</div>';
+      +'<div class="cp-note">'+(r.force?'ready to push — needs <b>--force-with-lease</b> (branch was rebased).':'ready to push (no force needed).')+'</div>';
     if(desc.length){
       const proj=(typeof MODEL!=='undefined' && MODEL && MODEL.project) || '';
       const hb=el('button','cp-go','⤳ hand off restack to Claude'); hb.onclick=()=>doRestack(proj, hb, desc.length);
