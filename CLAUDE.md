@@ -60,7 +60,7 @@ A pure line uses only `parent`; fan-in adds `requires`. **Never any git merge co
 
 Every branch carries a one-line **purpose** — what it's for / what it lays the foundation for — stored as git's native **branch description** (`git config branch.<name>.description`, a.k.a. `git branch --edit-description`). Git owns it, it's free to read, and it shows in the forest viewer under each node.
 
-- **Set it as you create or edit a branch** — `loops purpose <branch> "<thesis>"`. Capturing intent at creation is the whole point; don't leave branches purposeless. When Claude creates branches for a stack, it sets each one's purpose.
+- **Set it as you create or edit a branch** — `git config branch.<branch>.description "<thesis>"` (a.k.a. `git branch --edit-description`). Capturing intent at creation is the whole point; don't leave branches purposeless. When Claude creates branches for a stack, it sets each one's purpose.
 - **Keep it current** — when a branch is repurposed, rebased onto different work, or its scope shifts, update the description. A stale purpose is worse than none.
 - The viewer reads the description for **free** (no LLM). A "suggest" button can draft one from the diff (opt-in, haiku) which you then save as the description — **generation never runs automatically**, nothing burns tokens on its own.
 
@@ -78,7 +78,7 @@ The parent relationship is **implicit in the fork point** — git does not track
 1. **PRs**: always `gh pr create --base main` — every branch merges into main, never onto its parent. Independent bases (forked off main) keep each PR's diff to its own work; a genuinely-dependent branch merges in order after its base lands. (Never let tooling open PRs — that's manual.)
 2. **Rebase after parent changes**: `git rebase <parent>` (or `git rebase --onto <new-parent> <old-parent>` when moving a branch).
 
-Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order. And **set the branch's purpose right after creating it** — `loops purpose <new-branch-name> "<one-line thesis>"` — so the intent is captured while it's fresh.
+Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order. And **set the branch's purpose right after creating it** — `git config branch.<new-branch-name>.description "<one-line thesis>"` — so the intent is captured while it's fresh.
 
 ## Common tasks
 
@@ -87,43 +87,60 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Create child branch        | `git checkout <parent> && git checkout -b <name>`           |
 | Fork an independent base off main | `git checkout main && git checkout -b <name>` (no parent → roots off main) |
 | Add a fan-in dep           | `git config --add stack-branch.<name>.requires <dep>`       |
-| Set/update a branch's purpose | `loops purpose <name> "<thesis>"` (git branch description) |
-| Review the forest (live)   | `loops stack web [<project>]` (live blessing-ledger server on :62333, reads git config per request) |
+| Set/update a branch's purpose | `git config branch.<name>.description "<thesis>"` (a.k.a. `git branch --edit-description`) |
+| Tag a branch's forest membership | `git config stack-branch.<name>.project <project>` + `git config --add stack-project.<project>.branch <name>` (the viewer reads these) |
+| Review the forest (live)   | `loops stack web [<project>]` — Phil's browser viewer on :62333 (read-only; reads git config per request). Claude doesn't drive it; it just keeps the config correct. |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
-| Restack whole project after a merge | `loops stack restack <project>` (see below)           |
+| Restack whole forest after a merge | raw git — snapshot SHAs, ff `main`, `rebase --onto` bottom-up (see *Restacking* below) |
 | Create PR (manual — Phil opens) | reference only: `gh pr create --base main --head <branch>` — never run against origin; see *Git Pushing & PRs* |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
 
-## Restacking after a merge — `loops stack restack`
+## The forest config is hand-maintained (the viewer reads it)
 
-When the bottom of a stack merges, `loops stack restack <project>` rebases every
-member onto fresh `origin/main`, bottom-up (topological), snapshotting SHAs so
-descendants land on their moved parents. After the walk it drops branches that
-became empty/merged and rewires children's parent metadata.
+The review surfaces — `loops stack web` (the :62333 viewer), `loops stack review` (nvim),
+and `loops bless` — are **read-only consumers of git config**. They render whatever these keys
+say; nothing writes them automatically. So Claude maintains them by hand:
 
-**Conflict handling is automated via headless `claude` (conservative bar).** On a
-conflict the script invokes `claude -p` to attempt resolution and auto-resolves
-*only* mechanically-certain cases — redundant squash-merged commits, generated
-files / lockfiles, non-overlapping add/add — then continues the rebase. Anything
-touching hand-written logic, delete/modify, or overlapping edits is **escalated**:
-the script pauses, saves state, and prints a ready-to-run interactive `claude`
-command (plus the manual git steps). Resolve, then `--continue` resumes the walk.
+- `git config stack-branch.<name>.parent <parent>` — the rebase base. Set at branch creation;
+  update on every rebase-onto-new-parent, on rename, and when rewiring a dropped node's children.
+- `git config stack-branch.<name>.project <project>` — per-branch project tag. Self-healing: it
+  dies with the branch. Set at creation.
+- `git config --add stack-project.<project>.branch <name>` — the project's branch list. **It rots**
+  — renaming/deleting a branch leaves a dangling entry nothing prunes. Fix by hand (`--unset` the
+  old value, `--add` the new); verify with `git config --get-all stack-project.<project>.branch`.
+- `git config branch.<name>.description "<thesis>"` — the branch purpose.
 
-- `loops stack restack <project> --plan` — dry-run: topo order + parent map, no mutations
-- `loops stack restack <project> --continue` — resume after a manual/escalated resolve
-- `loops stack restack <project> --abort` — discard saved restack state
-- `loops stack restack <project> --no-claude` — disable auto-resolve, always pause for a human
-- Tunables: `CLAUDE_BIN` (default `claude`), `STACK_RESTACK_BUDGET_USD` (default 2)
+**Rename checklist** (all four move together): `git branch -m`, then migrate `.parent` + `.project`
+keys and the `stack-project.*.branch` entry, and re-point any child's `.parent`. The branch
+*description* follows `git branch -m` automatically; the `stack-*` keys do **not**.
 
-Script: `~/.dotfiles/scripts/stack-restack`. Requires the project registered via
-`stack-project.<name>.branch` config (not just the `stack-branch.*.parent` pointers).
+## Restacking after a merge — first principles (raw git)
 
-> ⚠️ The `stack-project.<name>.branch` registry is a **separate, hand-maintained list of
-> branch names — it rots**: deleting or renaming a branch leaves a dangling entry the registry
-> never prunes. Verify it's clean (`git config --get-all stack-project.<name>.branch`) before
-> trusting restack. Membership is slated to move to a per-branch `stack-branch.<name>.project`
-> tag (self-healing — the tag dies with the branch); prefer that once it lands.
+When the bottom of a forest merges (or `origin/main` advances), rebase every member onto fresh
+`main` **by hand** — no wrapper. The whole walk is three moves:
+
+1. **Refresh main** (usually not checked out, so move the ref directly):
+   `git fetch origin main && git branch -f main origin/main`.
+2. **Snapshot each branch's current SHA** *before* moving anything — descendants need their
+   pre-rebase parent SHA as the `--onto` cut point.
+3. **Rebase bottom-up (topological)** — roots onto `main`, then each child onto its *moved* parent,
+   replaying only that branch's own commits:
+   `git rebase --onto <new-parent> <old-parent-sha> <branch>`.
+   Do each rebase in the worktree where that branch is checked out (a branch checked out elsewhere
+   can't be rebased from here); for an unchecked-out branch, add a throwaway worktree on it.
+
+After the walk: drop any branch that became empty (`git diff <parent>...<branch>` empty, or it's an
+ancestor of `main`) with `git branch -D`, and rewire its children's parent to the dropped node's
+parent (see the config checklist above). Squash-merged commits won't match `origin/main` by SHA —
+the rebase drops them cleanly (both `parent` and carried `requires`).
+
+Conflicts: resolve them yourself, in the rebase — don't bypass with `--skip`/`-X`. Treat a real
+(overlapping-logic) conflict as a signal to check with Phil rather than guess.
+
+> The viewer (:62333) still has a one-click **Restack** button that drives the `stack-restack`
+> script in the background — that's Phil's to press, not Claude's plumbing. Claude restacks from
+> first principles as above.
 
 ## Reviewing changes
 
@@ -140,8 +157,8 @@ Decision rule:
 
 ## Forest hygiene
 
-- After a base merges, `loops stack restack <project>` rebases the forest onto fresh `origin/main`, drops the now-redundant node, and rewires its children — **the graph contracts by that node**, and keeps contracting as each independent base lands. Squash-merged commits won't match `origin/main`; the rebase drops them cleanly (both `parent` and carried `requires`).
-- **History stays linear — no merge commits**, even with fan-in (it lives in `requires` metadata + carried cherry-picks). `stack-integrate` builds an *ephemeral* octopus ref only as a whole-feature preview, never a branch base.
+- After a base merges, rebase the forest onto fresh `origin/main` by hand (see *Restacking after a merge*), drop the now-redundant node, and rewire its children — **the graph contracts by that node**, and keeps contracting as each independent base lands. Squash-merged commits won't match `origin/main`; the rebase drops them cleanly (both `parent` and carried `requires`).
+- **History stays linear — no merge commits**, even with fan-in (it lives in `requires` metadata + carried cherry-picks). The viewer's integrate preview builds an *ephemeral* octopus ref only as a whole-feature view, never a branch base — Phil's tool, not Claude's plumbing.
 
 # Loops Script Runner
 

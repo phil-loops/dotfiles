@@ -345,17 +345,18 @@ async function renderPicker(){
       : `origin/main is ${beh} commit${beh===1?'':'s'} ahead but changes no file this forest touches — a restack here is a clean replay (cosmetic: SHA churn + re-bless). Click to restack anyway.`;
     const fresh = beh===null ? ''
       : beh>0 ? `<span class="pk-fresh behind${ov?'':' cosmetic'}" title="${behindTitle}">⟳ ${beh} behind${ov?'':' · cosmetic'}</span>`
-              : `<span class="pk-fresh ok" title="up to date with origin/main">✓ fresh</span>`;
+              : `<span class="pk-fresh ok" title="up to date with origin/main — click to restack anyway (refetch + verify, no-op if nothing moved)">✓ fresh</span>`;
     b.innerHTML=`<div class="pk-top"><span class="pk-name">${esc(p.name)}</span>`
       +`<span class="pk-rt">${fresh}<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></span></div>`
       +readyRow+candRow;
     b.onclick=()=>{ location.search='branch='+encodeURIComponent(p.name); };
     list.appendChild(b);
-    // behind badge → restack. Two-click arm (the card itself is clickable and the op
-    // is destructive): first click asks, second within 3s hands off to /restack
-    // (background `stack-restack <project>`, logs to restack.log).
-    const fb = b.querySelector('.pk-fresh.behind');
-    if(fb){ const label='⟳ '+beh+' behind';
+    // freshness chip = the restack button, on EVERY card (behind or fresh). Two-click
+    // arm (the card itself is clickable and the op is destructive): first click asks,
+    // second within 3s fires /restack (background `stack-restack <project>`, logs to
+    // restack.log). On a fresh card a restack is a harmless no-op (refetch + verify).
+    const fb = b.querySelector('.pk-fresh');
+    if(fb && beh!==null){ const label = beh>0 ? ('⟳ '+beh+' behind'+(ov?'':' · cosmetic')) : '✓ fresh';
       checkPaused(fb, p.name, label);   // a restack may already be parked on a conflict — surface it on render
       fb.onclick=async e=>{ e.stopPropagation();
         if(fb.dataset.paused==='1') return;   // already parked → onclick was reset by markPaused; guard the arm path
