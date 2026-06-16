@@ -297,6 +297,10 @@ svg.graph .gn.sel .cnt{fill:var(--ink)}
 .prbadge{cursor:pointer}
 .prbadge circle{stroke-width:1.6}
 .prbadge text{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:800;text-anchor:middle;pointer-events:none}
+/* fork-staleness pill: ↺N behind origin/main. ember = needs a restack, green = a clean rebase is available (syncable) */
+.stalebadge .sbp{fill:var(--ember);stroke:#ecc06a;stroke-width:1.2;filter:drop-shadow(0 0 5px #d36a3699)}
+.stalebadge.syncable .sbp{fill:#2c9a59;stroke:#8debb0;filter:drop-shadow(0 0 6px #3fbf7fcc)}
+.stalebadge text{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:800;text-anchor:middle;fill:#fff;pointer-events:none}
 .prbadge.tomain circle{fill:#2c9a59;stroke:#8debb0;filter:drop-shadow(0 0 7px #3fbf7fcc)} .prbadge.tomain text{fill:#fff}
 .prbadge.offbase circle{fill:#b5781f;stroke:#ecc06a;filter:drop-shadow(0 0 6px #d79a44aa)} .prbadge.offbase text{fill:#fff}  /* PR not into main — anti-pattern */
 .prbadge.draft circle{fill:#2b2b28;stroke:#9a9a96;stroke-dasharray:2 2} .prbadge.draft text{fill:#d4d4cf}
