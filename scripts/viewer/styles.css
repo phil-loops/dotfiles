@@ -38,6 +38,11 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 .pk-btn:hover{border-color:var(--gold);background:var(--raised);box-shadow:0 0 22px #e0ad4e22;transform:translateY(-1px)}
 .pk-top{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .pk-name{font-size:15px} .pk-meta{color:var(--faint);font-size:12px}
+/* freshness vs origin/main on each project card (right of the name) */
+.pk-rt{display:flex;align-items:center;gap:10px;flex:none}
+.pk-fresh{font-size:11px;letter-spacing:.02em;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.pk-fresh.behind{color:var(--ember);background:#d36a361f;border:1px solid var(--ember-soft)}   /* trails main → restack */
+.pk-fresh.ok{color:#56d090;background:#2c9a591a;border:1px solid #2c9a5944}                      /* up to date */
 .pk-ready{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .pk-ready-h{color:#56d090;font-size:11px;letter-spacing:.02em;margin-right:2px}
 .pk-ready-b{color:#cfe9d8;font-size:11px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
