@@ -56,22 +56,46 @@ def trunc(s, n):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+def area(r):
+    """The distinguishing 'what is this session working on' — the last touched
+    file's dir/name (what actually differs between sessions in the same repo),
+    falling back to the branch when nothing's been edited yet."""
+    files = r.get("files") or []
+    if files:
+        segs = [s for s in files[-1].split("/") if s]
+        return "/".join(segs[-2:]) if len(segs) >= 2 else (segs[-1] if segs else "?")
+    return r.get("branch", "") or "—"
+
+
 def load_live():
-    """Return live session records; delete dead ones as we go."""
-    live = []
+    """Live session records, one per process. Deletes dead ones; and since a /clear,
+    resume, or subagent reuses a process under a new session_id, dedupes by pid —
+    keeping the newest record per live process so one claude == one row."""
+    best = {}   # pid -> (file, record), newest by last_active
     for f in sorted(glob.glob(os.path.join(DIR, "*.json"))):
         try:
             r = json.load(open(f))
         except Exception:
             continue
-        if pid_alive(r.get("pid"), r.get("start_time", "")):
-            live.append(r)
-        else:
+        if not pid_alive(r.get("pid"), r.get("start_time", "")):
             try:
                 os.remove(f)
             except Exception:
                 pass
-    return live
+            continue
+        pid = r.get("pid")
+        if pid not in best:
+            best[pid] = (f, r)
+        else:   # same live process → keep newer, delete the superseded orphan file
+            of, orr = best[pid]
+            stale = of if r.get("last_active", 0) > orr.get("last_active", 0) else f
+            if r.get("last_active", 0) > orr.get("last_active", 0):
+                best[pid] = (f, r)
+            try:
+                os.remove(stale)
+            except Exception:
+                pass
+    return [r for (_, r) in best.values()]
 
 
 def lane_states(now):
@@ -109,22 +133,19 @@ def render_terminal(live, now):
     if not live:
         print("  %sno active Claude Code sessions%s" % (DIM, RST))
     else:
-        live.sort(key=lambda r: (r.get("repo_name", ""), r.get("branch", "")))
-        print("  %s%-2s %-11s %-32s %-11s %s%s" % (BOLD, "", "REPO", "BRANCH", "STATE", "PURPOSE / recent", RST))
+        live.sort(key=lambda r: (r.get("repo_name", ""), area(r)))
+        print("  %s%-2s %-9s %-30s %-11s %s%s" % (BOLD, "", "REPO", "WORKING ON", "STATE", "branch · purpose", RST))
         for r in live:
             idle = now - r.get("last_active", now)
             if idle < ACTIVE_WINDOW:
                 state, pad = "%s● active%s" % (GRN, RST), 11 + len(GRN) + len(RST)
             else:
                 state, pad = "%s○ idle %s%s" % (YEL, ago(idle), RST), 11 + len(YEL) + len(RST)
-            detail = r.get("purpose") or ""
-            files = r.get("files") or []
-            if files:
-                detail = (trunc(detail, 28) + "  " if detail else "") + "%s%s%s" % (DIM, ", ".join(files[-3:]), RST)
-            else:
-                detail = trunc(detail, 60)
-            print("  %-2s %-11s %-32s %-*s %s" % (
-                "", trunc(r.get("repo_name", "?"), 11), trunc(r.get("branch", "?"), 32), pad, state, detail))
+            ctx = trunc(r.get("branch", ""), 16)
+            if r.get("purpose"):
+                ctx += "  " + trunc(r["purpose"], 40)
+            print("  %-2s %-9s %-30s %-*s %s%s%s" % (
+                "", trunc(r.get("repo_name", "?"), 9), trunc(area(r), 30), pad, state, DIM, ctx, RST))
 
     lanes = lane_states(now)
     if lanes:
@@ -152,9 +173,8 @@ def render_swiftbar(live, now):
         idle = now - r.get("last_active", now)
         active = idle < ACTIVE_WINDOW
         dot, color = ("●", "#3fb950") if active else ("○", "#d9a441")
-        leaf = (r.get("branch", "?") or "?").split("/")[-1]
         state = "active" if active else "idle " + ago(idle)
-        print("%s %s · %s  —  %s | color=%s" % (dot, sbsan(r.get("repo_name", "?")), sbsan(leaf), state, color))
+        print("%s %s · %s  —  %s | color=%s" % (dot, sbsan(r.get("repo_name", "?")), sbsan(area(r)), state, color))
         print("-- branch: %s | color=#8f8472 font=Menlo" % sbsan(r.get("branch", "?")))
         if r.get("purpose"):
             print("-- purpose: %s | color=#8f8472" % sbsan(r["purpose"]))
