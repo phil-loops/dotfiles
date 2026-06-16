@@ -27,8 +27,30 @@ CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 MAIN = os.environ.get("MAIN_BRANCH", "main")
 
 
+_cwd = None   # set to a worktree path once we know where to mutate (see below)
+
+
 def git(args, **kw):
+    if _cwd and "cwd" not in kw:
+        kw["cwd"] = _cwd
     return subprocess.run(["git", *args], capture_output=True, text=True, **kw)
+
+
+def worktrees():
+    """[(path, branch_or_None)] from `git worktree list`, main worktree first."""
+    out, path = [], None
+    for ln in git(["worktree", "list", "--porcelain"]).stdout.splitlines():
+        if ln.startswith("worktree "):
+            path = ln[len("worktree "):]
+        elif ln.startswith("branch ") and path is not None:
+            out.append((path, ln[len("branch "):]))
+            path = None
+        elif ln == "" and path is not None:   # detached worktree (no branch line)
+            out.append((path, None))
+            path = None
+    if path is not None:
+        out.append((path, None))
+    return out
 
 
 def out(d):
@@ -159,12 +181,24 @@ def fail(err):
          "header": header, "message": message, "voiced": voiced, "err": err})
 
 
-if git(["status", "--porcelain"]).stdout.strip():
-    fail("working tree is dirty — commit or stash first (squash needs a clean checkout)")
+# Where to mutate. git refuses `checkout <branch>` when that branch is already
+# checked out in another worktree (Phil's worktree-per-feature workflow). So if
+# the branch lives in a worktree, operate THERE — it's already checked out, no
+# `checkout` needed. Otherwise check it out in the main repo as before.
+wts = worktrees()
+main_wt = wts[0][0] if wts else None
+branch_wt = next((p for p, b in wts if b == f"refs/heads/{branch}"), None)
 
-co = git(["checkout", branch])
-if co.returncode != 0:
-    fail("checkout failed: " + co.stderr.strip())
+if branch_wt:
+    _cwd = branch_wt   # all subsequent git() calls run here (read-only ref calls are cwd-agnostic)
+    if git(["status", "--porcelain"]).stdout.strip():
+        fail(f"working tree is dirty in worktree {branch_wt} — commit or stash first (squash needs a clean checkout)")
+else:
+    if git(["status", "--porcelain"]).stdout.strip():
+        fail("working tree is dirty — commit or stash first (squash needs a clean checkout)")
+    co = git(["checkout", branch])
+    if co.returncode != 0:
+        fail("checkout failed: " + co.stderr.strip())
 
 rs = git(["reset", "--soft", base])
 if rs.returncode != 0:
@@ -179,6 +213,10 @@ formatted = 0
 if fmt:
     repo = git(["rev-parse", "--show-toplevel"]).stdout.strip()
     oxfmt = os.path.join(repo, "node_modules", ".bin", "oxfmt")
+    # worktrees usually have no node_modules — borrow the main worktree's oxfmt
+    # (cwd stays `repo`, so it reads the worktree's own config + files)
+    if not os.path.exists(oxfmt) and main_wt:
+        oxfmt = os.path.join(main_wt, "node_modules", ".bin", "oxfmt")
     files = [f for f in git(["diff", "--name-only", f"{base}..HEAD"]).stdout.split()
              if os.path.exists(os.path.join(repo, f))]
     if files and os.path.exists(oxfmt):
