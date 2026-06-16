@@ -1,0 +1,54 @@
+#!/bin/zsh
+# cw — launch a Claude Code session in its OWN git worktree, so concurrent sessions
+# never collide on the shared index / HEAD / working files (the root cause of the
+# cross-session commit clobbers: N sessions in one checkout fight over one index and
+# one HEAD). Each session gets an isolated tree on its own branch.
+#
+# Convention (matches the repo's existing worktrees): tree at <repo>-<name> beside
+# the main checkout, with node_modules + .env symlinked from main so it's instantly
+# runnable. The branch is registered in the forest (stack-branch.<name>.parent=main).
+#
+#   cw <name> [claude args…]   new branch <name> off main, fresh worktree, launch claude
+#   cw <existing-branch> …     attach that branch in a worktree (or reuse its tree)
+#   cw                          name defaults to wt-<HHMMSS>
+#   cw -n <name>               make/prepare the worktree but DON'T launch (prints cd path)
+emulate -L zsh; set -uo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+launch=1
+[[ "${1:-}" == "-n" || "${1:-}" == "--no-launch" ]] && { launch=0; shift; }
+
+here=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "cw: not in a git repo" >&2; exit 1; }
+# anchor on the repo's MAIN checkout (first worktree entry), even if cw is run from
+# inside another worktree — so <repo>-<name> is always a sibling of main, not nested.
+main_top=$(git -C "$here" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+repo=$(basename "$main_top"); parent=$(dirname "$main_top")
+mainbranch=$(git -C "$main_top" config stack.main-branch 2>/dev/null || echo main)
+
+name="${1:-}"; (( $# > 0 )) && shift
+[[ -z "$name" ]] && name="wt-$(date +%H%M%S)"
+slug=$(echo "$name" | tr '/' '-')
+wt="$parent/${repo}-${slug}"
+
+if [[ -d "$wt" ]]; then
+  echo "cw: reusing existing worktree → $wt"
+elif git -C "$main_top" show-ref --verify --quiet "refs/heads/$name"; then
+  git -C "$main_top" worktree add "$wt" "$name" || exit 1          # attach an existing branch
+else
+  git -C "$main_top" worktree add "$wt" -b "$name" "$mainbranch" || exit 1   # new branch off main
+  git -C "$wt" config "stack-branch.$name.parent" "$mainbranch"    # register it in the forest
+fi
+
+# make the worktree immediately runnable: symlink the heavy / git-ignored bits from
+# main (node_modules is the big one; .env was the gap that bit the prisma session).
+for link in node_modules .env .env.local; do
+  [[ -e "$main_top/$link" && ! -e "$wt/$link" ]] && ln -s "$main_top/$link" "$wt/$link"
+done
+
+if (( launch )); then
+  echo "cw: $wt  (branch $name) → launching claude"
+  cd "$wt" && exec claude "$@"
+else
+  echo "$wt"
+  echo "  cd $wt && claude"
+fi
