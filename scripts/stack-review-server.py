@@ -191,7 +191,20 @@ class H(BaseHTTPRequestHandler):
             # it exits when it escalates, so running==False + paused==True means "needs you")
             running = subprocess.run(["pgrep", "-f", "stack-restack"],
                                      capture_output=True, text=True).returncode == 0
-            self._send(200, json.dumps({"paused": paused, "project": proj, "current": cur, "running": running}))
+            # surface WHY it parked: the last escalation reason from restack.log, so the
+            # picker badge can read "limitedCount or countSentPreviews?" instead of just
+            # "resolve". stack-restack logs `⚑ claude escalated: <reason>` per pause.
+            reason = ""
+            if paused:
+                try:
+                    with open(os.path.join(ROOT, "restack.log")) as fh:
+                        for line in fh:
+                            if "claude escalated:" in line:
+                                reason = line.split("claude escalated:", 1)[1].strip()
+                except Exception:
+                    pass
+            self._send(200, json.dumps({"paused": paused, "project": proj, "current": cur,
+                                        "running": running, "reason": reason}))
         elif u.path == "/sync":  # fork-staleness vs origin/main: how far behind, and is it safe to auto-rebase?
             self._send(200, json.dumps(_sync_state(parse_qs(u.query).get("branch", [""])[0])))
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls

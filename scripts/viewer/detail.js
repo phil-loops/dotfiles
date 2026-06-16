@@ -15,13 +15,8 @@ function renderRail(){
     const pr=(typeof GPRS!=='undefined') ? GPRS[b] : null;
     const ps=(pr && typeof prState==='function') ? prState(b) : null;
     const badge = ps ? `<span class="rdot ${ps.cls}" title="${ps.meta}">${ps.glyph}</span>` : '';
-    // fork-staleness ↺N (mirrors the map badge): GSYNC is populated by ensureSync
-    const sy=(typeof GSYNC!=='undefined') ? GSYNC[b] : null;
-    const sbadge = (sy && sy.behind)
-      ? `<span class="rstale${sy.syncable?' syncable':''}" title="${sy.behind} behind origin/main${sy.syncable?' · syncable: clean rebase':(sy.why?' · '+sy.why:' · needs a restack')}">↺${sy.behind}</span>`
-      : '';
     li.innerHTML=`<span class="tw">${connector}</span><span class="dot ${n.status}"></span>`
-      +`<span class="nm">${b.split('/').pop()}</span>${badge}${sbadge}<span class="cnt2">${n.clean}/${n.total}</span>`;
+      +`<span class="nm">${b.split('/').pop()}</span>${badge}<span class="cnt2">${n.clean}/${n.total}</span>`;
     li.onclick=()=>{ active=b; render(); };
     li.addEventListener('mouseenter',()=>{ if(typeof showTip==='function') showTip(b, li); railSpot(b); });
     li.addEventListener('mouseleave',()=>{ if(typeof hideTip==='function') hideTip(); railUnspot(); });
@@ -284,11 +279,14 @@ async function renderPicker(){
   // would otherwise leave the badge stuck on "⤳ restacking…" forever. stack-restack
   // parks on conflicts it can't auto-resolve (state at <git-dir>/stack-restack-state);
   // flip the badge to a "needs resolve" prompt so the escalation is visible.
-  const markPaused=(fb, project, br, label, withToast)=>{
+  const markPaused=(fb, project, br, label, withToast, reason)=>{
     const PAUSED='⚠ resolve '+leaf(br);
     fb.classList.remove('armed'); fb.classList.add('paused'); fb.dataset.paused='1';
     fb.textContent=PAUSED;
-    fb.title='restack paused on a conflict in '+br+' — click to hand it to Claude (resolves with judgment, then resumes the cascade). Manual: `loops stack restack '+project+' --continue`. See restack.log.';
+    // lead the tooltip with the actual DECISION (the escalation reason from restack.log),
+    // so a preference-conflict reads as "limitedCount or countSentPreviews?" not just "resolve".
+    fb.title=(reason?'NEEDS YOU: '+reason+'\n\n':'')
+      +'restack paused on a conflict in '+br+' — click to hand it to Claude (resolves with judgment, then resumes the cascade). Manual: `loops stack restack '+project+' --continue`. See restack.log.';
     // two-click arm: first click asks, second (within 3s) hands the conflict to Claude.
     fb.onclick=async e=>{ e.stopPropagation();
       if(fb.dataset.armed!=='1'){ fb.dataset.armed='1'; fb.classList.add('armed'); fb.textContent='⤳ hand '+leaf(br)+' to Claude?';
@@ -296,16 +294,17 @@ async function renderPicker(){
       clearTimeout(fb._dt); fb.dataset.armed=''; fb.dataset.paused=''; fb.classList.remove('armed','paused'); fb.textContent='⤳ Claude resolving…';
       try{ const r=await (await fetch('/restack-resolve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project})})).json();
         if(r.ok){ toast('⤳ handed conflict in <b>'+esc(leaf(br))+'</b> to Claude — resolving + resuming the cascade. Tailing restack.log.'); watchRestack(fb, project, label); }
-        else { toast('⤳ handoff failed: '+esc(r.err||'?')); markPaused(fb, project, br, label, false); }
-      }catch(err){ toast('⤳ handoff failed — server unreachable'); markPaused(fb, project, br, label, false); }
+        else { toast('⤳ handoff failed: '+esc(r.err||'?')); markPaused(fb, project, br, label, false, reason); }
+      }catch(err){ toast('⤳ handoff failed — server unreachable'); markPaused(fb, project, br, label, false, reason); }
     };
-    if(withToast) toast('⚠ restack of <b>'+esc(project)+'</b> hit a conflict on <b>'+esc(leaf(br))+'</b> — click the badge to hand it to Claude. See restack.log.');
+    if(withToast) toast('⚠ restack of <b>'+esc(project)+'</b> hit a conflict on <b>'+esc(leaf(br))+'</b>'
+      +(reason?' — <i>'+esc(reason)+'</i>':'')+' · click the badge to hand it to Claude. See restack.log.');
   };
   // one-shot: a restack may already be parked when the picker renders (e.g. a reload
   // mid-conflict) — reflect that without waiting for a click.
   const checkPaused=async(fb, project, label)=>{
     let s=null; try{ s=await (await fetch('/restack-status?project='+encodeURIComponent(project))).json(); }catch(e){}
-    if(s && s.paused) markPaused(fb, project, s.current||project, label, false);
+    if(s && s.paused) markPaused(fb, project, s.current||project, label, false, s.reason);
   };
   // after a handoff: poll until it finishes (clear in place) or parks (flag it).
   // NOTE: while a handoff is actively resolving, the state file still exists
@@ -320,7 +319,7 @@ async function renderPicker(){
       if(s && s.running){ sawRunning=true; if(tries<150) setTimeout(tick,2000); return; }   // still working (cap ~5min)
       if(s && s.paused){
         if(!sawRunning && tries<3){ setTimeout(tick,1500); return; }   // grace: the job may still be spawning
-        markPaused(fb, project, s.current||project, label, true); return;   // parked → needs a human
+        markPaused(fb, project, s.current||project, label, true, s.reason); return;   // parked → needs a human
       }
       renderPicker();   // not running, not paused → finished/stopped: rebuild so freshness re-reads
     };
