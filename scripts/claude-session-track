@@ -118,6 +118,11 @@ def main():
     rec["cwd"] = cwd
     rec["last_active"] = now
     rec.setdefault("started_at", now)
+    # the tmux pane this session lives in (inherited env) — lets claude-say address
+    # it directly instead of reverse-mapping pid→pane. Empty if not under tmux.
+    pane = os.environ.get("TMUX_PANE", "")
+    if pane:
+        rec["tmux_pane"] = pane
 
     # a SessionStart is a fresh process (incl. --resume) → (re)capture the liveness token
     if event == "SessionStart" or not rec.get("pid"):

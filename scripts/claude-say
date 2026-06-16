@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""claude-say <who> <message…>  [--send] — drop a message into another Claude Code
+session's prompt, over tmux.
+
+DRAFT BY DEFAULT (no Enter): the text lands in the target's input line for a human
+to review and submit — one session can leave another a note without driving it.
+--send also presses Enter (autonomous relay; crosses the human gate — use sparingly).
+
+<who> picks a LIVE session (from the presence registry, see claude-sessions) by:
+  • session-id prefix      claude-say 9272 "…"
+  • repo name              claude-say loops "…"     (if it's the only loops session)
+  • a substring of what it's working on (recent files / branch / area)
+                           claude-say goal-attachment "…"
+Empty, --list, ambiguous, or no-match → prints the addressable sessions.
+
+The current session is excluded (you can't message yourself).
+"""
+import os, sys, json, glob, time, subprocess
+
+DIR = os.path.expanduser("~/.claude/session-presence")
+SCRIPTS = os.path.dirname(os.path.realpath(__file__))
+
+
+def sh(a):
+    try:
+        return subprocess.run(a, capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ""
+
+
+def pid_alive(pid, start):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    except Exception:
+        return False
+    return " ".join(sh(["ps", "-o", "lstart=", "-p", str(pid)]).split()) == start
+
+
+def live_sessions():
+    """One record per live process (newest wins) — mirrors claude-sessions."""
+    best = {}
+    for f in glob.glob(os.path.join(DIR, "*.json")):
+        try:
+            r = json.load(open(f))
+        except Exception:
+            continue
+        if not pid_alive(r.get("pid"), r.get("start_time", "")):
+            continue
+        pid = r.get("pid")
+        if pid not in best or r.get("last_active", 0) > best[pid].get("last_active", 0):
+            best[pid] = r
+    return list(best.values())
+
+
+def self_pid():
+    out = sh([os.path.join(SCRIPTS, "claude-session-pid")])
+    try:
+        return int(out.split("\t")[0]) if out.strip() else None
+    except Exception:
+        return None
+
+
+def area(r):
+    files = r.get("files") or []
+    if files:
+        segs = [s for s in files[-1].split("/") if s]
+        return "/".join(segs[-2:]) if len(segs) >= 2 else (segs[-1] if segs else "?")
+    return r.get("branch", "") or "—"
+
+
+def pane_of(r):
+    """The session's tmux pane: the captured one, else reverse-map pid → pane."""
+    if r.get("tmux_pane"):
+        return r["tmux_pane"]
+    pid = r.get("pid")
+    if not pid:
+        return ""
+    anc, p = set(), pid
+    for _ in range(30):
+        if not p or p <= 1:
+            break
+        anc.add(p)
+        try:
+            p = int(sh(["ps", "-o", "ppid=", "-p", str(p)]))
+        except Exception:
+            break
+    for line in sh(["tmux", "list-panes", "-a", "-F", "#{pane_id} #{pane_pid}"]).splitlines():
+        try:
+            pane, ppid = line.split()
+            if int(ppid) in anc:
+                return pane
+        except Exception:
+            pass
+    return ""
+
+
+def show(sessions, stream=sys.stdout):
+    for r in sessions:
+        print("  %-10s %-28s %s" % (r.get("session_id", "")[:8], area(r), r.get("repo_name", "")), file=stream)
+
+
+def main():
+    args = [a for a in sys.argv[1:] if a != "--send"]
+    send = "--send" in sys.argv[1:]
+
+    me = self_pid()
+    others = [r for r in live_sessions() if r.get("pid") != me]
+
+    if not args or args[0] == "--list":
+        print("addressable sessions:")
+        show(others)
+        return 0
+
+    who, msg = args[0], " ".join(args[1:]).strip()
+    if not msg:
+        print("usage: claude-say <who> <message…> [--send]", file=sys.stderr)
+        return 2
+
+    w = who.lower()
+    def hit(r):
+        return (r.get("session_id", "").startswith(who)
+                or w == r.get("repo_name", "").lower()
+                or w in area(r).lower()
+                or w in (" ".join(r.get("files") or [])).lower()
+                or w in (r.get("branch", "") or "").lower())
+    cands = [r for r in others if hit(r)]
+
+    if not cands:
+        print("no live session matches %r. addressable:" % who, file=sys.stderr)
+        show(others, sys.stderr)
+        return 1
+    if len(cands) > 1:
+        print("%r matches %d sessions — narrow it (sid prefix or a unique file/area):" % (who, len(cands)), file=sys.stderr)
+        show(cands, sys.stderr)
+        return 1
+
+    tgt = cands[0]
+    pane = pane_of(tgt)
+    if not pane:
+        print("matched %s but found no tmux pane (not under tmux?) — can't deliver." % tgt.get("session_id", "")[:8], file=sys.stderr)
+        return 1
+
+    subprocess.run(["tmux", "send-keys", "-t", pane, "-l", msg])   # literal text, NO Enter
+    if send:
+        subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"])
+    print("%s → %s · %s  (pane %s)" % (
+        "sent+entered" if send else "drafted (no Enter — review & send in that pane)",
+        tgt.get("session_id", "")[:8], area(tgt), pane))
+    time.sleep(0.4)   # let the target TUI repaint so the confirmation shows the landed text
+    tail = [l for l in sh(["tmux", "capture-pane", "-t", pane, "-p"]).splitlines() if l.strip()][-3:]
+    for l in tail:
+        print("  | " + l)
+    return 0
+
+
+sys.exit(main())
