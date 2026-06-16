@@ -18,6 +18,7 @@ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts 
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
 _mcache = {}  # (branch, sig) -> model json — recompute only when something changed
+_pcache = {}  # (sig, origin-main-sha) -> picker json — the /projects fan-out is expensive
 _render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
 _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
@@ -25,6 +26,18 @@ _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by a
 
 def run(args):
     return subprocess.run(args, cwd=CWD, capture_output=True, text=True)
+
+
+def _worktree_of(branch):   # path of the worktree currently holding `branch`, or "" if none
+    if not branch:
+        return ""
+    path = ""
+    for line in run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line == "branch refs/heads/" + branch:
+            return path
+    return ""
 
 
 def model_sig():
@@ -240,6 +253,14 @@ class H(BaseHTTPRequestHandler):
             r = run([os.path.join(SCRIPTS, "stack-prs")])
             self._send(200, r.stdout or "{}")
         elif u.path == "/projects":   # the picker: [{name, branches, ready:[…]}] — choose a project to view
+            # The fan-out below (stack-forest --projects + a rev-list per branch)
+            # costs ~0.5s; cache on model_sig + origin/main tip so repeat loads are
+            # instant and it recomputes only when a ref/config/ledger changes or a
+            # fetch moves origin/main (which the "behind" counts depend on).
+            pck = (model_sig(), run(["git", "rev-parse", "origin/main"]).stdout.strip())
+            if pck in _pcache:
+                self._send(200, _pcache[pck])
+                return
             r = run([os.path.join(SCRIPTS, "stack-forest"), "--projects"])
             try:
                 projs = json.loads(r.stdout or "[]")
@@ -262,7 +283,10 @@ class H(BaseHTTPRequestHandler):
                     if n.isdigit():
                         behind = max(behind, int(n))
                 p["behind"] = behind
-            self._send(200, json.dumps(projs))
+            payload = json.dumps(projs)
+            _pcache.clear()
+            _pcache[pck] = payload
+            self._send(200, payload)
         elif u.path == "/standalone":   # the pinned watch list — [{branch, commits, add, del}]
             r = run([os.path.join(SCRIPTS, "stack-forest"), "--standalone"])
             self._send(200, r.stdout or "[]")
@@ -374,7 +398,20 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/checkout":   # move the working tree onto this branch (git refuses if dirty)
             d = json.loads(raw or "{}")
-            r = run(["git", "checkout", d.get("branch", "")])
+            branch = d.get("branch", "")
+            wt = _worktree_of(branch)
+            if wt and os.path.realpath(wt) != os.path.realpath(CWD):
+                # git can't move the main tree onto a branch another worktree already holds.
+                if not d.get("force"):
+                    # tell the client where it lives so it can offer to free it
+                    self._send(409, json.dumps({"ok": False, "err": "already open in worktree at " + wt, "worktree": wt}))
+                    return
+                # force: detach that worktree's HEAD (keeps its commits, releases the branch name), then checkout here
+                rd = run(["git", "-C", wt, "checkout", "--detach"])
+                if rd.returncode != 0:
+                    self._send(500, json.dumps({"ok": False, "err": "could not free worktree: " + (rd.stderr or rd.stdout)}))
+                    return
+            r = run(["git", "checkout", branch])
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return

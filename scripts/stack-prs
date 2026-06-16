@@ -11,9 +11,21 @@
 # merges into main, so the viewer highlights toMain edges and flags the rest
 # (a PR against a non-main base is the stacked-PR anti-pattern).
 #
-# Disk-cached (TTL default 300s; STACK_PRS_TTL=0 disables) so GitHub is hit at
-# most once per window across ALL callers/sessions — no hammering. On a failed or
-# offline fetch it reuses the last good cache rather than emit empty or re-query.
+# Stale-while-revalidate (GitHub-Desktop model): the request path NEVER blocks on
+# GitHub. A present cache is served immediately — even when stale — and a stale
+# cache triggers a single detached background `gh` refresh that updates the file
+# for the next read. Only a cold start (no cache yet) blocks once to populate.
+# This keeps every viewer load an instant local file read; badges are at most one
+# refresh-window stale, which is fine for PR state.
+#
+#   TTL (default 300s) = how long a cache is "fresh"; past it, serve-stale +
+#   background-refresh. STACK_PRS_TTL=0 forces a synchronous fresh fetch (old
+#   blocking behavior) for callers that need up-to-the-second data.
+#   `--refresh` drops the cache and fetches synchronously.
+#
+# A refresh lock (atomic mkdir, stolen after LOCK_TTL) ensures at most one gh
+# fetch runs at a time across ALL callers/sessions — no stampede, no hammering.
+# On a failed/offline fetch the last good cache is kept, never overwritten empty.
 #
 # Scans the fork then the team repo; the team repo wins on conflict (a promoted
 # PR is the real merge target). Override repos via `git config stack.pr-repos`.
@@ -26,39 +38,74 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PA
 gitdir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
 CACHE="${gitdir:-${TMPDIR:-/tmp}}/stack-prs.json"
 TTL=${STACK_PRS_TTL:-300}
+LOCK="$CACHE.refresh.lock"
+LOCK_TTL=120   # steal a refresh lock left behind by a crashed/killed fetch
+
 [[ "${1:-}" == "--refresh" ]] && rm -f "$CACHE"
 
-# Serve a fresh cache without touching GitHub.
-if [[ -f "$CACHE" ]] && (( TTL > 0 )); then
-  age=$(( $(date +%s) - $(stat -f %m "$CACHE" 2>/dev/null || echo 0) ))
-  (( age < TTL )) && { cat "$CACHE"; exit 0; }
-fi
+_now() { date +%s; }
+_age() { echo $(( $(_now) - $(stat -f %m "$1" 2>/dev/null || echo 0) )); }
 
-MAIN=$(git config stack.main-branch 2>/dev/null || echo main)
-repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
-(( ${#repos} )) || repos=(phil-loops/loops Loops-so/loops)
+# Hit GitHub and atomically rewrite $CACHE. Prints nothing. Returns 1 on a failed
+# fetch (offline/rate-limited) WITHOUT touching the existing cache.
+_refresh() {
+  local MAIN repo rows merged ok
+  MAIN=$(git config stack.main-branch 2>/dev/null || echo main)
+  local -a repos
+  repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
+  (( ${#repos} )) || repos=(phil-loops/loops Loops-so/loops)
 
-merged='{}'; ok=1
-for repo in $repos; do
-  rows=$(gh pr list --repo "$repo" --state open -L 300 \
-           --json number,url,headRefName,baseRefName,isDraft,reviewDecision 2>/dev/null) || { ok=0; break; }
-  merged=$(jq -n --arg main "$MAIN" --argjson acc "$merged" --argjson rows "$rows" '
-    $acc + (reduce $rows[] as $p ({};
-      .[$p.headRefName] = {
-        num:    $p.number,
-        url:    $p.url,
-        draft:  $p.isDraft,
-        base:   $p.baseRefName,
-        toMain: ($p.baseRefName == $main),
-        review: ($p.reviewDecision // "")
-      }))')
-done
+  merged='{}'; ok=1
+  for repo in $repos; do
+    rows=$(gh pr list --repo "$repo" --state open -L 300 \
+             --json number,url,headRefName,baseRefName,isDraft,reviewDecision 2>/dev/null) || { ok=0; break; }
+    merged=$(jq -n --arg main "$MAIN" --argjson acc "$merged" --argjson rows "$rows" '
+      $acc + (reduce $rows[] as $p ({};
+        .[$p.headRefName] = {
+          num:    $p.number,
+          url:    $p.url,
+          draft:  $p.isDraft,
+          base:   $p.baseRefName,
+          toMain: ($p.baseRefName == $main),
+          review: ($p.reviewDecision // "")
+        }))')
+  done
+  (( ok )) || return 1
+  printf '%s' "$merged" > "$CACHE.tmp.$$" && mv "$CACHE.tmp.$$" "$CACHE"
+}
 
-# Fetch failed (offline / rate-limited): reuse last good cache, don't re-hammer.
-if (( ! ok )); then
+# Fire a single detached background refresh — but only if one isn't already in
+# flight. Fully detaches (fds off the caller's pipe, disowned) so the HTTP
+# request that spawned us returns instantly.
+_refresh_bg() {
+  # Steal a stale lock from a fetch that died mid-flight.
+  if [[ -d "$LOCK" ]] && (( $(_age "$LOCK") > LOCK_TTL )); then
+    rmdir "$LOCK" 2>/dev/null || true
+  fi
+  mkdir "$LOCK" 2>/dev/null || return 0   # another refresh already running → skip
+  ( _refresh || true; rmdir "$LOCK" 2>/dev/null || true ) >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
+# TTL=0 → caller explicitly wants synchronous fresh data (bypass SWR).
+if (( TTL == 0 )); then
+  if _refresh; then cat "$CACHE"; exit 0; fi
   [[ -f "$CACHE" ]] && { cat "$CACHE"; exit 0; }
   echo '{}'; exit 0
 fi
 
-printf '%s' "$merged" > "$CACHE.tmp.$$" && mv "$CACHE.tmp.$$" "$CACHE"
-cat "$CACHE"
+# Fresh cache → serve, no network.
+if [[ -f "$CACHE" ]] && (( $(_age "$CACHE") < TTL )); then
+  cat "$CACHE"; exit 0
+fi
+
+# Stale-but-present → serve stale NOW, revalidate in the background (SWR).
+if [[ -f "$CACHE" ]]; then
+  cat "$CACHE"
+  _refresh_bg
+  exit 0
+fi
+
+# Cold start (no cache yet) → must populate once, blocking.
+if _refresh; then cat "$CACHE"; exit 0; fi
+echo '{}'; exit 0
