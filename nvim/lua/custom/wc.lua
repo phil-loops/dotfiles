@@ -6,24 +6,50 @@
 -- changes — and runs git in the file's own dir, so it works inside study
 -- worktrees too. Message is optional; defaults to "wip".
 --
--- After a successful commit it also flips focus back to the viewer: it finds the
--- browser tab on the viewer port and raises it — so the save→commit→see-it loop
--- is one command. Self-gating: if no such tab is open it does nothing (and never
--- launches the browser), so `:wc` on an unrelated file won't yank you anywhere.
+-- After a successful commit it also flips focus back to the viewer so the
+-- save→commit→see-it loop is one command.
+--
+-- Two gotchas drive the implementation:
+--   1. We only refocus when :wc runs in the warm "review-nvim" that stack-open
+--      drives (the hover+o → edit → :wc loop) — identified by its listen socket,
+--      not by enumerating Chrome's tabs. So :wc in your normal editing nvim never
+--      yanks you to the browser, and we need no Apple events to decide that.
+--   2. Raising Chrome uses `open -a` (LaunchServices), NOT AppleScript `activate`.
+--      Under a detached tmux server (parented by launchd) macOS denies Apple events
+--      to other apps with -1743 ("Not authorized to send Apple events"), so the old
+--      `tell application "Google Chrome"` silently failed and focus never moved.
+--      `open -a` needs no Automation permission and works from inside tmux.
 
-local BROWSER = "Google Chrome"   -- the browser hosting the viewer
-local VIEWER_MATCH = ":62333"     -- substring of the viewer URL to find its tab
+local BROWSER = "Google Chrome"                    -- the browser hosting the viewer
+local VIEWER_MATCH = ":62333"                      -- substring of the viewer URL to find its tab
+local REVIEW_SOCK = "/tmp/stack-review-nvim.sock"  -- STACK_OPEN_SOCK: the warm review-nvim's socket
 
--- Raise the browser tab whose URL contains VIEWER_MATCH. Returns "true" if found
--- (and focused), "false" otherwise. Never launches the browser if it isn't running.
+-- True only in the review-nvim stack-open opens files into. Gating on the listen
+-- socket (not Chrome's tabs) keeps the decision permission-free.
+local function in_review_loop()
+  if vim.v.servername == REVIEW_SOCK then
+    return true
+  end
+  return vim.tbl_contains(vim.fn.serverlist(), REVIEW_SOCK)
+end
+
+-- Raise the viewer's browser. Returns true if we refocused, false otherwise.
+-- No-ops outside the review loop or when the browser isn't running (never launches it).
 local function refocus_viewer()
-  local out = vim.fn.system({
+  if not in_review_loop() then
+    return false
+  end
+  vim.fn.system({ "pgrep", "-x", BROWSER })
+  if vim.v.shell_error ~= 0 then -- browser not running → don't launch it
+    return false
+  end
+  -- Best-effort: select the viewer tab when Automation IS available (e.g. not under
+  -- a detached tmux). Harmless -1743 no-op when it isn't — `open -a` below still raises.
+  vim.fn.system({
     "osascript",
     "-e", "on run argv",
-    "-e", 'tell application "System Events" to if not (exists process "' .. BROWSER .. '") then return "false"',
     "-e", "set needle to item 1 of argv",
     "-e", 'tell application "' .. BROWSER .. '"',
-    "-e", "set found to false",
     "-e", "repeat with w in windows",
     "-e", "set i to 0",
     "-e", "repeat with t in (tabs of w)",
@@ -31,19 +57,17 @@ local function refocus_viewer()
     "-e", "if (URL of t contains needle) then",
     "-e", "set active tab index of w to i",
     "-e", "set index of w to 1",
-    "-e", "set found to true",
-    "-e", "exit repeat",
+    "-e", "return",
     "-e", "end if",
     "-e", "end repeat",
-    "-e", "if found then exit repeat",
     "-e", "end repeat",
-    "-e", "if found then activate",
-    "-e", "return (found as text)",
     "-e", "end tell",
     "-e", "end run",
     VIEWER_MATCH,
   })
-  return vim.trim(out or "")
+  -- Guaranteed: raise the browser window via LaunchServices (no Apple-event permission).
+  vim.fn.system({ "open", "-a", BROWSER })
+  return vim.v.shell_error == 0
 end
 
 vim.api.nvim_create_user_command("Wc", function(opts)
@@ -65,7 +89,7 @@ vim.api.nvim_create_user_command("Wc", function(opts)
 
   local sha = vim.trim(vim.fn.system({ "git", "-C", dir, "rev-parse", "--short", "HEAD" }))
   -- notify first (we're about to lose focus to the browser), then flip back to the viewer
-  local back = refocus_viewer() == "true" and "  ↩ viewer" or ""
+  local back = refocus_viewer() and "  ↩ viewer" or ""
   vim.notify("✦ committed " .. sha .. "  " .. msg .. back, vim.log.levels.INFO)
 end, {
   nargs = "?",
