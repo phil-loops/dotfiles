@@ -464,3 +464,8 @@ tr.linehover .d2h-code-side-linenumber{color:var(--gold);font-weight:600}
   border:1px solid var(--line);border-radius:5px;padding:1px 5px}
 .prr-rv{flex:none;font-size:12px}
 .prr-rv.ok{color:#56d090} .prr-rv.chg{color:var(--ember)} .prr-rv.req{color:var(--faint)}
+
+/* sticky/multi-line toast (restack-all halt): cap width, style the inline command + reason */
+#toast{max-width:min(560px,90vw);line-height:1.5;cursor:pointer}
+#toast code{background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:1px 6px;font-size:11px}
+#toast i{color:var(--dim);font-style:italic}
