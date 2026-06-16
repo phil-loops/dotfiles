@@ -29,9 +29,12 @@ fi
 
 # --- render the menu -----------------------------------------------------------------
 up=0; curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && up=1
-# unique project names from stack-project.<name>.branch (multivar → dedupe)
-projects=("${(@f)$(git -C "$repo" config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null \
-  | sed -E 's/^stack-project\.(.*)\.branch .*/\1/' | sort -u)}")
+# unique project names from stack-project.<name>.branch (multivar → dedupe).
+# build only when non-empty — `("${(@f)$(empty)}")` is a 1-elem empty array, not empty.
+projects=()
+plist=$(git -C "$repo" config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null \
+  | sed -E 's/^stack-project\.(.*)\.branch .*/\1/' | sort -u)
+[[ -n "$plist" ]] && projects=("${(@f)plist}")
 n=${#projects}
 
 echo "✦ ${n}"            # menu-bar badge: number of registered projects
