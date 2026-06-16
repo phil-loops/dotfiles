@@ -25,6 +25,19 @@ def git_out(args):
     return r.stdout if r.returncode == 0 else ""
 
 
+def contrib_id(parent, branch, path):
+    """Rebase-stable identity of the branch's contribution to a file: the patch-id
+    of `git diff -U0 parent...branch -- path`. Survives the parent moving underneath
+    the branch, so an inherited upstream edit doesn't read as a change. "" if empty."""
+    d = subprocess.run(["git", "diff", "-U0", f"{parent}...{branch}", "--", path],
+                       capture_output=True, text=True).stdout
+    if not d:
+        return ""
+    pid = subprocess.run(["git", "patch-id", "--stable"], input=d,
+                         capture_output=True, text=True).stdout
+    return pid.split()[0] if pid.strip() else ""
+
+
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
 node_mode = False
@@ -119,19 +132,63 @@ if not node_mode and target == "--projects":
     sys.exit(0)
 
 
+# ---- standalone branches (the picker's "pinned loose branches" section) ----
+# An OPT-IN watch list: branches the user explicitly pinned (multivar
+# `stack.standalone`), NOT auto-discovery. With ~1.5k stale local heads in a real
+# repo, auto-listing every loose branch is noise — so nothing shows unless added.
+# Each pinned branch that still exists emits a row {branch, commits, add, del};
+# in the picker each opens as its own one-root view (?branch=X → expand([X])). A
+# pinned branch is shown regardless of ahead-ness (you chose it); only a deleted
+# ref drops out. numstat per branch, fanned out — the list is small by design.
+if not node_mode and target == "--standalone":
+    picked = [b.strip() for b in git_out(["config", "--get-all", "stack.standalone"]).splitlines() if b.strip()]
+    existing = set(_existing)
+
+    def standalone_row(b):
+        if b not in existing:        # ref deleted out from under the config → drop
+            return None
+        n = git_out(["rev-list", "--count", f"{MAIN}..{b}"]).strip()
+        ahead = int(n) if n.isdigit() else 0
+        add = dele = 0
+        for ln in git_out(["diff", "--numstat", f"{MAIN}...{b}"]).splitlines():
+            parts = ln.split("\t")
+            if len(parts) == 3:
+                a, d, _ = parts
+                add += 0 if a == "-" else int(a or 0)
+                dele += 0 if d == "-" else int(d or 0)
+        return {"branch": b, "commits": ahead, "add": add, "del": dele}
+
+    rows = []
+    if picked:
+        workers = max(1, min(8, (os.cpu_count() or 4), len(picked)))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            rows = [r for r in ex.map(standalone_row, picked) if r]
+    rows.sort(key=lambda r: r["branch"])
+    print(json.dumps(rows))
+    sys.exit(0)
+
+
 # ---- the blessing ledger, read once --------------------------------------
 gd = git_out(["rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
 try:
     ledger = json.load(open(os.path.join(gd, "stack-blessed.json")))
 except Exception:
     ledger = {}
+# contribution ledger (rebase-stable patch-ids) — preferred over the blob ledger
+# when present; the blob ledger remains the fallback for legacy / nvim blesses.
+try:
+    contrib = json.load(open(os.path.join(gd, "stack-blessed-contrib.json")))
+except Exception:
+    contrib = {}
 
 DIFF_HDR = re.compile(r"^diff --git a/(.+?) b/(.+)$")
 
 
 def file_status(branch, parent):
-    """(file rows with status, counts) — NO diffs. ~2 git calls."""
+    """(file rows with status, counts) — NO diffs. ~2 git calls, plus one cheap
+    patch-id per file that carries a contribution bless."""
     blessed = ledger.get(branch, {})
+    blessed_c = contrib.get(branch, {})
     toks = git_out(["diff", "--name-status", "-z", f"{parent}...{branch}"]).split("\x00")
     paths, deleted = [], set()
     i = 0
@@ -158,9 +215,17 @@ def file_status(branch, parent):
     stale = unbl = 0
     for p in paths:
         bl, cu = blessed.get(p, ""), cur.get(p, "")
-        if not bl:
+        blc = blessed_c.get(p, "")
+        if blc:
+            # blessed with a contribution id → compare the rebase-stable patch-id
+            cuc = contrib_id(parent, branch, p)
+            if cuc and cuc == blc:
+                s = "clean"; clean += 1
+            else:
+                s = "stale"; stale += 1
+        elif not bl:
             s = "unblessed"; unbl += 1
-        elif bl == cu:
+        elif bl == cu:          # legacy / nvim bless: blob fallback
             s = "clean"; clean += 1
         else:
             s = "stale"; stale += 1

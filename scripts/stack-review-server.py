@@ -220,6 +220,16 @@ class H(BaseHTTPRequestHandler):
             for p in projs:
                 p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
             self._send(200, json.dumps(projs))
+        elif u.path == "/standalone":   # the pinned watch list — [{branch, commits, add, del}]
+            r = run([os.path.join(SCRIPTS, "stack-forest"), "--standalone"])
+            self._send(200, r.stdout or "[]")
+        elif u.path == "/branches":   # typeahead candidates for pinning: all local heads,
+            # most-recent-first, minus main + the already-pinned. Names only.
+            main = run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+            pinned = set(run(["git", "config", "--get-all", "stack.standalone"]).stdout.splitlines())
+            heads = run(["git", "for-each-ref", "--sort=-committerdate", "refs/heads",
+                         "--format=%(refname:short)"]).stdout.splitlines()
+            self._send(200, json.dumps([b for b in heads if b and b != main and b not in pinned]))
         elif u.path == "/node":
             q = parse_qs(u.query)
             branch = q.get("branch", [""])[0]
@@ -277,6 +287,26 @@ class H(BaseHTTPRequestHandler):
             r = run(args)
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
+            return
+        if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list (stack.standalone multivar)
+            d = json.loads(raw or "{}")
+            branch = d.get("branch", "").strip()
+            if not branch:
+                self._send(400, json.dumps({"ok": False, "err": "no branch"}))
+                return
+            if d.get("op") == "remove":
+                # --fixed-value (git ≥2.30) treats the value as literal, not a regex —
+                # MUST precede --unset-all. Handles branch names with regex-special chars.
+                run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", branch])
+                self._send(200, json.dumps({"ok": True}))
+                return
+            # add: must be a real local head; de-dupe so a branch is pinned at most once
+            if run(["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + branch]).returncode != 0:
+                self._send(404, json.dumps({"ok": False, "err": "no such local branch"}))
+                return
+            if branch not in run(["git", "config", "--get-all", "stack.standalone"]).stdout.splitlines():
+                run(["git", "config", "--add", "stack.standalone", branch])
+            self._send(200, json.dumps({"ok": True}))
             return
         if self.path == "/purpose":   # save a thesis as the git branch description
             d = json.loads(raw or "{}")
