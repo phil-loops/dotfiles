@@ -226,7 +226,7 @@ function renderGraph(sel){
   // the map is organic but never jitters or shifts position between renders. We
   // trade the old left-to-right merge-order axis for compactness: deep stacks used
   // to run off the right edge; now they curl into 2D.
-  const PAD=72, K=175, ITER=460, MAIN={x:0,y:0};
+  const PAD=72, K=140, REP=210, GRAV=0.18, CUT=470, ITER=520, MAIN={x:0,y:0};
   const ids=Object.keys(N), P={};
   ids.forEach((b,i)=>{ const a=i*2.39996323, r=26+20*Math.sqrt(i+1); P[b]={x:Math.cos(a)*r, y:Math.sin(a)*r}; });
   const wOf=id=>id==='main'?40:nodeW(id);
@@ -236,11 +236,12 @@ function renderGraph(sel){
   let temp=K*1.8;
   for(let it=0; it<ITER; it++){
     const dsp={}; ids.forEach(b=>dsp[b]={x:0,y:0});
-    for(let i=0;i<ids.length;i++){ for(let j=i+1;j<ids.length;j++){            // separation
+    for(let i=0;i<ids.length;i++){ for(let j=i+1;j<ids.length;j++){            // separation — local collision only
       const A=P[ids[i]], B=P[ids[j]]; let dx=A.x-B.x, dy=A.y-B.y, d=Math.hypot(dx,dy)||0.01;
-      const minD=(wOf(ids[i])+wOf(ids[j]))/2+46, f=K*K/d*(d<minD?2.4:1);
+      const minD=(wOf(ids[i])+wOf(ids[j]))/2+90; if(d>CUT && d>minD) continue;  // beyond the cutoff, let gravity win
+      const f=REP*REP/d*(d<minD?7:1);                                           // hard shove out of overlap
       dx/=d; dy/=d; dsp[ids[i]].x+=dx*f; dsp[ids[i]].y+=dy*f; dsp[ids[j]].x-=dx*f; dsp[ids[j]].y-=dy*f; } }
-    ids.forEach(b=>{ let dx=P[b].x-MAIN.x, dy=P[b].y-MAIN.y, d=Math.hypot(dx,dy)||0.01, f=K*K/d; dsp[b].x+=dx/d*f; dsp[b].y+=dy/d*f; });
+    ids.forEach(b=>{ dsp[b].x-=P[b].x*GRAV; dsp[b].y-=P[b].y*GRAV; });          // gravity → pulls the chain inward into a ball
     links.forEach(([u,v])=>{ const A=at(u), B=at(v); let dx=B.x-A.x, dy=B.y-A.y, d=Math.hypot(dx,dy)||0.01, fa=d/K;  // cohesion
       if(u!=='main'){ dsp[u].x+=dx*fa; dsp[u].y+=dy*fa; } if(v!=='main'){ dsp[v].x-=dx*fa; dsp[v].y-=dy*fa; } });
     ids.forEach(b=>{ const m=Math.hypot(dsp[b].x,dsp[b].y)||0.01, s=Math.min(m,temp)/m; P[b].x+=dsp[b].x*s; P[b].y+=dsp[b].y*s; });
