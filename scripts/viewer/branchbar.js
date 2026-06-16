@@ -98,13 +98,50 @@
   async function doCheckout(btn){
     const branch=branchOf(); if(!branch) return;
     const t=btn.textContent; btn.textContent='checking out…'; btn.disabled=true;
-    try{
-      const r=await fetch('/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})}).then(x=>x.json());
-      toast(r.ok ? '⤓ checked out <b>'+esc(branch.split('/').pop())+'</b> in your tree'
-                 : '⤓ checkout failed: '+esc(lastLine(r.err)));
-    }catch(e){ toast('⤓ checkout failed — server unreachable'); }
+    let r;
+    try{ r=await fetch('/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch})}).then(x=>x.json()); }
+    catch(e){ toast('⤓ checkout failed — server unreachable'); btn.textContent=t; btn.disabled=false; return; }
     btn.textContent=t; btn.disabled=false;
+    if(r.ok){ toast('⤓ checked out <b>'+esc(branch.split('/').pop())+'</b> in your tree'); return; }
+    if(r.worktree){ showFree(btn, branch, r.worktree); return; }   // blocked: branch lives in another worktree
+    toast('⤓ checkout failed: '+esc(lastLine(r.err)));
   }
+
+  // ---- branch held by another worktree → free it, then checkout here ---------
+  let coPop=null, coAnchor=null;
+  function coEl(){
+    if(!coPop){ coPop=el('div'); coPop.id='copop';
+      coPop.addEventListener('mousedown',e=>e.stopPropagation());
+      document.body.appendChild(coPop); }
+    return coPop;
+  }
+  function hideFree(){ if(coPop) coPop.classList.remove('on'); }
+  function placeFree(){ if(!coPop||!coAnchor) return; const r=coAnchor.getBoundingClientRect();
+    coPop.style.left=Math.max(8, Math.min(r.left, innerWidth-coPop.offsetWidth-8))+'px';
+    coPop.style.top =Math.min(r.bottom+6, innerHeight-coPop.offsetHeight-8)+'px'; }
+  function showFree(anchor, branch, wt){
+    coAnchor=anchor; const p=coEl();
+    p.innerHTML='<div class="pp-h"><b>'+esc(branch.split('/').pop())+'</b> is open in another worktree</div>'
+      +'<div class="pp-note">'+esc(wt)+'</div>'
+      +'<div class="cp-warn"><span class="cp-orphan">⚠ frees the branch by detaching that worktree’s HEAD (its commits are kept), then checks it out here. Don’t do this if a session is live there.</span></div>'
+      +'<div class="cp-foot"></div>';
+    const f=p.querySelector('.cp-foot');
+    const go=el('button','cp-go','⤓ free worktree + checkout here'); go.onclick=()=>doFree(branch, f);
+    const cx=el('button','cp-cancel','cancel'); cx.onclick=hideFree;
+    const bar=el('div','cp-actions'); bar.append(go, cx); f.appendChild(bar);
+    p.classList.add('on'); placeFree();
+  }
+  async function doFree(branch, f){
+    f.innerHTML='<span class="cp-note">freeing worktree · checking out…</span>';
+    let r;
+    try{ r=await (await fetch('/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch, force:true})})).json(); }
+    catch(e){ f.innerHTML='<span class="cp-warn">checkout failed — server unreachable</span>'; return; }
+    if(!r || !r.ok){ f.innerHTML='<span class="cp-warn">checkout failed: '+esc((r&&lastLine(r.err))||'see server')+'</span>'; return; }
+    toast('⤓ freed + checked out <b>'+esc(branch.split('/').pop())+'</b> in your tree');
+    hideFree();
+  }
+  document.addEventListener('mousedown',e=>{ if(coPop && !coPop.contains(e.target) && !(e.target.closest&&e.target.closest('.checkouthere'))) hideFree(); });
+  document.addEventListener('scroll', hideFree, true);
 
   // ---- prep for push (squash UNPUSHED commits → one, then oxfmt) -------------
   let prepPop=null, prepAnchor=null;
