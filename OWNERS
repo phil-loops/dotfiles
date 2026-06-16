@@ -6,5 +6,7 @@
 # lane      paths (space-separated; prefix-matched against the repo-relative path)
 viewer      scripts/viewer/ scripts/stack-review-html.tpl.py scripts/stack-review-server.py scripts/stack-review-serve scripts/stack-prs
 forest      scripts/stack-forest scripts/stack-bless scripts/stack-blessed-status scripts/stack-model scripts/stack-open scripts/stack-purpose
-stack       scripts/stack-restack scripts/stack-integrate scripts/stack-list scripts/stack-rm scripts/git-stacks scripts/stack-prompt.sh
-docs        CLAUDE.md
+stack       scripts/stack-restack scripts/stack-integrate scripts/stack-list scripts/stack-rm scripts/git-stacks scripts/stack-prompt.sh scripts/stack-squash scripts/stack-archive
+review      scripts/stack-review scripts/stack-review-html scripts/branch-review
+shell       .zshrc
+docs        CLAUDE.md OWNERS
