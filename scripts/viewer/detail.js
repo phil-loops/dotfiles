@@ -232,11 +232,15 @@ function render(){
 
 // the diff line under the mouse (set by the d2h hover handlers) — press `o` to open it
 let _hoverLine = null;
-// keyboard: o → open hovered diff line in nvim; m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node; Tab/⇧Tab → next/prev file
+// keyboard: o → open hovered diff line in nvim; m → graph map; ]/[ walk the tree;
+// s → next stale/new node; Tab/⇧Tab → next/prev file. Nav model: projects → graph
+// → node/files; esc pops one level back up (node→graph→projects).
 addEventListener('keydown',e=>{
   if(e.metaKey||e.ctrlKey||e.altKey) return;   // let ⌘F / ⌘O / etc. reach the browser — these are bare-key shortcuts
+  if(document.getElementById('picker')) return;   // on the project-listing overlay: no in-forest shortcuts
   if(e.key==='Tab'){ const ae=document.activeElement;
     if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;   // let Tab move between fields while typing
+    if($('#map').classList.contains('on')) return;   // graph view: Tab walks files only in the node view
     e.preventDefault(); stepRailFile(e.shiftKey?-1:1); return; }
   if(e.key==='o' && _hoverLine){ const ae=document.activeElement;
     if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;   // don't fire while typing
@@ -246,7 +250,11 @@ addEventListener('keydown',e=>{
     return; }
   if(e.key==='m'){ toggleMap(); e.preventDefault(); return; }
   if(e.key==='f'){ document.body.classList.toggle('focus'); e.preventDefault(); return; }
-  if(e.key==='Escape'){ if($('#map').classList.contains('on')) toggleMap(false); else document.body.classList.remove('focus'); return; }
+  if(e.key==='Escape'){
+    if(document.body.classList.contains('focus')){ document.body.classList.remove('focus'); return; }
+    if($('#map').classList.contains('on')){ location.assign('/'); return; }   // graph → project listings
+    toggleMap(true); return;                                                  // node/files → graph
+  }
   const idx=NODES.findIndex(n=>n.id===active);
   if(e.key===']'){active=(NODES[Math.min(idx+1,NODES.length-1)]||{}).id;render();}
   else if(e.key==='['){active=(NODES[Math.max(idx-1,0)]||{}).id;render();}
@@ -599,7 +607,10 @@ async function boot(){
     if(V.base){ diffBase=V.base; diffBaseFor=active; }   // keep the saved diff base for the restored node
     render(); buildDock();
     restoreScroll(loadScroll());   // refresh-safe: land back where you were, not at the top
-    if(V.map) toggleMap(true);
+    // nav model: picking a project lands on the graph; a node is only shown when the
+    // URL hash names one (a click, refresh, or bookmark). fresh project click → no
+    // node in hash → open the map by default.
+    if(V.map || !V.node) toggleMap(true);
     $('#mapbtn').onclick=()=>toggleMap();
     $('#focusbtn').onclick=()=>document.body.classList.toggle('focus');
     if(LIVE){
@@ -612,6 +623,7 @@ async function boot(){
       // EventSource auto-reconnects on drop (e.g. the server's self-reexec), so no manual retry.
       const es=new EventSource('/events');
       window.__events=es;   // shared so accessories (freshness chip) ride one stream, not their own
+      let _updateT;   // debounce: coalesce a restack's rapid per-branch moves into one re-render
       es.addEventListener('update', async()=>{
         // Our own bless already updated the UI optimistically; the server then re-broadcasts
         // the ledger write as an 'update'. Reconcile counts silently (refetch + rail repaint,
@@ -622,15 +634,35 @@ async function boot(){
           }catch(e){}
           return;
         }
-        try{
-          const anchor=captureScroll();
-          MODEL=await fetchModel();
-          for(const k in NODEPATCH) delete NODEPATCH[k];   // diffs may have moved
-          render(); buildDock();
-          if($('#map').classList.contains('on')) renderGraph('#map');
-          restoreScroll(anchor);
-          toast('↻ forest updated');
-        }catch(e){}
+        // Coalesce a restack's rapid per-branch moves, then re-render ONLY what moved.
+        // Re-rendering the whole detail panel on every forest move thrashed the page —
+        // diff-cache wiped, scroll jumped, the open file reloaded — even when the restack
+        // was nowhere near your node. So: settle, then diff the model per-node by its
+        // file-signature (path+status+add/del — which encodes the parent→node diff, so it
+        // catches a move of the node OR its parent), and touch only the movers. The node
+        // you're reading is left completely alone unless it actually changed.
+        clearTimeout(_updateT);
+        _updateT=setTimeout(async()=>{
+          try{
+            const prevNODES=NODES;
+            MODEL=await fetchModel(); NODES=flatten();
+            const fsig=n=>JSON.stringify((n&&n.files)||[]);
+            const psig={}; prevNODES.forEach(n=>{ psig[n.id]=fsig(n); });
+            const changed=new Set();
+            NODES.forEach(n=>{ if(psig[n.id]!==fsig(n)) changed.add(n.id); });
+            prevNODES.forEach(n=>{ if(!NODES.some(x=>x.id===n.id)) changed.add(n.id); });
+            if(!changed.size) return;                                  // nothing real moved → don't touch the page
+            // wipe cached diffs only for nodes that moved (others keep their open diff)
+            changed.forEach(id=>{ for(const k in NODEPATCH){ if(k===id||k.startsWith(id+'@')) delete NODEPATCH[k]; } });
+            renderRail();                                              // status dots: cheap, always
+            if($('#map').classList.contains('on')) renderGraph('#map');
+            buildDock();
+            const cur=curObj();                                        // remount detail ONLY if YOUR node moved
+            if(cur && changed.has(cur.id)){
+              const anchor=captureScroll(); render(); restoreScroll(anchor); toast('↻ this node updated');
+            }
+          }catch(e){}
+        }, 800);
       });
       es.addEventListener('reload', ()=>{ saveScroll(); setTimeout(()=>location.reload(), 150+Math.random()*1200); });
     }
