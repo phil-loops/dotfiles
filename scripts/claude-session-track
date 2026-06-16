@@ -101,7 +101,10 @@ def main():
     if event == "SessionStart" or (now - rec.get("_git_at", 0) >= GIT_TTL):
         repo = sh(["git", "-C", cwd, "rev-parse", "--show-toplevel"])
         branch = sh(["git", "-C", cwd, "rev-parse", "--abbrev-ref", "HEAD"])
-        purpose = sh(["git", "-C", cwd, "config", "branch.%s.description" % branch]) if branch else ""
+        if branch == "HEAD":   # detached (common in worktrees) → a short sha reads better
+            sha = sh(["git", "-C", cwd, "rev-parse", "--short", "HEAD"])
+            branch = "@" + sha if sha else "(detached)"
+        purpose = sh(["git", "-C", cwd, "config", "branch.%s.description" % branch]) if branch and not branch.startswith("@") else ""
         rec["repo"] = repo
         rec["repo_name"] = os.path.basename(repo) if repo else "(no repo)"
         rec["branch"] = branch
