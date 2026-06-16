@@ -34,6 +34,15 @@ up=0; curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && up=1
 projects=()
 plist=$(git -C "$repo" config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null \
   | sed -E 's/^stack-project\.(.*)\.branch .*/\1/' | sort -u)
+# drop archived projects (stack-project.<name>.archived=true) — kept registered,
+# just hidden here and in the chooser; `loops stack unarchive <name>` restores.
+if [[ -n "$plist" ]]; then
+  plist=$(while IFS= read -r n; do
+    [[ -z "$n" ]] && continue
+    [[ "$(git -C "$repo" config --bool stack-project.${n}.archived 2>/dev/null)" == "true" ]] && continue
+    echo "$n"
+  done <<< "$plist")
+fi
 [[ -n "$plist" ]] && projects=("${(@f)plist}")
 n=${#projects}
 
