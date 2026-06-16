@@ -13,7 +13,7 @@ which the 15-minute time-based staleness can't tell you.
 Liveness model: a session is alive iff its process exists (not a timeout). ACTIVE
 vs idle is a *display* label off the last tool-use heartbeat — idle never releases.
 """
-import os, json, glob, time, subprocess
+import os, sys, json, glob, time, subprocess
 
 DIR = os.path.expanduser("~/.claude/session-presence")
 DOTFILES = os.path.expanduser("~/.dotfiles")
@@ -74,10 +74,37 @@ def load_live():
     return live
 
 
-def main():
-    live = load_live()
-    now = int(time.time())
+def lane_states(now):
+    """Each dotfiles `own` lane → {lane, kind, age}. kind: alive | dead | legacy | manual.
+    Liveness reads straight from the claim's stored pid+start (own stamps them)."""
+    out = []
+    held = sh(["git", "-C", DOTFILES, "config", "--get-regexp", r"^own\..*\.held"])
+    for ln in held.splitlines():
+        try:
+            key, epoch = ln.split()
+            lane, epoch = key[len("own."):-len(".held")], int(epoch)
+        except Exception:
+            continue
+        pid = sh(["git", "-C", DOTFILES, "config", "own.%s.pid" % lane])
+        start = sh(["git", "-C", DOTFILES, "config", "own.%s.start" % lane])
+        sid = sh(["git", "-C", DOTFILES, "config", "own.%s.session" % lane])
+        if pid:
+            kind = "alive" if pid_alive(pid, start) else "dead"
+        elif sid:
+            kind = "legacy"
+        else:
+            kind = "manual"
+        out.append({"lane": lane, "kind": kind, "age": now - epoch})
+    out.sort(key=lambda x: x["lane"])
+    return out
 
+
+def sbsan(s):
+    """sanitize text for a SwiftBar menu line — '|' starts param parsing; no newlines."""
+    return (s or "").replace("|", "¦").replace("\n", " ").strip()
+
+
+def render_terminal(live, now):
     print()
     if not live:
         print("  %sno active Claude Code sessions%s" % (DIM, RST))
@@ -87,11 +114,9 @@ def main():
         for r in live:
             idle = now - r.get("last_active", now)
             if idle < ACTIVE_WINDOW:
-                state = "%s● active%s" % (GRN, RST)
-                pad = 11 + len(GRN) + len(RST)
+                state, pad = "%s● active%s" % (GRN, RST), 11 + len(GRN) + len(RST)
             else:
-                state = "%s○ idle %s%s" % (YEL, ago(idle), RST)
-                pad = 11 + len(YEL) + len(RST)
+                state, pad = "%s○ idle %s%s" % (YEL, ago(idle), RST), 11 + len(YEL) + len(RST)
             detail = r.get("purpose") or ""
             files = r.get("files") or []
             if files:
@@ -99,40 +124,64 @@ def main():
             else:
                 detail = trunc(detail, 60)
             print("  %-2s %-11s %-32s %-*s %s" % (
-                "", trunc(r.get("repo_name", "?"), 11), trunc(r.get("branch", "?"), 32),
-                pad, state, detail))
+                "", trunc(r.get("repo_name", "?"), 11), trunc(r.get("branch", "?"), 32), pad, state, detail))
 
-    # dotfiles `own` lanes, with REAL liveness of each holder
-    live_sids = {r.get("session_id") for r in live}
-    held = sh(["git", "-C", DOTFILES, "config", "--get-regexp", r"^own\..*\.held"])
-    lanes = []
-    for ln in held.splitlines():
-        try:
-            key, epoch = ln.split()
-            lane = key[len("own."):-len(".held")]
-            lanes.append((lane, int(epoch)))
-        except Exception:
-            pass
+    lanes = lane_states(now)
     if lanes:
+        tag = {"alive": "%s● holder alive%s" % (GRN, RST),
+               "dead": "%s✗ holder process gone · free to take%s" % (RED, RST),
+               "legacy": "%s? legacy claim · no pid (confirm before taking)%s" % (YEL, RST)}
         print("\n  %sdotfiles lanes%s" % (BOLD, RST))
-        for lane, epoch in sorted(lanes):
-            # liveness straight from the claim's stored process token (own stamps
-            # pid+start) — self-contained, no dependence on a presence record.
-            pid = sh(["git", "-C", DOTFILES, "config", "own.%s.pid" % lane])
-            start = sh(["git", "-C", DOTFILES, "config", "own.%s.start" % lane])
-            sid = sh(["git", "-C", DOTFILES, "config", "own.%s.session" % lane])
-            if pid:
-                if pid_alive(pid, start):
-                    tag = "%s● holder alive%s" % (GRN, RST)
-                else:
-                    tag = "%s✗ holder process gone · free to take%s" % (RED, RST)
-            elif sid:
-                tag = "%s? legacy claim · no pid (confirm before taking)%s" % (YEL, RST)
-            else:
-                tag = "%smanual claim · %s ago%s" % (DIM, ago(now - epoch), RST)
-            print("    %-9s %s" % (lane, tag))
-
+        for l in lanes:
+            t = tag.get(l["kind"], "%smanual claim · %s ago%s" % (DIM, ago(l["age"]), RST))
+            print("    %-9s %s" % (l["lane"], t))
     print()
+
+
+def render_swiftbar(live, now):
+    print("◉ %d" % len(live))                                   # menu-bar badge
+    print("---")
+    idlec = sum(1 for r in live if now - r.get("last_active", now) >= ACTIVE_WINDOW)
+    n = len(live)
+    print("%d Claude session%s%s | color=#8f8472" % (n, "" if n == 1 else "s",
+          (" · %d idle" % idlec) if idlec else ""))
+    print("---")
+    if not live:
+        print("no active sessions | color=#8f8472")
+    for r in sorted(live, key=lambda r: (r.get("repo_name", ""), r.get("branch", ""))):
+        idle = now - r.get("last_active", now)
+        active = idle < ACTIVE_WINDOW
+        dot, color = ("●", "#3fb950") if active else ("○", "#d9a441")
+        leaf = (r.get("branch", "?") or "?").split("/")[-1]
+        state = "active" if active else "idle " + ago(idle)
+        print("%s %s · %s  —  %s | color=%s" % (dot, sbsan(r.get("repo_name", "?")), sbsan(leaf), state, color))
+        print("-- branch: %s | color=#8f8472 font=Menlo" % sbsan(r.get("branch", "?")))
+        if r.get("purpose"):
+            print("-- purpose: %s | color=#8f8472" % sbsan(r["purpose"]))
+        for f in (r.get("files") or [])[-5:]:
+            print("-- %s | color=#8f8472 font=Menlo" % sbsan(f))
+        print("-- since active: %s | color=#8f8472" % ago(idle))
+    lanes = lane_states(now)
+    if lanes:
+        print("---")
+        print("dotfiles lanes | color=#8f8472")
+        sym = {"alive": ("● alive", "#3fb950"), "dead": ("✗ gone · free to take", "#d36a36"),
+               "legacy": ("? legacy (no pid)", "#d9a441"), "manual": ("manual", "#8f8472")}
+        for l in lanes:
+            t, c = sym[l["kind"]]
+            print("%s — %s | color=%s" % (sbsan(l["lane"]), t, c))
+    print("---")
+    print("open forest viewer | href=http://127.0.0.1:62333/")
+    print("↻ refresh | refresh=true")
+
+
+def main():
+    live = load_live()                       # reaps dead records as a side effect
+    now = int(time.time())
+    if "--swiftbar" in sys.argv:
+        render_swiftbar(live, now)
+    else:
+        render_terminal(live, now)
 
 
 main()
