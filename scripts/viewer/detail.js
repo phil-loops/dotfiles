@@ -285,8 +285,14 @@ async function renderPicker(){
     // a PR for / merge straight into main.
     const candRow = cands.length
       ? `<div class="pk-ready pk-cand"><span class="pk-ready-h">○ candidate · no PR</span>${chips(cands)}</div>` : '';
+    // freshness vs origin/main: ⟳ N behind → the forest trails main, restack to
+    // refresh & condense; ✓ fresh → up to date. (server omits behind on old builds.)
+    const beh = (typeof p.behind==='number') ? p.behind : null;
+    const fresh = beh===null ? ''
+      : beh>0 ? `<span class="pk-fresh behind" title="origin/main is ${beh} commit${beh===1?'':'s'} ahead — restack to refresh &amp; condense">⟳ ${beh} behind</span>`
+              : `<span class="pk-fresh ok" title="up to date with origin/main">✓ fresh</span>`;
     b.innerHTML=`<div class="pk-top"><span class="pk-name">${esc(p.name)}</span>`
-      +`<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></div>`
+      +`<span class="pk-rt">${fresh}<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></span></div>`
       +readyRow+candRow;
     b.onclick=()=>{ location.search='branch='+encodeURIComponent(p.name); };
     list.appendChild(b); });
