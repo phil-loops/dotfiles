@@ -61,14 +61,40 @@ def pid_alive(pid, start):
     return proc_start(pid) == start   # start-time match guards against pid reuse
 
 
-def gc_dead():
+def gc_stale():
+    """Reap records whose process is gone, AND superseded records that share a LIVE
+    pid: one claude process == one session, but a /clear, resume, or subagent reuses
+    the process under a NEW session_id, orphaning the old record (its pid stays alive
+    so a plain liveness check never drops it). Keep the newest per pid, drop the rest."""
+    best = {}   # pid -> (file, last_active)
     for f in glob.glob(os.path.join(DIR, "*.json")):
         try:
             r = json.load(open(f))
-            if not pid_alive(r.get("pid"), r.get("start_time", "")):
-                os.remove(f)
         except Exception:
-            pass
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+            continue
+        pid = r.get("pid")
+        if not pid_alive(pid, r.get("start_time", "")):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+            continue
+        la = r.get("last_active", 0)
+        if pid not in best:
+            best[pid] = (f, la)
+        else:   # same live process → keep the newer record, drop the older
+            old = best[pid]
+            drop = old[0] if la > old[1] else f
+            if la > old[1]:
+                best[pid] = (f, la)
+            try:
+                os.remove(drop)
+            except Exception:
+                pass
 
 
 def main():
@@ -125,7 +151,7 @@ def main():
         json.dump(rec, fh)
 
     if event == "SessionStart":
-        gc_dead()   # reap records whose owning process is gone
+        gc_stale()   # reap dead records + supersede our pid's prior session_id
 
 
 try:
