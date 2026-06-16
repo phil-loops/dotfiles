@@ -220,56 +220,52 @@ function renderGraph(sel){
   const nodeW=b=>{ const lbl=b.split('/').pop(); return 50+lbl.length*7.2+34; };
   // each node reflects its OWN changes only — never a subtree rollup
   const own=b=>{ const n=N[b]||{}; return {clean:n.clean||0,stale:n.stale||0,unblessed:n.unblessed||0,total:n.total||0}; };
-  // ── columns (x) = MERGE-SEQUENCE position: a node sits one past EVERYTHING that
-  // must merge before it — its git parent chain (logical) AND its `requires`
-  // (planned). So a node that merges after a same-parent sibling lands one column
-  // further out, never in the sibling's column. When that pushes a node >1 column
-  // past its git parent, the parent rail is routed LOW (see skipEdge) so it runs
-  // below the intervening sibling instead of colliding with it.
-  const depth={}; const depthOf=(b,g)=>{ if(depth[b]!=null) return depth[b]; if(g>64) return depth[b]=1;
-    const n=N[b]||{}; let d=1;
-    if(n.parent && n.parent!=='main' && N[n.parent]) d=Math.max(d, depthOf(n.parent,g+1)+1);
-    (n.requires||[]).forEach(r=>{ if(N[r]) d=Math.max(d, depthOf(r,g+1)+1); });
-    return depth[b]=d; };
-  Object.keys(N).forEach(b=>depthOf(b,0));
-  const maxD=Math.max(1, ...Object.values(depth));
-  // variable-width columns: a column's x starts past the WIDEST node in the
-  // previous column + HGAP. Fixed-stride columns let a long branch name overflow
-  // into its child's column (the read-lock-from-flag / wire-and-cleanup overlap);
-  // sizing each column to its content guarantees no node ever overlaps the next.
-  const colMaxW={}; Object.keys(N).forEach(b=>{ const d=depth[b]; colMaxW[d]=Math.max(colMaxW[d]||0, nodeW(b)); });
-  const colX={1:PADX+GAPX}; for(let d=2; d<=maxD; d++){ colX[d]=colX[d-1]+(colMaxW[d-1]||0)+HGAP; }
-  // ── rows (y): tidy-tree over a layout spine. A node hangs under its git
-  // parent; a dep that only forks off main is ADOPTED under the (first) fan-in
-  // node that requires it, so requires-deps cluster beneath the node that
-  // carries them instead of scattering down the column.
-  const lkids={}; Object.keys(N).forEach(b=>lkids[b]=[]); const lpar={};
-  Object.keys(N).forEach(b=>{ const p=N[b].parent; if(p && p!=='main' && N[p]) lpar[b]=p; });
-  Object.keys(N).forEach(f=>{ (N[f].requires||[]).forEach(r=>{ if(N[r] && r!==f && lpar[r]==null) lpar[r]=f; }); });
-  Object.keys(lpar).forEach(b=>{ if(lkids[lpar[b]]) lkids[lpar[b]].push(b); });
-  const lroots=Object.keys(N).filter(b=>lpar[b]==null);
-  const place=(b,g)=>{ const kids=(g>64?[]:lkids[b])||[]; let y;
-    if(!kids.length){ y=leafY*GAPY; leafY++; } else { const ys=kids.map(c=>place(c,g+1)); y=(ys[0]+ys[ys.length-1])/2; }
-    pos[b]={x:colX[depth[b]], y:PADY+y, depth:depth[b]}; return y; };
-  lroots.forEach(r=>place(r,0));
-  // safety: any node missed (e.g. a requires-cycle) still gets its own row
-  Object.keys(N).forEach(b=>{ if(!pos[b]){ pos[b]={x:colX[depth[b]], y:PADY+leafY*GAPY, depth:depth[b]}; leafY++; } });
-  const rootYs=gm.roots.map(r=>pos[r]?pos[r].y:PADY);
-  const mainY=rootYs.length? rootYs.reduce((a,b)=>a+b,0)/rootYs.length : PADY;
-  const W=colX[maxD]+(colMaxW[maxD]||0)+PADX, H=PADY*2+Math.max(1,leafY)*GAPY;
+  // ── BOIDS / force-directed layout. Nodes repel (separation), edges pull
+  // together (cohesion), and `main` is a pinned anchor everything relaxes around.
+  // Deterministic — seeded spiral init + a fixed iteration count, NO rAF loop — so
+  // the map is organic but never jitters or shifts position between renders. We
+  // trade the old left-to-right merge-order axis for compactness: deep stacks used
+  // to run off the right edge; now they curl into 2D.
+  const PAD=72, K=175, ITER=460, MAIN={x:0,y:0};
+  const ids=Object.keys(N), P={};
+  ids.forEach((b,i)=>{ const a=i*2.39996323, r=26+20*Math.sqrt(i+1); P[b]={x:Math.cos(a)*r, y:Math.sin(a)*r}; });
+  const wOf=id=>id==='main'?40:nodeW(id);
+  const links=[]; ids.forEach(b=>{ const p=N[b].parent; links.push([(p&&p!=='main'&&N[p])?p:'main', b]);
+    (N[b].requires||[]).forEach(r=>{ if(N[r]&&r!==b) links.push([r,b]); }); });
+  const at=id=>id==='main'?MAIN:P[id];
+  let temp=K*1.8;
+  for(let it=0; it<ITER; it++){
+    const dsp={}; ids.forEach(b=>dsp[b]={x:0,y:0});
+    for(let i=0;i<ids.length;i++){ for(let j=i+1;j<ids.length;j++){            // separation
+      const A=P[ids[i]], B=P[ids[j]]; let dx=A.x-B.x, dy=A.y-B.y, d=Math.hypot(dx,dy)||0.01;
+      const minD=(wOf(ids[i])+wOf(ids[j]))/2+46, f=K*K/d*(d<minD?2.4:1);
+      dx/=d; dy/=d; dsp[ids[i]].x+=dx*f; dsp[ids[i]].y+=dy*f; dsp[ids[j]].x-=dx*f; dsp[ids[j]].y-=dy*f; } }
+    ids.forEach(b=>{ let dx=P[b].x-MAIN.x, dy=P[b].y-MAIN.y, d=Math.hypot(dx,dy)||0.01, f=K*K/d; dsp[b].x+=dx/d*f; dsp[b].y+=dy/d*f; });
+    links.forEach(([u,v])=>{ const A=at(u), B=at(v); let dx=B.x-A.x, dy=B.y-A.y, d=Math.hypot(dx,dy)||0.01, fa=d/K;  // cohesion
+      if(u!=='main'){ dsp[u].x+=dx*fa; dsp[u].y+=dy*fa; } if(v!=='main'){ dsp[v].x-=dx*fa; dsp[v].y-=dy*fa; } });
+    ids.forEach(b=>{ const m=Math.hypot(dsp[b].x,dsp[b].y)||0.01, s=Math.min(m,temp)/m; P[b].x+=dsp[b].x*s; P[b].y+=dsp[b].y*s; });
+    temp*=0.985;
+  }
+  // pack into the canvas: bbox over node extents (+ main), shift into PAD margins
+  let minX=MAIN.x-8, maxX=MAIN.x+46, minY=MAIN.y-14, maxY=MAIN.y+14;
+  ids.forEach(b=>{ const hw=nodeW(b)/2; minX=Math.min(minX,P[b].x-hw); maxX=Math.max(maxX,P[b].x+hw); minY=Math.min(minY,P[b].y-16); maxY=Math.max(maxY,P[b].y+16); });
+  const ox=PAD-minX, oy=PAD-minY;
+  ids.forEach(b=>{ pos[b]={x:P[b].x+ox-nodeW(b)/2, y:P[b].y+oy}; });
+  const mainPos={x:MAIN.x+ox, y:MAIN.y+oy};
+  const W=(maxX-minX)+PAD*2, H=(maxY-minY)+PAD*2;
+  const cx=b=>pos[b].x+nodeW(b)/2, cy=b=>pos[b].y;
+  // straight center-to-center connectors — the old layered S-curve assumed a
+  // left→right flow the force layout no longer guarantees.
+  const seg=(x1,y1,x2,y2,st,i,from,to)=>`<path class="ge ${st}" data-from="${from||''}" data-to="${to||''}" style="animation-delay:${i*40}ms" d="M${x1},${y1} L${x2},${y2}"/>`;
   let E='', G='', ei=0, gi=0;
-  gm.roots.forEach(r=>{ if(pos[r]) E+=edge(54,mainY,pos[r].x,pos[r].y,rollStatus(own(r)),ei++,'main',r); });
-  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].children)||[]).forEach(c=>{ if(!pos[c])return;
-    const fn = (pos[c].depth - p.depth > 1) ? skipEdge : edge;   // low-route when the child skips a column past its parent
-    E+=fn(p.x+nodeW(b),p.y,pos[c].x,pos[c].y,rollStatus(own(c)),ei++,b,c); }); });
-  // fan-in: a "phantom" inbound edge from each `requires` dep into the node that
-  // carries it — a PLANNED (deliberate, revisable) merge-order, not a logical
-  // build-link, so it reads in a softer/neutral style than the solid parent rail.
-  // Edge-case: if the dep is already a parent-ANCESTOR, the solid chain implies
-  // it — drawing a dashed edge too would contradict, so skip it as redundant.
-  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const chain=parentChain(b);
-    ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq] && !chain.has(rq)) E+=faninEdge(pos[rq],p,nodeW(rq),nodeW(b),ei++,rq,b); }); });
-  G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(40,${mainY})"><circle r="6"/><text x="16" y="4">main</text></g>`;
+  gm.roots.forEach(r=>{ if(pos[r]) E+=seg(mainPos.x,mainPos.y,cx(r),cy(r),rollStatus(own(r)),ei++,'main',r); });
+  Object.keys(N).forEach(b=>{ if(!pos[b])return; ((N[b].children)||[]).forEach(c=>{ if(!pos[c])return;
+    E+=seg(cx(b),cy(b),cx(c),cy(c),rollStatus(own(c)),ei++,b,c); }); });
+  // fan-in (`requires`): a dashed PLANNED edge, unless the dep is already a parent
+  // ancestor (the solid chain implies it — drawing it too would be redundant).
+  Object.keys(N).forEach(b=>{ if(!pos[b])return; const chain=parentChain(b);
+    ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq] && !chain.has(rq)) E+=seg(cx(rq),cy(rq),cx(b),cy(b),'fanin',ei++,rq,b); }); });
+  G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(${mainPos.x},${mainPos.y})"><circle r="6"/><text x="16" y="4">main</text></g>`;
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=own(b), w=nodeW(b);
     const done = r.total>0 && r.clean===r.total && r.stale===0;   // this branch's own files all reviewed
     const cnt = `${r.clean}/${r.total}`;   // always the count — gold border already signals "all blessed"; a 2nd ✓ collided with the PR badge
@@ -288,7 +284,7 @@ function renderGraph(sel){
   const swatch = cls=>`<svg class="lgsw" width="26" height="8" viewBox="0 0 26 8"><path class="ge ${cls}" style="animation:none;opacity:1" d="M1,4 L25,4"/></svg>`;
   const legend = `<span class="maplegend">${swatch('clean')}<span class="lgl">builds on</span>${swatch('fanin')}<span class="lgl">merge after · planned</span></span>`;
   const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3>${legend}<span class="mapclose">click a node · esc to close</span></div>` : '';
-  tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${E}${G}</svg>`;
+  tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="height:auto;max-height:84vh;display:block">${E}${G}</svg>`;
   tgt.querySelectorAll('.gn[data-b]').forEach(g=>{ g.onclick=()=>{ active=g.getAttribute('data-b'); if(sel==='#map') toggleMap(false); render(); };
     // hover → what must merge before this branch is a candidate to merge into main
     g.addEventListener('mouseenter',()=>showTip(g.getAttribute('data-b'), g));
