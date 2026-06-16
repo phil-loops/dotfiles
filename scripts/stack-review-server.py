@@ -29,6 +29,41 @@ def run(args):
     return subprocess.run(args, cwd=CWD, capture_output=True, text=True)
 
 
+def _proj_opened_file():
+    # project -> epoch of the last hover+o file-open, kept in the git-common-dir so it
+    # survives across worktrees. Drives the picker's "recently touched first" ordering.
+    gd = run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+    if gd and not os.path.isabs(gd):
+        gd = os.path.join(CWD, gd)
+    return os.path.join(gd, "stack-project-opened.json") if gd else ""
+
+
+def _proj_opened_load():
+    try:
+        with open(_proj_opened_file()) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _record_proj_open(branch):
+    # Stamp now against the branch's project tag, so a no-PR project floats to the top
+    # of the picker after you open one of its files. No tag → nothing to order by, skip.
+    if not branch:
+        return
+    proj = run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    path = _proj_opened_file()
+    if not proj or not path:
+        return
+    try:
+        d = _proj_opened_load()
+        d[proj] = int(time.time())
+        with open(path, "w") as f:
+            json.dump(d, f)
+    except Exception:
+        pass
+
+
 def _main_worktree():
     # "check out here" / "jump to checkout" act on the user's PRIMARY working tree
     # — the repo's main worktree (git always lists it first) — never the dir this
@@ -365,6 +400,8 @@ class H(BaseHTTPRequestHandler):
             _pcache.clear()
             _pcache[pck] = payload
             self._send(200, payload)
+        elif u.path == "/project-opened":   # project -> last hover+o open epoch; orders the no-PR picker cards
+            self._send(200, json.dumps(_proj_opened_load()))
         elif u.path == "/standalone":   # the pinned watch list — [{branch, commits, add, del}]
             r = run([os.path.join(SCRIPTS, "stack-forest"), "--standalone"])
             self._send(200, r.stdout or "[]")
@@ -465,6 +502,8 @@ class H(BaseHTTPRequestHandler):
             if pos:                               # verbatim; this wiring layer never parses it. stack-open owns
                 args.append(str(pos))             # the grammar, so new locator kinds cost zero change HERE.
             r = run(args)
+            if r.returncode == 0:
+                _record_proj_open(d.get("branch", ""))   # stamp recency for the picker's no-PR ordering
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return

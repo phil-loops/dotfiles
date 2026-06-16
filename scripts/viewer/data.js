@@ -53,14 +53,49 @@ async function fetchModel(){
   if(!r.ok) throw new Error('model fetch failed');
   return r.json();
 }
-// bless: live → POST then re-fetch (staleness recomputed server-side); static → copy the command
+// the source node object in MODEL (mutable — NODES are throwaway copies from flatten())
+function srcNode(branch){ return MODEL.nodes ? MODEL.nodes[branch] : (MODEL.links||[]).find(l=>l.branch===branch); }
+// our own bless writes the ledger, which the server re-broadcasts as an SSE 'update'.
+// we already applied that optimistically in place, so suppress the remount for it until
+// this deadline (re-armed around the POST so a slow round-trip can't let the echo leak).
+let blessEchoUntil = 0;
+// repaint ONE file card in place to `status` — chip, tag, class, bless-button label —
+// without touching #main's diffs or scroll. Missing card (filtered out) is a no-op.
+function paintFileCard(path, status){
+  const main=$('#main'); if(!main) return;
+  const card=[...main.querySelectorAll('.file[data-path]')].find(c=>c.dataset.path===path); if(!card) return;
+  card.classList.remove('clean','stale','unblessed'); card.classList.add(status);
+  const chip=card.querySelector('.chip'); if(chip){ chip.className='chip '+status;
+    chip.textContent = status==='clean'?'✓':status==='stale'?'△':'·'; }
+  const tag=card.querySelector('.tag'); if(tag){ tag.className='tag'+(status==='clean'?' clean':status==='stale'?' stale':'');
+    tag.textContent = status==='clean'?'blessed':status==='stale'?'changed since blessed':'unreviewed'; }
+  const bb=card.querySelector('.bless'); if(bb) bb.textContent = status==='stale'?'re-bless':'bless';
+}
+// bless: live → flip the UI OPTIMISTICALLY (status + counts + cards, no remount), then POST
+// in the background and roll back if it fails. static → tell the user it's read-only.
 async function doBless(branch, file){
   if(!LIVE){ toast('read-only snapshot — open via <b>loops stack review --html</b> to bless'); return; }
-  toast('blessing…');
-  await fetch('/bless',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch,file})});
-  Object.keys(NODEPATCH).forEach(k=>{ if(k===branch || k.startsWith(branch+'@')) delete NODEPATCH[k]; });  // all base-variants stale
-  MODEL = await fetchModel();
-  render(); toast('✦ blessed');
+  const n=srcNode(branch);
+  const targets = (n&&n.files) ? (file==='.' ? n.files.filter(f=>f.status!=='clean')
+                                             : n.files.filter(f=>f.path===file && f.status!=='clean')) : [];
+  const undo = targets.map(f=>({f, status:f.status}));   // capture for rollback
+  undo.forEach(({f,status})=>{ if(status==='stale') n.stale--; else if(status==='unblessed') n.unblessed--; n.clean++; f.status='clean'; });
+  undo.forEach(({f})=>paintFileCard(f.path,'clean'));
+  NODES=flatten(); renderRail();   // rail + tally only — leaves #main (diffs, scroll) untouched
+  toast('✦ blessed');
+  blessEchoUntil = Date.now()+3000;   // arm BEFORE the write so the echoed pulse is covered
+  try{
+    const r=await fetch('/bless',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch,file})});
+    if(!r.ok) throw new Error('bless '+r.status);
+    Object.keys(NODEPATCH).forEach(k=>{ if(k===branch || k.startsWith(branch+'@')) delete NODEPATCH[k]; });  // since-blessed diffs reset
+    blessEchoUntil = Date.now()+3000;   // re-arm: the ledger pulse lands shortly AFTER the POST returns
+  }catch(e){
+    blessEchoUntil = 0;
+    undo.forEach(({f,status})=>{ f.status=status; if(status==='stale') n.stale++; else if(status==='unblessed') n.unblessed++; n.clean--; });
+    undo.forEach(({f,status})=>paintFileCard(f.path,status));
+    NODES=flatten(); renderRail();
+    toast('⚠ bless failed — reverted');
+  }
 }
 
 // normalize either shape — forest {nodes,roots} OR linear {links} — into a flat,

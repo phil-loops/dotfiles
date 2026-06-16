@@ -1,56 +1,48 @@
-// the left rail IS the dependency graph now — a vertical tree (main → roots →
-// children) with connector lines, per-node status + PR badge + N/N count. The
-// horizontal flowchart with edges/spotlight lives in the fullscreen map (m).
+// the left rail lists the SELECTED node's edited files (path + bless status); click
+// one to open + scroll to its diff card in the main panel. Branch navigation lives
+// in the fullscreen map (m) and the ]/[ keys — the rail is per-node now, not the
+// forest tree.
 function renderRail(){
-  $('#leaf').textContent = MODEL.project || MODEL.leaf || '';
-  const tot=NODES.reduce((a,n)=>{a.c+=n.clean;a.s+=n.stale;a.u+=n.unblessed;a.t+=n.total;return a;},{c:0,s:0,u:0,t:0});
-  $('#bar').style.width=(tot.t?Math.round(100*tot.c/tot.t):0)+'%';
-  $('#tally').innerHTML=`<span><b>${tot.c}</b> blessed</span><span><b>${tot.s}</b> stale</span><span><b>${tot.u}</b> new</span>`;
-  const rail=$('#rail'); rail.innerHTML='';
-  const N = MODEL.nodes;
-  const row=(b,n,connector)=>{
-    const done = n.total>0 && n.clean===n.total && n.stale===0;
-    const li=el('li','lk'+(b===active?' on':'')+(done?' done':''));
-    li.dataset.b=b;
-    const pr=(typeof GPRS!=='undefined') ? GPRS[b] : null;
-    const ps=(pr && typeof prState==='function') ? prState(b) : null;
-    const badge = ps ? `<span class="rdot ${ps.cls}" title="${ps.meta}">${ps.glyph}</span>` : '';
-    li.innerHTML=`<span class="tw">${connector}</span><span class="dot ${n.status}"></span>`
-      +`<span class="nm">${b.split('/').pop()}</span>${badge}<span class="cnt2">${n.clean}/${n.total}</span>`;
-    li.onclick=()=>{ active=b; render(); };
-    li.addEventListener('mouseenter',()=>{ if(typeof showTip==='function') showTip(b, li); railSpot(b); });
-    li.addEventListener('mouseleave',()=>{ if(typeof hideTip==='function') hideTip(); railUnspot(); });
-    rail.appendChild(li);
-  };
-  if(N){
-    const trunk=el('li','lk trunk');
-    trunk.innerHTML='<span class="tw"> </span><span class="dot clean"></span><span class="nm main">main</span>';
-    rail.appendChild(trunk);
-    const seen=new Set();
-    const walk=(b,anc,isLast)=>{
-      if(seen.has(b))return; seen.add(b);
-      const n=N[b]; if(!n)return;
-      row(b,n, anc.map(v=>v?'│ ':'  ').join('')+(isLast?'└ ':'├ '));
-      const kids=(n.children||[]).filter(c=>N[c] && !seen.has(c));
-      kids.forEach((c,i)=>walk(c, anc.concat(!isLast), i===kids.length-1));
-    };
-    const roots=(MODEL.roots||[]).filter(r=>N[r]);
-    roots.forEach((r,i)=>walk(r, [], i===roots.length-1));
-    Object.keys(N).forEach(b=>{ if(!seen.has(b)) walk(b, [], true); });   // any orphans
-  } else {
-    NODES.forEach(n=>row(n.id, n, ''));   // linear snapshot fallback
+  const l = (typeof curObj==='function') ? curObj() : {branch:'',files:[]};
+  $('#leaf').textContent = (l.branch||MODEL.project||MODEL.leaf||'').split('/').pop();
+  const node = (MODEL.nodes && MODEL.nodes[l.branch]) || null;
+  const c=node?node.clean:0, s=node?node.stale:0, u=node?node.unblessed:0,
+        t=node?node.total:(l.files||[]).length;
+  $('#bar').style.width=(t?Math.round(100*c/t):0)+'%';
+  $('#tally').innerHTML=`<span><b>${c}</b> blessed</span><span><b>${s}</b> stale</span><span><b>${u}</b> new</span>`;
+  const rail=$('#rail'); rail.innerHTML=''; rail.classList.add('files');
+  const files=(l.files||[]).filter(f=>
+    filter==='all' || (filter==='stale' ? f.status==='stale' : f.status==='unblessed'));
+  if(!files.length){
+    rail.appendChild(el('li','rail-empty', filter==='all' ? 'no files in this branch' : 'nothing '+filter+' here'));
+    return;
   }
+  files.forEach(f=>{
+    const sym=f.status==='clean'?'✓':f.status==='stale'?'△':'·';
+    const li=el('li','fk '+f.status); li.dataset.path=f.path;
+    li.innerHTML=`<span class="dot ${f.status}"></span><span class="fnm">${segPath(f.path)}</span><span class="fsym">${sym}</span>`;
+    li.title=f.path+' — '+(f.status==='clean'?'blessed':f.status==='stale'?'changed since blessed':'unreviewed');
+    li.onclick=()=>{
+      rail.querySelectorAll('li.fk.on').forEach(x=>x.classList.remove('on')); li.classList.add('on');
+      const card=[...document.querySelectorAll('#main .file')].find(c=>c.dataset.path===f.path);
+      if(card){
+        if(!card.classList.contains('open')){ const fr=card.querySelector('.frow'); if(fr) fr.click(); }
+        card.scrollIntoView({block:'nearest',behavior:'smooth'});
+      }
+    };
+    rail.appendChild(li);
+  });
 }
-// hover spotlight in the tree: light the hovered row + its upstream blockers, dim the rest
-function railSpot(b){
-  if(typeof upstreamOf!=='function')return;
-  const up=new Set(upstreamOf(b).map(u=>u.branch)), lit=new Set([b,...up]);
-  const rail=$('#rail'); if(!rail)return; rail.classList.add('spotting');
-  rail.querySelectorAll('li.lk[data-b]').forEach(li=>{ const id=li.dataset.b;
-    li.classList.toggle('lit', lit.has(id)); li.classList.toggle('up', up.has(id)); });
+// Tab / Shift+Tab walk the rail's file list: select the next/previous file, opening
+// + scrolling to its diff card. Wraps around at the ends.
+function stepRailFile(dir){
+  const rows=[...document.querySelectorAll('#rail li.fk')];
+  if(!rows.length) return;
+  const cur=rows.findIndex(li=>li.classList.contains('on'));
+  const next=(((cur<0 ? (dir>0?0:-1) : cur+dir)%rows.length)+rows.length)%rows.length;
+  rows[next].click();
+  rows[next].scrollIntoView({block:'nearest'});
 }
-function railUnspot(){ const rail=$('#rail'); if(!rail)return; rail.classList.remove('spotting');
-  rail.querySelectorAll('li.lit,li.up').forEach(li=>li.classList.remove('lit','up')); }
 
 // diff base: view a node's diff vs an upstream ref (null = its parent). resets per node.
 let diffBase=null, diffBaseFor=null;
@@ -240,9 +232,12 @@ function render(){
 
 // the diff line under the mouse (set by the d2h hover handlers) — press `o` to open it
 let _hoverLine = null;
-// keyboard: o → open hovered diff line in nvim; m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node
+// keyboard: o → open hovered diff line in nvim; m → graph map, esc closes; ]/[ walk the tree, s → next stale/new node; Tab/⇧Tab → next/prev file
 addEventListener('keydown',e=>{
   if(e.metaKey||e.ctrlKey||e.altKey) return;   // let ⌘F / ⌘O / etc. reach the browser — these are bare-key shortcuts
+  if(e.key==='Tab'){ const ae=document.activeElement;
+    if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;   // let Tab move between fields while typing
+    e.preventDefault(); stepRailFile(e.shiftKey?-1:1); return; }
   if(e.key==='o' && _hoverLine){ const ae=document.activeElement;
     if(ae && /^(INPUT|TEXTAREA)$/.test(ae.tagName)) return;   // don't fire while typing
     e.preventDefault(); const h=_hoverLine;
@@ -264,7 +259,15 @@ addEventListener('keydown',e=>{
 // (like the terminal fzf); clicking one opens ?branch=<project name>.
 async function renderPicker(){
   const stale=document.getElementById('picker'); if(stale) stale.remove();   // idempotent: re-invokable to refresh in place
-  let projs=[]; try{ projs=await (await fetch('/projects')).json(); }catch(e){}
+  let projs=[],myprs=[],opened={};
+  [projs,myprs,opened]=await Promise.all([
+    fetch('/projects').then(r=>r.json()).catch(()=>[]),
+    fetch('/myprs').then(r=>r.json()).catch(()=>[]),
+    fetch('/project-opened').then(r=>r.json()).catch(()=>({})),
+  ]);
+  if(!Array.isArray(projs)) projs=[];
+  if(!Array.isArray(myprs)) myprs=[];
+  if(!opened||typeof opened!=='object') opened={};
   const behindAll=projs.filter(p=>typeof p.behind==='number'&&p.behind>0).map(p=>p.name);
   const allBtn=behindAll.length
     ? `<button class="pk-restack-all" title="restack all ${behindAll.length} behind forests onto fresh main, one after another (background, scratch worktree). Stops at the first real conflict for you to resolve, then re-run to finish.">⟳ restack all ${behindAll.length} behind</button>`
@@ -279,37 +282,9 @@ async function renderPicker(){
   if(!projs.length){ list.innerHTML='<p style="color:var(--faint);font-size:12px">no projects configured (stack-project.*.branch)</p>'; }
   const esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
   const leaf=s=>esc(String(s).split('/').pop());
-  // Your open PRs into origin/main, grouped by their local project — click a row to
-  // hop straight onto that PR's node in the forest (no .project → open it on GitHub).
-  (async()=>{
-    const host=ov.querySelector('.pk-myprs'); if(!host) return;
-    let prs=[]; try{ prs=await (await fetch('/myprs')).json(); }catch(e){}
-    if(!Array.isArray(prs) || !prs.length){ host.remove(); return; }
-    const rv=r=> r==='APPROVED'?'<span class="prr-rv ok" title="approved">✓</span>'
-              : r==='CHANGES_REQUESTED'?'<span class="prr-rv chg" title="changes requested">⚠</span>'
-              : r==='REVIEW_REQUIRED'?'<span class="prr-rv req" title="review required">•</span>':'';
-    const NP='__noproj__', byProj={}, order=[];
-    prs.forEach(p=>{ const k=p.project||NP; if(!(k in byProj)){ byProj[k]=[]; order.push(k); } byProj[k].push(p); });
-    let html='<div class="pk-myprs-h">your open PRs</div>';
-    order.forEach(k=>{
-      const lbl = k===NP ? '<span class="pk-myprs-noproj">no local project</span>' : esc(k);
-      html+=`<div class="pk-myprs-g"><div class="pk-myprs-proj">${lbl}</div>`;
-      byProj[k].forEach(p=>{
-        html+=`<button class="pk-prrow" data-proj="${esc(p.project||'')}" data-br="${esc(p.branch||'')}" data-url="${esc(p.url||'')}">`
-          +`<span class="prr-num">#${esc(String(p.num))}</span>`
-          +`<span class="prr-title">${esc(p.title||'')}</span>`
-          +`${p.draft?'<span class="prr-draft">draft</span>':''}${rv(p.review)}</button>`;
-      });
-      html+='</div>';
-    });
-    host.innerHTML=html;
-    host.querySelectorAll('.pk-prrow').forEach(row=>{
-      row.onclick=()=>{ const pr=row.dataset.proj, br=row.dataset.br;
-        if(pr) location.href='?branch='+encodeURIComponent(pr)+'#node='+encodeURIComponent(br);
-        else if(row.dataset.url) window.open(row.dataset.url,'_blank');
-      };
-    });
-  })();
+  // Projects that already have an open PR — their card is moved up beneath their PR
+  // row (below), so they aren't also listed again under "choose a project".
+  const prdProjects=new Set(myprs.map(p=>p.project).filter(Boolean));
   const PK=renderPicker._p||(renderPicker._p={});   // branch → thesis cache, survives re-render
   // The picker is a static landing screen (no SSE here), so a handed-off restack
   // would otherwise leave the badge stuck on "⤳ restacking…" forever. stack-restack
@@ -378,7 +353,9 @@ async function renderPicker(){
     };
     setTimeout(tick,1500);
   };
-  projs.forEach(p=>{ const b=el('button','pk-btn');
+  // build a project card (freshness badge + ready/candidate chips + two-click restack).
+  // Returns the wired button; the caller places it (under its PR row, or in the list).
+  const makeCard=p=>{ const b=el('button','pk-btn');
     const ready=p.ready||[], cands=p.candidates||[];
     // hover shows the branch purpose via a styled tooltip (below); click opens the node.
     const chips=arr=>arr.map(r=>`<span class="pk-ready-b" data-b="${esc(r)}" data-p="${esc(p.name)}">${leaf(r)}</span>`).join('');
@@ -403,7 +380,6 @@ async function renderPicker(){
       +`<span class="pk-rt">${fresh}<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></span></div>`
       +readyRow+candRow;
     b.onclick=()=>{ location.search='branch='+encodeURIComponent(p.name); };
-    list.appendChild(b);
     // freshness chip = the restack button, on EVERY card (behind or fresh). Two-click
     // arm (the card itself is clickable and the op is destructive): first click asks,
     // second within 3s fires /restack (background `stack-restack <project>`, logs to
@@ -421,7 +397,48 @@ async function renderPicker(){
           else { toast('⤳ restack not started: '+esc(r.err||'?')); fb.textContent=label; }
         }catch(err){ toast('⤳ restack failed — server unreachable'); fb.textContent=label; }
       };
-    } });
+    }
+    return b; };
+  const projByName={}; projs.forEach(p=>{ projByName[p.name]=p; });
+  // "your open PRs": rows grouped by project; each PR'd project's card is moved in
+  // beneath its rows (keeping the freshness/restack badge) rather than listed below.
+  const myhost=ov.querySelector('.pk-myprs');
+  if(myhost){
+    if(!myprs.length){ myhost.remove(); }
+    else {
+      const rv=r=> r==='APPROVED'?'<span class="prr-rv ok" title="approved">✓</span>'
+                : r==='CHANGES_REQUESTED'?'<span class="prr-rv chg" title="changes requested">⚠</span>'
+                : r==='REVIEW_REQUIRED'?'<span class="prr-rv req" title="review required">•</span>':'';
+      const NP='__noproj__', byProj={}, order=[];
+      myprs.forEach(p=>{ const k=p.project||NP; if(!(k in byProj)){ byProj[k]=[]; order.push(k); } byProj[k].push(p); });
+      myhost.innerHTML='<div class="pk-myprs-h">your open PRs</div>';
+      order.forEach(k=>{
+        const lbl = k===NP ? '<span class="pk-myprs-noproj">no local project</span>' : esc(k);
+        const g=el('div','pk-myprs-g');
+        let html=`<div class="pk-myprs-proj">${lbl}</div>`;
+        byProj[k].forEach(p=>{
+          html+=`<button class="pk-prrow" data-proj="${esc(p.project||'')}" data-br="${esc(p.branch||'')}" data-url="${esc(p.url||'')}">`
+            +`<span class="prr-num">#${esc(String(p.num))}</span>`
+            +`<span class="prr-title">${esc(p.title||'')}</span>`
+            +`${p.draft?'<span class="prr-draft">draft</span>':''}${rv(p.review)}</button>`;
+        });
+        g.innerHTML=html;
+        if(k!==NP && projByName[k]) g.appendChild(makeCard(projByName[k]));   // card moves up under its PR rows
+        myhost.appendChild(g);
+      });
+      myhost.querySelectorAll('.pk-prrow').forEach(row=>{
+        row.onclick=()=>{ const pr=row.dataset.proj, br=row.dataset.br;
+          if(pr) location.href='?branch='+encodeURIComponent(pr)+'#node='+encodeURIComponent(br);
+          else if(row.dataset.url) window.open(row.dataset.url,'_blank');
+        };
+      });
+    }
+  }
+  // "choose a project": only projects WITHOUT an open PR, most-recently-opened (hover+o) first.
+  const noPr=projs.filter(p=>!prdProjects.has(p.name))
+    .sort((a,b)=>(opened[b.name]||0)-(opened[a.name]||0));
+  noPr.forEach(p=>{ list.appendChild(makeCard(p)); });
+  if(!noPr.length){ const sub=ov.querySelector('.pk-sub'); if(sub) sub.remove(); }   // no unattached projects → drop the header
   // header "restack all behind" → restack every trailing forest back-to-back. Two-click
   // arm (destructive, many forests). One background job; halts at the first conflict.
   const allEl=ov.querySelector('.pk-restack-all');
@@ -447,7 +464,7 @@ async function renderPicker(){
     t.style.left=Math.max(8, Math.min(r.left, innerWidth-t.offsetWidth-8))+'px';
     const above=r.top-t.offsetHeight-8; t.style.top=(above>8 ? above : r.bottom+8)+'px'; };
   const hidePkTip=()=>{ const t=document.getElementById('pktip'); if(t) t.classList.remove('on'); };
-  list.querySelectorAll('.pk-ready-b[data-b]').forEach(chip=>{
+  ov.querySelectorAll('.pk-ready-b[data-b]').forEach(chip=>{
     const br=chip.getAttribute('data-b');
     chip.onclick=e=>{ e.stopPropagation();   // open the branch's node; don't also fire the project nav
       location.href='?branch='+encodeURIComponent(chip.getAttribute('data-p'))+'#node='+encodeURIComponent(br); };
@@ -596,6 +613,15 @@ async function boot(){
       const es=new EventSource('/events');
       window.__events=es;   // shared so accessories (freshness chip) ride one stream, not their own
       es.addEventListener('update', async()=>{
+        // Our own bless already updated the UI optimistically; the server then re-broadcasts
+        // the ledger write as an 'update'. Reconcile counts silently (refetch + rail repaint,
+        // NO #main remount, no toast) so the page doesn't flash/scroll-jump on every bless.
+        if(Date.now() < blessEchoUntil){
+          try{ MODEL=await fetchModel(); NODES=flatten(); renderRail();
+            const l=curObj(); (l&&l.files||[]).forEach(f=>paintFileCard(f.path, f.status));   // absorb any drift
+          }catch(e){}
+          return;
+        }
         try{
           const anchor=captureScroll();
           MODEL=await fetchModel();
