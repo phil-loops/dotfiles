@@ -90,19 +90,23 @@ parent = git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN
 # force-push); if the branch was never published, fall back to the frozen base.
 sb = subprocess.run([STACK_BASE, branch], capture_output=True, text=True)
 base = sb.stdout.strip() or git(["merge-base", parent, branch]).stdout.strip() or parent
+force = False   # will pushing the squashed branch need a force? (true once published history is rewritten)
 if unpushed:
     up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     cand = up.stdout.strip()
-    # Only base on the upstream when it's actually an ANCESTOR of the branch — i.e.
-    # the branch is "remote + new commits" and a plain push lands them. If the branch
-    # was REBASED, its old remote is a stale ancestor on a different base; basing on it
-    # would sweep every intervening commit (origin/main's advance + pre-rebase history)
-    # into the squash. In that case keep the frozen fork-point base so only the branch's
-    # OWN commits collapse — such a branch needs a force-push regardless.
-    if (up.returncode == 0 and cand
-            and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0
-            and git(["merge-base", "--is-ancestor", cand, branch]).returncode == 0):
-        base = cand
+    published = (up.returncode == 0 and cand
+                 and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0)
+    if published:
+        # Only base on the upstream when it's actually an ANCESTOR of the branch — i.e.
+        # the branch is "remote + new commits" and a plain push lands them. If the branch
+        # was REBASED, its old remote is a stale ancestor on a different base; basing on it
+        # would sweep every intervening commit (origin/main's advance + pre-rebase history)
+        # into the squash. In that case keep the frozen fork-point base so only the branch's
+        # OWN commits collapse — and the push needs a force (the remote has diverged).
+        if git(["merge-base", "--is-ancestor", cand, branch]).returncode == 0:
+            base = cand
+        else:
+            force = True
 
 # the commits we'd collapse
 log = git(["log", f"{base}..{branch}", "--format=%h %s"]).stdout.strip()
@@ -181,7 +185,7 @@ header = message.splitlines()[0] if message else f"squash {branch}"
 
 def report(**extra):
     return {"ok": True, "branch": branch, "parent": parent, "base": base, "n": n,
-            "header": header, "message": message, "voiced": voiced, **extra}
+            "header": header, "message": message, "voiced": voiced, "force": force, **extra}
 
 
 if dry:
