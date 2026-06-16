@@ -292,6 +292,89 @@ EOF
   return 1
 }
 
+# ---------- footprint guard ----------
+#
+# A correct restack only moves a branch's commits onto a new base — it must NEVER
+# change WHICH files the branch touches. The dangerous failure mode is a conflict
+# auto-resolved by deleting the base's own work (e.g. dropping an upstream-added
+# file): the rebased commit then silently REVERTS upstream, and nothing downstream
+# notices until a human stares at a node diff full of unrelated deletions.
+#
+# So after each branch finishes rebasing, compare its file footprint before vs after:
+#   before = git diff --name-only OLD_PARENT...ORIG_TIP   (its own changes, pre-restack)
+#   after  = git diff --name-only NEW_PARENT...NEW_TIP    (its own changes, post-restack)
+# The set may only SHRINK (a commit becoming redundant). If it GREW, the rebase made
+# the branch touch files it never owned — almost always reverted upstream work. If a
+# file the branch used to ADD vanished from both the branch and the new base, its own
+# work was dropped. Either way: don't poison every descendant — escalate.
+#
+# Catches restack-INTRODUCED corruption (the thing the rebase did wrong). A branch
+# that was already corrupt before the restack carries the same footprint in and out,
+# so this won't retroactively flag it — fix those by hand.
+#
+# Returns 0 clean, 1 anomaly (prints offending paths). $1=dir $2=branch $3=parent
+# $4=old_parent_sha $5=orig_tip
+restack_sanity_check() {
+  local dir="$1" branch="$2" parent="$3" old_parent_sha="$4" orig_tip="$5"
+  [[ -z "$old_parent_sha" || -z "$orig_tip" ]] && return 0  # can't compare — don't block
+  local f
+  local -A before after
+  while IFS= read -r f; do [[ -n "$f" ]] && before[$f]=1; done \
+    < <(git -C "$dir" diff --name-only "${old_parent_sha}...${orig_tip}" 2>/dev/null)
+  while IFS= read -r f; do [[ -n "$f" ]] && after[$f]=1; done \
+    < <(git -C "$dir" diff --name-only "${parent}...${branch}" 2>/dev/null)
+  # An empty `before` with a non-empty `after` means we couldn't compute the
+  # pre-restack footprint (e.g. no merge-base) — bail rather than flag everything.
+  (( ${#before[@]} == 0 )) && return 0
+
+  local -a grew dropped
+  for f in "${(@k)after}"; do
+    [[ -z "${before[$f]:-}" ]] && grew+=("$f")
+  done
+  for f in "${(@k)before}"; do
+    [[ -n "${after[$f]:-}" ]] && continue
+    git -C "$dir" cat-file -e "${branch}:${f}" 2>/dev/null && continue  # still on branch
+    git -C "$dir" cat-file -e "${parent}:${f}" 2>/dev/null && continue  # landed on base
+    dropped+=("$f")
+  done
+
+  (( ${#grew[@]} + ${#dropped[@]} == 0 )) && return 0
+  echo "    ✗ sanity check failed for ${branch}: the rebase changed its file footprint" >&2
+  if (( ${#grew[@]} > 0 )); then
+    echo "        now touches files it never owned (likely reverted upstream work):" >&2
+    for f in "${(o)grew}"; do echo "          + $f" >&2; done
+  fi
+  if (( ${#dropped[@]} > 0 )); then
+    echo "        lost files it used to add (its own work was dropped):" >&2
+    for f in "${(o)dropped}"; do echo "          - $f" >&2; done
+  fi
+  return 1
+}
+
+# Park a footprint-guard failure for a human, mirroring the conflict-escalation flow:
+# save state (CURRENT stays set), print how to fix the branch + resume, and exit 1.
+# --continue re-runs the guard, so a blind resume won't sneak the corruption through.
+# $1=branch $2=dir $3=parent $4=old_parent_sha
+escalate_footprint() {
+  local branch="$1" dir="$2" parent="$3" old_parent_sha="$4"
+  save_state
+  cat >&2 <<EOF
+
+Restack halted: ${branch}'s rebased tip changed files it never owned (see ✗ above).
+  This is the signature of a conflict auto-resolved by reverting upstream work —
+  landing it would corrupt every branch that rebases onto ${branch}. Not marked done.
+
+  Redo this branch's rebase, resolving conflicts by KEEPING the upstream side:
+    git -C ${dir} rebase --onto ${parent} ${old_parent_sha} ${branch}
+  (or drop the spurious hunks from the current tip). Its diff vs ${parent} should be
+  limited to ${branch}'s own files. Then resume (re-checks the footprint first):
+    loops stack restack ${PROJECT} --continue
+  Or bail out:
+    git -C ${dir} rebase --abort 2>/dev/null; loops stack restack ${PROJECT} --abort
+EOF
+  exit 1
+}
+
 # ---------- state file (used by --continue) ----------
 
 save_state() {
@@ -387,6 +470,10 @@ Handoff: Claude couldn't safely resolve ${CURRENT} — genuinely ambiguous, stil
 EOF
     exit 1
   done
+  HANDOFF_OLDP="${SNAPSHOT[$PARENT_NAME]:-$(git rev-parse "$PARENT_NAME" 2>/dev/null)}"
+  if ! restack_sanity_check "$REBASE_DIR" "$CURRENT" "$PARENT_NAME" "$HANDOFF_OLDP" "${SNAPSHOT[$CURRENT]:-}"; then
+    escalate_footprint "$CURRENT" "$REBASE_DIR" "$PARENT_NAME" "$HANDOFF_OLDP"
+  fi
   COMPLETED+=("$CURRENT")
   CURRENT=""
   save_state
@@ -409,6 +496,13 @@ if [[ "$MODE" == "continue" ]]; then
         echo "Rebase still in progress in $cur_wt — finish it first." >&2
         exit 1
       fi
+    fi
+    # Re-verify the human-finished rebase before accepting it.
+    cont_parent=$(git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
+    cont_oldp="${SNAPSHOT[$cont_parent]:-$(git rev-parse "$cont_parent" 2>/dev/null)}"
+    cont_dir=$(rebase_dir_for "$CURRENT")
+    if ! restack_sanity_check "$cont_dir" "$CURRENT" "$cont_parent" "$cont_oldp" "${SNAPSHOT[$CURRENT]:-}"; then
+      escalate_footprint "$CURRENT" "$cont_dir" "$cont_parent" "$cont_oldp"
     fi
     COMPLETED+=("$CURRENT")
     CURRENT=""
@@ -516,6 +610,11 @@ Conflict during restack of ${BRANCH} — needs a human.
 EOF
     exit 1
   done
+
+  # The rebase finished — but did it stay within the branch's own footprint?
+  if ! restack_sanity_check "$REBASE_DIR" "$BRANCH" "$PARENT_NAME" "$OLD_PARENT_SHA" "${SNAPSHOT[$BRANCH]:-}"; then
+    escalate_footprint "$BRANCH" "$REBASE_DIR" "$PARENT_NAME" "$OLD_PARENT_SHA"
+  fi
 
   CURRENT=""
   COMPLETED+=("$BRANCH")
