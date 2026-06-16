@@ -1,6 +1,6 @@
 # Dotfiles
 
-When updating dotfiles (scripts, zshrc, CLAUDE.md, etc), `zsource` commits + pushes + reloads:
+When **Phil** updates dotfiles, his `zsource` alias commits + pushes + reloads (shown for context — **Claude must not run this**; see the warning directly below):
 
 ```
 cd ~/.dotfiles && git add -A && git commit -m 'Update dotfiles' && git push && cd - && source ~/.zshrc
@@ -88,11 +88,11 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Fork an independent base off main | `git checkout main && git checkout -b <name>` (no parent → roots off main) |
 | Add a fan-in dep           | `git config --add stack-branch.<name>.requires <dep>`       |
 | Set/update a branch's purpose | `loops purpose <name> "<thesis>"` (git branch description) |
-| Review the forest (live)   | `loops stack review [<branch>]` (blessing-ledger server, reads git config per request) |
+| Review the forest (live)   | `loops stack web [<project>]` (live blessing-ledger server on :62333, reads git config per request) |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
 | Restack whole project after a merge | `loops stack restack <project>` (see below)           |
-| Create PR                  | `gh pr create --base main --head <branch>`                  |
+| Create PR (manual — Phil opens) | reference only: `gh pr create --base main --head <branch>` — never run against origin; see *Git Pushing & PRs* |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
 
 ## Restacking after a merge — `loops stack restack`
@@ -119,23 +119,29 @@ command (plus the manual git steps). Resolve, then `--continue` resumes the walk
 Script: `~/.dotfiles/scripts/stack-restack`. Requires the project registered via
 `stack-project.<name>.branch` config (not just the `stack-branch.*.parent` pointers).
 
+> ⚠️ The `stack-project.<name>.branch` registry is a **separate, hand-maintained list of
+> branch names — it rots**: deleting or renaming a branch leaves a dangling entry the registry
+> never prunes. Verify it's clean (`git config --get-all stack-project.<name>.branch`) before
+> trusting restack. Membership is slated to move to a per-branch `stack-branch.<name>.project`
+> tag (self-healing — the tag dies with the branch); prefer that once it lands.
+
 ## Reviewing changes
 
-Two tools, different jobs — don't conflate them:
+Three tools, different jobs — don't conflate them. `review` (nvim) and `web` (browser) are **not the same command**:
 
-- **`loops stack review [<branch>]`** — solves the **stack-stepping** problem. Walks `stack-branch.<name>.parent` and shows each branch's incremental diff (`parent...child`) one link at a time in nvim diffview. Add `--html` to render each link as a side-by-side HTML and open them all in browser tabs. Doesn't know worktrees exist.
+- **`loops stack web [<project>]`** — the **primary, live review surface** (blessing-ledger server on :62333). Renders the whole forest in the browser: tree rail, graph map, per-node `parent...child` diffs, since-blessed deltas, and click-to-bless. Reads git config live per request. This is where Phil reviews — default to it.
+- **`loops stack review [<branch>]`** — *(legacy, local)* stack-stepping in **nvim diffview**, one `parent...child` link at a time. Doesn't know worktrees exist. Use only for offline/local stepping; the `--html` (/tmp browser tabs) flag is deprecated — use `loops stack web` instead.
 - **`wt [base-branch] [--html|-H]`** — solves the **worktree-discovery** problem. fzf-picks across sibling worktrees and shows the picked branch's *full* cumulative diff vs `base` (default `main`), including uncommitted working-tree changes (`--imply-local`). Not stack-aware — a 6-branch stack shows as one giant diff.
 
 Decision rule:
-- Branch is a stack, you know which one → `loops stack review`
+- Reviewing/blessing a whole forest or stack → `loops stack web` (default)
 - Single-branch feature, or scanning across many worktrees → `wt`
-- Stacked branch lives in a sibling worktree → `cd` into it, then `loops stack review` (use both)
+- Offline, no browser, want nvim stepping → `loops stack review`
 
 ## Forest hygiene
 
-- When a base branch merges, `loops stack restack <project>` rebases the forest onto fresh `main`, drops the now-redundant branch, and rewires its children. **The graph contracts by that node** — and keeps contracting as each independent base PR lands.
-- When PRs squash-merge, the commit on `main` won't match the branch's commits — expected. `git rebase main` drops the now-redundant commits cleanly (holds for both `parent` and carried `requires`).
-- **Git history stays linear — no merge commits**, even with fan-in. Fan-in lives in `requires` metadata + carried cherry-picks, not a git merge. (`stack-integrate` builds an *ephemeral* octopus-merge ref only as a "whole-feature-merged" preview, never as a branch base.)
+- After a base merges, `loops stack restack <project>` rebases the forest onto fresh `origin/main`, drops the now-redundant node, and rewires its children — **the graph contracts by that node**, and keeps contracting as each independent base lands. Squash-merged commits won't match `origin/main`; the rebase drops them cleanly (both `parent` and carried `requires`).
+- **History stays linear — no merge commits**, even with fan-in (it lives in `requires` metadata + carried cherry-picks). `stack-integrate` builds an *ephemeral* octopus ref only as a whole-feature preview, never a branch base.
 
 # Loops Script Runner
 
@@ -213,10 +219,10 @@ Run `task --list` to see all available tasks. Use the team's tools — don't rei
 Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done:
 
 ```bash
-./node_modules/.bin/tsc --project tsconfig.node.json --noEmit
+./node_modules/.bin/tsgo --project tsconfig.node.json --noEmit   # ~1.5s; fast default
 ```
 
-`oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
+Use `tsgo` (fast); fall back to `tsc --project tsconfig.node.json --noEmit` only if you need a discrepancy check. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
 
 # Skills
 
