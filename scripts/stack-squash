@@ -93,7 +93,15 @@ base = sb.stdout.strip() or git(["merge-base", parent, branch]).stdout.strip() o
 if unpushed:
     up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     cand = up.stdout.strip()
-    if up.returncode == 0 and cand and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0:
+    # Only base on the upstream when it's actually an ANCESTOR of the branch — i.e.
+    # the branch is "remote + new commits" and a plain push lands them. If the branch
+    # was REBASED, its old remote is a stale ancestor on a different base; basing on it
+    # would sweep every intervening commit (origin/main's advance + pre-rebase history)
+    # into the squash. In that case keep the frozen fork-point base so only the branch's
+    # OWN commits collapse — such a branch needs a force-push regardless.
+    if (up.returncode == 0 and cand
+            and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0
+            and git(["merge-base", "--is-ancestor", cand, branch]).returncode == 0):
         base = cand
 
 # the commits we'd collapse
