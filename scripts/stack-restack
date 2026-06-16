@@ -616,6 +616,12 @@ EOF
     escalate_footprint "$BRANCH" "$REBASE_DIR" "$PARENT_NAME" "$OLD_PARENT_SHA"
   fi
 
+  # Persist the frozen base: the branch now sits on the parent's current tip.
+  # Independent ops (stack-squash, the viewer) read this instead of resolving the
+  # moving parent name; stack-base recomputes it if ever unset or stale.
+  NEW_BASE=$(git rev-parse "$PARENT_NAME" 2>/dev/null || true)
+  [[ -n "$NEW_BASE" ]] && git config "stack-branch.${BRANCH}.base" "$NEW_BASE"
+
   CURRENT=""
   COMPLETED+=("$BRANCH")
   save_state
@@ -672,6 +678,8 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         if [[ "$val" == "$orphan" ]]; then
           echo "  rewire: $child parent → $op"
           git config "stack-branch.${child}.parent" "$op"
+          # Parent changed → drop the stale base so stack-base recomputes it.
+          git config --unset "stack-branch.${child}.base" 2>/dev/null || true
         fi
       done < <(git config --get-regexp '^stack-branch\..*\.parent$')
       git config --unset "stack-branch.${orphan}.parent" 2>/dev/null || true
@@ -702,6 +710,8 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         if [[ "$val" == "$dropped" ]]; then
           echo "  rewire: $child parent → $dropped_parent"
           git config "stack-branch.${child}.parent" "$dropped_parent"
+          # Parent changed → drop the stale base so stack-base recomputes it.
+          git config --unset "stack-branch.${child}.base" 2>/dev/null || true
         fi
       done < <(git config --get-regexp '^stack-branch\..*\.parent$')
     done
@@ -716,6 +726,7 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
       fi
       git branch -D "$b" >/dev/null 2>&1 || echo "    (couldn't delete $b)" >&2
       git config --unset "stack-branch.${b}.parent" 2>/dev/null || true
+      git config --unset "stack-branch.${b}.base" 2>/dev/null || true
 
       # Remove from project listing.
       typeset -a remaining

@@ -25,6 +25,7 @@ import sys, os, json, subprocess
 
 CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
 MAIN = os.environ.get("MAIN_BRANCH", "main")
+STACK_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-base")
 
 
 _cwd = None   # set to a worktree path once we know where to mutate (see below)
@@ -81,11 +82,14 @@ if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
 
 parent = git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN
 
-# squash base: parent by default. --unpushed bases on the branch's upstream (so only
-# never-pushed commits collapse — a plain push lands them, no force-push). If the
-# branch was never published (no upstream, or its tracking ref is gone), fall back to
-# parent: everything on the branch is unpushed anyway.
-base = parent
+# squash base: the FROZEN commit the branch sits on, via stack-base (resolves the
+# recorded stack-branch.<b>.base, else merge-base(parent, branch)). Never reset
+# against the parent *name* — `main` is a moving ref, and resolving it here would
+# fold main's advance into the squash. --unpushed instead bases on the branch's
+# upstream (so only never-pushed commits collapse — a plain push lands them, no
+# force-push); if the branch was never published, fall back to the frozen base.
+sb = subprocess.run([STACK_BASE, branch], capture_output=True, text=True)
+base = sb.stdout.strip() or git(["merge-base", parent, branch]).stdout.strip() or parent
 if unpushed:
     up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     cand = up.stdout.strip()
