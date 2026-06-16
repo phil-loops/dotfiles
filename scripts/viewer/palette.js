@@ -42,12 +42,21 @@
     c.push({
       k: "forest",
       label: "⟳  Restack forest onto fresh main (claude-driven)",
-      run() {
-        const cmd = `loops stack restack ${proj()}`;
-        copy(cmd);
-        toast(
-          `copied — run in terminal (preview with <b>--plan</b> first):<br><b>${cmd}</b>`
-        );
+      async run() {
+        const project = proj();
+        if (!project) { toast("no project to restack"); return; }
+        toast(`⤳ restacking <b>${project}</b> onto fresh main…`);
+        try {
+          const r = await (await fetch("/restack", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project }),
+          })).json();
+          toast(r.ok
+            ? `⤳ restacking <b>${project}</b> — fetches main, rebases forward, contracts merged branches. Runs in a scratch worktree (your checkout is untouched); tailing restack.log. Conflicts surface on the picker badge.`
+            : `⤳ restack not started: ${r.err || "?"}`);
+        } catch (e) {
+          toast("⤳ restack failed — server unreachable");
+        }
       },
     });
     c.push({
