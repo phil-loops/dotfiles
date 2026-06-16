@@ -16,8 +16,14 @@ trackdir="$HOME/.cache/prwatch/tracking"
 
 # --- click action: ➕ Watch… → dialog (clipboard-prefilled) → dispatch to prwatch ---
 if [[ "$1" == "--prompt" ]]; then
+  # prefill ONLY when the clipboard is exactly a watchable form (bare PR#, or a
+  # github PR/run URL anchored at the host) — never a junk- or prefix-laden string.
   clip=$(pbpaste 2>/dev/null | head -1 | tr -d '[:space:]')
-  [[ "$clip" == <-> || "$clip" == *github.com/* ]] || clip=""   # only prefill if PR# or gh URL
+  [[ "$clip" == <-> \
+     || "$clip" == http(s|)://github.com/*/pull/<-> \
+     || "$clip" == http(s|)://github.com/*/pull/<->\?* \
+     || "$clip" == http(s|)://github.com/*/actions/runs/<-> \
+     || "$clip" == http(s|)://github.com/*/actions/runs/<->/* ]] || clip=""
   input=$(osascript \
     -e 'on run argv' \
     -e 'set d to (display dialog "Watch a PR (number or URL) or an Actions run URL:" default answer (item 1 of argv) with title "prwatch" buttons {"Cancel", "Watch"} default button "Watch")' \
@@ -26,6 +32,18 @@ if [[ "$1" == "--prompt" ]]; then
     "$clip" 2>/dev/null) || exit 0    # Cancel → no-op
   input=$(print -r -- "$input" | tr -d '[:space:]')
   [[ -n "$input" ]] || exit 0
+  # validate before dispatch; bad input → alert, don't silently dump the PR list
+  if [[ "$input" != <-> \
+     && "$input" != http(s|)://github.com/*/pull/<-> \
+     && "$input" != http(s|)://github.com/*/pull/<->\?* \
+     && "$input" != http(s|)://github.com/*/actions/runs/<-> \
+     && "$input" != http(s|)://github.com/*/actions/runs/<->/* ]]; then
+    osascript \
+      -e 'on run argv' \
+      -e 'display alert "prwatch — not a PR or run" message ("Expected a PR number, a /pull/<n> URL, or an /actions/runs/<id> URL." & return & return & (item 1 of argv))' \
+      -e 'end run' "$input" >/dev/null 2>&1
+    exit 0
+  fi
   log="$HOME/.cache/prwatch"; mkdir -p "$log"
   print -r -- "$(date '+%F %T') dispatch: $input" >> "$log/prompt.log"
   # nohup + subshell → fully detached, SIGHUP-immune, survives SwiftBar reaping the click.
