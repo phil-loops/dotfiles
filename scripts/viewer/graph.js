@@ -239,16 +239,21 @@ function renderGraph(sel){
   G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(40,${mainY})"><circle r="6"/><text x="16" y="4">main</text></g>`;
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=own(b), w=nodeW(b);
     const done = r.total>0 && r.clean===r.total && r.stale===0;   // this branch's own files all reviewed
-    const cnt = `${r.clean}/${r.total}`;   // always the count — gold border already signals "all blessed"; a 2nd ✓ collided with the PR badge
+    // total===0 ⇒ zero diff vs parent: the branch is spent — squash-merged into
+    // main (its commits now redundant), or nothing committed yet. Render it as a
+    // muted, dashed "empty" node with a self-explaining tooltip rather than a blank
+    // "0/0" that reads like a bug; a restack drops these.
+    const empty = r.total===0;
+    const cnt = empty ? 'empty' : `${r.clean}/${r.total}`;   // always the count — gold border already signals "all blessed"; a 2nd ✓ collided with the PR badge
     // legal-to-merge: nothing upstream still in the forest (parent is main + all fan-in
     // deps landed) AND an open PR exists — i.e. "this PR is unblocked, go merge it".
     // surfaced persistently as a left edge-bar so the ready bases read without a hover.
     // (PR map loads async; ensurePRs re-renders the map once it lands, lighting these up.)
     const mergeable = !!(N[b] && N[b].mergeable) && !!GPRS[b];   // topology from stack-forest; PR keeps the bar to "ready"
     const mbar = mergeable ? `<rect class="mbar" x="-5" y="-13" width="3.5" height="26" rx="1.75"><title>legal to merge into main — no upstream blockers</title></rect>` : '';
-    G+=`<g class="gn ${done?'clean done':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
-      ${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
-      <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}${staleBadge(b,w)}</g>`; });
+    G+=`<g class="gn ${done?'clean done':empty?'empty':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
+      ${empty?`<title>empty — no diff vs ${N[b].parent||'parent'}: squash-merged into main, or nothing committed yet. A restack drops this branch.</title>`:''}${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"${empty?' style="stroke:var(--dim);stroke-dasharray:5 3;fill:none"':''}/><circle class="d" cx="16" cy="0" r="5"${empty?' style="fill:var(--dim)"':''}/>
+      <text x="30" y="4.5"${empty?' style="fill:var(--faint)"':''}>${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}${staleBadge(b,w)}</g>`; });
   // legend: name the two edge kinds so the visual language decodes at a glance —
   // solid rail = logical (builds on parent), phantom = planned (merge-after fan-in).
   // swatches reuse the real .ge classes so they never drift from the actual edges.
