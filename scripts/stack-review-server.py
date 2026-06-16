@@ -28,6 +28,20 @@ def run(args):
     return subprocess.run(args, cwd=CWD, capture_output=True, text=True)
 
 
+def _main_worktree():
+    # "check out here" / "jump to checkout" act on the user's PRIMARY working tree
+    # — the repo's main worktree (git always lists it first) — never the dir this
+    # server happened to be launched from (which may be an ephemeral feature
+    # worktree). Resolve once so the target is stable regardless of launch cwd.
+    for line in run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
+        if line.startswith("worktree "):
+            return line[len("worktree "):]
+    return CWD
+
+
+MAIN_WT = _main_worktree()
+
+
 def _worktree_of(branch):   # path of the worktree currently holding `branch`, or "" if none
     if not branch:
         return ""
@@ -184,7 +198,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": model_sig()}))
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
-            self._send(200, json.dumps({"branch": run(["git", "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
+            self._send(200, json.dumps({"branch": run(["git", "-C", MAIN_WT, "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
             # stack-restack writes <git-common-dir>/stack-restack-state/state on a conflict
             # it can't auto-resolve (and removes it on success/abort). Its presence == paused.
@@ -400,7 +414,7 @@ class H(BaseHTTPRequestHandler):
             d = json.loads(raw or "{}")
             branch = d.get("branch", "")
             wt = _worktree_of(branch)
-            if wt and os.path.realpath(wt) != os.path.realpath(CWD):
+            if wt and os.path.realpath(wt) != os.path.realpath(MAIN_WT):
                 # git can't move the main tree onto a branch another worktree already holds.
                 if not d.get("force"):
                     # tell the client where it lives so it can offer to free it
@@ -411,7 +425,7 @@ class H(BaseHTTPRequestHandler):
                 if rd.returncode != 0:
                     self._send(500, json.dumps({"ok": False, "err": "could not free worktree: " + (rd.stderr or rd.stdout)}))
                     return
-            r = run(["git", "checkout", branch])
+            r = run(["git", "-C", MAIN_WT, "checkout", branch])
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return
