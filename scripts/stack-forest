@@ -71,6 +71,14 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     if m:
         requires.setdefault(m.group(1), []).append(v)
         continue
+    # per-branch project tag (stack-branch.<b>.project = <name>) — the rot-free
+    # successor to the stack-project.<name>.branch registry: the tag lives on the
+    # branch, so deleting/renaming it can't dangle a central list. Both are read
+    # during migration; a branch tagged into project N is a seed of N.
+    m = re.match(r"^stack-branch\.(.+)\.project$", k)
+    if m:
+        seeds.setdefault(v, []).append(m.group(1))
+        continue
     m = re.match(r"^stack-project\.(.+)\.branch$", k)
     if m:
         seeds.setdefault(m.group(1), []).append(v)
@@ -82,6 +90,9 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
         archived.add(m.group(1))
 for b, p in parents.items():
     children.setdefault(p, []).append(b)
+# a branch may appear in seeds from both the legacy registry and its per-branch
+# tag during migration — dedupe (order-preserving) so counts/lists don't double.
+seeds = {n: list(dict.fromkeys(bs)) for n, bs in seeds.items()}
 
 
 def expand(seedlist):
