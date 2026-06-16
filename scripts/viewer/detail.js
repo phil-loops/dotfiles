@@ -416,6 +416,20 @@ async function renderPicker(){
         }catch(err){ toast('⤳ restack failed — server unreachable'); fb.textContent=label; }
       };
     } });
+  // header "restack all behind" → restack every trailing forest back-to-back. Two-click
+  // arm (destructive, many forests). One background job; halts at the first conflict.
+  const allEl=ov.querySelector('.pk-restack-all');
+  if(allEl){ const orig=allEl.textContent;
+    allEl.onclick=async e=>{ e.stopPropagation();
+      if(allEl.dataset.armed!=='1'){ allEl.dataset.armed='1'; allEl.classList.add('armed'); allEl.textContent='↻ restack all '+behindAll.length+'?';
+        allEl._dt=setTimeout(()=>{ allEl.dataset.armed=''; allEl.classList.remove('armed'); allEl.textContent=orig; },3000); return; }
+      clearTimeout(allEl._dt); allEl.dataset.armed=''; allEl.classList.remove('armed'); allEl.textContent='⤳ restacking all…';
+      try{ const r=await (await fetch('/restack-all',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({projects:behindAll})})).json();
+        if(r.ok){ toast('⤳ restacking <b>'+behindAll.length+'</b> forests onto fresh main, in sequence — tailing restack.log. Conflicts halt the run on that forest’s card.'); watchRestackAll(); }
+        else { toast('⤳ restack-all not started: '+esc(r.err||'?')); allEl.textContent=orig; }
+      }catch(err){ toast('⤳ restack-all failed — server unreachable'); allEl.textContent=orig; }
+    };
+  }
   // merge-candidate chips: hover → styled tooltip with the branch purpose; click → open its
   // node. purpose is read-only /purpose (no token spend), cached in PK across re-renders.
   const pkTipEl=()=>{ let t=document.getElementById('pktip'); if(!t){ t=el('div','pk-tip'); t.id='pktip'; document.body.appendChild(t); } return t; };
