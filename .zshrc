@@ -109,6 +109,15 @@ loops() {
                 rm|kill)
                     ~/.dotfiles/scripts/stack-rm "$@"
                     ;;
+                archive)
+                    ~/.dotfiles/scripts/stack-archive archive "$@"
+                    ;;
+                unarchive)
+                    ~/.dotfiles/scripts/stack-archive unarchive "$@"
+                    ;;
+                archived)
+                    ~/.dotfiles/scripts/stack-archive list
+                    ;;
                 *)
                     echo "loops stack commands:"
                     echo "  loops stack review [project|branch]   review stack in nvim diffview"
@@ -120,6 +129,9 @@ loops() {
                     echo "  loops stack restack <project> --plan   dry-run: show planned topo order"
                     echo "  loops stack rm [project...]            fzf multi-select & kill project(s): branches+worktrees+config"
                     echo "  loops stack rm --dry-run               show the kill plan, change nothing"
+                    echo "  loops stack archive [project]          hide a finished project from the chooser"
+                    echo "  loops stack unarchive [project]        show an archived project again"
+                    echo "  loops stack archived                   list archived projects"
                     ;;
             esac
             ;;
