@@ -53,8 +53,18 @@ function ensureSync(){
     const m=$('#map'); if(m && m.classList.contains('on')) renderGraph('#map');
   });
 }
+function isLanded(b){ const N=(typeof graphModel==='function')&&graphModel().nodes; return !!(N && N[b] && N[b].landed); }
+function landedBadge(b,w){   // branch already merged into origin/main (commits patch-equal) — its ref just lingers
+  if(!isLanded(b)) return '';
+  const txt = '⤓merged', pw = 12 + txt.length*6.5;
+  return `<g class="stalebadge landed" transform="translate(${w-pw/2+2},14)">
+      <title>already merged into origin/main — restack to drop this branch</title>
+      <rect class="sbp" x="${-pw/2}" y="-8" width="${pw}" height="16" rx="8"/>
+      <text x="0" y="4">${txt}</text></g>`;
+}
 function staleBadge(b,w){   // a corner badge if this branch's fork point lags origin/main
   const s = GSYNC[b]; if(!s || !s.behind) return '';
+  if(isLanded(b)) return '';   // landed reads as "drop it", not "restack to refresh" — landedBadge owns the corner
   const txt = '↺'+s.behind, pw = 12 + txt.length*7;
   const note = s.behind+' behind origin/main'
     + (s.syncable ? ' · syncable: rebase onto fresh origin/main (no force-push)'
@@ -271,7 +281,7 @@ function renderGraph(sel){
     const mbar = mergeable ? `<rect class="mbar" x="-5" y="-13" width="3.5" height="26" rx="1.75"><title>legal to merge into main — no upstream blockers</title></rect>` : '';
     G+=`<g class="gn ${done?'clean done':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
       ${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
-      <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}${staleBadge(b,w)}</g>`; });
+      <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}${landedBadge(b,w)}${staleBadge(b,w)}</g>`; });
   // legend: name the two edge kinds so the visual language decodes at a glance —
   // solid rail = logical (builds on parent), phantom = planned (merge-after fan-in).
   // swatches reuse the real .ge classes so they never drift from the actual edges.
