@@ -266,7 +266,8 @@ async function renderPicker(){
   let projs=[]; try{ projs=await (await fetch('/projects')).json(); }catch(e){}
   const ov=el('div'); ov.id='picker';
   ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><p class="pk-sub">choose a project</p>`
-    +`<div class="pk-list"></div><button class="pk-all">view the whole forest</button></div>`;
+    +`<div class="pk-list"></div><button class="pk-all">view the whole forest</button>`
+    +`<div class="pk-standalone"></div></div>`;
   document.body.appendChild(ov);
   const list=ov.querySelector('.pk-list');
   if(!projs.length){ list.innerHTML='<p style="color:var(--faint);font-size:12px">no projects configured (stack-project.*.branch)</p>'; }
@@ -311,6 +312,52 @@ async function renderPicker(){
     chip.addEventListener('mouseleave',hidePkTip);
   });
   ov.querySelector('.pk-all').onclick=()=>{ location.search='branch=--all'; };
+  // standalone: an OPT-IN watch list, not auto-discovery (a real repo has ~1.5k
+  // loose heads). The section is always present so "+ add" is reachable; pins
+  // persist in git config (stack.standalone). Each row opens that branch as its
+  // own one-root view (?branch=X → stack-forest expand([X])), reusing the whole
+  // detail + toolbar with no downstream special-casing.
+  const sa=ov.querySelector('.pk-standalone');
+  async function refreshStandalone(){
+    let loose=[]; try{ loose=await (await fetch('/standalone')).json(); }catch(e){}
+    sa.innerHTML=`<div class="pk-sa-h">standalone branches`
+      +`<span class="pk-sa-sub">${loose.length?loose.length+' pinned':'opt-in watch list'}</span>`
+      +`<button class="pk-sa-add" title="pin a branch to watch here">+ add</button></div>`
+      +`<div class="pk-sa-list"></div><div class="pk-sa-form"></div>`;
+    const wrap=sa.querySelector('.pk-sa-list');
+    if(!loose.length){ wrap.innerHTML='<p class="pk-sa-empty">nothing pinned — add a loose branch to open it from here</p>'; }
+    loose.forEach(b=>{ const row=el('div','pk-sa-b');
+      row.innerHTML=`<span class="pk-sa-d">◇</span>`
+        +`<span class="pk-sa-path">${esc(b.branch)}</span>`
+        +`<span class="pk-sa-stat"><span class="add">+${b.add}</span><span class="del">−${b.del}</span></span>`
+        +`<button class="pk-sa-x" title="unpin">×</button>`;
+      row.title=`${b.branch} · ${b.commits} commit${b.commits!==1?'s':''} ahead of main`;
+      row.onclick=()=>{ location.search='branch='+encodeURIComponent(b.branch); };
+      row.querySelector('.pk-sa-x').onclick=async e=>{ e.stopPropagation();
+        await fetch('/standalone',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:b.branch,op:'remove'})}).catch(()=>{});
+        refreshStandalone(); };
+      wrap.appendChild(row); });
+    sa.querySelector('.pk-sa-add').onclick=()=>showAddForm(sa.querySelector('.pk-sa-form'));
+  }
+  // "+ add": a typeahead over local heads (most-recent first) backed by a datalist.
+  async function showAddForm(host){
+    if(host.dataset.open){ host.dataset.open=''; host.innerHTML=''; return; }
+    host.dataset.open='1';
+    let names=[]; try{ names=await (await fetch('/branches')).json(); }catch(e){}
+    host.innerHTML=`<input class="pk-sa-in" list="pk-sa-dl" autocomplete="off" spellcheck="false"`
+      +` placeholder="branch name… (${names.length} local, recent first)">`
+      +`<datalist id="pk-sa-dl">${names.map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`;
+    const inp=host.querySelector('.pk-sa-in'); inp.focus();
+    const submit=async()=>{ const v=inp.value.trim(); if(!v) return;
+      const r=await fetch('/standalone',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({branch:v,op:'add'})}).then(x=>x.json()).catch(()=>({ok:false,err:'server unreachable'}));
+      if(!r.ok){ inp.classList.add('err'); inp.title=r.err||'could not add'; return; }
+      host.dataset.open=''; host.innerHTML=''; refreshStandalone(); };
+    inp.addEventListener('keydown',e=>{ inp.classList.remove('err');
+      if(e.key==='Enter'){ e.preventDefault(); submit(); }
+      else if(e.key==='Escape'){ host.dataset.open=''; host.innerHTML=''; } });
+  }
+  refreshStandalone();
 }
 // preserve scroll across a live re-render. NB the scroller is `.main` (the body is
 // height:100vh/overflow:hidden) — driving window.scroll* is a no-op, which is why a
