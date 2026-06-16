@@ -26,8 +26,12 @@ if [[ "$1" == "--prompt" ]]; then
     "$clip" 2>/dev/null) || exit 0    # Cancel → no-op
   input=$(print -r -- "$input" | tr -d '[:space:]')
   [[ -n "$input" ]] || exit 0
-  ( cd "$HOME/coding/loops" && "$HOME/.dotfiles/scripts/prwatch" "$input" \
-      >/dev/null 2>&1 </dev/null & )                            # detached; reuses all input forms
+  log="$HOME/.cache/prwatch"; mkdir -p "$log"
+  print -r -- "$(date '+%F %T') dispatch: $input" >> "$log/prompt.log"
+  # nohup + subshell → fully detached, SIGHUP-immune, survives SwiftBar reaping the click.
+  ( cd "$HOME/coding/loops" && nohup "$HOME/.dotfiles/scripts/prwatch" "$input" \
+      >> "$log/prompt.log" 2>&1 </dev/null & )                  # reuses all input forms
+  open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null
   exit 0
 fi
 
