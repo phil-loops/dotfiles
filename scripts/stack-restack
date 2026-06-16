@@ -556,9 +556,12 @@ while (( ${#PENDING[@]} > 0 )); do
 
   PARENT_NAME=$(git config "stack-branch.${BRANCH}.parent" 2>/dev/null || true)
   if [[ -z "$PARENT_NAME" ]]; then
-    echo "  ! $BRANCH has no parent recorded — skipping" >&2
-    COMPLETED+=("$BRANCH")
-    continue
+    # No parent recorded = almost always a root that lost (or never got) its pointer.
+    # Default to main, RECORD it (self-heal so the next run is clean), and warn — rather
+    # than silently skipping, which strands the branch forever "behind".
+    PARENT_NAME="$MAIN_BRANCH"
+    echo "  ! $BRANCH has no parent recorded — assuming '$MAIN_BRANCH' (root) and recording it" >&2
+    git config "stack-branch.${BRANCH}.parent" "$MAIN_BRANCH"
   fi
 
   OLD_PARENT_SHA="${SNAPSHOT[$PARENT_NAME]:-}"
@@ -724,7 +727,15 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         echo "  (warning: $b is checked out in $wt — leaving the worktree alone, but the branch ref will be deleted)" >&2
         git -C "$wt" checkout --detach HEAD >/dev/null 2>&1 || true
       fi
-      git branch -D "$b" >/dev/null 2>&1 || echo "    (couldn't delete $b)" >&2
+      if ! git branch -D "$b" >/dev/null 2>&1; then
+        # A failed delete (usually: still checked out in some worktree, so git refuses)
+        # must NOT strip the node's parent/membership. A surviving branch with its
+        # parent erased becomes an "amnesiac" member that every future restack silently
+        # skips — it just shows "behind" forever. Leave it FULLY intact; a later run
+        # reaps it once it's free.
+        echo "    ⚠ couldn't delete $b (still checked out?) — left intact (parent + membership kept); re-run restack once it's free" >&2
+        continue
+      fi
       git config --unset "stack-branch.${b}.parent" 2>/dev/null || true
       git config --unset "stack-branch.${b}.base" 2>/dev/null || true
 
