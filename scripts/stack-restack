@@ -156,6 +156,25 @@ is_ancestor() {
   git merge-base --is-ancestor "$1" "$2" 2>/dev/null
 }
 
+# When a member is dropped/orphaned (its branch ref is gone), strip the config refs
+# that the parent-rewire + registry-removal DON'T cover: its per-branch `.project`
+# membership tag, and any OTHER branch's `requires` that points AT it (a fan-in dep on
+# a now-gone branch). Without this, a merged base leaves dangling tags + requires that
+# the viewer and the next restack trip over.  $1 = the removed branch
+_purge_member_refs() {
+  local gone="$1" key v
+  git config --unset "stack-branch.${gone}.project" 2>/dev/null || true
+  while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    typeset -a keep; keep=()
+    while IFS= read -r v; do [[ -n "$v" && "$v" != "$gone" ]] && keep+=("$v"); done \
+      < <(git config --get-all "$key" 2>/dev/null)
+    git config --unset-all "$key" 2>/dev/null || true
+    for v in "${keep[@]}"; do git config --add "$key" "$v"; done
+    echo "  cleaned requires: ${key#stack-branch.} no longer needs ${gone}" >&2
+  done < <(git config --get-regexp '^stack-branch\..*\.requires$' | awk -v g="$gone" '$2==g{print $1}' | sort -u)
+}
+
 # Where a branch's rebase actually runs (its worktree, or the current repo
 # after in_branch_place checked it out here).
 rebase_dir_for() {
@@ -686,6 +705,7 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         fi
       done < <(git config --get-regexp '^stack-branch\..*\.parent$')
       git config --unset "stack-branch.${orphan}.parent" 2>/dev/null || true
+      _purge_member_refs "$orphan"
 
       typeset -a remaining
       remaining=()
@@ -738,6 +758,7 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
       fi
       git config --unset "stack-branch.${b}.parent" 2>/dev/null || true
       git config --unset "stack-branch.${b}.base" 2>/dev/null || true
+      _purge_member_refs "$b"
 
       # Remove from project listing.
       typeset -a remaining
