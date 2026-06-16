@@ -1,0 +1,59 @@
+#!/usr/bin/env python3
+"""claude-session-pid — resolve the current Claude Code session's owning process.
+
+Walks the process-ancestor chain from this script's parent up to the `claude` CLI
+process (which lives exactly as long as the session) and prints:
+
+    <pid>\t<start-time>
+
+Shared by claude-session-track (presence records) and `own` (lane claims) so both
+stamp the SAME liveness token — a lane claim and a presence record then agree on
+whether a session is alive, with no dependence on each other's files. Resolves
+correctly from any descendant (a tool hook, `own guard`, a manual `own claim` in a
+session shell). Exit 1 / no output if no claude ancestor is found.
+"""
+import sys, os, subprocess
+
+
+def sh(args):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout
+    except Exception:
+        return ""
+
+
+def main():
+    # one ps snapshot → {pid: (ppid, command)}
+    tree = {}
+    for line in sh(["ps", "-axo", "pid=,ppid=,command="]).splitlines():
+        parts = line.split(None, 2)
+        if len(parts) >= 2:
+            try:
+                tree[int(parts[0])] = (int(parts[1]), parts[2] if len(parts) > 2 else "")
+            except ValueError:
+                pass
+
+    pid = int(sys.argv[1]) if len(sys.argv) > 1 else os.getppid()
+    for _ in range(24):
+        node = tree.get(pid)
+        if not node:
+            break
+        ppid, cmd = node
+        # match only when the EXECUTABLE is `claude` (argv[0] basename) — not any
+        # command that merely mentions a `.claude/...` path (e.g. a transient shell
+        # sourcing ~/.claude/shell-snapshots/*, which dies between calls and would
+        # stamp a bogus dead pid). Walk past those to the real long-lived CLI.
+        argv0 = cmd.split()[0] if cmd.split() else ""
+        if argv0.rsplit("/", 1)[-1] == "claude":
+            # canonicalize: ps lstart has trailing pad + double-spaces single-digit
+            # days; collapse to single-spaced so every reader compares the same string.
+            start = " ".join(sh(["ps", "-o", "lstart=", "-p", str(pid)]).split())
+            sys.stdout.write("%d\t%s\n" % (pid, start))
+            return 0
+        if ppid <= 1:
+            break
+        pid = ppid
+    return 1
+
+
+sys.exit(main())
