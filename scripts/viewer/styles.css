@@ -41,7 +41,9 @@ body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:98;opa
 /* freshness vs origin/main on each project card (right of the name) */
 .pk-rt{display:flex;align-items:center;gap:10px;flex:none}
 .pk-fresh{font-size:11px;letter-spacing:.02em;padding:1px 8px;border-radius:999px;white-space:nowrap}
-.pk-fresh.behind{color:var(--ember);background:#d36a361f;border:1px solid var(--ember-soft)}   /* trails main → restack */
+.pk-fresh.behind{color:var(--ember);background:#d36a361f;border:1px solid var(--ember-soft);cursor:pointer;transition:.12s}   /* trails main → click to restack */
+.pk-fresh.behind:hover{background:#d36a3633;border-color:var(--ember);box-shadow:0 0 10px #d36a3633}
+.pk-fresh.behind.armed{color:var(--bg);background:var(--ember);border-color:var(--ember);font-weight:600}   /* primed: click again to fire */
 .pk-fresh.ok{color:#56d090;background:#2c9a591a;border:1px solid #2c9a5944}                      /* up to date */
 .pk-ready{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
 .pk-ready-h{color:#56d090;font-size:11px;letter-spacing:.02em;margin-right:2px}
