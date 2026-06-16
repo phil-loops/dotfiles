@@ -311,6 +311,9 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/prs":   # branch → open-PR map; stack-prs disk-caches, so GH isn't hammered
             r = run([os.path.join(SCRIPTS, "stack-prs")])
             self._send(200, r.stdout or "{}")
+        elif u.path == "/myprs":   # my open PRs (gh --author @me) annotated with .project — homepage list
+            r = run([os.path.join(SCRIPTS, "my-prs")])
+            self._send(200, r.stdout or "[]")
         elif u.path == "/projects":   # the picker: [{name, branches, ready:[…]}] — choose a project to view
             # The fan-out below (stack-forest --projects + a rev-list per branch)
             # costs ~0.5s; cache on model_sig + origin/main tip so repeat loads are
@@ -320,45 +323,44 @@ class H(BaseHTTPRequestHandler):
             if pck in _pcache:
                 self._send(200, _pcache[pck])
                 return
-            r = run([os.path.join(SCRIPTS, "stack-forest"), "--projects"])
+            # stack-forest --projects and stack-prs are independent → run concurrently.
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                fr = ex.submit(run, [os.path.join(SCRIPTS, "stack-forest"), "--projects"])
+                pf = ex.submit(run, [os.path.join(SCRIPTS, "stack-prs")])
+                r, prs = fr.result(), pf.result()
             try:
                 projs = json.loads(r.stdout or "[]")
             except Exception:
                 projs = []
-            prs = run([os.path.join(SCRIPTS, "stack-prs")])
             try:
                 prmap = json.loads(prs.stdout or "{}")
             except Exception:
                 prmap = {}
-            for p in projs:
-                p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
-                # freshness vs origin/main: how far the project's roots trail. >0 means
-                # origin/main has moved ahead → the forest needs a restack (which also
-                # condenses any now-redundant/squash-merged branches). Measured on the
-                # mergeable roots (they fork off main); pure inspection, no fetch.
-                behind = 0
-                for b in p.get("mergeable", []):
-                    n = run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip()
-                    if n.isdigit():
-                        behind = max(behind, int(n))
-                p["behind"] = behind
-                # "smart glow": is the trailing actually consequential? Only if origin/main's
-                # new commits touch files this project's branches also touch — otherwise the
-                # restack is a clean replay (pure SHA churn + re-bless). Computed only when behind.
+            # Per mergeable root: how far it trails origin/main (behind), and whether main's
+            # new commits touch files the branch also touches (overlap → a consequential
+            # restack vs pure SHA churn). This per-branch git fan-out was the bulk of the
+            # cold-build cost — compute each root ONCE, fanned out through a thread pool
+            # (git releases the GIL), then aggregate per project.
+            def _root_fresh(b):
+                n = run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip()
+                behind = int(n) if n.isdigit() else 0
                 overlap = False
                 if behind:
-                    for b in p.get("mergeable", []):
-                        mb = run(["git", "merge-base", b, "origin/main"]).stdout.strip()
-                        if not mb:
-                            continue
+                    mb = run(["git", "merge-base", b, "origin/main"]).stdout.strip()
+                    if mb:
                         main_files = set(run(["git", "diff", "--name-only", f"{mb}..origin/main"]).stdout.splitlines())
-                        if not main_files:
-                            continue
-                        branch_files = set(run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
-                        if main_files & branch_files:
-                            overlap = True
-                            break
-                p["overlap"] = overlap
+                        if main_files:
+                            branch_files = set(run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
+                            overlap = bool(main_files & branch_files)
+                return behind, overlap
+            roots = sorted({b for p in projs for b in p.get("mergeable", [])})
+            with ThreadPoolExecutor(max_workers=8) as ex:
+                fresh = dict(zip(roots, ex.map(_root_fresh, roots)))
+            for p in projs:
+                p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
+                bs = p.get("mergeable", [])
+                p["behind"] = max((fresh[b][0] for b in bs), default=0)
+                p["overlap"] = any(fresh[b][1] for b in bs)
             payload = json.dumps(projs)
             _pcache.clear()
             _pcache[pck] = payload
