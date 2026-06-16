@@ -91,15 +91,24 @@ function showTip(b, anchorEl){
       PURPOSE[b]=p; _purposeFetching.delete(b); if(_tipBranch===b) showTip(b, anchorEl);
     }).catch(()=>_purposeFetching.delete(b));
   }
-  const rows = up.map(u=>{ const s=prState(u.branch);
+  // two kinds of upstream, deliberately kept distinct:
+  //   builds on  → the git parent chain. a LOGICAL dependency: this branch
+  //                literally compiles on top of those.
+  //   merge after→ fan-in `requires`. a PLANNED dependency: no compile link,
+  //                just a deliberate merge-order we stand by (and could pivot).
+  const row = u=>{ const s=prState(u.branch);
     return `<li class="us ${s.cls}"><span class="us-g">${s.glyph}</span>
-      <span class="us-b">${u.branch}</span>${u.fanin?'<span class="us-tag">fan-in</span>':''}
-      <span class="us-m">${s.meta}</span></li>`; }).join('');
+      <span class="us-b">${u.branch}</span>
+      <span class="us-m">${s.meta}</span></li>`; };
+  const builds = up.filter(u=>!u.fanin), planned = up.filter(u=>u.fanin);
+  const sec = (title, items)=> items.length
+    ? `<div class="tip-sec">${title}</div><ul class="tip-up">${items.map(row).join('')}</ul>` : '';
   const v = verdictOf(b, up);
   const verdict = `<div class="tip-v ${v.cls}">${v.txt}</div>`;
   t.innerHTML = `<div class="tip-h"><b>${b.split('/').pop()}</b>
       <span class="tip-self ${self.cls}">${self.glyph} ${self.meta}</span></div>${why}
-    ${up.length?`<div class="tip-sec">must merge first · merge order ↓</div><ul class="tip-up">${rows}</ul>`:''}
+    ${sec('builds on · logical ↓', builds)}
+    ${sec('merge after · planned ↓', planned)}
     ${verdict}`;
   const r=anchorEl.getBoundingClientRect();
   t.style.left = Math.min(r.left, innerWidth-360)+'px';
@@ -166,8 +175,13 @@ function renderGraph(sel){
   let E='', G='', ei=0, gi=0;
   gm.roots.forEach(r=>{ if(pos[r]) E+=edge(54,mainY,pos[r].x,pos[r].y,rollStatus(own(r)),ei++,'main',r); });
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].children)||[]).forEach(c=>{ if(pos[c]) E+=edge(p.x+nodeW(b),p.y,pos[c].x,pos[c].y,rollStatus(own(c)),ei++,b,c); }); });
-  // fan-in: dashed inbound edge from each `requires` dep into the node that carries it
-  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq]) E+=edge(pos[rq].x+nodeW(rq),pos[rq].y,p.x,p.y,'fanin',ei++,rq,b); }); });
+  // fan-in: a "phantom" inbound edge from each `requires` dep into the node that
+  // carries it — a PLANNED (deliberate, revisable) merge-order, not a logical
+  // build-link, so it reads in a softer/neutral style than the solid parent rail.
+  // Edge-case: if the dep is already a parent-ANCESTOR, the solid chain implies
+  // it — drawing a dashed edge too would contradict, so skip it as redundant.
+  Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const chain=parentChain(b);
+    ((N[b].requires)||[]).forEach(rq=>{ if(pos[rq] && !chain.has(rq)) E+=edge(pos[rq].x+nodeW(rq),pos[rq].y,p.x,p.y,'fanin',ei++,rq,b); }); });
   G+=`<g class="gn main" style="animation-delay:80ms" transform="translate(40,${mainY})"><circle r="6"/><text x="16" y="4">main</text></g>`;
   Object.keys(N).forEach(b=>{ const p=pos[b]; if(!p)return; const r=own(b), w=nodeW(b);
     const done = r.total>0 && r.clean===r.total && r.stale===0;   // this branch's own files all reviewed
@@ -181,7 +195,12 @@ function renderGraph(sel){
     G+=`<g class="gn ${done?'clean done':rollStatus(r)}${mergeable?' mergeable':''}${b===active?' sel':''}" data-b="${b}" style="animation-delay:${120+gi++*45}ms" transform="translate(${p.x},${p.y})">
       ${mbar}<rect x="0" y="-14" rx="8" width="${w}" height="28"/><circle class="d" cx="16" cy="0" r="5"/>
       <text x="30" y="4.5">${b.split('/').pop()}</text><text class="cnt" x="${w-12}" y="4.5">${cnt}</text>${prBadge(b,w)}</g>`; });
-  const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3><span class="mapclose">click a node · esc to close</span></div>` : '';
+  // legend: name the two edge kinds so the visual language decodes at a glance —
+  // solid rail = logical (builds on parent), phantom = planned (merge-after fan-in).
+  // swatches reuse the real .ge classes so they never drift from the actual edges.
+  const swatch = cls=>`<svg class="lgsw" width="26" height="8" viewBox="0 0 26 8"><path class="ge ${cls}" style="animation:none;opacity:1" d="M1,4 L25,4"/></svg>`;
+  const legend = `<span class="maplegend">${swatch('clean')}<span class="lgl">builds on</span>${swatch('fanin')}<span class="lgl">merge after · planned</span></span>`;
+  const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3>${legend}<span class="mapclose">click a node · esc to close</span></div>` : '';
   tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${E}${G}</svg>`;
   tgt.querySelectorAll('.gn[data-b]').forEach(g=>{ g.onclick=()=>{ active=g.getAttribute('data-b'); if(sel==='#map') toggleMap(false); render(); };
     // hover → what must merge before this branch is a candidate to merge into main
