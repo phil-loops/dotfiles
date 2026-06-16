@@ -46,8 +46,12 @@ if [[ "$1" == "--edit" ]]; then
 fi
 
 # --- render ---
-# open items as "lineno:text" (lineno drives check-off; survives reorder between renders)
-items=("${(@f)$(grep -nE '^- \[ \] ' "$file" 2>/dev/null)}")
+# open items as "lineno:text" (lineno drives check-off; survives reorder between renders).
+# NB build the array only when grep matched — `("${(@f)$(empty)}")` yields a single
+# EMPTY element (count 1), not an empty array.
+items=()
+open_lines=$(grep -nE '^- \[ \] ' "$file" 2>/dev/null)
+[[ -n "$open_lines" ]] && items=("${(@f)open_lines}")
 n=${#items}
 (( n )) && echo "📝 $n" || echo "📝"
 echo "---"
