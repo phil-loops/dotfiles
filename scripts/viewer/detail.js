@@ -289,13 +289,28 @@ async function renderPicker(){
     // refresh & condense; ✓ fresh → up to date. (server omits behind on old builds.)
     const beh = (typeof p.behind==='number') ? p.behind : null;
     const fresh = beh===null ? ''
-      : beh>0 ? `<span class="pk-fresh behind" title="origin/main is ${beh} commit${beh===1?'':'s'} ahead — restack to refresh &amp; condense">⟳ ${beh} behind</span>`
+      : beh>0 ? `<span class="pk-fresh behind" title="origin/main is ${beh} commit${beh===1?'':'s'} ahead — click to restack ${esc(p.name)} onto fresh main (runs in background → restack.log)">⟳ ${beh} behind</span>`
               : `<span class="pk-fresh ok" title="up to date with origin/main">✓ fresh</span>`;
     b.innerHTML=`<div class="pk-top"><span class="pk-name">${esc(p.name)}</span>`
       +`<span class="pk-rt">${fresh}<span class="pk-meta">${p.branches} ${p.branches===1?'branch':'branches'}</span></span></div>`
       +readyRow+candRow;
     b.onclick=()=>{ location.search='branch='+encodeURIComponent(p.name); };
-    list.appendChild(b); });
+    list.appendChild(b);
+    // behind badge → restack. Two-click arm (the card itself is clickable and the op
+    // is destructive): first click asks, second within 3s hands off to /restack
+    // (background `stack-restack <project>`, logs to restack.log).
+    const fb = b.querySelector('.pk-fresh.behind');
+    if(fb){ const label='⟳ '+beh+' behind';
+      fb.onclick=async e=>{ e.stopPropagation();
+        if(fb.dataset.armed!=='1'){ fb.dataset.armed='1'; fb.classList.add('armed'); fb.textContent='↻ restack '+leaf(p.name)+'?';
+          fb._dt=setTimeout(()=>{ fb.dataset.armed=''; fb.classList.remove('armed'); fb.textContent=label; },3000); return; }
+        clearTimeout(fb._dt); fb.dataset.armed=''; fb.classList.remove('armed'); fb.textContent='handing off…';
+        try{ const r=await (await fetch('/restack',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({project:p.name})})).json();
+          if(r.ok){ toast('⤳ restacking <b>'+esc(p.name)+'</b> onto origin/main — tailing restack.log'); fb.textContent='⤳ restacking…'; }
+          else { toast('⤳ restack not started: '+esc(r.err||'?')); fb.textContent=label; }
+        }catch(err){ toast('⤳ restack failed — server unreachable'); fb.textContent=label; }
+      };
+    } });
   // merge-candidate chips: hover → styled tooltip with the branch purpose; click → open its
   // node. purpose is read-only /purpose (no token spend), cached in PK across re-renders.
   const pkTipEl=()=>{ let t=document.getElementById('pktip'); if(!t){ t=el('div','pk-tip'); t.id='pktip'; document.body.appendChild(t); } return t; };
