@@ -810,37 +810,118 @@ require('lazy').setup({
       -- (name, root_dir), so each worktree gets its own tsgo — correct per-branch types.
       local lspconfig_util = require('lspconfig.util')
       local tsgo_root = lspconfig_util.root_pattern('tsconfig.json', 'jsconfig.json', 'package.json', '.git')
+
+      -- LRU cap: per-worktree rooting means one tsgo per branch you open, and they do
+      -- NOT auto-stop when buffers close — so a long review session would accumulate a
+      -- tsgo (and its workers) per branch ever touched. Keep only the N most-recently-
+      -- FOCUSED clients alive; stop the stalest. The active worktree is always freshest
+      -- so it's never evicted; re-entering an evicted worktree respawns its tsgo (~1.5s).
+      -- Each tsgo costs ~550MB here (it re-infers the appRouter; worktrees have no .gen),
+      -- so this N is a memory dial: 3 ≈ 1.7GB ceiling (active branch + 2 recent). Raise
+      -- it if you have RAM and bounce between many branches; lower it to 2 to stay lean.
+      local TSGO_MAX = 3
+      local tsgo_used = {} -- client_id -> focus tick
+      local tsgo_tick = 0
+
+      local function tsgo_on_screen(client)
+        for _, buf in ipairs(vim.lsp.get_buffers_by_client_id(client.id)) do
+          if vim.fn.bufwinid(buf) ~= -1 then
+            return true
+          end
+        end
+        return false
+      end
+
+      local function ensure_tsgo(buf)
+        if not (buf and vim.api.nvim_buf_is_valid(buf)) then
+          return
+        end
+        local fname = vim.api.nvim_buf_get_name(buf)
+        if fname == '' then
+          return
+        end
+        local root = tsgo_root(fname)
+        if not root then
+          return -- no project root → don't attach (no single-file fallback)
+        end
+        local id = vim.lsp.start({
+          name = 'tsgo',
+          cmd = { 'tsgo', '--lsp', '-stdio' },
+          root_dir = root,
+          capabilities = capabilities,
+        }, {
+          bufnr = buf,
+          -- exact-root reuse: one tsgo per worktree, never adopt a foreign root
+          reuse_client = function(client, config)
+            return client.name == config.name and client.config.root_dir == config.root_dir
+          end,
+        })
+        if not id then
+          return
+        end
+        tsgo_tick = tsgo_tick + 1
+        tsgo_used[id] = tsgo_tick -- mark freshest
+
+        -- evict stalest beyond the cap. The just-started client may not be in
+        -- get_clients yet (still initializing), so count it explicitly and never evict
+        -- it; also never evict a client whose buffer is currently on screen.
+        -- Count only clients still considered live: tsgo_used is cleared on stop, and
+        -- vim.lsp.stop_client is async (a stopping client lingers in get_clients), so
+        -- filtering by tsgo_used excludes ones already on their way out. The just-started
+        -- client may not be registered yet, so count it explicitly. Never evict it or a
+        -- client whose buffer is currently on screen.
+        local live = {}
+        local found_new = false
+        for _, c in ipairs(vim.lsp.get_clients { name = 'tsgo' }) do
+          if tsgo_used[c.id] ~= nil then
+            live[#live + 1] = c
+            if c.id == id then
+              found_new = true
+            end
+          end
+        end
+        local over = #live + (found_new and 0 or 1) - TSGO_MAX
+        if over <= 0 then
+          return
+        end
+        table.sort(live, function(a, b)
+          return (tsgo_used[a.id] or 0) < (tsgo_used[b.id] or 0)
+        end)
+        for _, c in ipairs(live) do
+          if over <= 0 then
+            break
+          end
+          if c.id ~= id and not tsgo_on_screen(c) then
+            vim.lsp.stop_client(c.id, true)
+            tsgo_used[c.id] = nil
+            over = over - 1
+          end
+        end
+      end
+
+      local ts_ft = {
+        javascript = true,
+        javascriptreact = true,
+        ['javascript.jsx'] = true,
+        typescript = true,
+        typescriptreact = true,
+        ['typescript.tsx'] = true,
+      }
+      local tsgo_grp = vim.api.nvim_create_augroup('tsgo-per-worktree', { clear = true })
       vim.api.nvim_create_autocmd('FileType', {
-        pattern = {
-          'javascript',
-          'javascriptreact',
-          'javascript.jsx',
-          'typescript',
-          'typescriptreact',
-          'typescript.tsx',
-        },
-        group = vim.api.nvim_create_augroup('tsgo-per-worktree', { clear = true }),
+        group = tsgo_grp,
+        pattern = vim.tbl_keys(ts_ft),
         callback = function(args)
-          local fname = vim.api.nvim_buf_get_name(args.buf)
-          if fname == '' then
-            return
+          ensure_tsgo(args.buf)
+        end,
+      })
+      -- re-mark recency on focus (and respawn tsgo if this buffer's worktree was evicted)
+      vim.api.nvim_create_autocmd('BufEnter', {
+        group = tsgo_grp,
+        callback = function(args)
+          if ts_ft[vim.bo[args.buf].filetype] then
+            ensure_tsgo(args.buf)
           end
-          local root = tsgo_root(fname)
-          if not root then
-            return -- no project root → don't attach (no single-file fallback)
-          end
-          vim.lsp.start({
-            name = 'tsgo',
-            cmd = { 'tsgo', '--lsp', '-stdio' },
-            root_dir = root,
-            capabilities = capabilities,
-          }, {
-            bufnr = args.buf,
-            -- exact-root reuse: one tsgo per worktree, never adopt a foreign root
-            reuse_client = function(client, config)
-              return client.name == config.name and client.config.root_dir == config.root_dir
-            end,
-          })
         end,
       })
     end,
