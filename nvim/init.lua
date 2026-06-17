@@ -816,9 +816,9 @@ require('lazy').setup({
       -- tsgo (and its workers) per branch ever touched. Keep only the N most-recently-
       -- FOCUSED clients alive; stop the stalest. The active worktree is always freshest
       -- so it's never evicted; re-entering an evicted worktree respawns its tsgo (~1.5s).
-      -- Each tsgo costs ~550MB here (it re-infers the appRouter; worktrees have no .gen),
-      -- so this N is a memory dial: 3 ≈ 1.7GB ceiling (active branch + 2 recent). Raise
-      -- it if you have RAM and bounce between many branches; lower it to 2 to stay lean.
+      -- Each tsgo holds the whole program in memory (~0.5–1.2GB, file-dependent), so
+      -- this N is a memory dial: 3 ≈ ~2–3GB ceiling (active branch + 2 recent). Raise it
+      -- if you have RAM and bounce between many branches; lower it to 2 to stay lean.
       local TSGO_MAX = 3
       local tsgo_used = {} -- client_id -> focus tick
       local tsgo_tick = 0
