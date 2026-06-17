@@ -17,6 +17,9 @@ import { ColorSchemeType } from "diff2html/lib/types";
 import { fetchJSON } from "./api";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
+import { useDiffSelection } from "./useDiffSelection";
+import AskClaudeChip from "./AskClaudeChip";
+import { useFileCycle } from "./useFileCycle";
 import type {
   ForestModel,
   SpineNode,
@@ -453,6 +456,13 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
 
+  // sweep-select diff text → floating "ask Claude" chip → POST /claude. Attributes selected
+  // rows to a file via each .entry's existing data-path (see useDiffSelection).
+  const { selection: claudeSel, clear: clearClaudeSel } = useDiffSelection();
+
+  // Tab / Shift+Tab cycle through this node's modified-file cards (nvim <leader>gm style).
+  useFileCycle();
+
   // hover a spine node → float its branch purpose (the one-line thesis) beside it.
   // Purposes are cheap + immutable for a session, so cache by branch and guard the
   // async gap (if the pointer left before /purpose resolved, don't pop a stale tip).
@@ -606,7 +616,7 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
                 </button>
               )}
             </For>
-            <span class="kbd-hint">hover a line · <b>o</b> → nvim</span>
+            <span class="kbd-hint"><b>tab</b> next file · hover a line · <b>o</b> → nvim</span>
           </div>
           <Show when={node.data} fallback={<p class="loading">loading…</p>}>
             {(data) => (
@@ -617,6 +627,7 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
           </Show>
         </Show>
       </main>
+      <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
       <Show when={showMap()}>
         <ForestMap
           spine={spine}
