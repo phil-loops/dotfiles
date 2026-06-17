@@ -291,6 +291,82 @@ function Home() {
   );
 }
 
+// ── forest map: the DAG as an SVG (illumination-colored nodes, parent rails +
+// fan-in edges). Toggled with `m`; click a node to jump there. ───────────────
+const NW = 158, NH = 28, COL = 178, ROWH = 56, PADX = 80, PADY = 44;
+function ForestMap(props) {
+  // tree-row layout: a node inherits its parent's row when it's the first child, so a
+  // linear chain runs HORIZONTALLY (x = depth); branches/extra roots drop to a new row.
+  const pos = createMemo(() => {
+    const list = props.spine();
+    const byId = {};
+    list.forEach((n) => (byId[n.id] = n));
+    const row = {};
+    let next = 0;
+    const walk = (id, inherit) => {
+      if (id in row) return;
+      row[id] = inherit != null ? inherit : next++;
+      const kids = (byId[id]?.children || []).filter((k) => byId[k]);
+      kids.forEach((k, i) => walk(k, i === 0 ? row[id] : next++));
+    };
+    list.filter((n) => n.depth === 0).forEach((rt) => walk(rt.id, null));
+    list.forEach((n) => { if (!(n.id in row)) row[n.id] = next++; });
+    const m = {};
+    list.forEach((n) => {
+      m[n.id] = { x: PADX + n.depth * COL, y: PADY + row[n.id] * ROWH, n };
+    });
+    return m;
+  });
+  const W = () =>
+    Math.max(0, ...Object.values(pos()).map((p) => p.x)) + NW + PADX;
+  const H = () => props.spine().length * ROWH + PADY;
+  const edges = createMemo(() => {
+    const P = pos(), out = [];
+    for (const n of props.spine()) {
+      const c = P[n.id];
+      if (!c) continue;
+      const par = P[n.parent];
+      if (par) out.push({ ...curve(par, c), kind: "rail" });
+      for (const req of n.requires || []) {
+        const r = P[req];
+        if (r) out.push({ ...curve(r, c), kind: "fanin" });
+      }
+    }
+    return out;
+  });
+  function curve(a, b) {
+    const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
+    return { d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` };
+  }
+  return (
+    <div class="map-overlay" onClick={() => props.onClose()}>
+      <svg class="map-svg" width={W()} height={H()} onClick={(e) => e.stopPropagation()}>
+        <For each={edges()}>{(e) => <path class={`ge ${e.kind}`} d={e.d} />}</For>
+        <For each={props.spine()}>
+          {(n) => {
+            const c = () => pos()[n.id];
+            return (
+              <g
+                class={`gnode ${lumen(n)}`}
+                classList={{ active: n.id === props.active() }}
+                transform={`translate(${c().x},${c().y})`}
+                onClick={() => props.onPick(n.id)}
+              >
+                <rect width={NW} height={NH} rx="8" />
+                <circle class="gdot" cx="14" cy={NH / 2} r="4" />
+                <text x="28" y={NH / 2 + 4}>{leaf(n.id)}</text>
+                <text class="gcount" x={NW - 11} y={NH / 2 + 4} text-anchor="end">
+                  {n.clean}/{n.total}
+                </text>
+              </g>
+            );
+          }}
+        </For>
+      </svg>
+    </div>
+  );
+}
+
 // ── node detail: forest spine + review surface ───────────────────────
 function NodeDetail(props) {
   const qc = useQueryClient();
@@ -340,8 +416,9 @@ function NodeDetail(props) {
   const goto = (b) => (location.hash = "node=" + b);
   const litCount = () => spine().filter((n) => lumen(n) === "blessed").length;
   const BASES = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
+  const [showMap, setShowMap] = createSignal(false);
 
-  // keyboard: j/k walk the spine; 1/2/3 switch the diff base.
+  // keyboard: j/k walk the spine; 1/2/3 switch the diff base; m toggles the forest map.
   const onKey = (e) => {
     if (e.target.matches("input, textarea, [contenteditable]")) return;
     const list = spine();
@@ -351,6 +428,8 @@ function NodeDetail(props) {
     else if (e.key === "1") setBase("");
     else if (e.key === "2") setBase("main");
     else if (e.key === "3") setBase("blessed");
+    else if (e.key === "m") setShowMap((v) => !v);
+    else if (e.key === "Escape") setShowMap(false);
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
@@ -407,6 +486,9 @@ function NodeDetail(props) {
                   ? `${node.data.files.filter(isBlessed).length}/${node.data.files.length} blessed`
                   : ""}
           </span>
+          <button class="map-btn" onClick={() => setShowMap(true)} title="forest map (m)">
+            ⊞ map
+          </button>
         </header>
         <div class="base-toggle">
           <span class="base-label">diff vs</span>
@@ -428,6 +510,17 @@ function NodeDetail(props) {
           </Show>
         </Show>
       </main>
+      <Show when={showMap()}>
+        <ForestMap
+          spine={spine}
+          active={active}
+          onPick={(b) => {
+            goto(b);
+            setShowMap(false);
+          }}
+          onClose={() => setShowMap(false)}
+        />
+      </Show>
     </div>
   );
 }

@@ -236,3 +236,30 @@ body {
 }
 .forest-dot.parked { background: transparent; border: 1.5px solid var(--del); box-shadow: inset 0 0 0 1.5px var(--del); }
 .forest-row.parked { border-color: var(--del); }
+
+/* ── map button + forest-map overlay ─────────────────────────────────── */
+.map-btn {
+  font: inherit; font-size: 11px; letter-spacing: 0.04em; color: var(--ink-dim);
+  background: transparent; border: 1px solid var(--rule); border-radius: 7px;
+  padding: 3px 11px; cursor: pointer; margin-left: 12px; transition: border-color .12s, color .12s;
+}
+.map-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
+.map-overlay {
+  position: fixed; inset: 0; z-index: 200; overflow: auto; padding: 40px;
+  background: rgba(8, 6, 3, 0.9); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.map-svg { display: block; margin: auto; }
+.ge { fill: none; stroke-width: 1.5; }
+.ge.rail { stroke: var(--ink-faint); }
+.ge.fanin { stroke: var(--patina); stroke-dasharray: 2 5; opacity: 0.7; }
+.gnode { cursor: pointer; }
+.gnode rect { fill: var(--vellum-raise); stroke: var(--rule); stroke-width: 1; transition: stroke .12s; }
+.gnode:hover rect { stroke: var(--ink-faint); }
+.gnode.active rect { stroke: var(--gold-leaf); }
+.gnode text { fill: var(--ink-dim); font-family: var(--mono); font-size: 12px; }
+.gnode.active text { fill: var(--ink); }
+.gnode .gcount { fill: var(--ink-faint); font-size: 10px; }
+.gdot { stroke-width: 1.5; }
+.gnode.blessed .gdot { fill: var(--gold-leaf); stroke: var(--gold-leaf); }
+.gnode.stale .gdot { fill: none; stroke: var(--patina); }
+.gnode.unblessed .gdot { fill: none; stroke: var(--ink-faint); }
