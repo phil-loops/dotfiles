@@ -124,6 +124,17 @@ export function ForestMap(props: {
           dsp[ids[j]].x -= dx * f; dsp[ids[j]].y -= dy * f;
         }
       }
+      // keep nodes clear of the pinned main anchor: main repels but never moves, so
+      // roots don't collapse on top of it under edge cohesion.
+      ids.forEach((b) => {
+        const dx = P[b].x - MAIN.x, dy = P[b].y - MAIN.y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        const minD = (wOf(b) + 40) / 2 + 90;
+        if (d < CUT || d < minD) {
+          const f = (REP * REP) / d * (d < minD ? 6 : 1);
+          dsp[b].x += (dx / d) * f; dsp[b].y += (dy / d) * f;
+        }
+      });
       // rank spring: pull x back toward the node's depth column → clean banding.
       ids.forEach((b) => { dsp[b].x += ((byId[b].depth + 1) * COLW - P[b].x) * RANKK; });
       // cohesion: edges pull connected nodes together (mainly settles y; main pinned).
