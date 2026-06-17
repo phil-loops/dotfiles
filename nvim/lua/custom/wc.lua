@@ -21,7 +21,10 @@
 --      `open -a` needs no Automation permission and works from inside tmux.
 
 local BROWSER = "Google Chrome"                    -- the browser hosting the viewer
-local VIEWER_MATCH = ":62333"                      -- substring of the viewer URL to find its tab
+-- substrings of the viewer URL, tried in priority order. :5174 = the Solid dev viewer
+-- (preferred during the migration); :62333 = the vanilla server, and also where the Solid
+-- app lands after the cutover — so this keeps working through and past the migration.
+local VIEWER_MATCHES = { ":5174", ":62333" }
 local REVIEW_SOCK = "/tmp/stack-review-nvim.sock"  -- STACK_OPEN_SOCK: the warm review-nvim's socket
 
 -- True only in the review-nvim stack-open opens files into. Gating on the listen
@@ -45,26 +48,33 @@ local function refocus_viewer()
   end
   -- Best-effort: select the viewer tab when Automation IS available (e.g. not under
   -- a detached tmux). Harmless -1743 no-op when it isn't — `open -a` below still raises.
-  vim.fn.system({
-    "osascript",
-    "-e", "on run argv",
-    "-e", "set needle to item 1 of argv",
-    "-e", 'tell application "' .. BROWSER .. '"',
-    "-e", "repeat with w in windows",
-    "-e", "set i to 0",
-    "-e", "repeat with t in (tabs of w)",
-    "-e", "set i to i + 1",
-    "-e", "if (URL of t contains needle) then",
-    "-e", "set active tab index of w to i",
-    "-e", "set index of w to 1",
-    "-e", "return",
-    "-e", "end if",
-    "-e", "end repeat",
-    "-e", "end repeat",
-    "-e", "end tell",
-    "-e", "end run",
-    VIEWER_MATCH,
-  })
+  -- Try each needle in priority order; stop at the first viewer tab we can select.
+  for _, needle in ipairs(VIEWER_MATCHES) do
+    local out = vim.fn.system({
+      "osascript",
+      "-e", "on run argv",
+      "-e", "set needle to item 1 of argv",
+      "-e", 'tell application "' .. BROWSER .. '"',
+      "-e", "repeat with w in windows",
+      "-e", "set i to 0",
+      "-e", "repeat with t in (tabs of w)",
+      "-e", "set i to i + 1",
+      "-e", "if (URL of t contains needle) then",
+      "-e", "set active tab index of w to i",
+      "-e", "set index of w to 1",
+      "-e", 'return "1"',
+      "-e", "end if",
+      "-e", "end repeat",
+      "-e", "end repeat",
+      "-e", 'return ""',
+      "-e", "end tell",
+      "-e", "end run",
+      needle,
+    })
+    if (out or ""):match("1") then
+      break
+    end
+  end
   -- Guaranteed: raise the browser window via LaunchServices (no Apple-event permission).
   vim.fn.system({ "open", "-a", BROWSER })
   return vim.v.shell_error == 0
