@@ -91,6 +91,66 @@ function Home() {
     },
   }));
 
+  // ── restack: two-click arm → run (background) → poll → parked? hand to Claude ──
+  const [armed, setArmed] = createSignal(null); // project name (or "__all__") awaiting confirm
+  const [running, setRunning] = createSignal(null); // project name (or "__all__") restacking now
+  const [parked, setParked] = createSignal(null); // { project, current, reason } on a conflict
+  let armT;
+  const post = (url, body) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+  const start = (key) => {
+    setParked(null);
+    const body =
+      key === "__all__"
+        ? { projects: (projects.data || []).filter((p) => p.behind > 0).map((p) => p.name) }
+        : { project: key };
+    post(key === "__all__" ? "/restack-all" : "/restack", body).then((r) => {
+      if (r.ok) setRunning(key);
+    });
+  };
+  const arm = (key) => {
+    if (armed() === key) {
+      clearTimeout(armT);
+      setArmed(null);
+      start(key);
+      return;
+    }
+    setArmed(key);
+    clearTimeout(armT);
+    armT = setTimeout(() => setArmed(null), 3000);
+  };
+  const status = createQuery(() => ({
+    queryKey: ["restack-status", running()],
+    queryFn: () =>
+      fetchJSON(
+        "/restack-status" +
+          (running() && running() !== "__all__"
+            ? "?project=" + encodeURIComponent(running())
+            : "")
+      ),
+    enabled: !!running(),
+    refetchInterval: (q) => (q.state.data?.running === false ? false : 2500),
+  }));
+  createEffect(() => {
+    if (!running()) return;
+    const d = status.data;
+    if (!d || d.running) return; // still churning through the topo walk
+    if (d.paused) setParked({ project: d.project, current: d.current, reason: d.reason });
+    setRunning(null);
+    projects.refetch();
+  });
+  const resolve = (project) =>
+    post("/restack-resolve", { project }).then((r) => {
+      if (r.ok) {
+        setParked(null);
+        setRunning(project); // re-poll while Claude resolves + resumes
+      }
+    });
+
   const byProject = createMemo(() => {
     const m = new Map();
     for (const p of prs.data || []) {
@@ -150,19 +210,80 @@ function Home() {
       </Show>
 
       <section>
-        <h2 class="eyebrow">forests</h2>
+        <div class="eyebrow-row">
+          <h2 class="eyebrow">forests</h2>
+          <Show when={(projects.data || []).some((p) => p.behind > 0)}>
+            <button
+              class="restack-all"
+              classList={{ armed: armed() === "__all__", running: running() === "__all__" }}
+              onClick={() => running() !== "__all__" && arm("__all__")}
+            >
+              {running() === "__all__"
+                ? "⤳ restacking all…"
+                : armed() === "__all__"
+                  ? "restack all behind?"
+                  : `⟳ restack all ${(projects.data || []).filter((p) => p.behind > 0).length} behind`}
+            </button>
+          </Show>
+        </div>
         <Show when={(projects.data || []).length} fallback={<p class="loading">no forests configured</p>}>
           <For each={projects.data}>
-            {(p) => (
-              <a class="forest-row" href={`?branch=${encodeURIComponent(p.name)}`}>
-                <span class={`forest-dot ${p.behind > 0 ? "behind" : "fresh"}`} />
-                <span class="forest-name">{p.name}</span>
-                <span class="forest-meta">{p.branches} {p.branches === 1 ? "node" : "nodes"}</span>
-                <span class={`forest-fresh ${p.behind > 0 ? "behind" : "fresh"}`}>
-                  {p.behind > 0 ? `⟳ ${p.behind} behind` : "✦ fresh"}
-                </span>
-              </a>
-            )}
+            {(p) => {
+              const busy = () => running() === p.name || running() === "__all__";
+              const stuck = () => parked()?.project === p.name;
+              return (
+                <a
+                  class="forest-row"
+                  classList={{ parked: stuck() }}
+                  href={`?branch=${encodeURIComponent(p.name)}`}
+                >
+                  <span
+                    class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
+                  />
+                  <span class="forest-name">{p.name}</span>
+                  <span class="forest-meta">
+                    {p.branches} {p.branches === 1 ? "node" : "nodes"}
+                  </span>
+                  <Show
+                    when={stuck()}
+                    fallback={
+                      <Show
+                        when={p.behind > 0}
+                        fallback={<span class="forest-fresh fresh">✦ fresh</span>}
+                      >
+                        <button
+                          class="forest-restack"
+                          classList={{ armed: armed() === p.name, running: busy() }}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (!busy()) arm(p.name);
+                          }}
+                        >
+                          {busy()
+                            ? "⤳ restacking…"
+                            : armed() === p.name
+                              ? "restack?"
+                              : `⟳ ${p.behind} behind`}
+                        </button>
+                      </Show>
+                    }
+                  >
+                    <button
+                      class="forest-resolve"
+                      title={parked()?.reason || ""}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        resolve(p.name);
+                      }}
+                    >
+                      ⚠ resolve {leaf(parked()?.current || p.name)}
+                    </button>
+                  </Show>
+                </a>
+              );
+            }}
           </For>
         </Show>
       </section>
