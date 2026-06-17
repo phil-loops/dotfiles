@@ -505,10 +505,13 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
   const lineAt = (e: MouseEvent): { path: string; line: number } | null => {
     const target = e.target as Element | null;
     const ent = target?.closest<HTMLElement>(".entry");
-    const ln = target?.closest<HTMLElement>(".d2h-code-side-linenumber, .d2h-code-linenumber");
-    if (!ent || !ln) return null;
-    const n = parseInt((ln.textContent || "").trim(), 10);
-    return n ? { path: ent.dataset.path ?? "", line: n } : null;
+    const tr = target?.closest<HTMLElement>("tr");
+    if (!ent || !tr) return null;
+    // arm anywhere in the row (code OR gutter) by reading that row's line-number cell —
+    // not only when the cursor is over the tiny number itself
+    const ln = tr.querySelector<HTMLElement>(".d2h-code-side-linenumber, .d2h-code-linenumber");
+    const n = parseInt((ln?.textContent || "").trim(), 10);
+    return Number.isFinite(n) ? { path: ent.dataset.path ?? "", line: n } : null;
   };
 
   // keyboard: j/k walk the spine; 1/2/3 switch the diff base; m toggles the forest map.
@@ -572,8 +575,10 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
         class="surface"
         onMouseOver={(e) => {
           const h = lineAt(e);
-          if (h) setHover(h);
+          // clear when off any row so `o` can't fire on a stale line; dedup to avoid churn
+          setHover((prev) => (prev?.path === h?.path && prev?.line === h?.line ? prev : h));
         }}
+        onMouseLeave={() => setHover(null)}
         onClick={(e) => {
           const h = lineAt(e);
           if (h) openInNvim(h.path, h.line);
