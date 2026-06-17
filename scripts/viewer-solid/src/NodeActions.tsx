@@ -12,7 +12,8 @@
 //                                       worktree holds the branch (force:true frees it)
 //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
 import { createSignal, Show } from "solid-js";
-import { createMutation, useQueryClient } from "@tanstack/solid-query";
+import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
+import { fetchJSON } from "./api";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -26,6 +27,13 @@ interface SquashResult {
   sha?: string; // new short sha
   header?: string; // the voiced subject line
   err?: string;
+}
+
+interface SyncState {
+  behind: number; // commits on origin/main not in this branch
+  syncable: boolean; // safe to rebase onto origin/main with no force-push (unpublished root)
+  why: string; // when not syncable, why (stacked / published / up-to-date)
+  deployCritical?: string[]; // deploy-critical files changed on main → pre-push hook hard-fails
 }
 
 async function post<T>(url: string, body: unknown): Promise<T> {
@@ -121,10 +129,72 @@ export function NodeActions(props: { branch: string }) {
     armT = setTimeout(() => setArmed(false), 4000); // disarm if not confirmed
   };
 
-  const busy = () => checkout.isPending || squash.isPending;
+  // branch state vs origin/main — drives the "N behind / push blocked" badge + rebase.
+  const sync = createQuery(() => ({
+    queryKey: ["sync", props.branch],
+    queryFn: () =>
+      fetchJSON<SyncState>("/sync?branch=" + encodeURIComponent(props.branch)),
+    enabled: !!props.branch,
+  }));
+  const behind = () => sync.data?.behind ?? 0;
+  const critical = () => sync.data?.deployCritical ?? [];
+  const blocked = () => critical().length > 0; // the pre-push hook hard-fails on these
+
+  const rebase = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string }>("/sync", { branch: props.branch }),
+    onSuccess: (r) => {
+      if (r.ok) {
+        setDone("✓ rebased onto origin/main");
+        sync.refetch();
+        qc.invalidateQueries({ queryKey: ["model"] });
+        qc.invalidateQueries({ queryKey: ["node", props.branch] });
+      } else {
+        // 409 = not syncable (stacked/published) — show the server's reason
+        setDone(`✗ ${r.err || "rebase failed"}`);
+      }
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "rebase failed"}`),
+  }));
+
+  const busy = () => checkout.isPending || squash.isPending || rebase.isPending;
 
   return (
     <div class="node-actions" style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+      {/* branch state vs origin/main: behind count, push-blocking deploy-critical files, rebase */}
+      <Show when={behind() > 0}>
+        <span
+          style={blocked() ? { ...note, opacity: "1", "font-weight": "600" } : note}
+          title={
+            blocked()
+              ? `push BLOCKED by the pre-push hook — origin/main changed deploy-critical files you're missing:\n${critical().join("\n")}\n\nrebase onto origin/main to clear it`
+              : `${behind()} commit(s) on origin/main not yet in this branch`
+          }
+        >
+          {blocked() ? "⚠" : "↓"} {behind()} behind{blocked() ? " · push blocked" : ""}
+        </span>
+        <Show
+          when={sync.data?.syncable}
+          fallback={
+            <span style={note} title={sync.data?.why}>
+              ({sync.data?.why})
+            </span>
+          }
+        >
+          <button
+            style={btn}
+            disabled={busy()}
+            title="git rebase origin/main onto this branch"
+            onClick={() => {
+              setDone(null);
+              rebase.mutate();
+            }}
+          >
+            {rebase.isPending ? "rebasing…" : "⟳ rebase onto main"}
+          </button>
+        </Show>
+      </Show>
+
       {/* checkout — move the primary working tree onto this branch */}
       <Show
         when={heldAt()}

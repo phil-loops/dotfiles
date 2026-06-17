@@ -43,8 +43,25 @@ def state(branch):
         why = f"stacked on {parent} — needs a restack, not a sync"
     elif published:
         why = "published — rebasing would rewrite pushed commits"
+    # deploy-critical files changed on origin/main that this branch is missing. The
+    # pre-push hook (.git/hooks/pre-push) HARD-BLOCKS the push (exit 1) when the branch
+    # is behind AND any of these changed — plain "behind" only warns. Same pathspec list
+    # as the hook, so the UI can show "push blocked, rebase first" before you try.
+    deploy_critical = []
+    if behind > 0:
+        deploy_critical = [f for f in ctx.run([
+            "git", "diff", "--name-only", f"{branch}..origin/main", "--",
+            "k8s/charts/loops/values.staging.yaml",
+            "k8s/charts/loops/values.production.yaml",
+            "packages/prisma/migrations/*",
+            "clickhouse/migrations/*",
+            "jobs.ts",
+            "jobs/index.ts",
+            ".env.template",
+        ]).stdout.splitlines() if f]
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
-            "syncable": behind > 0 and parent == "main" and not published, "why": why}
+            "syncable": behind > 0 and parent == "main" and not published, "why": why,
+            "deployCritical": deploy_critical}
 
 
 def get_one(req, u):
