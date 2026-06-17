@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
@@ -222,6 +222,8 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/restack-all":      # restack several projects back-to-back
             return restack.restack_all(self, raw)
+        if self.path == "/claude":           # select diff lines → start a fresh claude on them
+            return assist.start(self, raw)
         self._send(404, "{}")
 
 
