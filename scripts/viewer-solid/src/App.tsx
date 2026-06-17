@@ -84,13 +84,39 @@ export default function App() {
   window.addEventListener("popstate", sync);
 
   const qc = useQueryClient();
-  const es = new EventSource("/events");
-  es.addEventListener("update", () => {
+  // /events is a persistent SSE stream and the browser only allows ~6 connections per origin
+  // (HTTP/1.1) — so a graveyard of idle tabs each squatting a stream exhausts the pool and new
+  // loads hang. Hold the stream ONLY while the tab is visible: a backgrounded tab closes it
+  // (frees its slot), and re-opening on show refetches to catch up on anything missed.
+  let es: EventSource | null = null;
+  const refresh = () => {
     qc.invalidateQueries({ queryKey: ["node"] });
     qc.invalidateQueries({ queryKey: ["model"] });
     qc.invalidateQueries({ queryKey: ["projects"] });
+  };
+  const openStream = () => {
+    if (es) return;
+    es = new EventSource("/events");
+    es.addEventListener("update", refresh);
+  };
+  const closeStream = () => {
+    es?.close();
+    es = null;
+  };
+  const onVisibility = () => {
+    if (document.hidden) {
+      closeStream();
+    } else {
+      openStream();
+      refresh(); // we may have missed updates while hidden
+    }
+  };
+  if (!document.hidden) openStream();
+  document.addEventListener("visibilitychange", onVisibility);
+  onCleanup(() => {
+    document.removeEventListener("visibilitychange", onVisibility);
+    closeStream();
   });
-  onCleanup(() => es.close());
 
   return (
     <>
