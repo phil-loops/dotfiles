@@ -152,8 +152,10 @@ function render(){
         if(right) right.querySelectorAll('tr').forEach(tr=>{
           const numCell=tr.querySelector('.d2h-code-side-linenumber'); if(!numCell) return;
           const n=parseInt((numCell.textContent||'').trim(),10); if(!n) return;   // blank gutter (deleted/gap) — skip
-          numCell.classList.add('lineopen'); numCell.title='⌁ open line '+n+' in nvim';
+          numCell.classList.add('lineopen'); numCell.title='⌁ click: open line '+n+' in nvim · ⇧click: add to a Claude selection';
+          if(claudeHas(l.branch,f.path,n)) numCell.classList.add('claudesel');   // re-apply highlight across redraws
           numCell.onclick=async(e)=>{ e.stopPropagation();
+            if(e.shiftKey){ e.preventDefault(); claudeToggle(l.branch,f.path,n,numCell); return; }   // ⇧click → collect for Claude
             const r=await fetch('/open',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch:l.branch,path:f.path,pos:String(n)})}).then(x=>x.json()).catch(()=>({ok:false}));
             toast(r.ok ? '⌁ '+f.path.split('/').pop()+':'+n+' → review-nvim' : '⌁ open failed: '+((r.err||'').trim()||'see server')); };
           // hover anywhere on the row → press `o` to open that line in nvim (same as clicking the gutter #)
@@ -232,6 +234,81 @@ function render(){
 
 // the diff line under the mouse (set by the d2h hover handlers) — press `o` to open it
 let _hoverLine = null;
+
+// ── select diff lines → ask Claude ──────────────────────────────────────────
+// ⇧click the new-side gutter to toggle a line into a selection (across files); the bar
+// collects them + a one-liner and POSTs /claude, which starts a FRESH standalone claude
+// in the branch's worktree pointed at exactly those ranges.
+let _claudeSel = { branch:null, files:Object.create(null) };   // path -> Set<lineNum>
+const _esc=s=>(s||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));   // toast() renders HTML
+function claudeHas(branch, path, n){
+  return _claudeSel.branch===branch && _claudeSel.files[path] && _claudeSel.files[path].has(n);
+}
+function claudeToggle(branch, path, n, cell){
+  if(_claudeSel.branch && _claudeSel.branch!==branch) claudeClear();   // selection is per-branch
+  _claudeSel.branch = branch;
+  const set = _claudeSel.files[path] || (_claudeSel.files[path] = new Set());
+  if(set.has(n)){ set.delete(n); cell&&cell.classList.remove('claudesel'); if(!set.size) delete _claudeSel.files[path]; }
+  else { set.add(n); cell&&cell.classList.add('claudesel'); }
+  renderClaudeBar();
+}
+function claudeClear(){
+  _claudeSel = { branch:null, files:Object.create(null) };
+  document.querySelectorAll('.d2h-code-side-linenumber.claudesel').forEach(c=>c.classList.remove('claudesel'));
+  renderClaudeBar();
+}
+function _claudeRanges(set){   // line Set -> [[a,b],…] contiguous
+  const ns=[...set].sort((a,b)=>a-b), out=[]; let a=null,p=null;
+  for(const n of ns){ if(a===null){a=p=n;} else if(n===p+1){p=n;} else {out.push([a,p]); a=p=n;} }
+  if(a!==null) out.push([a,p]);
+  return out;
+}
+function renderClaudeBar(){
+  let bar=document.getElementById('claudebar');
+  const paths=Object.keys(_claudeSel.files);
+  const total=paths.reduce((s,p)=>s+_claudeSel.files[p].size,0);
+  if(!total){ if(bar) bar.remove(); return; }
+  if(!bar){
+    if(!document.getElementById('claudebar-css')){
+      const st=el('style'); st.id='claudebar-css';
+      st.textContent=`.d2h-code-side-linenumber.claudesel{background:#3a2d12!important;box-shadow:inset 2px 0 0 var(--gold)}
+#claudebar{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:90;display:flex;align-items:center;gap:10px;
+  background:var(--raised);border:1px solid var(--gold-soft);border-radius:12px;padding:9px 12px;box-shadow:0 12px 40px #000a}
+#claudebar .cb-count{color:var(--gold);font-size:12px;white-space:nowrap}
+#claudebar .cb-in{font:inherit;font-size:12px;width:340px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:5px 9px}
+#claudebar .cb-in:focus{outline:none;border-color:var(--gold)}
+#claudebar .cb-go{font:inherit;font-size:12px;color:var(--bg);background:var(--gold);border:none;border-radius:7px;padding:5px 12px;cursor:pointer;font-weight:600}
+#claudebar .cb-go:hover{filter:brightness(1.1)}
+#claudebar .cb-x{font:inherit;font-size:13px;color:var(--faint);background:none;border:none;cursor:pointer}
+#claudebar .cb-x:hover{color:var(--ink)}`;
+      document.head.appendChild(st);
+    }
+    bar=el('div'); bar.id='claudebar';
+    bar.innerHTML=`<span class="cb-count"></span>`
+      +`<input class="cb-in" placeholder="instruction for Claude (e.g. no comments + add tests)" spellcheck="false">`
+      +`<button class="cb-go">⌁ ask Claude</button><button class="cb-x" title="clear selection">✕</button>`;
+    document.body.appendChild(bar);
+    const go=()=>claudeAsk(bar);
+    bar.querySelector('.cb-x').onclick=claudeClear;
+    bar.querySelector('.cb-go').onclick=go;
+    bar.querySelector('.cb-in').addEventListener('keydown',e=>{ e.stopPropagation(); if(e.key==='Enter'){ e.preventDefault(); go(); } });
+    setTimeout(()=>{ const i=bar.querySelector('.cb-in'); i&&i.focus(); },0);
+  }
+  bar.querySelector('.cb-count').textContent = `${total} line${total>1?'s':''} · ${paths.length} file${paths.length>1?'s':''}`;
+}
+async function claudeAsk(bar){
+  const branch=_claudeSel.branch;
+  const sel=Object.keys(_claudeSel.files).map(p=>({path:p, ranges:_claudeRanges(_claudeSel.files[p])}));
+  if(!branch || !sel.length) return;
+  const go=bar.querySelector('.cb-go'), instruction=bar.querySelector('.cb-in').value;
+  go.textContent='starting…';
+  try{
+    const r=await fetch('/claude',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({branch, selections:sel, instruction})}).then(x=>x.json());
+    if(r.ok){ toast('⌁ Claude started on <b>'+_esc(branch.split('/').pop())+'</b> → its own tmux window'); claudeClear(); }
+    else { toast('⌁ start failed: '+_esc((r.err||'').trim()||'see server')); go.textContent='⌁ ask Claude'; }
+  }catch(e){ toast('⌁ start failed — server unreachable'); go.textContent='⌁ ask Claude'; }
+}
 // keyboard: o → open hovered diff line in nvim; m → graph map; ]/[ walk the tree;
 // s → next stale/new node; Tab/⇧Tab → next/prev file. Nav model: projects → graph
 // → node/files; esc pops one level back up (node→graph→projects).
