@@ -1,0 +1,48 @@
+#!/bin/zsh
+# stack-claude <branch> [<prompt>] — start a fresh, standalone `claude` session in the
+# branch's scratch worktree (the SAME one stack-open builds), seeded with <prompt>, in
+# its own tmux window. The viewer's "select diff lines → ask Claude" action: it sends
+# the file:line ranges + your instruction as the prompt.
+#
+# A fresh session per launch (NOT a pipe into a running one) so it never depends on some
+# other session being alive — it stands on its own and survives independently.
+#
+#   stack-claude <branch> "<prompt>"   prompt as an arg
+#   stack-claude <branch>              prompt on stdin
+#   STACK_CLAUDE_DRY=1 …               print the worktree + tmux command, launch nothing
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+SCRATCH="${STACK_OPEN_DIR:-/tmp/stack-study}"
+SESSION="${STACK_OPEN_TMUX:-loops}"
+here="${0:A:h}"
+
+branch="${1:?usage: stack-claude <branch> [<prompt>]}"
+prompt="${2:-}"
+[[ -n "$prompt" ]] || prompt="$(cat)"   # no arg → read the prompt from stdin
+[[ -n "$prompt" ]] || { print -u2 "stack-claude: empty prompt"; return 1 2>/dev/null || exit 1; }
+
+# Build (or refresh) the branch's worktree exactly the way file-open does, then resolve
+# its path the same way: a real worktree holding the branch wins, else the scratch dir.
+"$here/stack-open" --prepare "$branch"
+dir=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" '
+  /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}')
+[[ -n "$dir" ]] || dir="$SCRATCH/${branch//\//_}"
+[[ -d "$dir" ]] || { print -u2 "stack-claude: no worktree for $branch at $dir"; exit 1; }
+
+# tmux -e passes the prompt as an env var → zero quoting headaches for multi-line /
+# special-char prompts. The pane runs `claude "$STACK_CLAUDE_PROMPT"` and, when claude
+# exits, drops to a shell so the window (and claude's output) sticks around.
+win="claude:${branch##*/}"
+if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
+  print -r -- "DRY: dir=$dir"
+  print -r -- "DRY: tmux new-window -t $SESSION -n $win -c $dir -e STACK_CLAUDE_PROMPT=<prompt> 'claude \"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL'"
+  print -r -- "DRY: prompt:"; print -r -- "$prompt"
+  exit 0
+fi
+
+tmux new-window -t "$SESSION" -n "$win" -c "$dir" -e "STACK_CLAUDE_PROMPT=$prompt" \
+  'claude "$STACK_CLAUDE_PROMPT"; exec $SHELL' \
+  || { print -u2 "stack-claude: couldn't open a tmux window (is the '$SESSION' session running?)"; exit 1; }
+tmux select-window -t "$SESSION:$win" 2>/dev/null || true
+print -r -- "started claude on $branch in $dir"
