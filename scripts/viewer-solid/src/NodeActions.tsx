@@ -34,8 +34,16 @@ async function post<T>(url: string, body: unknown): Promise<T> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  // /checkout answers 409 with a JSON body (held elsewhere) — read it either way.
-  return (await r.json()) as T;
+  // /checkout & /squash send a JSON body on success AND on handled failure (409 held
+  // elsewhere, 500 git error) — parse it either way so onSuccess can branch on r.ok.
+  // A non-JSON body (server down / restarting, proxy 502, crash before the JSON path)
+  // throws here instead of failing silently — the mutations' onError surfaces it.
+  const text = await r.text();
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : " (empty response)"}`);
+  }
 }
 
 // patina-tinted secondary button; gold stays the sole property of blessed.
@@ -81,6 +89,7 @@ export function NodeActions(props: { branch: string }) {
         setDone(`✗ ${r.err || "checkout failed"}`);
       }
     },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "checkout failed"}`),
   }));
 
   const squash = createMutation(() => ({
@@ -95,6 +104,10 @@ export function NodeActions(props: { branch: string }) {
       } else {
         setDone(`✗ ${r.err || "squash failed"}`);
       }
+    },
+    onError: (e) => {
+      setArmed(false);
+      setDone(`✗ ${(e as Error).message || "squash failed"}`);
     },
   }));
 
