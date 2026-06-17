@@ -422,6 +422,21 @@ class H(BaseHTTPRequestHandler):
             return restack.restack(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
             return restack.resolve(self, raw)
+        if self.path == "/check-origin":   # fetch origin + refresh PR/behind caches; report how far main moved
+            before = run(["git", "rev-parse", "origin/main"]).stdout.strip()
+            run(["git", "fetch", "origin", "main"])
+            after = run(["git", "rev-parse", "origin/main"]).stdout.strip()
+            moved = 0
+            if before and after and before != after:
+                try:
+                    moved = int(run(["git", "rev-list", "--count", f"{before}..{after}"]).stdout.strip() or "0")
+                except ValueError:
+                    moved = 0
+            # force the SWR caches fresh so the homepage reflects merges/new-PRs immediately
+            run([os.path.join(SCRIPTS, "my-prs"), "--refresh"])
+            run([os.path.join(SCRIPTS, "stack-prs"), "--refresh"])
+            self._send(200, json.dumps({"ok": True, "moved": moved, "after": after[:9]}))
+            return
         if self.path == "/restack-all":      # restack several projects back-to-back
             return restack.restack_all(self, raw)
         self._send(404, "{}")

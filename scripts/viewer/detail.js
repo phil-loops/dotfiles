@@ -281,7 +281,7 @@ async function renderPicker(){
     ? `<button class="pk-restack-all" title="restack all ${behindAll.length} behind forests onto fresh main, one after another (background, scratch worktree). Stops at the first real conflict for you to resolve, then re-run to finish.">⟳ restack all ${behindAll.length} behind</button>`
     : '';
   const ov=el('div'); ov.id='picker';
-  ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><div class="pk-myprs"></div><p class="pk-sub">choose a project</p>`
+  ov.innerHTML=`<div class="pk-card"><h1>blessed</h1><button class="pk-checkorigin" title="fetch origin/main + refresh open PRs and behind-counts — see what merged and what now needs a restack">↻ check origin</button><div class="pk-myprs"></div><p class="pk-sub">choose a project</p>`
     +allBtn
     +`<div class="pk-list"></div><button class="pk-all">view the whole forest</button>`
     +`<div class="pk-standalone"></div></div>`;
@@ -449,6 +449,17 @@ async function renderPicker(){
   if(!noPr.length){ const sub=ov.querySelector('.pk-sub'); if(sub) sub.remove(); }   // no unattached projects → drop the header
   // header "restack all behind" → restack every trailing forest back-to-back. Two-click
   // arm (destructive, many forests). One background job; halts at the first conflict.
+  // "check origin" — fetch origin/main + force-refresh the PR/behind caches, then
+  // rebuild the homepage: merged PRs drop off, review states + "N behind" go current.
+  const coBtn=ov.querySelector('.pk-checkorigin');
+  if(coBtn){ const o0=coBtn.textContent;
+    coBtn.onclick=async()=>{ coBtn.disabled=true; coBtn.textContent='↻ checking origin…';
+      try{ const r=await (await fetch('/check-origin',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();
+        if(r.ok){ toast('↻ origin checked — '+(r.moved>0?('main +'+r.moved+' commit'+(r.moved===1?'':'s')):'up to date')+' · PRs + behind-counts refreshed'); renderPicker(); }
+        else { toast('↻ check failed: '+esc(r.err||'?')); coBtn.disabled=false; coBtn.textContent=o0; }
+      }catch(e){ toast('↻ check origin failed — server unreachable'); coBtn.disabled=false; coBtn.textContent=o0; }
+    };
+  }
   const allEl=ov.querySelector('.pk-restack-all');
   if(allEl){ const orig=allEl.textContent;
     allEl.onclick=async e=>{ e.stopPropagation();
