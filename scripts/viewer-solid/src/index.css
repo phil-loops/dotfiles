@@ -204,3 +204,14 @@ body {
 .forest-fresh { flex: none; font-size: 11px; letter-spacing: 0.03em; }
 .forest-fresh.fresh { color: var(--gold-leaf); }
 .forest-fresh.behind { color: var(--patina); }
+
+/* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
+.base-toggle { display: flex; align-items: center; gap: 6px; margin: -6px 0 20px; }
+.base-label { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; margin-right: 4px; }
+.base-pill {
+  font: inherit; font-size: 11px; color: var(--ink-dim); background: transparent;
+  border: 1px solid var(--rule); border-radius: 7px; padding: 3px 11px; cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.base-pill:hover { color: var(--ink); border-color: var(--ink-faint); }
+.base-pill.on { color: var(--ink); border-color: var(--ink-faint); background: var(--vellum-edge); }
