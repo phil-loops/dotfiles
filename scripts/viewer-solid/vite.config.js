@@ -8,7 +8,7 @@ const API = "http://127.0.0.1:62333";
 const ROUTES = [
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/events", "/restack-status", "/branches", "/standalone",
-  "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/open",
+  "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
   "/claude", "/purpose", "/squash", "/prep", "/restack-resolve", "/heartbeat",
 ];
 
