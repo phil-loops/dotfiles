@@ -12,17 +12,15 @@ The page is same-origin with the server, so /model and /bless are plain relative
 import sys, os, json, subprocess, threading, time, hashlib, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
-from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout
+from srv import ctx as srvctx, restack, sync, checkout, picker
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
 _mcache = {}  # (branch, sig) -> model json — recompute only when something changed
-_pcache = {}  # (sig, origin-main-sha) -> picker json — the /projects fan-out is expensive
 _render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
 _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
@@ -30,41 +28,6 @@ _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by a
 
 def run(args):
     return subprocess.run(args, cwd=CWD, capture_output=True, text=True)
-
-
-def _proj_opened_file():
-    # project -> epoch of the last hover+o file-open, kept in the git-common-dir so it
-    # survives across worktrees. Drives the picker's "recently touched first" ordering.
-    gd = run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
-    if gd and not os.path.isabs(gd):
-        gd = os.path.join(CWD, gd)
-    return os.path.join(gd, "stack-project-opened.json") if gd else ""
-
-
-def _proj_opened_load():
-    try:
-        with open(_proj_opened_file()) as f:
-            return json.load(f)
-    except Exception:
-        return {}
-
-
-def _record_proj_open(branch):
-    # Stamp now against the branch's project tag, so a no-PR project floats to the top
-    # of the picker after you open one of its files. No tag → nothing to order by, skip.
-    if not branch:
-        return
-    proj = run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
-    path = _proj_opened_file()
-    if not proj or not path:
-        return
-    try:
-        d = _proj_opened_load()
-        d[proj] = int(time.time())
-        with open(path, "w") as f:
-            json.dump(d, f)
-    except Exception:
-        pass
 
 
 def _main_worktree():
@@ -124,17 +87,7 @@ def pulse():
 # fork-staleness (_sync_state) + the /sync endpoints now live in srv/sync.py.
 
 
-def _ready_to_merge(mergeable, prs):
-    """Split stack-forest's topologically-mergeable branches by PR state:
-      ready      — an open PR already exists (the green into-main edge-bar set)
-      candidates — no PR yet, but clear to merge: local branches you could open a
-                   PR for / merge straight into main.
-    The topology walk now lives in stack-forest (`mergeable`), so this is a pure
-    split — no git calls. Returns (ready, candidates), input order preserved."""
-    ready, candidates = [], []
-    for b in mergeable:
-        (ready if b in prs else candidates).append(b)
-    return ready, candidates
+# picker endpoints + helpers (_ready_to_merge, recency) now live in srv/picker.py.
 
 
 class H(BaseHTTPRequestHandler):
@@ -223,75 +176,12 @@ class H(BaseHTTPRequestHandler):
             except OSError:
                 pass   # client closed the tab → the write fails, this thread ends
             return
-        elif u.path == "/prs":   # branch → open-PR map; stack-prs disk-caches, so GH isn't hammered
-            r = run([os.path.join(SCRIPTS, "stack-prs")])
-            self._send(200, r.stdout or "{}")
-        elif u.path == "/myprs":   # my open PRs (gh --author @me) annotated with .project — homepage list
-            r = run([os.path.join(SCRIPTS, "my-prs")])
-            self._send(200, r.stdout or "[]")
-        elif u.path == "/projects":   # the picker: [{name, branches, ready:[…]}] — choose a project to view
-            # The fan-out below (stack-forest --projects + a rev-list per branch)
-            # costs ~0.5s; cache on model_sig + origin/main tip so repeat loads are
-            # instant and it recomputes only when a ref/config/ledger changes or a
-            # fetch moves origin/main (which the "behind" counts depend on).
-            pck = (srvctx.model_sig(), run(["git", "rev-parse", "origin/main"]).stdout.strip())
-            if pck in _pcache:
-                self._send(200, _pcache[pck])
-                return
-            # stack-forest --projects and stack-prs are independent → run concurrently.
-            with ThreadPoolExecutor(max_workers=2) as ex:
-                fr = ex.submit(run, [os.path.join(SCRIPTS, "stack-forest"), "--projects"])
-                pf = ex.submit(run, [os.path.join(SCRIPTS, "stack-prs")])
-                r, prs = fr.result(), pf.result()
-            try:
-                projs = json.loads(r.stdout or "[]")
-            except Exception:
-                projs = []
-            try:
-                prmap = json.loads(prs.stdout or "{}")
-            except Exception:
-                prmap = {}
-            # Per mergeable root: how far it trails origin/main (behind), and whether main's
-            # new commits touch files the branch also touches (overlap → a consequential
-            # restack vs pure SHA churn). This per-branch git fan-out was the bulk of the
-            # cold-build cost — compute each root ONCE, fanned out through a thread pool
-            # (git releases the GIL), then aggregate per project.
-            def _root_fresh(b):
-                n = run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip()
-                behind = int(n) if n.isdigit() else 0
-                overlap = False
-                if behind:
-                    mb = run(["git", "merge-base", b, "origin/main"]).stdout.strip()
-                    if mb:
-                        main_files = set(run(["git", "diff", "--name-only", f"{mb}..origin/main"]).stdout.splitlines())
-                        if main_files:
-                            branch_files = set(run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
-                            overlap = bool(main_files & branch_files)
-                return behind, overlap
-            roots = sorted({b for p in projs for b in p.get("mergeable", [])})
-            with ThreadPoolExecutor(max_workers=8) as ex:
-                fresh = dict(zip(roots, ex.map(_root_fresh, roots)))
-            for p in projs:
-                p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
-                bs = p.get("mergeable", [])
-                p["behind"] = max((fresh[b][0] for b in bs), default=0)
-                p["overlap"] = any(fresh[b][1] for b in bs)
-            payload = json.dumps(projs)
-            _pcache.clear()
-            _pcache[pck] = payload
-            self._send(200, payload)
-        elif u.path == "/project-opened":   # project -> last hover+o open epoch; orders the no-PR picker cards
-            self._send(200, json.dumps(_proj_opened_load()))
-        elif u.path == "/standalone":   # the pinned watch list — [{branch, commits, add, del}]
-            r = run([os.path.join(SCRIPTS, "stack-forest"), "--standalone"])
-            self._send(200, r.stdout or "[]")
-        elif u.path == "/branches":   # typeahead candidates for pinning: all local heads,
-            # most-recent-first, minus main + the already-pinned. Names only.
-            main = run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-            pinned = set(run(["git", "config", "--get-all", "stack.standalone"]).stdout.splitlines())
-            heads = run(["git", "for-each-ref", "--sort=-committerdate", "refs/heads",
-                         "--format=%(refname:short)"]).stdout.splitlines()
-            self._send(200, json.dumps([b for b in heads if b and b != main and b not in pinned]))
+        elif u.path == "/prs":            return picker.prs(self)
+        elif u.path == "/myprs":          return picker.myprs(self)
+        elif u.path == "/projects":       return picker.projects(self)
+        elif u.path == "/project-opened": return picker.project_opened(self)
+        elif u.path == "/standalone":     return picker.standalone_list(self)
+        elif u.path == "/branches":       return picker.branches(self)
         elif u.path == "/node":
             q = parse_qs(u.query)
             branch = q.get("branch", [""])[0]
@@ -350,43 +240,15 @@ class H(BaseHTTPRequestHandler):
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return
-        if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list (stack.standalone multivar)
-            d = json.loads(raw or "{}")
-            branch = d.get("branch", "").strip()
-            if not branch:
-                self._send(400, json.dumps({"ok": False, "err": "no branch"}))
-                return
-            if d.get("op") == "remove":
-                # --fixed-value (git ≥2.30) treats the value as literal, not a regex —
-                # MUST precede --unset-all. Handles branch names with regex-special chars.
-                run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", branch])
-                self._send(200, json.dumps({"ok": True}))
-                return
-            # add: must be a real local head; de-dupe so a branch is pinned at most once
-            if run(["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + branch]).returncode != 0:
-                self._send(404, json.dumps({"ok": False, "err": "no such local branch"}))
-                return
-            if branch not in run(["git", "config", "--get-all", "stack.standalone"]).stdout.splitlines():
-                run(["git", "config", "--add", "stack.standalone", branch])
-            self._send(200, json.dumps({"ok": True}))
-            return
+        if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list
+            return picker.pin(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
             d = json.loads(raw or "{}")
             r = run([os.path.join(SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
             self._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
             return
-        if self.path == "/open":   # open the file ON that branch in the warm review-nvim (full LSP)
-            d = json.loads(raw or "{}")
-            args = [os.path.join(SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")]
-            pos = d.get("pos") or d.get("line")   # opaque locator ("<line>" / "<line>:<col>" / …) — forwarded
-            if pos:                               # verbatim; this wiring layer never parses it. stack-open owns
-                args.append(str(pos))             # the grammar, so new locator kinds cost zero change HERE.
-            r = run(args)
-            if r.returncode == 0:
-                _record_proj_open(d.get("branch", ""))   # stamp recency for the picker's no-PR ordering
-            self._send(200 if r.returncode == 0 else 500,
-                       json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
-            return
+        if self.path == "/open":   # open the file on that branch in the warm review-nvim
+            return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
             return checkout.prepare(self, raw)
         if self.path == "/checkout":  # move the working tree onto this branch (git refuses if dirty)
