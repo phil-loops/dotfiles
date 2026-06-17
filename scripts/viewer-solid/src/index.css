@@ -263,3 +263,14 @@ body {
 .gnode.blessed .gdot { fill: var(--gold-leaf); stroke: var(--gold-leaf); }
 .gnode.stale .gdot { fill: none; stroke: var(--patina); }
 .gnode.unblessed .gdot { fill: none; stroke: var(--ink-faint); }
+
+/* ── hover a diff line + o → open it in the warm nvim ─────────────────── */
+.d2h-code-side-linenumber, .d2h-code-linenumber { cursor: pointer; }
+.d2h-code-side-linenumber:hover, .d2h-code-linenumber:hover { color: var(--ink); background: var(--vellum-edge); }
+.kbd-hint { margin-left: auto; color: var(--ink-faint); font-size: 10px; letter-spacing: 0.04em; }
+.kbd-hint b { color: var(--ink-dim); font-weight: 600; }
+.flash {
+  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 250;
+  background: var(--vellum-raise); border: 1px solid var(--rule); color: var(--ink);
+  padding: 9px 16px; border-radius: 9px; font-size: 12px; box-shadow: 0 14px 40px #0009;
+}
