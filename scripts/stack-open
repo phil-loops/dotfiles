@@ -160,13 +160,26 @@ case "$pos" in
   *)         echo "stack-open: unrecognized <pos> '$pos' — opening at top" >&2 ;;
 esac
 
-if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
-  nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
+# Bound every --server call: a WEDGED review-nvim (stuck on a swap/other prompt) makes
+# any --server request hang forever — that hangs /open and spins the viewer's hover+o
+# indefinitely. macOS has no `timeout`; perl's alarm caps each call (the exec'd nvim
+# inherits the pending alarm and dies on SIGALRM).
+nvim_to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }
+
+if [[ -S "$SOCK" ]] && nvim_to 2 nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
+  nvim_to 5 nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
   # force normal mode first (<C-\><C-N>): the warm instance may be in insert/visual/
   # cmdline mode when `o` fires from the browser — without the guard the ":<line>" keys
   # are swallowed by that mode and the jump silently no-ops.
-  [[ -n "$warm_jump" ]] && nvim --server "$SOCK" --remote-send "<C-\><C-N>${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
+  [[ -n "$warm_jump" ]] && nvim_to 3 nvim --server "$SOCK" --remote-send "<C-\><C-N>${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
 else
+  # Socket missing OR the probe timed out (a WEDGED nvim still holding it). Just rm +
+  # respawn would leave the zombie alive while the new nvim binds a fresh socket → the
+  # "N nvims contending on one socket" pileup. So reap whatever holds $SOCK first.
+  if [[ -S "$SOCK" ]]; then
+    stale=$(lsof -t "$SOCK" 2>/dev/null)
+    [[ -n "$stale" ]] && kill -9 ${=stale} 2>/dev/null || true
+  fi
   rm -f "$SOCK"
   cmd="nvim --listen ${(q)SOCK}"                   # single-string form (proven); (q) keeps spaces/parens intact
   [[ -n "$launch_arg" ]] && cmd+=" ${(q)launch_arg}"
