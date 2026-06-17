@@ -99,9 +99,10 @@ function render(){
       .then(p=>{ PURPOSE[l.branch]=p; if(curObj().branch===l.branch) route(p); }).catch(showEmpty);
   }
 
+  // no bless-all: blessing is earned per-file by actually reading the diff — a bulk-bless
+  // makes the gold a lie. (snapshot mode keeps its read-only badge.)
   const sub=el('div','sub2');
-  if(LIVE){ const ba=el('button','blessall','✦ bless all remaining'); ba.onclick=()=>doBless(l.branch,'.'); sub.appendChild(ba); }
-  else { sub.appendChild(el('span','ro-badge','snapshot · read-only')); }
+  if(!LIVE){ sub.appendChild(el('span','ro-badge','snapshot · read-only')); }
   main.appendChild(sub);
 
   // diff base picker — view this node's diff vs an upstream ref OR vs the last blessed blob
