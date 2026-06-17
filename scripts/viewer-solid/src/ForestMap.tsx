@@ -23,9 +23,11 @@ function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
   return "unblessed";
 }
 
-// layout constants. COLW = x-distance per depth band; RANKK = how hard a node is
-// pulled back to its depth column (higher = cleaner columns, less 2D drift).
-const COLW = 186, REP = 170, K = 150, RANKK = 0.2, CUT = 470, ITER = 420, PAD = 72;
+// layout constants. COLW = x-distance per depth band; REST = the spring's natural
+// edge length (≈ one column), so a child settles a column from its parent instead of
+// collapsing onto it; SPRING = spring stiffness; RANKK = a light rightward bias so
+// depth flows left→right from the pinned main.
+const COLW = 186, REP = 180, REST = 186, SPRING = 0.5, K = 150, RANKK = 0.14, CUT = 520, ITER = 460, PAD = 72;
 
 export function ForestMap(props: {
   spine: () => SpineNode[];
@@ -129,20 +131,23 @@ export function ForestMap(props: {
       ids.forEach((b) => {
         const dx = P[b].x - MAIN.x, dy = P[b].y - MAIN.y;
         const d = Math.hypot(dx, dy) || 0.01;
-        const minD = (wOf(b) + 40) / 2 + 90;
+        const minD = (wOf(b) + 40) / 2 + 120;
         if (d < CUT || d < minD) {
           const f = (REP * REP) / d * (d < minD ? 6 : 1);
           dsp[b].x += (dx / d) * f; dsp[b].y += (dy / d) * f;
         }
       });
-      // rank spring: pull x back toward the node's depth column → clean banding.
+      // light rightward bias: nudge x toward the node's depth column so depth reads
+      // left→right (the rest-length springs below do the real spacing).
       ids.forEach((b) => { dsp[b].x += ((byId[b].depth + 1) * COLW - P[b].x) * RANKK; });
-      // cohesion: edges pull connected nodes together (mainly settles y; main pinned).
+      // cohesion: rest-length springs — zero force at REST, attract beyond, repel within,
+      // so connected nodes settle ~one column apart instead of collapsing together. main pinned.
       links.forEach(([u, v]) => {
         const A = at(u), B = at(v);
-        const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 0.01, fa = d / K;
-        if (u !== "main") { dsp[u].x += dx * fa; dsp[u].y += dy * fa; }
-        if (v !== "main") { dsp[v].x -= dx * fa; dsp[v].y -= dy * fa; }
+        const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 0.01;
+        const f = ((d - REST) / d) * SPRING;
+        if (u !== "main") { dsp[u].x += dx * f; dsp[u].y += dy * f; }
+        if (v !== "main") { dsp[v].x -= dx * f; dsp[v].y -= dy * f; }
       });
       ids.forEach((b) => {
         const m = Math.hypot(dsp[b].x, dsp[b].y) || 0.01, s = Math.min(m, temp) / m;
