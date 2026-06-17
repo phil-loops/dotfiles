@@ -245,13 +245,11 @@ function Home() {
     return [...m.entries()];
   });
 
-  // float forests that have an open PR to the top (they're already listed under "your
-  // open PRs", so surfacing them first in the forest list reunites the two views).
+  // a PR'd forest shows its forest meta UP in its "your open PRs" group, so it drops out
+  // of the FORESTS list entirely — no duplicate listing across the two sections.
   const prProjects = createMemo(() => new Set((prs.data || []).map((p) => p.project).filter(Boolean)));
-  const sortedProjects = createMemo(() => {
-    const s = prProjects();
-    return [...(projects.data || [])].sort((a, b) => Number(s.has(b.name)) - Number(s.has(a.name)));
-  });
+  const nonPrProjects = createMemo(() => (projects.data || []).filter((p) => !prProjects().has(p.name)));
+  const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
 
   const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
@@ -277,7 +275,19 @@ function Home() {
           <For each={byProject()}>
             {([proj, list]) => (
               <div class="pr-group">
-                <div class="pr-project">{proj}</div>
+                <div class="pr-project">
+                  {proj}
+                  <Show when={forestOf(proj)}>
+                    {(f) => (
+                      <span class="forest-meta">
+                        {" · "}{f().branches} {f().branches === 1 ? "node" : "nodes"}{" · "}
+                        <span class={f().behind > 0 ? "forest-fresh behind" : "forest-fresh fresh"}>
+                          {f().behind > 0 ? `↻ ${f().behind} behind` : "✦ fresh"}
+                        </span>
+                      </span>
+                    )}
+                  </Show>
+                </div>
                 <For each={list}>
                   {(p) => {
                     const [mark, cls] = review(p.review);
@@ -318,8 +328,15 @@ function Home() {
             </button>
           </Show>
         </div>
-        <Show when={(projects.data || []).length} fallback={<p class="loading">no forests configured</p>}>
-          <For each={sortedProjects()}>
+        <Show
+          when={nonPrProjects().length}
+          fallback={
+            <p class="loading">
+              {(projects.data || []).length ? "every forest has an open PR ✦" : "no forests configured"}
+            </p>
+          }
+        >
+          <For each={nonPrProjects()}>
             {(p) => {
               const busy = () => running() === p.name || running() === "__all__";
               const stuck = () => parked()?.project === p.name;
