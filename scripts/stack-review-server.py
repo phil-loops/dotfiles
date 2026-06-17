@@ -15,7 +15,7 @@ from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync
+from srv import ctx as srvctx, restack, sync, checkout
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
@@ -87,16 +87,7 @@ srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT)
 # restack helpers + endpoints now live in srv/restack.py (delegated below).
 
 
-def _worktree_of(branch):   # path of the worktree currently holding `branch`, or "" if none
-    if not branch:
-        return ""
-    path = ""
-    for line in run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-        elif line == "branch refs/heads/" + branch:
-            return path
-    return ""
+# /head, /prepare, /checkout (+ _worktree_of) now live in srv/checkout.py.
 
 
 def model_sig():
@@ -208,7 +199,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": model_sig()}))
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
-            self._send(200, json.dumps({"branch": run(["git", "-C", MAIN_WT, "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
+            return checkout.head(self)
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
             return restack.status(self, u)
         elif u.path == "/sync":   # fork-staleness vs origin/main (single branch)
@@ -409,30 +400,9 @@ class H(BaseHTTPRequestHandler):
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
-            d = json.loads(raw or "{}")
-            subprocess.Popen([os.path.join(SCRIPTS, "stack-open"), "--prepare", d.get("branch", "")],
-                             cwd=CWD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            self._send(200, '{"ok":true}')
-            return
-        if self.path == "/checkout":   # move the working tree onto this branch (git refuses if dirty)
-            d = json.loads(raw or "{}")
-            branch = d.get("branch", "")
-            wt = _worktree_of(branch)
-            if wt and os.path.realpath(wt) != os.path.realpath(MAIN_WT):
-                # git can't move the main tree onto a branch another worktree already holds.
-                if not d.get("force"):
-                    # tell the client where it lives so it can offer to free it
-                    self._send(409, json.dumps({"ok": False, "err": "already open in worktree at " + wt, "worktree": wt}))
-                    return
-                # force: detach that worktree's HEAD (keeps its commits, releases the branch name), then checkout here
-                rd = run(["git", "-C", wt, "checkout", "--detach"])
-                if rd.returncode != 0:
-                    self._send(500, json.dumps({"ok": False, "err": "could not free worktree: " + (rd.stderr or rd.stdout)}))
-                    return
-            r = run(["git", "-C", MAIN_WT, "checkout", branch])
-            self._send(200 if r.returncode == 0 else 500,
-                       json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
-            return
+            return checkout.prepare(self, raw)
+        if self.path == "/checkout":  # move the working tree onto this branch (git refuses if dirty)
+            return checkout.move(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit (headless claude)
