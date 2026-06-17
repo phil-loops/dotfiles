@@ -134,7 +134,10 @@ esac
 
 if [[ -S "$SOCK" ]] && nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
   nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
-  [[ -n "$warm_jump" ]] && nvim --server "$SOCK" --remote-send "${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
+  # force normal mode first (<C-\><C-N>): the warm instance may be in insert/visual/
+  # cmdline mode when `o` fires from the browser — without the guard the ":<line>" keys
+  # are swallowed by that mode and the jump silently no-ops.
+  [[ -n "$warm_jump" ]] && nvim --server "$SOCK" --remote-send "<C-\><C-N>${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
 else
   rm -f "$SOCK"
   cmd="nvim --listen ${(q)SOCK}"                   # single-string form (proven); (q) keeps spaces/parens intact
