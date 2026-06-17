@@ -418,6 +418,29 @@ function NodeDetail(props) {
   const BASES = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
 
+  // hover a diff line + press o (or click the gutter #) → open that exact line in the warm
+  // review-nvim. Event-delegated off the surface so it works on diff2html's raw HTML.
+  const [hover, setHover] = createSignal(null); // { path, line }
+  const [flash, setFlash] = createSignal("");
+  let flashT;
+  const note = (m) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
+  const openInNvim = (path, line) =>
+    fetch("/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ branch: active(), path, ...(line != null ? { pos: String(line) } : {}) }),
+    })
+      .then((r) => r.json())
+      .then((r) => note(r.ok ? `⌁ ${leaf(path)}:${line ?? ""} → nvim` : "⌁ open failed — see server"))
+      .catch(() => note("⌁ open failed — server unreachable"));
+  const lineAt = (e) => {
+    const ent = e.target.closest?.(".entry");
+    const ln = e.target.closest?.(".d2h-code-side-linenumber, .d2h-code-linenumber");
+    if (!ent || !ln) return null;
+    const n = parseInt((ln.textContent || "").trim(), 10);
+    return n ? { path: ent.dataset.path, line: n } : null;
+  };
+
   // keyboard: j/k walk the spine; 1/2/3 switch the diff base; m toggles the forest map.
   const onKey = (e) => {
     if (e.target.matches("input, textarea, [contenteditable]")) return;
@@ -430,6 +453,7 @@ function NodeDetail(props) {
     else if (e.key === "3") setBase("blessed");
     else if (e.key === "m") setShowMap((v) => !v);
     else if (e.key === "Escape") setShowMap(false);
+    else if (e.key === "o" && hover()) { e.preventDefault(); openInNvim(hover().path, hover().line); }
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
@@ -471,7 +495,17 @@ function NodeDetail(props) {
         </Show>
       </aside>
 
-      <main class="surface">
+      <main
+        class="surface"
+        onMouseOver={(e) => {
+          const h = lineAt(e);
+          if (h) setHover(h);
+        }}
+        onClick={(e) => {
+          const h = lineAt(e);
+          if (h) openInNvim(h.path, h.line);
+        }}
+      >
         <header class="node-head">
           <h1>{leaf(active()) || "—"}</h1>
           <Show when={parentOf()}>
@@ -503,6 +537,7 @@ function NodeDetail(props) {
               </button>
             )}
           </For>
+          <span class="kbd-hint">hover a line · <b>o</b> → nvim</span>
         </div>
         <Show when={node.data} fallback={<p class="loading">loading…</p>}>
           <Show when={node.data.files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
@@ -520,6 +555,9 @@ function NodeDetail(props) {
           }}
           onClose={() => setShowMap(false)}
         />
+      </Show>
+      <Show when={flash()}>
+        <div class="flash">{flash()}</div>
       </Show>
     </div>
   );
@@ -547,7 +585,7 @@ function FileEntry(props) {
     return i < 0 ? <b>{p}</b> : [<span class="dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
   };
   return (
-    <article class="entry" classList={{ blessed: blessed(), foil: foil() }}>
+    <article class="entry" data-path={props.file.path} classList={{ blessed: blessed(), foil: foil() }}>
       <div class="entry-head">
         <span class="gutter">{blessed() || foil() ? "✦" : ""}</span>
         <span class="path">{seg(props.file.path)}</span>
