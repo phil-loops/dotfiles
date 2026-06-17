@@ -40,13 +40,21 @@ def blocked():
     return ""
 
 
-def cmd(project, wt, handoff=False):
+def cmd(project, wt, action=None):
+    # action: None = fresh restack, "handoff" = AI-resolve the parked conflict + resume,
+    # "diagnose" = AI-analyze the parked conflict read-only (no resolve, no resume).
+    #
     # On clean success, detach the scratch worktree so it doesn't keep the last
     # rebased branch checked out (locking it from other worktrees). On a conflict-pause
     # stack-restack exits non-zero and `&&` short-circuits — the parked rebase is left
     # intact for /restack-resolve to resume.
     parts = [shlex.quote(os.path.join(ctx.SCRIPTS, "stack-restack")), shlex.quote(project)]
-    if handoff:
+    if action == "diagnose":
+        # Read-only: leaves the rebase exactly as parked. No worktree-detach tail —
+        # nothing finished, and detaching mid-park would fight the parked rebase.
+        parts.append("--diagnose")
+        return " ".join(parts)
+    if action == "handoff":
         parts.append("--handoff")
     return " ".join(parts) + f" && git -C {shlex.quote(wt)} checkout --detach >/dev/null 2>&1"
 
@@ -107,14 +115,43 @@ def restack(req, raw):
 
 
 def resolve(req, raw):
+    # One endpoint, two intents via `mode`:
+    #   "resolve"  (default) — AI-fix the parked conflict + resume the cascade
+    #   "diagnose"           — AI-analyze it read-only into stack-restack-conflict.json
     d = json.loads(raw or "{}")
     project = d.get("project", "")
+    mode = d.get("mode", "resolve")
     if not project:
         req._send(400, json.dumps({"ok": False, "err": "no project"}))
         return
     wt = worktree()
-    logpath = _spawn(cmd(project, wt, handoff=True), wt)
-    req._send(200, json.dumps({"ok": True, "project": project, "log": logpath}))
+    action = "diagnose" if mode == "diagnose" else "handoff"
+    logpath = _spawn(cmd(project, wt, action=action), wt)
+    req._send(200, json.dumps({"ok": True, "project": project, "mode": mode, "log": logpath}))
+
+
+def conflict(req, u):
+    # Serve the structured diagnosis artifact stack-restack --diagnose writes to
+    # <git-common-dir>/stack-restack-conflict.json (same dir-resolution as status()).
+    # {present:false} when absent or scoped to a different project than requested.
+    gitdir = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+    if gitdir and not os.path.isabs(gitdir):
+        gitdir = os.path.join(ctx.CWD, gitdir)
+    path = os.path.join(gitdir, "stack-restack-conflict.json") if gitdir else ""
+    want = parse_qs(u.query).get("project", [""])[0]
+    if not path or not os.path.exists(path):
+        req._send(200, json.dumps({"present": False}))
+        return
+    try:
+        with open(path) as fh:
+            art = json.load(fh)
+    except Exception as e:
+        req._send(200, json.dumps({"present": False, "err": str(e)}))
+        return
+    if want and art.get("project") and art.get("project") != want:
+        req._send(200, json.dumps({"present": False}))
+        return
+    req._send(200, json.dumps({"present": True, "conflict": art}))
 
 
 def restack_all(req, raw):
