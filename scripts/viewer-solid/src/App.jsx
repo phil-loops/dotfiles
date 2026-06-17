@@ -1,4 +1,11 @@
-import { createSignal, createMemo, Show, For, onCleanup } from "solid-js";
+import {
+  createSignal,
+  createMemo,
+  createEffect,
+  Show,
+  For,
+  onCleanup,
+} from "solid-js";
 import {
   createQuery,
   createMutation,
@@ -177,9 +184,22 @@ function NodeDetail(props) {
   const active = () => props.url().node || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
 
+  // diff base: parent ("") | main | last-blessed ("blessed"); resets when you change node.
+  const [base, setBase] = createSignal("");
+  let lastActive;
+  createEffect(() => {
+    if (active() !== lastActive) {
+      lastActive = active();
+      setBase("");
+    }
+  });
+
   const node = createQuery(() => ({
-    queryKey: ["node", active()],
-    queryFn: () => fetchJSON("/node?branch=" + encodeURIComponent(active())),
+    queryKey: ["node", active(), base()],
+    queryFn: () =>
+      fetchJSON(
+        "/node?branch=" + encodeURIComponent(active()) + (base() ? "&base=" + base() : "")
+      ),
     enabled: !!active(),
   }));
 
@@ -198,6 +218,30 @@ function NodeDetail(props) {
 
   const goto = (b) => (location.hash = "node=" + b);
   const litCount = () => spine().filter((n) => lumen(n) === "blessed").length;
+  const BASES = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
+
+  // keyboard: j/k walk the spine; 1/2/3 switch the diff base.
+  const onKey = (e) => {
+    if (e.target.matches("input, textarea, [contenteditable]")) return;
+    const list = spine();
+    const i = list.findIndex((n) => n.id === active());
+    if (e.key === "j" && i < list.length - 1) { e.preventDefault(); goto(list[i + 1].id); }
+    else if (e.key === "k" && i > 0) { e.preventDefault(); goto(list[i - 1].id); }
+    else if (e.key === "1") setBase("");
+    else if (e.key === "2") setBase("main");
+    else if (e.key === "3") setBase("blessed");
+  };
+  window.addEventListener("keydown", onKey);
+  onCleanup(() => window.removeEventListener("keydown", onKey));
+
+  // on node change: jump to top, keep the active spine entry in view.
+  createEffect(() => {
+    active();
+    window.scrollTo({ top: 0 });
+    queueMicrotask(() =>
+      document.querySelector(".spine-node.active")?.scrollIntoView({ block: "nearest" })
+    );
+  });
 
   return (
     <div class="shell">
@@ -243,6 +287,20 @@ function NodeDetail(props) {
                   : ""}
           </span>
         </header>
+        <div class="base-toggle">
+          <span class="base-label">diff vs</span>
+          <For each={BASES}>
+            {([v, lab]) => (
+              <button
+                class="base-pill"
+                classList={{ on: base() === v }}
+                onClick={() => setBase(v)}
+              >
+                {lab}
+              </button>
+            )}
+          </For>
+        </div>
         <Show when={node.data} fallback={<p class="loading">loading…</p>}>
           <Show when={node.data.files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
             <For each={node.data.files}>{(f) => <FileEntry file={f} bless={bless} />}</For>
