@@ -90,19 +90,7 @@ srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT)
 # /head, /prepare, /checkout (+ _worktree_of) now live in srv/checkout.py.
 
 
-def model_sig():
-    # cheap fingerprint of everything the model depends on: ref tips + config +
-    # blessing ledger. Changes on re-point, commit, re-parent, or bless.
-    refs = run(["git", "for-each-ref", "--format=%(objectname)", "refs/heads"]).stdout
-    gd = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
-
-    def mt(p):
-        try:
-            return os.path.getmtime(p)
-        except OSError:
-            return 0
-    stamp = refs + str(mt(os.path.join(gd, "config"))) + str(mt(os.path.join(gd, "stack-blessed.json")))
-    return hashlib.sha1(stamp.encode()).hexdigest()
+# srvctx.model_sig() now lives in srv/ctx.py (shared by /model, /projects, /sig).
 
 
 def asset_sig():
@@ -126,7 +114,7 @@ def pulse():
     # reads these in-process, so N tabs cost one git check total, not N polling tabs.
     while True:
         try:
-            _pulse["sig"] = model_sig()
+            _pulse["sig"] = srvctx.model_sig()
             _pulse["asset"] = asset_sig()
         except Exception:
             pass
@@ -185,7 +173,7 @@ class H(BaseHTTPRequestHandler):
             self._send(200, body, "text/html; charset=utf-8")
         elif u.path == "/model":
             branch = parse_qs(u.query).get("branch", [""])[0]
-            ck = (branch, model_sig())
+            ck = (branch, srvctx.model_sig())
             if ck in _mcache:
                 self._send(200, _mcache[ck])
                 return
@@ -197,7 +185,7 @@ class H(BaseHTTPRequestHandler):
                 _mcache[ck] = r.stdout
                 self._send(200, r.stdout)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
-            self._send(200, json.dumps({"sig": model_sig()}))
+            self._send(200, json.dumps({"sig": srvctx.model_sig()}))
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
             return checkout.head(self)
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
@@ -246,7 +234,7 @@ class H(BaseHTTPRequestHandler):
             # costs ~0.5s; cache on model_sig + origin/main tip so repeat loads are
             # instant and it recomputes only when a ref/config/ledger changes or a
             # fetch moves origin/main (which the "behind" counts depend on).
-            pck = (model_sig(), run(["git", "rev-parse", "origin/main"]).stdout.strip())
+            pck = (srvctx.model_sig(), run(["git", "rev-parse", "origin/main"]).stdout.strip())
             if pck in _pcache:
                 self._send(200, _pcache[pck])
                 return
@@ -479,7 +467,7 @@ def watcher():
             pass
 
 
-_pulse["sig"], _pulse["asset"] = model_sig(), asset_sig()   # seed so the first /events stream sees real values
+_pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()   # seed so the first /events stream sees real values
 threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
