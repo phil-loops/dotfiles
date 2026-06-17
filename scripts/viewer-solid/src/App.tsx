@@ -21,6 +21,7 @@ import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
+import { ServerStatus } from "./ServerStatus";
 import type {
   ForestModel,
   SpineNode,
@@ -124,6 +125,7 @@ export default function App() {
         <NodeDetail url={url} />
       </Show>
       <CommandPalette />
+      <ServerStatus />
     </>
   );
 }
