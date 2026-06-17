@@ -367,4 +367,25 @@ workers = max(1, min(8, (os.cpu_count() or 4), len(members) or 1))
 with ThreadPoolExecutor(max_workers=workers) as ex:
     nodes = dict(ex.map(build, members))
 roots = [b for b in members if parents.get(b, MAIN) not in members]
+
+# ---- ghost "feature" node: the single culmination of a multi-leaf project. A
+# phantom (no branch, no diff/bless) that fans in the project's un-subsumed TIPS —
+# leaves not already carried by another node's `requires`. It maps to the ephemeral
+# integration ref (stack-integrate octopus-merges the same tips), so its only action
+# is an integrate preview. Emitted ONLY when >1 tip exists; a single-tip project
+# already culminates in that tip. Pure topology — zero extra git calls.
+if project and project != "whole forest":
+    required = {r for b in members for r in requires.get(b, []) if r in members}
+    tips = sorted(b for b in members if not nodes[b]["children"] and b not in required)
+    if len(tips) > 1:
+        ghost = f"✦ {project}"   # ✦ <project> — sentinel key, never a real branch
+        nodes[ghost] = {
+            "branch": ghost, "parent": MAIN, "ghost": True, "status": "ghost",
+            "requires": tips, "children": [],
+            "clean": 0, "stale": 0, "unblessed": 0, "total": 0, "files": [],
+            "mergeable": False, "landed": False,
+            "integration": f"refs/stack/{project}-integration",
+        }
+        roots.append(ghost)
+
 print(json.dumps({"project": project, "roots": roots, "nodes": nodes}))
