@@ -19,5 +19,5 @@ render(
       <App />
     </QueryClientProvider>
   ),
-  document.getElementById("root")
+  document.getElementById("root")!
 );

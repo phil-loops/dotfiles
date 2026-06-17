@@ -5,6 +5,7 @@ import {
   Show,
   For,
   onCleanup,
+  type JSX,
 } from "solid-js";
 import {
   createQuery,
@@ -12,7 +13,23 @@ import {
   useQueryClient,
 } from "@tanstack/solid-query";
 import * as Diff2Html from "diff2html";
+import { ColorSchemeType } from "diff2html/lib/types";
 import { fetchJSON } from "./api";
+import { NodeActions } from "./NodeActions";
+import type {
+  ForestModel,
+  SpineNode,
+  NodeMeta,
+  FileDiff,
+  NodeData,
+  PR,
+  Project,
+  Standalone,
+  Purpose,
+  Commit,
+  RestackStatus,
+  Parked,
+} from "./types";
 
 // ── url ──────────────────────────────────────────────────────────────
 // ?branch=<project> chooses a forest; #node=<branch> the node you're reading.
@@ -22,29 +39,33 @@ function readUrl() {
   const h = new URLSearchParams(location.hash.replace(/^#/, ""));
   return { project: q.get("branch") || "", node: h.get("node") || "" };
 }
-const leaf = (s) => (s || "").split("/").pop();
-const isBlessed = (f) => f.status === "clean" || f.status === "blessed";
+const leaf = (s?: string): string => (s || "").split("/").pop() ?? "";
+const isBlessed = (f: FileDiff): boolean =>
+  f.status === "clean" || f.status === "blessed";
 
-function flattenForest(model) {
+function flattenForest(model: ForestModel | undefined): SpineNode[] {
   if (!model) return [];
-  if (model.nodes) {
-    const out = [],
-      seen = new Set();
-    const walk = (b, d) => {
+  const nodes = model.nodes;
+  if (nodes) {
+    const out: SpineNode[] = [];
+    const seen = new Set<string>();
+    const walk = (b: string, d: number) => {
       if (seen.has(b)) return;
       seen.add(b);
-      const n = model.nodes[b];
+      const n = nodes[b];
       if (!n) return;
       out.push({ ...n, id: b, depth: d });
       (n.children || []).forEach((c) => walk(c, d + 1));
     };
     (model.roots || []).forEach((r) => walk(r, 0));
-    Object.keys(model.nodes).forEach((b) => !seen.has(b) && walk(b, 0));
+    Object.keys(nodes).forEach((b) => !seen.has(b) && walk(b, 0));
     return out;
   }
-  return (model.links || []).map((l) => ({ ...l, id: l.branch, depth: 0 }));
+  return (model.links || []).map(
+    (l) => ({ ...l, id: l.branch, depth: 0 }) as unknown as SpineNode
+  );
 }
-function lumen(n) {
+function lumen(n: NodeMeta): "stale" | "blessed" | "unblessed" {
   if (n.stale > 0) return "stale";
   if (n.total > 0 && n.clean === n.total) return "blessed";
   return "unblessed";
@@ -77,11 +98,11 @@ export default function App() {
 function Home() {
   const prs = createQuery(() => ({
     queryKey: ["myprs"],
-    queryFn: () => fetchJSON("/myprs"),
+    queryFn: () => fetchJSON<PR[]>("/myprs"),
   }));
   const projects = createQuery(() => ({
     queryKey: ["projects"],
-    queryFn: () => fetchJSON("/projects"),
+    queryFn: () => fetchJSON<Project[]>("/projects"),
   }));
   const checkOrigin = createMutation(() => ({
     mutationFn: () => fetch("/check-origin", { method: "POST", body: "{}" }).then((r) => r.json()),
@@ -92,17 +113,17 @@ function Home() {
   }));
 
   // ── restack: two-click arm → run (background) → poll → parked? hand to Claude ──
-  const [armed, setArmed] = createSignal(null); // project name (or "__all__") awaiting confirm
-  const [running, setRunning] = createSignal(null); // project name (or "__all__") restacking now
-  const [parked, setParked] = createSignal(null); // { project, current, reason } on a conflict
-  let armT;
-  const post = (url, body) =>
+  const [armed, setArmed] = createSignal<string | null>(null); // project (or "__all__") awaiting confirm
+  const [running, setRunning] = createSignal<string | null>(null); // project (or "__all__") restacking now
+  const [parked, setParked] = createSignal<Parked | null>(null); // set on a conflict
+  let armT: ReturnType<typeof setTimeout>;
+  const post = (url: string, body: unknown): Promise<{ ok?: boolean }> =>
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json());
-  const start = (key) => {
+  const start = (key: string) => {
     setParked(null);
     const body =
       key === "__all__"
@@ -112,7 +133,7 @@ function Home() {
       if (r.ok) setRunning(key);
     });
   };
-  const arm = (key) => {
+  const arm = (key: string) => {
     if (armed() === key) {
       clearTimeout(armT);
       setArmed(null);
@@ -126,10 +147,10 @@ function Home() {
   const status = createQuery(() => ({
     queryKey: ["restack-status", running()],
     queryFn: () =>
-      fetchJSON(
+      fetchJSON<RestackStatus>(
         "/restack-status" +
           (running() && running() !== "__all__"
-            ? "?project=" + encodeURIComponent(running())
+            ? "?project=" + encodeURIComponent(running()!)
             : "")
       ),
     enabled: !!running(),
@@ -139,11 +160,12 @@ function Home() {
     if (!running()) return;
     const d = status.data;
     if (!d || d.running) return; // still churning through the topo walk
-    if (d.paused) setParked({ project: d.project, current: d.current, reason: d.reason });
+    if (d.paused)
+      setParked({ project: d.project ?? "", current: d.current ?? "", reason: d.reason ?? "" });
     setRunning(null);
     projects.refetch();
   });
-  const resolve = (project) =>
+  const resolve = (project: string) =>
     post("/restack-resolve", { project }).then((r) => {
       if (r.ok) {
         setParked(null);
@@ -151,17 +173,43 @@ function Home() {
       }
     });
 
-  const byProject = createMemo(() => {
-    const m = new Map();
+  // ── watching: opt-in pinned loose branches (git config stack.standalone) ──
+  // Not auto-discovery — branches you deliberately pin to keep an eye on. /branches
+  // (the typeahead source, ~all local heads) is heavy, so only fetch it while adding.
+  const standalone = createQuery(() => ({
+    queryKey: ["standalone"],
+    queryFn: () => fetchJSON<Standalone[]>("/standalone"),
+  }));
+  const [adding, setAdding] = createSignal(false);
+  const [pick, setPick] = createSignal("");
+  const branches = createQuery(() => ({
+    queryKey: ["branches"],
+    queryFn: () => fetchJSON<string[]>("/branches"),
+    enabled: adding(),
+  }));
+  const pin = createMutation(() => ({
+    mutationFn: (body: { branch: string; op?: string }) => post("/standalone", body),
+    onSuccess: () => { standalone.refetch(); branches.refetch(); },
+  }));
+  const submitPin = () => {
+    const b = pick().trim();
+    if (!b) return;
+    pin.mutate({ branch: b });
+    setPick("");
+    setAdding(false);
+  };
+
+  const byProject = createMemo<[string, PR[]][]>(() => {
+    const m = new Map<string, PR[]>();
     for (const p of prs.data || []) {
       const k = p.project || "—";
       if (!m.has(k)) m.set(k, []);
-      m.get(k).push(p);
+      m.get(k)!.push(p);
     }
     return [...m.entries()];
   });
 
-  const review = (r) =>
+  const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
 
   return (
@@ -287,6 +335,61 @@ function Home() {
           </For>
         </Show>
       </section>
+
+      <section>
+        <div class="eyebrow-row">
+          <h2 class="eyebrow">watching</h2>
+          <button class="watch-add" onClick={() => setAdding((v) => !v)}>
+            {adding() ? "× cancel" : "+ watch a branch"}
+          </button>
+        </div>
+        <Show when={adding()}>
+          <div class="watch-pick">
+            <input
+              class="watch-input"
+              list="watch-branches"
+              placeholder="branch name…"
+              value={pick()}
+              onInput={(e) => setPick(e.currentTarget.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitPin()}
+              autofocus
+            />
+            <datalist id="watch-branches">
+              <For each={branches.data || []}>{(b) => <option value={b} />}</For>
+            </datalist>
+            <button class="watch-pin" disabled={!pick().trim()} onClick={submitPin}>
+              pin
+            </button>
+          </div>
+        </Show>
+        <Show
+          when={(standalone.data || []).length}
+          fallback={<p class="loading">nothing pinned — watch a loose branch to track it here</p>}
+        >
+          <For each={standalone.data}>
+            {(b) => (
+              <div class="watch-row">
+                <a class="watch-link" href={`?branch=${encodeURIComponent(b.branch)}`}>
+                  <span class="watch-dot" />
+                  <span class="watch-name">{b.branch}</span>
+                  <span class="watch-meta">
+                    <span>{b.commits} {b.commits === 1 ? "commit" : "commits"}</span>
+                    <span class="watch-add-n">+{b.add}</span>
+                    <span class="watch-del-n">−{b.del}</span>
+                  </span>
+                </a>
+                <button
+                  class="watch-unpin"
+                  title="stop watching"
+                  onClick={() => pin.mutate({ branch: b.branch, op: "remove" })}
+                >
+                  ×
+                </button>
+              </div>
+            )}
+          </For>
+        </Show>
+      </section>
     </div>
   );
 }
@@ -294,16 +397,22 @@ function Home() {
 // ── forest map: the DAG as an SVG (illumination-colored nodes, parent rails +
 // fan-in edges). Toggled with `m`; click a node to jump there. ───────────────
 const NW = 158, NH = 28, COL = 178, ROWH = 56, PADX = 80, PADY = 44;
-function ForestMap(props) {
+function ForestMap(props: {
+  spine: () => SpineNode[];
+  active: () => string;
+  onPick: (b: string) => void;
+  onClose: () => void;
+}) {
+  type Pt = { x: number; y: number; n: SpineNode };
   // tree-row layout: a node inherits its parent's row when it's the first child, so a
   // linear chain runs HORIZONTALLY (x = depth); branches/extra roots drop to a new row.
-  const pos = createMemo(() => {
+  const pos = createMemo<Record<string, Pt>>(() => {
     const list = props.spine();
-    const byId = {};
+    const byId: Record<string, SpineNode> = {};
     list.forEach((n) => (byId[n.id] = n));
-    const row = {};
+    const row: Record<string, number> = {};
     let next = 0;
-    const walk = (id, inherit) => {
+    const walk = (id: string, inherit: number | null) => {
       if (id in row) return;
       row[id] = inherit != null ? inherit : next++;
       const kids = (byId[id]?.children || []).filter((k) => byId[k]);
@@ -311,7 +420,7 @@ function ForestMap(props) {
     };
     list.filter((n) => n.depth === 0).forEach((rt) => walk(rt.id, null));
     list.forEach((n) => { if (!(n.id in row)) row[n.id] = next++; });
-    const m = {};
+    const m: Record<string, Pt> = {};
     list.forEach((n) => {
       m[n.id] = { x: PADX + n.depth * COL, y: PADY + row[n.id] * ROWH, n };
     });
@@ -320,13 +429,16 @@ function ForestMap(props) {
   const W = () =>
     Math.max(0, ...Object.values(pos()).map((p) => p.x)) + NW + PADX;
   const H = () => props.spine().length * ROWH + PADY;
-  const edges = createMemo(() => {
-    const P = pos(), out = [];
+  const edges = createMemo<{ d: string; kind: string }[]>(() => {
+    const P = pos();
+    const out: { d: string; kind: string }[] = [];
     for (const n of props.spine()) {
       const c = P[n.id];
       if (!c) continue;
-      const par = P[n.parent];
-      if (par) out.push({ ...curve(par, c), kind: "rail" });
+      if (n.parent) {
+        const par = P[n.parent];
+        if (par) out.push({ ...curve(par, c), kind: "rail" });
+      }
       for (const req of n.requires || []) {
         const r = P[req];
         if (r) out.push({ ...curve(r, c), kind: "fanin" });
@@ -334,7 +446,7 @@ function ForestMap(props) {
     }
     return out;
   });
-  function curve(a, b) {
+  function curve(a: { x: number; y: number }, b: { x: number; y: number }) {
     const x1 = a.x + NW, y1 = a.y + NH / 2, x2 = b.x, y2 = b.y + NH / 2, mx = (x1 + x2) / 2;
     return { d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` };
   }
@@ -368,40 +480,47 @@ function ForestMap(props) {
 }
 
 // ── node detail: forest spine + review surface ───────────────────────
-function NodeDetail(props) {
+function NodeDetail(props: { url: () => { project: string; node: string } }) {
   const qc = useQueryClient();
   const project = () => props.url().project;
 
   const model = createQuery(() => ({
     queryKey: ["model", project()],
-    queryFn: () => fetchJSON("/model?branch=" + encodeURIComponent(project())),
+    queryFn: () => fetchJSON<ForestModel>("/model?branch=" + encodeURIComponent(project())),
     enabled: !!project(),
   }));
   const spine = createMemo(() => flattenForest(model.data));
   const active = () => props.url().node || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
 
-  // diff base: parent ("") | main | last-blessed ("blessed"); resets when you change node.
-  const [base, setBase] = createSignal("");
-  let lastActive;
+  // diff base + view (diffs|commits) reset when you change node.
+  const [base, setBase] = createSignal(""); // "" parent | "main" | "blessed" last-blessed
+  const [view, setView] = createSignal<"diffs" | "commits">("diffs");
+  let lastActive: string | undefined;
   createEffect(() => {
     if (active() !== lastActive) {
       lastActive = active();
       setBase("");
+      setView("diffs");
     }
   });
 
   const node = createQuery(() => ({
     queryKey: ["node", active(), base()],
     queryFn: () =>
-      fetchJSON(
+      fetchJSON<NodeData>(
         "/node?branch=" + encodeURIComponent(active()) + (base() ? "&base=" + base() : "")
       ),
     enabled: !!active(),
   }));
+  const commits = createQuery(() => ({
+    queryKey: ["commits", active()],
+    queryFn: () => fetchJSON<Commit[]>("/commits?branch=" + encodeURIComponent(active())),
+    enabled: !!active() && view() === "commits",
+  }));
 
   const bless = createMutation(() => ({
-    mutationFn: (file) =>
+    mutationFn: (file: string) =>
       fetch("/bless", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -413,18 +532,38 @@ function NodeDetail(props) {
     },
   }));
 
-  const goto = (b) => (location.hash = "node=" + b);
+  const goto = (b: string) => (location.hash = "node=" + b);
   const litCount = () => spine().filter((n) => lumen(n) === "blessed").length;
-  const BASES = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
+  const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
+
+  // hover a spine node → float its branch purpose (the one-line thesis) beside it.
+  // Purposes are cheap + immutable for a session, so cache by branch and guard the
+  // async gap (if the pointer left before /purpose resolved, don't pop a stale tip).
+  const purposeCache = new Map<string, Purpose>();
+  const [tip, setTip] = createSignal<{ text: string; x: number; y: number } | null>(null);
+  let tipBranch: string | null = null;
+  const showTip = async (branch: string, el: HTMLElement) => {
+    tipBranch = branch;
+    let p = purposeCache.get(branch);
+    if (!p) {
+      try { p = await fetchJSON<Purpose>("/purpose?branch=" + encodeURIComponent(branch)); }
+      catch { p = { thesis: "" }; }
+      purposeCache.set(branch, p);
+    }
+    if (tipBranch !== branch || !p.thesis) return;
+    const r = el.getBoundingClientRect();
+    setTip({ text: p.thesis, x: r.right + 12, y: r.top });
+  };
+  const hideTip = () => { tipBranch = null; setTip(null); };
 
   // hover a diff line + press o (or click the gutter #) → open that exact line in the warm
   // review-nvim. Event-delegated off the surface so it works on diff2html's raw HTML.
-  const [hover, setHover] = createSignal(null); // { path, line }
+  const [hover, setHover] = createSignal<{ path: string; line: number } | null>(null);
   const [flash, setFlash] = createSignal("");
-  let flashT;
-  const note = (m) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
-  const openInNvim = (path, line) =>
+  let flashT: ReturnType<typeof setTimeout>;
+  const note = (m: string) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
+  const openInNvim = (path: string, line: number | null) =>
     fetch("/open", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -433,17 +572,18 @@ function NodeDetail(props) {
       .then((r) => r.json())
       .then((r) => note(r.ok ? `⌁ ${leaf(path)}:${line ?? ""} → nvim` : "⌁ open failed — see server"))
       .catch(() => note("⌁ open failed — server unreachable"));
-  const lineAt = (e) => {
-    const ent = e.target.closest?.(".entry");
-    const ln = e.target.closest?.(".d2h-code-side-linenumber, .d2h-code-linenumber");
+  const lineAt = (e: MouseEvent): { path: string; line: number } | null => {
+    const target = e.target as Element | null;
+    const ent = target?.closest<HTMLElement>(".entry");
+    const ln = target?.closest<HTMLElement>(".d2h-code-side-linenumber, .d2h-code-linenumber");
     if (!ent || !ln) return null;
     const n = parseInt((ln.textContent || "").trim(), 10);
-    return n ? { path: ent.dataset.path, line: n } : null;
+    return n ? { path: ent.dataset.path ?? "", line: n } : null;
   };
 
   // keyboard: j/k walk the spine; 1/2/3 switch the diff base; m toggles the forest map.
-  const onKey = (e) => {
-    if (e.target.matches("input, textarea, [contenteditable]")) return;
+  const onKey = (e: KeyboardEvent) => {
+    if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
     const list = spine();
     const i = list.findIndex((n) => n.id === active());
     if (e.key === "j" && i < list.length - 1) { e.preventDefault(); goto(list[i + 1].id); }
@@ -453,7 +593,8 @@ function NodeDetail(props) {
     else if (e.key === "3") setBase("blessed");
     else if (e.key === "m") setShowMap((v) => !v);
     else if (e.key === "Escape") setShowMap(false);
-    else if (e.key === "o" && hover()) { e.preventDefault(); openInNvim(hover().path, hover().line); }
+    else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
+    else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
@@ -483,6 +624,8 @@ function NodeDetail(props) {
                   classList={{ active: n.id === active() }}
                   style={{ "padding-left": `${10 + n.depth * 14}px` }}
                   onClick={() => goto(n.id)}
+                  onMouseEnter={(e) => showTip(n.id, e.currentTarget)}
+                  onMouseLeave={hideTip}
                   title={n.id}
                 >
                   <span class={`dot ${lumen(n)}`} />
@@ -511,6 +654,14 @@ function NodeDetail(props) {
           <Show when={parentOf()}>
             <span class="against">◂ {leaf(parentOf())}</span>
           </Show>
+          <div class="view-toggle">
+            <button class="view-pill" classList={{ on: view() === "diffs" }} onClick={() => setView("diffs")}>
+              diffs
+            </button>
+            <button class="view-pill" classList={{ on: view() === "commits" }} onClick={() => setView("commits")}>
+              commits
+            </button>
+          </div>
           <span class="meta">
             {node.isFetching
               ? "syncing…"
@@ -520,28 +671,33 @@ function NodeDetail(props) {
                   ? `${node.data.files.filter(isBlessed).length}/${node.data.files.length} blessed`
                   : ""}
           </span>
+          <NodeActions branch={active()} />
           <button class="map-btn" onClick={() => setShowMap(true)} title="forest map (m)">
             ⊞ map
           </button>
         </header>
-        <div class="base-toggle">
-          <span class="base-label">diff vs</span>
-          <For each={BASES}>
-            {([v, lab]) => (
-              <button
-                class="base-pill"
-                classList={{ on: base() === v }}
-                onClick={() => setBase(v)}
-              >
-                {lab}
-              </button>
+        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
+          <div class="base-toggle">
+            <span class="base-label">diff vs</span>
+            <For each={BASES}>
+              {([v, lab]) => (
+                <button
+                  class="base-pill"
+                  classList={{ on: base() === v }}
+                  onClick={() => setBase(v)}
+                >
+                  {lab}
+                </button>
+              )}
+            </For>
+            <span class="kbd-hint">hover a line · <b>o</b> → nvim</span>
+          </div>
+          <Show when={node.data} fallback={<p class="loading">loading…</p>}>
+            {(data) => (
+              <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
+                <For each={data().files}>{(f) => <FileEntry file={f} bless={bless} />}</For>
+              </Show>
             )}
-          </For>
-          <span class="kbd-hint">hover a line · <b>o</b> → nvim</span>
-        </div>
-        <Show when={node.data} fallback={<p class="loading">loading…</p>}>
-          <Show when={node.data.files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
-            <For each={node.data.files}>{(f) => <FileEntry file={f} bless={bless} />}</For>
           </Show>
         </Show>
       </main>
@@ -559,11 +715,18 @@ function NodeDetail(props) {
       <Show when={flash()}>
         <div class="flash">{flash()}</div>
       </Show>
+      <Show when={tip()}>
+        {(t) => (
+          <div class="purpose-tip" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
+            {t().text}
+          </div>
+        )}
+      </Show>
     </div>
   );
 }
 
-function FileEntry(props) {
+function FileEntry(props: { file: FileDiff; bless: { mutate: (file: string) => void } }) {
   const [foil, setFoil] = createSignal(false);
   const blessed = () => isBlessed(props.file);
   const doBless = () => {
@@ -577,10 +740,10 @@ function FileEntry(props) {
           drawFileList: false,
           outputFormat: "side-by-side",
           matching: "lines",
-          colorScheme: "dark",
+          colorScheme: ColorSchemeType.DARK,
         })
       : `<p class="empty">no textual diff</p>`;
-  const seg = (p) => {
+  const seg = (p: string): JSX.Element => {
     const i = p.lastIndexOf("/");
     return i < 0 ? <b>{p}</b> : [<span class="dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
   };
@@ -599,5 +762,30 @@ function FileEntry(props) {
       </div>
       <div class="diff" innerHTML={html()} />
     </article>
+  );
+}
+
+function CommitsList(props: { q: { data: Commit[] | undefined } }) {
+  return (
+    <Show when={props.q.data} fallback={<p class="loading">loading…</p>}>
+      {(data) => (
+        <Show
+          when={data().length}
+          fallback={<p class="loading">no commits on this branch</p>}
+        >
+          <ol class="commits">
+            <For each={data()}>
+              {(c) => (
+                <li class="commit">
+                  <span class="c-sha">{c.sha}</span>
+                  <span class="c-subject">{c.subject}</span>
+                  <span class="c-meta">{c.author} · {c.date}</span>
+                </li>
+              )}
+            </For>
+          </ol>
+        </Show>
+      )}
+    </Show>
   );
 }

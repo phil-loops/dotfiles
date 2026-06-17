@@ -274,3 +274,70 @@ body {
   background: var(--vellum-raise); border: 1px solid var(--rule); color: var(--ink);
   padding: 9px 16px; border-radius: 9px; font-size: 12px; box-shadow: 0 14px 40px #0009;
 }
+
+/* ── diffs / commits view toggle + the commits list ──────────────────── */
+.view-toggle { display: flex; gap: 2px; }
+.view-pill {
+  font: inherit; font-size: 11px; color: var(--ink-faint); background: transparent;
+  border: 1px solid transparent; border-radius: 7px; padding: 3px 10px; cursor: pointer;
+  transition: color .12s, background .12s;
+}
+.view-pill:hover { color: var(--ink-dim); }
+.view-pill.on { color: var(--ink); background: var(--vellum-edge); border-color: var(--rule); }
+.commits { list-style: none; margin: 8px 0 0; padding: 0; }
+.commit { display: flex; align-items: baseline; gap: 13px; padding: 9px 4px; border-bottom: 1px solid var(--rule); }
+.c-sha { color: var(--ink-faint); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
+.c-subject { color: var(--ink); flex: 1; }
+.c-meta { color: var(--ink-faint); font-size: 10.5px; flex: none; }
+
+/* ── purpose tooltip: a margin gloss floated beside a hovered spine node ── */
+.purpose-tip {
+  position: fixed; z-index: 60; max-width: 286px; pointer-events: none;
+  background: var(--vellum-raise); color: var(--ink-dim);
+  border: 1px solid var(--rule); border-left: 2px solid var(--gold-deep);
+  border-radius: 9px; padding: 9px 13px;
+  font-family: var(--display); font-style: italic; font-size: 13px; line-height: 1.42;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  animation: tip-in .12s ease-out;
+}
+@keyframes tip-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .purpose-tip { animation: none; } }
+
+/* ── watching: opt-in pinned loose branches ──────────────────────────── */
+.watch-add {
+  font: inherit; font-size: 12px; letter-spacing: .04em; cursor: pointer;
+  border-radius: 8px; padding: 5px 12px; background: transparent;
+  color: var(--patina); border: 1px solid transparent;
+}
+.watch-add:hover { border-color: var(--patina); }
+.watch-pick { display: flex; gap: 8px; margin: 8px 0 12px; }
+.watch-input {
+  flex: 1; font: inherit; font-family: var(--mono); font-size: 13px; color: var(--ink);
+  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px; padding: 9px 13px;
+}
+.watch-input:focus { outline: none; border-color: var(--gold-deep); }
+.watch-pin {
+  font: inherit; font-size: 13px; cursor: pointer; border-radius: 9px; padding: 0 18px;
+  color: var(--vellum-night); background: var(--gold-leaf); border: 1px solid var(--gold-leaf);
+}
+.watch-pin:disabled { opacity: .4; cursor: default; }
+.watch-row {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--rule); border-radius: 10px; background: var(--vellum-raise);
+  margin-bottom: 6px; transition: border-color .12s, background .12s, transform .12s;
+}
+.watch-row:hover { border-color: var(--gold-deep); background: var(--vellum-edge); transform: translateY(-1px); }
+.watch-link {
+  flex: 1; display: flex; align-items: center; gap: 11px; text-decoration: none;
+  color: var(--ink); padding: 11px 4px 11px 15px; min-width: 0;
+}
+.watch-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; border: 1.5px solid var(--patina); box-shadow: inset 0 0 0 1.5px var(--patina); }
+.watch-name { font-family: var(--mono); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.watch-meta { display: flex; gap: 11px; color: var(--ink-faint); font-size: 11px; flex: none; }
+.watch-add-n { color: var(--add); }
+.watch-del-n { color: var(--del); }
+.watch-unpin {
+  flex: none; font-size: 17px; line-height: 1; cursor: pointer; color: var(--ink-faint);
+  background: transparent; border: none; padding: 8px 15px 8px 8px; transition: color .12s;
+}
+.watch-unpin:hover { color: var(--del); }
