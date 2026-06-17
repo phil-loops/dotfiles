@@ -28,11 +28,19 @@ if curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1; 
   exit 0
 fi
 
-servedir="$(mktemp -d)"
+servedir="$(mktemp -d)"   # scratch ROOT (restack.log etc.); the page itself is the built dist/
 
-# build the shell once in LIVE mode (model = null → the page fetches /model)
-echo 'null' > "$servedir/model.json"
-python3 "$here/stack-review-html.tpl.py" "$servedir/model.json" "$servedir/index.html"
+# Build the Solid viewer so the server serves a current scripts/viewer-solid/dist/.
+# Cold-start only (a live server is reused above), so this ~0.4s build is rare. During
+# active viewer work use `npm run dev` (:5174); this is the stable served build.
+viewer="$here/viewer-solid"
+if [[ -d "$viewer/node_modules" ]]; then
+  ( cd "$viewer" && npm run build >/dev/null 2>&1 ) \
+    || echo "stack-review-serve: viewer build failed — serving the existing dist/ if present" >&2
+elif [[ ! -f "$viewer/dist/index.html" ]]; then
+  echo "stack-review-serve: viewer not built and node_modules missing — run 'npm install' in $viewer" >&2
+  exit 1
+fi
 
 # start the server detached; it prints its chosen port on the first line (the
 # stable port, or an ephemeral fallback if something else already holds it)

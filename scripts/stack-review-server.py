@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the s
 from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
+DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
@@ -56,12 +57,15 @@ srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT)
 
 
 def asset_sig():
-    # fingerprint the viewer source the page is assembled from (tpl + shell + css/js).
-    # a change here means a code edit, so open tabs should reload the reassembled page.
-    parts = [os.path.join(SCRIPTS, "stack-review-html.tpl.py")]
-    v = os.path.join(SCRIPTS, "viewer")
-    for f in ("shell.html", "styles.css", "data.js", "graph.js", "detail.js", "palette.js", "freshness.js", "branchbar.js"):
-        parts.append(os.path.join(v, f))
+    # fingerprint the built Solid app (dist/) so a fresh `npm run build` reloads open tabs.
+    # dist/index.html names hashed asset files, so its mtime alone moves on a rebuild; we
+    # hash the assets dir too to be safe.
+    parts = [os.path.join(DIST, "index.html")]
+    adir = os.path.join(DIST, "assets")
+    try:
+        parts += [os.path.join(adir, f) for f in sorted(os.listdir(adir))]
+    except OSError:
+        pass
 
     def mt(p):
         try:
@@ -106,23 +110,39 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         u = urlparse(self.path)
         if u.path in ("/", "/index.html"):
-            # page-hot, but cached: rebuild index.html only when a viewer source file
-            # actually changed (asset_sig), else serve the cached bytes — skips a python
-            # subprocess + 8 file reads on every page load. The live shell is model-
-            # independent (model.json is always "null" here), so asset_sig alone keys it.
+            # Serve the built Solid app (scripts/viewer-solid/dist/index.html). Cached
+            # in-process, re-read only when asset_sig moves (a fresh `npm run build`).
+            # Same-origin with this server, so the app's /model, /node, /bless… are plain
+            # relative fetches — no dev proxy.
             sig = asset_sig()
             with _render_lock:
                 if _index_cache["html"] is None or _index_cache["asset"] != sig:
                     try:
-                        subprocess.run([sys.executable, os.path.join(SCRIPTS, "stack-review-html.tpl.py"),
-                                        os.path.join(ROOT, "model.json"), os.path.join(ROOT, "index.html")],
-                                       cwd=CWD, capture_output=True, timeout=20)
-                    except Exception:
-                        pass
-                    _index_cache["html"] = open(os.path.join(ROOT, "index.html"), "rb").read()
+                        _index_cache["html"] = open(os.path.join(DIST, "index.html"), "rb").read()
+                    except OSError:
+                        self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
+                        return
                     _index_cache["asset"] = sig
                 body = _index_cache["html"]
             self._send(200, body, "text/html; charset=utf-8")
+        elif u.path.startswith("/assets/"):
+            # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the
+            # path can't escape dist/assets. Cache hard — the filename changes on rebuild.
+            name = os.path.basename(u.path)
+            fp = os.path.join(DIST, "assets", name)
+            if not os.path.isfile(fp):
+                return self._send(404, "{}")
+            ctype = ("text/css" if name.endswith(".css")
+                     else "application/javascript" if name.endswith(".js")
+                     else "application/octet-stream")
+            with open(fp, "rb") as fh:
+                data = fh.read()
+            self.send_response(200)
+            self.send_header("Content-Type", ctype + "; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
+            self.end_headers()
+            self.wfile.write(data)
         elif u.path == "/model":          return review.model(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": srvctx.model_sig()}))
