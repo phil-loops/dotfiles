@@ -12,7 +12,8 @@
 //                                       worktree holds the branch (force:true frees it)
 //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
 import { createSignal, Show } from "solid-js";
-import { createMutation, useQueryClient } from "@tanstack/solid-query";
+import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
+import { fetchJSON } from "./api";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -26,6 +27,13 @@ interface SquashResult {
   sha?: string; // new short sha
   header?: string; // the voiced subject line
   err?: string;
+}
+
+interface SyncState {
+  behind: number; // commits on origin/main not yet in this branch
+  syncable: boolean; // safe to fast-forward-rebase (else stacked/published)
+  why: string; // when not syncable, the reason
+  deployCritical?: string[]; // deploy-critical files origin/main changed that this branch lacks
 }
 
 async function post<T>(url: string, body: unknown): Promise<T> {
@@ -64,6 +72,13 @@ const note = {
   color: "var(--patina)",
   opacity: "0.9",
 } as const;
+
+// ember = "needs your eye". Being behind is calm/patina; a push-block is the one urgent
+// state here, so it escalates to ember — gold stays reserved for blessed.
+const alarm = { "font-size": "12px", color: "var(--ember)", "font-weight": "600" } as const;
+// basename minus the dbmate timestamp prefix — humans recognize "drop-dead-tables.sql",
+// not "20260616193000_drop-dead-tables.sql".
+const migName = (p: string): string => (p || "").split("/").pop()?.replace(/^\d+_/, "") ?? "";
 
 export function NodeActions(props: { branch: string }) {
   const qc = useQueryClient();
@@ -111,6 +126,34 @@ export function NodeActions(props: { branch: string }) {
     },
   }));
 
+  // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
+  // (deployCritical is added to /sync in the coupled backend change; until then it's
+  // absent → badge shows the calm "behind" state, never a false block.)
+  const sync = createQuery(() => ({
+    queryKey: ["sync", props.branch],
+    queryFn: () => fetchJSON<SyncState>("/sync?branch=" + encodeURIComponent(props.branch)),
+    enabled: !!props.branch,
+  }));
+  const behind = () => sync.data?.behind ?? 0;
+  const critical = () => sync.data?.deployCritical ?? [];
+  const blocked = () => critical().length > 0;
+
+  // rebase forward = eject to a standalone Claude in the branch's own worktree; the server
+  // does zero git (can't wedge main). Non-syncable branches (open PR / stacked) come back 409
+  // with the reason, surfaced via done().
+  const rebase = createMutation(() => ({
+    mutationFn: () => post<{ ok?: boolean; err?: string }>("/sync", { branch: props.branch }),
+    onSuccess: (r) => {
+      if (r.ok) {
+        setDone("✓ rebasing on main — Claude is on it in a worktree");
+        sync.refetch();
+      } else {
+        setDone(`✗ ${r.err || "rebase failed"}`);
+      }
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "rebase failed"}`),
+  }));
+
   const armSquash = () => {
     if (armed()) {
       squash.mutate();
@@ -121,10 +164,37 @@ export function NodeActions(props: { branch: string }) {
     armT = setTimeout(() => setArmed(false), 4000); // disarm if not confirmed
   };
 
-  const busy = () => checkout.isPending || squash.isPending;
+  const busy = () => checkout.isPending || squash.isPending || rebase.isPending;
 
   return (
     <div class="node-actions" style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+      {/* fork-state vs origin/main — calm "behind", escalating to ember "push blocked" when
+          main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
+          Button action is a placeholder until the eject-to-Claude backend lands (coupled, so a
+          visible button never runs the old main-wedging rebase). */}
+      <Show when={behind() > 0}>
+        <Show when={blocked()} fallback={<span style={note}>↓ {behind()} behind</span>}>
+          <span
+            style={alarm}
+            title={`origin/main changed deploy-critical files this branch is missing:\n${critical().join("\n")}\n\nrebase forward to clear the push block`}
+          >
+            ⚠ push blocked
+          </span>
+          <span style={{ ...note, opacity: "0.7" }}>
+            main changed {migName(critical()[0])}
+            {critical().length > 1 ? ` +${critical().length - 1} more` : ""}
+          </span>
+        </Show>
+        <button
+          style={btn}
+          disabled={busy()}
+          title="rebase this branch forward onto origin/main — runs in an isolated worktree via Claude (never your main checkout); resolves there, you push"
+          onClick={() => { setDone(null); rebase.mutate(); }}
+        >
+          {rebase.isPending ? "rebasing on main…" : "⟳ rebase forward"}
+        </button>
+      </Show>
+
       {/* checkout — move the primary working tree onto this branch */}
       <Show
         when={heldAt()}
