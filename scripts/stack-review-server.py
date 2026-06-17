@@ -14,13 +14,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker
+from srv import ctx as srvctx, restack, sync, checkout, picker, review
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
-_mcache = {}  # (branch, sig) -> model json — recompute only when something changed
 _render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
 _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
@@ -124,19 +123,7 @@ class H(BaseHTTPRequestHandler):
                     _index_cache["asset"] = sig
                 body = _index_cache["html"]
             self._send(200, body, "text/html; charset=utf-8")
-        elif u.path == "/model":
-            branch = parse_qs(u.query).get("branch", [""])[0]
-            ck = (branch, srvctx.model_sig())
-            if ck in _mcache:
-                self._send(200, _mcache[ck])
-                return
-            r = run([os.path.join(SCRIPTS, "stack-forest"), branch])
-            if r.returncode != 0:
-                self._send(500, json.dumps({"error": r.stderr}))
-            else:
-                _mcache.clear()
-                _mcache[ck] = r.stdout
-                self._send(200, r.stdout)
+        elif u.path == "/model":          return review.model(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             self._send(200, json.dumps({"sig": srvctx.model_sig()}))
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
@@ -182,44 +169,10 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/project-opened": return picker.project_opened(self)
         elif u.path == "/standalone":     return picker.standalone_list(self)
         elif u.path == "/branches":       return picker.branches(self)
-        elif u.path == "/node":
-            q = parse_qs(u.query)
-            branch = q.get("branch", [""])[0]
-            base = q.get("base", [""])[0]
-            args = [os.path.join(SCRIPTS, "stack-forest"), "--node", branch]
-            if base:
-                args += ["--base", base]
-            r = run(args)
-            self._send(200 if r.returncode == 0 else 500,
-                       r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
-        elif u.path == "/purpose":
-            q = parse_qs(u.query)
-            args = [os.path.join(SCRIPTS, "stack-purpose")]
-            if q.get("generate", ["0"])[0] == "1":   # opt-in token spend, only on ask
-                args.append("--generate")
-            args.append(q.get("branch", [""])[0])
-            r = run(args)
-            self._send(200 if r.returncode == 0 else 500,
-                       r.stdout if r.returncode == 0 else json.dumps({"thesis": "", "enables": "", "source": "none"}))
-        elif u.path == "/file":
-            q = parse_qs(u.query)
-            branch, path = q.get("branch", [""])[0], q.get("path", [""])[0]
-            r = run(["git", "show", f"{branch}:{path}"])
-            self._send(200 if r.returncode == 0 else 404,
-                       r.stdout if r.returncode == 0 else "(file not found on this ref)",
-                       "text/plain; charset=utf-8")
-        elif u.path == "/commits":   # this branch's own commits: parent..branch, newest first
-            branch = parse_qs(u.query).get("branch", [""])[0]
-            parent = run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
-            fmt = "%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
-            out = run(["git", "log", f"{parent}..{branch}", f"--format={fmt}", "--date=short"]).stdout
-            commits = []
-            for ln in out.splitlines():
-                p = ln.split("\x1f")
-                if len(p) >= 2:
-                    commits.append({"sha": p[0], "subject": p[1],
-                                    "author": p[2] if len(p) > 2 else "", "date": p[3] if len(p) > 3 else ""})
-            self._send(200, json.dumps(commits))
+        elif u.path == "/node":           return review.node(self, u)
+        elif u.path == "/purpose":        return review.purpose_get(self, u)
+        elif u.path == "/file":           return review.file(self, u)
+        elif u.path == "/commits":        return review.commits(self, u)
         else:
             self._send(404, "{}")
 
@@ -231,22 +184,11 @@ class H(BaseHTTPRequestHandler):
             self._send(200, '{"ok":true}')
             return
         if self.path == "/bless":
-            d = json.loads(raw or "{}")
-            args = [os.path.join(SCRIPTS, "stack-bless"), d.get("branch", "")]
-            f = d.get("file")
-            if f and f != ".":
-                args += ["--file", f]
-            r = run(args)
-            self._send(200 if r.returncode == 0 else 500,
-                       json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
-            return
+            return review.bless(self, raw)
         if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list
             return picker.pin(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
-            d = json.loads(raw or "{}")
-            r = run([os.path.join(SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
-            self._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
-            return
+            return review.purpose_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
@@ -255,19 +197,10 @@ class H(BaseHTTPRequestHandler):
             return checkout.move(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
-        if self.path == "/squash":   # collapse parent..branch into one voiced commit (headless claude)
-            d = json.loads(raw or "{}")
-            r = run([os.path.join(SCRIPTS, "stack-squash"), d.get("branch", "")])
-            # stack-squash always prints a JSON report (on success AND handled failure)
-            self._send(200 if r.returncode == 0 else 500,
-                       r.stdout or json.dumps({"ok": False, "err": r.stderr or "squash crashed"}))
-            return
-        if self.path == "/prep":   # prep-for-push: squash UNPUSHED commits → one, then oxfmt
-            d = json.loads(raw or "{}")
-            r = run([os.path.join(SCRIPTS, "stack-squash"), "--unpushed", "--format", d.get("branch", "")])
-            self._send(200 if r.returncode == 0 else 500,
-                       r.stdout or json.dumps({"ok": False, "err": r.stderr or "prep crashed"}))
-            return
+        if self.path == "/squash":   # collapse parent..branch into one voiced commit
+            return review.squash(self, raw)
+        if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
+            return review.prep(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
