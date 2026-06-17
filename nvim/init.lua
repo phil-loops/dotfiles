@@ -800,30 +800,49 @@ require('lazy').setup({
         },
       }
 
-      -- tsgo (TypeScript native preview) — not in mason or lspconfig presets yet,
-      -- so register manually. Install with `npm i -g @typescript/native-preview`.
-      local lsp_configs = require('lspconfig.configs')
+      -- tsgo (TypeScript native preview). Install with `npm i -g @typescript/native-preview`.
+      --
+      -- Driven via vim.lsp.start directly, NOT lspconfig's manager. review-nvim is one
+      -- warm instance that opens files across many git worktrees; lspconfig collapses
+      -- them all onto a SINGLE tsgo client rooted wherever it first started (e.g. the
+      -- main checkout), so a worktree's branch code gets type-checked against the wrong
+      -- source tree and reads as stale/invisible. vim.lsp.start dedups per
+      -- (name, root_dir), so each worktree gets its own tsgo — correct per-branch types.
       local lspconfig_util = require('lspconfig.util')
-      if not lsp_configs.tsgo then
-        lsp_configs.tsgo = {
-          default_config = {
+      local tsgo_root = lspconfig_util.root_pattern('tsconfig.json', 'jsconfig.json', 'package.json', '.git')
+      vim.api.nvim_create_autocmd('FileType', {
+        pattern = {
+          'javascript',
+          'javascriptreact',
+          'javascript.jsx',
+          'typescript',
+          'typescriptreact',
+          'typescript.tsx',
+        },
+        group = vim.api.nvim_create_augroup('tsgo-per-worktree', { clear = true }),
+        callback = function(args)
+          local fname = vim.api.nvim_buf_get_name(args.buf)
+          if fname == '' then
+            return
+          end
+          local root = tsgo_root(fname)
+          if not root then
+            return -- no project root → don't attach (no single-file fallback)
+          end
+          vim.lsp.start({
+            name = 'tsgo',
             cmd = { 'tsgo', '--lsp', '-stdio' },
-            filetypes = {
-              'javascript',
-              'javascriptreact',
-              'javascript.jsx',
-              'typescript',
-              'typescriptreact',
-              'typescript.tsx',
-            },
-            root_dir = lspconfig_util.root_pattern('tsconfig.json', 'jsconfig.json', 'package.json', '.git'),
-            single_file_support = true,
-          },
-        }
-      end
-      require('lspconfig').tsgo.setup {
-        capabilities = capabilities,
-      }
+            root_dir = root,
+            capabilities = capabilities,
+          }, {
+            bufnr = args.buf,
+            -- exact-root reuse: one tsgo per worktree, never adopt a foreign root
+            reuse_client = function(client, config)
+              return client.name == config.name and client.config.root_dir == config.root_dir
+            end,
+          })
+        end,
+      })
     end,
   },
 
