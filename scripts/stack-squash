@@ -9,6 +9,8 @@
                                    plain push works, never a force-push
   stack-squash --format <branch>   after committing, run oxfmt on the changed files
                                    and fold the formatting into the same commit
+  stack-squash --subject-only <b>  draft a SUBJECT LINE ONLY — no body, no bullets
+                                   (a smart one-line title for the squash)
 
 `--unpushed` + `--format` together is the "prep for push" combo. Flags compose and
 may appear in any order before <branch>.
@@ -61,7 +63,7 @@ def out(d):
 
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
-dry = unpushed = fmt = False
+dry = unpushed = fmt = subject_only = False
 rest = []
 for a in argv:
     if a == "--dry":
@@ -70,11 +72,13 @@ for a in argv:
         unpushed = True
     elif a == "--format":
         fmt = True
+    elif a == "--subject-only":
+        subject_only = True
     else:
         rest.append(a)
 branch = (rest[0] if rest else "").strip()
 if not branch:
-    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] <branch>"})
+    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] <branch>"})
 
 # branch must exist
 if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
@@ -126,6 +130,23 @@ diffstat = git(["diff", "--stat", f"{base}...{branch}"]).stdout.strip()
 patch = git(["diff", f"{base}...{branch}"]).stdout
 patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 
+if subject_only:
+    write_instr = (
+        f"Write ONE commit message that is a SUBJECT LINE ONLY — a single line in {author}'s "
+        f"voice (their prefix/scope convention, imperative, terse) capturing the whole squashed "
+        f"change. NO body, NO blank line, NO bullets — output just the one subject line."
+    )
+else:
+    write_instr = (
+        f"Write ONE commit message:\n"
+        f"- A subject line in {author}'s voice (their prefix/scope convention, imperative, terse).\n"
+        f"- Then a blank line, then a SHORT body that summarizes what got folded in: 2-4 terse\n"
+        f"  bullet points, one per distinct change being squashed (derive them from the commits\n"
+        f"  and diff above — e.g. the impl, a refactor, the tests). Keep each bullet to one line,\n"
+        f"  in the author's voice. If only one trivial change is being squashed, the body may be\n"
+        f"  a single line instead of bullets."
+    )
+
 prompt = f"""You are drafting a single git commit message in {author}'s voice for a squashed branch.
 
 Study {author}'s recent commit messages and match their conventions EXACTLY — prefix
@@ -150,13 +171,7 @@ are often just "wip" — rely on the DIFF below for what actually changed:
 {patch_clip}
 </diff>
 
-Write ONE commit message:
-- A subject line in {author}'s voice (their prefix/scope convention, imperative, terse).
-- Then a blank line, then a SHORT body that summarizes what got folded in: 2-4 terse
-  bullet points, one per distinct change being squashed (derive them from the commits
-  and diff above — e.g. the impl, a refactor, the tests). Keep each bullet to one line,
-  in the author's voice. If only one trivial change is being squashed, the body may be
-  a single line instead of bullets.
+{write_instr}
 
 Output ONLY the raw commit message — no preface, no explanation, no code fences."""
 
@@ -180,12 +195,17 @@ if not message:
     top = pick.split(" ", 1)
     message = top[1] if len(top) > 1 else f"squash {branch}"
 
+if subject_only and message:
+    # guarantee no body regardless of what the draft (or fallback) returned
+    message = message.splitlines()[0].strip()
+
 header = message.splitlines()[0] if message else f"squash {branch}"
 
 
 def report(**extra):
     return {"ok": True, "branch": branch, "parent": parent, "base": base, "n": n,
-            "header": header, "message": message, "voiced": voiced, "force": force, **extra}
+            "header": header, "message": message, "voiced": voiced, "force": force,
+            "subject_only": subject_only, **extra}
 
 
 if dry:

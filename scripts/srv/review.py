@@ -100,7 +100,8 @@ def purpose_set(req, raw):
 
 def squash(req, raw):
     d = json.loads(raw or "{}")
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), d.get("branch", "")])
+    # squash button → smart subject, NO body (Phil's preference for squashed commits)
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--subject-only", d.get("branch", "")])
     # stack-squash always prints a JSON report (on success AND handled failure)
     req._send(200 if r.returncode == 0 else 500,
               r.stdout or json.dumps({"ok": False, "err": r.stderr or "squash crashed"}))
@@ -108,6 +109,8 @@ def squash(req, raw):
 
 def prep(req, raw):
     d = json.loads(raw or "{}")
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format", d.get("branch", "")])
+    # prep-for-push squash → smart subject, NO body (Phil's preference for squashed commits)
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"),
+                 "--unpushed", "--format", "--subject-only", d.get("branch", "")])
     req._send(200 if r.returncode == 0 else 500,
               r.stdout or json.dumps({"ok": False, "err": r.stderr or "prep crashed"}))
