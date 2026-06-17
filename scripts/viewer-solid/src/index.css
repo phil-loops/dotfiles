@@ -215,3 +215,24 @@ body {
 }
 .base-pill:hover { color: var(--ink); border-color: var(--ink-faint); }
 .base-pill.on { color: var(--ink); border-color: var(--ink-faint); background: var(--vellum-edge); }
+
+/* ── restack affordances on the home (patina = behind/restack; ember = needs you) ── */
+.eyebrow-row { display: flex; align-items: center; justify-content: space-between; }
+.restack-all, .forest-restack, .forest-resolve {
+  font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;
+  border-radius: 7px; padding: 3px 11px; background: transparent;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.restack-all { color: var(--patina); border: 1px solid var(--patina); opacity: 0.8; margin-top: 30px; }
+.restack-all:hover { opacity: 1; }
+.restack-all.armed, .forest-restack.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
+.restack-all.running, .forest-restack.running { color: var(--patina); border-color: transparent; opacity: 0.8; }
+.forest-restack { color: var(--patina); border: 1px solid transparent; }
+.forest-restack:hover { border-color: var(--patina); }
+.forest-resolve { color: var(--del); border: 1px solid var(--del); background: var(--del-bg); }
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes pulse-resolve { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 14px -2px var(--del); } }
+  .forest-resolve { animation: pulse-resolve 1.7s ease-in-out infinite; }
+}
+.forest-dot.parked { background: transparent; border: 1.5px solid var(--del); box-shadow: inset 0 0 0 1.5px var(--del); }
+.forest-row.parked { border-color: var(--del); }
