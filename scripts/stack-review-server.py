@@ -15,7 +15,7 @@ from urllib.parse import urlparse, parse_qs
 from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack
+from srv import ctx as srvctx, restack, sync
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
@@ -142,42 +142,7 @@ def pulse():
         time.sleep(1.0)
 
 
-def _sync_state(branch):
-    """Fork-staleness of a branch vs origin/main — the signal behind the viewer's
-    "N behind" badge.
-      behind    — commits on origin/main not yet in this branch (two-dot count,
-                  `git rev-list --count <branch>..origin/main`). >0 means the fork
-                  point is stale, so GitHub-Desktop two-dot diffs inflate by ~this.
-      syncable  — safe to auto-rebase onto origin/main with NO force-push. True
-                  only for a root off main (parent==main) that is unpublished (no
-                  remote-tracking ref). Rebasing a *published* branch rewrites
-                  pushed commits (→ force-push); rebasing a *stacked* branch
-                  detaches it from its parent (→ that's a restack, not a sync).
-                  Neither is offered here — `why` explains the refusal.
-    Pure inspection: no fetch, no mutation."""
-    if not branch:
-        return {"branch": "", "behind": 0, "syncable": False, "why": "no branch"}
-    raw = run(["git", "rev-list", "--count", f"{branch}..origin/main"]).stdout.strip()
-    try:
-        behind = int(raw)
-    except ValueError:
-        behind = 0   # origin/main absent or bad ref → treat as up-to-date (no badge)
-    parent = run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
-    # published = a remote-tracking ref for THIS branch exists on any remote. Suffix-
-    # match (not a `refs/remotes/*/X` glob) so slashed names like goal/foo and
-    # multiple remotes both resolve. More reliable than upstream config, which the
-    # repo's branch.autoSetupMerge=simple can silently point at origin/main.
-    remotes = run(["git", "for-each-ref", "--format=%(refname)", "refs/remotes/"]).stdout.splitlines()
-    published = any(r.endswith("/" + branch) for r in remotes)
-    why = ""
-    if behind == 0:
-        why = "up to date with origin/main"
-    elif parent != "main":
-        why = f"stacked on {parent} — needs a restack, not a sync"
-    elif published:
-        why = "published — rebasing would rewrite pushed commits"
-    return {"branch": branch, "behind": behind, "parent": parent, "published": published,
-            "syncable": behind > 0 and parent == "main" and not published, "why": why}
+# fork-staleness (_sync_state) + the /sync endpoints now live in srv/sync.py.
 
 
 def _ready_to_merge(mergeable, prs):
@@ -246,15 +211,10 @@ class H(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"branch": run(["git", "-C", MAIN_WT, "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
             return restack.status(self, u)
-        elif u.path == "/sync":  # fork-staleness vs origin/main: how far behind, and is it safe to auto-rebase?
-            self._send(200, json.dumps(_sync_state(parse_qs(u.query).get("branch", [""])[0])))
-        elif u.path == "/syncs":  # BATCH fork-staleness: all branches in ONE round-trip, so the
-            # graph/rail badges don't fan out N per-node /sync requests into the browser's
-            # ~6-connection-per-origin limit (which serializes them into a load waterfall).
-            bs = [b for b in parse_qs(u.query).get("branch", []) if b]
-            with ThreadPoolExecutor(max_workers=8) as ex:   # _sync_state shells git (GIL released) → real parallelism
-                states = dict(zip(bs, ex.map(_sync_state, bs)))
-            self._send(200, json.dumps(states))
+        elif u.path == "/sync":   # fork-staleness vs origin/main (single branch)
+            return sync.get_one(self, u)
+        elif u.path == "/syncs":  # batch fork-staleness in one round-trip
+            return sync.get_many(self, u)
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -473,17 +433,8 @@ class H(BaseHTTPRequestHandler):
             self._send(200 if r.returncode == 0 else 500,
                        json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
             return
-        if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main (no force-push possible)
-            d = json.loads(raw or "{}")
-            branch = d.get("branch", "")
-            st = _sync_state(branch)   # re-check server-side: never rebase a published/stacked branch on a stale client view
-            if not st.get("syncable"):
-                self._send(409, json.dumps({"ok": False, "err": st.get("why", "not syncable")}))
-                return
-            r = run(["git", "rebase", "origin/main", branch])   # checks out branch; git refuses if the tree is dirty
-            self._send(200 if r.returncode == 0 else 500,
-                       json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
-            return
+        if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
+            return sync.post_sync(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit (headless claude)
             d = json.loads(raw or "{}")
             r = run([os.path.join(SCRIPTS, "stack-squash"), d.get("branch", "")])
