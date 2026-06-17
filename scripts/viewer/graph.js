@@ -302,7 +302,7 @@ function renderGraph(sel){
   // swatches reuse the real .ge classes so they never drift from the actual edges.
   const swatch = cls=>`<svg class="lgsw" width="26" height="8" viewBox="0 0 26 8"><path class="ge ${cls}" style="animation:none;opacity:1" d="M1,4 L25,4"/></svg>`;
   const legend = `<span class="maplegend">${swatch('clean')}<span class="lgl">builds on</span>${swatch('fanin')}<span class="lgl">merge after · planned</span></span>`;
-  const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3>${legend}<span class="mapclose">click a node · esc to close</span></div>` : '';
+  const header = sel==='#map' ? `<div class="maphd"><h3>${MODEL.project||MODEL.leaf||'stack'} — dependency graph</h3>${legend}<span class="mapclose">click a node → files · esc → projects</span></div>` : '';
   tgt.innerHTML = header + `<svg class="graph" viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet" style="height:auto;max-height:84vh;display:block">${E}${G}</svg>`;
   tgt.querySelectorAll('.gn[data-b]').forEach(g=>{ const id=g.getAttribute('data-b');
     if(id!=='main') g.onclick=()=>{ active=id; if(sel==='#map') toggleMap(false); render(); };

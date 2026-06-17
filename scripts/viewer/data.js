@@ -43,9 +43,35 @@ const $ = (s,r=document)=>r.querySelector(s);
 const el = (t,c,h)=>{const e=document.createElement(t); if(c)e.className=c; if(h!=null)e.innerHTML=h; return e;};
 const segPath = p => p.replace(/(.*\/)([^/]+)$/, '<span class="seg">$1</span>$2');
 
-function toast(html,sticky){const t=$('#toast'); t.innerHTML=html; t.classList.add('show'); clearTimeout(t._t);
-  t.onclick=()=>{ t.classList.remove('show'); };   // click-to-dismiss (the only way out for a sticky toast)
-  if(!sticky) t._t=setTimeout(()=>t.classList.remove('show'),1900);}
+// toast = TRANSIENT confirmation only. It always auto-dismisses; anything that needs
+// a decision/action belongs in actionBanner() below, not a "sticky" toast.
+function toast(html){const t=$('#toast'); t.innerHTML=html; t.classList.add('show'); clearTimeout(t._t);
+  t.onclick=()=>{ t.classList.remove('show'); };   // click to dismiss early
+  // dwell scales with how much there is to read (4.5s floor → 12s cap), and hovering
+  // to read pauses the countdown — so a toast never vanishes before you've read it.
+  const ms=Math.min(12000, Math.max(4500, t.textContent.length*70));
+  const arm=()=>{ clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),ms); };
+  t.onmouseenter=()=>clearTimeout(t._t);
+  t.onmouseleave=arm;
+  arm();}
+
+// actionBanner = PERSISTENT + actionable, the deliberate counterpart to a toast: it
+// stays until you act and carries real buttons. Use it whenever a message offers a
+// choice (hand a conflict to Claude, copy a command, dismiss) instead of just
+// reporting that something happened. Each action: {label, primary?, onClick(close)}.
+function closeBanner(){ const b=document.getElementById('banner'); if(b) b.classList.remove('show'); }
+function actionBanner({tone, title, body, actions}){
+  let b=document.getElementById('banner');
+  if(!b){ b=document.createElement('div'); b.id='banner'; document.body.appendChild(b); }
+  b.className='show'+(tone?(' '+tone):'');
+  const list=actions||[];
+  b.innerHTML='<div class="bn-main"><div class="bn-title">'+(title||'')+'</div>'
+    +(body?'<div class="bn-body">'+body+'</div>':'')+'</div>'
+    +'<div class="bn-acts">'+list.map((a,i)=>'<button class="bn-act'+(a.primary?' primary':'')
+      +'" data-i="'+i+'">'+a.label+'</button>').join('')+'</div>';
+  b.querySelectorAll('.bn-act').forEach(btn=>{ btn.onclick=()=>{ const a=list[+btn.dataset.i]; if(a&&a.onClick) a.onClick(closeBanner); }; });
+  return closeBanner;
+}
 
 async function fetchModel(){
   const b = Q.get('branch') || (MODEL && (MODEL.project||MODEL.leaf)) || '';
