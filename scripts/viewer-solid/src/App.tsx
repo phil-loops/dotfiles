@@ -217,6 +217,14 @@ function Home() {
     return [...m.entries()];
   });
 
+  // float forests that have an open PR to the top (they're already listed under "your
+  // open PRs", so surfacing them first in the forest list reunites the two views).
+  const prProjects = createMemo(() => new Set((prs.data || []).map((p) => p.project).filter(Boolean)));
+  const sortedProjects = createMemo(() => {
+    const s = prProjects();
+    return [...(projects.data || [])].sort((a, b) => Number(s.has(b.name)) - Number(s.has(a.name)));
+  });
+
   const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
 
@@ -283,7 +291,7 @@ function Home() {
           </Show>
         </div>
         <Show when={(projects.data || []).length} fallback={<p class="loading">no forests configured</p>}>
-          <For each={projects.data}>
+          <For each={sortedProjects()}>
             {(p) => {
               const busy = () => running() === p.name || running() === "__all__";
               const stuck = () => parked()?.project === p.name;
