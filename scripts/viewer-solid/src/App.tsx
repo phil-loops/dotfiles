@@ -20,6 +20,7 @@ import { ForestMap } from "./ForestMap";
 import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import { useFileCycle } from "./useFileCycle";
+import CommandPalette from "./CommandPalette";
 import type {
   ForestModel,
   SpineNode,
@@ -92,9 +93,12 @@ export default function App() {
   onCleanup(() => es.close());
 
   return (
-    <Show when={url().project} fallback={<Home />}>
-      <NodeDetail url={url} />
-    </Show>
+    <>
+      <Show when={url().project} fallback={<Home />}>
+        <NodeDetail url={url} />
+      </Show>
+      <CommandPalette />
+    </>
   );
 }
 
