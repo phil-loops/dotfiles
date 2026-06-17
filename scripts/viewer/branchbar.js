@@ -221,6 +221,30 @@
     sub.appendChild(b);
   }
 
+  // ---- steer: open a headless-Claude design conversation for this branch -----
+  // Spawns a separate `claude` (via the server → steer-open → nvim), never your
+  // interactive session. Left = briefing + convo, right = the focused .ts to edit.
+  // The file you're looking at (rail selection, else the open card) opens on the
+  // right; with nothing focused, steer-open picks the branch's top-changed .ts.
+  function focusedFile(){
+    const sel=document.querySelector('#rail li.fk.on');
+    if(sel && sel.dataset.path) return sel.dataset.path;
+    const card=document.querySelector('#main .file.open');
+    return (card && card.dataset.path) || '';
+  }
+  async function doSteer(btn){
+    const branch=branchOf(); if(!branch) return;
+    const path=focusedFile();
+    const t=btn.textContent; btn.textContent='opening…'; btn.disabled=true;
+    let r;
+    try{ r=await fetch('/steer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({branch, path})}).then(x=>x.json()); }
+    catch(e){ toast('◆ steer failed — server unreachable'); btn.textContent=t; btn.disabled=false; return; }
+    btn.textContent=t; btn.disabled=false;
+    toast(r && r.ok
+      ? '◆ steering <b>'+esc(branch.split('/').pop())+'</b>'+(path?' · editing <b>'+esc(path.split('/').pop())+'</b>':'')+' in tmux <b>loops:steer</b> — conversation on the left, code on the right.'
+      : '◆ steer failed: '+esc(lastLine(r&&r.err)));
+  }
+
   // ---- inject into the toolbar ----------------------------------------------
   function inject(sub){
     if(typeof LIVE!=='undefined' && !LIVE) return;   // actions need the live repo
@@ -231,7 +255,9 @@
     co.onclick=()=>doCheckout(co);
     const pp=el('button','prepbtn','⇡ prep for push'); pp.title='squash unpushed commits into one + oxfmt, ready to push';
     pp.onclick=()=>{ (prepPop && prepPop.classList.contains('on')) ? hidePrep() : showPrep(pp); };
-    sub.append(ci, co, pp);   // after "bless all remaining" (which carries margin-left:auto → right group)
+    const st=el('button','steerbtn','◆ steer'); st.title='open a headless-Claude design conversation for this branch in nvim (a separate claude — never your interactive session)';
+    st.onclick=()=>doSteer(st);
+    sub.append(ci, co, pp, st);   // after "bless all remaining" (which carries margin-left:auto → right group)
     const branch=branchOf(); if(branch) syncBadge(sub, branch);   // async; appends iff behind origin/main
   }
   function scan(n){ if(n.nodeType!==1) return;
