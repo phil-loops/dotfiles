@@ -13,7 +13,8 @@
 //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
 import { createSignal, Show } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
-import { fetchJSON } from "./api";
+import { provider } from "./provider";
+import type { SyncState } from "./types";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -27,13 +28,6 @@ interface SquashResult {
   sha?: string; // new short sha
   header?: string; // the voiced subject line
   err?: string;
-}
-
-interface SyncState {
-  behind: number; // commits on origin/main not yet in this branch
-  syncable: boolean; // safe to fast-forward-rebase (else stacked/published)
-  why: string; // when not syncable, the reason
-  deployCritical?: string[]; // deploy-critical files origin/main changed that this branch lacks
 }
 
 async function post<T>(url: string, body: unknown): Promise<T> {
@@ -131,7 +125,7 @@ export function NodeActions(props: { branch: string }) {
   // absent → badge shows the calm "behind" state, never a false block.)
   const sync = createQuery(() => ({
     queryKey: ["sync", props.branch],
-    queryFn: () => fetchJSON<SyncState>("/sync?branch=" + encodeURIComponent(props.branch)),
+    queryFn: () => provider.sync(props.branch),
     enabled: !!props.branch,
   }));
   const behind = () => sync.data?.behind ?? 0;
