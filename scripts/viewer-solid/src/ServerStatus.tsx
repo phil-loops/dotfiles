@@ -44,7 +44,7 @@ export function ServerStatus() {
   });
 
   return (
-    <div class="srvstat" classList={{ down: !up() }} title={up() ? "review server connected" : "review server unreachable — reconnecting"}>
+    <div class="srvstat" classList={{ down: !up() }} title={up() ? "review server connected — click to re-check" : "review server unreachable — click to reconnect now"} onClick={ping}>
       <style>{CSS}</style>
       <span class="srvstat-dot" />
       <Show when={!up()}>
@@ -56,7 +56,9 @@ export function ServerStatus() {
 
 const CSS = `
 .srvstat { position: fixed; left: 14px; bottom: 12px; z-index: 70; display: flex;
-  align-items: center; gap: 7px; pointer-events: none; }
+  align-items: center; gap: 7px; pointer-events: none; cursor: pointer; }
+.srvstat .srvstat-dot, .srvstat .srvstat-label { pointer-events: auto; }
+.srvstat:hover .srvstat-dot { opacity: 1; }
 .srvstat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--patina);
   box-shadow: 0 0 6px var(--patina); opacity: .5; transition: background .2s, opacity .2s, box-shadow .2s; }
 .srvstat.down .srvstat-dot { background: var(--del); box-shadow: 0 0 9px var(--del); opacity: 1;
