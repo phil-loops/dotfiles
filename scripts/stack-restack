@@ -38,14 +38,28 @@
 set -u
 
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
-STATE_DIR="$(git rev-parse --git-common-dir)/stack-restack-state"
+# Absolute git-common-dir: shared across linked worktrees, so the state + conflict
+# artifacts live in ONE place regardless of which worktree the (background) restack
+# runs in — the viewer/server resolve the same path the same way.
+GIT_COMMON_DIR="$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
+STATE_DIR="${GIT_COMMON_DIR}/stack-restack-state"
+# Structured sidecar describing the currently-parked conflict. `--diagnose` fills it
+# (analysis + a STAGED proposed resolution, no commit/continue); `--handoff` then just
+# continues past the staged work, and clears the artifact. Viewer renders it; bash owns the schema.
+CONFLICT_FILE="${GIT_COMMON_DIR}/stack-restack-conflict.json"
+# Pre-stage snapshot of the conflict's unmerged index entries (git ls-files -u), taken
+# before --diagnose stages a resolution. --discard restores it (update-index + checkout -m)
+# so a rejected staged fix returns to the exact parked conflict. Cleared with the artifact.
+SNAPSHOT_FILE="${GIT_COMMON_DIR}/stack-restack-conflict-snapshot"
 SELF_DIR="${0:A:h}"   # script dir, captured at top level ($0 inside a zsh function is the function name, not the script)
 
 usage() {
   cat >&2 <<EOF
 Usage: loops stack restack <project>
        loops stack restack <project> --continue
-       loops stack restack <project> --handoff   # AI-resolve the parked conflict (human-authorized), then resume
+       loops stack restack <project> --handoff    # AI-resolve the parked conflict (human-authorized), then resume
+       loops stack restack <project> --diagnose   # AI-resolve + STAGE the parked conflict for review (no continue) → stack-restack-conflict.json
+       loops stack restack <project> --discard    # discard a staged diagnose fix, restoring the parked conflict
        loops stack restack <project> --abort
        loops stack restack <project> --plan
        loops stack restack <project> --no-claude
@@ -68,6 +82,8 @@ for arg in "$@"; do
   case "$arg" in
     --continue) MODE="continue" ;;
     --handoff|--resolve) MODE="handoff" ;;   # AI-resolve the currently-paused conflict (human-authorized), then resume
+    --diagnose|--explain) MODE="diagnose" ;; # AI-resolve + stage the currently-paused conflict (no continue) into the conflict artifact
+    --discard) MODE="discard" ;;             # discard a staged diagnose fix, restoring the parked conflict
     --abort) MODE="abort" ;;
     --plan) MODE="plan" ;;
     --no-claude|--manual) USE_CLAUDE=0 ;;
@@ -210,6 +226,18 @@ claude_attempt_resolve() {
   if [[ "$RESOLVE_BAR" == "full" ]]; then
     echo "    → claude (full-judgment handoff)…" >&2
     budget="${STACK_RESTACK_HANDOFF_BUDGET_USD:-5}"
+    # If a prior --diagnose run analyzed THIS conflict, hand its analysis to the
+    # resolver as context so the applied fix is consistent with what was proposed
+    # (Autosolve-with-this-plan), rather than re-deriving from scratch.
+    local prior=""
+    if [[ -f "$CONFLICT_FILE" ]] && [[ "$(jq -r '.branch // ""' "$CONFLICT_FILE" 2>/dev/null)" == "$branch" ]]; then
+      prior=$(jq -r 'if (.ok and .diagnosis) then
+          "\nYour earlier diagnosis of THIS conflict (resolve consistently with it):\n"
+          + "  Summary: " + (.diagnosis.summary // "-") + "\n"
+          + "  Recommendation: " + (.diagnosis.recommendation // "-") + "\n"
+          + "  Confidence: " + (.diagnosis.confidence // "-") + "\n"
+        else "" end' "$CONFLICT_FILE" 2>/dev/null)
+    fi
     prompt=$(cat <<EOF
 You are resolving a git rebase conflict during a stack restack. A human has
 explicitly handed this conflict to you to resolve with judgment — the
@@ -218,6 +246,7 @@ Claude". So resolve it properly; do not punt it back unless intent is genuinely
 unrecoverable from the code + history.
 Branch being rebased: ${branch}
 Rebasing onto: ${parent}
+${prior}
 
 The rebase is PAUSED with conflicts. Unmerged files:
 ${conflicted}
@@ -309,6 +338,128 @@ EOF
   reason=$(echo "$out" | grep -m1 "RESTACK_ESCALATE" | sed 's/.*RESTACK_ESCALATE: *//')
   echo "    ⚑ claude escalated: ${reason:-no clear decision}" >&2
   return 1
+}
+
+# ---------- diagnose (resolve + stage, but DON'T continue) ----------
+#
+# "Ask what the problem is" — but make the answer concrete and actionable. Claude
+# resolves the conflict with full judgment AND explains it, then STOPS: the
+# resolution is staged (`git add`) and the rebase is left PAUSED — no
+# `rebase --continue`, no commit, no cascade. The human reviews the staged diff
+# (which we capture verbatim into the artifact), then either accepts it (Autosolve
+# with this plan == a plain `rebase --continue`, since the work is already staged)
+# or discards it. Claude supplies the prose analysis; the proposedDiff per file is
+# the REAL staged diff (bash-captured), never a hallucinated patch.
+# $1=dir $2=branch $3=parent  → stdout: claude's raw output (JSON between markers)
+claude_diagnose() {
+  local dir="$1" branch="$2" parent="$3"
+  command -v "$CLAUDE_BIN" >/dev/null 2>&1 || { echo "    (claude not found on PATH)" >&2; return 1; }
+  local conflicted
+  conflicted=$(git -C "$dir" diff --name-only --diff-filter=U)
+  [[ -z "$conflicted" ]] && { echo "    (no unmerged paths to diagnose)" >&2; return 1; }
+  echo "    → claude (diagnose: resolve + stage, no continue)…" >&2
+  local budget="${STACK_RESTACK_DIAGNOSE_BUDGET_USD:-5}"
+  local prompt
+  prompt=$(cat <<EOF
+A human asked "what's the problem here?" for a git rebase conflict during a stack
+restack, and wants to REVIEW a concrete proposed resolution before it is committed.
+So do two things: resolve the conflict, and explain it.
+
+RESOLVE: edit each conflicted file to its correct final content and \`git add\` it —
+with full judgment, exactly as you would for a handoff:
+  - Redundant squash-merge replay → take the new base's (${parent}) version.
+  - Branch adds genuinely NEW behavior on top → combine so BOTH intents survive.
+  - Generated files / lockfiles (*.gen, .gen/*, package-lock.json, pnpm-lock.yaml,
+    clickhouse/schema.sql, prisma client) → take the new-base side.
+  - Match surrounding style; keep it compiling.
+
+Then STOP. Do NOT run \`git rebase --continue\`, commit, push, reset, or rebase —
+leave your resolution STAGED and the rebase PAUSED so the human can review it.
+
+If the conflict is genuinely unresolvable (two conflicting logic changes where
+picking either silently loses behavior), do NOT stage a guess: leave the files
+unmerged, and report it below with confidence "low".
+
+Branch being rebased: ${branch}
+Rebasing onto (the new base): ${parent}
+Unmerged files:
+${conflicted}
+
+Finish by printing a SINGLE JSON object and NOTHING else — no prose outside it,
+no markdown code fences — wrapped exactly between these two marker lines:
+<DIAGNOSIS_JSON>
+{...}
+</DIAGNOSIS_JSON>
+
+Required shape (do NOT include diffs — we read your staged changes directly):
+{
+  "summary": "one or two sentences capturing the essence of the conflict",
+  "confidence": "high" | "medium" | "low",
+  "recommendation": "what you did to resolve it, and why, in plain words",
+  "perFile": [
+    {
+      "path": "relative/path/to/file",
+      "oursIntent": "what the new base's version is doing, and why",
+      "theirsIntent": "what the branch commit is doing, and why"
+    }
+  ]
+}
+EOF
+)
+  ( cd "$dir" && "$CLAUDE_BIN" -p "$prompt" \
+        --permission-mode default \
+        --allowed-tools "Edit" "Read" "Grep" "Glob" \
+          "Bash(git add:*)" "Bash(git diff:*)" "Bash(git status:*)" \
+          "Bash(git log:*)" "Bash(git show:*)" "Bash(git checkout:*)" \
+        --output-format text \
+        --max-budget-usd "$budget" )
+}
+
+# Build the perFile JSON array for the artifact: the REAL staged diff per file
+# (git diff --cached), enriched with Claude's intents matched by path. The diffs
+# are ground-truth — they're exactly what `rebase --continue` will commit.
+# $1=dir $2=claude-inner-json  → stdout: a JSON array
+build_perfile() {
+  local dir="$1" inner="$2"
+  local f diff ours theirs obj first=1 out="["
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    diff=$(git -C "$dir" diff --cached -- "$f")
+    ours=$(printf '%s' "$inner" | jq -r --arg p "$f" '[(.perFile // [])[] | select(.path==$p) | .oursIntent] | map(select(. != null))[0] // ""' 2>/dev/null)
+    theirs=$(printf '%s' "$inner" | jq -r --arg p "$f" '[(.perFile // [])[] | select(.path==$p) | .theirsIntent] | map(select(. != null))[0] // ""' 2>/dev/null)
+    obj=$(jq -n --arg path "$f" --arg ours "$ours" --arg theirs "$theirs" --arg diff "$diff" \
+      '{path:$path, oursIntent:$ours, theirsIntent:$theirs, proposedDiff:$diff}')
+    if (( first )); then out="$out$obj"; first=0; else out="$out,$obj"; fi
+  done < <(git -C "$dir" diff --cached --name-only)
+  printf '%s]' "$out"
+}
+
+# Compose + write the durable conflict artifact. Bash owns the envelope facts
+# (project/branch/parent/base/generatedAt/staged); claude supplies the `diagnosis`.
+# $1=branch $2=parent $3=diagnosis-json (validated inner object) $4=staged(true/false)
+write_conflict_artifact() {
+  local branch="$1" parent="$2" inner="$3" staged="${4:-false}"
+  local base now
+  base=$(git config "stack-branch.${branch}.base" 2>/dev/null || git rev-parse "$parent" 2>/dev/null || true)
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  jq -n \
+    --arg project "$PROJECT" --arg branch "$branch" --arg parent "$parent" \
+    --arg base "$base" --arg now "$now" --argjson staged "$staged" --argjson diagnosis "$inner" \
+    '{ok:true, project:$project, branch:$branch, parent:$parent, base:$base,
+      generatedAt:$now, staged:$staged, diagnosis:$diagnosis}' > "$CONFLICT_FILE"
+}
+
+# Fallback artifact so the viewer always has SOMETHING to show even when the
+# diagnosis couldn't be produced/parsed — never leave the user staring at nothing.
+# $1=branch $2=parent $3=error $4=raw(optional)
+write_conflict_artifact_error() {
+  local branch="$1" parent="$2" err="$3" raw="${4:-}" now
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  jq -n \
+    --arg project "$PROJECT" --arg branch "$branch" --arg parent "$parent" \
+    --arg err "$err" --arg raw "$raw" --arg now "$now" \
+    '{ok:false, project:$project, branch:$branch, parent:$parent,
+      generatedAt:$now, error:$err, raw:$raw}' > "$CONFLICT_FILE"
 }
 
 # ---------- footprint guard ----------
@@ -435,6 +586,7 @@ load_state() {
 
 clear_state() {
   rm -rf "$STATE_DIR"
+  rm -f "$CONFLICT_FILE" "$SNAPSHOT_FILE"   # no parked conflict → no diagnosis artifact/snapshot
 }
 
 # ---------- main flows ----------
@@ -454,6 +606,87 @@ if [[ "$MODE" == "plan" ]]; then
     wt=$(worktree_of "$b")
     printf "  %-45s parent=%-40s sha=%s  wt=%s\n" "$b" "$p" "$sha" "${wt:-<unchecked-out>}"
   done < <(topo_order "$PROJECT")
+  exit 0
+fi
+
+if [[ "$MODE" == "diagnose" ]]; then
+  # "What's the problem?" — Claude resolves + STAGES the fix and explains it, but does
+  # NOT continue the rebase. We capture the real staged diff into the artifact; the
+  # human reviews it, then Autosolve-with-this-plan is just a plain `rebase --continue`.
+  load_state || exit 1
+  if [[ -z "${CURRENT:-}" ]]; then
+    echo "Nothing paused to diagnose (no CURRENT in saved state)." >&2
+    exit 1
+  fi
+  REBASE_DIR=$(rebase_dir_for "$CURRENT")
+  PARENT_NAME=$(git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
+  if ! rebase_in_progress "$REBASE_DIR"; then
+    echo "No rebase in progress for ${CURRENT} — nothing to diagnose." >&2
+    exit 1
+  fi
+  echo "→ Diagnose: Claude resolving + staging the paused rebase of ${CURRENT} onto ${PARENT_NAME} (no continue)…"
+  # Snapshot the unmerged index BEFORE staging, so --discard can restore the exact
+  # parked conflict later. Only when there ARE unmerged entries (a re-diagnose of
+  # already-staged files would otherwise clobber the good snapshot with an empty one).
+  UNMERGED_SNAP=$(git -C "$REBASE_DIR" ls-files -u)
+  [[ -n "$UNMERGED_SNAP" ]] && printf '%s\n' "$UNMERGED_SNAP" > "$SNAPSHOT_FILE"
+  RAW=$(claude_diagnose "$REBASE_DIR" "$CURRENT" "$PARENT_NAME") || {
+    write_conflict_artifact_error "$CURRENT" "$PARENT_NAME" "claude diagnose failed to run"
+    echo "  ⚠ diagnose could not run — wrote a fallback artifact to $CONFLICT_FILE" >&2
+    exit 1
+  }
+  # Extract Claude's analysis JSON (summary/intents/recommendation) from the sentinels.
+  INNER=$(printf '%s\n' "$RAW" | sed -n '/<DIAGNOSIS_JSON>/,/<\/DIAGNOSIS_JSON>/p' | sed '1d;$d')
+  [[ -z "$INNER" ]] || printf '%s' "$INNER" | jq -e . >/dev/null 2>&1 || INNER=""
+  # If unmerged paths remain, Claude punted (or the conflict is unresolvable): leave
+  # the rebase parked and surface a non-staged artifact so the human can autosolve/abort.
+  if [[ -n "$(git -C "$REBASE_DIR" diff --name-only --diff-filter=U)" ]]; then
+    DERR="left some files unmerged — the conflict needs a human or a full autosolve"
+    [[ -n "$INNER" ]] && DERR=$(printf '%s' "$INNER" | jq -r '.recommendation // .summary // empty' 2>/dev/null)
+    write_conflict_artifact_error "$CURRENT" "$PARENT_NAME" "${DERR:-unresolved conflict}" "$RAW"
+    echo "  ⚠ diagnose left unmerged paths — wrote a non-staged artifact to $CONFLICT_FILE" >&2
+    exit 1
+  fi
+  # Resolved + staged. Compose the artifact: Claude's prose + the REAL staged diff per file.
+  [[ -z "$INNER" ]] && INNER='{}'
+  PERFILE=$(build_perfile "$REBASE_DIR" "$INNER")
+  FINAL_INNER=$(jq -n --argjson c "$INNER" --argjson pf "$PERFILE" \
+    '{summary:($c.summary // ""), confidence:($c.confidence // "medium"),
+      recommendation:($c.recommendation // ""), perFile:$pf}')
+  write_conflict_artifact "$CURRENT" "$PARENT_NAME" "$FINAL_INNER" true
+  echo "  ✓ resolution staged + diagnosis written → $CONFLICT_FILE (review, then Autosolve-with-this-plan = rebase --continue)"
+  exit 0
+fi
+
+if [[ "$MODE" == "discard" ]]; then
+  # Throw away a staged diagnose resolution and restore the exact parked conflict
+  # (conflict markers + unmerged index) from the pre-stage snapshot. The rebase stays
+  # paused — the human is back to square one, free to autosolve, hand-edit, or abort.
+  load_state || exit 1
+  if [[ -z "${CURRENT:-}" ]]; then
+    echo "Nothing paused — nothing to discard." >&2
+    exit 1
+  fi
+  REBASE_DIR=$(rebase_dir_for "$CURRENT")
+  if ! rebase_in_progress "$REBASE_DIR"; then
+    echo "No rebase in progress for ${CURRENT} — nothing to discard." >&2
+    exit 1
+  fi
+  if [[ ! -s "$SNAPSHOT_FILE" ]]; then
+    echo "No conflict snapshot to restore from — can't safely un-stage. Resolve by hand or --abort." >&2
+    exit 1
+  fi
+  echo "→ Discard: restoring the parked conflict in ${CURRENT} from snapshot…"
+  # Clear whatever's currently indexed for the snapshot's paths, re-add the unmerged
+  # stage entries, then regenerate the working-tree conflict markers.
+  typeset -a SNAP_PATHS
+  SNAP_PATHS=()
+  while IFS= read -r p; do [[ -n "$p" ]] && SNAP_PATHS+=("$p"); done < <(cut -f2 "$SNAPSHOT_FILE" | sort -u)
+  for p in "${SNAP_PATHS[@]}"; do git -C "$REBASE_DIR" update-index --force-remove "$p"; done
+  git -C "$REBASE_DIR" update-index --index-info < "$SNAPSHOT_FILE"
+  git -C "$REBASE_DIR" checkout -m -- "${SNAP_PATHS[@]}"
+  rm -f "$CONFLICT_FILE" "$SNAPSHOT_FILE"
+  echo "  ✓ staged fix discarded — conflict restored, rebase still parked on ${CURRENT}"
   exit 0
 fi
 
@@ -496,6 +729,7 @@ EOF
   COMPLETED+=("$CURRENT")
   CURRENT=""
   save_state
+  rm -f "$CONFLICT_FILE" "$SNAPSHOT_FILE"   # this conflict is resolved; its diagnosis/snapshot are now stale
   echo "    ✓ ${COMPLETED[-1]} resolved + rebased — resuming the cascade"
 fi
 
