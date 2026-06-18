@@ -155,6 +155,28 @@ Decision rule:
 - Single-branch feature, or scanning across many worktrees → `wt`
 - Offline, no browser, want nvim stepping → `loops stack review`
 
+### Claude inside the viewer (it's no longer purely read-only)
+
+The :62333 viewer started as a read-only config consumer, but the Solid rewrite
+(`scripts/viewer-solid/`) added affordances that **mutate state and spend tokens**. Know
+they exist before you assume a click is free:
+
+- **Per-file diff card** — each `.entry` carries `⎘ copy ref` (clipboard: `` `path` (on
+  branch `branch`) ``, for pasting into a chat) and `✦ chat` (a right-side drawer that
+  streams a headless **read-only** `claude -p` token-by-token over SSE; seeded with the
+  file's diff, multi-turn via `--resume`). Backend: `srv/chat.py` → `POST /chat`. It's
+  allowlisted to `Read`/`Grep`/`Glob` — it can read the branch's tree but never edits/runs/commits.
+- **Sweep-select diff text → floating "ask Claude" chip** — fires a *fresh* `claude` in the
+  branch's tmux worktree (`srv/assist.py` → `POST /claude` → `stack-claude`). Fire-and-forget,
+  not streamed.
+- **Mutating actions**: `/bless`, `/checkout` (moves the **main working tree** onto a branch),
+  `/squash`, `/restack`, `/restack-all`, `/sync`, `/prep`. These rewrite history / move HEAD.
+
+**Never curl-probe a mutating endpoint with a real branch name to "test" it.** `POST /checkout`
+will yank `~/coding/loops` off whatever branch another session is live on — it bit us. To check a
+route is wired, probe with a nonexistent branch (e.g. `__probe__`) or an empty body and assert it
+returns 400/404, never a real value.
+
 ## Forest hygiene
 
 - After a base merges, rebase the forest onto fresh `origin/main` by hand (see *Restacking after a merge*), drop the now-redundant node, and rewire its children — **the graph contracts by that node**, and keeps contracting as each independent base lands. Squash-merged commits won't match `origin/main`; the rebase drops them cleanly (both `parent` and carried `requires`).
