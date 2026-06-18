@@ -368,6 +368,49 @@ with ThreadPoolExecutor(max_workers=workers) as ex:
     nodes = dict(ex.map(build, members))
 roots = [b for b in members if parents.get(b, MAIN) not in members]
 
+# ---- working-tree dirt per branch (the raw signal the map turns into "dams") --
+# A branch's dirt = the tracked, uncommitted paths in the worktree it's checked
+# out in. The map flags a branch as a dam when this set collides with a DOWNSTREAM
+# node's own diff: once the dirt commits, those descendants conflict on rebase.
+# Untracked (??) paths are excluded — rebase never touches them, so they can't
+# conflict. Cheap: one `worktree list` + a `status` per member worktree.
+def _worktree_branches():
+    res, path = [], None
+    for line in git_out(["worktree", "list", "--porcelain"]).splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line.startswith("branch "):
+            if path:
+                res.append((path, line[len("branch "):].replace("refs/heads/", "", 1)))
+            path = None
+        elif not line:
+            path = None
+    return res
+
+
+def _dirty_paths(wt_path):
+    out = subprocess.run(["git", "-C", wt_path, "status", "--porcelain"],
+                         capture_output=True, text=True).stdout
+    paths = set()
+    for ln in out.splitlines():
+        if len(ln) < 4 or ln[:2] == "??":
+            continue
+        rest = ln[3:]
+        if " -> " in rest:                       # rename: both endpoints can collide
+            old, new = rest.split(" -> ", 1)
+            paths.add(old.strip().strip('"'))
+            paths.add(new.strip().strip('"'))
+        else:
+            paths.add(rest.strip().strip('"'))
+    return paths
+
+
+for _wt, _br in _worktree_branches():
+    if _br in nodes:
+        dp = _dirty_paths(_wt)
+        if dp:
+            nodes[_br]["dirty"] = sorted(dp)
+
 # ---- ghost "feature" node: the single culmination of a multi-leaf project. A
 # phantom (no branch, no diff/bless) that fans in the project's un-subsumed TIPS —
 # leaves not already carried by another node's `requires`. It maps to the ephemeral

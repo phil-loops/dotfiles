@@ -8,6 +8,11 @@ export interface NodeMeta {
   stale: number;
   total: number;
   clean: number;
+  // WAVE 1 carries each file's path + status (no patch); the map uses the paths
+  // to test dirty-overlap dams. `dirty` = tracked, uncommitted paths in the
+  // worktree this branch is checked out in (absent ⇒ clean / no worktree).
+  files?: FileDiff[];
+  dirty?: string[];
 }
 
 export interface ForestModel {
