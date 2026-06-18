@@ -272,14 +272,17 @@ if len(sys.argv) <= 4:
 
 
 def watcher():
-    # server-hot: re-exec (same port) when this file changes. The shell scripts
-    # it shells out to are already hot (run per request); only server.py needs this.
+    # server-hot: re-exec (same port) when this file OR any srv/*.py module changes. srv/ is
+    # imported once at startup, so without watching it those edits stay stale until a real
+    # restart. (The shell scripts it shells out to are already hot — run per request.)
+    import glob
     src = os.path.abspath(__file__)
-    m0 = os.path.getmtime(src)
+    srcs = [src] + glob.glob(os.path.join(os.path.dirname(src), "srv", "*.py"))
+    m0 = max(os.path.getmtime(f) for f in srcs)
     while True:
         time.sleep(1.0)
         try:
-            if os.path.getmtime(src) != m0:
+            if max(os.path.getmtime(f) for f in srcs) != m0:
                 httpd.socket.close()
                 os.execv(sys.executable, [sys.executable, src, ROOT, SCRIPTS, CWD, str(PORT)])
         except OSError:
