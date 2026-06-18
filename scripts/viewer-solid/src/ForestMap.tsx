@@ -1,9 +1,11 @@
-// ForestMap — the forest DAG as an SVG. `main` is pinned at the TOP-LEFT and the
-// stack flows down-right from it: x is banded by depth (a soft rank spring keeps
-// clean left→right columns) while y is force-relaxed (nodes repel, edges cohere),
-// so the picture is organic without the full-2D boids chaos — and main always
-// reads from the same corner. Deterministic (seeded by depth + index, fixed
-// iteration count, no requestAnimationFrame), so it never jitters between renders.
+// ForestMap — the forest DAG as an SVG, read as a JOURNEY: `main` is pinned at the
+// TOP-LEFT (where you are) and the project's culmination — its "endstate" — is pinned
+// BOTTOM-RIGHT (where the work is headed). Every branch sits on the main→endstate
+// diagonal by its RANK (longest path from main over parent + fan-in edges), so each
+// step down the stack moves both right and down; repulsion + edge cohesion fan the
+// siblings off that axis. The endstate is the ghost ✦ node when a project has several
+// tips (it fans them all in), else the single deepest tip. Deterministic (seeded by
+// rank + index, fixed iteration count, no requestAnimationFrame), so it never jitters.
 //
 // Hover a node to SPOTLIGHT its dependency neighborhood: everything that flows IN
 // (its upstream blockers, gold) and OUT (its downstream dependents, ember) lights
@@ -15,6 +17,8 @@ import { createMemo, createSignal, For, Show } from "solid-js";
 import type { SpineNode } from "./types";
 
 const leafOf = (s: string): string => s.split("/").pop() ?? s;
+// the ghost culmination node is keyed "✦ <project>" (a sentinel, never a real branch).
+const isGhostId = (id: string): boolean => id.startsWith("✦");
 const nodeW = (b: string): number => 50 + leafOf(b).length * 7.2 + 34;
 const NODE_H = 28;
 function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
@@ -23,11 +27,11 @@ function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
   return "unblessed";
 }
 
-// layout constants. COLW = x-distance per depth band; REST = the spring's natural
-// edge length (≈ one column), so a child settles a column from its parent instead of
-// collapsing onto it; SPRING = spring stiffness; RANKK = a light rightward bias so
-// depth flows left→right from the pinned main.
-const COLW = 186, REP = 180, REST = 186, SPRING = 0.5, K = 150, RANKK = 0.14, CUT = 520, ITER = 460, PAD = 72;
+// layout constants. COLW/ROWH = x/y advance per rank step (their ratio sets the
+// diagonal's slope — near-equal ⇒ a strong ~45° main→endstate axis); REST = the
+// spring's natural edge length (≈ one column) so a child settles a step off its parent;
+// SPRING = stiffness; RANKK = pull toward each node's diagonal slot.
+const COLW = 186, ROWH = 150, REP = 180, REST = 186, SPRING = 0.5, K = 150, RANKK = 0.3, CUT = 340, ITER = 480, PAD = 72;
 
 export function ForestMap(props: {
   spine: () => SpineNode[];
@@ -88,16 +92,77 @@ export function ForestMap(props: {
     return { h, up, down, lit: new Set<string>([h, "main", ...up, ...down]) };
   });
 
+  // CHEAP dirty-conflict "dams". A node with uncommitted (tracked) working-tree
+  // changes whose paths collide with a DOWNSTREAM node's OWN diff is a dam: once
+  // that dirt commits, those descendants conflict on rebase. A dam freezes the
+  // flow to its WHOLE downstream subtree — everything below is built on a world
+  // about to shift. File-overlap only (no merge attempt): honest "potential",
+  // instant, recomputed each render. `frozen` = nodes whose inbound edge is dead.
+  const dams = createMemo(() => {
+    const { list, byId } = model();
+    const damSet = new Set<string>();
+    const conflictSet = new Set<string>();
+    const frozen = new Set<string>();
+    const dirtyOf = (id: string) => byId[id]?.dirty ?? [];
+    const ownPaths = (id: string) => (byId[id]?.files ?? []).map((f) => f.path);
+    list.forEach((n) => {
+      const d = dirtyOf(n.id);
+      if (!d.length) return;
+      const dset = new Set(d);
+      const down = downstreamOf(n.id);
+      let active = false;
+      down.forEach((c) => {
+        if (ownPaths(c).some((p) => dset.has(p))) { conflictSet.add(c); active = true; }
+      });
+      if (active) {
+        damSet.add(n.id);
+        down.forEach((c) => frozen.add(c));
+      }
+    });
+    return { damSet, conflictSet, frozen, dirtyOf };
+  });
+
   const layout = createMemo(() => {
     const { list, byId } = model();
     const ids = list.map((n) => n.id);
 
-    // seed: x by depth band, y fanned out (deterministic — no Math.random).
+    // rank = longest path from main over upstream edges (parent + requires). The ghost
+    // culmination (parent=main but requires the deep tips) ranks PAST them instead of
+    // collapsing to depth 0, so it lands at the far end of the diagonal. main = 0.
+    const rankCache: Record<string, number> = {};
+    const rankOf = (id: string): number => {
+      if (id === "main") return 0;
+      const c = rankCache[id];
+      if (c != null) return c;
+      rankCache[id] = 1; // cycle guard while recursing
+      const n = byId[id];
+      let r = 1;
+      if (n) {
+        const ups: string[] = [];
+        if (n.parent && n.parent !== "main" && byId[n.parent]) ups.push(n.parent);
+        (n.requires || []).forEach((rq) => { if (byId[rq]) ups.push(rq); });
+        ups.forEach((u) => { r = Math.max(r, rankOf(u) + 1); });
+      }
+      return (rankCache[id] = r);
+    };
+    ids.forEach(rankOf);
+
+    // the endstate: the single culmination the forest builds toward — the highest-rank
+    // node (the ghost ✦ when multi-tip, else the deepest tip). Pinned bottom-right as
+    // the mirror of main's pinned top-left.
+    let endId: string | null = null;
+    ids.forEach((b) => { if (endId === null || rankCache[b] > rankCache[endId]) endId = b; });
+
+    // seed every node on its diagonal slot (rank → both x and y); siblings jittered off
+    // it deterministically (no Math.random). main + endstate are fixed anchors.
+    const diagOf = (id: string) => ({ x: (rankCache[id] || 0) * COLW, y: (rankCache[id] || 0) * ROWH });
     const P: Record<string, { x: number; y: number }> = {};
     ids.forEach((b, i) => {
-      P[b] = { x: (byId[b].depth + 1) * COLW, y: 40 + ((i * 53) % 320) };
+      const d = diagOf(b);
+      P[b] = { x: d.x, y: d.y + ((i * 37) % 90) - 45 };
     });
     const MAIN = { x: 0, y: 0 };
+    if (endId) P[endId] = diagOf(endId); // pin the endstate exactly on the diagonal's far corner
     const wOf = (id: string) => (id === "main" ? 40 : nodeW(id));
     const at = (id: string) => (id === "main" ? MAIN : P[id]);
 
@@ -110,6 +175,18 @@ export function ForestMap(props: {
 
     let temp = K * 1.6;
     for (let it = 0; it < ITER; it++) {
+      // keep the endstate parked just past the bottom-right of everything else, so it
+      // reads as the literal destination corner no matter how wide the fan-in spreads
+      // (a rank slot alone gets overshot by scattered tips). Recomputed as the field settles.
+      if (endId) {
+        let mx = -Infinity, my = -Infinity;
+        for (const b of ids) {
+          if (b === endId) continue;
+          if (P[b].x > mx) mx = P[b].x;
+          if (P[b].y > my) my = P[b].y;
+        }
+        if (mx > -Infinity) P[endId] = { x: mx + COLW * 0.8, y: my + ROWH * 0.55 };
+      }
       const dsp: Record<string, { x: number; y: number }> = {};
       ids.forEach((b) => (dsp[b] = { x: 0, y: 0 }));
       // separation: pairwise repulsion (hard shove out of overlap).
@@ -137,9 +214,13 @@ export function ForestMap(props: {
           dsp[b].x += (dx / d) * f; dsp[b].y += (dy / d) * f;
         }
       });
-      // light rightward bias: nudge x toward the node's depth column so depth reads
-      // left→right (the rest-length springs below do the real spacing).
-      ids.forEach((b) => { dsp[b].x += ((byId[b].depth + 1) * COLW - P[b].x) * RANKK; });
+      // diagonal rank bias: pull each node toward its (rank·COLW, rank·ROWH) slot so the
+      // sequence flows top-left → bottom-right (the rest-length springs do the spacing).
+      ids.forEach((b) => {
+        const d = diagOf(b);
+        dsp[b].x += (d.x - P[b].x) * RANKK;
+        dsp[b].y += (d.y - P[b].y) * RANKK;
+      });
       // cohesion: rest-length springs — zero force at REST, attract beyond, repel within,
       // so connected nodes settle ~one column apart instead of collapsing together. main pinned.
       links.forEach(([u, v]) => {
@@ -150,6 +231,7 @@ export function ForestMap(props: {
         if (v !== "main") { dsp[v].x -= dx * f; dsp[v].y -= dy * f; }
       });
       ids.forEach((b) => {
+        if (b === endId) return; // pinned bottom-right anchor — never moves
         const m = Math.hypot(dsp[b].x, dsp[b].y) || 0.01, s = Math.min(m, temp) / m;
         P[b].x += dsp[b].x * s; P[b].y += dsp[b].y * s;
         // keep everything down-right of main so main stays the top-left anchor.
@@ -178,7 +260,9 @@ export function ForestMap(props: {
     type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string };
     const edges: Edge[] = [];
     list.forEach((n) => {
-      if (n.depth === 0 && pos[n.id]) {
+      // main→root spokes, but NOT to the ghost endstate — it reaches the map via its
+      // fan-in edges, so a straight main→ghost line across the whole canvas is noise.
+      if (n.depth === 0 && pos[n.id] && !isGhostId(n.id)) {
         edges.push({ x1: mainPos.x, y1: mainPos.y, x2: cx(n.id), y2: cy(n.id), kind: lumen(n), from: "main", to: n.id });
       }
       const p = n.parent;
@@ -219,7 +303,7 @@ export function ForestMap(props: {
           {(e, i) => (
             <path
               class={`fm-edge ${e.kind}`}
-              classList={{ lit: litEdge(e.from, e.to) }}
+              classList={{ lit: litEdge(e.from, e.to), frozen: dams().frozen.has(e.to) }}
               style={{ "animation-delay": `${i() * 40}ms` }}
               d={`M${e.x1},${e.y1} L${e.x2},${e.y2}`}
             />
@@ -245,11 +329,14 @@ export function ForestMap(props: {
                 <g
                   class={`fm-node ${lumen(n)}`}
                   classList={{
+                    ghost: isGhostId(n.id),
                     active: n.id === props.active(),
                     lit: !!spot() && spot()!.lit.has(n.id),
                     up: !!spot() && spot()!.up.has(n.id),
                     down: !!spot() && spot()!.down.has(n.id),
                     hov: hov() === n.id,
+                    dam: dams().damSet.has(n.id),
+                    conflict: dams().conflictSet.has(n.id),
                   }}
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
@@ -257,10 +344,15 @@ export function ForestMap(props: {
                   onMouseEnter={() => setHov(n.id)}
                   onMouseLeave={() => setHov(null)}
                 >
+                  <Show when={dams().damSet.has(n.id)}>
+                    <title>dirty — downstream conflict on {dams().dirtyOf(n.id).join(", ")}</title>
+                  </Show>
                   <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
                   <circle class="dot" cx="16" cy="0" r="5" />
-                  <text x="30" y="4.5">{leafOf(n.id)}</text>
-                  <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
+                  <text x={isGhostId(n.id) ? 16 : 30} y="4.5">{leafOf(n.id)}</text>
+                  <Show when={!isGhostId(n.id)}>
+                    <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
+                  </Show>
                 </g>
               </Show>
             );
@@ -275,8 +367,10 @@ const CSS = `
 .fm-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center;
   justify-content: center; overflow: auto; background: rgba(8, 6, 3, .93); backdrop-filter: blur(3px); }
 .fm-svg { display: block; margin: auto; max-width: 94vw; max-height: 90vh; height: auto; }
+/* every edge flows gently by default — the forest is "live water": work is
+   integration-ready and the world downstream is coherent. A dam (below) stops it. */
 .fm-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.6; opacity: 0;
-  animation: fm-fade .8s ease forwards; }
+  stroke-dasharray: 5 6; animation: fm-fade .8s ease forwards, fm-drift 3.2s linear infinite; }
 .fm-edge.blessed { stroke: var(--gold-deep); }
 .fm-edge.stale { stroke: var(--del); }
 .fm-edge.fanin { stroke: var(--patina); stroke-width: 1.3; stroke-dasharray: 11 3 2 3; animation-delay: .25s; }
@@ -295,6 +389,23 @@ const CSS = `
 .fm-main circle { fill: var(--gold-leaf); filter: drop-shadow(0 0 7px var(--gold-leaf)); }
 .fm-main text { fill: var(--gold-leaf); font-family: var(--display); font-style: italic; font-size: 15px; }
 
+/* the endstate ghost (✦ <project>): a destination, not a branch — dashed + faint, no
+   blessing dot or count, so it reads as the place the work is headed rather than work itself. */
+.fm-node.ghost rect { fill: none; stroke: var(--ink-faint); stroke-width: 1.3; stroke-dasharray: 5 4; }
+.fm-node.ghost text { fill: var(--ink-dim); font-family: var(--display); font-style: italic; font-size: 13.5px; }
+.fm-node.ghost .dot { display: none; }
+.fm-node.ghost:hover rect { stroke: var(--patina); fill: none; }
+
+/* DAMS: a dirty branch whose uncommitted paths collide with a downstream node's
+   own diff. The dam (red, pulsing) stops the water — every edge below it freezes
+   to a dim, static trickle, and the descendants it will actually conflict with
+   carry a dashed-red outline. The dam holds until the dirt commits + the forest restacks. */
+.fm-edge.frozen { stroke: var(--ink-faint) !important; opacity: .2 !important;
+  stroke-dasharray: 2 7 !important; animation: fm-fade .8s ease forwards !important; }   /* no drift = no flow */
+.fm-node.dam rect { stroke: var(--del); stroke-width: 2; filter: drop-shadow(0 0 8px var(--del)); }
+.fm-node.dam .dot { fill: var(--del); stroke: var(--del); animation: fm-pulse 1.6s ease-in-out infinite; }
+.fm-node.conflict rect { stroke: var(--del); stroke-dasharray: 4 3; }
+
 /* spotlight: hovering a node dims the field and lights its dependency neighborhood.
    !important beats the entrance animation's forwards-fill on opacity. */
 .fm-svg.focusing .fm-node { opacity: .16 !important; transition: opacity .14s; }
@@ -305,8 +416,13 @@ const CSS = `
 .fm-svg.focusing .fm-node.hov rect { stroke: var(--ink); stroke-width: 2; filter: drop-shadow(0 0 10px var(--gold-wash)); }          /* the hovered node */
 .fm-svg.focusing .fm-edge.lit { opacity: 1 !important; stroke: var(--gold-leaf) !important; stroke-width: 2.3;
   stroke-dasharray: 6 7; animation: fm-flow .6s linear infinite; }
+/* a frozen edge stays frozen even when the spotlight would otherwise light it */
+.fm-svg.focusing .fm-edge.frozen { opacity: .35 !important; stroke: var(--ink-faint) !important;
+  stroke-width: 1.6; stroke-dasharray: 2 7 !important; animation: fm-fade .8s ease forwards !important; }
 
 @keyframes fm-fade { to { opacity: 1; } }
+@keyframes fm-drift { to { stroke-dashoffset: -22; } }  /* gentle ambient flow toward each edge's target */
+@keyframes fm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @keyframes fm-flow { to { stroke-dashoffset: -26; } }  /* dashes flow toward each edge's target */
 @media (prefers-reduced-motion: reduce) {
   .fm-edge, .fm-node { animation: none; opacity: 1; }
