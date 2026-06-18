@@ -41,6 +41,28 @@ export function ForestMap(props: {
 }) {
   const [hov, setHov] = createSignal<string | null>(null);
 
+  // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
+  // the project's leaves on main in an ephemeral ref (read-only, never pushed) — does the whole
+  // thing land clean? Result keyed by project, shown as a badge on the ghost.
+  type Integ = { loading?: boolean; clean?: boolean; detail?: string };
+  const [integ, setInteg] = createSignal<Record<string, Integ>>({});
+  const ghostProject = (id: string) => id.replace(/^✦\s*/, "");
+  const runIntegrate = async (id: string) => {
+    const project = ghostProject(id);
+    setInteg((s) => ({ ...s, [project]: { loading: true } }));
+    try {
+      const r = await fetch("/integrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project }),
+      });
+      const d = await r.json();
+      setInteg((s) => ({ ...s, [project]: { clean: !!d.clean, detail: d.detail || "" } }));
+    } catch {
+      setInteg((s) => ({ ...s, [project]: { clean: false, detail: "integrate check failed — is the server up?" } }));
+    }
+  };
+
   const model = createMemo(() => {
     const list = props.spine();
     const byId: Record<string, SpineNode> = {};
@@ -340,7 +362,7 @@ export function ForestMap(props: {
                   }}
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
-                  onClick={() => props.onPick(n.id)}
+                  onClick={() => (isGhostId(n.id) ? runIntegrate(n.id) : props.onPick(n.id))}
                   onMouseEnter={() => setHov(n.id)}
                   onMouseLeave={() => setHov(null)}
                 >
@@ -352,6 +374,30 @@ export function ForestMap(props: {
                   <text x={isGhostId(n.id) ? 16 : 30} y="4.5">{leafOf(n.id)}</text>
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
+                  </Show>
+                  <Show when={isGhostId(n.id)}>
+                    <text
+                      class="cnt fm-integ"
+                      x={w - 12}
+                      y="4.5"
+                      classList={{
+                        clean: integ()[ghostProject(n.id)]?.clean === true,
+                        conflict:
+                          integ()[ghostProject(n.id)]?.clean === false &&
+                          !integ()[ghostProject(n.id)]?.loading,
+                      }}
+                    >
+                      {integ()[ghostProject(n.id)]?.loading
+                        ? "checking…"
+                        : integ()[ghostProject(n.id)]
+                          ? integ()[ghostProject(n.id)]!.clean
+                            ? "✓ lands clean"
+                            : "⚠ conflicts"
+                          : "▸ preview"}
+                      <Show when={integ()[ghostProject(n.id)]?.detail}>
+                        <title>{integ()[ghostProject(n.id)]!.detail}</title>
+                      </Show>
+                    </text>
                   </Show>
                 </g>
               </Show>
@@ -381,6 +427,12 @@ const CSS = `
 .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
 .fm-node.active text { fill: var(--ink); }
 .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }
+/* integrate-preview badge on the ghost node — mono + small (beats the ghost's italic display
+   via the extra class), faint until you hover, ember when the project won't land clean. */
+.fm-node.ghost .fm-integ { fill: var(--ink-faint); font-style: normal; font-family: var(--mono); font-size: 10px; text-anchor: end; }
+.fm-node.ghost:hover .fm-integ { fill: var(--ink-dim); }
+.fm-node.ghost .fm-integ.clean { fill: var(--moss, #7c9a6b); }
+.fm-node.ghost .fm-integ.conflict { fill: var(--ember, #d36a36); }
 .fm-node .dot { stroke-width: 1.5; fill: none; }
 .fm-node.blessed .dot { fill: var(--gold-leaf); stroke: var(--gold-leaf); filter: drop-shadow(0 0 5px var(--gold-wash)); }
 .fm-node.blessed rect { stroke: var(--gold-deep); }
