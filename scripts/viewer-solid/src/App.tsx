@@ -16,7 +16,7 @@ import { HashRouter, Route, A, useParams, useNavigate, useSearchParams } from "@
 import { homePath, forestPath, nodePath } from "./routes";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
-import { fetchJSON } from "./api";
+import { provider } from "./provider";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
 import { useDiffSelection } from "./useDiffSelection";
@@ -126,11 +126,11 @@ function Layout(props: { children?: JSX.Element }) {
 function Home() {
   const prs = createQuery(() => ({
     queryKey: ["myprs"],
-    queryFn: () => fetchJSON<PR[]>("/myprs"),
+    queryFn: () => provider.myPrs(),
   }));
   const projects = createQuery(() => ({
     queryKey: ["projects"],
-    queryFn: () => fetchJSON<Project[]>("/projects"),
+    queryFn: () => provider.projects(),
   }));
   const checkOrigin = createMutation(() => ({
     mutationFn: () => fetch("/check-origin", { method: "POST", body: "{}" }).then((r) => r.json()),
@@ -175,11 +175,8 @@ function Home() {
   const status = createQuery(() => ({
     queryKey: ["restack-status", running()],
     queryFn: () =>
-      fetchJSON<RestackStatus>(
-        "/restack-status" +
-          (running() && running() !== "__all__"
-            ? "?project=" + encodeURIComponent(running()!)
-            : "")
+      provider.restackStatus(
+        running() && running() !== "__all__" ? running()! : undefined
       ),
     enabled: !!running(),
     refetchInterval: (q) => (q.state.data?.running === false ? false : 2500),
@@ -206,13 +203,13 @@ function Home() {
   // (the typeahead source, ~all local heads) is heavy, so only fetch it while adding.
   const standalone = createQuery(() => ({
     queryKey: ["standalone"],
-    queryFn: () => fetchJSON<Standalone[]>("/standalone"),
+    queryFn: () => provider.standalone(),
   }));
   const [adding, setAdding] = createSignal(false);
   const [pick, setPick] = createSignal("");
   const branches = createQuery(() => ({
     queryKey: ["branches"],
-    queryFn: () => fetchJSON<string[]>("/branches"),
+    queryFn: () => provider.branches(),
     enabled: adding(),
   }));
   const pin = createMutation(() => ({
@@ -465,7 +462,7 @@ function NodeDetail() {
 
   const model = createQuery(() => ({
     queryKey: ["model", project()],
-    queryFn: () => fetchJSON<ForestModel>("/model?branch=" + encodeURIComponent(project())),
+    queryFn: () => provider.model(project()),
     enabled: !!project(),
   }));
   const spine = createMemo(() => flattenForest(model.data));
@@ -488,15 +485,12 @@ function NodeDetail() {
 
   const node = createQuery(() => ({
     queryKey: ["node", active(), base()],
-    queryFn: () =>
-      fetchJSON<NodeData>(
-        "/node?branch=" + encodeURIComponent(active()) + (base() ? "&base=" + base() : "")
-      ),
+    queryFn: () => provider.node(active(), base() || undefined),
     enabled: !!active(),
   }));
   const commits = createQuery(() => ({
     queryKey: ["commits", active()],
-    queryFn: () => fetchJSON<Commit[]>("/commits?branch=" + encodeURIComponent(active())),
+    queryFn: () => provider.commits(active()),
     enabled: !!active() && view() === "commits",
   }));
 
@@ -591,7 +585,7 @@ function NodeDetail() {
     tipBranch = branch;
     let p = purposeCache.get(branch);
     if (!p) {
-      try { p = await fetchJSON<Purpose>("/purpose?branch=" + encodeURIComponent(branch)); }
+      try { p = await provider.purpose(branch); }
       catch { p = { thesis: "" }; }
       purposeCache.set(branch, p);
     }

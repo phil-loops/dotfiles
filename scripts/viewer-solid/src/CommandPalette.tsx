@@ -1,7 +1,7 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { useLocation, useNavigate } from "@solidjs/router";
-import { fetchJSON } from "./api";
+import { provider } from "./provider";
 import { homePath, forestPath, nodePath } from "./routes";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
@@ -47,13 +47,13 @@ export default function CommandPalette() {
   // forest nodes (when a forest is open) — shares App's ["model", project] cache, no extra fetch
   const model = createQuery(() => ({
     queryKey: ["model", ctx().project],
-    queryFn: () => fetchJSON<{ nodes?: Record<string, unknown> }>("/model?branch=" + encodeURIComponent(ctx().project)),
+    queryFn: () => provider.model(ctx().project),
     enabled: open() && !!ctx().project,
   }));
   // forests (on the home screen) — shares App's ["projects"] cache
   const projects = createQuery(() => ({
     queryKey: ["projects"],
-    queryFn: () => fetchJSON<{ name: string }[]>("/projects"),
+    queryFn: () => provider.projects(),
     enabled: open() && !ctx().project,
   }));
 
@@ -70,7 +70,7 @@ export default function CommandPalette() {
       label: "↪ jump to checkout (HEAD)",
       run: async () => {
         try {
-          const h = await fetchJSON<{ branch?: string }>("/head");
+          const h = await provider.head();
           if (h.branch) navigate(nodePath(c.project, h.branch));
         } catch {
           /* head unavailable — no-op */
