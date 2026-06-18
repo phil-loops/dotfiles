@@ -51,7 +51,7 @@ echo "---"
 if (( up )); then
   echo "● viewer live · :${port} | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
 else
-  echo "○ viewer down — click a project to start it | color=#d36a36"
+  echo "○ viewer down — click to launch | color=#d36a36 bash=\"$self\" param1=--open terminal=false"
 fi
 echo "---"
 if (( n == 0 )); then
