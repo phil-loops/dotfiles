@@ -28,13 +28,21 @@ is_up() { curl -sf --max-time 1 -o /dev/null "$url" 2>/dev/null; }
 # attach to the `dev` window to watch logs / Ctrl-C it. Mirrors the `dev` alias
 # (NGROK=false task dev | tee). `exec $SHELL` keeps the window if the task exits.
 if [[ "$1" == "--start" ]]; then
-  if ! is_up; then
+  if is_up; then
+    open "$url"
+    open -g "swiftbar://refreshplugin?name=loops-dev" 2>/dev/null
+  else
     tmux has-session -t "$session" 2>/dev/null || tmux new-session -d -s "$session"
     tmux new-window -t "$session" -n dev -c "$repo" \
       "NGROK=false task dev 2>&1 | tee ${log}; exec \$SHELL" 2>/dev/null
+    # task dev takes a bit to bind :3000 (services + Next compile). Wait for it before
+    # opening so the click doesn't land on a dead page. Backgrounded (&!) so the click
+    # returns instantly AND survives SwiftBar reaping it; falls back to opening anyway
+    # after the timeout. Poke SwiftBar to re-render once it's up.
+    ( for i in {1..90}; do is_up && break; sleep 1; done
+      open "$url"
+      open -g "swiftbar://refreshplugin?name=loops-dev" 2>/dev/null ) &!
   fi
-  open "$url"
-  open -g "swiftbar://refreshplugin?name=loops-dev" 2>/dev/null
   exit 0
 fi
 
