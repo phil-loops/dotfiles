@@ -14,6 +14,7 @@
 // Fully self-contained (own class names + <style>): drops into App.tsx with one
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
 import { createMemo, createSignal, For, Show } from "solid-js";
+import { canMutate } from "./provider";
 import type { SpineNode } from "./types";
 
 const leafOf = (s: string): string => s.split("/").pop() ?? s;
@@ -48,6 +49,7 @@ export function ForestMap(props: {
   const [integ, setInteg] = createSignal<Record<string, Integ>>({});
   const ghostProject = (id: string) => id.replace(/^✦\s*/, "");
   const runIntegrate = async (id: string) => {
+    if (!canMutate) return; // static snapshot: no live integrate-preview
     const project = ghostProject(id);
     setInteg((s) => ({ ...s, [project]: { loading: true } }));
     try {
@@ -375,7 +377,7 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
                   </Show>
-                  <Show when={isGhostId(n.id)}>
+                  <Show when={isGhostId(n.id) && canMutate}>
                     <text
                       class="cnt fm-integ"
                       x={w - 12}

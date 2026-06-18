@@ -56,6 +56,11 @@ function parse<S extends z.ZodType>(schema: S, data: unknown, label: string): z.
 
 const q = (s: string): string => encodeURIComponent(s);
 
+// Branch → filesystem/URL slug for baked blobs. Slashes become "~" so a baked file
+// is a flat name (not a nested dir) and a static file server never decodes %2F into a
+// path segment. The bake script (bake.mjs) MUST use the identical transform.
+export const slug = (branch: string): string => branch.replaceAll("/", "~");
+
 export class HttpProvider implements DataProvider {
   readonly capabilities: Capabilities = { mutate: true, live: true };
 
@@ -74,6 +79,41 @@ export class HttpProvider implements DataProvider {
     fetchJSON<unknown>("/restack-status" + (project ? "?project=" + q(project) : "")).then((d) => parse(RestackStatus, d, "restack-status"));
 }
 
-// The one place a provider is chosen. A future StaticProvider lands behind a
-// build-time flag here; consumers import `provider` and never see the difference.
-export const provider: DataProvider = new HttpProvider();
+// Reads pre-baked /data/*.json blobs (see bake.mjs) — a frozen, slice-in-time
+// snapshot that needs no live server or GitHub connection. Read-only: mutating
+// actions are hidden by the UI via `capabilities.mutate = false`. `base` lets the
+// blobs live under a subpath if the static site isn't deployed at the root.
+export class StaticProvider implements DataProvider {
+  readonly capabilities: Capabilities = { mutate: false, live: false };
+  constructor(private base = "") {}
+
+  private get<S extends z.ZodType>(file: string, schema: S, label: string): Promise<z.infer<S>> {
+    return fetchJSON<unknown>(`${this.base}/data/${file}`).then((d) => parse(schema, d, label));
+  }
+
+  myPrs = () => this.get("myprs.json", z.array(PR), "myprs");
+  projects = () => this.get("projects.json", z.array(Project), "projects");
+  standalone = () => this.get("standalone.json", z.array(Standalone), "standalone");
+  branches = () => this.get("branches.json", z.array(z.string()), "branches");
+  model = (branch: string) => this.get(`model/${slug(branch)}.json`, ForestModel, "model");
+  // base variants (main/blessed) aren't baked — static shows the default parent diff.
+  // Tolerant of a missing blob: before the model resolves, the UI briefly queries the
+  // project name as if it were a branch (no blob for that) — return empty, don't 404-spam.
+  node = (branch: string, _base?: string) =>
+    this.get(`node/${slug(branch)}.json`, NodeData, "node").catch(() => ({ branch, files: [] }) as NodeData);
+  commits = (branch: string) => this.get(`commits/${slug(branch)}.json`, z.array(Commit), "commits");
+  purpose = (branch: string) => this.get(`purpose/${slug(branch)}.json`, Purpose, "purpose");
+  head = () => this.get("head.json", Head, "head");
+  sync = (branch: string) => this.get(`sync/${slug(branch)}.json`, SyncState, "sync");
+  restackStatus = () => Promise.resolve<RestackStatus>({ running: false });
+}
+
+// The one place a provider is chosen. `VITE_STATIC=1 vite build` bakes a snapshot
+// build; everything else stays live. Consumers import `provider` and never see which.
+const isStatic = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_STATIC === "1";
+export const provider: DataProvider = isStatic ? new StaticProvider() : new HttpProvider();
+
+// Convenience for the UI: gate live-only actions (bless / checkout / squash /
+// restack / integrate / chat / open) behind this so static mode shows no dead
+// buttons. Fixed at module load — the provider never changes within a session.
+export const canMutate = provider.capabilities.mutate;

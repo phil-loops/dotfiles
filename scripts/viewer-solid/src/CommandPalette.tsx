@@ -1,7 +1,7 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { useLocation, useNavigate } from "@solidjs/router";
-import { provider } from "./provider";
+import { provider, canMutate } from "./provider";
 import { homePath, forestPath, nodePath } from "./routes";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
@@ -60,7 +60,7 @@ export default function CommandPalette() {
   const commands = createMemo<Cmd[]>(() => {
     const c = ctx();
     const cmds: Cmd[] = [];
-    if (c.project) {
+    if (c.project && canMutate) {
       cmds.push({
         label: `⟳ restack ${leaf(c.project)} onto fresh main`,
         run: () => void post("/restack", { project: c.project }),

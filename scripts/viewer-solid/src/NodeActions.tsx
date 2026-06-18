@@ -13,7 +13,7 @@
 //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
 import { createSignal, Show } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
-import { provider } from "./provider";
+import { provider, canMutate } from "./provider";
 import type { SyncState } from "./types";
 
 interface CheckoutResult {
@@ -75,6 +75,7 @@ const alarm = { "font-size": "12px", color: "var(--ember)", "font-weight": "600"
 const migName = (p: string): string => (p || "").split("/").pop()?.replace(/^\d+_/, "") ?? "";
 
 export function NodeActions(props: { branch: string }) {
+  if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
   // 409 stash: the worktree holding the branch, awaiting a force-confirm.
   const [heldAt, setHeldAt] = createSignal<string | null>(null);

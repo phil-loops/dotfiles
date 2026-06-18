@@ -6,8 +6,10 @@
 // Polls ONLY while the tab is visible — same discipline as the /events SSE — so a
 // backgrounded tab doesn't keep the server alive and defeat its idle-reap.
 import { createSignal, onCleanup, Show } from "solid-js";
+import { canMutate } from "./provider";
 
 export function ServerStatus() {
+  if (!canMutate) return null; // static snapshot: no live server to monitor
   const [up, setUp] = createSignal(true); // optimistic; flips on the first failed poll
   let timer: ReturnType<typeof setInterval> | null = null;
 
