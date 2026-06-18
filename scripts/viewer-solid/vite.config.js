@@ -9,7 +9,7 @@ const ROUTES = [
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/events", "/restack-status", "/branches", "/standalone",
   "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
-  "/claude", "/purpose", "/squash", "/prep", "/restack-resolve", "/heartbeat",
+  "/claude", "/chat", "/purpose", "/squash", "/prep", "/restack-resolve", "/heartbeat",
 ];
 
 export default defineConfig({
