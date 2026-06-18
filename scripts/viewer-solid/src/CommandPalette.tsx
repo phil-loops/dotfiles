@@ -1,22 +1,19 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
+import { useLocation, useNavigate } from "@solidjs/router";
 import { fetchJSON } from "./api";
+import { homePath, forestPath, nodePath } from "./routes";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
 // forest by name (type a branch → Enter → you're there); it also carries a few safe global
 // commands. Deliberately NO "bless" command — blessing is earned per-file in the diff view
 // (bulk-bless is banned house-wide). Standalone, self-styled; mount once in App.
 //
-// Context comes from the URL: ?branch=<project> (the forest) and #node=<branch> (the node).
+// Context comes from the router: the splat path is the forest, ?node= the node.
 // With a forest open it lists that forest's nodes; on the home screen it lists the forests.
 
 type Cmd = { label: string; sub?: string; run: () => void };
 
-function urlCtx() {
-  const q = new URLSearchParams(location.search);
-  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
-  return { project: q.get("branch") || "", node: h.get("node") || "" };
-}
 const leaf = (s: string) => (s || "").split("/").pop() ?? "";
 const post = (url: string, body: unknown) =>
   fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -25,13 +22,18 @@ export default function CommandPalette() {
   const [open, setOpen] = createSignal(false);
   const [q, setQ] = createSignal("");
   const [sel, setSel] = createSignal(0);
-  const [ctx, setCtx] = createSignal(urlCtx());
+  const loc = useLocation();
+  const navigate = useNavigate();
+  // the splat path (sans leading "/") is the forest; ?node= is the node within it.
+  const ctx = createMemo(() => ({
+    project: loc.pathname.replace(/^\//, ""),
+    node: (loc.query.node as string) || "",
+  }));
   let inputRef: HTMLInputElement | undefined;
 
   const onKey = (e: KeyboardEvent) => {
     if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
       e.preventDefault();
-      setCtx(urlCtx());
       setQ("");
       setSel(0);
       setOpen((v) => !v);
@@ -69,22 +71,22 @@ export default function CommandPalette() {
       run: async () => {
         try {
           const h = await fetchJSON<{ branch?: string }>("/head");
-          if (h.branch) location.hash = "node=" + h.branch;
+          if (h.branch) navigate(nodePath(c.project, h.branch));
         } catch {
           /* head unavailable — no-op */
         }
       },
     });
-    cmds.push({ label: "⌂ home — all forests", run: () => { location.href = "?"; } });
+    cmds.push({ label: "⌂ home — all forests", run: () => navigate(homePath()) });
 
     if (c.project) {
       const nodes = model.data?.nodes ? Object.keys(model.data.nodes) : [];
       for (const b of nodes) {
-        cmds.push({ label: `→ ${leaf(b)}`, sub: b, run: () => { location.hash = "node=" + b; } });
+        cmds.push({ label: `→ ${leaf(b)}`, sub: b, run: () => navigate(nodePath(c.project, b)) });
       }
     } else {
       for (const p of projects.data || []) {
-        cmds.push({ label: `→ ${p.name}`, sub: "forest", run: () => { location.href = "?branch=" + encodeURIComponent(p.name); } });
+        cmds.push({ label: `→ ${p.name}`, sub: "forest", run: () => navigate(forestPath(p.name)) });
       }
     }
     return cmds;

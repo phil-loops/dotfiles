@@ -29,6 +29,11 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
 
   const pin = () => scroller && (scroller.scrollTop = scroller.scrollHeight);
 
+  // stop the in-flight turn: abort the fetch (closes the stream → the server SIGKILLs the
+  // headless claude), keep whatever streamed so far, then let the queue drain as normal.
+  let abort: AbortController | null = null;
+  const stop = () => abort?.abort();
+
   // You can fire off a message any time — even while Claude is still answering. `submit` just
   // enqueues; `pump` drains the queue one turn at a time. So a mid-stream message shows as
   // "queued" and auto-sends the instant the current turn ends — turns stay ordered, and each
@@ -61,10 +66,13 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
     setStreaming(true);
     setStatus("starting");
     pin();
+    const ctrl = new AbortController();
+    abort = ctrl;
     try {
       const res = await fetch("/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
         body: JSON.stringify({
           branch: props.branch,
           path: props.file.path,
@@ -129,12 +137,20 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // an aborted fetch is a user-initiated stop, not a failure — leave the partial answer be
+      if (!ctrl.signal.aborted) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
     } finally {
       setStreaming(false);
       setStatus(null);
-      // an answer that arrived empty (claude died before any token) reads as a failure
-      if (!msgs[idx]?.text && !error()) {
+      abort = null;
+      // mark a stopped-before-any-token turn so it doesn't read as an empty answer or an error
+      if (ctrl.signal.aborted) {
+        if (!msgs[idx]?.text) {
+          setMsgs(idx, "text", "⏹ stopped");
+        }
+      } else if (!msgs[idx]?.text && !error()) {
         setError("no response — the headless claude produced nothing");
       }
       inputEl?.focus();
@@ -194,14 +210,28 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
             )}
           </For>
           <Show when={streaming() || status()}>
-            <div class="cp-status">{status() || "responding"}…</div>
+            <div class="cp-status">
+              <span>{status() || "responding"}…</span>
+              <Show when={streaming()}>
+                <button class="cp-stop" title="stop responding" onClick={stop}>◼ stop</button>
+              </Show>
+            </div>
           </Show>
           {/* messages you sent while a turn was streaming — they auto-send in order */}
           <For each={pending}>
-            {(p) => (
+            {(p, i) => (
               <div class="cp-turn you queued">
                 <span class="cp-who">queued</span>
-                <div class="cp-text">{p}</div>
+                <div class="cp-text">
+                  <span>{p}</span>
+                  <button
+                    class="cp-unqueue"
+                    title="remove from queue"
+                    onClick={() => setPending(produce((arr) => arr.splice(i(), 1)))}
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
             )}
           </For>
@@ -277,7 +307,19 @@ const CSS = `
 .cp-caret { display: inline-block; width: 7px; height: 14px; margin-left: 1px; vertical-align: text-bottom;
   background: var(--gold, #e0ad4e); animation: cp-blink 1s step-end infinite; }
 @keyframes cp-blink { 50% { opacity: 0; } }
-.cp-status { font-size: 11.5px; color: var(--faint, #6f675a); font-style: italic; }
+.cp-status { font-size: 11.5px; color: var(--faint, #6f675a); font-style: italic; display: flex; align-items: center; gap: 10px; }
+.cp-stop {
+  font: inherit; font-style: normal; font-size: 11px; cursor: pointer;
+  color: var(--ember, #d36a36); background: transparent;
+  border: 1px solid var(--ember, #d36a36); border-radius: 5px; padding: 1px 8px;
+}
+.cp-stop:hover { background: rgba(211,106,54,.12); }
+.cp-unqueue {
+  border: 0; background: transparent; color: var(--faint, #6f675a);
+  font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; margin-left: 6px;
+  vertical-align: middle;
+}
+.cp-unqueue:hover { color: var(--ember, #d36a36); }
 .cp-err { font-size: 12px; color: var(--ember, #d36a36); }
 
 .cp-foot { display: flex; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--line, #3a332b); align-items: flex-end; }
