@@ -100,12 +100,7 @@ def state(branch):
     except ValueError:
         behind = 0   # origin/main absent or bad ref → treat as up-to-date (no badge)
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
-    # published = a remote-tracking ref for THIS branch exists on any remote. Suffix-
-    # match (not a `refs/remotes/*/X` glob) so slashed names like goal/foo and
-    # multiple remotes both resolve. More reliable than upstream config, which the
-    # repo's branch.autoSetupMerge=simple can silently point at origin/main.
-    # published = has an OPEN PR. Phil's rule: only an open PR counts — a bare remote ref
-    # doesn't. PRs live on the fork, so this reads phil-loops via gh (cached).
+    # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
     published = branch in _open_pr_heads()
     why = ""
     if behind == 0:
