@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -246,6 +246,8 @@ class H(BaseHTTPRequestHandler):
             return assist.start(self, raw)
         if self.path == "/chat":             # chat about a file → stream a headless claude back as SSE
             return chat.start(self, raw)
+        if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
+            return integrate.check(self, raw)
         self._send(404, "{}")
 
 
