@@ -215,6 +215,10 @@ Follow a strict layering pattern: **queries → models → wiring**.
 
 - **Inline object-parameter type literals in function signatures.** Don't declare a separate named type alias just to name the input shape. Example: `function update(input: { id: string; name?: string })` — not `type UpdateInput = { ... }; function update(input: UpdateInput)`. Standalone aliases pollute the file's mental context: readers have to scroll up to resolve the alias to understand the contract. Inlining keeps the contract at the call site, even with 5+ fields. Test code that uses `Deps<typeof fn>` / `Parameters<typeof fn>` extracts from the function itself, so inline types don't break it. Don't refactor pre-existing standalone types unless asked.
 
+# Comments
+
+Comment the extraordinary, not the obvious. A comment earns its place when it tells the reader something the code *can't*: a non-obvious **why**, a gotcha, a constraint, a deliberate deviation, a "this looks wrong but isn't." Don't narrate the **what** — if every delta carries a comment restating what the line does, that's noise, and it rots into tech debt as the code moves and the comments don't follow. When in doubt, let the code explain the code: clear names and small functions beat a comment. Reach for prose only when a reader would otherwise be surprised or misled.
+
 # Forest PR Design
 
 Each branch is **one reviewable unit — a single capability that compiles on its own**, named with one verb (`add X`, `record X`, `emit X`, `use X in Y`, `remove X`). Size tracks concern-count, not a line budget: prefer 3× 80-line PRs over 1× 200-line PR — but a cohesive primitive + its tests is fine even at ~250. The reference standard is **nalanj's PRs**: a feature shipped as ~7 single-verb stacked PRs, tests co-located, each metric its own tiny PR.
