@@ -30,7 +30,13 @@ def worktree():
 def blocked():
     # Don't start a restack while one is running or parked on a conflict — detaching
     # the scratch worktree under a live/paused rebase would corrupt it.
-    if subprocess.run(["pgrep", "-f", "stack-restack"], capture_output=True).returncode == 0:
+    # Match the actual INVOCATION (absolute script path + a following arg), not any
+    # process that merely mentions the string: a `git diff scripts/stack-restack`
+    # watcher or an editor with the file open used to false-positive this and 409 every
+    # restack. The real run is `<SCRIPTS>/stack-restack <project> …` (abs path + space);
+    # watchers use the relative path and editors have no trailing arg, so neither matches.
+    invocation = os.path.join(ctx.SCRIPTS, "stack-restack") + " "
+    if subprocess.run(["pgrep", "-f", invocation], capture_output=True).returncode == 0:
         return "a restack is already running"
     gitdir = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
     if gitdir and not os.path.isabs(gitdir):
@@ -42,17 +48,18 @@ def blocked():
 
 def cmd(project, wt, action=None):
     # action: None = fresh restack, "handoff" = AI-resolve the parked conflict + resume,
-    # "diagnose" = AI-analyze the parked conflict read-only (no resolve, no resume).
+    # "diagnose" = AI-resolve + stage the parked conflict for review (no resume),
+    # "discard"  = drop a staged diagnose fix, restoring the parked conflict.
     #
     # On clean success, detach the scratch worktree so it doesn't keep the last
     # rebased branch checked out (locking it from other worktrees). On a conflict-pause
     # stack-restack exits non-zero and `&&` short-circuits — the parked rebase is left
     # intact for /restack-resolve to resume.
     parts = [shlex.quote(os.path.join(ctx.SCRIPTS, "stack-restack")), shlex.quote(project)]
-    if action == "diagnose":
-        # Read-only: leaves the rebase exactly as parked. No worktree-detach tail —
-        # nothing finished, and detaching mid-park would fight the parked rebase.
-        parts.append("--diagnose")
+    if action in ("diagnose", "discard"):
+        # Both leave the rebase parked. No worktree-detach tail — nothing finished,
+        # and detaching mid-park would fight the parked rebase.
+        parts.append("--diagnose" if action == "diagnose" else "--discard")
         return " ".join(parts)
     if action == "handoff":
         parts.append("--handoff")
@@ -115,9 +122,10 @@ def restack(req, raw):
 
 
 def resolve(req, raw):
-    # One endpoint, two intents via `mode`:
+    # One endpoint, three intents via `mode`:
     #   "resolve"  (default) — AI-fix the parked conflict + resume the cascade
-    #   "diagnose"           — AI-analyze it read-only into stack-restack-conflict.json
+    #   "diagnose"           — AI-resolve + stage it for review (no resume) → conflict.json
+    #   "discard"            — drop a staged diagnose fix, restoring the parked conflict
     d = json.loads(raw or "{}")
     project = d.get("project", "")
     mode = d.get("mode", "resolve")
@@ -125,7 +133,7 @@ def resolve(req, raw):
         req._send(400, json.dumps({"ok": False, "err": "no project"}))
         return
     wt = worktree()
-    action = "diagnose" if mode == "diagnose" else "handoff"
+    action = {"diagnose": "diagnose", "discard": "discard"}.get(mode, "handoff")
     logpath = _spawn(cmd(project, wt, action=action), wt)
     req._send(200, json.dumps({"ok": True, "project": project, "mode": mode, "log": logpath}))
 
