@@ -16,7 +16,7 @@ import { HashRouter, Route, A, useParams, useNavigate, useSearchParams } from "@
 import { homePath, forestPath, nodePath } from "./routes";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
-import { provider } from "./provider";
+import { provider, canMutate } from "./provider";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
 import { useDiffSelection } from "./useDiffSelection";
@@ -90,7 +90,7 @@ function Layout(props: { children?: JSX.Element }) {
     qc.invalidateQueries({ queryKey: ["projects"] });
   };
   const openStream = () => {
-    if (es) return;
+    if (!canMutate || es) return; // static snapshot: no live event stream
     es = new EventSource("/events");
     es.addEventListener("update", refresh);
   };
@@ -249,13 +249,15 @@ function Home() {
         <div class="brand big">
           <span class="brand-mark">✦</span> blessed
         </div>
-        <button
-          class="origin-btn"
-          disabled={checkOrigin.isPending}
-          onClick={() => checkOrigin.mutate()}
-        >
-          {checkOrigin.isPending ? "checking…" : "↻ check origin"}
-        </button>
+        <Show when={canMutate}>
+          <button
+            class="origin-btn"
+            disabled={checkOrigin.isPending}
+            onClick={() => checkOrigin.mutate()}
+          >
+            {checkOrigin.isPending ? "checking…" : "↻ check origin"}
+          </button>
+        </Show>
       </header>
 
       <Show when={(prs.data || []).length}>
@@ -311,7 +313,7 @@ function Home() {
       <section>
         <div class="eyebrow-row">
           <h2 class="eyebrow">forests</h2>
-          <Show when={(projects.data || []).some((p) => p.behind > 0)}>
+          <Show when={canMutate && (projects.data || []).some((p) => p.behind > 0)}>
             <button
               class="restack-all"
               classList={{ armed: armed() === "__all__", running: running() === "__all__" }}
@@ -357,21 +359,26 @@ function Home() {
                         when={p.behind > 0}
                         fallback={<span class="forest-fresh fresh">✦ fresh</span>}
                       >
-                        <button
-                          class="forest-restack"
-                          classList={{ armed: armed() === p.name, running: busy() }}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            if (!busy()) arm(p.name);
-                          }}
+                        <Show
+                          when={canMutate}
+                          fallback={<span class="forest-meta">⟳ {p.behind} behind</span>}
                         >
-                          {busy()
-                            ? "⤳ restacking…"
-                            : armed() === p.name
-                              ? "restack?"
-                              : `⟳ ${p.behind} behind`}
-                        </button>
+                          <button
+                            class="forest-restack"
+                            classList={{ armed: armed() === p.name, running: busy() }}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              if (!busy()) arm(p.name);
+                            }}
+                          >
+                            {busy()
+                              ? "⤳ restacking…"
+                              : armed() === p.name
+                                ? "restack?"
+                                : `⟳ ${p.behind} behind`}
+                          </button>
+                        </Show>
                       </Show>
                     }
                   >
@@ -397,9 +404,11 @@ function Home() {
       <section>
         <div class="eyebrow-row">
           <h2 class="eyebrow">watching</h2>
-          <button class="watch-add" onClick={() => setAdding((v) => !v)}>
-            {adding() ? "× cancel" : "+ watch a branch"}
-          </button>
+          <Show when={canMutate}>
+            <button class="watch-add" onClick={() => setAdding((v) => !v)}>
+              {adding() ? "× cancel" : "+ watch a branch"}
+            </button>
+          </Show>
         </div>
         <Show when={adding()}>
           <div class="watch-pick">
@@ -436,13 +445,15 @@ function Home() {
                     <span class="watch-del-n">−{b.del}</span>
                   </span>
                 </A>
-                <button
-                  class="watch-unpin"
-                  title="stop watching"
-                  onClick={() => pin.mutate({ branch: b.branch, op: "remove" })}
-                >
-                  ×
-                </button>
+                <Show when={canMutate}>
+                  <button
+                    class="watch-unpin"
+                    title="stop watching"
+                    onClick={() => pin.mutate({ branch: b.branch, op: "remove" })}
+                  >
+                    ×
+                  </button>
+                </Show>
               </div>
             )}
           </For>
@@ -602,7 +613,9 @@ function NodeDetail() {
   let flashT: ReturnType<typeof setTimeout>;
   const note = (m: string) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
   const openInNvim = (path: string, line: number | null) =>
-    fetch("/open", {
+    !canMutate
+      ? undefined // static snapshot: no live nvim to open into
+      : fetch("/open", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch: active(), path, ...(line != null ? { pos: String(line) } : {}) }),
@@ -770,8 +783,10 @@ function NodeDetail() {
           </Show>
         </Show>
       </main>
-      <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
-      <Show when={chatFile()}>
+      <Show when={canMutate}>
+        <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
+      </Show>
+      <Show when={canMutate && chatFile()}>
         {(f) => <ChatPanel file={f()} branch={active()} onClose={() => setChatFile(null)} />}
       </Show>
       <Show when={showMap()}>
@@ -852,16 +867,18 @@ function FileEntry(props: {
         >
           {copied() ? "copied ✓" : "⎘ copy ref"}
         </button>
-        <button
-          class="file-act"
-          title="chat about this file with Claude — streamed right here"
-          onClick={() => props.onChat(props.file)}
-        >
-          ✦ chat
-        </button>
-        <button class="bless-btn" disabled={blessed()} onClick={doBless}>
-          {blessed() ? "blessed" : "bless ✦"}
-        </button>
+        <Show when={canMutate}>
+          <button
+            class="file-act"
+            title="chat about this file with Claude — streamed right here"
+            onClick={() => props.onChat(props.file)}
+          >
+            ✦ chat
+          </button>
+          <button class="bless-btn" disabled={blessed()} onClick={doBless}>
+            {blessed() ? "blessed" : "bless ✦"}
+          </button>
+        </Show>
       </div>
       <div class="diff" innerHTML={html()} />
     </article>

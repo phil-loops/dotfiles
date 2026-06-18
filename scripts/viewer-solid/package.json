@@ -6,7 +6,9 @@
     "dev": "vite --port 5174 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsgo --noEmit"
+    "typecheck": "tsgo --noEmit",
+    "bake": "node bake.mjs",
+    "build:static": "VITE_STATIC=1 vite build && node bake.mjs"
   },
   "dependencies": {
     "@solidjs/router": "^0.16.1",
