@@ -9,7 +9,12 @@ import { onCleanup } from "solid-js";
 // Shift+Tab move forward / backward through the files and wrap at the ends. The current file
 // gets a gold outline and scrolls into view (offset below the toolbar). Ignored while typing
 // in an input so the ask-Claude / watch fields keep normal Tab behavior.
-export function useFileCycle(options: { selector?: string; offsetTop?: number } = {}) {
+// `onCurrent` fires with the file the cursor lands on each move, so the sidebar can light the
+// matching row. The returned `setCurrent` lets a sidebar click seed the cursor, so a following
+// Tab continues from the file you clicked (the two motions share one cursor).
+export function useFileCycle(
+  options: { selector?: string; offsetTop?: number; onCurrent?: (path: string) => void } = {}
+) {
   const SEL = options.selector ?? ".entry[data-path]";
   const offset = options.offsetTop ?? 80;
   let currentPath: string | null = null;
@@ -53,6 +58,7 @@ export function useFileCycle(options: { selector?: string; offsetTop?: number } 
     }
     const { path, el } = list[idx];
     currentPath = path;
+    options.onCurrent?.(path); // light the matching sidebar row
     highlight(el); // sets scroll-margin-top FIRST so the scroll clears the toolbar
     el.scrollIntoView({ block: "start" });
   };
@@ -66,4 +72,7 @@ export function useFileCycle(options: { selector?: string; offsetTop?: number } 
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
+
+  // seed (or clear, with "") the cursor from outside — e.g. a sidebar click or a node change.
+  return { setCurrent: (path: string) => { currentPath = path || null; } };
 }

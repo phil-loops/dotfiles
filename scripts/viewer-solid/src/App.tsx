@@ -12,6 +12,8 @@ import {
   createMutation,
   useQueryClient,
 } from "@tanstack/solid-query";
+import { HashRouter, Route, A, useParams, useNavigate, useSearchParams } from "@solidjs/router";
+import { homePath, forestPath, nodePath } from "./routes";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { fetchJSON } from "./api";
@@ -19,13 +21,13 @@ import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
 import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
+import ChatPanel from "./ChatPanel";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
 import { ServerStatus } from "./ServerStatus";
 import type {
   ForestModel,
   SpineNode,
-  NodeMeta,
   FileDiff,
   NodeData,
   PR,
@@ -37,14 +39,6 @@ import type {
   Parked,
 } from "./types";
 
-// ── url ──────────────────────────────────────────────────────────────
-// ?branch=<project> chooses a forest; #node=<branch> the node you're reading.
-// No project → the home (your ledger summary). Project, no node → its tip.
-function readUrl() {
-  const q = new URLSearchParams(location.search);
-  const h = new URLSearchParams(location.hash.replace(/^#/, ""));
-  return { project: q.get("branch") || "", node: h.get("node") || "" };
-}
 const leaf = (s?: string): string => (s || "").split("/").pop() ?? "";
 const isBlessed = (f: FileDiff): boolean =>
   f.status === "clean" || f.status === "blessed";
@@ -71,19 +65,19 @@ function flattenForest(model: ForestModel | undefined): SpineNode[] {
     (l) => ({ ...l, id: l.branch, depth: 0 }) as unknown as SpineNode
   );
 }
-function lumen(n: NodeMeta): "stale" | "blessed" | "unblessed" {
-  if (n.stale > 0) return "stale";
-  if (n.total > 0 && n.clean === n.total) return "blessed";
-  return "unblessed";
-}
-
 // ── router ───────────────────────────────────────────────────────────
 export default function App() {
-  const [url, setUrl] = createSignal(readUrl());
-  const sync = () => setUrl(readUrl());
-  window.addEventListener("hashchange", sync);
-  window.addEventListener("popstate", sync);
+  return (
+    <HashRouter root={Layout}>
+      <Route path="/" component={Home} />
+      <Route path="/*forest" component={NodeDetail} />
+    </HashRouter>
+  );
+}
 
+// Persistent chrome that survives route changes: the SSE stream, the command
+// palette, and the server-status pill. The matched route renders as props.children.
+function Layout(props: { children?: JSX.Element }) {
   const qc = useQueryClient();
   // /events is a persistent SSE stream and the browser only allows ~6 connections per origin
   // (HTTP/1.1) — so a graveyard of idle tabs each squatting a stream exhausts the pool and new
@@ -121,9 +115,7 @@ export default function App() {
 
   return (
     <>
-      <Show when={url().project} fallback={<Home />}>
-        <NodeDetail url={url} />
-      </Show>
+      {props.children}
       <CommandPalette />
       <ServerStatus />
     </>
@@ -276,31 +268,39 @@ function Home() {
             {([proj, list]) => (
               <div class="pr-group">
                 <div class="pr-project">
-                  {proj}
-                  <Show when={forestOf(proj)}>
+                  <Show when={forestOf(proj)} fallback={proj}>
                     {(f) => (
-                      <span class="forest-meta">
-                        {" · "}{f().branches} {f().branches === 1 ? "node" : "nodes"}{" · "}
-                        <span class={f().behind > 0 ? "forest-fresh behind" : "forest-fresh fresh"}>
-                          {f().behind > 0 ? `↻ ${f().behind} behind` : "✦ fresh"}
+                      <>
+                        <A class="pr-project-link" href={forestPath(proj)}>{proj}</A>
+                        <span class="forest-meta">
+                          {" · "}{f().branches} {f().branches === 1 ? "node" : "nodes"}{" · "}
+                          <span class={f().behind > 0 ? "forest-fresh behind" : "forest-fresh fresh"}>
+                            {f().behind > 0 ? `↻ ${f().behind} behind` : "✦ fresh"}
+                          </span>
                         </span>
-                      </span>
+                      </>
                     )}
                   </Show>
                 </div>
                 <For each={list}>
                   {(p) => {
                     const [mark, cls] = review(p.review);
-                    return (
-                      <a
-                        class="pr-row"
-                        href={p.project ? `?branch=${encodeURIComponent(p.project)}#node=${encodeURIComponent(p.branch)}` : p.url}
-                        target={p.project ? "_self" : "_blank"}
-                      >
+                    const inner = () => (
+                      <>
                         <span class="pr-num">#{p.num}</span>
                         <span class="pr-title">{p.title}</span>
                         {p.draft && <span class="pr-draft">draft</span>}
                         <span class={`pr-rev ${cls}`}>{mark}</span>
+                      </>
+                    );
+                    // forest-backed PRs route in-app; a bare PR opens GitHub in a new tab.
+                    return p.project ? (
+                      <A class="pr-row" href={nodePath(p.project, p.branch)}>
+                        {inner()}
+                      </A>
+                    ) : (
+                      <a class="pr-row" href={p.url} target="_blank">
+                        {inner()}
                       </a>
                     );
                   }}
@@ -341,10 +341,10 @@ function Home() {
               const busy = () => running() === p.name || running() === "__all__";
               const stuck = () => parked()?.project === p.name;
               return (
-                <a
+                <A
                   class="forest-row"
                   classList={{ parked: stuck() }}
-                  href={`?branch=${encodeURIComponent(p.name)}`}
+                  href={forestPath(p.name)}
                 >
                   <span
                     class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
@@ -390,7 +390,7 @@ function Home() {
                       ⚠ resolve {leaf(parked()?.current || p.name)}
                     </button>
                   </Show>
-                </a>
+                </A>
               );
             }}
           </For>
@@ -430,7 +430,7 @@ function Home() {
           <For each={standalone.data}>
             {(b) => (
               <div class="watch-row">
-                <a class="watch-link" href={`?branch=${encodeURIComponent(b.branch)}`}>
+                <A class="watch-link" href={forestPath(b.branch)}>
                   <span class="watch-dot" />
                   <span class="watch-name">{b.branch}</span>
                   <span class="watch-meta">
@@ -438,7 +438,7 @@ function Home() {
                     <span class="watch-add-n">+{b.add}</span>
                     <span class="watch-del-n">−{b.del}</span>
                   </span>
-                </a>
+                </A>
                 <button
                   class="watch-unpin"
                   title="stop watching"
@@ -456,9 +456,12 @@ function Home() {
 }
 
 // ── node detail: forest spine + review surface ───────────────────────
-function NodeDetail(props: { url: () => { project: string; node: string } }) {
+function NodeDetail() {
   const qc = useQueryClient();
-  const project = () => props.url().project;
+  const params = useParams<{ forest: string }>();
+  const [search] = useSearchParams<{ node?: string }>();
+  const navigate = useNavigate();
+  const project = () => params.forest;
 
   const model = createQuery(() => ({
     queryKey: ["model", project()],
@@ -466,7 +469,7 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
     enabled: !!project(),
   }));
   const spine = createMemo(() => flattenForest(model.data));
-  const active = () => props.url().node || spine()[0]?.id || project();
+  const active = () => search.node || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
 
   // diff base + view (diffs|commits) reset when you change node.
@@ -478,6 +481,8 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
       lastActive = active();
       setBase("");
       setView("diffs");
+      setActiveFile("");
+      fileCycle.setCurrent("");
     }
   });
 
@@ -508,17 +513,73 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
     },
   }));
 
-  const goto = (b: string) => (location.hash = "node=" + b);
-  const litCount = () => spine().filter((n) => lumen(n) === "blessed").length;
+  const goto = (b: string) => navigate(nodePath(project(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
+  // "chat about this file" drawer — the file whose diff we're chatting about, or null.
+  const [chatFile, setChatFile] = createSignal<FileDiff | null>(null);
+
+  // the sidebar is a GitHub-PR-style file list for the active node; clicking a row
+  // scrolls its diff card into view and lights the row. activeFile tracks the lit row.
+  const [activeFile, setActiveFile] = createSignal("");
+  // Tab / Shift+Tab cycle through this node's diff cards (nvim <leader>gm style); onCurrent
+  // lights the matching sidebar row so the list tracks the keyboard cursor.
+  const fileCycle = useFileCycle({ onCurrent: setActiveFile });
+  const scrollToFile = (path: string) => {
+    setActiveFile(path);
+    fileCycle.setCurrent(path); // so a following Tab continues from the file you clicked
+    document
+      .querySelector(`.entry[data-path="${CSS.escape(path)}"]`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  // keep the lit sidebar row on screen when Tab cycles to a file scrolled out of the list
+  // (block:nearest is a no-op when it's already visible, e.g. right after a click).
+  createEffect(() => {
+    if (!activeFile()) return;
+    queueMicrotask(() =>
+      document.querySelector(".file-item.active")?.scrollIntoView({ block: "nearest" })
+    );
+  });
+  // scroll-spy: as you just scroll the diff surface, light the row for the card you're reading —
+  // the last card whose top has passed under the toolbar line. rAF-throttled; also seeds the Tab
+  // cursor so cycling continues from where you scrolled. (Tab/click route through here too via
+  // their own scroll, so all three motions converge on the same lit row.)
+  const SPY_OFFSET = 100;
+  let spyRaf = 0;
+  const onScroll = () => {
+    if (spyRaf) return;
+    spyRaf = requestAnimationFrame(() => {
+      spyRaf = 0;
+      const cards = document.querySelectorAll<HTMLElement>(".entry[data-path]");
+      if (!cards.length) return;
+      let pick = cards[0];
+      for (const el of cards) {
+        if (el.getBoundingClientRect().top <= SPY_OFFSET) pick = el;
+        else break;
+      }
+      const path = pick.getAttribute("data-path") || "";
+      if (path && path !== activeFile()) {
+        setActiveFile(path);
+        fileCycle.setCurrent(path);
+      }
+    });
+  };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onCleanup(() => {
+    window.removeEventListener("scroll", onScroll);
+    if (spyRaf) cancelAnimationFrame(spyRaf);
+  });
+  // dir/base split so the sidebar greys the folder and bolds the filename (like GitHub).
+  const fileSeg = (p: string): JSX.Element => {
+    const i = p.lastIndexOf("/");
+    return i < 0
+      ? (<b>{p}</b>)
+      : [<span class="file-dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
+  };
 
   // sweep-select diff text → floating "ask Claude" chip → POST /claude. Attributes selected
   // rows to a file via each .entry's existing data-path (see useDiffSelection).
   const { selection: claudeSel, clear: clearClaudeSel } = useDiffSelection();
-
-  // Tab / Shift+Tab cycle through this node's modified-file cards (nvim <leader>gm style).
-  useFileCycle();
 
   // hover a spine node → float its branch purpose (the one-line thesis) beside it.
   // Purposes are cheap + immutable for a session, so cache by branch and guard the
@@ -597,30 +658,54 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
   return (
     <div class="shell">
       <aside class="spine">
-        <a class="brand" href="?">
+        <A class="brand" href={homePath()}>
           <span class="brand-mark">✦</span> blessed
-        </a>
+        </A>
         <Show when={spine().length} fallback={<div class="spine-empty">{project()}</div>}>
-          <div class="spine-meta">{litCount()}/{spine().length} lit</div>
-          <ul class="spine-list">
-            <For each={spine()}>
-              {(n) => (
-                <li
-                  class="spine-node"
-                  classList={{ active: n.id === active() }}
-                  style={{ "padding-left": `${10 + n.depth * 14}px` }}
-                  onClick={() => goto(n.id)}
-                  onMouseEnter={(e) => showTip(n.id, e.currentTarget)}
-                  onMouseLeave={hideTip}
-                  title={n.id}
+          {/* current branch as a header; click → forest map to switch (also j/k, m) */}
+          <button
+            class="spine-branch"
+            onClick={() => setShowMap(true)}
+            onMouseEnter={(e) => showTip(active(), e.currentTarget)}
+            onMouseLeave={hideTip}
+            title="switch branch — forest map (m), or j/k"
+          >
+            <span class="spine-branch-name">{leaf(active())}</span>
+            <span class="spine-branch-switch">⊞</span>
+          </button>
+          <Show when={node.data} fallback={<div class="spine-meta">loading…</div>}>
+            {(data) => (
+              <>
+                <div class="spine-meta">
+                  {data().files.filter(isBlessed).length}/{data().files.length} files blessed
+                </div>
+                <Show
+                  when={data().files.length}
+                  fallback={<div class="spine-empty">nothing to review</div>}
                 >
-                  <span class={`dot ${lumen(n)}`} />
-                  <span class="spine-name">{leaf(n.id)}</span>
-                  <span class="spine-count">{n.clean}<span class="slash">/</span>{n.total}</span>
-                </li>
-              )}
-            </For>
-          </ul>
+                  <ul class="file-list">
+                    <For each={data().files}>
+                      {(f) => (
+                        <li
+                          class="file-item"
+                          classList={{ blessed: isBlessed(f), active: activeFile() === f.path }}
+                          onClick={() => scrollToFile(f.path)}
+                          title={f.path}
+                        >
+                          <span class={`dot ${isBlessed(f) ? "blessed" : "unblessed"}`} />
+                          <span class="file-item-name">{fileSeg(f.path)}</span>
+                          <span class="file-item-lines">
+                            <span class="add">+{f.add ?? 0}</span>
+                            <span class="del">−{f.del ?? 0}</span>
+                          </span>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+              </>
+            )}
+          </Show>
         </Show>
       </aside>
 
@@ -683,13 +768,18 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
           <Show when={node.data} fallback={<p class="loading">loading…</p>}>
             {(data) => (
               <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
-                <For each={data().files}>{(f) => <FileEntry file={f} bless={bless} />}</For>
+                <For each={data().files}>
+                  {(f) => <FileEntry file={f} bless={bless} branch={active()} onChat={setChatFile} />}
+                </For>
               </Show>
             )}
           </Show>
         </Show>
       </main>
       <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
+      <Show when={chatFile()}>
+        {(f) => <ChatPanel file={f()} branch={active()} onClose={() => setChatFile(null)} />}
+      </Show>
       <Show when={showMap()}>
         <ForestMap
           spine={spine}
@@ -715,13 +805,29 @@ function NodeDetail(props: { url: () => { project: string; node: string } }) {
   );
 }
 
-function FileEntry(props: { file: FileDiff; bless: { mutate: (file: string) => void } }) {
+function FileEntry(props: {
+  file: FileDiff;
+  bless: { mutate: (file: string) => void };
+  branch: string;
+  onChat: (f: FileDiff) => void;
+}) {
   const [foil, setFoil] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
   const blessed = () => isBlessed(props.file);
   const doBless = () => {
     setFoil(true); // play the foil on the click — feels instant; the steady gold lands on refetch
     props.bless.mutate(props.file.path);
     setTimeout(() => setFoil(false), 750);
+  };
+  // Copy a paste-ready reference for dropping the file into a Claude conversation.
+  const copyRef = async () => {
+    try {
+      await navigator.clipboard.writeText(`\`${props.file.path}\` (on branch \`${props.branch}\`)`);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch {
+      /* clipboard blocked (insecure origin / denied) — silently no-op */
+    }
   };
   const html = () =>
     props.file.patch
@@ -745,6 +851,20 @@ function FileEntry(props: { file: FileDiff; bless: { mutate: (file: string) => v
           <span class="add">+{props.file.add ?? 0}</span>
           <span class="del">−{props.file.del ?? 0}</span>
         </span>
+        <button
+          class="file-act"
+          title="copy a paste-ready file + branch reference for a Claude conversation"
+          onClick={copyRef}
+        >
+          {copied() ? "copied ✓" : "⎘ copy ref"}
+        </button>
+        <button
+          class="file-act"
+          title="chat about this file with Claude — streamed right here"
+          onClick={() => props.onChat(props.file)}
+        >
+          ✦ chat
+        </button>
         <button class="bless-btn" disabled={blessed()} onClick={doBless}>
           {blessed() ? "blessed" : "bless ✦"}
         </button>
