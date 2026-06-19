@@ -8,6 +8,15 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
+# `--ensure` (first arg) → headless "make sure :62333 is up" mode for the dev flow:
+# no browser, no build, just start the API server if it isn't already live, then exit.
+# `npm run dev`'s predev hook calls this so the Vite proxy always has a live upstream.
+ensure=0
+if [[ "${1:-}" == "--ensure" ]]; then
+  ensure=1
+  shift
+fi
+
 # No arg → land on the project picker (no ?branch). An explicit branch/project
 # name (or `--all`) opens straight into that view.
 branch="${1:-}"
@@ -23,6 +32,9 @@ STABLE_PORT="${STACK_REVIEW_PORT:-62333}"
 # Reuse a review server already live on the stable port instead of spawning a
 # second one on a new port (which would strand any open tab on a dead port).
 if curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1; then
+  if (( ensure )); then
+    exit 0
+  fi
   open "http://127.0.0.1:${STABLE_PORT}/${qs}"
   echo "✦ reusing live review → http://127.0.0.1:${STABLE_PORT}  (${branch:-project picker})"
   exit 0
@@ -33,13 +45,17 @@ servedir="$(mktemp -d)"   # scratch ROOT (restack.log etc.); the page itself is 
 # Build the Solid viewer so the server serves a current scripts/viewer-solid/dist/.
 # Cold-start only (a live server is reused above), so this ~0.4s build is rare. During
 # active viewer work use `npm run dev` (:5174); this is the stable served build.
-viewer="$here/viewer-solid"
-if [[ -d "$viewer/node_modules" ]]; then
-  ( cd "$viewer" && npm run build >/dev/null 2>&1 ) \
-    || echo "stack-review-serve: viewer build failed — serving the existing dist/ if present" >&2
-elif [[ ! -f "$viewer/dist/index.html" ]]; then
-  echo "stack-review-serve: viewer not built and node_modules missing — run 'npm install' in $viewer" >&2
-  exit 1
+# In --ensure (dev) mode the app is served by Vite on :5174, so :62333 only needs to
+# answer the JSON/SSE API — skip the dist build entirely.
+if (( ! ensure )); then
+  viewer="$here/viewer-solid"
+  if [[ -d "$viewer/node_modules" ]]; then
+    ( cd "$viewer" && npm run build >/dev/null 2>&1 ) \
+      || echo "stack-review-serve: viewer build failed — serving the existing dist/ if present" >&2
+  elif [[ ! -f "$viewer/dist/index.html" ]]; then
+    echo "stack-review-serve: viewer not built and node_modules missing — run 'npm install' in $viewer" >&2
+    exit 1
+  fi
 fi
 
 # start the server detached; it prints its chosen port on the first line (the
@@ -47,6 +63,11 @@ fi
 python3 "$here/stack-review-server.py" "$servedir" "$here" "$repo" > "$servedir/port" 2>"$servedir/log" &!
 for i in {1..60}; do port=$(cat "$servedir/port" 2>/dev/null); [[ -n "$port" ]] && break; sleep 0.1; done
 [[ -n "${port:-}" ]] || { echo "stack-review-serve: server didn't start"; cat "$servedir/log"; exit 1; }
+
+if (( ensure )); then
+  echo "stack-review-serve: backend ensured live → http://127.0.0.1:${port}"
+  exit 0
+fi
 
 open "http://127.0.0.1:${port}/${qs}"
 echo "✦ live review → http://127.0.0.1:${port}  (${branch:-project picker})"
