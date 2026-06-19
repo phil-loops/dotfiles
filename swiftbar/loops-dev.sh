@@ -47,7 +47,7 @@ if [[ "$1" == "--start" ]]; then
 fi
 
 # --- render the menu -----------------------------------------------------------------
-echo "◎ loops"        # static title — no polling, so the title can't show live status
+echo "◎"        # static title — no polling, so the title can't show live status
 echo "---"
 if is_up; then
   echo "● site up · :${port} | color=#3fb950 href=${url}"
