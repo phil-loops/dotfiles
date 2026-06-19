@@ -49,7 +49,7 @@ esac
 
 # --- render the menu ----------------------------------------------------------
 if is_up; then
-  echo "web | color=#3fb950"
+  echo "● | color=#3fb950"
   echo "---"
   echo "● viewer live · :${port} | color=#3fb950 href=${base}/"
   echo "Open in Chrome | bash=\"$self\" param1=--open terminal=false"
@@ -57,7 +57,7 @@ if is_up; then
   echo "Restart server | bash=\"$self\" param1=--restart terminal=false"
   echo "Stop server | bash=\"$self\" param1=--stop terminal=false color=#d36a36"
 else
-  echo "web | color=#8b949e"
+  echo "○ | color=#8b949e"
   echo "---"
   echo "○ viewer down | color=#8b949e"
   echo "Launch & open in Chrome | bash=\"$self\" param1=--open terminal=false color=#3fb950"
