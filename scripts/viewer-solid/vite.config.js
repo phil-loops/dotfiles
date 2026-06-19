@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
@@ -12,8 +13,41 @@ const ROUTES = [
   "/claude", "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/heartbeat",
 ];
 
+// Dev-only keep-alive: the Python backend self-reaps after 15min without an /events
+// SSE or /heartbeat (stack-review-server.py IDLE=900). `predev` starts it, but a closed
+// tab (overnight) lets it reap mid-session with nothing to revive it — the proxy then
+// 500s forever. Bind the backend's life to the `npm run dev` process instead: POST
+// /heartbeat every 60s (resets the idle timer, so it never reaps), and if it's already
+// down, respawn it headless. Zero prod impact — only runs under `vite serve`.
+function keepBackendAlive() {
+  const respawn = () =>
+    spawn(`${process.env.HOME}/.dotfiles/scripts/stack-review-serve`, ["--ensure"], {
+      stdio: "ignore",
+      detached: true,
+    })
+      .on("error", () => {})
+      .unref();
+
+  return {
+    name: "keep-backend-alive",
+    apply: "serve",
+    configureServer() {
+      const beat = async () => {
+        try {
+          const r = await fetch(`${API}/heartbeat`, { method: "POST" });
+          if (!r.ok) respawn();
+        } catch {
+          respawn(); // connection refused → backend down → bring it back
+        }
+      };
+      void beat();
+      setInterval(beat, 60_000).unref();
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [solid()],
+  plugins: [solid(), keepBackendAlive()],
   server: {
     port: 5174,
     strictPort: true,
