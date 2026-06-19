@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "$HOME/.dotfiles/scripts/stack-review-serve --ensure || true",
     "dev": "vite --port 5174 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
