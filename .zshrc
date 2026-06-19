@@ -17,6 +17,7 @@ alias kcup="kubectl config use-context production"
 alias kcus="kubectl config use-context staging"
 alias zconfig="nvim ~/.zshrc"
 alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles"; git push); source ~/.zshrc'
+alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design doc (see scripts/dd-design)
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
 alias db="task db:port_forward"
 alias db:rw="task db:port_forward:rw"
