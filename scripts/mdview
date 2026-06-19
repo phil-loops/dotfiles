@@ -1,0 +1,86 @@
+#!/bin/zsh
+# mdview <file.md> — render a markdown file to a styled, self-contained HTML page
+# (light/dark aware) and open it in the browser. Uses `marked` via npx (cached
+# after first run). Output goes to a temp file keyed by the source name, so
+# re-running overwrites instead of cluttering the source directory.
+#
+#   mdview ~/notes/foo.md
+#   mdview README.md
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+src="${1:-}"
+if [[ -z "$src" ]]; then
+  print -u2 "usage: mdview <file.md>"
+  exit 1
+fi
+if [[ ! -f "$src" ]]; then
+  print -u2 "mdview: no such file: $src"
+  exit 1
+fi
+
+# Title from the first H1, falling back to the filename. HTML-escape it.
+title=$(grep -m1 '^# ' "$src" 2>/dev/null | sed 's/^# *//' || true)
+[[ -n "$title" ]] || title="${src:t}"
+title=$(print -r -- "$title" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+
+out="${TMPDIR:-/tmp}/mdview-${src:t:r}.html"
+
+# --- header (static) ---
+cat > "$out" <<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+HTML
+# --- title (dynamic) ---
+print -r -- "<title>${title}</title>" >> "$out"
+# --- style + body open (static) ---
+cat >> "$out" <<'HTML'
+<style>
+  :root{
+    --bg:#ffffff; --fg:#1f2328; --muted:#656d76; --link:#0969da;
+    --code-bg:#f6f8fa; --border:#d0d7de; --quote:#57606a;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --link:#4493f8;
+      --code-bg:#161b22; --border:#30363d; --quote:#9198a1;
+    }
+  }
+  *{box-sizing:border-box}
+  body{background:var(--bg); color:var(--fg);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;
+    margin:0; padding:48px 20px;}
+  main{max-width:860px; margin:0 auto;}
+  h1,h2,h3{line-height:1.25; margin:1.8em 0 .6em;}
+  h1{font-size:2em; border-bottom:1px solid var(--border); padding-bottom:.3em;}
+  h2{font-size:1.5em; border-bottom:1px solid var(--border); padding-bottom:.3em; margin-top:2.2em;}
+  h3{font-size:1.2em;}
+  a{color:var(--link); text-decoration:none;}
+  a:hover{text-decoration:underline;}
+  p,li{margin:.5em 0;}
+  hr{border:0; border-top:1px solid var(--border); margin:2.4em 0;}
+  blockquote{margin:1em 0; padding:.2em 1em; color:var(--quote);
+    border-left:.3em solid var(--border);}
+  code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.88em; background:var(--code-bg); padding:.15em .4em; border-radius:6px;}
+  pre{background:var(--code-bg); border:1px solid var(--border); border-radius:8px;
+    padding:14px 16px; overflow-x:auto; line-height:1.5;}
+  pre code{background:none; padding:0; font-size:.86em;}
+  table{border-collapse:collapse; width:100%; margin:1em 0; display:block; overflow-x:auto;}
+  th,td{border:1px solid var(--border); padding:7px 12px; text-align:left;}
+  th{background:var(--code-bg);}
+  .md > :first-child{margin-top:0;}
+</style>
+</head>
+<body><main class="md">
+HTML
+# --- rendered markdown body ---
+npx -y marked -i "$src" >> "$out"
+# --- footer (static) ---
+print -r -- '</main></body></html>' >> "$out"
+
+print "mdview → $out"
+open "$out"
