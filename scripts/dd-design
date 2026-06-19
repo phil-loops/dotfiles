@@ -1,0 +1,52 @@
+#!/bin/zsh
+# dd-design — jump into the current design doc in nvim, then dismiss the launchpad pane.
+#
+# Meant to be aliased to `dd` and run from the bottom "launchpad" pane that Claude
+# spawns during the /design loop. It:
+#   1. opens the design doc in the `design` tmux window (reuse or create), and
+#   2. kills the pane it was invoked from (the launchpad), so you land in the doc
+#      and the launchpad vanishes — zero Claude in the loop.
+#
+# Which doc: explicit arg › $DESIGN_DOC (Claude sets this when spawning the launchpad)
+# › newest ~/design-docs/*.md.
+#
+# It deliberately does NOT touch the doc's `<file>.submit-target` sidecar — Claude
+# owns that, so `:submit` keeps handing back to Claude's pane.
+set -euo pipefail
+set -o pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+session="${DESIGN_TMUX:-loops}"
+docs_dir="$HOME/design-docs"
+
+file="${1:-${DESIGN_DOC:-}}"
+if [[ -z "$file" ]]; then
+  local -a found
+  found=("$docs_dir"/*.md(N.om))   # N: nullglob, .: regular files, om: newest mtime first
+  file="${found[1]:-}"
+fi
+
+if [[ -z "$file" || ! -f "$file" ]]; then
+  print -u2 "dd: no design doc found (looked in $docs_dir)"
+  exit 1
+fi
+
+# the pane we're running in — dismiss it last, after the doc is up elsewhere
+launchpad="${TMUX_PANE:-}"
+
+if [[ -z "${TMUX:-}" ]]; then
+  exec nvim "$file"   # not in tmux: just open it here
+fi
+
+if tmux list-windows -t "$session" -F '#{window_name}' 2>/dev/null | grep -qx design; then
+  tmux send-keys -t "${session}:design" Escape ":edit ${file}" Enter
+  tmux select-window -t "${session}:design"
+else
+  tmux new-window -t "$session" -n design "nvim ${(q)file}"
+fi
+
+# Dismiss the launchpad. Target it explicitly: after the select/new-window above the
+# *active* pane is now nvim, so a bare `kill-pane` would close the doc instead.
+if [[ -n "$launchpad" ]]; then
+  tmux kill-pane -t "$launchpad" 2>/dev/null || true
+fi
