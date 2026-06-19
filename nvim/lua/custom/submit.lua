@@ -30,8 +30,13 @@ vim.api.nvim_create_user_command("Submit", function(opts)
     vim.notify("Submit: couldn't reach pane " .. target .. " (still saved)", vim.log.levels.WARN)
     return
   end
-  vim.notify("✦ submitted to Claude", vim.log.levels.INFO)
-end, { nargs = "?", desc = "hand the current design doc back to the Claude session (writes + tmux send-keys)" })
+  -- snap focus back to the Claude pane, then close nvim — the doc is handed off, so
+  -- get out of the way. `dd` re-enters a fresh nvim when Claude's rewrite is ready.
+  vim.fn.system({ "tmux", "select-window", "-t", target })
+  vim.fn.system({ "tmux", "select-pane", "-t", target })
+  vim.cmd("silent! wall") -- save any other touched buffers so qa won't block
+  vim.cmd("qa")
+end, { nargs = "?", desc = "hand the current design doc back to the Claude session, refocus it, and close nvim" })
 
 -- lowercase `:submit` → `:Submit`, only when the whole command line is exactly `submit`
 vim.cmd([[cnoreabbrev <expr> submit (getcmdtype() == ':' && getcmdline() == 'submit') ? 'Submit' : 'submit']])
