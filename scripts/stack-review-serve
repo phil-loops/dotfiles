@@ -27,17 +27,41 @@ here="${0:A:h}"
 # of silently binding to the wrong place (the empty-/model footgun).
 repo=$(git rev-parse --show-toplevel 2>/dev/null) \
   || { echo "stack-review-serve: not inside a git repo" >&2; exit 1; }
+# Repo IDENTITY for the squatter check: the git common dir, shared by every
+# worktree of the same repo (so launching from a feature worktree still matches
+# the main checkout's live server). Must mirror the server's _repo_id().
+repo_id=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
 STABLE_PORT="${STACK_REVIEW_PORT:-62333}"
 
-# Reuse a review server already live on the stable port instead of spawning a
-# second one on a new port (which would strand any open tab on a dead port).
-if curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1; then
-  if (( ensure )); then
+# A review server already live on the stable port belongs to SOME repo — one
+# global port, one repo at a time. If it's ours, reuse it; if a foreign repo
+# squats the port (the "no forests configured" footgun), reclaim it: kill the
+# holder and fall through to launch a server bound to THIS repo.
+sig=$(curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" 2>/dev/null) || sig=""
+if [[ -n "$sig" ]]; then
+  live_repo=$(print -r -- "$sig" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("repo",""))' 2>/dev/null)
+  if [[ -n "$live_repo" && "$live_repo" == "$repo_id" ]]; then
+    if (( ensure )); then
+      exit 0
+    fi
+    open "http://127.0.0.1:${STABLE_PORT}/${qs}"
+    echo "✦ reusing live review → http://127.0.0.1:${STABLE_PORT}  (${branch:-project picker})"
     exit 0
   fi
-  open "http://127.0.0.1:${STABLE_PORT}/${qs}"
-  echo "✦ reusing live review → http://127.0.0.1:${STABLE_PORT}  (${branch:-project picker})"
-  exit 0
+
+  # Foreign squatter (or a pre-/sig-repo server that can't identify itself).
+  live_pid=$(print -r -- "$sig" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("pid",""))' 2>/dev/null)
+  [[ -z "$live_pid" ]] && live_pid=$(lsof -ti "TCP:${STABLE_PORT}" -sTCP:LISTEN 2>/dev/null | head -1)
+  other=$(basename "$(dirname "${live_repo:-?}")")
+  if [[ -n "$live_pid" ]]; then
+    kill "$live_pid" 2>/dev/null
+    # wait for the port to actually free before we try to bind it
+    for i in {1..50}; do
+      curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1 || break
+      sleep 0.1
+    done
+  fi
+  echo "✦ reclaimed :${STABLE_PORT} from another repo (${other}) → rebinding to $(basename "$repo")" >&2
 fi
 
 servedir="$(mktemp -d)"   # scratch ROOT (restack.log etc.); the page itself is the built dist/

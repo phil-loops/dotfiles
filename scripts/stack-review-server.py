@@ -43,6 +43,18 @@ def _main_worktree():
 
 MAIN_WT = _main_worktree()
 
+
+def _repo_id():
+    # Stable identity of the repo this server is bound to: the git COMMON dir
+    # (shared by every worktree of the same repo, so launching from a feature
+    # worktree still matches the main checkout). Used by stack-review-serve to
+    # tell "this is my repo, reuse it" from "a foreign repo squats the port".
+    gd = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+    return gd or CWD
+
+
+REPO_ID = _repo_id()
+
 # wire the shared context for the extracted handler modules (srv/*)
 srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT)
 
@@ -145,7 +157,9 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(data)
         elif u.path == "/model":          return review.model(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
-            self._send(200, json.dumps({"sig": srvctx.model_sig()}))
+            # repo + pid let stack-review-serve detect a foreign-repo squatter on the
+            # stable port and reclaim it (kill REPO_ID's holder, relaunch for its own repo).
+            self._send(200, json.dumps({"sig": srvctx.model_sig(), "repo": REPO_ID, "pid": os.getpid()}))
         elif u.path == "/head":  # the branch the main checkout currently points at (for "jump to checkout")
             return checkout.head(self)
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
