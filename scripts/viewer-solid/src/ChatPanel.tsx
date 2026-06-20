@@ -1,6 +1,7 @@
 import { createSignal, onCleanup, onMount, For, Show, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { FileDiff } from "./types";
+import { appendMsg, setMsgText, setSession, thread } from "./chatStore";
 
 // ChatPanel — "chat about this file", with Claude's answer streaming in token-by-token.
 // A right-side drawer scoped to ONE file on ONE branch: the diff is the opening context,
@@ -11,19 +12,18 @@ import type { FileDiff } from "./types";
 //
 // EventSource only speaks GET, and we need a JSON POST body — so we read the SSE frames off
 // the fetch response stream by hand (split on the blank-line frame boundary).
-interface Msg {
-  role: "you" | "claude";
-  text: string;
-}
-
+//
+// History (msgs) and the resume session-id live in the module-level chatStore keyed by
+// branch+path, not in this component — so closing the drawer or reloading the page no longer
+// wipes the conversation. `msgs`/`session` below are just reactive views onto that thread.
 export default function ChatPanel(props: { file: FileDiff; branch: string; onClose: () => void }) {
-  const [msgs, setMsgs] = createStore<Msg[]>([]);
+  const msgs = () => thread(props.branch, props.file.path).msgs;
+  const session = () => thread(props.branch, props.file.path).session;
   const [pending, setPending] = createStore<string[]>([]); // queued while a turn streams
   const [input, setInput] = createSignal("");
   const [streaming, setStreaming] = createSignal(false);
   const [status, setStatus] = createSignal<string | null>(null);
   const [error, setError] = createSignal<string | null>(null);
-  const [session, setSession] = createSignal<string>("");
   let scroller: HTMLDivElement | undefined;
   let inputEl: HTMLTextAreaElement | undefined;
 
@@ -59,10 +59,14 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
   };
 
   const runTurn = async (q: string) => {
+    // Pin the thread for the whole turn: streaming writes must land on the file we started on,
+    // even if the user switches files mid-stream (props would otherwise move out from under us).
+    const branch = props.branch;
+    const path = props.file.path;
+    const resume = session();
     setError(null);
-    setMsgs(msgs.length, { role: "you", text: q });
-    const idx = msgs.length;
-    setMsgs(idx, { role: "claude", text: "" });
+    appendMsg(branch, path, { role: "you", text: q });
+    const idx = appendMsg(branch, path, { role: "claude", text: "" });
     setStreaming(true);
     setStatus("starting");
     pin();
@@ -74,11 +78,11 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
         headers: { "Content-Type": "application/json" },
         signal: ctrl.signal,
         body: JSON.stringify({
-          branch: props.branch,
-          path: props.file.path,
-          patch: session() ? undefined : props.file.patch, // diff only seeds turn one
+          branch,
+          path,
+          patch: resume ? undefined : props.file.patch, // diff only seeds turn one
           question: q,
-          resume: session() || undefined,
+          resume: resume || undefined,
         }),
       });
       if (!res.ok || !res.body) {
@@ -118,13 +122,13 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
           const payload = JSON.parse(data);
           if (event === "token") {
             setStatus(null);
-            setMsgs(idx, "text", (t) => t + (payload.t || ""));
+            setMsgText(branch, path, idx, (t) => t + (payload.t || ""));
             pin();
           } else if (event === "status") {
             setStatus(payload.s);
           } else if (event === "done") {
             if (payload.session_id) {
-              setSession(payload.session_id);
+              setSession(branch, path, payload.session_id);
             }
             finished = true;
           } else if (event === "error") {
@@ -146,11 +150,12 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
       setStatus(null);
       abort = null;
       // mark a stopped-before-any-token turn so it doesn't read as an empty answer or an error
+      const answered = thread(branch, path).msgs[idx]?.text;
       if (ctrl.signal.aborted) {
-        if (!msgs[idx]?.text) {
-          setMsgs(idx, "text", "⏹ stopped");
+        if (!answered) {
+          setMsgText(branch, path, idx, () => "⏹ stopped");
         }
-      } else if (!msgs[idx]?.text && !error()) {
+      } else if (!answered && !error()) {
         setError("no response — the headless claude produced nothing");
       }
       inputEl?.focus();
@@ -165,6 +170,7 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
   onMount(() => {
     window.addEventListener("keydown", onKey);
     inputEl?.focus();
+    pin(); // reopened with restored history — drop to the latest turn
   });
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
@@ -190,19 +196,19 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
         </header>
 
         <div class="cp-body" ref={scroller}>
-          <Show when={!msgs.length}>
+          <Show when={!msgs().length}>
             <p class="cp-empty">
               Ask anything about this diff — what it does, whether it's correct, what you'd
               change. Claude reads the diff and can look at related code (read-only).
             </p>
           </Show>
-          <For each={msgs}>
+          <For each={msgs()}>
             {(m, i) => (
               <div class="cp-turn" classList={{ you: m.role === "you", claude: m.role === "claude" }}>
                 <span class="cp-who">{m.role}</span>
                 <div class="cp-text">
                   {m.text}
-                  <Show when={streaming() && m.role === "claude" && i() === msgs.length - 1}>
+                  <Show when={streaming() && m.role === "claude" && i() === msgs().length - 1}>
                     <span class="cp-caret" />
                   </Show>
                 </div>
