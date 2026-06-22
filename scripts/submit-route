@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""submit-route — the `:submit` warm router's core query.
+
+Given an ANCHOR (a worktree/file path, or a branch name), find a LIVE Claude Code
+session already working on it and print the tmux pane to hand the envelope to.
+
+There is no separate registry: the presence store claude-session-track already
+maintains (~/.claude/session-presence/*.json) carries everything the router needs
+— `tmux_pane`, `cwd`/`repo`/`branch`, and `pid`/`start_time` for liveness. So the
+presence store IS the anchor→pane registry (per the submit-primitive design:
+"registry → claude-sessions, it's all the same thing").
+
+Contract:
+  exit 0 + print "<pane>"   → WARM: forward the envelope into that pane.
+  exit 1 + print nothing    → COLD: caller spawns a fresh session/split.
+
+Usage:
+  submit-route <anchor>                 # anchor = path (worktree/file) or branch
+  submit-route --json <anchor>          # full match as JSON (pane/session/branch/cwd)
+  submit-route --exclude-self <anchor>  # ignore the calling session's own pane
+"""
+import os, sys, json, glob, subprocess
+
+DIR = os.path.expanduser("~/.claude/session-presence")
+
+
+def sh(args):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        return ""
+
+
+def pid_alive(pid, start):
+    """A session is alive iff its owning process exists AND its start-time matches
+    (guards pid reuse) — the same liveness model claude-sessions uses."""
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass
+    except Exception:
+        return False
+    return " ".join(sh(["ps", "-o", "lstart=", "-p", str(pid)]).split()) == start
+
+
+def worktree_of(path):
+    """Toplevel of the git worktree containing path (file or dir), else ''. Each
+    worktree is its own toplevel, so this matches per-worktree, not per-repo."""
+    d = path if os.path.isdir(path) else (os.path.dirname(path) or ".")
+    return sh(["git", "-C", d, "rev-parse", "--show-toplevel"])
+
+
+def live_records():
+    for f in glob.glob(os.path.join(DIR, "*.json")):
+        try:
+            r = json.load(open(f))
+        except Exception:
+            continue
+        if pid_alive(r.get("pid"), r.get("start_time", "")):
+            yield r
+
+
+def main(argv):
+    as_json = "--json" in argv
+    exclude_self = "--exclude-self" in argv
+    rest = [a for a in argv if not a.startswith("--")]
+    if not rest:
+        sys.stderr.write("usage: submit-route [--json] [--exclude-self] <anchor>\n")
+        return 2
+    anchor = rest[0]
+    self_pane = os.environ.get("TMUX_PANE", "")
+
+    # path anchor → resolve to its worktree; otherwise treat the string as a branch
+    looks_like_path = os.path.sep in anchor or os.path.exists(os.path.expanduser(anchor))
+    anchor_wt = worktree_of(os.path.abspath(os.path.expanduser(anchor))) if looks_like_path else ""
+
+    matches = []
+    for r in live_records():
+        pane = r.get("tmux_pane")
+        if not pane:
+            continue                      # can't route to a paneless session
+        if exclude_self and pane == self_pane:
+            continue
+        if anchor_wt:
+            if r.get("repo") == anchor_wt or r.get("cwd", "").startswith(anchor_wt):
+                matches.append(r)
+        elif r.get("branch") == anchor:
+            matches.append(r)
+
+    matches.sort(key=lambda r: r.get("last_active", 0), reverse=True)
+    if not matches:
+        return 1                          # cold path
+
+    best = matches[0]
+    if as_json:
+        print(json.dumps({k: best.get(k) for k in
+                          ("tmux_pane", "session_id", "branch", "cwd", "repo", "repo_name")}))
+    else:
+        sys.stderr.write("→ %s  (%s · %s)\n" %
+                         (best.get("tmux_pane"), best.get("repo_name", ""), best.get("branch", "")))
+        print(best.get("tmux_pane"))
+    return 0
+
+
+sys.exit(main(sys.argv[1:]))
