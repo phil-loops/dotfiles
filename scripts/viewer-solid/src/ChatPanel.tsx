@@ -2,6 +2,7 @@ import { createSignal, onCleanup, onMount, For, Show, type JSX } from "solid-js"
 import { createStore, produce } from "solid-js/store";
 import type { FileDiff } from "./types";
 import { appendMsg, setMsgText, setSession, thread } from "./chatStore";
+import { renderMarkdown } from "./markdown";
 
 // ChatPanel — "chat about this file", with Claude's answer streaming in token-by-token.
 // A right-side drawer scoped to ONE file on ONE branch: the diff is the opening context,
@@ -27,7 +28,20 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
   let scroller: HTMLDivElement | undefined;
   let inputEl: HTMLTextAreaElement | undefined;
 
-  const pin = () => scroller && (scroller.scrollTop = scroller.scrollHeight);
+  // Sticky-bottom auto-scroll: follow new tokens only while the user is parked at the bottom.
+  // The moment they scroll up to read back, stop yanking them down; resume once they return.
+  let stick = true;
+  const onScroll = () => {
+    if (!scroller) {
+      return;
+    }
+    stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 48;
+  };
+  const pin = () => {
+    if (stick && scroller) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  };
 
   // stop the in-flight turn: abort the fetch (closes the stream → the server SIGKILLs the
   // headless claude), keep whatever streamed so far, then let the queue drain as normal.
@@ -69,6 +83,7 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
     const idx = appendMsg(branch, path, { role: "claude", text: "" });
     setStreaming(true);
     setStatus("starting");
+    stick = true; // a just-sent message should pull the view to the bottom
     pin();
     const ctrl = new AbortController();
     abort = ctrl;
@@ -195,7 +210,7 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
           </div>
         </header>
 
-        <div class="cp-body" ref={scroller}>
+        <div class="cp-body" ref={scroller} onScroll={onScroll}>
           <Show when={!msgs().length}>
             <p class="cp-empty">
               Ask anything about this diff — what it does, whether it's correct, what you'd
@@ -207,7 +222,9 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
               <div class="cp-turn" classList={{ you: m.role === "you", claude: m.role === "claude" }}>
                 <span class="cp-who">{m.role}</span>
                 <div class="cp-text">
-                  {m.text}
+                  <Show when={m.role === "claude"} fallback={m.text}>
+                    <div class="cp-md" innerHTML={renderMarkdown(m.text)} />
+                  </Show>
                   <Show when={streaming() && m.role === "claude" && i() === msgs().length - 1}>
                     <span class="cp-caret" />
                   </Show>
@@ -308,6 +325,21 @@ const CSS = `
 .cp-turn.claude .cp-who { color: var(--gold, #e0ad4e); }
 .cp-text { font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
 .cp-turn.you .cp-text { color: var(--dim, #cabfa8); }
+.cp-md { white-space: normal; }
+.cp-md > :first-child { margin-top: 0; }
+.cp-md > :last-child { margin-bottom: 0; }
+.cp-md p { margin: 0 0 10px; }
+.cp-md ul, .cp-md ol { margin: 0 0 10px; padding-left: 22px; }
+.cp-md li { margin: 2px 0; }
+.cp-md h1, .cp-md h2, .cp-md h3, .cp-md h4 { margin: 14px 0 8px; font-size: 13.5px; line-height: 1.3; color: var(--ink, #e9e2d4); }
+.cp-md a { color: var(--gold, #e0ad4e); }
+.cp-md blockquote { margin: 0 0 10px; padding-left: 12px; border-left: 2px solid var(--line, #3a332b); color: var(--dim, #a89e8c); }
+.cp-md hr { border: 0; border-top: 1px solid var(--line, #3a332b); margin: 14px 0; }
+.cp-md code { font-family: inherit; font-size: 12px; background: rgba(224,173,78,.12); color: var(--gold, #e0ad4e); padding: 1px 5px; border-radius: 4px; }
+.cp-md .cp-pre { margin: 0 0 10px; padding: 10px 12px; background: var(--bg, #100e0c); border: 1px solid var(--line, #3a332b); border-radius: 7px; overflow-x: auto; }
+.cp-md .cp-pre code { font-size: 12px; background: none; color: inherit; padding: 0; border-radius: 0; }
+.cp-md table { border-collapse: collapse; margin: 0 0 10px; font-size: 12px; }
+.cp-md th, .cp-md td { border: 1px solid var(--line, #3a332b); padding: 4px 8px; text-align: left; }
 .cp-turn.queued { opacity: .55; }
 .cp-turn.queued .cp-who::after { content: " · waiting"; color: var(--faint, #6f675a); }
 .cp-caret { display: inline-block; width: 7px; height: 14px; margin-left: 1px; vertical-align: text-bottom;
