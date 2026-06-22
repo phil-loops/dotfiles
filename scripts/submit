@@ -1,0 +1,83 @@
+#!/bin/zsh
+# submit — local `:submit` v2: hand the human's edits + intent to a Claude session
+# for this anchor. Warm-route into a LIVE session's pane (via submit-route), else
+# spawn a fresh split seeded with the envelope. Forwards BY REFERENCE — writes the
+# envelope to a file and send-keys "re-read <path>", never a blob into the prompt.
+#
+# Usage: submit [-m "<intent>"] [--base <ref>] [--spawn-cmd <cmd>] [anchor]
+#   anchor   default: current git worktree toplevel
+#   intent   -m  ›  PLAN.md (worktree root)  ›  branch description
+#   content  cumulative diff vs base (default origin/main, else main) — "what the human changed"
+#   --spawn-cmd  override the cold-path spawn command (used by tests)
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+SELF_DIR="${0:A:h}"
+
+intent=""; base=""; spawn_cmd=""; anchor=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -m) intent="${2:-}"; shift 2 ;;
+    --base) base="${2:-}"; shift 2 ;;
+    --spawn-cmd) spawn_cmd="${2:-}"; shift 2 ;;
+    *) anchor="$1"; shift ;;
+  esac
+done
+
+[[ -z "$anchor" ]] && anchor="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -z "$anchor" ]] && { print -u2 "submit: no anchor (not in a git worktree; pass one)"; exit 1 }
+wt="$(git -C "$anchor" rev-parse --show-toplevel 2>/dev/null || echo "$anchor")"
+branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+
+# base for the cumulative diff
+if [[ -z "$base" ]]; then
+  if git -C "$wt" rev-parse --verify -q origin/main >/dev/null 2>&1; then base=origin/main; else base=main; fi
+fi
+
+# intent: -m › PLAN.md › branch description
+[[ -z "$intent" && -f "$wt/PLAN.md" ]] && intent="$(<"$wt/PLAN.md")"
+[[ -z "$intent" ]] && intent="$(git -C "$wt" config branch.${branch}.description 2>/dev/null || true)"
+[[ -z "$intent" ]] && intent="(no intent given)"
+
+# content: cumulative diff vs base (committed + working tree) — the human's changes
+diffstat="$(git -C "$wt" diff --stat "$base" 2>/dev/null | tail -40 || true)"
+diff="$(git -C "$wt" diff "$base" 2>/dev/null || true)"
+
+# assemble the envelope (forward by reference)
+env_dir="${TMPDIR:-/tmp}/submit-envelopes"
+mkdir -p "$env_dir"
+env_file="$env_dir/$(print -r -- "$wt" | tr '/ ' '__').md"
+{
+  print -- "# :submit — review \`$branch\`"
+  print --
+  print -- "**Anchor:** $wt  ·  branch \`$branch\`  ·  base \`$base\`"
+  print --
+  print -- "## Intent"
+  print -r -- "$intent"
+  print --
+  print -- "## Diffstat"
+  print -r -- "$diffstat"
+  print --
+  print -- "## Diff"
+  print -- '```diff'
+  print -r -- "$diff"
+  print -- '```'
+  print --
+  print -- "Review these edits. Talk here; edit the worktree in place; the human will \`submit\` again."
+} > "$env_file"
+
+# route: warm (live session for this anchor) or cold (spawn)
+if pane="$("$SELF_DIR/submit-route" --exclude-self "$wt" 2>/dev/null)"; then
+  tmux send-keys -t "$pane" "submit: re-read $env_file" Enter
+  print -- "warm → forwarded to pane $pane"
+  print -- "       envelope: $env_file"
+else
+  cmd="${spawn_cmd:-claude \"read $env_file and review these edits, then we'll go back and forth\"}"
+  if [[ -n "${TMUX:-}" ]]; then
+    new=$(tmux split-window -d -h -t "${TMUX_PANE:-}" -c "$wt" -P -F '#{pane_id}' "$cmd")
+    print -- "cold → spawned session in split $new"
+    print -- "       envelope: $env_file"
+  else
+    print -u2 "cold (no tmux) — run yourself:  $cmd"
+    exit 3
+  fi
+fi

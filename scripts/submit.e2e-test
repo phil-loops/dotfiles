@@ -1,0 +1,68 @@
+#!/bin/zsh
+# E2E test for submit / submit-route. SAFE: all tmux ops happen inside an isolated
+# 'submit_e2e' session; fake presence records are prefixed e2e- and removed on exit.
+setopt nullglob
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+SCRIPTS=/Users/philbrockman/.dotfiles/scripts
+PRES="$HOME/.claude/session-presence"
+SESS=submit_e2e
+PASS=0; FAIL=0
+ok(){ print -- "  \033[32m✓\033[0m $1"; PASS=$((PASS+1)); return 0; }
+no(){ print -- "  \033[31m✗\033[0m $1"; FAIL=$((FAIL+1)); return 0; }
+
+cleanup(){
+  tmux kill-session -t "$SESS" 2>/dev/null
+  rm -f "$PRES"/e2e-*.json
+  rm -rf /tmp/submit-e2e-warm /tmp/submit-e2e-cold /tmp/submit-e2e-marker
+}
+trap cleanup EXIT
+cleanup
+mkdir -p "$PRES"
+
+mkrepo(){  # $1 dir, $2 branch — make a git repo with a base commit + a human edit
+  rm -rf "$1"; mkdir -p "$1"; ( cd "$1"
+    git init -q; git config user.email t@t; git config user.name t
+    print base > f.txt; git add f.txt; git commit -qm base; git branch -M main
+    git checkout -q -b "$2"; print "human edit" >> f.txt )
+  git -C "$1" rev-parse --show-toplevel
+}
+
+tmux new-session -d -s "$SESS" -x 220 -y 50
+TPANE=$(tmux display-message -p -t "$SESS" '#{pane_id}')
+
+print -- "\n\033[1mWARM path\033[0m (a live session owns the anchor)"
+WWT=$(mkrepo /tmp/submit-e2e-warm feature)
+TARGET=$(tmux split-window -d -t "$TPANE" -P -F '#{pane_id}')      # stand-in 'live claude' pane
+TPID=$(tmux display-message -p -t "$TARGET" '#{pane_pid}')
+TSTART=$(ps -o lstart= -p "$TPID" | tr -s ' ' | sed 's/^ //; s/ $//')
+print -- "{\"session_id\":\"e2e-warm\",\"pid\":$TPID,\"start_time\":\"$TSTART\",\"tmux_pane\":\"$TARGET\",\"repo\":\"$WWT\",\"cwd\":\"$WWT\",\"repo_name\":\"e2e-warm\",\"branch\":\"feature\",\"last_active\":$(date +%s)}" > "$PRES/e2e-warm.json"
+
+R=$("$SCRIPTS/submit-route" "$WWT" 2>/dev/null)
+[[ "$R" == "$TARGET" ]] && ok "submit-route resolves anchor → live pane ($TARGET)" || no "submit-route='$R' want '$TARGET'"
+
+OUT=$("$SCRIPTS/submit" -m "verify warm path" "$WWT" 2>&1)
+[[ "$OUT" == *"warm → forwarded to pane $TARGET"* ]] && ok "submit reports warm forward to the right pane" || no "warm report wrong: $OUT"
+
+CAP=""
+for i in {1..50}; do CAP=$(tmux capture-pane -p -t "$TARGET"); [[ "$CAP" == *"submit: re-read"* ]] && break; done
+[[ "$CAP" == *"submit: re-read"* ]] && ok "live pane received the 're-read <envelope>' ping" || no "ping not seen in target pane"
+
+ENV=$(print -r -- "$OUT" | sed -n 's/.*envelope: //p' | head -1)
+[[ -f "$ENV" ]] && ok "envelope file written ($ENV:t)" || no "envelope missing"
+grep -q "verify warm path" "$ENV" 2>/dev/null && ok "envelope carries the intent" || no "intent missing from envelope"
+grep -q "human edit" "$ENV" 2>/dev/null && ok "envelope carries the human's diff" || no "diff missing from envelope"
+
+print -- "\n\033[1mCOLD path\033[0m (no live session → spawn seeded split)"
+CWT=$(mkrepo /tmp/submit-e2e-cold feature)
+MARK=/tmp/submit-e2e-marker
+OUT2=$(TMUX_PANE="$TPANE" "$SCRIPTS/submit" --spawn-cmd "echo SPAWNED-COLD > $MARK; sleep 2" -m "verify cold path" "$CWT" 2>&1)
+[[ "$OUT2" == *"cold → spawned session in split"* ]] && ok "submit reports cold spawn" || no "cold report wrong: $OUT2"
+NPANES_OK=no
+for i in {1..60}; do [[ -f "$MARK" ]] && { NPANES_OK=yes; break; }; tmux list-panes -t "$SESS" >/dev/null 2>&1; done
+[[ "$NPANES_OK" == yes && "$(cat $MARK 2>/dev/null)" == "SPAWNED-COLD" ]] && ok "cold spawn ran the seeded command in a new split" || no "cold spawn didn't run"
+# confirm the split landed in the ISOLATED session, not anywhere else
+SPLIT_IN_SESS=$(tmux list-panes -s -t "$SESS" -F '#{pane_id}' | wc -l | tr -d ' ')
+[[ "$SPLIT_IN_SESS" -ge 3 ]] && ok "spawn landed inside the isolated session (panes=$SPLIT_IN_SESS)" || no "spawn pane count off ($SPLIT_IN_SESS)"
+
+print -- "\n\033[1m$PASS passed, $FAIL failed\033[0m"
+exit $(( FAIL > 0 ))
