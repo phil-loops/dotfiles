@@ -1,11 +1,15 @@
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
 
-// The existing Python viewer (`stack-review-server.py`) already exposes everything as a
-// JSON/SSE API on :62333. Vite proxies those exact routes so the Solid app is a pure
-// frontend swap — zero backend changes, the working vanilla viewer keeps running.
-const API = "http://127.0.0.1:62333";
+// The Python viewer (`stack-review-server.py`) exposes everything as a JSON/SSE API; Vite
+// proxies those exact routes so the Solid app is a pure frontend. The backend port is now
+// PER-REPO (so forests in several repos coexist), so resolve it from the same shared helper
+// stack-review-serve uses — never hardcode it, or the proxy drifts off the live backend.
+// $STACK_REVIEW_PORT overrides (point the dev server at another repo's backend); with no
+// arg the helper derives from cwd = this repo (dotfiles), which is where you dev the viewer.
+const PORT = execSync(`${process.env.HOME}/.dotfiles/scripts/stack-review-port`).toString().trim();
+const API = `http://127.0.0.1:${PORT}`;
 const ROUTES = [
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/events", "/restack-status", "/branches", "/standalone",
