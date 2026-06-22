@@ -1,0 +1,29 @@
+#!/bin/zsh
+# submit-refresh <anchor> — the agent's hands-off "push the view update".
+#
+# After the agent edits the shared worktree, it runs this to reload the HUMAN's
+# editor: send-keys `:checktime` into the surface (nvim) pane that `submit`
+# recorded for this anchor. With `set autoread` (default in Phil's config) nvim
+# silently reloads the externally-changed buffers — no manual `:e`.
+#
+# Exit 0 = refreshed; 1 = no surface pane recorded / pane gone (caller can ignore).
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+anchor="${1:?usage: submit-refresh <anchor>}"
+wt="$(git -C "$anchor" rev-parse --show-toplevel 2>/dev/null || echo "$anchor")"
+
+env_dir="${TMPDIR:-/tmp}/submit-envelopes"
+surf_file="$env_dir/surface/$(print -r -- "$wt" | tr '/ ' '__').pane"
+[[ -f "$surf_file" ]] || { print -u2 "submit-refresh: no surface pane recorded for $wt"; exit 1 }
+pane="$(<"$surf_file")"
+
+tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx "$pane" \
+  || { print -u2 "submit-refresh: surface pane $pane is gone"; exit 1 }
+
+# Escape to normal mode, then run :checktime (split sends so the literal ':checktime'
+# isn't parsed as tmux key names).
+tmux send-keys -t "$pane" Escape
+tmux send-keys -t "$pane" -l ":checktime"
+tmux send-keys -t "$pane" Enter
+print -- "refreshed surface pane $pane (:checktime)"

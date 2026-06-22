@@ -13,7 +13,7 @@ no(){ print -- "  \033[31m✗\033[0m $1"; FAIL=$((FAIL+1)); return 0; }
 cleanup(){
   tmux kill-session -t "$SESS" 2>/dev/null
   rm -f "$PRES"/e2e-*.json
-  rm -rf /tmp/submit-e2e-warm /tmp/submit-e2e-cold /tmp/submit-e2e-marker
+  rm -rf /tmp/submit-e2e-warm /tmp/submit-e2e-cold /tmp/submit-e2e-marker /tmp/submit-e2e-ref
 }
 trap cleanup EXIT
 cleanup
@@ -63,6 +63,31 @@ for i in {1..60}; do [[ -f "$MARK" ]] && { NPANES_OK=yes; break; }; tmux list-pa
 # confirm the split landed in the ISOLATED session, not anywhere else
 SPLIT_IN_SESS=$(tmux list-panes -s -t "$SESS" -F '#{pane_id}' | wc -l | tr -d ' ')
 [[ "$SPLIT_IN_SESS" -ge 3 ]] && ok "spawn landed inside the isolated session (panes=$SPLIT_IN_SESS)" || no "spawn pane count off ($SPLIT_IN_SESS)"
+
+print -- "\n\033[1mREPLY-IN-PLACE\033[0m (agent edits worktree → pushes nvim refresh)"
+RWT=$(mkrepo /tmp/submit-e2e-ref feature)
+SURF=$(tmux split-window -d -t "$TPANE" -c "$RWT" -P -F '#{pane_id}' "nvim -c 'set autoread' f.txt")
+for i in {1..80}; do [[ "$(tmux display-message -p -t "$SURF" '#{pane_current_command}')" == nvim ]] && break; done
+[[ "$(tmux display-message -p -t "$SURF" '#{pane_current_command}')" == nvim ]] && ok "surface nvim started" || no "nvim didn't start"
+
+# submit from the surface pane's context → records SURF as the surface pane (route is a no-op stub here)
+TMUX_PANE="$SURF" "$SCRIPTS/submit" --spawn-cmd "true" -m "ref test" "$RWT" >/dev/null 2>&1
+SKEY=$(print -r -- "$RWT" | tr '/ ' '__')
+SREC=$(cat "${TMPDIR:-/tmp}/submit-envelopes/surface/$SKEY.pane" 2>/dev/null)
+[[ "$SREC" == "$SURF" ]] && ok "submit recorded the human's surface pane" || no "surface not recorded ($SREC want $SURF)"
+
+# the agent edits the worktree on disk, then pushes the refresh
+print "AGENT-EDIT-MARKER" >> "$RWT/f.txt"
+RO=$("$SCRIPTS/submit-refresh" "$RWT" 2>&1)
+[[ "$RO" == *"refreshed surface pane $SURF"* ]] && ok "submit-refresh targeted the surface pane" || no "refresh report wrong: $RO"
+
+NV=""
+for i in {1..100}; do NV=$(tmux capture-pane -p -t "$SURF"); [[ "$NV" == *"AGENT-EDIT-MARKER"* ]] && break; done
+[[ "$NV" == *"AGENT-EDIT-MARKER"* ]] && ok "nvim reloaded the agent's external edit via :checktime" || no "nvim did not reload the edit"
+tmux send-keys -t "$SURF" Escape; tmux send-keys -t "$SURF" -l ":q!"; tmux send-keys -t "$SURF" Enter
+
+# submit-refresh on an unknown anchor → graceful exit 1
+"$SCRIPTS/submit-refresh" /tmp/no-such-anchor >/dev/null 2>&1; [[ $? -eq 1 ]] && ok "submit-refresh exits 1 when no surface recorded" || no "submit-refresh didn't exit 1"
 
 print -- "\n\033[1m$PASS passed, $FAIL failed\033[0m"
 exit $(( FAIL > 0 ))
