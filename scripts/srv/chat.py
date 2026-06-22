@@ -5,7 +5,8 @@
 # sends it back as `resume` for the next turn (so follow-ups keep the thread + the file
 # context without us re-sending the diff).
 #
-#   POST /chat {branch, path, patch?, question, resume?}  → text/event-stream
+#   POST /chat {branch, path?, patch?, question, resume?}  → text/event-stream
+#     (omit path → chat about the whole branch; the server computes its parent…branch diff)
 #     event: status data: {"s":"starting|thinking|writing"}
 #     event: token  data: {"t":"…"}                  # an answer text delta
 #     event: done   data: {"ok":true,"session_id":"…"}
@@ -56,18 +57,54 @@ def _first_prompt(branch, path, patch, question):
     return "\n".join(parts)
 
 
+def _branch_prompt(branch, patch, question):
+    patch = (patch or "").strip()
+    parts = [
+        f"You're reviewing the whole git branch `{branch}` of the Loops codebase — "
+        "every file it changes against its parent.",
+        "Here is the branch's combined diff:",
+        "",
+        "```diff",
+        patch or "(no textual diff was provided — read the files if you need their contents)",
+        "```",
+        "",
+        "Answer concisely, in plain prose for a senior engineer. You may use Read/Grep/Glob "
+        "to inspect related code, but you cannot and must not modify anything.",
+        "",
+        f"Question: {question}",
+    ]
+    return "\n".join(parts)
+
+
+# The branch's combined review diff (parent…branch), computed server-side so the page doesn't
+# have to ship the whole thing. Capped — headless claude can Read individual files for the rest.
+def _branch_diff(branch):
+    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    out = ctx.run(["git", "diff", f"{parent}...{branch}"]).stdout
+    cap = 80_000
+    if len(out) > cap:
+        out = out[:cap] + f"\n\n… (diff truncated at {cap} chars — use Read on individual files for the rest)"
+    return out
+
+
 def start(req, raw):
     d = json.loads(raw or "{}")
     branch = (d.get("branch") or "").strip()
+    path = (d.get("path") or "").strip()
     question = (d.get("question") or "").strip()
     resume = (d.get("resume") or "").strip()
     if not branch or not question:
         req._send(400, json.dumps({"ok": False, "err": "need a branch + question"}))
         return
 
-    # A resumed turn already carries the file context in its session — just send the
-    # question. A fresh turn seeds the diff + ground rules.
-    prompt = question if resume else _first_prompt(branch, d.get("path", ""), d.get("patch", ""), question)
+    # A resumed turn already carries its context in the session — just send the question. A fresh
+    # turn seeds the diff + ground rules: one file when a path is given, else the whole branch.
+    if resume:
+        prompt = question
+    elif path:
+        prompt = _first_prompt(branch, path, d.get("patch", ""), question)
+    else:
+        prompt = _branch_prompt(branch, d.get("patch") or _branch_diff(branch), question)
     cwd = _worktree_for(branch) or ctx.CWD
 
     cmd = ["claude", "-p", prompt,
