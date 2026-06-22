@@ -1,13 +1,12 @@
 #!/bin/zsh
 # submit — local `:submit` v2: hand the human's edits + intent to a Claude session
-# for this anchor. Warm-route into a LIVE session's pane (via submit-route), else
-# spawn a fresh split seeded with the envelope. Forwards BY REFERENCE — writes the
-# envelope to a file and send-keys "re-read <path>", never a blob into the prompt.
+# for this anchor. Warm-route into a LIVE session's pane (submit-route), else spawn
+# a fresh split seeded with the envelope. Forwards BY REFERENCE — writes the shared
+# envelope (submit-envelope) to a file and send-keys "re-read <path>".
 #
 # Usage: submit [-m "<intent>"] [--base <ref>] [--spawn-cmd <cmd>] [anchor]
 #   anchor   default: current git worktree toplevel
-#   intent   -m  ›  PLAN.md (worktree root)  ›  branch description
-#   content  cumulative diff vs base (default origin/main, else main) — "what the human changed"
+#   intent   -m  ›  PLAN.md (worktree root)  ›  branch description   (resolved by submit-envelope)
 #   --spawn-cmd  override the cold-path spawn command (used by tests)
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
@@ -26,45 +25,14 @@ done
 [[ -z "$anchor" ]] && anchor="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [[ -z "$anchor" ]] && { print -u2 "submit: no anchor (not in a git worktree; pass one)"; exit 1 }
 wt="$(git -C "$anchor" rev-parse --show-toplevel 2>/dev/null || echo "$anchor")"
-branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
 
-# base for the cumulative diff
-if [[ -z "$base" ]]; then
-  if git -C "$wt" rev-parse --verify -q origin/main >/dev/null 2>&1; then base=origin/main; else base=main; fi
-fi
-
-# intent: -m › PLAN.md › branch description
-[[ -z "$intent" && -f "$wt/PLAN.md" ]] && intent="$(<"$wt/PLAN.md")"
-[[ -z "$intent" ]] && intent="$(git -C "$wt" config branch.${branch}.description 2>/dev/null || true)"
-[[ -z "$intent" ]] && intent="(no intent given)"
-
-# content: cumulative diff vs base (committed + working tree) — the human's changes
-diffstat="$(git -C "$wt" diff --stat "$base" 2>/dev/null | tail -40 || true)"
-diff="$(git -C "$wt" diff "$base" 2>/dev/null || true)"
-
-# assemble the envelope (forward by reference)
-env_dir="${TMPDIR:-/tmp}/submit-envelopes"
-mkdir -p "$env_dir"
+# envelope — shared canonical format (submit-envelope owns intent/commits/diff)
+env_dir="${TMPDIR:-/tmp}/submit-envelopes"; mkdir -p "$env_dir"
 env_file="$env_dir/$(print -r -- "$wt" | tr '/ ' '__').md"
-{
-  print -- "# :submit — review \`$branch\`"
-  print --
-  print -- "**Anchor:** $wt  ·  branch \`$branch\`  ·  base \`$base\`"
-  print --
-  print -- "## Intent"
-  print -r -- "$intent"
-  print --
-  print -- "## Diffstat"
-  print -r -- "$diffstat"
-  print --
-  print -- "## Diff"
-  print -- '```diff'
-  print -r -- "$diff"
-  print -- '```'
-  print --
-  print -- "Review these edits. Talk here; edit the worktree in place; the human will \`submit\` again."
-  print -- "After you edit files, run \`submit-refresh $wt\` to reload the human's editor."
-} > "$env_file"
+env_args=(--with-diff)
+[[ -n "$intent" ]] && env_args+=(-m "$intent")
+[[ -n "$base" ]] && env_args+=(--base "$base")
+"$SELF_DIR/submit-envelope" "${env_args[@]}" "$wt" > "$env_file"
 
 # record the human's surface pane (where :submit ran) so the agent can push a
 # view-refresh back here after editing the worktree — submit-refresh reads this.

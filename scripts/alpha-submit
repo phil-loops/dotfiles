@@ -1,0 +1,99 @@
+#!/bin/zsh
+# alpha-submit — the cloud counterpart of the local `:submit` hand-back.
+#
+# Local `:submit` send-keys a live tmux pane. That can't work when no interactive
+# session is guaranteed to be alive (e.g. a worktree launched from the web app).
+# So instead of handing back to a *session*, alpha-submit targets the durable
+# anchor — the *branch* — and then *manufactures* a reviewer:
+#
+#   1. push the current branch to a fork (durable; survives any session dying)
+#   2. POST a SELF-CONTAINED handoff to a Claude Code routine's /fire endpoint,
+#      which spawns a fresh session to review it.
+#
+# The handoff has to stand alone (plan + commits + diffstat + compare URL) because
+# the routine session has none of the originating chat history — the plan IS the
+# memory.
+#
+# Usage:   alpha-submit [--dry-run] [-m "<plan / how this fits the project>"]
+# Env:
+#   ALPHA_REMOTE            push target (default: phil-loops; refuses origin)
+#   ALPHA_BASE             review base (default: origin/main)
+#   ALPHA_ROUTINE_FIRE_URL  full routine fire URL  …/routines/<id>/fire
+#   ALPHA_ROUTINE_TOKEN     Bearer token (sk-ant-oat01-…)
+# Plan source (first hit wins): -m flag › PLAN.md at repo root › branch description.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+dry_run=false
+plan_arg=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) dry_run=true; shift ;;
+    -m) plan_arg="${2:-}"; shift 2 ;;
+    *) print -u2 "alpha-submit: unknown arg $1"; exit 2 ;;
+  esac
+done
+
+remote="${ALPHA_REMOTE:-phil-loops}"
+base="${ALPHA_BASE:-origin/main}"
+
+[[ "$remote" == "origin" ]] && { print -u2 "refuse to push to origin"; exit 1 }
+
+root=$(git rev-parse --show-toplevel 2>/dev/null) || { print -u2 "not in a git repo"; exit 1 }
+branch=$(git rev-parse --abbrev-ref HEAD)
+[[ "$branch" == "HEAD" || "$branch" == "main" ]] && { print -u2 "refuse to submit '$branch'"; exit 1 }
+
+# plan: -m › PLAN.md › branch description
+plan="$plan_arg"
+[[ -z "$plan" && -f "$root/PLAN.md" ]] && plan="$(<"$root/PLAN.md")"
+[[ -z "$plan" ]] && plan="$(git config branch.${branch}.description 2>/dev/null || true)"
+[[ -z "$plan" ]] && { print -u2 "no plan — pass -m, add PLAN.md, or set a branch description"; exit 1 }
+
+# commit any uncommitted edits (this is the alpha scratch worktree)
+if [[ -n "$(git status --porcelain)" ]]; then
+  git add -A
+  git commit -q -m "alpha: wip submit"
+fi
+
+remote_url="$(git remote get-url "$remote" 2>/dev/null || echo '')"
+slug="$(print -r -- "$remote_url" | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
+compare_url="https://github.com/${slug}/compare/${branch}?expand=1"
+
+# shared canonical envelope (same format submit uses locally) — references the
+# pushed branch via the compare URL rather than inlining the diff.
+handoff="$("${0:A:h}/submit-envelope" --compare-url "$compare_url" -m "$plan" --base "$base" "$root")"
+
+print -P "%F{cyan}── alpha-submit ───────────────────────────────%f"
+print -- "branch : ${branch} → ${remote}"
+print -- "base   : ${base}"
+print -- "plan   : ${plan%%$'\n'*}"
+print -- "compare: ${compare_url}"
+print -P "%F{cyan}───────────────────────────────────────────────%f"
+
+if $dry_run; then
+  print -- "[dry-run] would: git push -u ${remote} ${branch} --force-with-lease"
+  print -- "[dry-run] would POST to ${ALPHA_ROUTINE_FIRE_URL:-<ALPHA_ROUTINE_FIRE_URL unset>}"
+  print -P "%F{8}----- handoff payload -----%f"
+  print -r -- "$handoff"
+  exit 0
+fi
+
+# 1. push the durable anchor
+git push -u "$remote" "$branch" --force-with-lease
+print -- "✓ pushed ${branch} → ${remote}"
+
+# 2. fire the routine (cold-path reviewer), if configured
+if [[ -n "${ALPHA_ROUTINE_FIRE_URL:-}" && -n "${ALPHA_ROUTINE_TOKEN:-}" ]]; then
+  payload="$(jq -nc --arg t "$handoff" '{text:$t}')"
+  resp="$(curl -sS -X POST "$ALPHA_ROUTINE_FIRE_URL" \
+    -H "Authorization: Bearer ${ALPHA_ROUTINE_TOKEN}" \
+    -H 'content-type: application/json' \
+    -d "$payload")"
+  print -- "✓ fired routine"
+  url="$(print -r -- "$resp" | jq -r '.claude_code_session_url // empty' 2>/dev/null || true)"
+  [[ -n "$url" ]] && print -- "  session: $url" || print -r -- "  response: $resp"
+else
+  print -- "⚠ routine not configured — set ALPHA_ROUTINE_FIRE_URL + ALPHA_ROUTINE_TOKEN."
+  print -- "  branch is pushed; handoff to fire manually:"
+  print -r -- "$handoff"
+fi

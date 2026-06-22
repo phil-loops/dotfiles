@@ -64,6 +64,16 @@ for i in {1..60}; do [[ -f "$MARK" ]] && { NPANES_OK=yes; break; }; tmux list-pa
 SPLIT_IN_SESS=$(tmux list-panes -s -t "$SESS" -F '#{pane_id}' | wc -l | tr -d ' ')
 [[ "$SPLIT_IN_SESS" -ge 3 ]] && ok "spawn landed inside the isolated session (panes=$SPLIT_IN_SESS)" || no "spawn pane count off ($SPLIT_IN_SESS)"
 
+print -- "\n\033[1mENVELOPE\033[0m (shared format: submit local + alpha-submit cloud)"
+EWITH=$("$SCRIPTS/submit-envelope" --with-diff -m "x" "$CWT" 2>/dev/null)
+for s in "# :submit" "## Intent" "## Commits" "## Diffstat"; do
+  [[ "$EWITH" == *"$s"* ]] && ok "envelope has '$s'" || no "envelope missing '$s'"
+done
+[[ "$EWITH" == *'```diff'* ]] && ok "local mode inlines the diff" || no "local mode missing inline diff"
+ECMP=$("$SCRIPTS/submit-envelope" --compare-url "http://x/compare" -m "x" "$CWT" 2>/dev/null)
+[[ "$ECMP" == *"Compare / open PR"* ]] && ok "cloud mode carries the compare URL" || no "cloud mode missing compare URL"
+[[ "$ECMP" != *'```diff'* ]] && ok "cloud mode omits the inline diff (URL instead)" || no "cloud mode unexpectedly inlined the diff"
+
 print -- "\n\033[1mREPLY-IN-PLACE\033[0m (agent edits worktree → pushes nvim refresh)"
 RWT=$(mkrepo /tmp/submit-e2e-ref feature)
 SURF=$(tmux split-window -d -t "$TPANE" -c "$RWT" -P -F '#{pane_id}' "nvim -c 'set autoread' f.txt")
