@@ -221,7 +221,17 @@ Follow a strict layering pattern: **queries → models → wiring**.
 
 # Comments
 
-Comment the extraordinary, not the obvious. A comment earns its place when it tells the reader something the code *can't*: a non-obvious **why**, a gotcha, a constraint, a deliberate deviation, a "this looks wrong but isn't." Don't narrate the **what** — if every delta carries a comment restating what the line does, that's noise, and it rots into tech debt as the code moves and the comments don't follow. When in doubt, let the code explain the code: clear names and small functions beat a comment. Reach for prose only when a reader would otherwise be surprised or misled.
+**Default to zero comments.** Code carries the *what*; names and types carry intent and shape. A comment is a last resort for a fact none of those can hold — not a companion to the diff. Most commits should add **no** comments; a diff dotted with explanatory prose is the smell this rule exists to kill.
+
+Before writing a comment, it must clear **every** bar — fail any, delete it:
+
+- **Misleading without it, not merely nice-to-have.** Its absence would lead a competent reader to a *wrong change* or a bug. "Helpful context," "for clarity," or restating the obvious does not qualify.
+- **Unrecoverable from the code.** If a sharper name, a named constant, or an extracted well-named function would carry the fact, do **that** instead — always. A comment is an admission the code couldn't say it itself.
+- **One line.** Needing two-plus lines of prose means the *code* is wrong, not under-documented — restructure (rename, split, introduce a named intermediate) until the note is trivial or unnecessary. A paragraph above a statement is never the answer.
+
+**"Why" is not a license to narrate.** Restating the adjacent code with "so that…" or "because…" bolted on is still narration — the call and the names already show it. A genuine *why* points **outside** this code: an external constraint, a bug being worked around, an invariant enforced elsewhere, a deliberate deviation from the obvious approach. (Narration, delete it: `// disable sole members so the Loops sync stops pushing them`. Why, keep it: `// sole members only — multi-team users get disabled via <other path>; double-disabling races it`.)
+
+Banned outright: restating the next line, section-header comments (`// fetch users`), step-by-step narration of an obvious sequence, and any comment that will silently rot when the code beside it moves.
 
 # Forest PR Design
 
