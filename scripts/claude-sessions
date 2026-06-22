@@ -160,10 +160,11 @@ def render_terminal(live, now):
 
 
 def render_swiftbar(live, now):
-    print("◉ %d" % len(live))                                   # menu-bar badge
-    print("---")
-    idlec = sum(1 for r in live if now - r.get("last_active", now) >= ACTIVE_WINDOW)
     n = len(live)
+    idlec = sum(1 for r in live if now - r.get("last_active", now) >= ACTIVE_WINDOW)
+    activec = n - idlec
+    print("◉ %d · %d▶ %d○" % (n, activec, idlec) if live else "◉ 0")  # menu-bar: total · active · idle
+    print("---")
     print("%d Claude session%s%s | color=#8f8472" % (n, "" if n == 1 else "s",
           (" · %d idle" % idlec) if idlec else ""))
     print("---")
