@@ -31,12 +31,15 @@ repo=$(git rev-parse --show-toplevel 2>/dev/null) \
 # worktree of the same repo (so launching from a feature worktree still matches
 # the main checkout's live server). Must mirror the server's _repo_id().
 repo_id=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-STABLE_PORT="${STACK_REVIEW_PORT:-62333}"
+# Per-repo stable port (shared helper → never drifts from the :5174 proxy). Each repo
+# gets its own port, so forests in several repos coexist as live tabs. Export it so the
+# Python server binds the same port we computed (it reads $STACK_REVIEW_PORT).
+STABLE_PORT=$("$here/stack-review-port" "$repo")
+export STACK_REVIEW_PORT="$STABLE_PORT"
 
-# A review server already live on the stable port belongs to SOME repo — one
-# global port, one repo at a time. If it's ours, reuse it; if a foreign repo
-# squats the port (the "no forests configured" footgun), reclaim it: kill the
-# holder and fall through to launch a server bound to THIS repo.
+# A live server on THIS repo's port is normally ours (same repo → reuse). A foreign repo
+# can only land here via a rare hash collision; the reclaim path stays as the safety net
+# (kill the holder, fall through to launch a server bound to THIS repo).
 sig=$(curl -sf --max-time 1 "http://127.0.0.1:${STABLE_PORT}/sig" 2>/dev/null) || sig=""
 if [[ -n "$sig" ]]; then
   live_repo=$(print -r -- "$sig" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("repo",""))' 2>/dev/null)

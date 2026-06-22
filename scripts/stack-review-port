@@ -1,0 +1,39 @@
+#!/bin/zsh
+# stack-review-port [repo-path] — the deterministic stable port for a repo's blessing
+# viewer. ONE source of truth for the formula: stack-review-serve (shell) and the :5174
+# Vite dev proxy (vite.config.ts) both shell out here, so the launcher and the proxy can
+# never drift onto different ports.
+#
+# Per-repo ports are what let you forest several repos AT ONCE — loops on its port,
+# dotfiles on its own, each `loops stack web` opening a live tab that coexists with the
+# others (the old single :62333 served one repo at a time and reclaimed the port).
+#
+#   $STACK_REVIEW_PORT (if set) wins   — explicit override / pinning
+#   else derive from the repo's git COMMON dir — shared across all worktrees of one repo,
+#        so launching from a feature worktree lands on the same port as the main checkout.
+#   not in a repo → the legacy default (62333), so bare/standalone use still works.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+if [[ -n "${STACK_REVIEW_PORT:-}" ]]; then
+  echo "$STACK_REVIEW_PORT"
+  exit 0
+fi
+
+repo_arg="${1:-}"
+if [[ -n "$repo_arg" ]]; then
+  gd=$(git -C "$repo_arg" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || gd=""
+else
+  gd=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || gd=""
+fi
+
+if [[ -z "$gd" ]]; then
+  echo 62333
+  exit 0
+fi
+
+# cksum is a stable, everywhere-present numeric hash. Band: [62333, 63332] — 1000 slots,
+# keyed off a handful of repos, so birthday collisions are negligible (and a collision just
+# falls back to stack-review-serve's reclaim path, it isn't fatal).
+h=$(printf '%s' "$gd" | cksum | cut -d' ' -f1)
+echo $(( 62333 + (h % 1000) ))
