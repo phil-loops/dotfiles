@@ -17,9 +17,12 @@ import { renderMarkdown } from "./markdown";
 // History (msgs) and the resume session-id live in the module-level chatStore keyed by
 // branch+path, not in this component — so closing the drawer or reloading the page no longer
 // wipes the conversation. `msgs`/`session` below are just reactive views onto that thread.
-export default function ChatPanel(props: { file: FileDiff; branch: string; onClose: () => void }) {
-  const msgs = () => thread(props.branch, props.file.path).msgs;
-  const session = () => thread(props.branch, props.file.path).session;
+// `file` null → chat about the whole branch (the server computes its parent…branch diff). The
+// store thread is keyed by path, so branch chats live under the "" key, distinct from any file.
+export default function ChatPanel(props: { file: FileDiff | null; branch: string; onClose: () => void }) {
+  const path = () => props.file?.path ?? "";
+  const msgs = () => thread(props.branch, path()).msgs;
+  const session = () => thread(props.branch, path()).session;
   const [pending, setPending] = createStore<string[]>([]); // queued while a turn streams
   const [input, setInput] = createSignal("");
   const [streaming, setStreaming] = createSignal(false);
@@ -76,7 +79,8 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
     // Pin the thread for the whole turn: streaming writes must land on the file we started on,
     // even if the user switches files mid-stream (props would otherwise move out from under us).
     const branch = props.branch;
-    const path = props.file.path;
+    const path = props.file?.path ?? "";
+    const patch = props.file?.patch; // undefined for a branch chat → server computes the diff
     const resume = session();
     setError(null);
     appendMsg(branch, path, { role: "you", text: q });
@@ -94,8 +98,8 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
         signal: ctrl.signal,
         body: JSON.stringify({
           branch,
-          path,
-          patch: resume ? undefined : props.file.patch, // diff only seeds turn one
+          path: path || undefined,
+          patch: resume ? undefined : patch, // diff only seeds turn one
           question: q,
           resume: resume || undefined,
         }),
@@ -202,7 +206,9 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
         <header class="cp-head">
           <div class="cp-title">
             <span class="cp-mark">✦</span>
-            <span class="cp-path">{seg(props.file.path)}</span>
+            <span class="cp-path">
+              {props.file ? seg(props.file.path) : <b>whole branch</b>}
+            </span>
           </div>
           <div class="cp-sub">
             <span class="cp-branch">{props.branch}</span>
@@ -213,8 +219,10 @@ export default function ChatPanel(props: { file: FileDiff; branch: string; onClo
         <div class="cp-body" ref={scroller} onScroll={onScroll}>
           <Show when={!msgs().length}>
             <p class="cp-empty">
-              Ask anything about this diff — what it does, whether it's correct, what you'd
-              change. Claude reads the diff and can look at related code (read-only).
+              {props.file
+                ? "Ask anything about this diff — what it does, whether it's correct, what you'd change."
+                : "Ask anything about this whole branch — what it does, whether it hangs together, what you'd change."}
+              {" "}Claude reads the diff and can look at related code (read-only).
             </p>
           </Show>
           <For each={msgs()}>

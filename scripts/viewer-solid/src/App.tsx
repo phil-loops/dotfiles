@@ -521,8 +521,8 @@ function NodeDetail() {
   const goto = (b: string) => navigate(nodePath(project(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
-  // "chat about this file" drawer — the file whose diff we're chatting about, or null.
-  const [chatFile, setChatFile] = createSignal<FileDiff | null>(null);
+  // chat drawer target: a file's diff, or the whole branch ({ file: null }). null = closed.
+  const [chat, setChat] = createSignal<{ file: FileDiff | null } | null>(null);
 
   // the sidebar is a GitHub-PR-style file list for the active node; clicking a row
   // scrolls its diff card into view and lights the row. activeFile tracks the lit row.
@@ -752,6 +752,11 @@ function NodeDetail() {
                   : ""}
           </span>
           <NodeActions branch={active()} />
+          <Show when={canMutate}>
+            <button class="map-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
+              ✦ chat
+            </button>
+          </Show>
           <button class="map-btn" onClick={() => setShowMap(true)} title="forest map (m)">
             ⊞ map
           </button>
@@ -776,7 +781,7 @@ function NodeDetail() {
             {(data) => (
               <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
                 <For each={data().files}>
-                  {(f) => <FileEntry file={f} bless={bless} branch={active()} onChat={setChatFile} />}
+                  {(f) => <FileEntry file={f} bless={bless} branch={active()} onChat={(file) => setChat({ file })} />}
                 </For>
               </Show>
             )}
@@ -786,8 +791,8 @@ function NodeDetail() {
       <Show when={canMutate}>
         <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
       </Show>
-      <Show when={canMutate && chatFile()}>
-        {(f) => <ChatPanel file={f()} branch={active()} onClose={() => setChatFile(null)} />}
+      <Show when={canMutate && chat()}>
+        {(c) => <ChatPanel file={c().file} branch={active()} onClose={() => setChat(null)} />}
       </Show>
       <Show when={showMap()}>
         <ForestMap
