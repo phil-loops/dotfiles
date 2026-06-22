@@ -130,6 +130,7 @@ def start(req, raw):
     proc = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)
     session_id = ""
+    text_seen = False
     try:
         sse("status", {"s": "starting"})
         for line in proc.stdout:
@@ -151,10 +152,16 @@ def start(req, raw):
                     dt = delta.get("type")
                     if dt == "text_delta":
                         sse("token", {"t": delta.get("text", "")})
+                        text_seen = True
                     elif dt == "thinking_delta":
                         sse("status", {"s": "thinking"})
                 elif et == "content_block_start":
                     if e.get("content_block", {}).get("type") == "text":
+                        # claude interleaves text→tool→text as separate blocks; their deltas
+                        # carry no space across the join, so a later block glues onto the
+                        # prior sentence ("…precisely.Now…"). Re-paragraph at each new text block.
+                        if text_seen:
+                            sse("token", {"t": "\n\n"})
                         sse("status", {"s": "writing"})
             elif t == "result":
                 session_id = ev.get("session_id", session_id)
