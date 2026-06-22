@@ -13,7 +13,7 @@ no(){ print -- "  \033[31m✗\033[0m $1"; FAIL=$((FAIL+1)); return 0; }
 cleanup(){
   tmux kill-session -t "$SESS" 2>/dev/null
   rm -f "$PRES"/e2e-*.json
-  rm -rf /tmp/submit-e2e-warm /tmp/submit-e2e-cold /tmp/submit-e2e-marker /tmp/submit-e2e-ref
+  rm -rf /tmp/submit-e2e-warm /tmp/submit-e2e-cold /tmp/submit-e2e-marker /tmp/submit-e2e-ref /tmp/submit-e2e-nvim
 }
 trap cleanup EXIT
 cleanup
@@ -98,6 +98,26 @@ tmux send-keys -t "$SURF" Escape; tmux send-keys -t "$SURF" -l ":q!"; tmux send-
 
 # submit-refresh on an unknown anchor → graceful exit 1
 "$SCRIPTS/submit-refresh" /tmp/no-such-anchor >/dev/null 2>&1; [[ $? -eq 1 ]] && ok "submit-refresh exits 1 when no surface recorded" || no "submit-refresh didn't exit 1"
+
+print -- "\n\033[1mNVIM :submit WIRING\033[0m (code buffer → submit script → warm route)"
+NWT=$(mkrepo /tmp/submit-e2e-nvim feature)
+NTARGET=$(tmux split-window -d -t "$TPANE" -P -F '#{pane_id}')           # fake live session
+NPID=$(tmux display-message -p -t "$NTARGET" '#{pane_pid}')
+NSTART=$(ps -o lstart= -p "$NPID" | tr -s ' ' | sed 's/^ //; s/ $//')
+print -- "{\"session_id\":\"e2e-nvim\",\"pid\":$NPID,\"start_time\":\"$NSTART\",\"tmux_pane\":\"$NTARGET\",\"repo\":\"$NWT\",\"cwd\":\"$NWT\",\"repo_name\":\"e2e-nvim\",\"branch\":\"feature\",\"last_active\":$(date +%s)}" > "$PRES/e2e-nvim.json"
+NVPANE=$(tmux split-window -d -t "$TPANE" -c "$NWT" -P -F '#{pane_id}' "nvim f.txt")
+for i in {1..120}; do [[ "$(tmux display-message -p -t "$NVPANE" '#{pane_current_command}')" == nvim ]] && break; done
+[[ "$(tmux display-message -p -t "$NVPANE" '#{pane_current_command}')" == nvim ]] && ok "nvim opened on the worktree file" || no "nvim didn't open"
+
+tmux send-keys -t "$NVPANE" Escape
+tmux send-keys -t "$NVPANE" -l ":submit nvim wiring test"
+tmux send-keys -t "$NVPANE" Enter
+NCAP=""
+for i in {1..120}; do NCAP=$(tmux capture-pane -p -t "$NTARGET"); [[ "$NCAP" == *"submit: re-read"* ]] && break; done
+[[ "$NCAP" == *"submit: re-read"* ]] && ok ":submit in nvim warm-routed to the live session" || no "nvim :submit didn't reach the live session"
+NSREC=$(cat "${TMPDIR:-/tmp}/submit-envelopes/surface/$(print -r -- "$NWT" | tr '/ ' '__').pane" 2>/dev/null)
+[[ "$NSREC" == "$NVPANE" ]] && ok "submit recorded the nvim pane as the surface" || no "surface pane wrong ($NSREC want $NVPANE)"
+tmux send-keys -t "$NVPANE" Escape; tmux send-keys -t "$NVPANE" -l ":qa!"; tmux send-keys -t "$NVPANE" Enter
 
 print -- "\n\033[1m$PASS passed, $FAIL failed\033[0m"
 exit $(( FAIL > 0 ))
