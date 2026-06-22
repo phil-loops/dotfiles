@@ -1,0 +1,67 @@
+#!/bin/zsh
+# submit-envelope — print the canonical :submit handoff envelope for an anchor.
+#
+# The SINGLE source of the envelope format, shared by `submit` (local — writes it
+# to a file and forwards by reference) and `alpha-submit` (cloud — POSTs it as a
+# routine's text). So every surface hands off the SAME shape:
+#   anchor + intent + commits + diffstat + (inline diff | compare URL).
+#
+# Usage:
+#   submit-envelope [-m <intent>] [--base <ref>] [--with-diff] [--compare-url <url>] <anchor>
+# Intent source if -m omitted: PLAN.md (worktree root) › branch description.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+intent=""; base=""; with_diff=false; compare_url=""; anchor=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -m) intent="${2:-}"; shift 2 ;;
+    --base) base="${2:-}"; shift 2 ;;
+    --with-diff) with_diff=true; shift ;;
+    --compare-url) compare_url="${2:-}"; shift 2 ;;
+    *) anchor="$1"; shift ;;
+  esac
+done
+
+[[ -z "$anchor" ]] && anchor="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[[ -z "$anchor" ]] && { print -u2 "submit-envelope: no anchor"; exit 1 }
+wt="$(git -C "$anchor" rev-parse --show-toplevel 2>/dev/null || echo "$anchor")"
+branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+if [[ -z "$base" ]]; then
+  if git -C "$wt" rev-parse --verify -q origin/main >/dev/null 2>&1; then base=origin/main; else base=main; fi
+fi
+[[ -z "$intent" && -f "$wt/PLAN.md" ]] && intent="$(<"$wt/PLAN.md")"
+[[ -z "$intent" ]] && intent="$(git -C "$wt" config branch.${branch}.description 2>/dev/null || true)"
+[[ -z "$intent" ]] && intent="(no intent given)"
+
+commits="$(git -C "$wt" log --oneline ${base}..HEAD 2>/dev/null || true)"
+diffstat="$(git -C "$wt" diff --stat "$base" 2>/dev/null | tail -40 || true)"
+
+print -- "# :submit — review \`$branch\`"
+print --
+print -- "**Anchor:** $wt  ·  branch \`$branch\`  ·  base \`$base\`"
+[[ -n "$compare_url" ]] && { print --; print -- "**Compare / open PR:** $compare_url" }
+print --
+print -- "## Intent"
+print -r -- "$intent"
+print --
+print -- "## Commits"
+print -r -- "$commits"
+print --
+print -- "## Diffstat"
+print -r -- "$diffstat"
+if $with_diff; then
+  print --
+  print -- "## Diff"
+  print -- '```diff'
+  git -C "$wt" diff "$base" 2>/dev/null || true
+  print -- '```'
+fi
+print --
+print -- "## Ask"
+print -- "Review these edits against \`$base\`: correctness + layering (queries → models → wiring)."
+if [[ -n "$compare_url" ]]; then
+  print -- "Report findings; land only on the human's OK."
+else
+  print -- "Talk in this pane; edit the worktree in place; then run \`submit-refresh $wt\` to reload the human's editor. The human will \`submit\` again."
+fi
