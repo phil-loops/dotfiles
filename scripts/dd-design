@@ -31,22 +31,24 @@ if [[ -z "$file" || ! -f "$file" ]]; then
   exit 1
 fi
 
-# the pane we're running in — dismiss it last, after the doc is up elsewhere
+# The pane we're running in — capture it NOW, before any window switch, and dismiss
+# it on exit. A trap (not a trailing line) guarantees the kill even if a tmux command
+# below trips `set -e`: otherwise an errexit abort would strand the launchpad pane.
+# Target it by explicit id — after the select/new-window the *active* pane is nvim,
+# so a bare `kill-pane` would close the doc instead.
 launchpad="${TMUX_PANE:-}"
+[[ -n "$launchpad" ]] && trap 'tmux kill-pane -t "$launchpad" 2>/dev/null || true' EXIT
 
 if [[ -z "${TMUX:-}" ]]; then
-  exec nvim "$file"   # not in tmux: just open it here
+  trap - EXIT          # no tmux: nothing to dismiss
+  exec nvim "$file"    # not in tmux: just open it here
 fi
 
+# Don't let a non-zero from send-keys/select-window (nvim busy, transient race) abort
+# under `set -e` before the trap-driven kill — match `design`'s tolerant style.
 if tmux list-windows -t "$session" -F '#{window_name}' 2>/dev/null | grep -qx design; then
-  tmux send-keys -t "${session}:design" Escape ":edit ${file}" Enter
-  tmux select-window -t "${session}:design"
+  tmux send-keys -t "${session}:design" Escape ":edit ${file}" Enter 2>/dev/null || true
+  tmux select-window -t "${session}:design" 2>/dev/null || true
 else
   tmux new-window -t "$session" -n design "nvim ${(q)file}"
-fi
-
-# Dismiss the launchpad. Target it explicitly: after the select/new-window above the
-# *active* pane is now nvim, so a bare `kill-pane` would close the doc instead.
-if [[ -n "$launchpad" ]]; then
-  tmux kill-pane -t "$launchpad" 2>/dev/null || true
 fi
