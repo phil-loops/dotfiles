@@ -63,7 +63,14 @@ env_file="$env_dir/$(print -r -- "$wt" | tr '/ ' '__').md"
   print -- '```'
   print --
   print -- "Review these edits. Talk here; edit the worktree in place; the human will \`submit\` again."
+  print -- "After you edit files, run \`submit-refresh $wt\` to reload the human's editor."
 } > "$env_file"
+
+# record the human's surface pane (where :submit ran) so the agent can push a
+# view-refresh back here after editing the worktree — submit-refresh reads this.
+surf_dir="$env_dir/surface"; mkdir -p "$surf_dir"
+surf_file="$surf_dir/$(print -r -- "$wt" | tr '/ ' '__').pane"
+[[ -n "${TMUX_PANE:-}" ]] && print -r -- "${TMUX_PANE}" > "$surf_file"
 
 # route: warm (live session for this anchor) or cold (spawn)
 if pane="$("$SELF_DIR/submit-route" --exclude-self "$wt" 2>/dev/null)"; then
