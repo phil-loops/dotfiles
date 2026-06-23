@@ -22,6 +22,8 @@ import { ForestMap } from "./ForestMap";
 import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
+import ChatIndex from "./ChatIndex";
+import { threadMsgCount } from "./chatStore";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
 import { ServerStatus } from "./ServerStatus";
@@ -144,23 +146,48 @@ function Home() {
   const [armed, setArmed] = createSignal<string | null>(null); // project (or "__all__") awaiting confirm
   const [running, setRunning] = createSignal<string | null>(null); // project (or "__all__") restacking now
   const [parked, setParked] = createSignal<Parked | null>(null); // set on a conflict
+  const [restackErr, setRestackErr] = createSignal<string | null>(null);
+  const [menu, setMenu] = createSignal<string | null>(null); // project whose parked-action popover is open
   let armT: ReturnType<typeof setTimeout>;
-  const post = (url: string, body: unknown): Promise<{ ok?: boolean }> =>
+  const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json());
+  const behindNames = () => (projects.data || []).filter((p) => p.behind > 0).map((p) => p.name);
   const start = (key: string) => {
-    setParked(null);
+    setRestackErr(null);
+    // restack-all clears any pre-existing park first (server frees the worktree, then the
+    // resilient walk restacks the rest); a single-project restack never auto-drops a park.
     const body =
       key === "__all__"
-        ? { projects: (projects.data || []).filter((p) => p.behind > 0).map((p) => p.name) }
+        ? { projects: behindNames(), abortParked: !!parked() }
         : { project: key };
     post(key === "__all__" ? "/restack-all" : "/restack", body).then((r) => {
-      if (r.ok) setRunning(key);
+      if (r.ok) {
+        setParked(null);
+        setRunning(key);
+      } else {
+        // Don't swallow it — a stale park 409s here; surface why + refresh so the parked
+        // branch's contextual button appears on its row.
+        setRestackErr(r.err ?? "couldn’t start restack");
+        homeStatus.refetch();
+      }
     });
   };
+  const abort = (project: string) =>
+    post("/restack-abort", { project }).then((r) => {
+      if (r.ok) {
+        setParked(null);
+        setRestackErr(null);
+        setMenu(null);
+        projects.refetch();
+        homeStatus.refetch();
+      } else {
+        setRestackErr(r.err ?? "couldn’t abort");
+      }
+    });
   const arm = (key: string) => {
     if (armed() === key) {
       clearTimeout(armT);
@@ -194,9 +221,25 @@ function Home() {
     post("/restack-resolve", { project }).then((r) => {
       if (r.ok) {
         setParked(null);
+        setMenu(null);
         setRunning(project); // re-poll while Claude resolves + resumes
       }
     });
+  // Surface a parked conflict on the home screen even when nothing is running — without
+  // this a stale park silently 409s every restack with no clue which branch is stuck.
+  const homeStatus = createQuery(() => ({
+    queryKey: ["home-restack-status"],
+    queryFn: () => provider.restackStatus(),
+    refetchInterval: 5000,
+  }));
+  createEffect(() => {
+    if (running()) return; // the running-restack effect owns `parked` mid-walk
+    const d = homeStatus.data;
+    if (!d) return;
+    setParked(
+      d.paused ? { project: d.project ?? "", current: d.current ?? "", reason: d.reason ?? "" } : null
+    );
+  });
 
   // ── watching: opt-in pinned loose branches (git config stack.standalone) ──
   // Not auto-discovery — branches you deliberately pin to keep an eye on. /branches
@@ -313,6 +356,9 @@ function Home() {
       <section>
         <div class="eyebrow-row">
           <h2 class="eyebrow">forests</h2>
+          <Show when={restackErr()}>
+            <span class="restack-err">{restackErr()}</span>
+          </Show>
           <Show when={canMutate && (projects.data || []).some((p) => p.behind > 0)}>
             <button
               class="restack-all"
@@ -322,8 +368,10 @@ function Home() {
               {running() === "__all__"
                 ? "⤳ restacking all…"
                 : armed() === "__all__"
-                  ? "restack all behind?"
-                  : `⟳ restack all ${(projects.data || []).filter((p) => p.behind > 0).length} behind`}
+                  ? parked()
+                    ? `drop parked ${leaf(parked()!.project)} & restack all?`
+                    : "restack all behind?"
+                  : `⟳ restack all ${behindNames().length} behind`}
             </button>
           </Show>
         </div>
@@ -382,17 +430,58 @@ function Home() {
                       </Show>
                     }
                   >
-                    <button
-                      class="forest-resolve"
-                      title={parked()?.reason || ""}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        resolve(p.name);
-                      }}
-                    >
-                      ⚠ resolve {leaf(parked()?.current || p.name)}
-                    </button>
+                    <div class="forest-parked">
+                      <button
+                        class="forest-resolve"
+                        classList={{ open: menu() === p.name }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setMenu(menu() === p.name ? null : p.name);
+                        }}
+                      >
+                        ⚠ parked at {leaf(parked()?.current || p.name)}
+                      </button>
+                      <Show when={menu() === p.name}>
+                        <div
+                          class="forest-popover"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                          }}
+                        >
+                          <p class="forest-popover-why">
+                            Rebase paused on a conflict
+                            {parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a
+                            worktree and blocks restacks until it’s cleared.
+                          </p>
+                          <Show when={parked()?.reason}>
+                            {(r) => <p class="forest-popover-reason">{r()}</p>}
+                          </Show>
+                          <div class="forest-popover-actions">
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                resolve(p.name);
+                              }}
+                            >
+                              ✦ resolve with Claude
+                            </button>
+                            <button
+                              class="danger"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                abort(p.name);
+                              }}
+                            >
+                              ✕ abort & discard
+                            </button>
+                          </div>
+                        </div>
+                      </Show>
+                    </div>
                   </Show>
                 </A>
               );
@@ -523,6 +612,8 @@ function NodeDetail() {
   const [showMap, setShowMap] = createSignal(false);
   // chat drawer target: a file's diff, or the whole branch ({ file: null }). null = closed.
   const [chat, setChat] = createSignal<{ file: FileDiff | null } | null>(null);
+  // cross-forest chat index overlay (read-only; every thread in this browser).
+  const [showChats, setShowChats] = createSignal(false);
 
   // the sidebar is a GitHub-PR-style file list for the active node; clicking a row
   // scrolls its diff card into view and lights the row. activeFile tracks the lit row.
@@ -730,51 +821,51 @@ function NodeDetail() {
         }}
       >
         <header class="node-head">
-          <h1>{leaf(active()) || "—"}</h1>
-          <Show when={parentOf()}>
-            <span class="against">◂ {leaf(parentOf())}</span>
-          </Show>
-          <div class="view-toggle">
-            <button class="view-pill" classList={{ on: view() === "diffs" }} onClick={() => setView("diffs")}>
-              diffs
-            </button>
-            <button class="view-pill" classList={{ on: view() === "commits" }} onClick={() => setView("commits")}>
-              commits
+          {/* tier 1 — identity: the branch name + what it's diffed against, nothing else.
+              Giving this its own line stops the long title from wrapping into the controls. */}
+          <div class="nh-id">
+            <h1>{leaf(active()) || "—"}</h1>
+            <Show when={parentOf()}>
+              <span class="against">◂ {leaf(parentOf())}</span>
+            </Show>
+          </div>
+          {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
+              The blessed count lives in the spine; the map opens from the spine + `m`. */}
+          <div class="nh-bar">
+            <div class="view-toggle">
+              <button class="view-pill" classList={{ on: view() === "diffs" }} onClick={() => setView("diffs")}>
+                diffs
+              </button>
+              <button class="view-pill" classList={{ on: view() === "commits" }} onClick={() => setView("commits")}>
+                commits
+              </button>
+            </div>
+            <Show when={view() === "diffs"}>
+              <div class="base-toggle">
+                <span class="base-label">diff vs</span>
+                <For each={BASES}>
+                  {([v, lab]) => (
+                    <button class="base-pill" classList={{ on: base() === v }} onClick={() => setBase(v)}>
+                      {lab}
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
+            <div class="nh-spacer" />
+            <NodeActions branch={active()} />
+            <Show when={canMutate}>
+              <button class="icon-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
+                ✦
+              </button>
+            </Show>
+            <button class="icon-btn" onClick={() => setShowChats(true)} title="all chat threads across the forest">
+              💬
             </button>
           </div>
-          <span class="meta">
-            {node.isFetching
-              ? "syncing…"
-              : node.isError
-                ? "couldn't load — retrying"
-                : node.data
-                  ? `${node.data.files.filter(isBlessed).length}/${node.data.files.length} blessed`
-                  : ""}
-          </span>
-          <NodeActions branch={active()} />
-          <Show when={canMutate}>
-            <button class="map-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
-              ✦ chat
-            </button>
-          </Show>
-          <button class="map-btn" onClick={() => setShowMap(true)} title="forest map (m)">
-            ⊞ map
-          </button>
         </header>
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
-          <div class="base-toggle">
-            <span class="base-label">diff vs</span>
-            <For each={BASES}>
-              {([v, lab]) => (
-                <button
-                  class="base-pill"
-                  classList={{ on: base() === v }}
-                  onClick={() => setBase(v)}
-                >
-                  {lab}
-                </button>
-              )}
-            </For>
+          <div class="diff-hint">
             <span class="kbd-hint"><b>tab</b> next file · hover a line · <b>o</b> → nvim</span>
           </div>
           <Show when={node.data} fallback={<p class="loading">loading…</p>}>
@@ -793,6 +884,9 @@ function NodeDetail() {
       </Show>
       <Show when={canMutate && chat()}>
         {(c) => <ChatPanel file={c().file} branch={active()} onClose={() => setChat(null)} />}
+      </Show>
+      <Show when={showChats()}>
+        <ChatIndex onClose={() => setShowChats(false)} />
       </Show>
       <Show when={showMap()}>
         <ForestMap
@@ -872,6 +966,11 @@ function FileEntry(props: {
         >
           {copied() ? "copied ✓" : "⎘ copy ref"}
         </button>
+        <Show when={threadMsgCount(props.branch, props.file.path) > 0}>
+          <span class="chat-badge" title="this file has a chat thread">
+            💬 {threadMsgCount(props.branch, props.file.path)}
+          </span>
+        </Show>
         <Show when={canMutate}>
           <button
             class="file-act"
