@@ -4,8 +4,14 @@
 #   POST /claude {branch, selections:[{path, ranges:[[start,end],…]}], instruction}
 import os
 import json
+import subprocess
 
 from . import ctx
+
+# Model aliases the chip may request (resolved to current models by the claude CLI). Unlike the
+# SSE chat, every chip launch is a FRESH session, so the chosen model always takes effect. An
+# unrecognized value is dropped → stack-claude falls back to claude's configured default.
+ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
 
 
 def _fmt_ranges(ranges):
@@ -35,10 +41,17 @@ def start(req, raw):
     branch = (d.get("branch") or "").strip()
     selections = [s for s in d.get("selections", []) if s.get("path")]
     instruction = d.get("instruction") or ""
+    model = (d.get("model") or "").strip()
     if not branch or not selections:
         req._send(400, json.dumps({"ok": False, "err": "need a branch + at least one selection"}))
         return
     prompt = _build_prompt(branch, selections, instruction)
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch, prompt])
+    # ctx.run can't set env; stack-claude reads the model from STACK_CLAUDE_MODEL, so shell out
+    # directly with it added (only when recognized — else the var stays unset = claude default).
+    env = dict(os.environ)
+    if model in ALLOWED_MODELS:
+        env["STACK_CLAUDE_MODEL"] = model
+    r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch, prompt],
+                       cwd=ctx.CWD, capture_output=True, text=True, env=env)
     req._send(200 if r.returncode == 0 else 500,
               json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))

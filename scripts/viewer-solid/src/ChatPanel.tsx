@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, onMount, For, Show, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { FileDiff } from "./types";
-import { appendMsg, setMsgText, setSession, thread } from "./chatStore";
+import { appendMsg, setMsgText, setSession, thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
 import { renderMarkdown } from "./markdown";
 
 // ChatPanel — "chat about this file", with Claude's answer streaming in token-by-token.
@@ -102,6 +102,7 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
           patch: resume ? undefined : patch, // diff only seeds turn one
           question: q,
           resume: resume || undefined,
+          model: chatModel(),
         }),
       });
       if (!res.ok || !res.body) {
@@ -211,8 +212,34 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
             </span>
           </div>
           <div class="cp-sub">
-            <span class="cp-branch">{props.branch}</span>
-            <button class="cp-x" title="close (esc)" onClick={props.onClose}>×</button>
+            <div class="cp-models" role="group" aria-label="chat model">
+              <For each={CHAT_MODELS}>
+                {(m) => (
+                  <button
+                    class="cp-model"
+                    classList={{ on: chatModel() === m }}
+                    title={`claude ${m} — used when a chat starts. A running thread stays on the model it began with; hit "new chat" to switch.`}
+                    onClick={() => setChatModel(m)}
+                  >
+                    {m}
+                  </button>
+                )}
+              </For>
+            </div>
+            <div class="cp-sub-right">
+              <Show when={msgs().length}>
+                <button
+                  class="cp-new"
+                  title="start a fresh chat — clears this thread so the next message opens a new session (the only way to switch an existing thread to a different model)"
+                  disabled={streaming()}
+                  onClick={() => clearThread(props.branch, path())}
+                >
+                  ＋ new chat
+                </button>
+              </Show>
+              <span class="cp-branch">{props.branch}</span>
+              <button class="cp-x" title="close (esc)" onClick={props.onClose}>×</button>
+            </div>
           </div>
         </header>
 
@@ -317,13 +344,29 @@ const CSS = `
 .cp-mark { color: var(--gold, #e0ad4e); }
 .cp-path { word-break: break-all; }
 .cp-path .cp-dir { color: var(--faint, #6f675a); }
-.cp-sub { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; }
+.cp-sub { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; }
+.cp-sub-right { display: flex; align-items: center; gap: 6px; }
+.cp-models { display: flex; gap: 2px; }
+.cp-model {
+  font: inherit; font-size: 10.5px; letter-spacing: .02em; cursor: pointer;
+  color: var(--faint, #6f675a); background: transparent;
+  border: 1px solid transparent; border-radius: 5px; padding: 2px 8px;
+}
+.cp-model:hover { color: var(--dim, #a89e8c); }
+.cp-model.on { color: var(--gold, #e0ad4e); border-color: var(--gold, #e0ad4e); background: rgba(224,173,78,.08); }
 .cp-branch {
   font-size: 11px; color: var(--patina, #8a9a6b); border: 1px solid var(--patina, #8a9a6b);
   border-radius: 4px; padding: 1px 7px; opacity: .85;
 }
 .cp-x { border: 0; background: transparent; color: var(--faint, #6f675a); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .cp-x:hover { color: var(--ink, #e9e2d4); }
+.cp-new {
+  font: inherit; font-size: 10.5px; cursor: pointer; white-space: nowrap;
+  color: var(--patina, #8a9a6b); background: transparent;
+  border: 1px solid var(--patina, #8a9a6b); border-radius: 5px; padding: 2px 8px; opacity: .85;
+}
+.cp-new:hover:not(:disabled) { opacity: 1; }
+.cp-new:disabled { opacity: .4; cursor: default; }
 
 .cp-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 .cp-empty { color: var(--dim, #a89e8c); font-size: 12.5px; line-height: 1.6; margin: 4px 0 0; }

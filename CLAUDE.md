@@ -137,10 +137,19 @@ When the bottom of a forest merges (or `origin/main` advances), rebase every mem
    Do each rebase in the worktree where that branch is checked out (a branch checked out elsewhere
    can't be rebased from here); for an unchecked-out branch, add a throwaway worktree on it.
 
-After the walk: drop any branch that became empty (`git diff <parent>...<branch>` empty, or it's an
-ancestor of `main`) with `git branch -D`, and rewire its children's parent to the dropped node's
-parent (see the config checklist above). Squash-merged commits won't match `origin/main` by SHA —
-the rebase drops them cleanly (both `parent` and carried `requires`).
+After the walk — or after **any** rebase that empties a branch, even a one-branch forward-rebase —
+**contract the graph, don't leave the empty node.** A branch whose `git diff <parent>...<branch>` is
+empty (or that is now an ancestor of `main`, i.e. its work squash-merged) is done: drop it (`git
+branch -D`) and rewire its children's `parent` onto the dropped node's parent (see the config
+checklist above). Contracting is what *preserves* graph integrity — children reconnect to a live
+base — so it beats leaving a zero-diff branch hanging; an empty node is the confusing state to
+avoid. **Do this as part of the rebase, then summarize — never just report "the branch is now empty"
+and stop.** Squash-merged commits won't match `origin/main` by SHA — the rebase drops them cleanly
+(both `parent` and carried `requires`).
+
+A rebase is also a **comment-review checkpoint.** Any branch you rewrite, re-read its `parent...child`
+diff against the comment gate (*Comments* below) and trim anything that no longer earns its keep —
+reforesting is the free moment to delete narration that survived the first pass.
 
 Conflicts: resolve them yourself, in the rebase — don't bypass with `--skip`/`-X`. Treat a real
 (overlapping-logic) conflict as a signal to check with Phil rather than guess.

@@ -1,5 +1,6 @@
-import { createSignal, createEffect, onCleanup, Show, type Accessor } from "solid-js";
+import { createSignal, createEffect, onCleanup, Show, For, type Accessor } from "solid-js";
 import type { DiffSelection } from "./useDiffSelection";
+import { chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
 
 // AskClaudeChip — the floating "ask Claude" affordance that appears when you sweep-select
 // text in a diff (see ../design-select-to-claude.md). Sweep → chip floats by the selection →
@@ -72,6 +73,7 @@ export default function AskClaudeChip(props: {
           branch,
           selections: s.files,
           instruction: instruction().trim(),
+          model: chatModel(),
         }),
       });
       if (!r.ok) {
@@ -157,14 +159,32 @@ export default function AskClaudeChip(props: {
           <Show when={error()}>
             <div class="dsc-err">{error()}</div>
           </Show>
-          <button
-            class="dsc-send"
-            disabled={sending() || sent()}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={send}
-          >
-            {sent() ? "sent ✦" : sending() ? "starting…" : "ask Claude ✦"}
-          </button>
+          <div class="dsc-foot">
+            <div class="dsc-models" role="group" aria-label="model">
+              <For each={CHAT_MODELS}>
+                {(m) => (
+                  <button
+                    class="dsc-model"
+                    classList={{ on: chatModel() === m }}
+                    title={`launch this session with claude ${m}`}
+                    disabled={sending() || sent()}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => setChatModel(m)}
+                  >
+                    {m}
+                  </button>
+                )}
+              </For>
+            </div>
+            <button
+              class="dsc-send"
+              disabled={sending() || sent()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={send}
+            >
+              {sent() ? "sent ✦" : sending() ? "starting…" : "ask Claude ✦"}
+            </button>
+          </div>
         </div>
       </Show>
     </>
@@ -209,8 +229,17 @@ const CHIP_CSS = `
 }
 .dsc-input:focus { border-color: var(--gold, #e0ad4e); }
 .dsc-err { color: var(--ember, #d36a36); font-size: 11.5px; }
+.dsc-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dsc-models { display: flex; gap: 2px; }
+.dsc-model {
+  font: inherit; font-size: 10.5px; cursor: pointer;
+  color: var(--faint, #6f675a); background: transparent;
+  border: 1px solid transparent; border-radius: 5px; padding: 2px 7px;
+}
+.dsc-model:hover:not(:disabled) { color: var(--dim, #a89e8c); }
+.dsc-model.on { color: var(--gold, #e0ad4e); border-color: var(--gold, #e0ad4e); background: rgba(224,173,78,.08); }
+.dsc-model:disabled { opacity: 0.5; cursor: default; }
 .dsc-send {
-  align-self: flex-end;
   background: var(--gold, #e0ad4e); color: #1a160f;
   border: 0; border-radius: 6px; padding: 6px 12px;
   font: inherit; font-weight: 600; cursor: pointer;

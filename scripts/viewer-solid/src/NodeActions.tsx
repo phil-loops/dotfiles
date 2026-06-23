@@ -1,9 +1,12 @@
-// NodeActions — the two node-level "do something to this branch" affordances that
-// live in NodeDetail's node-head: move the main checkout (~/coding/loops) onto this
-// branch, and squash parent..branch into one voiced commit. Both are SECONDARY
-// actions, so they wear --patina (stale/tarnished green), never gold — gold is
-// reserved for blessed work. This component owns its own wiring + styling so it can
-// drop into App.tsx with a single import + mount line (no shared lines).
+// NodeActions — the branch-level "do something to this branch" affordances that live on
+// the right of NodeDetail's node-head: a fork-state badge (behind / push-blocked) and a
+// ⋯ menu collapsing the three rare, history-touching mutations — move the main checkout
+// (~/coding/loops) onto this branch, squash parent..branch into one voiced commit, and
+// rebase forward onto origin/main. Collapsing them into a menu keeps the header calm and
+// adds a click of friction before anything rewrites history. All three are SECONDARY
+// actions, so they wear --patina (stale/tarnished green), never gold — gold is reserved
+// for blessed work. This component owns its wiring + state so it drops into App.tsx with a
+// single mount line.
 //
 //   <NodeActions branch={active()} />
 //
@@ -11,10 +14,10 @@
 //   POST /checkout {branch, force?}  → {ok} | 409 {ok:false, worktree} when another
 //                                       worktree holds the branch (force:true frees it)
 //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
-import { createSignal, Show } from "solid-js";
+//   POST /sync     {branch}          → {ok} | 409 {ok:false, err}  (eject-to-Claude rebase)
+import { createSignal, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
-import type { SyncState } from "./types";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -48,32 +51,6 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   }
 }
 
-// patina-tinted secondary button; gold stays the sole property of blessed.
-const btn = {
-  font: "inherit",
-  "font-size": "12px",
-  color: "var(--patina)",
-  background: "transparent",
-  border: "1px solid var(--patina)",
-  "border-radius": "5px",
-  padding: "3px 9px",
-  cursor: "pointer",
-  opacity: "0.85",
-} as const;
-
-const note = {
-  "font-size": "12px",
-  color: "var(--patina)",
-  opacity: "0.9",
-} as const;
-
-// ember = "needs your eye". Being behind is calm/patina; a push-block is the one urgent
-// state here, so it escalates to ember — gold stays reserved for blessed.
-const alarm = { "font-size": "12px", color: "var(--ember)", "font-weight": "600" } as const;
-// basename minus the dbmate timestamp prefix — humans recognize "drop-dead-tables.sql",
-// not "20260616193000_drop-dead-tables.sql".
-const migName = (p: string): string => (p || "").split("/").pop()?.replace(/^\d+_/, "") ?? "";
-
 export function NodeActions(props: { branch: string }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
@@ -82,8 +59,25 @@ export function NodeActions(props: { branch: string }) {
   // squash is history-rewriting → two-click arm before it fires.
   const [armed, setArmed] = createSignal(false);
   let armT: ReturnType<typeof setTimeout>;
-  // transient success line ("✓ …"), cleared on the next node.
+  // transient result line ("✓ …" / "✗ …"), cleared on the next action.
   const [done, setDone] = createSignal<string | null>(null);
+  // the ⋯ menu open/closed
+  const [open, setOpen] = createSignal(false);
+  let root: HTMLDivElement | undefined;
+
+  // close the menu on outside click / Escape so it never lingers over the diff.
+  const onDocDown = (e: MouseEvent) => {
+    if (root && !root.contains(e.target as Node)) setOpen(false);
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") setOpen(false);
+  };
+  document.addEventListener("mousedown", onDocDown);
+  document.addEventListener("keydown", onKey);
+  onCleanup(() => {
+    document.removeEventListener("mousedown", onDocDown);
+    document.removeEventListener("keydown", onKey);
+  });
 
   const checkout = createMutation(() => ({
     mutationFn: (force: boolean) =>
@@ -91,6 +85,7 @@ export function NodeActions(props: { branch: string }) {
     onSuccess: (r) => {
       if (r.ok) {
         setHeldAt(null);
+        setOpen(false);
         setDone(`✓ checked out in ~/coding/loops`);
         qc.invalidateQueries({ queryKey: ["head"] });
       } else if (r.worktree) {
@@ -106,6 +101,7 @@ export function NodeActions(props: { branch: string }) {
     mutationFn: () => post<SquashResult>("/squash", { branch: props.branch }),
     onSuccess: (r) => {
       setArmed(false);
+      setOpen(false);
       if (r.ok) {
         setDone(`✓ squashed ${r.n ?? ""} → ${r.sha ?? ""} ${r.header ?? ""}`.trim());
         qc.invalidateQueries({ queryKey: ["commits", props.branch] });
@@ -122,8 +118,6 @@ export function NodeActions(props: { branch: string }) {
   }));
 
   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
-  // (deployCritical is added to /sync in the coupled backend change; until then it's
-  // absent → badge shows the calm "behind" state, never a false block.)
   const sync = createQuery(() => ({
     queryKey: ["sync", props.branch],
     queryFn: () => provider.sync(props.branch),
@@ -139,6 +133,7 @@ export function NodeActions(props: { branch: string }) {
   const rebase = createMutation(() => ({
     mutationFn: () => post<{ ok?: boolean; err?: string }>("/sync", { branch: props.branch }),
     onSuccess: (r) => {
+      setOpen(false);
       if (r.ok) {
         setDone("✓ rebasing on main — Claude is on it in a worktree");
         sync.refetch();
@@ -160,77 +155,107 @@ export function NodeActions(props: { branch: string }) {
   };
 
   const busy = () => checkout.isPending || squash.isPending || rebase.isPending;
+  const fire = (fn: () => void) => () => {
+    setDone(null);
+    fn();
+  };
 
   return (
-    <div class="node-actions" style={{ display: "flex", "align-items": "center", gap: "8px" }}>
+    <div class="node-actions" ref={root}>
       {/* fork-state vs origin/main — calm "behind", escalating to ember "push blocked" when
           main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
-          Button action is a placeholder until the eject-to-Claude backend lands (coupled, so a
-          visible button never runs the old main-wedging rebase). */}
+          When blocked the fix (rebase forward) surfaces inline next to the alarm; the full
+          list of missing files lives in the tooltip rather than spread across the header. */}
       <Show when={behind() > 0}>
-        <Show when={blocked()} fallback={<span style={note}>↓ {behind()} behind</span>}>
+        <Show
+          when={blocked()}
+          fallback={<span class="nh-behind">↓ {behind()} behind</span>}
+        >
           <span
-            style={alarm}
+            class="nh-blocked"
             title={`origin/main changed deploy-critical files this branch is missing:\n${critical().join("\n")}\n\nrebase forward to clear the push block`}
           >
             ⚠ push blocked
           </span>
-          <span style={{ ...note, opacity: "0.7" }}>
-            main changed {migName(critical()[0])}
-            {critical().length > 1 ? ` +${critical().length - 1} more` : ""}
-          </span>
         </Show>
         <button
-          style={btn}
+          class="nh-fix"
           disabled={busy()}
           title="rebase this branch forward onto origin/main — runs in an isolated worktree via Claude (never your main checkout); resolves there, you push"
-          onClick={() => { setDone(null); rebase.mutate(); }}
+          onClick={fire(() => rebase.mutate())}
         >
-          {rebase.isPending ? "rebasing on main…" : "⟳ rebase forward"}
+          {rebase.isPending ? "rebasing…" : "rebase →"}
         </button>
       </Show>
 
-      {/* checkout — move the primary working tree onto this branch */}
-      <Show
-        when={heldAt()}
-        fallback={
-          <button
-            style={btn}
-            disabled={busy()}
-            title="move your main checkout (~/coding/loops) onto this branch"
-            onClick={() => {
-              setDone(null);
-              checkout.mutate(false);
-            }}
-          >
-            {checkout.isPending ? "checking out…" : "⤓ checkout here"}
-          </button>
-        }
-      >
-        <span style={note}>open in {heldAt()} —</span>
-        <button style={btn} disabled={busy()} onClick={() => checkout.mutate(true)}>
-          free &amp; checkout
-        </button>
-        <button style={{ ...btn, border: "1px solid transparent" }} onClick={() => setHeldAt(null)}>
-          cancel
-        </button>
-      </Show>
-
-      {/* squash — collapse parent..branch into one voiced commit (two-click) */}
+      {/* ⋯ menu — the three rare, history-touching mutations, collapsed off the header */}
       <button
-        style={armed() ? { ...btn, opacity: "1", "border-color": "var(--patina)" } : btn}
-        disabled={busy()}
-        title="collapse parent..branch into one commit with a generated subject"
-        onClick={() => {
-          setDone(null);
-          armSquash();
-        }}
+        class="icon-btn"
+        classList={{ on: open() }}
+        aria-haspopup="true"
+        aria-expanded={open()}
+        title="branch actions — checkout, squash, rebase"
+        onClick={() => setOpen((o) => !o)}
       >
-        {squash.isPending ? "squashing…" : armed() ? "confirm squash" : "⊟ squash → 1"}
+        ⋯
       </button>
 
+      <Show when={open()}>
+        <div class="nh-menu" role="menu">
+          {/* checkout — move the primary working tree onto this branch */}
+          <Show
+            when={heldAt()}
+            fallback={
+              <button
+                class="nh-item"
+                role="menuitem"
+                disabled={busy()}
+                title="move your main checkout (~/coding/loops) onto this branch"
+                onClick={fire(() => checkout.mutate(false))}
+              >
+                <span class="nh-item-ic">⤓</span>
+                {checkout.isPending ? "checking out…" : "checkout here"}
+              </button>
+            }
+          >
+            <div class="nh-item-note">held in {heldAt()}</div>
+            <button class="nh-item" role="menuitem" disabled={busy()} onClick={() => checkout.mutate(true)}>
+              <span class="nh-item-ic">⤓</span> free &amp; checkout
+            </button>
+            <button class="nh-item" role="menuitem" onClick={() => setHeldAt(null)}>
+              <span class="nh-item-ic" /> cancel
+            </button>
+          </Show>
+
+          {/* squash — collapse parent..branch into one voiced commit (two-click) */}
+          <button
+            class="nh-item"
+            classList={{ armed: armed() }}
+            role="menuitem"
+            disabled={busy()}
+            title="collapse parent..branch into one commit with a generated subject"
+            onClick={fire(armSquash)}
+          >
+            <span class="nh-item-ic">⊟</span>
+            {squash.isPending ? "squashing…" : armed() ? "confirm squash → 1" : "squash → 1"}
+          </button>
+
+          {/* rebase forward — also surfaced inline when push is blocked */}
+          <button
+            class="nh-item"
+            role="menuitem"
+            disabled={busy()}
+            title="rebase this branch forward onto origin/main in an isolated worktree (never your main checkout)"
+            onClick={fire(() => rebase.mutate())}
+          >
+            <span class="nh-item-ic">⟳</span>
+            {rebase.isPending ? "rebasing…" : "rebase forward"}
+          </button>
+        </div>
+      </Show>
+
       <Show when={done()}>
-        <span style={note}>{done()}</span>
+        <span class="nh-done" title={done() ?? ""}>{done()}</span>
       </Show>
     </div>
   );

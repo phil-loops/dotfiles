@@ -22,6 +22,16 @@ prompt="${2:-}"
 [[ -n "$prompt" ]] || prompt="$(cat)"   # no arg → read the prompt from stdin
 [[ -n "$prompt" ]] || { print -u2 "stack-claude: empty prompt"; return 1 2>/dev/null || exit 1; }
 
+# Optional model (a CLI alias like opus/sonnet/haiku, or a full id) via STACK_CLAUDE_MODEL —
+# set by the viewer's model picker. Empty → let claude use its configured default. Each launch
+# is a fresh session, so --model always applies here (unlike a --resume, which pins the model).
+# The value is baked into the tmux command string, so guard it to a plain token: no metachars.
+model="${STACK_CLAUDE_MODEL:-}"
+if [[ -n "$model" && ! "$model" =~ '^[A-Za-z0-9._-]+$' ]]; then
+  print -u2 "stack-claude: ignoring suspicious model '$model'"; model=""
+fi
+model_flag=""; [[ -n "$model" ]] && model_flag="--model $model "
+
 # Build (or refresh) the branch's worktree exactly the way file-open does, then resolve
 # its path the same way: a real worktree holding the branch wins, else the scratch dir.
 "$here/stack-open" --prepare "$branch"
@@ -36,13 +46,13 @@ dir=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" '
 win="claude:${branch##*/}"
 if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
   print -r -- "DRY: dir=$dir"
-  print -r -- "DRY: tmux new-window -t $SESSION -n $win -c $dir -e STACK_CLAUDE_PROMPT=<prompt> 'claude \"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL'"
+  print -r -- "DRY: tmux new-window -t $SESSION -n $win -c $dir -e STACK_CLAUDE_PROMPT=<prompt> 'claude ${model_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL'"
   print -r -- "DRY: prompt:"; print -r -- "$prompt"
   exit 0
 fi
 
 tmux new-window -t "$SESSION" -n "$win" -c "$dir" -e "STACK_CLAUDE_PROMPT=$prompt" \
-  'claude "$STACK_CLAUDE_PROMPT"; exec $SHELL' \
+  "claude ${model_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL" \
   || { print -u2 "stack-claude: couldn't open a tmux window (is the '$SESSION' session running?)"; exit 1; }
 tmux select-window -t "$SESSION:$win" 2>/dev/null || true
 print -r -- "started claude on $branch in $dir"

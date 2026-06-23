@@ -1,0 +1,32 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index c80768e6e0..c4e00a119c 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -13,6 +13,8 @@ import {
+ } from "@tanstack/solid-query";
+ import * as Diff2Html from "diff2html";
+ import { fetchJSON } from "./api";
++import { useDiffSelection } from "./useDiffSelection";
++import AskClaudeChip from "./AskClaudeChip";
+ 
+ // ── url ──────────────────────────────────────────────────────────────
+ // ?branch=<project> chooses a forest; #node=<branch> the node you're reading.
+@@ -506,6 +508,10 @@ function NodeDetail(props) {
+   const BASES = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
+   const [showMap, setShowMap] = createSignal(false);
+ 
++  // sweep-select diff text → floating "ask Claude" chip → POST /claude. Attributes selected
++  // rows to a file via each .entry's existing data-path (see useDiffSelection).
++  const { selection: claudeSel, clear: clearClaudeSel } = useDiffSelection();
++
+   // hover a spine node → float its branch purpose (the one-line thesis) beside it.
+   // Purposes are cheap + immutable for a session, so cache by branch and guard the
+   // async gap (if the pointer left before /purpose resolved, don't pop a stale tip).
+@@ -666,6 +672,7 @@ function NodeDetail(props) {
+           </Show>
+         </Show>
+       </main>
++      <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
+       <Show when={showMap()}>
+         <ForestMap
+           spine={spine}

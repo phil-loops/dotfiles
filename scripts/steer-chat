@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""
+steer-chat — slice 1 of the viewer "Steer" feature.
+
+A per-branch design / pulse conversation with a HEADLESS `claude` (never your
+interactive session — same pattern as stack-squash / stack-restack). It prints a
+zero-token briefing assembled from git (purpose, parent, children, requires, files
+changed) and then streams a `claude` turn that narrates what the branch is really
+doing and surfaces open questions. The session is persisted per branch, so each
+turn resumes the prior context.
+
+Standalone usage (verify this before any nvim/viewer wiring):
+  steer-chat <branch>              open: print briefing + stream narrative, then REPL
+  steer-chat <branch> --say "..."  one-shot follow-up turn (resumes the session)
+  steer-chat <branch> --reset      forget the saved session, start fresh next time
+
+Run it from inside the repo/worktree that has the branch (it reads git from cwd).
+
+Env:
+  CLAUDE_BIN  (default "claude")   the headless binary
+  STEER_MODEL (default "sonnet")   keep it cheap; resume turns are ~$0.006
+"""
+import sys
+import os
+import json
+import time
+import uuid
+import argparse
+import subprocess
+
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "claude")
+MODEL = os.environ.get("STEER_MODEL", "sonnet")
+MAIN = "main"
+PATCH_CLIP_LINES = 160  # keep the opening prompt bounded
+
+# ── ANSI (dim/gold) for the human-facing chrome; the streamed reply is plain ──
+DIM = "\033[2m"
+GOLD = "\033[33m"
+BOLD = "\033[1m"
+OFF = "\033[0m"
+
+
+def git(args):
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True
+    ).stdout.strip()
+
+
+def git_common_dir():
+    # --git-common-dir so the session sidecar is SHARED across this branch's
+    # worktrees (a stacked branch is often checked out in its own worktree).
+    d = git(["rev-parse", "--git-common-dir"])
+    if not os.path.isabs(d):
+        top = git(["rev-parse", "--show-toplevel"])
+        d = os.path.join(top, d)
+    return d
+
+
+def session_path(branch):
+    d = os.path.join(git_common_dir(), "steer")
+    os.makedirs(d, exist_ok=True)
+    safe = branch.replace("/", "%2F")
+    return os.path.join(d, safe + ".session")
+
+
+def children_of(branch):
+    out = git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"])
+    kids = []
+    for ln in out.splitlines():
+        try:
+            key, val = ln.split(" ", 1)
+        except ValueError:
+            continue
+        if val.strip() == branch:
+            kids.append(key[len("stack-branch."):-len(".parent")])
+    return kids
+
+
+def assemble_briefing(branch):
+    parent = git(["config", f"stack-branch.{branch}.parent"]) or MAIN
+    purpose = git(["config", f"branch.{branch}.description"])
+    requires = git(["config", "--get-all", f"stack-branch.{branch}.requires"])
+    kids = children_of(branch)
+    commits = git(["log", f"{parent}..{branch}", "--format=%h %s"])
+    diffstat = git(["diff", "--stat", f"{parent}...{branch}"])
+    patch = git(["diff", f"{parent}...{branch}"])
+    patch_clip = "\n".join(patch.splitlines()[:PATCH_CLIP_LINES])
+    return {
+        "branch": branch,
+        "parent": parent,
+        "purpose": purpose,
+        "requires": requires.replace("\n", ", ") if requires else "",
+        "children": ", ".join(kids),
+        "commits": commits,
+        "diffstat": diffstat,
+        "patch_clip": patch_clip,
+    }
+
+
+def print_briefing(b):
+    def row(label, val):
+        print(f"  {DIM}{label:<10}{OFF} {val or DIM + '(none)' + OFF}")
+    print(f"\n{GOLD}{BOLD}◆ steer · {b['branch']}{OFF}")
+    row("purpose", b["purpose"])
+    row("parent", b["parent"])
+    row("carries", b["requires"])
+    row("children", b["children"])
+    if b["diffstat"]:
+        print(f"\n  {DIM}files changed vs {b['parent']}:{OFF}")
+        for ln in b["diffstat"].splitlines():
+            print(f"  {ln}")
+    print()
+
+
+def opening_prompt(b):
+    author = git(["config", "user.name"]) or "the author"
+    return f"""You are a thinking partner helping {author} steer a single git branch in a \
+stacked "forest" workflow (each branch is one reviewable unit; branches have a git \
+parent and may carry fan-in `requires`). This is a DESIGN / PULSE conversation, not a \
+coding task — do NOT use any tools, just reason over the briefing below and talk with me.
+
+BRANCH: {b['branch']}
+PURPOSE (recorded thesis): {b['purpose'] or '(none set)'}
+PARENT (rebase base): {b['parent']}
+CARRIES (fan-in requires): {b['requires'] or 'none'}
+CHILDREN (stacked on this): {b['children'] or 'none'}
+
+COMMITS ({b['parent']}..{b['branch']}):
+{b['commits'] or '(none)'}
+
+DIFFSTAT:
+{b['diffstat'] or '(none)'}
+
+DIFF (clipped to {PATCH_CLIP_LINES} lines):
+{b['patch_clip'] or '(none)'}
+
+Give me a tight read:
+1) What this branch is really doing, in plain terms.
+2) How it fits the forest — what it depends on, what it unblocks.
+3) Two or three sharp open questions or directions worth deciding now.
+Keep it conversational and brief. I'll reply with where I want to take it."""
+
+
+def stream_turn(prompt, *, session_id=None, resume=None):
+    """Run one headless claude turn, streaming text deltas to stdout live.
+    Returns (result_session_id, cost_usd, is_error)."""
+    cmd = [CLAUDE_BIN, "-p", prompt, "--model", MODEL, "--tools", "",
+           "--output-format", "stream-json", "--include-partial-messages",
+           "--verbose"]
+    if session_id:
+        cmd += ["--session-id", session_id]
+    if resume:
+        cmd += ["--resume", resume]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, bufsize=1)
+    sid, cost, err = None, 0.0, False
+    for line in proc.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        t = ev.get("type")
+        if t == "stream_event":
+            e = ev.get("event", {})
+            if e.get("type") == "content_block_delta":
+                d = e.get("delta", {})
+                if d.get("type") == "text_delta":
+                    sys.stdout.write(d.get("text", ""))
+                    sys.stdout.flush()
+        elif t == "result":
+            sid = ev.get("session_id")
+            cost = ev.get("total_cost_usd", 0.0) or 0.0
+            err = bool(ev.get("is_error"))
+    proc.wait()
+    print(f"\n{DIM}— sonnet · ${cost:.4f}{OFF}")
+    return sid, cost, err
+
+
+def repl(branch, spath):
+    print(f"{DIM}type where you want to take it · blank line or Ctrl-D to exit{OFF}")
+    while True:
+        try:
+            msg = input(f"{GOLD}steer ›{OFF} ").strip()
+        except EOFError:
+            print()
+            break
+        if not msg or msg in ("/q", "quit", "exit"):
+            break
+        sid = open(spath).read().strip() if os.path.exists(spath) else None
+        if sid:
+            stream_turn(msg, resume=sid)
+        else:  # no session yet (shouldn't happen post-open) → seed one
+            new = str(uuid.uuid4())
+            with open(spath, "w") as f:
+                f.write(new)
+            stream_turn(msg, session_id=new)
+
+
+def turn_path(spath):
+    return (spath[:-len(".session")] if spath.endswith(".session") else spath) + ".turn"
+
+
+def watch(branch, spath):
+    """Stay alive after the opening turn and run a new turn whenever the .turn file
+    is (re)written — this is how nvim's :SteerSubmit hands a turn over. Each submit
+    resumes the session, so the conversation accrues."""
+    turn = turn_path(spath)
+    try:
+        last = os.path.getmtime(turn)   # ignore a pre-existing turn so we don't replay it
+    except OSError:
+        last = 0.0
+    print(f"\n{DIM}watching — edit the file in the right pane, then :SteerSubmit{OFF}")
+    while True:
+        try:
+            m, size = os.path.getmtime(turn), os.path.getsize(turn)
+        except OSError:
+            m, size = 0.0, 0
+        if m > last and size > 0:
+            last = m
+            msg = open(turn).read().strip()
+            if msg:
+                print(f"\n{GOLD}{BOLD}── you ──{OFF}")
+                print(f"{DIM}" + "\n".join(msg.splitlines()[:8]) + OFF)
+                print(f"{GOLD}{BOLD}── claude ──{OFF}")
+                sid = open(spath).read().strip() if os.path.exists(spath) else None
+                if sid:
+                    stream_turn(msg, resume=sid)
+                else:
+                    sid = str(uuid.uuid4())
+                    open(spath, "w").write(sid)
+                    stream_turn(msg, session_id=sid)
+                print(f"{DIM}watching — :SteerSubmit again to continue{OFF}")
+        time.sleep(1)
+
+
+def main():
+    ap = argparse.ArgumentParser(add_help=True)
+    ap.add_argument("branch")
+    ap.add_argument("--say", help="one-shot follow-up turn (resume), then exit")
+    ap.add_argument("--watch", action="store_true",
+                    help="after the opening turn, run a turn each time the .turn file is written (nvim :SteerSubmit)")
+    ap.add_argument("--reset", action="store_true", help="forget saved session")
+    args = ap.parse_args()
+
+    branch = args.branch
+    if not git(["rev-parse", "--verify", "--quiet", branch]):
+        sys.exit(f"steer-chat: no such branch: {branch}")
+    spath = session_path(branch)
+
+    if args.reset:
+        if os.path.exists(spath):
+            os.remove(spath)
+        print(f"{DIM}session reset for {branch}{OFF}")
+        return
+
+    has_session = os.path.exists(spath)
+
+    # one-shot follow-up (this is what the nvim :submit / server will call)
+    if args.say:
+        if has_session:
+            stream_turn(args.say, resume=open(spath).read().strip())
+        else:  # first contact via --say: open with briefing + the message appended
+            b = assemble_briefing(branch)
+            print_briefing(b)
+            sid = str(uuid.uuid4())
+            prompt = opening_prompt(b) + "\n\nMy opening direction: " + args.say
+            with open(spath, "w") as f:
+                f.write(sid)
+            _, _, err = stream_turn(prompt, session_id=sid)
+            if err:
+                os.remove(spath)
+        return
+
+    # interactive: open (briefing + narrative) on first run, then REPL
+    if not has_session:
+        b = assemble_briefing(branch)
+        print_briefing(b)
+        sid = str(uuid.uuid4())
+        with open(spath, "w") as f:
+            f.write(sid)
+        _, _, err = stream_turn(opening_prompt(b), session_id=sid)
+        if err:
+            os.remove(spath)
+            sys.exit("steer-chat: opening turn failed")
+    else:
+        print(f"{DIM}resuming steer session for {branch}{OFF}")
+    (watch if args.watch else repl)(branch, spath)
+
+
+if __name__ == "__main__":
+    main()

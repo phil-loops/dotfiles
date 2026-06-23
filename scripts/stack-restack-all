@@ -1,0 +1,56 @@
+#!/usr/bin/env zsh
+# Restack several projects back-to-back, RESILIENT to conflicts. A project that parks
+# on a conflict must not block the others: we abort that project's own in-progress
+# rebase (freeing whatever worktree it parked in) and carry on to the next. The FIRST
+# project that hit a conflict is then re-restacked LAST so it re-parks and surfaces its
+# contextual resolve/abort button to the human; everything that could restack already did.
+#
+# Only ever aborts a rebase THIS run started (located via the parked state's CURRENT
+# branch) — never an unrelated rebase a human has going in some other worktree.
+#
+# Usage: stack-restack-all <project> [<project> ...]   (run cwd = the scratch worktree)
+set -uo pipefail
+
+SCRIPTS="${0:A:h}"
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
+[[ "$GIT_COMMON_DIR" != /* ]] && GIT_COMMON_DIR="$PWD/$GIT_COMMON_DIR"
+STATE="$GIT_COMMON_DIR/stack-restack-state/state"
+
+worktree_of() {  # the worktree a branch is checked out in (mirrors stack-restack's helper)
+  git worktree list --porcelain | awk -v b="refs/heads/$1" '
+    $1 == "worktree" { p = $2 }
+    $0 == "branch " b { print p; exit }
+  '
+}
+
+abort_park() {  # $1 = project whose just-finished run parked: undo its rebase + clear state
+  local cur wt
+  [[ -f "$STATE" ]] && cur=$(sed -n 's/^CURRENT=//p' "$STATE" | head -1)
+  if [[ -n "${cur:-}" ]]; then
+    wt=$(worktree_of "$cur")
+    [[ -n "$wt" ]] && git -C "$wt" rebase --abort 2>/dev/null
+  fi
+  git -C "$PWD" rebase --abort 2>/dev/null            # also the scratch wt, if it parked here
+  "$SCRIPTS/stack-restack" "$1" --abort >/dev/null 2>&1   # clears STATE_DIR + artifacts
+}
+
+typeset -a problems
+problems=()
+for p in "$@"; do
+  if "$SCRIPTS/stack-restack" "$p"; then
+    echo "✓ $p restacked"
+  else
+    echo "⚠ $p parked on a conflict — aborting to continue with the rest"
+    problems+=("$p")
+    abort_park "$p"
+  fi
+done
+
+if (( ${#problems} > 0 )); then
+  # Re-run the first problem so it re-parks and its branch surfaces the contextual
+  # button. Leaves that worktree mid-rebase on purpose — do NOT detach over a live park.
+  echo "↩ re-surfacing ${problems[1]} for review (${#problems} project(s) need attention)"
+  "$SCRIPTS/stack-restack" "${problems[1]}" || true
+else
+  git -C "$PWD" checkout --detach >/dev/null 2>&1   # release the last branch held here
+fi

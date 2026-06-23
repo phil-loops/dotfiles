@@ -9,10 +9,67 @@
 import os
 import json
 import shlex
+import shutil
 import subprocess
 from urllib.parse import parse_qs
 
 from . import ctx
+
+
+def _gitdir():
+    # Absolute git-common-dir — shared across linked worktrees, so the restack state +
+    # conflict artifacts live in ONE place regardless of which worktree the run is in.
+    gd = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+    if gd and not os.path.isabs(gd):
+        gd = os.path.join(ctx.CWD, gd)
+    return gd
+
+
+def _worktree_of(branch):
+    # The worktree a branch is currently checked out in (mirrors stack-restack's helper).
+    if not branch:
+        return ""
+    out = ctx.run(["git", "worktree", "list", "--porcelain"]).stdout
+    cur = ""
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            cur = line[len("worktree "):]
+        elif line == f"branch refs/heads/{branch}":
+            return cur
+    return ""
+
+
+def _parked():
+    # Read the parked conflict's PROJECT/CURRENT from the state file, or ("", "") if none.
+    sd = _state_path()
+    if not sd or not os.path.exists(sd):
+        return "", ""
+    with open(sd) as fh:
+        kv = dict(l.rstrip("\n").split("=", 1) for l in fh
+                  if "=" in l and not l.startswith("SNAP"))
+    return kv.get("PROJECT", ""), kv.get("CURRENT", "")
+
+
+def _clear_park():
+    # Undo a parked rebase the same way `stack-restack --abort` + manual abort would:
+    # abort the in-progress rebase in whatever worktree it parked in, then drop the
+    # state dir + diagnosis artifacts. Background restacks park DETACHED in the scratch
+    # worktree (so worktree_of can't name them) — abort there too, not just the branch's
+    # own worktree. Only ever touches a rebase the parked state points at.
+    proj, cur = _parked()
+    for wt in {_worktree_of(cur), worktree()}:
+        if wt:
+            ctx.run(["git", "-C", wt, "rebase", "--abort"])
+            ctx.run(["git", "-C", wt, "checkout", "--detach"])
+    gd = _gitdir()
+    if gd:
+        shutil.rmtree(os.path.join(gd, "stack-restack-state"), ignore_errors=True)
+        for f in ("stack-restack-conflict.json", "stack-restack-conflict-snapshot"):
+            try:
+                os.remove(os.path.join(gd, f))
+            except OSError:
+                pass
+    return proj
 
 
 def worktree():
@@ -27,21 +84,32 @@ def worktree():
     return path
 
 
-def blocked():
-    # Don't start a restack while one is running or parked on a conflict — detaching
-    # the scratch worktree under a live/paused rebase would corrupt it.
+def _running():
     # Match the actual INVOCATION (absolute script path + a following arg), not any
     # process that merely mentions the string: a `git diff scripts/stack-restack`
     # watcher or an editor with the file open used to false-positive this and 409 every
-    # restack. The real run is `<SCRIPTS>/stack-restack <project> …` (abs path + space);
-    # watchers use the relative path and editors have no trailing arg, so neither matches.
-    invocation = os.path.join(ctx.SCRIPTS, "stack-restack") + " "
-    if subprocess.run(["pgrep", "-f", invocation], capture_output=True).returncode == 0:
+    # restack. The real run is `<SCRIPTS>/stack-restack <project> …` (abs path + space)
+    # or the resilient wrapper `<SCRIPTS>/stack-restack-all`; watchers use the relative
+    # path and editors have no trailing arg, so neither matches.
+    base = os.path.join(ctx.SCRIPTS, "stack-restack")
+    for pat in (base + " ", base + "-all"):
+        if subprocess.run(["pgrep", "-f", pat], capture_output=True).returncode == 0:
+            return True
+    return False
+
+
+def _state_path():
+    gd = _gitdir()
+    return os.path.join(gd, "stack-restack-state", "state") if gd else ""
+
+
+def blocked():
+    # Don't start a restack while one is running or parked on a conflict — detaching
+    # the scratch worktree under a live/paused rebase would corrupt it.
+    if _running():
         return "a restack is already running"
-    gitdir = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
-    if gitdir and not os.path.isabs(gitdir):
-        gitdir = os.path.join(ctx.CWD, gitdir)
-    if gitdir and os.path.exists(os.path.join(gitdir, "stack-restack-state", "state")):
+    sp = _state_path()
+    if sp and os.path.exists(sp):
         return "a restack is parked on a conflict — resolve it first"
     return ""
 
@@ -76,10 +144,7 @@ def _spawn(chain, wt):
 def status(req, u):
     # stack-restack writes <git-common-dir>/stack-restack-state/state on a conflict it
     # can't auto-resolve (removed on success/abort). Its presence == paused.
-    gitdir = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
-    if gitdir and not os.path.isabs(gitdir):
-        gitdir = os.path.join(ctx.CWD, gitdir)
-    sd = os.path.join(gitdir, "stack-restack-state", "state") if gitdir else ""
+    sd = _state_path()
     want = parse_qs(u.query).get("project", [""])[0]
     paused, proj, cur = False, "", ""
     if sd and os.path.exists(sd):
@@ -90,8 +155,7 @@ def status(req, u):
         paused = (not want) or proj == want
     # running==False + paused==True means "escalated, needs a human" (the parent
     # stack-restack stays alive across the whole walk and exits when it escalates).
-    running = subprocess.run(["pgrep", "-f", "stack-restack"],
-                             capture_output=True, text=True).returncode == 0
+    running = _running()
     reason = ""
     if paused:
         try:
@@ -113,7 +177,8 @@ def restack(req, raw):
         return
     b = blocked()
     if b:
-        req._send(409, json.dumps({"ok": False, "err": b}))
+        parked, current = _parked()
+        req._send(409, json.dumps({"ok": False, "err": b, "parked": parked, "current": current}))
         return
     wt = worktree()
     ctx.run(["git", "-C", wt, "checkout", "--detach"])  # release any branch held from a prior run
@@ -138,13 +203,23 @@ def resolve(req, raw):
     req._send(200, json.dumps({"ok": True, "project": project, "mode": mode, "log": logpath}))
 
 
+def abort(req, raw):
+    # Discard the parked rebase entirely (the human chose "give up on this conflict"):
+    # abort the in-progress rebase in whatever worktree it parked in + drop the state.
+    # Non-destructive to commits — the project's branches keep their pre-restack tips and
+    # can be restacked again later. Refuses while a restack PROCESS is actively churning.
+    if _running():
+        req._send(409, json.dumps({"ok": False, "err": "a restack is still running"}))
+        return
+    project = _clear_park()
+    req._send(200, json.dumps({"ok": True, "project": project}))
+
+
 def conflict(req, u):
     # Serve the structured diagnosis artifact stack-restack --diagnose writes to
     # <git-common-dir>/stack-restack-conflict.json (same dir-resolution as status()).
     # {present:false} when absent or scoped to a different project than requested.
-    gitdir = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
-    if gitdir and not os.path.isabs(gitdir):
-        gitdir = os.path.join(ctx.CWD, gitdir)
+    gitdir = _gitdir()
     path = os.path.join(gitdir, "stack-restack-conflict.json") if gitdir else ""
     want = parse_qs(u.query).get("project", [""])[0]
     if not path or not os.path.exists(path):
@@ -168,14 +243,22 @@ def restack_all(req, raw):
     if not projects:
         req._send(400, json.dumps({"ok": False, "err": "no projects"}))
         return
-    b = blocked()
-    if b:
-        req._send(409, json.dumps({"ok": False, "err": b}))
+    if _running():
+        req._send(409, json.dumps({"ok": False, "err": "a restack is already running"}))
         return
+    parked, current = _parked()
+    if parked and not d.get("abortParked"):
+        # A pre-existing park holds a worktree mid-rebase; restacking the rest needs it
+        # freed first. Surface it so the UI can offer one-click "abort & restack all".
+        req._send(409, json.dumps({"ok": False, "err": "a restack is parked on a conflict — resolve it first",
+                                   "parked": parked, "current": current}))
+        return
+    if parked:
+        _clear_park()
     wt = worktree()
     ctx.run(["git", "-C", wt, "checkout", "--detach"])
-    # Chain with `&&` so a conflict-park (non-zero exit) HALTS the sequence — the
-    # parked project surfaces via /restack-status; resolve it, then re-run for the rest.
-    chain = " && ".join(cmd(p, wt) for p in projects)
-    logpath = _spawn(chain, wt)
+    # stack-restack-all is resilient: a project that conflicts is aborted + skipped so the
+    # rest still restack, and the first problem re-parks at the end to surface its button.
+    argv = " ".join(shlex.quote(p) for p in projects)
+    logpath = _spawn(f"{shlex.quote(os.path.join(ctx.SCRIPTS, 'stack-restack-all'))} {argv}", wt)
     req._send(200, json.dumps({"ok": True, "projects": projects, "log": logpath}))
