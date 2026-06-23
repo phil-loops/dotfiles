@@ -43,6 +43,11 @@ MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 # runs in — the viewer/server resolve the same path the same way.
 GIT_COMMON_DIR="$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd)"
 STATE_DIR="${GIT_COMMON_DIR}/stack-restack-state"
+# Single-driver mutex: at most one restack process may drive git mutations for this
+# repo at a time. Lives in GIT_COMMON_DIR so every linked worktree resolves the same
+# lock. Held for the process lifetime (released on exit), so the legitimate
+# park→exit→handoff sequence still works — only genuinely concurrent drivers collide.
+LOCK_FILE="${GIT_COMMON_DIR}/stack-restack.lock"
 # Structured sidecar describing the currently-parked conflict. `--diagnose` fills it
 # (analysis + a STAGED proposed resolution, no commit/continue); `--handoff` then just
 # continues past the staged work, and clears the artifact. Viewer renders it; bash owns the schema.
@@ -93,6 +98,44 @@ for arg in "$@"; do
 done
 
 [[ -z "$PROJECT" ]] && usage
+
+# ---------- single-driver mutex ----------
+# Guards the tangle this script was bitten by: a viewer "resolve with Claude"
+# (--handoff) firing while a --start driver was still live blocking on its own
+# resolver — two rebases racing one worktree, spawning duplicate resolvers. The lock
+# is held only while a process is ACTIVELY driving, so park→exit→handoff (sequential)
+# is unaffected; only concurrent drivers collide, and the second refuses fast.
+LOCK_HELD=""
+acquire_lock() {
+  local label="$1"
+  while true; do
+    if ( set -o noclobber; print -r -- "$$ $label" > "$LOCK_FILE" ) 2>/dev/null; then
+      LOCK_HELD="$LOCK_FILE"
+      return 0
+    fi
+    local holder holder_pid
+    holder="$(cat "$LOCK_FILE" 2>/dev/null)"
+    holder_pid="${holder%% *}"
+    if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
+      echo "a restack is already running (pid $holder_pid: ${holder#* }) — wait for it, or 'loops stack restack $PROJECT --abort' if it's wedged." >&2
+      exit 1
+    fi
+    echo "  (clearing stale restack lock from dead pid ${holder_pid:-?})" >&2
+    rm -f "$LOCK_FILE"
+  done
+}
+release_lock() {
+  [[ -n "$LOCK_HELD" ]] || return 0
+  local holder; holder="$(cat "$LOCK_HELD" 2>/dev/null)"
+  [[ "${holder%% *}" == "$$" ]] && rm -f "$LOCK_HELD"
+  LOCK_HELD=""
+}
+# Every mutating mode takes the lock; --plan is read-only and --abort is the escape
+# hatch (it clears a wedged holder's lock via clear_state, so it must never block on it).
+if [[ "$MODE" != "plan" && "$MODE" != "abort" ]]; then
+  trap 'release_lock' EXIT INT TERM
+  acquire_lock "$MODE $PROJECT"
+fi
 
 # ---------- helpers ----------
 
@@ -607,6 +650,7 @@ load_state() {
 clear_state() {
   rm -rf "$STATE_DIR"
   rm -f "$CONFLICT_FILE" "$SNAPSHOT_FILE"   # no parked conflict → no diagnosis artifact/snapshot
+  rm -f "$LOCK_FILE"                        # abort is the escape hatch — free a wedged driver's lock
 }
 
 # ---------- main flows ----------
