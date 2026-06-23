@@ -103,20 +103,65 @@ body {
 .file-item-lines .del { color: var(--del); }
 
 /* ── review surface ─────────────────────────────────────────────────── */
-.surface { padding: 30px 34px 90px; max-width: 1120px; }
-.node-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 24px; }
+.surface { padding: 30px 34px 90px; max-width: 1500px; }
+/* two tiers: an identity line, then a quiet controls bar under a hairline. Splitting them
+   stops a long branch name from wrapping into the toolbar and gives the actions room. */
+.node-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
 .node-head h1 {
   font-family: var(--display); font-style: italic; font-weight: 600;
   font-size: 32px; margin: 0; color: var(--ink); letter-spacing: -0.01em;
 }
-.against { color: var(--ink-faint); font-size: 13px; }
+.nh-id { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.nh-bar { display: flex; align-items: center; gap: 16px; padding-top: 11px; border-top: 1px solid var(--rule); }
+.nh-spacer { flex: 1; }
+.diff-hint { display: flex; justify-content: flex-end; margin: -8px 0 16px; }
+.against { color: var(--ink-faint); font-size: 13px; flex: none; }
 .meta { margin-left: auto; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.06em; }
+
+/* ── branch state badge + ⋯ actions menu (NodeActions) ───────────────── */
+.node-actions { position: relative; display: flex; align-items: center; gap: 9px; }
+.nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
+.nh-blocked { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
+.nh-fix {
+  font: inherit; font-size: 12px; color: var(--del); background: transparent;
+  border: 1px solid var(--del); border-radius: 5px; padding: 3px 9px; cursor: pointer; opacity: 0.9;
+}
+.nh-fix:hover:not(:disabled) { opacity: 1; }
+.nh-fix:disabled { opacity: 0.5; cursor: default; }
+.nh-done {
+  font-size: 12px; color: var(--patina); opacity: 0.9;
+  max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
+.icon-btn {
+  font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: 4px 9px; cursor: pointer;
+}
+.icon-btn:hover, .icon-btn.on { color: var(--ink); border-color: var(--rule); background: var(--vellum-edge); }
+.nh-menu {
+  position: absolute; top: calc(100% + 7px); right: 0; z-index: 20;
+  min-width: 196px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
+  padding: 6px; box-shadow: 0 12px 34px -14px rgba(0, 0, 0, 0.75);
+}
+.nh-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  font: inherit; font-size: 12px; color: var(--patina);
+  background: transparent; border: 1px solid transparent; border-radius: 6px;
+  padding: 7px 10px; cursor: pointer;
+}
+.nh-item:hover:not(:disabled) { background: var(--vellum-edge); border-color: var(--patina); }
+.nh-item:disabled { opacity: 0.45; cursor: default; }
+.nh-item.armed { color: var(--del); border-color: var(--del); }
+.nh-item-ic { width: 14px; flex: none; text-align: center; opacity: 0.85; }
+.nh-item-note { font-size: 11px; color: var(--ink-faint); padding: 4px 10px 2px; }
 .loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
 
 /* a file is a ledger entry; blessed ones illuminate from the gutter */
 .entry {
   border: 1px solid var(--rule); border-radius: 10px; background: var(--vellum-raise);
-  margin-bottom: 14px; overflow: hidden;
+  margin-bottom: 14px; overflow: clip; /* clip (not hidden) keeps rounded corners without making .entry a scroll container, so .entry-head can stick to the viewport */
   border-left: 3px solid var(--rule); transition: border-color 0.25s, box-shadow 0.25s;
 }
 .entry.blessed { border-left-color: var(--gold-leaf); box-shadow: -1px 0 16px -6px var(--gold-wash); }
@@ -173,9 +218,16 @@ body {
 .d2h-del .d2h-code-line-ctn, .d2h-del del { color: var(--del); }
 .d2h-code-line-prefix { opacity: 0.6; }
 .d2h-info { color: var(--ink-faint); }
+/* wrap long lines inside each side-by-side column instead of clipping at its edge */
+.d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }
 
 /* ── the foil moment: one orchestrated gold-leaf settle on bless ──────── */
-.entry-head { position: relative; overflow: hidden; }
+/* sticky pins the bar to the top of the viewport while scrolling a file's diff;
+   it also serves as the containing block for the foil ::after sweep (like relative did). */
+.entry-head {
+  position: sticky; top: 0; z-index: 3;
+  overflow: hidden; background: var(--vellum-raise);
+}
 @media (prefers-reduced-motion: no-preference) {
   @keyframes foil-edge {
     0% { box-shadow: none; }
@@ -251,7 +303,7 @@ body {
 .forest-fresh.behind { color: var(--patina); }
 
 /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
-.base-toggle { display: flex; align-items: center; gap: 6px; margin: -6px 0 20px; }
+.base-toggle { display: flex; align-items: center; gap: 6px; }
 .base-label { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; margin-right: 4px; }
 .base-pill {
   font: inherit; font-size: 11px; color: var(--ink-dim); background: transparent;
@@ -281,6 +333,28 @@ body {
 }
 .forest-dot.parked { background: transparent; border: 1.5px solid var(--del); box-shadow: inset 0 0 0 1.5px var(--del); }
 .forest-row.parked { border-color: var(--del); }
+.restack-err { margin-left: auto; color: var(--del); font-size: 11px; letter-spacing: 0.02em; padding-right: 10px; }
+/* a parked branch carries its own contextual menu — one bad branch marks itself, not the whole home */
+.forest-parked { position: relative; flex: none; }
+.forest-resolve.open { background: var(--del); color: #1a1411; }
+.forest-popover {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 240px;
+  padding: 11px 12px; border-radius: 9px; border: 1px solid var(--del);
+  background: #18120f; box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.6);
+  cursor: default; text-align: left;
+}
+.forest-popover-why { margin: 0 0 8px; font-size: 11px; line-height: 1.45; color: var(--patina); }
+.forest-popover-reason { margin: 0 0 8px; font-size: 10.5px; line-height: 1.4; color: var(--del); opacity: 0.85; }
+.forest-popover-actions { display: flex; flex-direction: column; gap: 6px; }
+.forest-popover-actions button {
+  font: inherit; font-size: 11px; letter-spacing: 0.02em; cursor: pointer; text-align: left;
+  border-radius: 6px; padding: 5px 9px; background: transparent;
+  color: var(--patina); border: 1px solid var(--patina);
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.forest-popover-actions button:hover { background: rgba(127, 160, 147, 0.12); }
+.forest-popover-actions button.danger { color: var(--del); border-color: var(--del); }
+.forest-popover-actions button.danger:hover { background: var(--del-bg); }
 
 /* ── map button + forest-map overlay ─────────────────────────────────── */
 .map-btn {
@@ -386,3 +460,44 @@ body {
   background: transparent; border: none; padding: 8px 15px 8px 8px; transition: color .12s;
 }
 .watch-unpin:hover { color: var(--del); }
+
+/* ── chat: per-file badge + cross-forest index overlay (ChatIndex) ───── */
+.chat-badge {
+  flex: none; font-size: 11px; color: var(--ink-dim); white-space: nowrap;
+  border: 1px solid var(--rule); border-radius: 5px; padding: 1px 6px; background: var(--vellum-edge);
+}
+.chat-index-backdrop {
+  position: fixed; inset: 0; z-index: 210; display: flex; justify-content: flex-end;
+  background: rgba(8, 6, 3, 0.78); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.chat-index {
+  width: 380px; max-width: 92vw; height: 100%; overflow-y: auto;
+  background: linear-gradient(180deg, var(--vellum-raise), var(--vellum-night));
+  border-left: 1px solid var(--rule); box-shadow: -18px 0 40px rgba(0, 0, 0, 0.4);
+}
+.ci-head {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--rule); background: var(--vellum-raise);
+}
+.ci-title { font-size: 14px; color: var(--ink); }
+.ci-empty { color: var(--ink-faint); font-style: italic; padding: 22px 16px; }
+.ci-list { padding: 8px 0 32px; }
+.ci-group { padding: 6px 0; }
+.ci-branch {
+  margin: 0; padding: 8px 16px 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--gold-leaf); cursor: pointer;
+}
+.ci-branch:hover { color: var(--ink); }
+.ci-row {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; cursor: pointer;
+  padding: 7px 16px; background: transparent; border: none; border-left: 2px solid transparent;
+}
+.ci-row:hover { background: var(--vellum-edge); border-left-color: var(--gold-leaf); }
+.ci-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.ci-file { color: var(--ink); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ci-meta { flex: none; color: var(--ink-faint); font-size: 11px; }
+.ci-snippet {
+  color: var(--ink-dim); font-size: 11px; line-height: 1.4;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ci-who { color: var(--ink-faint); }
