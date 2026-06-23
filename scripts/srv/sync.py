@@ -128,16 +128,74 @@ def get_many(req, u):
     req._send(200, json.dumps(states))
 
 
-def post_sync(req, raw):
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    st = state(branch)   # re-check server-side: never rebase a published/stacked branch on a stale client view
-    if not st.get("syncable"):
-        req._send(409, json.dumps({"ok": False, "err": st.get("why", "not syncable")}))
-        return
-    # Eject to a standalone Claude in the branch's OWN scratch worktree — never git-rebase
-    # in the server's checkout (that wedged main). Claude fetches origin/main, rebases there,
-    # resolves conflicts in isolation, and does NOT push or open a PR (Phil handles that).
+# ── direct forward-rebase (the clean fast path) ──────────────────────────────
+# A syncable root that's behind a CLEAN main rebases in one shot — replaying it onto
+# origin/main almost never conflicts, so spinning up a whole Claude session for it is
+# overkill. We do the `git rebase origin/main` ourselves, but NEVER in the server's main
+# checkout (that wedged main): only in the branch's own clean worktree, or a dedicated
+# detached scratch worktree when the branch isn't checked out anywhere. Conflicts /
+# unsafe layouts fall back to the Claude eject below.
+def _worktree_of(branch):
+    out = ctx.run(["git", "worktree", "list", "--porcelain"]).stdout
+    cur = ""
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            cur = line[len("worktree "):]
+        elif line == f"branch refs/heads/{branch}":
+            return cur
+    return ""
+
+
+def _clean(wt):
+    return not ctx.run(["git", "-C", wt, "status", "--porcelain"]).stdout.strip()
+
+
+def _scratch_wt():
+    # dedicated detached scratch worktree for rebasing un-checked-out branches — separate
+    # from restack's .loops-restack-wt so the two never fight over one worktree. Reused.
+    path = os.path.join(os.path.dirname(ctx.MAIN_WT) or ".", ".loops-sync-wt")
+    listing = ctx.run(["git", "worktree", "list", "--porcelain"]).stdout
+    if not any(os.path.realpath(line[len("worktree "):]) == os.path.realpath(path)
+               for line in listing.splitlines() if line.startswith("worktree ")):
+        ctx.run(["git", "worktree", "add", "--detach", path, "HEAD"])
+    return path
+
+
+def _direct_rebase(branch):
+    """Try `git rebase origin/main` for `branch` in an isolated worktree (assumes
+    origin/main is already fetched). Returns (status, summary):
+      'clean'    — landed; branch ref moved. summary = what replayed.
+      'conflict' — hit a conflict; aborted + restored. → caller ejects to Claude.
+      'skip'     — no safe in-place worktree (branch in the main checkout, or its
+                   worktree is dirty). → caller ejects to Claude.
+    """
+    main = os.path.realpath(ctx.MAIN_WT)
+    wt = _worktree_of(branch)
+    own = False  # did we borrow the branch into the scratch worktree?
+    if wt and os.path.realpath(wt) != main and _clean(wt):
+        target = wt
+    elif not wt:
+        target = _scratch_wt()
+        if ctx.run(["git", "-C", target, "checkout", branch]).returncode != 0:
+            return "skip", ""
+        own = True
+    else:
+        return "skip", ""
+    reb = ctx.run(["git", "-C", target, "rebase", "origin/main"])
+    if reb.returncode != 0:
+        ctx.run(["git", "-C", target, "rebase", "--abort"])
+        if own:
+            ctx.run(["git", "-C", target, "checkout", "--detach"])
+        return "conflict", ""
+    n = ctx.run(["git", "-C", target, "rev-list", "--count", "origin/main..HEAD"]).stdout.strip()
+    if own:
+        ctx.run(["git", "-C", target, "checkout", "--detach"])  # release the branch
+    return "clean", f"replayed {n} commit{'' if n == '1' else 's'} onto origin/main"
+
+
+def _eject(branch):
+    # Fallback: hand the rebase to a standalone Claude in the branch's OWN worktree — it
+    # resolves conflicts in isolation and does NOT push or open a PR (Phil handles that).
     prompt = (
         f"Rebase the branch `{branch}` forward onto the latest origin/main, here in this "
         f"worktree. Run `git fetch origin main` then `git rebase origin/main`. Resolve any "
@@ -147,5 +205,25 @@ def post_sync(req, raw):
     )
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch, prompt])
     ok = r.returncode == 0
+    return ok, ("" if ok else (r.stderr or r.stdout or "could not launch rebase session"))
+
+
+def post_sync(req, raw):
+    branch = json.loads(raw or "{}").get("branch", "")
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    ctx.run(["git", "fetch", "origin", "main"])   # fresh origin/main before gating + rebasing
+    st = state(branch)   # re-check server-side: never rebase a published/stacked branch on a stale client view
+    if not st.get("syncable"):
+        req._send(409, json.dumps({"ok": False, "err": st.get("why", "not syncable")}))
+        return
+    status, summary = _direct_rebase(branch)
+    if status == "clean":
+        req._send(200, json.dumps({"ok": True, "rebased": True, "summary": summary}))
+        return
+    # conflict or unsafe-to-rebase-in-place → eject to a standalone Claude.
+    ok, err = _eject(branch)
     req._send(200 if ok else 500, json.dumps(
-        {"ok": ok, "ejected": ok, "err": "" if ok else (r.stderr or r.stdout or "could not launch rebase session")}))
+        {"ok": ok, "ejected": ok, "conflict": status == "conflict",
+         "err": "" if ok else (err or "could not launch rebase session")}))
