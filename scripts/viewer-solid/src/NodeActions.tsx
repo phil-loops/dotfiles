@@ -14,7 +14,8 @@
 //   POST /checkout {branch, force?}  → {ok} | 409 {ok:false, worktree} when another
 //                                       worktree holds the branch (force:true frees it)
 //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
-//   POST /sync     {branch}          → {ok} | 409 {ok:false, err}  (eject-to-Claude rebase)
+//   POST /sync     {branch}          → {ok, rebased?, ejected?, conflict?, summary?} | 409
+//                                       (rebase forward: in place when clean, else eject Claude)
 import { createSignal, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
@@ -127,19 +128,33 @@ export function NodeActions(props: { branch: string }) {
   const critical = () => sync.data?.deployCritical ?? [];
   const blocked = () => critical().length > 0;
 
-  // rebase forward = eject to a standalone Claude in the branch's own worktree; the server
-  // does zero git (can't wedge main). Non-syncable branches (open PR / stacked) come back 409
-  // with the reason, surfaced via done().
+  // rebase forward onto origin/main. The server rebases in place when the branch is behind a
+  // clean main (the common 1-behind case) → {rebased:true} lands instantly; a real conflict or
+  // an unsafe layout ejects to a standalone Claude in an isolated worktree → {ejected:true}.
+  // Non-syncable branches (open PR / stacked) come back 409 with the reason, surfaced via done().
   const rebase = createMutation(() => ({
-    mutationFn: () => post<{ ok?: boolean; err?: string }>("/sync", { branch: props.branch }),
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string; rebased?: boolean; ejected?: boolean; conflict?: boolean; summary?: string }>(
+        "/sync",
+        { branch: props.branch },
+      ),
     onSuccess: (r) => {
       setOpen(false);
-      if (r.ok) {
-        setDone("✓ rebasing on main — Claude is on it in a worktree");
-        sync.refetch();
-      } else {
+      if (!r.ok) {
         setDone(`✗ ${r.err || "rebase failed"}`);
+        return;
       }
+      if (r.rebased) {
+        setDone(`✓ rebased — ${r.summary || "up to date with origin/main"}`);
+        qc.invalidateQueries({ queryKey: ["node", props.branch] });
+        qc.invalidateQueries({ queryKey: ["commits", props.branch] });
+        qc.invalidateQueries({ queryKey: ["model"] });
+      } else if (r.conflict) {
+        setDone("✓ conflict — Claude is resolving it in a worktree");
+      } else {
+        setDone("✓ rebasing on main — Claude is on it in a worktree");
+      }
+      sync.refetch();
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "rebase failed"}`),
   }));
@@ -181,7 +196,7 @@ export function NodeActions(props: { branch: string }) {
         <button
           class="nh-fix"
           disabled={busy()}
-          title="rebase this branch forward onto origin/main — runs in an isolated worktree via Claude (never your main checkout); resolves there, you push"
+          title="rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude in an isolated worktree on a conflict (never your main checkout)"
           onClick={fire(() => rebase.mutate())}
         >
           {rebase.isPending ? "rebasing…" : "rebase →"}
@@ -245,7 +260,7 @@ export function NodeActions(props: { branch: string }) {
             class="nh-item"
             role="menuitem"
             disabled={busy()}
-            title="rebase this branch forward onto origin/main in an isolated worktree (never your main checkout)"
+            title="rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict (never your main checkout)"
             onClick={fire(() => rebase.mutate())}
           >
             <span class="nh-item-ic">⟳</span>
