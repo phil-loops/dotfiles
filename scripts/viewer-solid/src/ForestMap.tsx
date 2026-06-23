@@ -14,8 +14,9 @@
 // Fully self-contained (own class names + <style>): drops into App.tsx with one
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
 import { createMemo, createSignal, For, Show } from "solid-js";
-import { canMutate } from "./provider";
-import type { SpineNode } from "./types";
+import { createQuery } from "@tanstack/solid-query";
+import { canMutate, provider } from "./provider";
+import type { SpineNode, RestackStatus } from "./types";
 
 const leafOf = (s: string): string => s.split("/").pop() ?? s;
 // the ghost culmination node is keyed "✦ <project>" (a sentinel, never a real branch).
@@ -145,6 +146,39 @@ export function ForestMap(props: {
     });
     return { damSet, conflictSet, frozen, dirtyOf };
   });
+
+  // KILN: a live restack walking THIS forest, read off /restack-status. The cascade
+  // rebases bottom-up, so a heat-front climbs the branches: completed = set (rebased,
+  // cooled, awaiting bless), current = rebasing now, pending = not yet reached, parked =
+  // stalled on a conflict. Branch ids match the status's branch names directly, so the
+  // kiln self-scopes: if the running restack is a DIFFERENT forest, nothing here lights.
+  // Polls only while the overlay is mounted (the map is open).
+  const kilnQ = createQuery<RestackStatus>(() => ({
+    queryKey: ["forestmap-restack"],
+    queryFn: () => provider.restackStatus(),
+    refetchInterval: 2000,
+    enabled: canMutate, // a static snapshot has no live engine to watch
+  }));
+  const kiln = createMemo(() => {
+    const s = kilnQ.data;
+    if (!s || (!s.running && !s.paused)) return null;
+    const completed = new Set(s.completed ?? []);
+    const pending = new Set(s.pending ?? []);
+    const current = s.current ?? "";
+    const touches = model().list.some(
+      (n) => completed.has(n.id) || pending.has(n.id) || n.id === current
+    );
+    if (!touches) return null;
+    return { completed, pending, current, parked: !!s.paused && !s.running };
+  });
+  const kilnState = (id: string): "" | "set" | "current" | "pending" | "parked" => {
+    const k = kiln();
+    if (!k) return "";
+    if (id === k.current) return k.parked ? "parked" : "current";
+    if (k.completed.has(id)) return "set";
+    if (k.pending.has(id)) return "pending";
+    return "";
+  };
 
   const layout = createMemo(() => {
     const { list, byId } = model();
@@ -316,7 +350,7 @@ export function ForestMap(props: {
       <style>{CSS}</style>
       <svg
         class="fm-svg"
-        classList={{ focusing: !!spot() }}
+        classList={{ focusing: !!spot(), kiln: !!kiln() }}
         viewBox={`0 0 ${layout().W} ${layout().H}`}
         width={layout().W}
         height={layout().H}
@@ -361,6 +395,10 @@ export function ForestMap(props: {
                     hov: hov() === n.id,
                     dam: dams().damSet.has(n.id),
                     conflict: dams().conflictSet.has(n.id),
+                    "kiln-set": kilnState(n.id) === "set",
+                    "kiln-current": kilnState(n.id) === "current",
+                    "kiln-pending": kilnState(n.id) === "pending",
+                    "kiln-parked": kilnState(n.id) === "parked",
                   }}
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
@@ -474,12 +512,32 @@ const CSS = `
 .fm-svg.focusing .fm-edge.frozen { opacity: .35 !important; stroke: var(--ink-faint) !important;
   stroke-width: 1.6; stroke-dasharray: 2 7 !important; animation: fm-fade .8s ease forwards !important; }
 
+/* KILN: a restack walking the forest bottom-up — a heat-front climbing the branches.
+   Ember throughout, never gold (gold is earned by blessing): set = rebased this run
+   (cooled), current = rebasing now (breathing glow), pending = not yet reached (dim),
+   parked = stalled on a conflict (dashed + pulse). While the kiln burns, branches the
+   walk hasn't touched recede so the front reads clearly. !important beats the entrance
+   animation's forwards-fill on opacity (same trick the spotlight uses). */
+.fm-svg.kiln .fm-node:not(.kiln-set):not(.kiln-current):not(.kiln-pending):not(.kiln-parked) { opacity: .26 !important; }
+.fm-node.kiln-pending { opacity: .34 !important; }
+.fm-node.kiln-set rect { stroke: var(--del); stroke-width: 1.6; }
+.fm-node.kiln-set .dot { fill: var(--del); stroke: var(--del); opacity: .75; }
+.fm-node.kiln-current rect { stroke: var(--del); stroke-width: 2.3; fill: var(--vellum-edge);
+  filter: drop-shadow(0 0 11px var(--del)); }
+.fm-node.kiln-current .dot { fill: var(--del); stroke: var(--del); animation: fm-kiln-breathe 1.5s ease-in-out infinite; }
+.fm-node.kiln-current text { fill: var(--ink); }
+.fm-node.kiln-parked rect { stroke: var(--del); stroke-width: 2.3; stroke-dasharray: 5 3;
+  filter: drop-shadow(0 0 9px var(--del)); }
+.fm-node.kiln-parked .dot { fill: var(--del); stroke: var(--del); animation: fm-pulse 1.6s ease-in-out infinite; }
+
 @keyframes fm-fade { to { opacity: 1; } }
+@keyframes fm-kiln-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @keyframes fm-drift { to { stroke-dashoffset: -22; } }  /* gentle ambient flow toward each edge's target */
 @keyframes fm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @keyframes fm-flow { to { stroke-dashoffset: -26; } }  /* dashes flow toward each edge's target */
 @media (prefers-reduced-motion: reduce) {
   .fm-edge, .fm-node { animation: none; opacity: 1; }
   .fm-svg.focusing .fm-edge.lit { animation: none; }
+  .fm-node.kiln-current .dot, .fm-node.kiln-parked .dot { animation: none; }
 }
 `;
