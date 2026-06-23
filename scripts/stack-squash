@@ -11,6 +11,9 @@
                                    and fold the formatting into the same commit
   stack-squash --subject-only <b>  draft a SUBJECT LINE ONLY — no body, no bullets
                                    (a smart one-line title for the squash)
+  stack-squash --unstage <branch>  collapse parent..branch into UNSTAGED working-tree
+                                   changes (reset --mixed base) — NO commit, no message;
+                                   hand the commit to GitHub Desktop. Skips claude.
 
 `--unpushed` + `--format` together is the "prep for push" combo. Flags compose and
 may appear in any order before <branch>.
@@ -78,7 +81,7 @@ def out(d):
 
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
-dry = unpushed = fmt = subject_only = False
+dry = unpushed = fmt = subject_only = unstage = False
 rest = []
 for a in argv:
     if a == "--dry":
@@ -89,11 +92,13 @@ for a in argv:
         fmt = True
     elif a == "--subject-only":
         subject_only = True
+    elif a == "--unstage":
+        unstage = True
     else:
         rest.append(a)
 branch = (rest[0] if rest else "").strip()
 if not branch:
-    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] <branch>"})
+    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] [--unstage] <branch>"})
 
 # branch must exist
 if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
@@ -134,6 +139,32 @@ n = len(commits)
 if n == 0:
     out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": 0,
          "err": f"{branch} has no {'unpushed ' if unpushed else ''}commits beyond {base} — nothing to squash"})
+
+# ---- --unstage: collapse to UNSTAGED working-tree changes, no commit ------
+# Hand the commit to GitHub Desktop. `reset --mixed base` moves HEAD+index to base but
+# leaves the working tree at the branch tip, so the whole parent..branch diff shows up as
+# unstaged changes. No commit ⇒ no voiced message, so skip the drafting below entirely.
+if unstage:
+    if dry:
+        out({"ok": True, "branch": branch, "parent": parent, "base": base, "n": n,
+             "unstaged": True, "dry": True})
+    branch_wt = next((p for p, b in worktrees() if b == f"refs/heads/{branch}"), None)
+    if branch_wt:
+        _cwd = branch_wt
+    if git(["status", "--porcelain", "--untracked-files=no"]).stdout.strip():
+        where = f" in worktree {branch_wt}" if branch_wt else ""
+        out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
+             "err": f"working tree is dirty{where} — commit or stash first"})
+    if not branch_wt:
+        co = git(["checkout", branch])
+        if co.returncode != 0:
+            out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
+                 "err": "checkout failed: " + co.stderr.strip()})
+    rs = git(["reset", "--mixed", base])
+    if rs.returncode != 0:
+        out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
+             "err": "reset --mixed failed: " + rs.stderr.strip()})
+    out({"ok": True, "branch": branch, "parent": parent, "base": base, "n": n, "unstaged": True})
 
 # ---- draft the message in your voice -------------------------------------
 author = git(["config", "user.name"]).stdout.strip() or "the author"
