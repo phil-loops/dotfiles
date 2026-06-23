@@ -7,7 +7,7 @@
 #   GET  /commits?branch=X  this branch's own commits (parent..branch)
 #   POST /bless {branch,file}    mark file(s) reviewed (stack-bless)
 #   POST /purpose {branch,text}  save a thesis as the branch description
-#   POST /squash {branch}        collapse parent..branch into one commit
+#   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import json
@@ -100,8 +100,9 @@ def purpose_set(req, raw):
 
 def squash(req, raw):
     d = json.loads(raw or "{}")
-    # squash button → smart subject, NO body (Phil's preference for squashed commits)
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--subject-only", d.get("branch", "")])
+    # squash button → collapse parent..branch into UNSTAGED working-tree changes, no commit
+    # (Phil writes the commit in GitHub Desktop). See stack-squash --unstage.
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--unstage", d.get("branch", "")])
     # stack-squash always prints a JSON report (on success AND handled failure)
     req._send(200 if r.returncode == 0 else 500,
               r.stdout or json.dumps({"ok": False, "err": r.stderr or "squash crashed"}))

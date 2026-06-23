@@ -13,7 +13,8 @@
 // Endpoints (Python review server, unchanged):
 //   POST /checkout {branch, force?}  → {ok} | 409 {ok:false, worktree} when another
 //                                       worktree holds the branch (force:true frees it)
-//   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
+//   POST /squash   {branch}          → {ok, n, base, unstaged}  (stack-squash --unstage:
+//                                       collapse parent..branch to unstaged changes, no commit)
 //   POST /sync     {branch}          → {ok, rebased?, ejected?, conflict?, summary?} | 409
 //                                       (rebase forward: in place when clean, else eject Claude)
 import { createSignal, Show, onCleanup } from "solid-js";
@@ -28,9 +29,8 @@ interface CheckoutResult {
 
 interface SquashResult {
   ok?: boolean;
-  n?: number; // commits collapsed
-  sha?: string; // new short sha
-  header?: string; // the voiced subject line
+  n?: number; // commits collapsed into the working tree
+  unstaged?: boolean; // changes left unstaged for GitHub Desktop (no commit)
   err?: string;
 }
 
@@ -104,10 +104,12 @@ export function NodeActions(props: { branch: string }) {
       setArmed(false);
       setOpen(false);
       if (r.ok) {
-        setDone(`✓ squashed ${r.n ?? ""} → ${r.sha ?? ""} ${r.header ?? ""}`.trim());
+        const n = r.n ?? 0;
+        setDone(`✓ uncommitted ${n} commit${n === 1 ? "" : "s"} — unstaged for GitHub Desktop`);
         qc.invalidateQueries({ queryKey: ["commits", props.branch] });
         qc.invalidateQueries({ queryKey: ["node", props.branch] });
         qc.invalidateQueries({ queryKey: ["model"] });
+        qc.invalidateQueries({ queryKey: ["head"] });
       } else {
         setDone(`✗ ${r.err || "squash failed"}`);
       }
@@ -242,17 +244,18 @@ export function NodeActions(props: { branch: string }) {
             </button>
           </Show>
 
-          {/* squash — collapse parent..branch into one voiced commit (two-click) */}
+          {/* squash & unstage — collapse parent..branch into unstaged working-tree changes,
+              no commit, so you write the commit in GitHub Desktop (two-click: rewrites history) */}
           <button
             class="nh-item"
             classList={{ armed: armed() }}
             role="menuitem"
             disabled={busy()}
-            title="collapse parent..branch into one commit with a generated subject"
+            title="collapse parent..branch into unstaged working-tree changes (no commit) — commit it in GitHub Desktop"
             onClick={fire(armSquash)}
           >
             <span class="nh-item-ic">⊟</span>
-            {squash.isPending ? "squashing…" : armed() ? "confirm squash → 1" : "squash → 1"}
+            {squash.isPending ? "unstaging…" : armed() ? "confirm squash & unstage" : "squash & unstage"}
           </button>
 
           {/* rebase forward — also surfaced inline when push is blocked */}
