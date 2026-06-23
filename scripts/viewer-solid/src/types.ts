@@ -109,6 +109,8 @@ export const RestackStatus = z.object({
   reason: z.string().optional(),
   done: z.number().optional(), // branches rebased so far this walk
   total: z.number().optional(), // total in the walk → "node done of total"
+  completed: z.array(z.string()).optional(), // branches rebased this run (forest-map kiln: "set")
+  pending: z.array(z.string()).optional(), // branches not yet reached (kiln: dim)
   // The list, not a boolean — a boolean can't tell one driver from two. >1 == a tangle.
   drivers: z.array(RestackDriver).optional(),
   resolvers: z.number().optional(), // live headless claude conflict-resolvers

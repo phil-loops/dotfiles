@@ -191,15 +191,19 @@ def status(req, u):
     want = parse_qs(u.query).get("project", [""])[0]
     paused, proj, cur = False, "", ""
     done = total = 0
+    completed, pending = [], []
     if sd and os.path.exists(sd):
         with open(sd) as fh:
             kv = dict(l.rstrip("\n").split("=", 1) for l in fh
                       if "=" in l and not l.startswith("SNAP"))
         proj, cur = kv.get("PROJECT", ""), kv.get("CURRENT", "")
         # COMPLETED/PENDING are space-joined branch lists; CURRENT is the in-flight one
-        # (popped from PENDING, not in either list) → it's node done+1 of total.
-        done = len(kv.get("COMPLETED", "").split())
-        total = done + len(kv.get("PENDING", "").split()) + (1 if cur else 0)
+        # (popped from PENDING, not in either list) → it's node done+1 of total. The lists
+        # also drive the forest-map kiln (per-branch set/current/pending heat-front).
+        completed = kv.get("COMPLETED", "").split()
+        pending = kv.get("PENDING", "").split()
+        done = len(completed)
+        total = done + len(pending) + (1 if cur else 0)
         paused = (not want) or proj == want
     # running==False + paused==True means "escalated, needs a human" (the parent
     # stack-restack stays alive across the whole walk and exits when it escalates).
@@ -216,6 +220,7 @@ def status(req, u):
     req._send(200, json.dumps({"paused": paused, "project": proj, "current": cur,
                                "running": running, "reason": reason,
                                "done": done, "total": total,
+                               "completed": completed, "pending": pending,
                                "drivers": _drivers(), "resolvers": _resolvers()}))
 
 
