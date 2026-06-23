@@ -1,0 +1,452 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 734f938..69cc5bf 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -730,51 +730,48 @@ function NodeDetail() {
+         }}
+       >
+         <header class="node-head">
+-          <h1>{leaf(active()) || "—"}</h1>
+-          <Show when={parentOf()}>
+-            <span class="against">◂ {leaf(parentOf())}</span>
+-          </Show>
+-          <div class="view-toggle">
+-            <button class="view-pill" classList={{ on: view() === "diffs" }} onClick={() => setView("diffs")}>
+-              diffs
+-            </button>
+-            <button class="view-pill" classList={{ on: view() === "commits" }} onClick={() => setView("commits")}>
+-              commits
+-            </button>
++          {/* tier 1 — identity: the branch name + what it's diffed against, nothing else.
++              Giving this its own line stops the long title from wrapping into the controls. */}
++          <div class="nh-id">
++            <h1>{leaf(active()) || "—"}</h1>
++            <Show when={parentOf()}>
++              <span class="against">◂ {leaf(parentOf())}</span>
++            </Show>
++          </div>
++          {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
++              The blessed count lives in the spine; the map opens from the spine + `m`. */}
++          <div class="nh-bar">
++            <div class="view-toggle">
++              <button class="view-pill" classList={{ on: view() === "diffs" }} onClick={() => setView("diffs")}>
++                diffs
++              </button>
++              <button class="view-pill" classList={{ on: view() === "commits" }} onClick={() => setView("commits")}>
++                commits
++              </button>
++            </div>
++            <Show when={view() === "diffs"}>
++              <div class="base-toggle">
++                <span class="base-label">diff vs</span>
++                <For each={BASES}>
++                  {([v, lab]) => (
++                    <button class="base-pill" classList={{ on: base() === v }} onClick={() => setBase(v)}>
++                      {lab}
++                    </button>
++                  )}
++                </For>
++              </div>
++            </Show>
++            <div class="nh-spacer" />
++            <NodeActions branch={active()} />
++            <Show when={canMutate}>
++              <button class="icon-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
++                ✦
++              </button>
++            </Show>
+           </div>
+-          <span class="meta">
+-            {node.isFetching
+-              ? "syncing…"
+-              : node.isError
+-                ? "couldn't load — retrying"
+-                : node.data
+-                  ? `${node.data.files.filter(isBlessed).length}/${node.data.files.length} blessed`
+-                  : ""}
+-          </span>
+-          <NodeActions branch={active()} />
+-          <Show when={canMutate}>
+-            <button class="map-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
+-              ✦ chat
+-            </button>
+-          </Show>
+-          <button class="map-btn" onClick={() => setShowMap(true)} title="forest map (m)">
+-            ⊞ map
+-          </button>
+         </header>
+         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
+-          <div class="base-toggle">
+-            <span class="base-label">diff vs</span>
+-            <For each={BASES}>
+-              {([v, lab]) => (
+-                <button
+-                  class="base-pill"
+-                  classList={{ on: base() === v }}
+-                  onClick={() => setBase(v)}
+-                >
+-                  {lab}
+-                </button>
+-              )}
+-            </For>
++          <div class="diff-hint">
+             <span class="kbd-hint"><b>tab</b> next file · hover a line · <b>o</b> → nvim</span>
+           </div>
+           <Show when={node.data} fallback={<p class="loading">loading…</p>}>
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index 9769ecd..05d24a0 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -1,9 +1,12 @@
+-// NodeActions — the two node-level "do something to this branch" affordances that
+-// live in NodeDetail's node-head: move the main checkout (~/coding/loops) onto this
+-// branch, and squash parent..branch into one voiced commit. Both are SECONDARY
+-// actions, so they wear --patina (stale/tarnished green), never gold — gold is
+-// reserved for blessed work. This component owns its own wiring + styling so it can
+-// drop into App.tsx with a single import + mount line (no shared lines).
++// NodeActions — the branch-level "do something to this branch" affordances that live on
++// the right of NodeDetail's node-head: a fork-state badge (behind / push-blocked) and a
++// ⋯ menu collapsing the three rare, history-touching mutations — move the main checkout
++// (~/coding/loops) onto this branch, squash parent..branch into one voiced commit, and
++// rebase forward onto origin/main. Collapsing them into a menu keeps the header calm and
++// adds a click of friction before anything rewrites history. All three are SECONDARY
++// actions, so they wear --patina (stale/tarnished green), never gold — gold is reserved
++// for blessed work. This component owns its wiring + state so it drops into App.tsx with a
++// single mount line.
+ //
+ //   <NodeActions branch={active()} />
+ //
+@@ -11,10 +14,10 @@
+ //   POST /checkout {branch, force?}  → {ok} | 409 {ok:false, worktree} when another
+ //                                       worktree holds the branch (force:true frees it)
+ //   POST /squash   {branch}          → {ok, n, sha, header, voiced, …}  (stack-squash)
+-import { createSignal, Show } from "solid-js";
++//   POST /sync     {branch}          → {ok} | 409 {ok:false, err}  (eject-to-Claude rebase)
++import { createSignal, Show, onCleanup } from "solid-js";
+ import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
+ import { provider, canMutate } from "./provider";
+-import type { SyncState } from "./types";
+ 
+ interface CheckoutResult {
+   ok?: boolean;
+@@ -48,32 +51,6 @@ async function post<T>(url: string, body: unknown): Promise<T> {
+   }
+ }
+ 
+-// patina-tinted secondary button; gold stays the sole property of blessed.
+-const btn = {
+-  font: "inherit",
+-  "font-size": "12px",
+-  color: "var(--patina)",
+-  background: "transparent",
+-  border: "1px solid var(--patina)",
+-  "border-radius": "5px",
+-  padding: "3px 9px",
+-  cursor: "pointer",
+-  opacity: "0.85",
+-} as const;
+-
+-const note = {
+-  "font-size": "12px",
+-  color: "var(--patina)",
+-  opacity: "0.9",
+-} as const;
+-
+-// ember = "needs your eye". Being behind is calm/patina; a push-block is the one urgent
+-// state here, so it escalates to ember — gold stays reserved for blessed.
+-const alarm = { "font-size": "12px", color: "var(--ember)", "font-weight": "600" } as const;
+-// basename minus the dbmate timestamp prefix — humans recognize "drop-dead-tables.sql",
+-// not "20260616193000_drop-dead-tables.sql".
+-const migName = (p: string): string => (p || "").split("/").pop()?.replace(/^\d+_/, "") ?? "";
+-
+ export function NodeActions(props: { branch: string }) {
+   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
+   const qc = useQueryClient();
+@@ -82,8 +59,25 @@ export function NodeActions(props: { branch: string }) {
+   // squash is history-rewriting → two-click arm before it fires.
+   const [armed, setArmed] = createSignal(false);
+   let armT: ReturnType<typeof setTimeout>;
+-  // transient success line ("✓ …"), cleared on the next node.
++  // transient result line ("✓ …" / "✗ …"), cleared on the next action.
+   const [done, setDone] = createSignal<string | null>(null);
++  // the ⋯ menu open/closed
++  const [open, setOpen] = createSignal(false);
++  let root: HTMLDivElement | undefined;
++
++  // close the menu on outside click / Escape so it never lingers over the diff.
++  const onDocDown = (e: MouseEvent) => {
++    if (root && !root.contains(e.target as Node)) setOpen(false);
++  };
++  const onKey = (e: KeyboardEvent) => {
++    if (e.key === "Escape") setOpen(false);
++  };
++  document.addEventListener("mousedown", onDocDown);
++  document.addEventListener("keydown", onKey);
++  onCleanup(() => {
++    document.removeEventListener("mousedown", onDocDown);
++    document.removeEventListener("keydown", onKey);
++  });
+ 
+   const checkout = createMutation(() => ({
+     mutationFn: (force: boolean) =>
+@@ -91,6 +85,7 @@ export function NodeActions(props: { branch: string }) {
+     onSuccess: (r) => {
+       if (r.ok) {
+         setHeldAt(null);
++        setOpen(false);
+         setDone(`✓ checked out in ~/coding/loops`);
+         qc.invalidateQueries({ queryKey: ["head"] });
+       } else if (r.worktree) {
+@@ -106,6 +101,7 @@ export function NodeActions(props: { branch: string }) {
+     mutationFn: () => post<SquashResult>("/squash", { branch: props.branch }),
+     onSuccess: (r) => {
+       setArmed(false);
++      setOpen(false);
+       if (r.ok) {
+         setDone(`✓ squashed ${r.n ?? ""} → ${r.sha ?? ""} ${r.header ?? ""}`.trim());
+         qc.invalidateQueries({ queryKey: ["commits", props.branch] });
+@@ -122,8 +118,6 @@ export function NodeActions(props: { branch: string }) {
+   }));
+ 
+   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
+-  // (deployCritical is added to /sync in the coupled backend change; until then it's
+-  // absent → badge shows the calm "behind" state, never a false block.)
+   const sync = createQuery(() => ({
+     queryKey: ["sync", props.branch],
+     queryFn: () => provider.sync(props.branch),
+@@ -139,6 +133,7 @@ export function NodeActions(props: { branch: string }) {
+   const rebase = createMutation(() => ({
+     mutationFn: () => post<{ ok?: boolean; err?: string }>("/sync", { branch: props.branch }),
+     onSuccess: (r) => {
++      setOpen(false);
+       if (r.ok) {
+         setDone("✓ rebasing on main — Claude is on it in a worktree");
+         sync.refetch();
+@@ -160,77 +155,107 @@ export function NodeActions(props: { branch: string }) {
+   };
+ 
+   const busy = () => checkout.isPending || squash.isPending || rebase.isPending;
++  const fire = (fn: () => void) => () => {
++    setDone(null);
++    fn();
++  };
+ 
+   return (
+-    <div class="node-actions" style={{ display: "flex", "align-items": "center", gap: "8px" }}>
++    <div class="node-actions" ref={root}>
+       {/* fork-state vs origin/main — calm "behind", escalating to ember "push blocked" when
+           main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
+-          Button action is a placeholder until the eject-to-Claude backend lands (coupled, so a
+-          visible button never runs the old main-wedging rebase). */}
++          When blocked the fix (rebase forward) surfaces inline next to the alarm; the full
++          list of missing files lives in the tooltip rather than spread across the header. */}
+       <Show when={behind() > 0}>
+-        <Show when={blocked()} fallback={<span style={note}>↓ {behind()} behind</span>}>
++        <Show
++          when={blocked()}
++          fallback={<span class="nh-behind">↓ {behind()} behind</span>}
++        >
+           <span
+-            style={alarm}
++            class="nh-blocked"
+             title={`origin/main changed deploy-critical files this branch is missing:\n${critical().join("\n")}\n\nrebase forward to clear the push block`}
+           >
+             ⚠ push blocked
+           </span>
+-          <span style={{ ...note, opacity: "0.7" }}>
+-            main changed {migName(critical()[0])}
+-            {critical().length > 1 ? ` +${critical().length - 1} more` : ""}
+-          </span>
+         </Show>
+         <button
+-          style={btn}
++          class="nh-fix"
+           disabled={busy()}
+           title="rebase this branch forward onto origin/main — runs in an isolated worktree via Claude (never your main checkout); resolves there, you push"
+-          onClick={() => { setDone(null); rebase.mutate(); }}
++          onClick={fire(() => rebase.mutate())}
+         >
+-          {rebase.isPending ? "rebasing on main…" : "⟳ rebase forward"}
++          {rebase.isPending ? "rebasing…" : "rebase →"}
+         </button>
+       </Show>
+ 
+-      {/* checkout — move the primary working tree onto this branch */}
+-      <Show
+-        when={heldAt()}
+-        fallback={
++      {/* ⋯ menu — the three rare, history-touching mutations, collapsed off the header */}
++      <button
++        class="icon-btn"
++        classList={{ on: open() }}
++        aria-haspopup="true"
++        aria-expanded={open()}
++        title="branch actions — checkout, squash, rebase"
++        onClick={() => setOpen((o) => !o)}
++      >
++        ⋯
++      </button>
++
++      <Show when={open()}>
++        <div class="nh-menu" role="menu">
++          {/* checkout — move the primary working tree onto this branch */}
++          <Show
++            when={heldAt()}
++            fallback={
++              <button
++                class="nh-item"
++                role="menuitem"
++                disabled={busy()}
++                title="move your main checkout (~/coding/loops) onto this branch"
++                onClick={fire(() => checkout.mutate(false))}
++              >
++                <span class="nh-item-ic">⤓</span>
++                {checkout.isPending ? "checking out…" : "checkout here"}
++              </button>
++            }
++          >
++            <div class="nh-item-note">held in {heldAt()}</div>
++            <button class="nh-item" role="menuitem" disabled={busy()} onClick={() => checkout.mutate(true)}>
++              <span class="nh-item-ic">⤓</span> free &amp; checkout
++            </button>
++            <button class="nh-item" role="menuitem" onClick={() => setHeldAt(null)}>
++              <span class="nh-item-ic" /> cancel
++            </button>
++          </Show>
++
++          {/* squash — collapse parent..branch into one voiced commit (two-click) */}
+           <button
+-            style={btn}
++            class="nh-item"
++            classList={{ armed: armed() }}
++            role="menuitem"
+             disabled={busy()}
+-            title="move your main checkout (~/coding/loops) onto this branch"
+-            onClick={() => {
+-              setDone(null);
+-              checkout.mutate(false);
+-            }}
++            title="collapse parent..branch into one commit with a generated subject"
++            onClick={fire(armSquash)}
+           >
+-            {checkout.isPending ? "checking out…" : "⤓ checkout here"}
++            <span class="nh-item-ic">⊟</span>
++            {squash.isPending ? "squashing…" : armed() ? "confirm squash → 1" : "squash → 1"}
+           </button>
+-        }
+-      >
+-        <span style={note}>open in {heldAt()} —</span>
+-        <button style={btn} disabled={busy()} onClick={() => checkout.mutate(true)}>
+-          free &amp; checkout
+-        </button>
+-        <button style={{ ...btn, border: "1px solid transparent" }} onClick={() => setHeldAt(null)}>
+-          cancel
+-        </button>
+-      </Show>
+ 
+-      {/* squash — collapse parent..branch into one voiced commit (two-click) */}
+-      <button
+-        style={armed() ? { ...btn, opacity: "1", "border-color": "var(--patina)" } : btn}
+-        disabled={busy()}
+-        title="collapse parent..branch into one commit with a generated subject"
+-        onClick={() => {
+-          setDone(null);
+-          armSquash();
+-        }}
+-      >
+-        {squash.isPending ? "squashing…" : armed() ? "confirm squash" : "⊟ squash → 1"}
+-      </button>
++          {/* rebase forward — also surfaced inline when push is blocked */}
++          <button
++            class="nh-item"
++            role="menuitem"
++            disabled={busy()}
++            title="rebase this branch forward onto origin/main in an isolated worktree (never your main checkout)"
++            onClick={fire(() => rebase.mutate())}
++          >
++            <span class="nh-item-ic">⟳</span>
++            {rebase.isPending ? "rebasing…" : "rebase forward"}
++          </button>
++        </div>
++      </Show>
+ 
+       <Show when={done()}>
+-        <span style={note}>{done()}</span>
++        <span class="nh-done" title={done() ?? ""}>{done()}</span>
+       </Show>
+     </div>
+   );
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index 1a3ceeb..bf2ca59 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -104,13 +104,58 @@ body {
+ 
+ /* ── review surface ─────────────────────────────────────────────────── */
+ .surface { padding: 30px 34px 90px; max-width: 1120px; }
+-.node-head { display: flex; align-items: baseline; gap: 14px; margin-bottom: 24px; }
++/* two tiers: an identity line, then a quiet controls bar under a hairline. Splitting them
++   stops a long branch name from wrapping into the toolbar and gives the actions room. */
++.node-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+ .node-head h1 {
+   font-family: var(--display); font-style: italic; font-weight: 600;
+   font-size: 32px; margin: 0; color: var(--ink); letter-spacing: -0.01em;
+ }
+-.against { color: var(--ink-faint); font-size: 13px; }
++.nh-id { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
++.nh-bar { display: flex; align-items: center; gap: 16px; padding-top: 11px; border-top: 1px solid var(--rule); }
++.nh-spacer { flex: 1; }
++.diff-hint { display: flex; justify-content: flex-end; margin: -8px 0 16px; }
++.against { color: var(--ink-faint); font-size: 13px; flex: none; }
+ .meta { margin-left: auto; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.06em; }
++
++/* ── branch state badge + ⋯ actions menu (NodeActions) ───────────────── */
++.node-actions { position: relative; display: flex; align-items: center; gap: 9px; }
++.nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
++.nh-blocked { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
++.nh-fix {
++  font: inherit; font-size: 12px; color: var(--del); background: transparent;
++  border: 1px solid var(--del); border-radius: 5px; padding: 3px 9px; cursor: pointer; opacity: 0.9;
++}
++.nh-fix:hover:not(:disabled) { opacity: 1; }
++.nh-fix:disabled { opacity: 0.5; cursor: default; }
++.nh-done {
++  font-size: 12px; color: var(--patina); opacity: 0.9;
++  max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
++}
++/* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
++.icon-btn {
++  font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);
++  background: transparent; border: 1px solid transparent; border-radius: 6px;
++  padding: 4px 9px; cursor: pointer;
++}
++.icon-btn:hover, .icon-btn.on { color: var(--ink); border-color: var(--rule); background: var(--vellum-edge); }
++.nh-menu {
++  position: absolute; top: calc(100% + 7px); right: 0; z-index: 20;
++  min-width: 196px; display: flex; flex-direction: column; gap: 2px;
++  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
++  padding: 6px; box-shadow: 0 12px 34px -14px rgba(0, 0, 0, 0.75);
++}
++.nh-item {
++  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
++  font: inherit; font-size: 12px; color: var(--patina);
++  background: transparent; border: 1px solid transparent; border-radius: 6px;
++  padding: 7px 10px; cursor: pointer;
++}
++.nh-item:hover:not(:disabled) { background: var(--vellum-edge); border-color: var(--patina); }
++.nh-item:disabled { opacity: 0.45; cursor: default; }
++.nh-item.armed { color: var(--del); border-color: var(--del); }
++.nh-item-ic { width: 14px; flex: none; text-align: center; opacity: 0.85; }
++.nh-item-note { font-size: 11px; color: var(--ink-faint); padding: 4px 10px 2px; }
+ .loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
+ 
+ /* a file is a ledger entry; blessed ones illuminate from the gutter */
+@@ -251,7 +296,7 @@ body {
+ .forest-fresh.behind { color: var(--patina); }
+ 
+ /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
+-.base-toggle { display: flex; align-items: center; gap: 6px; margin: -6px 0 20px; }
++.base-toggle { display: flex; align-items: center; gap: 6px; }
+ .base-label { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; margin-right: 4px; }
+ .base-pill {
+   font: inherit; font-size: 11px; color: var(--ink-dim); background: transparent;

@@ -24,6 +24,10 @@ import subprocess
 from . import ctx
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
+# Model aliases the chat may use — resolved to current models by the claude CLI, so no dated
+# IDs to rot. Anything else from the client falls back to the default (never passed raw to --model).
+ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
+DEFAULT_MODEL = "sonnet"
 
 
 def _worktree_for(branch):
@@ -93,6 +97,9 @@ def start(req, raw):
     path = (d.get("path") or "").strip()
     question = (d.get("question") or "").strip()
     resume = (d.get("resume") or "").strip()
+    model = (d.get("model") or "").strip()
+    if model not in ALLOWED_MODELS:
+        model = DEFAULT_MODEL
     if not branch or not question:
         req._send(400, json.dumps({"ok": False, "err": "need a branch + question"}))
         return
@@ -111,7 +118,7 @@ def start(req, raw):
            "--output-format", "stream-json",
            "--include-partial-messages",
            "--verbose",
-           "--model", "sonnet"]
+           "--model", model]
     if resume:
         cmd += ["--resume", resume]
     # variadic — keep it LAST so it doesn't swallow a following flag's value

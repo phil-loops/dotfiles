@@ -11,6 +11,8 @@
 import os
 import json
 import time
+import signal
+import subprocess
 from concurrent.futures import ThreadPoolExecutor
 
 from . import ctx
@@ -171,8 +173,35 @@ def open_file(req, raw):   # POST /open — open a file on a branch in the warm 
     pos = d.get("pos") or d.get("line")   # opaque locator; forwarded verbatim — stack-open owns the grammar
     if pos:
         args.append(str(pos))
-    r = ctx.run(args)
-    if r.returncode == 0:
+    # Bound it: stack-open probes the warm review-nvim, which hangs indefinitely if that
+    # nvim is wedged (e.g. stuck on a prompt). Without a timeout the /open request — and
+    # its server thread — pends forever, and each hung probe leaks an nvim. Run in its own
+    # process group and SIGKILL the whole group on timeout so hover+o fails visibly fast
+    # instead of spinning, and no zombie probe is left behind.
+    proc = subprocess.Popen(args, cwd=ctx.CWD, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=8)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        req._send(504, json.dumps({"ok": False, "err": "stack-open timed out — the review-nvim is unresponsive (wedged on a prompt?)"}))
+        return
+    if proc.returncode == 0:
         _record_open(d.get("branch", ""))   # stamp recency for the no-PR picker ordering
+    req._send(200 if proc.returncode == 0 else 500,
+              json.dumps({"ok": proc.returncode == 0, "out": out, "err": err}))
+
+
+def steer(req, raw):   # POST /steer — launch the Steer workspace (headless-claude design convo)
+    d = json.loads(raw or "{}")
+    args = [os.path.join(ctx.SCRIPTS, "steer-open"), d.get("branch", "")]
+    p = d.get("path")   # the file the user is focused on; steer-open falls back to top-changed .ts
+    if p:
+        args.append(p)
+    r = ctx.run(args)
     req._send(200 if r.returncode == 0 else 500,
               json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))

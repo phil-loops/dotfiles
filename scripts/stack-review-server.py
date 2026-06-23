@@ -239,6 +239,8 @@ class H(BaseHTTPRequestHandler):
             return restack.restack(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
             return restack.resolve(self, raw)
+        if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state
+            return restack.abort(self, raw)
         if self.path == "/check-origin":   # fetch origin + refresh PR/behind caches; report how far main moved
             before = run(["git", "rev-parse", "origin/main"]).stdout.strip()
             run(["git", "fetch", "origin", "main"])

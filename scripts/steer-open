@@ -1,0 +1,74 @@
+#!/bin/zsh
+# steer-open — launch the "Steer" workspace for a branch: ONE nvim, split in two.
+#
+#   left  window: a :terminal running `steer-chat <branch> --watch` — headless-claude
+#                 briefing + conversation; runs a turn whenever :SteerSubmit writes .turn
+#   right window: a real .ts on the branch — full LSP/format/treesitter — you steer by
+#                 editing actual code; :SteerSubmit hands your working diff to Claude
+#
+# It's one nvim (native Ctrl-w nav, yank chat→code), hosted in a tmux `loops` window so
+# it shows on screen. The file opens in a warm worktree (node_modules symlinked, via
+# `stack-open --prepare`) so tsserver attaches and formatting works for real.
+#
+#   steer-open <branch> [path]      # path defaults to the branch's top-changed .ts
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+SESSION="${STEER_TMUX:-loops}"
+SCRIPTS="${0:A:h}"                       # this script's dir (~/.dotfiles/scripts)
+branch="${1:?usage: steer-open <branch> [path]}"
+want="${2:-}"
+
+git rev-parse --verify --quiet "$branch" >/dev/null \
+  || { echo "steer-open: no such branch: $branch" >&2; exit 1; }
+repo=$(git rev-parse --show-toplevel)
+parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true); [[ -n "$parent" ]] || parent=main
+
+# warm worktree for the branch (node_modules symlinked) so the right-pane nvim gets LSP.
+"$SCRIPTS/stack-open" --prepare "$branch" >/dev/null 2>&1 || true
+wt=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" \
+  '/^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}')
+[[ -n "$wt" ]] || wt="${STACK_OPEN_DIR:-/tmp/stack-study}/${branch//\//_}"
+
+# pick the file to steer: explicit arg → top-changed .ts/.tsx → first changed file
+relpath="$want"
+if [[ -z "$relpath" ]]; then
+  relpath=$(git diff --name-only "${parent}...${branch}" -- '*.ts' '*.tsx' 2>/dev/null | head -1)
+  [[ -n "$relpath" ]] || relpath=$(git diff --name-only "${parent}...${branch}" 2>/dev/null | head -1)
+fi
+
+# session/turn sidecars live beside each other in the shared git dir (survives worktrees).
+# `safe` MUST match steer-chat's encoding (/→%2F) so both agree on the .turn path.
+gitdir=$(git rev-parse --git-common-dir); [[ "$gitdir" = /* ]] || gitdir="$repo/$gitdir"
+sdir="$gitdir/steer"; mkdir -p "$sdir"
+safe="${branch//\//%2F}"
+turn="$sdir/${safe}.turn"
+
+# resolve the editable target; if the branch changed nothing, fall back to a scratch .ts
+if [[ -n "$relpath" && -f "$wt/$relpath" ]]; then
+  target="$wt/$relpath"; editdir="$wt"
+else
+  target="$sdir/${safe}.scratch.ts"; editdir="$repo"
+  [[ -s "$target" ]] || print -r -- "// steer · $branch — scratch (branch has no file to open). Sketch a direction; :SteerSubmit sends it." > "$target"
+fi
+
+# the tmux session must exist; create it detached if it isn't already up
+tmux has-session -t "$SESSION" 2>/dev/null || tmux new-session -d -s "$SESSION" -c "$repo"
+
+# fresh steer window: ONE nvim that splits itself — left window is a :terminal running
+# the headless-claude conversation (steer-chat --watch streams natively in it), right
+# window is the real .ts with full LSP. One process, native nvim navigation; the tmux
+# window only hosts it on screen. :SteerSubmit (and the split) are set up by the lua we
+# pass via -c, which also gets the branch/worktree/turn so it knows how to diff + reply.
+tmux kill-window -t "${SESSION}:steer" 2>/dev/null || true
+chatcmd="${SCRIPTS}/steer-chat ${branch} --watch"
+vimcmd="let g:steer_branch='${branch}' | let g:steer_wt='${editdir}' | let g:steer_turn='${turn}' | let g:steer_chat_cmd='${chatcmd}' | lua pcall(function() require('custom.steer-submit').start() end)"
+tmux new-window -t "$SESSION" -n steer -c "$editdir" "nvim -c ${(q)vimcmd} ${(q)target}"
+tmux set-window-option -t "${SESSION}:steer" automatic-rename off 2>/dev/null || true
+tmux select-window -t "${SESSION}:steer" 2>/dev/null || true
+
+# best-effort raise of the GUI terminal hosting tmux (same idea as stack-open)
+{ app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1)
+  [[ -n "${app:-}" ]] && osascript -e "tell application \"$app\" to activate" >/dev/null 2>&1; } || true
+
+echo "steer: opened $branch -> tmux $SESSION:steer (editing ${target#$wt/})"

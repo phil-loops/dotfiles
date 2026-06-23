@@ -60,5 +60,7 @@ vim.api.nvim_create_user_command("Submit", function(opts)
   vim.cmd("qa")
 end, { nargs = "?", desc = "submit: design doc → hand back & close; code buffer → route the worktree to a Claude session (stay open)" })
 
--- lowercase `:submit` → `:Submit`, only when the whole command line is exactly `submit`
-vim.cmd([[cnoreabbrev <expr> submit (getcmdtype() == ':' && getcmdline() == 'submit') ? 'Submit' : 'submit']])
+-- lowercase `:submit` → `:Submit`, for bare `submit` or `submit <intent>` (intent rides
+-- along to the script as -m). `\v^submit>` anchors on the leading `submit` word so trailing
+-- args still expand; an exact `== 'submit'` guard would only fire on the no-arg form.
+vim.cmd([[cnoreabbrev <expr> submit (getcmdtype() == ':' && getcmdline() =~# '\v^submit>') ? 'Submit' : 'submit']])

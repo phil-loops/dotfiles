@@ -1,0 +1,75 @@
+diff --git a/scripts/stack-restack b/scripts/stack-restack
+index 1ba3bd3..38cd508 100755
+--- a/scripts/stack-restack
++++ b/scripts/stack-restack
+@@ -154,16 +154,36 @@ worktree_of() {
+   '
+ }
+ 
++# Run `git "$@"`, retrying briefly on a transient `.git/index.lock` loss. We mutate
++# in whatever worktree a branch lives in — often the MAIN checkout, whose index is
++# shared with anything else watching it (GitHub Desktop polling `git status` holds
++# the lock ~100ms). A rebase / update-index / checkout that reaches for the lock
++# mid-poll would otherwise fail — and here those failures are mostly swallowed
++# (`|| true`, exit code ignored), so a lost lock silently SKIPS the step. Retried
++# only on the lock's stderr signature; any other failure returns its real exit code
++# at once. Combined output is re-emitted on stdout so each caller's own redirection
++# (`2>&1 | sed`, `>/dev/null 2>&1`) still applies.
++git_locked() {
++  local attempt out rc
++  for attempt in 1 2 3 4 5; do   # 0.15+0.30+0.45+0.60+0.75 ≈ 2.25s of patience, max
++    out=$(git "$@" 2>&1); rc=$?
++    [[ -n "$out" ]] && print -r -- "$out"
++    [[ $rc -eq 0 || "$out" != *index.lock*"File exists"* ]] && return $rc
++    sleep 0.$(( attempt * 15 ))
++  done
++  return $rc
++}
++
+ # Run a git command in the right place for a branch. If checked out in another
+ # worktree, use -C <wt>. Else use current dir, after checking out the branch.
+ in_branch_place() {
+   local branch="$1"; shift
+   local wt=$(worktree_of "$branch")
+   if [[ -n "$wt" ]]; then
+-    git -C "$wt" "$@"
++    git_locked -C "$wt" "$@"
+   else
+-    git checkout "$branch" >/dev/null 2>&1 || return $?
+-    git "$@"
++    git_locked checkout "$branch" >/dev/null 2>&1 || return $?
++    git_locked "$@"
+   fi
+ }
+ 
+@@ -682,9 +702,9 @@ if [[ "$MODE" == "discard" ]]; then
+   typeset -a SNAP_PATHS
+   SNAP_PATHS=()
+   while IFS= read -r p; do [[ -n "$p" ]] && SNAP_PATHS+=("$p"); done < <(cut -f2 "$SNAPSHOT_FILE" | sort -u)
+-  for p in "${SNAP_PATHS[@]}"; do git -C "$REBASE_DIR" update-index --force-remove "$p"; done
+-  git -C "$REBASE_DIR" update-index --index-info < "$SNAPSHOT_FILE"
+-  git -C "$REBASE_DIR" checkout -m -- "${SNAP_PATHS[@]}"
++  for p in "${SNAP_PATHS[@]}"; do git_locked -C "$REBASE_DIR" update-index --force-remove "$p"; done
++  git_locked -C "$REBASE_DIR" update-index --index-info < "$SNAPSHOT_FILE"
++  git_locked -C "$REBASE_DIR" checkout -m -- "${SNAP_PATHS[@]}"
+   rm -f "$CONFLICT_FILE" "$SNAPSHOT_FILE"
+   echo "  ✓ staged fix discarded — conflict restored, rebase still parked on ${CURRENT}"
+   exit 0
+@@ -708,7 +728,7 @@ if [[ "$MODE" == "handoff" ]]; then
+   echo "→ Handoff: Claude resolving the paused rebase of ${CURRENT} onto ${PARENT_NAME}…"
+   while rebase_in_progress "$REBASE_DIR"; do
+     if claude_attempt_resolve "$REBASE_DIR" "$CURRENT" "$PARENT_NAME"; then
+-      git -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
++      git_locked -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
+       continue
+     fi
+     save_state
+@@ -841,7 +861,7 @@ while (( ${#PENDING[@]} > 0 )); do
+     if claude_attempt_resolve "$REBASE_DIR" "$BRANCH" "$PARENT_NAME"; then
+       # Advance past the now-staged commit. core.editor=true avoids opening an
+       # editor for the commit message.
+-      git -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
++      git_locked -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
+       continue
+     fi
+ 

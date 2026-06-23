@@ -19,8 +19,9 @@ alias zconfig="nvim ~/.zshrc"
 alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles"; git push); source ~/.zshrc'
 alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design doc (see scripts/dd-design)
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
-alias db="task db:port_forward"
-alias db:rw="task db:port_forward:rw"
+alias db="aws-vault exec staging -- bin/bastion-tunnel"
+alias db:rw="aws-vault exec staging -- bin/bastion-tunnel --writer"
+alias db:prod="aws-vault exec prod -- bin/bastion-tunnel"
 alias refresh="rm -fr .next node_modules && task dev"
 alias docs="cd ~/coding/docs && mintlify dev"
 
@@ -410,7 +411,7 @@ alias log-edit="~/.dotfiles/scripts/daily-log edit"
 hold() {
     if [[ "$1 $2" == "my beer" ]]; then
         shift 2
-        claude --dangerously-skip-permissions "$@"
+        cw "$@"
     else
         echo "🍺 Usage: hold my beer"
     fi
