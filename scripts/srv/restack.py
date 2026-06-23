@@ -98,6 +98,49 @@ def _running():
     return False
 
 
+def _drivers():
+    # Every LIVE restack driver as {pid, mode, project, etime}. Normally ≤1; two means a
+    # tangle — concurrent drivers racing one worktree (the lock refuses the second now,
+    # but we still surface the count as the safety net). _running() is the boolean form;
+    # the Hearth needs the list, because a boolean can't tell one driver from two.
+    base = os.path.join(ctx.SCRIPTS, "stack-restack")
+    pids = subprocess.run(["pgrep", "-f", base], capture_output=True, text=True).stdout.split()
+    if not pids:
+        return []
+    ps = subprocess.run(["ps", "-o", "pid=,etime=,command=", "-p", ",".join(pids)],
+                        capture_output=True, text=True).stdout
+    drivers = []
+    for line in ps.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        pid, etime, c = parts
+        # Keep only the real invocation; drop the `zsh -c "… && git checkout"` parent so
+        # wrapper+inner count as ONE driver (they bit us as two in the tangle).
+        if (base + " ") not in c and (base + "-all") not in c:
+            continue
+        if "zsh -c" in c:
+            continue
+        mode = ("all" if "stack-restack-all" in c else "handoff" if "--handoff" in c
+                else "diagnose" if "--diagnose" in c else "discard" if "--discard" in c
+                else "continue" if "--continue" in c else "start")
+        project = ""
+        if mode != "all":
+            after = c.split("stack-restack", 1)[1]
+            project = next((t for t in after.split() if not t.startswith("-")), "")
+        drivers.append({"pid": int(pid), "mode": mode, "project": project, "etime": etime})
+    drivers.sort(key=lambda d: d["pid"])
+    return drivers
+
+
+def _resolvers():
+    # Live headless `claude` conflict-resolvers. >1 on one conflict is the duplicate-spawn
+    # half of the tangle (today three piled up on the same job-status clash).
+    sig = "resolving a git rebase conflict during a stack restack"
+    out = subprocess.run(["pgrep", "-fc", sig], capture_output=True, text=True).stdout.strip()
+    return int(out) if out.isdigit() else 0
+
+
 def _state_path():
     gd = _gitdir()
     return os.path.join(gd, "stack-restack-state", "state") if gd else ""
@@ -147,11 +190,16 @@ def status(req, u):
     sd = _state_path()
     want = parse_qs(u.query).get("project", [""])[0]
     paused, proj, cur = False, "", ""
+    done = total = 0
     if sd and os.path.exists(sd):
         with open(sd) as fh:
             kv = dict(l.rstrip("\n").split("=", 1) for l in fh
                       if "=" in l and not l.startswith("SNAP"))
         proj, cur = kv.get("PROJECT", ""), kv.get("CURRENT", "")
+        # COMPLETED/PENDING are space-joined branch lists; CURRENT is the in-flight one
+        # (popped from PENDING, not in either list) → it's node done+1 of total.
+        done = len(kv.get("COMPLETED", "").split())
+        total = done + len(kv.get("PENDING", "").split()) + (1 if cur else 0)
         paused = (not want) or proj == want
     # running==False + paused==True means "escalated, needs a human" (the parent
     # stack-restack stays alive across the whole walk and exits when it escalates).
@@ -166,7 +214,9 @@ def status(req, u):
         except Exception:
             pass
     req._send(200, json.dumps({"paused": paused, "project": proj, "current": cur,
-                               "running": running, "reason": reason}))
+                               "running": running, "reason": reason,
+                               "done": done, "total": total,
+                               "drivers": _drivers(), "resolvers": _resolvers()}))
 
 
 def restack(req, raw):

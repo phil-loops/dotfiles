@@ -63,6 +63,10 @@ export const Project = z.object({
   name: z.string(),
   branches: z.number(),
   behind: z.number(),
+  merged: z
+    .object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() })
+    .nullable()
+    .optional(), // most recent squash-merge into main attributed to this forest
 });
 export type Project = z.infer<typeof Project>;
 
@@ -89,12 +93,25 @@ export const Commit = z.object({
 });
 export type Commit = z.infer<typeof Commit>;
 
+export const RestackDriver = z.object({
+  pid: z.number(),
+  mode: z.string(), // start | handoff | continue | diagnose | discard | all
+  project: z.string().optional(),
+  etime: z.string().optional(), // ps elapsed time, e.g. "11:13"
+});
+export type RestackDriver = z.infer<typeof RestackDriver>;
+
 export const RestackStatus = z.object({
   running: z.boolean(),
   paused: z.boolean().optional(),
   project: z.string().optional(),
   current: z.string().optional(),
   reason: z.string().optional(),
+  done: z.number().optional(), // branches rebased so far this walk
+  total: z.number().optional(), // total in the walk → "node done of total"
+  // The list, not a boolean — a boolean can't tell one driver from two. >1 == a tangle.
+  drivers: z.array(RestackDriver).optional(),
+  resolvers: z.number().optional(), // live headless claude conflict-resolvers
 });
 export type RestackStatus = z.infer<typeof RestackStatus>;
 
