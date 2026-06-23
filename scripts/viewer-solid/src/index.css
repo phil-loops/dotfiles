@@ -301,6 +301,7 @@ body {
 .forest-fresh { flex: none; font-size: 11px; letter-spacing: 0.03em; }
 .forest-fresh.fresh { color: var(--gold-leaf); }
 .forest-fresh.behind { color: var(--patina); }
+.forest-merged { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); opacity: 0.85; }
 
 /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
 .base-toggle { display: flex; align-items: center; gap: 6px; }
@@ -315,11 +316,25 @@ body {
 
 /* ── restack affordances on the home (patina = behind/restack; ember = needs you) ── */
 .eyebrow-row { display: flex; align-items: center; justify-content: space-between; }
-.restack-all, .forest-restack, .forest-resolve {
+.restack-all, .forest-restack, .forest-resolve, .forest-drop {
   font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;
   border-radius: 7px; padding: 3px 11px; background: transparent;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
+.forest-drop { color: var(--del); border: 1px solid transparent; }
+.forest-drop:hover { border-color: var(--del); background: var(--del-bg); }
+.forest-drop.armed { border-color: var(--del); background: var(--del); color: #1a1411; }
+.forest-drop.running { color: var(--del); border-color: transparent; opacity: 0.7; }
+.delete-mode-tag {
+  display: inline-flex; align-items: center; gap: 8px; margin-left: 12px;
+  color: var(--del); font-size: 11px; letter-spacing: 0.03em;
+}
+.delete-mode-exit {
+  font: inherit; font-size: 11px; cursor: pointer; border-radius: 6px;
+  padding: 2px 8px; background: transparent; color: var(--del); border: 1px solid var(--del);
+  transition: background 0.12s;
+}
+.delete-mode-exit:hover { background: var(--del-bg); }
 .restack-all { color: var(--patina); border: 1px solid var(--patina); opacity: 0.8; margin-top: 30px; }
 .restack-all:hover { opacity: 1; }
 .restack-all.armed, .forest-restack.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }

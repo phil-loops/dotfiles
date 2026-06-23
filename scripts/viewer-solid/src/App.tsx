@@ -17,6 +17,7 @@ import { homePath, forestPath, nodePath } from "./routes";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, canMutate } from "./provider";
+import { deleteMode, setDeleteMode } from "./deleteMode";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
 import { useDiffSelection } from "./useDiffSelection";
@@ -27,6 +28,7 @@ import { threadMsgCount } from "./chatStore";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
 import { ServerStatus } from "./ServerStatus";
+import { Hearth } from "./Hearth";
 import type {
   ForestModel,
   SpineNode,
@@ -42,6 +44,18 @@ import type {
 } from "./types";
 
 const leaf = (s?: string): string => (s || "").split("/").pop() ?? "";
+
+// Relative age of a merge, or null once it's older than a week (don't badge stale merges).
+const mergedAgo = (iso?: string): string | null => {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!t) return null;
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s > 7 * 86400) return null;
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+};
 const isBlessed = (f: FileDiff): boolean =>
   f.status === "clean" || f.status === "blessed";
 
@@ -188,17 +202,33 @@ function Home() {
         setRestackErr(r.err ?? "couldn’t abort");
       }
     });
-  const arm = (key: string) => {
+  const arm = (key: string, confirm: () => void = () => start(key)) => {
     if (armed() === key) {
       clearTimeout(armT);
       setArmed(null);
-      start(key);
+      confirm();
       return;
     }
     setArmed(key);
     clearTimeout(armT);
     armT = setTimeout(() => setArmed(null), 3000);
   };
+
+  // ── delete mode: forget an old forest grouping (config only; branches kept) ──
+  const [dropping, setDropping] = createSignal<string | null>(null);
+  const dropProject = (project: string) => {
+    setDropping(project);
+    post("/drop-project", { project }).then((r) => {
+      setDropping(null);
+      if (r.ok) {
+        projects.refetch();
+        prs.refetch();
+      } else {
+        setRestackErr(r.err ?? "couldn’t drop forest");
+      }
+    });
+  };
+  onCleanup(() => setDeleteMode(false)); // leaving home always exits delete mode
   const status = createQuery(() => ({
     queryKey: ["restack-status", running()],
     queryFn: () =>
@@ -303,6 +333,8 @@ function Home() {
         </Show>
       </header>
 
+      <Hearth />
+
       <Show when={(prs.data || []).length}>
         <section>
           <h2 class="eyebrow">your open PRs</h2>
@@ -319,6 +351,13 @@ function Home() {
                           <span class={f().behind > 0 ? "forest-fresh behind" : "forest-fresh fresh"}>
                             {f().behind > 0 ? `↻ ${f().behind} behind` : "✦ fresh"}
                           </span>
+                          <Show when={f().merged && mergedAgo(f().merged!.at)}>
+                            {(rel) => (
+                              <span class="forest-merged" title={f().merged!.title}>
+                                {" · "}✨ merged {rel()} (#{f().merged!.pr})
+                              </span>
+                            )}
+                          </Show>
                         </span>
                       </>
                     )}
@@ -356,6 +395,12 @@ function Home() {
       <section>
         <div class="eyebrow-row">
           <h2 class="eyebrow">forests</h2>
+          <Show when={deleteMode()}>
+            <span class="delete-mode-tag">
+              delete mode
+              <button class="delete-mode-exit" onClick={() => setDeleteMode(false)}>exit</button>
+            </span>
+          </Show>
           <Show when={restackErr()}>
             <span class="restack-err">{restackErr()}</span>
           </Show>
@@ -400,6 +445,16 @@ function Home() {
                   <span class="forest-meta">
                     {p.branches} {p.branches === 1 ? "node" : "nodes"}
                   </span>
+                  <Show when={p.merged && mergedAgo(p.merged.at)}>
+                    {(rel) => (
+                      <span class="forest-merged" title={p.merged!.title}>
+                        ✨ merged {rel()} (#{p.merged!.pr})
+                      </span>
+                    )}
+                  </Show>
+                  <Show
+                    when={deleteMode() && canMutate}
+                    fallback={
                   <Show
                     when={stuck()}
                     fallback={
@@ -482,6 +537,24 @@ function Home() {
                         </div>
                       </Show>
                     </div>
+                  </Show>
+                    }
+                  >
+                    <button
+                      class="forest-drop"
+                      classList={{ armed: armed() === p.name, running: dropping() === p.name }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (dropping() !== p.name) arm(p.name, () => dropProject(p.name));
+                      }}
+                    >
+                      {dropping() === p.name
+                        ? "⌫ dropping…"
+                        : armed() === p.name
+                          ? "drop forest?"
+                          : "✕ drop"}
+                    </button>
                   </Show>
                 </A>
               );

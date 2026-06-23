@@ -9,6 +9,7 @@
 #   POST /standalone      pin/unpin a branch
 #   POST /open            open a file on a branch in the warm review-nvim (+ recency stamp)
 import os
+import re
 import json
 import time
 import signal
@@ -18,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import ctx
 
 _pcache = {}  # (model_sig, origin-main-sha) -> picker json — the /projects fan-out is expensive
+_PR_RE = re.compile(r"\(#(\d+)\)")
 
 
 def _opened_file():
@@ -64,6 +66,86 @@ def _ready_to_merge(mergeable, prs):
     for b in mergeable:
         (ready if b in prs else candidates).append(b)
     return ready, candidates
+
+
+def _merges_file():
+    # project -> last merge-into-main {pr,title,at,branch}, kept in the git-common-dir
+    # so it survives restarts and is shared across worktrees. Drives the "merged Xm
+    # ago" recency badge on the picker cards.
+    gd = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+    if gd and not os.path.isabs(gd):
+        gd = os.path.join(ctx.CWD, gd)
+    return os.path.join(gd, "stack-project-merges.json") if gd else ""
+
+
+def _gh_pr(num):
+    # Resolve a (possibly already-merged) PR to its head branch + title. Bounded so a
+    # slow/offline GitHub never stalls the picker; any failure → None (just no badge).
+    try:
+        r = subprocess.run(["gh", "pr", "view", str(num), "--json", "headRefName,title"],
+                           cwd=ctx.CWD, capture_output=True, text=True, timeout=6)
+        if r.returncode != 0:
+            return None
+        d = json.loads(r.stdout or "{}")
+        return d.get("headRefName") or "", d.get("title") or ""
+    except Exception:
+        return None
+
+
+def _project_of(branch):
+    p = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    if p:
+        return p
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.branch$"]).stdout.splitlines():
+        k, _, v = line.partition(" ")
+        if v.strip() == branch:
+            m = re.match(r"^stack-project\.(.+)\.branch$", k)
+            if m:
+                return m.group(1)
+    return None
+
+
+def _scan_merges():
+    # Walk new origin/main commits since the last scan; attribute each squash-merge
+    # (subject "… (#N)") to a project via its head branch's project tag, and keep the
+    # newest merge per project. The store persists, so the badge survives restarts and
+    # lingers after the now-empty node is contracted — until that project merges again.
+    path = _merges_file()
+    try:
+        with open(path) as f:
+            store = json.load(f)
+    except Exception:
+        store = {}
+    tip = ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip()
+    old = store.get("tip", "")
+    # Incremental when old..tip is a fast-forward; otherwise (first run / rewritten
+    # main) backfill a bounded window so a brand-new viewer shows recent merges once.
+    if old and ctx.run(["git", "merge-base", "--is-ancestor", old, tip]).returncode == 0:
+        rng, cap = [f"{old}..origin/main"], []
+    else:
+        rng, cap = ["origin/main"], ["-n", "12"]
+    log = ctx.run(["git", "log", *cap, "--format=%cI%x09%s", *rng]).stdout.splitlines()
+    merges = store.get("merges", {})
+    for line in reversed(log):   # oldest-first so a newer merge overwrites its project
+        at, _, subj = line.partition("\t")
+        nums = _PR_RE.findall(subj)
+        if not nums:
+            continue
+        res = _gh_pr(int(nums[-1]))
+        if not res:
+            continue
+        branch, title = res
+        proj = _project_of(branch) if branch else None
+        if proj:
+            merges[proj] = {"pr": int(nums[-1]), "title": title or subj, "at": at, "branch": branch}
+    try:
+        if path:
+            with open(path, "w") as f:
+                json.dump({"tip": tip, "merges": merges}, f)
+    except Exception:
+        pass
+    return merges
 
 
 # --- GET handlers ---
@@ -116,11 +198,13 @@ def projects(req):
     roots = sorted({b for p in projs for b in p.get("mergeable", [])})
     with ThreadPoolExecutor(max_workers=8) as ex:
         fresh = dict(zip(roots, ex.map(_root_fresh, roots)))
+    merges = _scan_merges()
     for p in projs:
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
         bs = p.get("mergeable", [])
         p["behind"] = max((fresh[b][0] for b in bs), default=0)
         p["overlap"] = any(fresh[b][1] for b in bs)
+        p["merged"] = merges.get(p["name"])
     payload = json.dumps(projs)
     _pcache.clear()
     _pcache[pck] = payload
@@ -194,6 +278,27 @@ def open_file(req, raw):   # POST /open — open a file on a branch in the warm 
         _record_open(d.get("branch", ""))   # stamp recency for the no-PR picker ordering
     req._send(200 if proc.returncode == 0 else 500,
               json.dumps({"ok": proc.returncode == 0, "out": out, "err": err}))
+
+
+def drop_project(req, raw):   # POST /drop-project — forget a forest grouping (config only; branches kept)
+    d = json.loads(raw or "{}")
+    project = d.get("project", "").strip()
+    if not project:
+        req._send(400, json.dumps({"ok": False, "err": "no project"}))
+        return
+    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.splitlines()
+    # Untag each member, but only if it still points at THIS project — a branch since
+    # retagged into another forest must keep its newer tag.
+    untagged = 0
+    for b in (m.strip() for m in members):
+        if not b:
+            continue
+        if ctx.run(["git", "config", f"stack-branch.{b}.project"]).stdout.strip() == project:
+            ctx.run(["git", "config", "--unset", f"stack-branch.{b}.project"])
+            untagged += 1
+    # Drop the whole [stack-project "<name>"] section (the branch list + any sibling keys).
+    ctx.run(["git", "config", "--remove-section", f"stack-project.{project}"])
+    req._send(200, json.dumps({"ok": True, "dropped": project, "untagged": untagged}))
 
 
 def steer(req, raw):   # POST /steer — launch the Steer workspace (headless-claude design convo)
