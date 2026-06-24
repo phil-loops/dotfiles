@@ -217,8 +217,24 @@ def project_opened(req):
 
 
 def standalone_list(req):
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--standalone"])
-    req._send(200, r.stdout or "[]")
+    raw = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--standalone"]).stdout
+    try:
+        items = json.loads(raw or "[]")
+    except json.JSONDecodeError:
+        req._send(200, raw or "[]")
+        return
+    kept = []
+    for it in items:
+        b = it.get("branch", "")
+        empty = it.get("commits", 0) == 0 and it.get("add", 0) == 0 and it.get("del", 0) == 0
+        # a watched review PR with nothing left to review (empty diff vs main) has merged — auto-
+        # drop it so the watch list self-cleans. Scoped to review/pr-* so a freshly-pinned branch
+        # (also momentarily 0/0/0) isn't yanked out from under you.
+        if b.startswith("review/pr-") and empty:
+            ctx.run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", b])
+            continue
+        kept.append(it)
+    req._send(200, json.dumps(kept))
 
 
 def _repo_web_url(remote):   # git@github.com:o/r.git | https://github.com/o/r.git → https web url
