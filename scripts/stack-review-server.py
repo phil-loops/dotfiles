@@ -202,6 +202,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/projects":       return picker.projects(self)
         elif u.path == "/project-opened": return picker.project_opened(self)
         elif u.path == "/standalone":     return picker.standalone_list(self)
+        elif u.path == "/branch-url":     return picker.branch_url(self, u)
         elif u.path == "/review-requests": return reviews.requests(self)
         elif u.path == "/review-remote":   return reviews.remote(self, u)
         elif u.path == "/branches":       return picker.branches(self)

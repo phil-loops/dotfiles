@@ -15,6 +15,7 @@ import time
 import signal
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import parse_qs
 
 from . import ctx
 
@@ -218,6 +219,28 @@ def project_opened(req):
 def standalone_list(req):
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--standalone"])
     req._send(200, r.stdout or "[]")
+
+
+def _repo_web_url(remote):   # git@github.com:o/r.git | https://github.com/o/r.git → https web url
+    raw = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
+    m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", raw) if raw else None
+    return f"https://github.com/{m.group(1)}" if m else ""
+
+
+def branch_url(req, u):   # GET /branch-url?branch= — the branch's open-PR url, else a compare view
+    branch = (parse_qs(u.query).get("branch") or [""])[0]
+    if not branch:
+        req._send(400, json.dumps({"url": ""}))
+        return
+    url = ctx.run(["gh", "pr", "view", branch, "--json", "url", "-q", ".url"]).stdout.strip()
+    if not url:
+        # no PR → compare against main on the repo this branch pushes to (its fork), else origin.
+        remote = ctx.run(["git", "config", "--get", f"branch.{branch}.remote"]).stdout.strip() or "origin"
+        base = _repo_web_url(remote)
+        if base:
+            main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+            url = f"{base}/compare/{main}...{branch}"
+    req._send(200, json.dumps({"url": url}))
 
 
 def branches(req):
