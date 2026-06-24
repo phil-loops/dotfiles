@@ -41,6 +41,7 @@ import type {
   Commit,
   RestackStatus,
   Parked,
+  ReviewRequest,
 } from "./types";
 
 const leaf = (s?: string): string => (s || "").split("/").pop() ?? "";
@@ -140,6 +141,7 @@ function Layout(props: { children?: JSX.Element }) {
 
 // ── home: the ledger summary ─────────────────────────────────────────
 function Home() {
+  const qc = useQueryClient();
   const prs = createQuery(() => ({
     queryKey: ["myprs"],
     queryFn: () => provider.myPrs(),
@@ -300,10 +302,20 @@ function Home() {
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
     queryFn: () => provider.reviewRequests(),
+    // keep the queue warm in the background so newly-requested PRs surface on their
+    // own; 30s matches the server's gh-search cache TTL, so most polls are free.
+    refetchInterval: 30_000,
+    refetchOnWindowFocus: true,
   }));
   const importReview = createMutation(() => ({
     mutationFn: (number: number) => post("/review-import", { number }),
-    onSuccess: () => { reviewReqs.refetch(); standalone.refetch(); },
+    // flip the row to imported in-place; without this the button drops back to
+    // "import" for the frame between the mutation settling and the refetch landing.
+    onSuccess: (_res, number) => {
+      qc.setQueryData<ReviewRequest[]>(["review-requests"], (cur) =>
+        cur?.map((r) => (r.number === number ? { ...r, imported: true } : r)));
+      standalone.refetch();
+    },
   }));
 
   const [tab, setTab] = createSignal<"work" | "forests" | "watching">("work");
