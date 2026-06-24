@@ -299,7 +299,7 @@ Use `tsgo` (fast); fall back to `tsc --project tsconfig.node.json --noEmit` only
 
 # Browser / "open in web"
 
-**There is no Claude browser plugin installed** — the `mcp__claude-in-chrome__*` tools are not available; don't reach for them. When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `loops stack web`, which is the forest viewer server the user reviews on himself.)
+**The Claude browser extension is NOT installed/connected.** The `mcp__claude-in-chrome__*` tools *load* via ToolSearch but fail at runtime with "browser extension is not connected" — don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a headless-Chromium script — `npx puppeteer`, or a small node script that launches Chromium, navigates, screenshots, and asserts on the DOM). When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `loops stack web`, which is the forest viewer server the user reviews on himself.)
 
 # Git Changes
 
