@@ -38,9 +38,11 @@ const COLW = 186, ROWH = 150, REP = 180, REST = 186, SPRING = 0.5, K = 150, RANK
 export function ForestMap(props: {
   spine: () => SpineNode[];
   active: () => string;
+  health?: () => Record<string, { drifted: boolean; merged: boolean }> | undefined;
   onPick: (b: string) => void;
   onClose: () => void;
 }) {
+  const nhealth = (id: string) => props.health?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
 
   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
@@ -399,6 +401,8 @@ export function ForestMap(props: {
                     "kiln-current": kilnState(n.id) === "current",
                     "kiln-pending": kilnState(n.id) === "pending",
                     "kiln-parked": kilnState(n.id) === "parked",
+                    drifted: !!nhealth(n.id)?.drifted,
+                    merged: !!nhealth(n.id)?.merged,
                   }}
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
@@ -413,6 +417,13 @@ export function ForestMap(props: {
                 >
                   <Show when={dams().damSet.has(n.id)}>
                     <title>dirty — downstream conflict on {dams().dirtyOf(n.id).join(", ")}</title>
+                  </Show>
+                  <Show when={!dams().damSet.has(n.id) && (nhealth(n.id)?.drifted || nhealth(n.id)?.merged)}>
+                    <title>
+                      {nhealth(n.id)?.merged
+                        ? "merged into main (ghost) — restack to contract it (drop + rewire children)"
+                        : "off its parent (not a git ancestor) — its diff is effectively vs main; restack to separate"}
+                    </title>
                   </Show>
                   <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
                   <circle class="dot" cx="16" cy="0" r="5" />
@@ -469,6 +480,8 @@ const CSS = `
 .fm-node rect { fill: var(--vellum-raise); stroke: var(--rule); stroke-width: 1.2; transition: stroke .15s, fill .15s; }
 .fm-node:hover rect { stroke: var(--ink-faint); fill: var(--vellum-edge); }
 .fm-node.active rect { stroke: var(--gold-leaf); stroke-width: 2; filter: drop-shadow(0 0 9px var(--gold-wash)); }
+.fm-node.drifted rect { stroke: var(--del); stroke-dasharray: 4 3; }
+.fm-node.merged rect { stroke: var(--patina); stroke-dasharray: 1 3; }
 .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
 .fm-node.active text { fill: var(--ink); }
 .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }

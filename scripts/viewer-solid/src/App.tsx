@@ -1248,6 +1248,7 @@ function NodeDetail() {
         <ForestMap
           spine={spine}
           active={active}
+          health={() => health.data}
           onPick={(b) => {
             goto(b);
             setShowMap(false);
