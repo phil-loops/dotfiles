@@ -207,16 +207,20 @@ body {
 .d2h-diff-table { font-family: var(--mono); font-size: 12px; }
 .d2h-dark-color-scheme {
   --d2h-dark-bg-color: transparent;
-  --d2h-dark-ins-bg-color: var(--add-bg);
-  --d2h-dark-del-bg-color: var(--del-bg);
-  --d2h-dark-ins-highlight-bg-color: rgba(143, 174, 122, 0.18);
-  --d2h-dark-del-highlight-bg-color: rgba(200, 122, 85, 0.18);
+  --d2h-dark-ins-bg-color: rgba(143, 174, 122, 0.13);
+  --d2h-dark-del-bg-color: rgba(200, 122, 85, 0.13);
+  --d2h-dark-ins-highlight-bg-color: rgba(143, 174, 122, 0.28);
+  --d2h-dark-del-highlight-bg-color: rgba(200, 122, 85, 0.28);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
 }
-.d2h-ins .d2h-code-line-ctn, .d2h-ins ins { color: var(--add); }
-.d2h-del .d2h-code-line-ctn, .d2h-del del { color: var(--del); }
+/* code text stays at the readable warm ink; the +/- prefix and the row tint
+   carry the add/del signal, so a whole-added file isn't a wall of dim green. */
+.d2h-ins .d2h-code-line-ctn, .d2h-ins ins { color: var(--ink); }
+.d2h-del .d2h-code-line-ctn, .d2h-del del { color: var(--ink); }
+.d2h-ins .d2h-code-line-prefix { color: var(--add); opacity: 1; }
+.d2h-del .d2h-code-line-prefix { color: var(--del); opacity: 1; }
 .d2h-code-line-prefix { opacity: 0.6; }
 .d2h-info { color: var(--ink-faint); }
 /* wrap long lines inside each side-by-side column instead of clipping at its edge */
