@@ -20,6 +20,7 @@
 import { createSignal, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
+import { useArm } from "./actions";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -52,14 +53,13 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   }
 }
 
-export function NodeActions(props: { branch: string }) {
+export function NodeActions(props: { branch: string; isReview: boolean }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
   // 409 stash: the worktree holding the branch, awaiting a force-confirm.
   const [heldAt, setHeldAt] = createSignal<string | null>(null);
-  // squash is history-rewriting → two-click arm before it fires.
-  const [armed, setArmed] = createSignal(false);
-  let armT: ReturnType<typeof setTimeout>;
+  // squash is history-rewriting → two-click arm (shared useArm) before it fires.
+  const { armed, trigger } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
   const [done, setDone] = createSignal<string | null>(null);
   // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
@@ -103,7 +103,6 @@ export function NodeActions(props: { branch: string }) {
   const squash = createMutation(() => ({
     mutationFn: () => post<SquashResult>("/squash", { branch: props.branch }),
     onSuccess: (r) => {
-      setArmed(false);
       setOpen(false);
       if (r.ok) {
         const n = r.n ?? 0;
@@ -116,10 +115,7 @@ export function NodeActions(props: { branch: string }) {
         setDone(`✗ ${r.err || "squash failed"}`);
       }
     },
-    onError: (e) => {
-      setArmed(false);
-      setDone(`✗ ${(e as Error).message || "squash failed"}`);
-    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "squash failed"}`),
   }));
 
   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
@@ -188,7 +184,7 @@ export function NodeActions(props: { branch: string }) {
   // A review/pr-<N> node tracks someone else's PR. When they force-push, re-fetch their new
   // head into the local branch. Blessings are keyed by file content, not the tip SHA, so they
   // survive: unchanged files stay blessed, changed files fall to stale for re-review.
-  const isReview = () => /^review\/pr-\d+$/.test(props.branch);
+  const isReview = () => props.isReview;
   // node-load hint: ls-remote the PR head and compare to our tip, so we can surface "they
   // pushed" the moment you open a stale review node — no blind clicking.
   const remote = createQuery(() => ({
@@ -216,16 +212,6 @@ export function NodeActions(props: { branch: string }) {
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
   }));
-
-  const armSquash = () => {
-    if (armed()) {
-      squash.mutate();
-      return;
-    }
-    setArmed(true);
-    clearTimeout(armT);
-    armT = setTimeout(() => setArmed(false), 4000); // disarm if not confirmed
-  };
 
   const busy = () => checkout.isPending || squash.isPending || rebase.isPending || pull.isPending || contract.isPending;
   const fire = (fn: () => void) => () => {
@@ -338,14 +324,14 @@ export function NodeActions(props: { branch: string }) {
               no commit, so you write the commit in GitHub Desktop (two-click: rewrites history) */}
           <button
             class="nh-item"
-            classList={{ armed: armed() }}
+            classList={{ armed: armed() === "squash" }}
             role="menuitem"
             disabled={busy()}
             title="collapse parent..branch into unstaged working-tree changes (no commit) — commit it in GitHub Desktop"
-            onClick={fire(armSquash)}
+            onClick={fire(() => trigger("squash", () => squash.mutate()))}
           >
             <span class="nh-item-ic">⊟</span>
-            {squash.isPending ? "unstaging…" : armed() ? "confirm squash & unstage" : "squash & unstage"}
+            {squash.isPending ? "unstaging…" : armed() === "squash" ? "confirm squash & unstage" : "squash & unstage"}
           </button>
 
           {/* rebase forward — also surfaced inline when push is blocked */}

@@ -1026,7 +1026,7 @@ function NodeDetail() {
               </div>
             </Show>
             <div class="nh-spacer" />
-            <NodeActions branch={active()} />
+            <NodeActions branch={active()} isReview={location().kind === "review"} />
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
                 ✦
