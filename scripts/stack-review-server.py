@@ -238,6 +238,8 @@ class H(BaseHTTPRequestHandler):
             return checkout.prepare(self, raw)
         if self.path == "/checkout":  # move the working tree onto this branch (git refuses if dirty)
             return checkout.move(self, raw)
+        if self.path == "/worktree":  # reveal the branch's worktree in Finder (scratch one if none)
+            return checkout.worktree(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
         if self.path == "/contract":   # drop an already-merged branch + rewire its children onto main

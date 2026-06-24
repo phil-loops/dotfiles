@@ -180,6 +180,13 @@ function Home() {
   const [running, setRunning] = createSignal<string | null>(null); // project (or "__all__") restacking now
   const [parked, setParked] = createSignal<Parked | null>(null); // set on a conflict
   const [restackErr, setRestackErr] = createSignal<string | null>(null);
+  const [flash, setFlash] = createSignal<string | null>(null);
+  let flashT: ReturnType<typeof setTimeout>;
+  const note = (m: string) => {
+    setFlash(m);
+    clearTimeout(flashT);
+    flashT = setTimeout(() => setFlash(null), 2400);
+  };
   const [menu, setMenu] = createSignal<string | null>(null); // project whose parked-action popover is open
   const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
     fetch(url, {
@@ -384,6 +391,41 @@ function Home() {
     run: () => start("__all__"),
   });
 
+  const openWorktree = (branch: string) =>
+    post("/worktree", { branch }).then((r) =>
+      note(r.ok ? `⌂ revealed ${leaf(branch)} in Finder` : `✗ ${r.err || "couldn’t open worktree"}`));
+  const worktreeAction = (branch: string): Action => ({
+    id: "wt:" + branch,
+    title: "reveal this branch's worktree in Finder — materialises a scratch one if it's checked out nowhere",
+    label: () => "⌂ worktree",
+    run: () => openWorktree(branch),
+  });
+  const githubAction = (url: string, branch: string): Action => ({
+    id: "gh:" + branch,
+    title: "open on GitHub",
+    label: () => "↗ GitHub",
+    run: () => window.open(url, "_blank"),
+  });
+  const checkoutAction = (branch: string): Action => ({
+    id: "co:" + branch,
+    title: "move your main checkout (~/coding/loops) onto this branch",
+    label: () => "⤓ checkout",
+    run: () =>
+      post("/checkout", { branch }).then((r) =>
+        note(r.ok ? `✓ checked out ${leaf(branch)}` : `✗ ${r.err || "checkout failed (held elsewhere?)"}`)),
+  });
+  const unpinAction = (branch: string): Action => ({
+    id: "unpin:" + branch,
+    class: "watch-unpin",
+    title: "stop watching",
+    label: () => "×",
+    run: () => pin.mutate({ branch, op: "remove" }),
+  });
+  const workRowActions = (p: PR): Action[] =>
+    [githubAction(p.url, p.branch), ...(canMutate ? [worktreeAction(p.branch)] : [])];
+  const watchRowActions = (b: Standalone): Action[] =>
+    canMutate ? [worktreeAction(b.branch), checkoutAction(b.branch), unpinAction(b.branch)] : [];
+
   return (
     <div class="ledger">
       <nav class="thumb-index">
@@ -467,9 +509,12 @@ function Home() {
                     );
                     // forest-backed PRs route in-app; a bare PR opens GitHub in a new tab.
                     return p.project ? (
-                      <Link class="pr-row" to={{ kind: "forest", name: p.project, node: p.branch }}>
-                        {inner()}
-                      </Link>
+                      <div class="watch-row">
+                        <Link class="watch-link" to={{ kind: "forest", name: p.project, node: p.branch }}>
+                          {inner()}
+                        </Link>
+                        <ActionBar actions={workRowActions(p)} />
+                      </div>
                     ) : (
                       <a class="pr-row" href={p.url} target="_blank">
                         {inner()}
@@ -703,21 +748,16 @@ function Home() {
                     <span class="watch-del-n">−{b.del}</span>
                   </span>
                 </Link>
-                <Show when={canMutate}>
-                  <button
-                    class="watch-unpin"
-                    title="stop watching"
-                    onClick={() => pin.mutate({ branch: b.branch, op: "remove" })}
-                  >
-                    ×
-                  </button>
-                </Show>
+                <ActionBar actions={watchRowActions(b)} />
               </div>
             )}
           </For>
         </Show>
       </section>
       </Show>
+        <Show when={flash()}>
+          <div class="flash">{flash()}</div>
+        </Show>
       </main>
     </div>
   );

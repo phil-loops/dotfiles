@@ -138,6 +138,7 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
 case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
+  --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
 esac
 
 branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
