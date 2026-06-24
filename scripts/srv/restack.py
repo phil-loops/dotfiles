@@ -8,8 +8,10 @@
 #   POST /restack-all      restack several projects back-to-back in one job
 import os
 import json
+import time
 import shlex
 import shutil
+import signal
 import subprocess
 from urllib.parse import parse_qs
 
@@ -268,6 +270,35 @@ def abort(req, raw):
         return
     project = _clear_park()
     req._send(200, json.dumps({"ok": True, "project": project}))
+
+
+def stop(req, raw):
+    # Stop a RUNNING restack walk — vs. abort(), which only clears a PARKED conflict. SIGTERM the
+    # drivers first; stack-restack-all traps TERM (to release its lock) and won't exit on it, so
+    # SIGKILL the survivors — untrappable. Then abort any in-progress rebase + drop state + clear
+    # the now-stale lock. Non-destructive: completed branches keep their restacked tips, the
+    # current/pending are dropped and can be restacked again later.
+    def _pids():
+        return [d["pid"] for d in _drivers() if d.get("pid")]
+
+    killed = _pids()
+    for pid in killed:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
+    time.sleep(0.6)
+    for pid in _pids():
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    project = _clear_park()
+    try:
+        os.remove(os.path.join(_gitdir(), "stack-restack.lock"))
+    except OSError:
+        pass
+    req._send(200, json.dumps({"ok": True, "stopped": killed, "project": project}))
 
 
 def conflict(req, u):
