@@ -6,7 +6,7 @@ import os
 import json
 import subprocess
 
-from . import ctx
+from . import ctx, prompts
 
 # Model aliases the chip may request (resolved to current models by the claude CLI). Unlike the
 # SSE chat, every chip launch is a FRESH session, so the chosen model always takes effect. An
@@ -25,15 +25,13 @@ def _fmt_ranges(ranges):
     return ", ".join(out)
 
 
-def _build_prompt(branch, selections, instruction):
-    lines = [f"You're in a worktree of branch `{branch}`. I selected these spots in its diff:"]
+def _selection_lines(selections):
+    out = []
     for s in selections:
         path = s.get("path", "")
         rng = _fmt_ranges(s.get("ranges", []))
-        lines.append(f"- `{path}`" + (f" ({rng})" if rng else ""))
-    lines.append("")
-    lines.append(instruction.strip() or "Review these and tell me what you'd improve.")
-    return "\n".join(lines)
+        out.append(f"- `{path}`" + (f" ({rng})" if rng else ""))
+    return out
 
 
 def start(req, raw):
@@ -45,7 +43,7 @@ def start(req, raw):
     if not branch or not selections:
         req._send(400, json.dumps({"ok": False, "err": "need a branch + at least one selection"}))
         return
-    prompt = _build_prompt(branch, selections, instruction)
+    prompt = prompts.select_assist(branch, _selection_lines(selections), instruction)
     # ctx.run can't set env; stack-claude reads the model from STACK_CLAUDE_MODEL, so shell out
     # directly with it added (only when recognized — else the var stays unset = claude default).
     env = dict(os.environ)

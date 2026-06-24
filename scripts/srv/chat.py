@@ -21,7 +21,38 @@ import json
 import signal
 import subprocess
 
-from . import ctx
+from . import ctx, prompts
+
+
+def tmux_targets(req):   # GET /tmux-targets — existing windows the pop-out can drop a chat into
+    r = ctx.run(["tmux", "list-windows", "-a", "-F",
+                 "#{session_name}:#{window_index}\t#{window_name}\t#{window_panes}"])
+    targets = []
+    for line in r.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3:
+            targets.append({"target": parts[0], "name": parts[1],
+                            "panes": int(parts[2]) if parts[2].isdigit() else 1})
+    req._send(200, json.dumps(targets))
+
+
+def popout(req, raw):   # POST /chat-popout — resume a chat's headless session in an interactive tmux claude
+    d = json.loads(raw or "{}")
+    session = (d.get("session") or "").strip()
+    branch = (d.get("branch") or "").strip()
+    target = (d.get("target") or "").strip()
+    if not session or not branch:
+        req._send(400, json.dumps({"ok": False, "err": "need a session + branch"}))
+        return
+    # Resume MUST run where the chat ran — claude sessions are scoped to their project dir,
+    # so we hand the script the exact cwd chat.start used (the worktree, else the server's repo).
+    cwd = _worktree_for(branch) or ctx.CWD
+    args = [os.path.join(ctx.SCRIPTS, "stack-claude-resume"), session, cwd, branch]
+    if target:
+        args.append(target)
+    r = ctx.run(args)
+    req._send(200 if r.returncode == 0 else 500,
+              json.dumps({"ok": r.returncode == 0, "out": r.stdout.strip(), "err": r.stderr.strip()}))
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
 # Model aliases the chat may use — resolved to current models by the claude CLI, so no dated
@@ -41,43 +72,6 @@ def _worktree_for(branch):
         elif line.startswith("branch ") and line[7:].strip() == f"refs/heads/{branch}":
             return cur
     return None
-
-
-def _first_prompt(branch, path, patch, question):
-    patch = (patch or "").strip()
-    parts = [
-        f"You're reviewing the file `{path}` on git branch `{branch}` of the Loops codebase.",
-        "Here is its diff against the branch's parent:",
-        "",
-        "```diff",
-        patch or "(no textual diff was provided — read the file if you need its contents)",
-        "```",
-        "",
-        "Answer concisely, in plain prose for a senior engineer. You may use Read/Grep/Glob "
-        "to inspect related code, but you cannot and must not modify anything.",
-        "",
-        f"Question: {question}",
-    ]
-    return "\n".join(parts)
-
-
-def _branch_prompt(branch, patch, question):
-    patch = (patch or "").strip()
-    parts = [
-        f"You're reviewing the whole git branch `{branch}` of the Loops codebase — "
-        "every file it changes against its parent.",
-        "Here is the branch's combined diff:",
-        "",
-        "```diff",
-        patch or "(no textual diff was provided — read the files if you need their contents)",
-        "```",
-        "",
-        "Answer concisely, in plain prose for a senior engineer. You may use Read/Grep/Glob "
-        "to inspect related code, but you cannot and must not modify anything.",
-        "",
-        f"Question: {question}",
-    ]
-    return "\n".join(parts)
 
 
 # The branch's combined review diff (parent…branch), computed server-side so the page doesn't
@@ -109,9 +103,9 @@ def start(req, raw):
     if resume:
         prompt = question
     elif path:
-        prompt = _first_prompt(branch, path, d.get("patch", ""), question)
+        prompt = prompts.file_chat(branch, path, d.get("patch", ""), question)
     else:
-        prompt = _branch_prompt(branch, d.get("patch") or _branch_diff(branch), question)
+        prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
     cwd = _worktree_for(branch) or ctx.CWD
 
     cmd = ["claude", "-p", prompt,
