@@ -121,9 +121,14 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         last[0] = time.time()
         u = urlparse(self.path)
-        if u.path in ("/", "/index.html"):
-            # Serve the built Solid app (scripts/viewer-solid/dist/index.html). Cached
-            # in-process, re-read only when asset_sig moves (a fresh `npm run build`).
+        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching")
+                or u.path.startswith(("/forest/", "/branch/", "/review/"))):
+            # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
+            # every client route: path-based routing (History API) means a deep-link/refresh to
+            # /forest/x hits the server, which must return index.html (SPA fallback) so the client
+            # can route it. API routes (/branch-url, /review-requests, /node, …) don't match these
+            # prefixes, so they still fall through to their own handlers below.
+            # Cached in-process, re-read only when asset_sig moves (a fresh `npm run build`).
             # Same-origin with this server, so the app's /model, /node, /bless… are plain
             # relative fetches — no dev proxy.
             sig = asset_sig()
