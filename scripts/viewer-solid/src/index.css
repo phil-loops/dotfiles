@@ -4,6 +4,7 @@
   --vellum-raise: #1c180f;
   --vellum-edge: #221c11;
   --ink: #e8dcc4;
+  --ink-bright: #faf5ea;  /* near-white warm — diff code body, max readability */
   --ink-dim: #9a8e78;
   --ink-faint: #675d4d;
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
@@ -215,10 +216,10 @@ body {
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
 }
-/* code text stays at the readable warm ink; the +/- prefix and the row tint
-   carry the add/del signal, so a whole-added file isn't a wall of dim green. */
-.d2h-ins .d2h-code-line-ctn, .d2h-ins ins { color: var(--ink); }
-.d2h-del .d2h-code-line-ctn, .d2h-del del { color: var(--ink); }
+/* code text stays bright and readable; the +/- prefix and the row tint carry the
+   add/del signal, so a whole-added file isn't a wall of dim green. */
+.d2h-code-line-ctn, .d2h-ins .d2h-code-line-ctn, .d2h-del .d2h-code-line-ctn,
+.d2h-ins ins, .d2h-del del { color: var(--ink-bright); }
 .d2h-ins .d2h-code-line-prefix { color: var(--add); opacity: 1; }
 .d2h-del .d2h-code-line-prefix { color: var(--del); opacity: 1; }
 .d2h-code-line-prefix { opacity: 0.6; }
