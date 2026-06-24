@@ -1,7 +1,6 @@
 import { For, Show } from "solid-js";
-import { useNavigate } from "@solidjs/router";
 import { chatSummaries, type ChatSummary } from "./chatStore";
-import { forestPath } from "./routes";
+import { useViewerLocation } from "./router";
 
 // Cross-forest index of every chat thread. Chats are stored per branch+file but only surfaced
 // from that one file's ✦ drawer — so a conversation is invisible unless you remember where you
@@ -24,7 +23,7 @@ function ago(ms: number): string {
 }
 
 export default function ChatIndex(props: { onClose: () => void }) {
-  const navigate = useNavigate();
+  const { navigate } = useViewerLocation();
   const groups = (): [string, ChatSummary[]][] => {
     const out: Record<string, ChatSummary[]> = {};
     for (const s of chatSummaries()) {
@@ -33,7 +32,7 @@ export default function ChatIndex(props: { onClose: () => void }) {
     return Object.entries(out);
   };
   const open = (branch: string) => {
-    navigate(forestPath(branch));
+    navigate({ kind: "forest", name: branch });
     props.onClose();
   };
   return (

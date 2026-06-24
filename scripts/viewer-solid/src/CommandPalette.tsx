@@ -1,8 +1,7 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
-import { useLocation, useNavigate } from "@solidjs/router";
 import { provider, canMutate } from "./provider";
-import { homePath, forestPath, nodePath } from "./routes";
+import { useViewerLocation, forestKey, withNode } from "./router";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
 // forest by name (type a branch → Enter → you're there); it also carries a few safe global
@@ -22,13 +21,12 @@ export default function CommandPalette() {
   const [open, setOpen] = createSignal(false);
   const [q, setQ] = createSignal("");
   const [sel, setSel] = createSignal(0);
-  const loc = useLocation();
-  const navigate = useNavigate();
-  // the splat path (sans leading "/") is the forest; ?node= is the node within it.
-  const ctx = createMemo(() => ({
-    project: loc.pathname.replace(/^\//, ""),
-    node: (loc.query.node as string) || "",
-  }));
+  const { location, navigate } = useViewerLocation();
+  // forestKey = the server's branch/project name for the current location; node = active branch.
+  const ctx = createMemo(() => {
+    const l = location();
+    return { project: forestKey(l), node: l.kind === "home" ? "" : l.node || "" };
+  });
   let inputRef: HTMLInputElement | undefined;
 
   const onKey = (e: KeyboardEvent) => {
@@ -71,22 +69,24 @@ export default function CommandPalette() {
       run: async () => {
         try {
           const h = await provider.head();
-          if (h.branch) navigate(nodePath(c.project, h.branch));
+          if (!h.branch) return;
+          const l = location();
+          navigate(l.kind === "home" ? { kind: "forest", name: h.branch } : withNode(l, h.branch));
         } catch {
           /* head unavailable — no-op */
         }
       },
     });
-    cmds.push({ label: "⌂ home — all forests", run: () => navigate(homePath()) });
+    cmds.push({ label: "⌂ home — all forests", run: () => navigate({ kind: "home", tab: "forests" }) });
 
     if (c.project) {
       const nodes = model.data?.nodes ? Object.keys(model.data.nodes) : [];
       for (const b of nodes) {
-        cmds.push({ label: `→ ${leaf(b)}`, sub: b, run: () => navigate(nodePath(c.project, b)) });
+        cmds.push({ label: `→ ${leaf(b)}`, sub: b, run: () => navigate(withNode(location(), b)) });
       }
     } else {
       for (const p of projects.data || []) {
-        cmds.push({ label: `→ ${p.name}`, sub: "forest", run: () => navigate(forestPath(p.name)) });
+        cmds.push({ label: `→ ${p.name}`, sub: "forest", run: () => navigate({ kind: "forest", name: p.name }) });
       }
     }
     return cmds;

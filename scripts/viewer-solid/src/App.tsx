@@ -3,6 +3,8 @@ import {
   createMemo,
   createEffect,
   Show,
+  Switch,
+  Match,
   For,
   onCleanup,
   type JSX,
@@ -12,8 +14,7 @@ import {
   createMutation,
   useQueryClient,
 } from "@tanstack/solid-query";
-import { HashRouter, Route, A, useParams, useNavigate, useSearchParams } from "@solidjs/router";
-import { homePath, forestPath, nodePath } from "./routes";
+import { RouterProvider, useViewerLocation, Link, forestKey, withNode, type HomeTab } from "./router";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, canMutate } from "./provider";
@@ -85,10 +86,26 @@ function flattenForest(model: ForestModel | undefined): SpineNode[] {
 // ── router ───────────────────────────────────────────────────────────
 export default function App() {
   return (
-    <HashRouter root={Layout}>
-      <Route path="/" component={Home} />
-      <Route path="/*forest" component={NodeDetail} />
-    </HashRouter>
+    <RouterProvider>
+      <Layout>
+        <Routes />
+      </Layout>
+    </RouterProvider>
+  );
+}
+
+// home is its own kind; forest / standalone / review all render the node-review surface.
+function Routes() {
+  const { location } = useViewerLocation();
+  return (
+    <Switch>
+      <Match when={location().kind === "home"}>
+        <Home />
+      </Match>
+      <Match when={location().kind !== "home"}>
+        <NodeDetail />
+      </Match>
+    </Switch>
   );
 }
 
@@ -318,7 +335,11 @@ function Home() {
     },
   }));
 
-  const [tab, setTab] = createSignal<"work" | "forests" | "watching">("work");
+  const { location, navigate } = useViewerLocation();
+  const tab = (): HomeTab => {
+    const l = location();
+    return l.kind === "home" ? l.tab : "work";
+  };
   const [forestQuery, setForestQuery] = createSignal("");
 
   const byProject = createMemo<[string, PR[]][]>(() => {
@@ -360,7 +381,7 @@ function Home() {
             <button
               class="thumb"
               classList={{ active: tab() === t.id }}
-              onClick={() => setTab(t.id)}
+              onClick={() => navigate({ kind: "home", tab: t.id })}
             >
               <span class="thumb-label">{t.label}</span>
               <Show when={t.count}>
@@ -399,7 +420,7 @@ function Home() {
                   <Show when={forestOf(proj)} fallback={proj}>
                     {(f) => (
                       <>
-                        <A class="pr-project-link" href={forestPath(proj)}>{proj}</A>
+                        <Link class="pr-project-link" to={{ kind: "forest", name: proj }}>{proj}</Link>
                         <span class="forest-meta">
                           {" · "}{f().branches} {f().branches === 1 ? "node" : "nodes"}{" · "}
                           <span class={f().behind > 0 ? "forest-fresh behind" : "forest-fresh fresh"}>
@@ -430,9 +451,9 @@ function Home() {
                     );
                     // forest-backed PRs route in-app; a bare PR opens GitHub in a new tab.
                     return p.project ? (
-                      <A class="pr-row" href={nodePath(p.project, p.branch)}>
+                      <Link class="pr-row" to={{ kind: "forest", name: p.project, node: p.branch }}>
                         {inner()}
-                      </A>
+                      </Link>
                     ) : (
                       <a class="pr-row" href={p.url} target="_blank">
                         {inner()}
@@ -498,10 +519,10 @@ function Home() {
               const busy = () => running() === p.name || running() === "__all__";
               const stuck = () => parked()?.project === p.name;
               return (
-                <A
+                <Link
                   class="forest-row"
                   classList={{ parked: stuck() }}
-                  href={forestPath(p.name)}
+                  to={{ kind: "forest", name: p.name }}
                 >
                   <span
                     class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
@@ -621,7 +642,7 @@ function Home() {
                           : "✕ drop"}
                     </button>
                   </Show>
-                </A>
+                </Link>
               );
             }}
           </For>
@@ -651,12 +672,12 @@ function Home() {
                       </a>
                     }
                   >
-                    <A class="watch-link" href={forestPath(`review/pr-${r.number}`)}>
+                    <Link class="watch-link" to={{ kind: "review", pr: r.number }}>
                       <span class="watch-dot" />
                       <span class="pr-num">#{r.number}</span>
                       <span class="watch-name">{r.title}</span>
                       <span class="watch-meta"><span>@{r.author}</span></span>
-                    </A>
+                    </Link>
                   </Show>
                   <Show
                     when={canMutate && !r.imported}
@@ -709,7 +730,7 @@ function Home() {
           <For each={standalone.data}>
             {(b) => (
               <div class="watch-row">
-                <A class="watch-link" href={forestPath(b.branch)}>
+                <Link class="watch-link" to={{ kind: "standalone", branch: b.branch }}>
                   <span class="watch-dot" />
                   <span class="watch-name">{b.branch}</span>
                   <span class="watch-meta">
@@ -717,7 +738,7 @@ function Home() {
                     <span class="watch-add-n">+{b.add}</span>
                     <span class="watch-del-n">−{b.del}</span>
                   </span>
-                </A>
+                </Link>
                 <Show when={canMutate}>
                   <button
                     class="watch-unpin"
@@ -741,10 +762,12 @@ function Home() {
 // ── node detail: forest spine + review surface ───────────────────────
 function NodeDetail() {
   const qc = useQueryClient();
-  const params = useParams<{ forest: string }>();
-  const [search] = useSearchParams<{ node?: string }>();
-  const navigate = useNavigate();
-  const project = () => params.forest;
+  const { location, navigate } = useViewerLocation();
+  const project = () => forestKey(location());
+  const nodeParam = (): string | undefined => {
+    const l = location();
+    return l.kind === "home" ? undefined : l.node;
+  };
 
   const model = createQuery(() => ({
     queryKey: ["model", project()],
@@ -752,7 +775,7 @@ function NodeDetail() {
     enabled: !!project(),
   }));
   const spine = createMemo(() => flattenForest(model.data));
-  const active = () => search.node || spine()[0]?.id || project();
+  const active = () => nodeParam() || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
 
   // diff base + view (diffs|commits) reset when you change node.
@@ -793,7 +816,7 @@ function NodeDetail() {
     },
   }));
 
-  const goto = (b: string) => navigate(nodePath(project(), b));
+  const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
   // chat drawer target: a file's diff, or the whole branch ({ file: null }). null = closed.
@@ -942,9 +965,9 @@ function NodeDetail() {
   return (
     <div class="shell">
       <aside class="spine">
-        <A class="brand" href={homePath()}>
+        <Link class="brand" to={{ kind: "home", tab: "forests" }}>
           <span class="brand-mark">✦</span> blessed
-        </A>
+        </Link>
         <Show when={spine().length} fallback={<div class="spine-empty">{project()}</div>}>
           {/* current branch as a header; click → forest map to switch (also j/k, m) */}
           <button

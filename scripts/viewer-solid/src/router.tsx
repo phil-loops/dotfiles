@@ -67,6 +67,27 @@ export function buildHash(loc: ViewerLocation): string {
   }
 }
 
+// The server identifies a node by its branch/project name. ViewerLocation stores a review as
+// a number for clean URLs, so map back to the name the backend expects — a review node's real
+// local branch IS "review/pr-<N>". Home has no node target, so "".
+export function forestKey(loc: ViewerLocation): string {
+  switch (loc.kind) {
+    case "home":
+      return "";
+    case "forest":
+      return loc.name;
+    case "standalone":
+      return loc.branch;
+    case "review":
+      return "review/pr-" + loc.pr;
+  }
+}
+
+// Re-target the active node within the current location (the j/k spine walk, click-to-open).
+export function withNode(loc: ViewerLocation, node: string): ViewerLocation {
+  return loc.kind === "home" ? loc : { ...loc, node };
+}
+
 interface RouterCtx {
   location: () => ViewerLocation;
   navigate: (loc: ViewerLocation, opts?: { replace?: boolean }) => void;
