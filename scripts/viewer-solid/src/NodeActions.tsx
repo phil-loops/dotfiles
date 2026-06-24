@@ -237,13 +237,24 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             ⚠ push blocked
           </span>
         </Show>
+      </Show>
+
+      {/* rebase onto origin/main — first-class + always visible (not just when behind, not buried
+          in ⋯). Disabled, reading "on origin/main", once current. Hidden on review nodes (there
+          "pull to their state" is the move). The /sync gate still refuses a stacked / open-PR
+          branch and explains why in the result line. */}
+      <Show when={!isReview()}>
         <button
           class="nh-fix"
-          disabled={busy()}
-          title="rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude in an isolated worktree on a conflict (never your main checkout)"
+          disabled={busy() || behind() === 0}
+          title={
+            behind() === 0
+              ? "already up to date with origin/main"
+              : "rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict (never your main checkout); a stacked or open-PR branch is refused with the reason"
+          }
           onClick={fire(() => rebase.mutate())}
         >
-          {rebase.isPending ? "rebasing…" : "rebase →"}
+          {rebase.isPending ? "rebasing…" : behind() === 0 ? "✦ on origin/main" : "⟳ rebase onto main"}
         </button>
       </Show>
 
@@ -287,7 +298,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}
-        title="branch actions — checkout, squash, rebase"
+        title="branch actions — checkout, squash"
         onClick={() => setOpen((o) => !o)}
       >
         ⋯
@@ -334,17 +345,6 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             {squash.isPending ? "unstaging…" : armed() === "squash" ? "confirm squash & unstage" : "squash & unstage"}
           </button>
 
-          {/* rebase forward — also surfaced inline when push is blocked */}
-          <button
-            class="nh-item"
-            role="menuitem"
-            disabled={busy()}
-            title="rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict (never your main checkout)"
-            onClick={fire(() => rebase.mutate())}
-          >
-            <span class="nh-item-ic">⟳</span>
-            {rebase.isPending ? "rebasing…" : "rebase forward"}
-          </button>
         </div>
       </Show>
 
