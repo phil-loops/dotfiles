@@ -212,12 +212,13 @@ body {
 .d2h-diff-table { font-family: var(--mono); font-size: 13px; }
 .d2h-dark-color-scheme {
   --d2h-dark-bg-color: transparent;
-  /* quiet gutter-bar style: no full-row wash behind code — a margin stripe + the
-     +/- prefix carry the signal. Only the changed WORDS keep a faint highlight. */
+  /* quiet gutter-bar style: the margin stripe + the +/- prefix carry the signal,
+     code sits on the plain dark surface. No intra-line word block — it landed on
+     re-indented whitespace as ugly solid rectangles and fought the calm read. */
   --d2h-dark-ins-bg-color: transparent;
   --d2h-dark-del-bg-color: transparent;
-  --d2h-dark-ins-highlight-bg-color: rgba(11, 138, 20, 0.34);
-  --d2h-dark-del-highlight-bg-color: rgba(204, 42, 24, 0.38);
+  --d2h-dark-ins-highlight-bg-color: transparent;
+  --d2h-dark-del-highlight-bg-color: transparent;
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
