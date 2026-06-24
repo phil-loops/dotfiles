@@ -1,0 +1,104 @@
+# srv/reviews.py — bridge GitHub "review requested of me" PRs into the local forest.
+#
+#   GET  /review-requests   open PRs awaiting your review (gh search), each flagged
+#                           `imported` if its review/pr-<N> branch already exists
+#   POST /review-import      fetch a PR head → local node off its base, pin it
+#
+# An imported PR is an ordinary standalone watch node — base...head diffs,
+# open-in-nvim, chat, bless, even checkout — because it's a real local branch.
+import json
+import os
+import re
+import time
+from urllib.parse import parse_qs
+
+from srv import ctx
+
+_cache = {"at": 0.0, "json": "[]"}
+_TTL = 30   # gh search is a ~1s network round-trip and the review queue barely moves
+
+
+def _imported(num):
+    return ctx.run(["git", "rev-parse", "--verify", "--quiet",
+                    f"refs/heads/review/pr-{num}"]).returncode == 0
+
+
+def requests(req):
+    now = time.time()
+    if now - _cache["at"] < _TTL:
+        req._send(200, _cache["json"])
+        return
+    repo = ctx.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).stdout.strip()
+    r = ctx.run(["gh", "search", "prs", "--review-requested=@me", "--state=open",
+                 "--repo", repo, "--json", "number,title,author,url"])
+    try:
+        prs = json.loads(r.stdout or "[]")
+    except json.JSONDecodeError:
+        prs = []
+    out = [{"number": p["number"], "title": p["title"],
+            "author": (p.get("author") or {}).get("login", ""),
+            "url": p["url"], "imported": _imported(p["number"])} for p in prs]
+    _cache["at"], _cache["json"] = now, json.dumps(out)
+    req._send(200, _cache["json"])
+
+
+def import_pr(req, raw):
+    d = json.loads(raw or "{}")
+    num = str(d.get("number", "")).strip().lstrip("#")
+    if not num.isdigit():
+        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
+        return
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
+    if r.returncode != 0:
+        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
+        return
+    _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
+    req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
+
+
+# Cheap "did they push?" check for the node-load hint: ls-remote the PR head and compare to
+# the local branch tip. Network, so cache per branch briefly — a node can re-render often.
+_remote_cache = {}   # branch -> (at, payload)
+_REMOTE_TTL = 20
+
+
+def remote(req, u):
+    branch = (parse_qs(u.query).get("branch", [""])[0]).strip()
+    m = re.match(r"^review/pr-(\d+)$", branch)
+    if not m:
+        req._send(400, json.dumps({"ok": False, "err": "not a review branch"}))
+        return
+    now = time.time()
+    hit = _remote_cache.get(branch)
+    if hit and now - hit[0] < _REMOTE_TTL:
+        req._send(200, hit[1])
+        return
+    local = ctx.run(["git", "rev-parse", branch]).stdout.strip()
+    r = ctx.run(["git", "ls-remote", "origin", f"pull/{m.group(1)}/head"])
+    remote_sha = r.stdout.split()[0] if r.returncode == 0 and r.stdout.split() else ""
+    payload = json.dumps({
+        "available": bool(remote_sha) and remote_sha != local,
+        "remote": remote_sha[:9], "local": local[:9],
+    })
+    _remote_cache[branch] = (now, payload)
+    req._send(200, payload)
+
+
+# Re-fetch a force-pushed PR head into the local review branch. The bless ledger is keyed
+# by branch+file → blob/patch-id (NOT the tip SHA), so we leave it untouched: files whose
+# content is unchanged stay blessed, and genuinely-changed files fall to "stale" on their own.
+def pull(req, raw):
+    d = json.loads(raw or "{}")
+    branch = (d.get("branch") or "").strip()
+    m = re.match(r"^review/pr-(\d+)$", branch)
+    if not m:
+        req._send(400, json.dumps({"ok": False, "err": "not a review branch"}))
+        return
+    before = ctx.run(["git", "rev-parse", branch]).stdout.strip()
+    r = ctx.run(["git", "fetch", "--force", "origin", f"pull/{m.group(1)}/head:{branch}"])
+    if r.returncode != 0:
+        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "fetch failed").strip()[:500]}))
+        return
+    after = ctx.run(["git", "rev-parse", branch]).stdout.strip()
+    _remote_cache.pop(branch, None)   # local now matches remote → next hint check recomputes
+    req._send(200, json.dumps({"ok": True, "before": before[:9], "after": after[:9], "changed": before != after}))

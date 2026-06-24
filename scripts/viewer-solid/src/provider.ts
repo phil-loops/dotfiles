@@ -17,6 +17,8 @@ import {
   Project,
   Purpose,
   RestackStatus,
+  ReviewRemote,
+  ReviewRequest,
   Standalone,
   SyncState,
 } from "./types";
@@ -29,6 +31,8 @@ export interface Capabilities {
 export interface DataProvider {
   readonly capabilities: Capabilities;
   myPrs(): Promise<PR[]>;
+  reviewRequests(): Promise<ReviewRequest[]>;
+  reviewRemote(branch: string): Promise<ReviewRemote>;
   projects(): Promise<Project[]>;
   standalone(): Promise<Standalone[]>;
   branches(): Promise<string[]>;
@@ -65,6 +69,9 @@ export class HttpProvider implements DataProvider {
   readonly capabilities: Capabilities = { mutate: true, live: true };
 
   myPrs = () => fetchJSON<unknown>("/myprs").then((d) => parse(z.array(PR), d, "myprs"));
+  reviewRequests = () => fetchJSON<unknown>("/review-requests").then((d) => parse(z.array(ReviewRequest), d, "review-requests"));
+  reviewRemote = (branch: string) =>
+    fetchJSON<unknown>("/review-remote?branch=" + q(branch)).then((d) => parse(ReviewRemote, d, "review-remote"));
   projects = () => fetchJSON<unknown>("/projects").then((d) => parse(z.array(Project), d, "projects"));
   standalone = () => fetchJSON<unknown>("/standalone").then((d) => parse(z.array(Standalone), d, "standalone"));
   branches = () => fetchJSON<unknown>("/branches").then((d) => parse(z.array(z.string()), d, "branches"));
@@ -92,6 +99,9 @@ export class StaticProvider implements DataProvider {
   }
 
   myPrs = () => this.get("myprs.json", z.array(PR), "myprs");
+  // a baked snapshot has no live GitHub connection to query review requests against
+  reviewRequests = () => Promise.resolve<ReviewRequest[]>([]);
+  reviewRemote = () => Promise.resolve<ReviewRemote>({ available: false });
   projects = () => this.get("projects.json", z.array(Project), "projects");
   standalone = () => this.get("standalone.json", z.array(Standalone), "standalone");
   branches = () => this.get("branches.json", z.array(z.string()), "branches");

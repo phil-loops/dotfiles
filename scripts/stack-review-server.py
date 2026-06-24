@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -202,11 +202,14 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/projects":       return picker.projects(self)
         elif u.path == "/project-opened": return picker.project_opened(self)
         elif u.path == "/standalone":     return picker.standalone_list(self)
+        elif u.path == "/review-requests": return reviews.requests(self)
+        elif u.path == "/review-remote":   return reviews.remote(self, u)
         elif u.path == "/branches":       return picker.branches(self)
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
+        elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
         else:
             self._send(404, "{}")
 
@@ -221,6 +224,12 @@ class H(BaseHTTPRequestHandler):
             return review.bless(self, raw)
         if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list
             return picker.pin(self, raw)
+        if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
+            return reviews.import_pr(self, raw)
+        if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
+            return reviews.pull(self, raw)
+        if self.path == "/drop-project":   # forget a forest grouping (config only; branches kept)
+            return picker.drop_project(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
             return review.purpose_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
@@ -262,6 +271,8 @@ class H(BaseHTTPRequestHandler):
             return assist.start(self, raw)
         if self.path == "/chat":             # chat about a file → stream a headless claude back as SSE
             return chat.start(self, raw)
+        if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
+            return chat.popout(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
             return integrate.check(self, raw)
         self._send(404, "{}")

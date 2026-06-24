@@ -297,6 +297,18 @@ function Home() {
     setAdding(false);
   };
 
+  const reviewReqs = createQuery(() => ({
+    queryKey: ["review-requests"],
+    queryFn: () => provider.reviewRequests(),
+  }));
+  const importReview = createMutation(() => ({
+    mutationFn: (number: number) => post("/review-import", { number }),
+    onSuccess: () => { reviewReqs.refetch(); standalone.refetch(); },
+  }));
+
+  const [tab, setTab] = createSignal<"work" | "forests" | "watching">("work");
+  const [forestQuery, setForestQuery] = createSignal("");
+
   const byProject = createMemo<[string, PR[]][]>(() => {
     const m = new Map<string, PR[]>();
     for (const p of prs.data || []) {
@@ -313,29 +325,59 @@ function Home() {
   const nonPrProjects = createMemo(() => (projects.data || []).filter((p) => !prProjects().has(p.name)));
   const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
 
+  const filteredForests = createMemo(() => {
+    const needle = forestQuery().trim().toLowerCase();
+    const list = nonPrProjects();
+    return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list;
+  });
+  const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
+
   const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
 
   return (
-    <div class="home">
-      <header class="home-head">
-        <div class="brand big">
-          <span class="brand-mark">✦</span> blessed
-        </div>
-        <Show when={canMutate}>
-          <button
-            class="origin-btn"
-            disabled={checkOrigin.isPending}
-            onClick={() => checkOrigin.mutate()}
-          >
-            {checkOrigin.isPending ? "checking…" : "↻ check origin"}
-          </button>
-        </Show>
-      </header>
+    <div class="ledger">
+      <nav class="thumb-index">
+        <div class="thumb-brand"><span class="brand-mark">✦</span></div>
+        <For each={[
+          { id: "work" as const, label: "Work", count: workCount() },
+          { id: "forests" as const, label: "Forests", count: nonPrProjects().length },
+          { id: "watching" as const, label: "Watching", count: (standalone.data || []).length },
+        ]}>
+          {(t) => (
+            <button
+              class="thumb"
+              classList={{ active: tab() === t.id }}
+              onClick={() => setTab(t.id)}
+            >
+              <span class="thumb-label">{t.label}</span>
+              <Show when={t.count}>
+                <span class="thumb-count">{t.count}</span>
+              </Show>
+            </button>
+          )}
+        </For>
+      </nav>
 
-      <Hearth />
+      <main class="ledger-page">
+        <header class="home-head">
+          <div class="brand big">
+            <span class="brand-mark">✦</span> blessed
+          </div>
+          <Show when={canMutate}>
+            <button
+              class="origin-btn"
+              disabled={checkOrigin.isPending}
+              onClick={() => checkOrigin.mutate()}
+            >
+              {checkOrigin.isPending ? "checking…" : "↻ check origin"}
+            </button>
+          </Show>
+        </header>
 
-      <Show when={(prs.data || []).length}>
+        <Hearth />
+
+      <Show when={tab() === "work" && (prs.data || []).length}>
         <section>
           <h2 class="eyebrow">your open PRs</h2>
           <For each={byProject()}>
@@ -392,6 +434,7 @@ function Home() {
         </section>
       </Show>
 
+      <Show when={tab() === "forests"}>
       <section>
         <div class="eyebrow-row">
           <h2 class="eyebrow">forests</h2>
@@ -420,15 +463,25 @@ function Home() {
             </button>
           </Show>
         </div>
+        <Show when={nonPrProjects().length > 6}>
+          <input
+            class="forest-search"
+            placeholder="filter forests…"
+            value={forestQuery()}
+            onInput={(e) => setForestQuery(e.currentTarget.value)}
+          />
+        </Show>
         <Show
-          when={nonPrProjects().length}
+          when={filteredForests().length}
           fallback={
             <p class="loading">
-              {(projects.data || []).length ? "every forest has an open PR ✦" : "no forests configured"}
+              {forestQuery()
+                ? `no forest matches “${forestQuery()}”`
+                : (projects.data || []).length ? "every forest has an open PR ✦" : "no forests configured"}
             </p>
           }
         >
-          <For each={nonPrProjects()}>
+          <For each={filteredForests()}>
             {(p) => {
               const busy = () => running() === p.name || running() === "__all__";
               const stuck = () => parked()?.project === p.name;
@@ -562,7 +615,53 @@ function Home() {
           </For>
         </Show>
       </section>
+      </Show>
 
+      <Show when={tab() === "work" && !workCount()}>
+        <p class="tab-empty">Nothing waiting on you — no open PRs or review requests.</p>
+      </Show>
+
+      <Show when={tab() === "work" && (reviewReqs.data || []).length}>
+        <section>
+          <h2 class="eyebrow">review requests</h2>
+          <For each={reviewReqs.data}>
+            {(r) => {
+              const importing = () => importReview.isPending && importReview.variables === r.number;
+              return (
+                <div class="watch-row">
+                  <Show
+                    when={r.imported}
+                    fallback={
+                      <a class="watch-link" href={r.url} target="_blank">
+                        <span class="pr-num">#{r.number}</span>
+                        <span class="watch-name">{r.title}</span>
+                        <span class="watch-meta"><span>@{r.author}</span></span>
+                      </a>
+                    }
+                  >
+                    <A class="watch-link" href={forestPath(`review/pr-${r.number}`)}>
+                      <span class="watch-dot" />
+                      <span class="pr-num">#{r.number}</span>
+                      <span class="watch-name">{r.title}</span>
+                      <span class="watch-meta"><span>@{r.author}</span></span>
+                    </A>
+                  </Show>
+                  <Show
+                    when={canMutate && !r.imported}
+                    fallback={<Show when={r.imported}><span class="review-on">on viewer ✓</span></Show>}
+                  >
+                    <button class="watch-pin review-import" disabled={importing()} onClick={() => importReview.mutate(r.number)}>
+                      {importing() ? "importing…" : "import"}
+                    </button>
+                  </Show>
+                </div>
+              );
+            }}
+          </For>
+        </section>
+      </Show>
+
+      <Show when={tab() === "watching"}>
       <section>
         <div class="eyebrow-row">
           <h2 class="eyebrow">watching</h2>
@@ -621,6 +720,8 @@ function Home() {
           </For>
         </Show>
       </section>
+      </Show>
+      </main>
     </div>
   );
 }
