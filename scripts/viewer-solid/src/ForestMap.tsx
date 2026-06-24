@@ -402,8 +402,13 @@ export function ForestMap(props: {
                   }}
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
-                  onClick={() => (isGhostId(n.id) ? runIntegrate(n.id) : props.onPick(n.id))}
-                  onMouseEnter={() => setHov(n.id)}
+                  onClick={() => props.onPick(isGhostId(n.id) ? "~integration" : n.id)}
+                  onMouseEnter={() => {
+                    setHov(n.id);
+                    // hover the ghost → run the integrate-preview badge once (clean/dirty); clicking
+                    // it now SELECTS it — its diff is main..refs/stack/<project>-integration.
+                    if (isGhostId(n.id) && !integ()[ghostProject(n.id)]) runIntegrate(n.id);
+                  }}
                   onMouseLeave={() => setHov(null)}
                 >
                   <Show when={dams().damSet.has(n.id)}>

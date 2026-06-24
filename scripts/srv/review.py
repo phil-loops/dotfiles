@@ -37,6 +37,13 @@ def node(req, u):
     q = parse_qs(u.query)
     branch = q.get("branch", [""])[0]
     base = q.get("base", [""])[0]
+    # the ghost ✦<project> node diffs main..refs/stack/<project>-integration — an ephemeral octopus
+    # of the project's leaves. Branches move, so rebuild it on select before diffing; stack-forest
+    # --node handles the raw ref + --base main exactly like a real node's parent..branch.
+    if branch.startswith("refs/stack/") and branch.endswith("-integration"):
+        project = branch[len("refs/stack/"):-len("-integration")]
+        ctx.run([os.path.join(ctx.SCRIPTS, "stack-integrate"), project, "--check"])
+        base = base or "main"
     args = [os.path.join(ctx.SCRIPTS, "stack-forest"), "--node", branch]
     if base:
         args += ["--base", base]
