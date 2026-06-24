@@ -7,13 +7,14 @@
 // name to know what it's looking at. Real History-API paths (not hash) — clean URLs; the
 // server serves index.html for any app route (SPA fallback) so deep-links + refresh resolve.
 //
-//   /work  /forests  /watching         → home, a named tab
-//   /forest/<name>[?node=<branch>]      → a forest project (node = the active branch)
-//   /branch/<branch...>[?node=<branch>] → a pinned standalone (slashes ride the path tail)
-//   /review/<pr>[?node=<branch>]        → an imported review PR
+//   /work  /forests  /watching          → home, a named tab
+//   /forests/<project>[/<branch...>]     → a forest: project + active node (a branch), both in path
+//   /branch/<branch...>                  → a pinned standalone (single node)
+//   /review/<pr>                         → an imported review PR (single node)
 //
-// Forest/branch names carry slashes, so they travel raw in the path tail (joined back with
-// "/"); `node` carries slashes too, so it rides as a search param the way it always has.
+// A forest project tag is a single segment; the active node (a branch) is the path tail, slashes
+// and all. Putting both in the path means the URL fully identifies the view — no ?node= query.
+// `/forests` with no project is the home tab; `/forests/<project>` is a forest (collection/item).
 import { createContext, useContext, createSignal, onCleanup, type JSX } from "solid-js";
 
 export type HomeTab = "work" | "forests" | "watching";
@@ -29,23 +30,30 @@ const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(
 
 // pathname + search → typed location. Anything unrecognised falls home.
 export function parseLocation(pathname: string, search: string): ViewerLocation {
-  const node = new URLSearchParams(search).get("node") || undefined;
   const [head, ...rest] = pathname.split("/").filter(Boolean);
-  const tail = rest.join("/"); // forest / branch names keep their slashes
 
-  if (!head || isHomeTab(head)) {
-    return { kind: "home", tab: head ? (head as HomeTab) : "work" };
+  if (!head) {
+    // legacy launch entry: `loops stack web <name>` opens /?branch=<name> — honour it as a forest
+    // (RouterProvider canonicalises the URL to /forests/<name> on load).
+    const branch = new URLSearchParams(search).get("branch");
+    return branch ? { kind: "forest", name: branch } : { kind: "home", tab: "work" };
   }
-  if (head === "forest" && tail) {
-    return { kind: "forest", name: tail, node };
+  // /forests is the home tab; /forests/<project>[/<branch...>] is a forest — project is one
+  // segment, the active node (a branch, slashes and all) is the tail.
+  if (head === "forests" && rest.length) {
+    const [project, ...nodeParts] = rest;
+    return { kind: "forest", name: project, node: nodeParts.length ? nodeParts.join("/") : undefined };
   }
-  if (head === "branch" && tail) {
-    return { kind: "standalone", branch: tail, node };
+  if (isHomeTab(head)) {
+    return { kind: "home", tab: head };
+  }
+  if (head === "branch" && rest.length) {
+    return { kind: "standalone", branch: rest.join("/") };
   }
   if (head === "review" && rest.length) {
     const pr = parseInt(rest[0], 10);
     if (Number.isFinite(pr)) {
-      return { kind: "review", pr, node };
+      return { kind: "review", pr };
     }
   }
   return { kind: "home", tab: "work" };
@@ -53,16 +61,15 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
 
 // typed location → path (leading "/"), for both href and navigate.
 export function buildPath(loc: ViewerLocation): string {
-  const q = (n?: string) => (n ? "?node=" + encodeURIComponent(n) : "");
   switch (loc.kind) {
     case "home":
       return "/" + loc.tab;
     case "forest":
-      return "/forest/" + loc.name + q(loc.node);
+      return "/forests/" + loc.name + (loc.node ? "/" + loc.node : "");
     case "standalone":
-      return "/branch/" + loc.branch + q(loc.node);
+      return "/branch/" + loc.branch;
     case "review":
-      return "/review/" + loc.pr + q(loc.node);
+      return "/review/" + loc.pr;
   }
 }
 
@@ -96,6 +103,10 @@ const Ctx = createContext<RouterCtx>();
 export function RouterProvider(props: { children: JSX.Element }) {
   const read = (): ViewerLocation => parseLocation(window.location.pathname, window.location.search);
   const [location, setLocation] = createSignal<ViewerLocation>(read());
+  // Canonicalise a legacy launch URL (`/?branch=<name>`) to its clean path so the bar reads right.
+  if (window.location.pathname === "/" && new URLSearchParams(window.location.search).get("branch")) {
+    history.replaceState(null, "", buildPath(location()));
+  }
   // Back/forward fire popstate; pushState/replaceState do NOT, so navigate() syncs by hand.
   const onPop = () => setLocation(read());
   window.addEventListener("popstate", onPop);

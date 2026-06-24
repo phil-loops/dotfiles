@@ -826,7 +826,10 @@ function NodeDetail() {
     enabled: !!project(),
   }));
   const spine = createMemo(() => flattenForest(model.data));
-  const active = () => nodeParam() || spine()[0]?.id || project();
+  // default to the first node with actual files — a fan-in forest's first root is often an empty
+  // integrator (total 0), so landing there shows a blank surface; skip to one with something to review.
+  const active = () =>
+    nodeParam() || spine().find((n) => (n.total ?? 0) > 0)?.id || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
 
   // diff base + view (diffs|commits) reset when you change node.

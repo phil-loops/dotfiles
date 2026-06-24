@@ -122,7 +122,7 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         u = urlparse(self.path)
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching")
-                or u.path.startswith(("/forest/", "/branch/", "/review/"))):
+                or u.path.startswith(("/forests/", "/branch/", "/review/"))):
             # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
             # every client route: path-based routing (History API) means a deep-link/refresh to
             # /forest/x hits the server, which must return index.html (SPA fallback) so the client
