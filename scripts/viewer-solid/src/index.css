@@ -233,7 +233,7 @@ body {
 td.d2h-cntx:not(.d2h-code-side-linenumber),
 td.d2h-info:not(.d2h-code-side-linenumber),
 td.d2h-ins:not(.d2h-code-side-linenumber),
-td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 3px solid transparent; }
+td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 5px solid transparent; }
 td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #5fa058; }
 td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #c8654a; }
 .d2h-info { color: var(--ink-faint); }
