@@ -98,10 +98,11 @@
     <h1>diff style tuner</h1>
     <p class="sub">Tune the diff look, then paste the config block back to Claude. The preview is real diff2html side-by-side — same markup as the viewer.</p>
 
+    <div class="sub" style="margin:0 0 5px;color:#c4ba9f">full themes</div>
     <div class="presets">
       <button data-preset="yours">yours</button>
+      <button data-preset="goldCoal">gold·coal ★</button>
       <button data-preset="amberNavy">amber·navy</button>
-      <button data-preset="goldCoal">gold·coal</button>
       <button data-preset="cobalt">cobalt</button>
       <button data-preset="tokyo">tokyo night</button>
       <button data-preset="dracula">dracula</button>
@@ -109,6 +110,19 @@
       <button data-preset="nord">nord</button>
       <button data-preset="solarized">solarized</button>
       <button data-preset="monoIce">mono·ice</button>
+    </div>
+    <div class="sub" style="margin:12px 0 5px;color:#c4ba9f">stripe color + opacity <span style="color:#675d4d">(gold·coal base)</span></div>
+    <div class="presets">
+      <button data-preset="gcVivid">vivid</button>
+      <button data-preset="gcNeon">neon</button>
+      <button data-preset="gcDeep">deep</button>
+      <button data-preset="gcMuted">muted</button>
+      <button data-preset="gcEmerald">emerald·rose</button>
+      <button data-preset="gcTeal">teal·coral</button>
+      <button data-preset="gcForest">forest·brick</button>
+      <button data-preset="gcMint">mint·salmon</button>
+      <button data-preset="gcHiOp">hi-opacity</button>
+      <button data-preset="gcLoOp">lo-opacity</button>
     </div>
 
     <div class="contrast">
@@ -274,6 +288,18 @@ text↔bg contrast: ${cr.toFixed(2)}:1 (${grade})`;
     solarized: { ink: "#cad6d6", bg: "#002b36", weight: "500", size: 13, sa: "#859900", sd: "#dc322f", sw: 4, ha: 0.26, hd: 0.26 },
     // clean cool-neutral, no hue gimmick — just crisp light-on-near-black
     monoIce:   { ink: "#e8eaed", bg: "#0e1013", weight: "500", size: 13, sa: "#4caf50", sd: "#ef5350", sw: 4, ha: 0.22, hd: 0.22 },
+
+    // ── gold·coal base (ink #ecd35a / bg #0a0a0d fixed): only stripe color + opacity vary ──
+    gcVivid:   { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.30, hd: 0.34 },
+    gcNeon:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#19e000", sd: "#ff2a2a", sw: 5, ha: 0.32, hd: 0.36 },
+    gcDeep:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#0b8a14", sd: "#cc2a18", sw: 5, ha: 0.34, hd: 0.38 },
+    gcMuted:   { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#4f9e46", sd: "#cf5a44", sw: 5, ha: 0.20, hd: 0.22 },
+    gcEmerald: { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#10b981", sd: "#fb5b78", sw: 5, ha: 0.26, hd: 0.28 },
+    gcTeal:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#15b8a6", sd: "#ff6b5b", sw: 5, ha: 0.26, hd: 0.28 },
+    gcForest:  { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#2f9e3a", sd: "#c0392b", sw: 5, ha: 0.28, hd: 0.30 },
+    gcMint:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#3ddc84", sd: "#ff7a6b", sw: 5, ha: 0.24, hd: 0.26 },
+    gcHiOp:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.46, hd: 0.50 },
+    gcLoOp:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.14, hd: 0.16 },
   };
   document.querySelectorAll(".presets button").forEach((b) => {
     b.addEventListener("click", () => { Object.assign(S, presets[b.dataset.preset]); syncInputs(); apply(); });
