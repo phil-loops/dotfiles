@@ -210,10 +210,12 @@ body {
 .d2h-diff-table { font-family: var(--mono); font-size: 13px; }
 .d2h-dark-color-scheme {
   --d2h-dark-bg-color: transparent;
-  --d2h-dark-ins-bg-color: rgba(46, 96, 44, 0.42);
-  --d2h-dark-del-bg-color: rgba(190, 96, 64, 0.26);
-  --d2h-dark-ins-highlight-bg-color: rgba(46, 96, 44, 0.62);
-  --d2h-dark-del-highlight-bg-color: rgba(190, 96, 64, 0.46);
+  /* quiet gutter-bar style: no full-row wash behind code — a margin stripe + the
+     +/- prefix carry the signal. Only the changed WORDS keep a faint highlight. */
+  --d2h-dark-ins-bg-color: transparent;
+  --d2h-dark-del-bg-color: transparent;
+  --d2h-dark-ins-highlight-bg-color: rgba(90, 150, 80, 0.22);
+  --d2h-dark-del-highlight-bg-color: rgba(190, 96, 64, 0.20);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
@@ -225,6 +227,15 @@ body {
 .d2h-ins .d2h-code-line-prefix { color: var(--add); opacity: 1; }
 .d2h-del .d2h-code-line-prefix { color: var(--del); opacity: 1; }
 .d2h-code-line-prefix { opacity: 0.6; }
+/* the gutter bar: a stripe at the left of the code column (between line numbers and
+   code) marks add/del. Transparent on every content cell so context stays aligned;
+   colored only on changed lines. :not(linenumber) keeps it off the number column. */
+td.d2h-cntx:not(.d2h-code-side-linenumber),
+td.d2h-info:not(.d2h-code-side-linenumber),
+td.d2h-ins:not(.d2h-code-side-linenumber),
+td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 3px solid transparent; }
+td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #5fa058; }
+td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #c8654a; }
 .d2h-info { color: var(--ink-faint); }
 /* wrap long lines inside each side-by-side column instead of clipping at its edge */
 .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }
