@@ -11,12 +11,17 @@
 #   1. Fetch origin; fast-forward local main
 #   2. Snapshot every project branch's current SHA (so descendants know where to
 #      rebase --onto from after their parent moves)
-#   3. Topologically rebase bottom-up: roots onto main, then children onto their
+#   3. Pre-pass: classify each branch (rebase-classify). A branch already merged
+#      into its parent (squash/ff — files landed but history diverged) is contracted
+#      up front: rewire its children onto its parent and queue it to drop, NEVER
+#      rebase it (replaying its commits conflicts with their own landed work). The
+#      post-walk empty check (step 5) misses this case — files differ, history diverges.
+#   4. Topologically rebase bottom-up: roots onto main, then children onto their
 #      (now-moved) parents, walking up the tree
-#   4. After the walk, detect branches that became empty (no diff vs parent, or
+#   5. After the walk, detect branches that became empty (no diff vs parent, or
 #      ancestor of main) — delete them locally and rewire children's parent
 #      metadata to the dropped branch's parent
-#   5. Print summary
+#   6. Print summary
 #
 # Conflict handling:
 #   On a conflict, headless `claude` is invoked (conservative bar) to attempt a
@@ -69,12 +74,20 @@ Usage: loops stack restack <project>
        loops stack restack <project> --abort
        loops stack restack <project> --plan
        loops stack restack <project> --no-claude
+       loops stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
 EOF
   exit 2
 }
 
 PROJECT=""
 MODE="start"
+# Branches already merged into their parent (squash/ff) are contracted in a pre-pass
+# instead of rebased — see step 3. On by default; --no-classify reverts to rebasing
+# everything and relying on the post-walk empty check. CONTRACTED survives --continue
+# via the state file, so a conflict-resume still drops them.
+USE_CLASSIFY=1
+typeset -ga CONTRACTED
+CONTRACTED=()
 # Auto-resolve conflicts via headless claude (conservative bar). On by default;
 # --no-claude reverts to the old behavior (pause + manual resolve + --continue).
 USE_CLAUDE=1
@@ -97,6 +110,7 @@ for arg in "$@"; do
     --abort) MODE="abort" ;;
     --plan) MODE="plan" ;;
     --no-claude|--manual) USE_CLAUDE=0 ;;
+    --no-classify) USE_CLASSIFY=0 ;;
     --*) echo "unknown flag: $arg" >&2; usage ;;
     *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
   esac
@@ -656,6 +670,7 @@ save_state() {
     echo "CURRENT=${CURRENT:-}"
     printf "COMPLETED="; for b in "${COMPLETED[@]}"; do printf "%s\n" "$b"; done | tr '\n' ' '; echo
     printf "PENDING="; for b in "${PENDING[@]}"; do printf "%s\n" "$b"; done | tr '\n' ' '; echo
+    printf "CONTRACTED="; for b in "${CONTRACTED[@]}"; do printf "%s\n" "$b"; done | tr '\n' ' '; echo
     for key in "${(@k)SNAPSHOT}"; do
       echo "SNAP|${key}|${SNAPSHOT[$key]}"
     done
@@ -666,6 +681,7 @@ load_state() {
   [[ ! -f "$STATE_DIR/state" ]] && { echo "no saved state" >&2; return 1; }
   COMPLETED=()
   PENDING=()
+  CONTRACTED=()
   typeset -gA SNAPSHOT
   SNAPSHOT=()
   while IFS= read -r line; do
@@ -675,6 +691,7 @@ load_state() {
       CURRENT=*) CURRENT="${line#CURRENT=}" ;;
       COMPLETED=*) read -rA COMPLETED <<<"${line#COMPLETED=}" ;;
       PENDING=*) read -rA PENDING <<<"${line#PENDING=}" ;;
+      CONTRACTED=*) read -rA CONTRACTED <<<"${line#CONTRACTED=}" ;;
       SNAP\|*)
         local rest="${line#SNAP|}"
         local k="${rest%|*}"
@@ -903,6 +920,40 @@ elif [[ "$MODE" == "start" ]]; then
 
   COMPLETED=()
   CURRENT=""
+
+  # ---------- pre-pass: contract already-merged branches ----------
+  # A squash-merged branch's files are already in its parent but its history diverged,
+  # so it's neither empty-vs-parent nor an ancestor of main — the post-walk drop check
+  # misses it, and rebasing it replays commits that conflict with their own landed work.
+  # rebase-classify catches it (VERDICT=already-merged → exit 20). Contract it up front:
+  # rewire its inbound children onto its parent (so the walk rebases them onto a live
+  # base) and queue it for the same drop machinery the empty-branch pass uses. The probe
+  # is read-only (scratch worktree); the branch ref never moves until the drop step.
+  if (( USE_CLASSIFY )) && [[ -x "${SELF_DIR}/rebase-classify" ]]; then
+    typeset -a _survivors
+    _survivors=()
+    for b in "${PENDING[@]}"; do
+      bp=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      [[ -z "$bp" ]] && bp="$MAIN_BRANCH"
+      "${SELF_DIR}/rebase-classify" "$b" "$bp" >/dev/null 2>&1 && _crc=0 || _crc=$?
+      if (( _crc == 20 )); then
+        echo "  ● $b already merged into $bp — contracting (drop + rewire), skipping rebase"
+        while IFS=' ' read -r key val; do
+          [[ -z "$key" ]] && continue
+          child="${key#stack-branch.}"; child="${child%.parent}"
+          if [[ "$val" == "$b" ]]; then
+            echo "    rewire: $child parent → $bp"
+            git config "stack-branch.${child}.parent" "$bp"
+            git config --unset "stack-branch.${child}.base" 2>/dev/null || true
+          fi
+        done < <(git config --get-regexp '^stack-branch\..*\.parent$')
+        CONTRACTED+=("$b")
+      else
+        _survivors+=("$b")
+      fi
+    done
+    PENDING=("${_survivors[@]}")
+  fi
 fi
 
 # ---------- the rebase loop ----------
@@ -993,6 +1044,7 @@ echo ""
 echo "Rebase loop complete. Checking for empty/merged branches..."
 
 typeset -a TO_DROP
+TO_DROP=("${CONTRACTED[@]}")   # already-merged branches contracted in the pre-pass (children already rewired)
 for b in "${COMPLETED[@]}"; do
   [[ "$b" == "$MAIN_BRANCH" ]] && continue
   p=$(git config "stack-branch.${b}.parent" 2>/dev/null || true)

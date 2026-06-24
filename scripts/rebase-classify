@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# rebase-classify — triage "rebase <branch> onto <target>" BEFORE launching an
+# unattended agent to do it. Answers the one question the launcher needs:
+# can this run headless, or does it need a human?
+#
+#   rebase-classify <branch> [target] [--fetch] [--deep]
+#
+#   target   branch/ref to rebase onto (default: origin/main)
+#   --fetch  fetch the target first when it's a remote ref (origin/x -> fetch origin x)
+#   --deep   definitive answer: trial-rebase in a throwaway worktree instead of
+#            guessing from file overlap (catches per-commit conflicts the fast
+#            heuristic misses — e.g. an intermediate commit that conflicts even
+#            though the final tree merges clean)
+#
+# Prints a machine-readable `VERDICT=<kw>` line, then a human summary.
+# All probes are read-only; --deep works in a scratch worktree, so the current
+# working tree is never touched (dirty tree / mid-rebase here doesn't matter).
+#
+# Exit codes — the launcher branches on these:
+#   0   AUTOMATE  up-to-date or clean-replay — safe for a headless agent
+#   20  CONTRACT  already-merged (squash/ff) — needs a drop+rewire decision
+#   30  CONFLICT  branch and target collide — needs a human
+#   2   usage / git error
+
+positional=()
+do_fetch=0
+do_deep=0
+for a in "$@"; do
+  case "$a" in
+    --fetch) do_fetch=1 ;;
+    --deep)  do_deep=1 ;;
+    -h|--help) sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "unknown flag: $a" >&2; exit 2 ;;
+    *)  positional+=("$a") ;;
+  esac
+done
+branch=${positional[0]:-}
+target=${positional[1]:-origin/main}
+if [ -z "$branch" ]; then
+  echo "usage: rebase-classify <branch> [target] [--fetch] [--deep]" >&2
+  exit 2
+fi
+
+git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repo" >&2; exit 2; }
+git rev-parse --verify -q "$branch" >/dev/null || { echo "no such branch: $branch" >&2; exit 2; }
+if [ "$do_fetch" = 1 ] && [[ "$target" == origin/* ]]; then
+  git fetch -q origin "${target#origin/}"
+fi
+git rev-parse --verify -q "$target" >/dev/null || { echo "no such target: $target" >&2; exit 2; }
+
+verdict() { echo "VERDICT=$1"; printf '%s\n' "$2"; exit "$3"; }
+
+# Children that name <branch> as their stack parent (forest viewer config).
+# `git config --get-regexp` exits 1 on no match → under `set -e` that aborts the
+# `kids=$(children_of …)` assignment before the verdict prints (any repo with no
+# stack config). No children is a valid answer, so swallow the empty-match failure.
+children_of() {
+  { git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
+    | awk -v p="$1" '$2==p { sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1 }'; } || true
+}
+
+# Replay <branch>'s commits onto <target> in a detached scratch worktree.
+# Non-destructive: the branch ref never moves. Echoes the replayed-commit count
+# on a clean run (0 => nothing to replay = already-merged). 0 = clean, 1 = conflicts.
+trial_rebase() {
+  local br=$1 tg=$2 wt rc=0
+  wt=$(mktemp -d "${TMPDIR:-/tmp}/rebase-classify.XXXXXX")
+  git worktree add -q --detach "$wt" "$br" || { rmdir "$wt" 2>/dev/null || true; return 2; }
+  if git -C "$wt" -c core.editor=true rebase -q "$tg" >/dev/null 2>&1; then
+    git -C "$wt" rev-list --count "$tg"..HEAD
+  else
+    rc=1
+    git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+  fi
+  git worktree remove --force "$wt" >/dev/null 2>&1 || true
+  return $rc
+}
+
+mb=$(git merge-base "$branch" "$target")
+target_sha=$(git rev-parse "$target^{commit}")
+
+# target already an ancestor of branch -> branch sits at/above target already
+if [ "$mb" = "$target_sha" ]; then
+  verdict up-to-date "✓ $branch already contains $target — rebase is a no-op." 0
+fi
+
+bfiles=()
+while IFS= read -r f; do [ -n "$f" ] && bfiles+=("$f"); done < <(git diff --name-only "$mb" "$branch")
+
+# Branch has no changes of its own -> rebase is a trivial fast-forward.
+if [ "${#bfiles[@]}" -eq 0 ]; then
+  verdict clean-replay "✓ $branch has no commits of its own — trivial fast-forward onto $target." 0
+fi
+
+# Already-merged: restricted to the files the BRANCH touched, branch == target.
+# (Whole-tree compare is wrong — target may have advanced with unrelated work.
+#  This is the squash-merge case: the branch's own contribution is in target,
+#  even though its history diverges and most of the tree differs.)
+if git diff --quiet "$target" "$branch" -- "${bfiles[@]}"; then
+  if git merge-base --is-ancestor "$branch" "$target"; then
+    how="fast-forward-merged (branch tip is an ancestor of $target)"
+  else
+    how="squash-merged (its files already match $target; history diverges)"
+  fi
+  kids=$(children_of "$branch")
+  verdict already-merged \
+"● $branch is already merged into $target — $how.
+  A forward rebase replays nothing and leaves the branch empty.
+  Decide: drop it and rewire its children onto $target (contract the graph), or leave it.
+  Children that would need rewiring:
+$( [ -n "$kids" ] && printf '%s\n' "$kids" | sed 's/^/    - /' || echo '    (none)' )" 20
+fi
+
+tfiles=()
+while IFS= read -r f; do [ -n "$f" ] && tfiles+=("$f"); done < <(git diff --name-only "$mb" "$target")
+overlap=$(comm -12 \
+  <(printf '%s\n' "${bfiles[@]}" | sort -u) \
+  <(printf '%s\n' "${tfiles[@]+"${tfiles[@]}"}" | sort -u))
+
+if [ -z "$overlap" ]; then
+  verdict clean-replay \
+"✓ $branch touches no file that $target changed since the fork point — clean replay.
+  Safe headless:  git rebase $target $branch" 0
+fi
+
+if [ "$do_deep" = 1 ]; then
+  if replayed=$(trial_rebase "$branch" "$target"); then
+    if [ "${replayed:-0}" -eq 0 ]; then
+      verdict already-merged \
+"● Trial rebase replayed 0 commits — $branch's work is already in $target.
+  Contract the graph (drop + rewire children) rather than rebase." 20
+    fi
+    verdict clean-replay \
+"✓ Trial rebase applied $replayed commit(s) cleanly despite shared files:
+$(printf '%s\n' "$overlap" | sed 's/^/    /')
+  Safe headless:  git rebase $target $branch" 0
+  fi
+  verdict conflict \
+"✗ Trial rebase hit conflicts on shared files:
+$(printf '%s\n' "$overlap" | sed 's/^/    /')
+  Needs a human — do NOT run unattended." 30
+fi
+
+verdict conflict \
+"⚠ $branch and $target both changed:
+$(printf '%s\n' "$overlap" | sed 's/^/    /')
+  May conflict on replay. Re-run with --deep for a definitive trial rebase, or hand to a human." 30
