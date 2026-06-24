@@ -173,6 +173,8 @@ class H(BaseHTTPRequestHandler):
             return sync.get_one(self, u)
         elif u.path == "/syncs":  # batch fork-staleness in one round-trip
             return sync.get_many(self, u)
+        elif u.path == "/forest-health":  # batch drifted/merged-ghost per node (badges + fix-all)
+            return sync.health_many(self, u)
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")

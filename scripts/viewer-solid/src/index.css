@@ -124,6 +124,8 @@ body {
 /* ── branch state badge + ⋯ actions menu (NodeActions) ───────────────── */
 .node-actions { position: relative; display: flex; align-items: center; gap: 9px; }
 .nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
+.nh-drift { font-size: 12px; color: var(--del); cursor: help; }
+.nh-ghost { font-size: 12px; color: var(--patina); cursor: help; }
 .nh-blocked { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
 .nh-pushed { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
 .nh-fix {
