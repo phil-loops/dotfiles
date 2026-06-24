@@ -122,6 +122,7 @@ body {
 .node-actions { position: relative; display: flex; align-items: center; gap: 9px; }
 .nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
 .nh-blocked { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
+.nh-pushed { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
 .nh-fix {
   font: inherit; font-size: 12px; color: var(--del); background: transparent;
   border: 1px solid var(--del); border-radius: 5px; padding: 3px 9px; cursor: pointer; opacity: 0.9;
@@ -254,7 +255,56 @@ body {
 }
 
 /* ── home: the ledger summary ────────────────────────────────────────── */
-.home { max-width: 720px; margin: 0 auto; padding: 60px 28px 100px; }
+/* ── ledger shell: thumb-index rail | page ──────────────────────────── */
+.ledger { display: grid; grid-template-columns: 96px 1fr; min-height: 100vh; }
+.ledger-page { max-width: 720px; margin: 0 auto; padding: 60px 28px 100px; width: 100%; }
+
+.thumb-index {
+  display: flex; flex-direction: column; gap: 4px; padding: 22px 0 40px;
+  border-right: 1px solid var(--rule);
+  background: linear-gradient(180deg, var(--vellum-raise), var(--vellum-night));
+  position: sticky; top: 0; align-self: start; height: 100vh;
+}
+.thumb-brand { color: var(--gold-leaf); font-size: 19px; text-align: center; margin-bottom: 26px; }
+.thumb {
+  position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px;
+  padding: 18px 0; background: transparent; border: none; border-left: 2px solid transparent;
+  cursor: pointer; color: var(--ink-faint); transition: color 0.14s, background 0.14s;
+}
+.thumb:hover { color: var(--ink-dim); background: var(--vellum-edge); }
+.thumb.active { color: var(--gold-leaf); border-left-color: var(--gold-leaf); background: var(--vellum-edge); }
+.thumb-label {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  font-family: var(--display); font-style: italic; font-size: 17px; letter-spacing: 0.04em;
+}
+.thumb-count {
+  font-family: var(--mono); font-size: 10px; color: var(--ink-faint);
+  background: var(--vellum-night); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 1px 5px; min-width: 17px; text-align: center;
+}
+.thumb.active .thumb-count { color: var(--gold-leaf); border-color: var(--gold-deep); }
+
+.forest-search {
+  width: 100%; font: inherit; font-family: var(--mono); font-size: 13px; color: var(--ink);
+  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
+  padding: 9px 13px; margin: 0 0 12px;
+}
+.forest-search:focus { outline: none; border-color: var(--gold-deep); }
+.tab-empty { color: var(--ink-faint); font-style: italic; padding: 30px 4px; }
+
+@media (max-width: 640px) {
+  .ledger { grid-template-columns: 1fr; }
+  .thumb-index {
+    flex-direction: row; height: auto; position: static; padding: 10px; gap: 4px;
+    border-right: none; border-bottom: 1px solid var(--rule);
+  }
+  .thumb-brand { display: none; }
+  .thumb { flex-direction: row; border-left: none; border-bottom: 2px solid transparent; padding: 10px 14px; }
+  .thumb.active { border-left-color: transparent; border-bottom-color: var(--gold-leaf); }
+  .thumb-label { writing-mode: horizontal-tb; }
+}
+@media (prefers-reduced-motion: reduce) { .thumb { transition: none; } }
+
 .home-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 34px; }
 .brand {
   font-family: var(--display); font-style: italic; font-weight: 600; font-size: 26px;
@@ -475,6 +525,8 @@ body {
   background: transparent; border: none; padding: 8px 15px 8px 8px; transition: color .12s;
 }
 .watch-unpin:hover { color: var(--del); }
+.review-import { flex: none; margin: 6px 10px 6px 0; padding: 0 14px; height: 30px; font-size: 12px; }
+.review-on { flex: none; margin: 0 14px 0 0; color: var(--patina); font-size: 11px; letter-spacing: .04em; }
 
 /* ── chat: per-file badge + cross-forest index overlay (ChatIndex) ───── */
 .chat-badge {

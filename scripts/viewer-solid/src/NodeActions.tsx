@@ -161,6 +161,38 @@ export function NodeActions(props: { branch: string }) {
     onError: (e) => setDone(`✗ ${(e as Error).message || "rebase failed"}`),
   }));
 
+  // A review/pr-<N> node tracks someone else's PR. When they force-push, re-fetch their new
+  // head into the local branch. Blessings are keyed by file content, not the tip SHA, so they
+  // survive: unchanged files stay blessed, changed files fall to stale for re-review.
+  const isReview = () => /^review\/pr-\d+$/.test(props.branch);
+  // node-load hint: ls-remote the PR head and compare to our tip, so we can surface "they
+  // pushed" the moment you open a stale review node — no blind clicking.
+  const remote = createQuery(() => ({
+    queryKey: ["review-remote", props.branch],
+    queryFn: () => provider.reviewRemote(props.branch),
+    enabled: isReview(),
+    staleTime: 20_000,
+  }));
+  const pull = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string; changed?: boolean; after?: string }>("/review-pull", {
+        branch: props.branch,
+      }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        setDone(`✗ ${r.err || "pull failed"}`);
+        return;
+      }
+      setDone(r.changed ? `✓ pulled to ${r.after} — re-review the files now marked stale` : "✓ already at their state");
+      qc.invalidateQueries({ queryKey: ["node", props.branch] });
+      qc.invalidateQueries({ queryKey: ["commits", props.branch] });
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["review-remote", props.branch] });
+      sync.refetch();
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
+  }));
+
   const armSquash = () => {
     if (armed()) {
       squash.mutate();
@@ -171,7 +203,7 @@ export function NodeActions(props: { branch: string }) {
     armT = setTimeout(() => setArmed(false), 4000); // disarm if not confirmed
   };
 
-  const busy = () => checkout.isPending || squash.isPending || rebase.isPending;
+  const busy = () => checkout.isPending || squash.isPending || rebase.isPending || pull.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
     fn();
@@ -202,6 +234,24 @@ export function NodeActions(props: { branch: string }) {
           onClick={fire(() => rebase.mutate())}
         >
           {rebase.isPending ? "rebasing…" : "rebase →"}
+        </button>
+      </Show>
+
+      {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}
+      <Show when={isReview() && remote.data?.available}>
+        <span
+          class="nh-pushed"
+          title={`they pushed — your branch is at ${remote.data?.local}, theirs at ${remote.data?.remote}`}
+        >
+          ↯ they pushed
+        </span>
+        <button
+          class="nh-fix"
+          disabled={busy()}
+          title="re-fetch this PR's pushed head into your local review branch. Your blessings stay — files whose content is unchanged remain blessed; changed files fall to stale for re-review."
+          onClick={fire(() => pull.mutate())}
+        >
+          {pull.isPending ? "pulling…" : "pull to their state"}
         </button>
       </Show>
 

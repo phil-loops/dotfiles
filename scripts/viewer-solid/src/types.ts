@@ -70,6 +70,22 @@ export const Project = z.object({
 });
 export type Project = z.infer<typeof Project>;
 
+export const ReviewRequest = z.object({
+  number: z.number(),
+  title: z.string(),
+  author: z.string(),
+  url: z.string(),
+  imported: z.boolean(), // a review/pr-<N> branch already fetched into the local forest
+});
+export type ReviewRequest = z.infer<typeof ReviewRequest>;
+
+export const ReviewRemote = z.object({
+  available: z.boolean(), // the PR's remote head differs from the local review branch (they pushed)
+  remote: z.string().optional(),
+  local: z.string().optional(),
+});
+export type ReviewRemote = z.infer<typeof ReviewRemote>;
+
 export const Standalone = z.object({
   branch: z.string(),
   commits: z.number(),

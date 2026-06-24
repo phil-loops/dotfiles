@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# stack-review-import <pr-number> — pull a GitHub PR you've been asked to review
+# into the local forest viewer as a checkout-able node off its base.
+#
+#   • fetches the PR head (via the pull/ ref, so fork PRs work) to  review/pr-<N>
+#   • points its forest parent at the PR's base, so the viewer diffs base...head
+#   • seeds the branch description from the PR title + author
+#   • pins it to the standalone watch-list so it surfaces on the landing page
+#
+# Prints the local branch name on success. Idempotent: re-running refreshes the
+# fetched head and leaves the single watch-list entry intact.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+num="${1:?usage: stack-review-import <pr-number>}"
+num="${num#\#}"
+
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+IFS=$'\t' read -r base _head title login < <(
+  gh pr view "$num" --repo "$repo" \
+    --json baseRefName,headRefName,title,author \
+    --jq '[.baseRefName, .headRefName, .title, .author.login] | @tsv'
+)
+
+branch="review/pr-${num}"
+
+git fetch -q --force origin "pull/${num}/head:${branch}"
+git fetch -q origin "$base" || true   # ensure the base ref exists locally to diff against
+
+git config "stack-branch.${branch}.parent" "$base"
+git config "branch.${branch}.description" "#${num} ${title} — @${login}"
+
+if ! git config --get-all stack.standalone | grep -qxF "$branch"; then
+  git config --add stack.standalone "$branch"
+fi
+
+echo "$branch"
