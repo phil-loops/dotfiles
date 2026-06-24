@@ -16,6 +16,34 @@ GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
 [[ "$GIT_COMMON_DIR" != /* ]] && GIT_COMMON_DIR="$PWD/$GIT_COMMON_DIR"
 STATE="$GIT_COMMON_DIR/stack-restack-state/state"
 
+# Single-flight the WHOLE batch. stack-restack locks per-invocation and releases on
+# every exit (including a park→handoff), so back-to-back children leave gaps a
+# concurrent `stack-restack <project>` can slip into — two drivers, one worktree.
+# Hold ONE lock for the run; children go reentrant via STACK_RESTACK_LOCK_OWNER.
+# Same lockfile stack-restack uses (GIT_COMMON_DIR, shared across linked worktrees).
+LOCK_FILE="$GIT_COMMON_DIR/stack-restack.lock"
+LOCK_HELD=""
+release_batch_lock() {
+  [[ -n "$LOCK_HELD" ]] || return 0
+  local holder; holder="$(cat "$LOCK_HELD" 2>/dev/null)"
+  [[ "${holder%% *}" == "$$" ]] && rm -f "$LOCK_HELD"
+  LOCK_HELD=""
+}
+trap 'release_batch_lock' EXIT INT TERM
+while true; do
+  if ( set -o noclobber; print -r -- "$$ restack-all $*" > "$LOCK_FILE" ) 2>/dev/null; then
+    LOCK_HELD="$LOCK_FILE"; break
+  fi
+  holder="$(cat "$LOCK_FILE" 2>/dev/null)"; holder_pid="${holder%% *}"
+  if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
+    echo "a restack is already running (pid $holder_pid: ${holder#* }) — wait for it, or abort the wedged project if needed." >&2
+    exit 1
+  fi
+  echo "  (clearing stale restack lock from dead pid ${holder_pid:-?})" >&2
+  rm -f "$LOCK_FILE"
+done
+export STACK_RESTACK_LOCK_OWNER=$$
+
 worktree_of() {  # the worktree a branch is checked out in (mirrors stack-restack's helper)
   git worktree list --porcelain | awk -v b="refs/heads/$1" '
     $1 == "worktree" { p = $2 }
