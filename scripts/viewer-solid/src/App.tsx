@@ -406,6 +406,30 @@ function Home() {
     label: () => "↗ GitHub",
     run: () => window.open(url, "_blank"),
   });
+  // A watched branch has no url on the wire — resolve it (PR else compare) on click. Open the
+  // tab on the gesture so the popup blocker doesn't eat it, then point it once resolved.
+  const githubBranchAction = (branch: string): Action => ({
+    id: "ghb:" + branch,
+    title: "open this branch on GitHub — its PR if one exists, else a compare view",
+    label: () => "↗ GitHub",
+    run: () => {
+      const w = window.open("", "_blank");
+      fetch("/branch-url?branch=" + encodeURIComponent(branch))
+        .then((r) => r.json())
+        .then((d: { url?: string }) => {
+          if (d.url && w) {
+            w.location.href = d.url;
+          } else {
+            w?.close();
+            note(`no GitHub URL for ${leaf(branch)}`);
+          }
+        })
+        .catch(() => {
+          w?.close();
+          note("couldn’t resolve a GitHub URL");
+        });
+    },
+  });
   const checkoutAction = (branch: string): Action => ({
     id: "co:" + branch,
     title: "move your main checkout (~/coding/loops) onto this branch",
@@ -424,7 +448,9 @@ function Home() {
   const workRowActions = (p: PR): Action[] =>
     [githubAction(p.url, p.branch), ...(canMutate ? [worktreeAction(p.branch)] : [])];
   const watchRowActions = (b: Standalone): Action[] =>
-    canMutate ? [worktreeAction(b.branch), checkoutAction(b.branch), unpinAction(b.branch)] : [];
+    canMutate
+      ? [githubBranchAction(b.branch), worktreeAction(b.branch), checkoutAction(b.branch), unpinAction(b.branch)]
+      : [githubBranchAction(b.branch)];
 
   return (
     <div class="ledger">
