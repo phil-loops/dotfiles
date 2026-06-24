@@ -3,68 +3,95 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>diff style tuner</title>
+<title>diff palette tuner</title>
 <!-- diff2html base CSS + JS (same lib the viewer uses) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3/bundles/css/diff2html.min.css" />
 <style>
   :root {
-    /* fixed theme tokens (match the viewer) */
+    /* fixed page chrome (the panel, not the diff) */
     --vellum-night: #14110a;
     --vellum-raise: #1c180f;
+    --rule: #2c2517;
     --ink-faint: #675d4d;
     --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 
-    /* TUNABLE knobs — the controls write these */
-    --t-ink: #dcd9d0;
-    --t-bg: #14110a;
-    --t-stripe-add: #5fa058;
-    --t-stripe-del: #c8654a;
-    --t-stripe-w: 5px;
-    --t-hl-add: rgba(95, 160, 88, 0.12);
-    --t-hl-del: rgba(200, 101, 74, 0.12);
+    /* TUNABLE — the controls write these; the diff reads them */
+    --t-bg: #0a0a0d;
+    --t-ink: #ecd35a;       /* unchanged / context code */
+    --t-text-add: #ecd35a;  /* ADDED line text */
+    --t-text-del: #ecd35a;  /* REMOVED line text */
+    --t-stripe-add: #0b8a14;
+    --t-stripe-del: #cc2a18;
     --t-prefix-add: #8fae7a;
     --t-prefix-del: #c87a55;
+    --t-hl-add: rgba(11, 138, 20, 0.0);
+    --t-hl-del: rgba(204, 42, 24, 0.0);
+    --t-stripe-w: 5px;
     --t-weight: 500;
     --t-size: 13px;
   }
   * { box-sizing: border-box; }
   body {
-    margin: 0; height: 100vh; display: grid; grid-template-columns: 320px 1fr;
+    margin: 0; height: 100vh; display: grid; grid-template-columns: 360px 1fr;
     background: var(--vellum-night); color: #e8dcc4; font-family: var(--mono); font-size: 13px;
   }
 
   /* ── controls ── */
-  .panel { border-right: 1px solid #2c2517; padding: 18px 16px; overflow-y: auto; background: var(--vellum-raise); }
+  .panel { border-right: 1px solid var(--rule); padding: 18px 16px; overflow-y: auto; background: var(--vellum-raise); }
   .panel h1 { font-size: 14px; margin: 0 0 4px; letter-spacing: .04em; }
-  .panel .sub { color: #9a8e78; font-size: 11px; margin: 0 0 16px; line-height: 1.5; }
-  .ctl { margin: 0 0 14px; }
+  .panel .sub { color: #9a8e78; font-size: 11px; margin: 0 0 14px; line-height: 1.5; }
+  .sec { margin: 0 0 6px; color: #c4ba9f; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+  .sec .hint { text-transform: none; letter-spacing: 0; color: var(--ink-faint); }
+  .block { border: 1px solid var(--rule); border-radius: 10px; padding: 12px; margin: 0 0 16px; background: var(--vellum-night); }
+  .block.greenblock { border-color: #2f4a2a; }
+  .block.redblock { border-color: #4a2a24; }
+
+  .ctl { margin: 0 0 12px; }
+  .ctl:last-child { margin-bottom: 0; }
   .ctl label { display: block; font-size: 11px; color: #c4ba9f; margin-bottom: 5px; letter-spacing: .02em; }
-  .ctl .val { color: #675d4d; }
-  .ctl input[type=color] { width: 46px; height: 28px; padding: 0; border: 1px solid #2c2517; background: none; vertical-align: middle; cursor: pointer; }
-  .ctl input[type=range] { width: 100%; vertical-align: middle; accent-color: #8fae7a; }
-  .ctl input[type=text] { width: 92px; background: var(--vellum-night); color: #e8dcc4; border: 1px solid #2c2517; font: inherit; font-size: 12px; padding: 3px 6px; }
-  .ctl select { background: var(--vellum-night); color: #e8dcc4; border: 1px solid #2c2517; font: inherit; padding: 4px 6px; }
+  .ctl .val { color: var(--ink-faint); }
+  .ctl input[type=color] { width: 44px; height: 26px; padding: 0; border: 1px solid var(--rule); background: none; vertical-align: middle; cursor: pointer; }
+  .ctl input[type=range] { width: 100%; vertical-align: middle; }
+  .greenblock input[type=range] { accent-color: var(--t-stripe-add); }
+  .redblock input[type=range] { accent-color: var(--t-stripe-del); }
+  .ctl input[type=range].neutral { accent-color: #8fae7a; }
+  .ctl input[type=text] { width: 92px; background: var(--vellum-raise); color: #e8dcc4; border: 1px solid var(--rule); font: inherit; font-size: 12px; padding: 3px 6px; }
+  .ctl select { background: var(--vellum-raise); color: #e8dcc4; border: 1px solid var(--rule); font: inherit; padding: 4px 6px; }
   .row { display: flex; align-items: center; gap: 8px; }
 
-  .contrast { margin: 14px 0; padding: 10px 12px; border: 1px solid #2c2517; border-radius: 8px; background: var(--vellum-night); }
-  .contrast .big { font-size: 22px; font-weight: 600; }
-  .contrast .grade { font-size: 11px; }
-  .contrast .pass { color: #8fae7a; } .contrast .warn { color: #d6b24a; } .contrast .fail { color: #c87a55; }
+  /* swatch palettes */
+  .swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin: 0 0 4px; }
+  .swatches.ramp { grid-template-columns: repeat(9, 1fr); }
+  .sw {
+    height: 22px; border-radius: 5px; border: 1px solid rgba(255,255,255,.08); cursor: pointer;
+    padding: 0; transition: transform .08s, box-shadow .08s;
+  }
+  .sw:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,.5); }
+  .sw.active { outline: 2px solid #e8dcc4; outline-offset: 1px; }
+  .active-row { display: flex; align-items: center; gap: 8px; margin: 8px 0 10px; }
+  .active-chip { width: 34px; height: 34px; border-radius: 7px; border: 1px solid var(--rule); }
+  .active-row .meta { font-size: 11px; color: #c4ba9f; line-height: 1.4; }
+  .active-row .meta b { color: #e8dcc4; }
 
-  .out { margin-top: 16px; }
-  .out textarea { width: 100%; height: 150px; background: var(--vellum-night); color: #c4ba9f; border: 1px solid #2c2517; font: inherit; font-size: 11px; padding: 8px; resize: vertical; }
-  .out button { margin-top: 6px; background: #2c2517; color: #e8dcc4; border: 1px solid #46402c; font: inherit; padding: 6px 12px; cursor: pointer; border-radius: 6px; }
-  .out button:hover { background: #46402c; }
+  .contrast { display: flex; gap: 10px; margin: 10px 0 4px; }
+  .contrast .pill { flex: 1; border: 1px solid var(--rule); border-radius: 8px; padding: 7px 9px; background: var(--vellum-raise); }
+  .contrast .pill .big { font-size: 15px; font-weight: 600; }
+  .contrast .pill .lab { font-size: 10px; color: var(--ink-faint); }
+  .pass { color: #8fae7a; } .warn { color: #d6b24a; } .fail { color: #c87a55; }
 
-  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-  .presets button { background: var(--vellum-night); color: #c4ba9f; border: 1px solid #2c2517; font: inherit; font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 5px; }
+  .out { margin-top: 4px; }
+  .out textarea { width: 100%; height: 168px; background: var(--vellum-night); color: #c4ba9f; border: 1px solid var(--rule); font: inherit; font-size: 11px; padding: 8px; resize: vertical; }
+  .out button, .barbtn { margin-top: 6px; background: var(--rule); color: #e8dcc4; border: 1px solid #46402c; font: inherit; font-size: 11px; padding: 6px 12px; cursor: pointer; border-radius: 6px; }
+  .out button:hover, .barbtn:hover { background: #46402c; }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 6px; }
+  .presets button { background: var(--vellum-night); color: #c4ba9f; border: 1px solid var(--rule); font: inherit; font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 5px; }
   .presets button:hover { border-color: #8fae7a; }
 
   /* ── preview surface ── */
-  .preview { overflow: auto; padding: 0; background: var(--t-bg); }
+  .preview { overflow: auto; background: var(--t-bg); }
   #diff { background: var(--t-bg); min-height: 100%; }
 
-  /* ── the EXACT viewer overrides, driven by the tunable vars ── */
+  /* ── viewer-equivalent overrides, driven by the tunable vars ── */
   .d2h-file-wrapper { border: none; margin: 0; }
   .d2h-file-header, .d2h-file-list-wrapper { display: none; }
   .d2h-diff-table { font-family: var(--mono); font-size: var(--t-size); }
@@ -78,8 +105,11 @@
     --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
     background: transparent;
   }
-  .d2h-code-line-ctn, .d2h-ins .d2h-code-line-ctn, .d2h-del .d2h-code-line-ctn,
-  .d2h-ins ins, .d2h-del del { color: var(--t-ink); font-weight: var(--t-weight); }
+  /* neutral/context text */
+  .d2h-code-line-ctn { color: var(--t-ink); font-weight: var(--t-weight); white-space: pre-wrap; word-break: break-word; }
+  /* the readability lever: added / removed LINE TEXT carries the hue, not just the stripe */
+  .d2h-ins .d2h-code-line-ctn, .d2h-ins ins { color: var(--t-text-add); font-weight: var(--t-weight); }
+  .d2h-del .d2h-code-line-ctn, .d2h-del del { color: var(--t-text-del); font-weight: var(--t-weight); }
   .d2h-ins .d2h-code-line-prefix { color: var(--t-prefix-add); opacity: 1; }
   .d2h-del .d2h-code-line-prefix { color: var(--t-prefix-del); opacity: 1; }
   .d2h-code-line-prefix { opacity: 0.6; }
@@ -89,70 +119,75 @@
   td.d2h-del:not(.d2h-code-side-linenumber) { border-left: var(--t-stripe-w) solid transparent; }
   td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: var(--t-stripe-add); }
   td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--t-stripe-del); }
-  .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }
   .d2h-info { color: var(--ink-faint); }
 </style>
 </head>
 <body>
   <div class="panel">
-    <h1>diff style tuner</h1>
-    <p class="sub">Tune the diff look, then paste the config block back to Claude. The preview is real diff2html side-by-side — same markup as the viewer.</p>
+    <h1>diff palette tuner</h1>
+    <p class="sub">Pick a green and a red, then dial the <b>tint</b> — how much each side's <i>text</i> leans toward its hue (tint&nbsp;0 = the current all-gold look, where only the stripe carries the signal). Swatch rows are palettes; the ramp below each is that hue light→dark. Copy the config block back to Claude to land it in the viewer.</p>
 
-    <div class="sub" style="margin:0 0 5px;color:#c4ba9f">full themes</div>
-    <div class="presets">
-      <button data-preset="yours">yours</button>
-      <button data-preset="goldCoal">gold·coal ★</button>
-      <button data-preset="amberNavy">amber·navy</button>
-      <button data-preset="cobalt">cobalt</button>
-      <button data-preset="tokyo">tokyo night</button>
-      <button data-preset="dracula">dracula</button>
-      <button data-preset="gruvbox">gruvbox</button>
-      <button data-preset="nord">nord</button>
-      <button data-preset="solarized">solarized</button>
-      <button data-preset="monoIce">mono·ice</button>
-    </div>
-    <div class="sub" style="margin:12px 0 5px;color:#c4ba9f">stripe color + opacity <span style="color:#675d4d">(gold·coal base)</span></div>
-    <div class="presets">
-      <button data-preset="gcVivid">vivid</button>
-      <button data-preset="gcNeon">neon</button>
-      <button data-preset="gcDeep">deep</button>
-      <button data-preset="gcMuted">muted</button>
-      <button data-preset="gcEmerald">emerald·rose</button>
-      <button data-preset="gcTeal">teal·coral</button>
-      <button data-preset="gcForest">forest·brick</button>
-      <button data-preset="gcMint">mint·salmon</button>
-      <button data-preset="gcHiOp">hi-opacity</button>
-      <button data-preset="gcLoOp">lo-opacity</button>
+    <div class="sec">base <span class="hint">— page + neutral text</span></div>
+    <div class="block">
+      <div class="presets">
+        <button data-base="coal">gold·coal ★</button>
+        <button data-base="navy">amber·navy</button>
+        <button data-base="ice">mono·ice</button>
+        <button data-base="gruv">gruvbox</button>
+        <button data-base="tokyo">tokyo</button>
+      </div>
+      <div class="ctl"><label>code background <span class="val" id="vBg"></span></label>
+        <div class="row"><input type="color" id="bg"><input type="text" id="bgHex"></div></div>
+      <div class="ctl"><label>neutral / context text <span class="val" id="vInk"></span></label>
+        <div class="row"><input type="color" id="ink"><input type="text" id="inkHex"></div></div>
+      <div class="ctl"><label>font weight</label>
+        <select id="weight"><option>300</option><option>400</option><option selected>500</option><option>600</option><option>700</option></select>
+        <label style="display:inline;margin-left:10px">size <span class="val" id="vSize"></span></label>
+        <input type="range" class="neutral" id="size" min="11" max="17" step="0.5" style="width:110px"></div>
+      <div class="ctl"><label>stripe width <span class="val" id="vSW"></span></label>
+        <input type="range" class="neutral" id="sw" min="0" max="12" step="1"></div>
     </div>
 
-    <div class="contrast">
-      <div><span class="big" id="cRatio">–</span> <span class="grade" id="cGrade"></span></div>
-      <div class="sub" style="margin:4px 0 0">text vs background (WCAG)</div>
+    <div class="sec">greens <span class="hint">— additions</span></div>
+    <div class="block greenblock">
+      <div class="swatches" id="greenSw"></div>
+      <div class="active-row">
+        <div class="active-chip" id="gChip"></div>
+        <div class="meta">active green <b id="gHex"></b><br><span id="gHsl"></span></div>
+      </div>
+      <div class="swatches ramp" id="greenRamp"></div>
+      <div class="ctl"><label>hue <span class="val" id="vGh"></span></label><input type="range" id="gh" min="60" max="180" step="1"></div>
+      <div class="ctl"><label>saturation <span class="val" id="vGs"></span></label><input type="range" id="gs" min="0" max="100" step="1"></div>
+      <div class="ctl"><label>lightness <span class="val" id="vGl"></span></label><input type="range" id="gl" min="15" max="85" step="1"></div>
     </div>
 
-    <div class="ctl"><label>text color <span class="val" id="vInk"></span></label>
-      <div class="row"><input type="color" id="ink"><input type="text" id="inkHex"></div></div>
-    <div class="ctl"><label>code background <span class="val" id="vBg"></span></label>
-      <div class="row"><input type="color" id="bg"><input type="text" id="bgHex"></div></div>
-    <div class="ctl"><label>font weight</label>
-      <select id="weight"><option>300</option><option>400</option><option selected>500</option><option>600</option><option>700</option></select></div>
-    <div class="ctl"><label>font size <span class="val" id="vSize"></span></label>
-      <input type="range" id="size" min="11" max="17" step="0.5"></div>
+    <div class="sec">reds <span class="hint">— removals</span></div>
+    <div class="block redblock">
+      <div class="swatches" id="redSw"></div>
+      <div class="active-row">
+        <div class="active-chip" id="rChip"></div>
+        <div class="meta">active red <b id="rHex"></b><br><span id="rHsl"></span></div>
+      </div>
+      <div class="swatches ramp" id="redRamp"></div>
+      <div class="ctl"><label>hue <span class="val" id="vRh"></span></label><input type="range" id="rh" min="-20" max="40" step="1"></div>
+      <div class="ctl"><label>saturation <span class="val" id="vRs"></span></label><input type="range" id="rs" min="0" max="100" step="1"></div>
+      <div class="ctl"><label>lightness <span class="val" id="vRl"></span></label><input type="range" id="rl" min="15" max="85" step="1"></div>
+    </div>
 
-    <div class="ctl"><label>stripe — added <span class="val" id="vSA"></span></label>
-      <div class="row"><input type="color" id="sa"><input type="text" id="saHex"></div></div>
-    <div class="ctl"><label>stripe — removed <span class="val" id="vSD"></span></label>
-      <div class="row"><input type="color" id="sd"><input type="text" id="sdHex"></div></div>
-    <div class="ctl"><label>stripe width <span class="val" id="vSW"></span></label>
-      <input type="range" id="sw" min="0" max="12" step="1"></div>
-
-    <div class="ctl"><label>changed-word highlight (added) <span class="val" id="vHA"></span></label>
-      <input type="range" id="ha" min="0" max="0.6" step="0.02"></div>
-    <div class="ctl"><label>changed-word highlight (removed) <span class="val" id="vHD"></span></label>
-      <input type="range" id="hd" min="0" max="0.6" step="0.02"></div>
+    <div class="sec">how the hues are used</div>
+    <div class="block">
+      <div class="ctl"><label>text tint <span class="val" id="vTint"></span> <span class="hint" style="color:var(--ink-faint)">— 0 = all gold, 1 = full color</span></label>
+        <input type="range" class="neutral" id="tint" min="0" max="1" step="0.05"></div>
+      <div class="ctl"><label>word-highlight opacity <span class="val" id="vHl"></span></label>
+        <input type="range" class="neutral" id="hl" min="0" max="0.6" step="0.02"></div>
+      <div class="contrast">
+        <div class="pill"><div class="big" id="cAdd">–</div><div class="lab">added text ↔ bg</div></div>
+        <div class="pill"><div class="big" id="cDel">–</div><div class="lab">removed text ↔ bg</div></div>
+      </div>
+    </div>
 
     <div class="out">
-      <label style="font-size:11px;color:#c4ba9f;display:block;margin-bottom:5px">config — copy &amp; send back</label>
+      <label style="font-size:11px;color:#c4ba9f;display:block;margin-bottom:5px">config — copy &amp; send back to Claude</label>
       <textarea id="out" readonly></textarea>
       <button id="copy">copy config</button>
     </div>
@@ -162,155 +197,218 @@
 
 <script src="https://cdn.jsdelivr.net/npm/diff2html@3/bundles/js/diff2html.min.js"></script>
 <script>
-  const patch = `diff --git a/useHydratedRows.ts b/useHydratedRows.ts
+  const patch = `diff --git a/admin-settings.tsx b/admin-settings.tsx
 index 1111111..2222222 100644
---- a/useHydratedRows.ts
-+++ b/useHydratedRows.ts
-@@ -7,9 +7,11 @@ import {
-   numberWithCommas,
- } from "../../lib/stringUtils";
+--- a/admin-settings.tsx
++++ b/admin-settings.tsx
+@@ -1,9 +1,11 @@ import {
+ import { useContext, useMemo, useState } from "react";
++import { settingDefinitions } from "../../lib/setting-definitions";
  import { api } from "../../lib/trpc";
-+import { useSourceMetrics } from "../../hooks/use-source-metrics";
- import GoalContactsTable from "../goals/metrics/GoalContactsTable";
- import GoalTimeSeriesChart, {
-   buildChartData,
-@@ -366,12 +369,17 @@ function useHydratedRows(
-   attachments: GoalAttachmentSummary[],
-   timezone: string,
- ): GoalMetricRow[] {
--  const impressionQueries = api.useQueries((t) =>
--    attachments.map((a) =>
--      t.goals.getCampaignGoalImpressionStats({ attachmentId: a.attachmentId }),
--    ),
--  );
-+  const { value } = useSourceMetrics({
-+    sourceType: "campaign",
-+    sourceId: campaignId,
-+  });
-+  const perAttachment = value?.perAttachment[attachment.attachmentId];
-+  const stats = {
-+    impressions: perAttachment?.impressions ?? 0,
-+    conversions: perAttachment?.conversions ?? 0,
-+  };
-   return rows;
+ import AlertContext from "../../store/error-alert-context";
+ import { useToastProviderContext } from "../../store/toast-provider";
+@@ -16,7 +17,10 @@ type AdminSetting = {
+ type ParsedInput =
+-  | { ok: true; value: string | number | boolean | string[] }
++  | { ok: true; value: string | number | Record<string, number> }
+   | { ok: false; message: string };
+@@ -34,6 +38,10 @@ function getEditingValue(setting: AdminSetting): string {
+   return setting.parsedValue === true ? "true" : "false";
+ }
++  if (setting.kind === "numericEnum") {
++    return JSON.stringify(setting.parsedValue, null, 2);
++  }
+   return String(setting.parsedValue ?? "");
  }
 `;
 
   function renderDiff() {
     document.getElementById("diff").innerHTML =
-      Diff2Html.html(patch, { drawFileList: false, outputFormat: "side-by-side", matching: "lines", colorScheme: "dark" });
+      Diff2Html.html(patch, { drawFileList: false, outputFormat: "side-by-side", matching: "words", colorScheme: "dark" });
   }
   renderDiff();
 
   // ── color math ──
-  const rgb = (hex) => { const c = hex.replace("#", ""); return [0, 2, 4].map((i) => parseInt(c.substr(i, 2), 16)); };
-  const lum = (hex) => { const f = (x) => (x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); const [r, g, b] = rgb(hex).map((v) => v / 255); return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const hexToRgb = (hex) => { const c = hex.replace("#", ""); return [0, 2, 4].map((i) => parseInt(c.substr(i, 2), 16)); };
+  const rgbToHex = ([r, g, b]) => "#" + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+  function rgbToHsl([r, g, b]) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) { h = s = 0; }
+    else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) { case r: h = (g - b) / d + (g < b ? 6 : 0); break; case g: h = (b - r) / d + 2; break; default: h = (r - g) / d + 4; }
+      h /= 6;
+    }
+    return [h * 360, s * 100, l * 100];
+  }
+  function hslToRgb([h, s, l]) {
+    h = ((h % 360) + 360) % 360 / 360; s /= 100; l /= 100;
+    if (s === 0) { const v = l * 255; return [v, v, v]; }
+    const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)].map((v) => v * 255);
+  }
+  const hexToHsl = (h) => rgbToHsl(hexToRgb(h));
+  const hslToHex = (hsl) => rgbToHex(hslToRgb(hsl));
+  const mix = (a, b, t) => { const ra = hexToRgb(a), rb = hexToRgb(b); return rgbToHex(ra.map((v, i) => v + (rb[i] - v) * t)); };
+  const lum = (hex) => { const f = (x) => (x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); const [r, g, b] = hexToRgb(hex).map((v) => v / 255); return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
   const contrast = (a, b) => { const L1 = lum(a), L2 = lum(b); const hi = Math.max(L1, L2), lo = Math.min(L1, L2); return (hi + 0.05) / (lo + 0.05); };
 
   const root = document.documentElement;
+
+  // ── state ──
   const S = {
-    ink: "#dcd9d0", bg: "#14110a", weight: "500", size: 13,
-    sa: "#5fa058", sd: "#c8654a", sw: 5, ha: 0.12, hd: 0.12,
+    bg: "#0a0a0d", ink: "#ecd35a", weight: "500", size: 13, sw: 5,
+    green: "#1fb300", red: "#cc2a18",
+    tint: 0.62, hl: 0.0,
   };
 
+  const GREENS = ["#1fb300", "#19e000", "#3ad900", "#2faa3a", "#10b981", "#15b8a6", "#3ddc84", "#9ece6a", "#b8bb26", "#50fa7b", "#4caf50", "#0b8a14", "#7bc043", "#26a269", "#86efac", "#a3be8c"];
+  const REDS   = ["#ff3b1f", "#e03100", "#ff5555", "#fb4934", "#f7768e", "#ff6b5b", "#dc322f", "#cc2a18", "#bf616a", "#ef5350", "#c0392b", "#e8443a", "#ff8a80", "#d6604d", "#f4978e", "#c87a55"];
+  const BASES = {
+    coal:  { bg: "#0a0a0d", ink: "#ecd35a" },
+    navy:  { bg: "#0f1220", ink: "#e6cf73" },
+    ice:   { bg: "#0e1013", ink: "#e8eaed" },
+    gruv:  { bg: "#1d2021", ink: "#ebdbb2" },
+    tokyo: { bg: "#16161e", ink: "#c0caf5" },
+  };
+
+  // build a light, readable text color for a hue (keeps hue, caps saturation, lifts lightness)
+  function lightText(hex) {
+    const [h, s] = hexToHsl(hex);
+    return hslToHex([h, Math.min(s, 58), 72]);
+  }
+  // derived tokens for one side: returns {stripe, prefix, text, hl}
+  function side(seedHex, opacity) {
+    const stripe = seedHex;
+    const prefix = hslToHex(hexToHsl(seedHex).map((v, i) => i === 2 ? Math.max(v, 60) : v));
+    const text = mix(S.ink, lightText(seedHex), S.tint);
+    const [r, g, b] = hexToRgb(seedHex);
+    const hl = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+    return { stripe, prefix, text, hl };
+  }
+
+  function buildSwatches(containerId, list, key) {
+    const c = document.getElementById(containerId);
+    c.innerHTML = "";
+    list.forEach((hex) => {
+      const b = document.createElement("button");
+      b.className = "sw"; b.style.background = hex; b.title = hex;
+      b.addEventListener("click", () => { S[key] = hex; syncInputs(); apply(); });
+      c.appendChild(b);
+    });
+  }
+  function buildRamp(containerId, seedHex, key) {
+    const c = document.getElementById(containerId);
+    c.innerHTML = "";
+    const [h, s] = hexToHsl(seedHex);
+    for (let i = 0; i < 9; i++) {
+      const l = 25 + i * 6.5;
+      const hex = hslToHex([h, s, l]);
+      const b = document.createElement("button");
+      b.className = "sw"; b.style.background = hex; b.title = hex;
+      b.addEventListener("click", () => { S[key] = hex; syncInputs(); apply(); });
+      c.appendChild(b);
+    }
+  }
+  function markActive(containerId, hex) {
+    document.querySelectorAll(`#${containerId} .sw`).forEach((el) => {
+      el.classList.toggle("active", el.style.background && rgbToHex(el.style.background.match(/\d+/g).slice(0, 3).map(Number)) === hex.toLowerCase());
+    });
+  }
+
   function apply() {
-    root.style.setProperty("--t-ink", S.ink);
+    const add = side(S.green, S.hl), del = side(S.red, S.hl);
     root.style.setProperty("--t-bg", S.bg);
+    root.style.setProperty("--t-ink", S.ink);
+    root.style.setProperty("--t-text-add", add.text);
+    root.style.setProperty("--t-text-del", del.text);
+    root.style.setProperty("--t-stripe-add", add.stripe);
+    root.style.setProperty("--t-stripe-del", del.stripe);
+    root.style.setProperty("--t-prefix-add", add.prefix);
+    root.style.setProperty("--t-prefix-del", del.prefix);
+    root.style.setProperty("--t-hl-add", add.hl);
+    root.style.setProperty("--t-hl-del", del.hl);
+    root.style.setProperty("--t-stripe-w", S.sw + "px");
     root.style.setProperty("--t-weight", S.weight);
     root.style.setProperty("--t-size", S.size + "px");
-    root.style.setProperty("--t-stripe-add", S.sa);
-    root.style.setProperty("--t-stripe-del", S.sd);
-    root.style.setProperty("--t-stripe-w", S.sw + "px");
-    root.style.setProperty("--t-hl-add", `rgba(${rgb(S.sa).join(", ")}, ${S.ha})`);
-    root.style.setProperty("--t-hl-del", `rgba(${rgb(S.sd).join(", ")}, ${S.hd})`);
     document.querySelector(".preview").style.background = S.bg;
 
-    // value labels
-    vInk.textContent = S.ink; vBg.textContent = S.bg; vSize.textContent = S.size + "px";
-    vSA.textContent = S.sa; vSD.textContent = S.sd; vSW.textContent = S.sw + "px";
-    vHA.textContent = S.ha.toFixed(2); vHD.textContent = S.hd.toFixed(2);
-    inkHex.value = S.ink; bgHex.value = S.bg; saHex.value = S.sa; sdHex.value = S.sd;
+    // chips + labels
+    const gh = hexToHsl(S.green).map(Math.round), rh = hexToHsl(S.red).map(Math.round);
+    gChip.style.background = S.green; rChip.style.background = S.red;
+    gHex.textContent = S.green; rHex.textContent = S.red;
+    gHsl.textContent = `h ${gh[0]}  s ${gh[1]}  l ${gh[2]}`;
+    rHsl.textContent = `h ${rh[0]}  s ${rh[1]}  l ${rh[2]}`;
+    vBg.textContent = S.bg; vInk.textContent = S.ink; vSize.textContent = S.size + "px"; vSW.textContent = S.sw + "px";
+    vGh.textContent = gh[0]; vGs.textContent = gh[1] + "%"; vGl.textContent = gh[2] + "%";
+    vRh.textContent = rh[0]; vRs.textContent = rh[1] + "%"; vRl.textContent = rh[2] + "%";
+    vTint.textContent = S.tint.toFixed(2); vHl.textContent = S.hl.toFixed(2);
 
-    // contrast readout
-    const cr = contrast(S.ink, S.bg);
-    cRatio.textContent = cr.toFixed(2) + ":1";
-    let grade = "fail", cls = "fail";
-    if (cr >= 7) { grade = "AAA — body text"; cls = "pass"; }
-    else if (cr >= 4.5) { grade = "AA — body text"; cls = "warn"; }
-    else if (cr >= 3) { grade = "AA — large only"; cls = "warn"; }
-    else { grade = "below AA"; cls = "fail"; }
-    cGrade.textContent = grade; cGrade.className = "grade " + cls;
+    buildRamp("greenRamp", S.green, "green");
+    buildRamp("redRamp", S.red, "red");
+    markActive("greenSw", S.green); markActive("redSw", S.red);
+
+    // contrast of the actual rendered add/del text
+    const grade = (cr) => cr >= 7 ? ["AAA", "pass"] : cr >= 4.5 ? ["AA", "pass"] : cr >= 3 ? ["AA·lg", "warn"] : ["low", "fail"];
+    const ca = contrast(add.text, S.bg), cd = contrast(del.text, S.bg);
+    const [ga, ca2] = grade(ca), [gd, cd2] = grade(cd);
+    cAdd.innerHTML = `${ca.toFixed(1)}:1 <span class="${ca2}" style="font-size:11px">${ga}</span>`;
+    cDel.innerHTML = `${cd.toFixed(1)}:1 <span class="${cd2}" style="font-size:11px">${gd}</span>`;
 
     out.value =
-`/* paste-back config */
---diff-ink: ${S.ink};
-code background: ${S.bg};
-font-weight: ${S.weight};   font-size: ${S.size}px;
-stripe add: ${S.sa};   stripe del: ${S.sd};   width: ${S.sw}px;
-ins-highlight: rgba(${rgb(S.sa).join(", ")}, ${S.ha});
-del-highlight: rgba(${rgb(S.sd).join(", ")}, ${S.hd});
-text↔bg contrast: ${cr.toFixed(2)}:1 (${grade})`;
+`/* diff palette — paste back; maps to the viewer's index.css tokens */
+--diff-bg:        ${S.bg};
+--diff-ink:       ${S.ink};      /* unchanged / context code */
+--diff-ink-add:   ${add.text};   /* ADDED line text (new) */
+--diff-ink-del:   ${del.text};   /* REMOVED line text (new) */
+--add:            ${add.prefix};   /* '+' prefix sign */
+--del:            ${del.prefix};   /* '-' prefix sign */
+stripe add:       ${add.stripe};   stripe del: ${del.stripe};   width: ${S.sw}px;
+--hl-add:         ${add.hl};
+--hl-del:         ${del.hl};
+font: ${S.weight} / ${S.size}px;   text tint: ${S.tint.toFixed(2)}
+contrast  add ${ca.toFixed(1)}:1 (${ga})   del ${cd.toFixed(1)}:1 (${gd})`;
   }
 
   function syncInputs() {
-    ink.value = S.ink; bg.value = S.bg; weight.value = S.weight; size.value = S.size;
-    sa.value = S.sa; sd.value = S.sd; sw.value = S.sw; ha.value = S.ha; hd.value = S.hd;
+    bg.value = S.bg; bgHex.value = S.bg; ink.value = S.ink; inkHex.value = S.ink;
+    weight.value = S.weight; size.value = S.size; sw.value = S.sw;
+    const gh = hexToHsl(S.green), rh = hexToHsl(S.red);
+    document.getElementById("gh").value = Math.round(gh[0]); gs.value = Math.round(gh[1]); gl.value = Math.round(gh[2]);
+    document.getElementById("rh").value = Math.round(rh[0]); rs.value = Math.round(rh[1]); rl.value = Math.round(rh[2]);
+    tint.value = S.tint; hl.value = S.hl;
   }
 
-  const bind = (id, key, transform = (v) => v) => {
-    const el = document.getElementById(id);
-    el.addEventListener("input", () => { S[key] = transform(el.value); syncInputs(); apply(); });
-  };
-  bind("ink", "ink"); bind("inkHex", "ink");
-  bind("bg", "bg"); bind("bgHex", "bg");
-  bind("weight", "weight");
-  bind("size", "size", Number);
-  bind("sa", "sa"); bind("saHex", "sa");
-  bind("sd", "sd"); bind("sdHex", "sd");
-  bind("sw", "sw", Number);
-  bind("ha", "ha", Number);
-  bind("hd", "hd", Number);
+  const bind = (id, fn) => document.getElementById(id).addEventListener("input", (e) => { fn(e.target.value); syncInputs(); apply(); });
+  bind("bg", (v) => S.bg = v); bind("bgHex", (v) => S.bg = v);
+  bind("ink", (v) => S.ink = v); bind("inkHex", (v) => S.ink = v);
+  bind("weight", (v) => S.weight = v);
+  bind("size", (v) => S.size = Number(v));
+  bind("sw", (v) => S.sw = Number(v));
+  bind("tint", (v) => S.tint = Number(v));
+  bind("hl", (v) => S.hl = Number(v));
+  // HSL sliders rebuild the active hue
+  const setG = () => S.green = hslToHex([Number(document.getElementById("gh").value), Number(gs.value), Number(gl.value)]);
+  const setR = () => S.red = hslToHex([Number(document.getElementById("rh").value), Number(rs.value), Number(rl.value)]);
+  ["gh", "gs", "gl"].forEach((id) => document.getElementById(id).addEventListener("input", () => { setG(); apply(); }));
+  ["rh", "rs", "rl"].forEach((id) => document.getElementById(id).addEventListener("input", () => { setR(); apply(); }));
 
-  const presets = {
-    // your pick, verbatim
-    yours:     { ink: "#d7d46a", bg: "#111322", weight: "500", size: 13, sa: "#0f9900", sd: "#e03100", sw: 4, ha: 0.34, hd: 0.40 },
-    // same idea, softened: less acid yellow, a touch more bg depth
-    amberNavy: { ink: "#e6cf73", bg: "#0f1220", weight: "500", size: 13, sa: "#2faa3a", sd: "#e8443a", sw: 4, ha: 0.28, hd: 0.30 },
-    // gold text pushed onto near-black for max punch
-    goldCoal:  { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.30, hd: 0.34 },
-    // cooler navy, yellow-green text, vivid stripes (cobalt-ish)
-    cobalt:    { ink: "#e8e85a", bg: "#0d1f2d", weight: "500", size: 13, sa: "#3ad900", sd: "#ff5a4d", sw: 4, ha: 0.30, hd: 0.32 },
-    // proven editor themes, adapted ↓ (cool bg, hue-separated text)
-    tokyo:     { ink: "#c0caf5", bg: "#16161e", weight: "500", size: 13, sa: "#9ece6a", sd: "#f7768e", sw: 4, ha: 0.26, hd: 0.26 },
-    dracula:   { ink: "#f8f8f2", bg: "#21222c", weight: "500", size: 13, sa: "#50fa7b", sd: "#ff5555", sw: 4, ha: 0.24, hd: 0.24 },
-    gruvbox:   { ink: "#ebdbb2", bg: "#1d2021", weight: "500", size: 13, sa: "#b8bb26", sd: "#fb4934", sw: 4, ha: 0.26, hd: 0.26 },
-    nord:      { ink: "#e5e9f0", bg: "#242933", weight: "500", size: 13, sa: "#a3be8c", sd: "#bf616a", sw: 4, ha: 0.26, hd: 0.26 },
-    solarized: { ink: "#cad6d6", bg: "#002b36", weight: "500", size: 13, sa: "#859900", sd: "#dc322f", sw: 4, ha: 0.26, hd: 0.26 },
-    // clean cool-neutral, no hue gimmick — just crisp light-on-near-black
-    monoIce:   { ink: "#e8eaed", bg: "#0e1013", weight: "500", size: 13, sa: "#4caf50", sd: "#ef5350", sw: 4, ha: 0.22, hd: 0.22 },
-
-    // ── gold·coal base (ink #ecd35a / bg #0a0a0d fixed): only stripe color + opacity vary ──
-    gcVivid:   { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.30, hd: 0.34 },
-    gcNeon:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#19e000", sd: "#ff2a2a", sw: 5, ha: 0.32, hd: 0.36 },
-    gcDeep:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#0b8a14", sd: "#cc2a18", sw: 5, ha: 0.34, hd: 0.38 },
-    gcMuted:   { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#4f9e46", sd: "#cf5a44", sw: 5, ha: 0.20, hd: 0.22 },
-    gcEmerald: { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#10b981", sd: "#fb5b78", sw: 5, ha: 0.26, hd: 0.28 },
-    gcTeal:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#15b8a6", sd: "#ff6b5b", sw: 5, ha: 0.26, hd: 0.28 },
-    gcForest:  { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#2f9e3a", sd: "#c0392b", sw: 5, ha: 0.28, hd: 0.30 },
-    gcMint:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#3ddc84", sd: "#ff7a6b", sw: 5, ha: 0.24, hd: 0.26 },
-    gcHiOp:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.46, hd: 0.50 },
-    gcLoOp:    { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.14, hd: 0.16 },
-  };
-  document.querySelectorAll(".presets button").forEach((b) => {
-    b.addEventListener("click", () => { Object.assign(S, presets[b.dataset.preset]); syncInputs(); apply(); });
+  document.querySelectorAll("[data-base]").forEach((b) => {
+    b.addEventListener("click", () => { Object.assign(S, BASES[b.dataset.base]); syncInputs(); apply(); });
   });
-
   document.getElementById("copy").addEventListener("click", () => {
     navigator.clipboard.writeText(out.value);
     const btn = document.getElementById("copy"); btn.textContent = "copied ✓";
     setTimeout(() => (btn.textContent = "copy config"), 1200);
   });
 
+  buildSwatches("greenSw", GREENS, "green");
+  buildSwatches("redSw", REDS, "red");
   syncInputs(); apply();
 </script>
 </body>

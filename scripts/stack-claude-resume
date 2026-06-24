@@ -1,0 +1,52 @@
+#!/bin/zsh
+# stack-claude-resume <session-id> <cwd> <branch> [<target>] — pop a headless viewer chat
+# out into an INTERACTIVE claude in tmux, continuing the SAME conversation via `claude
+# --resume`. The viewer's chat ran headless + read-only in <cwd>; resuming there (claude
+# sessions are scoped to their project dir, so the cwd MUST match the one the chat used)
+# hands you the whole thread in a real terminal — now able to edit/run, not just read.
+#
+#   <target> placement:
+#     (empty) | "new"      → a fresh tmux window
+#     "<session>:<window>" → split that existing window into a new pane (the "which window?" pick)
+#   STACK_CLAUDE_TMUX=<session>  override the session a new window lands in (default: loops)
+#   STACK_CLAUDE_DRY=1           print what it would do, launch nothing
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+SESSION="${STACK_CLAUDE_TMUX:-${STACK_OPEN_TMUX:-loops}}"
+
+sid="${1:?usage: stack-claude-resume <session-id> <cwd> <branch> [<target>]}"
+dir="${2:?usage: stack-claude-resume <session-id> <cwd> <branch> [<target>]}"
+branch="${3:?usage: stack-claude-resume <session-id> <cwd> <branch> [<target>]}"
+target="${4:-}"
+
+# sid + target are baked into the tmux command/target strings — guard them to plain tokens.
+if [[ ! "$sid" =~ '^[A-Za-z0-9._-]+$' ]]; then
+  print -u2 "stack-claude-resume: refusing suspicious session id '$sid'"; exit 1
+fi
+[[ -d "$dir" ]] || { print -u2 "stack-claude-resume: no such dir '$dir'"; exit 1; }
+
+# claude exits → drop to a shell so the resumed thread's output sticks around in the pane.
+cmd="claude --resume $sid; exec \$SHELL"
+
+if [[ -z "$target" || "$target" == "new" ]]; then
+  win="chat:${branch##*/}"
+  if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
+    print -r -- "DRY: tmux new-window -t $SESSION -n $win -c $dir '$cmd'"; exit 0
+  fi
+  tmux new-window -t "$SESSION" -n "$win" -c "$dir" "$cmd" \
+    || { print -u2 "stack-claude-resume: couldn't open a tmux window (is the '$SESSION' session running?)"; exit 1; }
+  tmux select-window -t "$SESSION:$win" 2>/dev/null || true
+  print -r -- "resumed $sid in a new window ($SESSION:$win) at $dir"
+else
+  if [[ ! "$target" =~ '^[A-Za-z0-9._:/-]+$' ]]; then
+    print -u2 "stack-claude-resume: bad target '$target'"; exit 1
+  fi
+  if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
+    print -r -- "DRY: tmux split-window -t $target -c $dir '$cmd'"; exit 0
+  fi
+  tmux split-window -t "$target" -c "$dir" "$cmd" \
+    || { print -u2 "stack-claude-resume: couldn't split window '$target'"; exit 1; }
+  tmux select-window -t "$target" 2>/dev/null || true
+  print -r -- "resumed $sid as a new pane in $target at $dir"
+fi

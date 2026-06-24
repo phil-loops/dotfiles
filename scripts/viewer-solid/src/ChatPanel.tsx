@@ -51,6 +51,43 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
   let abort: AbortController | null = null;
   const stop = () => abort?.abort();
 
+  // ── pop out: hand this chat's headless session to an interactive claude in tmux ──
+  // The thread already carries a resume session-id; `claude --resume` continues the same
+  // conversation in a real terminal (now able to edit/run, not just read). Bonus: pick which
+  // tmux window to drop it into — a fresh window, or split an existing one into a new pane.
+  const [popoutOpen, setPopoutOpen] = createSignal(false);
+  const [targets, setTargets] = createStore<{ target: string; name: string; panes: number }[]>([]);
+  const [popoutMsg, setPopoutMsg] = createSignal<string | null>(null);
+  const togglePopout = async () => {
+    if (popoutOpen()) {
+      setPopoutOpen(false);
+      return;
+    }
+    setPopoutMsg(null);
+    setPopoutOpen(true);
+    try {
+      const r = await fetch("/tmux-targets").then((res) => res.json());
+      setTargets(Array.isArray(r) ? r : []);
+    } catch {
+      setTargets([]);
+    }
+  };
+  const popOut = async (target: string) => {
+    setPopoutOpen(false);
+    setPopoutMsg("opening…");
+    try {
+      const r = await fetch("/chat-popout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session: session(), branch: props.branch, target }),
+      }).then((res) => res.json());
+      setPopoutMsg(r.ok ? "✦ opened in tmux" : r.err || "couldn’t open");
+    } catch {
+      setPopoutMsg("couldn’t reach the server");
+    }
+    setTimeout(() => setPopoutMsg(null), 4000);
+  };
+
   // You can fire off a message any time — even while Claude is still answering. `submit` just
   // enqueues; `pump` drains the queue one turn at a time. So a mid-stream message shows as
   // "queued" and auto-sends the instant the current turn ends — turns stay ordered, and each
@@ -227,6 +264,40 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
               </For>
             </div>
             <div class="cp-sub-right">
+              <Show when={session()}>
+                <div class="cp-popout-wrap">
+                  <button
+                    class="cp-popout"
+                    classList={{ on: popoutOpen() }}
+                    title="pop this chat out into an interactive Claude Code session in tmux — resumes the same thread, now able to edit/run"
+                    onClick={togglePopout}
+                  >
+                    ⤢ pop out
+                  </button>
+                  <Show when={popoutOpen()}>
+                    <div class="cp-popout-menu">
+                      <div class="cp-popout-head">open in…</div>
+                      <button class="cp-popout-item" onClick={() => popOut("new")}>
+                        ＋ new window
+                      </button>
+                      <For each={targets}>
+                        {(t) => (
+                          <button class="cp-popout-item" onClick={() => popOut(t.target)}>
+                            <span class="cp-popout-target">{t.target}</span>
+                            <span class="cp-popout-name">{t.name}</span>
+                          </button>
+                        )}
+                      </For>
+                      <Show when={!targets.length}>
+                        <div class="cp-popout-empty">no tmux windows — opens a new one</div>
+                      </Show>
+                    </div>
+                  </Show>
+                </div>
+              </Show>
+              <Show when={popoutMsg()}>
+                <span class="cp-popout-msg">{popoutMsg()}</span>
+              </Show>
               <Show when={msgs().length}>
                 <button
                   class="cp-new"
@@ -367,6 +438,31 @@ const CSS = `
 }
 .cp-new:hover:not(:disabled) { opacity: 1; }
 .cp-new:disabled { opacity: .4; cursor: default; }
+
+.cp-popout-wrap { position: relative; }
+.cp-popout {
+  font: inherit; font-size: 10.5px; cursor: pointer; white-space: nowrap;
+  color: var(--gold, #e0ad4e); background: transparent;
+  border: 1px solid var(--gold, #e0ad4e); border-radius: 5px; padding: 2px 8px; opacity: .85;
+}
+.cp-popout:hover, .cp-popout.on { opacity: 1; background: rgba(224,173,78,.1); }
+.cp-popout-menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 62; width: 220px;
+  padding: 5px; border-radius: 8px; border: 1px solid var(--line, #3a332b);
+  background: var(--raised, #1b1815); box-shadow: 0 12px 32px rgba(0,0,0,.5);
+  display: flex; flex-direction: column; gap: 1px; cursor: default; text-align: left;
+}
+.cp-popout-head { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint, #6f675a); padding: 4px 8px 5px; }
+.cp-popout-item {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  font: inherit; font-size: 11.5px; text-align: left; cursor: pointer;
+  color: var(--ink, #e9e2d4); background: transparent; border: 0; border-radius: 5px; padding: 6px 8px;
+}
+.cp-popout-item:hover { background: var(--panel, #221e1a); }
+.cp-popout-target { color: var(--patina, #8a9a6b); flex: none; }
+.cp-popout-name { color: var(--faint, #6f675a); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-popout-empty { font-size: 10.5px; color: var(--faint, #6f675a); padding: 4px 8px 6px; font-style: italic; }
+.cp-popout-msg { font-size: 10.5px; color: var(--gold, #e0ad4e); white-space: nowrap; }
 
 .cp-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
 .cp-empty { color: var(--dim, #a89e8c); font-size: 12.5px; line-height: 1.6; margin: 4px 0 0; }

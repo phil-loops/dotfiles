@@ -1,0 +1,446 @@
+diff --git a/scripts/srv/restack.py b/scripts/srv/restack.py
+index c118dce..18e044a 100644
+--- a/scripts/srv/restack.py
++++ b/scripts/srv/restack.py
+@@ -98,6 +98,49 @@ def _running():
+     return False
+ 
+ 
++def _drivers():
++    # Every LIVE restack driver as {pid, mode, project, etime}. Normally ≤1; two means a
++    # tangle — concurrent drivers racing one worktree (the lock refuses the second now,
++    # but we still surface the count as the safety net). _running() is the boolean form;
++    # the Hearth needs the list, because a boolean can't tell one driver from two.
++    base = os.path.join(ctx.SCRIPTS, "stack-restack")
++    pids = subprocess.run(["pgrep", "-f", base], capture_output=True, text=True).stdout.split()
++    if not pids:
++        return []
++    ps = subprocess.run(["ps", "-o", "pid=,etime=,command=", "-p", ",".join(pids)],
++                        capture_output=True, text=True).stdout
++    drivers = []
++    for line in ps.splitlines():
++        parts = line.strip().split(None, 2)
++        if len(parts) < 3:
++            continue
++        pid, etime, c = parts
++        # Keep only the real invocation; drop the `zsh -c "… && git checkout"` parent so
++        # wrapper+inner count as ONE driver (they bit us as two in the tangle).
++        if (base + " ") not in c and (base + "-all") not in c:
++            continue
++        if "zsh -c" in c:
++            continue
++        mode = ("all" if "stack-restack-all" in c else "handoff" if "--handoff" in c
++                else "diagnose" if "--diagnose" in c else "discard" if "--discard" in c
++                else "continue" if "--continue" in c else "start")
++        project = ""
++        if mode != "all":
++            after = c.split("stack-restack", 1)[1]
++            project = next((t for t in after.split() if not t.startswith("-")), "")
++        drivers.append({"pid": int(pid), "mode": mode, "project": project, "etime": etime})
++    drivers.sort(key=lambda d: d["pid"])
++    return drivers
++
++
++def _resolvers():
++    # Live headless `claude` conflict-resolvers. >1 on one conflict is the duplicate-spawn
++    # half of the tangle (today three piled up on the same job-status clash).
++    sig = "resolving a git rebase conflict during a stack restack"
++    out = subprocess.run(["pgrep", "-fc", sig], capture_output=True, text=True).stdout.strip()
++    return int(out) if out.isdigit() else 0
++
++
+ def _state_path():
+     gd = _gitdir()
+     return os.path.join(gd, "stack-restack-state", "state") if gd else ""
+@@ -147,11 +190,16 @@ def status(req, u):
+     sd = _state_path()
+     want = parse_qs(u.query).get("project", [""])[0]
+     paused, proj, cur = False, "", ""
++    done = total = 0
+     if sd and os.path.exists(sd):
+         with open(sd) as fh:
+             kv = dict(l.rstrip("\n").split("=", 1) for l in fh
+                       if "=" in l and not l.startswith("SNAP"))
+         proj, cur = kv.get("PROJECT", ""), kv.get("CURRENT", "")
++        # COMPLETED/PENDING are space-joined branch lists; CURRENT is the in-flight one
++        # (popped from PENDING, not in either list) → it's node done+1 of total.
++        done = len(kv.get("COMPLETED", "").split())
++        total = done + len(kv.get("PENDING", "").split()) + (1 if cur else 0)
+         paused = (not want) or proj == want
+     # running==False + paused==True means "escalated, needs a human" (the parent
+     # stack-restack stays alive across the whole walk and exits when it escalates).
+@@ -166,7 +214,9 @@ def status(req, u):
+         except Exception:
+             pass
+     req._send(200, json.dumps({"paused": paused, "project": proj, "current": cur,
+-                               "running": running, "reason": reason}))
++                               "running": running, "reason": reason,
++                               "done": done, "total": total,
++                               "drivers": _drivers(), "resolvers": _resolvers()}))
+ 
+ 
+ def restack(req, raw):
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 332553e..0a2b2fb 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -27,6 +27,7 @@ import { threadMsgCount } from "./chatStore";
+ import { useFileCycle } from "./useFileCycle";
+ import CommandPalette from "./CommandPalette";
+ import { ServerStatus } from "./ServerStatus";
++import { Hearth } from "./Hearth";
+ import type {
+   ForestModel,
+   SpineNode,
+@@ -303,6 +304,8 @@ function Home() {
+         </Show>
+       </header>
+ 
++      <Hearth />
++
+       <Show when={(prs.data || []).length}>
+         <section>
+           <h2 class="eyebrow">your open PRs</h2>
+diff --git a/scripts/viewer-solid/src/Hearth.css b/scripts/viewer-solid/src/Hearth.css
+new file mode 100644
+index 0000000..d206c98
+--- /dev/null
++++ b/scripts/viewer-solid/src/Hearth.css
+@@ -0,0 +1,168 @@
++/* The Hearth — a live-activity strip for the home ledger. The ledger records what's
++   BLESSED (gold); the Hearth records what's IN MOTION (ember). Gold is never spent on
++   activity. The one new hue, --ember-hot, appears ONLY on a tangle (>1 driver/resolver)
++   so its rarity is its alarm. All other tones are the global ledger tokens (index.css). */
++.hearth-root {
++  --ember: var(--del); /* #c87a55 — the system's warm tone, reused for work-in-motion */
++  --ember-wash: rgba(200, 122, 85, 0.1);
++  --ember-hot: #e2643a; /* hotter, more saturated — wrong-state only */
++  --ember-hot-wash: rgba(226, 100, 58, 0.12);
++  margin: 2px 0 18px;
++}
++
++/* ── the calm strip: one ember line while work flows ─────────────────── */
++.hearth {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 9px 14px;
++  border: 1px solid var(--rule);
++  border-left: 2px solid var(--ember);
++  border-radius: 7px;
++  background: linear-gradient(90deg, var(--ember-wash), transparent 70%);
++}
++.hearth .sig {
++  width: 7px;
++  height: 7px;
++  border-radius: 50%;
++  background: var(--ember);
++  flex: 0 0 auto;
++}
++.hearth.is-running .sig {
++  animation: hearth-breathe 1.6s ease-in-out infinite;
++}
++.hearth .lede {
++  font-family: var(--display);
++  font-style: italic;
++  font-size: 16px;
++  color: #f0d3b6;
++}
++.hearth .meta {
++  font-size: 11px;
++  letter-spacing: 0.04em;
++  color: var(--ink-dim);
++}
++.hearth .meta b {
++  color: var(--ink);
++  font-weight: 500;
++}
++.hearth .count {
++  margin-left: auto;
++  font-size: 10px;
++  letter-spacing: 0.16em;
++  text-transform: uppercase;
++  color: var(--ink-faint);
++}
++.hearth.is-parked {
++  border-left-color: var(--ember);
++  background: var(--ember-wash);
++}
++.hearth.is-parked .sig {
++  animation: none;
++}
++
++@keyframes hearth-breathe {
++  0%, 100% {
++    box-shadow: 0 0 0 2px var(--ember-wash);
++    opacity: 0.65;
++  }
++  50% {
++    box-shadow: 0 0 0 5px var(--ember-wash);
++    opacity: 1;
++  }
++}
++
++/* ── the alarm: more than one driver / resolver. the one aesthetic risk. ── */
++.hearth-alarm {
++  border: 1px solid var(--ember-hot);
++  border-radius: 8px;
++  overflow: hidden;
++  background: var(--ember-hot-wash);
++  animation: hearth-alarm-pulse 2s ease-out 2;
++}
++.hearth-alarm .bar {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 12px 16px;
++  border-bottom: 1px solid rgba(226, 100, 58, 0.22);
++}
++.hearth-alarm .bar .sig {
++  font-size: 15px;
++  color: var(--ember-hot);
++}
++.hearth-alarm .bar .msg {
++  font-family: var(--display);
++  font-style: italic;
++  font-size: 17px;
++  color: #f4c3aa;
++}
++.hearth-alarm .bar .act {
++  margin-left: auto;
++}
++.hearth-alarm .rows {
++  padding: 6px 16px 12px;
++}
++.hearth-alarm .arow {
++  display: flex;
++  align-items: center;
++  gap: 12px;
++  padding: 6px 0;
++  border-bottom: 1px dashed rgba(226, 100, 58, 0.15);
++  font-size: 12px;
++}
++.hearth-alarm .arow:last-child {
++  border-bottom: 0;
++}
++.hearth-alarm .arow .pid {
++  color: var(--ember-hot);
++  min-width: 96px;
++}
++.hearth-alarm .arow.first .pid {
++  color: var(--ink-dim); /* the one that started first is the keeper */
++}
++.hearth-alarm .arow .desc {
++  color: var(--ink-dim);
++}
++.hearth-alarm .arow .desc b {
++  color: var(--ink);
++  font-weight: 500;
++}
++.hearth-alarm .arow .age {
++  margin-left: auto;
++  color: var(--ink-faint);
++}
++
++.hearth-btn {
++  font-family: var(--mono);
++  font-size: 12px;
++  padding: 7px 13px;
++  border-radius: 6px;
++  border: 1px solid var(--ember-hot);
++  background: transparent;
++  color: var(--ember-hot);
++  cursor: pointer;
++}
++.hearth-btn:hover {
++  background: var(--ember-hot-wash);
++}
++.hearth-btn:disabled {
++  opacity: 0.5;
++  cursor: default;
++}
++
++@keyframes hearth-alarm-pulse {
++  0%, 100% {
++    box-shadow: 0 0 0 0 transparent;
++  }
++  50% {
++    box-shadow: 0 0 34px -10px var(--ember-hot);
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .hearth .sig,
++  .hearth-alarm {
++    animation: none !important;
++  }
++}
+diff --git a/scripts/viewer-solid/src/Hearth.tsx b/scripts/viewer-solid/src/Hearth.tsx
+new file mode 100644
+index 0000000..76b7dc6
+--- /dev/null
++++ b/scripts/viewer-solid/src/Hearth.tsx
+@@ -0,0 +1,133 @@
++// The Hearth — the home ledger's live-activity strip. The ledger records what's
++// BLESSED; the Hearth records what's IN MOTION: a restack walking the forest, a
++// conflict handed to Claude. It polls /restack-status and renders nothing when idle.
++//
++// Its real job is the alarm: the day this was written, two restack drivers raced one
++// worktree and three resolvers piled on one conflict — invisible until someone ran
++// `ps`. A boolean `running` can't see that; the server now returns the driver LIST, and
++// when it's longer than one the strip goes hot and names the race.
++import { createQuery } from "@tanstack/solid-query";
++import { createSignal, Show, For } from "solid-js";
++import { provider, canMutate } from "./provider";
++import type { RestackStatus } from "./types";
++import "./Hearth.css";
++
++const leaf = (s?: string): string => (s || "").split("/").pop() ?? "";
++
++const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
++  fetch(url, {
++    method: "POST",
++    headers: { "Content-Type": "application/json" },
++    body: JSON.stringify(body),
++  }).then((r) => r.json());
++
++export function Hearth() {
++  const q = createQuery<RestackStatus>(() => ({
++    queryKey: ["hearth-status"],
++    queryFn: () => provider.restackStatus(),
++    refetchInterval: 2000,
++    enabled: canMutate, // a baked static snapshot has no live engine to watch
++  }));
++
++  const s = () => q.data;
++  const drivers = () => s()?.drivers ?? [];
++  const resolvers = () => s()?.resolvers ?? 0;
++  const active = () => {
++    const d = s();
++    return !!d && (d.running || d.paused || drivers().length > 0);
++  };
++  const tangle = () => drivers().length > 1 || resolvers() > 1;
++
++  const [aborting, setAborting] = createSignal(false);
++  const abort = () => {
++    const project = s()?.project || drivers()[0]?.project || "";
++    setAborting(true);
++    post("/restack-abort", { project }).finally(() => {
++      setAborting(false);
++      void q.refetch();
++    });
++  };
++
++  const alarmMsg = () =>
++    drivers().length > 1
++      ? "Two restack drivers are live — they’re racing one worktree."
++      : "Duplicate resolvers are on one conflict.";
++
++  return (
++    <Show when={active()}>
++      <div class="hearth-root">
++        <Show
++          when={tangle()}
++          fallback={
++            <div
++              class="hearth"
++              classList={{ "is-running": !!s()?.running, "is-parked": !!s()?.paused && !s()?.running }}
++            >
++              <span class="sig" />
++              <Show
++                when={s()?.paused && !s()?.running}
++                fallback={
++                  <>
++                    <span class="lede">Restacking {s()?.project}</span>
++                    <span class="meta">
++                      <Show when={s()?.current} fallback={<>starting the walk…</>}>
++                        <Show when={s()?.total}>
++                          node {s()?.done != null ? s()!.done! + 1 : 1} of {s()?.total} ·{" "}
++                        </Show>
++                        rebasing <b>{leaf(s()!.current!)}</b>
++                      </Show>
++                    </span>
++                  </>
++                }
++              >
++                <span class="lede">Parked at {leaf(s()?.current || s()?.project || "")}</span>
++                <span class="meta">{s()?.reason || "needs a hand — hand it to Claude or abort"}</span>
++              </Show>
++              <span class="count">
++                {drivers().length || (s()?.running ? 1 : 0)} driver
++                {(drivers().length || 1) === 1 ? "" : "s"}
++                <Show when={resolvers() > 0}> · claude resolving</Show>
++              </span>
++            </div>
++          }
++        >
++          <div class="hearth-alarm">
++            <div class="bar">
++              <span class="sig">◆◆</span>
++              <span class="msg">{alarmMsg()}</span>
++              <Show when={canMutate}>
++                <span class="act">
++                  <button class="hearth-btn" disabled={aborting()} onClick={abort}>
++                    {aborting() ? "aborting…" : "Abort the race"}
++                  </button>
++                </span>
++              </Show>
++            </div>
++            <div class="rows">
++              <For each={drivers()}>
++                {(d, i) => (
++                  <div class="arow" classList={{ first: i() === 0 }}>
++                    <span class="pid">pid {d.pid}</span>
++                    <span class="desc">
++                      driving <b>{d.project || d.mode}</b>
++                      {d.mode !== "start" && d.project ? ` · ${d.mode}` : ""}
++                    </span>
++                    <span class="age">{d.etime ? `${d.etime} in` : ""}</span>
++                  </div>
++                )}
++              </For>
++              <Show when={resolvers() > 1}>
++                <div class="arow">
++                  <span class="pid">claude ×{resolvers()}</span>
++                  <span class="desc">
++                    <b>{resolvers()}</b> resolvers spawned on the same conflict
++                  </span>
++                </div>
++              </Show>
++            </div>
++          </div>
++        </Show>
++      </div>
++    </Show>
++  );
++}
+diff --git a/scripts/viewer-solid/src/types.ts b/scripts/viewer-solid/src/types.ts
+index b70d165..34cb947 100644
+--- a/scripts/viewer-solid/src/types.ts
++++ b/scripts/viewer-solid/src/types.ts
+@@ -89,12 +89,25 @@ export const Commit = z.object({
+ });
+ export type Commit = z.infer<typeof Commit>;
+ 
++export const RestackDriver = z.object({
++  pid: z.number(),
++  mode: z.string(), // start | handoff | continue | diagnose | discard | all
++  project: z.string().optional(),
++  etime: z.string().optional(), // ps elapsed time, e.g. "11:13"
++});
++export type RestackDriver = z.infer<typeof RestackDriver>;
++
+ export const RestackStatus = z.object({
+   running: z.boolean(),
+   paused: z.boolean().optional(),
+   project: z.string().optional(),
+   current: z.string().optional(),
+   reason: z.string().optional(),
++  done: z.number().optional(), // branches rebased so far this walk
++  total: z.number().optional(), // total in the walk → "node done of total"
++  // The list, not a boolean — a boolean can't tell one driver from two. >1 == a tangle.
++  drivers: z.array(RestackDriver).optional(),
++  resolvers: z.number().optional(), // live headless claude conflict-resolvers
+ });
+ export type RestackStatus = z.infer<typeof RestackStatus>;
+ 

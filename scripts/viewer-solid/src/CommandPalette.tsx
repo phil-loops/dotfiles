@@ -1,6 +1,7 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
+import { deleteMode, setDeleteMode } from "./deleteMode";
 import { useViewerLocation, forestKey, withNode } from "./router";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
@@ -78,6 +79,13 @@ export default function CommandPalette() {
       },
     });
     cmds.push({ label: "⌂ home — all forests", run: () => navigate({ kind: "home", tab: "forests" }) });
+    // Home only: flip the forest list into drop mode (each row grows a ✕ drop button).
+    if (!c.project && canMutate) {
+      cmds.push({
+        label: deleteMode() ? "⌫ exit delete mode" : "⌫ delete mode — drop old forests",
+        run: () => setDeleteMode((v) => !v),
+      });
+    }
 
     if (c.project) {
       const nodes = model.data?.nodes ? Object.keys(model.data.nodes) : [];
