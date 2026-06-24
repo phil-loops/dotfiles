@@ -225,6 +225,8 @@ class H(BaseHTTPRequestHandler):
             return review.bless(self, raw)
         if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list
             return picker.pin(self, raw)
+        if self.path == "/promote":   # graduate a watched branch into its own forest project
+            return picker.promote(self, raw)
         if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
             return reviews.import_pr(self, raw)
         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive

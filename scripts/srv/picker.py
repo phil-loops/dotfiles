@@ -274,6 +274,27 @@ def pin(req, raw):   # POST /standalone — pin/unpin a branch in the watch list
     req._send(200, json.dumps({"ok": True}))
 
 
+def promote(req, raw):   # POST /promote — graduate a watched branch into its own forest project
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "").strip()
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    if ctx.run(["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + branch]).returncode != 0:
+        req._send(404, json.dumps({"ok": False, "err": "no such local branch"}))
+        return
+    project = branch.rsplit("/", 1)[-1]   # the branch leaf becomes the forest tag
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    ctx.run(["git", "config", f"stack-branch.{branch}.parent", main])   # forks off main → a root
+    ctx.run(["git", "config", f"stack-branch.{branch}.project", project])
+    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.splitlines()
+    if branch not in members:
+        ctx.run(["git", "config", "--add", f"stack-project.{project}.branch", branch])
+    # it's a forest now, not a loose watched branch — drop it from the watch list.
+    ctx.run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", branch])
+    req._send(200, json.dumps({"ok": True, "project": project}))
+
+
 def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
     d = json.loads(raw or "{}")
     args = [os.path.join(ctx.SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")]
