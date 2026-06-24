@@ -64,6 +64,21 @@ export function Hearth() {
       });
   };
 
+  const [stopping, setStopping] = createSignal(false);
+  const stop = () => {
+    setStopping(true);
+    setAbortErr(null);
+    post("/restack-stop", {})
+      .then((r) => {
+        if (!r?.ok) setAbortErr(r?.err || "couldn’t stop the restack");
+      })
+      .catch(() => setAbortErr("stop failed — server unreachable"))
+      .finally(() => {
+        setStopping(false);
+        void q.refetch();
+      });
+  };
+
   const alarmMsg = () => {
     const n = drivers().length;
     return n > 1
@@ -106,6 +121,14 @@ export function Hearth() {
                 {(drivers().length || 1) === 1 ? "" : "s"}
                 <Show when={resolvers() > 0}> · claude resolving</Show>
               </span>
+              <Show when={canMutate && s()?.running}>
+                <button class="hearth-btn" disabled={stopping()} onClick={stop}>
+                  {stopping() ? "stopping…" : "■ stop"}
+                </button>
+              </Show>
+              <Show when={abortErr()}>
+                <span class="hearth-err">{abortErr()}</span>
+              </Show>
             </div>
           }
         >
