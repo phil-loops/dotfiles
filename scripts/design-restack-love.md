@@ -31,12 +31,23 @@ conflict the conservative resolver escalates.
   Escalate only if the integrator *independently* modified those files (its own non-carried commit
   touches them). This makes Phil's "merged ⇒ should just work" hold even when the dep drifted.
 
-## P3 — Reliability paper-cuts  *(mostly stack lane — hand off)*
-- Stop swallowing git errors (`|| true` around mutating ops) — fail loud on the unexpected.
-- Amnesiac branches: only strip a branch's parent/project metadata *after* a successful delete
-  (a delete that fails because the branch is checked out elsewhere currently leaves it invisible).
-- Dedupe resolver spawns; bound/raise the 600s Claude-resolver hang.
+## P3 — Reliability  *(mostly already hardened; one wart fixed)*
+On reading the live code, the flagged paper-cuts were **already handled**:
+- **Amnesiac branches** — fixed: a failed `git branch -D` `continue`s *before* stripping
+  parent/membership (`stack-restack` ~1184–1192).
+- **Duplicate resolvers** — prevented by the single-flight `STACK_RESTACK_LOCK_OWNER` reentrancy
+  (`stack-restack` ~133–135).
+- **Claude-resolver hang** — bounded: `run_bounded` kills the resolver at `RESOLVE_TIMEOUT` (600s,
+  ~439) and escalates.
+- `|| true` swallowing is mostly intentional (`config --unset` on maybe-absent keys); no clear bug
+  to fix without risky churn — left alone.
 
-## Sequencing
-P1 now (viewer, this session). P2 + P3 are stack-lane — coordinate with that session (claude-say)
-or land via the patch protocol; P2 specifically is the contract work already on that session's plate.
+**Fixed:** `stack-restack-all` trapped `INT/TERM` to *release the lock* but didn't exit — so a plain
+kill was ignored and `/restack-stop` had to SIGKILL. Now an `on_signal` handler aborts the in-flight
+rebase, drops the parked state, releases the lock, and exits — graceful stop works.
+
+## Status (2026-06-24)
+- **P1 — stoppability:** DONE (`0722de2`) — `/restack-stop` + Hearth ■ stop.
+- **P2 — contracted-dep drift:** DONE (`bdb92b1`) — auto-take main's landed version; verified.
+- **P3 — reliability:** the concrete items were already hardened; the `stack-restack-all` TERM-trap
+  wart is fixed. Nothing else worth churning a critical script for.
