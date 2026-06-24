@@ -3,3 +3,6 @@ scripts/stack/plans/
 
 # MCP server dependencies
 mcp-servers/*/node_modules/
+
+# Externally-installed agent skills (npx skills add) — symlinks into ~/.agents/skills, not ours to track
+.claude/skills/loops-*

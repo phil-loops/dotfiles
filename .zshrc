@@ -21,7 +21,7 @@ alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design do
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
 alias db="LOCAL_PORT=54322 aws-vault exec staging -- bin/bastion-tunnel"
 alias db:rw="LOCAL_PORT=54322 aws-vault exec staging -- bin/bastion-tunnel --writer"
-alias db:prod="LOCAL_PORT=54322 aws-vault exec prod -- bin/bastion-tunnel"
+alias db:prod="LOCAL_PORT=54322 aws-vault exec prod -- ~/coding/loops/bin/bastion-tunnel --cluster db-loops-production"
 alias refresh="rm -fr .next node_modules && task dev"
 alias docs="cd ~/coding/docs && mintlify dev"
 
