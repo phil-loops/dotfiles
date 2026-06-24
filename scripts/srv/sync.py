@@ -208,6 +208,46 @@ def _eject(branch):
     return ok, ("" if ok else (r.stderr or r.stdout or "could not launch rebase session"))
 
 
+def _children_of(branch):
+    out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout
+    kids = []
+    for line in out.splitlines():
+        key, _, val = line.partition(" ")
+        if val.strip() == branch:
+            kids.append(key[len("stack-branch."):-len(".parent")])
+    return kids
+
+
+def _already_merged(branch):
+    """rebase-classify exit 20 == already-merged (squash/ff): its work is in origin/main,
+    a forward rebase replays nothing. Non-destructive probe; origin/main assumed fetched."""
+    rc = ctx.run([os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, "origin/main"]).returncode
+    return rc == 20
+
+
+def _contract(branch):
+    """Drop an already-merged branch and rewire its children onto its parent (== main for a
+    syncable root). Deterministic mirror of the manual contraction. Returns (children, parent).
+    Caller MUST have confirmed _already_merged first — this never re-checks."""
+    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    base = ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip()
+    kids = _children_of(branch)
+    for k in kids:
+        ctx.run(["git", "config", f"stack-branch.{k}.parent", parent])
+        ctx.run(["git", "config", f"stack-branch.{k}.base", base])
+    wt = _worktree_of(branch)
+    if wt:
+        ctx.run(["git", "-C", wt, "checkout", "--detach"])   # release so branch -D can run
+    ctx.run(["git", "branch", "-D", branch])
+    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    for key in ("parent", "project", "base"):
+        ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.{key}"])
+    if proj:
+        ctx.run(["git", "config", "--unset", f"stack-project.{proj}.branch",
+                 "^" + branch.replace(".", r"\.") + "$"])
+    return kids, parent
+
+
 def post_sync(req, raw):
     branch = json.loads(raw or "{}").get("branch", "")
     if not branch:
@@ -222,8 +262,33 @@ def post_sync(req, raw):
     if status == "clean":
         req._send(200, json.dumps({"ok": True, "rebased": True, "summary": summary}))
         return
-    # conflict or unsafe-to-rebase-in-place → eject to a standalone Claude.
+    # A replay conflict can mean the branch already squash-merged to main — rewiring it is
+    # wrong; it should be CONTRACTED. Surface a Phil-driven drop, not a Claude grinding it.
+    if status == "conflict" and _already_merged(branch):
+        req._send(200, json.dumps(
+            {"ok": True, "contract": True, "branch": branch, "children": _children_of(branch)}))
+        return
+    # genuine conflict or unsafe-to-rebase-in-place → eject to a standalone Claude.
     ok, err = _eject(branch)
     req._send(200 if ok else 500, json.dumps(
         {"ok": ok, "ejected": ok, "conflict": status == "conflict",
          "err": "" if ok else (err or "could not launch rebase session")}))
+
+
+def post_contract(req, raw):
+    branch = json.loads(raw or "{}").get("branch", "")
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    ctx.run(["git", "fetch", "origin", "main"])
+    if not _already_merged(branch):
+        req._send(409, json.dumps(
+            {"ok": False, "err": "not already-merged — refusing to drop a branch with unmerged work"}))
+        return
+    kids, parent = _contract(branch)
+    n = len(kids)
+    summary = (f"dropped {branch}; rewired {n} child{'' if n == 1 else 'ren'} onto {parent}"
+               if kids else f"dropped {branch} (no children)")
+    req._send(200, json.dumps(
+        {"ok": True, "contracted": True, "branch": branch, "children": kids,
+         "parent": parent, "summary": summary}))

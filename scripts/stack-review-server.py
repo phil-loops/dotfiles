@@ -240,6 +240,8 @@ class H(BaseHTTPRequestHandler):
             return checkout.move(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
+        if self.path == "/contract":   # drop an already-merged branch + rewire its children onto main
+            return sync.post_contract(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit
             return review.squash(self, raw)
         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
