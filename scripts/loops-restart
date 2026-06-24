@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# loops-restart — kill the running loops dev stack, rebuild packages, restart it cleanly.
+#
+#   loops-restart [--dir <checkout>] [--reset|--keep] [--no-restart] [--dry-run]
+#
+#   --dir <path>   checkout to (re)start in. Default: ~/coding/loops (the main checkout).
+#   --reset        full DB reset on start: `task dev` (prisma migrate reset --force +
+#                  reseed + clickhouse:reset). Use for a clean slate.
+#   --keep         keep dev data: `task dev:watch` (rebuild packages + restart node
+#                  services only, no DB wipe). DEFAULT — right for a code/package change.
+#   --no-restart   kill + docker-down only; don't relaunch.
+#   --dry-run      print what it WOULD kill / bring down / start; touch nothing.
+#
+# Why this exists: a dev server was found running out of a stale worktree
+# (loops-loo5170-verify), and killing the node processes was NOT enough — its Docker
+# compose project kept holding :9000 (minio) / :5432 (psql) / :8123 (clickhouse), so a
+# restart in another checkout died on "port is already allocated". This brings the
+# RUNNING checkout's compose project down before relaunching, so ports are free even
+# when relocating between checkouts.
+#
+# Safety: only touches processes whose cwd is the discovered dev checkout, and never a
+# `claude` process. Docker volumes are preserved (`compose down` without -v). The server
+# runs in a detached tmux session `loops-dev`, logging to /tmp/loops-dev.log (which the
+# `dev-tail` skill reads), so it outlives your shell.
+
+DIR="$HOME/coding/loops"
+MODE="keep"        # keep | reset
+RESTART=1
+DRY=0
+LOG=/tmp/loops-dev.log
+SESSION=loops-dev
+DEV_PORTS=(3000 3001 3002 3003 3004 3005 4000)
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dir) DIR="$2"; shift 2 ;;
+    --reset) MODE="reset"; shift ;;
+    --keep)  MODE="keep";  shift ;;
+    --no-restart) RESTART=0; shift ;;
+    --dry-run) DRY=1; shift ;;
+    -h|--help) sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "loops-restart: unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+DIR="${DIR%/}"
+
+say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
+
+cwd_of()  { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | grep '^n' | sed 's/^n//'; }
+pgid_of() { ps -o pgid= -p "$1" 2>/dev/null | tr -d ' '; }
+
+# Seed PIDs that DEFINE the running dev stack — precisely, not "anything sharing the
+# checkout cwd" (the main checkout is the cwd of the viewer, shells, editors… killing by
+# cwd there is a footgun). Two unambiguous signals: the `task …dev…` orchestrator, and
+# whoever LISTENS on the dev ports. Their process GROUPS are the whole tree to kill.
+SELF_PGID="$(pgid_of $$)"
+seed_pids() {
+  { pgrep -f 'task .*dev' 2>/dev/null || true
+    lsof -nP -sTCP:LISTEN $(printf -- '-iTCP:%s ' "${DEV_PORTS[@]}") -t 2>/dev/null || true
+  } | sort -u
+}
+
+RUNNING=""
+declare -a KILL_PGIDS=()
+for p in $(seed_pids); do
+  cmd=$(ps -o command= -p "$p" 2>/dev/null || true)
+  case "$cmd" in claude\ *|*/claude\ *|claude) continue ;; esac   # never a working session
+  g=$(pgid_of "$p"); [ -n "$g" ] || continue
+  [ "$g" = "$SELF_PGID" ] && continue                              # never our own group
+  [ -z "$RUNNING" ] && RUNNING="$(cwd_of "$p")"
+  case " ${KILL_PGIDS[*]:-} " in *" $g "*) ;; *) KILL_PGIDS+=("$g") ;; esac
+done
+
+if [ "${#KILL_PGIDS[@]}" -gt 0 ]; then
+  say "dev stack running in: ${RUNNING:-unknown}   (process groups: ${KILL_PGIDS[*]})"
+  if [ "$DRY" = 1 ]; then
+    for g in "${KILL_PGIDS[@]}"; do
+      say "would TERM→KILL process group $g:"; ps -o pid=,command= -g "$g" 2>/dev/null | sed 's/^/      /' | cut -c1-100
+    done
+    [ -n "$RUNNING" ] && say "would: (cd $RUNNING && docker compose down)"
+  else
+    for g in "${KILL_PGIDS[@]}"; do kill -TERM "-$g" 2>/dev/null || true; done
+    sleep 2
+    for g in "${KILL_PGIDS[@]}"; do kill -9 "-$g" 2>/dev/null || true; done
+    if [ -n "$RUNNING" ] && [ -f "$RUNNING/docker-compose.yml" -o -f "$RUNNING/compose.yml" -o -f "$RUNNING/docker-compose.yaml" ]; then
+      say "bringing down its Docker compose project (volumes preserved)"
+      (cd "$RUNNING" && docker compose down) 2>&1 | tail -3 || true
+    fi
+  fi
+else
+  say "no dev stack found (no 'task …dev…' process, nothing on dev ports) — nothing to kill"
+fi
+
+# free-port sanity — anything still bound would fail the relaunch
+STILL=$(lsof -nP -sTCP:LISTEN $(printf -- '-iTCP:%s ' "${DEV_PORTS[@]}") -t 2>/dev/null | sort -u | tr '\n' ' ' || true)
+[ -n "$STILL" ] && say "warning: dev ports still held by pids: $STILL"
+
+if [ "$RESTART" = 0 ]; then
+  say "--no-restart: stopped. (kill + docker-down only)"
+  exit 0
+fi
+
+[ -d "$DIR" ] || { echo "loops-restart: --dir not a directory: $DIR" >&2; exit 2; }
+TASK=$([ "$MODE" = reset ] && echo "task dev" || echo "task dev:watch")
+say "restarting in $DIR via: $TASK   (mode=$MODE, log=$LOG, tmux=$SESSION)"
+
+if [ "$DRY" = 1 ]; then
+  say "dry-run: not launching"
+  exit 0
+fi
+
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+tmux new-session -d -s "$SESSION" "cd '$DIR' && $TASK 2>&1 | tee '$LOG'"
+sleep 3
+if tmux has-session -t "$SESSION" 2>/dev/null; then
+  say "up: tmux attach -t $SESSION   ·   tail -f $LOG   ·   dev-tail skill reads $LOG"
+else
+  echo "loops-restart: $SESSION exited immediately — check $LOG:" >&2
+  tail -n 20 "$LOG" >&2 || true
+  exit 1
+fi
