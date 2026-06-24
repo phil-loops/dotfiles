@@ -3,7 +3,8 @@
 # into the local forest viewer as a checkout-able node off its base.
 #
 #   • fetches the PR head (via the pull/ ref, so fork PRs work) to  review/pr-<N>
-#   • points its forest parent at the PR's base, so the viewer diffs base...head
+#   • points its forest parent at origin/<base>, so the diff matches GitHub's
+#     (origin/base...head) and ignores a stale local base that lags behind
 #   • seeds the branch description from the PR title + author
 #   • pins it to the standalone watch-list so it surfaces on the landing page
 #
@@ -25,9 +26,9 @@ IFS=$'\t' read -r base _head title login < <(
 branch="review/pr-${num}"
 
 git fetch -q --force origin "pull/${num}/head:${branch}"
-git fetch -q origin "$base" || true   # ensure the base ref exists locally to diff against
+git fetch -q origin "$base" || true   # refresh refs/remotes/origin/<base> — the diff base
 
-git config "stack-branch.${branch}.parent" "$base"
+git config "stack-branch.${branch}.parent" "origin/${base}"
 git config "branch.${branch}.description" "#${num} ${title} — @${login}"
 
 if ! git config --get-all stack.standalone | grep -qxF "$branch"; then
