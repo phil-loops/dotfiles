@@ -846,9 +846,16 @@ function NodeDetail() {
     }
   });
 
+  // the ghost ✦<project> culmination node (picked from the forest map as "~integration"): diff
+  // main..refs/stack/<project>-integration — the union of all the project's leaf changes.
+  const GHOST = "~integration";
+  const isGhost = () => active() === GHOST;
+  const nodeRef = () => (isGhost() ? `refs/stack/${project()}-integration` : active());
+  const nodeBase = () => (isGhost() ? "main" : base() || undefined);
+
   const node = createQuery(() => ({
-    queryKey: ["node", active(), base()],
-    queryFn: () => provider.node(active(), base() || undefined),
+    queryKey: ["node", nodeRef(), nodeBase() ?? ""],
+    queryFn: () => provider.node(nodeRef(), nodeBase()),
     enabled: !!active(),
   }));
   const commits = createQuery(() => ({
@@ -972,7 +979,7 @@ function NodeDetail() {
       : fetch("/open", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branch: active(), path, ...(line != null ? { pos: String(line) } : {}) }),
+      body: JSON.stringify({ branch: nodeRef(), path, ...(line != null ? { pos: String(line) } : {}) }),
     })
       .then((r) => r.json())
       .then((r) => note(r.ok ? `⌁ ${leaf(path)}:${line ?? ""} → nvim` : "⌁ open failed — see server"))
@@ -1038,7 +1045,9 @@ function NodeDetail() {
             {(data) => (
               <>
                 <div class="spine-meta">
-                  {data().files.filter(isBlessed).length}/{data().files.length} files blessed
+                  {isGhost()
+                    ? `${data().files.length} files · ✦ all changes`
+                    : `${data().files.filter(isBlessed).length}/${data().files.length} files blessed`}
                 </div>
                 <Show
                   when={data().files.length}
@@ -1087,9 +1096,16 @@ function NodeDetail() {
           {/* tier 1 — identity: the branch name + what it's diffed against, nothing else.
               Giving this its own line stops the long title from wrapping into the controls. */}
           <div class="nh-id">
-            <h1>{leaf(active()) || "—"}</h1>
-            <Show when={parentOf()}>
-              <span class="against">◂ {leaf(parentOf())}</span>
+            <h1>{isGhost() ? `✦ ${project()}` : leaf(active()) || "—"}</h1>
+            <Show
+              when={isGhost()}
+              fallback={
+                <Show when={parentOf()}>
+                  <span class="against">◂ {leaf(parentOf())}</span>
+                </Show>
+              }
+            >
+              <span class="against">◂ main · all changes on this project</span>
             </Show>
           </div>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
@@ -1103,7 +1119,7 @@ function NodeDetail() {
                 commits
               </button>
             </div>
-            <Show when={view() === "diffs"}>
+            <Show when={view() === "diffs" && !isGhost()}>
               <div class="base-toggle">
                 <span class="base-label">diff vs</span>
                 <For each={BASES}>
@@ -1116,7 +1132,9 @@ function NodeDetail() {
               </div>
             </Show>
             <div class="nh-spacer" />
-            <NodeActions branch={active()} isReview={location().kind === "review"} />
+            <Show when={!isGhost()}>
+              <NodeActions branch={active()} isReview={location().kind === "review"} />
+            </Show>
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
                 ✦
@@ -1135,7 +1153,7 @@ function NodeDetail() {
             {(data) => (
               <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
                 <For each={data().files}>
-                  {(f) => <FileEntry file={f} bless={bless} branch={active()} onChat={(file) => setChat({ file })} />}
+                  {(f) => <FileEntry file={f} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => setChat({ file })} />}
                 </For>
               </Show>
             )}
@@ -1180,6 +1198,7 @@ function FileEntry(props: {
   file: FileDiff;
   bless: { mutate: (file: string) => void };
   branch: string;
+  readOnly?: boolean;
   onChat: (f: FileDiff) => void;
 }) {
   const [foil, setFoil] = createSignal(false);
@@ -1242,9 +1261,11 @@ function FileEntry(props: {
           >
             ✦ chat
           </button>
-          <button class="bless-btn" disabled={blessed()} onClick={doBless}>
-            {blessed() ? "blessed" : "bless ✦"}
-          </button>
+          <Show when={!props.readOnly}>
+            <button class="bless-btn" disabled={blessed()} onClick={doBless}>
+              {blessed() ? "blessed" : "bless ✦"}
+            </button>
+          </Show>
         </Show>
       </div>
       <div class="diff" innerHTML={html()} />
