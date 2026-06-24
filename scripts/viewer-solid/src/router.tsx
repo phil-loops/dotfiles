@@ -1,16 +1,16 @@
-// The viewer's router — a hand-rolled, typed replacement for @solidjs/router's HashRouter.
+// The viewer's router — a hand-rolled, typed replacement for @solidjs/router.
 //
 // Why hand-rolled: the app has exactly four destinations, and three of them (forest /
 // standalone / review) were previously crammed into one `/*forest` splat and pulled apart
 // downstream by regex (/^review\/pr-\d+$/) and string-shape guesses. A discriminated
 // ViewerLocation makes the identity explicit at the boundary, so no consumer has to sniff a
-// name to know what it's looking at. We still drive the URL hash (static-deploy keeps working
-// — the server never sees the path).
+// name to know what it's looking at. Real History-API paths (not hash) — clean URLs; the
+// server serves index.html for any app route (SPA fallback) so deep-links + refresh resolve.
 //
-//   #/work  #/forests  #/watching        → home, a named tab
-//   #/forest/<name>[?node=<branch>]       → a forest project (node = the active branch)
-//   #/branch/<branch...>[?node=<branch>]  → a pinned standalone (slashes ride the path tail)
-//   #/review/<pr>[?node=<branch>]         → an imported review PR
+//   /work  /forests  /watching         → home, a named tab
+//   /forest/<name>[?node=<branch>]      → a forest project (node = the active branch)
+//   /branch/<branch...>[?node=<branch>] → a pinned standalone (slashes ride the path tail)
+//   /review/<pr>[?node=<branch>]        → an imported review PR
 //
 // Forest/branch names carry slashes, so they travel raw in the path tail (joined back with
 // "/"); `node` carries slashes too, so it rides as a search param the way it always has.
@@ -27,11 +27,10 @@ export type ViewerLocation =
 
 const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(s);
 
-// hash (with or without leading "#") → typed location. Anything unrecognised falls home.
-export function parseHash(raw: string): ViewerLocation {
-  const [path, query = ""] = raw.replace(/^#/, "").split("?");
-  const node = new URLSearchParams(query).get("node") || undefined;
-  const [head, ...rest] = path.split("/").filter(Boolean);
+// pathname + search → typed location. Anything unrecognised falls home.
+export function parseLocation(pathname: string, search: string): ViewerLocation {
+  const node = new URLSearchParams(search).get("node") || undefined;
+  const [head, ...rest] = pathname.split("/").filter(Boolean);
   const tail = rest.join("/"); // forest / branch names keep their slashes
 
   if (!head || isHomeTab(head)) {
@@ -52,18 +51,18 @@ export function parseHash(raw: string): ViewerLocation {
   return { kind: "home", tab: "work" };
 }
 
-// typed location → hash (leading "#"), for both href and navigate.
-export function buildHash(loc: ViewerLocation): string {
+// typed location → path (leading "/"), for both href and navigate.
+export function buildPath(loc: ViewerLocation): string {
   const q = (n?: string) => (n ? "?node=" + encodeURIComponent(n) : "");
   switch (loc.kind) {
     case "home":
-      return "#/" + loc.tab;
+      return "/" + loc.tab;
     case "forest":
-      return "#/forest/" + loc.name + q(loc.node);
+      return "/forest/" + loc.name + q(loc.node);
     case "standalone":
-      return "#/branch/" + loc.branch + q(loc.node);
+      return "/branch/" + loc.branch + q(loc.node);
     case "review":
-      return "#/review/" + loc.pr + q(loc.node);
+      return "/review/" + loc.pr + q(loc.node);
   }
 }
 
@@ -95,21 +94,21 @@ interface RouterCtx {
 const Ctx = createContext<RouterCtx>();
 
 export function RouterProvider(props: { children: JSX.Element }) {
-  const read = (): ViewerLocation => parseHash(window.location.hash);
+  const read = (): ViewerLocation => parseLocation(window.location.pathname, window.location.search);
   const [location, setLocation] = createSignal<ViewerLocation>(read());
-  const onHash = () => setLocation(read());
-  window.addEventListener("hashchange", onHash);
-  onCleanup(() => window.removeEventListener("hashchange", onHash));
+  // Back/forward fire popstate; pushState/replaceState do NOT, so navigate() syncs by hand.
+  const onPop = () => setLocation(read());
+  window.addEventListener("popstate", onPop);
+  onCleanup(() => window.removeEventListener("popstate", onPop));
 
   const navigate = (loc: ViewerLocation, opts?: { replace?: boolean }) => {
-    const h = buildHash(loc);
+    const p = buildPath(loc);
     if (opts?.replace) {
-      // replaceState doesn't fire hashchange — push the new location through by hand.
-      history.replaceState(null, "", h);
-      setLocation(read());
+      history.replaceState(null, "", p);
     } else {
-      window.location.hash = h; // fires hashchange → onHash → setLocation
+      history.pushState(null, "", p);
     }
+    setLocation(read());
   };
 
   return <Ctx.Provider value={{ location, navigate }}>{props.children}</Ctx.Provider>;
@@ -123,8 +122,9 @@ export function useViewerLocation(): RouterCtx {
   return c;
 }
 
-// A hash anchor that routes through navigate(). The href is a real "#/…" so middle/⌘-click
-// opens a new tab and copy-link works; a plain left-click is intercepted for in-app nav.
+// A real-path anchor that routes through navigate(). The href is a true "/…" path so
+// middle/⌘-click opens a new tab and copy-link works; a plain left-click is intercepted for
+// in-app nav (no full reload).
 export function Link(props: {
   to: ViewerLocation;
   class?: string;
@@ -136,7 +136,7 @@ export function Link(props: {
   const { navigate } = useViewerLocation();
   return (
     <a
-      href={buildHash(props.to)}
+      href={buildPath(props.to)}
       class={props.class}
       classList={props.classList}
       title={props.title}
