@@ -4,8 +4,9 @@
   --vellum-raise: #1c180f;
   --vellum-edge: #221c11;
   --ink: #e8dcc4;
-  --diff-ink: #dcd9d0;    /* bright neutral code text — reads high-contrast on the
-                             warm-dark bg via HUE separation, without harsh white */
+  --diff-ink: #ecd35a;    /* gold-on-coal: warm gold code on a cool near-black diff
+                             surface — high contrast via hue, easy on the eyes */
+  --diff-bg: #0a0a0d;     /* cool near-black surface behind the diff (not the warm page) */
   --ink-dim: #9a8e78;
   --ink-faint: #675d4d;
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
@@ -202,7 +203,7 @@ body {
 .entry-head .file-act:first-of-type { margin-left: auto; }
 /* subpixel-weight smoothing (not the body's antialiased) so strokes stay heavy on
    dark — color contrast was already maxed; the text just read thin. */
-.diff { padding: 2px 0; font-size: 12px; -webkit-font-smoothing: auto; }
+.diff { padding: 2px 0 6px; font-size: 12px; -webkit-font-smoothing: auto; background: var(--diff-bg); }
 
 /* ── diff2html: keep its dark-scheme LAYOUT intact, only re-tint colors so gold
    stays reserved (adds = sage, dels = ember). Never touch padding/border/position. ── */
@@ -215,8 +216,8 @@ body {
      +/- prefix carry the signal. Only the changed WORDS keep a faint highlight. */
   --d2h-dark-ins-bg-color: transparent;
   --d2h-dark-del-bg-color: transparent;
-  --d2h-dark-ins-highlight-bg-color: rgba(90, 150, 80, 0.12);
-  --d2h-dark-del-highlight-bg-color: rgba(190, 96, 64, 0.12);
+  --d2h-dark-ins-highlight-bg-color: rgba(31, 179, 0, 0.30);
+  --d2h-dark-del-highlight-bg-color: rgba(255, 59, 31, 0.34);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
@@ -235,8 +236,8 @@ td.d2h-cntx:not(.d2h-code-side-linenumber),
 td.d2h-info:not(.d2h-code-side-linenumber),
 td.d2h-ins:not(.d2h-code-side-linenumber),
 td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 5px solid transparent; }
-td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #5fa058; }
-td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #c8654a; }
+td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #1fb300; }
+td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #ff3b1f; }
 .d2h-info { color: var(--ink-faint); }
 /* wrap long lines inside each side-by-side column instead of clipping at its edge */
 .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }

@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>diff style tuner</title>
+<!-- diff2html base CSS + JS (same lib the viewer uses) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/diff2html@3/bundles/css/diff2html.min.css" />
+<style>
+  :root {
+    /* fixed theme tokens (match the viewer) */
+    --vellum-night: #14110a;
+    --vellum-raise: #1c180f;
+    --ink-faint: #675d4d;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+    /* TUNABLE knobs — the controls write these */
+    --t-ink: #dcd9d0;
+    --t-bg: #14110a;
+    --t-stripe-add: #5fa058;
+    --t-stripe-del: #c8654a;
+    --t-stripe-w: 5px;
+    --t-hl-add: rgba(95, 160, 88, 0.12);
+    --t-hl-del: rgba(200, 101, 74, 0.12);
+    --t-prefix-add: #8fae7a;
+    --t-prefix-del: #c87a55;
+    --t-weight: 500;
+    --t-size: 13px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; height: 100vh; display: grid; grid-template-columns: 320px 1fr;
+    background: var(--vellum-night); color: #e8dcc4; font-family: var(--mono); font-size: 13px;
+  }
+
+  /* ── controls ── */
+  .panel { border-right: 1px solid #2c2517; padding: 18px 16px; overflow-y: auto; background: var(--vellum-raise); }
+  .panel h1 { font-size: 14px; margin: 0 0 4px; letter-spacing: .04em; }
+  .panel .sub { color: #9a8e78; font-size: 11px; margin: 0 0 16px; line-height: 1.5; }
+  .ctl { margin: 0 0 14px; }
+  .ctl label { display: block; font-size: 11px; color: #c4ba9f; margin-bottom: 5px; letter-spacing: .02em; }
+  .ctl .val { color: #675d4d; }
+  .ctl input[type=color] { width: 46px; height: 28px; padding: 0; border: 1px solid #2c2517; background: none; vertical-align: middle; cursor: pointer; }
+  .ctl input[type=range] { width: 100%; vertical-align: middle; accent-color: #8fae7a; }
+  .ctl input[type=text] { width: 92px; background: var(--vellum-night); color: #e8dcc4; border: 1px solid #2c2517; font: inherit; font-size: 12px; padding: 3px 6px; }
+  .ctl select { background: var(--vellum-night); color: #e8dcc4; border: 1px solid #2c2517; font: inherit; padding: 4px 6px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+
+  .contrast { margin: 14px 0; padding: 10px 12px; border: 1px solid #2c2517; border-radius: 8px; background: var(--vellum-night); }
+  .contrast .big { font-size: 22px; font-weight: 600; }
+  .contrast .grade { font-size: 11px; }
+  .contrast .pass { color: #8fae7a; } .contrast .warn { color: #d6b24a; } .contrast .fail { color: #c87a55; }
+
+  .out { margin-top: 16px; }
+  .out textarea { width: 100%; height: 150px; background: var(--vellum-night); color: #c4ba9f; border: 1px solid #2c2517; font: inherit; font-size: 11px; padding: 8px; resize: vertical; }
+  .out button { margin-top: 6px; background: #2c2517; color: #e8dcc4; border: 1px solid #46402c; font: inherit; padding: 6px 12px; cursor: pointer; border-radius: 6px; }
+  .out button:hover { background: #46402c; }
+
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  .presets button { background: var(--vellum-night); color: #c4ba9f; border: 1px solid #2c2517; font: inherit; font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 5px; }
+  .presets button:hover { border-color: #8fae7a; }
+
+  /* ── preview surface ── */
+  .preview { overflow: auto; padding: 0; background: var(--t-bg); }
+  #diff { background: var(--t-bg); min-height: 100%; }
+
+  /* ── the EXACT viewer overrides, driven by the tunable vars ── */
+  .d2h-file-wrapper { border: none; margin: 0; }
+  .d2h-file-header, .d2h-file-list-wrapper { display: none; }
+  .d2h-diff-table { font-family: var(--mono); font-size: var(--t-size); }
+  .d2h-dark-color-scheme {
+    --d2h-dark-bg-color: transparent;
+    --d2h-dark-ins-bg-color: transparent;
+    --d2h-dark-del-bg-color: transparent;
+    --d2h-dark-ins-highlight-bg-color: var(--t-hl-add);
+    --d2h-dark-del-highlight-bg-color: var(--t-hl-del);
+    --d2h-dark-info-bg-color: #221c11;
+    --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
+    background: transparent;
+  }
+  .d2h-code-line-ctn, .d2h-ins .d2h-code-line-ctn, .d2h-del .d2h-code-line-ctn,
+  .d2h-ins ins, .d2h-del del { color: var(--t-ink); font-weight: var(--t-weight); }
+  .d2h-ins .d2h-code-line-prefix { color: var(--t-prefix-add); opacity: 1; }
+  .d2h-del .d2h-code-line-prefix { color: var(--t-prefix-del); opacity: 1; }
+  .d2h-code-line-prefix { opacity: 0.6; }
+  td.d2h-cntx:not(.d2h-code-side-linenumber),
+  td.d2h-info:not(.d2h-code-side-linenumber),
+  td.d2h-ins:not(.d2h-code-side-linenumber),
+  td.d2h-del:not(.d2h-code-side-linenumber) { border-left: var(--t-stripe-w) solid transparent; }
+  td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: var(--t-stripe-add); }
+  td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--t-stripe-del); }
+  .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }
+  .d2h-info { color: var(--ink-faint); }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <h1>diff style tuner</h1>
+    <p class="sub">Tune the diff look, then paste the config block back to Claude. The preview is real diff2html side-by-side — same markup as the viewer.</p>
+
+    <div class="presets">
+      <button data-preset="yours">yours</button>
+      <button data-preset="amberNavy">amber·navy</button>
+      <button data-preset="goldCoal">gold·coal</button>
+      <button data-preset="cobalt">cobalt</button>
+      <button data-preset="tokyo">tokyo night</button>
+      <button data-preset="dracula">dracula</button>
+      <button data-preset="gruvbox">gruvbox</button>
+      <button data-preset="nord">nord</button>
+      <button data-preset="solarized">solarized</button>
+      <button data-preset="monoIce">mono·ice</button>
+    </div>
+
+    <div class="contrast">
+      <div><span class="big" id="cRatio">–</span> <span class="grade" id="cGrade"></span></div>
+      <div class="sub" style="margin:4px 0 0">text vs background (WCAG)</div>
+    </div>
+
+    <div class="ctl"><label>text color <span class="val" id="vInk"></span></label>
+      <div class="row"><input type="color" id="ink"><input type="text" id="inkHex"></div></div>
+    <div class="ctl"><label>code background <span class="val" id="vBg"></span></label>
+      <div class="row"><input type="color" id="bg"><input type="text" id="bgHex"></div></div>
+    <div class="ctl"><label>font weight</label>
+      <select id="weight"><option>300</option><option>400</option><option selected>500</option><option>600</option><option>700</option></select></div>
+    <div class="ctl"><label>font size <span class="val" id="vSize"></span></label>
+      <input type="range" id="size" min="11" max="17" step="0.5"></div>
+
+    <div class="ctl"><label>stripe — added <span class="val" id="vSA"></span></label>
+      <div class="row"><input type="color" id="sa"><input type="text" id="saHex"></div></div>
+    <div class="ctl"><label>stripe — removed <span class="val" id="vSD"></span></label>
+      <div class="row"><input type="color" id="sd"><input type="text" id="sdHex"></div></div>
+    <div class="ctl"><label>stripe width <span class="val" id="vSW"></span></label>
+      <input type="range" id="sw" min="0" max="12" step="1"></div>
+
+    <div class="ctl"><label>changed-word highlight (added) <span class="val" id="vHA"></span></label>
+      <input type="range" id="ha" min="0" max="0.6" step="0.02"></div>
+    <div class="ctl"><label>changed-word highlight (removed) <span class="val" id="vHD"></span></label>
+      <input type="range" id="hd" min="0" max="0.6" step="0.02"></div>
+
+    <div class="out">
+      <label style="font-size:11px;color:#c4ba9f;display:block;margin-bottom:5px">config — copy &amp; send back</label>
+      <textarea id="out" readonly></textarea>
+      <button id="copy">copy config</button>
+    </div>
+  </div>
+
+  <div class="preview"><div id="diff"></div></div>
+
+<script src="https://cdn.jsdelivr.net/npm/diff2html@3/bundles/js/diff2html.min.js"></script>
+<script>
+  const patch = `diff --git a/useHydratedRows.ts b/useHydratedRows.ts
+index 1111111..2222222 100644
+--- a/useHydratedRows.ts
++++ b/useHydratedRows.ts
+@@ -7,9 +7,11 @@ import {
+   numberWithCommas,
+ } from "../../lib/stringUtils";
+ import { api } from "../../lib/trpc";
++import { useSourceMetrics } from "../../hooks/use-source-metrics";
+ import GoalContactsTable from "../goals/metrics/GoalContactsTable";
+ import GoalTimeSeriesChart, {
+   buildChartData,
+@@ -366,12 +369,17 @@ function useHydratedRows(
+   attachments: GoalAttachmentSummary[],
+   timezone: string,
+ ): GoalMetricRow[] {
+-  const impressionQueries = api.useQueries((t) =>
+-    attachments.map((a) =>
+-      t.goals.getCampaignGoalImpressionStats({ attachmentId: a.attachmentId }),
+-    ),
+-  );
++  const { value } = useSourceMetrics({
++    sourceType: "campaign",
++    sourceId: campaignId,
++  });
++  const perAttachment = value?.perAttachment[attachment.attachmentId];
++  const stats = {
++    impressions: perAttachment?.impressions ?? 0,
++    conversions: perAttachment?.conversions ?? 0,
++  };
+   return rows;
+ }
+`;
+
+  function renderDiff() {
+    document.getElementById("diff").innerHTML =
+      Diff2Html.html(patch, { drawFileList: false, outputFormat: "side-by-side", matching: "lines", colorScheme: "dark" });
+  }
+  renderDiff();
+
+  // ── color math ──
+  const rgb = (hex) => { const c = hex.replace("#", ""); return [0, 2, 4].map((i) => parseInt(c.substr(i, 2), 16)); };
+  const lum = (hex) => { const f = (x) => (x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4)); const [r, g, b] = rgb(hex).map((v) => v / 255); return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+  const contrast = (a, b) => { const L1 = lum(a), L2 = lum(b); const hi = Math.max(L1, L2), lo = Math.min(L1, L2); return (hi + 0.05) / (lo + 0.05); };
+
+  const root = document.documentElement;
+  const S = {
+    ink: "#dcd9d0", bg: "#14110a", weight: "500", size: 13,
+    sa: "#5fa058", sd: "#c8654a", sw: 5, ha: 0.12, hd: 0.12,
+  };
+
+  function apply() {
+    root.style.setProperty("--t-ink", S.ink);
+    root.style.setProperty("--t-bg", S.bg);
+    root.style.setProperty("--t-weight", S.weight);
+    root.style.setProperty("--t-size", S.size + "px");
+    root.style.setProperty("--t-stripe-add", S.sa);
+    root.style.setProperty("--t-stripe-del", S.sd);
+    root.style.setProperty("--t-stripe-w", S.sw + "px");
+    root.style.setProperty("--t-hl-add", `rgba(${rgb(S.sa).join(", ")}, ${S.ha})`);
+    root.style.setProperty("--t-hl-del", `rgba(${rgb(S.sd).join(", ")}, ${S.hd})`);
+    document.querySelector(".preview").style.background = S.bg;
+
+    // value labels
+    vInk.textContent = S.ink; vBg.textContent = S.bg; vSize.textContent = S.size + "px";
+    vSA.textContent = S.sa; vSD.textContent = S.sd; vSW.textContent = S.sw + "px";
+    vHA.textContent = S.ha.toFixed(2); vHD.textContent = S.hd.toFixed(2);
+    inkHex.value = S.ink; bgHex.value = S.bg; saHex.value = S.sa; sdHex.value = S.sd;
+
+    // contrast readout
+    const cr = contrast(S.ink, S.bg);
+    cRatio.textContent = cr.toFixed(2) + ":1";
+    let grade = "fail", cls = "fail";
+    if (cr >= 7) { grade = "AAA — body text"; cls = "pass"; }
+    else if (cr >= 4.5) { grade = "AA — body text"; cls = "warn"; }
+    else if (cr >= 3) { grade = "AA — large only"; cls = "warn"; }
+    else { grade = "below AA"; cls = "fail"; }
+    cGrade.textContent = grade; cGrade.className = "grade " + cls;
+
+    out.value =
+`/* paste-back config */
+--diff-ink: ${S.ink};
+code background: ${S.bg};
+font-weight: ${S.weight};   font-size: ${S.size}px;
+stripe add: ${S.sa};   stripe del: ${S.sd};   width: ${S.sw}px;
+ins-highlight: rgba(${rgb(S.sa).join(", ")}, ${S.ha});
+del-highlight: rgba(${rgb(S.sd).join(", ")}, ${S.hd});
+text↔bg contrast: ${cr.toFixed(2)}:1 (${grade})`;
+  }
+
+  function syncInputs() {
+    ink.value = S.ink; bg.value = S.bg; weight.value = S.weight; size.value = S.size;
+    sa.value = S.sa; sd.value = S.sd; sw.value = S.sw; ha.value = S.ha; hd.value = S.hd;
+  }
+
+  const bind = (id, key, transform = (v) => v) => {
+    const el = document.getElementById(id);
+    el.addEventListener("input", () => { S[key] = transform(el.value); syncInputs(); apply(); });
+  };
+  bind("ink", "ink"); bind("inkHex", "ink");
+  bind("bg", "bg"); bind("bgHex", "bg");
+  bind("weight", "weight");
+  bind("size", "size", Number);
+  bind("sa", "sa"); bind("saHex", "sa");
+  bind("sd", "sd"); bind("sdHex", "sd");
+  bind("sw", "sw", Number);
+  bind("ha", "ha", Number);
+  bind("hd", "hd", Number);
+
+  const presets = {
+    // your pick, verbatim
+    yours:     { ink: "#d7d46a", bg: "#111322", weight: "500", size: 13, sa: "#0f9900", sd: "#e03100", sw: 4, ha: 0.34, hd: 0.40 },
+    // same idea, softened: less acid yellow, a touch more bg depth
+    amberNavy: { ink: "#e6cf73", bg: "#0f1220", weight: "500", size: 13, sa: "#2faa3a", sd: "#e8443a", sw: 4, ha: 0.28, hd: 0.30 },
+    // gold text pushed onto near-black for max punch
+    goldCoal:  { ink: "#ecd35a", bg: "#0a0a0d", weight: "500", size: 13, sa: "#1fb300", sd: "#ff3b1f", sw: 5, ha: 0.30, hd: 0.34 },
+    // cooler navy, yellow-green text, vivid stripes (cobalt-ish)
+    cobalt:    { ink: "#e8e85a", bg: "#0d1f2d", weight: "500", size: 13, sa: "#3ad900", sd: "#ff5a4d", sw: 4, ha: 0.30, hd: 0.32 },
+    // proven editor themes, adapted ↓ (cool bg, hue-separated text)
+    tokyo:     { ink: "#c0caf5", bg: "#16161e", weight: "500", size: 13, sa: "#9ece6a", sd: "#f7768e", sw: 4, ha: 0.26, hd: 0.26 },
+    dracula:   { ink: "#f8f8f2", bg: "#21222c", weight: "500", size: 13, sa: "#50fa7b", sd: "#ff5555", sw: 4, ha: 0.24, hd: 0.24 },
+    gruvbox:   { ink: "#ebdbb2", bg: "#1d2021", weight: "500", size: 13, sa: "#b8bb26", sd: "#fb4934", sw: 4, ha: 0.26, hd: 0.26 },
+    nord:      { ink: "#e5e9f0", bg: "#242933", weight: "500", size: 13, sa: "#a3be8c", sd: "#bf616a", sw: 4, ha: 0.26, hd: 0.26 },
+    solarized: { ink: "#cad6d6", bg: "#002b36", weight: "500", size: 13, sa: "#859900", sd: "#dc322f", sw: 4, ha: 0.26, hd: 0.26 },
+    // clean cool-neutral, no hue gimmick — just crisp light-on-near-black
+    monoIce:   { ink: "#e8eaed", bg: "#0e1013", weight: "500", size: 13, sa: "#4caf50", sd: "#ef5350", sw: 4, ha: 0.22, hd: 0.22 },
+  };
+  document.querySelectorAll(".presets button").forEach((b) => {
+    b.addEventListener("click", () => { Object.assign(S, presets[b.dataset.preset]); syncInputs(); apply(); });
+  });
+
+  document.getElementById("copy").addEventListener("click", () => {
+    navigator.clipboard.writeText(out.value);
+    const btn = document.getElementById("copy"); btn.textContent = "copied ✓";
+    setTimeout(() => (btn.textContent = "copy config"), 1200);
+  });
+
+  syncInputs(); apply();
+</script>
+</body>
+</html>
