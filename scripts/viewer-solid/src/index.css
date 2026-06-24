@@ -4,7 +4,7 @@
   --vellum-raise: #1c180f;
   --vellum-edge: #221c11;
   --ink: #e8dcc4;
-  --ink-bright: #faf5ea;  /* near-white warm — diff code body, max readability */
+  --diff-ink: #c4ba9f;    /* calm warm code text — softer than white, easy on eyes */
   --ink-dim: #9a8e78;
   --ink-faint: #675d4d;
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
@@ -210,10 +210,10 @@ body {
 .d2h-diff-table { font-family: var(--mono); font-size: 13px; }
 .d2h-dark-color-scheme {
   --d2h-dark-bg-color: transparent;
-  --d2h-dark-ins-bg-color: rgba(122, 180, 90, 0.22);
-  --d2h-dark-del-bg-color: rgba(214, 105, 70, 0.22);
-  --d2h-dark-ins-highlight-bg-color: rgba(122, 180, 90, 0.42);
-  --d2h-dark-del-highlight-bg-color: rgba(214, 105, 70, 0.42);
+  --d2h-dark-ins-bg-color: rgba(78, 124, 64, 0.32);
+  --d2h-dark-del-bg-color: rgba(190, 96, 64, 0.26);
+  --d2h-dark-ins-highlight-bg-color: rgba(78, 124, 64, 0.5);
+  --d2h-dark-del-highlight-bg-color: rgba(190, 96, 64, 0.46);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
@@ -221,7 +221,7 @@ body {
 /* code text stays bright and readable; the +/- prefix and the row tint carry the
    add/del signal, so a whole-added file isn't a wall of dim green. */
 .d2h-code-line-ctn, .d2h-ins .d2h-code-line-ctn, .d2h-del .d2h-code-line-ctn,
-.d2h-ins ins, .d2h-del del { color: var(--ink-bright); font-weight: 500; }
+.d2h-ins ins, .d2h-del del { color: var(--diff-ink); font-weight: 500; }
 .d2h-ins .d2h-code-line-prefix { color: var(--add); opacity: 1; }
 .d2h-del .d2h-code-line-prefix { color: var(--del); opacity: 1; }
 .d2h-code-line-prefix { opacity: 0.6; }
