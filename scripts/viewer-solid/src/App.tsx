@@ -15,6 +15,7 @@ import {
   useQueryClient,
 } from "@tanstack/solid-query";
 import { RouterProvider, useViewerLocation, Link, forestKey, withNode, type HomeTab } from "./router";
+import { ActionBar, type Action } from "./actions";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, canMutate } from "./provider";
@@ -175,13 +176,11 @@ function Home() {
     },
   }));
 
-  // ── restack: two-click arm → run (background) → poll → parked? hand to Claude ──
-  const [armed, setArmed] = createSignal<string | null>(null); // project (or "__all__") awaiting confirm
+  // ── restack: two-click arm (via ActionBar) → run (background) → poll → parked? hand to Claude ──
   const [running, setRunning] = createSignal<string | null>(null); // project (or "__all__") restacking now
   const [parked, setParked] = createSignal<Parked | null>(null); // set on a conflict
   const [restackErr, setRestackErr] = createSignal<string | null>(null);
   const [menu, setMenu] = createSignal<string | null>(null); // project whose parked-action popover is open
-  let armT: ReturnType<typeof setTimeout>;
   const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
     fetch(url, {
       method: "POST",
@@ -221,18 +220,6 @@ function Home() {
         setRestackErr(r.err ?? "couldn’t abort");
       }
     });
-  const arm = (key: string, confirm: () => void = () => start(key)) => {
-    if (armed() === key) {
-      clearTimeout(armT);
-      setArmed(null);
-      confirm();
-      return;
-    }
-    setArmed(key);
-    clearTimeout(armT);
-    armT = setTimeout(() => setArmed(null), 3000);
-  };
-
   // ── delete mode: forget an old forest grouping (config only; branches kept) ──
   const [dropping, setDropping] = createSignal<string | null>(null);
   const dropProject = (project: string) => {
@@ -368,6 +355,35 @@ function Home() {
   const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
 
+  const restacking = (name: string) => () => running() === name || running() === "__all__";
+  const restackAction = (p: Project): Action => ({
+    id: "restack:" + p.name,
+    class: "forest-restack",
+    arm: true,
+    busy: restacking(p.name),
+    label: () => (restacking(p.name)() ? "⤳ restacking…" : `⟳ ${p.behind} behind`),
+    armLabel: () => "restack?",
+    run: () => start(p.name),
+  });
+  const dropAction = (p: Project): Action => ({
+    id: "drop:" + p.name,
+    class: "forest-drop",
+    arm: true,
+    busy: () => dropping() === p.name,
+    label: () => (dropping() === p.name ? "⌫ dropping…" : "✕ drop"),
+    armLabel: () => "drop forest?",
+    run: () => dropProject(p.name),
+  });
+  const restackAllAction = (): Action => ({
+    id: "restack:__all__",
+    class: "restack-all",
+    arm: true,
+    busy: () => running() === "__all__",
+    label: () => (running() === "__all__" ? "⤳ restacking all…" : `⟳ restack all ${behindNames().length} behind`),
+    armLabel: () => (parked() ? `drop parked ${leaf(parked()!.project)} & restack all?` : "restack all behind?"),
+    run: () => start("__all__"),
+  });
+
   return (
     <div class="ledger">
       <nav class="thumb-index">
@@ -481,19 +497,7 @@ function Home() {
             <span class="restack-err">{restackErr()}</span>
           </Show>
           <Show when={canMutate && (projects.data || []).some((p) => p.behind > 0)}>
-            <button
-              class="restack-all"
-              classList={{ armed: armed() === "__all__", running: running() === "__all__" }}
-              onClick={() => running() !== "__all__" && arm("__all__")}
-            >
-              {running() === "__all__"
-                ? "⤳ restacking all…"
-                : armed() === "__all__"
-                  ? parked()
-                    ? `drop parked ${leaf(parked()!.project)} & restack all?`
-                    : "restack all behind?"
-                  : `⟳ restack all ${behindNames().length} behind`}
-            </button>
+            <ActionBar actions={[restackAllAction()]} />
           </Show>
         </div>
         <Show when={nonPrProjects().length > 6}>
@@ -516,7 +520,6 @@ function Home() {
         >
           <For each={filteredForests()}>
             {(p) => {
-              const busy = () => running() === p.name || running() === "__all__";
               const stuck = () => parked()?.project === p.name;
               return (
                 <Link
@@ -538,110 +541,71 @@ function Home() {
                       </span>
                     )}
                   </Show>
-                  <Show
-                    when={deleteMode() && canMutate}
-                    fallback={
-                  <Show
-                    when={stuck()}
-                    fallback={
-                      <Show
-                        when={p.behind > 0}
-                        fallback={<span class="forest-fresh fresh">✦ fresh</span>}
-                      >
-                        <Show
-                          when={canMutate}
-                          fallback={<span class="forest-meta">⟳ {p.behind} behind</span>}
-                        >
-                          <button
-                            class="forest-restack"
-                            classList={{ armed: armed() === p.name, running: busy() }}
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              if (!busy()) arm(p.name);
-                            }}
-                          >
-                            {busy()
-                              ? "⤳ restacking…"
-                              : armed() === p.name
-                                ? "restack?"
-                                : `⟳ ${p.behind} behind`}
-                          </button>
-                        </Show>
-                      </Show>
-                    }
-                  >
-                    <div class="forest-parked">
-                      <button
-                        class="forest-resolve"
-                        classList={{ open: menu() === p.name }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setMenu(menu() === p.name ? null : p.name);
-                        }}
-                      >
-                        ⚠ parked at {leaf(parked()?.current || p.name)}
-                      </button>
-                      <Show when={menu() === p.name}>
-                        <div
-                          class="forest-popover"
+                  <Switch fallback={<span class="forest-fresh fresh">✦ fresh</span>}>
+                    <Match when={deleteMode() && canMutate}>
+                      <ActionBar actions={[dropAction(p)]} />
+                    </Match>
+                    <Match when={stuck()}>
+                      <div class="forest-parked">
+                        <button
+                          class="forest-resolve"
+                          classList={{ open: menu() === p.name }}
                           onClick={(e) => {
                             e.preventDefault();
                             e.stopPropagation();
+                            setMenu(menu() === p.name ? null : p.name);
                           }}
                         >
-                          <p class="forest-popover-why">
-                            Rebase paused on a conflict
-                            {parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a
-                            worktree and blocks restacks until it’s cleared.
-                          </p>
-                          <Show when={parked()?.reason}>
-                            {(r) => <p class="forest-popover-reason">{r()}</p>}
-                          </Show>
-                          <div class="forest-popover-actions">
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                resolve(p.name);
-                              }}
-                            >
-                              ✦ resolve with Claude
-                            </button>
-                            <button
-                              class="danger"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                abort(p.name);
-                              }}
-                            >
-                              ✕ abort & discard
-                            </button>
+                          ⚠ parked at {leaf(parked()?.current || p.name)}
+                        </button>
+                        <Show when={menu() === p.name}>
+                          <div
+                            class="forest-popover"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                          >
+                            <p class="forest-popover-why">
+                              Rebase paused on a conflict
+                              {parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a
+                              worktree and blocks restacks until it’s cleared.
+                            </p>
+                            <Show when={parked()?.reason}>
+                              {(r) => <p class="forest-popover-reason">{r()}</p>}
+                            </Show>
+                            <div class="forest-popover-actions">
+                              <button
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  resolve(p.name);
+                                }}
+                              >
+                                ✦ resolve with Claude
+                              </button>
+                              <button
+                                class="danger"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  abort(p.name);
+                                }}
+                              >
+                                ✕ abort & discard
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                      </Show>
-                    </div>
-                  </Show>
-                    }
-                  >
-                    <button
-                      class="forest-drop"
-                      classList={{ armed: armed() === p.name, running: dropping() === p.name }}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        if (dropping() !== p.name) arm(p.name, () => dropProject(p.name));
-                      }}
-                    >
-                      {dropping() === p.name
-                        ? "⌫ dropping…"
-                        : armed() === p.name
-                          ? "drop forest?"
-                          : "✕ drop"}
-                    </button>
-                  </Show>
+                        </Show>
+                      </div>
+                    </Match>
+                    <Match when={p.behind > 0 && canMutate}>
+                      <ActionBar actions={[restackAction(p)]} />
+                    </Match>
+                    <Match when={p.behind > 0}>
+                      <span class="forest-meta">⟳ {p.behind} behind</span>
+                    </Match>
+                  </Switch>
                 </Link>
               );
             }}
