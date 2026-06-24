@@ -956,6 +956,44 @@ elif [[ "$MODE" == "start" ]]; then
   fi
 fi
 
+# ---------- contracted-dep auto-resolve ----------
+# A `requires` dep that merged to main is contracted (its NODE dropped) in the pre-pass above —
+# but an integrator that CARRIES the dep's cherry-picked commits still replays them here. If the
+# dep DRIFTED before merging (carried copy != what landed), that replay conflicts. The merged
+# dep's landed content is authoritative, so for a conflict confined to a contracted dep's files we
+# keep main's version (rebase --ours = the base we're rebasing onto) and drop the stale carried
+# copy. A pure fan-in carry never touches those files independently; if the integrator DID, some
+# conflicting file falls outside the contracted set and we bail to the resolver/human.
+typeset -gA _CONTRACTED_FILES
+typeset -g _CONTRACTED_FILES_BUILT=0
+build_contracted_files() {
+  (( _CONTRACTED_FILES_BUILT )) && return 0
+  _CONTRACTED_FILES_BUILT=1
+  local dep f
+  for dep in "${CONTRACTED[@]}"; do
+    for f in ${(f)"$(git diff --name-only "${MAIN_BRANCH}...${dep}" 2>/dev/null)"}; do
+      [[ -n "$f" ]] && _CONTRACTED_FILES[$f]=1
+    done
+  done
+}
+try_contracted_resolve() {
+  local rdir="$1" f conflicted
+  (( ${#CONTRACTED[@]} )) || return 1
+  build_contracted_files
+  (( ${#_CONTRACTED_FILES[@]} )) || return 1
+  conflicted=$(git -C "$rdir" diff --name-only --diff-filter=U 2>/dev/null)
+  [[ -n "$conflicted" ]] || return 1
+  for f in ${(f)conflicted}; do
+    [[ -n "${_CONTRACTED_FILES[$f]:-}" ]] || return 1   # a non-contracted file conflicts → not ours
+  done
+  for f in ${(f)conflicted}; do
+    git -C "$rdir" checkout --ours -- "$f" 2>/dev/null || return 1
+    git -C "$rdir" add -- "$f" 2>/dev/null || return 1
+  done
+  echo "    ✓ contracted-dep conflict — kept main's landed version, dropped the stale carried copy: ${conflicted//$'\n'/, }"
+  return 0
+}
+
 # ---------- the rebase loop ----------
 
 while (( ${#PENDING[@]} > 0 )); do
@@ -993,6 +1031,12 @@ while (( ${#PENDING[@]} > 0 )); do
   # try claude (conservative); if it resolves, --continue and re-check; if it
   # escalates, pause for a human.
   while rebase_in_progress "$REBASE_DIR"; do
+    # cheap, deterministic pass first: a conflict confined to a merged dep's files just takes
+    # main's landed version — no need to spend a resolver on it.
+    if try_contracted_resolve "$REBASE_DIR"; then
+      git_locked -C "$REBASE_DIR" -c core.editor=true rebase --continue >/dev/null 2>&1 || true
+      continue
+    fi
     if claude_attempt_resolve "$REBASE_DIR" "$BRANCH" "$PARENT_NAME"; then
       # Advance past the now-staged commit. core.editor=true avoids opening an
       # editor for the commit message.
