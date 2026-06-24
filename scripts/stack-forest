@@ -287,6 +287,11 @@ if node_mode:
     branch = target
     parent = parents.get(branch, MAIN)
     diff_base = base or parent            # diff vs any upstream node; default = parent
+    # the "diff vs main" button means the FRESH trunk — a stale local main lags
+    # origin and folds already-merged commits into the diff. Only on an explicit
+    # main request, so a root-on-main node's default parent view stays local.
+    if base == MAIN and git_out(["rev-parse", "--verify", "--quiet", f"origin/{MAIN}"]).strip():
+        diff_base = f"origin/{MAIN}"
     rows, *_ = file_status(branch, diff_base)
     # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
     # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
