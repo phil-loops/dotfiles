@@ -297,6 +297,10 @@ Use `tsgo` (fast); fall back to `tsc --project tsconfig.node.json --noEmit` only
 
 **The `design` skill (nvim whiteboard `:submit` loop) is opt-in only.** Phrases like "let's spec X", "design Y", "write up a plan", or "whiteboard it" do NOT mean launch it — they mean produce a spec. Default to writing the spec **inline** in chat (or a plain markdown file the user can read). Only start the design-doc loop when the user **explicitly** asks for that tool/flow. *Offer* it ("want to iterate on this in the design whiteboard?") rather than launching it. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
 
+# Browser / "open in web"
+
+**There is no Claude browser plugin installed** — the `mcp__claude-in-chrome__*` tools are not available; don't reach for them. When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `loops stack web`, which is the forest viewer server the user reviews on himself.)
+
 # Git Changes
 
 Never add Co-Authored-By lines. Never amend commits — always create new commits. History doesn't matter since PRs are squash-merged. Committing locally is fine (make clean, self-contained commits) — but never push or open PRs; the user handles those (see *Git Pushing & PRs*).
