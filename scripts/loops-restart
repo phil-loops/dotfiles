@@ -106,9 +106,20 @@ fi
 TASK=$([ "$MODE" = reset ] && echo "task dev" || echo "task dev:watch")
 say "restarting in $DIR via: $TASK   (mode=$MODE, log=$LOG, tmux=$SESSION)"
 
+# `task dev:watch` (keep mode) only relaunches node services — unlike `task dev`, it does
+# NOT bring the compose project up, so after the down above the watchers spin on
+# ECONNREFUSED. Reset mode's `task dev` already deps on :docker:compose:up.
+NEED_DOCKER_UP=$([ "$MODE" = keep ] && echo 1 || echo 0)
+
 if [ "$DRY" = 1 ]; then
+  [ "$NEED_DOCKER_UP" = 1 ] && say "would: (cd $DIR && docker compose up -d --remove-orphans)"
   say "dry-run: not launching"
   exit 0
+fi
+
+if [ "$NEED_DOCKER_UP" = 1 ]; then
+  say "bringing up Docker compose project in $DIR"
+  (cd "$DIR" && docker compose up -d --remove-orphans) 2>&1 | tail -3 || true
 fi
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
