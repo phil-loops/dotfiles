@@ -62,6 +62,8 @@ export function NodeActions(props: { branch: string }) {
   let armT: ReturnType<typeof setTimeout>;
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
   const [done, setDone] = createSignal<string | null>(null);
+  // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
+  const [contractKids, setContractKids] = createSignal<string[] | null>(null);
   // the ⋯ menu open/closed
   const [open, setOpen] = createSignal(false);
   let root: HTMLDivElement | undefined;
@@ -136,7 +138,7 @@ export function NodeActions(props: { branch: string }) {
   // Non-syncable branches (open PR / stacked) come back 409 with the reason, surfaced via done().
   const rebase = createMutation(() => ({
     mutationFn: () =>
-      post<{ ok?: boolean; err?: string; rebased?: boolean; ejected?: boolean; conflict?: boolean; summary?: string }>(
+      post<{ ok?: boolean; err?: string; rebased?: boolean; ejected?: boolean; conflict?: boolean; contract?: boolean; children?: string[]; summary?: string }>(
         "/sync",
         { branch: props.branch },
       ),
@@ -151,6 +153,10 @@ export function NodeActions(props: { branch: string }) {
         qc.invalidateQueries({ queryKey: ["node", props.branch] });
         qc.invalidateQueries({ queryKey: ["commits", props.branch] });
         qc.invalidateQueries({ queryKey: ["model"] });
+      } else if (r.contract) {
+        const kids = r.children ?? [];
+        setContractKids(kids);
+        setDone(`● already merged into origin/main — drop it & rewire ${kids.length} child${kids.length === 1 ? "" : "ren"} onto main?`);
       } else if (r.conflict) {
         setDone("✓ conflict — Claude is resolving it in a worktree");
       } else {
@@ -159,6 +165,24 @@ export function NodeActions(props: { branch: string }) {
       sync.refetch();
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "rebase failed"}`),
+  }));
+
+  // Confirm of the already-merged offer above: drop the empty branch and rewire its children
+  // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
+  const contract = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch: props.branch }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        setDone(`✗ ${r.err || "contract failed"}`);
+        return;
+      }
+      setContractKids(null);
+      setDone(`✓ ${r.summary || "contracted"}`);
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["node", props.branch] });
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "contract failed"}`),
   }));
 
   // A review/pr-<N> node tracks someone else's PR. When they force-push, re-fetch their new
@@ -203,7 +227,7 @@ export function NodeActions(props: { branch: string }) {
     armT = setTimeout(() => setArmed(false), 4000); // disarm if not confirmed
   };
 
-  const busy = () => checkout.isPending || squash.isPending || rebase.isPending || pull.isPending;
+  const busy = () => checkout.isPending || squash.isPending || rebase.isPending || pull.isPending || contract.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
     fn();
@@ -235,6 +259,22 @@ export function NodeActions(props: { branch: string }) {
         >
           {rebase.isPending ? "rebasing…" : "rebase →"}
         </button>
+      </Show>
+
+      {/* already-merged: /sync found this branch's work squash-merged to main, so a forward
+          rebase replays nothing. Offer the contraction (drop + rewire children) instead of a
+          Claude grinding the empty-rebase conflict. */}
+      <Show when={contractKids()}>
+        {(kids) => (
+          <button
+            class="nh-fix"
+            disabled={busy()}
+            title={`this branch's work already merged into origin/main — drop the empty branch and rewire its ${kids().length} child${kids().length === 1 ? "" : "ren"} onto main (forest contraction)`}
+            onClick={fire(() => contract.mutate())}
+          >
+            {contract.isPending ? "contracting…" : `drop & rewire ${kids().length} →`}
+          </button>
+        )}
       </Show>
 
       {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}
