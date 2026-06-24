@@ -438,6 +438,21 @@ function Home() {
       post("/checkout", { branch }).then((r) =>
         note(r.ok ? `✓ checked out ${leaf(branch)}` : `✗ ${r.err || "checkout failed (held elsewhere?)"}`)),
   });
+  const promoteAction = (branch: string): Action => ({
+    id: "promote:" + branch,
+    title: "graduate this branch into its own forest (tagged under its leaf name)",
+    label: () => "⤴ promote",
+    run: () =>
+      post("/promote", { branch }).then((r) => {
+        if (r.ok) {
+          standalone.refetch();
+          projects.refetch();
+          note(`⤴ promoted ${leaf(branch)} to a forest`);
+        } else {
+          note(`✗ ${r.err || "promote failed"}`);
+        }
+      }),
+  });
   const unpinAction = (branch: string): Action => ({
     id: "unpin:" + branch,
     class: "watch-unpin",
@@ -449,7 +464,13 @@ function Home() {
     [githubAction(p.url, p.branch), ...(canMutate ? [worktreeAction(p.branch)] : [])];
   const watchRowActions = (b: Standalone): Action[] =>
     canMutate
-      ? [githubBranchAction(b.branch), worktreeAction(b.branch), checkoutAction(b.branch), unpinAction(b.branch)]
+      ? [
+          githubBranchAction(b.branch),
+          worktreeAction(b.branch),
+          checkoutAction(b.branch),
+          promoteAction(b.branch),
+          unpinAction(b.branch),
+        ]
       : [githubBranchAction(b.branch)];
 
   return (
