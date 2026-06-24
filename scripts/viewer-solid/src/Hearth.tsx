@@ -36,22 +36,40 @@ export function Hearth() {
     const d = s();
     return !!d && (d.running || d.paused || drivers().length > 0);
   };
-  const tangle = () => drivers().length > 1 || resolvers() > 1;
+  // a batch ("all") driver runs its per-project children REENTRANTLY under one shared lock —
+  // 1 batch + ≤1 worker is the normal batch shape, NOT a race. A real tangle is ≥2 batch runs,
+  // ≥2 independent single-project workers, or ≥2 resolvers piled on one conflict.
+  const tangle = () => {
+    const batch = drivers().filter((d) => d.mode === "all").length;
+    const workers = drivers().length - batch;
+    return batch > 1 || workers > 1 || resolvers() > 1;
+  };
 
   const [aborting, setAborting] = createSignal(false);
+  const [abortErr, setAbortErr] = createSignal<string | null>(null);
   const abort = () => {
     const project = s()?.project || drivers()[0]?.project || "";
     setAborting(true);
-    post("/restack-abort", { project }).finally(() => {
-      setAborting(false);
-      void q.refetch();
-    });
+    setAbortErr(null);
+    post("/restack-abort", { project })
+      .then((r) => {
+        // /restack-abort only clears a PARKED conflict — it refuses while a restack process is
+        // still churning. Surface that instead of failing silently.
+        if (!r?.ok) setAbortErr(r?.err || "couldn’t abort — a restack is still running");
+      })
+      .catch(() => setAbortErr("abort failed — server unreachable"))
+      .finally(() => {
+        setAborting(false);
+        void q.refetch();
+      });
   };
 
-  const alarmMsg = () =>
-    drivers().length > 1
-      ? "Two restack drivers are live — they’re racing one worktree."
+  const alarmMsg = () => {
+    const n = drivers().length;
+    return n > 1
+      ? `${n} restack drivers are live — they’re racing one worktree.`
       : "Duplicate resolvers are on one conflict.";
+  };
 
   return (
     <Show when={active()}>
@@ -100,6 +118,9 @@ export function Hearth() {
                   <button class="hearth-btn" disabled={aborting()} onClick={abort}>
                     {aborting() ? "aborting…" : "Abort the race"}
                   </button>
+                  <Show when={abortErr()}>
+                    <span class="hearth-err">{abortErr()}</span>
+                  </Show>
                 </span>
               </Show>
             </div>

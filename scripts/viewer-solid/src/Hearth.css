@@ -133,6 +133,12 @@
   color: var(--ink-faint);
 }
 
+.hearth-err {
+  color: var(--ember-hot);
+  font-size: 11px;
+  margin-left: 10px;
+  align-self: center;
+}
 .hearth-btn {
   font-family: var(--mono);
   font-size: 12px;
