@@ -4,7 +4,8 @@
   --vellum-raise: #1c180f;
   --vellum-edge: #221c11;
   --ink: #e8dcc4;
-  --diff-ink: #c4ba9f;    /* calm warm code text — softer than white, easy on eyes */
+  --diff-ink: #dcd9d0;    /* bright neutral code text — reads high-contrast on the
+                             warm-dark bg via HUE separation, without harsh white */
   --ink-dim: #9a8e78;
   --ink-faint: #675d4d;
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
@@ -214,8 +215,8 @@ body {
      +/- prefix carry the signal. Only the changed WORDS keep a faint highlight. */
   --d2h-dark-ins-bg-color: transparent;
   --d2h-dark-del-bg-color: transparent;
-  --d2h-dark-ins-highlight-bg-color: rgba(90, 150, 80, 0.22);
-  --d2h-dark-del-highlight-bg-color: rgba(190, 96, 64, 0.20);
+  --d2h-dark-ins-highlight-bg-color: rgba(90, 150, 80, 0.12);
+  --d2h-dark-del-highlight-bg-color: rgba(190, 96, 64, 0.12);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
