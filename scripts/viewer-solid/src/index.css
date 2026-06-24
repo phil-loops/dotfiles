@@ -216,8 +216,8 @@ body {
      +/- prefix carry the signal. Only the changed WORDS keep a faint highlight. */
   --d2h-dark-ins-bg-color: transparent;
   --d2h-dark-del-bg-color: transparent;
-  --d2h-dark-ins-highlight-bg-color: rgba(31, 179, 0, 0.30);
-  --d2h-dark-del-highlight-bg-color: rgba(255, 59, 31, 0.34);
+  --d2h-dark-ins-highlight-bg-color: rgba(11, 138, 20, 0.34);
+  --d2h-dark-del-highlight-bg-color: rgba(204, 42, 24, 0.38);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
@@ -236,8 +236,8 @@ td.d2h-cntx:not(.d2h-code-side-linenumber),
 td.d2h-info:not(.d2h-code-side-linenumber),
 td.d2h-ins:not(.d2h-code-side-linenumber),
 td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 5px solid transparent; }
-td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #1fb300; }
-td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #ff3b1f; }
+td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #0b8a14; }
+td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #cc2a18; }
 .d2h-info { color: var(--ink-faint); }
 /* wrap long lines inside each side-by-side column instead of clipping at its edge */
 .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }
