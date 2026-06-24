@@ -29,7 +29,7 @@ release_batch_lock() {
   [[ "${holder%% *}" == "$$" ]] && rm -f "$LOCK_HELD"
   LOCK_HELD=""
 }
-trap 'release_batch_lock' EXIT INT TERM
+trap 'release_batch_lock' EXIT
 while true; do
   if ( set -o noclobber; print -r -- "$$ restack-all $*" > "$LOCK_FILE" ) 2>/dev/null; then
     LOCK_HELD="$LOCK_FILE"; break
@@ -61,6 +61,27 @@ abort_park() {  # $1 = project whose just-finished run parked: undo its rebase +
   git -C "$PWD" rebase --abort 2>/dev/null            # also the scratch wt, if it parked here
   "$SCRIPTS/stack-restack" "$1" --abort >/dev/null 2>&1   # clears STATE_DIR + artifacts
 }
+
+# A SIGTERM/SIGINT mid-walk (e.g. the viewer's "■ stop" → /restack-stop) must actually STOP:
+# abort whatever rebase is in flight, drop the parked state, release the lock, and exit — not
+# just release the lock and resume the loop (the old EEXIT-INT-TERM trap did the latter, so a
+# plain kill was ignored and /restack-stop had to escalate to SIGKILL). The server signals the
+# child stack-restack too, so we needn't chase it here.
+on_signal() {
+  echo "" >&2
+  echo "  ✋ restack-all interrupted — aborting the in-progress rebase and stopping" >&2
+  local cur wt
+  [[ -f "$STATE" ]] && cur=$(sed -n 's/^CURRENT=//p' "$STATE" | head -1)
+  if [[ -n "${cur:-}" ]]; then
+    wt=$(worktree_of "$cur")
+    [[ -n "$wt" ]] && git -C "$wt" rebase --abort 2>/dev/null
+  fi
+  git -C "$PWD" rebase --abort 2>/dev/null
+  rm -rf "$GIT_COMMON_DIR/stack-restack-state"
+  release_batch_lock
+  exit 130
+}
+trap 'on_signal' INT TERM
 
 typeset -a problems
 problems=()
