@@ -56,6 +56,13 @@ if not target:
     sys.exit(0)
 MAIN = git_out(["config", "stack.main-branch"]).strip() or "main"
 
+
+def is_trunk(ref):
+    """Forest boundary below a node: the trunk, or any remote-tracking ref — e.g. a
+    review node's `origin/<base>` parent. A remote ref is never a local working node,
+    so an upward walk must STOP at it without pulling it in as a phantom member."""
+    return not ref or ref == MAIN or ref.startswith("origin/")
+
 # ---- one config read → parents / children / requires / project seeds ------
 parents, children, seeds, requires, archived = {}, {}, {}, {}, set()
 for line in git_out(["config", "--local", "--list"]).splitlines():
@@ -105,7 +112,7 @@ def expand(seedlist):
                 descend(c)
     for s in seedlist:
         cur = s
-        while cur and cur != MAIN:
+        while cur and not is_trunk(cur):
             seen.add(cur)
             cur = parents.get(cur, "")
         descend(s)
@@ -117,7 +124,7 @@ def expand(seedlist):
             for req in requires.get(b, []):
                 if req not in seen:
                     cur = req
-                    while cur and cur != MAIN:
+                    while cur and not is_trunk(cur):
                         seen.add(cur)
                         cur = parents.get(cur, "")
                     descend(req)
@@ -135,7 +142,7 @@ _existing = set(git_out(["for-each-ref", "--format=%(refname:short)", "refs/head
 
 
 def mergeable(b):
-    upstream = ([parents.get(b, MAIN)] if parents.get(b, MAIN) != MAIN else []) + requires.get(b, [])
+    upstream = ([parents.get(b, MAIN)] if not is_trunk(parents.get(b, MAIN)) else []) + requires.get(b, [])
     return not any(u in _existing for u in upstream)
 
 
