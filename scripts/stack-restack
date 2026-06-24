@@ -108,6 +108,16 @@ done
 LOCK_HELD=""
 acquire_lock() {
   local label="$1"
+  # Reentrant under a batch driver (stack-restack-all holds one lock for the whole
+  # run and exports its pid): operate under the ancestor's lock — don't take or
+  # release our own, so a parked child handing off mid-batch can't drop it.
+  if [[ -n "${STACK_RESTACK_LOCK_OWNER:-}" ]]; then
+    local owner; owner="$(cat "$LOCK_FILE" 2>/dev/null)"
+    if [[ "${owner%% *}" == "$STACK_RESTACK_LOCK_OWNER" ]] && kill -0 "$STACK_RESTACK_LOCK_OWNER" 2>/dev/null; then
+      LOCK_HELD=""
+      return 0
+    fi
+  fi
   while true; do
     if ( set -o noclobber; print -r -- "$$ $label" > "$LOCK_FILE" ) 2>/dev/null; then
       LOCK_HELD="$LOCK_FILE"
@@ -650,7 +660,9 @@ load_state() {
 clear_state() {
   rm -rf "$STATE_DIR"
   rm -f "$CONFLICT_FILE" "$SNAPSHOT_FILE"   # no parked conflict → no diagnosis artifact/snapshot
-  rm -f "$LOCK_FILE"                        # abort is the escape hatch — free a wedged driver's lock
+  # abort frees a wedged STANDALONE driver's lock; under a batch driver (stack-restack-all's
+  # internal abort_park) the batch owns the lock for the rest of the run, so leave it.
+  [[ -z "${STACK_RESTACK_LOCK_OWNER:-}" ]] && rm -f "$LOCK_FILE"
 }
 
 # ---------- main flows ----------
