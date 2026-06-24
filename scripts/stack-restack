@@ -1016,6 +1016,21 @@ while (( ${#PENDING[@]} > 0 )); do
     OLD_PARENT_SHA=$(git rev-parse "$PARENT_NAME" 2>/dev/null || true)
   fi
 
+  # Cut point for replaying the branch's OWN commits. For a properly-stacked branch this IS
+  # OLD_PARENT_SHA (the branch descends from the parent's old tip) — a no-op. For a DRIFTED branch
+  # (forked off main, not its declared parent, so OLD_PARENT_SHA isn't an ancestor), the range
+  # OLD_PARENT_SHA..BRANCH re-includes a COPY of the parent's commits → the rebase re-applies them
+  # and self-conflicts. Back the cut up to the real fork (merge-base) so we replay only the branch's
+  # divergence; git drops patch-identical carried parent commits, fixing the drift in place.
+  REBASE_CUT="$OLD_PARENT_SHA"
+  if [[ -n "$OLD_PARENT_SHA" ]] && ! git merge-base --is-ancestor "$OLD_PARENT_SHA" "$BRANCH" 2>/dev/null; then
+    _mb=$(git merge-base "$OLD_PARENT_SHA" "$BRANCH" 2>/dev/null || true)
+    if [[ -n "$_mb" ]]; then
+      echo "  ⤺ ${BRANCH} drifted off ${PARENT_NAME} — cutting at the merge-base (${_mb[1,9]}), not the parent's stale tip"
+      REBASE_CUT="$_mb"
+    fi
+  fi
+
   CURRENT="$BRANCH"
   save_state
 
@@ -1024,7 +1039,7 @@ while (( ${#PENDING[@]} > 0 )); do
   # Kick off the rebase. Don't gate on the pipeline exit code (piping through
   # sed would mask git's status); detect conflicts via the on-disk rebase
   # state in the dir where it actually runs.
-  in_branch_place "$BRANCH" rebase --onto "$PARENT_NAME" "$OLD_PARENT_SHA" "$BRANCH" 2>&1 | sed 's/^/    /'
+  in_branch_place "$BRANCH" rebase --onto "$PARENT_NAME" "$REBASE_CUT" "$BRANCH" 2>&1 | sed 's/^/    /'
   REBASE_DIR=$(rebase_dir_for "$BRANCH")
 
   # Resolution loop: a single rebase can stop on multiple commits. Each stop,
