@@ -587,3 +587,17 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #c8654a; }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .ci-who { color: var(--ink-faint); }
+
+/* shared contextual-action model (actions.tsx) — fallback styling when an Action carries no
+   `class`; most rows pass an existing per-context class (.forest-restack, .watch-pin, …). */
+.action-bar { display: inline-flex; align-items: center; gap: 8px; }
+.action-btn {
+  font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;
+  border-radius: 7px; padding: 3px 11px; background: transparent;
+  color: var(--patina); border: 1px solid transparent;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.action-btn:hover { border-color: var(--patina); }
+.action-btn.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
+.action-btn.running { color: var(--patina); border-color: transparent; opacity: 0.7; }
+.action-btn:disabled { opacity: 0.5; cursor: default; }
