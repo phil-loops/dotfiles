@@ -210,10 +210,10 @@ body {
 .d2h-diff-table { font-family: var(--mono); font-size: 13px; }
 .d2h-dark-color-scheme {
   --d2h-dark-bg-color: transparent;
-  --d2h-dark-ins-bg-color: rgba(143, 174, 122, 0.13);
-  --d2h-dark-del-bg-color: rgba(200, 122, 85, 0.13);
-  --d2h-dark-ins-highlight-bg-color: rgba(143, 174, 122, 0.28);
-  --d2h-dark-del-highlight-bg-color: rgba(200, 122, 85, 0.28);
+  --d2h-dark-ins-bg-color: rgba(122, 180, 90, 0.22);
+  --d2h-dark-del-bg-color: rgba(214, 105, 70, 0.22);
+  --d2h-dark-ins-highlight-bg-color: rgba(122, 180, 90, 0.42);
+  --d2h-dark-del-highlight-bg-color: rgba(214, 105, 70, 0.42);
   --d2h-dark-info-bg-color: var(--vellum-edge);
   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
   background: transparent;
