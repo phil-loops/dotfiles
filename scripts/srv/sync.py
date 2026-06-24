@@ -128,6 +128,34 @@ def get_many(req, u):
     req._send(200, json.dumps(states))
 
 
+def _node_health(branch):
+    """Forest-STRUCTURAL health (vs. state()'s fork-staleness):
+      drifted — the node's configured parent is NOT a git ancestor, so it sits off the parent's
+                tip and its parent...node diff balloons to ≈ main...node (the misleading 'looks
+                like the main diff' case).
+      merged  — the node's work already landed in main (a ghost): rebase-classify exit 20. A
+                squash-merge with a stray 'Merge main' commit is caught (file-restricted check).
+    Read-only page-load signals; the fix for both is a restack (contracts ghosts, rebases drift)."""
+    if not branch:
+        return {"branch": "", "drifted": False, "merged": False, "parent": ""}
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main
+    drifted = parent != main and ctx.run(
+        ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
+    merged = ctx.run(
+        [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, main]).returncode == 20
+    return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged), "parent": parent}
+
+
+def health_many(req, u):
+    # BATCH forest-structural health for the model's nodes, parallel like get_many — the viewer
+    # overlays drifted/ghost badges + a "fix all" (restack) when anything's off.
+    bs = [b for b in parse_qs(u.query).get("branch", []) if b]
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        out = dict(zip(bs, ex.map(_node_health, bs)))
+    req._send(200, json.dumps(out))
+
+
 # ── direct forward-rebase (the clean fast path) ──────────────────────────────
 # A syncable root that's behind a CLEAN main rebases in one shot — replaying it onto
 # origin/main almost never conflicts, so spinning up a whole Claude session for it is

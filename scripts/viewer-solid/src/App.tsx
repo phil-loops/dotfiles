@@ -880,6 +880,58 @@ function NodeDetail() {
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
+
+  // ── forest health: per-node drifted (off-parent → its diff balloons to ≈main) / merged-ghost,
+  // for badges + a one-click "fix forest" (restack). Live-only; refetch after a fix lands.
+  const healthIds = createMemo(() => spine().map((n) => n.id).filter(Boolean));
+  const health = createQuery(() => ({
+    queryKey: ["forest-health", healthIds().join(",")],
+    queryFn: () =>
+      fetch("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&")).then(
+        (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean; parent?: string }>>,
+      ),
+    enabled: canMutate && healthIds().length > 0,
+  }));
+  const nodeHealth = (b: string) => health.data?.[b];
+  const unhealthy = createMemo(() =>
+    spine().filter((n) => {
+      const h = nodeHealth(n.id);
+      return h?.drifted || h?.merged;
+    }),
+  );
+
+  const [fixing, setFixing] = createSignal(false);
+  const fixForest = () => {
+    if (fixing()) return;
+    setFixing(true);
+    fetch("/restack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: project() }),
+    })
+      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) setFixing(false);
+      })
+      .catch(() => setFixing(false));
+  };
+  const fixStatus = createQuery(() => ({
+    queryKey: ["fix-status", project()],
+    queryFn: () => provider.restackStatus(project()),
+    enabled: fixing(),
+    refetchInterval: (q) => (q.state.data && !q.state.data.running ? false : 2000),
+  }));
+  createEffect(() => {
+    if (!fixing()) return;
+    const d = fixStatus.data;
+    if (d && !d.running) {
+      // restack finished (or parked — the Hearth/home owns conflict resolution); refresh in place.
+      setFixing(false);
+      model.refetch();
+      health.refetch();
+      node.refetch();
+    }
+  });
   // chat drawer target: a file's diff, or the whole branch ({ file: null }). null = closed.
   const [chat, setChat] = createSignal<{ file: FileDiff | null } | null>(null);
   // cross-forest chat index overlay (read-only; every thread in this browser).
@@ -1107,6 +1159,19 @@ function NodeDetail() {
             >
               <span class="against">◂ main · all changes on this project</span>
             </Show>
+            <Show when={!isGhost() && nodeHealth(active())?.drifted}>
+              <span
+                class="nh-drift"
+                title={`off its parent (${nodeHealth(active())?.parent ?? "?"}) — that branch isn't a git ancestor, so this 'diff vs parent' is effectively the diff vs main. Restack the forest to separate it.`}
+              >
+                ⤺ off-parent · diff ≈ vs main
+              </span>
+            </Show>
+            <Show when={!isGhost() && nodeHealth(active())?.merged}>
+              <span class="nh-ghost" title="this branch's work already landed in main (a ghost) — restack to contract it (drop + rewire its children)">
+                ✦ merged — ghost
+              </span>
+            </Show>
           </div>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
@@ -1130,6 +1195,16 @@ function NodeDetail() {
                   )}
                 </For>
               </div>
+            </Show>
+            <Show when={canMutate && unhealthy().length}>
+              <button
+                class="nh-fix"
+                disabled={fixing()}
+                title="restack this forest — rebases drifted nodes onto their parents and contracts merged ghosts (drop + rewire children). A conflict confined to a merged dep's files auto-resolves to what landed."
+                onClick={fixForest}
+              >
+                {fixing() ? "fixing…" : `✦ fix forest (${unhealthy().length})`}
+              </button>
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
