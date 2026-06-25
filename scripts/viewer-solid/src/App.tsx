@@ -935,9 +935,19 @@ function NodeDetail() {
   // outcome of the last restack — a 6-branch history rewrite must never read as a no-op.
   // errors/parks stay until the next click; a clean success auto-clears.
   const [fixResult, setFixResult] = createSignal<{ msg: string; ok: boolean } | null>(null);
+  // live walk progress while the restack runs (the status file is wiped on a clean
+  // finish, so we also latch the last seen total for the success line).
+  const [fixProgress, setFixProgress] = createSignal<{ done: number; total: number; current: string } | null>(null);
+  let fixSawRunning = false;
+  let fixLastTotal = 0;
+  let fixStartedAt = 0;
   const fixForest = () => {
     if (fixing()) return;
     setFixResult(null);
+    setFixProgress(null);
+    fixSawRunning = false;
+    fixLastTotal = 0;
+    fixStartedAt = Date.now();
     setFixing(true);
     fetch("/restack", {
       method: "POST",
@@ -960,28 +970,40 @@ function NodeDetail() {
     queryKey: ["fix-status", project()],
     queryFn: () => provider.restackStatus(project()),
     enabled: fixing(),
-    refetchInterval: (q) => (q.state.data && !q.state.data.running ? false : 2000),
+    refetchInterval: () => (fixing() ? 1200 : false),
   }));
   createEffect(() => {
     if (!fixing()) return;
     const d = fixStatus.data;
-    if (d && !d.running) {
-      // restack finished (or parked — the Hearth/home owns conflict resolution); refresh in place.
-      setFixing(false);
-      if (d.paused) {
-        setFixResult({
-          msg: `parked on ${d.current || "a conflict"}${d.reason ? `: ${d.reason}` : ""} — resolve in Hearth`,
-          ok: false,
-        });
-      } else {
-        const n = d.completed?.length ?? d.total ?? 0;
-        setFixResult({ msg: `✓ restacked ${n} branch${n === 1 ? "" : "es"}`, ok: true });
-        setTimeout(() => setFixResult((r) => (r?.ok ? null : r)), 6000);
-      }
-      model.refetch();
-      health.refetch();
-      node.refetch();
+    if (!d) return;
+    if (d.running) {
+      fixSawRunning = true;
+      if (d.total) fixLastTotal = d.total;
+      setFixProgress({ done: d.done ?? 0, total: d.total ?? 0, current: d.current ?? "" });
+      return;
     }
+    // the first poll can land before the background walk spawns — don't call it done
+    // until we've actually seen it running (or it parked, or a grace window passed).
+    if (!fixSawRunning && !d.paused && Date.now() - fixStartedAt < 2500) return;
+    // restack finished (or parked — the Hearth/home owns conflict resolution); refresh in place.
+    setFixing(false);
+    setFixProgress(null);
+    if (d.paused) {
+      setFixResult({
+        msg: `parked on ${d.current || "a conflict"}${d.reason ? `: ${d.reason}` : ""} — resolve in Hearth`,
+        ok: false,
+      });
+    } else {
+      const n = fixLastTotal || d.completed?.length || 0;
+      setFixResult({
+        msg: n ? `✓ restacked ${n} branch${n === 1 ? "" : "es"}` : "✓ forest restacked",
+        ok: true,
+      });
+      setTimeout(() => setFixResult((r) => (r?.ok ? null : r)), 6000);
+    }
+    model.refetch();
+    health.refetch();
+    node.refetch();
   });
   // chat drawer target: a file's diff, or the whole branch ({ file: null }). null = closed.
   const [chat, setChat] = createSignal<{ file: FileDiff | null } | null>(null);
@@ -1290,7 +1312,11 @@ function NodeDetail() {
                 title="restack this forest — rebases drifted nodes onto their parents and contracts merged ghosts (drop + rewire children). A conflict confined to a merged dep's files auto-resolves to what landed."
                 onClick={fixForest}
               >
-                {fixing() ? "fixing…" : `✦ fix forest (${unhealthy().length})`}
+                {fixing()
+                  ? fixProgress()?.total
+                    ? `fixing… ${fixProgress()!.current ? fixProgress()!.current.split("/").pop() + " " : ""}${fixProgress()!.done}/${fixProgress()!.total}`
+                    : "fixing…"
+                  : `✦ fix forest (${unhealthy().length})`}
               </button>
             </Show>
             <Show when={fixResult()}>
