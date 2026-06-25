@@ -1360,7 +1360,7 @@ function NodeDetail() {
                   ? fixProgress()?.total
                     ? `fixing… ${fixProgress()!.current ? fixProgress()!.current.split("/").pop() + " " : ""}${fixProgress()!.done}/${fixProgress()!.total}`
                     : "fixing…"
-                  : `✦ fix forest (${unhealthy().length})`}
+                  : `⟳ restack forest (${unhealthy().length})`}
               </button>
             </Show>
             <Show when={fixResult()}>

@@ -289,7 +289,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
           }
           onClick={fire(() => rebase.mutate())}
         >
-          {rebase.isPending ? "rebasing…" : behind() === 0 ? "✦ on origin/main" : "⟳ rebase onto main"}
+          {rebase.isPending ? "rebasing…" : behind() === 0 ? "✦ on origin/main" : "⟳ restack branch"}
         </button>
       </Show>
 
@@ -303,7 +303,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
           title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
           onClick={fire(() => trigger("prep", () => prep.mutate()))}
         >
-          {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm squash" : "✓ squash unpushed"}
+          {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm tidy" : "✓ tidy commits"}
         </button>
       </Show>
 
@@ -391,7 +391,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             onClick={fire(() => trigger("squash", () => squash.mutate()))}
           >
             <span class="nh-item-ic">⊟</span>
-            {squash.isPending ? "unstaging…" : armed() === "squash" ? "confirm squash & unstage" : "squash & unstage"}
+            {squash.isPending ? "uncommitting…" : armed() === "squash" ? "confirm uncommit" : "uncommit → GitHub Desktop"}
           </button>
 
           {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
@@ -406,7 +406,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
                 navigate({ kind: "push", branch: props.branch });
               }}
             >
-              <span class="nh-item-ic">↑</span> prepare to push
+              <span class="nh-item-ic">↑</span> pre-push gates
             </button>
           </Show>
 
