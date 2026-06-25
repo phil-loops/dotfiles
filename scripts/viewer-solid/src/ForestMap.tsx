@@ -455,6 +455,14 @@ export function ForestMap(props: {
                         ? "merged into main (ghost) — restack to contract it (drop + rewire children)"
                         : "off its parent (not a git ancestor) — its diff is effectively vs main; restack to separate"}
                     </title>
+                    <text
+                      class="fm-warn"
+                      classList={{ drift: !!nhealth(n.id)?.drifted, ghost: !!nhealth(n.id)?.merged }}
+                      x={w / 2}
+                      y={NODE_H / 2 + 12}
+                    >
+                      {nhealth(n.id)?.merged ? "✦ ghost · merged" : "⤺ off-parent"}
+                    </text>
                   </Show>
                   <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
                   <circle class="dot" cx="16" cy="0" r="5" />
@@ -516,8 +524,11 @@ const CSS = `
 .fm-node.head rect { stroke: var(--ink-dim); stroke-width: 1.6; filter: drop-shadow(0 0 5px var(--gold-wash)); }
 .fm-node.head:hover rect { stroke: var(--ink); }
 .fm-node.active rect { stroke: var(--gold-leaf); stroke-width: 2; filter: drop-shadow(0 0 9px var(--gold-wash)); }
-.fm-node.drifted rect { stroke: var(--del); stroke-dasharray: 4 3; }
-.fm-node.merged rect { stroke: var(--patina); stroke-dasharray: 1 3; }
+.fm-node.drifted rect { stroke: var(--del); stroke-width: 2.4; stroke-dasharray: 5 3; filter: drop-shadow(0 0 7px var(--del)); }
+.fm-node.merged rect { stroke: var(--patina); stroke-width: 2.2; stroke-dasharray: 2 3; filter: drop-shadow(0 0 6px var(--patina)); }
+.fm-warn { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; letter-spacing: .03em; }
+.fm-warn.drift { fill: var(--del); }
+.fm-warn.ghost { fill: var(--patina); }
 .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
 .fm-node.active text { fill: var(--ink); }
 .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }
