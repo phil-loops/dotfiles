@@ -1,0 +1,212 @@
+/* MobilePush — phone-first prepare-to-push card. Reuses the viewer's vellum/gold
+   palette (vars from index.css) so it feels like the same app on a small screen. */
+
+.mp-wrap {
+  max-width: 540px;
+  margin: 0 auto;
+  padding: 16px 14px 64px;
+  font-family: var(--mono);
+  color: var(--ink);
+}
+
+.mp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mp-back {
+  font-size: 28px;
+  line-height: 1;
+  color: var(--ink-dim);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+}
+.mp-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+}
+.mp-branch {
+  font-size: 17px;
+  color: var(--gold-leaf);
+  word-break: break-all;
+}
+
+.mp-card {
+  background: var(--vellum-raise);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin: 12px 0;
+}
+.mp-card.mp-bad {
+  border-color: var(--del);
+}
+.mp-card-h {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-dim);
+  margin-bottom: 8px;
+}
+
+.mp-dim {
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+
+.mp-commits,
+.mp-gates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mp-commits li {
+  font-size: 13px;
+  line-height: 1.4;
+}
+.mp-commits code {
+  color: var(--gold-deep);
+  margin-right: 6px;
+}
+
+.mp-subject {
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--diff-bg);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  padding: 10px 12px;
+  word-break: break-word;
+}
+
+.mp-tag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--vellum-night);
+  background: var(--gold-leaf);
+  border-radius: 999px;
+  padding: 1px 7px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.mp-tag.mp-warn {
+  background: var(--patina);
+}
+
+.mp-gates li {
+  display: grid;
+  grid-template-columns: 20px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.mp-gate-name {
+  color: var(--ink);
+}
+.mp-pass {
+  color: var(--add);
+}
+.mp-fail {
+  color: var(--del);
+}
+.mp-summary {
+  grid-column: 1 / -1;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--del);
+  background: var(--del-bg);
+  border-radius: 8px;
+  white-space: pre-wrap;
+  overflow-x: auto;
+}
+
+.mp-err {
+  color: var(--del);
+  font-size: 13px;
+  margin-top: 8px;
+}
+
+/* big, thumb-sized buttons */
+.mp-btn {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  padding: 16px;
+  font-family: var(--mono);
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--vellum-edge);
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.mp-btn:disabled {
+  opacity: 0.45;
+}
+.mp-primary {
+  border-color: var(--gold-deep);
+  color: var(--gold-leaf);
+}
+.mp-go {
+  background: var(--gold-leaf);
+  color: var(--vellum-night);
+  border-color: var(--gold-leaf);
+  font-weight: 600;
+}
+.mp-go:disabled {
+  background: var(--vellum-edge);
+  color: var(--ink-faint);
+  border-color: var(--rule);
+}
+
+.mp-done {
+  font-size: 18px;
+  color: var(--add);
+  text-align: center;
+  padding: 6px 0;
+}
+
+/* confetti — a brief CSS-only burst on a successful push */
+.mp-confetti {
+  position: relative;
+  height: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.mp-confetti i {
+  position: absolute;
+  top: -8px;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: mp-fall;
+  animation-timing-function: ease-in;
+  animation-iteration-count: 1;
+  animation-fill-mode: forwards;
+}
+@keyframes mp-fall {
+  0% {
+    opacity: 1;
+    transform: translateY(0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(180px) rotate(420deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mp-confetti i {
+    animation: none;
+  }
+}

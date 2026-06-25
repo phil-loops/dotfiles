@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -122,7 +122,7 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         u = urlparse(self.path)
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching")
-                or u.path.startswith(("/forests/", "/branch/", "/review/"))):
+                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/"))):
             # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
             # every client route: path-based routing (History API) means a deep-link/refresh to
             # /forest/x hits the server, which must return index.html (SPA fallback) so the client
@@ -258,6 +258,10 @@ class H(BaseHTTPRequestHandler):
             return review.squash(self, raw)
         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
             return review.prep(self, raw)
+        if self.path == "/gates":    # mobile prepare-to-push: run repo gates → per-gate verdict
+            return push.gates(self, raw)
+        if self.path == "/push":     # mobile prepare-to-push: FF push to a safe (non-origin) remote
+            return push.push(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
