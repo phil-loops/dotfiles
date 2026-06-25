@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""stack-gates — run a repo's pre-push gates and report per-gate pass/fail as JSON.
+
+This is the "run the gates" step of prepare-to-push: the mobile flow shows each
+gate's verdict and only enables push when all are green (a red gate = "blocked,
+needs the laptop" — you can't fix code from a phone).
+
+Gates are git-config driven so each repo declares its own, e.g.:
+
+    git config --add stack-gates.cmd "typecheck::./node_modules/.bin/tsgo --project tsconfig.node.json --noEmit"
+    git config --add stack-gates.cmd "format::git diff --name-only main HEAD -- '*.ts' '*.tsx' | xargs -r ./node_modules/.bin/oxfmt --check"
+
+Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With no
+config, falls back to auto-detected defaults (tsgo if tsconfig.node.json exists,
+oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
+
+  stack-gates [--branch <b>]   run in the worktree of <b> if it has one, else cwd
+
+Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary"}]}
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+
+
+def run(cmd, cwd):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+def worktree_of(branch, cwd):
+    if not branch:
+        return cwd
+    path = None
+    out = run(["git", "worktree", "list", "--porcelain"], cwd).stdout
+    for ln in out.splitlines():
+        if ln.startswith("worktree "):
+            path = ln[len("worktree "):]
+        elif ln == f"branch refs/heads/{branch}" and path:
+            return path
+    return cwd
+
+
+def configured_gates(cwd):
+    out = run(["git", "config", "--get-all", "stack-gates.cmd"], cwd).stdout
+    gates = []
+    for ln in out.splitlines():
+        if "::" in ln:
+            label, cmd = ln.split("::", 1)
+            gates.append((label.strip(), cmd.strip()))
+    return gates
+
+
+def resolve(cmd, cwd):
+    """Absolute path to a tool: repo-local node_modules first, then PATH (volta etc.)."""
+    local = os.path.join(cwd, "node_modules", ".bin", cmd)
+    return local if os.path.exists(local) else shutil.which(cmd)
+
+
+def default_gates(cwd):
+    gates = []
+    tsgo = resolve("tsgo", cwd)
+    oxfmt = resolve("oxfmt", cwd)
+    if tsgo and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
+        gates.append(("typecheck", f"{tsgo} --project tsconfig.node.json --noEmit"))
+    if oxfmt:
+        gates.append((
+            "format",
+            "git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx' "
+            f"| xargs -r {oxfmt} --check",
+        ))
+    return gates
+
+
+def last_lines(text, n=12):
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    tail = lines[-n:]
+    return "\n".join(tail)
+
+
+def main():
+    branch = ""
+    argv = sys.argv[1:]
+    if "--branch" in argv:
+        i = argv.index("--branch")
+        branch = argv[i + 1] if i + 1 < len(argv) else ""
+
+    cwd = worktree_of(branch, os.getcwd())
+    gates = configured_gates(cwd) or default_gates(cwd)
+
+    if not gates:
+        print(json.dumps({"ok": True, "gates": [], "note": "no gates configured for this repo"}))
+        return 0
+
+    results = []
+    all_ok = True
+    for name, cmd in gates:
+        t0 = time.time()
+        r = run(["bash", "-lc", cmd], cwd)
+        ms = int((time.time() - t0) * 1000)
+        ok = r.returncode == 0
+        all_ok = all_ok and ok
+        summary = "" if ok else last_lines((r.stdout or "") + "\n" + (r.stderr or ""))
+        results.append({"name": name, "ok": ok, "ms": ms, "summary": summary})
+
+    print(json.dumps({"ok": all_ok, "gates": results}))
+    return 0 if all_ok else 0   # always exit 0: the JSON carries the verdict; the caller reads ok
+
+
+if __name__ == "__main__":
+    sys.exit(main())
