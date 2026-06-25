@@ -59,12 +59,22 @@ def resolve(cmd, cwd):
     return local if os.path.exists(local) else shutil.which(cmd)
 
 
+def repo_local(cmd, cwd):
+    """Repo-pinned tool only — no PATH fallback. A global build (volta) can be
+    version-skewed from the repo's toolchain and reject configs the repo accepts."""
+    local = os.path.join(cwd, "node_modules", ".bin", cmd)
+    return local if os.path.exists(local) else None
+
+
 def default_gates(cwd):
     gates = []
-    tsgo = resolve("tsgo", cwd)
+    # Typecheck with the repo-PINNED compiler: a global tsgo dev build rejects
+    # configs the repo's own tsc accepts (e.g. moduleResolution=node10 removed),
+    # which surfaces as a false "blocked, needs the laptop". Prefer repo tsgo, else tsc.
+    typechecker = repo_local("tsgo", cwd) or repo_local("tsc", cwd)
     oxfmt = resolve("oxfmt", cwd)
-    if tsgo and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
-        gates.append(("typecheck", f"{tsgo} --project tsconfig.node.json --noEmit"))
+    if typechecker and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
+        gates.append(("typecheck", f"{typechecker} --project tsconfig.node.json --noEmit"))
     if oxfmt:
         gates.append((
             "format",
