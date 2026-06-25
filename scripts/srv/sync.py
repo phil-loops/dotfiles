@@ -159,6 +159,32 @@ def _freshen_trunk(main):
     ).start()
 
 
+def _upstream_state(branch, main):
+    # Surface a tracking ref that will bite a plain Pull/Push. A stacked branch should
+    # track origin/<itself> (or nothing) — never origin/<main> (the autoSetupMerge trap)
+    # or a differently-named remote (rename drift); both make GitHub Desktop's Pull MERGE
+    # the wrong ref into the branch. Also flag a genuine ahead+behind divergence. Unset
+    # upstream is the safe state (nothing to pull-merge), so it's never flagged.
+    r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
+    up = r.stdout.strip() if r.returncode == 0 else ""
+    if not up:
+        return {"upstream": "", "upstreamBad": False, "upstreamReason": "", "ahead": 0, "behind": 0}
+    remote = ctx.run(["git", "config", f"branch.{branch}.remote"]).stdout.strip()
+    up_branch = up[len(remote) + 1:] if remote and up.startswith(remote + "/") else up
+    ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
+    behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)
+    if up_branch == main:
+        reason = f"tracks {up} (the trunk) — a Pull would merge main into this branch"
+    elif up_branch != branch:
+        reason = f"tracks {up} — a renamed/foreign remote branch; a Pull would merge it in"
+    elif ahead and behind:
+        reason = f"diverged from {up} ({ahead}↑ {behind}↓) — a Pull merges, a Push is rejected"
+    else:
+        reason = ""
+    return {"upstream": up, "upstreamBad": bool(reason), "upstreamReason": reason,
+            "ahead": ahead, "behind": behind}
+
+
 def _node_health(branch):
     """Forest-STRUCTURAL health (vs. state()'s fork-staleness):
       drifted — the node's configured parent is NOT a git ancestor, so it sits off the parent's
@@ -176,7 +202,8 @@ def _node_health(branch):
         ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
     merged = ctx.run(
         [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, _trunk(main)]).returncode == 20
-    return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged), "parent": parent}
+    return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged), "parent": parent,
+            **_upstream_state(branch, main)}
 
 
 def health_many(req, u):
@@ -187,6 +214,23 @@ def health_many(req, u):
     with ThreadPoolExecutor(max_workers=8) as ex:
         out = dict(zip(bs, ex.map(_node_health, bs)))
     req._send(200, json.dumps(out))
+
+
+def fix_upstream(req, raw):
+    # Neutralize a footgun tracking ref: unset the branch's upstream so a Pull/Push can no
+    # longer merge the wrong remote in. Config-only, non-destructive — the branch keeps all
+    # its commits and can be published cleanly later. GitHub Desktop then offers "Publish"
+    # instead of a dangerous "Pull".
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    r = ctx.run(["git", "branch", "--unset-upstream", branch])
+    if r.returncode != 0:
+        req._send(200, json.dumps({"ok": False, "err": (getattr(r, "stderr", "") or "no upstream to unset").strip()}))
+        return
+    req._send(200, json.dumps({"ok": True, "branch": branch}))
 
 
 # ── direct forward-rebase (the clean fast path) ──────────────────────────────
