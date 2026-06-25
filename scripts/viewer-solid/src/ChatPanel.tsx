@@ -177,7 +177,13 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
             continue;
           }
           const payload = JSON.parse(data);
-          if (event === "token") {
+          if (event === "session") {
+            // persist the resume id the moment the server reports it — so even if this turn is
+            // cut short (tab close, reload), the thread can still be continued with --resume.
+            if (payload.session_id) {
+              setSession(branch, path, payload.session_id);
+            }
+          } else if (event === "token") {
             setStatus(null);
             setMsgText(branch, path, idx, (t) => t + (payload.t || ""));
             pin();

@@ -1,12 +1,13 @@
 # srv/chat.py — "chat about this file", streamed into the browser. Runs a headless,
 # READ-ONLY `claude -p` in the branch's worktree and proxies its stream-json output to
 # the page as Server-Sent Events, so answer tokens land live instead of all-at-once.
-# Multi-turn is stateless here: the client keeps the session_id we report on `done` and
-# sends it back as `resume` for the next turn (so follow-ups keep the thread + the file
+# Multi-turn is stateless here: the client keeps the session_id we report (at stream start,
+# repeated on `done`) and sends it back as `resume` for the next turn (so follow-ups keep the file
 # context without us re-sending the diff).
 #
 #   POST /chat {branch, path?, patch?, question, resume?}  → text/event-stream
 #     (omit path → chat about the whole branch; the server computes its parent…branch diff)
+#     event: session data: {"session_id":"…"}        # sent ASAP so a cut-short chat resumes
 #     event: status data: {"s":"starting|thinking|writing"}
 #     event: token  data: {"t":"…"}                  # an answer text delta
 #     event: done   data: {"ok":true,"session_id":"…"}
@@ -145,6 +146,10 @@ def start(req, raw):
             t = ev.get("type")
             if t == "system" and ev.get("subtype") == "init":
                 session_id = ev.get("session_id", session_id)
+                # report it NOW, not just on `done` — so a chat cut short (tab close, reload,
+                # network drop) is still resumable: the client has the id to --resume from.
+                if session_id:
+                    sse("session", {"session_id": session_id})
             elif t == "stream_event":
                 e = ev.get("event", {})
                 et = e.get("type")
