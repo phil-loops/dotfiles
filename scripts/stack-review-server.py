@@ -213,6 +213,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/review-requests": return reviews.requests(self)
         elif u.path == "/review-remote":   return reviews.remote(self, u)
         elif u.path == "/branches":       return picker.branches(self)
+        elif u.path == "/forest-branches": return picker.forest_branches(self)
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/file":           return review.file(self, u)

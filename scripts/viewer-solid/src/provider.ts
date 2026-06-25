@@ -10,6 +10,7 @@ import { z } from "zod";
 import { fetchJSON } from "./api";
 import {
   Commit,
+  ForestBranch,
   ForestModel,
   Head,
   NodeData,
@@ -36,6 +37,7 @@ export interface DataProvider {
   projects(): Promise<Project[]>;
   standalone(): Promise<Standalone[]>;
   branches(): Promise<string[]>;
+  forestBranches(): Promise<ForestBranch[]>;
   model(branch: string): Promise<ForestModel>;
   node(branch: string, base?: string): Promise<NodeData>;
   commits(branch: string): Promise<Commit[]>;
@@ -75,6 +77,7 @@ export class HttpProvider implements DataProvider {
   projects = () => fetchJSON<unknown>("/projects").then((d) => parse(z.array(Project), d, "projects"));
   standalone = () => fetchJSON<unknown>("/standalone").then((d) => parse(z.array(Standalone), d, "standalone"));
   branches = () => fetchJSON<unknown>("/branches").then((d) => parse(z.array(z.string()), d, "branches"));
+  forestBranches = () => fetchJSON<unknown>("/forest-branches").then((d) => parse(z.array(ForestBranch), d, "forest-branches"));
   model = (branch: string) => fetchJSON<unknown>("/model?branch=" + q(branch)).then((d) => parse(ForestModel, d, "model"));
   node = (branch: string, base?: string) =>
     fetchJSON<unknown>("/node?branch=" + q(branch) + (base ? "&base=" + base : "")).then((d) => parse(NodeData, d, "node"));
@@ -105,6 +108,7 @@ export class StaticProvider implements DataProvider {
   projects = () => this.get("projects.json", z.array(Project), "projects");
   standalone = () => this.get("standalone.json", z.array(Standalone), "standalone");
   branches = () => this.get("branches.json", z.array(z.string()), "branches");
+  forestBranches = () => this.get("forest-branches.json", z.array(ForestBranch), "forest-branches");
   model = (branch: string) => this.get(`model/${slug(branch)}.json`, ForestModel, "model");
   // base variants (main/blessed) aren't baked — static shows the default parent diff.
   // Tolerant of a missing blob: before the model resolves, the UI briefly queries the

@@ -55,6 +55,13 @@ export default function CommandPalette() {
     queryFn: () => provider.projects(),
     enabled: open() && !ctx().project,
   }));
+  // every (branch, forest) pair across all projects — the global jump index, always on so
+  // you can search any branch by name from anywhere (home or a different forest).
+  const forestBranches = createQuery(() => ({
+    queryKey: ["forest-branches"],
+    queryFn: () => provider.forestBranches(),
+    enabled: open(),
+  }));
 
   const commands = createMemo<Cmd[]>(() => {
     const c = ctx();
@@ -96,6 +103,18 @@ export default function CommandPalette() {
       for (const p of projects.data || []) {
         cmds.push({ label: `→ ${p.name}`, sub: "forest", run: () => navigate({ kind: "forest", name: p.name }) });
       }
+    }
+
+    // global branch index: jump to ANY branch in ANY forest by name. Skip the open forest's
+    // own branches — those are already listed above from the live model, the source of truth.
+    const shown = c.project ? new Set(model.data?.nodes ? Object.keys(model.data.nodes) : []) : new Set<string>();
+    for (const fb of forestBranches.data || []) {
+      if (fb.project === c.project || shown.has(fb.branch)) continue;
+      cmds.push({
+        label: `→ ${fb.branch}`,
+        sub: fb.project,
+        run: () => navigate({ kind: "forest", name: fb.project, node: fb.branch }),
+      });
     }
     return cmds;
   });

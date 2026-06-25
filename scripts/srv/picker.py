@@ -268,6 +268,22 @@ def branches(req):
     req._send(200, json.dumps([b for b in heads if b and b != main and b not in pinned]))
 
 
+def forest_branches(req):
+    # Every (branch, project) the forest config names — the Cmd+K global jump index.
+    # Pure config read (no model rebuild, no per-project fan-out), so it's cheap to call
+    # on every palette open. The .branch list rots independently of the computed model,
+    # so the palette still lists a forest's true nodes from /model when one is open.
+    pairs = []
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.branch$"]).stdout.splitlines():
+        k, _, v = line.partition(" ")
+        b = v.strip()
+        m = re.match(r"^stack-project\.(.+)\.branch$", k)
+        if b and m:
+            pairs.append({"branch": b, "project": m.group(1)})
+    req._send(200, json.dumps(pairs))
+
+
 # --- POST handlers ---
 
 def pin(req, raw):   # POST /standalone — pin/unpin a branch in the watch list
