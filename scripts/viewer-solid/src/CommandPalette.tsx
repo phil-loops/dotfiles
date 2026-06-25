@@ -16,10 +16,8 @@ import { useViewerLocation, forestKey, withNode } from "./router";
 type Cmd = { label: string; sub?: string; run: () => void };
 
 const leaf = (s: string) => (s || "").split("/").pop() ?? "";
-const post = (url: string, body: unknown) => {
-  track("action", { url });
-  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-};
+const post = (url: string, body: unknown) =>
+  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 export default function CommandPalette() {
   const [open, setOpen] = createSignal(false);

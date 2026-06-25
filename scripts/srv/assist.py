@@ -4,6 +4,7 @@
 #   POST /claude {branch, selections:[{path, ranges:[[start,end],…]}], instruction}
 import os
 import json
+import uuid
 import subprocess
 
 from . import ctx, prompts
@@ -49,7 +50,12 @@ def start(req, raw):
     env = dict(os.environ)
     if model in ALLOWED_MODELS:
         env["STACK_CLAUDE_MODEL"] = model
+    # Mint the spawned session's id here and hand it to claude (--session-id) via stack-claude,
+    # so the fire-and-forget conversation is addressable later (--resume) and linkable from the
+    # usage log — the chip echoes it back as a "claude" event.
+    session_id = str(uuid.uuid4())
+    env["STACK_CLAUDE_SESSION_ID"] = session_id
     r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch, prompt],
                        cwd=ctx.CWD, capture_output=True, text=True, env=env)
     req._send(200 if r.returncode == 0 else 500,
-              json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
+              json.dumps({"ok": r.returncode == 0, "sessionId": session_id, "out": r.stdout, "err": r.stderr}))

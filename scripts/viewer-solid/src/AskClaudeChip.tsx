@@ -1,6 +1,7 @@
 import { createSignal, createEffect, onCleanup, Show, For, type Accessor } from "solid-js";
 import type { DiffSelection } from "./useDiffSelection";
 import { chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
+import { track } from "./track";
 
 // AskClaudeChip — the floating "ask Claude" affordance that appears when you sweep-select
 // text in a diff (see ../design-select-to-claude.md). Sweep → chip floats by the selection →
@@ -79,6 +80,8 @@ export default function AskClaudeChip(props: {
       if (!r.ok) {
         throw new Error(`/claude → ${r.status}`);
       }
+      const { sessionId } = (await r.json().catch(() => ({}))) as { sessionId?: string };
+      track("claude", { branch, sessionId }); // link this launch to its mineable transcript
       setSent(true);
       setTimeout(dismiss, 900); // brief "sent ✦" flash, then clear
     } catch (e) {
