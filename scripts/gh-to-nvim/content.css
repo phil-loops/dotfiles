@@ -25,3 +25,36 @@
 #gh-nvim-fab.gh-nvim-err {
   background: #da3633;
 }
+
+.gh-nvim-file-btn {
+  margin-right: 4px;
+  padding: 0 6px;
+  height: 24px;
+  font: 600 11px/22px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1f6feb;
+  background: transparent;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.gh-nvim-file-btn:hover {
+  background: rgba(31, 111, 235, 0.1);
+}
+
+.gh-nvim-file-btn:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+.gh-nvim-file-btn.gh-nvim-ok {
+  color: #fff;
+  background: #238636;
+  border-color: #238636;
+}
+
+.gh-nvim-file-btn.gh-nvim-err {
+  color: #fff;
+  background: #da3633;
+  border-color: #da3633;
+}
