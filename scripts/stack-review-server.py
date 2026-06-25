@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -239,6 +239,8 @@ class H(BaseHTTPRequestHandler):
             return reviews.import_pr(self, raw)
         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
             return reviews.pull(self, raw)
+        if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
+            return usage.track(self, raw)
         if self.path == "/drop-project":   # forget a forest grouping (config only; branches kept)
             return picker.drop_project(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
