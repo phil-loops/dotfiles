@@ -293,6 +293,20 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
         </button>
       </Show>
 
+      {/* squash unpushed — first-class: collapse unpushed commits into one voiced + oxfmt'd
+          commit, NO push (Phil pushes to origin from GitHub Desktop). Two-click arm: rewrites history. */}
+      <Show when={!isReview()}>
+        <button
+          class="nh-fix"
+          classList={{ armed: armed() === "prep" }}
+          disabled={busy()}
+          title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
+          onClick={fire(() => trigger("prep", () => prep.mutate()))}
+        >
+          {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm squash" : "✓ squash unpushed"}
+        </button>
+      </Show>
+
       {/* already-merged: /sync found this branch's work squash-merged to main, so a forward
           rebase replays nothing. Offer the contraction (drop + rewire children) instead of a
           Claude grinding the empty-rebase conflict. */}
@@ -379,22 +393,6 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             <span class="nh-item-ic">⊟</span>
             {squash.isPending ? "unstaging…" : armed() === "squash" ? "confirm squash & unstage" : "squash & unstage"}
           </button>
-
-          {/* squash unpushed — collapse your unpushed commits into one voiced + oxfmt'd commit,
-              NO push (you push to origin from GitHub Desktop). Two-click: rewrites history. */}
-          <Show when={!isReview()}>
-            <button
-              class="nh-item"
-              classList={{ armed: armed() === "prep" }}
-              role="menuitem"
-              disabled={busy()}
-              title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
-              onClick={fire(() => trigger("prep", () => prep.mutate()))}
-            >
-              <span class="nh-item-ic">✓</span>
-              {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm squash unpushed" : "squash unpushed"}
-            </button>
-          </Show>
 
           {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
               Not for review nodes (those track someone else's PR — you don't push it). */}
