@@ -31,6 +31,7 @@ import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
 import { ServerStatus } from "./ServerStatus";
 import { Hearth } from "./Hearth";
+import MobilePush from "./MobilePush";
 import type {
   ForestModel,
   SpineNode,
@@ -102,6 +103,9 @@ function Routes() {
     <Switch>
       <Match when={location().kind === "home"}>
         <Home />
+      </Match>
+      <Match when={location().kind === "push"}>
+        <MobilePush />
       </Match>
       <Match when={location().kind !== "home"}>
         <NodeDetail />
@@ -817,7 +821,7 @@ function NodeDetail() {
   const project = () => forestKey(location());
   const nodeParam = (): string | undefined => {
     const l = location();
-    return l.kind === "home" ? undefined : l.node;
+    return l.kind === "home" || l.kind === "push" ? undefined : l.node;
   };
 
   const model = createQuery(() => ({
