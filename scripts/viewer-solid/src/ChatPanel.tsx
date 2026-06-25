@@ -1,7 +1,7 @@
 import { createSignal, onCleanup, onMount, For, Show, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import type { FileDiff } from "./types";
-import { appendMsg, setMsgText, setSession, thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
+import { appendMsg, setMsgText, setSession, setActiveTurn, clearActiveTurn, thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
 import { renderMarkdown } from "./markdown";
 
 // ChatPanel — "chat about this file", with Claude's answer streaming in token-by-token.
@@ -46,10 +46,24 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
     }
   };
 
-  // stop the in-flight turn: abort the fetch (closes the stream → the server SIGKILLs the
-  // headless claude), keep whatever streamed so far, then let the queue drain as normal.
+  // The turn now runs as a server-side job, decoupled from this connection. So:
+  //   • STOP must tell the server to kill it (disconnecting alone would leave it running).
+  //   • closing the drawer just drops our subscriber — the job keeps going, and reopening
+  //     re-attaches (see onMount/onCleanup). `unmounting` distinguishes the two: an
+  //     unmount-abort keeps the activeTurn for reattach; a stop-abort ends it.
   let abort: AbortController | null = null;
-  const stop = () => abort?.abort();
+  let curTurn = "";
+  let unmounting = false;
+  const stop = () => {
+    if (curTurn) {
+      void fetch("/chat-stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turn: curTurn }),
+      });
+    }
+    abort?.abort();
+  };
 
   // ── pop out: hand this chat's headless session to an interactive claude in tmux ──
   // The thread already carries a resume session-id; `claude --resume` continues the same
@@ -112,6 +126,106 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
     void pump(); // chain the next queued message, if any
   };
 
+  // Read the SSE stream off a /chat response into thread msg[idx]. `reset` (used when
+  // re-attaching to an in-flight job, which replays from the top) rebuilds the message from
+  // scratch — but LAZILY, on the first token, so re-attaching to a "gone" job (no replay)
+  // doesn't wipe the partial we already had. Returns the terminal outcome.
+  const consumeStream = async (
+    res: Response,
+    branch: string,
+    path: string,
+    idx: number,
+    reset: boolean,
+  ): Promise<"done" | "gone" | "error"> => {
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let outcome: "done" | "gone" | "error" = "done";
+    let didReset = false;
+    let finished = false;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      buf += dec.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, nl);
+        buf = buf.slice(nl + 2);
+        let event = "message";
+        let data = "";
+        for (const ln of frame.split("\n")) {
+          if (ln.startsWith("event:")) {
+            event = ln.slice(6).trim();
+          } else if (ln.startsWith("data:")) {
+            data += ln.slice(5).trim();
+          }
+        }
+        if (!data) {
+          continue; // keepalive comment / empty frame
+        }
+        const payload = JSON.parse(data);
+        if (event === "session") {
+          // persist the resume id the moment the server reports it — so even a cut-short turn
+          // (server reaped, job evicted) is still continuable via --resume.
+          if (payload.session_id) {
+            setSession(branch, path, payload.session_id);
+          }
+        } else if (event === "token") {
+          setStatus(null);
+          if (reset && !didReset) {
+            setMsgText(branch, path, idx, () => ""); // first replayed token → rebuild from scratch
+            didReset = true;
+          }
+          setMsgText(branch, path, idx, (t) => t + (payload.t || ""));
+          pin();
+        } else if (event === "status") {
+          setStatus(payload.s);
+        } else if (event === "done") {
+          if (payload.session_id) {
+            setSession(branch, path, payload.session_id);
+          }
+          finished = true;
+        } else if (event === "gone") {
+          outcome = "gone"; // the job no longer exists — partial stays; --resume can continue it
+          finished = true;
+        } else if (event === "error") {
+          setError(payload.err || "stream error");
+          outcome = "error";
+          finished = true;
+        }
+      }
+      if (finished) {
+        await reader.cancel().catch(() => {});
+        break;
+      }
+    }
+    return outcome;
+  };
+
+  // Shared teardown. A stop or a normal end clears the activeTurn; an UNMOUNT abort keeps it,
+  // because the server job is still running and reopening should re-attach to it.
+  const finishTurn = (branch: string, path: string, idx: number, ctrl: AbortController) => {
+    setStreaming(false);
+    setStatus(null);
+    abort = null;
+    curTurn = "";
+    if (ctrl.signal.aborted && unmounting) {
+      return; // drawer closed mid-answer — leave activeTurn set so reopening re-attaches
+    }
+    clearActiveTurn(branch, path);
+    const answered = thread(branch, path).msgs[idx]?.text;
+    if (ctrl.signal.aborted) {
+      if (!answered) {
+        setMsgText(branch, path, idx, () => "⏹ stopped");
+      }
+    } else if (!answered && !error()) {
+      setError("no response — the headless claude produced nothing");
+    }
+    inputEl?.focus();
+  };
+
   const runTurn = async (q: string) => {
     // Pin the thread for the whole turn: streaming writes must land on the file we started on,
     // even if the user switches files mid-stream (props would otherwise move out from under us).
@@ -119,9 +233,12 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
     const path = props.file?.path ?? "";
     const patch = props.file?.patch; // undefined for a branch chat → server computes the diff
     const resume = session();
+    const turn = crypto.randomUUID(); // the server keys the job by this; a reload re-attaches to it
     setError(null);
     appendMsg(branch, path, { role: "you", text: q });
     const idx = appendMsg(branch, path, { role: "claude", text: "" });
+    setActiveTurn(branch, path, turn, idx); // persist NOW so a reload mid-answer can re-attach
+    curTurn = turn;
     setStreaming(true);
     setStatus("starting");
     stick = true; // a just-sent message should pull the view to the bottom
@@ -135,6 +252,7 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
         signal: ctrl.signal,
         body: JSON.stringify({
           branch,
+          turn,
           path: path || undefined,
           patch: resume ? undefined : patch, // diff only seeds turn one
           question: q,
@@ -145,83 +263,44 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
       if (!res.ok || !res.body) {
         throw new Error(`/chat → ${res.status}`);
       }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = "";
-      // The answer is "done" when the `done` frame lands — NOT when the HTTP stream finally
-      // closes (the headless claude can take a beat to tear down after its last token). Freeing
-      // the UI on `done` is why the input stops hanging; we then cancel the reader, which closes
-      // the connection and lets the server SIGKILL the lingering claude instead of waiting on it.
-      let finished = false;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) {
-          break;
-        }
-        buf += dec.decode(value, { stream: true });
-        let nl: number;
-        // each SSE frame ends in a blank line; a frame is "event: x\ndata: {…}"
-        while ((nl = buf.indexOf("\n\n")) >= 0) {
-          const frame = buf.slice(0, nl);
-          buf = buf.slice(nl + 2);
-          let event = "message";
-          let data = "";
-          for (const ln of frame.split("\n")) {
-            if (ln.startsWith("event:")) {
-              event = ln.slice(6).trim();
-            } else if (ln.startsWith("data:")) {
-              data += ln.slice(5).trim();
-            }
-          }
-          if (!data) {
-            continue;
-          }
-          const payload = JSON.parse(data);
-          if (event === "session") {
-            // persist the resume id the moment the server reports it — so even if this turn is
-            // cut short (tab close, reload), the thread can still be continued with --resume.
-            if (payload.session_id) {
-              setSession(branch, path, payload.session_id);
-            }
-          } else if (event === "token") {
-            setStatus(null);
-            setMsgText(branch, path, idx, (t) => t + (payload.t || ""));
-            pin();
-          } else if (event === "status") {
-            setStatus(payload.s);
-          } else if (event === "done") {
-            if (payload.session_id) {
-              setSession(branch, path, payload.session_id);
-            }
-            finished = true;
-          } else if (event === "error") {
-            setError(payload.err || "stream error");
-          }
-        }
-        if (finished) {
-          await reader.cancel().catch(() => {});
-          break;
-        }
-      }
+      await consumeStream(res, branch, path, idx, false);
     } catch (e) {
-      // an aborted fetch is a user-initiated stop, not a failure — leave the partial answer be
       if (!ctrl.signal.aborted) {
         setError(e instanceof Error ? e.message : String(e));
       }
     } finally {
-      setStreaming(false);
-      setStatus(null);
-      abort = null;
-      // mark a stopped-before-any-token turn so it doesn't read as an empty answer or an error
-      const answered = thread(branch, path).msgs[idx]?.text;
-      if (ctrl.signal.aborted) {
-        if (!answered) {
-          setMsgText(branch, path, idx, () => "⏹ stopped");
-        }
-      } else if (!answered && !error()) {
-        setError("no response — the headless claude produced nothing");
+      finishTurn(branch, path, idx, ctrl);
+    }
+  };
+
+  // Re-attach to a still-running turn (reopened drawer / reloaded page): replay its buffer, then
+  // live-tail to the end. No question — a body without one tells the server "reconnect, don't start".
+  const reattach = async (branch: string, path: string, turn: string, idx: number) => {
+    setError(null);
+    curTurn = turn;
+    setStreaming(true);
+    setStatus("reconnecting");
+    stick = true;
+    pin();
+    const ctrl = new AbortController();
+    abort = ctrl;
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
+        body: JSON.stringify({ branch, turn, path: path || undefined }),
+      });
+      if (!res.ok || !res.body) {
+        throw new Error(`/chat → ${res.status}`);
       }
-      inputEl?.focus();
+      await consumeStream(res, branch, path, idx, true);
+    } catch (e) {
+      if (!ctrl.signal.aborted) {
+        setError(e instanceof Error ? e.message : String(e));
+      }
+    } finally {
+      finishTurn(branch, path, idx, ctrl);
     }
   };
 
@@ -234,8 +313,19 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
     window.addEventListener("keydown", onKey);
     inputEl?.focus();
     pin(); // reopened with restored history — drop to the latest turn
+    // reopened (or reloaded) while a turn was still cooking? re-attach to its server job.
+    const at = thread(props.branch, path()).activeTurn;
+    if (at && !streaming()) {
+      void reattach(props.branch, path(), at.id, at.idx);
+    }
   });
-  onCleanup(() => window.removeEventListener("keydown", onKey));
+  onCleanup(() => {
+    window.removeEventListener("keydown", onKey);
+    // drop our subscriber, but DON'T kill the job — it keeps running server-side and reopening
+    // re-attaches. `unmounting` tells finishTurn to keep the activeTurn for that reattach.
+    unmounting = true;
+    abort?.abort();
+  });
 
   const seg = (p: string): JSX.Element => {
     const i = p.lastIndexOf("/");

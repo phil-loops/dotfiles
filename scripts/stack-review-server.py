@@ -292,8 +292,10 @@ class H(BaseHTTPRequestHandler):
             return restack.restack_all(self, raw)
         if self.path == "/claude":           # select diff lines → start a fresh claude on them
             return assist.start(self, raw)
-        if self.path == "/chat":             # chat about a file → stream a headless claude back as SSE
+        if self.path == "/chat":             # start OR reconnect a chat turn (server-side job) → SSE replay+live
             return chat.start(self, raw)
+        if self.path == "/chat-stop":        # ■ stop: kill this turn's headless claude for real
+            return chat.stop(self, raw)
         if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
             return chat.popout(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
