@@ -932,8 +932,12 @@ function NodeDetail() {
   );
 
   const [fixing, setFixing] = createSignal(false);
+  // outcome of the last restack — a 6-branch history rewrite must never read as a no-op.
+  // errors/parks stay until the next click; a clean success auto-clears.
+  const [fixResult, setFixResult] = createSignal<{ msg: string; ok: boolean } | null>(null);
   const fixForest = () => {
     if (fixing()) return;
+    setFixResult(null);
     setFixing(true);
     fetch("/restack", {
       method: "POST",
@@ -942,9 +946,15 @@ function NodeDetail() {
     })
       .then((r) => r.json())
       .then((r) => {
-        if (!r.ok) setFixing(false);
+        if (!r.ok) {
+          setFixing(false);
+          setFixResult({ msg: r.err || "restack failed to start", ok: false });
+        }
       })
-      .catch(() => setFixing(false));
+      .catch(() => {
+        setFixing(false);
+        setFixResult({ msg: "restack failed to start", ok: false });
+      });
   };
   const fixStatus = createQuery(() => ({
     queryKey: ["fix-status", project()],
@@ -958,6 +968,16 @@ function NodeDetail() {
     if (d && !d.running) {
       // restack finished (or parked — the Hearth/home owns conflict resolution); refresh in place.
       setFixing(false);
+      if (d.paused) {
+        setFixResult({
+          msg: `parked on ${d.current || "a conflict"}${d.reason ? `: ${d.reason}` : ""} — resolve in Hearth`,
+          ok: false,
+        });
+      } else {
+        const n = d.completed?.length ?? d.total ?? 0;
+        setFixResult({ msg: `✓ restacked ${n} branch${n === 1 ? "" : "es"}`, ok: true });
+        setTimeout(() => setFixResult((r) => (r?.ok ? null : r)), 6000);
+      }
       model.refetch();
       health.refetch();
       node.refetch();
@@ -1272,6 +1292,20 @@ function NodeDetail() {
               >
                 {fixing() ? "fixing…" : `✦ fix forest (${unhealthy().length})`}
               </button>
+            </Show>
+            <Show when={fixResult()}>
+              <span
+                title={fixResult()!.ok ? "" : fixResult()!.msg}
+                style={{
+                  "font-size": "11px",
+                  "letter-spacing": ".03em",
+                  "align-self": "center",
+                  "white-space": "nowrap",
+                  color: fixResult()!.ok ? "var(--gold-leaf)" : "var(--del)",
+                }}
+              >
+                {fixResult()!.msg}
+              </span>
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
