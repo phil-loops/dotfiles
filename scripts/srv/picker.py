@@ -327,10 +327,10 @@ def promote(req, raw):   # POST /promote — graduate a watched branch into its 
     req._send(200, json.dumps({"ok": True, "project": project}))
 
 
-def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
-    d = json.loads(raw or "{}")
-    args = [os.path.join(ctx.SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")]
-    pos = d.get("pos") or d.get("line")   # opaque locator; forwarded verbatim — stack-open owns the grammar
+def open_on_branch(branch, path, pos=None):   # open <path> on <branch> in the warm review-nvim
+    # pos is an opaque locator forwarded verbatim — stack-open owns the grammar ("<line>" or "<line>:<col>").
+    # Returns (code, out, err); code 504 marks a wedged-nvim timeout. Stamps recency on success.
+    args = [os.path.join(ctx.SCRIPTS, "stack-open"), branch, path]
     if pos:
         args.append(str(pos))
     # Bound it: stack-open probes the warm review-nvim, which hangs indefinitely if that
@@ -348,12 +348,20 @@ def open_file(req, raw):   # POST /open — open a file on a branch in the warm 
         except ProcessLookupError:
             pass
         proc.communicate()
-        req._send(504, json.dumps({"ok": False, "err": "stack-open timed out — the review-nvim is unresponsive (wedged on a prompt?)"}))
-        return
+        return 504, "", "stack-open timed out — the review-nvim is unresponsive (wedged on a prompt?)"
     if proc.returncode == 0:
-        _record_open(d.get("branch", ""))   # stamp recency for the no-PR picker ordering
-    req._send(200 if proc.returncode == 0 else 500,
-              json.dumps({"ok": proc.returncode == 0, "out": out, "err": err}))
+        _record_open(branch)   # stamp recency for the no-PR picker ordering
+    return proc.returncode, out, err
+
+
+def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
+    d = json.loads(raw or "{}")
+    code, out, err = open_on_branch(d.get("branch", ""), d.get("path", ""), d.get("pos") or d.get("line"))
+    if code == 504:
+        req._send(504, json.dumps({"ok": False, "err": err}))
+        return
+    req._send(200 if code == 0 else 500,
+              json.dumps({"ok": code == 0, "out": out, "err": err}))
 
 
 def drop_project(req, raw):   # POST /drop-project — forget a forest grouping (config only; branches kept)

@@ -237,6 +237,8 @@ class H(BaseHTTPRequestHandler):
             return picker.promote(self, raw)
         if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
             return reviews.import_pr(self, raw)
+        if self.path == "/from-github":   # Chrome ext: import a PR + open <path> at <line> in warm nvim
+            return reviews.from_github(self, raw)
         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
             return reviews.pull(self, raw)
         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
