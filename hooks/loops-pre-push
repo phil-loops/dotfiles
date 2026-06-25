@@ -47,4 +47,8 @@ case "$branch" in
   main|HEAD) ;;  # never watch main or a detached HEAD
   *) ( "$HOME/.dotfiles/scripts/prwatch" --await "$branch" >/dev/null 2>&1 </dev/null & ) ;;
 esac
+
+# usage telemetry: log what this push is sending to GitHub (branch/project/ahead/subjects),
+# for the local-vs-pushed workflow read. Detached + best-effort — never blocks the push.
+( "$HOME/.dotfiles/scripts/stack-usage-event" push >/dev/null 2>&1 </dev/null & )
 exit 0

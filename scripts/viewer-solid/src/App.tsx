@@ -29,6 +29,7 @@ import ChatIndex from "./ChatIndex";
 import { threadMsgCount } from "./chatStore";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
+import { track } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { Hearth } from "./Hearth";
 import MobilePush from "./MobilePush";
@@ -118,6 +119,17 @@ function Routes() {
 // palette, and the server-status pill. The matched route renders as props.children.
 function Layout(props: { children?: JSX.Element }) {
   const qc = useQueryClient();
+  // usage telemetry: one event per route change (what you open, in what order). Dwell +
+  // bounce are derived offline from the gap between consecutive nav events.
+  const { location: loc } = useViewerLocation();
+  createEffect(() => {
+    const l = loc();
+    track("nav", {
+      kind: l.kind,
+      project: forestKey(l) || undefined,
+      node: "node" in l ? l.node : undefined,
+    });
+  });
   // /events is a persistent SSE stream and the browser only allows ~6 connections per origin
   // (HTTP/1.1) — so a graveyard of idle tabs each squatting a stream exhausts the pool and new
   // loads hang. Hold the stream ONLY while the tab is visible: a backgrounded tab closes it
@@ -192,12 +204,14 @@ function Home() {
     flashT = setTimeout(() => setFlash(null), 2400);
   };
   const [menu, setMenu] = createSignal<string | null>(null); // project whose parked-action popover is open
-  const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
-    fetch(url, {
+  const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> => {
+    if (url !== "/track") track("action", { url });
+    return fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json());
+  };
   const behindNames = () => (projects.data || []).filter((p) => p.behind > 0).map((p) => p.name);
   const start = (key: string) => {
     setRestackErr(null);

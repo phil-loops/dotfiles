@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+# stack-usage-event <kind> — append one git-workflow usage event to the same local log
+# the viewer writes (.git/stack-usage.jsonl in the git-common-dir), so commit/squash/push
+# behaviour sits in one stream alongside the in-app nav/cmd/action events.
+#
+# Called from git hooks (post-commit, pre-push). It does its OWN git introspection per
+# kind, so the hooks pass no message text — no shell-escaping of commit subjects. ALWAYS
+# exits 0 and swallows every error: a telemetry hiccup must never block a commit or push.
+# Kill switch: STACK_USAGE=0.
+#
+#   stack-usage-event commit   # one event per commit: branch, project, subject shape, ahead-count
+#   stack-usage-event push     # one event at push: branch, project, ahead-count, subjects sent
+import sys, os, json, time, subprocess
+
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+
+
+def log_file():
+    gd = git("rev-parse", "--git-common-dir")
+    if not gd:
+        return ""
+    if not os.path.isabs(gd):
+        top = git("rev-parse", "--show-toplevel")
+        gd = os.path.join(top, gd) if top else gd
+    return os.path.join(gd, "stack-usage.jsonl")
+
+
+def main():
+    if os.environ.get("STACK_USAGE") == "0":
+        return
+    kind = sys.argv[1] if len(sys.argv) > 1 else ""
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    if not branch or branch == "HEAD":
+        return  # detached (scratch worktree) — not a real workflow commit
+    main_branch = git("config", "stack.main-branch") or "main"
+    project = git("config", f"stack-branch.{branch}.project") or None
+    ahead = git("rev-list", "--count", f"{main_branch}..HEAD")
+    ev = {"type": kind, "branch": branch, "project": project,
+          "ahead": int(ahead) if ahead.isdigit() else None}
+
+    if kind == "commit":
+        subject = git("log", "-1", "--format=%s")
+        body = git("log", "-1", "--format=%b")
+        ev["subjectLen"] = len(subject)
+        ev["bodyLines"] = len([ln for ln in body.splitlines() if ln.strip()])
+    elif kind == "push":
+        subjects = git("log", "--format=%s", f"{main_branch}..HEAD").splitlines()
+        ev["subjects"] = subjects[:50]
+
+    ev["ts"] = int(time.time())
+    path = log_file()
+    if path:
+        with open(path, "a") as f:
+            f.write(json.dumps(ev) + "\n")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception:
+        pass
+    sys.exit(0)

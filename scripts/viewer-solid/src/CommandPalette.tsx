@@ -2,6 +2,7 @@ import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "so
 import { createQuery } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
+import { track } from "./track";
 import { useViewerLocation, forestKey, withNode } from "./router";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
@@ -15,8 +16,10 @@ import { useViewerLocation, forestKey, withNode } from "./router";
 type Cmd = { label: string; sub?: string; run: () => void };
 
 const leaf = (s: string) => (s || "").split("/").pop() ?? "";
-const post = (url: string, body: unknown) =>
-  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+const post = (url: string, body: unknown) => {
+  track("action", { url });
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+};
 
 export default function CommandPalette() {
   const [open, setOpen] = createSignal(false);
@@ -137,6 +140,13 @@ export default function CommandPalette() {
 
   const run = (c?: Cmd) => {
     setOpen(false);
+    // a query typed but Enter hit with no match = "I wanted something that isn't here" —
+    // the highest-signal friction event in the whole log.
+    if (c) {
+      track("cmd", { q: q(), label: c.label, sub: c.sub });
+    } else if (q().trim()) {
+      track("cmd_miss", { q: q() });
+    }
     c?.run();
   };
 
