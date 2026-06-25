@@ -1281,8 +1281,58 @@ function NodeDetail() {
         }}
       >
         <header class="node-head">
-          {/* tier 1 — identity: the branch name + what it's diffed against, nothing else.
-              Giving this its own line stops the long title from wrapping into the controls. */}
+          {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
+              branch control bar so forest-scope actions stop bleeding into branch controls. */}
+          <div
+            class="nh-forest"
+            style={{
+              display: "flex",
+              "align-items": "center",
+              gap: "10px",
+              "padding-bottom": "10px",
+              "border-bottom": "1px solid var(--rule)",
+            }}
+          >
+            <span
+              style={{
+                "font-size": "11px",
+                "letter-spacing": "0.07em",
+                "text-transform": "uppercase",
+                color: "var(--ink-faint)",
+              }}
+            >
+              {project()}
+            </span>
+            <div class="nh-spacer" />
+            <Show when={canMutate && unhealthy().length}>
+              <button
+                class="nh-fix"
+                disabled={fixing()}
+                title="restack this forest — rebases drifted nodes onto their parents and contracts merged ghosts (drop + rewire children). A conflict confined to a merged dep's files auto-resolves to what landed."
+                onClick={fixForest}
+              >
+                {fixing()
+                  ? fixProgress()?.total
+                    ? `fixing… ${fixProgress()!.current ? fixProgress()!.current.split("/").pop() + " " : ""}${fixProgress()!.done}/${fixProgress()!.total}`
+                    : "fixing…"
+                  : `⟳ restack forest (${unhealthy().length})`}
+              </button>
+            </Show>
+            <Show when={fixResult()}>
+              <span
+                title={fixResult()!.ok ? "" : fixResult()!.msg}
+                style={{
+                  "font-size": "11px",
+                  "letter-spacing": ".03em",
+                  "white-space": "nowrap",
+                  color: fixResult()!.ok ? "var(--gold-leaf)" : "var(--del)",
+                }}
+              >
+                {fixResult()!.msg}
+              </span>
+            </Show>
+          </div>
+          {/* branch strip — identity: the branch name + what it's diffed against + health badges. */}
           <div class="nh-id">
             <h1>{isGhost() ? `✦ ${project()}` : leaf(active()) || "—"}</h1>
             <Show
@@ -1348,34 +1398,6 @@ function NodeDetail() {
                   )}
                 </For>
               </div>
-            </Show>
-            <Show when={canMutate && unhealthy().length}>
-              <button
-                class="nh-fix"
-                disabled={fixing()}
-                title="restack this forest — rebases drifted nodes onto their parents and contracts merged ghosts (drop + rewire children). A conflict confined to a merged dep's files auto-resolves to what landed."
-                onClick={fixForest}
-              >
-                {fixing()
-                  ? fixProgress()?.total
-                    ? `fixing… ${fixProgress()!.current ? fixProgress()!.current.split("/").pop() + " " : ""}${fixProgress()!.done}/${fixProgress()!.total}`
-                    : "fixing…"
-                  : `⟳ restack forest (${unhealthy().length})`}
-              </button>
-            </Show>
-            <Show when={fixResult()}>
-              <span
-                title={fixResult()!.ok ? "" : fixResult()!.msg}
-                style={{
-                  "font-size": "11px",
-                  "letter-spacing": ".03em",
-                  "align-self": "center",
-                  "white-space": "nowrap",
-                  color: fixResult()!.ok ? "var(--gold-leaf)" : "var(--del)",
-                }}
-              >
-                {fixResult()!.msg}
-              </span>
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
