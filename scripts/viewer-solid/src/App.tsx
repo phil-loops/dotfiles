@@ -922,7 +922,9 @@ function NodeDetail() {
 
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
-  const [showMap, setShowMap] = createSignal(false);
+  // the docked forest map is the persistent branch navigator (the tree migrated out of the
+  // spine) — open by default; m / × / the forest-strip toggle collapse it for reading room.
+  const [showMap, setShowMap] = createSignal(true);
 
   // ── forest health: per-node drifted (off-parent → its diff balloons to ≈main) / merged-ghost,
   // for badges + a one-click "fix forest" (restack). Live-only; refetch after a fix lands.
@@ -1220,18 +1222,9 @@ function NodeDetail() {
         <Link class="brand" to={{ kind: "home", tab: "forests" }}>
           <span class="brand-mark">✦</span> blessed
         </Link>
+        {/* the branch tree migrated to the docked map (the navigator); the spine is now the
+            file list for the active branch. */}
         <Show when={spine().length} fallback={<div class="spine-empty">{project()}</div>}>
-          {/* current branch as a header; click → forest map to switch (also j/k, m) */}
-          <button
-            class="spine-branch"
-            onClick={() => setShowMap(true)}
-            onMouseEnter={(e) => showTip(active(), e.currentTarget)}
-            onMouseLeave={hideTip}
-            title="switch branch — forest map (m), or j/k"
-          >
-            <span class="spine-branch-name">{leaf(active())}</span>
-            <span class="spine-branch-switch">⊞</span>
-          </button>
           <Show when={node.data} fallback={<div class="spine-meta">loading…</div>}>
             {(data) => (
               <>
@@ -1307,6 +1300,13 @@ function NodeDetail() {
               {project()}
             </span>
             <div class="nh-spacer" />
+            <button
+              class="nh-fix"
+              title="toggle the forest navigator (m)"
+              onClick={() => setShowMap((v) => !v)}
+            >
+              {showMap() ? "▦ hide map" : "▦ map"}
+            </button>
             <Show when={canMutate && unhealthy().length}>
               <button
                 class="nh-fix"
@@ -1448,6 +1448,8 @@ function NodeDetail() {
           health={() => health.data}
           onPick={(b) => goto(b)}
           onClose={() => setShowMap(false)}
+          onHoverNode={showTip}
+          onLeaveNode={hideTip}
         />
       </Show>
       <Show when={flash()}>

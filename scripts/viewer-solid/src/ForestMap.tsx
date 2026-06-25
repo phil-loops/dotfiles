@@ -51,6 +51,8 @@ export function ForestMap(props: {
   onPick: (b: string) => void;
   onClose: () => void;
   docked?: boolean;
+  onHoverNode?: (branch: string, el: HTMLElement) => void;
+  onLeaveNode?: () => void;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
@@ -447,13 +449,17 @@ export function ForestMap(props: {
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
                   onClick={() => props.onPick(isGhostId(n.id) ? "~integration" : n.id)}
-                  onMouseEnter={() => {
+                  onMouseEnter={(e) => {
                     setHov(n.id);
                     // hover the ghost → run the integrate-preview badge once (clean/dirty); clicking
                     // it now SELECTS it — its diff is main..refs/stack/<project>-integration.
                     if (isGhostId(n.id) && !integ()[ghostProject(n.id)]) runIntegrate(n.id);
+                    else if (!isGhostId(n.id)) props.onHoverNode?.(n.id, e.currentTarget as unknown as HTMLElement);
                   }}
-                  onMouseLeave={() => setHov(null)}
+                  onMouseLeave={() => {
+                    setHov(null);
+                    props.onLeaveNode?.();
+                  }}
                 >
                   <Show when={dams().damSet.has(n.id)}>
                     <title>dirty — downstream conflict on {dams().dirtyOf(n.id).join(", ")}</title>
