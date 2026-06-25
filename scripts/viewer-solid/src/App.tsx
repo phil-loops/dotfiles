@@ -908,6 +908,18 @@ function NodeDetail() {
     },
   }));
 
+  // neutralize a footgun tracking ref (renamed/foreign remote or origin/main) by unsetting
+  // it — config-only, keeps every commit; GitHub Desktop then offers Publish, not a Pull.
+  const detachUpstream = createMutation(() => ({
+    mutationFn: (branch: string) =>
+      fetch("/fix-upstream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch }),
+      }).then((r) => r.json()),
+    onSuccess: () => health.refetch(),
+  }));
+
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
@@ -919,7 +931,22 @@ function NodeDetail() {
     queryKey: ["forest-health", healthIds().join(",")],
     queryFn: () =>
       fetch("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&")).then(
-        (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean; parent?: string }>>,
+        (r) =>
+          r.json() as Promise<
+            Record<
+              string,
+              {
+                drifted: boolean;
+                merged: boolean;
+                parent?: string;
+                upstream?: string;
+                upstreamBad?: boolean;
+                upstreamReason?: string;
+                ahead?: number;
+                behind?: number;
+              }
+            >
+          >,
       ),
     enabled: canMutate && healthIds().length > 0,
   }));
@@ -1279,6 +1306,23 @@ function NodeDetail() {
             <Show when={!isGhost() && nodeHealth(active())?.merged}>
               <span class="nh-ghost" title="this branch's work already landed in main (a ghost) — restack to contract it (drop + rewire its children)">
                 ✦ merged — ghost
+              </span>
+            </Show>
+            <Show when={!isGhost() && nodeHealth(active())?.upstreamBad}>
+              <span class="nh-drift" title={nodeHealth(active())?.upstreamReason}>
+                ⚠ tracks {leaf(nodeHealth(active())!.upstream!)}
+                <Show when={(nodeHealth(active())?.ahead || nodeHealth(active())?.behind)}>
+                  {" "}({nodeHealth(active())?.ahead ?? 0}↑ {nodeHealth(active())?.behind ?? 0}↓)
+                </Show>
+                <button
+                  class="nh-fix"
+                  style={{ "margin-left": "8px" }}
+                  disabled={detachUpstream.isPending}
+                  title="unset this tracking ref so a Pull/Push can't merge the wrong remote in — keeps every commit"
+                  onClick={() => detachUpstream.mutate(active())}
+                >
+                  {detachUpstream.isPending ? "detaching…" : "detach"}
+                </button>
               </span>
             </Show>
           </div>
