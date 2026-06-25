@@ -49,11 +49,12 @@ async function main() {
   }
 
   // top-level reads (home screen + jump-to-checkout).
-  const [projects, myprs, standalone, branches, head] = await Promise.all([
+  const [projects, myprs, standalone, branches, forestBranches, head] = await Promise.all([
     getJSON("/projects"),
     getJSON("/myprs"),
     getJSON("/standalone"),
     getJSON("/branches"),
+    getJSON("/forest-branches"),
     getJSON("/head"),
   ]);
   await Promise.all([
@@ -61,6 +62,7 @@ async function main() {
     writeBlob("myprs.json", myprs),
     writeBlob("standalone.json", standalone),
     writeBlob("branches.json", branches),
+    writeBlob("forest-branches.json", forestBranches),
     writeBlob("head.json", head),
   ]);
   console.log(`✦ ${projects.length} projects, ${myprs.length} PRs, ${standalone.length} standalone`);

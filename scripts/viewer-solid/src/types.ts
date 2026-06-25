@@ -70,6 +70,10 @@ export const Project = z.object({
 });
 export type Project = z.infer<typeof Project>;
 
+// one (branch, forest) pair — the Cmd+K global jump index across all projects
+export const ForestBranch = z.object({ branch: z.string(), project: z.string() });
+export type ForestBranch = z.infer<typeof ForestBranch>;
+
 export const ReviewRequest = z.object({
   number: z.number(),
   title: z.string(),
