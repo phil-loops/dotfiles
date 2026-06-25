@@ -113,7 +113,7 @@ focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actua
     *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1)
        [[ -n "$app" ]] || app=Terminal ;;
   esac; fi
-  [[ -n "$app" ]] && osascript -e "tell application \"$app\" to activate" >/dev/null 2>&1 || true
+  [[ -n "$app" ]] && open -a "$app" >/dev/null 2>&1 || true
 }
 surface_review_window(){   # bring the warm nvim's tmux window to the front, reliably.
   # Identify it by the socket nvim's PID, not by name: tmux `automatic-rename` (on by
