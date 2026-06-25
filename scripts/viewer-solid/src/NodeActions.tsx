@@ -36,6 +36,14 @@ interface SquashResult {
   err?: string;
 }
 
+interface PrepResult {
+  ok?: boolean;
+  n?: number; // unpushed commits collapsed into one
+  header?: string; // the new voiced subject
+  formatted?: number; // files oxfmt touched
+  err?: string;
+}
+
 async function post<T>(url: string, body: unknown): Promise<T> {
   const r = await fetch(url, {
     method: "POST",
@@ -118,6 +126,31 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
       }
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "squash failed"}`),
+  }));
+
+  // squash UNPUSHED commits → one voiced commit + oxfmt, NO push. Phil pushes to origin from
+  // GitHub Desktop himself; this just tidies the commits for him first.
+  const prep = createMutation(() => ({
+    mutationFn: () => post<PrepResult>("/prep", { branch: props.branch }),
+    onSuccess: (r) => {
+      setOpen(false);
+      if (!r.ok) {
+        setDone(`✗ ${r.err || "cleanup failed"}`);
+        return;
+      }
+      const n = r.n ?? 0;
+      const fmt = r.formatted ? `, fmt ${r.formatted}` : "";
+      setDone(
+        n > 1
+          ? `✓ squashed ${n} → 1${fmt}: ${r.header || "(voiced)"}`
+          : `✓ already 1 commit${fmt}${r.header ? `: ${r.header}` : ""}`,
+      );
+      qc.invalidateQueries({ queryKey: ["commits", props.branch] });
+      qc.invalidateQueries({ queryKey: ["node", props.branch] });
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["head"] });
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "cleanup failed"}`),
   }));
 
   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
@@ -215,7 +248,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
     onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
   }));
 
-  const busy = () => checkout.isPending || squash.isPending || rebase.isPending || pull.isPending || contract.isPending;
+  const busy = () => checkout.isPending || squash.isPending || prep.isPending || rebase.isPending || pull.isPending || contract.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
     fn();
@@ -346,6 +379,22 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             <span class="nh-item-ic">⊟</span>
             {squash.isPending ? "unstaging…" : armed() === "squash" ? "confirm squash & unstage" : "squash & unstage"}
           </button>
+
+          {/* squash unpushed — collapse your unpushed commits into one voiced + oxfmt'd commit,
+              NO push (you push to origin from GitHub Desktop). Two-click: rewrites history. */}
+          <Show when={!isReview()}>
+            <button
+              class="nh-item"
+              classList={{ armed: armed() === "prep" }}
+              role="menuitem"
+              disabled={busy()}
+              title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
+              onClick={fire(() => trigger("prep", () => prep.mutate()))}
+            >
+              <span class="nh-item-ic">✓</span>
+              {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm squash unpushed" : "squash unpushed"}
+            </button>
+          </Show>
 
           {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
               Not for review nodes (those track someone else's PR — you don't push it). */}
