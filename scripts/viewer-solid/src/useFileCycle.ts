@@ -60,7 +60,7 @@ export function useFileCycle(
     currentPath = path;
     options.onCurrent?.(path); // light the matching sidebar row
     highlight(el); // sets scroll-margin-top FIRST so the scroll clears the toolbar
-    el.scrollIntoView({ block: "start" });
+    el.scrollIntoView({ block: "start", behavior: "instant" }); // snap, never animate
   };
 
   const onKey = (e: KeyboardEvent) => {
@@ -74,5 +74,10 @@ export function useFileCycle(
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
   // seed (or clear, with "") the cursor from outside — e.g. a sidebar click or a node change.
-  return { setCurrent: (path: string) => { currentPath = path || null; } };
+  // next/prev let a caller advance the cursor itself (e.g. auto-advance after a keyboard bless).
+  return {
+    setCurrent: (path: string) => { currentPath = path || null; },
+    next: () => move(1),
+    prev: () => move(-1),
+  };
 }

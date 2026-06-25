@@ -94,6 +94,8 @@ def bless(req, raw):
     f = d.get("file")
     if f and f != ".":
         args += ["--file", f]
+    if d.get("unbless"):
+        args.append("--unbless")
     r = ctx.run(args)
     req._send(200 if r.returncode == 0 else 500,
               json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
