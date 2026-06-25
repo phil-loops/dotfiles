@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "GitHub → nvim",
+  "version": "0.1.0",
+  "description": "Route GitHub PR files/lines into the local forest viewer's warm nvim.",
+  "host_permissions": ["http://localhost:62333/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*/*/pull/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": { "service_worker": "background.js" }
+}
