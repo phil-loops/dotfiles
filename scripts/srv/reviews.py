@@ -13,6 +13,7 @@ import time
 from urllib.parse import parse_qs
 
 from srv import ctx
+from srv import picker
 
 _cache = {"at": 0.0, "json": "[]"}
 _TTL = 30   # gh search is a ~1s network round-trip and the review queue barely moves
@@ -54,6 +55,27 @@ def import_pr(req, raw):
         return
     _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
     req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
+
+
+def from_github(req, raw):   # POST /from-github — Chrome ext: import a PR, then open <path> at <line> in nvim
+    d = json.loads(raw or "{}")
+    num = str(d.get("number", "")).strip().lstrip("#")
+    if not num.isdigit():
+        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
+        return
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
+    if r.returncode != 0:
+        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
+        return
+    _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
+    branch = r.stdout.strip()
+    path = (d.get("path") or "").strip()
+    if not path:
+        req._send(200, json.dumps({"ok": True, "branch": branch, "opened": False}))
+        return
+    code, _out, err = picker.open_on_branch(branch, path, d.get("line"))
+    req._send(200 if code == 0 else (504 if code == 504 else 500),
+              json.dumps({"ok": code == 0, "branch": branch, "opened": code == 0, "err": err}))
 
 
 # Cheap "did they push?" check for the node-load hint: ls-remote the PR head and compare to
