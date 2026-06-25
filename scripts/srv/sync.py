@@ -171,17 +171,17 @@ def _upstream_state(branch, main):
         return {"upstream": "", "upstreamBad": False, "upstreamReason": "", "ahead": 0, "behind": 0}
     remote = ctx.run(["git", "config", f"branch.{branch}.remote"]).stdout.strip()
     up_branch = up[len(remote) + 1:] if remote and up.startswith(remote + "/") else up
-    ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
-    behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)
-    if up_branch == main:
-        reason = f"tracks {up} (the trunk) — a Pull would merge main into this branch"
-    elif up_branch != branch:
-        reason = f"tracks {up} — a renamed/foreign remote branch; a Pull would merge it in"
-    elif ahead and behind:
-        reason = f"diverged from {up} ({ahead}↑ {behind}↓) — a Pull merges, a Push is rejected"
-    else:
-        reason = ""
-    return {"upstream": up, "upstreamBad": bool(reason), "upstreamReason": reason,
+    # Only tracking the TRUNK is a real footgun (a Pull merges main into the branch). A
+    # differently-named or diverged origin branch is just Phil's renamed-PR update flow (he
+    # pushes to origin from GitHub Desktop) — surface the ref, don't alarm. Ahead/behind is
+    # only meaningful for the flagged case, so compute it only there.
+    bad = up_branch == main
+    ahead = behind = 0
+    if bad:
+        ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
+        behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)
+    reason = f"tracks {up} (the trunk) — a Pull would merge main into this branch" if bad else ""
+    return {"upstream": up, "upstreamBad": bad, "upstreamReason": reason,
             "ahead": ahead, "behind": behind}
 
 
