@@ -21,6 +21,7 @@ import { createSignal, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
 import { useArm } from "./actions";
+import { useViewerLocation } from "./router";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -56,6 +57,7 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 export function NodeActions(props: { branch: string; isReview: boolean }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
+  const { navigate } = useViewerLocation();
   // 409 stash: the worktree holding the branch, awaiting a force-confirm.
   const [heldAt, setHeldAt] = createSignal<string | null>(null);
   // squash is history-rewriting → two-click arm (shared useArm) before it fires.
@@ -344,6 +346,22 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             <span class="nh-item-ic">⊟</span>
             {squash.isPending ? "unstaging…" : armed() === "squash" ? "confirm squash & unstage" : "squash & unstage"}
           </button>
+
+          {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
+              Not for review nodes (those track someone else's PR — you don't push it). */}
+          <Show when={!isReview()}>
+            <button
+              class="nh-item"
+              role="menuitem"
+              title="open the prepare-to-push card: squash unpushed → run gates → fast-forward push to a safe remote"
+              onClick={() => {
+                setOpen(false);
+                navigate({ kind: "push", branch: props.branch });
+              }}
+            >
+              <span class="nh-item-ic">↑</span> prepare to push
+            </button>
+          </Show>
 
         </div>
       </Show>
