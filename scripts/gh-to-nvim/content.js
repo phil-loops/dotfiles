@@ -1,5 +1,7 @@
 const FILE_BTN = "gh-nvim-file-btn";
-const VIEWER_URL = "http://localhost:62333";
+const VIEWER_URL = "http://localhost:62497";
+
+console.log("[gh-to-nvim] content script loaded:", location.pathname);
 
 function parsePr() {
   const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
@@ -10,9 +12,24 @@ function parsePr() {
 }
 
 function send(payload) {
-  return new Promise((resolve) =>
-    chrome.runtime.sendMessage({ type: "from-github", payload }, resolve),
-  );
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "from-github", payload }, (res) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          console.warn("[gh-to-nvim] sendMessage failed:", err.message);
+          resolve({ status: 0, error: err.message });
+        } else {
+          resolve(res);
+        }
+      });
+    } catch (e) {
+      // Thrown when the content script is orphaned (extension reloaded under an
+      // open tab) — hard-reload the tab. Surface it instead of hanging on "…".
+      console.warn("[gh-to-nvim] context invalidated — hard-reload the tab:", String(e));
+      resolve({ status: 0, error: "extension reloaded — refresh this tab" });
+    }
+  });
 }
 
 function reset(btn, label) {

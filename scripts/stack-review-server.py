@@ -212,6 +212,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/branch-url":     return picker.branch_url(self, u)
         elif u.path == "/review-requests": return reviews.requests(self)
         elif u.path == "/review-remote":   return reviews.remote(self, u)
+        elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
         elif u.path == "/branches":       return picker.branches(self)
         elif u.path == "/forest-branches": return picker.forest_branches(self)
         elif u.path == "/node":           return review.node(self, u)
@@ -261,6 +262,8 @@ class H(BaseHTTPRequestHandler):
             return sync.post_contract(self, raw)
         if self.path == "/fix-upstream":   # neutralize a footgun tracking ref (unset upstream)
             return sync.fix_upstream(self, raw)
+        if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
+            return sync.post_reconcile(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit
             return review.squash(self, raw)
         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
