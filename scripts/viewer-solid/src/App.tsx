@@ -1212,7 +1212,10 @@ function NodeDetail() {
   });
 
   return (
-    <div class="shell">
+    <div
+      class="shell"
+      style={showMap() ? { "grid-template-columns": "264px 1fr minmax(300px, 360px)" } : undefined}
+    >
       <aside class="spine">
         <Link class="brand" to={{ kind: "home", tab: "forests" }}>
           <span class="brand-mark">✦</span> blessed
@@ -1439,13 +1442,11 @@ function NodeDetail() {
       </Show>
       <Show when={showMap()}>
         <ForestMap
+          docked
           spine={spine}
           active={active}
           health={() => health.data}
-          onPick={(b) => {
-            goto(b);
-            setShowMap(false);
-          }}
+          onPick={(b) => goto(b)}
           onClose={() => setShowMap(false)}
         />
       </Show>
