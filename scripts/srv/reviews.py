@@ -57,25 +57,66 @@ def import_pr(req, raw):
     req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
 
 
-def from_github(req, raw):   # POST /from-github — Chrome ext: import a PR, then open <path> at <line> in nvim
+_branch_cache = {}   # pr-num -> (at, own_local_branch_or_None)
+_BRANCH_TTL = 120
+
+
+def _local_branch_for_pr(num):
+    # Your own PR? Open the real local branch (already checked out, editable) instead of a
+    # detached review/pr-N fetch — skips the gh + 2 fetches + scratch-worktree import.
+    now = time.time()
+    hit = _branch_cache.get(num)
+    if hit and now - hit[0] < _BRANCH_TTL:
+        return hit[1]
+    r = ctx.run(["gh", "pr", "view", num, "--json", "headRefName,isCrossRepository",
+                 "--jq", "[.headRefName, .isCrossRepository] | @tsv"])
+    parts = r.stdout.strip().split("\t") if r.returncode == 0 else []
+    branch = None
+    if len(parts) == 2 and parts[1] != "true" and parts[0] and \
+            ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{parts[0]}"]).returncode == 0:
+        branch = parts[0]
+    _branch_cache[num] = (now, branch)
+    return branch
+
+
+def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <path> at <line> in nvim
     d = json.loads(raw or "{}")
     num = str(d.get("number", "")).strip().lstrip("#")
     if not num.isdigit():
         req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
         return
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
-    if r.returncode != 0:
-        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
-        return
-    _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
-    branch = r.stdout.strip()
+    branch = _local_branch_for_pr(num)
+    local = branch is not None
+    if not local:
+        review = f"review/pr-{num}"
+        if ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{review}"]).returncode == 0:
+            branch = review   # already imported — reuse, don't re-fetch on every click
+        else:
+            r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
+            if r.returncode != 0:
+                req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
+                return
+            _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
+            branch = r.stdout.strip()
     path = (d.get("path") or "").strip()
     if not path:
-        req._send(200, json.dumps({"ok": True, "branch": branch, "opened": False}))
+        req._send(200, json.dumps({"ok": True, "branch": branch, "opened": False, "local": local}))
         return
     code, _out, err = picker.open_on_branch(branch, path, d.get("line"))
     req._send(200 if code == 0 else (504 if code == 504 else 500),
-              json.dumps({"ok": code == 0, "branch": branch, "opened": code == 0, "err": err}))
+              json.dumps({"ok": code == 0, "branch": branch, "opened": code == 0, "local": local, "err": err}))
+
+
+def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext can flag a stale loaded copy
+    d = os.path.join(ctx.SCRIPTS, "gh-to-nvim")
+    latest = 0.0
+    try:   # every loadable file (manifest/scripts/markup); skips README.md and icons/*.png
+        for name in os.listdir(d):
+            if name.endswith((".json", ".js", ".css", ".html")):
+                latest = max(latest, os.path.getmtime(os.path.join(d, name)))
+    except OSError:
+        pass
+    req._send(200, json.dumps({"mtime": int(latest * 1000)}))
 
 
 # Cheap "did they push?" check for the node-load hint: ls-remote the PR head and compare to

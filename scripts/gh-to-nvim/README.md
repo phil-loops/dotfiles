@@ -20,7 +20,7 @@ All paths hit the viewer's `POST /from-github`.
 1. Make sure the viewer is serving the new endpoint (restart it so `/from-github`
    is live), then smoke-test:
    ```
-   curl -s localhost:62333/from-github -d '{"number":"__nope__"}'
+   curl -s localhost:62497/from-github -d '{"number":"__nope__"}'
    # → {"ok": false, "err": "no pr number"}   (400)
    ```
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
@@ -29,7 +29,20 @@ All paths hit the viewer's `POST /from-github`.
    - the `→ nvim` / `→ viewer` pills (bottom-right),
    - the `nvim` button in any file's header (opens at line 1),
    - **⌥-click** a line number on the new/right side (opens that file+line).
-   After editing the extension, hit **reload** on its card in `chrome://extensions`.
+## Dev loop (toolbar icon)
+
+The toolbar icon is the dev console — no `chrome://extensions` trip:
+
+- **green** → loaded copy matches disk.
+- **amber ●** → you edited a source file; the loaded copy is stale.
+- **grey ×** → the viewer isn't reachable on `:62497` (its `/ext-mtime` is the
+  staleness signal; a service worker can't read disk itself).
+
+**Click the icon to open the menu** (`popup.html`): current status + a **Reload
+extension** button + a link to the forest viewer. Reload from there, then refresh
+the GitHub tab to re-inject `content.js`. Staleness is computed against the
+viewer's `/ext-mtime`; the baseline lives in `storage.session`, which Chrome
+wipes on a real reload — so a fresh reload re-baselines to "green" automatically.
 
 ## Notes
 
@@ -37,5 +50,6 @@ All paths hit the viewer's `POST /from-github`.
   virtualized React diff DOM. Per-file/line affordances live inside the diff and
   are (re)attached via a `MutationObserver` as rows mount on scroll.
 - ⌥-click is the line trigger so we don't hijack GitHub's own click-to-select-line.
-- Only `http://localhost:62333` is in `host_permissions`; nothing leaves the
-  machine.
+- `host_permissions` is `http://localhost/*` (any port) so the per-repo viewer
+  port can move without re-permissioning; the viewer URL itself is pinned to
+  `:62497` (the loops repo's hash). Nothing leaves the machine.
