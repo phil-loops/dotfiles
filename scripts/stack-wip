@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# stack-wip — make a checkpoint commit stamped so stack-prepush-guard will block it
+# from ever reaching a remote. Use for throwaway/in-progress saves.
+#
+#   stack-wip                 # commits staged changes as "wip"
+#   stack-wip "spike: foo"    # custom subject
+#   stack-wip -a "msg"        # stage tracked changes first (git commit -a)
+set -euo pipefail
+
+all=""
+if [[ "${1:-}" == "-a" ]]; then
+  all="-a"
+  shift
+fi
+msg="${1:-wip}"
+
+git commit $all -m "$msg" --trailer "X-WIP: true"

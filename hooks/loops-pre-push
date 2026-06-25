@@ -2,6 +2,10 @@
 
 export PATH="$HOME/.volta/bin:$PATH"
 
+# Block work-in-progress commits (X-WIP trailer / wip subjects) from reaching a remote.
+# Reads the ref lines git pipes in on stdin; the rest of this hook doesn't use stdin.
+"$HOME/.dotfiles/scripts/stack-prepush-guard" || exit 1
+
 # Warn if branch is behind main
 behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
 if [ "$behind" -gt 0 ] 2>/dev/null; then
