@@ -87,7 +87,7 @@ export default function MobilePush() {
           ‹
         </Link>
         <div class="mp-title">
-          <div class="mp-label">prepare to push</div>
+          <div class="mp-label">pre-push gates</div>
           <div class="mp-branch">{branch()}</div>
         </div>
       </header>
