@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""stack-prepush-guard — refuse to push throwaway/checkpoint commits.
+
+Install as a repo's `pre-push` hook (see stack-install-prepush-hook). git feeds the
+hook one line per ref being pushed on stdin:
+
+    <local ref> <local sha> <remote ref> <remote sha>
+
+For each pushed ref we scan the commits that would actually land on the remote and
+abort the whole push if any is a work-in-progress commit — one carrying an `X-WIP`
+trailer (how Claude/`stack-wip` stamp checkpoints), or a bare `wip`/`fixup!`/`squash!`
+subject. The squash-before-push flow consumes these in the happy path; this hook is
+the net for a push that skips the flow (e.g. straight from the laptop).
+
+Escape hatch: `ALLOW_WIP_PUSH=1 git push …` bypasses the guard for the one push.
+
+Exit 0 = clean (allow push). Exit 1 = WIP found (abort).
+"""
+import os
+import re
+import subprocess
+import sys
+
+ZERO = "0" * 40
+TRAILER_RE = re.compile(r"^X-WIP:\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+FALSEY = {"", "0", "false", "no", "off"}
+SUBJECT_RE = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
+
+
+def range_for(local_sha, remote_sha):
+    """The commits this ref would add to the remote, as git-rev-list args."""
+    if remote_sha == ZERO or not remote_sha:
+        # new branch on the remote: everything on it that no remote already has
+        return [local_sha, "--not", "--remotes"]
+    return [f"{remote_sha}..{local_sha}"]
+
+
+def wip_commits(rev_args):
+    """[(sha, subject, reason)] for WIP commits in the range, newest first."""
+    sep = "\x1e"     # record sep between commits
+    usep = "\x1f"    # unit sep: sha / subject / full-body
+    fmt = f"%H{usep}%s{usep}%B{sep}"
+    out = subprocess.run(
+        ["git", "log", f"--format={fmt}", *rev_args],
+        capture_output=True, text=True,
+    ).stdout
+    found = []
+    for rec in out.split(sep):
+        rec = rec.strip("\n")
+        if not rec:
+            continue
+        parts = rec.split(usep)
+        if len(parts) < 3:
+            continue
+        sha, subject, body = parts[0], parts[1], parts[2]
+        m = TRAILER_RE.search(body)
+        if m and m.group(1).strip().lower() not in FALSEY:
+            found.append((sha[:9], subject, f"X-WIP: {m.group(1).strip()}"))
+        elif SUBJECT_RE.match(subject.strip()):
+            found.append((sha[:9], subject, "wip-style subject"))
+    return found
+
+
+def main():
+    if os.environ.get("ALLOW_WIP_PUSH", "").strip().lower() not in FALSEY:
+        return 0
+
+    offenders = []
+    for line in sys.stdin:
+        cols = line.split()
+        if len(cols) < 4:
+            continue
+        _local_ref, local_sha, _remote_ref, remote_sha = cols[:4]
+        if local_sha == ZERO:   # deleting a ref — nothing to scan
+            continue
+        offenders += wip_commits(range_for(local_sha, remote_sha))
+
+    if not offenders:
+        return 0
+
+    seen = set()
+    print("\n✋ push blocked — work-in-progress commit(s) in this push:\n", file=sys.stderr)
+    for sha, subject, reason in offenders:
+        if sha in seen:
+            continue
+        seen.add(sha)
+        print(f"   {sha}  {subject}   ({reason})", file=sys.stderr)
+    print(
+        "\nSquash them away first (the viewer's 'prepare to push' / `stack-squash --unpushed`),\n"
+        "or, to override this one push: ALLOW_WIP_PUSH=1 git push …\n",
+        file=sys.stderr,
+    )
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

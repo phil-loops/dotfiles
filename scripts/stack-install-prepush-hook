@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# stack-install-prepush-hook — wire stack-prepush-guard as a repo's pre-push hook.
+# Idempotent. Run from inside the target repo, or pass its path.
+#
+#   stack-install-prepush-hook            # install into the current repo
+#   stack-install-prepush-hook /path/repo
+set -euo pipefail
+
+guard="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/stack-prepush-guard"
+repo="${1:-$PWD}"
+# absolute git dir — `--git-path` alone is relative to cwd, which bites when run from
+# elsewhere (and worse, a worktree's `.git` is a file, so a relative mkdir explodes).
+hooks_dir="$(git -C "$repo" rev-parse --absolute-git-dir)/hooks"
+hook="$hooks_dir/pre-push"
+
+mkdir -p "$hooks_dir"
+
+if [[ -e "$hook" ]] && ! grep -q "stack-prepush-guard" "$hook" 2>/dev/null; then
+  echo "✋ $hook already exists and isn't ours — leaving it alone." >&2
+  echo "   Add this line to it yourself: exec \"$guard\"" >&2
+  exit 1
+fi
+
+cat > "$hook" <<EOF
+#!/usr/bin/env bash
+# installed by stack-install-prepush-hook — bans WIP commits from being pushed
+exec "$guard"
+EOF
+chmod +x "$hook"
+echo "✓ pre-push guard installed → $hook"
