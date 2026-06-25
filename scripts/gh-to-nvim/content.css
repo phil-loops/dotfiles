@@ -1,0 +1,27 @@
+#gh-nvim-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2147483647;
+  padding: 6px 12px;
+  font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #fff;
+  background: #1f6feb;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+#gh-nvim-fab:disabled {
+  opacity: 0.7;
+  cursor: default;
+}
+
+#gh-nvim-fab.gh-nvim-ok {
+  background: #238636;
+}
+
+#gh-nvim-fab.gh-nvim-err {
+  background: #da3633;
+}
