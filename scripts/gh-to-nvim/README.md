@@ -4,13 +4,16 @@ Routes a GitHub PR into the local forest viewer's warm nvim. Backend is the
 viewer's `POST /from-github` (import the PR → optionally open a file at a line).
 See `../design-github-to-nvim-extension.md` for the full design.
 
-## Status
+## Status — feature-complete (steps 1–5)
 
-- **Step 2 (this):** MV3 skeleton + a floating `→ nvim` button that imports the
-  current PR and reports the local `review/pr-N` branch. Proves the
-  content → background → `localhost:62333/from-github` → git round-trip.
-- Steps 3–4 (next): per-file `⬚ nvim` buttons in the diff file headers, and
-  ⌥-click on a diff line to open that exact file+line in nvim.
+- **Floating buttons (bottom-right):** `→ nvim` imports the current PR;
+  `→ viewer` imports it and opens the node in the forest viewer (new tab).
+- **Per-file `nvim` button** in each diff file header — opens that file at line 1.
+- **⌥-click a diff line number** (right/new side) → opens that exact file+line in
+  the warm nvim. A blue outline appears on hover while ⌥ is held to advertise it.
+- A toast (bottom-right) reports the file:line result of a line-click.
+
+All paths hit the viewer's `POST /from-github`.
 
 ## Load it
 
@@ -22,13 +25,17 @@ See `../design-github-to-nvim-extension.md` for the full design.
    ```
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
    pick this `gh-to-nvim/` directory.
-3. Open any PR on github.com. A `→ nvim` pill appears bottom-right. Click it:
-   it imports the PR and flips to `✓ review/pr-<N>` (or `✗ <error>`).
+3. Open any PR on github.com and try:
+   - the `→ nvim` / `→ viewer` pills (bottom-right),
+   - the `nvim` button in any file's header (opens at line 1),
+   - **⌥-click** a line number on the new/right side (opens that file+line).
+   After editing the extension, hit **reload** on its card in `chrome://extensions`.
 
 ## Notes
 
-- The button is fixed-position on purpose for this step — robust to GitHub's
-  virtualized React diff DOM. Precise in-header placement comes with the per-file
-  buttons.
+- The floating pills are fixed-position on purpose — robust to GitHub's
+  virtualized React diff DOM. Per-file/line affordances live inside the diff and
+  are (re)attached via a `MutationObserver` as rows mount on scroll.
+- ⌥-click is the line trigger so we don't hijack GitHub's own click-to-select-line.
 - Only `http://localhost:62333` is in `host_permissions`; nothing leaves the
   machine.
