@@ -967,6 +967,38 @@ function NodeDetail() {
   const [chat, setChat] = createSignal<{ file: FileDiff | null } | null>(null);
   // cross-forest chat index overlay (read-only; every thread in this browser).
   const [showChats, setShowChats] = createSignal(false);
+  // a chat the index asked to open on a (possibly other) branch: navigate there, then open the
+  // drawer once that node's files have loaded (see the effect below). Cleared once opened.
+  const [pendingChat, setPendingChat] = createSignal<{ branch: string; path: string } | null>(null);
+
+  // resolve a chat target into the drawer: prefer the real FileDiff (carries the patch); else
+  // synthesize a minimal one so the server computes the diff for that path. "" path → whole branch.
+  const openChatFor = (path: string) => {
+    if (!path) {
+      setChat({ file: null });
+      return;
+    }
+    const real = node.data?.files.find((f) => f.path === path);
+    setChat({ file: real ?? { path, status: "modified" } });
+  };
+  // from the index: open a chat in its own branch+file context. Same branch → open now; another
+  // branch → navigate (as a standalone node) and let the effect open it once its files arrive.
+  const openChatInContext = (branch: string, path: string) => {
+    setShowChats(false);
+    if (branch === active()) {
+      openChatFor(path);
+    } else {
+      setPendingChat({ branch, path });
+      navigate({ kind: "standalone", branch });
+    }
+  };
+  createEffect(() => {
+    const p = pendingChat();
+    if (p && active() === p.branch && node.data?.files) {
+      openChatFor(p.path);
+      setPendingChat(null);
+    }
+  });
 
   // the sidebar is a GitHub-PR-style file list for the active node; clicking a row
   // scrolls its diff card into view and lights the row. activeFile tracks the lit row.
@@ -1277,7 +1309,7 @@ function NodeDetail() {
         {(c) => <ChatPanel file={c().file} branch={active()} onClose={() => setChat(null)} />}
       </Show>
       <Show when={showChats()}>
-        <ChatIndex onClose={() => setShowChats(false)} />
+        <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
       </Show>
       <Show when={showMap()}>
         <ForestMap

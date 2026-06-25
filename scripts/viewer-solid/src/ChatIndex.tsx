@@ -22,7 +22,11 @@ function ago(ms: number): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-export default function ChatIndex(props: { onClose: () => void }) {
+export default function ChatIndex(props: {
+  onClose: () => void;
+  // open a chat in its branch+file context (navigate there + reopen the drawer). "" path → whole branch.
+  onOpen: (branch: string, path: string) => void;
+}) {
   const { navigate } = useViewerLocation();
   const groups = (): [string, ChatSummary[]][] => {
     const out: Record<string, ChatSummary[]> = {};
@@ -31,6 +35,7 @@ export default function ChatIndex(props: { onClose: () => void }) {
     }
     return Object.entries(out);
   };
+  // branch header → just jump to the branch (no specific chat). A row → reopen that exact chat.
   const open = (branch: string) => {
     navigate({ kind: "forest", name: branch });
     props.onClose();
@@ -57,7 +62,7 @@ export default function ChatIndex(props: { onClose: () => void }) {
                   </h4>
                   <For each={rows}>
                     {(r) => (
-                      <button class="ci-row" onClick={() => open(branch)}>
+                      <button class="ci-row" onClick={() => props.onOpen(branch, r.path)}>
                         <span class="ci-row-top">
                           <span class="ci-file">{fileLeaf(r.path)}</span>
                           <span class="ci-meta">
