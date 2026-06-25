@@ -895,6 +895,19 @@ function NodeDetail() {
     },
   }));
 
+  const unbless = createMutation(() => ({
+    mutationFn: (file: string) =>
+      fetch("/bless", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: active(), file, unbless: true }),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["node", active()] });
+      qc.invalidateQueries({ queryKey: ["model"] });
+    },
+  }));
+
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   const [showMap, setShowMap] = createSignal(false);
@@ -966,7 +979,7 @@ function NodeDetail() {
     fileCycle.setCurrent(path); // so a following Tab continues from the file you clicked
     document
       .querySelector(`.entry[data-path="${CSS.escape(path)}"]`)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      ?.scrollIntoView({ behavior: "instant", block: "start" });
   };
   // keep the lit sidebar row on screen when Tab cycles to a file scrolled out of the list
   // (block:nearest is a no-op when it's already visible, e.g. right after a click).
@@ -1080,6 +1093,10 @@ function NodeDetail() {
     else if (e.key === "Escape") setShowMap(false);
     else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
     else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
+    // b blesses the focused file and advances to the next (b·b·b down a branch, no mouse);
+    // u unblesses it in place. Per-file only — there is deliberately no bless-all key.
+    else if (e.key === "b" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); fileCycle.next(); }
+    else if (e.key === "u" && activeFile()) { e.preventDefault(); unbless.mutate(activeFile()); }
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
