@@ -50,6 +50,7 @@ export function ForestMap(props: {
   health?: () => Record<string, { drifted: boolean; merged: boolean }> | undefined;
   onPick: (b: string) => void;
   onClose: () => void;
+  docked?: boolean;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
@@ -372,11 +373,19 @@ export function ForestMap(props: {
   };
 
   return (
-    <div class="fm-overlay" onClick={() => props.onClose()}>
+    <div
+      class={props.docked ? "fm-dock" : "fm-overlay"}
+      onClick={props.docked ? undefined : () => props.onClose()}
+    >
       <style>{CSS}</style>
+      <Show when={props.docked}>
+        <button class="fm-dock-close" title="close map (m)" onClick={() => props.onClose()}>
+          ×
+        </button>
+      </Show>
       <svg
         class="fm-svg"
-        classList={{ focusing: !!spot(), kiln: !!kiln() }}
+        classList={{ focusing: !!spot(), kiln: !!kiln(), docked: !!props.docked }}
         viewBox={`0 0 ${layout().W} ${layout().H}`}
         width={layout().W}
         height={layout().H}
@@ -508,6 +517,14 @@ const CSS = `
 .fm-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center;
   justify-content: center; overflow: auto; background: rgba(8, 6, 3, .93); backdrop-filter: blur(3px); }
 .fm-svg { display: block; margin: auto; max-width: 94vw; max-height: 90vh; height: auto; }
+/* docked: a persistent right-rail navigator (grid column), not a modal — no backdrop,
+   stays open on node-click. The svg scales to the panel width instead of the viewport. */
+.fm-dock { grid-column: 3; position: sticky; top: 0; height: 100vh; overflow: auto; border-left: 1px solid var(--rule);
+  background: var(--vellum); padding: 30px 8px 14px; display: flex; align-items: flex-start; justify-content: center; }
+.fm-svg.docked { max-width: 100%; max-height: calc(100vh - 44px); margin: 0 auto; }
+.fm-dock-close { position: absolute; top: 8px; right: 10px; z-index: 1; background: none; border: none;
+  color: var(--ink-faint); font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 6px; }
+.fm-dock-close:hover { color: var(--ink); }
 /* every edge flows gently by default — the forest is "live water": work is
    integration-ready and the world downstream is coherent. A dam (below) stops it. */
 .fm-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.6; opacity: 0;
