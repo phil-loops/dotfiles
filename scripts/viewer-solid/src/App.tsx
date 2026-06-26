@@ -27,7 +27,8 @@ import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
 import ChatIndex from "./ChatIndex";
 import { chatTarget, openChat, closeChat } from "./chatDrawer";
-import { threadMsgCount } from "./chatStore";
+import { threadMsgCount, threadWorking, threadUnseenDone } from "./chatStore";
+import { reconcile as reconcileChats } from "./chatRunner";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
@@ -168,6 +169,7 @@ function Layout(props: { children?: JSX.Element }) {
     }
   };
   if (!document.hidden) openStream();
+  reconcileChats(); // re-attach any chat turn left in flight by a reload, so its badge resolves
   document.addEventListener("visibilitychange", onVisibility);
   onCleanup(() => {
     document.removeEventListener("visibilitychange", onVisibility);
@@ -1003,6 +1005,17 @@ function NodeDetail() {
     onSuccess: () => health.refetch(),
   }));
 
+  // diverged-from-PR-head (local rebased, pushed head stale) → eject a standalone Claude in the
+  // branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull.
+  const reconcile = createMutation(() => ({
+    mutationFn: (branch: string) =>
+      fetch("/reconcile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch }),
+      }).then((r) => r.json()),
+  }));
+
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   // the docked forest map is the persistent branch navigator (the tree migrated out of the
@@ -1027,6 +1040,7 @@ function NodeDetail() {
                 upstream?: string;
                 upstreamBad?: boolean;
                 upstreamReason?: string;
+                diverged?: boolean;
                 ahead?: number;
                 behind?: number;
               }
@@ -1473,6 +1487,23 @@ function NodeDetail() {
                 </button>
               </span>
             </Show>
+            <Show when={!isGhost() && nodeHealth(active())?.diverged}>
+              <span
+                class="nh-drift"
+                title={`local diverged from its pushed PR head ${leaf(nodeHealth(active())!.upstream!)} (${nodeHealth(active())?.ahead ?? 0}↑ ${nodeHealth(active())?.behind ?? 0}↓) — almost always a local rebase the pushed head hasn't caught. Don't Pull (it re-adds the stale commits); hand it to Claude to reconcile.`}
+              >
+                ⇄ diverged from {leaf(nodeHealth(active())!.upstream!)} ({nodeHealth(active())?.ahead ?? 0}↑ {nodeHealth(active())?.behind ?? 0}↓)
+                <button
+                  class="nh-fix"
+                  style={{ "margin-left": "8px" }}
+                  disabled={reconcile.isPending}
+                  title="eject a standalone Claude in this branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull"
+                  onClick={() => reconcile.mutate(active())}
+                >
+                  {reconcile.isPending ? "ejecting…" : "reconcile"}
+                </button>
+              </span>
+            </Show>
           </div>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
@@ -1568,6 +1599,8 @@ function FileEntry(props: {
   const [foil, setFoil] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   const blessed = () => isBlessed(props.file);
+  const chatWorking = () => threadWorking(props.branch, props.file.path);
+  const chatUnseen = () => threadUnseenDone(props.branch, props.file.path);
   const doBless = () => {
     setFoil(true); // play the foil on the click — feels instant; the steady gold lands on refetch
     props.bless.mutate(props.file.path);
@@ -1619,11 +1652,18 @@ function FileEntry(props: {
         </Show>
         <Show when={canMutate}>
           <button
-            class="file-act"
-            title="chat about this file with Claude — streamed right here"
+            class="file-act chat-act"
+            classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
+            title={
+              chatWorking()
+                ? "Claude is still answering on this file — click to watch"
+                : chatUnseen()
+                  ? "Claude finished while the drawer was closed — click to read"
+                  : "chat about this file with Claude — streamed right here"
+            }
             onClick={() => props.onChat(props.file)}
           >
-            ✦ chat
+            {chatWorking() ? "✦ working…" : chatUnseen() ? "✦ done ✓" : "✦ chat"}
           </button>
           <Show when={!props.readOnly}>
             <button class="bless-btn" disabled={blessed()} onClick={doBless}>
