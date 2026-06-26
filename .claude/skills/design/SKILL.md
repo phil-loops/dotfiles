@@ -33,8 +33,9 @@ Skip for trivial/mechanical work, or when the user just wants it built now.
 - `dd` → `~/.dotfiles/scripts/dd-design`: the **user's one-keystroke jump** into the doc. It opens
   the doc (`$DESIGN_DOC`, else newest `~/design-docs/*.md`) in the `design` tmux window and **kills
   the pane it ran in**. It does NOT touch the sidecar. The intended flow: you spawn a small shell
-  pane (the "launchpad") below your own pane; the user types `dd` there; they land in nvim and the
-  launchpad vanishes — zero model latency. This is why the user drives the jump, not you.
+  pane (the "launchpad") below your own pane with `DESIGN_DOC=<doc> dd` pre-typed; the user presses
+  Enter there; they land in nvim and the launchpad vanishes — zero model latency. This is why the
+  user drives the jump, not you. (`dd`'s `$1` is the doc path, so don't stage a bare-arg label.)
 - `design <file>` — `~/.dotfiles/scripts/design`: a legacy *user-run* manual open. **You don't run
   it** — it steals focus and re-points the sidecar to the launching pane. Prefer the `dd` launchpad.
 
@@ -49,18 +50,31 @@ user the path, ask them to edit and paste back / tell you when ready.
    the repo's conventions if it's a code project), and an **Open questions** section with the real
    forks called out. Ground it in actual code/benchmarks where you can — don't hand-wave.
 
-2. **Record the hand-back, spawn the launchpad, announce — never open nvim yourself.** Two
-   commands (skip both if `$TMUX` is unset — see the fallback above), with `$DOC` = the doc path:
+2. **Record the hand-back, spawn the launchpad with a staged command, announce — never open nvim
+   yourself.** Three commands (skip all if `$TMUX` is unset — see the fallback above), with
+   `$DOC` = the doc path:
    ```bash
    # a) point :submit back at you
    print -r -- "$TMUX_PANE" > "$DOC.submit-target"
-   # b) drop a small shell pane below your own; it inherits DESIGN_DOC so the user's `dd` knows the doc
-   tmux split-window -v -l 30% -t "$TMUX_PANE" -e DESIGN_DOC="$DOC" -c "$HOME"
+   # b) drop a small shell pane below your own. -d so it does NOT steal focus (a bare split makes
+   #    the new pane active — that yanks the user out of whatever they were doing). -P -F captures
+   #    its id so we can type into it.
+   NEW=$(tmux split-window -d -v -l 30% -t "$TMUX_PANE" -e DESIGN_DOC="$DOC" -c "$HOME" -P -F '#{pane_id}')
+   # c) pre-type (do NOT run) a self-documenting command. The doc path IS the label — clear if the
+   #    user comes back to a cold pane. -l sends it literally; no trailing Enter.
+   tmux send-keys -l -t "$NEW" "DESIGN_DOC=$DOC dd"
    ```
-   The launchpad is a fresh interactive zsh (it sources `.zshrc`, so the `dd` alias is live). Then
-   announce: *"Drafted `<path>` — type `dd` in the pane below to jump in, edit, then `:submit`."*
-   Do **not** run `dd`, `design`, `nvim`, or any `select-window`/`new-window` yourself — spawning
-   the launchpad is the only tmux move you make; the user presses `dd` to actually jump.
+   Then announce: *"Drafted `<path>` — go to the pane below and press Enter on the staged command to
+   jump in, then edit and `:submit`."*
+
+   **Why `DESIGN_DOC=$DOC dd` and not `dd` or `dd <label>`:** `dd`'s first positional arg IS the doc
+   path (`file="${1:-$DESIGN_DOC}"`), so a bare arg label (`dd footer-design`) makes it look for a
+   file by that name and fail. And zsh interactive shells default `interactive_comments` OFF, so a
+   trailing `# label` is passed as `$1` too — overriding `DESIGN_DOC` → "no design doc found". The
+   env-prefix form sidesteps both and works from any pane.
+
+   Do **not** run `dd`, `design`, `nvim`, or any `select-window`/`new-window` yourself — spawning the
+   launchpad + staging the command is the only tmux move you make; the user presses Enter to jump.
 
 3. **On each `:submit`** (you'll receive a message like `design doc submitted, please re-read <path>`):
    - **Re-read the file** — the user's edits + inline notes are in it (the system reminder shows the diff).
