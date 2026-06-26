@@ -1581,6 +1581,10 @@ function FileEntry(props: {
   const [foil, setFoil] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
   const blessed = () => isBlessed(props.file);
+  // a blessed file starts collapsed — it's reviewed with nothing new since (a changed-since-
+  // blessed file reads as 'stale', not blessed), so it shouldn't cost screen space. Stale and
+  // unblessed files start open.
+  const [collapsed, setCollapsed] = createSignal(blessed());
   const chatWorking = () => threadWorking(props.branch, props.file.path);
   const chatUnseen = () => threadUnseenDone(props.branch, props.file.path);
   const doBless = () => {
@@ -1614,8 +1618,15 @@ function FileEntry(props: {
   return (
     <article class="entry" data-path={props.file.path} classList={{ blessed: blessed(), foil: foil() }}>
       <div class="entry-head">
+        <button
+          class="entry-toggle"
+          title={collapsed() ? "expand" : "collapse"}
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          {collapsed() ? "▸" : "▾"}
+        </button>
         <span class="gutter">{blessed() || foil() ? "✦" : ""}</span>
-        <span class="path">{seg(props.file.path)}</span>
+        <span class="path" onClick={() => setCollapsed((c) => !c)}>{seg(props.file.path)}</span>
         <span class="lines">
           <span class="add">+{props.file.add ?? 0}</span>
           <span class="del">−{props.file.del ?? 0}</span>
@@ -1654,7 +1665,9 @@ function FileEntry(props: {
           </Show>
         </Show>
       </div>
-      <div class="diff" innerHTML={html()} />
+      <Show when={!collapsed()}>
+        <div class="diff" innerHTML={html()} />
+      </Show>
     </article>
   );
 }
