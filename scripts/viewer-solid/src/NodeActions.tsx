@@ -260,18 +260,15 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
           main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
           When blocked the fix (rebase forward) surfaces inline next to the alarm; the full
           list of missing files lives in the tooltip rather than spread across the header. */}
-      <Show when={behind() > 0}>
-        <Show
-          when={blocked()}
-          fallback={<span class="nh-behind">↓ {behind()} behind</span>}
+      {/* the plain "↓ N behind" count is folded into the restack button below; only the
+          escalated push-blocked alarm stays as its own ember badge. */}
+      <Show when={blocked()}>
+        <span
+          class="nh-blocked"
+          title={`origin/main changed deploy-critical files this branch is missing:\n${critical().join("\n")}\n\nrebase forward to clear the push block`}
         >
-          <span
-            class="nh-blocked"
-            title={`origin/main changed deploy-critical files this branch is missing:\n${critical().join("\n")}\n\nrebase forward to clear the push block`}
-          >
-            ⚠ push blocked
-          </span>
-        </Show>
+          ⚠ push blocked
+        </span>
       </Show>
 
       {/* rebase onto origin/main — first-class + always visible (not just when behind, not buried
@@ -289,21 +286,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
           }
           onClick={fire(() => rebase.mutate())}
         >
-          {rebase.isPending ? "rebasing…" : behind() === 0 ? "✦ on origin/main" : "⟳ restack branch"}
-        </button>
-      </Show>
-
-      {/* squash unpushed — first-class: collapse unpushed commits into one voiced + oxfmt'd
-          commit, NO push (Phil pushes to origin from GitHub Desktop). Two-click arm: rewrites history. */}
-      <Show when={!isReview()}>
-        <button
-          class="nh-fix"
-          classList={{ armed: armed() === "prep" }}
-          disabled={busy()}
-          title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
-          onClick={fire(() => trigger("prep", () => prep.mutate()))}
-        >
-          {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm tidy" : "✓ tidy commits"}
+          {rebase.isPending ? "rebasing…" : behind() === 0 ? "✦ on origin/main" : `⟳ restack · ${behind()} behind`}
         </button>
       </Show>
 
@@ -347,7 +330,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}
-        title="branch actions — checkout, squash"
+        title="branch actions — checkout, tidy commits, uncommit, pre-push gates"
         onClick={() => setOpen((o) => !o)}
       >
         ⋯
@@ -393,6 +376,21 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             <span class="nh-item-ic">⊟</span>
             {squash.isPending ? "uncommitting…" : armed() === "squash" ? "confirm uncommit" : "uncommit → GitHub Desktop"}
           </button>
+
+          {/* tidy commits — squash unpushed into one voiced + oxfmt'd commit (no push) */}
+          <Show when={!isReview()}>
+            <button
+              class="nh-item"
+              classList={{ armed: armed() === "prep" }}
+              role="menuitem"
+              disabled={busy()}
+              title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
+              onClick={fire(() => trigger("prep", () => prep.mutate()))}
+            >
+              <span class="nh-item-ic">✓</span>
+              {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm tidy" : "tidy commits"}
+            </button>
+          </Show>
 
           {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
               Not for review nodes (those track someone else's PR — you don't push it). */}
