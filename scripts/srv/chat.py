@@ -19,10 +19,13 @@
 # the group so no headless session lingers.
 import os
 import json
+import base64
 import signal
 import subprocess
+import tempfile
 import threading
 import time
+import uuid
 
 from . import ctx, prompts
 
@@ -58,6 +61,57 @@ def popout(req, raw):   # POST /chat-popout — resume a chat's headless session
               json.dumps({"ok": r.returncode == 0, "out": r.stdout.strip(), "err": r.stderr.strip()}))
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
+# Dropped/pasted chat images land here as temp files claude Reads. Outside the repo so they
+# never show up in `git status`; pruned by age on each upload.
+ATTACH_DIR = os.path.join(tempfile.gettempdir(), "stack-chat-attach")
+ATTACH_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
+ATTACH_MAX = 12 * 1024 * 1024   # 12MB/image
+ATTACH_TTL = 86_400             # reap files older than a day
+
+
+def _prune_attachments():
+    try:
+        now = time.time()
+        for fn in os.listdir(ATTACH_DIR):
+            fp = os.path.join(ATTACH_DIR, fn)
+            if now - os.path.getmtime(fp) > ATTACH_TTL:
+                os.remove(fp)
+    except OSError:
+        pass
+
+
+def attach(req, raw):   # POST /chat-attach {name, dataB64} → save a dropped image, return its path
+    d = json.loads(raw or "{}")
+    name = (d.get("name") or "image.png").strip()
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else "png"
+    if ext not in ATTACH_EXT:
+        req._send(400, json.dumps({"ok": False, "err": "images only (png/jpg/gif/webp)"}))
+        return
+    try:
+        data = base64.b64decode(d.get("dataB64") or "", validate=True)
+    except (ValueError, base64.binascii.Error):
+        req._send(400, json.dumps({"ok": False, "err": "bad image data"}))
+        return
+    if not data or len(data) > ATTACH_MAX:
+        req._send(400, json.dumps({"ok": False, "err": "image empty or over 12MB"}))
+        return
+    os.makedirs(ATTACH_DIR, exist_ok=True)
+    _prune_attachments()
+    fpath = os.path.join(ATTACH_DIR, f"{uuid.uuid4().hex}.{ext}")
+    with open(fpath, "wb") as f:
+        f.write(data)
+    req._send(200, json.dumps({"ok": True, "path": fpath, "name": name}))
+
+
+def _valid_attachments(raw_list):
+    # Only paths we minted under ATTACH_DIR — so a crafted request can't turn the attachment
+    # channel into "Read any file on disk" (claude already has read-only Read, but keep it tight).
+    base = os.path.realpath(ATTACH_DIR) + os.sep
+    out = []
+    for a in raw_list or []:
+        if isinstance(a, str) and a and os.path.realpath(a).startswith(base) and os.path.exists(a):
+            out.append(a)
+    return out
 # Model aliases the chat may use — resolved to current models by the claude CLI, so no dated
 # IDs to rot. Anything else from the client falls back to the default (never passed raw to --model).
 ALLOWED_MODELS = {"opus", "sonnet", "haiku"}
@@ -266,6 +320,7 @@ def start(req, raw):
             prompt = prompts.file_chat(branch, path, d.get("patch", ""), question)
         else:
             prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
+        prompt = prompts.with_attachments(prompt, _valid_attachments(d.get("attachments")))
         cwd = _worktree_for(branch) or ctx.CWD
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json",

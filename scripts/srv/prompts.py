@@ -54,6 +54,19 @@ def branch_chat(branch, patch, question):
     ])
 
 
+# Dropped/pasted screenshots ride in as saved temp files — headless claude can't take image
+# input directly, but Read renders an image visually, so we just point it at the paths.
+def with_attachments(prompt, paths):
+    if not paths:
+        return prompt
+    return "\n".join([
+        prompt,
+        "",
+        f"I attached {len(paths)} image(s) — Read each path to see it:",
+        *[f"- {p}" for p in paths],
+    ])
+
+
 # The select-to-Claude chip fires a FULL (editing) claude in the worktree, so it gets the
 # house style as an editing bar — no read-only clause.
 def select_assist(branch, selection_lines, instruction):
