@@ -98,13 +98,16 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
                 return
             _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
             branch = r.stdout.strip()
+    # Canonical viewer route — mirrors the TS router's buildPath() so the extension never
+    # guesses URL shape: an own local branch is a standalone node, an imported PR is /review/N.
+    route = f"/branch/{branch}" if local else f"/review/{num}"
     path = (d.get("path") or "").strip()
     if not path:
-        req._send(200, json.dumps({"ok": True, "branch": branch, "opened": False, "local": local}))
+        req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
         return
     code, _out, err = picker.open_on_branch(branch, path, d.get("line"))
     req._send(200 if code == 0 else (504 if code == 504 else 500),
-              json.dumps({"ok": code == 0, "branch": branch, "opened": code == 0, "local": local, "err": err}))
+              json.dumps({"ok": code == 0, "branch": branch, "path": route, "opened": code == 0, "local": local, "err": err}))
 
 
 def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext can flag a stale loaded copy

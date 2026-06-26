@@ -1,4 +1,4 @@
-const VIEWER = "http://localhost:62497";
+importScripts("./config.js");   // VIEWER_URL — single source of truth (see config.js)
 
 // The content script runs on https://github.com and can't fetch http://localhost
 // (mixed content) — the service worker can, via host_permissions, so relay here.
@@ -6,8 +6,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type !== "from-github") {
     return;
   }
-  console.log("[gh-to-nvim] relay →", `${VIEWER}/from-github`, msg.payload);
-  fetch(`${VIEWER}/from-github`, {
+  console.log("[gh-to-nvim] relay →", `${VIEWER_URL}/from-github`, msg.payload);
+  fetch(`${VIEWER_URL}/from-github`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(msg.payload),
@@ -32,7 +32,7 @@ const ICONS = {
 const STATE = {
   fresh: { badge: "", color: "#3FB950", title: "GitHub → nvim — up to date" },
   stale: { badge: "●", color: "#D29922", title: "GitHub → nvim — source changed (click for menu)" },
-  offline: { badge: "×", color: "#6E7681", title: `GitHub → nvim — viewer offline (${VIEWER})` },
+  offline: { badge: "×", color: "#6E7681", title: `GitHub → nvim — viewer offline (${VIEWER_URL})` },
 };
 
 function iconSet(name) {
@@ -56,7 +56,7 @@ async function apply(state) {
 
 async function diskMtime() {
   try {
-    const r = await fetch(`${VIEWER}/ext-mtime`);
+    const r = await fetch(`${VIEWER_URL}/ext-mtime`);
     if (!r.ok) {
       return null;
     }

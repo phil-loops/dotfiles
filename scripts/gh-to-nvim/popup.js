@@ -1,10 +1,9 @@
-const VIEWER = "http://localhost:62497";
-
+// VIEWER_URL / VIEWER_PORT come from config.js (loaded first in popup.html).
 const COPY = {
   fresh: { label: "Up to date", detail: "loaded copy matches disk" },
   stale: { label: "Source changed", detail: "reload to apply your edits" },
-  offline: { label: "Viewer offline", detail: `unreachable on ${VIEWER}` },
-  unknown: { label: "Checking…", detail: "viewer :62497" },
+  offline: { label: "Viewer offline", detail: `unreachable on ${VIEWER_URL}` },
+  unknown: { label: "Checking…", detail: `viewer :${VIEWER_PORT}` },
 };
 
 const HOST = "com.loops.gh_to_nvim";
@@ -65,6 +64,6 @@ document.getElementById("reload").addEventListener("click", () => {
 });
 
 document.getElementById("viewer").addEventListener("click", () => {
-  chrome.tabs.create({ url: VIEWER });
+  chrome.tabs.create({ url: VIEWER_URL });
   window.close();
 });
