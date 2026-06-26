@@ -56,6 +56,7 @@ function reset(btn, label) {
 async function fire(btn, payload, label, okText) {
   btn.disabled = true;
   btn.textContent = "…";
+  toast("opening in nvim…", true, true);
   const res = await send(payload);
   const ok = res?.status === 200 && res.body?.ok;
   btn.classList.add(ok ? "gh-nvim-ok" : "gh-nvim-err");
@@ -63,6 +64,7 @@ async function fire(btn, payload, label, okText) {
   btn.title = ok
     ? `opened ${res.body.branch}`
     : `failed: ${res?.body?.err || res?.error || res?.status || "error"}`;
+  toast(ok ? `✓ opened ${res.body?.branch || ""}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
   setTimeout(() => reset(btn, label), 4000);
 }
 
@@ -106,7 +108,7 @@ function makeFab(pr) {
   return box;
 }
 
-function toast(text, ok) {
+function toast(text, ok, sticky) {
   let el = document.getElementById("gh-nvim-toast");
   if (!el) {
     el = document.createElement("div");
@@ -117,7 +119,11 @@ function toast(text, ok) {
   el.classList.toggle("gh-nvim-err", !ok);
   el.classList.add("gh-nvim-show");
   clearTimeout(el._timer);
-  el._timer = setTimeout(() => el.classList.remove("gh-nvim-show"), 3000);
+  // sticky = stay up until the result replaces it (a cold open can take several seconds —
+  // without this the "opening…" toast vanishes mid-wait and it looks like nothing's happening).
+  if (!sticky) {
+    el._timer = setTimeout(() => el.classList.remove("gh-nvim-show"), 3000);
+  }
 }
 
 // ⌥-click a right-side (new-file) line number → open that exact file+line in nvim.
@@ -139,23 +145,25 @@ async function onLineClick(e) {
   e.stopPropagation();
   const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
   const line = cell.getAttribute("data-line-number");
-  toast(`→ ${path}:${line} …`, true);
+  toast(`→ ${path}:${line} — opening…`, true, true);
   const res = await send({ number: pr.number, repo: pr.repo, path, line });
   const ok = res?.status === 200 && res.body?.ok;
   toast(ok ? `✓ ${path}:${line}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
 }
 
 let prewarmedPr = null;
+function prewarm(pr) {
+  // import the PR's branch (+ materialize its worktree, server-side) in the background, once,
+  // so the first real open skips the slow git fetch + worktree build. Path-less = no nvim open.
+  if (pr && prewarmedPr !== pr.number) {
+    prewarmedPr = pr.number;
+    send({ number: pr.number, repo: pr.repo });
+  }
+}
 function altToggle(e) {
   document.body.classList.toggle("gh-nvim-alt", e.altKey);
-  // pre-warm: the moment you hold ⌥ (intending to ⌥-click a line), import the PR's branch in
-  // the background (path-less = no nvim open) so the click skips the slow first-time git fetch.
   if (e.altKey) {
-    const pr = parsePr();
-    if (pr && prewarmedPr !== pr.number) {
-      prewarmedPr = pr.number;
-      send({ number: pr.number, repo: pr.repo });
-    }
+    prewarm(parsePr());
   }
 }
 
@@ -203,6 +211,7 @@ function tick() {
   }
   if (!fab) {
     document.body.appendChild(makeFab(pr));
+    prewarm(pr);   // warm the import + worktree on page load so the first open is fast
   }
   injectFileButtons(pr);
 }
