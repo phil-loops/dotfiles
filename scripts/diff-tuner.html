@@ -28,7 +28,8 @@
     --t-hl-del: rgba(204, 42, 24, 0.0);
     --t-row-add: rgba(11, 138, 20, 0.16);
     --t-row-del: rgba(204, 42, 24, 0.16);
-    --t-chip-text: #fbf7ee;
+    --t-chip-text-add: #1a160d;
+    --t-chip-text-del: #fbf7ee;
     --t-stripe-w: 5px;
     --t-weight: 500;
     --t-size: 13px;
@@ -113,8 +114,10 @@
   /* the readability lever: a gentle hue lean on add/del LINE text — kept light so the gold still reads */
   .d2h-ins .d2h-code-line-ctn { color: var(--t-text-add); font-weight: var(--t-weight); }
   .d2h-del .d2h-code-line-ctn { color: var(--t-text-del); font-weight: var(--t-weight); }
-  /* the changed WORD sits on its colored chip — NEUTRAL (not gold) so there's no yellow-on-green/red mud */
-  .d2h-ins ins, .d2h-del del { color: var(--t-chip-text); font-weight: 700; text-decoration: none; border-radius: 2px; padding: 0 1px; }
+  /* the changed WORD sits on its colored chip — auto dark-on-green / light-on-red (luminance), no yellow mud */
+  .d2h-ins ins, .d2h-del del { font-weight: 700; text-decoration: none; border-radius: 2px; padding: 0 1px; }
+  .d2h-ins ins { color: var(--t-chip-text-add); }
+  .d2h-del del { color: var(--t-chip-text-del); }
   .d2h-ins .d2h-code-line-prefix { color: var(--t-prefix-add); opacity: 1; }
   .d2h-del .d2h-code-line-prefix { color: var(--t-prefix-del); opacity: 1; }
   .d2h-code-line-prefix { opacity: 0.6; }
@@ -187,8 +190,8 @@
         <input type="range" class="neutral" id="hl" min="0" max="1" step="0.02"></div>
       <div class="ctl"><label>text tint <span class="val" id="vTint"></span> <span class="hint" style="color:var(--ink-faint)">— 0 = all gold, 1 = full color</span></label>
         <input type="range" class="neutral" id="tint" min="0" max="1" step="0.05"></div>
-      <div class="ctl"><label>changed-word text <span class="val" id="vChip"></span> <span class="hint" style="color:var(--ink-faint)">— color of the token ON the chip (keep it off-gold)</span></label>
-        <div class="row"><input type="color" id="chip"><input type="text" id="chipHex"></div></div>
+      <div class="ctl"><label>changed-word text <span class="val" id="vChip"></span></label>
+        <select id="chipMode"><option value="auto">auto (dark on green, light on red)</option><option value="light">always light</option><option value="dark">always dark</option></select></div>
       <div class="contrast">
         <div class="pill"><div class="big" id="cAdd">–</div><div class="lab">added text ↔ bg</div></div>
         <div class="pill"><div class="big" id="cDel">–</div><div class="lab">removed text ↔ bg</div></div>
@@ -273,7 +276,7 @@ index 1111111..2222222 100644
   const S = {
     bg: "#0a0a0d", ink: "#ecd35a", weight: "500", size: 13, sw: 5,
     green: "#1fb300", red: "#cc2a18",
-    tint: 0.6, hl: 0.75, row: 0.2,
+    tint: 0.6, hl: 0.75, row: 0.2, chipMode: "auto",
   };
 
   const GREENS = ["#1fb300", "#19e000", "#3ad900", "#2faa3a", "#10b981", "#15b8a6", "#3ddc84", "#9ece6a", "#b8bb26", "#50fa7b", "#4caf50", "#0b8a14", "#7bc043", "#26a269", "#86efac", "#a3be8c"];
@@ -299,7 +302,14 @@ index 1111111..2222222 100644
     const [r, g, b] = hexToRgb(seedHex);
     const hl = `rgba(${r}, ${g}, ${b}, ${opacity})`;
     const row = `rgba(${r}, ${g}, ${b}, ${S.row})`;
-    return { stripe, prefix, text, hl, row };
+    // chip text: the chip is the seed laid over bg at `opacity`; pick dark/light by whichever
+    // out-contrasts on THAT effective color (green is luminous → dark wins; red is dim → light wins)
+    const DARK = "#1a160d", LIGHT = "#fbf7ee";
+    const eff = mix(S.bg, seedHex, opacity);
+    const chipText = S.chipMode === "light" ? LIGHT
+      : S.chipMode === "dark" ? DARK
+      : (contrast(DARK, eff) >= contrast(LIGHT, eff) ? DARK : LIGHT);
+    return { stripe, prefix, text, hl, row, chipText, chipContrast: contrast(chipText, eff) };
   }
 
   function buildSwatches(containerId, list, key) {
@@ -345,6 +355,8 @@ index 1111111..2222222 100644
     root.style.setProperty("--t-hl-del", del.hl);
     root.style.setProperty("--t-row-add", add.row);
     root.style.setProperty("--t-row-del", del.row);
+    root.style.setProperty("--t-chip-text-add", add.chipText);
+    root.style.setProperty("--t-chip-text-del", del.chipText);
     root.style.setProperty("--t-stripe-w", S.sw + "px");
     root.style.setProperty("--t-weight", S.weight);
     root.style.setProperty("--t-size", S.size + "px");
@@ -360,6 +372,7 @@ index 1111111..2222222 100644
     vGh.textContent = gh[0]; vGs.textContent = gh[1] + "%"; vGl.textContent = gh[2] + "%";
     vRh.textContent = rh[0]; vRs.textContent = rh[1] + "%"; vRl.textContent = rh[2] + "%";
     vTint.textContent = S.tint.toFixed(2); vHl.textContent = S.hl.toFixed(2); vRow.textContent = S.row.toFixed(2);
+    vChip.textContent = `add ${add.chipText} ${add.chipContrast.toFixed(1)}:1 · del ${del.chipText} ${del.chipContrast.toFixed(1)}:1`;
 
     buildRamp("greenRamp", S.green, "green");
     buildRamp("redRamp", S.red, "red");
@@ -385,6 +398,8 @@ stripe add:       ${add.stripe};   stripe del: ${del.stripe};   width: ${S.sw}px
 --row-del:        ${del.row};   /* whole removed-line wash */
 --hl-add:         ${add.hl};   /* changed-word chip */
 --hl-del:         ${del.hl};
+--chip-text-add:  ${add.chipText};   /* token on green chip (${add.chipContrast.toFixed(1)}:1) */
+--chip-text-del:  ${del.chipText};   /* token on red chip (${del.chipContrast.toFixed(1)}:1) */
 font: ${S.weight} / ${S.size}px;   text tint: ${S.tint.toFixed(2)}
 contrast  add ${ca.toFixed(1)}:1 (${ga})   del ${cd.toFixed(1)}:1 (${gd})`;
   }
@@ -395,7 +410,7 @@ contrast  add ${ca.toFixed(1)}:1 (${ga})   del ${cd.toFixed(1)}:1 (${gd})`;
     const gh = hexToHsl(S.green), rh = hexToHsl(S.red);
     document.getElementById("gh").value = Math.round(gh[0]); gs.value = Math.round(gh[1]); gl.value = Math.round(gh[2]);
     document.getElementById("rh").value = Math.round(rh[0]); rs.value = Math.round(rh[1]); rl.value = Math.round(rh[2]);
-    tint.value = S.tint; hl.value = S.hl; row.value = S.row;
+    tint.value = S.tint; hl.value = S.hl; row.value = S.row; chipMode.value = S.chipMode;
   }
 
   const bind = (id, fn) => document.getElementById(id).addEventListener("input", (e) => { fn(e.target.value); syncInputs(); apply(); });
@@ -407,6 +422,7 @@ contrast  add ${ca.toFixed(1)}:1 (${ga})   del ${cd.toFixed(1)}:1 (${gd})`;
   bind("tint", (v) => S.tint = Number(v));
   bind("hl", (v) => S.hl = Number(v));
   bind("row", (v) => S.row = Number(v));
+  bind("chipMode", (v) => S.chipMode = v);
   // HSL sliders rebuild the active hue
   const setG = () => S.green = hslToHex([Number(document.getElementById("gh").value), Number(gs.value), Number(gl.value)]);
   const setR = () => S.red = hslToHex([Number(document.getElementById("rh").value), Number(rs.value), Number(rl.value)]);
