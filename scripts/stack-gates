@@ -14,9 +14,14 @@ Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With 
 config, falls back to auto-detected defaults (tsgo if tsconfig.node.json exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
-  stack-gates [--branch <b>]   run in the worktree of <b> if it has one, else cwd
+  stack-gates [--branch <b>] [--fix]   run in the worktree of <b> if it has one, else cwd
 
-Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary"}]}
+--fix: a red gate with a registered remediation (`stack-gates.fix "<name>::<cmd>"`, or a
+built-in) gets one fix attempt + re-check. The built-in format fix cascades stack-fmt
+across the branch's forest (or folds an oxfmt commit on a standalone branch). A fixed
+gate reports "fixed": true.
+
+Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary","fixed"?}]}
 """
 import json
 import os
@@ -87,6 +92,43 @@ def default_gates(cwd):
     return gates
 
 
+def gconf(key, cwd):
+    return run(["git", "config", "--get", key], cwd).stdout.strip()
+
+
+def configured_fixes(cwd):
+    """Optional per-gate remediation: `stack-gates.fix "<name>::<cmd>"`, mirroring
+    stack-gates.cmd. A failing gate with a fix can be auto-remediated under --fix."""
+    out = run(["git", "config", "--get-all", "stack-gates.fix"], cwd).stdout
+    fixes = {}
+    for ln in out.splitlines():
+        if "::" in ln:
+            name, cmd = ln.split("::", 1)
+            fixes[name.strip()] = cmd.strip()
+    return fixes
+
+
+def default_fixes(cwd, branch):
+    """Built-in remediation for the format gate. A branch in a forest is fixed by the
+    whole-forest cascade (stack-fmt — each layer formatted at its own branch; formatting
+    only the leaf would leave its drifted ancestors red). A standalone branch folds an
+    oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
+    self_dir = os.path.dirname(os.path.abspath(__file__))
+    project = gconf(f"stack-branch.{branch}.project", cwd) if branch else ""
+    if project and os.path.exists(os.path.join(self_dir, "stack-fmt")):
+        return {"format": f"{self_dir}/stack-fmt {project}"}
+    oxfmt = resolve("oxfmt", cwd)
+    if not oxfmt:
+        return {}
+    return {"format": (
+        "files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
+        '[ -z "$files" ] && exit 0; '
+        f'echo "$files" | xargs {oxfmt} --write; '
+        'echo "$files" | xargs git add; '
+        'git commit -q -m "style: oxfmt" --no-verify'
+    )}
+
+
 def last_lines(text, n=12):
     lines = [ln for ln in text.splitlines() if ln.strip()]
     tail = lines[-n:]
@@ -100,8 +142,11 @@ def main():
         i = argv.index("--branch")
         branch = argv[i + 1] if i + 1 < len(argv) else ""
 
+    do_fix = "--fix" in argv
+
     cwd = worktree_of(branch, os.getcwd())
     gates = configured_gates(cwd) or default_gates(cwd)
+    fixes = (configured_fixes(cwd) or default_fixes(cwd, branch)) if do_fix else {}
 
     if not gates:
         print(json.dumps({"ok": True, "gates": [], "note": "no gates configured for this repo"}))
@@ -112,11 +157,22 @@ def main():
     for name, cmd in gates:
         t0 = time.time()
         r = run(["bash", "-lc", cmd], cwd)
-        ms = int((time.time() - t0) * 1000)
         ok = r.returncode == 0
+        fixed = False
+        # A red gate with a registered fix gets one remediation attempt, then a re-check.
+        if not ok and name in fixes:
+            run(["bash", "-lc", fixes[name]], cwd)
+            r = run(["bash", "-lc", cmd], cwd)
+            if r.returncode == 0:
+                ok = True
+                fixed = True
+        ms = int((time.time() - t0) * 1000)
         all_ok = all_ok and ok
         summary = "" if ok else last_lines((r.stdout or "") + "\n" + (r.stderr or ""))
-        results.append({"name": name, "ok": ok, "ms": ms, "summary": summary})
+        entry = {"name": name, "ok": ok, "ms": ms, "summary": summary}
+        if fixed:
+            entry["fixed"] = True
+        results.append(entry)
 
     print(json.dumps({"ok": all_ok, "gates": results}))
     return 0 if all_ok else 0   # always exit 0: the JSON carries the verdict; the caller reads ok
