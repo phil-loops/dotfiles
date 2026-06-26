@@ -10,6 +10,22 @@ function parsePr() {
   return { repo: `${m[1]}/${m[2]}`, number: Number(m[3]) };
 }
 
+// the line GitHub has selected (you clicked a line number): the URL hash carries it as
+// #diff-<sha256(path)>R<line> (R = the new-file side). Resolve the file via the anchored
+// element's diff table; null when nothing's selected → caller falls back to the gm Diffview.
+function selectedLine() {
+  const m = location.hash.match(/^#(diff-[0-9a-f]+)R(\d+)$/);
+  if (!m) {
+    return null;
+  }
+  const anchored = document.getElementById(location.hash.slice(1)) || document.getElementById(m[1]);
+  const table =
+    anchored?.closest('table[aria-label^="Diff for: "]') ||
+    anchored?.querySelector?.('table[aria-label^="Diff for: "]');
+  const path = table?.getAttribute("aria-label")?.replace(/^Diff for: /, "");
+  return path ? { path, line: Number(m[2]) } : null;
+}
+
 function send(payload) {
   return new Promise((resolve) => {
     try {
@@ -54,13 +70,17 @@ function makeFab(pr) {
   const box = document.createElement("div");
   box.id = "gh-nvim-fab";
 
-  const imp = document.createElement("button");
-  imp.className = "gh-nvim-fab-btn";
-  imp.textContent = "import";
-  imp.title = `Import PR #${pr.number} as a watch node (use the per-file nvim button or ⌥-click a line to open in nvim)`;
-  imp.addEventListener("click", () =>
-    fire(imp, { number: pr.number, repo: pr.repo }, "import", (b) => `✓ ${b.branch}`),
-  );
+  const nvimBtn = document.createElement("button");
+  nvimBtn.className = "gh-nvim-fab-btn";
+  nvimBtn.textContent = "→ nvim";
+  nvimBtn.title = `Open PR #${pr.number} in nvim — the file+line if one is selected, else the whole-PR Diffview (⌥-click any line works too)`;
+  nvimBtn.addEventListener("click", () => {
+    const sel = selectedLine();
+    const payload = sel
+      ? { number: pr.number, repo: pr.repo, path: sel.path, line: sel.line }
+      : { number: pr.number, repo: pr.repo, view: "gm" };
+    fire(nvimBtn, payload, "→ nvim", () => (sel ? `✓ :${sel.line}` : "✓ gm"));
+  });
 
   const viewer = document.createElement("button");
   viewer.className = "gh-nvim-fab-btn";
@@ -82,7 +102,7 @@ function makeFab(pr) {
     setTimeout(() => reset(viewer, "→ viewer"), 4000);
   });
 
-  box.append(imp, viewer);
+  box.append(nvimBtn, viewer);
   return box;
 }
 
