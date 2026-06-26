@@ -66,6 +66,10 @@ const mergedAgo = (iso?: string): string | null => {
 const isBlessed = (f: FileDiff): boolean =>
   f.status === "clean" || f.status === "blessed";
 
+// the node you last left via "back to the forest map", so the overview can emphasize where you
+// were. Module-scope so it survives the route change from a node to its forest overview.
+const [cameFrom, setCameFrom] = createSignal("");
+
 function flattenForest(model: ForestModel | undefined): SpineNode[] {
   if (!model) return [];
   const nodes = model.nodes;
@@ -856,7 +860,7 @@ function ForestOverview() {
         <ForestMap
           page
           spine={spine}
-          active={() => ""}
+          active={() => (spine().some((n) => n.id === cameFrom()) ? cameFrom() : "")}
           health={() => health.data}
           onPick={open}
           onClose={() => {}}
@@ -887,6 +891,8 @@ function NodeDetail() {
   const active = () =>
     nodeParam() || spine().find((n) => (n.total ?? 0) > 0)?.id || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
+  // remember the node you're on, so popping back to the forest map highlights where you were.
+  createEffect(() => active() && setCameFrom(active()));
 
   // diff base + view (diffs|commits) reset when you change node.
   const [base, setBase] = createSignal(""); // "" parent | "main" | "blessed" last-blessed
@@ -1364,9 +1370,9 @@ function NodeDetail() {
               <Link
                 class="nh-forest-back"
                 to={{ kind: "forest", name: project() }}
-                title="back to the forest map"
+                title="back to the forest map — your current node stays highlighted there"
               >
-                {project()}
+                ⊞ {project()}
               </Link>
             </Show>
             <div class="nh-spacer" />
