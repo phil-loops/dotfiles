@@ -114,29 +114,41 @@ def _valid_attachments(raw_list):
     return out
 
 
+def _node_diff(branch):
+    # capped parent…branch diff so the model can read a real implementation detail per node
+    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    out = ctx.run(["git", "diff", f"{parent}...{branch}"]).stdout
+    return out[:3500]
+
+
 def merge_subjects(req, raw):
-    # POST /merge-subjects {scope, items:[{key, type, purpose}]} → {key: subject}
-    # One cheap haiku pass that crisps each plain purpose into a pithy commit subject for the
-    # merge-story view. Opt-in (fires only when the user clicks "polish"); the client already holds
-    # the purposes, so this endpoint just compresses them — no git/forest knowledge needed here.
+    # POST /merge-subjects {scope, items:[{key, type, purpose}]} → {key: {subject, detail}}
+    # One opt-in pass (the "polish" button) that, per node, crisps the plain purpose into a pithy
+    # commit subject AND reads the node's diff to surface one relevant/non-trivial implementation
+    # detail — so the story reads as more than a one-liner. Diffs are server-side (git here).
     d = json.loads(raw or "{}")
     scope = (d.get("scope") or "scope").strip()
     items = [it for it in (d.get("items") or [])
-             if isinstance(it, dict) and it.get("key") and (it.get("purpose") or "").strip()]
+             if isinstance(it, dict) and it.get("key") and (it.get("purpose") or "").strip()][:16]
     if not items:
         req._send(200, json.dumps({}))
         return
-    numbered = "\n".join(f"{i}. [{(it.get('type') or 'feat')}] {it['purpose'].strip()}"
-                         for i, it in enumerate(items))
-    prompt = (
-        f"Rewrite each branch purpose below as a git commit SUBJECT — the text that follows "
-        f"'type({scope}): '. Pithy, concise, but eminently clear. Imperative mood, lower-case first "
-        f"word, NO trailing period, aim under ~60 chars. Stay specific — keep what it actually does, "
-        f"don't generalize. Plain register: no raw identifiers, no jargon.\n"
-        f"Return ONLY a JSON object mapping each item's number (a string) to its subject. No prose.\n\n"
-        + numbered
+    blocks = "\n\n".join(
+        f"### {i}  [{(it.get('type') or 'feat')}]\nPURPOSE: {it['purpose'].strip()}\nDIFF (truncated):\n{_node_diff(it['key'])}"
+        for i, it in enumerate(items)
     )
-    r = ctx.run(["claude", "-p", prompt, "--model", "haiku"])
+    prompt = (
+        f"For each numbered branch below (its plain purpose + a truncated diff), produce two things:\n"
+        f"- subject: a git commit subject, the text after 'type({scope}): '. Pithy, imperative, "
+        f"lower-case first word, no trailing period, under ~60 chars.\n"
+        f"- detail: ONE or TWO sentences naming what it does AND the most relevant non-trivial "
+        f"implementation detail you can see in the diff (a mechanism, an invariant, a gotcha, a "
+        f"perf/correctness choice). Concrete and specific. Plain register — explain in words, but "
+        f"you MAY name a key field/table/function if it's load-bearing. Skip if the diff is trivial.\n"
+        f"Return ONLY a JSON object mapping each number (a string) to {{\"subject\":…, \"detail\":…}}. "
+        f"No prose, no fences.\n\n" + blocks
+    )
+    r = ctx.run(["claude", "-p", prompt, "--model", "sonnet"])
     text = (r.stdout or "").strip()
     out = {}
     try:   # claude may fence the JSON or add stray text — take the outermost {...}
@@ -144,8 +156,14 @@ def merge_subjects(req, raw):
         obj = json.loads(text[s:e + 1]) if 0 <= s < e else {}
         for i, it in enumerate(items):
             v = obj.get(str(i))
-            if isinstance(v, str) and v.strip():
-                out[it["key"]] = v.strip().rstrip(".")
+            if isinstance(v, dict):
+                entry = {}
+                if isinstance(v.get("subject"), str) and v["subject"].strip():
+                    entry["subject"] = v["subject"].strip().rstrip(".")
+                if isinstance(v.get("detail"), str) and v["detail"].strip():
+                    entry["detail"] = v["detail"].strip()
+                if entry:
+                    out[it["key"]] = entry
     except ValueError:
         out = {}
     req._send(200, json.dumps(out))
