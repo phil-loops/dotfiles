@@ -98,9 +98,17 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
                 return
             _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
             branch = r.stdout.strip()
-    # Canonical viewer route — mirrors the TS router's buildPath() so the extension never
-    # guesses URL shape: an own local branch is a standalone node, an imported PR is /review/N.
-    route = f"/branch/{branch}" if local else f"/review/{num}"
+    # Canonical viewer route — mirrors how the viewer opens a node: a forest member
+    # (tagged stack-branch.<b>.project) lives at /forests/<project>/<branch>, an untagged
+    # own branch is a standalone /branch/<b>, an imported PR is /review/N. The project tag
+    # is the same git config the viewer reads, so membership stays single-source.
+    project = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    if project:
+        route = f"/forests/{project}/{branch}"
+    elif local:
+        route = f"/branch/{branch}"
+    else:
+        route = f"/review/{num}"
     path = (d.get("path") or "").strip()
     if not path:
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
