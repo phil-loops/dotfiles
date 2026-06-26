@@ -31,12 +31,20 @@ orphaned WIP into clean commits, then landed UI on top):**
 - **Purpose hover popovers** (`e54adb1`) — hovering a Forests row pops a card of its branches
   + one-line purposes (`/forest-purposes?project=X`, cached, short delay). Aggregation solved.
 
-**Still to land:**
-- Header diet — folds into the ambient-restack model (Phase 3); the biggest remaining piece.
-  Can ship as a LIGHT declutter (group/relocate the existing buttons, e.g. tidy-commits into
-  the ⋯ menu) WITHOUT the daemon, or wait for the full ambient model. Decision pending.
-- Follow-ups: dead-code sweep of the watching-only helpers; wire salvaged promote/checkout
-  onto a branch-row context.
+- **Header light declutter** (`8768be6`) — `↓ N behind` folded into the restack button,
+  `tidy commits` moved into the ⋯ menu; push-blocked stays the one alarm. The full ambient
+  model (below) is the deeper version.
+
+**Delightful-UI backlog: CLEAR.** Everything from Phil's walkthrough is shipped.
+
+**Remaining (bigger / optional, not part of the delight pass):**
+- **Full ambient-restack daemon** (Phase 3) — the real header endgame: forests auto-restack,
+  the header collapses to one status chip. `restack-dryrun` (`f17c45e`) is the dry-run-first
+  foundation. A standalone project when wanted; stage carefully (dry-run-first).
+- Small follow-ups: dead-code sweep of the now-unused watching helpers; wire salvaged
+  promote/checkout onto a branch-row context; group the forest-level restack with the
+  branch one (cross-component).
+- GitHub notify → Work-page live-refresh (the `gh-review-notify` loop as a second consumer).
 
 **Local-delta composer** — backend ALREADY EXISTS in `stack-squash` (`--unpushed`/`--unstage`);
 it's an App.tsx UI over that, not a new CLI. Don't rebuild the engine.
