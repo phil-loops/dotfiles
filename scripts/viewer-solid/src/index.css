@@ -51,6 +51,23 @@ body {
 
 /* ── shell: forest spine | review surface ───────────────────────────── */
 .shell { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
+/* collapse the file panel to hand the diff the full width — one column, so main (the only
+   in-flow grid child once the spine is hidden) fills it instead of landing in a 0-width track */
+.shell.panel-collapsed { grid-template-columns: 1fr; }
+.shell.panel-collapsed .spine { display: none; }
+.panel-collapse {
+  position: absolute; top: 20px; right: 6px; z-index: 2; padding: 2px 6px;
+  background: none; border: 0; cursor: pointer; font-family: var(--mono);
+  font-size: 16px; line-height: 1; color: var(--ink-faint);
+}
+.panel-collapse:hover { color: var(--ink); }
+.panel-reopen {
+  position: fixed; left: 0; top: 16px; z-index: 5; padding: 7px 9px;
+  background: var(--vellum-edge); border: 1px solid var(--rule); border-left: 0;
+  border-radius: 0 8px 8px 0; cursor: pointer; font-family: var(--mono);
+  font-size: 15px; line-height: 1; color: var(--ink-dim);
+}
+.panel-reopen:hover { color: var(--gold-leaf); border-color: var(--gold-deep); }
 
 .spine {
   border-right: 1px solid var(--rule);
