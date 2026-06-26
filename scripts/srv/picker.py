@@ -374,6 +374,11 @@ def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in t
     return proc.returncode, out, err
 
 
+def prepare_branch(branch):   # background worktree prefetch (stack-open --prepare) — fire-and-forget
+    subprocess.Popen([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
+                     cwd=ctx.CWD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
     d = json.loads(raw or "{}")
     code, out, err = open_on_branch(d.get("branch", ""), d.get("path", ""), d.get("pos") or d.get("line"))
