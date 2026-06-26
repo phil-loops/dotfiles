@@ -47,8 +47,11 @@ user the path, ask them to edit and paste back / tell you when ready.
 1. **Draft the doc.** Write a real design doc to `~/design-docs/<slug>.md`. Good bones:
    `# Design: <title>`, a one-line "edit then `:submit`" banner, **Problem**, **Design**
    (with the concrete shape — names, signatures, data flow), **Branch structure** (forest, per
-   the repo's conventions if it's a code project), and an **Open questions** section with the real
-   forks called out. Ground it in actual code/benchmarks where you can — don't hand-wave.
+   the repo's conventions if it's a code project — write each branch's purpose in the plain register
+   CLAUDE.md's *Branch purpose* section prescribes: what it *does*, no raw identifiers or terms-of-art,
+   keep forest vocab, so purposes read clean at generation time, not as a later de-jargon pass), and
+   an **Open questions** section with the real forks called out. Ground it in actual code/benchmarks
+   where you can — don't hand-wave.
 
 2. **Record the hand-back, spawn the launchpad with a staged command, announce — never open nvim
    yourself.** Three commands (skip all if `$TMUX` is unset — see the fallback above), with
