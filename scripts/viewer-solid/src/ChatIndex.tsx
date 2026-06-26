@@ -66,6 +66,12 @@ export default function ChatIndex(props: {
                         <span class="ci-row-top">
                           <span class="ci-file">{fileLeaf(r.path)}</span>
                           <span class="ci-meta">
+                            <Show when={r.working}>
+                              <span class="ci-state working">working…</span>
+                            </Show>
+                            <Show when={!r.working && r.unseenDone}>
+                              <span class="ci-state done">done ✓</span>
+                            </Show>
                             {r.count} msg{r.count === 1 ? "" : "s"}
                             <Show when={r.writtenAt}> · {ago(r.writtenAt)}</Show>
                           </span>
