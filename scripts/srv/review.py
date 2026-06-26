@@ -63,6 +63,21 @@ def purpose_get(req, u):
               r.stdout if r.returncode == 0 else json.dumps({"thesis": "", "enables": "", "source": "none"}))
 
 
+def forest_purposes(req, u):
+    # one shot for the Forests-row hover card: every member branch + its one-line purpose
+    # (git branch description), so "what's going on in here" reads at a glance without N fetches.
+    project = parse_qs(u.query).get("project", [""])[0]
+    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.splitlines()
+    out, seen = [], set()
+    for b in (m.strip() for m in members):
+        if not b or b in seen:
+            continue
+        seen.add(b)
+        thesis = ctx.run(["git", "config", f"branch.{b}.description"]).stdout.strip()
+        out.append({"branch": b, "thesis": thesis})
+    req._send(200, json.dumps(out))
+
+
 def file(req, u):
     q = parse_qs(u.query)
     branch, path = q.get("branch", [""])[0], q.get("path", [""])[0]
