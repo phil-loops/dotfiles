@@ -104,8 +104,8 @@ export default function MergeStory(props: {
 
   const scope = () => leafOf(props.project);
 
-  // opt-in LLM crisp pass: swap the deterministic subjects for pithy commit subjects (haiku).
-  const [polished, setPolished] = createSignal<Record<string, string>>({});
+  // opt-in LLM pass: crisp each subject AND read the node's diff for one non-trivial detail.
+  const [polished, setPolished] = createSignal<Record<string, { subject?: string; detail?: string }>>({});
   const [polishing, setPolishing] = createSignal(false);
   const [polishErr, setPolishErr] = createSignal(false);
   const polish = async () => {
@@ -123,7 +123,7 @@ export default function MergeStory(props: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ scope: scope(), items }),
       }).then((res) => res.json());
-      const map = r && typeof r === "object" ? (r as Record<string, string>) : {};
+      const map = r && typeof r === "object" ? (r as Record<string, { subject?: string; detail?: string }>) : {};
       setPolished(map);
       if (!Object.keys(map).length) {
         setPolishErr(true);
@@ -140,7 +140,7 @@ export default function MergeStory(props: {
       <div class="ms-head">
         <span class="ms-flow">{props.project} → main</span>
         <span class="ms-cap">in merge order</span>
-        <button class="ms-polish" disabled={polishing()} onClick={polish} title="crisp the subjects with a quick LLM pass (haiku)">
+        <button class="ms-polish" disabled={polishing()} onClick={polish} title="crisp the subjects + pull a non-trivial implementation detail from each diff (LLM)">
           {polishing() ? "polishing…" : Object.keys(polished()).length ? "✨ re-polish" : "✨ polish"}
         </button>
         <Show when={polishErr()}>
@@ -160,8 +160,11 @@ export default function MergeStory(props: {
               <div class="ms-body">
                 <code class="ms-commit" classList={{ faint: !s.hasPurpose }}>
                   <span class="ms-type" classList={{ refactor: s.type === "refactor" }}>{s.type}</span>
-                  <span class="ms-scope">({scope()})</span>: {polished()[s.id] ?? s.subject}
+                  <span class="ms-scope">({scope()})</span>: {polished()[s.id]?.subject ?? s.subject}
                 </code>
+                <Show when={polished()[s.id]?.detail ?? (s.hasPurpose ? s.purpose : "")}>
+                  {(detail) => <p class="ms-detail">{detail()}</p>}
+                </Show>
                 <Show when={s.convergence}>
                   <span class="ms-dep conv">converges {s.deps.join(" · ")} — convergence view, never merges</span>
                 </Show>
@@ -204,6 +207,7 @@ const CSS = `
 .ms-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .ms-commit { font-size: 13px; line-height: 1.5; color: var(--ink, #e9e2d4); word-break: break-word; }
 .ms-commit.faint { color: var(--ink-faint, #6f675a); font-style: italic; }
+.ms-detail { margin: 2px 0 0; font-size: 12px; line-height: 1.55; color: var(--ink-dim, #a89e8c); max-width: 64ch; }
 .ms-type { color: var(--patina, #8a9a6b); }
 .ms-type.refactor { color: var(--gold, #e0ad4e); }
 .ms-scope { color: var(--ink-dim, #a89e8c); }
