@@ -44,6 +44,24 @@ the GitHub tab to re-inject `content.js`. Staleness is computed against the
 viewer's `/ext-mtime`; the baseline lives in `storage.session`, which Chrome
 wipes on a real reload — so a fresh reload re-baselines to "green" automatically.
 
+## Launch the viewer from the popup (native messaging)
+
+When the viewer is **offline (grey ×)** the popup shows a **▶ Launch viewer**
+button. An extension can't run a shell command, so a registered native-messaging
+host (`../gh-to-nvim-host`) does it: Chrome spawns it on demand, it runs
+`stack-review-serve` in `~/coding/loops`, and the popup polls until the viewer is
+reachable. Nothing stays resident — the host exits as soon as the server is detached.
+
+One-time install (registers the host + whitelists the extension's pinned ID):
+
+```
+~/.dotfiles/scripts/gh-to-nvim-install   # writes the NativeMessagingHosts manifest
+```
+
+The ID is pinned by the `"key"` in `manifest.json` (derived from `.ext-key.pem`,
+git-ignored), so it survives reloads and matches what the host whitelists. Reload
+the extension after the first install so Chrome picks up the `key` + `nativeMessaging`.
+
 ## Notes
 
 - The floating pills are fixed-position on purpose — robust to GitHub's

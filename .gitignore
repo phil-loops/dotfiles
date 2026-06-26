@@ -6,3 +6,4 @@ mcp-servers/*/node_modules/
 
 # Externally-installed agent skills (npx skills add) — symlinks into ~/.agents/skills, not ours to track
 .claude/skills/loops-*
+scripts/gh-to-nvim/.ext-key.pem

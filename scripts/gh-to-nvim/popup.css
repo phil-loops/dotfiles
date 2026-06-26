@@ -53,6 +53,10 @@ body {
 .btn:hover { background: #30363d; border-color: #8b949e; }
 .btn.primary { background: #238636; border-color: #2ea043; color: #fff; font-weight: 600; }
 .btn.primary:hover { background: #2ea043; }
+.btn.launch { background: #1f6feb; border-color: #388bfd; color: #fff; font-weight: 600; }
+.btn.launch:hover { background: #388bfd; }
+.btn:disabled { opacity: 0.6; cursor: default; }
+.btn[hidden] { display: none; }
 
 .hint {
   margin: 9px 2px 2px;
