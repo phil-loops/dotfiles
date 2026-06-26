@@ -116,6 +116,7 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
         return
     path = (d.get("path") or "").strip()
     if not path:
+        picker.prepare_branch(branch)   # warm the worktree in the background for a fast first open
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
         return
     code, _out, err = picker.open_on_branch(branch, path, d.get("line"))
