@@ -148,6 +148,22 @@ case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
+  --review)  # open <branch> in the warm review-nvim as the whole-PR Diffview (<leader>gm)
+    rbranch="${2:?usage: stack-open --review <branch>}"
+    rdir=$(ensure_worktree "$rbranch")
+    to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }   # bound every --server call (wedged-nvim guard)
+    if [[ -S "$SOCK" ]] && to 2 nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
+      # cd the warm nvim into the worktree so <leader>gm's git calls target THIS branch, then fire
+      # the mapping (mapleader=space → " gm"). <C-\><C-N> forces normal mode first.
+      to 4 nvim --server "$SOCK" --remote-send "<C-\><C-N>:cd ${rdir}<CR>" >/dev/null 2>&1 || true
+      to 6 nvim --server "$SOCK" --remote-send "<C-\><C-N> gm" >/dev/null 2>&1 || true
+    else
+      rm -f "$SOCK"
+      tmux new-window -t "$SESSION" -n review-nvim "cd ${(q)rdir} && nvim --listen ${(q)SOCK}" \
+        || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
+    fi
+    surface_review_window; focus_terminal
+    echo "review-opened $rbranch (gm Diffview) → review-nvim ($rdir)"; exit 0;;
 esac
 
 branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
