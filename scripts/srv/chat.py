@@ -112,6 +112,43 @@ def _valid_attachments(raw_list):
         if isinstance(a, str) and a and os.path.realpath(a).startswith(base) and os.path.exists(a):
             out.append(a)
     return out
+
+
+def merge_subjects(req, raw):
+    # POST /merge-subjects {scope, items:[{key, type, purpose}]} → {key: subject}
+    # One cheap haiku pass that crisps each plain purpose into a pithy commit subject for the
+    # merge-story view. Opt-in (fires only when the user clicks "polish"); the client already holds
+    # the purposes, so this endpoint just compresses them — no git/forest knowledge needed here.
+    d = json.loads(raw or "{}")
+    scope = (d.get("scope") or "scope").strip()
+    items = [it for it in (d.get("items") or [])
+             if isinstance(it, dict) and it.get("key") and (it.get("purpose") or "").strip()]
+    if not items:
+        req._send(200, json.dumps({}))
+        return
+    numbered = "\n".join(f"{i}. [{(it.get('type') or 'feat')}] {it['purpose'].strip()}"
+                         for i, it in enumerate(items))
+    prompt = (
+        f"Rewrite each branch purpose below as a git commit SUBJECT — the text that follows "
+        f"'type({scope}): '. Pithy, concise, but eminently clear. Imperative mood, lower-case first "
+        f"word, NO trailing period, aim under ~60 chars. Stay specific — keep what it actually does, "
+        f"don't generalize. Plain register: no raw identifiers, no jargon.\n"
+        f"Return ONLY a JSON object mapping each item's number (a string) to its subject. No prose.\n\n"
+        + numbered
+    )
+    r = ctx.run(["claude", "-p", prompt, "--model", "haiku"])
+    text = (r.stdout or "").strip()
+    out = {}
+    try:   # claude may fence the JSON or add stray text — take the outermost {...}
+        s, e = text.find("{"), text.rfind("}")
+        obj = json.loads(text[s:e + 1]) if 0 <= s < e else {}
+        for i, it in enumerate(items):
+            v = obj.get(str(i))
+            if isinstance(v, str) and v.strip():
+                out[it["key"]] = v.strip().rstrip(".")
+    except ValueError:
+        out = {}
+    req._send(200, json.dumps(out))
 # Model aliases the chat may use — resolved to current models by the claude CLI, so no dated
 # IDs to rot. Anything else from the client falls back to the default (never passed raw to --model).
 ALLOWED_MODELS = {"opus", "sonnet", "haiku"}

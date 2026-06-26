@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import type { ForestModel } from "./types";
 
 // The forest read as a STORY: every branch as the semantic commit it will become, in the order it
@@ -22,7 +22,8 @@ const typeOf = (desc?: string): "feat" | "refactor" =>
 type Step = {
   id: string;
   type: "feat" | "refactor";
-  subject: string;
+  subject: string; // deterministic first-clause fallback
+  purpose: string; // the full plain description, sent to the LLM polish
   hasPurpose: boolean;
   deps: number[]; // 1-based merge-order positions this step lands after
   convergence: boolean; // the integrator: pulls lines together, never merges itself
@@ -77,6 +78,7 @@ export default function MergeStory(props: {
         id,
         type: typeOf(m?.description),
         subject: subjectOf(m?.description),
+        purpose: m?.description ?? "",
         hasPurpose: !!m?.description,
         deps: deps.map((d) => pos.get(d) ?? 0).sort((a, b) => a - b),
         convergence: deps.length > 0 && !hasDownstream(id) && (m?.requires?.length ?? 0) > 0,
@@ -86,12 +88,48 @@ export default function MergeStory(props: {
 
   const scope = () => leafOf(props.project);
 
+  // opt-in LLM crisp pass: swap the deterministic subjects for pithy commit subjects (haiku).
+  const [polished, setPolished] = createSignal<Record<string, string>>({});
+  const [polishing, setPolishing] = createSignal(false);
+  const [polishErr, setPolishErr] = createSignal(false);
+  const polish = async () => {
+    if (polishing()) {
+      return;
+    }
+    setPolishing(true);
+    setPolishErr(false);
+    try {
+      const items = steps()
+        .filter((s) => s.hasPurpose)
+        .map((s) => ({ key: s.id, type: s.type, purpose: s.purpose }));
+      const r = await fetch("/merge-subjects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope: scope(), items }),
+      }).then((res) => res.json());
+      const map = r && typeof r === "object" ? (r as Record<string, string>) : {};
+      setPolished(map);
+      if (!Object.keys(map).length) {
+        setPolishErr(true);
+      }
+    } catch {
+      setPolishErr(true);
+    }
+    setPolishing(false);
+  };
+
   return (
     <div class="ms">
       <style>{CSS}</style>
       <div class="ms-head">
         <span class="ms-flow">{props.project} → main</span>
         <span class="ms-cap">in merge order</span>
+        <button class="ms-polish" disabled={polishing()} onClick={polish} title="crisp the subjects with a quick LLM pass (haiku)">
+          {polishing() ? "polishing…" : Object.keys(polished()).length ? "✨ re-polish" : "✨ polish"}
+        </button>
+        <Show when={polishErr()}>
+          <span class="ms-polish-err">couldn’t polish</span>
+        </Show>
       </div>
       <ol class="ms-list">
         <For each={steps()}>
@@ -106,7 +144,7 @@ export default function MergeStory(props: {
               <div class="ms-body">
                 <code class="ms-commit" classList={{ faint: !s.hasPurpose }}>
                   <span class="ms-type" classList={{ refactor: s.type === "refactor" }}>{s.type}</span>
-                  <span class="ms-scope">({scope()})</span>: {s.subject}
+                  <span class="ms-scope">({scope()})</span>: {polished()[s.id] ?? s.subject}
                 </code>
                 <Show when={s.convergence}>
                   <span class="ms-dep conv">converges {s.deps.join(" · ")} — convergence view, never merges</span>
@@ -128,6 +166,14 @@ const CSS = `
 .ms-head { display: flex; align-items: baseline; gap: 12px; padding: 6px 2px 16px; }
 .ms-flow { font-size: 14px; color: var(--ink, #e9e2d4); }
 .ms-cap { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint, #6f675a); }
+.ms-polish {
+  margin-left: auto; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+  color: var(--gold, #e0ad4e); background: transparent; border: 1px solid var(--gold, #e0ad4e);
+  border-radius: 6px; padding: 3px 10px; opacity: .9;
+}
+.ms-polish:hover:not(:disabled) { opacity: 1; background: rgba(224,173,78,.1); }
+.ms-polish:disabled { opacity: .5; cursor: default; }
+.ms-polish-err { font-size: 11px; color: var(--ember, #d36a36); }
 .ms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ms-row {
   display: flex; align-items: baseline; gap: 12px; padding: 9px 12px; border-radius: 8px; cursor: pointer;

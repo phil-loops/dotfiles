@@ -308,6 +308,8 @@ class H(BaseHTTPRequestHandler):
             return chat.popout(self, raw)
         if self.path == "/chat-attach":      # save a dropped/pasted image → temp file claude can Read
             return chat.attach(self, raw)
+        if self.path == "/merge-subjects":   # crisp the merge-story commit subjects (one haiku pass)
+            return chat.merge_subjects(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
             return integrate.check(self, raw)
         self._send(404, "{}")
