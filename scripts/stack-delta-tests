@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""stack-delta-tests — run the tests RELATED to a branch's delta, so prepare-to-push
+catches a broken push before it leaves the laptop.
+
+"Related" = for every changed `X.ts(x)`, its co-located `X.test.ts(x)`; and any
+changed `*.test.ts(x)` runs directly. Nothing changed has a sibling test ⇒ exit 0
+(green, fast) — the gate only blocks when a relevant test actually fails.
+
+  stack-delta-tests [--branch <b>]   delta = <base>..HEAD ∪ working tree, where
+                                     base = merge-base(parent, HEAD), parent from
+                                     stack-branch.<b>.parent (else main)
+
+Runs `tsx --tsconfig tsconfig.node.json --test <files>` from the repo toplevel,
+resolving tsx repo-local first. A worktree with no node_modules borrows the main
+worktree's via a symlink (the established worktree-verify pattern). Exit code is the
+test run's own (0 pass / non-zero fail); prints the runner's output through.
+"""
+import os
+import subprocess
+import sys
+
+MAIN = os.environ.get("MAIN_BRANCH", "main")
+
+
+def git(args, cwd="."):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+
+
+def main_worktree(repo):
+    out = git(["worktree", "list", "--porcelain"], repo).stdout
+    for ln in out.splitlines():
+        if ln.startswith("worktree "):
+            return ln[len("worktree "):]
+    return None
+
+
+def changed_files(repo, branch):
+    parent = git(["config", f"stack-branch.{branch}.parent"], repo).stdout.strip() or MAIN
+    base = git(["merge-base", parent, "HEAD"], repo).stdout.strip() or parent
+    names = set()
+    for rng in ([f"{base}...HEAD"], ["HEAD"], ["--cached"]):
+        for f in git(["diff", "--name-only", *rng], repo).stdout.split():
+            names.add(f)
+    return [f for f in names if f.endswith((".ts", ".tsx"))]
+
+
+def related_tests(repo, files):
+    tests = set()
+    for f in files:
+        if f.endswith((".test.ts", ".test.tsx")):
+            if os.path.exists(os.path.join(repo, f)):
+                tests.add(f)
+            continue
+        stem = f.rsplit(".", 1)[0]
+        for cand in (f"{stem}.test.ts", f"{stem}.test.tsx"):
+            if os.path.exists(os.path.join(repo, cand)):
+                tests.add(cand)
+    return sorted(tests)
+
+
+def ensure_node_modules(repo):
+    nm = os.path.join(repo, "node_modules")
+    if os.path.exists(nm):
+        return True
+    main_wt = main_worktree(repo)
+    if main_wt and main_wt != repo:
+        src = os.path.join(main_wt, "node_modules")
+        if os.path.isdir(src):
+            try:
+                os.symlink(src, nm)
+                return True
+            except OSError:
+                return False
+    return False
+
+
+def main():
+    argv = sys.argv[1:]
+    branch = ""
+    if "--branch" in argv:
+        i = argv.index("--branch")
+        branch = argv[i + 1] if i + 1 < len(argv) else ""
+
+    repo = git(["rev-parse", "--show-toplevel"]).stdout.strip() or "."
+    if not branch:
+        branch = git(["rev-parse", "--abbrev-ref", "HEAD"], repo).stdout.strip()
+
+    files = changed_files(repo, branch)
+    tests = related_tests(repo, files)
+    if not tests:
+        print(f"no related tests for {len(files)} changed .ts file(s) — nothing to run")
+        return 0
+
+    if not ensure_node_modules(repo):
+        print("no node_modules in this worktree (and none to borrow) — cannot run tests")
+        return 1
+
+    tsx = os.path.join(repo, "node_modules", ".bin", "tsx")
+    if not os.path.exists(tsx):
+        print("tsx not found in node_modules/.bin — cannot run tests")
+        return 1
+
+    print(f"running {len(tests)} related test file(s):")
+    for t in tests:
+        print(f"  {t}")
+    sys.stdout.flush()
+    r = subprocess.run(
+        [tsx, "--tsconfig", "tsconfig.node.json", "--test", *tests],
+        cwd=repo,
+    )
+    return r.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

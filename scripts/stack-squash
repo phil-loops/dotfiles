@@ -7,8 +7,8 @@
   stack-squash --unpushed <b>      squash only UNPUSHED commits (base = upstream if
                                    the branch is published, else its parent) — so a
                                    plain push works, never a force-push
-  stack-squash --format <branch>   after committing, run oxfmt on the changed files
-                                   and fold the formatting into the same commit
+  stack-squash --format <branch>   after committing, run oxfmt + oxlint --fix on the
+                                   changed files and fold the fixes into the same commit
   stack-squash --subject-only <b>  draft a SUBJECT LINE ONLY — no body, no bullets
                                    (a smart one-line title for the squash)
   stack-squash --unstage <branch>  collapse parent..branch into UNSTAGED working-tree
@@ -299,11 +299,20 @@ if fmt:
     # (cwd stays `repo`, so it reads the worktree's own config + files)
     if not os.path.exists(oxfmt) and main_wt:
         oxfmt = os.path.join(main_wt, "node_modules", ".bin", "oxfmt")
+    oxlint = os.path.join(repo, "node_modules", ".bin", "oxlint")
+    if not os.path.exists(oxlint) and main_wt:
+        oxlint = os.path.join(main_wt, "node_modules", ".bin", "oxlint")
     files = [f for f in git(["diff", "--name-only", f"{base}..HEAD"]).stdout.split()
              if os.path.exists(os.path.join(repo, f))]
+    ran = False
     if files and os.path.exists(oxfmt):
         subprocess.run([oxfmt, "--write", *files], cwd=repo, capture_output=True, text=True)
-        porc = git(["status", "--porcelain"]).stdout.strip()   # tree was clean → any dirt is oxfmt's
+        ran = True
+    if files and os.path.exists(oxlint):
+        subprocess.run([oxlint, "--type-aware", "--quiet", "--fix", *files], cwd=repo, capture_output=True, text=True)
+        ran = True
+    if ran:
+        porc = git(["status", "--porcelain"]).stdout.strip()   # tree was clean → any dirt is the fixers'
         if porc:
             formatted = len(porc.splitlines())
             git(["add", "-u"])
