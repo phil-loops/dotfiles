@@ -37,13 +37,16 @@ orphaned WIP into clean commits, then landed UI on top):**
 
 **Delightful-UI backlog: CLEAR.** Everything from Phil's walkthrough is shipped.
 
+- **Dead-code sweep + salvage** (`fcce888`) — promote joins checkout in the node ⋯ menu
+  (salvaged onto a real branch context); removed the now-unused watching-only Home helpers
+  (−92 lines). Kept worktree/github/workRow + review-import.
+
 **Remaining (bigger / optional, not part of the delight pass):**
 - **Full ambient-restack daemon** (Phase 3) — the real header endgame: forests auto-restack,
   the header collapses to one status chip. `restack-dryrun` (`f17c45e`) is the dry-run-first
   foundation. A standalone project when wanted; stage carefully (dry-run-first).
-- Small follow-ups: dead-code sweep of the now-unused watching helpers; wire salvaged
-  promote/checkout onto a branch-row context; group the forest-level restack with the
-  branch one (cross-component).
+- Minor: group the forest-level restack with the branch one (cross-component); a CSS sweep
+  of the now-unused `.watch-add/-pick/-input/-dot/-name/-meta` rules (harmless).
 - GitHub notify → Work-page live-refresh (the `gh-review-notify` loop as a second consumer).
 
 **Local-delta composer** — backend ALREADY EXISTS in `stack-squash` (`--unpushed`/`--unstage`);
