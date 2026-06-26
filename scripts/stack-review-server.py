@@ -305,6 +305,8 @@ class H(BaseHTTPRequestHandler):
             return chat.stop(self, raw)
         if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
             return chat.popout(self, raw)
+        if self.path == "/chat-attach":      # save a dropped/pasted image → temp file claude can Read
+            return chat.attach(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
             return integrate.check(self, raw)
         self._send(404, "{}")

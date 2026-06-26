@@ -33,6 +33,7 @@ interface QueuedMsg {
   q: string;
   patch?: string; // seeds turn one only; ignored once a resume session exists
   model: ChatModel;
+  attachments?: { name: string; path: string }[]; // dropped/pasted images, saved server-side
 }
 
 interface Runtime {
@@ -179,7 +180,11 @@ async function runTurn(branch: string, path: string, item: QueuedMsg) {
   setRt(k, "streaming", true);
   setRt(k, "status", "starting");
   markThreadSeen(branch, path); // a fresh turn supersedes any prior "done" marker
-  appendMsg(branch, path, { role: "you", text: item.q });
+  appendMsg(branch, path, {
+    role: "you",
+    text: item.q,
+    attachments: item.attachments?.map((a) => ({ name: a.name })),
+  });
   const idx = appendMsg(branch, path, { role: "claude", text: "" });
   setActiveTurn(branch, path, turn, idx); // persist NOW so a reload mid-answer can re-attach
   const ctrl = new AbortController();
@@ -197,6 +202,7 @@ async function runTurn(branch: string, path: string, item: QueuedMsg) {
         question: item.q,
         resume: resume || undefined,
         model: item.model,
+        attachments: item.attachments?.map((a) => a.path),
       }),
     });
     if (!res.ok || !res.body) {

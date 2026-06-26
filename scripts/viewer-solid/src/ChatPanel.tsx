@@ -1,5 +1,5 @@
 import { createEffect, on, onCleanup, onMount, createSignal, For, Show, type JSX } from "solid-js";
-import { createStore } from "solid-js/store";
+import { createStore, produce } from "solid-js/store";
 import type { FileDiff } from "./types";
 import { thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
 import { runtime, send, stop as runnerStop, unqueue, setViewingThread, clearViewingThread, ensureWatching } from "./chatRunner";
@@ -99,16 +99,89 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
     setTimeout(() => setPopoutMsg(null), 4000);
   };
 
+  // ── attached images: drop or paste a screenshot, we upload it to a temp file claude can Read ──
+  // Each carries a blob URL for the live thumbnail + the server path that rides with the message.
+  type Att = { id: number; name: string; path: string; url: string; uploading: boolean };
+  const [atts, setAtts] = createStore<Att[]>([]);
+  const [dragOver, setDragOver] = createSignal(false);
+  let attSeq = 0;
+
+  const toB64 = (buf: ArrayBuffer): string => {
+    const bytes = new Uint8Array(buf);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(bin);
+  };
+  const dropAtt = (id: number) => {
+    const it = atts.find((a) => a.id === id);
+    if (it) {
+      URL.revokeObjectURL(it.url);
+    }
+    setAtts(produce((list) => {
+      const i = list.findIndex((a) => a.id === id);
+      if (i >= 0) {
+        list.splice(i, 1);
+      }
+    }));
+  };
+  const addImage = async (file: File) => {
+    const id = ++attSeq;
+    const name = file.name || "pasted.png";
+    setAtts(produce((list) => {
+      list.push({ id, name, path: "", url: URL.createObjectURL(file), uploading: true });
+    }));
+    try {
+      const r = await fetch("/chat-attach", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, dataB64: toB64(await file.arrayBuffer()) }),
+      }).then((res) => res.json());
+      if (r.ok && r.path) {
+        setAtts(produce((list) => {
+          const it = list.find((a) => a.id === id);
+          if (it) {
+            it.path = r.path;
+            it.uploading = false;
+          }
+        }));
+      } else {
+        dropAtt(id);
+      }
+    } catch {
+      dropAtt(id);
+    }
+  };
+  const takeImages = (files: FileList | null | undefined): boolean => {
+    let took = false;
+    for (const f of files ?? []) {
+      if (f.type.startsWith("image/")) {
+        void addImage(f);
+        took = true;
+      }
+    }
+    return took;
+  };
+
   // Fire a message any time — even while Claude is still answering: the runner queues it and
   // auto-sends in order when the current turn ends. A just-sent message should yank the view down.
   const submit = () => {
     const q = input().trim();
-    if (!q) {
+    const ready = atts.filter((a) => a.path && !a.uploading);
+    if (!q && !ready.length) {
       return;
     }
     setInput("");
+    atts.forEach((a) => URL.revokeObjectURL(a.url));
+    setAtts([]);
     stick = true;
-    send(props.branch, path(), { q, patch: props.file?.patch, model: chatModel() });
+    send(props.branch, path(), {
+      q: q || "Take a look at the attached screenshot(s).",
+      patch: props.file?.patch,
+      model: chatModel(),
+      attachments: ready.map((a) => ({ name: a.name, path: a.path })),
+    });
     pin();
     inputEl?.focus();
   };
@@ -127,6 +200,7 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
   });
   onCleanup(() => {
     window.removeEventListener("keydown", onKey);
+    atts.forEach((a) => URL.revokeObjectURL(a.url)); // un-sent previews: free their blob URLs
     // Just stop viewing — the runner keeps the turn going at module scope, so the answer finishes
     // and the badges update even with the drawer closed. (No abort: that's what used to strand it.)
     clearViewingThread(props.branch, path());
@@ -145,7 +219,31 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
     <>
       <style>{CSS}</style>
       <div class="cp-scrim" classList={{ "cp-hidden": minimized() }} onClick={props.onClose} />
-      <aside class="cp" classList={{ "cp-hidden": minimized() }} role="dialog" aria-label="chat about this file">
+      <aside
+        class="cp"
+        classList={{ "cp-hidden": minimized(), "cp-drag": dragOver() }}
+        role="dialog"
+        aria-label="chat about this file"
+        onDragOver={(e) => {
+          if (e.dataTransfer?.types.includes("Files")) {
+            e.preventDefault();
+            setDragOver(true);
+          }
+        }}
+        onDragLeave={(e) => {
+          if (!e.relatedTarget || !e.currentTarget.contains(e.relatedTarget as Node)) {
+            setDragOver(false);
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          takeImages(e.dataTransfer?.files);
+        }}
+      >
+        <Show when={dragOver()}>
+          <div class="cp-drop">⤓ drop image to attach</div>
+        </Show>
         <header class="cp-head">
           <div class="cp-title">
             <span class="cp-mark">✦</span>
@@ -241,6 +339,13 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
                     <span class="cp-caret" />
                   </Show>
                 </div>
+                <Show when={m.attachments?.length}>
+                  <div class="cp-att-row">
+                    <For each={m.attachments}>
+                      {(a) => <span class="cp-att-chip">🖼 {a.name}</span>}
+                    </For>
+                  </div>
+                </Show>
               </div>
             )}
           </For>
@@ -276,24 +381,47 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
         </div>
 
         <footer class="cp-foot">
-          {/* always sends — a message fired mid-stream queues and auto-sends when the turn ends */}
-          <textarea
-            class="cp-input"
-            ref={inputEl}
-            rows={2}
-            placeholder={streaming() ? "Claude is responding — ⏎ to queue your next question…" : "ask about this file — ⏎ to send, ⇧⏎ for a newline"}
-            value={input()}
-            onInput={(e) => setInput(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          <button class="cp-send" disabled={!input().trim()} onClick={submit}>
-            {streaming() ? "queue ✦" : "send ✦"}
-          </button>
+          <Show when={atts.length}>
+            <div class="cp-att-strip">
+              <For each={atts}>
+                {(a) => (
+                  <div class="cp-thumb" classList={{ uploading: a.uploading }}>
+                    <img src={a.url} alt={a.name} />
+                    <button class="cp-thumb-x" title="remove" onClick={() => dropAtt(a.id)}>×</button>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+          <div class="cp-foot-row">
+            {/* always sends — a message fired mid-stream queues and auto-sends when the turn ends */}
+            <textarea
+              class="cp-input"
+              ref={inputEl}
+              rows={2}
+              placeholder={streaming() ? "Claude is responding — ⏎ to queue your next question…" : "ask about this file — drop or paste a screenshot, ⏎ to send"}
+              value={input()}
+              onInput={(e) => setInput(e.currentTarget.value)}
+              onPaste={(e) => {
+                if (takeImages(e.clipboardData?.files)) {
+                  e.preventDefault();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            <button
+              class="cp-send"
+              disabled={!input().trim() && !atts.some((a) => a.path && !a.uploading)}
+              onClick={submit}
+            >
+              {streaming() ? "queue ✦" : "send ✦"}
+            </button>
+          </div>
         </footer>
       </aside>
       <Show when={minimized()}>
@@ -460,7 +588,37 @@ const CSS = `
 .cp-unqueue:hover { color: var(--ember, #d36a36); }
 .cp-err { font-size: 12px; color: var(--ember, #d36a36); }
 
-.cp-foot { display: flex; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--line, #3a332b); align-items: flex-end; }
+.cp-foot { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--line, #3a332b); }
+.cp-foot-row { display: flex; gap: 8px; align-items: flex-end; }
+
+/* drag-to-attach: a dashed overlay over the drawer while a file hovers */
+.cp.cp-drag { outline: 2px dashed var(--gold, #e0ad4e); outline-offset: -8px; }
+.cp-drop {
+  position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
+  background: rgba(27,24,21,.86); color: var(--gold, #e0ad4e); font-size: 14px; letter-spacing: .03em;
+  pointer-events: none;
+}
+/* composer thumbnails of pending attachments */
+.cp-att-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-thumb { position: relative; width: 56px; height: 56px; border-radius: 7px; overflow: hidden; border: 1px solid var(--line, #3a332b); }
+.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-thumb.uploading img { opacity: .45; }
+.cp-thumb.uploading::after {
+  content: "↑"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--gold, #e0ad4e); font-size: 16px; animation: cp-blink 1s step-end infinite;
+}
+.cp-thumb-x {
+  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; line-height: 14px; padding: 0;
+  border: 0; border-radius: 0 0 0 6px; cursor: pointer; font-size: 13px;
+  background: rgba(8,7,6,.7); color: var(--ink, #e9e2d4);
+}
+.cp-thumb-x:hover { background: var(--ember, #d36a36); color: #1a160f; }
+/* sent-message attachment chips */
+.cp-att-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+.cp-att-chip {
+  font-size: 10.5px; color: var(--dim, #a89e8c); background: var(--panel, #221e1a);
+  border: 1px solid var(--line, #3a332b); border-radius: 5px; padding: 1px 7px;
+}
 .cp-input {
   flex: 1; resize: none; box-sizing: border-box; font: inherit; font-size: 12.5px; line-height: 1.5;
   background: var(--bg, #100e0c); color: var(--ink, #e9e2d4);
