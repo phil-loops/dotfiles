@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# gh-to-nvim-install — register the native-messaging host so the extension's
+# "Launch viewer" button can start the forest viewer.
+#
+# Writes the host manifest into Chrome's (and Chrome Canary's / Chromium's, if
+# present) NativeMessagingHosts dir, pointing at gh-to-nvim-host and whitelisting
+# the extension's pinned ID. Idempotent — rerun any time the path or ID changes.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_BIN="$here/gh-to-nvim-host"
+HOST_NAME="com.loops.gh_to_nvim"
+# Pinned in manifest.json's "key" — derived from gh-to-nvim/.ext-key.pem.
+EXT_ID="icojbpfabggonphegfghfnmjemejofoi"
+
+chmod +x "$HOST_BIN"
+
+read -r -d '' TEMPLATE <<JSON || true
+{
+  "name": "$HOST_NAME",
+  "description": "GitHub→nvim viewer launcher",
+  "path": "$HOST_BIN",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://$EXT_ID/"]
+}
+JSON
+
+wrote=0
+for dir in \
+  "$HOME/Library/Application Support/Google/Chrome/NativeMessagingHosts" \
+  "$HOME/Library/Application Support/Google/Chrome Canary/NativeMessagingHosts" \
+  "$HOME/Library/Application Support/Chromium/NativeMessagingHosts"; do
+  base="$(dirname "$dir")"
+  [[ -d "$base" ]] || continue          # only into browsers that are actually installed
+  mkdir -p "$dir"
+  printf '%s\n' "$TEMPLATE" > "$dir/$HOST_NAME.json"
+  echo "✓ $dir/$HOST_NAME.json"
+  wrote=1
+done
+
+if [[ "$wrote" == 0 ]]; then
+  echo "no Chrome/Chromium profile dir found — is the browser installed?" >&2
+  exit 1
+fi
+
+echo
+echo "Native host registered for extension $EXT_ID."
+echo "Reload the extension at chrome://extensions, then the Launch button will work."

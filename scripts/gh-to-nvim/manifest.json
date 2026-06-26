@@ -3,8 +3,9 @@
   "name": "GitHub → nvim",
   "version": "0.1.0",
   "description": "Route GitHub PR files/lines into the local forest viewer's warm nvim.",
-  "permissions": ["storage"],
+  "permissions": ["storage", "nativeMessaging"],
   "host_permissions": ["http://localhost/*"],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3hjEpbAdpr9v1Lcoj8sXTLDRh66jA+a/rAUHIU4KGkMSvKKQdwmHkfPvBnp3AfM3/89kVvkq3A7jASy1o+5ZkNp02JD5BSNgNOPLNyZfWG8lVg+TLdW6b5Hu05MEHUlBRURiJMV9IICLfPnA9JxuG4HWajVfOqtDiisYI4pgk2UOSx99mMQ3qJu7DX5j1TOUeAGHfF0UOP7Ks0TI+Y06neYHIIy8N4bKz3H4R+f6Vm0Z77dTNiQsQYtvrVodAZN1YnK6TVqwGlaosiJkbIfWSJ3D84p/UWYxuA1O/Ntl94sSB1h6cO0eoGv9EFtUrIk7LHKFBuoCG+FR6drri9RqnQIDAQAB",
   "icons": {
     "16": "icons/fresh-16.png",
     "32": "icons/fresh-32.png",
