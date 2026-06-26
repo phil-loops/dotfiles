@@ -4,6 +4,7 @@ import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { track } from "./track";
 import { useViewerLocation, forestKey, withNode } from "./router";
+import { setOverviewView } from "./overviewView";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
 // forest by name (type a branch → Enter → you're there); it also carries a few safe global
@@ -71,6 +72,19 @@ export default function CommandPalette() {
       cmds.push({
         label: `⟳ restack ${leaf(c.project)} onto fresh main`,
         run: () => void post("/restack", { project: c.project }),
+      });
+    }
+    if (c.project) {
+      cmds.push({
+        label: `≣ merge story — ${leaf(c.project)}`,
+        sub: "the feature as ordered commits, in merge order",
+        run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project }); },
+      });
+    } else {
+      cmds.push({
+        label: "≣ merge story view",
+        sub: "open forests as ordered commits",
+        run: () => setOverviewView("story"),
       });
     }
     cmds.push({
