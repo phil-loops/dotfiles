@@ -1018,9 +1018,9 @@ function NodeDetail() {
 
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
-  // the docked forest map is the persistent branch navigator (the tree migrated out of the
-  // spine) — open by default; m / × / the forest-strip toggle collapse it for reading room.
-  const [showMap, setShowMap] = createSignal(true);
+  // The forest map is a destination (the /forests/<project> overview), never docked into
+  // the review surface — the diff gets the full width. "back to the forest map" lives in the
+  // node header (nh-forest-back).
 
   // ── forest health: per-node drifted (off-parent → its diff balloons to ≈main) / merged-ghost,
   // for badges + a one-click "fix forest" (restack). Live-only; refetch after a fix lands.
@@ -1288,8 +1288,6 @@ function NodeDetail() {
     else if (e.key === "1") setBase("");
     else if (e.key === "2") setBase("main");
     else if (e.key === "3") setBase("blessed");
-    else if (e.key === "m") setShowMap((v) => !v);
-    else if (e.key === "Escape") setShowMap(false);
     else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
     else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
     // b blesses the focused file and advances to the next (b·b·b down a branch, no mouse);
@@ -1310,10 +1308,7 @@ function NodeDetail() {
   });
 
   return (
-    <div
-      class="shell"
-      style={showMap() ? { "grid-template-columns": "264px 1fr minmax(300px, 360px)" } : undefined}
-    >
+    <div class="shell">
       <aside class="spine">
         <Link class="brand" to={{ kind: "home", tab: "forests" }}>
           <span class="brand-mark">✦</span> blessed
@@ -1409,13 +1404,6 @@ function NodeDetail() {
               </Link>
             </Show>
             <div class="nh-spacer" />
-            <button
-              class="nh-fix"
-              title="toggle the forest navigator (m)"
-              onClick={() => setShowMap((v) => !v)}
-            >
-              {showMap() ? "▦ hide map" : "▦ map"}
-            </button>
             <Show when={canMutate && unhealthy().length}>
               <button
                 class="nh-fix"
@@ -1562,18 +1550,6 @@ function NodeDetail() {
       </Show>
       <Show when={showChats()}>
         <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
-      </Show>
-      <Show when={showMap()}>
-        <ForestMap
-          docked
-          spine={spine}
-          active={active}
-          health={() => health.data}
-          onPick={(b) => goto(b)}
-          onClose={() => setShowMap(false)}
-          onHoverNode={showTip}
-          onLeaveNode={hideTip}
-        />
       </Show>
       <Show when={flash()}>
         <div class="flash">{flash()}</div>
