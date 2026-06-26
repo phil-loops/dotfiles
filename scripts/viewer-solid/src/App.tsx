@@ -26,6 +26,7 @@ import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
 import ChatIndex from "./ChatIndex";
+import { chatTarget, openChat, closeChat } from "./chatDrawer";
 import { threadMsgCount } from "./chatStore";
 import { useFileCycle } from "./useFileCycle";
 import CommandPalette from "./CommandPalette";
@@ -176,9 +177,32 @@ function Layout(props: { children?: JSX.Element }) {
   return (
     <>
       {props.children}
+      <ChatDrawerHost />
       <CommandPalette />
       <ServerStatus />
     </>
+  );
+}
+
+// The chat drawer lives HERE, above the routed views, so it persists across navigation (and, via
+// chatDrawer's localStorage mirror, across reload). `viewingBranch` is the branch on screen right
+// now — when it differs from the chat's pinned branch, the drawer offers a one-click way back.
+function ChatDrawerHost() {
+  const { location, navigate } = useViewerLocation();
+  const viewingBranch = () => {
+    const l = location();
+    return l.kind === "forest" ? (l.node ?? "") : l.kind === "standalone" ? l.branch : "";
+  };
+  return (
+    <Show when={canMutate && chatTarget()}>
+      <ChatPanel
+        file={chatTarget()?.file ?? null}
+        branch={chatTarget()?.branch ?? ""}
+        viewingBranch={viewingBranch()}
+        onGoToBranch={() => { const t = chatTarget(); if (t) { navigate(t.origin); } }}
+        onClose={() => closeChat()}
+      />
+    </Show>
   );
 }
 
@@ -1093,8 +1117,6 @@ function NodeDetail() {
     health.refetch();
     node.refetch();
   });
-  // chat drawer target: a file's diff, or the whole branch ({ file: null }). null = closed.
-  const [chat, setChat] = createSignal<{ file: FileDiff | null } | null>(null);
   // cross-forest chat index overlay (read-only; every thread in this browser).
   const [showChats, setShowChats] = createSignal(false);
   // a chat the index asked to open on a (possibly other) branch: navigate there, then open the
@@ -1104,12 +1126,13 @@ function NodeDetail() {
   // resolve a chat target into the drawer: prefer the real FileDiff (carries the patch); else
   // synthesize a minimal one so the server computes the diff for that path. "" path → whole branch.
   const openChatFor = (path: string) => {
+    const at = { branch: active(), origin: location() };
     if (!path) {
-      setChat({ file: null });
+      openChat({ ...at, file: null });
       return;
     }
     const real = node.data?.files.find((f) => f.path === path);
-    setChat({ file: real ?? { path, status: "modified" } });
+    openChat({ ...at, file: real ?? { path, status: "modified" } });
   };
   // from the index: open a chat in its own branch+file context. Same branch → open now; another
   // branch → navigate (as a standalone node) and let the effect open it once its files arrive.
@@ -1479,7 +1502,7 @@ function NodeDetail() {
               <NodeActions branch={active()} isReview={location().kind === "review"} />
             </Show>
             <Show when={canMutate}>
-              <button class="icon-btn" onClick={() => setChat({ file: null })} title="chat about this whole branch">
+              <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">
                 ✦
               </button>
             </Show>
@@ -1496,7 +1519,7 @@ function NodeDetail() {
             {(data) => (
               <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
                 <For each={data().files}>
-                  {(f) => <FileEntry file={f} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => setChat({ file })} />}
+                  {(f) => <FileEntry file={f} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
                 </For>
               </Show>
             )}
@@ -1505,10 +1528,6 @@ function NodeDetail() {
       </main>
       <Show when={canMutate}>
         <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
-      </Show>
-      <Show when={canMutate && chat()}>
-        {/* read chat() directly, not the Show's `c()` accessor — ChatPanel's onCleanup reads its file path on close, and a stale `c()` throws "Stale read from <Show>" and aborts the close */}
-        <ChatPanel file={chat()?.file ?? null} branch={active()} onClose={() => setChat(null)} />
       </Show>
       <Show when={showChats()}>
         <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />

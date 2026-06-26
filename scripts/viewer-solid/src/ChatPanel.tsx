@@ -3,6 +3,7 @@ import { createStore, produce } from "solid-js/store";
 import type { FileDiff } from "./types";
 import { thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
 import { runtime, send, stop as runnerStop, unqueue, setViewingThread, clearViewingThread, ensureWatching } from "./chatRunner";
+import { drawerMinimized as minimized, setDrawerMinimized } from "./chatDrawer";
 import { renderMarkdown } from "./markdown";
 
 // ChatPanel — "chat about this file", with Claude's answer streaming in token-by-token.
@@ -14,8 +15,15 @@ import { renderMarkdown } from "./markdown";
 // session come from chatStore; the live run state (streaming/status/error/queue) from the runner.
 // `file` null → chat about the whole branch (the server computes its parent…branch diff). The
 // store thread is keyed by path, so branch chats live under the "" key, distinct from any file.
-export default function ChatPanel(props: { file: FileDiff | null; branch: string; onClose: () => void }) {
+export default function ChatPanel(props: {
+  file: FileDiff | null;
+  branch: string; // the branch this chat is pinned to — stays put even as you navigate elsewhere
+  viewingBranch: string; // the branch currently on screen; differs from `branch` once you nav away
+  onGoToBranch: () => void; // navigate back to this chat's project + branch
+  onClose: () => void;
+}) {
   const path = () => props.file?.path ?? "";
+  const away = () => props.viewingBranch !== props.branch; // you've navigated off this chat's branch
   const msgs = () => thread(props.branch, path()).msgs;
   const session = () => thread(props.branch, path()).session;
   const rt = () => runtime(props.branch, path());
@@ -49,10 +57,9 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
   // drops you back to the file list with only a small badge. Minimize keeps the chat one click away
   // — a docked pill, no scrim, page fully interactive — and flips to "done ✓" when the turn settles,
   // so you can fire a question and ignore it until Claude's finished.
-  const [minimized, setMinimized] = createSignal(false);
   const [finished, setFinished] = createSignal(false);
   const restore = () => {
-    setMinimized(false);
+    setDrawerMinimized(false);
     setFinished(false);
   };
   // While minimized, remember the moment the turn ends so the pill can say "done ✓".
@@ -311,8 +318,15 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
                   ＋ new chat
                 </button>
               </Show>
-              <span class="cp-branch">{props.branch}</span>
-              <button class="cp-min" title="minimize — shrink to a corner pill; the chat keeps running and tells you when it's done" onClick={() => setMinimized(true)}>
+              <button
+                class="cp-branch"
+                classList={{ away: away() }}
+                title={`${away() ? "you're viewing another branch — return to " : "this chat's branch · "}${props.branch}`}
+                onClick={props.onGoToBranch}
+              >
+                {props.branch.split("/").pop()}{away() ? " ↗" : ""}
+              </button>
+              <button class="cp-min" title="minimize — shrink to a corner pill; the chat keeps running and tells you when it's done" onClick={() => setDrawerMinimized(true)}>
                 <span class="cp-min-bar" />
               </button>
               <button class="cp-x" title="close (esc)" onClick={props.onClose}>×</button>
@@ -431,10 +445,14 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
           <button class="cp-pill-main" title="restore chat" onClick={restore}>
             <span class="cp-pill-mark">✦</span>
             <span class="cp-pill-name">{props.file ? props.file.path.split("/").pop() : "whole branch"}</span>
+            <span class="cp-pill-branch">{props.branch.split("/").pop()}</span>
             <Show when={streaming() || (finished() && !streaming())}>
               <span class="cp-pill-state">{streaming() ? status() || "working…" : "done ✓"}</span>
             </Show>
           </button>
+          <Show when={away()}>
+            <button class="cp-pill-go" title={`return to ${props.branch}`} onClick={props.onGoToBranch}>↗</button>
+          </Show>
           <button class="cp-pill-x" title="close chat" onClick={props.onClose}>×</button>
         </div>
       </Show>
@@ -475,9 +493,13 @@ const CSS = `
 .cp-model:hover { color: var(--dim, #a89e8c); }
 .cp-model.on { color: var(--gold, #e0ad4e); border-color: var(--gold, #e0ad4e); background: rgba(224,173,78,.08); }
 .cp-branch {
-  font-size: 11px; color: var(--patina, #8a9a6b); border: 1px solid var(--patina, #8a9a6b);
+  font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+  max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  color: var(--patina, #8a9a6b); background: transparent; border: 1px solid var(--patina, #8a9a6b);
   border-radius: 4px; padding: 1px 7px; opacity: .85;
 }
+.cp-branch:hover { opacity: 1; }
+.cp-branch.away { color: var(--gold, #e0ad4e); border-color: var(--gold, #e0ad4e); background: rgba(224,173,78,.08); opacity: 1; }
 .cp-x { border: 0; background: transparent; color: var(--faint, #6f675a); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .cp-x:hover { color: var(--ink, #e9e2d4); }
 .cp-min {
@@ -511,6 +533,12 @@ const CSS = `
 .cp-pill-mark { color: var(--gold, #e0ad4e); flex: none; }
 .cp-pill.working .cp-pill-mark { animation: cp-blink 1s step-end infinite; }
 .cp-pill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-pill-branch { flex: none; font-size: 10px; color: var(--faint, #6f675a); border-left: 1px solid var(--line, #3a332b); padding-left: 8px; }
+.cp-pill-go {
+  flex: none; border: 0; border-left: 1px solid var(--line, #3a332b); background: transparent;
+  color: var(--gold, #e0ad4e); font-size: 13px; line-height: 1; cursor: pointer; padding: 0 9px;
+}
+.cp-pill-go:hover { background: rgba(224,173,78,.12); }
 .cp-pill-state { flex: none; font-size: 10.5px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
 .cp-pill.working .cp-pill-state { color: var(--gold, #e0ad4e); background: rgba(224,173,78,.12); }
 .cp-pill.done .cp-pill-state { color: var(--patina, #8a9a6b); background: rgba(138,154,107,.14); }
