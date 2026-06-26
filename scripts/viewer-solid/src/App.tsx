@@ -530,7 +530,6 @@ function Home() {
         <For each={[
           { id: "work" as const, label: "Work", count: workCount() },
           { id: "forests" as const, label: "Forests", count: (projects.data || []).length },
-          { id: "watching" as const, label: "Watching", count: (standalone.data || []).length },
         ]}>
           {(t) => (
             <button
@@ -807,58 +806,6 @@ function Home() {
         </section>
       </Show>
 
-      <Show when={tab() === "watching"}>
-      <section>
-        <div class="eyebrow-row">
-          <h2 class="eyebrow">watching</h2>
-          <Show when={canMutate}>
-            <button class="watch-add" onClick={() => setAdding((v) => !v)}>
-              {adding() ? "× cancel" : "+ watch a branch"}
-            </button>
-          </Show>
-        </div>
-        <Show when={adding()}>
-          <div class="watch-pick">
-            <input
-              class="watch-input"
-              list="watch-branches"
-              placeholder="branch name…"
-              value={pick()}
-              onInput={(e) => setPick(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === "Enter" && submitPin()}
-              autofocus
-            />
-            <datalist id="watch-branches">
-              <For each={branches.data || []}>{(b) => <option value={b} />}</For>
-            </datalist>
-            <button class="watch-pin" disabled={!pick().trim()} onClick={submitPin}>
-              pin
-            </button>
-          </div>
-        </Show>
-        <Show
-          when={(standalone.data || []).length}
-          fallback={<p class="loading">nothing pinned — watch a loose branch to track it here</p>}
-        >
-          <For each={standalone.data}>
-            {(b) => (
-              <div class="watch-row">
-                <Link class="watch-link" to={{ kind: "standalone", branch: b.branch }}>
-                  <span class="watch-dot" />
-                  <span class="watch-name">{b.branch}</span>
-                  <span class="watch-meta">
-                    <span>{b.commits} {b.commits === 1 ? "commit" : "commits"}</span>
-                    <span class="watch-add-n">+{b.add}</span>
-                    <span class="watch-del-n">−{b.del}</span>
-                  </span>
-                </Link>
-                <ActionBar actions={watchRowActions(b)} />
-              </div>
-            )}
-          </For>
-        </Show>
-      </section>
-      </Show>
         <Show when={flash()}>
           <div class="flash">{flash()}</div>
         </Show>
