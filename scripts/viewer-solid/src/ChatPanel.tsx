@@ -144,12 +144,8 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
   return (
     <>
       <style>{CSS}</style>
-      <Show
-        when={minimized()}
-        fallback={
-          <>
-      <div class="cp-scrim" onClick={props.onClose} />
-      <aside class="cp" role="dialog" aria-label="chat about this file">
+      <div class="cp-scrim" classList={{ "cp-hidden": minimized() }} onClick={props.onClose} />
+      <aside class="cp" classList={{ "cp-hidden": minimized() }} role="dialog" aria-label="chat about this file">
         <header class="cp-head">
           <div class="cp-title">
             <span class="cp-mark">✦</span>
@@ -300,9 +296,7 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
           </button>
         </footer>
       </aside>
-          </>
-        }
-      >
+      <Show when={minimized()}>
         <div class="cp-pill" classList={{ working: streaming(), done: !streaming() && finished() }}>
           <button class="cp-pill-main" title="restore chat" onClick={restore}>
             <span class="cp-pill-mark">✦</span>
@@ -322,6 +316,7 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
 // Plex Mono without touching index.css.
 const CSS = `
 .cp-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(8,7,6,.45); animation: cp-fade 120ms ease-out; }
+.cp-hidden { display: none !important; }
 .cp {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 61;
   width: min(540px, 92vw); display: flex; flex-direction: column;

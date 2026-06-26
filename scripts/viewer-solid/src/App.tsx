@@ -1507,7 +1507,8 @@ function NodeDetail() {
         <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
       </Show>
       <Show when={canMutate && chat()}>
-        {(c) => <ChatPanel file={c().file} branch={active()} onClose={() => setChat(null)} />}
+        {/* read chat() directly, not the Show's `c()` accessor — ChatPanel's onCleanup reads its file path on close, and a stale `c()` throws "Stale read from <Show>" and aborts the close */}
+        <ChatPanel file={chat()?.file ?? null} branch={active()} onClose={() => setChat(null)} />
       </Show>
       <Show when={showChats()}>
         <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
