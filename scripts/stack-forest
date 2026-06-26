@@ -38,6 +38,25 @@ def contrib_id(parent, branch, path):
     return pid.split()[0] if pid.strip() else ""
 
 
+def blob_diff(a_blob, b_blob, path):
+    """A file's blessed-blob → current-blob diff, with the real path in the headers — git
+    names a blob-to-blob diff by hash, which renders as gibberish. "" if identical."""
+    raw = git_out(["diff", a_blob, b_blob])
+    if not raw:
+        return ""
+    out = []
+    for ln in raw.split("\n"):
+        if ln.startswith("diff --git "):
+            out.append(f"diff --git a/{path} b/{path}")
+        elif ln.startswith("--- "):
+            out.append(f"--- a/{path}")
+        elif ln.startswith("+++ "):
+            out.append(f"+++ b/{path}")
+        else:
+            out.append(ln)
+    return "\n".join(out)
+
+
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
 node_mode = False
@@ -286,7 +305,10 @@ def file_status(branch, parent):
 if node_mode:
     branch = target
     parent = parents.get(branch, MAIN)
-    diff_base = base or parent            # diff vs any upstream node; default = parent
+    # "last blessed" is per-file — blessing keys on each file's blob, there is no blessed
+    # ref to diff against — so each file's patch is rebuilt from its blessed blob below.
+    since_blessed = base == "blessed"
+    diff_base = parent if since_blessed else (base or parent)
     # the "diff vs main" button means the FRESH trunk — a stale local main lags
     # origin and folds already-merged commits into the diff. Only on an explicit
     # main request, so a root-on-main node's default parent view stays local.
@@ -313,8 +335,19 @@ if node_mode:
         stale = ""
         if r["status"] == "stale" and r["blessed"] and r["current"]:
             stale = git_out(["diff", r["blessed"], r["current"]])
+        if since_blessed:
+            # what you haven't reviewed yet: an unblessed file shows its whole contribution;
+            # a blessed file shows only the delta past its blessed blob (nothing if clean).
+            if r["status"] == "unblessed":
+                patch = chunks.get(r["path"], "")
+            elif r["blessed"] and r["current"] and r["blessed"] != r["current"]:
+                patch = blob_diff(r["blessed"], r["current"], r["path"])
+            else:
+                patch = ""
+        else:
+            patch = chunks.get(r["path"], "")
         files.append({"path": r["path"], "status": r["status"], "add": r["add"], "del": r["del"],
-                      "patch": chunks.get(r["path"], ""), "stale": stale})
+                      "patch": patch, "stale": stale})
     print(json.dumps({"branch": branch, "files": files}))
     sys.exit(0)
 

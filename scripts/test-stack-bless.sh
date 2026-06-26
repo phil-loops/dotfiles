@@ -246,9 +246,11 @@ fi
 echo
 
 # =========================================================================
-# T7 — base=blessed pill bug (viewer passes --base blessed)
+# T7 — base=blessed ("last blessed") yields a real per-file since-blessed diff
+#      (regression for the old bug: --base blessed passed a non-ref to git diff
+#       and silently returned 0 files)
 # =========================================================================
-echo "[T7] base=blessed pill (stack-forest --node <branch> --base blessed)"
+echo "[T7] base=blessed → per-file since-blessed delta"
 T7="$ROOT/t7"; mkrepo "$T7"
 (
   cd "$T7"
@@ -257,19 +259,31 @@ T7="$ROOT/t7"; mkrepo "$T7"
   printf 'p\nq\nr\n' > A.txt; git add A.txt; git commit -qm "add A"
   git config stack-branch.feat.parent main
 )
-( cd "$T7" && "$BLESS" feat >/dev/null )
-# normal parent base: should list A.txt
-normal_json=$(forest_node_json "$T7" feat)
-normal_count=$(echo "$normal_json" | jq '.files | length')
-# blessed base: "blessed" is not a real ref
-blessed_json=$(forest_node_json "$T7" feat --base blessed)
-blessed_count=$(echo "$blessed_json" | jq '.files | length' 2>/dev/null || echo "ERR")
-ref_exists=$( cd "$T7" && git rev-parse --verify --quiet blessed >/dev/null 2>&1 && echo yes || echo no )
-echo "    info: normal --node files=$normal_count ; --base blessed files=$blessed_count ; 'blessed' ref exists=$ref_exists"
-if [[ "$blessed_count" == "0" || "$blessed_count" == "ERR" ]]; then
-  record "T7 base=blessed pill" "CONFIRMED" "normal=$normal_count files, --base blessed=$blessed_count (empty/erroring diff — bug confirmed)"
+( cd "$T7" && "$BLESS" feat --file A.txt >/dev/null )
+( cd "$T7" && printf 'x\ny\n' > B.txt && git add B.txt && git commit -qm "add B (unblessed)" )
+
+normal_count=$(forest_node_json "$T7" feat | jq '.files | length')
+blessed_count=$(forest_node_json "$T7" feat --base blessed | jq '.files | length' 2>/dev/null || echo ERR)
+assert_eq "T7 base=blessed lists files (not empty)" "$normal_count" "$blessed_count"; t7a=$ASSERT_OK
+
+# A is blessed + unchanged → nothing new since blessed → empty patch
+a_patch=$(forest_node_json "$T7" feat --base blessed | jq -r '.files[] | select(.path=="A.txt") | .patch')
+[[ -z "$a_patch" ]] && t7b=1 || t7b=0
+echo "    info: clean-blessed A.txt since-blessed patch empty? $([[ -z "$a_patch" ]] && echo yes || echo no)"
+
+# B is unblessed → its whole contribution shows under --base blessed, path-named
+b_patch=$(forest_node_json "$T7" feat --base blessed | jq -r '.files[] | select(.path=="B.txt") | .patch')
+echo "$b_patch" | grep -q 'diff --git a/B.txt b/B.txt' && t7c=1 || t7c=0
+
+# modify A (no re-bless) → since-blessed patch is non-empty, path-named (not blob-hash), shows the new line
+( cd "$T7" && printf 'p\nq\nr\nNEW_SINCE_BLESS\n' > A.txt && git commit -qam "touch A after bless" )
+a_patch2=$(forest_node_json "$T7" feat --base blessed | jq -r '.files[] | select(.path=="A.txt") | .patch')
+{ echo "$a_patch2" | grep -q 'diff --git a/A.txt b/A.txt' && echo "$a_patch2" | grep -q 'NEW_SINCE_BLESS'; } && t7d=1 || t7d=0
+
+if (( t7a && t7b && t7c && t7d )); then
+  record "T7 base=blessed delta" PASS "lists files; clean→empty; unblessed→full; modified→since-blessed diff (path-named)"
 else
-  record "T7 base=blessed pill" "NOT-REPRODUCED" "--base blessed returned $blessed_count files"
+  record "T7 base=blessed delta" FAIL "count=$normal_count/$blessed_count empty=$t7b unbl=$t7c delta=$t7d"
 fi
 echo
 
