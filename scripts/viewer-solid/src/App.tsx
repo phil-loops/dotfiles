@@ -826,6 +826,25 @@ function ForestOverview() {
   const open = (b: string) => navigate({ kind: "forest", name: project(), node: b });
   const nodeCount = () => spine().filter((n) => !n.id.startsWith("✦")).length;
 
+  // hover a node in the map → float its branch purpose (cached; guard the async gap so a
+  // pointer that left before /purpose resolved doesn't pop a stale tip).
+  const purposeCache = new Map<string, Purpose>();
+  const [tip, setTip] = createSignal<{ text: string; x: number; y: number } | null>(null);
+  let tipBranch: string | null = null;
+  const showTip = async (branch: string, el: HTMLElement) => {
+    tipBranch = branch;
+    let p = purposeCache.get(branch);
+    if (!p) {
+      try { p = await provider.purpose(branch); }
+      catch { p = { thesis: "" }; }
+      purposeCache.set(branch, p);
+    }
+    if (tipBranch !== branch || !p.thesis) return;
+    const r = el.getBoundingClientRect();
+    setTip({ text: p.thesis, x: r.right + 12, y: r.top });
+  };
+  const hideTip = () => { tipBranch = null; setTip(null); };
+
   return (
     <div class="forest-overview">
       <header class="fo-head">
@@ -848,7 +867,16 @@ function ForestOverview() {
           health={() => health.data}
           onPick={open}
           onClose={() => {}}
+          onHoverNode={showTip}
+          onLeaveNode={hideTip}
         />
+      </Show>
+      <Show when={tip()}>
+        {(t) => (
+          <div class="purpose-tip" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
+            {t().text}
+          </div>
+        )}
       </Show>
     </div>
   );
@@ -1223,8 +1251,9 @@ function NodeDetail() {
 
   // keyboard: j/k walk the spine; 1/2/3 switch the diff base; b toggles the file panel; ? for all.
   const onKey = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); focusFilter(); return; }
+    // already typing (incl. the filter box) → let everything bubble: a 2nd ⌘F reaches native find
     if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
+    if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); focusFilter(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return; // leave OS/browser chords alone
     const list = spine();
     const i = list.findIndex((n) => n.id === active());
