@@ -28,10 +28,13 @@ orphaned WIP into clean commits, then landed UI on top):**
 - **Back-to-flowchart highlights the node you came from** (`49ad58f`) — `⊞ project` action +
   module-scope `cameFrom` (effect-tracked) passed as the overview map's active node.
 
+- **Purpose hover popovers** (`e54adb1`) — hovering a Forests row pops a card of its branches
+  + one-line purposes (`/forest-purposes?project=X`, cached, short delay). Aggregation solved.
+
 **Still to land:**
-- Purpose hover popovers — needs forest→branch purpose *aggregation* (a forest is many
-  branches), so more design than the other slices.
 - Header diet — folds into the ambient-restack model (Phase 3); the biggest remaining piece.
+  Can ship as a LIGHT declutter (group/relocate the existing buttons, e.g. tidy-commits into
+  the ⋯ menu) WITHOUT the daemon, or wait for the full ambient model. Decision pending.
 - Follow-ups: dead-code sweep of the watching-only helpers; wire salvaged promote/checkout
   onto a branch-row context.
 
