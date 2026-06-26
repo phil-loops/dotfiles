@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# restack-dryrun — what the (future) ambient restacker WOULD do, moving NOTHING.
+#
+# The dry-run-first safety gate for the auto-restack daemon (design-viewer-flow.md,
+# Phase 3): before the daemon is ever allowed to move a ref, this reports — per forest
+# branch — its behind-count, a definitive rebase-classify verdict, and the action the
+# daemon would take. No ref is moved, no branch checked out, no worktree mutated. The
+# only side effect is fetching origin/main (read-only, like the daemon's trunk poll).
+#
+#   restack-dryrun            fetch origin/main, classify every forest branch, report
+#   restack-dryrun --no-fetch use the local origin/main as-is (no network)
+#
+# Verdicts (per branch, vs fresh origin/main):
+#   clean          behind=0 — nothing to do
+#   would-restack  behind, replays clean (classify AUTOMATE) — daemon does it SILENTLY
+#   would-contract already-merged ghost (classify CONTRACT) — daemon would drop & rewire
+#   WILL-CONFLICT  real collision (classify CONFLICT, --deep confirmed) — needs a human
+#   skip(open-PR)  has an open PR — daemon never auto-restacks it (house rule)
+#   skip(stacked)  parent isn't main — restacked by the forest walk, not the trunk pass
+
+here="$(cd "$(dirname "$0")" && pwd)"
+classify="$here/rebase-classify"
+MAIN="$(git config stack.main-branch 2>/dev/null || echo main)"
+fetch=1
+[[ "${1:-}" == "--no-fetch" ]] && fetch=0
+
+command -v git >/dev/null || { echo "git required" >&2; exit 2; }
+[[ -x "$classify" ]] || { echo "rebase-classify not found next to this script" >&2; exit 2; }
+
+if (( fetch )); then
+  git fetch -q origin "$MAIN" 2>/dev/null || echo "restack-dryrun: warning — could not fetch origin/$MAIN, using local" >&2
+fi
+trunk="origin/$MAIN"
+git rev-parse --verify --quiet "$trunk" >/dev/null || trunk="$MAIN"
+
+# forest branches = anything with a stack-branch.<b>.parent, plus every stack-project list entry.
+branches="$(
+  {
+    git config --name-only --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
+      | sed 's/^stack-branch\.//; s/\.parent$//'
+    git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk '{print $2}'
+  } | sort -u
+)"
+[[ -n "$branches" ]] || { echo "no forest branches configured (stack-branch.*.parent / stack-project.*.branch)"; exit 0; }
+
+# one gh call for all open-PR heads (best-effort; empty if gh/network unavailable).
+open_pr_heads=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ') "
+
+printf '%-40s %-8s %-16s %s\n' "BRANCH" "BEHIND" "VERDICT" "WOULD DO"
+printf '%-40s %-8s %-16s %s\n' "------" "------" "-------" "--------"
+
+clean=0 restack=0 contract=0 conflict=0 skipped=0
+while IFS= read -r b; do
+  [[ -n "$b" ]] || continue
+  git rev-parse --verify --quiet "$b" >/dev/null || continue
+  parent="$(git config "stack-branch.$b.parent" 2>/dev/null || echo "$MAIN")"
+
+  if [[ "$open_pr_heads" == *" $b "* ]]; then
+    printf '%-40s %-8s %-16s %s\n' "$b" "-" "skip(open-PR)" "left alone — has an open PR"
+    skipped=$((skipped+1)); continue
+  fi
+  if [[ "$parent" != "$MAIN" ]]; then
+    printf '%-40s %-8s %-16s %s\n' "$b" "-" "skip(stacked)" "parent=$parent — forest walk handles it"
+    skipped=$((skipped+1)); continue
+  fi
+
+  behind="$(git rev-list --count "$b..$trunk" 2>/dev/null || echo 0)"
+  if [[ "$behind" == "0" ]]; then
+    printf '%-40s %-8s %-16s %s\n' "$b" "0" "clean" "nothing to do"
+    clean=$((clean+1)); continue
+  fi
+
+  # definitive verdict: --deep trial-rebases in a throwaway worktree (read-only).
+  set +e
+  "$classify" "$b" "$trunk" --deep >/dev/null 2>&1
+  code=$?
+  set -e
+  case "$code" in
+    0)  printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "would-restack" "auto-restack (silent)"; restack=$((restack+1)) ;;
+    20) printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "would-contract" "drop & rewire (already merged)"; contract=$((contract+1)) ;;
+    30) printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "WILL-CONFLICT" "⚠ needs you — real collision"; conflict=$((conflict+1)) ;;
+    *)  printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "error($code)" "classify failed — inspect by hand"; skipped=$((skipped+1)) ;;
+  esac
+done <<< "$branches"
+
+echo "------"
+echo "summary: clean=$clean would-restack=$restack would-contract=$contract WILL-CONFLICT=$conflict skipped=$skipped"
+echo "(dry run — nothing was moved)"
