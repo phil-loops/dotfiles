@@ -45,8 +45,15 @@ orphaned WIP into clean commits, then landed UI on top):**
 - **Full ambient-restack daemon** (Phase 3) — the real header endgame: forests auto-restack,
   the header collapses to one status chip. `restack-dryrun` (`f17c45e`) is the dry-run-first
   foundation. A standalone project when wanted; stage carefully (dry-run-first).
-- Minor: group the forest-level restack with the branch one (cross-component); a CSS sweep
-  of the now-unused `.watch-add/-pick/-input/-dot/-name/-meta` rules (harmless).
+- **Narrow App.tsx split — DO IT NEXT TIME App.tsx IS QUIET + the other session is
+  coordinated.** Not a broad modularization (the pieces are coupled via shared signals /
+  router / provider, so splitting for tidiness is churn with no benefit — per Phil). The
+  ONLY justification is the concrete pressure that bit us: multi-session collisions on the
+  one giant file. So peel ONLY the genuinely self-contained leaves into their own files —
+  `ForestOverview`, `FileEntry`, maybe `CommitsList` — to enable parallel edits. Leave
+  everything woven into `NodeDetail`/`Home`. A structural move while a session is live in
+  the file is the one thing guaranteed to conflict — do it only when quiet.
+- Minor: group the forest-level restack with the branch one (cross-component).
 - GitHub notify → Work-page live-refresh (the `gh-review-notify` loop as a second consumer).
 
 **Local-delta composer** — backend ALREADY EXISTS in `stack-squash` (`--unpushed`/`--unstage`);
