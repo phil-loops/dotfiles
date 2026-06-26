@@ -335,6 +335,19 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #cc2a18; }
 }
 .brand.big { font-size: 44px; }
 .brand-mark { color: var(--gold-leaf); font-style: normal; }
+
+/* forest overview: the map as a forest's landing hero (no node selected). */
+.forest-overview { min-height: 100vh; background: var(--vellum-night); }
+.fo-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; gap: 16px;
+  padding: 16px 24px; background: var(--vellum-night); border-bottom: 1px solid var(--rule); }
+.fo-head .brand { font-size: 22px; }
+.fo-project { font-family: var(--display); font-style: italic; font-size: 21px; color: var(--ink); }
+.fo-meta { font-size: 12px; letter-spacing: 0.04em; color: var(--ink-faint); }
+.fo-empty { padding: 40px 24px; }
+/* the project name in the detail forest-strip doubles as a back-link to the overview map. */
+.nh-forest-back { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-faint); text-decoration: none; transition: color 0.12s; }
+.nh-forest-back:hover { color: var(--ink-dim); }
 .origin-btn {
   font: inherit; font-size: 12px; letter-spacing: 0.04em; color: var(--ink-dim);
   background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 8px;

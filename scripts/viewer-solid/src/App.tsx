@@ -14,7 +14,7 @@ import {
   createMutation,
   useQueryClient,
 } from "@tanstack/solid-query";
-import { RouterProvider, useViewerLocation, Link, forestKey, withNode, type HomeTab } from "./router";
+import { RouterProvider, useViewerLocation, Link, forestKey, withNode, type HomeTab, type ViewerLocation } from "./router";
 import { ActionBar, type Action } from "./actions";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
@@ -97,7 +97,11 @@ export default function App() {
   );
 }
 
-// home is its own kind; forest / standalone / review all render the node-review surface.
+// A forest with no node selected is its own altitude — the map IS the view (overview); a
+// forest WITH a node, plus every standalone/review, drops into the per-node review surface.
+const isForestOverview = (l: ViewerLocation): boolean => l.kind === "forest" && !l.node;
+
+// home is its own kind; a node-less forest lands on the map; everything else is node review.
 function Routes() {
   const { location } = useViewerLocation();
   return (
@@ -107,6 +111,9 @@ function Routes() {
       </Match>
       <Match when={location().kind === "push"}>
         <MobilePush />
+      </Match>
+      <Match when={isForestOverview(location())}>
+        <ForestOverview />
       </Match>
       <Match when={location().kind !== "home"}>
         <NodeDetail />
@@ -828,6 +835,58 @@ function Home() {
   );
 }
 
+// ── forest overview: the map as the landing hero (no node selected) ──────
+// Picking a node navigates to /forests/<project>/<branch> — the per-node review surface.
+function ForestOverview() {
+  const { location, navigate } = useViewerLocation();
+  const project = () => forestKey(location());
+  const model = createQuery(() => ({
+    queryKey: ["model", project()],
+    queryFn: () => provider.model(project()),
+    enabled: !!project(),
+  }));
+  const spine = createMemo(() => flattenForest(model.data));
+  const healthIds = createMemo(() => spine().map((n) => n.id).filter(Boolean));
+  const health = createQuery(() => ({
+    queryKey: ["forest-health", healthIds().join(",")],
+    queryFn: () =>
+      fetch("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&")).then(
+        (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean }>>,
+      ),
+    enabled: canMutate && healthIds().length > 0,
+  }));
+  // ghost endstate (✦ <project>) opens its integration diff; every other node opens itself.
+  const open = (b: string) => navigate({ kind: "forest", name: project(), node: b });
+  const nodeCount = () => spine().filter((n) => !n.id.startsWith("✦")).length;
+
+  return (
+    <div class="forest-overview">
+      <header class="fo-head">
+        <Link class="brand" to={{ kind: "home", tab: "forests" }}>
+          <span class="brand-mark">✦</span> blessed
+        </Link>
+        <span class="fo-project">{project()}</span>
+        <Show when={spine().length}>
+          <span class="fo-meta">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
+        </Show>
+      </header>
+      <Show
+        when={spine().length}
+        fallback={<p class="loading fo-empty">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
+      >
+        <ForestMap
+          page
+          spine={spine}
+          active={() => ""}
+          health={() => health.data}
+          onPick={open}
+          onClose={() => {}}
+        />
+      </Show>
+    </div>
+  );
+}
+
 // ── node detail: forest spine + review surface ───────────────────────
 function NodeDetail() {
   const qc = useQueryClient();
@@ -1289,16 +1348,29 @@ function NodeDetail() {
               "border-bottom": "1px solid var(--rule)",
             }}
           >
-            <span
-              style={{
-                "font-size": "11px",
-                "letter-spacing": "0.07em",
-                "text-transform": "uppercase",
-                color: "var(--ink-faint)",
-              }}
+            <Show
+              when={location().kind === "forest"}
+              fallback={
+                <span
+                  style={{
+                    "font-size": "11px",
+                    "letter-spacing": "0.07em",
+                    "text-transform": "uppercase",
+                    color: "var(--ink-faint)",
+                  }}
+                >
+                  {project()}
+                </span>
+              }
             >
-              {project()}
-            </span>
+              <Link
+                class="nh-forest-back"
+                to={{ kind: "forest", name: project() }}
+                title="back to the forest map"
+              >
+                {project()}
+              </Link>
+            </Show>
             <div class="nh-spacer" />
             <button
               class="nh-fix"
