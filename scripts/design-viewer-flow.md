@@ -23,14 +23,17 @@ orphaned WIP into clean commits, then landed UI on top):**
 - **Forests lists ALL forests + PR badges** (`31f2ccf`) — the IA fix.
 - **Collapsible files**, blessed-no-delta collapsed by default (`3b4d312`).
 - **Collapsible side panel** for full-width diff (`4748c10`).
+- **Cut the Watching tab + page** (`e5a2a08`) — standalone query + promote/checkout helpers
+  retained (review-import still uses standalone; promote/checkout are salvage candidates).
+- **Back-to-flowchart highlights the node you came from** (`49ad58f`) — `⊞ project` action +
+  module-scope `cameFrom` (effect-tracked) passed as the overview map's active node.
 
-**Still to land (UI, App.tsx now free + viewer lane claimed):**
-- Cut `Watching` tab (+ salvage promote/checkout onto branch rows).
+**Still to land:**
 - Purpose hover popovers — needs forest→branch purpose *aggregation* (a forest is many
   branches), so more design than the other slices.
-- Back-to-flowchart with origin-node emphasis (the `nh-forest-back` link exists; make it
-  prominent + highlight the node you left on the overview).
 - Header diet — folds into the ambient-restack model (Phase 3); the biggest remaining piece.
+- Follow-ups: dead-code sweep of the watching-only helpers; wire salvaged promote/checkout
+  onto a branch-row context.
 
 **Local-delta composer** — backend ALREADY EXISTS in `stack-squash` (`--unpushed`/`--unstage`);
 it's an App.tsx UI over that, not a new CLI. Don't rebuild the engine.
