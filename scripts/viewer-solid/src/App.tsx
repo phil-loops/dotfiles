@@ -22,6 +22,7 @@ import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
+import MergeStory from "./MergeStory";
 import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
@@ -809,9 +810,20 @@ function Home() {
 
 // ── forest overview: the map as the landing hero (no node selected) ──────
 // Picking a node navigates to /forests/<project>/<branch> — the per-node review surface.
+const FO_VIEWS_CSS = `
+.fo-views { display: inline-flex; gap: 2px; margin-left: auto; }
+.fo-views button {
+  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px;
+  color: var(--ink-faint, #6f675a); background: transparent; border: 1px solid transparent;
+}
+.fo-views button:hover { color: var(--ink-dim, #a89e8c); }
+.fo-views button.on { color: var(--gold, #e0ad4e); border-color: var(--rule, #3a332b); background: var(--raised, #1b1815); }
+`;
+
 function ForestOverview() {
   const { location, navigate } = useViewerLocation();
   const project = () => forestKey(location());
+  const [ovView, setOvView] = createSignal<"map" | "story">("map");
   const model = createQuery(() => ({
     queryKey: ["model", project()],
     queryFn: () => provider.model(project()),
@@ -859,22 +871,34 @@ function ForestOverview() {
         <span class="fo-project">{project()}</span>
         <Show when={spine().length}>
           <span class="fo-meta">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
+          <div class="fo-views" role="group" aria-label="overview view">
+            <button classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
+            <button classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
+          </div>
         </Show>
+        <style>{FO_VIEWS_CSS}</style>
       </header>
       <Show
         when={spine().length}
         fallback={<p class="loading fo-empty">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
       >
-        <ForestMap
-          page
-          spine={spine}
-          active={() => (spine().some((n) => n.id === cameFrom()) ? cameFrom() : "")}
-          health={() => health.data}
-          onPick={open}
-          onClose={() => {}}
-          onHoverNode={showTip}
-          onLeaveNode={hideTip}
-        />
+        <Show
+          when={ovView() === "story"}
+          fallback={
+            <ForestMap
+              page
+              spine={spine}
+              active={() => (spine().some((n) => n.id === cameFrom()) ? cameFrom() : "")}
+              health={() => health.data}
+              onPick={open}
+              onClose={() => {}}
+              onHoverNode={showTip}
+              onLeaveNode={hideTip}
+            />
+          }
+        >
+          <MergeStory model={model.data} project={project()} onPick={open} />
+        </Show>
       </Show>
       <Show when={tip()}>
         {(t) => (
