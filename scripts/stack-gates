@@ -81,6 +81,9 @@ def default_gates(cwd):
             "git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx' "
             f"| xargs -r {oxfmt} --check",
         ))
+    delta_tests = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-delta-tests")
+    if typechecker and os.path.exists(delta_tests):
+        gates.append(("tests", delta_tests))
     return gates
 
 
