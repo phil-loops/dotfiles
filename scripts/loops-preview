@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# loops-preview — preview a loops worktree/branch on a side port WITHOUT disturbing
+# the primary dev server (or another Claude session's checkout).
+#
+# Runs a web-only `next dev` for the given checkout in a detached tmux session, on
+# an auto-picked free port, reusing the MAIN checkout's node_modules + .env and the
+# already-running Docker services (Postgres/ClickHouse/Valkey/…). One tmux session
+# per checkout, so several previews can run side by side. No second DB, no second
+# Docker project, no collision with `task dev` on :3000.
+#
+# Usage:
+#   loops-preview [dir] [--port N] [--main path]   # start (dir defaults to $PWD)
+#   loops-preview [dir] --kill                      # stop the preview for that dir
+#   loops-preview --list                            # list running previews
+#
+# Env: LOOPS_MAIN overrides the main checkout (default ~/coding/loops).
+#
+# Caveat: shares MAIN's built workspace packages (via the symlinked node_modules),
+# so a preview that changes packages/* won't reflect those until MAIN rebuilds them.
+# App code (app/, pages/, components/, trpc/, lib/) is compiled from the preview
+# checkout itself, so UI/route changes show up fine.
+set -euo pipefail
+
+cyan() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
+err() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; }
+
+MAIN="${LOOPS_MAIN:-$HOME/coding/loops}"
+PORT=""
+ACTION="start"
+DIR=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --kill) ACTION="kill" ;;
+    --list) ACTION="list" ;;
+    --port) PORT="${2:-}"; shift ;;
+    --main) MAIN="${2:-}"; shift ;;
+    -*) err "unknown flag: $1"; exit 2 ;;
+    *) DIR="$1" ;;
+  esac
+  shift
+done
+
+if [ "$ACTION" = "list" ]; then
+  tmux ls 2>/dev/null | grep '^loops-preview-' || echo "no previews running"
+  exit 0
+fi
+
+DIR="$(cd "${DIR:-$PWD}" && pwd)"
+NAME="$(basename "$DIR")"
+SESSION="loops-preview-$NAME"
+LOG="/tmp/$SESSION.log"
+
+if [ "$ACTION" = "kill" ]; then
+  tmux kill-session -t "$SESSION" 2>/dev/null && cyan "killed $SESSION" || echo "no session $SESSION"
+  exit 0
+fi
+
+[ -f "$DIR/package.json" ] || { err "$DIR is not a loops checkout (no package.json)"; exit 1; }
+MAIN="$(cd "$MAIN" && pwd)"
+
+# Worktrees have no node_modules and don't carry untracked env files — borrow MAIN's.
+if [ ! -e "$DIR/node_modules" ]; then
+  ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
+  cyan "linked node_modules from $MAIN"
+fi
+for e in .env .env.local .env.development; do
+  if [ -f "$MAIN/$e" ] && [ ! -e "$DIR/$e" ]; then
+    ln -sfn "$MAIN/$e" "$DIR/$e"
+    cyan "linked $e from $MAIN"
+  fi
+done
+
+# Auto-pick the first free port (3010-3060) unless one was given.
+if [ -z "$PORT" ]; then
+  for p in $(seq 3010 3060); do
+    if ! lsof -iTCP:"$p" -sTCP:LISTEN -n >/dev/null 2>&1; then PORT="$p"; break; fi
+  done
+fi
+[ -n "$PORT" ] || { err "no free port in 3010-3060"; exit 1; }
+
+tmux kill-session -t "$SESSION" 2>/dev/null || true
+tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev --webpack -p $PORT > '$LOG' 2>&1"
+
+cyan "preview $NAME  →  http://localhost:$PORT"
+cyan "branch:  $(git -C "$DIR" branch --show-current 2>/dev/null || echo '(detached)')"
+cyan "watch:   tmux attach -t $SESSION   ·   log: $LOG"
+cyan "stop:    loops-preview '$DIR' --kill"
+echo "(first request compiles on demand — give it ~10-20s)"
