@@ -1,5 +1,4 @@
-const FILE_BTN = "gh-nvim-file-btn";
-const VIEWER_URL = "http://localhost:62497";
+const FILE_BTN = "gh-nvim-file-btn";   // VIEWER_URL comes from config.js (loaded first)
 
 console.log("[gh-to-nvim] content script loaded:", location.pathname);
 
@@ -55,12 +54,12 @@ function makeFab(pr) {
   const box = document.createElement("div");
   box.id = "gh-nvim-fab";
 
-  const nvim = document.createElement("button");
-  nvim.className = "gh-nvim-fab-btn";
-  nvim.textContent = "→ nvim";
-  nvim.title = `Import PR #${pr.number} into the forest viewer`;
-  nvim.addEventListener("click", () =>
-    fire(nvim, { number: pr.number, repo: pr.repo }, "→ nvim", (b) => `✓ ${b.branch}`),
+  const imp = document.createElement("button");
+  imp.className = "gh-nvim-fab-btn";
+  imp.textContent = "import";
+  imp.title = `Import PR #${pr.number} as a watch node (use the per-file nvim button or ⌥-click a line to open in nvim)`;
+  imp.addEventListener("click", () =>
+    fire(imp, { number: pr.number, repo: pr.repo }, "import", (b) => `✓ ${b.branch}`),
   );
 
   const viewer = document.createElement("button");
@@ -73,7 +72,9 @@ function makeFab(pr) {
     const res = await send({ number: pr.number, repo: pr.repo });
     const ok = res?.status === 200 && res.body?.ok;
     if (ok) {
-      window.open(`${VIEWER_URL}/${res.body.branch}`, "_blank");
+      // backend owns the route; fall back to the standalone shape if it predates `path`
+      const route = res.body.path || `/branch/${res.body.branch}`;
+      window.open(`${VIEWER_URL}${route}`, "_blank");
     }
     viewer.classList.add(ok ? "gh-nvim-ok" : "gh-nvim-err");
     viewer.textContent = ok ? "✓" : "✗";
@@ -81,7 +82,7 @@ function makeFab(pr) {
     setTimeout(() => reset(viewer, "→ viewer"), 4000);
   });
 
-  box.append(nvim, viewer);
+  box.append(imp, viewer);
   return box;
 }
 
