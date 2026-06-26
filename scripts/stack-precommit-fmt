@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# stack-precommit-fmt — oxfmt staged .ts/.tsx in place before each commit, so branches
+# never accumulate format drift (the thing stack-fmt has to cascade away after the fact).
+# Installed as a repo's pre-commit hook by stack-install-precommit-hook.
+#
+# Contract: fast, quiet, and NEVER blocks a commit. Missing oxfmt, a format error, or a
+# partially-staged file all fall through to a clean exit — the worst case is "this commit
+# wasn't auto-formatted", never "this commit was refused."
+set -uo pipefail
+
+repo=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+oxfmt="$repo/node_modules/.bin/oxfmt"
+[[ -x "$oxfmt" ]] || exit 0
+
+# Only files that are fully staged (index == working tree) are safe to reformat+re-add:
+# a file with unstaged hunks would have those hunks swept into the commit by `git add`.
+to_fmt=()
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  git diff --quiet -- "$f" 2>/dev/null || continue   # has unstaged hunks → leave alone
+  to_fmt+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACM -- '*.ts' '*.tsx')
+
+[[ ${#to_fmt[@]} -eq 0 ]] && exit 0
+
+"$oxfmt" "${to_fmt[@]}" >/dev/null 2>&1 || exit 0
+git add -- "${to_fmt[@]}" 2>/dev/null || true
+exit 0
