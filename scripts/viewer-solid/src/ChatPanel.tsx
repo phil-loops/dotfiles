@@ -312,7 +312,9 @@ export default function ChatPanel(props: { file: FileDiff | null; branch: string
                 </button>
               </Show>
               <span class="cp-branch">{props.branch}</span>
-              <button class="cp-min" title="minimize — shrink to a corner pill; the chat keeps running and tells you when it's done" onClick={() => setMinimized(true)}>▁</button>
+              <button class="cp-min" title="minimize — shrink to a corner pill; the chat keeps running and tells you when it's done" onClick={() => setMinimized(true)}>
+                <span class="cp-min-bar" />
+              </button>
               <button class="cp-x" title="close (esc)" onClick={props.onClose}>×</button>
             </div>
           </div>
@@ -478,8 +480,14 @@ const CSS = `
 }
 .cp-x { border: 0; background: transparent; color: var(--faint, #6f675a); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .cp-x:hover { color: var(--ink, #e9e2d4); }
-.cp-min { border: 0; background: transparent; color: var(--faint, #6f675a); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 3px; }
-.cp-min:hover { color: var(--ink, #e9e2d4); }
+.cp-min {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 24px; padding: 0 6px;
+  border: 0; border-radius: 5px; background: transparent; cursor: pointer;
+}
+.cp-min:hover { background: rgba(224,173,78,.1); }
+.cp-min-bar { display: block; width: 12px; height: 2px; border-radius: 2px; background: var(--faint, #6f675a); }
+.cp-min:hover .cp-min-bar { background: var(--ink, #e9e2d4); }
 
 /* minimized → docked corner pill: no scrim, page interactive, the turn keeps streaming behind it */
 .cp-pill {
