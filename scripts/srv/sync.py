@@ -11,6 +11,7 @@ from urllib.parse import parse_qs
 from concurrent.futures import ThreadPoolExecutor
 
 from . import ctx
+from . import prompts
 
 
 # ── deploy-critical detection (read-only) ────────────────────────────────────
@@ -168,21 +169,26 @@ def _upstream_state(branch, main):
     r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     up = r.stdout.strip() if r.returncode == 0 else ""
     if not up:
-        return {"upstream": "", "upstreamBad": False, "upstreamReason": "", "ahead": 0, "behind": 0}
+        return {"upstream": "", "upstreamBad": False, "upstreamReason": "",
+                "diverged": False, "ahead": 0, "behind": 0}
     remote = ctx.run(["git", "config", f"branch.{branch}.remote"]).stdout.strip()
     up_branch = up[len(remote) + 1:] if remote and up.startswith(remote + "/") else up
-    # Only tracking the TRUNK is a real footgun (a Pull merges main into the branch). A
-    # differently-named or diverged origin branch is just Phil's renamed-PR update flow (he
-    # pushes to origin from GitHub Desktop) — surface the ref, don't alarm. Ahead/behind is
-    # only meaningful for the flagged case, so compute it only there.
     bad = up_branch == main
-    ahead = behind = 0
-    if bad:
-        ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
-        behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)
+    ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
+    behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)
+    # Two distinct footguns the badge surfaces:
+    #   bad      — tracks the TRUNK: a Pull merges main into the branch (autoSetupMerge trap).
+    #   diverged — tracks its OWN (non-trunk) pushed PR head but history was rewritten on one
+    #              side (ahead AND behind ⇒ no fast-forward): a Pull re-merges the stale pre-
+    #              rebase commits, a Push needs --force. The post-rebase PR-head case. We used
+    #              to stay silent here ("Phil's renamed-PR flow"), but a clean rebase forward
+    #              looks identical to a stale fork — so offer a Claude reconcile instead of
+    #              letting GitHub Desktop tempt a destructive Pull. A branch merely ahead
+    #              (behind == 0, an unpushed push) fast-forwards cleanly and is NOT flagged.
+    diverged = (not bad) and ahead > 0 and behind > 0
     reason = f"tracks {up} (the trunk) — a Pull would merge main into this branch" if bad else ""
     return {"upstream": up, "upstreamBad": bad, "upstreamReason": reason,
-            "ahead": ahead, "behind": behind}
+            "diverged": diverged, "ahead": ahead, "behind": behind}
 
 
 def _node_health(branch):
@@ -397,3 +403,27 @@ def post_contract(req, raw):
     req._send(200, json.dumps(
         {"ok": True, "contracted": True, "branch": branch, "children": kids,
          "parent": parent, "summary": summary}))
+
+
+def post_reconcile(req, raw):
+    # A branch diverged from its pushed PR head (rebased on one side) → hand it to a standalone
+    # Claude in the branch's OWN worktree to work out which side is the source of truth and
+    # reconcile. Mirrors _eject's contract: never force-pushes, never blind-pulls the stale head
+    # back in — publishing stays Phil's. Almost always local was rebased and already wins, so the
+    # session resolves it without back-and-forth.
+    branch = json.loads(raw or "{}").get("branch", "")
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    up = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"]).stdout.strip()
+    if not up:
+        req._send(409, json.dumps({"ok": False, "err": "no upstream to reconcile against"}))
+        return
+    ahead = int(ctx.run(["git", "rev-list", "--count", f"{up}..{branch}"]).stdout.strip() or 0)
+    behind = int(ctx.run(["git", "rev-list", "--count", f"{branch}..{up}"]).stdout.strip() or 0)
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch,
+                 prompts.reconcile(branch, up, ahead, behind)])
+    ok = r.returncode == 0
+    req._send(200 if ok else 500, json.dumps(
+        {"ok": ok, "ejected": ok,
+         "err": "" if ok else (r.stderr or r.stdout or "could not launch reconcile session")}))
