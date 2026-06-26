@@ -405,8 +405,13 @@ function Home() {
     clearTimeout(ftipTimer);
     ftipFor = project;
     const r = el.getBoundingClientRect();
-    const place = (rows: FPurpose[]) =>
-      ftipFor === project && rows.length && setFtip({ rows, x: r.left + 18, y: r.bottom + 6 });
+    const place = (rows: FPurpose[]) => {
+      if (ftipFor !== project || !rows.length) return;
+      const estH = 18 + rows.length * 44; // ~name + 2-line clamped thesis per row
+      // flip above the row when there isn't room below, so the card stays on-screen
+      const y = window.innerHeight - r.bottom >= estH + 12 ? r.bottom + 6 : Math.max(8, r.top - estH - 6);
+      setFtip({ rows, x: r.left + 18, y });
+    };
     const cached = fpCache.get(project);
     if (cached) {
       ftipTimer = setTimeout(() => place(cached), 160);
