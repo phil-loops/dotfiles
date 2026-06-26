@@ -403,6 +403,12 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .pr-rev.req { color: var(--ink-faint); }
 .forest-name { font-family: var(--display); font-style: italic; font-size: 17px; flex: 1; }
 .forest-meta { color: var(--ink-faint); font-size: 11px; flex: none; }
+/* a forest with an open PR is badged (not hidden) — understated, never gold (gold is earned) */
+.forest-pr {
+  flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--ink-dim); border: 1px solid var(--rule); border-radius: 999px; padding: 1px 7px;
+}
+.forest-pr.draft { color: var(--ink-faint); }
 .forest-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
 .forest-dot.fresh { background: var(--gold-leaf); box-shadow: 0 0 7px var(--gold-wash); }
 .forest-dot.behind { background: transparent; border: 1.5px solid var(--patina); box-shadow: inset 0 0 0 1.5px var(--patina); }
