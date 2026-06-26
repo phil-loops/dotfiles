@@ -25,7 +25,8 @@ type Step = {
   subject: string; // deterministic first-clause fallback
   purpose: string; // the full plain description, sent to the LLM polish
   hasPurpose: boolean;
-  deps: number[]; // 1-based merge-order positions this step lands after
+  buildsOn: number | null; // parent position — a CODE dep (this branch is stacked on it)
+  requires: number[]; // requires positions — MERGE-AFTER fan-in deps (separate bases off main)
   convergence: boolean; // the integrator: pulls lines together, never merges itself
 };
 
@@ -89,15 +90,19 @@ export default function MergeStory(props: {
     const pos = new Map(order.map((id, i) => [id, i + 1]));
     return order.map((id) => {
       const m = nodes[id];
-      const deps = depsOf(id);
+      // parent (≠ main, in-forest) = a CODE dependency — this branch is stacked on it. requires =
+      // MERGE-AFTER fan-in: separate bases that must land first. The story labels them differently.
+      const parent = m?.parent && inForest.has(m.parent) && m.parent !== "main" ? m.parent : null;
+      const reqs = (m?.requires ?? []).filter((r) => inForest.has(r));
       return {
         id,
         type: typeOf(m?.description),
         subject: subjectOf(m?.description),
         purpose: m?.description ?? "",
         hasPurpose: !!m?.description,
-        deps: deps.map((d) => pos.get(d) ?? 0).sort((a, b) => a - b),
-        convergence: deps.length > 0 && !hasDownstream(id) && (m?.requires?.length ?? 0) > 0,
+        buildsOn: parent ? (pos.get(parent) ?? null) : null,
+        requires: reqs.map((r) => pos.get(r) ?? 0).filter((n) => n > 0).sort((a, b) => a - b),
+        convergence: !hasDownstream(id) && reqs.length > 0,
       };
     });
   });
@@ -166,10 +171,17 @@ export default function MergeStory(props: {
                   {(detail) => <p class="ms-detail">{detail()}</p>}
                 </Show>
                 <Show when={s.convergence}>
-                  <span class="ms-dep conv">converges {s.deps.join(" · ")} — convergence view, never merges</span>
+                  <span class="ms-dep conv">
+                    converges {[...(s.buildsOn ? [s.buildsOn] : []), ...s.requires].sort((a, b) => a - b).join(" · ")} — convergence view, never merges
+                  </span>
                 </Show>
-                <Show when={!s.convergence && s.deps.length}>
-                  <span class="ms-dep">↳ after {s.deps.join(" · ")}</span>
+                <Show when={!s.convergence}>
+                  <Show when={s.buildsOn}>
+                    <span class="ms-dep">↳ builds on {s.buildsOn}</span>
+                  </Show>
+                  <Show when={s.requires.length}>
+                    <span class="ms-dep req">⤿ requires {s.requires.join(" · ")} — merges after</span>
+                  </Show>
                 </Show>
               </div>
             </li>
@@ -211,7 +223,8 @@ const CSS = `
 .ms-type { color: var(--patina, #8a9a6b); }
 .ms-type.refactor { color: var(--gold, #e0ad4e); }
 .ms-scope { color: var(--ink-dim, #a89e8c); }
-.ms-dep { font-size: 11px; color: var(--ink-faint, #6f675a); }
+.ms-dep { display: block; font-size: 11px; color: var(--ink-faint, #6f675a); }
+.ms-dep.req { color: var(--patina, #8a9a6b); }
 .ms-dep.conv { color: var(--gold, #e0ad4e); opacity: .85; }
 .ms-row.convergence { opacity: .9; }
 `;
