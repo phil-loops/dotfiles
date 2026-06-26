@@ -26,6 +26,16 @@ function selectedLine() {
   return path ? { path, line: Number(m[2]) } : null;
 }
 
+// what an "open in nvim" gesture sends: the selected file+line, else the whole-PR gm Diffview.
+function nvimRequest(pr) {
+  const sel = selectedLine();
+  if (sel) {
+    return { payload: { number: pr.number, repo: pr.repo, path: sel.path, line: sel.line },
+             short: `:${sel.line}`, full: `${sel.path}:${sel.line}` };
+  }
+  return { payload: { number: pr.number, repo: pr.repo, view: "gm" }, short: "gm", full: "gm Diffview" };
+}
+
 function send(payload) {
   return new Promise((resolve) => {
     try {
@@ -77,11 +87,8 @@ function makeFab(pr) {
   nvimBtn.textContent = "→ nvim";
   nvimBtn.title = `Open PR #${pr.number} in nvim — the file+line if one is selected, else the whole-PR Diffview (⌥-click any line works too)`;
   nvimBtn.addEventListener("click", () => {
-    const sel = selectedLine();
-    const payload = sel
-      ? { number: pr.number, repo: pr.repo, path: sel.path, line: sel.line }
-      : { number: pr.number, repo: pr.repo, view: "gm" };
-    fire(nvimBtn, payload, "→ nvim", () => (sel ? `✓ :${sel.line}` : "✓ gm"));
+    const { payload, short } = nvimRequest(pr);
+    fire(nvimBtn, payload, "→ nvim", () => `✓ ${short}`);
   });
 
   const viewer = document.createElement("button");
@@ -231,7 +238,30 @@ function schedule() {
 tick();
 new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
 setInterval(tick, 3000);
+// "o" (no modifiers, not while typing) → open the selected file+line, else the gm Diffview.
+async function onOpenKey(e) {
+  if (e.key !== "o" || e.altKey || e.metaKey || e.ctrlKey) {
+    return;
+  }
+  const t = e.target;
+  if (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) {
+    return;
+  }
+  const pr = parsePr();
+  if (!pr) {
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  const { payload, full } = nvimRequest(pr);
+  toast(`→ ${full} — opening…`, true, true);
+  const res = await send(payload);
+  const ok = res?.status === 200 && res.body?.ok;
+  toast(ok ? `✓ ${full}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
+}
+
 document.addEventListener("click", onLineClick, true);
 document.addEventListener("keydown", altToggle, true);
 document.addEventListener("keyup", altToggle, true);
+document.addEventListener("keydown", onOpenKey, true);
 window.addEventListener("blur", () => document.body.classList.remove("gh-nvim-alt"));
