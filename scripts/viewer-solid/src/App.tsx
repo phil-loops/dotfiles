@@ -391,6 +391,33 @@ function Home() {
   };
   const [forestQuery, setForestQuery] = createSignal("");
 
+  // hover a forest row → a card of its branches + one-line purposes ("what's in here").
+  // cached per project; a short delay keeps it from flickering as the pointer crosses rows.
+  type FPurpose = { branch: string; thesis: string };
+  const [ftip, setFtip] = createSignal<{ rows: FPurpose[]; x: number; y: number } | null>(null);
+  const fpCache = new Map<string, FPurpose[]>();
+  let ftipFor: string | null = null;
+  let ftipTimer: ReturnType<typeof setTimeout> | undefined;
+  const showFtip = (project: string, el: HTMLElement) => {
+    clearTimeout(ftipTimer);
+    ftipFor = project;
+    const r = el.getBoundingClientRect();
+    const place = (rows: FPurpose[]) =>
+      ftipFor === project && rows.length && setFtip({ rows, x: r.left + 18, y: r.bottom + 6 });
+    const cached = fpCache.get(project);
+    if (cached) {
+      ftipTimer = setTimeout(() => place(cached), 160);
+      return;
+    }
+    ftipTimer = setTimeout(() => {
+      fetch("/forest-purposes?project=" + encodeURIComponent(project))
+        .then((res) => res.json() as Promise<FPurpose[]>)
+        .then((rows) => { fpCache.set(project, rows); place(rows); })
+        .catch(() => {});
+    }, 160);
+  };
+  const hideFtip = () => { clearTimeout(ftipTimer); ftipFor = null; setFtip(null); };
+
   const byProject = createMemo<[string, PR[]][]>(() => {
     const m = new Map<string, PR[]>();
     for (const p of prs.data || []) {
@@ -671,6 +698,8 @@ function Home() {
                   class="forest-row"
                   classList={{ parked: stuck() }}
                   to={{ kind: "forest", name: p.name }}
+                  onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement)}
+                  onMouseLeave={hideFtip}
                 >
                   <span
                     class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
@@ -812,6 +841,22 @@ function Home() {
 
         <Show when={flash()}>
           <div class="flash">{flash()}</div>
+        </Show>
+        <Show when={ftip()}>
+          {(t) => (
+            <div class="forest-tip" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
+              <For each={t().rows}>
+                {(r) => (
+                  <div class="forest-tip-row">
+                    <span class="forest-tip-branch">{leaf(r.branch)}</span>
+                    <span class="forest-tip-thesis" classList={{ none: !r.thesis }}>
+                      {r.thesis || "no purpose set"}
+                    </span>
+                  </div>
+                )}
+              </For>
+            </div>
+          )}
         </Show>
       </main>
     </div>

@@ -217,6 +217,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/forest-branches": return picker.forest_branches(self)
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
+        elif u.path == "/forest-purposes": return review.forest_purposes(self, u)
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
