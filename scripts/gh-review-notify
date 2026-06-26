@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""gh-review-notify — poll GitHub notifications, forward the ones that matter to your phone.
+
+GitHub has no real push to a third-party app, so this polls GET /notifications politely (via
+`gh api`, so auth is gh's own — no PAT to manage) and forwards the threads you care about to
+ntfy (https://ntfy.sh): your phone subscribes to a topic, no account, no keys.
+
+  gh-review-notify              one poll; print new matching threads
+  gh-review-notify --watch      loop forever, honoring GitHub's X-Poll-Interval
+  NTFY_TOPIC=<topic> gh-review-notify --watch   also push each to ntfy.sh/<topic>
+
+Env:
+  NTFY_TOPIC          ntfy topic to POST to (optional; print-only if unset)
+  NTFY_SERVER         ntfy base url (default https://ntfy.sh)
+  GH_NOTIFY_REASONS   comma list of notification `reason`s to forward
+                      (default: review_requested,state_change,mention,assign)
+
+Polling is conditional: we send If-Modified-Since with the prior Last-Modified, so an
+unchanged feed returns 304 and costs nothing against the rate limit. State (the last
+Last-Modified + the thread ids already forwarded) lives in ~/.cache/gh-review-notify/.
+This never marks anything read — it only observes.
+"""
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import time
+import urllib.request
+from pathlib import Path
+
+REASONS = set(
+    (os.environ.get("GH_NOTIFY_REASONS") or "review_requested,state_change,mention,assign").split(",")
+)
+NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
+NTFY_SERVER = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
+STATE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "gh-review-notify"
+STATE_FILE = STATE_DIR / "state.json"
+
+# a reason → (emoji, ntfy priority, short label) for legible output and phone alerts.
+REASON_STYLE = {
+    "review_requested": ("👀", "high", "review requested"),
+    "state_change": ("🔀", "default", "state changed"),
+    "mention": ("💬", "high", "mentioned"),
+    "assign": ("📌", "default", "assigned"),
+    "ci_activity": ("🔧", "low", "CI"),
+    "comment": ("💬", "default", "comment"),
+}
+
+
+def load_state() -> dict:
+    try:
+        return json.loads(STATE_FILE.read_text())
+    except (FileNotFoundError, ValueError):
+        return {"last_modified": None, "seen": []}
+
+
+def save_state(state: dict) -> None:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    # cap the seen-id list so it can't grow forever; recent ids are all dedup needs.
+    state["seen"] = state["seen"][-500:]
+    STATE_FILE.write_text(json.dumps(state))
+
+
+def poll(last_modified: str | None) -> tuple[int, list[dict], str | None, int]:
+    """One conditional poll. Returns (status, threads, new_last_modified, poll_interval)."""
+    args = ["gh", "api", "--include"]
+    if last_modified:
+        args += ["-H", f"If-Modified-Since: {last_modified}"]
+    args += ["/notifications?all=false&per_page=50"]
+    r = subprocess.run(args, capture_output=True, text=True)
+    if r.returncode != 0 and "304" not in r.stdout and "304" not in r.stderr:
+        sys.stderr.write(f"gh-review-notify: gh api failed:\n{r.stderr}\n")
+        return 0, [], last_modified, 60
+    head, _, body = r.stdout.partition("\n\n")
+    status = 304 if " 304" in head.split("\n", 1)[0] else 200
+    new_lm, interval = last_modified, 60
+    for line in head.splitlines():
+        low = line.lower()
+        if low.startswith("last-modified:"):
+            new_lm = line.split(":", 1)[1].strip()
+        elif low.startswith("x-poll-interval:"):
+            interval = int(line.split(":", 1)[1].strip() or 60)
+    if status == 304:
+        return 304, [], new_lm, interval
+    try:
+        threads = json.loads(body) if body.strip() else []
+    except ValueError:
+        threads = []
+    return 200, threads, new_lm, interval
+
+
+def html_url(thread: dict) -> str:
+    subj = thread.get("subject") or {}
+    api = subj.get("url") or ""
+    # api.github.com/repos/o/r/pulls/N → github.com/o/r/pull/N ; same for issues.
+    if "/repos/" in api:
+        path = api.split("/repos/", 1)[1].replace("/pulls/", "/pull/")
+        return f"https://github.com/{path}"
+    return (thread.get("repository") or {}).get("html_url", "https://github.com/notifications")
+
+
+def notify(thread: dict) -> None:
+    reason = thread.get("reason", "")
+    emoji, priority, label = REASON_STYLE.get(reason, ("•", "default", reason))
+    subj = (thread.get("subject") or {}).get("title", "(no title)")
+    repo = (thread.get("repository") or {}).get("full_name", "?")
+    url = html_url(thread)
+    print(f"{emoji} [{label}] {subj}  ·  {repo}\n   {url}", flush=True)
+    if not NTFY_TOPIC:
+        return
+    try:
+        req = urllib.request.Request(
+            f"{NTFY_SERVER}/{NTFY_TOPIC}",
+            data=f"{subj}\n{repo}".encode(),
+            headers={"Title": f"{emoji} {label}", "Priority": priority, "Click": url, "Tags": "octopus"},
+            method="POST",
+        )
+        urllib.request.urlopen(req, timeout=10).read()
+    except Exception as e:  # ntfy down shouldn't kill the loop
+        sys.stderr.write(f"gh-review-notify: ntfy POST failed: {e}\n")
+
+
+def run_once(state: dict) -> int:
+    status, threads, new_lm, interval = poll(state.get("last_modified"))
+    state["last_modified"] = new_lm
+    seen = set(state.get("seen", []))
+    fresh = 0
+    for t in threads:
+        if t.get("reason") not in REASONS:
+            continue
+        key = f"{t.get('id')}@{t.get('updated_at')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        state["seen"].append(key)
+        notify(t)
+        fresh += 1
+    if status == 200 and fresh == 0:
+        print(f"(nothing new matching {sorted(REASONS)})", flush=True)
+    save_state(state)
+    return interval
+
+
+def main() -> None:
+    watch = "--watch" in sys.argv[1:]
+    dest = f"→ ntfy.sh/{NTFY_TOPIC}" if NTFY_TOPIC else "(print only — set NTFY_TOPIC to push to your phone)"
+    print(f"gh-review-notify: reasons={sorted(REASONS)} {dest}", flush=True)
+    state = load_state()
+    if not watch:
+        run_once(state)
+        return
+    while True:
+        interval = run_once(state)
+        time.sleep(max(60, interval))
+
+
+if __name__ == "__main__":
+    main()
