@@ -53,21 +53,37 @@ export default function MergeStory(props: {
     };
     const hasDownstream = (id: string): boolean => ids.some((o) => o !== id && depsOf(o).includes(id));
 
-    // topological merge order (Kahn) — emit a node once all its deps are emitted; stable by leaf.
-    const order: string[] = [];
-    const done = new Set<string>();
-    const remaining = [...ids];
-    let guard = 0;
-    while (remaining.length && guard++ < 999) {
-      const ready = remaining.filter((id) => depsOf(id).every((d) => done.has(d)));
-      const batch = (ready.length ? ready : [...remaining]).sort((a, b) => leafOf(a).localeCompare(leafOf(b)));
-      for (const id of batch) {
-        order.push(id);
-        done.add(id);
-        remaining.splice(remaining.indexOf(id), 1);
+    // Merge order: consume /model's canonical mergeOrder VERBATIM (stack-merge-rank — the single
+    // authority, with the declared-order tie-break already baked in), so the story, the PR-body
+    // sequencing, and the map can't disagree. Sorting by the mergeRank field client-side is NOT
+    // equivalent (its tie-break would fall to node-key order). Local Kahn is only a fallback for an
+    // older /model that predates mergeOrder.
+    const canonical = props.model?.mergeOrder?.filter((id) => inForest.has(id));
+    let order: string[];
+    if (canonical && canonical.length) {
+      order = [...canonical];
+      const seen = new Set(order);
+      for (const id of ids) {
+        if (!seen.has(id)) {
+          order.push(id); // safety net: never silently drop a node mergeOrder happened to omit
+        }
       }
-      if (!ready.length) {
-        break; // a cycle (shouldn't happen) — dump the rest rather than spin
+    } else {
+      order = [];
+      const done = new Set<string>();
+      const remaining = [...ids];
+      let guard = 0;
+      while (remaining.length && guard++ < 999) {
+        const ready = remaining.filter((id) => depsOf(id).every((d) => done.has(d)));
+        const batch = (ready.length ? ready : [...remaining]).sort((a, b) => leafOf(a).localeCompare(leafOf(b)));
+        for (const id of batch) {
+          order.push(id);
+          done.add(id);
+          remaining.splice(remaining.indexOf(id), 1);
+        }
+        if (!ready.length) {
+          break; // a cycle (shouldn't happen) — dump the rest rather than spin
+        }
       }
     }
     const pos = new Map(order.map((id, i) => [id, i + 1]));
