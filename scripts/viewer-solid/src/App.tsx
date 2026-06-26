@@ -23,6 +23,7 @@ import { deleteMode, setDeleteMode } from "./deleteMode";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
+import { overviewView, setOverviewView } from "./overviewView";
 import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
@@ -823,7 +824,7 @@ const FO_VIEWS_CSS = `
 function ForestOverview() {
   const { location, navigate } = useViewerLocation();
   const project = () => forestKey(location());
-  const [ovView, setOvView] = createSignal<"map" | "story">("map");
+  const [ovView, setOvView] = [overviewView, setOverviewView]; // shared module signal so ⌘K can open straight into a view
   const model = createQuery(() => ({
     queryKey: ["model", project()],
     queryFn: () => provider.model(project()),
