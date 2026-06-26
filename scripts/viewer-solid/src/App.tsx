@@ -397,15 +397,14 @@ function Home() {
     return [...m.entries()];
   });
 
-  // a PR'd forest shows its forest meta UP in its "your open PRs" group, so it drops out
-  // of the FORESTS list entirely — no duplicate listing across the two sections.
-  const prProjects = createMemo(() => new Set((prs.data || []).map((p) => p.project).filter(Boolean)));
-  const nonPrProjects = createMemo(() => (projects.data || []).filter((p) => !prProjects().has(p.name)));
   const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
+  // the open PR for a forest, if any — drives the [PR #N] badge so a PR'd forest stays in the
+  // Forests list (the complete index) instead of vanishing the moment it gets a PR.
+  const prOf = (name: string): PR | undefined => (prs.data || []).find((p) => p.project === name);
 
   const filteredForests = createMemo(() => {
     const needle = forestQuery().trim().toLowerCase();
-    const list = nonPrProjects();
+    const list = projects.data || [];
     return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list;
   });
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
@@ -530,7 +529,7 @@ function Home() {
         <div class="thumb-brand"><span class="brand-mark">✦</span></div>
         <For each={[
           { id: "work" as const, label: "Work", count: workCount() },
-          { id: "forests" as const, label: "Forests", count: nonPrProjects().length },
+          { id: "forests" as const, label: "Forests", count: (projects.data || []).length },
           { id: "watching" as const, label: "Watching", count: (standalone.data || []).length },
         ]}>
           {(t) => (
@@ -643,7 +642,7 @@ function Home() {
             <ActionBar actions={[restackAllAction()]} />
           </Show>
         </div>
-        <Show when={nonPrProjects().length > 6}>
+        <Show when={(projects.data || []).length > 6}>
           <input
             class="forest-search"
             placeholder="filter forests…"
@@ -657,7 +656,7 @@ function Home() {
             <p class="loading">
               {forestQuery()
                 ? `no forest matches “${forestQuery()}”`
-                : (projects.data || []).length ? "every forest has an open PR ✦" : "no forests configured"}
+                : "no forests configured"}
             </p>
           }
         >
@@ -677,6 +676,13 @@ function Home() {
                   <span class="forest-meta">
                     {p.branches} {p.branches === 1 ? "node" : "nodes"}
                   </span>
+                  <Show when={prOf(p.name)}>
+                    {(pr) => (
+                      <span class="forest-pr" classList={{ draft: pr().draft }} title={pr().title}>
+                        {pr().draft ? "draft" : "PR"} #{pr().num}
+                      </span>
+                    )}
+                  </Show>
                   <Show when={p.merged && mergedAgo(p.merged.at)}>
                     {(rel) => (
                       <span class="forest-merged" title={p.merged!.title}>
