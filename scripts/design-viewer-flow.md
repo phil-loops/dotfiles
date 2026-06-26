@@ -15,14 +15,25 @@ trustworthy.
 - `gh-review-notify` (poll /notifications → ntfy) + launchd agent — `dea8bdd`, `925b0ca`
 - `restack-dryrun` (ambient-restack dry-run-first prototype) — `f17c45e`
 
-**Held / blocked:**
-- Map removal — verified live, held as `patches/kill-docked-map.patch`; still entangled
-  with the viewer session's *uncommitted* App.tsx WIP (idle but dirty). Lands when App.tsx
-  goes clean.
-- Local-delta composer — backend ALREADY EXISTS in `stack-squash` (`--unpushed` /
-  `--unstage`); it's an App.tsx UI over that, not a new CLI. Don't rebuild the engine.
-- All Phase 1-2 UI items — blocked on the live App.tsx; `stack-bless`/`stack-squash` lanes
-  also held by live sessions.
+**Unblocked + landed (2026-06-26 morning — the viewer session exited overnight; recovered its
+orphaned WIP into clean commits, then landed UI on top):**
+- Recovered dead session's WIP as its own commits: reconcile-diverged front+back
+  (`8e72d96`/`c1e3d7b`), readable-diff CSS (`e131cec`), diff-tuner (`b70f26c`).
+- Map removal — committed clean (`c4c9d8f`).
+- **Forests lists ALL forests + PR badges** (`31f2ccf`) — the IA fix.
+- **Collapsible files**, blessed-no-delta collapsed by default (`3b4d312`).
+- **Collapsible side panel** for full-width diff (`4748c10`).
+
+**Still to land (UI, App.tsx now free + viewer lane claimed):**
+- Cut `Watching` tab (+ salvage promote/checkout onto branch rows).
+- Purpose hover popovers — needs forest→branch purpose *aggregation* (a forest is many
+  branches), so more design than the other slices.
+- Back-to-flowchart with origin-node emphasis (the `nh-forest-back` link exists; make it
+  prominent + highlight the node you left on the overview).
+- Header diet — folds into the ambient-restack model (Phase 3); the biggest remaining piece.
+
+**Local-delta composer** — backend ALREADY EXISTS in `stack-squash` (`--unpushed`/`--unstage`);
+it's an App.tsx UI over that, not a new CLI. Don't rebuild the engine.
 
 ## North star
 
