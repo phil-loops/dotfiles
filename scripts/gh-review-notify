@@ -33,10 +33,28 @@ from pathlib import Path
 REASONS = set(
     (os.environ.get("GH_NOTIFY_REASONS") or "review_requested,state_change,mention,assign").split(",")
 )
-NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "").strip()
 NTFY_SERVER = os.environ.get("NTFY_SERVER", "https://ntfy.sh").rstrip("/")
 STATE_DIR = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "gh-review-notify"
 STATE_FILE = STATE_DIR / "state.json"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "gh-review-notify"
+TOPIC_FILE = CONFIG_DIR / "topic"
+LABEL = "com.philbrockman.gh-review-notify"
+PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+
+
+def configured_topic() -> str:
+    """ntfy topic from $NTFY_TOPIC, else the saved config — so the launchd agent (which
+    carries no shell env) still knows where to push."""
+    env = os.environ.get("NTFY_TOPIC", "").strip()
+    if env:
+        return env
+    try:
+        return TOPIC_FILE.read_text().strip()
+    except FileNotFoundError:
+        return ""
+
+
+NTFY_TOPIC = configured_topic()
 
 # a reason → (emoji, ntfy priority, short label) for legible output and phone alerts.
 REASON_STYLE = {
@@ -143,9 +161,88 @@ def run_once(state: dict) -> int:
     return interval
 
 
+PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{label}</string>
+  <key>ProgramArguments</key>
+  <array><string>{python}</string><string>{script}</string><string>--watch</string></array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>NTFY_TOPIC</key><string>{topic}</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{out}</string>
+  <key>StandardErrorPath</key><string>{err}</string>
+</dict>
+</plist>
+"""
+
+
+def plist_text(topic: str) -> str:
+    # stable system interpreter, not sys.executable (which can be Xcode's, prone to moving);
+    # the script is pure stdlib so /usr/bin/python3 runs it.
+    return PLIST_TEMPLATE.format(
+        label=LABEL, python="/usr/bin/python3", script=os.path.abspath(__file__), topic=topic,
+        out=str(STATE_DIR / "agent.out.log"), err=str(STATE_DIR / "agent.err.log"))
+
+
+def cmd_install(topic: str, dry: bool) -> None:
+    if not topic:
+        sys.exit("install: need a topic — `gh-review-notify install --topic <your-secret-topic>`")
+    text = plist_text(topic)
+    if dry:
+        print(text)
+        return
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    TOPIC_FILE.write_text(topic + "\n")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
+    PLIST.write_text(text)
+    uid = os.getuid()
+    subprocess.run(["launchctl", "bootout", f"gui/{uid}/{LABEL}"], capture_output=True)
+    r = subprocess.run(["launchctl", "bootstrap", f"gui/{uid}", str(PLIST)], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"install: launchctl bootstrap failed: {r.stderr.strip()}")
+    print(f"installed + started → pushing to ntfy.sh/{topic}\n  logs: {STATE_DIR}/agent.*.log\n  stop: gh-review-notify uninstall")
+
+
+def cmd_uninstall() -> None:
+    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{LABEL}"], capture_output=True)
+    if PLIST.exists():
+        PLIST.unlink()
+    print("uninstalled (agent stopped, plist removed; topic config kept)")
+
+
+def cmd_status() -> None:
+    loaded = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{LABEL}"], capture_output=True).returncode == 0
+    print(f"agent:   {'running' if loaded else 'not loaded'}")
+    print(f"plist:   {'present' if PLIST.exists() else 'absent'} ({PLIST})")
+    print(f"topic:   {NTFY_TOPIC or '(unset — run install --topic <x>)'}")
+    print(f"reasons: {sorted(REASONS)}")
+
+
 def main() -> None:
-    watch = "--watch" in sys.argv[1:]
-    dest = f"→ ntfy.sh/{NTFY_TOPIC}" if NTFY_TOPIC else "(print only — set NTFY_TOPIC to push to your phone)"
+    args = sys.argv[1:]
+    cmd = args[0] if args else ""
+    if cmd == "install":
+        topic = ""
+        if "--topic" in args:
+            i = args.index("--topic")
+            topic = args[i + 1] if i + 1 < len(args) else ""
+        cmd_install(topic or NTFY_TOPIC, "--dry-run" in args)
+        return
+    if cmd == "uninstall":
+        cmd_uninstall()
+        return
+    if cmd == "status":
+        cmd_status()
+        return
+    watch = "--watch" in args
+    dest = f"→ ntfy.sh/{NTFY_TOPIC}" if NTFY_TOPIC else "(print only — set NTFY_TOPIC or run `install`)"
     print(f"gh-review-notify: reasons={sorted(REASONS)} {dest}", flush=True)
     state = load_state()
     if not watch:
