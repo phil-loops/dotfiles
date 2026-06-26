@@ -51,6 +51,9 @@ export function ForestMap(props: {
   onPick: (b: string) => void;
   onClose: () => void;
   docked?: boolean;
+  // page = the forest's landing hero (full-bleed, no backdrop, no close): the map IS the view
+  // at /forests/<project>, not a rail beside a diff. docked = right-rail navigator in detail.
+  page?: boolean;
   onHoverNode?: (branch: string, el: HTMLElement) => void;
   onLeaveNode?: () => void;
 }) {
@@ -376,8 +379,8 @@ export function ForestMap(props: {
 
   return (
     <div
-      class={props.docked ? "fm-dock" : "fm-overlay"}
-      onClick={props.docked ? undefined : () => props.onClose()}
+      class={props.page ? "fm-page" : props.docked ? "fm-dock" : "fm-overlay"}
+      onClick={props.docked || props.page ? undefined : () => props.onClose()}
     >
       <style>{CSS}</style>
       <Show when={props.docked}>
@@ -387,7 +390,7 @@ export function ForestMap(props: {
       </Show>
       <svg
         class="fm-svg"
-        classList={{ focusing: !!spot(), kiln: !!kiln(), docked: !!props.docked }}
+        classList={{ focusing: !!spot(), kiln: !!kiln(), docked: !!props.docked, page: !!props.page }}
         viewBox={`0 0 ${layout().W} ${layout().H}`}
         width={layout().W}
         height={layout().H}
@@ -528,6 +531,11 @@ const CSS = `
 .fm-dock { grid-column: 3; position: sticky; top: 0; height: 100vh; overflow: auto; border-left: 1px solid var(--rule);
   background: var(--vellum); padding: 30px 8px 14px; display: flex; align-items: flex-start; justify-content: center; }
 .fm-svg.docked { max-width: 100%; max-height: calc(100vh - 44px); margin: 0 auto; }
+/* page: the forest landing hero — the map fills the main column under its header, no
+   backdrop and no close (you leave by picking a node or the back-link). */
+.fm-page { display: flex; align-items: flex-start; justify-content: center;
+  padding: 30px 22px 48px; overflow: auto; }
+.fm-svg.page { max-width: 100%; max-height: none; height: auto; margin: 0 auto; }
 .fm-dock-close { position: absolute; top: 8px; right: 10px; z-index: 1; background: none; border: none;
   color: var(--ink-faint); font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 6px; }
 .fm-dock-close:hover { color: var(--ink); }
