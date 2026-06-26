@@ -58,7 +58,13 @@ launchBtn.addEventListener("click", () => {
   });
 });
 
-document.getElementById("reload").addEventListener("click", () => {
+document.getElementById("reload").addEventListener("click", async () => {
+  // a content-script change can't reach an already-open tab on extension reload, so flag the
+  // active tab for the freshly-restarted background SW to refresh once the new code is live.
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tab?.id != null) {
+    await chrome.storage.local.set({ refreshTab: tab.id });
+  }
   chrome.runtime.reload();
   window.close();
 });

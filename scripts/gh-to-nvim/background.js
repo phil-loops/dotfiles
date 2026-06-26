@@ -1,5 +1,14 @@
 importScripts("./config.js");   // VIEWER_URL — single source of truth (see config.js)
 
+// after a popup "reload extension": the new content script isn't in the tab that was open, and
+// reloading the extension can't re-inject it — so the popup flags the active tab here and this
+// (freshly-restarted) SW refreshes it once the new code is live.
+chrome.storage.local.get("refreshTab").then(({ refreshTab }) => {
+  if (refreshTab == null) return;
+  chrome.storage.local.remove("refreshTab");
+  chrome.tabs.reload(refreshTab).catch(() => {});
+});
+
 // The content script runs on https://github.com and can't fetch http://localhost
 // (mixed content) — the service worker can, via host_permissions, so relay here.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
