@@ -1313,9 +1313,22 @@ function NodeDetail() {
     );
   });
 
+  const [panelOpen, setPanelOpen] = createSignal(true);
   return (
-    <div class="shell">
+    <div class="shell" classList={{ "panel-collapsed": !panelOpen() }}>
+      <Show when={!panelOpen()}>
+        <button class="panel-reopen" title="show the file panel" onClick={() => setPanelOpen(true)}>
+          ›
+        </button>
+      </Show>
       <aside class="spine">
+        <button
+          class="panel-collapse"
+          title="collapse the file panel for more diff width"
+          onClick={() => setPanelOpen(false)}
+        >
+          ‹
+        </button>
         <Link class="brand" to={{ kind: "home", tab: "forests" }}>
           <span class="brand-mark">✦</span> blessed
         </Link>
