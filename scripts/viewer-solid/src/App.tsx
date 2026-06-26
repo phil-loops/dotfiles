@@ -1269,7 +1269,7 @@ function NodeDetail() {
     else if (e.key === "3") setBase("blessed");
     else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
     else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
-    else if (e.key === "b") { e.preventDefault(); setPanelOpen((v) => !v); } // show / hide the file panel
+    else if (e.key === "b") { e.preventDefault(); filterAutoOpenedPanel = false; setPanelOpen((v) => !v); } // show / hide the file panel
     // ⇧B blesses the focused file and advances (B·B·B down a branch, no mouse); ⇧U unblesses it in
     // place. Per-file only — there is deliberately no bless-all key.
     else if (e.key === "B" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); fileCycle.next(); }
@@ -1302,9 +1302,22 @@ function NodeDetail() {
     const q = fileFilter().trim().toLowerCase();
     return !q || f.path.toLowerCase().includes(q);
   };
+  // ⌘F may pop the file panel open just to filter. Remember if WE opened it, so dismissing the
+  // filter (esc, or a 2nd ⌘F that hands off to native find) folds it back; if it was already open,
+  // it stays open.
+  let filterAutoOpenedPanel = false;
   const focusFilter = () => {
-    setPanelOpen(true);
+    if (!panelOpen()) {
+      filterAutoOpenedPanel = true;
+      setPanelOpen(true);
+    }
     queueMicrotask(() => filterEl?.focus());
+  };
+  const restorePanel = () => {
+    if (filterAutoOpenedPanel) {
+      filterAutoOpenedPanel = false;
+      setPanelOpen(false);
+    }
   };
   return (
     <div class="shell" classList={{ "panel-collapsed": !panelOpen() }}>
@@ -1349,7 +1362,9 @@ function NodeDetail() {
                       if (e.key === "Escape") {
                         e.preventDefault();
                         e.stopPropagation(); // don't let the global Esc fire (would jump to the map)
-                        if (fileFilter()) { setFileFilter(""); } else { filterEl?.blur(); }
+                        if (fileFilter()) { setFileFilter(""); } else { filterEl?.blur(); restorePanel(); }
+                      } else if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+                        restorePanel(); // a 2nd ⌘F bubbles to native find; fold an auto-opened panel back
                       }
                     }}
                   />
