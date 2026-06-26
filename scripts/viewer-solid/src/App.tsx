@@ -42,7 +42,6 @@ import type {
   NodeData,
   PR,
   Project,
-  Standalone,
   Purpose,
   Commit,
   RestackStatus,
@@ -339,32 +338,6 @@ function Home() {
     );
   });
 
-  // ── watching: opt-in pinned loose branches (git config stack.standalone) ──
-  // Not auto-discovery — branches you deliberately pin to keep an eye on. /branches
-  // (the typeahead source, ~all local heads) is heavy, so only fetch it while adding.
-  const standalone = createQuery(() => ({
-    queryKey: ["standalone"],
-    queryFn: () => provider.standalone(),
-  }));
-  const [adding, setAdding] = createSignal(false);
-  const [pick, setPick] = createSignal("");
-  const branches = createQuery(() => ({
-    queryKey: ["branches"],
-    queryFn: () => provider.branches(),
-    enabled: adding(),
-  }));
-  const pin = createMutation(() => ({
-    mutationFn: (body: { branch: string; op?: string }) => post("/standalone", body),
-    onSuccess: () => { standalone.refetch(); branches.refetch(); },
-  }));
-  const submitPin = () => {
-    const b = pick().trim();
-    if (!b) return;
-    pin.mutate({ branch: b });
-    setPick("");
-    setAdding(false);
-  };
-
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
     queryFn: () => provider.reviewRequests(),
@@ -380,7 +353,6 @@ function Home() {
     onSuccess: (_res, number) => {
       qc.setQueryData<ReviewRequest[]>(["review-requests"], (cur) =>
         cur?.map((r) => (r.number === number ? { ...r, imported: true } : r)));
-      standalone.refetch();
     },
   }));
 
@@ -487,72 +459,8 @@ function Home() {
     label: () => "↗ GitHub",
     run: () => window.open(url, "_blank"),
   });
-  // A watched branch has no url on the wire — resolve it (PR else compare) on click. Open the
-  // tab on the gesture so the popup blocker doesn't eat it, then point it once resolved.
-  const githubBranchAction = (branch: string): Action => ({
-    id: "ghb:" + branch,
-    title: "open this branch on GitHub — its PR if one exists, else a compare view",
-    label: () => "↗ GitHub",
-    run: () => {
-      const w = window.open("", "_blank");
-      fetch("/branch-url?branch=" + encodeURIComponent(branch))
-        .then((r) => r.json())
-        .then((d: { url?: string }) => {
-          if (d.url && w) {
-            w.location.href = d.url;
-          } else {
-            w?.close();
-            note(`no GitHub URL for ${leaf(branch)}`);
-          }
-        })
-        .catch(() => {
-          w?.close();
-          note("couldn’t resolve a GitHub URL");
-        });
-    },
-  });
-  const checkoutAction = (branch: string): Action => ({
-    id: "co:" + branch,
-    title: "move your main checkout (~/coding/loops) onto this branch",
-    label: () => "⤓ checkout",
-    run: () =>
-      post("/checkout", { branch }).then((r) =>
-        note(r.ok ? `✓ checked out ${leaf(branch)}` : `✗ ${r.err || "checkout failed (held elsewhere?)"}`)),
-  });
-  const promoteAction = (branch: string): Action => ({
-    id: "promote:" + branch,
-    title: "graduate this branch into its own forest (tagged under its leaf name)",
-    label: () => "⤴ promote",
-    run: () =>
-      post("/promote", { branch }).then((r) => {
-        if (r.ok) {
-          standalone.refetch();
-          projects.refetch();
-          note(`⤴ promoted ${leaf(branch)} to a forest`);
-        } else {
-          note(`✗ ${r.err || "promote failed"}`);
-        }
-      }),
-  });
-  const unpinAction = (branch: string): Action => ({
-    id: "unpin:" + branch,
-    class: "watch-unpin",
-    title: "stop watching",
-    label: () => "×",
-    run: () => pin.mutate({ branch, op: "remove" }),
-  });
   const workRowActions = (p: PR): Action[] =>
     [githubAction(p.url, p.branch), ...(canMutate ? [worktreeAction(p.branch)] : [])];
-  const watchRowActions = (b: Standalone): Action[] =>
-    canMutate
-      ? [
-          githubBranchAction(b.branch),
-          worktreeAction(b.branch),
-          checkoutAction(b.branch),
-          promoteAction(b.branch),
-          unpinAction(b.branch),
-        ]
-      : [githubBranchAction(b.branch)];
 
   return (
     <div class="ledger">

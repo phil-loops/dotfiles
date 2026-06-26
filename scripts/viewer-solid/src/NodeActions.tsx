@@ -128,6 +128,22 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
     onError: (e) => setDone(`✗ ${(e as Error).message || "squash failed"}`),
   }));
 
+  // graduate this branch into its own forest (a stack-project tag) — config-only, non-destructive.
+  const promote = createMutation(() => ({
+    mutationFn: () => post<{ ok: boolean; err?: string }>("/promote", { branch: props.branch }),
+    onSuccess: (r) => {
+      setOpen(false);
+      if (r.ok) {
+        setDone("⤴ promoted to its own forest");
+        qc.invalidateQueries({ queryKey: ["projects"] });
+        qc.invalidateQueries({ queryKey: ["model"] });
+      } else {
+        setDone(`✗ ${r.err || "promote failed"}`);
+      }
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "promote failed"}`),
+  }));
+
   // squash UNPUSHED commits → one voiced commit + oxfmt, NO push. Phil pushes to origin from
   // GitHub Desktop himself; this just tidies the commits for him first.
   const prep = createMutation(() => ({
@@ -248,7 +264,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
     onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
   }));
 
-  const busy = () => checkout.isPending || squash.isPending || prep.isPending || rebase.isPending || pull.isPending || contract.isPending;
+  const busy = () => checkout.isPending || squash.isPending || prep.isPending || rebase.isPending || pull.isPending || contract.isPending || promote.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
     fn();
@@ -360,6 +376,20 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             </button>
             <button class="nh-item" role="menuitem" onClick={() => setHeldAt(null)}>
               <span class="nh-item-ic" /> cancel
+            </button>
+          </Show>
+
+          {/* promote — graduate this branch into its own forest (config-only tag) */}
+          <Show when={!isReview()}>
+            <button
+              class="nh-item"
+              role="menuitem"
+              disabled={busy()}
+              title="graduate this branch into its own forest, tagged under its leaf name"
+              onClick={() => promote.mutate()}
+            >
+              <span class="nh-item-ic">⤴</span>
+              {promote.isPending ? "promoting…" : "promote to its own forest"}
             </button>
           </Show>
 
