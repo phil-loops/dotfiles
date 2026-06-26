@@ -125,8 +125,18 @@ async function onLineClick(e) {
   toast(ok ? `✓ ${path}:${line}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
 }
 
+let prewarmedPr = null;
 function altToggle(e) {
   document.body.classList.toggle("gh-nvim-alt", e.altKey);
+  // pre-warm: the moment you hold ⌥ (intending to ⌥-click a line), import the PR's branch in
+  // the background (path-less = no nvim open) so the click skips the slow first-time git fetch.
+  if (e.altKey) {
+    const pr = parsePr();
+    if (pr && prewarmedPr !== pr.number) {
+      prewarmedPr = pr.number;
+      send({ number: pr.number, repo: pr.repo });
+    }
+  }
 }
 
 function makeFileButton(pr, path) {
