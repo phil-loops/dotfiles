@@ -354,6 +354,26 @@ def open_on_branch(branch, path, pos=None):   # open <path> on <branch> in the w
     return proc.returncode, out, err
 
 
+def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in the warm review-nvim
+    # mirrors open_on_branch's wedged-nvim guard; the longer timeout covers <leader>gm's
+    # origin/main fetch + Diffview build.
+    args = [os.path.join(ctx.SCRIPTS, "stack-open"), "--review", branch]
+    proc = subprocess.Popen(args, cwd=ctx.CWD, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True, start_new_session=True)
+    try:
+        out, err = proc.communicate(timeout=20)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
+        return 504, "", "stack-open --review timed out"
+    if proc.returncode == 0:
+        _record_open(branch)
+    return proc.returncode, out, err
+
+
 def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
     d = json.loads(raw or "{}")
     code, out, err = open_on_branch(d.get("branch", ""), d.get("path", ""), d.get("pos") or d.get("line"))

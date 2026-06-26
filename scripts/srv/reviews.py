@@ -109,6 +109,11 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
         route = f"/branch/{branch}"
     else:
         route = f"/review/{num}"
+    if d.get("view") == "gm":   # whole-PR Diffview (<leader>gm) — no specific file/line
+        code, _out, err = picker.review_on_branch(branch)
+        req._send(200 if code == 0 else (504 if code == 504 else 500),
+                  json.dumps({"ok": code == 0, "branch": branch, "path": route, "opened": code == 0, "local": local, "err": err}))
+        return
     path = (d.get("path") or "").strip()
     if not path:
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
