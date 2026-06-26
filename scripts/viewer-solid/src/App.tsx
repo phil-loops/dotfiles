@@ -1229,26 +1229,6 @@ function NodeDetail() {
   // rows to a file via each .entry's existing data-path (see useDiffSelection).
   const { selection: claudeSel, clear: clearClaudeSel } = useDiffSelection();
 
-  // hover a spine node → float its branch purpose (the one-line thesis) beside it.
-  // Purposes are cheap + immutable for a session, so cache by branch and guard the
-  // async gap (if the pointer left before /purpose resolved, don't pop a stale tip).
-  const purposeCache = new Map<string, Purpose>();
-  const [tip, setTip] = createSignal<{ text: string; x: number; y: number } | null>(null);
-  let tipBranch: string | null = null;
-  const showTip = async (branch: string, el: HTMLElement) => {
-    tipBranch = branch;
-    let p = purposeCache.get(branch);
-    if (!p) {
-      try { p = await provider.purpose(branch); }
-      catch { p = { thesis: "" }; }
-      purposeCache.set(branch, p);
-    }
-    if (tipBranch !== branch || !p.thesis) return;
-    const r = el.getBoundingClientRect();
-    setTip({ text: p.thesis, x: r.right + 12, y: r.top });
-  };
-  const hideTip = () => { tipBranch = null; setTip(null); };
-
   // hover a diff line + press o (or click the gutter #) → open that exact line in the warm
   // review-nvim. Event-delegated off the surface so it works on diff2html's raw HTML.
   const [hover, setHover] = createSignal<{ path: string; line: number } | null>(null);
@@ -1640,13 +1620,6 @@ function NodeDetail() {
       <style>{NODE_KBD_CSS}</style>
       <Show when={flash()}>
         <div class="flash">{flash()}</div>
-      </Show>
-      <Show when={tip()}>
-        {(t) => (
-          <div class="purpose-tip" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
-            {t().text}
-          </div>
-        )}
       </Show>
     </div>
   );
