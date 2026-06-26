@@ -65,6 +65,37 @@ const mergedAgo = (iso?: string): string | null => {
 const isBlessed = (f: FileDiff): boolean =>
   f.status === "clean" || f.status === "blessed";
 
+// node-view file filter + the `?` shortcut cheatsheet — scoped here so it rides the viewer palette
+// without touching the shared index.css.
+const NODE_KBD_CSS = `
+.file-filter {
+  width: 100%; box-sizing: border-box; margin: 0 0 8px; font: inherit; font-size: 12px;
+  background: var(--bg, #100e0c); color: var(--ink, #e9e2d4);
+  border: 1px solid var(--rule, #3a332b); border-radius: 6px; padding: 5px 8px; outline: none;
+}
+.file-filter:focus { border-color: var(--gold, #e0ad4e); }
+.file-filter::placeholder { color: var(--ink-faint, #6f675a); }
+.kbd-help-scrim {
+  position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
+  background: rgba(8,7,6,.55);
+}
+.kbd-help {
+  min-width: 320px; max-width: 92vw; padding: 18px 20px; border-radius: 12px;
+  background: var(--raised, #1b1815); border: 1px solid var(--rule, #3a332b);
+  box-shadow: 0 24px 64px rgba(0,0,0,.5); font-family: "IBM Plex Mono", ui-monospace, monospace;
+  color: var(--ink, #e9e2d4);
+}
+.kbd-help-head { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint, #6f675a); margin-bottom: 14px; }
+.kbd-help dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; align-items: baseline; }
+.kbd-help dl > div { display: contents; }
+.kbd-help dt { display: flex; gap: 4px; justify-self: start; margin: 0; }
+.kbd-help dt .k {
+  font-size: 11px; line-height: 1.5; padding: 1px 7px; border-radius: 5px;
+  background: var(--bg, #100e0c); border: 1px solid var(--rule, #3a332b); color: var(--gold, #e0ad4e);
+}
+.kbd-help dd { margin: 0; font-size: 12.5px; color: var(--ink-dim, #a89e8c); }
+`;
+
 // the node you last left via "back to the forest map", so the overview can emphasize where you
 // were. Module-scope so it survives the route change from a node to its forest overview.
 const [cameFrom, setCameFrom] = createSignal("");
@@ -1190,9 +1221,11 @@ function NodeDetail() {
     return Number.isFinite(n) ? { path: ent.dataset.path ?? "", line: n } : null;
   };
 
-  // keyboard: j/k walk the spine; 1/2/3 switch the diff base; m toggles the forest map.
+  // keyboard: j/k walk the spine; 1/2/3 switch the diff base; b toggles the file panel; ? for all.
   const onKey = (e: KeyboardEvent) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); focusFilter(); return; }
     if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return; // leave OS/browser chords alone
     const list = spine();
     const i = list.findIndex((n) => n.id === active());
     if (e.key === "j" && i < list.length - 1) { e.preventDefault(); goto(list[i + 1].id); }
@@ -1202,10 +1235,17 @@ function NodeDetail() {
     else if (e.key === "3") setBase("blessed");
     else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
     else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
-    // b blesses the focused file and advances to the next (b·b·b down a branch, no mouse);
-    // u unblesses it in place. Per-file only — there is deliberately no bless-all key.
-    else if (e.key === "b" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); fileCycle.next(); }
-    else if (e.key === "u" && activeFile()) { e.preventDefault(); unbless.mutate(activeFile()); }
+    else if (e.key === "b") { e.preventDefault(); setPanelOpen((v) => !v); } // show / hide the file panel
+    // ⇧B blesses the focused file and advances (B·B·B down a branch, no mouse); ⇧U unblesses it in
+    // place. Per-file only — there is deliberately no bless-all key.
+    else if (e.key === "B" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); fileCycle.next(); }
+    else if (e.key === "U" && activeFile()) { e.preventDefault(); unbless.mutate(activeFile()); }
+    else if (e.key === "?") { e.preventDefault(); setShowHelp((v) => !v); }
+    else if (e.key === "Escape") {
+      // up a level: help → close it; else (when the chat drawer isn't grabbing Esc) → the forest map
+      if (showHelp()) { setShowHelp(false); }
+      else if (!chatTarget()) { const p = project(); if (p) { navigate({ kind: "forest", name: p }); } }
+    }
   };
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
@@ -1220,17 +1260,29 @@ function NodeDetail() {
   });
 
   const [panelOpen, setPanelOpen] = createSignal(true);
+  const [fileFilter, setFileFilter] = createSignal("");
+  const [showHelp, setShowHelp] = createSignal(false);
+  let filterEl: HTMLInputElement | undefined;
+  // file filter (⌘F): narrow both the sidebar list and the rendered diffs to matching paths.
+  const matchFilter = (f: FileDiff): boolean => {
+    const q = fileFilter().trim().toLowerCase();
+    return !q || f.path.toLowerCase().includes(q);
+  };
+  const focusFilter = () => {
+    setPanelOpen(true);
+    queueMicrotask(() => filterEl?.focus());
+  };
   return (
     <div class="shell" classList={{ "panel-collapsed": !panelOpen() }}>
       <Show when={!panelOpen()}>
-        <button class="panel-reopen" title="show the file panel" onClick={() => setPanelOpen(true)}>
+        <button class="panel-reopen" title="show the file panel (b)" onClick={() => setPanelOpen(true)}>
           ›
         </button>
       </Show>
       <aside class="spine">
         <button
           class="panel-collapse"
-          title="collapse the file panel for more diff width"
+          title="collapse the file panel for more diff width (b)"
           onClick={() => setPanelOpen(false)}
         >
           ‹
@@ -1253,8 +1305,22 @@ function NodeDetail() {
                   when={data().files.length}
                   fallback={<div class="spine-empty">nothing to review</div>}
                 >
+                  <input
+                    class="file-filter"
+                    ref={filterEl}
+                    placeholder="filter files… (⌘F)"
+                    value={fileFilter()}
+                    onInput={(e) => setFileFilter(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation(); // don't let the global Esc fire (would jump to the map)
+                        if (fileFilter()) { setFileFilter(""); } else { filterEl?.blur(); }
+                      }
+                    }}
+                  />
                   <ul class="file-list">
-                    <For each={data().files}>
+                    <For each={data().files.filter(matchFilter)}>
                       {(f) => (
                         <li
                           class="file-item"
@@ -1457,14 +1523,16 @@ function NodeDetail() {
         </header>
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
           <div class="diff-hint">
-            <span class="kbd-hint"><b>tab</b> next file · hover a line · <b>o</b> → nvim</span>
+            <span class="kbd-hint"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>
           <Show when={node.data} fallback={<p class="loading">loading…</p>}>
             {(data) => (
               <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
-                <For each={data().files}>
-                  {(f) => <FileEntry file={f} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
-                </For>
+                <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
+                  <For each={data().files.filter(matchFilter)}>
+                    {(f) => <FileEntry file={f} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
+                  </For>
+                </Show>
               </Show>
             )}
           </Show>
@@ -1476,6 +1544,27 @@ function NodeDetail() {
       <Show when={showChats()}>
         <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
       </Show>
+      <Show when={showHelp()}>
+        <div class="kbd-help-scrim" onClick={() => setShowHelp(false)}>
+          <div class="kbd-help" onClick={(e) => e.stopPropagation()}>
+            <div class="kbd-help-head">keyboard · reviewing a branch</div>
+            <dl>
+              <div><dt><span class="k">j</span><span class="k">k</span></dt><dd>previous / next branch</dd></div>
+              <div><dt><span class="k">tab</span></dt><dd>next file</dd></div>
+              <div><dt><span class="k">b</span></dt><dd>show / hide the file panel</dd></div>
+              <div><dt><span class="k">⌘F</span></dt><dd>filter files</dd></div>
+              <div><dt><span class="k">⇧B</span></dt><dd>bless file &amp; advance</dd></div>
+              <div><dt><span class="k">⇧U</span></dt><dd>unbless file</dd></div>
+              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span></dt><dd>base: branch / main / blessed</dd></div>
+              <div><dt><span class="k">c</span></dt><dd>commits ↔ diffs</dd></div>
+              <div><dt><span class="k">o</span></dt><dd>open hovered line in nvim</dd></div>
+              <div><dt><span class="k">esc</span></dt><dd>up to the forest map</dd></div>
+              <div><dt><span class="k">?</span></dt><dd>this help</dd></div>
+            </dl>
+          </div>
+        </div>
+      </Show>
+      <style>{NODE_KBD_CSS}</style>
       <Show when={flash()}>
         <div class="flash">{flash()}</div>
       </Show>
