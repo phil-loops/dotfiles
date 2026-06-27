@@ -104,8 +104,12 @@ rebase-survival harness ran T1/T2/T3 + the T7 repro against throwaway repos. Res
 **Verdict: KEEP the contrib (patch-id) ledger.** R2 fear was wrong — the core is trustworthy.
 So Phase 0 is NOT a rewrite and there is **no bless migration risk.** Bounded cleanup —
 **ALL DONE (2026-06-26):**
-- **base=blessed pill (R1/T7) — DELETED (`70750f5`).** No blessed ref exists to diff against
-  (the ledger stores per-file ids, not a tree); dropped the pill, its key-3 binding, cheatsheet.
+- **base=blessed pill (R1/T7) — NOT A BUG; KEPT.** Briefly deleted (`70750f5`) on the stale
+  audit line, then REVERTED (`735623f`) after testing the live code. The "0 rows" was a
+  point-in-time bug that had already been fixed: the backend's `since_blessed` path diffs vs
+  `parent` (never passes "blessed" to git diff) and renders per-file *unreviewed-delta* patches
+  — a working "what's left to review" view. `test-stack-bless.sh` T7 is its regression test and
+  PASSES. Lesson: verify a flagged bug against current code before acting on an audit snapshot.
 - **Classifier dead-arm (R4) — REMOVED (`7c045d3`).** `file_status` only emits
   clean/stale/unblessed; killed App.tsx's `"blessed"` arm + the stale type comment.
 - **Stamp contrib in `model_sig` (R5) — DONE (`a268ba2`).** A contrib-only bless now bumps
