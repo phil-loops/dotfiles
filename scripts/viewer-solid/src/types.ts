@@ -10,7 +10,7 @@ import { z } from "zod";
 
 export const FileDiff = z.object({
   path: z.string(),
-  status: z.string(), // "clean" | "blessed" | "added" | "modified" | …
+  status: z.string(), // "clean" | "stale" | "unblessed" (stack-forest file_status)
   add: z.number().optional(),
   del: z.number().optional(),
   patch: z.string().optional(),
