@@ -170,6 +170,8 @@ class H(BaseHTTPRequestHandler):
             return checkout.head(self)
         elif u.path == "/restack-status":  # is a handed-off restack paused for a human? drives the picker badge
             return restack.status(self, u)
+        elif u.path == "/restack-ambient":  # ambient daemon's latest dry-run report → the status chip
+            return restack.ambient(self)
         elif u.path == "/sync":   # fork-staleness vs origin/main (single branch)
             return sync.get_one(self, u)
         elif u.path == "/syncs":  # batch fork-staleness in one round-trip

@@ -370,6 +370,30 @@ function Home() {
     );
   });
 
+  // the ambient daemon's dry-run forest verdict (scripts/restack-daemon) → one quiet chip
+  const ambient = createQuery(() => ({
+    queryKey: ["restack-ambient"],
+    queryFn: () => provider.restackAmbient(),
+    refetchInterval: 15000,
+  }));
+  // collapse the summary to the single most-urgent signal: a real conflict outranks an
+  // already-merged ghost outranks pending restacks; all-zero behind = the forest is clean.
+  const ambientChip = (): { cls: string; text: string; title: string } | null => {
+    const a = ambient.data;
+    if (!a?.available || !a.report) return null;
+    const s = a.report.summary;
+    const stale = (a.age_s ?? 0) > 3600; // daemon hasn't refreshed in >1h → don't trust it
+    const age = a.age_s == null ? "" : a.age_s < 90 ? "just now"
+      : a.age_s < 3600 ? `${Math.round(a.age_s / 60)}m ago` : `${Math.round(a.age_s / 3600)}h ago`;
+    const title = `dry-run @ ${age}: ${s.clean} clean · ${s.would_restack} would-restack · `
+      + `${s.would_contract} merged · ${s.will_conflict} will-conflict · ${s.skipped} skipped (moves nothing)`;
+    if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
+    if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title };
+    if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title };
+    if (s.would_restack > 0) return { cls: "amb-restack", text: `⟳ ${s.would_restack} would restack`, title };
+    return { cls: "amb-clean", text: "✦ forest clean", title };
+  };
+
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
     queryFn: () => provider.reviewRequests(),
@@ -527,6 +551,9 @@ function Home() {
           <div class="brand big">
             <span class="brand-mark">✦</span> blessed
           </div>
+          <Show when={ambientChip()}>
+            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
+          </Show>
           <Show when={canMutate}>
             <button
               class="origin-btn"
