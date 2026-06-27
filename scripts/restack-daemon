@@ -12,6 +12,8 @@ set -euo pipefail
 #   restack-daemon --interval N    seconds between trunk polls (default 60)
 #   restack-daemon --status        print the current state file and exit
 #   restack-daemon --stop          signal a running daemon to exit
+#   restack-daemon install         run it ambiently via launchd (cwd repo = the watched repo)
+#   restack-daemon uninstall       stop + remove the launchd agent
 #   restack-daemon --apply         RESERVED — refused; daemon is dry-run-only for now
 #
 # State (under the common git dir, so all worktrees share it):
@@ -31,6 +33,8 @@ while (( $# )); do
     --once)     mode="once"; shift ;;
     --status)   mode="status"; shift ;;
     --stop)     mode="stop"; shift ;;
+    install)    mode="install"; shift ;;
+    uninstall)  mode="uninstall"; shift ;;
     --apply)    echo "restack-daemon: --apply is refused — this daemon is DRY-RUN-ONLY." >&2
                 echo "  Ref-moving lands in a later step, after the dry-run report has proven itself." >&2
                 exit 2 ;;
@@ -92,6 +96,57 @@ case "$mode" in
     tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
     reclassify "" "$tip"
     echo "restack-daemon: single dry-run pass written → $state"
+    exit 0 ;;
+  install)
+    label="com.philbrockman.restack-daemon"
+    plist="$HOME/Library/LaunchAgents/$label.plist"
+    repo="$(git rev-parse --show-toplevel)"
+    self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    mkdir -p "$(dirname "$plist")"
+    # KeepAlive restarts it if it dies; WorkingDirectory pins the watched repo (origin/main +
+    # forest config are per-repo). Stop = uninstall (KeepAlive would relaunch a --stop'd one).
+    cat > "$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$label</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>$self</string><string>--interval</string><string>$interval</string></array>
+  <key>WorkingDirectory</key><string>$repo</string>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>Nice</key><integer>10</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>$gd/restack-ambient.agent.out.log</string>
+  <key>StandardErrorPath</key><string>$gd/restack-ambient.agent.err.log</string>
+</dict>
+</plist>
+EOF
+    uid="$(id -u)"
+    launchctl bootout "gui/$uid/$label" 2>/dev/null || true
+    rm -f "$pidf"   # a prior run's pidfile would block the relaunched loop's single-instance guard
+    # bootout is async; an immediate re-bootstrap can race it and fail with EIO(5). Retry briefly.
+    ok=0
+    for _ in 1 2 3 4 5; do
+      launchctl bootstrap "gui/$uid" "$plist" 2>/dev/null && { ok=1; break; }
+      sleep 1
+    done
+    if (( ok )); then
+      echo "restack-daemon: installed + started (watching $repo every ${interval}s, DRY-RUN)"
+      echo "  state: $state    logs: $gd/restack-ambient.agent.*.log    stop: restack-daemon uninstall"
+    else
+      echo "restack-daemon: launchctl bootstrap failed (still loaded? try: restack-daemon uninstall)" >&2; exit 1
+    fi
+    exit 0 ;;
+  uninstall)
+    label="com.philbrockman.restack-daemon"
+    plist="$HOME/Library/LaunchAgents/$label.plist"
+    launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true
+    rm -f "$plist" "$pidf"
+    echo "restack-daemon: uninstalled (agent stopped, plist removed)"
     exit 0 ;;
 esac
 
