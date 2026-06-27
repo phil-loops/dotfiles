@@ -76,6 +76,34 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
   const [contractKids, setContractKids] = createSignal<string[] | null>(null);
   // the ⋯ menu open/closed
   const [open, setOpen] = createSignal(false);
+  // draft-PR overlay: the generated markdown (null = closed; "" while in-flight), editable
+  // before copy so you can tweak the framing. Token spend — only on the explicit menu click.
+  const [prBody, setPrBody] = createSignal<string | null>(null);
+  const [prBusy, setPrBusy] = createSignal(false);
+  const [copied, setCopied] = createSignal(false);
+  const draftPr = async () => {
+    setOpen(false);
+    setPrBusy(true);
+    setPrBody("");
+    try {
+      const r = await fetch("/pr-body?branch=" + encodeURIComponent(props.branch));
+      const text = await r.text();
+      setPrBody(r.ok ? text : `_(draft failed: ${text.slice(0, 200)})_`);
+    } catch (e) {
+      setPrBody(`_(draft failed: ${(e as Error).message})_`);
+    } finally {
+      setPrBusy(false);
+    }
+  };
+  const copyPr = async () => {
+    try {
+      await navigator.clipboard.writeText(prBody() ?? "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked — the textarea is still selectable for a manual copy */
+    }
+  };
   let root: HTMLDivElement | undefined;
 
   // close the menu on outside click / Escape so it never lingers over the diff.
@@ -438,6 +466,48 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
             </button>
           </Show>
 
+          {/* draft PR body — frame this branch in its forest (what + where-it-fits) via claude.
+              Opt-in token spend; you edit + copy the markdown, never auto-posted to GitHub. */}
+          <Show when={!isReview()}>
+            <button
+              class="nh-item"
+              role="menuitem"
+              disabled={busy() || prBusy()}
+              title="draft a GitHub PR description that frames this branch within its forest — what it does + where it fits the bigger picture (runs claude)"
+              onClick={() => draftPr()}
+            >
+              <span class="nh-item-ic">✎</span>
+              {prBusy() ? "drafting…" : "draft PR description"}
+            </button>
+          </Show>
+
+        </div>
+      </Show>
+
+      <Show when={prBody() !== null}>
+        <div class="pr-draft-backdrop" onClick={() => setPrBody(null)}>
+          <div class="pr-draft" onClick={(e) => e.stopPropagation()}>
+            <div class="pr-draft-head">
+              <span class="pr-draft-title">PR description · {props.branch.split("/").pop()}</span>
+              <div class="pr-draft-btns">
+                <button class="pr-draft-btn" disabled={prBusy()} onClick={() => copyPr()}>
+                  {copied() ? "copied ✓" : "copy"}
+                </button>
+                <button class="pr-draft-btn" onClick={() => setPrBody(null)}>close</button>
+              </div>
+            </div>
+            <Show
+              when={!prBusy()}
+              fallback={<div class="pr-draft-loading">drafting from the forest…</div>}
+            >
+              <textarea
+                class="pr-draft-body"
+                spellcheck={false}
+                value={prBody() ?? ""}
+                onInput={(e) => setPrBody(e.currentTarget.value)}
+              />
+            </Show>
+          </div>
         </div>
       </Show>
 

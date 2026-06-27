@@ -195,6 +195,36 @@ body {
 .nh-item.armed { color: var(--del); border-color: var(--del); }
 .nh-item-ic { width: 14px; flex: none; text-align: center; opacity: 0.85; }
 .nh-item-note { font-size: 11px; color: var(--ink-faint); padding: 4px 10px 2px; }
+
+/* draft-PR overlay — the generated markdown body, editable + copyable before you paste it
+   into GitHub. Centered modal over a dimmed backdrop; closes on backdrop click or "close". */
+.pr-draft-backdrop {
+  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(2px); padding: 40px;
+}
+.pr-draft {
+  width: min(820px, 92vw); max-height: 84vh; display: flex; flex-direction: column;
+  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 12px;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8); overflow: clip;
+}
+.pr-draft-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; border-bottom: 1px solid var(--rule);
+}
+.pr-draft-title { font-size: 13px; color: var(--ink-dim); font-family: var(--mono); }
+.pr-draft-btns { display: flex; gap: 8px; }
+.pr-draft-btn {
+  font: inherit; font-size: 12px; color: var(--patina); cursor: pointer;
+  background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 5px 12px;
+}
+.pr-draft-btn:hover:not(:disabled) { background: var(--vellum-edge); border-color: var(--patina); }
+.pr-draft-btn:disabled { opacity: 0.45; cursor: default; }
+.pr-draft-body {
+  flex: 1; min-height: 320px; resize: none; border: 0; outline: none;
+  background: var(--vellum); color: var(--ink-dim);
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 16px;
+}
+.pr-draft-loading { padding: 60px; text-align: center; color: var(--ink-faint); font-style: italic; }
 .loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
 
 /* a file is a ledger entry; blessed ones illuminate from the gutter */
@@ -565,12 +595,12 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   position: fixed; z-index: 60; max-width: 286px; pointer-events: none;
   background: var(--vellum-raise); color: var(--ink-dim);
   border: 1px solid var(--rule); border-left: 2px solid var(--gold-deep);
-  border-radius: 9px; padding: 9px 13px;
-  font-family: var(--display); font-style: italic; font-size: 13px; line-height: 1.42;
+  border-radius: 9px; padding: 10px 13px;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
   animation: tip-in .12s ease-out;
 }
-@keyframes tip-in { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
+@keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .purpose-tip { animation: none; } }
 /* forest hover card: each branch in the forest + its one-line purpose */
 .forest-tip {
@@ -589,7 +619,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .forest-tip-thesis {
-  font-family: var(--display); font-style: italic; font-size: 13px; color: var(--ink-dim); line-height: 1.38;
+  font-family: var(--mono); font-size: 11px; color: var(--ink-dim); line-height: 1.45;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .forest-tip-thesis.none { color: var(--ink-faint); opacity: 0.7; }

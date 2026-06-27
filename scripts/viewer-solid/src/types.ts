@@ -21,6 +21,11 @@ export const NodeMeta = z.object({
   parent: z.string().optional(),
   children: z.array(z.string()).optional(),
   requires: z.array(z.string()).optional(),
+  // one-line branch purpose (git branch.<name>.description), grafted on by /model.
+  description: z.string().optional(),
+  // deterministic merge-order depth (stack-merge-rank), grafted on by /model. Canonical
+  // order = stable sort by mergeRank asc. Shared authority with stack-pr-body — see _enrich.
+  mergeRank: z.number().optional(),
   stale: z.number(),
   total: z.number(),
   clean: z.number(),
@@ -35,6 +40,9 @@ export const ForestModel = z.object({
   nodes: z.record(z.string(), NodeMeta).optional(),
   roots: z.array(z.string()).optional(),
   links: z.array(z.object({ branch: z.string() })).optional(),
+  // canonical merge order (stack-merge-rank), tie-break already baked in — render verbatim,
+  // do NOT re-sort by NodeMeta.mergeRank (that loses the declared-order tie-break). See _enrich.
+  mergeOrder: z.array(z.string()).optional(),
 });
 export type ForestModel = z.infer<typeof ForestModel>;
 

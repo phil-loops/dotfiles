@@ -1,0 +1,69 @@
+#!/usr/bin/env python3
+# stack-merge-rank <branch-or-project> — the ONE deterministic merge-order authority for a forest,
+# so the story view, ForestMap, and stack-pr-body stop each rolling their own topo (and drifting on
+# tie-breaks / cycle handling). Consumed by review.py (grafts mergeRank onto /model nodes) and
+# stack-pr-body (deterministic sequencing).
+#
+# mergeRank = longest path from main over parent + requires edges. main = 0; a base off main = 1;
+# a node one fan-in/parent step deeper = 2; and so on. Siblings share a rank (they're independent).
+#
+# Canonical merge order = STABLE sort by mergeRank ascending over the project's branch-list order
+# (the order in stack-project.<p>.branch) — so equal ranks keep their declared order, identically
+# for every consumer. The emitted "order" array already encodes that; consumers can render it as-is.
+#
+# Output (JSON): {"project": "...", "rank": {branch: rank, ...}, "order": [branch, ...]}
+import json
+import subprocess
+import sys
+
+
+def cfg(*args):
+    return subprocess.run(["git", "config", *args], capture_output=True, text=True).stdout
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(json.dumps({"project": "", "rank": {}, "order": []}))
+        return
+    key = sys.argv[1]
+    # accept a branch (resolve its project) or a project name directly
+    project = cfg(f"stack-branch.{key}.project").strip()
+    if not project:
+        project = key
+    branches = [b for b in cfg("--get-all", f"stack-project.{project}.branch").splitlines() if b]
+    if not branches:
+        print(json.dumps({"project": project, "rank": {}, "order": []}))
+        return
+
+    parent, requires = {}, {}
+    known = set(branches)
+    for b in branches:
+        p = cfg(f"stack-branch.{b}.parent").strip() or "main"
+        parent[b] = p
+        requires[b] = [r for r in cfg("--get-all", f"stack-branch.{b}.requires").splitlines() if r]
+
+    memo = {}
+
+    def rank(b, seen):
+        if b == "main" or b not in known:
+            return 0
+        if b in memo:
+            return memo[b]
+        if b in seen:
+            return 0  # cycle guard — a forest shouldn't have one, but never loop forever
+        seen = seen | {b}
+        ups = []
+        if parent[b] != "main" and parent[b] in known:
+            ups.append(parent[b])
+        ups += [r for r in requires[b] if r in known]
+        r = 1 + max((rank(u, seen) for u in ups), default=0)
+        memo[b] = r
+        return r
+
+    ranks = {b: rank(b, set()) for b in branches}
+    # stable sort preserves the declared branch-list order within a rank
+    order = sorted(branches, key=lambda b: ranks[b])
+    print(json.dumps({"project": project, "rank": ranks, "order": order}))
+
+
+main()

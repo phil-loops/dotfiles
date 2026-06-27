@@ -23,6 +23,12 @@ const leafOf = (s: string): string => s.split("/").pop() ?? s;
 const isGhostId = (id: string): boolean => id.startsWith("✦");
 const nodeW = (b: string): number => 50 + leafOf(b).length * 7.2 + 34;
 const NODE_H = 28;
+// the purpose subtitle rides under the pill; truncate to roughly the pill's width so it
+// never sprawls past the node it describes (full text stays in the node's <title>).
+const fitPurpose = (s: string, w: number): string => {
+  const max = Math.max(16, Math.floor((w - 10) / 5.1));
+  return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
+};
 function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
   if (n.stale > 0) return "stale";
   if (n.total > 0 && n.clean === n.total) return "blessed";
@@ -216,9 +222,11 @@ export function ForestMap(props: {
     const { list, byId } = model();
     const ids = list.map((n) => n.id);
 
-    // rank = longest path from main over upstream edges (parent + requires). The ghost
-    // culmination (parent=main but requires the deep tips) ranks PAST them instead of
-    // collapsing to depth 0, so it lands at the far end of the diagonal. main = 0.
+    // rank = longest path from main over upstream edges (parent + requires). Prefer the
+    // server's mergeRank (the shared stack-merge-rank authority, so the map agrees with the
+    // story + pr-body) and fall back to the local walk for nodes /model didn't rank — the
+    // ghost culmination especially (parent=main but requires the deep tips), which ranks PAST
+    // them instead of collapsing to depth 0 so it lands at the far end of the diagonal. main = 0.
     const rankCache: Record<string, number> = {};
     const rankOf = (id: string): number => {
       if (id === "main") return 0;
@@ -226,6 +234,7 @@ export function ForestMap(props: {
       if (c != null) return c;
       rankCache[id] = 1; // cycle guard while recursing
       const n = byId[id];
+      if (n?.mergeRank != null) return (rankCache[id] = n.mergeRank);
       let r = 1;
       if (n) {
         const ups: string[] = [];
@@ -488,6 +497,12 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
                   </Show>
+                  <Show when={!isGhostId(n.id) && n.description}>
+                    <text class="fm-purpose" x={w / 2} y={NODE_H / 2 + 13}>
+                      <title>{n.description}</title>
+                      {fitPurpose(n.description!, w)}
+                    </text>
+                  </Show>
                   <Show when={isGhostId(n.id) && canMutate}>
                     <text
                       class="cnt fm-integ"
@@ -542,7 +557,7 @@ const CSS = `
 /* every edge flows gently by default — the forest is "live water": work is
    integration-ready and the world downstream is coherent. A dam (below) stops it. */
 .fm-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.6; opacity: 0;
-  stroke-dasharray: 5 6; animation: fm-fade .8s ease forwards, fm-drift 3.2s linear infinite; }
+  stroke-dasharray: 5 6; animation: fm-fade .8s ease forwards; }
 .fm-edge.blessed { stroke: var(--gold-deep); }
 .fm-edge.stale { stroke: var(--del); }
 .fm-edge.fanin { stroke: var(--patina); stroke-width: 1.3; stroke-dasharray: 11 3 2 3; animation-delay: .25s; }
@@ -563,6 +578,10 @@ const CSS = `
 .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
 .fm-node.active text { fill: var(--ink); }
 .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }
+/* purpose subtitle — the branch's one-line thesis under the pill, dim so the name leads;
+   lifts to ink-dim on hover/active so the focused node's intent is fully legible. */
+.fm-node .fm-purpose { fill: var(--ink-faint); font-family: var(--mono); font-size: 9px; text-anchor: middle; opacity: .72; }
+.fm-node:hover .fm-purpose, .fm-node.active .fm-purpose { fill: var(--ink-dim); opacity: 1; }
 /* integrate-preview badge on the ghost node — mono + small (beats the ghost's italic display
    via the extra class), faint until you hover, ember when the project won't land clean. */
 .fm-node.ghost .fm-integ { fill: var(--ink-faint); font-style: normal; font-family: var(--mono); font-size: 10px; text-anchor: end; }
@@ -575,12 +594,12 @@ const CSS = `
 .fm-node.stale .dot { fill: var(--del); stroke: var(--del); }
 .fm-node.unblessed .dot { stroke: var(--ink-faint); }
 .fm-main circle { fill: var(--gold-leaf); filter: drop-shadow(0 0 7px var(--gold-leaf)); }
-.fm-main text { fill: var(--gold-leaf); font-family: var(--display); font-style: italic; font-size: 15px; }
+.fm-main text { fill: var(--gold-leaf); font-family: var(--display); font-style: normal; font-size: 15px; }
 
 /* the endstate ghost (✦ <project>): a destination, not a branch — dashed + faint, no
    blessing dot or count, so it reads as the place the work is headed rather than work itself. */
 .fm-node.ghost rect { fill: none; stroke: var(--ink-faint); stroke-width: 1.3; stroke-dasharray: 5 4; }
-.fm-node.ghost text { fill: var(--ink-dim); font-family: var(--display); font-style: italic; font-size: 13.5px; }
+.fm-node.ghost text { fill: var(--ink-dim); font-family: var(--display); font-style: normal; font-size: 13.5px; }
 .fm-node.ghost .dot { display: none; }
 .fm-node.ghost:hover rect { stroke: var(--patina); fill: none; }
 
@@ -603,7 +622,7 @@ const CSS = `
 .fm-svg.focusing .fm-node.down rect { stroke: var(--del); stroke-width: 1.8; filter: drop-shadow(0 0 8px var(--del)); }              /* flows OUT — dependents */
 .fm-svg.focusing .fm-node.hov rect { stroke: var(--ink); stroke-width: 2; filter: drop-shadow(0 0 10px var(--gold-wash)); }          /* the hovered node */
 .fm-svg.focusing .fm-edge.lit { opacity: 1 !important; stroke: var(--gold-leaf) !important; stroke-width: 2.3;
-  stroke-dasharray: 6 7; animation: fm-flow .6s linear infinite; }
+  transition: opacity .14s, stroke .14s; }
 /* a frozen edge stays frozen even when the spotlight would otherwise light it */
 .fm-svg.focusing .fm-edge.frozen { opacity: .35 !important; stroke: var(--ink-faint) !important;
   stroke-width: 1.6; stroke-dasharray: 2 7 !important; animation: fm-fade .8s ease forwards !important; }
@@ -628,12 +647,9 @@ const CSS = `
 
 @keyframes fm-fade { to { opacity: 1; } }
 @keyframes fm-kiln-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
-@keyframes fm-drift { to { stroke-dashoffset: -22; } }  /* gentle ambient flow toward each edge's target */
 @keyframes fm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
-@keyframes fm-flow { to { stroke-dashoffset: -26; } }  /* dashes flow toward each edge's target */
 @media (prefers-reduced-motion: reduce) {
   .fm-edge, .fm-node { animation: none; opacity: 1; }
-  .fm-svg.focusing .fm-edge.lit { animation: none; }
   .fm-node.kiln-current .dot, .fm-node.kiln-parked .dot { animation: none; }
 }
 `;
