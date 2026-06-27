@@ -18,6 +18,7 @@ import {
   Project,
   Purpose,
   RestackStatus,
+  RestackAmbient,
   ReviewRemote,
   ReviewRequest,
   Standalone,
@@ -45,6 +46,7 @@ export interface DataProvider {
   head(): Promise<Head>;
   sync(branch: string): Promise<SyncState>;
   restackStatus(project?: string): Promise<RestackStatus>;
+  restackAmbient(): Promise<RestackAmbient>;
 }
 
 // Validate at the boundary. In live mode this is NON-FATAL: a drift between the
@@ -87,6 +89,7 @@ export class HttpProvider implements DataProvider {
   sync = (branch: string) => fetchJSON<unknown>("/sync?branch=" + q(branch)).then((d) => parse(SyncState, d, "sync"));
   restackStatus = (project?: string) =>
     fetchJSON<unknown>("/restack-status" + (project ? "?project=" + q(project) : "")).then((d) => parse(RestackStatus, d, "restack-status"));
+  restackAmbient = () => fetchJSON<unknown>("/restack-ambient").then((d) => parse(RestackAmbient, d, "restack-ambient"));
 }
 
 // Reads pre-baked /data/*.json blobs (see bake.mjs) — a frozen, slice-in-time
@@ -120,6 +123,8 @@ export class StaticProvider implements DataProvider {
   head = () => this.get("head.json", Head, "head");
   sync = (branch: string) => this.get(`sync/${slug(branch)}.json`, SyncState, "sync");
   restackStatus = () => Promise.resolve<RestackStatus>({ running: false });
+  // a frozen snapshot has no live daemon to report — the chip simply hides
+  restackAmbient = () => Promise.resolve<RestackAmbient>({ available: false });
 }
 
 // The one place a provider is chosen. `VITE_STATIC=1 vite build` bakes a snapshot

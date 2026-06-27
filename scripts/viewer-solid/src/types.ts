@@ -145,6 +145,31 @@ export const RestackStatus = z.object({
 });
 export type RestackStatus = z.infer<typeof RestackStatus>;
 
+// The ambient daemon's latest DRY-RUN report (scripts/restack-daemon). available=false
+// means the daemon hasn't run in this repo yet. The summary counts drive the status chip;
+// branches[] carries each verdict for the per-node detail.
+export const RestackAmbientBranch = z.object({
+  branch: z.string(),
+  parent: z.string(),
+  behind: z.number().nullable(),
+  verdict: z.string(), // clean | would-restack | would-contract | will-conflict | skip-* | error
+  would_do: z.string(),
+});
+export const RestackAmbient = z.object({
+  available: z.boolean(),
+  at: z.number().optional(),
+  age_s: z.number().nullable().optional(),
+  trunk_tip: z.string().optional(),
+  report: z.object({
+    branches: z.array(RestackAmbientBranch),
+    summary: z.object({
+      clean: z.number(), would_restack: z.number(), would_contract: z.number(),
+      will_conflict: z.number(), skipped: z.number(),
+    }),
+  }).optional(),
+});
+export type RestackAmbient = z.infer<typeof RestackAmbient>;
+
 export const SyncState = z.object({
   behind: z.number(), // commits on origin/main not yet in this branch
   syncable: z.boolean(), // safe to fast-forward-rebase (else stacked/published)

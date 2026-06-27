@@ -429,6 +429,19 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 }
 .origin-btn:hover:not(:disabled) { border-color: var(--gold-deep); color: var(--gold-leaf); }
 .origin-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* ambient-restack daemon chip: one quiet forest-wide verdict, sits next to the brand.
+   margin-right:auto keeps it left-grouped with the brand while ↻ check origin stays right. */
+.amb-chip {
+  margin-right: auto; margin-left: 14px; font-size: 11px; letter-spacing: 0.03em;
+  padding: 3px 9px; border-radius: 7px; border: 1px solid var(--rule);
+  background: var(--vellum-raise); cursor: default; white-space: nowrap;
+}
+.amb-chip.amb-clean { color: var(--gold-leaf); border-color: var(--gold-deep); }
+.amb-chip.amb-restack { color: var(--patina); }
+.amb-chip.amb-contract { color: var(--patina); border-color: var(--gold-deep); }
+.amb-chip.amb-conflict { color: var(--del); border-color: var(--del); }
+.amb-chip.amb-stale { color: var(--ink-faint); }
 .eyebrow {
   color: var(--ink-faint); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
   font-weight: 500; margin: 34px 0 12px;

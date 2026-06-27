@@ -186,6 +186,23 @@ def _spawn(chain, wt):
     return logpath
 
 
+def ambient(req):
+    # The ambient daemon (scripts/restack-daemon) writes its latest DRY-RUN report to
+    # <git-common-dir>/restack-ambient.json on every origin/main tip change. This serves it
+    # verbatim for the viewer's status chip — read-only, no classification on the request path
+    # (the daemon already did it). available=false simply means the daemon hasn't run here yet.
+    path = os.path.join(_gitdir(), "restack-ambient.json")
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        req._send(200, json.dumps({"available": False}))
+        return
+    data["available"] = True
+    data["age_s"] = int(time.time() - data.get("at", 0)) if data.get("at") else None
+    req._send(200, json.dumps(data))
+
+
 def status(req, u):
     # stack-restack writes <git-common-dir>/stack-restack-state/state on a conflict it
     # can't auto-resolve (removed on success/abort). Its presence == paused.
