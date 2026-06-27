@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# restack-daemon — ambient trunk watcher (Phase 3, piece (a)), DRY-RUN-FIRST.
+#
+# Watches origin/main and, ONLY when its tip SHA changes (event-driven — fires at the
+# merge rate, never a poll-thrash), runs restack-dryrun and writes a shared state file
+# the viewer reads for its status chip / will-conflict badges. It MOVES NOTHING: this is
+# the safety gate that has to prove itself before ref-moving is ever switched on.
+#
+#   restack-daemon                 loop: poll trunk, re-classify on every tip change
+#   restack-daemon --once          single pass (cron / manual refresh), then exit
+#   restack-daemon --interval N    seconds between trunk polls (default 60)
+#   restack-daemon --status        print the current state file and exit
+#   restack-daemon --stop          signal a running daemon to exit
+#   restack-daemon --apply         RESERVED — refused; daemon is dry-run-only for now
+#
+# State (under the common git dir, so all worktrees share it):
+#   restack-ambient.json   { mode, at, pid, interval, trunk_tip, report:{…dryrun…} }
+#   restack-ambient.log    one summary line per re-classify
+#   restack-ambient.pid    running loop's pid (single-instance guard)
+
+here="$(cd "$(dirname "$0")" && pwd)"
+dryrun="$here/restack-dryrun"
+MAIN="$(git config stack.main-branch 2>/dev/null || echo main)"
+interval=60
+mode="loop"
+[[ -x "$dryrun" ]] || { echo "restack-daemon: restack-dryrun not found next to this script" >&2; exit 2; }
+
+while (( $# )); do
+  case "$1" in
+    --once)     mode="once"; shift ;;
+    --status)   mode="status"; shift ;;
+    --stop)     mode="stop"; shift ;;
+    --apply)    echo "restack-daemon: --apply is refused — this daemon is DRY-RUN-ONLY." >&2
+                echo "  Ref-moving lands in a later step, after the dry-run report has proven itself." >&2
+                exit 2 ;;
+    --interval) interval="${2:-}"; shift 2 ;;
+    -h|--help)  sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "restack-daemon: unknown arg $1" >&2; exit 2 ;;
+  esac
+done
+[[ "$interval" =~ ^[0-9]+$ ]] && (( interval > 0 )) || { echo "restack-daemon: --interval must be a positive integer" >&2; exit 2; }
+
+gd="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { echo "restack-daemon: not a git repo" >&2; exit 2; }
+state="$gd/restack-ambient.json"
+log="$gd/restack-ambient.log"
+pidf="$gd/restack-ambient.pid"
+
+now() { date +%s; }
+logline() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log"; }
+
+child=""   # pid of the in-flight restack-dryrun, so --stop can kill a slow --deep pass
+
+# wrap restack-dryrun --json with daemon metadata, write atomically (tmp + mv in the
+# same dir so the viewer never reads a half-written file). The dryrun runs as a tracked
+# background child: a full --deep pass over 100+ branches takes minutes, and a daemon you
+# can't stop mid-pass is worse than no daemon — the TERM trap kills $child.
+reclassify() {
+  local pid="$1" reportf="$state.report.$$" tmp rc
+  "$dryrun" --no-fetch --json > "$reportf" 2>/dev/null &
+  child=$!
+  set +e; wait "$child"; rc=$?; set -e
+  child=""
+  if (( rc != 0 )); then
+    rm -f "$reportf"; logline "reclassify FAILED/interrupted (rc=$rc)"; return 1
+  fi
+  tmp="$state.tmp.$$"
+  jq --slurpfile r "$reportf" -n --arg mode "dry-run" \
+    --argjson at "$(now)" --argjson interval "$interval" \
+    --arg pid "$pid" '
+      ($r[0]) as $report |
+      {mode:$mode, at:$at, pid:(if $pid=="" then null else ($pid|tonumber) end),
+       interval:$interval, trunk_tip:$report.trunk_tip, report:$report}' > "$tmp"
+  mv "$tmp" "$state"; rm -f "$reportf"
+  local s; s="$(jq -r '.report.summary | "clean=\(.clean) restack=\(.would_restack) contract=\(.would_contract) conflict=\(.will_conflict) skipped=\(.skipped)"' "$state")"
+  logline "reclassified @ ${2:0:9} → $s"
+}
+
+case "$mode" in
+  status)
+    [[ -f "$state" ]] && cat "$state" || { echo "restack-daemon: no state yet ($state)"; exit 1; }
+    exit 0 ;;
+  stop)
+    if [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf")" 2>/dev/null; then
+      kill -TERM "$(cat "$pidf")" && echo "restack-daemon: signalled pid $(cat "$pidf") to stop"
+    else
+      echo "restack-daemon: no running daemon (stale or absent pidfile)"; rm -f "$pidf"
+    fi
+    exit 0 ;;
+  once)
+    git fetch -q origin "$MAIN" 2>/dev/null || true
+    tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
+    reclassify "" "$tip"
+    echo "restack-daemon: single dry-run pass written → $state"
+    exit 0 ;;
+esac
+
+# ---- loop mode: single-instance guard ----
+if [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
+  echo "restack-daemon: already running (pid $(cat "$pidf")) — use --stop first" >&2; exit 1
+fi
+echo $$ > "$pidf"
+running=1
+# job control on → each backgrounded reclassify is its own process group, so the trap can
+# reap the WHOLE subtree (restack-dryrun → rebase-classify → git), not just the direct child.
+set -m
+# TERM/INT must actually stop the loop (the old stack-restack-all trapped TERM and hung —
+# this clears the flag AND kills any in-flight --deep pass's process group so --stop lands
+# within ~1s, leaving no orphaned classify/git procs, not after a minutes-long classify pass.
+trap 'running=0; [[ -n "$child" ]] && kill -TERM -"$child" 2>/dev/null || true' TERM INT
+trap 'rm -f "$pidf"' EXIT
+
+logline "daemon start pid=$$ interval=${interval}s (DRY-RUN — moves nothing)"
+last_tip=""
+while (( running )); do
+  git fetch -q origin "$MAIN" 2>/dev/null || true
+  tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
+  if [[ -n "$tip" && "$tip" != "$last_tip" ]]; then
+    reclassify "$$" "$tip" && last_tip="$tip"
+  fi
+  # interruptible sleep: a TERM during the sleep wakes us, the trap clears `running`,
+  # and the while-check exits — so --stop is honoured within one fetch cycle, not one interval.
+  for _ in $(seq "$interval"); do (( running )) || break; sleep 1; done
+done
+logline "daemon stop pid=$$"
