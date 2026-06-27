@@ -193,6 +193,9 @@ esac
 nvim_to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }
 
 if [[ -S "$SOCK" ]] && nvim_to 2 nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
+  # close any leftover gm Diffview first — --remote-expr is synchronous, so it's gone before the
+  # file opens; otherwise the file opens INSIDE the Diffview layout instead of as a clean buffer.
+  nvim_to 4 nvim --server "$SOCK" --remote-expr 'execute("silent! DiffviewClose")' >/dev/null 2>&1 || true
   nvim_to 5 nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
   # force normal mode first (<C-\><C-N>): the warm instance may be in insert/visual/
   # cmdline mode when `o` fires from the browser — without the guard the ":<line>" keys
