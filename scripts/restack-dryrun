@@ -10,20 +10,30 @@ set -euo pipefail
 #
 #   restack-dryrun            fetch origin/main, classify every forest branch, report
 #   restack-dryrun --no-fetch use the local origin/main as-is (no network)
+#   restack-dryrun --json     emit a machine-readable report (for the daemon / viewer)
 #
 # Verdicts (per branch, vs fresh origin/main):
 #   clean          behind=0 — nothing to do
 #   would-restack  behind, replays clean (classify AUTOMATE) — daemon does it SILENTLY
 #   would-contract already-merged ghost (classify CONTRACT) — daemon would drop & rewire
-#   WILL-CONFLICT  real collision (classify CONFLICT, --deep confirmed) — needs a human
-#   skip(open-PR)  has an open PR — daemon never auto-restacks it (house rule)
-#   skip(stacked)  parent isn't main — restacked by the forest walk, not the trunk pass
+#   will-conflict  real collision (classify CONFLICT, --deep confirmed) — needs a human
+#   skip-open-pr   has an open PR — daemon never auto-restacks it (house rule)
+#   skip-stacked   parent isn't main — restacked by the forest walk, not the trunk pass
+#   error          classify failed — inspect by hand
 
 here="$(cd "$(dirname "$0")" && pwd)"
 classify="$here/rebase-classify"
 MAIN="$(git config stack.main-branch 2>/dev/null || echo main)"
 fetch=1
-[[ "${1:-}" == "--no-fetch" ]] && fetch=0
+json=0
+for a in "$@"; do
+  case "$a" in
+    --no-fetch) fetch=0 ;;
+    --json)     json=1 ;;
+    -h|--help)  sed -n '3,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "restack-dryrun: unknown arg $a" >&2; exit 2 ;;
+  esac
+done
 
 command -v git >/dev/null || { echo "git required" >&2; exit 2; }
 [[ -x "$classify" ]] || { echo "rebase-classify not found next to this script" >&2; exit 2; }
@@ -33,6 +43,7 @@ if (( fetch )); then
 fi
 trunk="origin/$MAIN"
 git rev-parse --verify --quiet "$trunk" >/dev/null || trunk="$MAIN"
+trunk_tip="$(git rev-parse --verify --quiet "$trunk" || echo "")"
 
 # forest branches = anything with a stack-branch.<b>.parent, plus every stack-project list entry.
 branches="$(
@@ -42,14 +53,21 @@ branches="$(
     git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk '{print $2}'
   } | sort -u
 )"
-[[ -n "$branches" ]] || { echo "no forest branches configured (stack-branch.*.parent / stack-project.*.branch)"; exit 0; }
+if [[ -z "$branches" ]]; then
+  if (( json )); then
+    jq -n --arg trunk "$trunk" --arg tip "$trunk_tip" \
+      '{trunk:$trunk, trunk_tip:$tip, branches:[], summary:{clean:0,would_restack:0,would_contract:0,will_conflict:0,skipped:0}}'
+  else
+    echo "no forest branches configured (stack-branch.*.parent / stack-project.*.branch)"
+  fi
+  exit 0
+fi
 
 # one gh call for all open-PR heads (best-effort; empty if gh/network unavailable).
 open_pr_heads=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ') "
 
-printf '%-40s %-8s %-16s %s\n' "BRANCH" "BEHIND" "VERDICT" "WOULD DO"
-printf '%-40s %-8s %-16s %s\n' "------" "------" "-------" "--------"
-
+# classify every branch into a TSV row: branch \t parent \t behind \t verdict \t would-do
+rows=()
 clean=0 restack=0 contract=0 conflict=0 skipped=0
 while IFS= read -r b; do
   [[ -n "$b" ]] || continue
@@ -57,18 +75,15 @@ while IFS= read -r b; do
   parent="$(git config "stack-branch.$b.parent" 2>/dev/null || echo "$MAIN")"
 
   if [[ "$open_pr_heads" == *" $b "* ]]; then
-    printf '%-40s %-8s %-16s %s\n' "$b" "-" "skip(open-PR)" "left alone — has an open PR"
-    skipped=$((skipped+1)); continue
+    rows+=("$b	$parent	-	skip-open-pr	left alone — has an open PR"); skipped=$((skipped+1)); continue
   fi
   if [[ "$parent" != "$MAIN" ]]; then
-    printf '%-40s %-8s %-16s %s\n' "$b" "-" "skip(stacked)" "parent=$parent — forest walk handles it"
-    skipped=$((skipped+1)); continue
+    rows+=("$b	$parent	-	skip-stacked	parent=$parent — forest walk handles it"); skipped=$((skipped+1)); continue
   fi
 
   behind="$(git rev-list --count "$b..$trunk" 2>/dev/null || echo 0)"
   if [[ "$behind" == "0" ]]; then
-    printf '%-40s %-8s %-16s %s\n' "$b" "0" "clean" "nothing to do"
-    clean=$((clean+1)); continue
+    rows+=("$b	$parent	0	clean	nothing to do"); clean=$((clean+1)); continue
   fi
 
   # definitive verdict: --deep trial-rebases in a throwaway worktree (read-only).
@@ -77,13 +92,31 @@ while IFS= read -r b; do
   code=$?
   set -e
   case "$code" in
-    0)  printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "would-restack" "auto-restack (silent)"; restack=$((restack+1)) ;;
-    20) printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "would-contract" "drop & rewire (already merged)"; contract=$((contract+1)) ;;
-    30) printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "WILL-CONFLICT" "⚠ needs you — real collision"; conflict=$((conflict+1)) ;;
-    *)  printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "error($code)" "classify failed — inspect by hand"; skipped=$((skipped+1)) ;;
+    0)  rows+=("$b	$parent	$behind	would-restack	auto-restack (silent)"); restack=$((restack+1)) ;;
+    20) rows+=("$b	$parent	$behind	would-contract	drop & rewire (already merged)"); contract=$((contract+1)) ;;
+    30) rows+=("$b	$parent	$behind	will-conflict	⚠ needs you — real collision"); conflict=$((conflict+1)) ;;
+    *)  rows+=("$b	$parent	$behind	error	classify failed ($code) — inspect by hand"); skipped=$((skipped+1)) ;;
   esac
 done <<< "$branches"
 
+if (( json )); then
+  printf '%s\n' "${rows[@]}" | jq -R -s \
+    --arg trunk "$trunk" --arg tip "$trunk_tip" \
+    --argjson sum "{\"clean\":$clean,\"would_restack\":$restack,\"would_contract\":$contract,\"will_conflict\":$conflict,\"skipped\":$skipped}" '
+      split("\n") | map(select(length > 0) | split("\t")) |
+      map({branch:.[0], parent:.[1],
+           behind:(if .[2] == "-" then null else (.[2]|tonumber) end),
+           verdict:.[3], would_do:.[4]}) |
+      {trunk:$trunk, trunk_tip:$tip, branches:., summary:$sum}'
+  exit 0
+fi
+
+printf '%-40s %-8s %-16s %s\n' "BRANCH" "BEHIND" "VERDICT" "WOULD DO"
+printf '%-40s %-8s %-16s %s\n' "------" "------" "-------" "--------"
+for r in "${rows[@]}"; do
+  IFS=$'\t' read -r b parent behind verdict would <<< "$r"
+  printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "$verdict" "$would"
+done
 echo "------"
-echo "summary: clean=$clean would-restack=$restack would-contract=$contract WILL-CONFLICT=$conflict skipped=$skipped"
+echo "summary: clean=$clean would-restack=$restack would-contract=$contract will-conflict=$conflict skipped=$skipped"
 echo "(dry run — nothing was moved)"
