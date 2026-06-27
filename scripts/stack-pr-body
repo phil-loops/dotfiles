@@ -1,0 +1,118 @@
+#!/bin/zsh
+# stack-pr-body — draft a GitHub PR description that frames ONE branch in its forest, in the
+# plain register of the branch descriptions. Four parts: WHAT (the one-line purpose) → WHERE IT
+# FITS (the project, what it builds on, what it pulls in via requires, what it unblocks — each
+# named by what it DOES, never by branch name) → THE CHANGE (the diff in plain language) →
+# SEQUENCING (merge-order, only when it depends on siblings). Opt-in token spend; on-demand only.
+#
+#   stack-pr-body <branch>   → GitHub-flavored markdown PR body on stdout
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+branch="${1:-}"
+[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch>" >&2; exit 2; }
+
+parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+[[ -n "$parent" ]] || parent=main
+desc=$(git config "branch.${branch}.description" 2>/dev/null || true)
+project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
+
+have_gh=0; command -v gh >/dev/null 2>&1 && have_gh=1
+desc_of() { git config "branch.$1.description" 2>/dev/null || true; }
+pr_of() {  # " (PR #N, state)" for a branch, or empty
+  (( have_gh )) || return 0
+  gh pr list --head "$1" --state all --json number,state --limit 1 2>/dev/null \
+    | python3 -c 'import sys,json
+d=json.load(sys.stdin)
+print(" (PR #%s, %s)"%(d[0]["number"],d[0]["state"].lower())) if d else print("",end="")' 2>/dev/null || true
+}
+# one labelled line per related branch: its plain purpose + PR status (NO branch name — the
+# whole point is to reference work by what it does, so the model never echoes a slug).
+line_for() {
+  local d; d=$(desc_of "$1")
+  [[ -n "$d" ]] || d="(no description set)"
+  print -r -- "- ${d}$(pr_of "$1")"
+}
+
+# BUILDS ON — the parent (skip when it forks straight off main: that's an independent base).
+buildon=""
+[[ -n "$parent" && "$parent" != "main" ]] && buildon=$(line_for "$parent")
+
+# PULLS IN — this branch's own requires (fan-in deps it carries; must merge first).
+pulls=""
+while read -r r; do [[ -z "$r" ]] && continue; pulls+="$(line_for "$r")"$'\n'; done \
+  < <(git config --get-all "stack-branch.${branch}.requires" 2>/dev/null || true)
+
+# UNBLOCKS — everything that builds on this: children (parent==this) ∪ consumers (require this).
+typeset -a downstream
+while read -r c; do [[ -n "$c" ]] && downstream+=("$c"); done \
+  < <( (git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true) \
+       | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}')
+while read -r c; do [[ -n "$c" ]] && downstream+=("$c"); done \
+  < <( (git config --get-regexp '^stack-branch\..*\.requires$' 2>/dev/null || true) \
+       | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.requires$/,"",$1); print $1}')
+downstream=(${(u)downstream})
+unblocks=""
+for c in $downstream; do unblocks+="$(line_for "$c")"$'\n'; done
+
+# CANONICAL MERGE ORDER — from the single shared authority (stack-merge-rank), so the body's
+# Sequencing matches the forest story view exactly instead of the model re-guessing an order.
+order_list=$("${0:A:h}/stack-merge-rank" "$branch" 2>/dev/null | python3 -c '
+import sys, json, subprocess
+try: d = json.load(sys.stdin)
+except ValueError: sys.exit(0)
+me = sys.argv[1]
+for i, b in enumerate(d.get("order", []), 1):
+    desc = subprocess.run(["git","config",f"branch.{b}.description"],capture_output=True,text=True).stdout.strip() or "(no description)"
+    print(f"{i}. {desc}" + ("   <-- THIS PR" if b == me else ""))
+' "$branch" 2>/dev/null || true)
+
+files="$(git diff --name-only "${parent}...${branch}" | paste -sd', ' - || true)"
+diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,16000]}"
+
+read -r -d '' prompt <<EOF || true
+You are drafting a GitHub pull request description for ONE branch in a stacked-PR forest.
+Write GitHub-flavored markdown ONLY — no preamble, no surrounding code fence, no sign-off.
+
+SHAPE — exactly these parts, in this order:
+1. One plain sentence: what this PR does (the opening line; use the purpose below near-verbatim).
+2. "### Where it fits" — name the project/feature, what this builds on, what it pulls in via
+   requires, and what it unblocks. Open the body with this (where it sits comes before the change).
+3. "### The change" — what the diff actually does, in plain language.
+4. "### Sequencing" — ONLY include this heading if this branch builds on a sibling (a parent that
+   is not main) or pulls in requires; state the merge-order plainly, following the CANONICAL MERGE
+   ORDER below verbatim (do NOT invent your own order). OMIT the whole section for an independent
+   base (forks off main, no requires).
+
+VOICE — plain register. Transform jargon into meaning:
+- Drop raw identifiers (function names, variable names, column/field names) and terms-of-art
+  (idempotent, monotonic, short-circuit, memoize, invalidate). Say what they DO. This holds in
+  EVERY section, including "The change" where the prose hugs the diff — name things by role:
+    e.g. NOT "markLocked is idempotent so repeat calls short-circuit"
+         BUT "marking an already-locked goal does nothing, so it is safe to repeat"
+    e.g. NOT "reads the isLocked field"        BUT "reads the locked flag"
+    e.g. NOT "the findByGoalAndSource query"   BUT "the query that loads the attachment"
+- KEEP forest vocabulary (requires, fan-in, convergence, base, merges after) — that is meaning,
+  not jargon.
+- Reference every related branch by WHAT IT DOES (the purposes given below), NEVER by branch name.
+
+FOREST FACTS (already plain — quote their meaning, do not echo branch names):
+PROJECT: ${project:-(none)}
+THIS PR'S PURPOSE: ${desc:-(none set — derive a one-line summary from the diff)}
+BUILDS ON:
+${buildon:-- main directly — an independent base of the project (forks off main, merges on its own schedule)}
+PULLS IN (fan-in via requires — must merge first):
+${pulls:-(none)}
+UNBLOCKS (builds on this once it lands):
+${unblocks:-(nothing builds on this yet)}
+CANONICAL MERGE ORDER (authoritative — the whole project, by what each does; use for Sequencing):
+${order_list:-(single branch / not in a project)}
+CHANGED FILES: ${files}
+
+DIFF (truncated to 16k):
+${diff}
+EOF
+
+resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
+[[ -n "$resp" ]] || resp=$'_(could not draft — is `claude` on PATH?)_'
+printf '%s\n' "$resp"

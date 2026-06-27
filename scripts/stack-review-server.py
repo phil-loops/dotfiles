@@ -161,6 +161,7 @@ class H(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(data)
         elif u.path == "/model":          return review.model(self, u)
+        elif u.path == "/pr-body":        return review.pr_body(self, u)
         elif u.path == "/sig":   # cheap change-detector for live polling (no stack-forest)
             # repo + pid let stack-review-serve detect a foreign-repo squatter on the
             # stable port and reclaim it (kill REPO_ID's holder, relaunch for its own repo).

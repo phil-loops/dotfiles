@@ -28,9 +28,45 @@ def model(req, u):
     if r.returncode != 0:
         req._send(500, json.dumps({"error": r.stderr}))
     else:
+        out = _enrich(r.stdout, branch)
         _mcache.clear()
-        _mcache[ck] = r.stdout
-        req._send(200, r.stdout)
+        _mcache[ck] = out
+        req._send(200, out)
+
+
+def _enrich(raw, branch):
+    # graft what the forest views want without an N-fetch round trip:
+    #   description    — the branch's one-line purpose (git branch description), per node
+    #   mergeRank      — deterministic merge-order depth, per node (handy for layout/labels)
+    #   mergeOrder     — the canonical total order as a flat array, top-level. Consume this
+    #                    VERBATIM: sorting nodes by mergeRank client-side reintroduces drift
+    #                    (the rank ties, and the tie-break is the stack-project DECLARED order,
+    #                    which the nodes map does not preserve). The array bakes the tie-break in.
+    # All from stack-merge-rank — the single topo authority shared with stack-pr-body.
+    # Best-effort: malformed JSON or a missing field just passes through untouched.
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return raw
+    ranks, order = {}, []
+    rk = ctx.run([os.path.join(ctx.SCRIPTS, "stack-merge-rank"), branch])
+    if rk.returncode == 0:
+        try:
+            mr = json.loads(rk.stdout) or {}
+            ranks, order = mr.get("rank", {}), mr.get("order", [])
+        except ValueError:
+            pass
+    for bid, meta in (data.get("nodes") or {}).items():
+        if not isinstance(meta, dict):
+            continue
+        desc = ctx.run(["git", "config", f"branch.{bid}.description"]).stdout.strip()
+        if desc:
+            meta["description"] = desc
+        if bid in ranks:
+            meta["mergeRank"] = ranks[bid]
+    if order:
+        data["mergeOrder"] = order
+    return json.dumps(data)
 
 
 def node(req, u):
@@ -50,6 +86,16 @@ def node(req, u):
     r = ctx.run(args)
     req._send(200 if r.returncode == 0 else 500,
               r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
+
+
+def pr_body(req, u):
+    # draft a GitHub PR description that frames the branch in its forest (what + where-it-fits).
+    # Spends tokens (stack-pr-body → claude) — only ever hit from an explicit "draft PR" click.
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-pr-body"), branch])
+    req._send(200 if r.returncode == 0 else 500,
+              r.stdout if r.returncode == 0 else "_(draft failed — see server log)_",
+              "text/plain; charset=utf-8")
 
 
 def purpose_get(req, u):
