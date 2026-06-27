@@ -46,11 +46,14 @@ git rev-parse --verify --quiet "$trunk" >/dev/null || trunk="$MAIN"
 trunk_tip="$(git rev-parse --verify --quiet "$trunk" || echo "")"
 
 # forest branches = anything with a stack-branch.<b>.parent, plus every stack-project list entry.
+# NB: `git config --get-regexp` exits 1 when nothing matches; the `|| true` on each keeps
+# that (and `set -o pipefail`) from aborting the run in a forest that has parents but no
+# project lists (or vice-versa).
 branches="$(
   {
     git config --name-only --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
-      | sed 's/^stack-branch\.//; s/\.parent$//'
-    git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk '{print $2}'
+      | sed 's/^stack-branch\.//; s/\.parent$//' || true
+    git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk '{print $2}' || true
   } | sort -u
 )"
 if [[ -z "$branches" ]]; then
@@ -63,8 +66,9 @@ if [[ -z "$branches" ]]; then
   exit 0
 fi
 
-# one gh call for all open-PR heads (best-effort; empty if gh/network unavailable).
-open_pr_heads=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ') "
+# one gh call for all open-PR heads (best-effort; empty if gh/network/GH-remote unavailable —
+# the trailing `|| true` keeps a gh failure from tripping `set -o pipefail` and killing the run).
+open_pr_heads=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ' || true) "
 
 # classify every branch into a TSV row: branch \t parent \t behind \t verdict \t would-do
 rows=()
