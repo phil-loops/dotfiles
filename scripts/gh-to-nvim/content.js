@@ -10,25 +10,35 @@ function parsePr() {
   return { repo: `${m[1]}/${m[2]}`, number: Number(m[3]) };
 }
 
-// the line GitHub has selected (you clicked a line number): the URL hash carries it as
-// #diff-<sha256(path)>R<line> (R = the new-file side). Resolve the file via the anchored
-// element's diff table; null when nothing's selected → caller falls back to the gm Diffview.
-function selectedLine() {
-  const m = location.hash.match(/^#(diff-[0-9a-f]+)R(\d+)$/);
+async function sha256hex(s) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+// the line GitHub has selected (you clicked a line number): the URL hash is
+// #diff-<sha256(path)>R<line> (R = the new-file side). GitHub's diff is virtualized so the
+// anchor element often isn't in the DOM — resolve the path by hashing each RENDERED diff
+// table's path and matching the hash. null → caller falls back to the gm Diffview.
+async function selectedLine() {
+  const m = location.hash.match(/^#diff-([0-9a-f]+)R(\d+)/);
   if (!m) {
     return null;
   }
-  const anchored = document.getElementById(location.hash.slice(1)) || document.getElementById(m[1]);
-  const table =
-    anchored?.closest('table[aria-label^="Diff for: "]') ||
-    anchored?.querySelector?.('table[aria-label^="Diff for: "]');
-  const path = table?.getAttribute("aria-label")?.replace(/^Diff for: /, "");
-  return path ? { path, line: Number(m[2]) } : null;
+  const wantHash = m[1];
+  const line = Number(m[2]);
+  for (const table of document.querySelectorAll('table[aria-label^="Diff for: "]')) {
+    const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
+    if ((await sha256hex(path)) === wantHash) {
+      return { path, line };
+    }
+  }
+  console.warn(`[gh-to-nvim] line ${line} selected but its file isn't rendered — falling back to gm`);
+  return null;
 }
 
 // what an "open in nvim" gesture sends: the selected file+line, else the whole-PR gm Diffview.
-function nvimRequest(pr) {
-  const sel = selectedLine();
+async function nvimRequest(pr) {
+  const sel = await selectedLine();
   if (sel) {
     return { payload: { number: pr.number, repo: pr.repo, path: sel.path, line: sel.line },
              short: `:${sel.line}`, full: `${sel.path}:${sel.line}` };
@@ -86,8 +96,8 @@ function makeFab(pr) {
   nvimBtn.className = "gh-nvim-fab-btn";
   nvimBtn.textContent = "→ nvim";
   nvimBtn.title = `Open PR #${pr.number} in nvim — the file+line if one is selected, else the whole-PR Diffview (⌥-click any line works too)`;
-  nvimBtn.addEventListener("click", () => {
-    const { payload, short } = nvimRequest(pr);
+  nvimBtn.addEventListener("click", async () => {
+    const { payload, short } = await nvimRequest(pr);
     fire(nvimBtn, payload, "→ nvim", () => `✓ ${short}`);
   });
 
@@ -253,7 +263,7 @@ async function onOpenKey(e) {
   }
   e.preventDefault();
   e.stopPropagation();
-  const { payload, full } = nvimRequest(pr);
+  const { payload, full } = await nvimRequest(pr);
   toast(`→ ${full} — opening…`, true, true);
   const res = await send(payload);
   const ok = res?.status === 200 && res.body?.ok;
