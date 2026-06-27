@@ -102,15 +102,19 @@ rebase-survival harness ran T1/T2/T3 + the T7 repro against throwaway repos. Res
   swallowed, 0 rows.
 
 **Verdict: KEEP the contrib (patch-id) ledger.** R2 fear was wrong — the core is trustworthy.
-So Phase 0 is NOT a rewrite and there is **no bless migration risk.** Bounded cleanup only:
-- **Fix/remove the `base=blessed` pill (R1/T7)** — repoint at the per-file `stale` diff or
-  delete it.
-- **Dedupe the classifier (R4)** — one `file_status`, delete the dead `"blessed"` arm in
-  `App.tsx:65`.
-- **Stamp `stack-blessed-contrib.json` in `model_sig` (R5)** so a contrib-only write can't
-  serve a stale spine.
-- Keep the blob ledger only as the documented legacy/nvim fallback. (R6 rename-leak, R8
-  locking: note as low-priority follow-ups.)
+So Phase 0 is NOT a rewrite and there is **no bless migration risk.** Bounded cleanup —
+**ALL DONE (2026-06-26):**
+- **base=blessed pill (R1/T7) — DELETED (`70750f5`).** No blessed ref exists to diff against
+  (the ledger stores per-file ids, not a tree); dropped the pill, its key-3 binding, cheatsheet.
+- **Classifier dead-arm (R4) — REMOVED (`7c045d3`).** `file_status` only emits
+  clean/stale/unblessed; killed App.tsx's `"blessed"` arm + the stale type comment.
+- **Stamp contrib in `model_sig` (R5) — DONE (`a268ba2`).** A contrib-only bless now bumps
+  the sig, so `/model` can't serve a stale cached spine.
+- **R8 locking — DONE (`d23eb99`).** Was meant low-priority, but the race was severe: rapid
+  keyboard blessing lost 7-8 of 12 concurrent blesses (measured). mkdir mutex + stale-steal;
+  all 12 land. Partial: nvim's lua writes the same files unlocked (different lane).
+- Keep the blob ledger only as the documented legacy/nvim fallback. (R6 rename-leak: the one
+  remaining low-priority follow-up.)
 
 ---
 
