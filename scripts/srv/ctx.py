@@ -29,5 +29,7 @@ def model_sig():
             return os.path.getmtime(p)
         except OSError:
             return 0
-    stamp = refs + str(mt(os.path.join(gd, "config"))) + str(mt(os.path.join(gd, "stack-blessed.json")))
+    stamp = (refs + str(mt(os.path.join(gd, "config")))
+             + str(mt(os.path.join(gd, "stack-blessed.json")))
+             + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
     return hashlib.sha1(stamp.encode()).hexdigest()
