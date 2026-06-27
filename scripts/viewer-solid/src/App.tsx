@@ -936,7 +936,7 @@ function NodeDetail() {
   createEffect(() => active() && setCameFrom(active()));
 
   // diff base + view (diffs|commits) reset when you change node.
-  const [base, setBase] = createSignal(""); // "" parent | "main" | "blessed" last-blessed
+  const [base, setBase] = createSignal(""); // "" parent | "main"
   const [view, setView] = createSignal<"diffs" | "commits">("diffs");
   let lastActive: string | undefined;
   createEffect(() => {
@@ -1017,7 +1017,7 @@ function NodeDetail() {
   }));
 
   const goto = (b: string) => navigate(withNode(location(), b));
-  const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
+  const BASES: [string, string][] = [["", "parent"], ["main", "main"]];
   // The forest map is a destination (the /forests/<project> overview), never docked into
   // the review surface — the diff gets the full width. "back to the forest map" lives in the
   // node header (nh-forest-back).
@@ -1270,7 +1270,6 @@ function NodeDetail() {
     else if (e.key === "k" && i > 0) { e.preventDefault(); goto(list[i - 1].id); }
     else if (e.key === "1") setBase("");
     else if (e.key === "2") setBase("main");
-    else if (e.key === "3") setBase("blessed");
     else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
     else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
     else if (e.key === "b") { e.preventDefault(); filterAutoOpenedPanel = false; setPanelOpen((v) => !v); } // show / hide the file panel
@@ -1608,7 +1607,7 @@ function NodeDetail() {
               <div><dt><span class="k">⌘F</span></dt><dd>filter files</dd></div>
               <div><dt><span class="k">⇧B</span></dt><dd>bless file &amp; advance</dd></div>
               <div><dt><span class="k">⇧U</span></dt><dd>unbless file</dd></div>
-              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span></dt><dd>base: branch / main / blessed</dd></div>
+              <div><dt><span class="k">1</span><span class="k">2</span></dt><dd>base: branch / main</dd></div>
               <div><dt><span class="k">c</span></dt><dd>commits ↔ diffs</dd></div>
               <div><dt><span class="k">o</span></dt><dd>open hovered line in nvim</dd></div>
               <div><dt><span class="k">esc</span></dt><dd>up to the forest map</dd></div>
