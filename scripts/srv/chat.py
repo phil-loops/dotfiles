@@ -140,11 +140,14 @@ def merge_subjects(req, raw):
     prompt = (
         f"For each numbered branch below (its plain purpose + a truncated diff), produce two things:\n"
         f"- subject: a git commit subject, the text after 'type({scope}): '. Pithy, imperative, "
-        f"lower-case first word, no trailing period, under ~60 chars.\n"
+        f"lower-case first word, no trailing period, under ~60 chars. PLAIN ONLY — describe the "
+        f"behavior in words; NO raw identifiers (function/method/table/column/field names, camelCase "
+        f"or snake_case tokens). 'remove the dead ClickHouse exposure queries', NOT 'remove "
+        f"hasAnyExposureForGoal'. Identifiers belong in detail, never the subject.\n"
         f"- detail: ONE or TWO sentences naming what it does AND the most relevant non-trivial "
         f"implementation detail you can see in the diff (a mechanism, an invariant, a gotcha, a "
         f"perf/correctness choice). Concrete and specific. Plain register — explain in words, but "
-        f"you MAY name a key field/table/function if it's load-bearing. Skip if the diff is trivial.\n"
+        f"HERE you MAY name a key field/table/function if it's load-bearing. Skip if the diff is trivial.\n"
         f"Return ONLY a JSON object mapping each number (a string) to {{\"subject\":…, \"detail\":…}}. "
         f"No prose, no fences.\n\n" + blocks
     )

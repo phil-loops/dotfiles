@@ -27,6 +27,7 @@ type Step = {
   hasPurpose: boolean;
   buildsOn: number | null; // parent position — a CODE dep (this branch is stacked on it)
   requires: number[]; // requires positions — MERGE-AFTER fan-in deps (separate bases off main)
+  depth: number; // how deep in the parent (builds-on) chain — drives the visual indent
   convergence: boolean; // the integrator: pulls lines together, never merges itself
 };
 
@@ -53,6 +54,19 @@ export default function MergeStory(props: {
       return ds;
     };
     const hasDownstream = (id: string): boolean => ids.some((o) => o !== id && depsOf(o).includes(id));
+    // depth in the parent (builds-on) chain only — a separate base off main is depth 0 even if it
+    // `requires` something; a true child is one deeper than its parent. Drives the indent.
+    const depthOf = (id: string): number => {
+      let d = 0;
+      let cur = nodes[id]?.parent;
+      const guard = new Set<string>();
+      while (cur && inForest.has(cur) && cur !== "main" && !guard.has(cur)) {
+        guard.add(cur);
+        d++;
+        cur = nodes[cur]?.parent;
+      }
+      return d;
+    };
 
     // Merge order: consume /model's canonical mergeOrder VERBATIM (stack-merge-rank — the single
     // authority, with the declared-order tie-break already baked in), so the story, the PR-body
@@ -102,6 +116,7 @@ export default function MergeStory(props: {
         hasPurpose: !!m?.description,
         buildsOn: parent ? (pos.get(parent) ?? null) : null,
         requires: reqs.map((r) => pos.get(r) ?? 0).filter((n) => n > 0).sort((a, b) => a - b),
+        depth: depthOf(id),
         convergence: !hasDownstream(id) && reqs.length > 0,
       };
     });
@@ -157,7 +172,8 @@ export default function MergeStory(props: {
           {(s, i) => (
             <li
               class="ms-row"
-              classList={{ convergence: s.convergence }}
+              classList={{ convergence: s.convergence, nested: s.depth > 0 }}
+              style={{ "margin-left": `${s.depth * 26}px` }}
               onClick={() => props.onPick(s.id)}
               title={`open ${leafOf(s.id)}`}
             >
@@ -211,6 +227,8 @@ const CSS = `
   border: 1px solid transparent;
 }
 .ms-row:hover { background: var(--raised, #1b1815); border-color: var(--rule, #3a332b); }
+.ms-row.nested { border-left: 2px solid var(--rule, #3a332b); border-top-left-radius: 0; border-bottom-left-radius: 0; }
+.ms-row.nested:hover { border-left-color: var(--patina, #8a9a6b); }
 .ms-num {
   flex: none; width: 22px; text-align: center; font-size: 12px; color: var(--ink-faint, #6f675a);
   border-right: 1px solid var(--rule, #3a332b); padding-right: 10px;
