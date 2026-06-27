@@ -64,8 +64,7 @@ const mergedAgo = (iso?: string): string | null => {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 };
-const isBlessed = (f: FileDiff): boolean =>
-  f.status === "clean" || f.status === "blessed";
+const isBlessed = (f: FileDiff): boolean => f.status === "clean";
 
 // node-view file filter + the `?` shortcut cheatsheet — scoped here so it rides the viewer palette
 // without touching the shared index.css.
