@@ -44,6 +44,22 @@ contrib="$git_dir/stack-blessed-contrib.json"
 [[ -f "$contrib" ]] || echo '{}' > "$contrib"
 tmp="$(mktemp)"
 
+# Serialize the ledger read-modify-write: the viewer's keyboard blessing fires rapid
+# concurrent /bless POSTs that each exec stack-bless, and their jq-then-mv interleaves
+# (last mv wins → lost blesses). mkdir is the portable atomic mutex (no flock on macOS).
+# Partial: nvim's stack-blessed.lua writes the same files unlocked, so this guards the
+# CLI/viewer path against itself, not against a simultaneous nvim bless.
+lockdir="$git_dir/stack-blessed.lock"
+for _ in {1..40}; do
+  mkdir "$lockdir" 2>/dev/null && break
+  # steal a crashed holder's lock — 10s dwarfs any real bless write
+  if [[ -d "$lockdir" ]] && (( $(date +%s) - $(stat -f %m "$lockdir" 2>/dev/null || echo 0) > 10 )); then
+    rmdir "$lockdir" 2>/dev/null || true
+  fi
+  sleep 0.05
+done
+trap 'rmdir "$lockdir" 2>/dev/null || true' EXIT
+
 if (( unbless )); then
   if [[ -n "$file" ]]; then
     for L in "$ledger" "$contrib"; do
