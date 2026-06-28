@@ -129,7 +129,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
       if (r.ok) {
         setHeldAt(null);
         setOpen(false);
-        setDone(`✓ checked out in ~/coding/loops`);
+        setDone(`✓ checked out in ${r.worktree || "your main checkout"}`);
         qc.invalidateQueries({ queryKey: ["head"] });
       } else if (r.worktree) {
         setHeldAt(r.worktree); // held elsewhere → offer to free it
@@ -392,7 +392,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
                 class="nh-item"
                 role="menuitem"
                 disabled={busy()}
-                title="move your main checkout (~/coding/loops) onto this branch"
+                title="move this repo's main checkout onto this branch"
                 onClick={fire(() => checkout.mutate(false))}
               >
                 <span class="nh-item-ic">⤓</span>

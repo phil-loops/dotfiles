@@ -80,4 +80,4 @@ def move(req, raw):
             return
     r = ctx.run(["git", "-C", main_wt, "checkout", branch])
     req._send(200 if r.returncode == 0 else 500,
-              json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
+              json.dumps({"ok": r.returncode == 0, "worktree": main_wt, "out": r.stdout, "err": r.stderr}))
