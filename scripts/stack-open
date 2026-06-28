@@ -187,12 +187,12 @@ file="$dir/$rel"
 
 # Resolve the opaque <pos> into nvim locators — THE one place the grammar lives.
 # Grow it here (patterns, ranges) and callers/server never change.
-#   warm_jump = keys sent to a live instance after :edit;  launch_arg = a +cmd for a cold launch.
-warm_jump=""; launch_arg=""
+#   warm_expr = a VimL command run synchronously after :edit;  launch_arg = a +cmd for a cold launch.
+warm_expr=""; launch_arg=""
 case "$pos" in
   "")        ;;                                                  # no position — open at top
-  <->)       warm_jump=":${pos}";                  launch_arg="+${pos}" ;;          # line
-  <->:<->)   warm_jump=":call cursor(${pos%%:*},${pos##*:})"
+  <->)       warm_expr="normal! ${pos}Gzz";        launch_arg="+${pos}" ;;          # line
+  <->:<->)   warm_expr="call cursor(${pos%%:*},${pos##*:}) | normal! zz"
              launch_arg="+call cursor(${pos%%:*},${pos##*:})" ;;                    # line:col
   *)         echo "stack-open: unrecognized <pos> '$pos' — opening at top" >&2 ;;
 esac
@@ -208,10 +208,11 @@ if [[ -S "$SOCK" ]] && nvim_to 2 nvim --server "$SOCK" --remote-expr '1' >/dev/n
   # file opens; otherwise the file opens INSIDE the Diffview layout instead of as a clean buffer.
   nvim_to 4 nvim --server "$SOCK" --remote-expr 'execute("silent! DiffviewClose")' >/dev/null 2>&1 || true
   nvim_to 5 nvim --server "$SOCK" --remote "$file"          # warm instance — hot tsserver
-  # force normal mode first (<C-\><C-N>): the warm instance may be in insert/visual/
-  # cmdline mode when `o` fires from the browser — without the guard the ":<line>" keys
-  # are swallowed by that mode and the jump silently no-ops.
-  [[ -n "$warm_jump" ]] && nvim_to 3 nvim --server "$SOCK" --remote-send "<C-\><C-N>${warm_jump}<CR>zz" >/dev/null 2>&1 || true   # jump + center
+  # Jump synchronously via --remote-expr — an RPC that nvim serializes AFTER the :edit's reload
+  # on its main loop — instead of async --remote-send keys. Otherwise a file that changed on disk
+  # (e.g. a re-fetched PR head) reloads WHILE the keystrokes arrive and the cursor lands wrong.
+  # execute() also runs regardless of the user's current mode, so no <C-\><C-N> dance is needed.
+  [[ -n "$warm_expr" ]] && nvim_to 3 nvim --server "$SOCK" --remote-expr "execute('${warm_expr}')" >/dev/null 2>&1 || true
 else
   # Socket missing OR the probe timed out (a WEDGED nvim still holding it). Just rm +
   # respawn would leave the zombie alive while the new nvim binds a fresh socket → the
