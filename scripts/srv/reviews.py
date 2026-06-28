@@ -79,6 +79,14 @@ def _local_branch_for_pr(num):
     return branch
 
 
+def _refresh_review_branch(num):
+    # Re-sync review/pr-N to the live PR head before a precise line-open, so the line lands where
+    # GitHub shows it — a stale fetch drifts line numbers (a pushed refactor moves the line). The
+    # bless ledger is content-keyed (patch-id/blob), so re-fetch is safe; cheap when already
+    # current; --force because a PR head can be force-pushed.
+    ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
+
+
 def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <path> at <line> in nvim
     d = json.loads(raw or "{}")
     num = str(d.get("number", "")).strip().lstrip("#")
@@ -119,6 +127,8 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
         picker.prepare_branch(branch)   # warm the worktree in the background for a fast first open
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
         return
+    if not local:
+        _refresh_review_branch(num)   # land on the line GitHub shows, not a stale fetch's
     code, _out, err = picker.open_on_branch(branch, path, d.get("line"))
     req._send(200 if code == 0 else (504 if code == 504 else 500),
               json.dumps({"ok": code == 0, "branch": branch, "path": route, "opened": code == 0, "local": local, "err": err}))
