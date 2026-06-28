@@ -1084,6 +1084,14 @@ function NodeDetail() {
     enabled: canMutate && healthIds().length > 0,
   }));
   const nodeHealth = (b: string) => health.data?.[b];
+  // the ambient daemon's per-branch dry-run verdict (shared cache with Home's chip) — surfaces
+  // "would restack" / "conflicts with #PR" on the node you're actually looking at.
+  const ambient = createQuery(() => ({
+    queryKey: ["restack-ambient"],
+    queryFn: () => provider.restackAmbient(),
+    refetchInterval: 15000,
+  }));
+  const nodeAmbient = (b: string) => ambient.data?.report?.branches.find((x) => x.branch === b);
   const unhealthy = createMemo(() =>
     spine().filter((n) => {
       const h = nodeHealth(n.id);
@@ -1569,6 +1577,27 @@ function NodeDetail() {
                   {reconcile.isPending ? "ejecting…" : "reconcile"}
                 </button>
               </span>
+            </Show>
+            {/* ambient dry-run verdict for THIS branch (same data as Home's chip) — the daemon
+                already classified it, so surface what a restack would do right where you act. */}
+            <Show when={!isGhost() && nodeAmbient(active())}>
+              {(a) => (
+                <>
+                  <Show when={a().verdict === "will-conflict"}>
+                    <span
+                      class="nh-amb amb-conflict"
+                      title={`rebasing onto origin/main collides with ${a().conflict_title ? `#${a().conflict_pr} ${a().conflict_title}` : "a merged change"} — needs a human (ambient dry-run)`}
+                    >
+                      ⚠ conflicts{a().conflict_pr ? ` with #${a().conflict_pr}` : ""}
+                    </span>
+                  </Show>
+                  <Show when={a().verdict === "would-restack"}>
+                    <span class="nh-amb amb-restack" title="behind origin/main but replays clean — safe to restack (ambient dry-run)">
+                      ⟳ {a().behind} behind · clean restack
+                    </span>
+                  </Show>
+                </>
+              )}
             </Show>
           </div>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
