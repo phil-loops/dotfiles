@@ -29,13 +29,6 @@ interface CheckoutResult {
   worktree?: string; // set on 409: the worktree currently holding the branch
 }
 
-interface SquashResult {
-  ok?: boolean;
-  n?: number; // commits collapsed into the working tree
-  unstaged?: boolean; // changes left unstaged for GitHub Desktop (no commit)
-  err?: string;
-}
-
 interface PrepResult {
   ok?: boolean;
   n?: number; // unpushed commits collapsed into one
@@ -72,9 +65,11 @@ export function NodeActions(props: {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
   const { navigate } = useViewerLocation();
-  // 409 stash: the worktree holding the branch, awaiting a force-confirm.
+  // 409 stash: the worktree holding the branch, awaiting a force-confirm — plus which action
+  // hit it, so freeing the worktree resumes the right one (plain checkout vs full prep-to-merge).
   const [heldAt, setHeldAt] = createSignal<string | null>(null);
-  // squash is history-rewriting → two-click arm (shared useArm) before it fires.
+  const [heldFor, setHeldFor] = createSignal<"checkout" | "prepMerge">("checkout");
+  // squashing rewrites history → two-click arm (shared useArm) before it fires.
   const { armed, trigger } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
   const [done, setDone] = createSignal<string | null>(null);
@@ -82,34 +77,6 @@ export function NodeActions(props: {
   const [contractKids, setContractKids] = createSignal<string[] | null>(null);
   // the ⋯ menu open/closed
   const [open, setOpen] = createSignal(false);
-  // draft-PR overlay: the generated markdown (null = closed; "" while in-flight), editable
-  // before copy so you can tweak the framing. Token spend — only on the explicit menu click.
-  const [prBody, setPrBody] = createSignal<string | null>(null);
-  const [prBusy, setPrBusy] = createSignal(false);
-  const [copied, setCopied] = createSignal(false);
-  const draftPr = async () => {
-    setOpen(false);
-    setPrBusy(true);
-    setPrBody("");
-    try {
-      const r = await fetch(withRepo("/pr-body") + "?branch=" + encodeURIComponent(props.branch));
-      const text = await r.text();
-      setPrBody(r.ok ? text : `_(draft failed: ${text.slice(0, 200)})_`);
-    } catch (e) {
-      setPrBody(`_(draft failed: ${(e as Error).message})_`);
-    } finally {
-      setPrBusy(false);
-    }
-  };
-  const copyPr = async () => {
-    try {
-      await navigator.clipboard.writeText(prBody() ?? "");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked — the textarea is still selectable for a manual copy */
-    }
-  };
   let root: HTMLDivElement | undefined;
 
   // close the menu on outside click / Escape so it never lingers over the diff.
@@ -136,6 +103,7 @@ export function NodeActions(props: {
         setDone(`✓ checked out in ${r.worktree || "your main checkout"}`);
         qc.invalidateQueries({ queryKey: ["head"] });
       } else if (r.worktree) {
+        setHeldFor("checkout");
         setHeldAt(r.worktree); // held elsewhere → offer to free it
       } else {
         setDone(`✗ ${r.err || "checkout failed"}`);
@@ -144,64 +112,58 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "checkout failed"}`),
   }));
 
-  const squash = createMutation(() => ({
-    mutationFn: () => post<SquashResult>("/squash", { branch: props.branch }),
-    onSuccess: (r) => {
-      setOpen(false);
-      if (r.ok) {
-        const n = r.n ?? 0;
-        setDone(`✓ uncommitted ${n} commit${n === 1 ? "" : "s"} — unstaged for GitHub Desktop`);
-        qc.invalidateQueries({ queryKey: ["commits", props.branch] });
-        qc.invalidateQueries({ queryKey: ["node", props.branch] });
-        qc.invalidateQueries({ queryKey: ["model"] });
-        qc.invalidateQueries({ queryKey: ["head"] });
-      } else {
-        setDone(`✗ ${r.err || "squash failed"}`);
+  // prep to merge — the one-motion merge prep: move the main checkout onto this branch (so GitHub
+  // Desktop follows), then squash all unpushed commits into one voiced commit. You review + push
+  // from GitHub Desktop, where the pre-push hook runs the gates. Two git steps behind one click.
+  const prepMerge = createMutation(() => ({
+    mutationFn: async (force: boolean) => {
+      const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force });
+      if (!co.ok) {
+        return { ok: false as const, co };
       }
+      const pr = await post<PrepResult>("/prep", { branch: props.branch });
+      return { ok: true as const, co, pr };
     },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "squash failed"}`),
-  }));
-
-  // graduate this branch into its own forest (a stack-project tag) — config-only, non-destructive.
-  const promote = createMutation(() => ({
-    mutationFn: () => post<{ ok: boolean; err?: string }>("/promote", { branch: props.branch }),
     onSuccess: (r) => {
-      setOpen(false);
-      if (r.ok) {
-        setDone("⤴ promoted to its own forest");
-        qc.invalidateQueries({ queryKey: ["projects"] });
-        qc.invalidateQueries({ queryKey: ["model"] });
-      } else {
-        setDone(`✗ ${r.err || "promote failed"}`);
-      }
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "promote failed"}`),
-  }));
-
-  // squash UNPUSHED commits → one voiced commit + oxfmt, NO push. Phil pushes to origin from
-  // GitHub Desktop himself; this just tidies the commits for him first.
-  const prep = createMutation(() => ({
-    mutationFn: () => post<PrepResult>("/prep", { branch: props.branch }),
-    onSuccess: (r) => {
-      setOpen(false);
       if (!r.ok) {
-        setDone(`✗ ${r.err || "cleanup failed"}`);
+        if (r.co.worktree) {
+          setHeldFor("prepMerge");
+          setHeldAt(r.co.worktree);
+        } else {
+          setDone(`✗ ${r.co.err || "checkout failed"}`);
+        }
         return;
       }
-      const n = r.n ?? 0;
-      const fmt = r.formatted ? `, fmt ${r.formatted}` : "";
+      setHeldAt(null);
+      setOpen(false);
+      qc.invalidateQueries({ queryKey: ["head"] });
+      if (!r.pr.ok) {
+        setDone(`✓ checked out, but squash failed: ${r.pr.err || "?"}`);
+        return;
+      }
+      const n = r.pr.n ?? 0;
+      const fmt = r.pr.formatted ? `, fmt ${r.pr.formatted}` : "";
       setDone(
         n > 1
-          ? `✓ squashed ${n} → 1${fmt}: ${r.header || "(voiced)"}`
-          : `✓ already 1 commit${fmt}${r.header ? `: ${r.header}` : ""}`,
+          ? `✓ checked out + squashed ${n} → 1${fmt}: ${r.pr.header || "(voiced)"} — push from GitHub Desktop`
+          : `✓ checked out · already 1 commit${fmt}${r.pr.header ? `: ${r.pr.header}` : ""} — push from GitHub Desktop`,
       );
       qc.invalidateQueries({ queryKey: ["commits", props.branch] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
       qc.invalidateQueries({ queryKey: ["model"] });
-      qc.invalidateQueries({ queryKey: ["head"] });
     },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "cleanup failed"}`),
+    onError: (e) => setDone(`✗ ${(e as Error).message || "prep to merge failed"}`),
   }));
+
+  // free the worktree that 409'd, then resume whichever action hit it.
+  const freeAndContinue = () => {
+    setOpen(false);
+    if (heldFor() === "prepMerge") {
+      prepMerge.mutate(true);
+    } else {
+      checkout.mutate(true);
+    }
+  };
 
   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
   const sync = createQuery(() => ({
@@ -303,7 +265,7 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
   }));
 
-  const busy = () => checkout.isPending || squash.isPending || prep.isPending || rebase.isPending || pull.isPending || contract.isPending || promote.isPending;
+  const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
     fn();
@@ -352,6 +314,21 @@ export function NodeActions(props: {
         </button>
       </Show>
 
+      {/* prep to merge — the one-motion workflow: checkout onto this branch (GitHub Desktop
+          follows) + squash all unpushed into one voiced commit. Two-click arm (rewrites history);
+          you push from GitHub Desktop, where the pre-push hook runs the gates. */}
+      <Show when={!isReview()}>
+        <button
+          class="nh-fix nh-prep"
+          classList={{ armed: armed() === "prepMerge" }}
+          disabled={busy()}
+          title="prep to merge — move your main checkout onto this branch (GitHub Desktop follows), then squash all unpushed commits into one voiced commit. You review + push from GitHub Desktop, where the pre-push hook runs the gates."
+          onClick={fire(() => trigger("prepMerge", () => prepMerge.mutate(false)))}
+        >
+          {prepMerge.isPending ? "prepping…" : armed() === "prepMerge" ? "confirm prep to merge" : "↧ prep to merge"}
+        </button>
+      </Show>
+
       {/* already-merged: /sync found this branch's work squash-merged to main, so a forward
           rebase replays nothing. Offer the contraction (drop + rewire children) instead of a
           Claude grinding the empty-rebase conflict. */}
@@ -386,13 +363,27 @@ export function NodeActions(props: {
         </button>
       </Show>
 
-      {/* ⋯ menu — the three rare, history-touching mutations, collapsed off the header */}
+      {/* held-elsewhere banner: checkout / prep-to-merge 409'd because another worktree holds the
+          branch. Offer to free it and resume whichever action hit it. Lives outside the menu so it
+          shows even when the primary prep-to-merge button triggered it. */}
+      <Show when={heldAt()}>
+        <span class="nh-held">
+          held in {heldAt()}
+          <button class="nh-held-btn" disabled={busy()} onClick={freeAndContinue}>
+            free &amp; {heldFor() === "prepMerge" ? "prep" : "checkout"}
+          </button>
+          <button class="nh-held-btn" onClick={() => setHeldAt(null)}>cancel</button>
+        </span>
+      </Show>
+
+      {/* ⋯ menu — the rarer branch actions (view-only checkout, pre-push gates), collapsed off
+          the header. The merge-prep workflow is the primary button above. */}
       <button
         class="icon-btn"
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}
-        title="branch actions — checkout, tidy commits, uncommit, pre-push gates"
+        title="branch actions — checkout, pre-push gates"
         onClick={() => setOpen((o) => !o)}
       >
         ⋯
@@ -400,73 +391,17 @@ export function NodeActions(props: {
 
       <Show when={open()}>
         <div class="nh-menu" role="menu">
-          {/* checkout — move the primary working tree onto this branch */}
-          <Show
-            when={heldAt()}
-            fallback={
-              <button
-                class="nh-item"
-                role="menuitem"
-                disabled={busy()}
-                title="move this repo's main checkout onto this branch"
-                onClick={fire(() => checkout.mutate(false))}
-              >
-                <span class="nh-item-ic">⤓</span>
-                {checkout.isPending ? "checking out…" : "checkout here"}
-              </button>
-            }
-          >
-            <div class="nh-item-note">held in {heldAt()}</div>
-            <button class="nh-item" role="menuitem" disabled={busy()} onClick={() => checkout.mutate(true)}>
-              <span class="nh-item-ic">⤓</span> free &amp; checkout
-            </button>
-            <button class="nh-item" role="menuitem" onClick={() => setHeldAt(null)}>
-              <span class="nh-item-ic" /> cancel
-            </button>
-          </Show>
-
-          {/* promote — graduate this branch into its own forest (config-only tag) */}
-          <Show when={!isReview()}>
-            <button
-              class="nh-item"
-              role="menuitem"
-              disabled={busy()}
-              title="graduate this branch into its own forest, tagged under its leaf name"
-              onClick={() => promote.mutate()}
-            >
-              <span class="nh-item-ic">⤴</span>
-              {promote.isPending ? "promoting…" : "promote to its own forest"}
-            </button>
-          </Show>
-
-          {/* squash & unstage — collapse parent..branch into unstaged working-tree changes,
-              no commit, so you write the commit in GitHub Desktop (two-click: rewrites history) */}
+          {/* checkout — move the primary working tree onto this branch without squashing (view it) */}
           <button
             class="nh-item"
-            classList={{ armed: armed() === "squash" }}
             role="menuitem"
             disabled={busy()}
-            title="collapse parent..branch into unstaged working-tree changes (no commit) — commit it in GitHub Desktop"
-            onClick={fire(() => trigger("squash", () => squash.mutate()))}
+            title="move this repo's main checkout onto this branch (no squash — just switch to it)"
+            onClick={fire(() => checkout.mutate(false))}
           >
-            <span class="nh-item-ic">⊟</span>
-            {squash.isPending ? "uncommitting…" : armed() === "squash" ? "confirm uncommit" : "uncommit → GitHub Desktop"}
+            <span class="nh-item-ic">⤓</span>
+            {checkout.isPending ? "checking out…" : "checkout here"}
           </button>
-
-          {/* tidy commits — squash unpushed into one voiced + oxfmt'd commit (no push) */}
-          <Show when={!isReview()}>
-            <button
-              class="nh-item"
-              classList={{ armed: armed() === "prep" }}
-              role="menuitem"
-              disabled={busy()}
-              title="squash your unpushed commits into one voiced commit + oxfmt — no push; you push from GitHub Desktop"
-              onClick={fire(() => trigger("prep", () => prep.mutate()))}
-            >
-              <span class="nh-item-ic">✓</span>
-              {prep.isPending ? "tidying…" : armed() === "prep" ? "confirm tidy" : "tidy commits"}
-            </button>
-          </Show>
 
           {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
               Not for review nodes (those track someone else's PR — you don't push it). */}
@@ -484,48 +419,6 @@ export function NodeActions(props: {
             </button>
           </Show>
 
-          {/* draft PR body — frame this branch in its forest (what + where-it-fits) via claude.
-              Opt-in token spend; you edit + copy the markdown, never auto-posted to GitHub. */}
-          <Show when={!isReview()}>
-            <button
-              class="nh-item"
-              role="menuitem"
-              disabled={busy() || prBusy()}
-              title="draft a GitHub PR description that frames this branch within its forest — what it does + where it fits the bigger picture (runs claude)"
-              onClick={() => draftPr()}
-            >
-              <span class="nh-item-ic">✎</span>
-              {prBusy() ? "drafting…" : "draft PR description"}
-            </button>
-          </Show>
-
-        </div>
-      </Show>
-
-      <Show when={prBody() !== null}>
-        <div class="pr-draft-backdrop" onClick={() => setPrBody(null)}>
-          <div class="pr-draft" onClick={(e) => e.stopPropagation()}>
-            <div class="pr-draft-head">
-              <span class="pr-draft-title">PR description · {props.branch.split("/").pop()}</span>
-              <div class="pr-draft-btns">
-                <button class="pr-draft-btn" disabled={prBusy()} onClick={() => copyPr()}>
-                  {copied() ? "copied ✓" : "copy"}
-                </button>
-                <button class="pr-draft-btn" onClick={() => setPrBody(null)}>close</button>
-              </div>
-            </div>
-            <Show
-              when={!prBusy()}
-              fallback={<div class="pr-draft-loading">drafting from the forest…</div>}
-            >
-              <textarea
-                class="pr-draft-body"
-                spellcheck={false}
-                value={prBody() ?? ""}
-                onInput={(e) => setPrBody(e.currentTarget.value)}
-              />
-            </Show>
-          </div>
         </div>
       </Show>
 
