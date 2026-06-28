@@ -1134,87 +1134,7 @@ function NodeDetail() {
     refetchInterval: 15000,
   }));
   const nodeAmbient = (b: string) => ambient.data?.report?.branches.find((x) => x.branch === b);
-  const unhealthy = createMemo(() =>
-    spine().filter((n) => {
-      const h = nodeHealth(n.id);
-      return h?.drifted || h?.merged;
-    }),
-  );
 
-  const [fixing, setFixing] = createSignal(false);
-  // outcome of the last restack — a 6-branch history rewrite must never read as a no-op.
-  // errors/parks stay until the next click; a clean success auto-clears.
-  const [fixResult, setFixResult] = createSignal<{ msg: string; ok: boolean } | null>(null);
-  // live walk progress while the restack runs (the status file is wiped on a clean
-  // finish, so we also latch the last seen total for the success line).
-  const [fixProgress, setFixProgress] = createSignal<{ done: number; total: number; current: string } | null>(null);
-  let fixSawRunning = false;
-  let fixLastTotal = 0;
-  let fixStartedAt = 0;
-  const fixForest = () => {
-    if (fixing()) return;
-    setFixResult(null);
-    setFixProgress(null);
-    fixSawRunning = false;
-    fixLastTotal = 0;
-    fixStartedAt = Date.now();
-    setFixing(true);
-    fetch("/restack", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: project() }),
-    })
-      .then((r) => r.json())
-      .then((r) => {
-        if (!r.ok) {
-          setFixing(false);
-          setFixResult({ msg: r.err || "restack failed to start", ok: false });
-        }
-      })
-      .catch(() => {
-        setFixing(false);
-        setFixResult({ msg: "restack failed to start", ok: false });
-      });
-  };
-  const fixStatus = createQuery(() => ({
-    queryKey: ["fix-status", project()],
-    queryFn: () => provider.restackStatus(project()),
-    enabled: fixing(),
-    refetchInterval: () => (fixing() ? 1200 : false),
-  }));
-  createEffect(() => {
-    if (!fixing()) return;
-    const d = fixStatus.data;
-    if (!d) return;
-    if (d.running) {
-      fixSawRunning = true;
-      if (d.total) fixLastTotal = d.total;
-      setFixProgress({ done: d.done ?? 0, total: d.total ?? 0, current: d.current ?? "" });
-      return;
-    }
-    // the first poll can land before the background walk spawns — don't call it done
-    // until we've actually seen it running (or it parked, or a grace window passed).
-    if (!fixSawRunning && !d.paused && Date.now() - fixStartedAt < 2500) return;
-    // restack finished (or parked — the Hearth/home owns conflict resolution); refresh in place.
-    setFixing(false);
-    setFixProgress(null);
-    if (d.paused) {
-      setFixResult({
-        msg: `parked on ${d.current || "a conflict"}${d.reason ? `: ${d.reason}` : ""} — resolve in Hearth`,
-        ok: false,
-      });
-    } else {
-      const n = fixLastTotal || d.completed?.length || 0;
-      setFixResult({
-        msg: n ? `✓ restacked ${n} branch${n === 1 ? "" : "es"}` : "✓ forest restacked",
-        ok: true,
-      });
-      setTimeout(() => setFixResult((r) => (r?.ok ? null : r)), 6000);
-    }
-    model.refetch();
-    health.refetch();
-    node.refetch();
-  });
   // cross-forest chat index overlay (read-only; every thread in this browser).
   const [showChats, setShowChats] = createSignal(false);
   // a chat the index asked to open on a (possibly other) branch: navigate there, then open the
@@ -1532,33 +1452,6 @@ function NodeDetail() {
               </Link>
             </Show>
             <div class="nh-spacer" />
-            <Show when={canMutate && unhealthy().length}>
-              <button
-                class="nh-fix"
-                disabled={fixing()}
-                title="restack this forest — rebases drifted nodes onto their parents and contracts merged ghosts (drop + rewire children). A conflict confined to a merged dep's files auto-resolves to what landed."
-                onClick={fixForest}
-              >
-                {fixing()
-                  ? fixProgress()?.total
-                    ? `fixing… ${fixProgress()!.current ? fixProgress()!.current.split("/").pop() + " " : ""}${fixProgress()!.done}/${fixProgress()!.total}`
-                    : "fixing…"
-                  : `⟳ restack forest (${unhealthy().length})`}
-              </button>
-            </Show>
-            <Show when={fixResult()}>
-              <span
-                title={fixResult()!.ok ? "" : fixResult()!.msg}
-                style={{
-                  "font-size": "11px",
-                  "letter-spacing": ".03em",
-                  "white-space": "nowrap",
-                  color: fixResult()!.ok ? "var(--gold-leaf)" : "var(--del)",
-                }}
-              >
-                {fixResult()!.msg}
-              </span>
-            </Show>
           </div>
           {/* branch strip — identity: the branch name + what it's diffed against + health badges. */}
           <div class="nh-id">
@@ -1620,27 +1513,6 @@ function NodeDetail() {
                 </button>
               </span>
             </Show>
-            {/* ambient dry-run verdict for THIS branch (same data as Home's chip) — the daemon
-                already classified it, so surface what a restack would do right where you act. */}
-            <Show when={!isGhost() && nodeAmbient(active())}>
-              {(a) => (
-                <>
-                  <Show when={a().verdict === "will-conflict"}>
-                    <span
-                      class="nh-amb amb-conflict"
-                      title={`rebasing onto origin/main collides with ${a().conflict_title ? `#${a().conflict_pr} ${a().conflict_title}` : "a merged change"} — needs a human (ambient dry-run)`}
-                    >
-                      ⚠ conflicts{a().conflict_pr ? ` with #${a().conflict_pr}` : ""}
-                    </span>
-                  </Show>
-                  <Show when={a().verdict === "would-restack"}>
-                    <span class="nh-amb amb-restack" title="behind origin/main but replays clean — safe to restack (ambient dry-run)">
-                      ⟳ {a().behind} behind · clean restack
-                    </span>
-                  </Show>
-                </>
-              )}
-            </Show>
           </div>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
@@ -1667,7 +1539,7 @@ function NodeDetail() {
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
-              <NodeActions branch={active()} isReview={location().kind === "review"} />
+              <NodeActions branch={active()} isReview={location().kind === "review"} ambient={nodeAmbient(active())} />
             </Show>
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">

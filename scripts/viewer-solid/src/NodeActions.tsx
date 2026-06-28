@@ -64,7 +64,11 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   }
 }
 
-export function NodeActions(props: { branch: string; isReview: boolean }) {
+export function NodeActions(props: {
+  branch: string;
+  isReview: boolean;
+  ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
+}) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
   const { navigate } = useViewerLocation();
@@ -208,6 +212,9 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
   const behind = () => sync.data?.behind ?? 0;
   const critical = () => sync.data?.deployCritical ?? [];
   const blocked = () => critical().length > 0;
+  // ambient daemon's dry-run verdict for this branch — folded into the one restack button so a
+  // predicted collision warns before you click, instead of living as its own duplicate badge.
+  const willConflict = () => props.ambient?.verdict === "will-conflict";
 
   // rebase forward onto origin/main. The server rebases in place when the branch is behind a
   // clean main (the common 1-behind case) → {rebased:true} lands instantly; a real conflict or
@@ -230,6 +237,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
         qc.invalidateQueries({ queryKey: ["node", props.branch] });
         qc.invalidateQueries({ queryKey: ["commits", props.branch] });
         qc.invalidateQueries({ queryKey: ["model"] });
+        qc.invalidateQueries({ queryKey: ["restack-ambient"] });
       } else if (r.contract) {
         const kids = r.children ?? [];
         setContractKids(kids);
@@ -258,6 +266,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
       setDone(`✓ ${r.summary || "contracted"}`);
       qc.invalidateQueries({ queryKey: ["model"] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
+      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "contract failed"}`),
   }));
@@ -323,16 +332,23 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
           branch and explains why in the result line. */}
       <Show when={!isReview()}>
         <button
-          class="nh-fix"
+          class="nh-fix nh-restack"
+          classList={{ "amb-conflict": willConflict() && behind() > 0 }}
           disabled={busy() || behind() === 0}
           title={
             behind() === 0
               ? "already up to date with origin/main"
-              : "rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict (never your main checkout); a stacked or open-PR branch is refused with the reason"
+              : willConflict()
+                ? `rebasing onto origin/main collides with ${props.ambient?.conflict_title ? `#${props.ambient?.conflict_pr} ${props.ambient?.conflict_title}` : "a merged change"} — restacking will eject to Claude to resolve it in a worktree (ambient dry-run)`
+                : "rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict (never your main checkout); a stacked or open-PR branch is refused with the reason"
           }
           onClick={fire(() => rebase.mutate())}
         >
-          {rebase.isPending ? "rebasing…" : behind() === 0 ? "✦ on origin/main" : `⟳ restack · ${behind()} behind`}
+          {rebase.isPending
+            ? "rebasing…"
+            : behind() === 0
+              ? "✦ on origin/main"
+              : `${willConflict() ? "⚠" : "⟳"} restack · ${behind()} behind`}
         </button>
       </Show>
 
