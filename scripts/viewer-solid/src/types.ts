@@ -67,6 +67,20 @@ export const PR = z.object({
 });
 export type PR = z.infer<typeof PR>;
 
+// The /prs map (stack-prs): every open PR keyed by its HEAD branch, so the forest map can
+// badge a node the moment its branch has a PR. `toMain` is true iff the PR targets main (the
+// forest aim — every PR merges into main); a non-main base is the stacked-PR anti-pattern.
+export const BranchPR = z.object({
+  num: z.number(),
+  url: z.string(),
+  draft: z.boolean().optional(),
+  base: z.string().optional(),
+  toMain: z.boolean().optional(),
+  review: z.string().optional(), // reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | ""
+});
+export type BranchPR = z.infer<typeof BranchPR>;
+export const BranchPRMap = z.record(z.string(), BranchPR);
+
 export const Project = z.object({
   name: z.string(),
   repo: z.string().default("loops"), // which registry repo this forest lives in (Forests home groups by it)
