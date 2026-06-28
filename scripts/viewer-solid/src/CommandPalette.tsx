@@ -3,7 +3,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { track } from "./track";
-import { useViewerLocation, forestKey, withNode } from "./router";
+import { useViewerLocation, forestKey, withNode, forestRepo } from "./router";
 import { setOverviewView } from "./overviewView";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
@@ -78,7 +78,7 @@ export default function CommandPalette() {
       cmds.push({
         label: `≣ merge story — ${leaf(c.project)}`,
         sub: "the feature as ordered commits, in merge order",
-        run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project }); },
+        run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
       });
     } else {
       cmds.push({
@@ -116,7 +116,7 @@ export default function CommandPalette() {
       }
     } else {
       for (const p of projects.data || []) {
-        cmds.push({ label: `→ ${p.name}`, sub: "forest", run: () => navigate({ kind: "forest", name: p.name }) });
+        cmds.push({ label: `→ ${p.name}`, sub: p.repo !== "loops" ? p.repo : "forest", run: () => navigate({ kind: "forest", name: p.name, repo: p.repo }) });
       }
     }
 
@@ -127,8 +127,8 @@ export default function CommandPalette() {
       if (fb.project === c.project || shown.has(fb.branch)) continue;
       cmds.push({
         label: `→ ${fb.branch}`,
-        sub: fb.project,
-        run: () => navigate({ kind: "forest", name: fb.project, node: fb.branch }),
+        sub: fb.repo !== "loops" ? `${fb.repo}/${fb.project}` : fb.project,
+        run: () => navigate({ kind: "forest", name: fb.project, node: fb.branch, repo: fb.repo }),
       });
     }
     return cmds;

@@ -69,6 +69,7 @@ export type PR = z.infer<typeof PR>;
 
 export const Project = z.object({
   name: z.string(),
+  repo: z.string().default("loops"), // which registry repo this forest lives in (Forests home groups by it)
   branches: z.number(),
   behind: z.number(),
   merged: z
@@ -78,8 +79,8 @@ export const Project = z.object({
 });
 export type Project = z.infer<typeof Project>;
 
-// one (branch, forest) pair — the Cmd+K global jump index across all projects
-export const ForestBranch = z.object({ branch: z.string(), project: z.string() });
+// one (branch, forest) pair — the Cmd+K global jump index across all projects/repos
+export const ForestBranch = z.object({ branch: z.string(), project: z.string(), repo: z.string().default("loops") });
 export type ForestBranch = z.infer<typeof ForestBranch>;
 
 export const ReviewRequest = z.object({

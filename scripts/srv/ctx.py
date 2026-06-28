@@ -4,17 +4,44 @@
 # through every call — so concurrent sessions edit different files, not one giant one.
 import os
 import hashlib
+import threading
 
-run = None      # run(argv) -> CompletedProcess, cwd=repo
+run = None      # run(argv) -> CompletedProcess, cwd=repo_cwd()
 ROOT = ""       # servedir (where restack.log / index.html live)
 SCRIPTS = ""    # ~/.dotfiles/scripts
-CWD = ""        # the repo the server was launched in
+CWD = ""        # the repo the server was launched in (the default when no ?repo= is selected)
 MAIN_WT = ""    # the repo's primary worktree (checkout-here / restack targets)
+REPOS = {}      # multi-repo registry: name -> main worktree path (drives /projects aggregation)
+
+# Per-request active repo. The server is ThreadingHTTPServer (one thread per request), so a
+# request can pin its repo here and every ctx.run/ctx.repo_cwd in that handler operates on it
+# without threading a repo arg through every signature. Pool workers don't inherit a thread-local,
+# so fan-outs must seed it explicitly (ThreadPoolExecutor(initializer=set_repo, initargs=(path,))).
+_local = threading.local()
 
 
-def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT):
+def set_repo(path):
+    _local.repo = path
+
+
+def clear_repo():
+    _local.repo = None
+
+
+def repo_cwd():
+    return getattr(_local, "repo", None) or CWD
+
+
+def repo_path(name):
+    # registry resolver: a viewer-repos name -> its main worktree, or None for an unknown name
+    # (callers 400 rather than silently bind to the wrong repo).
+    return REPOS.get(name)
+
+
+def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT, repos):
     g = globals()
-    g["run"], g["ROOT"], g["SCRIPTS"], g["CWD"], g["MAIN_WT"] = run, ROOT, SCRIPTS, CWD, MAIN_WT
+    g["run"], g["ROOT"], g["SCRIPTS"], g["CWD"], g["MAIN_WT"], g["REPOS"] = (
+        run, ROOT, SCRIPTS, CWD, MAIN_WT, repos)
 
 
 def model_sig():

@@ -22,7 +22,7 @@ export const HOME_TABS: HomeTab[] = ["work", "forests", "watching"];
 
 export type ViewerLocation =
   | { kind: "home"; tab: HomeTab }
-  | { kind: "forest"; name: string; node?: string }
+  | { kind: "forest"; name: string; node?: string; repo?: string }
   | { kind: "standalone"; branch: string; node?: string }
   | { kind: "review"; pr: number; node?: string }
   | { kind: "push"; branch: string };
@@ -42,8 +42,11 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   // /forests is the home tab; /forests/<project>[/<branch...>] is a forest — project is one
   // segment, the active node (a branch, slashes and all) is the tail.
   if (head === "forests" && rest.length) {
+    // repo rides as ?repo= (not a path segment) so loops URLs stay short and a project name
+    // can't be mistaken for a repo name; a deep-link/refresh still carries the repo.
     const [project, ...nodeParts] = rest;
-    return { kind: "forest", name: project, node: nodeParts.length ? nodeParts.join("/") : undefined };
+    const repo = new URLSearchParams(search).get("repo") || undefined;
+    return { kind: "forest", name: project, node: nodeParts.length ? nodeParts.join("/") : undefined, repo };
   }
   if (isHomeTab(head)) {
     return { kind: "home", tab: head };
@@ -70,7 +73,8 @@ export function buildPath(loc: ViewerLocation): string {
     case "home":
       return "/" + loc.tab;
     case "forest":
-      return "/forests/" + loc.name + (loc.node ? "/" + loc.node : "");
+      return "/forests/" + loc.name + (loc.node ? "/" + loc.node : "")
+        + (loc.repo && loc.repo !== "loops" ? "?repo=" + encodeURIComponent(loc.repo) : "");
     case "standalone":
       return "/branch/" + loc.branch;
     case "review":
@@ -101,6 +105,12 @@ export function forestKey(loc: ViewerLocation): string {
 // Re-target the active node within the current location (the j/k spine walk, click-to-open).
 export function withNode(loc: ViewerLocation, node: string): ViewerLocation {
   return loc.kind === "home" || loc.kind === "push" ? loc : { ...loc, node };
+}
+
+// The repo a location belongs to — only a forest can live in a non-loops repo; everything
+// else is the launched (loops) repo. Used to keep repo on forest nav that rebuilds the location.
+export function forestRepo(loc: ViewerLocation): string | undefined {
+  return loc.kind === "forest" ? loc.repo : undefined;
 }
 
 interface RouterCtx {

@@ -14,11 +14,11 @@ import {
   createMutation,
   useQueryClient,
 } from "@tanstack/solid-query";
-import { RouterProvider, useViewerLocation, Link, forestKey, withNode, type HomeTab, type ViewerLocation } from "./router";
+import { RouterProvider, useViewerLocation, Link, forestKey, withNode, forestRepo, type HomeTab, type ViewerLocation } from "./router";
 import { ActionBar, type Action } from "./actions";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
-import { provider, canMutate } from "./provider";
+import { provider, canMutate, withRepo } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
@@ -433,7 +433,7 @@ function Home() {
   const fpCache = new Map<string, FPurpose[]>();
   let ftipFor: string | null = null;
   let ftipTimer: ReturnType<typeof setTimeout> | undefined;
-  const showFtip = (project: string, el: HTMLElement) => {
+  const showFtip = (project: string, el: HTMLElement, repo?: string) => {
     clearTimeout(ftipTimer);
     ftipFor = project;
     const r = el.getBoundingClientRect();
@@ -444,15 +444,18 @@ function Home() {
       const y = window.innerHeight - r.bottom >= estH + 12 ? r.bottom + 6 : Math.max(8, r.top - estH - 6);
       setFtip({ rows, x: r.left + 18, y });
     };
-    const cached = fpCache.get(project);
+    const key = (repo && repo !== "loops" ? repo + "/" : "") + project; // repo-qualify so names don't collide across repos
+    const cached = fpCache.get(key);
     if (cached) {
       ftipTimer = setTimeout(() => place(cached), 160);
       return;
     }
+    // the home list spans repos and isn't pinned to one, so pass the hovered forest's repo here.
+    const repoQ = repo && repo !== "loops" ? "&repo=" + encodeURIComponent(repo) : "";
     ftipTimer = setTimeout(() => {
-      fetch("/forest-purposes?project=" + encodeURIComponent(project))
+      fetch("/forest-purposes?project=" + encodeURIComponent(project) + repoQ)
         .then((res) => res.json() as Promise<FPurpose[]>)
-        .then((rows) => { fpCache.set(project, rows); place(rows); })
+        .then((rows) => { fpCache.set(key, rows); place(rows); })
         .catch(() => {});
     }, 160);
   };
@@ -478,6 +481,19 @@ function Home() {
     const list = projects.data || [];
     return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list;
   });
+  // Group the home list by repo — loops first, then the rest alphabetically. The repo header
+  // only shows when more than one repo has forests, so a single-repo setup looks unchanged.
+  const forestGroups = createMemo(() => {
+    const by = new Map<string, Project[]>();
+    for (const p of filteredForests()) {
+      const r = p.repo || "loops";
+      (by.get(r) ?? by.set(r, []).get(r)!).push(p);
+    }
+    return [...by.entries()]
+      .sort(([a], [b]) => (a === "loops" ? -1 : b === "loops" ? 1 : a.localeCompare(b)))
+      .map(([repo, items]) => ({ repo, items }));
+  });
+  const multiRepo = createMemo(() => forestGroups().length > 1);
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
 
   const review = (r?: string | null): [string, string] =>
@@ -669,15 +685,21 @@ function Home() {
             </p>
           }
         >
-          <For each={filteredForests()}>
+          <For each={forestGroups()}>
+            {(group) => (
+              <>
+                <Show when={multiRepo()}>
+                  <h3 class="forest-repo-head">{group.repo}</h3>
+                </Show>
+                <For each={group.items}>
             {(p) => {
               const stuck = () => parked()?.project === p.name;
               return (
                 <Link
                   class="forest-row"
                   classList={{ parked: stuck() }}
-                  to={{ kind: "forest", name: p.name }}
-                  onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement)}
+                  to={{ kind: "forest", name: p.name, repo: p.repo }}
+                  onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
                   onMouseLeave={hideFtip}
                 >
                   <span
@@ -769,6 +791,9 @@ function Home() {
                 </Link>
               );
             }}
+                </For>
+              </>
+            )}
           </For>
         </Show>
       </section>
@@ -859,22 +884,25 @@ function ForestOverview() {
   const project = () => forestKey(location());
   const [ovView, setOvView] = [overviewView, setOverviewView]; // shared module signal so ⌘K can open straight into a view
   const model = createQuery(() => ({
-    queryKey: ["model", project()],
+    // repo in the key so loops/monotoad forests with the same name don't share a cache entry
+    // and a cross-repo nav refetches; provider reads the repo from the URL at fetch time.
+    queryKey: ["model", forestRepo(location()) ?? "loops", project()],
     queryFn: () => provider.model(project()),
     enabled: !!project(),
   }));
   const spine = createMemo(() => flattenForest(model.data));
   const healthIds = createMemo(() => spine().map((n) => n.id).filter(Boolean));
   const health = createQuery(() => ({
-    queryKey: ["forest-health", healthIds().join(",")],
+    queryKey: ["forest-health", forestRepo(location()) ?? "loops", healthIds().join(",")],
     queryFn: () =>
-      fetch("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&")).then(
+      fetch(withRepo("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&"))).then(
         (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean }>>,
       ),
     enabled: canMutate && healthIds().length > 0,
   }));
   // ghost endstate (✦ <project>) opens its integration diff; every other node opens itself.
-  const open = (b: string) => navigate({ kind: "forest", name: project(), node: b });
+  // withNode keeps the location's repo so a monotoad node stays in monotoad.
+  const open = (b: string) => navigate(withNode(location(), b));
   const nodeCount = () => spine().filter((n) => !n.id.startsWith("✦")).length;
 
   // hover a node in the map → float its branch purpose (cached; guard the async gap so a
@@ -950,13 +978,14 @@ function NodeDetail() {
   const qc = useQueryClient();
   const { location, navigate } = useViewerLocation();
   const project = () => forestKey(location());
+  const repoKey = () => forestRepo(location()) ?? "loops"; // segregates query caches per repo
   const nodeParam = (): string | undefined => {
     const l = location();
     return l.kind === "home" || l.kind === "push" ? undefined : l.node;
   };
 
   const model = createQuery(() => ({
-    queryKey: ["model", project()],
+    queryKey: ["model", repoKey(), project()],
     queryFn: () => provider.model(project()),
     enabled: !!project(),
   }));
@@ -991,38 +1020,38 @@ function NodeDetail() {
   const nodeBase = () => (isGhost() ? "main" : base() || undefined);
 
   const node = createQuery(() => ({
-    queryKey: ["node", nodeRef(), nodeBase() ?? ""],
+    queryKey: ["node", repoKey(), nodeRef(), nodeBase() ?? ""],
     queryFn: () => provider.node(nodeRef(), nodeBase()),
     enabled: !!active(),
   }));
   const commits = createQuery(() => ({
-    queryKey: ["commits", active()],
+    queryKey: ["commits", repoKey(), active()],
     queryFn: () => provider.commits(active()),
     enabled: !!active() && view() === "commits",
   }));
 
   const bless = createMutation(() => ({
     mutationFn: (file: string) =>
-      fetch("/bless", {
+      fetch(withRepo("/bless"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: active(), file }),
       }).then((r) => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["node", active()] });
+      qc.invalidateQueries({ queryKey: ["node"] });
       qc.invalidateQueries({ queryKey: ["model"] });
     },
   }));
 
   const unbless = createMutation(() => ({
     mutationFn: (file: string) =>
-      fetch("/bless", {
+      fetch(withRepo("/bless"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: active(), file, unbless: true }),
       }).then((r) => r.json()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["node", active()] });
+      qc.invalidateQueries({ queryKey: ["node"] });
       qc.invalidateQueries({ queryKey: ["model"] });
     },
   }));
@@ -1060,9 +1089,9 @@ function NodeDetail() {
   // for badges + a one-click "fix forest" (restack). Live-only; refetch after a fix lands.
   const healthIds = createMemo(() => spine().map((n) => n.id).filter(Boolean));
   const health = createQuery(() => ({
-    queryKey: ["forest-health", healthIds().join(",")],
+    queryKey: ["forest-health", forestRepo(location()) ?? "loops", healthIds().join(",")],
     queryFn: () =>
-      fetch("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&")).then(
+      fetch(withRepo("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&"))).then(
         (r) =>
           r.json() as Promise<
             Record<
@@ -1324,7 +1353,7 @@ function NodeDetail() {
     else if (e.key === "Escape") {
       // up a level: help → close it; else (when the chat drawer isn't grabbing Esc) → the forest map
       if (showHelp()) { setShowHelp(false); }
-      else if (!chatTarget()) { const p = project(); if (p) { navigate({ kind: "forest", name: p }); } }
+      else if (!chatTarget()) { const p = project(); if (p) { navigate({ kind: "forest", name: p, repo: forestRepo(location()) }); } }
     }
   };
   window.addEventListener("keydown", onKey);
@@ -1483,7 +1512,7 @@ function NodeDetail() {
             >
               <Link
                 class="nh-forest-back"
-                to={{ kind: "forest", name: project() }}
+                to={{ kind: "forest", name: project(), repo: forestRepo(location()) }}
                 title="back to the forest map — your current node stays highlighted there"
               >
                 ⊞ {project()}
