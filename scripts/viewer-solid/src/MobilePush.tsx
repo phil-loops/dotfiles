@@ -5,9 +5,10 @@ import { provider } from "./provider";
 import "./MobilePush.css";
 
 // The mobile "prepare to push" card: one branch, the part of the git workflow that's
-// actually better on a phone — squash unpushed → voiced subject → run gates → push.
-// One tap runs the whole chain; it stops with a reason the moment a step can't proceed.
-// A red gate or a needed force-push is a clean "needs the laptop" stop, not fixable here.
+// actually better on a phone — squash unpushed → voiced subject → run gates (auto-rebasing
+// onto fresh main when that's what's stale). One tap gets the branch into a clean, pushable
+// local state and stops there; the push itself stays manual (Phil's GitHub Desktop → origin).
+// A red gate is a clean "needs the laptop" stop, not fixable here.
 
 interface PrepResult {
   ok: boolean;
@@ -32,14 +33,7 @@ interface GatesResult {
   note?: string;
   err?: string;
 }
-interface PushResult {
-  ok: boolean;
-  remote?: string;
-  out?: string;
-  err?: string;
-}
-
-type StepKey = "squash" | "gates" | "push";
+type StepKey = "squash" | "gates";
 type StepState = "idle" | "run" | "ok" | "fail";
 
 async function post<T>(path: string, branch: string): Promise<T> {
@@ -60,15 +54,14 @@ export default function MobilePush() {
   const [active, setActive] = createSignal<StepKey | null>(null);
   const [prep, setPrep] = createSignal<PrepResult | null>(null);
   const [gates, setGates] = createSignal<GatesResult | null>(null);
-  const [pushed, setPushed] = createSignal<PushResult | null>(null);
 
-  const started = createMemo(() => !!(prep() || gates() || pushed()));
-  const done = createMemo(() => !!pushed()?.ok);
+  const started = createMemo(() => !!(prep() || gates()));
+  const done = createMemo(() => !!(prep()?.ok && !prep()!.force && gates()?.ok));
 
-  // why the chain stopped short of a push — the one thing the laptop is needed for.
+  // why the chain stopped short of a clean local state — what the laptop is needed for.
   const blocked = createMemo(() => {
     if (prep()?.force) {
-      return "This branch diverged from its remote. Force-push from the laptop.";
+      return "This branch diverged from its remote. Sort it out on the laptop.";
     }
     if (prep() && !prep()!.ok) {
       return prep()!.err || "Couldn't prepare the branch.";
@@ -89,23 +82,16 @@ export default function MobilePush() {
       }
       return prep()!.ok && !prep()!.force ? "ok" : "fail";
     }
-    if (key === "gates") {
-      if (!gates()) {
-        return "idle";
-      }
-      return gates()!.ok ? "ok" : "fail";
-    }
-    if (!pushed()) {
+    if (!gates()) {
       return "idle";
     }
-    return pushed()!.ok ? "ok" : "fail";
+    return gates()!.ok ? "ok" : "fail";
   };
 
   const runAll = async () => {
     setRunning(true);
     setPrep(null);
     setGates(null);
-    setPushed(null);
 
     setActive("squash");
     const p = await post<PrepResult>("/prep", branch());
@@ -118,16 +104,8 @@ export default function MobilePush() {
     }
 
     setActive("gates");
-    const g = await post<GatesResult>("/gates", branch());
-    setGates(g);
-    if (!g.ok) {
-      setActive(null);
-      setRunning(false);
-      return;
-    }
-
-    setActive("push");
-    setPushed(await post<PushResult>("/push", branch()));
+    setGates(await post<GatesResult>("/gates", branch()));
+    commits.refetch();
     setActive(null);
     setRunning(false);
   };
@@ -139,10 +117,7 @@ export default function MobilePush() {
     if (active() === "gates") {
       return "Running gates…";
     }
-    if (active() === "push") {
-      return "Pushing…";
-    }
-    return started() ? "Run again" : "Prepare & push";
+    return started() ? "Run again" : "Get it ready";
   });
 
   return (
@@ -165,7 +140,7 @@ export default function MobilePush() {
           >
             <span class="mp-state-n">{commits.data?.length}</span>
             <span class="mp-dim">
-              {commits.data?.length === 1 ? "commit" : "commits"} to squash and push
+              {commits.data?.length === 1 ? "commit" : "commits"} to squash
             </span>
           </Show>
         </Show>
@@ -178,7 +153,7 @@ export default function MobilePush() {
         </button>
       }>
         <div class="mp-earned">
-          pushed to {pushed()!.remote}
+          ready to push — over to the laptop
           <div class="mp-confetti" aria-hidden="true">
             <For each={Array.from({ length: 24 })}>{(_, i) => <i style={confettiStyle(i())} />}</For>
           </div>
@@ -236,12 +211,6 @@ export default function MobilePush() {
                   </ul>
                 </Show>
               )}
-            </Show>
-          </Step>
-
-          <Step n={3} state={stepState("push")} name="push">
-            <Show when={pushed() && !pushed()!.ok}>
-              <span class="mp-detail-bad">{pushed()!.err || "push failed"}</span>
             </Show>
           </Step>
         </ol>
