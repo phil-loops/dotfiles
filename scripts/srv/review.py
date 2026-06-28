@@ -69,6 +69,17 @@ def _enrich(raw, branch):
     return json.dumps(data)
 
 
+def _is_convergence(branch, stdout):
+    # A convergence node: a real fan-in branch (has `requires`) whose OWN contribution
+    # (parent...node) is empty — it never merges, it converges several bases into one view.
+    try:
+        if (json.loads(stdout) or {}).get("files"):
+            return False  # has its own contribution — an ordinary node, not a convergence
+    except ValueError:
+        return False
+    return bool(ctx.run(["git", "config", "--get-all", f"stack-branch.{branch}.requires"]).stdout.strip())
+
+
 def node(req, u):
     q = parse_qs(u.query)
     branch = q.get("branch", [""])[0]
@@ -84,6 +95,11 @@ def node(req, u):
     if base:
         args += ["--base", base]
     r = ctx.run(args)
+    # A convergence node renders blank otherwise (its own parent...node diff is empty). Diff it
+    # against the base instead (base...node, base=main) so it shows the WHOLE assembled feature —
+    # a "review it all at once" surface — rather than a navigable blank.
+    if r.returncode == 0 and not base and _is_convergence(branch, r.stdout):
+        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--node", branch, "--base", "main"])
     req._send(200 if r.returncode == 0 else 500,
               r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
 
