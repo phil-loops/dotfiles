@@ -1,0 +1,13 @@
+{
+  "name": "loops-postman-gen",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Generate a Postman collection + environment from the Loops OpenAPI spec",
+  "bin": {
+    "loops-postman": "generate.mjs"
+  },
+  "dependencies": {
+    "openapi-to-postmanv2": "6.1.0"
+  }
+}
