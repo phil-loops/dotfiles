@@ -174,6 +174,18 @@ body {
    ambient dry-run predicts a collision. */
 .nh-fix.nh-restack { color: var(--patina); border-color: var(--patina); }
 .nh-fix.nh-restack.amb-conflict { color: var(--del); border-color: var(--del); font-weight: 600; }
+/* prep-to-merge: the primary merge-prep workflow (checkout + squash). Calm ink until armed,
+   then ember to signal the history rewrite is one more click away. */
+.nh-fix.nh-prep { color: var(--ink-dim); border-color: var(--ink-faint); }
+.nh-fix.nh-prep:hover:not(:disabled) { color: var(--ink); border-color: var(--patina); }
+.nh-fix.nh-prep.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
+/* held-elsewhere banner: another worktree holds the branch; free it and resume. */
+.nh-held { font-size: 12px; color: var(--ink-faint); display: inline-flex; align-items: center; gap: 8px; }
+.nh-held-btn {
+  font: inherit; font-size: 11px; color: var(--del); background: transparent;
+  border: 1px solid var(--del); border-radius: 5px; padding: 2px 7px; cursor: pointer;
+}
+.nh-held-btn:disabled { opacity: 0.5; cursor: default; }
 .nh-done {
   font-size: 12px; color: var(--patina); opacity: 0.9;
   max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
