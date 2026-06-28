@@ -147,25 +147,21 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(b)
 
     def _enter_repo(self, u):
-        # ?repo=<name> pins this request's thread to one registry repo so the handlers below
-        # operate on it via ctx.run / ctx.repo_cwd. No repo → CWD default. Unknown name → 400
-        # (never silently bind to the launched repo and serve the wrong tree as if it were right).
-        name = (parse_qs(u.query).get("repo") or [""])[0]
-        if not name:
-            srvctx.clear_repo()
-            return True
-        path = srvctx.repo_path(name)
-        if not path:
-            self._send(400, json.dumps({"err": f"unknown repo: {name}"}))
-            return False
-        srvctx.set_repo(path)
-        return True
+        # repo rides as the LEADING PATH SEGMENT when it names a registry repo: an API call
+        # /<repo>/model pins this thread to <repo> and dispatches on the stripped path /model.
+        # (The SPA route /forests/<repo>/<project>/<branch> starts with "forests" — not a repo —
+        # so it isn't stripped; it serves index.html and the CLIENT parses the repo from the path.)
+        # No repo prefix → CWD default. Returns the urlparse with the repo prefix removed.
+        parts = u.path.split("/")
+        if len(parts) >= 2 and parts[1] in srvctx.REPOS:
+            srvctx.set_repo(srvctx.REPOS[parts[1]])
+            return u._replace(path="/" + "/".join(parts[2:]))
+        srvctx.clear_repo()
+        return u
 
     def do_GET(self):
         last[0] = time.time()
-        u = urlparse(self.path)
-        if not self._enter_repo(u):
-            return
+        u = self._enter_repo(urlparse(self.path))
         try:
             self._dispatch_get(u)
         finally:
@@ -186,10 +182,14 @@ class H(BaseHTTPRequestHandler):
             with _render_lock:
                 if _index_cache["html"] is None or _index_cache["asset"] != sig:
                     try:
-                        _index_cache["html"] = open(os.path.join(DIST, "index.html"), "rb").read()
+                        html = open(os.path.join(DIST, "index.html"), "rb").read()
                     except OSError:
                         self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
                         return
+                    # Inject the registry repo names so the client router can tell a <repo> path
+                    # segment from a <project> one (/forests/<repo>/<project> vs /forests/<project>).
+                    inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))}</script>".encode()
+                    _index_cache["html"] = html.replace(b"<head>", b"<head>" + inject, 1)
                     _index_cache["asset"] = sig
                 body = _index_cache["html"]
             self._send(200, body, "text/html; charset=utf-8")
@@ -282,10 +282,8 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n).decode() if n else "{}"
-        u = urlparse(self.path)
-        if not self._enter_repo(u):
-            return
-        self.path = u.path   # drop ?repo= so the exact-match dispatch below is unchanged
+        u = self._enter_repo(urlparse(self.path))
+        self.path = u.path   # repo prefix stripped, so the exact-match dispatch below is unchanged
         try:
             self._dispatch_post(raw)
         finally:

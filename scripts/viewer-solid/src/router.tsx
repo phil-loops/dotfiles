@@ -29,6 +29,13 @@ export type ViewerLocation =
 
 const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(s);
 
+// The registry repo names, injected into index.html by the server (window.__VIEWER_REPOS__).
+// Lets the parser tell a <repo> path segment from a <project> one without an async fetch.
+export function knownRepos(): Set<string> {
+  const w = window as unknown as { __VIEWER_REPOS__?: string[] };
+  return new Set(w.__VIEWER_REPOS__ ?? ["loops", "monotoad"]);
+}
+
 // pathname + search → typed location. Anything unrecognised falls home.
 export function parseLocation(pathname: string, search: string): ViewerLocation {
   const [head, ...rest] = pathname.split("/").filter(Boolean);
@@ -42,10 +49,18 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   // /forests is the home tab; /forests/<project>[/<branch...>] is a forest — project is one
   // segment, the active node (a branch, slashes and all) is the tail.
   if (head === "forests" && rest.length) {
-    // repo rides as ?repo= (not a path segment) so loops URLs stay short and a project name
-    // can't be mistaken for a repo name; a deep-link/refresh still carries the repo.
-    const [project, ...nodeParts] = rest;
-    const repo = new URLSearchParams(search).get("repo") || undefined;
+    // repo is the TOP of the hierarchy: /forests/<repo>/<project>/<branch> when the first segment
+    // names a known repo; otherwise loops-implicit /forests/<project>/<branch> (short form kept).
+    let repo: string | undefined;
+    let segs = rest;
+    if (knownRepos().has(rest[0])) {
+      repo = rest[0] === "loops" ? undefined : rest[0];
+      segs = rest.slice(1);
+    }
+    const [project, ...nodeParts] = segs;
+    if (!project) {
+      return { kind: "home", tab: "forests" };
+    }
     return { kind: "forest", name: project, node: nodeParts.length ? nodeParts.join("/") : undefined, repo };
   }
   if (isHomeTab(head)) {
@@ -73,8 +88,8 @@ export function buildPath(loc: ViewerLocation): string {
     case "home":
       return "/" + loc.tab;
     case "forest":
-      return "/forests/" + loc.name + (loc.node ? "/" + loc.node : "")
-        + (loc.repo && loc.repo !== "loops" ? "?repo=" + encodeURIComponent(loc.repo) : "");
+      return "/forests/" + (loc.repo && loc.repo !== "loops" ? loc.repo + "/" : "")
+        + loc.name + (loc.node ? "/" + loc.node : "");
     case "standalone":
       return "/branch/" + loc.branch;
     case "review":

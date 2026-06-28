@@ -450,10 +450,10 @@ function Home() {
       ftipTimer = setTimeout(() => place(cached), 160);
       return;
     }
-    // the home list spans repos and isn't pinned to one, so pass the hovered forest's repo here.
-    const repoQ = repo && repo !== "loops" ? "&repo=" + encodeURIComponent(repo) : "";
+    // the home list spans repos and isn't pinned to one, so prefix the hovered forest's repo here.
+    const prefix = repo && repo !== "loops" ? "/" + encodeURIComponent(repo) : "";
     ftipTimer = setTimeout(() => {
-      fetch("/forest-purposes?project=" + encodeURIComponent(project) + repoQ)
+      fetch(prefix + "/forest-purposes?project=" + encodeURIComponent(project))
         .then((res) => res.json() as Promise<FPurpose[]>)
         .then((rows) => { fpCache.set(key, rows); place(rows); })
         .catch(() => {});
