@@ -295,8 +295,13 @@ end
 -- ── Main entry ─────────────────────────────────────────────────────────────
 
 local function jump_to(target)
-  vim.cmd('normal! m`')
-  vim.cmd('edit ' .. vim.fn.fnameescape(target.file))
+  vim.cmd('normal! m`')   -- drop a jumplist mark so <C-o> comes back
+  -- Switch via the buffer API, not `:edit` — `:edit` throws E37 ("No write since last
+  -- change") when the current buffer has unsaved edits, and reloads (also E37) when the
+  -- target IS the current file. nvim_win_set_buf just hides the modified buffer instead.
+  local buf = vim.fn.bufadd(target.file)
+  vim.fn.bufload(buf)
+  vim.api.nvim_win_set_buf(0, buf)
   vim.api.nvim_win_set_cursor(0, { target.line, target.col })
 end
 
