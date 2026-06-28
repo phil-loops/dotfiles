@@ -907,6 +907,11 @@ function ForestOverview() {
       ),
     enabled: canMutate && healthIds().length > 0,
   }));
+  // open PRs keyed by head branch — drives the per-node PR badge in the map.
+  const prs = createQuery(() => ({
+    queryKey: ["branch-prs", forestRepo(location()) ?? "loops"],
+    queryFn: () => provider.branchPrs(),
+  }));
   // ghost endstate (✦ <project>) opens its integration diff; every other node opens itself.
   // withNode keeps the location's repo so a monotoad node stays in monotoad.
   const open = (b: string) => navigate(withNode(location(), b));
@@ -959,6 +964,7 @@ function ForestOverview() {
               spine={spine}
               active={() => (spine().some((n) => n.id === cameFrom()) ? cameFrom() : "")}
               health={() => health.data}
+              prs={() => prs.data}
               onPick={open}
               onClose={() => {}}
               onHoverNode={showTip}

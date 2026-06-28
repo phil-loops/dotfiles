@@ -16,7 +16,7 @@
 import { createMemo, createSignal, For, Show } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { canMutate, provider } from "./provider";
-import type { SpineNode, RestackStatus } from "./types";
+import type { SpineNode, RestackStatus, BranchPR } from "./types";
 
 const leafOf = (s: string): string => s.split("/").pop() ?? s;
 // the ghost culmination node is keyed "✦ <project>" (a sentinel, never a real branch).
@@ -54,6 +54,7 @@ export function ForestMap(props: {
   spine: () => SpineNode[];
   active: () => string;
   health?: () => Record<string, { drifted: boolean; merged: boolean }> | undefined;
+  prs?: () => Record<string, BranchPR> | undefined;
   onPick: (b: string) => void;
   onClose: () => void;
   docked?: boolean;
@@ -64,6 +65,7 @@ export function ForestMap(props: {
   onLeaveNode?: () => void;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
+  const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
 
   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
@@ -497,6 +499,29 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
                   </Show>
+                  <Show when={!isGhostId(n.id) && prOf(n.id)}>
+                    {(pr) => (
+                      <text
+                        class="fm-pr"
+                        classList={{
+                          draft: !!pr().draft,
+                          approved: pr().review === "APPROVED",
+                          changes: pr().review === "CHANGES_REQUESTED",
+                          offbase: pr().toMain === false,
+                        }}
+                        x={14}
+                        y={-NODE_H / 2 - 6}
+                        onClick={(e) => { e.stopPropagation(); window.open(pr().url, "_blank", "noopener"); }}
+                      >
+                        <title>
+                          {pr().toMain === false ? `⚠ PR targets ${pr().base} — not main. ` : ""}
+                          {pr().review === "APPROVED" ? "approved · " : pr().review === "CHANGES_REQUESTED" ? "changes requested · " : ""}
+                          open #{pr().num} on GitHub
+                        </title>
+                        {pr().draft ? "◌ draft" : "↗ PR"} #{pr().num}
+                      </text>
+                    )}
+                  </Show>
                   <Show when={!isGhostId(n.id) && n.description}>
                     <text class="fm-purpose" x={w / 2} y={NODE_H / 2 + 13}>
                       <title>{n.description}</title>
@@ -578,6 +603,16 @@ const CSS = `
 .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
 .fm-node.active text { fill: var(--ink); }
 .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }
+/* PR badge — sits above the pill's top-left when the branch has an open PR. Click opens
+   GitHub. Neutral patina by default; gold when approved, ember on changes-requested, faint
+   when draft, dashed underline when the PR doesn't target main (the stacked-PR anti-pattern). */
+.fm-node .fm-pr { fill: var(--patina); font-family: var(--mono); font-size: 9.5px; text-anchor: start;
+  letter-spacing: .02em; cursor: pointer; }
+.fm-node .fm-pr:hover { fill: var(--gold-leaf); text-decoration: underline; }
+.fm-node .fm-pr.draft { fill: var(--ink-faint); }
+.fm-node .fm-pr.approved { fill: var(--gold-leaf); }
+.fm-node .fm-pr.changes { fill: var(--del); }
+.fm-node .fm-pr.offbase { text-decoration: underline dashed; }
 /* purpose subtitle — the branch's one-line thesis under the pill, dim so the name leads;
    lifts to ink-dim on hover/active so the focused node's intent is fully legible. */
 .fm-node .fm-purpose { fill: var(--ink-faint); font-family: var(--mono); font-size: 9px; text-anchor: middle; opacity: .72; }

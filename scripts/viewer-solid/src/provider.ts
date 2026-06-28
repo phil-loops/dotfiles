@@ -10,6 +10,8 @@ import { z } from "zod";
 import { fetchJSON } from "./api";
 import { knownRepos } from "./router";
 import {
+  BranchPR,
+  BranchPRMap,
   Commit,
   ForestBranch,
   ForestModel,
@@ -34,6 +36,7 @@ export interface Capabilities {
 export interface DataProvider {
   readonly capabilities: Capabilities;
   myPrs(): Promise<PR[]>;
+  branchPrs(): Promise<Record<string, BranchPR>>;
   reviewRequests(): Promise<ReviewRequest[]>;
   reviewRemote(branch: string): Promise<ReviewRemote>;
   projects(): Promise<Project[]>;
@@ -93,6 +96,7 @@ export class HttpProvider implements DataProvider {
   readonly capabilities: Capabilities = { mutate: true, live: true };
 
   myPrs = () => fetchJSON<unknown>("/myprs").then((d) => parse(z.array(PR), d, "myprs"));
+  branchPrs = () => fetchJSON<unknown>("/prs").then((d) => parse(BranchPRMap, d, "prs"));
   reviewRequests = () => fetchJSON<unknown>("/review-requests").then((d) => parse(z.array(ReviewRequest), d, "review-requests"));
   reviewRemote = (branch: string) =>
     fetchJSON<unknown>("/review-remote?branch=" + q(branch)).then((d) => parse(ReviewRemote, d, "review-remote"));
@@ -125,6 +129,7 @@ export class StaticProvider implements DataProvider {
   }
 
   myPrs = () => this.get("myprs.json", z.array(PR), "myprs");
+  branchPrs = () => this.get("prs.json", BranchPRMap, "prs").catch(() => ({}));
   // a baked snapshot has no live GitHub connection to query review requests against
   reviewRequests = () => Promise.resolve<ReviewRequest[]>([]);
   reviewRemote = () => Promise.resolve<ReviewRemote>({ available: false });
