@@ -154,6 +154,8 @@ export const RestackAmbientBranch = z.object({
   behind: z.number().nullable(),
   verdict: z.string(), // clean | would-restack | would-contract | will-conflict | skip-* | error
   would_do: z.string(),
+  conflict_pr: z.number().nullable().optional(), // will-conflict: the merged PR it collides with
+  conflict_title: z.string().nullable().optional(),
 });
 export const RestackAmbient = z.object({
   available: z.boolean(),
