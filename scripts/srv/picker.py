@@ -362,7 +362,7 @@ def open_on_branch(branch, path, pos=None):   # open <path> on <branch> in the w
     # its server thread — pends forever, and each hung probe leaks an nvim. Run in its own
     # process group and SIGKILL the whole group on timeout so hover+o fails visibly fast
     # instead of spinning, and no zombie probe is left behind.
-    proc = subprocess.Popen(args, cwd=ctx.CWD, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    proc = subprocess.Popen(args, cwd=ctx.repo_cwd(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)
     try:
         out, err = proc.communicate(timeout=8)
@@ -384,7 +384,7 @@ def open_here(path, pos=None):   # open <path> in the MAIN working checkout (sta
     args = [os.path.join(ctx.SCRIPTS, "stack-open"), "--here", path]
     if pos:
         args.append(str(pos))
-    proc = subprocess.Popen(args, cwd=ctx.CWD, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    proc = subprocess.Popen(args, cwd=ctx.repo_cwd(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)
     try:
         out, err = proc.communicate(timeout=8)
@@ -402,7 +402,7 @@ def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in t
     # mirrors open_on_branch's wedged-nvim guard; the longer timeout covers <leader>gm's
     # origin/main fetch + Diffview build.
     args = [os.path.join(ctx.SCRIPTS, "stack-open"), "--review", branch]
-    proc = subprocess.Popen(args, cwd=ctx.CWD, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    proc = subprocess.Popen(args, cwd=ctx.repo_cwd(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             text=True, start_new_session=True)
     try:
         out, err = proc.communicate(timeout=20)
@@ -420,7 +420,7 @@ def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in t
 
 def prepare_branch(branch):   # background worktree prefetch (stack-open --prepare) — fire-and-forget
     subprocess.Popen([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
-                     cwd=ctx.CWD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+                     cwd=ctx.repo_cwd(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
 def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
