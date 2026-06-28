@@ -698,7 +698,14 @@ function Home() {
                 <Link
                   class="forest-row"
                   classList={{ parked: stuck() }}
-                  to={{ kind: "forest", name: p.name, repo: p.repo }}
+                  // a non-loops forest opens straight on its root branch node (never the project
+                  // name, never a blank overview); loops keeps the map-first overview landing.
+                  to={{
+                    kind: "forest",
+                    name: p.name,
+                    repo: p.repo,
+                    node: p.repo !== "loops" ? (p.mergeable?.[0] ?? p.candidates?.[0]) : undefined,
+                  }}
                   onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
                   onMouseLeave={hideFtip}
                 >

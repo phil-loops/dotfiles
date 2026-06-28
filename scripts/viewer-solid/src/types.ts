@@ -72,6 +72,8 @@ export const Project = z.object({
   repo: z.string().default("loops"), // which registry repo this forest lives in (Forests home groups by it)
   branches: z.number(),
   behind: z.number(),
+  mergeable: z.array(z.string()).optional(), // topo-mergeable roots; [0] is the entry node a non-loops card opens
+  candidates: z.array(z.string()).optional(),
   merged: z
     .object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() })
     .nullable()
