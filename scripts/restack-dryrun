@@ -111,7 +111,11 @@ while IFS= read -r b; do
   case "$code" in
     0)  rows+=("$b	$parent	$behind	would-restack	auto-restack (silent)"); restack=$((restack+1)) ;;
     20) rows+=("$b	$parent	$behind	would-contract	drop & rewire (already merged)"); contract=$((contract+1)) ;;
-    30) rows+=("$b	$parent	$behind	will-conflict	⚠ needs you — real collision"); conflict=$((conflict+1)) ;;
+    30) # name the culprit: the newest merged PR whose files overlap this branch's (no gh call)
+        top="$("$here/rebase-culprit" "$b" "$trunk" 2>/dev/null | head -1)"
+        cpr="${top%%$'\t'*}"; ctitle=""; [[ "$top" == *$'\t'* ]] && ctitle="${top#*$'\t'}"
+        wd="⚠ needs you — real collision"; [[ -n "$cpr" ]] && wd="⚠ conflicts with #$cpr"
+        rows+=("$b	$parent	$behind	will-conflict	$wd	$cpr	$ctitle"); conflict=$((conflict+1)) ;;
     *)  rows+=("$b	$parent	$behind	error	classify failed ($code) — inspect by hand"); skipped=$((skipped+1)) ;;
   esac
 done <<< "$branches"
@@ -123,7 +127,9 @@ if (( json )); then
       split("\n") | map(select(length > 0) | split("\t")) |
       map({branch:.[0], parent:.[1],
            behind:(if .[2] == "-" then null else (.[2]|tonumber) end),
-           verdict:.[3], would_do:.[4]}) |
+           verdict:.[3], would_do:.[4],
+           conflict_pr:(if (.[5]//"") == "" then null else (.[5]|tonumber) end),
+           conflict_title:(if (.[6]//"") == "" then null else .[6] end)}) |
       {trunk:$trunk, trunk_tip:$tip, branches:., summary:$sum}'
   exit 0
 fi
@@ -131,7 +137,7 @@ fi
 printf '%-40s %-8s %-16s %s\n' "BRANCH" "BEHIND" "VERDICT" "WOULD DO"
 printf '%-40s %-8s %-16s %s\n' "------" "------" "-------" "--------"
 for r in "${rows[@]}"; do
-  IFS=$'\t' read -r b parent behind verdict would <<< "$r"
+  IFS=$'\t' read -r b parent behind verdict would cpr ctitle <<< "$r"
   printf '%-40s %-8s %-16s %s\n' "$b" "$behind" "$verdict" "$would"
 done
 echo "------"

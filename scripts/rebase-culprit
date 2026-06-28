@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# rebase-culprit — name the merged PR(s) a conflicting branch collides with.
+#
+# Given a branch that rebase-classify calls CONFLICT against origin/main, find which
+# squash-merged PR(s) on main since the branch's merge-base touched the SAME files the
+# branch touches — i.e. the change that will fight this branch's rebase. The squash subject
+# already carries "Title (#N)", so this needs NO gh call (fast + offline-safe).
+#
+#   rebase-culprit <branch> [target]      target default origin/main
+#   rebase-culprit <branch> --json        emit JSON {prs:[{n,title}]}
+#
+# Output (default): one "PR<TAB>title" line per overlapping merge, NEWEST FIRST. Empty if
+# nothing overlaps (a conflict with no file-overlap culprit — rare; inspect by hand).
+
+json=0
+args=()
+for a in "$@"; do
+  case "$a" in
+    --json) json=1 ;;
+    -h|--help) sed -n '3,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) args+=("$a") ;;
+  esac
+done
+branch="${args[0]:-}"
+target="${args[1]:-origin/main}"
+[[ -n "$branch" ]] || { echo "usage: rebase-culprit <branch> [target] [--json]" >&2; exit 2; }
+git rev-parse --verify -q "$branch" >/dev/null || { echo "rebase-culprit: no such branch: $branch" >&2; exit 2; }
+git rev-parse --verify -q "$target" >/dev/null || { echo "rebase-culprit: no such target: $target" >&2; exit 2; }
+
+mb="$(git merge-base "$branch" "$target")"
+# files the branch changed, and files main changed since the fork — their intersection is
+# the contested set. No intersection → no file-overlap culprit to name.
+branch_files="$(git diff --name-only "$mb" "$branch" | sort -u)"
+overlap="$(git diff --name-only "$mb" "$target" | sort -u | comm -12 - <(printf '%s\n' "$branch_files"))"
+if [[ -z "$overlap" ]]; then
+  (( json )) && echo '{"prs":[]}' || true
+  exit 0
+fi
+
+# walk merges newest-first; a squash merge whose own diff touches any contested file is a
+# culprit. PR number + title come straight from the subject "Title (#N)".
+emit=()
+while IFS=$'\t' read -r sha subj; do
+  [[ "$subj" =~ \(#([0-9]+)\)[[:space:]]*$ ]] || continue
+  n="${BASH_REMATCH[1]}"
+  # files this merge changed (squash = single commit; diff-tree vs its first parent)
+  cf="$(git diff-tree --no-commit-id --name-only -r "$sha" 2>/dev/null | sort -u)"
+  if printf '%s\n' "$cf" | comm -12 - <(printf '%s\n' "$overlap") | grep -q .; then
+    emit+=("$n	${subj%% (#$n)}")
+  fi
+done < <(git log "$mb..$target" --format='%H%x09%s')
+
+if (( json )); then
+  printf '%s\n' "${emit[@]}" | jq -R -s 'split("\n") | map(select(length>0) | split("\t")) | {prs: map({n:(.[0]|tonumber), title:.[1]})}'
+else
+  printf '%s\n' "${emit[@]}"
+fi
