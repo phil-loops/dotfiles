@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -16,6 +17,11 @@ const parseArgs = (argv) => {
       args.out = argv[++i];
     } else if (arg === "--name" || arg === "-n") {
       args.name = argv[++i];
+    } else if (arg === "--html") {
+      args.html = true;
+    } else if (arg === "--open") {
+      args.html = true;
+      args.open = true;
     } else if (arg === "--help" || arg === "-h") {
       args.help = true;
     }
@@ -32,9 +38,34 @@ Options:
   -s, --spec   OpenAPI spec URL or local path   (default: ${DEFAULT_SPEC})
   -o, --out    Output directory                  (default: current directory)
   -n, --name   Collection name                   (default: Loops API)
+      --html   Also write an interactive HTML API reference
+      --open   Write the HTML reference and open it in the browser
 
 Writes <out>/loops.postman_collection.json and <out>/loops.postman_environment.json.
 Import both into Postman, then set the environment's apiKey.`;
+
+const htmlFor = (name, rawSpec) => {
+  const inlineSpec = rawSpec.replace(/<\/script>/gi, "<\\/script>");
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${name}</title>
+  </head>
+  <body>
+    <script id="api-reference" type="application/json">${inlineSpec}</script>
+    <script>
+      document.getElementById("api-reference").dataset.configuration = JSON.stringify({
+        theme: "purple",
+        hideDownloadButton: false,
+      });
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>
+`;
+};
 
 const loadSpec = async (src) => {
   if (/^https?:\/\//.test(src)) {
@@ -201,6 +232,15 @@ const main = async () => {
     `Wrote ${collectionPath}\n  ${collection.item.length} folders, ${requests} requests (spec v${spec.info?.version ?? "?"})`,
   );
   console.log(`Wrote ${environmentPath}`);
+
+  if (args.html) {
+    const htmlPath = resolve(args.out, "loops.api.html");
+    writeFileSync(htmlPath, htmlFor(args.name, rawSpec));
+    console.log(`Wrote ${htmlPath}`);
+    if (args.open) {
+      spawn("open", [htmlPath], { stdio: "ignore", detached: true }).unref();
+    }
+  }
 };
 
 main().catch((err) => {
