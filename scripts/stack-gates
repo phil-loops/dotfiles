@@ -71,8 +71,25 @@ def repo_local(cmd, cwd):
     return local if os.path.exists(local) else None
 
 
+# Files where a behind-origin/main branch is a hard push-block, not just a warning —
+# kept in lockstep with the loops-pre-push hook's deploy-critical list (drift here =
+# the gate and the hook disagree on what blocks a push).
+DEPLOY_CRITICAL = (
+    "'k8s/charts/loops/values.staging.yaml' 'k8s/charts/loops/values.production.yaml' "
+    "'packages/prisma/migrations/*' 'clickhouse/migrations/*' "
+    "'jobs.ts' 'jobs/index.ts' '.env.template'"
+)
+
+
 def default_gates(cwd):
-    gates = []
+    # fresh: the pre-push hook rejects a branch behind origin/main on a deploy-critical
+    # file, so catch it here (with an auto-rebase fix) instead of at the push wall. Runs
+    # first — its rebase, when it fires, must land before typecheck/format see the tree.
+    gates = [("fresh",
+              '[ "$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)" -eq 0 ] && exit 0; '
+              f'miss="$(git diff HEAD..origin/main --name-only -- {DEPLOY_CRITICAL})"; '
+              '[ -z "$miss" ] && exit 0; '
+              'echo "behind origin/main, missing deploy-critical:"; echo "$miss"; exit 1')]
     # Typecheck with the repo-PINNED compiler: a global tsgo dev build rejects
     # configs the repo's own tsc accepts (e.g. moduleResolution=node10 removed),
     # which surfaces as a false "blocked, needs the laptop". Prefer repo tsgo, else tsc.
@@ -109,24 +126,32 @@ def configured_fixes(cwd):
 
 
 def default_fixes(cwd, branch):
-    """Built-in remediation for the format gate. A branch in a forest is fixed by the
-    whole-forest cascade (stack-fmt — each layer formatted at its own branch; formatting
-    only the leaf would leave its drifted ancestors red). A standalone branch folds an
-    oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
+    """Built-in remediation. The fresh gate rebases the branch onto fresh origin/main —
+    but only a root branch (parent main/empty): rebasing a STACKED branch onto main would
+    tear it off its parent, so those stay red ("restack the forest from the laptop").
+    The format gate: a forest branch is fixed by the whole-forest cascade (stack-fmt —
+    formatting only the leaf leaves its drifted ancestors red); a standalone branch folds
+    an oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
     self_dir = os.path.dirname(os.path.abspath(__file__))
+    fixes = {}
+    parent = gconf(f"stack-branch.{branch}.parent", cwd) if branch else ""
+    if parent in ("", "main"):
+        fixes["fresh"] = ("git fetch origin main -q && git rebase origin/main "
+                          "|| { git rebase --abort 2>/dev/null; exit 1; }")
     project = gconf(f"stack-branch.{branch}.project", cwd) if branch else ""
     if project and os.path.exists(os.path.join(self_dir, "stack-fmt")):
-        return {"format": f"{self_dir}/stack-fmt {project}"}
+        fixes["format"] = f"{self_dir}/stack-fmt {project}"
+        return fixes
     oxfmt = resolve("oxfmt", cwd)
-    if not oxfmt:
-        return {}
-    return {"format": (
-        "files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
-        '[ -z "$files" ] && exit 0; '
-        f'echo "$files" | xargs {oxfmt} --write; '
-        'echo "$files" | xargs git add; '
-        'git commit -q -m "style: oxfmt" --no-verify'
-    )}
+    if oxfmt:
+        fixes["format"] = (
+            "files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
+            '[ -z "$files" ] && exit 0; '
+            f'echo "$files" | xargs {oxfmt} --write; '
+            'echo "$files" | xargs git add; '
+            'git commit -q -m "style: oxfmt" --no-verify'
+        )
+    return fixes
 
 
 def last_lines(text, n=12):
