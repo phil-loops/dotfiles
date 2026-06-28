@@ -9,6 +9,8 @@
 #
 #   stack-open <branch> <path> [<pos>]  ensure worktree + open <path> in the warm nvim;
 #                                       <pos> lands the cursor: "<line>" or "<line>:<col>"
+#   stack-open --here <path> [<pos>]   open <path> in the MAIN working checkout (no worktree)
+#                                       — for jumping from a GitHub blob view to your editor
 #   stack-open --prepare <branch>  create/refresh the worktree only (prefetch)
 #   stack-open --prune [<days>]    remove scratch worktrees idle > days (default 3)
 #
@@ -166,13 +168,22 @@ case "${1:-}" in
     echo "review-opened $rbranch (gm Diffview) → review-nvim ($rdir)"; exit 0;;
 esac
 
-branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
-rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
-pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
-( prune_old 3 ) &!                       # lazy self-clean, non-blocking
-dir=$(ensure_worktree "$branch")
+if [[ "${1:-}" == "--here" ]]; then
+  # Open a path in the MAIN working checkout (no branch worktree) — for "jump to this file
+  # from a GitHub blob view", where you want your editable checkout at that line, not a
+  # detached scratch worktree of the ref.
+  rel="${2:?usage: stack-open --here <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
+  pos="${3:-}"
+  branch="working tree"; dir="$main_root"
+else
+  branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
+  rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
+  pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
+  ( prune_old 3 ) &!                       # lazy self-clean, non-blocking
+  dir=$(ensure_worktree "$branch")
+fi
 file="$dir/$rel"
-[[ -f "$file" ]] || { echo "stack-open: '$rel' not on $branch" >&2; exit 1; }
+[[ -f "$file" ]] || { echo "stack-open: '$rel' not in $branch" >&2; exit 1; }
 
 # Resolve the opaque <pos> into nvim locators — THE one place the grammar lives.
 # Grow it here (patterns, ranges) and callers/server never change.
