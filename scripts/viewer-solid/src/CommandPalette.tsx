@@ -116,7 +116,7 @@ export default function CommandPalette() {
       }
     } else {
       for (const p of projects.data || []) {
-        cmds.push({ label: `→ ${p.name}`, sub: p.repo !== "loops" ? p.repo : "forest", run: () => navigate({ kind: "forest", name: p.name, repo: p.repo }) });
+        cmds.push({ label: `→ ${p.name}`, sub: p.repo !== "loops" ? p.repo : "forest", run: () => navigate({ kind: "forest", name: p.name, repo: p.repo, node: p.repo !== "loops" ? p.mergeable?.[0] : undefined }) });
       }
     }
 
