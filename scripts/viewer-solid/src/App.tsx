@@ -907,11 +907,20 @@ function ForestOverview() {
       ),
     enabled: canMutate && healthIds().length > 0,
   }));
-  // open PRs keyed by head branch — drives the per-node PR badge in the map.
+  // open PRs keyed by head branch — drives the per-node PR badge in the map. The rich /prs
+  // map (base/toMain/review) is filtered to MY PRs via /myprs, so a node only badges a PR I own.
   const prs = createQuery(() => ({
     queryKey: ["branch-prs", forestRepo(location()) ?? "loops"],
     queryFn: () => provider.branchPrs(),
   }));
+  const myPrs = createQuery(() => ({ queryKey: ["myprs"], queryFn: () => provider.myPrs() }));
+  const myBranches = createMemo(() => new Set((myPrs.data || []).map((p) => p.branch)));
+  const myBranchPrs = () => {
+    const all = prs.data;
+    if (!all) return undefined;
+    const mine = myBranches();
+    return Object.fromEntries(Object.entries(all).filter(([b]) => mine.has(b)));
+  };
   // ghost endstate (✦ <project>) opens its integration diff; every other node opens itself.
   // withNode keeps the location's repo so a monotoad node stays in monotoad.
   const open = (b: string) => navigate(withNode(location(), b));
@@ -964,7 +973,7 @@ function ForestOverview() {
               spine={spine}
               active={() => (spine().some((n) => n.id === cameFrom()) ? cameFrom() : "")}
               health={() => health.data}
-              prs={() => prs.data}
+              prs={myBranchPrs}
               onPick={open}
               onClose={() => {}}
               onHoverNode={showTip}
