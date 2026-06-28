@@ -385,8 +385,15 @@ function Home() {
     const stale = (a.age_s ?? 0) > 3600; // daemon hasn't refreshed in >1h → don't trust it
     const age = a.age_s == null ? "" : a.age_s < 90 ? "just now"
       : a.age_s < 3600 ? `${Math.round(a.age_s / 60)}m ago` : `${Math.round(a.age_s / 3600)}h ago`;
-    const title = `dry-run @ ${age}: ${s.clean} clean · ${s.would_restack} would-restack · `
+    let title = `dry-run @ ${age}: ${s.clean} clean · ${s.would_restack} would-restack · `
       + `${s.would_contract} merged · ${s.will_conflict} will-conflict · ${s.skipped} skipped (moves nothing)`;
+    // name the culprits so the alarm is actionable, not just a count
+    const conflicts = a.report.branches.filter((b) => b.verdict === "will-conflict");
+    if (conflicts.length) {
+      title += "\n\nwill conflict:\n" + conflicts
+        .map((b) => `  ${b.branch}${b.conflict_pr ? ` → #${b.conflict_pr} ${b.conflict_title ?? ""}` : ""}`)
+        .join("\n");
+    }
     if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
     if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title };
     if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title };
