@@ -8,6 +8,7 @@
 // squash / restack / integrate / chat) in static mode instead of rendering dead ones.
 import { z } from "zod";
 import { fetchJSON } from "./api";
+import { knownRepos } from "./router";
 import {
   Commit,
   ForestBranch,
@@ -64,24 +65,23 @@ function parse<S extends z.ZodType>(schema: S, data: unknown, label: string): z.
 
 const q = (s: string): string => encodeURIComponent(s);
 
-// The active repo for repo-scoped reads (model/node/commits/purpose/sync) and writes
-// (bless/purpose) — read from the URL's ?repo= at CALL TIME. navigate() updates the URL
-// synchronously before any query reacts, and a deep-link/refresh already has it, so the fetch
-// always sees the right repo with no effect-ordering race. "loops" (the launched default) and
-// no param are equivalent → append nothing, so single-repo URLs and behavior are unchanged.
+// The active repo for repo-scoped reads (model/node/commits/purpose/sync) and writes (bless) —
+// read from the URL PATH at CALL TIME (/forests/<repo>/<project>/<branch>). navigate() updates the
+// path synchronously before any query reacts, and a deep-link already has it, so the fetch always
+// sees the right repo with no effect-ordering race. loops (the launched default) is implicit
+// (no segment) → null. Mirrors the router's parse.
 function activeRepo(): string | null {
-  const r = new URLSearchParams(window.location.search).get("repo");
-  return r && r !== "loops" ? r : null;
+  const segs = window.location.pathname.split("/").filter(Boolean);
+  if (segs[0] === "forests" && segs[1] && segs[1] !== "loops" && knownRepos().has(segs[1])) {
+    return segs[1];
+  }
+  return null;
 }
-export function repoQuery(): string {
-  const r = activeRepo();
-  return r ? "&repo=" + q(r) : "";
-}
-// Append the active repo to any URL (picks ? vs & correctly) — for POST actions like /bless
-// that the provider seam doesn't cover. No active repo → unchanged.
+// Prefix an API path with the active repo (/<repo>/model) so the server reads repo from the path,
+// never a ?repo= query. No active repo → unchanged. Used for reads below and POSTs (bless) via withRepo.
 export function withRepo(path: string): string {
   const r = activeRepo();
-  return r ? path + (path.includes("?") ? "&" : "?") + "repo=" + q(r) : path;
+  return r ? "/" + r + path : path;
 }
 
 // Branch → filesystem/URL slug for baked blobs. Slashes become "~" so a baked file
@@ -100,13 +100,13 @@ export class HttpProvider implements DataProvider {
   standalone = () => fetchJSON<unknown>("/standalone").then((d) => parse(z.array(Standalone), d, "standalone"));
   branches = () => fetchJSON<unknown>("/branches").then((d) => parse(z.array(z.string()), d, "branches"));
   forestBranches = () => fetchJSON<unknown>("/forest-branches").then((d) => parse(z.array(ForestBranch), d, "forest-branches"));
-  model = (branch: string) => fetchJSON<unknown>("/model?branch=" + q(branch) + repoQuery()).then((d) => parse(ForestModel, d, "model"));
+  model = (branch: string) => fetchJSON<unknown>(withRepo("/model") + "?branch=" + q(branch)).then((d) => parse(ForestModel, d, "model"));
   node = (branch: string, base?: string) =>
-    fetchJSON<unknown>("/node?branch=" + q(branch) + (base ? "&base=" + base : "") + repoQuery()).then((d) => parse(NodeData, d, "node"));
-  commits = (branch: string) => fetchJSON<unknown>("/commits?branch=" + q(branch) + repoQuery()).then((d) => parse(z.array(Commit), d, "commits"));
-  purpose = (branch: string) => fetchJSON<unknown>("/purpose?branch=" + q(branch) + repoQuery()).then((d) => parse(Purpose, d, "purpose"));
+    fetchJSON<unknown>(withRepo("/node") + "?branch=" + q(branch) + (base ? "&base=" + base : "")).then((d) => parse(NodeData, d, "node"));
+  commits = (branch: string) => fetchJSON<unknown>(withRepo("/commits") + "?branch=" + q(branch)).then((d) => parse(z.array(Commit), d, "commits"));
+  purpose = (branch: string) => fetchJSON<unknown>(withRepo("/purpose") + "?branch=" + q(branch)).then((d) => parse(Purpose, d, "purpose"));
   head = () => fetchJSON<unknown>("/head").then((d) => parse(Head, d, "head"));
-  sync = (branch: string) => fetchJSON<unknown>("/sync?branch=" + q(branch) + repoQuery()).then((d) => parse(SyncState, d, "sync"));
+  sync = (branch: string) => fetchJSON<unknown>(withRepo("/sync") + "?branch=" + q(branch)).then((d) => parse(SyncState, d, "sync"));
   restackStatus = (project?: string) =>
     fetchJSON<unknown>("/restack-status" + (project ? "?project=" + q(project) : "")).then((d) => parse(RestackStatus, d, "restack-status"));
   restackAmbient = () => fetchJSON<unknown>("/restack-ambient").then((d) => parse(RestackAmbient, d, "restack-ambient"));
