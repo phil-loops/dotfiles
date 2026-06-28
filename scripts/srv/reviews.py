@@ -124,6 +124,20 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
               json.dumps({"ok": code == 0, "branch": branch, "path": route, "opened": code == 0, "local": local, "err": err}))
 
 
+def open_blob(req, raw):   # POST /open-blob — Chrome ext: open a GitHub blob's <path> at <line>
+    # A blob view (github.com/.../blob/<ref>/<path>#L<n>) has no PR — just a file + line. Open it
+    # in the MAIN working checkout (where you read/edit), not a scratch worktree of the ref; the
+    # ref is informational. path is the repo-relative path straight from the URL.
+    d = json.loads(raw or "{}")
+    path = (d.get("path") or "").strip()
+    if not path:
+        req._send(400, json.dumps({"ok": False, "err": "no path"}))
+        return
+    code, _out, err = picker.open_here(path, d.get("line"))
+    req._send(200 if code == 0 else (504 if code == 504 else 500),
+              json.dumps({"ok": code == 0, "path": path, "opened": code == 0, "err": err}))
+
+
 def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext can flag a stale loaded copy
     d = os.path.join(ctx.SCRIPTS, "gh-to-nvim")
     latest = 0.0
