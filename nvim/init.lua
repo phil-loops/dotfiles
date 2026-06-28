@@ -811,6 +811,21 @@ require('lazy').setup({
       local lspconfig_util = require('lspconfig.util')
       local tsgo_root = lspconfig_util.root_pattern('tsconfig.json', 'jsconfig.json', 'package.json', '.git')
 
+      -- Resolve tsgo to an ABSOLUTE path. When review-nvim is spawned outside an
+      -- interactive shell (e.g. a tmux/launcher pane), ~/.volta/bin isn't on PATH, so a
+      -- bare 'tsgo' fails to spawn ("not installed, missing from PATH"). Prefer PATH when
+      -- it has it; else fall back to the volta-managed binary.
+      local function resolve_tsgo()
+        local p = vim.fn.exepath('tsgo')
+        if p ~= '' then return p end
+        for _, cand in ipairs({ '~/.volta/bin/tsgo', '~/.local/bin/tsgo' }) do
+          local abs = vim.fn.expand(cand)
+          if vim.fn.executable(abs) == 1 then return abs end
+        end
+        return 'tsgo' -- last resort; errors visibly if genuinely absent
+      end
+      local tsgo_bin = resolve_tsgo()
+
       -- LRU cap: per-worktree rooting means one tsgo per branch you open, and they do
       -- NOT auto-stop when buffers close — so a long review session would accumulate a
       -- tsgo (and its workers) per branch ever touched. Keep only the N most-recently-
@@ -846,7 +861,7 @@ require('lazy').setup({
         end
         local id = vim.lsp.start({
           name = 'tsgo',
-          cmd = { 'tsgo', '--lsp', '-stdio' },
+          cmd = { tsgo_bin, '--lsp', '-stdio' },
           root_dir = root,
           capabilities = capabilities,
         }, {
