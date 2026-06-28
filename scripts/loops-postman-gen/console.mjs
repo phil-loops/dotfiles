@@ -214,6 +214,8 @@ button.ghost { background:transparent; color:var(--accent); border:1px solid var
 .status { font-weight:700; padding:2px 8px; border-radius:5px; }
 .ok{ background:#0c3; color:#021; } .bad{ background:#f55; color:#200; }
 pre { background:#0b0d11; border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:42vh; white-space:pre-wrap; word-break:break-word; }
+.json .cap { color:var(--accent); cursor:pointer; border-bottom:1px dotted var(--muted); }
+.json .cap:hover { background:#2a2150; border-bottom-color:var(--accent); }
 .var { display:flex; justify-content:space-between; gap:6px; padding:4px 6px; border-radius:5px; cursor:pointer; }
 .var:hover { background:#222634; }
 .var b { color:var(--accent); font-weight:600; }
@@ -306,14 +308,67 @@ async function sendRequest() {
   const r = await fetch('/proxy', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }).then(r=>r.json());
   const ok = r.status>=200 && r.status<300;
   resp.innerHTML = '';
-  resp.appendChild(el('<div class="bar" style="margin-top:10px"><span class="status '+(ok?'ok':'bad')+'">'+(r.status||'ERR')+' '+(r.statusText||'')+'</span></div>'));
-  resp.appendChild(el('<pre>'+escapeHtml(JSON.stringify(r.body ?? r.error, null, 2))+'</pre>'));
+  resp.appendChild(el('<div class="bar" style="margin-top:10px"><span class="status '+(ok?'ok':'bad')+'">'+(r.status||'ERR')+' '+(r.statusText||'')+'</span><span class="sum">click any highlighted id to capture it</span></div>'));
+  resp.appendChild(renderResp(r.body ?? r.error));
   capture(r.body);
 }
 
 function capture(body) {
   walk(body, '', childResourceParam(current?.path));
   renderStore();
+}
+
+function captureValue(name, val) {
+  store[name] = val;
+  const child = childResourceParam(current?.path);
+  if (name === 'id' && child) store[child] = val;
+  renderStore();
+  selectVar(name);
+}
+
+function isIdish(key, val) {
+  if (/(^id$|Id$)/.test(key)) return true;
+  return typeof val === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{14,}$/.test(val) && /[0-9]/.test(val);
+}
+
+function capSpan(name, val, inner) {
+  return '<span class="cap" data-cn="'+escapeHtml(name)+'" data-cv="'+escapeHtml(val)+'">'+inner+'</span>';
+}
+
+function renderJson(v, key, indent) {
+  const pad = '  '.repeat(indent);
+  if (Array.isArray(v)) {
+    if (!v.length) return '[]';
+    return '[\\n' + v.map(x=>'  '.repeat(indent+1)+renderJson(x, key, indent+1)).join(',\\n') + '\\n'+pad+']';
+  }
+  if (v && typeof v === 'object') {
+    const keys = Object.keys(v);
+    if (!keys.length) return '{}';
+    const param = key.endsWith('s') && isIdMap(v) ? key.slice(0,-1)+'Id' : null;
+    const keyIsId = param && paramExists(param);
+    const rows = keys.map(k=>{
+      const label = keyIsId ? capSpan(param, k, '"'+escapeHtml(k)+'"') : '"'+escapeHtml(k)+'"';
+      return '  '.repeat(indent+1) + label + ': ' + renderJson(v[k], k, indent+1);
+    }).join(',\\n');
+    return '{\\n'+rows+'\\n'+pad+'}';
+  }
+  if (typeof v === 'string') {
+    const inner = '"'+escapeHtml(v)+'"';
+    return isIdish(key, v) ? capSpan(key||'value', v, inner) : inner;
+  }
+  if (typeof v === 'number') {
+    return isIdish(key, v) ? capSpan(key||'value', String(v), String(v)) : String(v);
+  }
+  return escapeHtml(String(v));
+}
+
+function renderResp(body) {
+  const pre = el('<pre class="json"></pre>');
+  pre.innerHTML = renderJson(body, '', 0);
+  pre.querySelectorAll('.cap').forEach(s=>{
+    s.onclick = ()=>captureValue(s.dataset.cn, s.dataset.cv);
+  });
+  return pre;
 }
 function childResourceParam(path) {
   if (!path) return null;
