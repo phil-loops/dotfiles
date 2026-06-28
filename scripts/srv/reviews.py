@@ -9,11 +9,31 @@
 import json
 import os
 import re
+import subprocess
 import time
 from urllib.parse import parse_qs
 
 from srv import ctx
 from srv import picker
+
+
+def _resolve_repo(slug):
+    # Map a GitHub "<owner>/<repo>" slug (what the Chrome ext sends in the body) to a registry
+    # repo → (name, worktree). Prefers an exact remote-URL match across the viewer-repos; falls
+    # back to the slug's basename matching a repo name (any owner / monotoad → the monotoad
+    # checkout). Unknown → (None, CWD) so it behaves exactly like today (loops default).
+    slug = (slug or "").strip().lower()
+    if not slug:
+        return None, ctx.CWD
+    base = {}
+    for name, path in (ctx.REPOS or {}).items():
+        base[name.lower()] = (name, path)
+        rv = subprocess.run(["git", "-C", path, "remote", "-v"], capture_output=True, text=True)
+        for m in re.finditer(r"github\.com[:/]([^/\s]+/[^/\s]+?)(?:\.git)?(?:\s|$)", rv.stdout):
+            if m.group(1).lower() == slug:
+                return name, path
+    hit = base.get(slug.split("/")[-1])
+    return hit if hit else (None, ctx.CWD)
 
 _cache = {"at": 0.0, "json": "[]"}
 _TTL = 30   # gh search is a ~1s network round-trip and the review queue barely moves
@@ -89,6 +109,11 @@ def _refresh_review_branch(num):
 
 def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <path> at <line> in nvim
     d = json.loads(raw or "{}")
+    # The ext sends repo="<owner>/<repo>" in the body (not ?repo=), so map it ourselves and pin
+    # the thread to that checkout — every ctx.run / picker.open below then acts on it. do_POST's
+    # finally clears the thread-local. Unknown slug → CWD (loops), today's behavior.
+    repo_name, repo_path = _resolve_repo(d.get("repo"))
+    ctx.set_repo(repo_path)
     num = str(d.get("number", "")).strip().lstrip("#")
     if not num.isdigit():
         req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
@@ -110,9 +135,12 @@ def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <pa
     # (tagged stack-branch.<b>.project) lives at /forests/<project>/<branch>, an untagged
     # own branch is a standalone /branch/<b>, an imported PR is /review/N. The project tag
     # is the same git config the viewer reads, so membership stays single-source.
+    # repo prefix on the forest route so `→ viewer` lands on the right repo's node; loops (the CWD
+    # default) and unknown slugs stay implicit (/forests/<project>/<branch>).
+    prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
     project = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
     if project:
-        route = f"/forests/{project}/{branch}"
+        route = f"/forests/{prefix}{project}/{branch}"
     elif local:
         route = f"/branch/{branch}"
     else:
@@ -139,6 +167,10 @@ def open_blob(req, raw):   # POST /open-blob — Chrome ext: open a GitHub blob'
     # in the MAIN working checkout (where you read/edit), not a scratch worktree of the ref; the
     # ref is informational. path is the repo-relative path straight from the URL.
     d = json.loads(raw or "{}")
+    # map the body's "<owner>/<repo>" → checkout and pin it, so open_here lands in THAT repo's
+    # working tree (not :62497's loops CWD). Unknown slug → CWD. do_POST's finally clears it.
+    _name, repo_path = _resolve_repo(d.get("repo"))
+    ctx.set_repo(repo_path)
     path = (d.get("path") or "").strip()
     if not path:
         req._send(400, json.dumps({"ok": False, "err": "no path"}))
