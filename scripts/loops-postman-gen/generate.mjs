@@ -32,16 +32,23 @@ const parseArgs = (argv) => {
 const HELP = `loops-postman — generate a Postman collection from an OpenAPI spec
 
 Usage:
-  loops-postman [--spec <path-or-url>] [--out <dir>] [--name <name>]
+  loops-postman [--spec <path-or-url>] [--out <dir>] [--name <name>] [--html|--open]
+  loops-postman serve [--base <url>] [--token <key>] [--spec <path-or-url>] [--port <n>]
 
-Options:
+Generate options:
   -s, --spec   OpenAPI spec URL or local path   (default: ${DEFAULT_SPEC})
   -o, --out    Output directory                  (default: current directory)
   -n, --name   Collection name                   (default: Loops API)
       --html   Also write an interactive HTML API reference
       --open   Write the HTML reference and open it in the browser
 
-Writes <out>/loops.postman_collection.json and <out>/loops.postman_environment.json.
+serve — responsive console that calls the API live and chains captured ids:
+  -b, --base   API base URL    (default: http://localhost:3000/api — dev)
+  -t, --token  Bearer token    (default: the seeded dev key)
+  -p, --port   Console port    (default: 7070)
+      --no-open  Don't open the browser
+
+Generate writes <out>/loops.postman_collection.json + loops.postman_environment.json.
 Import both into Postman, then set the environment's apiKey.`;
 
 const htmlFor = (name, rawSpec) => {
@@ -177,7 +184,31 @@ const convert = (spec) =>
     );
   });
 
+const runServe = async (argv) => {
+  const { serve } = await import("./console.mjs");
+  const opts = { open: true };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--spec" || arg === "-s") {
+      opts.spec = argv[++i];
+    } else if (arg === "--base" || arg === "-b") {
+      opts.base = argv[++i];
+    } else if (arg === "--token" || arg === "-t") {
+      opts.token = argv[++i];
+    } else if (arg === "--port" || arg === "-p") {
+      opts.port = Number(argv[++i]);
+    } else if (arg === "--no-open") {
+      opts.open = false;
+    }
+  }
+  await serve(opts);
+};
+
 const main = async () => {
+  if (process.argv[2] === "serve") {
+    return runServe(process.argv.slice(3));
+  }
+
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
     console.log(HELP);
