@@ -10,6 +10,24 @@ function parsePr() {
   return { repo: `${m[1]}/${m[2]}`, number: Number(m[3]) };
 }
 
+// a GitHub file blob view: /<owner>/<repo>/blob/<ref>/<path> with the line in #L<n>.
+// ref is informational (we open in the working checkout); path is the repo-relative path.
+// NB: a ref containing slashes (feature/x) over-claims path segments — fine for the common
+// main/single-segment-ref case, which is what blob "open in nvim" is for.
+function parseBlob() {
+  const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/([^/]+)\/(.+)$/);
+  if (!m) {
+    return null;
+  }
+  const lm = location.hash.match(/^#L(\d+)/);
+  return {
+    repo: `${m[1]}/${m[2]}`,
+    ref: decodeURIComponent(m[3]),
+    path: decodeURIComponent(m[4]),
+    line: lm ? Number(lm[1]) : 1,
+  };
+}
+
 async function sha256hex(s) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -46,10 +64,10 @@ async function nvimRequest(pr) {
   return { payload: { number: pr.number, repo: pr.repo, view: "gm" }, short: "gm", full: "gm Diffview" };
 }
 
-function send(payload) {
+function send(payload, endpoint) {
   return new Promise((resolve) => {
     try {
-      chrome.runtime.sendMessage({ type: "from-github", payload }, (res) => {
+      chrome.runtime.sendMessage({ type: "from-github", payload, endpoint }, (res) => {
         const err = chrome.runtime.lastError;
         if (err) {
           console.warn("[gh-to-nvim] sendMessage failed:", err.message);
@@ -248,7 +266,8 @@ function schedule() {
 tick();
 new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
 setInterval(tick, 3000);
-// "o" (no modifiers, not while typing) → open the selected file+line, else the gm Diffview.
+// "o" (no modifiers, not while typing) → on a PR: the selected file+line, else the gm Diffview;
+// on a file blob view: that file at #L<n> in the working checkout.
 async function onOpenKey(e) {
   if (e.key !== "o" || e.altKey || e.metaKey || e.ctrlKey) {
     return;
@@ -258,14 +277,25 @@ async function onOpenKey(e) {
     return;
   }
   const pr = parsePr();
-  if (!pr) {
+  if (pr) {
+    e.preventDefault();
+    e.stopPropagation();
+    const { payload, full } = await nvimRequest(pr);
+    toast(`→ ${full} — opening…`, true, true);
+    const res = await send(payload);
+    const ok = res?.status === 200 && res.body?.ok;
+    toast(ok ? `✓ ${full}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
+    return;
+  }
+  const blob = parseBlob();
+  if (!blob) {
     return;
   }
   e.preventDefault();
   e.stopPropagation();
-  const { payload, full } = await nvimRequest(pr);
+  const full = `${blob.path}:${blob.line}`;
   toast(`→ ${full} — opening…`, true, true);
-  const res = await send(payload);
+  const res = await send({ repo: blob.repo, ref: blob.ref, path: blob.path, line: blob.line }, "/open-blob");
   const ok = res?.status === 200 && res.body?.ok;
   toast(ok ? `✓ ${full}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
 }

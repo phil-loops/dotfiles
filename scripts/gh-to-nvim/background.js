@@ -15,8 +15,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type !== "from-github") {
     return;
   }
-  console.log("[gh-to-nvim] relay →", `${VIEWER_URL}/from-github`, msg.payload);
-  fetch(`${VIEWER_URL}/from-github`, {
+  // default endpoint is the PR opener; a blob open targets /open-blob (same relay past the wall)
+  const endpoint = msg.endpoint || "/from-github";
+  console.log("[gh-to-nvim] relay →", `${VIEWER_URL}${endpoint}`, msg.payload);
+  fetch(`${VIEWER_URL}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(msg.payload),
