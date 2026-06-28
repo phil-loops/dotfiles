@@ -10,6 +10,17 @@ import subprocess
 from . import ctx
 
 
+def _active_main_wt():
+    # The PRIMARY worktree of the request's ACTIVE repo — git lists the main worktree first,
+    # even when run from a linked one, and ctx.run's cwd is the pinned repo (the /<repo>/ path
+    # prefix). NOT the global ctx.MAIN_WT, which is always the launched repo (loops) → a monotoad
+    # checkout-here would otherwise run `git -C <loops> checkout <monotoad-branch>` and fail.
+    for line in ctx.run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
+        if line.startswith("worktree "):
+            return line[len("worktree "):]
+    return ctx.MAIN_WT
+
+
 def _worktree_of(branch):   # path of the worktree currently holding `branch`, or ""
     if not branch:
         return ""
@@ -24,7 +35,7 @@ def _worktree_of(branch):   # path of the worktree currently holding `branch`, o
 
 def head(req):
     req._send(200, json.dumps(
-        {"branch": ctx.run(["git", "-C", ctx.MAIN_WT, "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
+        {"branch": ctx.run(["git", "-C", _active_main_wt(), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
 
 
 def prepare(req, raw):
@@ -54,8 +65,9 @@ def worktree(req, raw):
 def move(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
+    main_wt = _active_main_wt()
     wt = _worktree_of(branch)
-    if wt and os.path.realpath(wt) != os.path.realpath(ctx.MAIN_WT):
+    if wt and os.path.realpath(wt) != os.path.realpath(main_wt):
         # git can't move the main tree onto a branch another worktree already holds.
         if not d.get("force"):
             # tell the client where it lives so it can offer to free it
@@ -66,6 +78,6 @@ def move(req, raw):
         if rd.returncode != 0:
             req._send(500, json.dumps({"ok": False, "err": "could not free worktree: " + (rd.stderr or rd.stdout)}))
             return
-    r = ctx.run(["git", "-C", ctx.MAIN_WT, "checkout", branch])
+    r = ctx.run(["git", "-C", main_wt, "checkout", branch])
     req._send(200 if r.returncode == 0 else 500,
               json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))

@@ -19,7 +19,7 @@
 //                                       (rebase forward: in place when clean, else eject Claude)
 import { createSignal, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
-import { provider, canMutate } from "./provider";
+import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
 import { useViewerLocation } from "./router";
 
@@ -45,7 +45,9 @@ interface PrepResult {
 }
 
 async function post<T>(url: string, body: unknown): Promise<T> {
-  const r = await fetch(url, {
+  // prefix the active repo (/monotoad/checkout) so the server pins the right repo — without it
+  // every node action (checkout/squash/rebase/contract/…) runs against the launched repo (loops).
+  const r = await fetch(withRepo(url), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -86,7 +88,7 @@ export function NodeActions(props: { branch: string; isReview: boolean }) {
     setPrBusy(true);
     setPrBody("");
     try {
-      const r = await fetch("/pr-body?branch=" + encodeURIComponent(props.branch));
+      const r = await fetch(withRepo("/pr-body") + "?branch=" + encodeURIComponent(props.branch));
       const text = await r.text();
       setPrBody(r.ok ? text : `_(draft failed: ${text.slice(0, 200)})_`);
     } catch (e) {
