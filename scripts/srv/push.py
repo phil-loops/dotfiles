@@ -13,7 +13,9 @@ from . import ctx
 def gates(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch])
+    # --fix: a red gate with a remediation (e.g. fresh → rebase onto origin/main, format
+    # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch, "--fix"])
     # stack-gates always prints a JSON verdict on stdout and exits 0
     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
 

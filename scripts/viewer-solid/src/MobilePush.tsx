@@ -24,6 +24,7 @@ interface Gate {
   ok: boolean;
   ms: number;
   summary: string;
+  fixed?: boolean;
 }
 interface GatesResult {
   ok: boolean;
@@ -222,6 +223,9 @@ export default function MobilePush() {
                             {gate.ok ? "✓" : "✗"}
                           </span>
                           <span class="mp-gate-name">{gate.name}</span>
+                          <Show when={gate.fixed}>
+                            <em class="mp-flag mp-flag-on">auto-fixed</em>
+                          </Show>
                           <span class="mp-dim">{gate.ms}ms</span>
                           <Show when={!gate.ok}>
                             <pre class="mp-gate-out">{gate.summary}</pre>

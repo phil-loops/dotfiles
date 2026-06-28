@@ -85,6 +85,28 @@ P.S. You can delete this when you're done too. It's your config now! :)
 --]]
 
 -- Set <space> as the leader key
+-- review-nvim is often spawned outside an interactive shell (a tmux/launcher pane), so its
+-- PATH misses the dirs the shell rc adds — volta shims, homebrew, ~/.local/bin — and EVERY
+-- tool nvim spawns (LSPs like tsgo, formatters, linters) then fails to resolve. Prepend the
+-- known tool dirs that exist and aren't already present, once, before anything spawns.
+do
+  local want = { vim.fn.expand '~/.volta/bin', '/opt/homebrew/bin', '/usr/local/bin', vim.fn.expand '~/.local/bin' }
+  local cur = vim.env.PATH or ''
+  local have = {}
+  for dir in cur:gmatch '[^:]+' do
+    have[dir] = true
+  end
+  local prepend = {}
+  for _, dir in ipairs(want) do
+    if vim.fn.isdirectory(dir) == 1 and not have[dir] then
+      prepend[#prepend + 1] = dir
+    end
+  end
+  if #prepend > 0 then
+    vim.env.PATH = table.concat(prepend, ':') .. ':' .. cur
+  end
+end
+
 -- See `:help mapleader`
 --  NOTE: Must happen before plugins are loaded (otherwise wrong leader will be used)
 vim.g.mapleader = ' '
