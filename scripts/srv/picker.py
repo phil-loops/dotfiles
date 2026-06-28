@@ -19,7 +19,7 @@ from urllib.parse import parse_qs
 
 from . import ctx
 
-_pcache = {}  # (model_sig, origin-main-sha) -> picker json — the /projects fan-out is expensive
+_pcache = {}  # repo-name -> ((model_sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
 _PR_RE = re.compile(r"\(#(\d+)\)")
 
 
@@ -28,7 +28,7 @@ def _opened_file():
     # survives across worktrees. Drives the "recently touched first" ordering.
     gd = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
     if gd and not os.path.isabs(gd):
-        gd = os.path.join(ctx.CWD, gd)
+        gd = os.path.join(ctx.repo_cwd(), gd)
     return os.path.join(gd, "stack-project-opened.json") if gd else ""
 
 
@@ -75,7 +75,7 @@ def _merges_file():
     # ago" recency badge on the picker cards.
     gd = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
     if gd and not os.path.isabs(gd):
-        gd = os.path.join(ctx.CWD, gd)
+        gd = os.path.join(ctx.repo_cwd(), gd)
     return os.path.join(gd, "stack-project-merges.json") if gd else ""
 
 
@@ -84,7 +84,7 @@ def _gh_pr(num):
     # slow/offline GitHub never stalls the picker; any failure → None (just no badge).
     try:
         r = subprocess.run(["gh", "pr", "view", str(num), "--json", "headRefName,title"],
-                           cwd=ctx.CWD, capture_output=True, text=True, timeout=6)
+                           cwd=ctx.repo_cwd(), capture_output=True, text=True, timeout=6)
         if r.returncode != 0:
             return None
         d = json.loads(r.stdout or "{}")
@@ -161,15 +161,17 @@ def myprs(req):
     req._send(200, r.stdout or "[]")
 
 
-def projects(req):
-    # Cache on model_sig + origin/main tip so repeat loads are instant and recompute
-    # only when a ref/config/ledger changes or a fetch moves origin/main.
+def _projects_for(name, path):
+    # Build one repo's project cards. The active repo is already pinned on this (request)
+    # thread, but the fan-out pools below run on WORKER threads that don't inherit the
+    # thread-local — so each pool seeds it via initializer=ctx.set_repo, else the workers
+    # would query CWD (loops) for a monotoad build. Returns the tagged list (repo=name).
     pck = (ctx.model_sig(), ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip())
-    if pck in _pcache:
-        req._send(200, _pcache[pck])
-        return
+    cached = _pcache.get(name)
+    if cached and cached[0] == pck:
+        return cached[1]
     # stack-forest --projects and stack-prs are independent → run concurrently.
-    with ThreadPoolExecutor(max_workers=2) as ex:
+    with ThreadPoolExecutor(max_workers=2, initializer=ctx.set_repo, initargs=(path,)) as ex:
         fr = ex.submit(ctx.run, [os.path.join(ctx.SCRIPTS, "stack-forest"), "--projects"])
         pf = ex.submit(ctx.run, [os.path.join(ctx.SCRIPTS, "stack-prs")])
         r, prsr = fr.result(), pf.result()
@@ -197,19 +199,35 @@ def projects(req):
                     overlap = bool(main_files & branch_files)
         return behind, overlap
     roots = sorted({b for p in projs for b in p.get("mergeable", [])})
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=8, initializer=ctx.set_repo, initargs=(path,)) as ex:
         fresh = dict(zip(roots, ex.map(_root_fresh, roots)))
     merges = _scan_merges()
     for p in projs:
+        p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
         bs = p.get("mergeable", [])
         p["behind"] = max((fresh[b][0] for b in bs), default=0)
         p["overlap"] = any(fresh[b][1] for b in bs)
         p["merged"] = merges.get(p["name"])
-    payload = json.dumps(projs)
-    _pcache.clear()
-    _pcache[pck] = payload
-    req._send(200, payload)
+    _pcache[name] = (pck, projs)   # one cached build per repo (keyed by its own model_sig)
+    return projs
+
+
+def projects(req):
+    # Aggregate every registry repo's forests into one list, tagged by repo. Pin each repo on
+    # this thread in turn (its build + pool workers read it); fall back to the launched repo
+    # when the registry is empty. Each repo caches independently on its own model_sig.
+    repos = ctx.REPOS or {os.path.basename(ctx.CWD): ctx.CWD}
+    out = []
+    for name, path in repos.items():
+        ctx.set_repo(path)
+        try:
+            out.extend(_projects_for(name, path))
+        except Exception:
+            pass   # one unreachable/half-set-up repo must not blank the whole home list
+        finally:
+            ctx.clear_repo()
+    req._send(200, json.dumps(out))
 
 
 def project_opened(req):
@@ -269,18 +287,24 @@ def branches(req):
 
 
 def forest_branches(req):
-    # Every (branch, project) the forest config names — the Cmd+K global jump index.
-    # Pure config read (no model rebuild, no per-project fan-out), so it's cheap to call
-    # on every palette open. The .branch list rots independently of the computed model,
-    # so the palette still lists a forest's true nodes from /model when one is open.
+    # Every (branch, project, repo) the forest config names across ALL registry repos — the
+    # Cmd+K global jump index. Pure config read per repo (no model rebuild, no fan-out), so it's
+    # cheap to call on every palette open. The .branch list rots independently of the computed
+    # model, so the palette still lists a forest's true nodes from /model when one is open.
+    repos = ctx.REPOS or {os.path.basename(ctx.CWD): ctx.CWD}
     pairs = []
-    for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-project\..*\.branch$"]).stdout.splitlines():
-        k, _, v = line.partition(" ")
-        b = v.strip()
-        m = re.match(r"^stack-project\.(.+)\.branch$", k)
-        if b and m:
-            pairs.append({"branch": b, "project": m.group(1)})
+    for name, path in repos.items():
+        ctx.set_repo(path)
+        try:
+            for line in ctx.run(["git", "config", "--get-regexp",
+                                 r"^stack-project\..*\.branch$"]).stdout.splitlines():
+                k, _, v = line.partition(" ")
+                b = v.strip()
+                m = re.match(r"^stack-project\.(.+)\.branch$", k)
+                if b and m:
+                    pairs.append({"branch": b, "project": m.group(1), "repo": name})
+        finally:
+            ctx.clear_repo()
     req._send(200, json.dumps(pairs))
 
 

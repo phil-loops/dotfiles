@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the s
 from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
+srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
@@ -27,7 +28,9 @@ _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by a
 
 
 def run(args):
-    return subprocess.run(args, cwd=CWD, capture_output=True, text=True)
+    # cwd is the per-request active repo (srvctx.repo_cwd) — the ?repo= selection for this
+    # thread, or CWD when none. So every handler that goes through run is repo-aware for free.
+    return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True)
 
 
 def _main_worktree():
@@ -55,8 +58,33 @@ def _repo_id():
 
 REPO_ID = _repo_id()
 
+
+def _build_registry():
+    # The repos the Forests home aggregates over: `git config --all stack.viewer-repos`
+    # (whitespace/newline-separated roots), defaulting to loops + monotoad. Each resolves to
+    # its MAIN worktree (git lists it first) so per-repo git-common-dir state lands in the right
+    # checkout. A root that isn't a git repo is skipped — never silently bound to the wrong tree.
+    cfg = run(["git", "config", "--get-all", "stack.viewer-repos"]).stdout.split()
+    roots = cfg or ["~/coding/loops", "~/coding/monotoad"]
+    reg = {}
+    for root in roots:
+        path = os.path.expanduser(root.strip())
+        if not path:
+            continue
+        r = subprocess.run(["git", "-C", path, "worktree", "list", "--porcelain"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            continue
+        wt = next((ln[len("worktree "):] for ln in r.stdout.splitlines()
+                   if ln.startswith("worktree ")), path)
+        reg[os.path.basename(path)] = wt
+    return reg
+
+
+REPOS = _build_registry()
+
 # wire the shared context for the extracted handler modules (srv/*)
-srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT)
+srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT, repos=REPOS)
 
 
 # restack helpers + endpoints now live in srv/restack.py (delegated below).
@@ -118,9 +146,32 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b)
 
+    def _enter_repo(self, u):
+        # ?repo=<name> pins this request's thread to one registry repo so the handlers below
+        # operate on it via ctx.run / ctx.repo_cwd. No repo → CWD default. Unknown name → 400
+        # (never silently bind to the launched repo and serve the wrong tree as if it were right).
+        name = (parse_qs(u.query).get("repo") or [""])[0]
+        if not name:
+            srvctx.clear_repo()
+            return True
+        path = srvctx.repo_path(name)
+        if not path:
+            self._send(400, json.dumps({"err": f"unknown repo: {name}"}))
+            return False
+        srvctx.set_repo(path)
+        return True
+
     def do_GET(self):
         last[0] = time.time()
         u = urlparse(self.path)
+        if not self._enter_repo(u):
+            return
+        try:
+            self._dispatch_get(u)
+        finally:
+            srvctx.clear_repo()
+
+    def _dispatch_get(self, u):
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/"))):
             # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
@@ -231,6 +282,16 @@ class H(BaseHTTPRequestHandler):
         last[0] = time.time()
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n).decode() if n else "{}"
+        u = urlparse(self.path)
+        if not self._enter_repo(u):
+            return
+        self.path = u.path   # drop ?repo= so the exact-match dispatch below is unchanged
+        try:
+            self._dispatch_post(raw)
+        finally:
+            srvctx.clear_repo()
+
+    def _dispatch_post(self, raw):
         if self.path == "/heartbeat":
             self._send(200, '{"ok":true}')
             return
