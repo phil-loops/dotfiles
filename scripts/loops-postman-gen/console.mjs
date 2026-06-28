@@ -268,8 +268,8 @@ function selectEndpoint(e, node) {
   form.innerHTML = '';
   form.appendChild(el('<div class="row"><span class="m '+e.method+'">'+e.method+'</span><b class="path">'+e.path+'</b></div>'));
   if (e.summary) form.appendChild(el('<p class="sum">'+e.summary+'</p>'));
-  for (const p of e.pathParams) form.appendChild(field('path:'+p, p, store[p] ?? ''));
-  for (const q of e.queryParams) form.appendChild(field('query:'+q.name, q.name+(q.required?' *':''), store[q.name] ?? ''));
+  for (const p of e.pathParams) form.appendChild(field('path:'+p, p, lookupStore(p)));
+  for (const q of e.queryParams) form.appendChild(field('query:'+q.name, q.name+(q.required?' *':''), lookupStore(q.name)));
   if (e.bodyExample) {
     form.appendChild(el('<label>body</label>'));
     const ta = el('<textarea id="body"></textarea>'); ta.value = e.bodyExample; form.appendChild(ta);
@@ -326,9 +326,18 @@ function childResourceParam(path) {
   }
   return null;
 }
+function paramExists(p){ return ENDPOINTS.some(e=>e.pathParams.some(pp=>idMatch(pp,p)) || e.queryParams.some(q=>idMatch(q.name,p))); }
+function isIdMap(o){ const ks=Object.keys(o); return ks.length>0 && ks.every(k=>k.length<=40) && Object.values(o).every(x=>x && (typeof x==='object'||typeof x==='boolean')); }
 function walk(v, key, childParam) {
   if (Array.isArray(v)) { v.forEach(x=>walk(x, key, childParam)); return; }
-  if (v && typeof v === 'object') { for (const [k,val] of Object.entries(v)) walk(val, k, childParam); return; }
+  if (v && typeof v === 'object') {
+    if (key.endsWith('s') && isIdMap(v)) {
+      const param = key.slice(0,-1) + 'Id';
+      if (paramExists(param)) { for (const mk of Object.keys(v)) store[param] = String(mk); }
+    }
+    for (const [k,val] of Object.entries(v)) walk(val, k, childParam);
+    return;
+  }
   if (/(^id$|Id$)/.test(key) && (typeof v==='string'||typeof v==='number')) {
     store[key] = String(v);
     if (key === 'id' && childParam) store[childParam] = String(v);
@@ -347,11 +356,24 @@ function renderStore() {
   }
 }
 
+function idMatch(param, key) {
+  param = param.toLowerCase(); key = key.toLowerCase();
+  if (param === key) return true;
+  const short = param.length < key.length ? param : key;
+  const long = param.length < key.length ? key : param;
+  return short.length >= 4 && long.endsWith(short);
+}
+function lookupStore(param) {
+  if (store[param] != null) return store[param];
+  const k = Object.keys(store).find(k=>idMatch(param, k));
+  return k ? store[k] : '';
+}
+
 function selectVar(k) {
   selectedVar = k;
-  document.querySelectorAll('[data-k]').forEach(i=>{ if (i.dataset.k.endsWith(':'+k)) i.value = store[k]; });
+  document.querySelectorAll('[data-k]').forEach(i=>{ if (idMatch(i.dataset.k.split(':')[1], k)) i.value = store[k]; });
   const rel = document.getElementById('related');
-  const matches = ENDPOINTS.filter(e=>e.pathParams.includes(k) || e.queryParams.some(q=>q.name===k));
+  const matches = ENDPOINTS.filter(e=>e.pathParams.some(p=>idMatch(p,k)) || e.queryParams.some(q=>idMatch(q.name,k)));
   if (!matches.length) { rel.innerHTML='<p class="empty">No endpoints use {'+k+'}.</p>'; return; }
   rel.innerHTML='<p class="sum">Endpoints using <code class="b">'+k+'</code>:</p>';
   for (const e of matches) {
