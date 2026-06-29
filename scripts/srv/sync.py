@@ -336,16 +336,34 @@ def _already_merged(branch):
     return rc == 20
 
 
+def _requirers_of(branch):
+    out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.requires$"]).stdout
+    deps = []
+    for line in out.splitlines():
+        key, _, val = line.partition(" ")
+        if val.strip() == branch:
+            deps.append(key[len("stack-branch."):-len(".requires")])
+    return deps
+
+
 def _contract(branch):
-    """Drop an already-merged branch and rewire its children onto its parent (== main for a
-    syncable root). Deterministic mirror of the manual contraction. Returns (children, parent).
-    Caller MUST have confirmed _already_merged first — this never re-checks."""
+    """Drop an already-merged branch and rewire its dependents onto its parent (== main for a
+    syncable root). Deterministic mirror of the manual contraction. Returns (children, deps, parent):
+    `children` are branches parented on it (line moves up); `deps` fan it in via `requires` and now
+    inherit its work from main, so that edge is dropped. Caller MUST have confirmed _already_merged
+    first — this never re-checks."""
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
     base = ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip()
+    esc = "^" + branch.replace(".", r"\.") + "$"
     kids = _children_of(branch)
     for k in kids:
         ctx.run(["git", "config", f"stack-branch.{k}.parent", parent])
         ctx.run(["git", "config", f"stack-branch.{k}.base", base])
+    # Fan-in dependents: the required base landed in main, so the edge is now redundant — drop it,
+    # else the integrator carries a `requires` pointing at a branch that no longer exists.
+    deps = _requirers_of(branch)
+    for d in deps:
+        ctx.run(["git", "config", "--unset", f"stack-branch.{d}.requires", esc])
     wt = _worktree_of(branch)
     if wt:
         ctx.run(["git", "-C", wt, "checkout", "--detach"])   # release so branch -D can run
@@ -354,9 +372,8 @@ def _contract(branch):
     for key in ("parent", "project", "base"):
         ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.{key}"])
     if proj:
-        ctx.run(["git", "config", "--unset", f"stack-project.{proj}.branch",
-                 "^" + branch.replace(".", r"\.") + "$"])
-    return kids, parent
+        ctx.run(["git", "config", "--unset", f"stack-project.{proj}.branch", esc])
+    return kids, deps, parent
 
 
 def post_sync(req, raw):
@@ -396,13 +413,16 @@ def post_contract(req, raw):
         req._send(409, json.dumps(
             {"ok": False, "err": "not already-merged — refusing to drop a branch with unmerged work"}))
         return
-    kids, parent = _contract(branch)
-    n = len(kids)
-    summary = (f"dropped {branch}; rewired {n} child{'' if n == 1 else 'ren'} onto {parent}"
-               if kids else f"dropped {branch} (no children)")
+    kids, deps, parent = _contract(branch)
+    parts = []
+    if kids:
+        parts.append(f"rewired {len(kids)} child{'' if len(kids) == 1 else 'ren'} onto {parent}")
+    if deps:
+        parts.append(f"dropped the requires edge on {len(deps)} integrator{'' if len(deps) == 1 else 's'}")
+    summary = f"dropped {branch}" + (f"; {', '.join(parts)}" if parts else " (no dependents)")
     req._send(200, json.dumps(
         {"ok": True, "contracted": True, "branch": branch, "children": kids,
-         "parent": parent, "summary": summary}))
+         "deps": deps, "parent": parent, "summary": summary}))
 
 
 def post_reconcile(req, raw):

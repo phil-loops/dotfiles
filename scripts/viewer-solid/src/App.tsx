@@ -1583,7 +1583,7 @@ function NodeDetail() {
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
-              <NodeActions branch={active()} isReview={location().kind === "review"} ambient={nodeAmbient(active())} />
+              <NodeActions branch={active()} isReview={location().kind === "review"} merged={nodeHealth(active())?.merged} ambient={nodeAmbient(active())} />
             </Show>
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">
