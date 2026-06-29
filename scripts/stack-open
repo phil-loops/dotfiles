@@ -97,9 +97,17 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   mkdir -p "$SCRATCH"; dir="$SCRATCH/${b//\//_}"
   if [[ -d "$dir" ]]; then
     # already at the branch's tip → skip the (~0.3s) re-checkout; only sync when it moved.
+    # Retry until HEAD actually matches the tip: a concurrent prepare (background warm) holds
+    # git's index.lock, and a single swallowed failure used to leave the worktree pinned to a
+    # stale (e.g. force-pushed) head — so a precise line-open landed on an old snapshot. Loop a
+    # few times instead of trusting one attempt.
     if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "$b" 2>/dev/null)" ]]; then
-      git -C "$dir" checkout --detach "$b" -q 2>/dev/null \
-        || git -C "$dir" reset --hard "$b" -q 2>/dev/null || true
+      for _ in 1 2 3 4 5; do
+        git -C "$dir" checkout --detach -f "$b" -q 2>/dev/null \
+          || git -C "$dir" reset --hard "$b" -q 2>/dev/null || true
+        [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$(git rev-parse "$b" 2>/dev/null)" ]] && break
+        sleep 0.2
+      done
     fi
   else
     git worktree add --detach "$dir" "$b" -q
@@ -185,6 +193,27 @@ fi
 file="$dir/$rel"
 [[ -f "$file" ]] || { echo "stack-open: '$rel' not in $branch" >&2; exit 1; }
 
+# Stale-worktree / force-push backstop. A requested line past EOF means this checkout is behind
+# the file the reviewer sees on GitHub (its line numbers are for the live head). For a scratch
+# worktree, force one more sync to the branch tip and re-measure; if the line still doesn't exist,
+# land on the LAST line and warn (the caller surfaces it) instead of silently clamping onto a
+# phantom line of an old snapshot — the "viewer lied" failure.
+stale_warn=""
+case "$pos" in <->) want_line="$pos";; <->:<->) want_line="${pos%%:*}";; *) want_line="";; esac
+if [[ -n "$want_line" ]]; then
+  nlines=$(wc -l < "$file" 2>/dev/null || echo 0)
+  if (( want_line > nlines + 1 )); then
+    if [[ "$dir" == "$SCRATCH"/* ]]; then
+      git -C "$dir" checkout --detach -f "$branch" -q 2>/dev/null || git -C "$dir" reset --hard "$branch" -q 2>/dev/null || true
+      nlines=$(wc -l < "$file" 2>/dev/null || echo 0)
+    fi
+    if (( want_line > nlines + 1 )); then
+      stale_warn="line ${want_line} > ${nlines}-line file — opened at end; this checkout differs from GitHub (re-fetch the PR head)"
+      pos="$nlines"
+    fi
+  fi
+fi
+
 # Resolve the opaque <pos> into nvim locators — THE one place the grammar lives.
 # Grow it here (patterns, ranges) and callers/server never change.
 #   warm_expr = a VimL command run synchronously after :edit;  launch_arg = a +cmd for a cold launch.
@@ -230,4 +259,7 @@ else
 fi
 surface_review_window
 focus_terminal
+# stderr (not stdout): the server captures it as the response's `err`, which the GitHub→nvim
+# toast shows even on a successful open — so a clamp-to-EOF reads as a visible warning, never silent.
+[[ -n "$stale_warn" ]] && echo "stack-open: $stale_warn" >&2 || true
 echo "opened $rel on $branch → review-nvim ($dir)"
