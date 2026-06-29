@@ -696,6 +696,44 @@ function Home() {
         </section>
       </Show>
 
+      <Show when={tab() === "work" && (reviewReqs.data || []).length}>
+        <section class="work-sec">
+          <h2 class="eyebrow">review requests <span class="eyebrow-ask">— teammates waiting on your review</span></h2>
+          <div class="work-rule" />
+          <For each={reviewReqs.data}>
+            {(r) => {
+              const importing = () => importReview.isPending && importReview.variables === r.number;
+              const body = (
+                <>
+                  <span class="pr-num">#{r.number}</span>
+                  <span class="pr-title">{r.title}</span>
+                  <span class="work-meta">@{r.author}</span>
+                </>
+              );
+              return (
+                <div class="work-row work-state-review">
+                  {r.imported ? (
+                    <Link class="work-link" to={{ kind: "review", pr: r.number }}>{body}</Link>
+                  ) : (
+                    <a class="work-link" href={r.url} target="_blank">{body}</a>
+                  )}
+                  {/* import is the primary act here + "on viewer ✓" is at-a-glance status, so both
+                      stay visible (not folded into the hover-recessive work-acts the PR rows use). */}
+                  <Show
+                    when={canMutate && !r.imported}
+                    fallback={<Show when={r.imported}><span class="review-on">on viewer ✓</span></Show>}
+                  >
+                    <button class="watch-pin review-import" disabled={importing()} onClick={() => importReview.mutate(r.number)}>
+                      {importing() ? "importing…" : "import"}
+                    </button>
+                  </Show>
+                </div>
+              );
+            }}
+          </For>
+        </section>
+      </Show>
+
       <Show when={tab() === "work" && inFlightByProject().length}>
         <section class="work-sec">
           <h2 class="eyebrow">in flight <span class="eyebrow-ask">— your open work, by forest</span></h2>
@@ -901,46 +939,6 @@ function Home() {
 
       <Show when={tab() === "work" && !workCount()}>
         <p class="tab-empty">Nothing waiting on you — no open PRs or review requests.</p>
-      </Show>
-
-      <Show when={tab() === "work" && (reviewReqs.data || []).length}>
-        <section>
-          <h2 class="eyebrow">review requests</h2>
-          <For each={reviewReqs.data}>
-            {(r) => {
-              const importing = () => importReview.isPending && importReview.variables === r.number;
-              return (
-                <div class="watch-row">
-                  <Show
-                    when={r.imported}
-                    fallback={
-                      <a class="watch-link" href={r.url} target="_blank">
-                        <span class="pr-num">#{r.number}</span>
-                        <span class="watch-name">{r.title}</span>
-                        <span class="watch-meta"><span>@{r.author}</span></span>
-                      </a>
-                    }
-                  >
-                    <Link class="watch-link" to={{ kind: "review", pr: r.number }}>
-                      <span class="watch-dot" />
-                      <span class="pr-num">#{r.number}</span>
-                      <span class="watch-name">{r.title}</span>
-                      <span class="watch-meta"><span>@{r.author}</span></span>
-                    </Link>
-                  </Show>
-                  <Show
-                    when={canMutate && !r.imported}
-                    fallback={<Show when={r.imported}><span class="review-on">on viewer ✓</span></Show>}
-                  >
-                    <button class="watch-pin review-import" disabled={importing()} onClick={() => importReview.mutate(r.number)}>
-                      {importing() ? "importing…" : "import"}
-                    </button>
-                  </Show>
-                </div>
-              );
-            }}
-          </For>
-        </section>
       </Show>
 
         <Show when={flash()}>
