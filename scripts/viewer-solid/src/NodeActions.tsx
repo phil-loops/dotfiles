@@ -78,6 +78,7 @@ async function post<T>(url: string, body: unknown): Promise<T> {
 export function NodeActions(props: {
   branch: string;
   isReview: boolean;
+  merged?: boolean; // forest-health flagged this branch a merged ghost → offer contraction on load
   ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
 }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
@@ -296,6 +297,7 @@ export function NodeActions(props: {
       setDone(`✓ ${r.summary || "contracted"}`);
       qc.invalidateQueries({ queryKey: ["model"] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
+      qc.invalidateQueries({ queryKey: ["forest-health"] });
       qc.invalidateQueries({ queryKey: ["restack-ambient"] });
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "contract failed"}`),
@@ -397,20 +399,24 @@ export function NodeActions(props: {
         </button>
       </Show>
 
-      {/* already-merged: /sync found this branch's work squash-merged to main, so a forward
-          rebase replays nothing. Offer the contraction (drop + rewire children) instead of a
-          Claude grinding the empty-rebase conflict. */}
-      <Show when={contractKids()}>
-        {(kids) => (
-          <button
-            class="nh-fix"
-            disabled={busy()}
-            title={`this branch's work already merged into origin/main — drop the empty branch and rewire its ${kids().length} child${kids().length === 1 ? "" : "ren"} onto main (forest contraction)`}
-            onClick={fire(() => contract.mutate())}
-          >
-            {contract.isPending ? "contracting…" : `drop & rewire ${kids().length} →`}
-          </button>
-        )}
+      {/* already-merged ghost → offer the contraction directly. Two ways to get here: the page-load
+          health badge (props.merged, the common case — no need to restack-into-a-conflict to find it)
+          or /sync reporting an empty-rebase conflict (contractKids, with a known child count). Either
+          way /contract re-verifies already-merged server-side, then drops the branch + rewires its
+          children onto main AND drops any integrator's requires edge on it. */}
+      <Show when={!isReview() && (contractKids() || props.merged)}>
+        <button
+          class="nh-fix nh-contract"
+          disabled={busy()}
+          title="this branch's work already merged into origin/main (a ghost) — drop the empty branch, rewire its children onto main, and drop any integrator's requires edge on it (forest contraction). Do this BEFORE restacking an integrator that fans it in."
+          onClick={fire(() => contract.mutate())}
+        >
+          {contract.isPending
+            ? "contracting…"
+            : contractKids()
+              ? `drop ghost & rewire ${contractKids()!.length} →`
+              : "drop ghost & rewire →"}
+        </button>
       </Show>
 
       {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}

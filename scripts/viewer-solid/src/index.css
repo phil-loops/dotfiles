@@ -179,6 +179,9 @@ body {
 .nh-fix.nh-prep { color: var(--ink-dim); border-color: var(--ink-faint); }
 .nh-fix.nh-prep:hover:not(:disabled) { color: var(--ink); border-color: var(--patina); }
 .nh-fix.nh-prep.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
+/* drop-ghost contraction: a merged ghost's one true move — faint ember fill so it reads as
+   the recommended action over the (patina) restack button beside it. */
+.nh-fix.nh-contract { background: var(--del-bg); font-weight: 600; }
 /* held-elsewhere banner: another worktree holds the branch; free it and resume. */
 .nh-held { font-size: 12px; color: var(--ink-faint); display: inline-flex; align-items: center; gap: 8px; }
 .nh-held-btn {
