@@ -86,6 +86,24 @@ function send(payload, endpoint) {
 }
 
 const reason = (res) => res?.body?.err || res?.error || res?.status || "failed";
+
+// One toast for an open's outcome. A success can still carry a warning (res.body.err on ok) —
+// the stack-open stale/force-push backstop landed the cursor at EOF because this checkout differs
+// from GitHub. Show that as a sticky warning instead of a bare ✓, so it's never a silent wrong jump.
+function resultToast(res, label) {
+  const ok = res?.status === 200 && res.body?.ok;
+  if (!ok) {
+    toast(`✗ ${reason(res)}`, false);
+    return false;
+  }
+  const warn = res.body?.err && String(res.body.err).trim().replace(/^stack-open:\s*/, "");
+  if (warn) {
+    toast(`⚠ ${label} · ${warn}`, false, true);
+  } else {
+    toast(`✓ ${label}`, true);
+  }
+  return true;
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ask the SW to start the viewer via the native host (idempotent). resolves {ok, err}.
@@ -164,11 +182,10 @@ async function fire(btn, payload, label, okText, target) {
   btn.disabled = true;
   btn.textContent = "…";
   const res = await openWithRecovery(payload, undefined, target || "nvim");
-  const ok = res?.status === 200 && res.body?.ok;
+  const ok = resultToast(res, target || "nvim");
   btn.classList.add(ok ? "gh-nvim-ok" : "gh-nvim-err");
   btn.textContent = ok ? okText(res.body) : "✗";
   btn.title = ok ? `opened ${res.body.branch}` : `failed: ${reason(res)}`;
-  toast(ok ? `✓ opened ${res.body?.branch || ""}` : `✗ ${reason(res)}`, ok);
   setTimeout(() => reset(btn, label), 4000);
 }
 
@@ -248,9 +265,7 @@ async function onLineClick(e) {
   const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
   const line = cell.getAttribute("data-line-number");
   const full = `${path}:${line}`;
-  const res = await openWithRecovery({ number: pr.number, repo: pr.repo, path, line }, undefined, full);
-  const ok = res?.status === 200 && res.body?.ok;
-  toast(ok ? `✓ ${full}` : `✗ ${reason(res)}`, ok);
+  resultToast(await openWithRecovery({ number: pr.number, repo: pr.repo, path, line }, undefined, full), full);
 }
 
 let prewarmedPr = null;
@@ -348,9 +363,7 @@ async function onOpenKey(e) {
     e.preventDefault();
     e.stopPropagation();
     const { payload, full } = await nvimRequest(pr);
-    const res = await openWithRecovery(payload, undefined, full);
-    const ok = res?.status === 200 && res.body?.ok;
-    toast(ok ? `✓ ${full}` : `✗ ${reason(res)}`, ok);
+    resultToast(await openWithRecovery(payload, undefined, full), full);
     return;
   }
   const blob = parseBlob();
@@ -360,9 +373,7 @@ async function onOpenKey(e) {
   e.preventDefault();
   e.stopPropagation();
   const full = `${blob.path}:${blob.line}`;
-  const res = await openWithRecovery({ repo: blob.repo, ref: blob.ref, path: blob.path, line: blob.line }, "/open-blob", full);
-  const ok = res?.status === 200 && res.body?.ok;
-  toast(ok ? `✓ ${full}` : `✗ ${reason(res)}`, ok);
+  resultToast(await openWithRecovery({ repo: blob.repo, ref: blob.ref, path: blob.path, line: blob.line }, "/open-blob", full), full);
 }
 
 document.addEventListener("click", onLineClick, true);
