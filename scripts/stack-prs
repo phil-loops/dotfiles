@@ -58,7 +58,7 @@ _refresh() {
   merged='{}'; ok=1
   for repo in $repos; do
     rows=$(gh pr list --repo "$repo" --state open -L 300 \
-             --json number,url,headRefName,baseRefName,isDraft,reviewDecision 2>/dev/null) || { ok=0; break; }
+             --json number,url,headRefName,baseRefName,isDraft,reviewDecision,createdAt 2>/dev/null) || { ok=0; break; }
     merged=$(jq -n --arg main "$MAIN" --argjson acc "$merged" --argjson rows "$rows" '
       $acc + (reduce $rows[] as $p ({};
         .[$p.headRefName] = {
@@ -67,7 +67,8 @@ _refresh() {
           draft:  $p.isDraft,
           base:   $p.baseRefName,
           toMain: ($p.baseRefName == $main),
-          review: ($p.reviewDecision // "")
+          review: ($p.reviewDecision // ""),
+          createdAt: $p.createdAt
         }))')
   done
   (( ok )) || return 1
