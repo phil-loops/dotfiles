@@ -196,8 +196,11 @@ def squash(req, raw):
 
 def prep(req, raw):
     d = json.loads(raw or "{}")
-    # prep-for-push squash → smart subject, NO body (Phil's preference for squashed commits)
+    # prep-for-push squash → smart subject, NO body (Phil's preference for squashed commits).
+    # WHOLE branch (no --unpushed): collapse the entire parent..branch diff into ONE commit so the
+    # PR is a single clean commit, no WIP. Safe now that stack-squash clamps a stale frozen .base
+    # forward to merge-base(origin/main, branch) (squash-base-clamp), so it can't fold main's advance in.
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"),
-                 "--unpushed", "--format", "--subject-only", d.get("branch", "")])
+                 "--format", "--subject-only", d.get("branch", "")])
     req._send(200 if r.returncode == 0 else 500,
               r.stdout or json.dumps({"ok": False, "err": r.stderr or "prep crashed"}))
