@@ -481,15 +481,93 @@ function Home() {
   };
   const hideFtip = () => { clearTimeout(ftipTimer); ftipFor = null; setFtip(null); };
 
-  const byProject = createMemo<[string, PR[]][]>(() => {
+  // A PR whose own forest reports it merged is "landed", not open — the merge fact lives on the
+  // forest (Project.merged), never on the PR, so without this merged PRs leak into the open list.
+  const mergedOf = (p: PR) => {
+    const m = forestOf(p.project)?.merged;
+    return m && (m.pr === p.num || m.branch === p.branch) ? m : undefined;
+  };
+  const landedRecently = (p: PR): boolean => {
+    const m = mergedOf(p);
+    if (!m) return false;
+    const at = Date.parse(m.at);
+    return Number.isFinite(at) && Date.now() - at < 24 * 3_600_000;
+  };
+  // one lifecycle state per row — drives the status-rail colour (the "blessing spine").
+  type WorkState = "changes" | "review" | "pending" | "draft" | "landed";
+  const prState = (p: PR): WorkState =>
+    landedRecently(p) ? "landed"
+    : p.review === "CHANGES_REQUESTED" ? "changes"
+    : p.review === "APPROVED" ? "review"
+    : p.draft ? "draft"
+    : "pending";
+
+  // Work tab partitions: what needs you (changes requested) → what's in flight (open, by
+  // forest) → what just landed (merged < 1d, then it drops off on its own).
+  const needsYouPRs = createMemo(() =>
+    (prs.data || []).filter((p) => !landedRecently(p) && p.review === "CHANGES_REQUESTED"));
+  const inFlightByProject = createMemo<[string, PR[]][]>(() => {
     const m = new Map<string, PR[]>();
     for (const p of prs.data || []) {
+      if (landedRecently(p) || p.review === "CHANGES_REQUESTED") continue;
       const k = p.project || "—";
-      if (!m.has(k)) m.set(k, []);
-      m.get(k)!.push(p);
+      (m.get(k) ?? m.set(k, []).get(k)!).push(p);
     }
     return [...m.entries()];
   });
+  const landedPRs = createMemo(() => (prs.data || []).filter(landedRecently));
+  // one verdict per in-flight forest, replacing the 4-fact comma run in the old header.
+  const forestVerdict = (proj: string, list: PR[]): { label: string; state: WorkState } => {
+    const f = forestOf(proj);
+    if (list.some((p) => p.review === "APPROVED")) return { label: "in review", state: "review" };
+    if (f && f.behind > 60) return { label: `${f.behind} behind · stale`, state: "changes" };
+    if (list.every((p) => p.draft)) return { label: "draft", state: "draft" };
+    return { label: "open", state: "pending" };
+  };
+
+  // the trailing slot of a work row — a landed row reads "forest · ago ✓"; everything else keeps
+  // the review mark (▲ changes / ✓ approved / • pending) and a draft tag when relevant.
+  const workRowTrail = (p: PR) => {
+    if (landedRecently(p)) {
+      const m = mergedOf(p)!;
+      return (
+        <>
+    <span class="work-meta">{p.project} · {mergedAgo(m.at)}</span>
+          <span class="pr-rev ok">✓</span>
+        </>
+      );
+    }
+    const [mark, cls] = review(p.review);
+    return (
+      <>
+{p.draft && <span class="pr-draft">draft</span>}
+        <span class={`pr-rev ${cls}`}>{mark}</span>
+      </>
+    );
+  };
+
+  // one work row, state-rail on the left. Forest-backed PRs route in-app and carry recessive
+  // hover actions; a bare PR is itself the GitHub link, so it needs no action bar.
+  const workRow = (p: PR) => {
+    const state = prState(p);
+    const body = (
+      <>
+        <span class="pr-num">#{p.num}</span>
+        <span class="pr-title">{p.title}</span>
+        {workRowTrail(p)}
+      </>
+    );
+    return p.project ? (
+      <div class={`work-row work-state-${state}`}>
+        <Link class="work-link" to={{ kind: "forest", name: p.project, node: p.branch }}>{body}</Link>
+        <Show when={state !== "landed"}>
+          <span class="work-acts"><ActionBar actions={workRowActions(p)} /></span>
+        </Show>
+      </div>
+    ) : (
+      <a class={`work-row work-state-${state}`} href={p.url} target="_blank">{body}</a>
+    );
+  };
 
   const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
   // the open PR for a forest, if any — drives the [PR #N] badge so a PR'd forest stays in the
@@ -610,63 +688,43 @@ function Home() {
 
         <Hearth />
 
-      <Show when={tab() === "work" && (prs.data || []).length}>
-        <section>
-          <h2 class="eyebrow">your open PRs</h2>
-          <For each={byProject()}>
-            {([proj, list]) => (
-              <div class="pr-group">
-                <div class="pr-project">
-                  <Show when={forestOf(proj)} fallback={proj}>
-                    {(f) => (
-                      <>
-                        <Link class="pr-project-link" to={{ kind: "forest", name: proj }}>{proj}</Link>
-                        <span class="forest-meta">
-                          {" · "}{f().branches} {f().branches === 1 ? "node" : "nodes"}{" · "}
-                          <span class={f().behind > 0 ? "forest-fresh behind" : "forest-fresh fresh"}>
-                            {f().behind > 0 ? `↻ ${f().behind} behind` : "✦ fresh"}
-                          </span>
-                          <Show when={f().merged && mergedAgo(f().merged!.at)}>
-                            {(rel) => (
-                              <span class="forest-merged" title={f().merged!.title}>
-                                {" · "}✨ merged {rel()} (#{f().merged!.pr})
-                              </span>
-                            )}
-                          </Show>
-                        </span>
-                      </>
-                    )}
-                  </Show>
-                </div>
-                <For each={list}>
-                  {(p) => {
-                    const [mark, cls] = review(p.review);
-                    const inner = () => (
-                      <>
-                        <span class="pr-num">#{p.num}</span>
-                        <span class="pr-title">{p.title}</span>
-                        {p.draft && <span class="pr-draft">draft</span>}
-                        <span class={`pr-rev ${cls}`}>{mark}</span>
-                      </>
-                    );
-                    // forest-backed PRs route in-app; a bare PR opens GitHub in a new tab.
-                    return p.project ? (
-                      <div class="watch-row">
-                        <Link class="watch-link" to={{ kind: "forest", name: p.project, node: p.branch }}>
-                          {inner()}
-                        </Link>
-                        <ActionBar actions={workRowActions(p)} />
-                      </div>
-                    ) : (
-                      <a class="pr-row" href={p.url} target="_blank">
-                        {inner()}
-                      </a>
-                    );
-                  }}
-                </For>
-              </div>
-            )}
+      <Show when={tab() === "work" && needsYouPRs().length}>
+        <section class="work-sec">
+          <h2 class="eyebrow">needs you <span class="eyebrow-ask">— blocked or waiting on your call</span></h2>
+          <div class="work-rule" />
+          <For each={needsYouPRs()}>{(p) => workRow(p)}</For>
+        </section>
+      </Show>
+
+      <Show when={tab() === "work" && inFlightByProject().length}>
+        <section class="work-sec">
+          <h2 class="eyebrow">in flight <span class="eyebrow-ask">— your open work, by forest</span></h2>
+          <div class="work-rule" />
+          <For each={inFlightByProject()}>
+            {([proj, list]) => {
+              const v = forestVerdict(proj, list);
+              return (
+                <>
+                  <div class={`work-forest work-state-${v.state}`}>
+                    <Link class="work-forest-name" to={{ kind: "forest", name: proj }}>{proj}</Link>
+                    <span class="work-verdict">{v.label}</span>
+                    <Show when={forestOf(proj)}>
+                      {(f) => <span class="work-meta">{f().branches} {f().branches === 1 ? "node" : "nodes"}</span>}
+                    </Show>
+                  </div>
+                  <For each={list}>{(p) => workRow(p)}</For>
+                </>
+              );
+            }}
           </For>
+        </section>
+      </Show>
+
+      <Show when={tab() === "work" && landedPRs().length}>
+        <section class="work-sec">
+          <h2 class="eyebrow">just landed <span class="eyebrow-ask">— merged in the last day, then it fades</span></h2>
+          <div class="work-rule" />
+          <For each={landedPRs()}>{(p) => workRow(p)}</For>
         </section>
       </Show>
 
