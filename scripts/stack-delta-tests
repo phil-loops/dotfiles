@@ -37,6 +37,16 @@ def main_worktree(repo):
 def changed_files(repo, branch):
     parent = git(["config", f"stack-branch.{branch}.parent"], repo).stdout.strip() or MAIN
     base = git(["merge-base", parent, "HEAD"], repo).stdout.strip() or parent
+    # Clamp a ROOT branch's diff base FORWARD to its real fork with origin/main. Local `main`
+    # is often stale (behind origin/main), so merge-base(main, HEAD) sits below origin/main and
+    # the delta balloons to include every upstream commit's files — running their tests, not the
+    # branch's. For a branch rooted on main the true fork is merge-base(origin/main, HEAD); use it
+    # when the parent base sits behind it. (Mirrors stack-squash's base clamp. Stacked branches keep
+    # their parent fork.)
+    if parent == MAIN:
+        omb = git(["merge-base", "origin/main", "HEAD"], repo).stdout.strip()
+        if omb and omb != base and git(["merge-base", "--is-ancestor", base, omb], repo).returncode == 0:
+            base = omb
     names = set()
     for rng in ([f"{base}...HEAD"], ["HEAD"], ["--cached"]):
         for f in git(["diff", "--name-only", *rng], repo).stdout.split():

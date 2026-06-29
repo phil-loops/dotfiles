@@ -6,8 +6,37 @@
 #                            so WIP commits are blocked at the door regardless.
 import json
 import os
+import re
 
 from . import ctx
+
+
+def delta_tests(req, raw):
+    # Run the tests RELATED to the branch's delta (stack-delta-tests: each changed X.ts's
+    # co-located X.test.ts, plus changed *.test.ts). The prep-to-merge pipeline calls this
+    # AFTER checkout, so it runs in the main checkout (HEAD = branch, real node_modules).
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-delta-tests"), "--branch", branch])
+    out = (r.stdout or "") + (r.stderr or "")
+
+    def _n(label):
+        # node:test summary lines are "<symbol> <label> <n>" — `ℹ ` under tsx, `# ` under plain
+        # node. (`ℹ` is isalnum/\w, so a \W-class won't consume it — match one leading token.)
+        m = re.search(rf"^\S* {label} (\d+)\s*$", out, re.M)
+        return int(m.group(1)) if m else None
+
+    total = _n("tests")
+    tail = "\n".join(l for l in out.splitlines() if l.strip())[-2000:]
+    req._send(200, json.dumps({
+        "ok": r.returncode == 0,
+        "ran": total is not None,                    # tsx printed a summary ⇒ tests executed
+        "noTests": ("no related tests" in out or "nothing to run" in out),
+        "passed": _n("pass"),
+        "failed": _n("fail"),
+        "total": total,
+        "summary": tail,
+    }))
 
 
 def gates(req, raw):
