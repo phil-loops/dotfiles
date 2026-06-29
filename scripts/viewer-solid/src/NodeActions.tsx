@@ -37,6 +37,24 @@ interface PrepResult {
   err?: string;
 }
 
+interface SyncResult {
+  ok?: boolean;
+  err?: string;
+  rebased?: boolean; // clean forward-rebase landed in place
+  conflict?: boolean; // hit a conflict → Claude resolving in a worktree
+  contract?: boolean; // branch already merged into origin/main → drop & rewire instead
+}
+
+interface DeltaTestResult {
+  ok?: boolean; // exit 0 (or no related tests)
+  ran?: boolean; // tsx actually executed a test summary
+  noTests?: boolean; // no changed file had a co-located test
+  passed?: number;
+  failed?: number;
+  total?: number;
+  summary?: string; // tail of the runner output (for the tooltip)
+}
+
 async function post<T>(url: string, body: unknown): Promise<T> {
   // prefix the active repo (/monotoad/checkout) so the server pins the right repo — without it
   // every node action (checkout/squash/rebase/contract/…) runs against the launched repo (loops).
@@ -112,45 +130,95 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "checkout failed"}`),
   }));
 
-  // prep to merge — the one-motion merge prep: move the main checkout onto this branch (so GitHub
-  // Desktop follows), then squash all unpushed commits into one voiced commit. You review + push
-  // from GitHub Desktop, where the pre-push hook runs the gates. Two git steps behind one click.
+  // prep to merge — the one-motion merge prep, run as a staged pipeline:
+  //   1. up-to-date  → rebase onto fresh origin/main (only if behind; conflict ejects to Claude)
+  //   2. checkout    → move the main checkout onto this branch so GitHub Desktop follows
+  //   3. squash      → collapse the whole branch into one voiced commit + oxfmt (base-clamped)
+  //   4. delta-tests → run the tests related to the diff (warn, never block)
+  // You review + push from GitHub Desktop, where the pre-push hook runs the gates. Each stage
+  // narrates via done(); a stale main, a held worktree, or a conflict stops early with the reason.
   const prepMerge = createMutation(() => ({
     mutationFn: async (force: boolean) => {
+      if (behind() > 0) {
+        setDone("⟳ fetching origin/main + rebasing…");
+        const sy = await post<SyncResult>("/sync", { branch: props.branch });
+        if (!sy.ok) {
+          return { phase: "blocked" as const, msg: sy.err || "rebase onto origin/main refused" };
+        }
+        if (sy.contract) {
+          return { phase: "blocked" as const, msg: "already merged into origin/main — drop & rewire it instead (restack)" };
+        }
+        if (!sy.rebased) {
+          return {
+            phase: "blocked" as const,
+            msg: sy.conflict
+              ? "rebase conflicts with origin/main — Claude is resolving it in a worktree; re-run prep to merge when it's done"
+              : "rebasing onto origin/main via Claude in a worktree — re-run prep to merge when it's done",
+          };
+        }
+      }
+      setDone("⤓ checking out onto your main checkout…");
       const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force });
       if (!co.ok) {
-        return { ok: false as const, co };
+        if (co.worktree) {
+          return { phase: "held" as const, held: co.worktree };
+        }
+        return { phase: "error" as const, msg: co.err || "checkout failed" };
       }
+      setDone("⊟ squashing the branch + oxfmt…");
       const pr = await post<PrepResult>("/prep", { branch: props.branch });
-      return { ok: true as const, co, pr };
+      if (!pr.ok) {
+        return { phase: "error" as const, msg: `checked out, but squash failed: ${pr.err || "?"}` };
+      }
+      setDone("⧗ running changed tests…");
+      let tests: DeltaTestResult | null = null;
+      try {
+        tests = await post<DeltaTestResult>("/delta-tests", { branch: props.branch });
+      } catch {
+        tests = null; // tests are advisory — a runner crash never blocks the merge prep
+      }
+      return { phase: "done" as const, n: pr.n ?? 0, header: pr.header, formatted: pr.formatted, tests };
     },
     onSuccess: (r) => {
-      if (!r.ok) {
-        if (r.co.worktree) {
-          setHeldFor("prepMerge");
-          setHeldAt(r.co.worktree);
-        } else {
-          setDone(`✗ ${r.co.err || "checkout failed"}`);
-        }
+      setOpen(false);
+      if (r.phase === "held") {
+        setHeldFor("prepMerge");
+        setHeldAt(r.held);
+        sync.refetch(); // the rebase already ran → retry skips it (behind == 0)
+        return;
+      }
+      if (r.phase === "blocked") {
+        setDone(`● ${r.msg}`);
+        sync.refetch();
+        return;
+      }
+      if (r.phase === "error") {
+        setDone(`✗ ${r.msg}`);
+        qc.invalidateQueries({ queryKey: ["head"] });
         return;
       }
       setHeldAt(null);
-      setOpen(false);
-      qc.invalidateQueries({ queryKey: ["head"] });
-      if (!r.pr.ok) {
-        setDone(`✓ checked out, but squash failed: ${r.pr.err || "?"}`);
-        return;
+      const n = r.n ?? 0;
+      const fmt = r.formatted ? `, fmt ${r.formatted}` : "";
+      const squashed = n > 1 ? `squashed ${n} → 1${fmt}` : `1 commit${fmt}`;
+      const head = r.header ? `: ${r.header}` : "";
+      let t = "";
+      if (r.tests) {
+        if (r.tests.noTests) {
+          t = " · no changed tests";
+        } else if (r.tests.ran) {
+          t = r.tests.ok ? ` · tests ${r.tests.passed ?? "?"}✓` : ` · ✗ tests ${r.tests.failed ?? "?"} FAILED`;
+        } else {
+          t = " · ⚠ tests couldn't run";
+        }
       }
-      const n = r.pr.n ?? 0;
-      const fmt = r.pr.formatted ? `, fmt ${r.pr.formatted}` : "";
-      setDone(
-        n > 1
-          ? `✓ checked out + squashed ${n} → 1${fmt}: ${r.pr.header || "(voiced)"} — push from GitHub Desktop`
-          : `✓ checked out · already 1 commit${fmt}${r.pr.header ? `: ${r.pr.header}` : ""} — push from GitHub Desktop`,
-      );
+      setDone(`✓ ready — checked out + ${squashed}${head}${t} — push from GitHub Desktop`);
+      qc.invalidateQueries({ queryKey: ["head"] });
       qc.invalidateQueries({ queryKey: ["commits", props.branch] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
       qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
+      sync.refetch();
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "prep to merge failed"}`),
   }));

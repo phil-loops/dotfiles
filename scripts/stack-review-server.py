@@ -335,6 +335,8 @@ class H(BaseHTTPRequestHandler):
             return review.prep(self, raw)
         if self.path == "/gates":    # mobile prepare-to-push: run repo gates → per-gate verdict
             return push.gates(self, raw)
+        if self.path == "/delta-tests":  # prep-to-merge: run the tests related to the branch's delta
+            return push.delta_tests(self, raw)
         if self.path == "/push":     # mobile prepare-to-push: FF push to a safe (non-origin) remote
             return push.push(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
