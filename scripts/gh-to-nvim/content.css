@@ -58,6 +58,29 @@
   background: #da3633;
 }
 
+/* an in-flight recovery stage (launching / waiting / warming): blue, with a pulsing leading dot
+   so a multi-second wait reads as live progress, not a frozen toast. */
+#gh-nvim-toast.gh-nvim-working {
+  background: #1f6feb;
+}
+
+#gh-nvim-toast.gh-nvim-working::before {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: #fff;
+  vertical-align: middle;
+  animation: gh-nvim-pulse 1s ease-in-out infinite;
+}
+
+@keyframes gh-nvim-pulse {
+  0%, 100% { opacity: 0.35; transform: scale(0.7); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
 body.gh-nvim-alt td.new-diff-line-number[data-diff-side="right"]:hover {
   outline: 2px solid #1f6feb;
   outline-offset: -2px;

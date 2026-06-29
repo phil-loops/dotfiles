@@ -1,5 +1,24 @@
 importScripts("./config.js");   // VIEWER_URL — single source of truth (see config.js)
 
+const HOST = "com.loops.gh_to_nvim";   // native host that launches the viewer (idempotent stack-review-serve)
+
+// Content scripts can't reach the native host — relay a launch request through the SW. The host
+// runs stack-review-serve (a no-op if already up), so the o-key recovery path can auto-start a
+// dead viewer instead of just reporting "offline".
+chrome.runtime.onMessage.addListener((msg, _s, respond) => {
+  if (msg?.type !== "launch") {
+    return;
+  }
+  try {
+    chrome.runtime.sendNativeMessage(HOST, { action: "launch" }, (res) => {
+      respond(chrome.runtime.lastError ? { ok: false, err: chrome.runtime.lastError.message } : (res || { ok: false, err: "no response" }));
+    });
+  } catch (e) {
+    respond({ ok: false, err: String(e) });
+  }
+  return true;
+});
+
 // after a popup "reload extension": the new content script isn't in the tab that was open, and
 // reloading the extension can't re-inject it — so the popup flags the active tab here and this
 // (freshly-restarted) SW refreshes it once the new code is live.

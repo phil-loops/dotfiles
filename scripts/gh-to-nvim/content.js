@@ -85,24 +85,90 @@ function send(payload, endpoint) {
   });
 }
 
+const reason = (res) => res?.body?.err || res?.error || res?.status || "failed";
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ask the SW to start the viewer via the native host (idempotent). resolves {ok, err}.
+function launchViewer() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage({ type: "launch" }, (res) => {
+        resolve(chrome.runtime.lastError ? { ok: false, err: chrome.runtime.lastError.message } : (res || { ok: false, err: "no response" }));
+      });
+    } catch (e) {
+      resolve({ ok: false, err: String(e) });
+    }
+  });
+}
+
+// poll the SW's reachability heartbeat (ext-state) until the viewer answers or we give up.
+function waitForViewer(timeoutMs) {
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const tick = () => {
+      chrome.runtime.sendMessage({ type: "ext-state" }, (s) => {
+        if (!chrome.runtime.lastError && s?.state && s.state !== "offline") {
+          resolve(true);
+        } else if (Date.now() - start > timeoutMs) {
+          resolve(false);
+        } else {
+          setTimeout(tick, 500);
+        }
+      });
+    };
+    tick();
+  });
+}
+
+const STAGE = {
+  launching: "⏻ viewer offline — launching…",
+  waiting: "◷ waiting for viewer…",
+  warming: "↻ warming — retrying…",
+};
+
+// send(), but self-healing: a dead viewer (status 0) is auto-launched and waited-on before one
+// retry; a cold first open (504 — the worktree/nvim still warming) gets a brief wait + retry, so
+// the user no longer has to press "o" twice. Narrates each stage in the toast. Returns the final res.
+async function openWithRecovery(payload, endpoint, label) {
+  toast(`→ ${label} — opening…`, true, true, true);
+  let res = await send(payload, endpoint);
+  // unreachable (and not an orphaned-context reload) → launch + wait for the heartbeat + retry once.
+  if (res?.status === 0 && !/reload/i.test(res.error || "")) {
+    toast(STAGE.launching, true, true, true);
+    const launched = await launchViewer();
+    if (!launched.ok) {
+      return { status: 0, error: `couldn't launch viewer — ${launched.err}` };
+    }
+    toast(STAGE.waiting, true, true, true);
+    if (!(await waitForViewer(15000))) {
+      return { status: 0, error: "viewer didn't come up" };
+    }
+    res = await send(payload, endpoint);
+  }
+  // up but cold: stack-open timed out building the worktree (504). It's warm now — wait + retry.
+  for (let i = 0; i < 2 && res?.status === 504; i++) {
+    toast(STAGE.warming, true, true, true);
+    await sleep(1200 + i * 800);
+    res = await send(payload, endpoint);
+  }
+  return res;
+}
+
 function reset(btn, label) {
   btn.textContent = label;
   btn.disabled = false;
   btn.classList.remove("gh-nvim-ok", "gh-nvim-err");
 }
 
-async function fire(btn, payload, label, okText) {
+async function fire(btn, payload, label, okText, target) {
   btn.disabled = true;
   btn.textContent = "…";
-  toast("opening in nvim…", true, true);
-  const res = await send(payload);
+  const res = await openWithRecovery(payload, undefined, target || "nvim");
   const ok = res?.status === 200 && res.body?.ok;
   btn.classList.add(ok ? "gh-nvim-ok" : "gh-nvim-err");
   btn.textContent = ok ? okText(res.body) : "✗";
-  btn.title = ok
-    ? `opened ${res.body.branch}`
-    : `failed: ${res?.body?.err || res?.error || res?.status || "error"}`;
-  toast(ok ? `✓ opened ${res.body?.branch || ""}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
+  btn.title = ok ? `opened ${res.body.branch}` : `failed: ${reason(res)}`;
+  toast(ok ? `✓ opened ${res.body?.branch || ""}` : `✗ ${reason(res)}`, ok);
   setTimeout(() => reset(btn, label), 4000);
 }
 
@@ -115,8 +181,8 @@ function makeFab(pr) {
   nvimBtn.textContent = "→ nvim";
   nvimBtn.title = `Open PR #${pr.number} in nvim — the file+line if one is selected, else the whole-PR Diffview (⌥-click any line works too)`;
   nvimBtn.addEventListener("click", async () => {
-    const { payload, short } = await nvimRequest(pr);
-    fire(nvimBtn, payload, "→ nvim", () => `✓ ${short}`);
+    const { payload, short, full } = await nvimRequest(pr);
+    fire(nvimBtn, payload, "→ nvim", () => `✓ ${short}`, full);
   });
 
   const viewer = document.createElement("button");
@@ -126,7 +192,7 @@ function makeFab(pr) {
   viewer.addEventListener("click", async () => {
     viewer.disabled = true;
     viewer.textContent = "…";
-    const res = await send({ number: pr.number, repo: pr.repo });
+    const res = await openWithRecovery({ number: pr.number, repo: pr.repo }, undefined, `viewer #${pr.number}`);
     const ok = res?.status === 200 && res.body?.ok;
     if (ok) {
       // backend owns the route; fall back to the standalone shape if it predates `path`
@@ -135,7 +201,7 @@ function makeFab(pr) {
     }
     viewer.classList.add(ok ? "gh-nvim-ok" : "gh-nvim-err");
     viewer.textContent = ok ? "✓" : "✗";
-    viewer.title = ok ? `opened ${res.body.branch}` : `failed: ${res?.body?.err || res?.error || res?.status || "error"}`;
+    viewer.title = ok ? `opened ${res.body.branch}` : `failed: ${reason(res)}`;
     setTimeout(() => reset(viewer, "→ viewer"), 4000);
   });
 
@@ -143,7 +209,7 @@ function makeFab(pr) {
   return box;
 }
 
-function toast(text, ok, sticky) {
+function toast(text, ok, sticky, working) {
   let el = document.getElementById("gh-nvim-toast");
   if (!el) {
     el = document.createElement("div");
@@ -152,6 +218,7 @@ function toast(text, ok, sticky) {
   }
   el.textContent = text;
   el.classList.toggle("gh-nvim-err", !ok);
+  el.classList.toggle("gh-nvim-working", !!working);   // blue + pulsing dot while a recovery stage runs
   el.classList.add("gh-nvim-show");
   clearTimeout(el._timer);
   // sticky = stay up until the result replaces it (a cold open can take several seconds —
@@ -180,10 +247,10 @@ async function onLineClick(e) {
   e.stopPropagation();
   const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
   const line = cell.getAttribute("data-line-number");
-  toast(`→ ${path}:${line} — opening…`, true, true);
-  const res = await send({ number: pr.number, repo: pr.repo, path, line });
+  const full = `${path}:${line}`;
+  const res = await openWithRecovery({ number: pr.number, repo: pr.repo, path, line }, undefined, full);
   const ok = res?.status === 200 && res.body?.ok;
-  toast(ok ? `✓ ${path}:${line}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
+  toast(ok ? `✓ ${full}` : `✗ ${reason(res)}`, ok);
 }
 
 let prewarmedPr = null;
@@ -211,7 +278,7 @@ function makeFileButton(pr, path) {
   btn.addEventListener("click", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    fire(btn, { number: pr.number, repo: pr.repo, path, line: 1 }, "nvim", () => "✓");
+    fire(btn, { number: pr.number, repo: pr.repo, path, line: 1 }, "nvim", () => "✓", path);
   });
   return btn;
 }
@@ -281,10 +348,9 @@ async function onOpenKey(e) {
     e.preventDefault();
     e.stopPropagation();
     const { payload, full } = await nvimRequest(pr);
-    toast(`→ ${full} — opening…`, true, true);
-    const res = await send(payload);
+    const res = await openWithRecovery(payload, undefined, full);
     const ok = res?.status === 200 && res.body?.ok;
-    toast(ok ? `✓ ${full}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
+    toast(ok ? `✓ ${full}` : `✗ ${reason(res)}`, ok);
     return;
   }
   const blob = parseBlob();
@@ -294,10 +360,9 @@ async function onOpenKey(e) {
   e.preventDefault();
   e.stopPropagation();
   const full = `${blob.path}:${blob.line}`;
-  toast(`→ ${full} — opening…`, true, true);
-  const res = await send({ repo: blob.repo, ref: blob.ref, path: blob.path, line: blob.line }, "/open-blob");
+  const res = await openWithRecovery({ repo: blob.repo, ref: blob.ref, path: blob.path, line: blob.line }, "/open-blob", full);
   const ok = res?.status === 200 && res.body?.ok;
-  toast(ok ? `✓ ${full}` : `✗ ${res?.body?.err || res?.error || res?.status || "failed"}`, ok);
+  toast(ok ? `✓ ${full}` : `✗ ${reason(res)}`, ok);
 }
 
 document.addEventListener("click", onLineClick, true);
