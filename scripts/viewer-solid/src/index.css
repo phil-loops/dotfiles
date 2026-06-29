@@ -406,6 +406,16 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   padding: 9px 13px; margin: 0 0 12px;
 }
 .forest-search:focus { outline: none; border-color: var(--gold-deep); }
+
+.forest-sort { display: inline-flex; gap: 2px; padding: 2px; background: var(--vellum-raise);
+  border: 1px solid var(--rule); border-radius: 9px; }
+.forest-sort-btn {
+  font: inherit; font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
+  background: transparent; border: 0; border-radius: 7px; padding: 4px 9px; cursor: pointer;
+}
+.forest-sort-btn:hover { color: var(--ink); }
+.forest-sort-btn.active { color: var(--gold-leaf); background: var(--vellum); border: 1px solid var(--gold-deep); padding: 3px 8px; }
+
 .tab-empty { color: var(--ink-faint); font-style: italic; padding: 30px 4px; }
 
 @media (max-width: 640px) {

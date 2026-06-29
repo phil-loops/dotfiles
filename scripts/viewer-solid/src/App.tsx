@@ -425,6 +425,26 @@ function Home() {
     return l.kind === "home" ? l.tab : "work";
   };
   const [forestQuery, setForestQuery] = createSignal("");
+  // Forests recency sort — local commit / PR open / merge-to-main, persisted across loads.
+  const FOREST_SORTS = [
+    ["local", "worked on"],
+    ["pr", "PR opened"],
+    ["merged", "merged"],
+  ] as const;
+  type ForestSort = (typeof FOREST_SORTS)[number][0];
+  const [forestSort, setForestSortRaw] = createSignal<ForestSort>(
+    (localStorage.getItem("forestSort") as ForestSort) || "local",
+  );
+  const setForestSort = (s: ForestSort) => {
+    localStorage.setItem("forestSort", s);
+    setForestSortRaw(s);
+  };
+  const forestTs = (p: Project): number => {
+    const mode = forestSort();
+    if (mode === "pr") return p.prOpened ? Date.parse(p.prOpened) : 0;
+    if (mode === "merged") return p.merged?.at ? Date.parse(p.merged.at) : 0;
+    return (p.lastCommit ?? 0) * 1000;
+  };
 
   // hover a forest row → a card of its branches + one-line purposes ("what's in here").
   // cached per project; a short delay keeps it from flickering as the pointer crosses rows.
@@ -491,7 +511,7 @@ function Home() {
     }
     return [...by.entries()]
       .sort(([a], [b]) => (a === "loops" ? -1 : b === "loops" ? 1 : a.localeCompare(b)))
-      .map(([repo, items]) => ({ repo, items }));
+      .map(([repo, items]) => ({ repo, items: items.sort((a, b) => forestTs(b) - forestTs(a)) }));
   });
   const multiRepo = createMemo(() => forestGroups().length > 1);
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
@@ -665,6 +685,21 @@ function Home() {
           </Show>
           <Show when={canMutate && (projects.data || []).some((p) => p.behind > 0)}>
             <ActionBar actions={[restackAllAction()]} />
+          </Show>
+          <Show when={(projects.data || []).length > 1}>
+            <span class="forest-sort">
+              <For each={FOREST_SORTS}>
+                {([key, label]) => (
+                  <button
+                    class="forest-sort-btn"
+                    classList={{ active: forestSort() === key }}
+                    onClick={() => setForestSort(key)}
+                  >
+                    {label}
+                  </button>
+                )}
+              </For>
+            </span>
           </Show>
         </div>
         <Show when={(projects.data || []).length > 6}>

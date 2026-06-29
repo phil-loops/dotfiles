@@ -149,6 +149,31 @@ def _scan_merges():
     return merges
 
 
+def _project_members():
+    # {project: [branch, ...]} from the hand-maintained stack-project.<name>.branch config.
+    # Keys are stack-project.<NAME>.branch where NAME may itself contain dots, so peel the
+    # fixed prefix/suffix rather than split on ".".
+    r = ctx.run(["git", "config", "--get-regexp", r"^stack-project\..*\.branch$"])
+    out = {}
+    for line in r.stdout.splitlines():
+        key, _, branch = line.partition(" ")
+        if branch and key.startswith("stack-project.") and key.endswith(".branch"):
+            out.setdefault(key[len("stack-project."):-len(".branch")], []).append(branch)
+    return out
+
+
+def _branch_commit_unix():
+    # {branch: committer-date-unix} for every local branch — one fan-out, lexically/numeric
+    # sortable for the Forests "recently worked on" order.
+    r = ctx.run(["git", "for-each-ref", "--format=%(refname:short)%09%(committerdate:unix)", "refs/heads"])
+    out = {}
+    for line in r.stdout.splitlines():
+        branch, _, ts = line.partition("\t")
+        if ts.isdigit():
+            out[branch] = int(ts)
+    return out
+
+
 # --- GET handlers ---
 
 def prs(req):
@@ -202,6 +227,10 @@ def _projects_for(name, path):
     with ThreadPoolExecutor(max_workers=8, initializer=ctx.set_repo, initargs=(path,)) as ex:
         fresh = dict(zip(roots, ex.map(_root_fresh, roots)))
     merges = _scan_merges()
+    # Recency signals for the Forests sort: newest local commit (unix secs) across every member
+    # branch, and newest PR open-date — so a forest's whole tree counts, not just its roots.
+    members = _project_members()
+    commits = _branch_commit_unix()
     for p in projs:
         p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
@@ -209,6 +238,10 @@ def _projects_for(name, path):
         p["behind"] = max((fresh[b][0] for b in bs), default=0)
         p["overlap"] = any(fresh[b][1] for b in bs)
         p["merged"] = merges.get(p["name"])
+        branches = members.get(p["name"]) or bs
+        p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
+        p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
+                             if b in prmap and prmap[b].get("createdAt")), default=None)
     _pcache[name] = (pck, projs)   # one cached build per repo (keyed by its own model_sig)
     return projs
 

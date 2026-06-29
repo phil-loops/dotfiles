@@ -92,6 +92,8 @@ export const Project = z.object({
     .object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() })
     .nullable()
     .optional(), // most recent squash-merge into main attributed to this forest
+  lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
+  prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
 });
 export type Project = z.infer<typeof Project>;
 
