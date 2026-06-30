@@ -179,6 +179,7 @@ export function Link(props: {
   onClick?: (e: MouseEvent) => void;
   onMouseEnter?: (e: MouseEvent) => void;
   onMouseLeave?: (e: MouseEvent) => void;
+  onContextMenu?: (e: MouseEvent) => void;
 }): JSX.Element {
   const { navigate } = useViewerLocation();
   return (
@@ -189,6 +190,7 @@ export function Link(props: {
       title={props.title}
       onMouseEnter={(e) => props.onMouseEnter?.(e)}
       onMouseLeave={(e) => props.onMouseLeave?.(e)}
+      onContextMenu={(e) => props.onContextMenu?.(e)}
       onClick={(e) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) {
           return; // let the browser handle new-tab / new-window
