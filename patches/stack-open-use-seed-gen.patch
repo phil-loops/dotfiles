@@ -1,0 +1,47 @@
+diff --git a/scripts/stack-open b/scripts/stack-open
+index 1e51dd1..ff4427d 100755
+--- a/scripts/stack-open
++++ b/scripts/stack-open
+@@ -64,33 +64,6 @@ prune_old(){ [[ -d "$SCRATCH" ]] || return 0
+   done
+   git worktree prune 2>/dev/null || true
+ }
+-seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without it the tRPC
+-              # client type COLLAPSES to the "collides with a built-in method" sentinel in
+-              # the editor (verified). Clone main's .gen (APFS COW, ~instant) as a baseline
+-              # so the open never collapses; then, ONLY if the branch actually touches the
+-              # router (trpc/**) and we haven't already built for this HEAD, kick a
+-              # background incremental rebuild so types reflect the branch. Never blocks the
+-              # open. NB: .gen does NOT reduce tsgo memory — this is purely for correctness.
+-  local dir="$1" head marker src
+-  # source .gen from the MAIN checkout (first worktree), not wherever stack-open runs —
+-  # a sibling worktree has no .gen of its own (it's gitignored, only built in main).
+-  src=$(git -C "$dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+-  [[ -n "$src" && -d "$src/.gen" ]] || return 0                # nothing to seed from
+-  [[ -d "$dir/.gen" ]] || cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
+-    || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || return 0   # COW clone, fall back to plain copy
+-  head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || return 0
+-  marker="$dir/.gen/.stack-open-gen-sha"
+-  [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && return 0   # already built for this HEAD
+-  git -C "$dir" diff --quiet main...HEAD -- trpc 2>/dev/null && return 0   # router untouched → main's .gen matches
+-  local tsc="$dir/node_modules/typescript/bin/tsc"
+-  [[ -e "$tsc" ]] || return 0                                   # no compiler → keep the cloned baseline
+-  mkdir "$dir/.gen/.rebuilding" 2>/dev/null || return 0         # single-flight lock: a rebuild is already in flight
+-  # background incremental rebuild → stamp the sha, release the lock. Call the binary
+-  # DIRECTLY via node (never npx — backgrounded npx with no TTY hangs on its install
+-  # prompt and piles up runaway procs).
+-  ( cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project tsconfig.trpc-types.json --pretty false >/dev/null 2>&1 \
+-      && echo "$head" > "$marker"; rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) &!
+-}
+ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
+   local b="$1" ex dir
+   ex=$(existing_worktree "$b"); if [[ -n "$ex" ]]; then echo "$ex"; return; fi
+@@ -113,7 +86,7 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
+     git worktree add --detach "$dir" "$b" -q
+   fi
+   [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
+-  seed_gen "$dir"   # .gen for #trpc resolution (clone now, branch-rebuild in background)
++  seed-gen "$dir"   # .gen for #trpc resolution (clone now, branch-rebuild in background)
+   # record the branch + install the follow-hook so commits here advance the ref
+   # instead of stranding on the detached HEAD (see install_followup_hook).
+   echo "$b" > "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch"
