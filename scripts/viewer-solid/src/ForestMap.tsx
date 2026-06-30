@@ -351,6 +351,32 @@ export function ForestMap(props: {
       temp *= 0.985;
     }
 
+    // The diagonal bias pulls every same-rank node toward one x slot, so a wide fan-out settles
+    // as a pile pairwise repulsion can't fully separate. Enforce the hard no-overlap constraint
+    // the force field only approximates: within each rank lane, sweep left→right and shove
+    // siblings apart by their half-widths, then recenter the lane on its original mean so it
+    // keeps the x the field chose for it (spreads both ways, doesn't drift right).
+    const byRank: Record<number, string[]> = {};
+    ids.forEach((b) => { if (b !== endId) (byRank[rankCache[b] || 0] ||= []).push(b); });
+    Object.values(byRank).forEach((lane) => {
+      if (lane.length < 2) return;
+      lane.sort((a, b) => P[a].x - P[b].x);
+      const mean0 = lane.reduce((s, b) => s + P[b].x, 0) / lane.length;
+      for (let i = 1; i < lane.length; i++) {
+        const prev = lane[i - 1], cur = lane[i];
+        const minGap = wOf(prev) / 2 + wOf(cur) / 2 + 30;
+        if (P[cur].x - P[prev].x < minGap) P[cur].x = P[prev].x + minGap;
+      }
+      const shift = mean0 - lane.reduce((s, b) => s + P[b].x, 0) / lane.length;
+      lane.forEach((b) => (P[b].x += shift));
+    });
+    // re-pin the endstate just past everything once the lanes have spread, so it stays the corner.
+    if (endId) {
+      let mx = -Infinity;
+      for (const b of ids) { if (b === endId) continue; if (P[b].x > mx) mx = P[b].x; }
+      if (mx > -Infinity) P[endId] = { x: mx + COLW * 0.8, y: diagOf(endId).y };
+    }
+
     // pack into the canvas with main at the top-left corner.
     let minX = MAIN.x - 8, maxX = MAIN.x + 46, minY = MAIN.y - 14, maxY = MAIN.y + 14;
     ids.forEach((b) => {
