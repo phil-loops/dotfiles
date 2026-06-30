@@ -174,16 +174,16 @@ def _branch_commit_unix():
     return out
 
 
-def _marked_ready():
-    # branches Phil has hand-flagged ready-to-PR (stack-branch.<b>.ready true). One read for
-    # all of them; drives the Forests promotion + the per-node ✅ pill.
-    out = set()
+def _interest_levels():
+    # {branch: interest} — Phil's hand-set promote/demote level (stack-branch.<b>.interest N).
+    # One read for all; drives the Forests promotion order + the per-node ▲ pill. 0/absent = none.
+    out = {}
     for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-branch\..*\.ready$"]).stdout.splitlines():
+                         r"^stack-branch\..*\.interest$"]).stdout.splitlines():
         key, _, val = line.partition(" ")
-        m = re.match(r"^stack-branch\.(.+)\.ready$", key)
-        if m and val.strip() == "true":
-            out.add(m.group(1))
+        m = re.match(r"^stack-branch\.(.+)\.interest$", key)
+        if m and val.strip().lstrip("-").isdigit() and int(val) > 0:
+            out[m.group(1)] = int(val)
     return out
 
 
@@ -244,7 +244,7 @@ def _projects_for(name, path):
     # branch, and newest PR open-date — so a forest's whole tree counts, not just its roots.
     members = _project_members()
     commits = _branch_commit_unix()
-    marked = _marked_ready()
+    interest = _interest_levels()
     for p in projs:
         p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
@@ -253,7 +253,7 @@ def _projects_for(name, path):
         p["overlap"] = any(fresh[b][1] for b in bs)
         p["merged"] = merges.get(p["name"])
         branches = members.get(p["name"]) or bs
-        p["hasReady"] = any(b in marked for b in branches)
+        p["interest"] = max((interest.get(b, 0) for b in branches), default=0)
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
                              if b in prmap and prmap[b].get("createdAt")), default=None)

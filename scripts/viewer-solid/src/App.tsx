@@ -101,6 +101,12 @@ const NODE_KBD_CSS = `
 // were. Module-scope so it survives the route change from a node to its forest overview.
 const [cameFrom, setCameFrom] = createSignal("");
 
+// compact interest indicator: ▲ per level, capped at 5 with a trailing + (exact n on hover).
+function interestPips(n: number): string {
+  if (!n || n <= 0) return "";
+  return "▲".repeat(Math.min(n, 5)) + (n > 5 ? "+" : "");
+}
+
 function flattenForest(model: ForestModel | undefined): SpineNode[] {
   if (!model) return [];
   const nodes = model.nodes;
@@ -591,9 +597,9 @@ function Home() {
       .sort(([a], [b]) => (a === "loops" ? -1 : b === "loops" ? 1 : a.localeCompare(b)))
       .map(([repo, items]) => ({
         repo,
-        // ready-flagged forests float to the top (next branch to PR), then by recency.
+        // higher manual interest floats up (next branch to PR), then by recency.
         items: items.sort(
-          (a, b) => (b.hasReady ? 1 : 0) - (a.hasReady ? 1 : 0) || forestTs(b) - forestTs(a)
+          (a, b) => (b.interest ?? 0) - (a.interest ?? 0) || forestTs(b) - forestTs(a)
         ),
       }));
   });
@@ -850,9 +856,9 @@ function Home() {
                     class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
                   />
                   <span class="forest-name">{p.name}</span>
-                  <Show when={p.hasReady}>
-                    <span class="forest-ready" title="a branch here is flagged ready to PR">
-                      ✅ ready
+                  <Show when={(p.interest ?? 0) > 0}>
+                    <span class="forest-ready" title={`interest ${p.interest} — promoted on Home`}>
+                      {interestPips(p.interest ?? 0)}
                     </span>
                   </Show>
                   <span class="forest-meta">
@@ -999,6 +1005,20 @@ function ForestOverview() {
     queryFn: () => provider.model(project()),
     enabled: !!project(),
   }));
+  const ovQc = useQueryClient();
+  // promote/demote a branch's interest straight from the map — refetch so the pip updates.
+  const bumpInterest = createMutation(() => ({
+    mutationFn: (arg: { branch: string; delta: number }) =>
+      fetch(withRepo("/interest"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(arg),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      ovQc.invalidateQueries({ queryKey: ["model"] });
+      ovQc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  }));
   const spine = createMemo(() => flattenForest(model.data));
   const healthIds = createMemo(() => spine().map((n) => n.id).filter(Boolean));
   const health = createQuery(() => ({
@@ -1080,6 +1100,7 @@ function ForestOverview() {
               onClose={() => {}}
               onHoverNode={showTip}
               onLeaveNode={hideTip}
+              onBump={canMutate ? (b, d) => bumpInterest.mutate({ branch: b, delta: d }) : undefined}
             />
           }
         >
@@ -1119,7 +1140,7 @@ function NodeDetail() {
   const active = () =>
     nodeParam() || spine().find((n) => (n.total ?? 0) > 0)?.id || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
-  const readyOf = () => !!model.data?.nodes?.[active()]?.ready;
+  const interestOf = () => model.data?.nodes?.[active()]?.interest ?? 0;
   // remember the node you're on, so popping back to the forest map highlights where you were.
   createEffect(() => active() && setCameFrom(active()));
 
@@ -1181,13 +1202,13 @@ function NodeDetail() {
     },
   }));
 
-  // toggle the manual ready-to-PR flag — promotes the forest on Home + badges the node.
-  const markReady = createMutation(() => ({
-    mutationFn: (ready: boolean) =>
-      fetch(withRepo("/ready"), {
+  // promote/demote a branch's manual interest level — orders the forest on Home + badges the node.
+  const bumpInterest = createMutation(() => ({
+    mutationFn: (arg: { branch: string; delta: number }) =>
+      fetch(withRepo("/interest"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch: active(), ready }),
+        body: JSON.stringify(arg),
       }).then((r) => r.json()),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["model"] });
@@ -1592,9 +1613,9 @@ function NodeDetail() {
             >
               <span class="against">◂ main · all changes on this project</span>
             </Show>
-            <Show when={!isGhost() && readyOf()}>
-              <span class="nh-ready" title="flagged ready to PR — promoted on the Forests home">
-                ✅ ready
+            <Show when={!isGhost() && interestOf() > 0}>
+              <span class="nh-ready" title={`interest ${interestOf()} — promoted on the Forests home`}>
+                {interestPips(interestOf())}
               </span>
             </Show>
             <Show when={!isGhost() && nodeHealth(active())?.drifted}>
@@ -1673,15 +1694,25 @@ function NodeDetail() {
               <NodeActions branch={active()} isReview={location().kind === "review"} merged={nodeHealth(active())?.merged} ambient={nodeAmbient(active())} />
             </Show>
             <Show when={canMutate && !isGhost()}>
-              <button
-                class="icon-btn"
-                classList={{ on: readyOf() }}
-                disabled={markReady.isPending}
-                title={readyOf() ? "ready to PR — click to unflag" : "flag this branch ready to PR (promotes its forest on Home)"}
-                onClick={() => markReady.mutate(!readyOf())}
-              >
-                {readyOf() ? "✅ ready" : "○ ready"}
-              </button>
+              <div class="interest-ctl" title="promote / demote — orders this branch's forest on Home">
+                <button
+                  class="icon-btn"
+                  disabled={bumpInterest.isPending || interestOf() <= 0}
+                  onClick={() => bumpInterest.mutate({ branch: active(), delta: -1 })}
+                >
+                  ▼
+                </button>
+                <span class="interest-val" classList={{ on: interestOf() > 0 }}>
+                  {interestOf() > 0 ? interestPips(interestOf()) : "—"}
+                </span>
+                <button
+                  class="icon-btn"
+                  disabled={bumpInterest.isPending}
+                  onClick={() => bumpInterest.mutate({ branch: active(), delta: 1 })}
+                >
+                  ▲
+                </button>
+              </div>
             </Show>
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">

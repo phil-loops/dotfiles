@@ -62,8 +62,9 @@ def _enrich(raw, branch):
         desc = ctx.run(["git", "config", f"branch.{bid}.description"]).stdout.strip()
         if desc:
             meta["description"] = desc
-        if ctx.run(["git", "config", f"stack-branch.{bid}.ready"]).stdout.strip() == "true":
-            meta["ready"] = True
+        iv = ctx.run(["git", "config", f"stack-branch.{bid}.interest"]).stdout.strip()
+        if iv.lstrip("-").isdigit() and int(iv) > 0:
+            meta["interest"] = int(iv)
         if bid in ranks:
             meta["mergeRank"] = ranks[bid]
     if order:
@@ -186,17 +187,22 @@ def purpose_set(req, raw):
     req._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
 
 
-def ready_set(req, raw):
-    # Toggle the manual ready-to-PR flag (stack-branch.<b>.ready). Promotes the branch's
-    # forest on Home and badges the node; purely Phil's signal, nothing reads it but the viewer.
+def interest_bump(req, raw):
+    # Promote/demote a branch's manual interest level (stack-branch.<b>.interest). Body carries
+    # {branch, delta} (+1 promote / -1 demote) or {branch, value} (absolute). Clamped ≥0; 0 unsets.
+    # Orders the Forests home + badges the node; purely Phil's signal, viewer-only.
     d = json.loads(raw or "{}")
-    branch, ready = d.get("branch", ""), bool(d.get("ready"))
-    key = f"stack-branch.{branch}.ready"
-    if ready:
-        ctx.run(["git", "config", key, "true"])
+    branch = d.get("branch", "")
+    key = f"stack-branch.{branch}.interest"
+    cur = ctx.run(["git", "config", key]).stdout.strip()
+    cur = int(cur) if cur.lstrip("-").isdigit() else 0
+    nxt = int(d["value"]) if "value" in d else cur + int(d.get("delta", 0))
+    nxt = max(0, nxt)
+    if nxt > 0:
+        ctx.run(["git", "config", key, str(nxt)])
     else:
         ctx.run(["git", "config", "--unset", key])
-    req._send(200, json.dumps({"ok": True, "branch": branch, "ready": ready}))
+    req._send(200, json.dumps({"ok": True, "branch": branch, "interest": nxt}))
 
 
 def squash(req, raw):
