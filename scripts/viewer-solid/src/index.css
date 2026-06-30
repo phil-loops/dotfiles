@@ -160,6 +160,10 @@ body {
 .nh-drift { font-size: 12px; color: var(--del); cursor: help; }
 .nh-ghost { font-size: 12px; color: var(--patina); cursor: help; }
 .nh-ready { font-size: 12px; color: var(--gold-leaf); cursor: help; letter-spacing: 0.02em; }
+.interest-ctl { display: inline-flex; align-items: center; gap: 4px; }
+.interest-ctl .icon-btn { padding: 0 6px; line-height: 1.4; }
+.interest-val { min-width: 16px; text-align: center; font-size: 11px; color: var(--ink-faint); }
+.interest-val.on { color: var(--gold-leaf); letter-spacing: -1px; }
 .nh-amb { font-size: 12px; cursor: help; letter-spacing: 0.02em; }
 .nh-amb.amb-conflict { color: var(--del); }
 .nh-amb.amb-restack { color: var(--patina); }

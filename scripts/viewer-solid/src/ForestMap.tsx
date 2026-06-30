@@ -29,6 +29,12 @@ const fitPurpose = (s: string, w: number): string => {
   const max = Math.max(16, Math.floor((w - 10) / 5.1));
   return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
 };
+// ▲ per interest level, capped at 5 with a trailing + (exact n on hover).
+function pips(n: number): string {
+  if (!n || n <= 0) return "";
+  return "▲".repeat(Math.min(n, 5)) + (n > 5 ? "+" : "");
+}
+
 function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
   if (n.stale > 0) return "stale";
   if (n.total > 0 && n.clean === n.total) return "blessed";
@@ -63,6 +69,8 @@ export function ForestMap(props: {
   page?: boolean;
   onHoverNode?: (branch: string, el: HTMLElement) => void;
   onLeaveNode?: () => void;
+  // promote (+1) / demote (-1) a branch's manual interest; absent → controls hidden (read-only).
+  onBump?: (branch: string, delta: number) => void;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
@@ -552,6 +560,31 @@ export function ForestMap(props: {
                       </Show>
                     </text>
                   </Show>
+                  <Show when={!isGhostId(n.id) && (n.interest ?? 0) > 0}>
+                    <text class="fm-interest" x={w - 12} y={-NODE_H / 2 - 6} text-anchor="end">
+                      <title>interest {n.interest}</title>
+                      {pips(n.interest!)}
+                    </text>
+                  </Show>
+                  <Show when={!isGhostId(n.id) && props.onBump && hov() === n.id}>
+                    <text
+                      class="fm-bump"
+                      x={w + 12}
+                      y={-2}
+                      onClick={(e) => { e.stopPropagation(); props.onBump!(n.id, 1); }}
+                    >
+                      <title>promote (more interest)</title>▲
+                    </text>
+                    <text
+                      class="fm-bump"
+                      classList={{ disabled: (n.interest ?? 0) <= 0 }}
+                      x={w + 12}
+                      y={14}
+                      onClick={(e) => { e.stopPropagation(); if ((n.interest ?? 0) > 0) props.onBump!(n.id, -1); }}
+                    >
+                      <title>demote (less interest)</title>▼
+                    </text>
+                  </Show>
                 </g>
               </Show>
             );
@@ -617,6 +650,10 @@ const CSS = `
    lifts to ink-dim on hover/active so the focused node's intent is fully legible. */
 .fm-node .fm-purpose { fill: var(--ink-faint); font-family: var(--mono); font-size: 9px; text-anchor: middle; opacity: .72; }
 .fm-node:hover .fm-purpose, .fm-node.active .fm-purpose { fill: var(--ink-dim); opacity: 1; }
+.fm-node .fm-interest { fill: var(--gold-leaf); font-size: 9px; letter-spacing: -1px; }
+.fm-node .fm-bump { fill: var(--ink-faint); font-size: 12px; cursor: pointer; text-anchor: middle; }
+.fm-node .fm-bump:hover { fill: var(--gold-leaf); }
+.fm-node .fm-bump.disabled { opacity: .3; pointer-events: none; }
 /* integrate-preview badge on the ghost node — mono + small (beats the ghost's italic display
    via the extra class), faint until you hover, ember when the project won't land clean. */
 .fm-node.ghost .fm-integ { fill: var(--ink-faint); font-style: normal; font-family: var(--mono); font-size: 10px; text-anchor: end; }
