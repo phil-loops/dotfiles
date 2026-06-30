@@ -501,6 +501,10 @@ function Home() {
   };
   const hideFtip = () => { clearTimeout(ftipTimer); ftipFor = null; setFtip(null); };
 
+  // declared before the work-tab memos below: createMemo runs eagerly, so a warm prs cache makes
+  // them call forestOf during render — a later `const` would hit its temporal dead zone and throw.
+  const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
+
   // A PR whose own forest reports it merged is "landed", not open — the merge fact lives on the
   // forest (Project.merged), never on the PR, so without this merged PRs leak into the open list.
   const mergedOf = (p: PR) => {
@@ -589,7 +593,6 @@ function Home() {
     );
   };
 
-  const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
   // the open PR for a forest, if any — drives the [PR #N] badge so a PR'd forest stays in the
   // Forests list (the complete index) instead of vanishing the moment it gets a PR.
   const prOf = (name: string): PR | undefined => (prs.data || []).find((p) => p.project === name);
@@ -599,8 +602,12 @@ function Home() {
     const list = projects.data || [];
     return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list;
   });
-  // Group the home list by repo — loops first, then the rest alphabetically. The repo header
-  // only shows when more than one repo has forests, so a single-repo setup looks unchanged.
+  // a forest whose tip merged inside the badge's recency window — "done", so it folds out of the
+  // active list into the recently-merged disclosure instead of cluttering the priority tiers.
+  const recentlyMerged = (p: Project): boolean => !!(p.merged && mergedAgo(p.merged.at));
+  // Group the home list by repo (loops first, then alphabetical), then within each repo split the
+  // active forests into PRIORITY TIERS (interest level, descending) so same-priority work stands
+  // together, and pull recently-merged forests aside into their own fold.
   const forestGroups = createMemo(() => {
     const by = new Map<string, Project[]>();
     for (const p of filteredForests()) {
@@ -609,16 +616,89 @@ function Home() {
     }
     return [...by.entries()]
       .sort(([a], [b]) => (a === "loops" ? -1 : b === "loops" ? 1 : a.localeCompare(b)))
-      .map(([repo, items]) => ({
-        repo,
-        // higher manual interest floats up (next branch to PR), then by recency.
-        items: items.sort(
-          (a, b) => (b.interest ?? 0) - (a.interest ?? 0) || forestTs(b) - forestTs(a)
-        ),
-      }));
+      .map(([repo, items]) => {
+        const merged = items.filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a));
+        const active = items.filter((p) => !recentlyMerged(p));
+        const levels = [...new Set(active.map((p) => p.interest ?? 0))].sort((a, b) => b - a);
+        const tiers = levels.map((interest) => ({
+          interest,
+          // within a tier, most-recently-worked first (forestTs follows the active sort tab).
+          items: active
+            .filter((p) => (p.interest ?? 0) === interest)
+            .sort((a, b) => forestTs(b) - forestTs(a)),
+        }));
+        return { repo, tiers, merged };
+      });
   });
   const multiRepo = createMemo(() => forestGroups().length > 1);
+  // recently-merged fold is collapsed per repo until clicked.
+  const [mergedOpenSet, setMergedOpenSet] = createSignal<Set<string>>(new Set());
+  const mergedOpen = (r: string) => mergedOpenSet().has(r);
+  const toggleMerged = (r: string) =>
+    setMergedOpenSet((s) => {
+      const n = new Set(s);
+      if (n.has(r)) { n.delete(r); } else { n.add(r); }
+      return n;
+    });
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
+
+  // NEXT — one ranked queue of concrete next actions, so you hop in at the top instead of
+  // triaging buckets. Pure function of signals already on hand: PR review/ci/mergeState,
+  // forest merged/behind/prOpened, and review-requested-of-you. Tier sets the order; each row
+  // carries a one-line WHY (the thing that justifies the rank) and a one-click target.
+  type NextAction = {
+    id: string; tier: number; tone: string; icon: string; verb: string;
+    target: string; why: string; title?: string;
+    href?: string; to?: ViewerLocation;
+  };
+  const STALE_BEHIND = 60; // a forest this far behind is rot to decide on, not work to open
+  const nextActions = createMemo<NextAction[]>(() => {
+    const out: NextAction[] = [];
+    const prList = prs.data || [];
+    const projs = projects.data || [];
+    const blockedMerge = (s?: string) => s === "BLOCKED" || s === "DIRTY";
+    const tag = (p: PR) => `#${p.num}${p.project ? " " + p.project : " " + leaf(p.branch)}`;
+    for (const p of prList) {
+      if (p.draft || landedRecently(p)) continue;
+      if (p.review === "APPROVED" && p.ci === "passing" && !blockedMerge(p.mergeState)) {
+        out.push({ id: "merge:" + p.num, tier: 0, tone: "ship", icon: "⬆", verb: "merge",
+          target: tag(p), why: "approved · CI green", title: p.title, href: p.url });
+      } else if (p.review === "APPROVED" && (p.ci === "failing" || blockedMerge(p.mergeState))) {
+        out.push({ id: "unblock:" + p.num, tier: 1, tone: "block",
+          icon: p.ci === "failing" ? "↻" : "⚠", verb: p.ci === "failing" ? "fix CI" : "unblock",
+          target: tag(p), why: p.ci === "failing" ? "approved · CI failing" : "approved · merge blocked",
+          title: p.title, href: p.url });
+      }
+    }
+    const hasPR = new Set(prList.filter((p) => p.project).map((p) => p.project));
+    for (const pr of projs) {
+      const loc: ViewerLocation = { kind: "forest", name: pr.name, repo: pr.repo };
+      if (pr.merged) {
+        out.push({ id: "contract:" + pr.name, tier: 3, tone: "contract", icon: "✂",
+          verb: "contract", target: pr.name, why: "merged · node lingering", to: loc });
+      } else if (!pr.prOpened && !hasPR.has(pr.name) && pr.mergeable?.length && pr.behind < STALE_BEHIND) {
+        out.push({ id: "open:" + pr.name, tier: 2, tone: "open", icon: "↗", verb: "open PR",
+          target: pr.name, why: pr.behind > 0 ? `${pr.behind} behind · no PR yet` : "clean · no PR yet", to: loc });
+      } else if (!pr.merged && pr.behind >= STALE_BEHIND) {
+        out.push({ id: "decide:" + pr.name, tier: 5, tone: "decide", icon: "✦",
+          verb: "decide", target: pr.name, why: `${pr.behind} behind · revive or drop`, to: loc });
+      }
+    }
+    for (const r of reviewReqs.data || []) {
+      out.push({ id: "review:" + r.number, tier: 4, tone: "review", icon: "\u{1F441}",
+        verb: "review", target: `#${r.number}`, why: `requested of you · @${r.author}`,
+        title: r.title, href: r.url });
+    }
+    return out.sort((a, b) => a.tier - b.tier);
+  });
+  const nextRowBody = (a: NextAction) => (
+    <>
+      <span class="nq-icon">{a.icon}</span>
+      <span class="nq-verb">{a.verb}</span>
+      <span class="nq-target">{a.target}</span>
+      <span class="nq-why">{a.why}</span>
+    </>
+  );
 
   const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
@@ -670,6 +750,103 @@ function Home() {
   const workRowActions = (p: PR): Action[] =>
     [githubAction(p.url, p.branch), ...(canMutate ? [worktreeAction(p.branch)] : [])];
 
+  // one forest row, shared by the priority tiers and the recently-merged fold. Metadata sits in
+  // fixed-width cells (pips · nodes · PR) so the columns line up down the list; the trailing cell
+  // hugs the right edge. `folded` rows swap the behind/restack trail for a static ✨-merged badge.
+  const forestRow = (p: Project, folded: boolean) => {
+    const stuck = () => parked()?.project === p.name;
+    return (
+      <Link
+        class="forest-row"
+        classList={{ parked: stuck(), folded }}
+        to={{
+          kind: "forest",
+          name: p.name,
+          repo: p.repo,
+          node: p.repo !== "loops" ? (p.mergeable?.[0] ?? p.candidates?.[0]) : undefined,
+        }}
+        onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
+        onMouseLeave={hideFtip}
+        onContextMenu={(e) => {
+          const branch = p.mergeable?.[0] ?? p.candidates?.[0];
+          if (!branch || !canMutate) return;
+          e.preventDefault();
+          hideFtip();
+          setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, branch, current: p.interest ?? 0 });
+        }}
+      >
+        <span class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`} />
+        <span class="forest-name">{p.name}</span>
+        <span class="fcell pips">
+          <Show when={(p.interest ?? 0) > 0}>
+            <span class="forest-ready" title={`interest ${p.interest} — promoted on Home`}>
+              {interestPips(p.interest ?? 0)}
+            </span>
+          </Show>
+        </span>
+        <span class="fcell nodes">{p.branches} {p.branches === 1 ? "node" : "nodes"}</span>
+        <span class="fcell pr">
+          <Show when={prOf(p.name)}>
+            {(pr) => (
+              <span class="forest-pr" classList={{ draft: pr().draft }} title={pr().title}>
+                {pr().draft ? "draft" : "PR"} #{pr().num}
+              </span>
+            )}
+          </Show>
+        </span>
+        <Show
+          when={!folded}
+          fallback={
+            <span class="fcell trail">
+              <Show when={p.merged && mergedAgo(p.merged.at)}>
+                {(rel) => (
+                  <span class="forest-merged" title={p.merged!.title}>✨ {rel()} (#{p.merged!.pr})</span>
+                )}
+              </Show>
+            </span>
+          }
+        >
+          <span class="fcell trail">
+            <Switch fallback={<span class="forest-trail"><span class="forest-fresh fresh">✦ fresh</span></span>}>
+              <Match when={deleteMode() && canMutate}>
+                <ActionBar actions={[dropAction(p)]} />
+              </Match>
+              <Match when={stuck()}>
+                <div class="forest-parked">
+                  <button
+                    class="forest-resolve"
+                    classList={{ open: menu() === p.name }}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(menu() === p.name ? null : p.name); }}
+                  >
+                    ⚠ parked at {leaf(parked()?.current || p.name)}
+                  </button>
+                  <Show when={menu() === p.name}>
+                    <div class="forest-popover" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                      <p class="forest-popover-why">
+                        Rebase paused on a conflict{parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a worktree and blocks restacks until it’s cleared.
+                      </p>
+                      <Show when={parked()?.reason}>{(r) => <p class="forest-popover-reason">{r()}</p>}</Show>
+                      <div class="forest-popover-actions">
+                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); resolve(p.name); }}>✦ resolve with Claude</button>
+                        <button class="danger" onClick={(e) => { e.preventDefault(); e.stopPropagation(); abort(p.name); }}>✕ abort & discard</button>
+                      </div>
+                    </div>
+                  </Show>
+                </div>
+              </Match>
+              <Match when={p.behind > 0 && canMutate}>
+                <span class="forest-trail"><ActionBar actions={[restackAction(p)]} /></span>
+              </Match>
+              <Match when={p.behind > 0}>
+                <span class="forest-trail">⟳ {p.behind} behind</span>
+              </Match>
+            </Switch>
+          </span>
+        </Show>
+      </Link>
+    );
+  };
+
   return (
     <div class="ledger">
       <nav class="thumb-index">
@@ -713,6 +890,26 @@ function Home() {
         </header>
 
         <Hearth />
+
+      <Show when={tab() === "work" && nextActions().length}>
+        <section class="work-sec next-queue">
+          <h2 class="eyebrow">next <span class="eyebrow-ask">— what to do, ranked</span></h2>
+          <div class="work-rule" />
+          <For each={nextActions()}>
+            {(a) =>
+              a.to ? (
+                <Link class={`nq-row nq-${a.tone}`} to={a.to} title={a.title}>
+                  {nextRowBody(a)}
+                </Link>
+              ) : (
+                <a class={`nq-row nq-${a.tone}`} href={a.href} target="_blank" rel="noopener" title={a.title}>
+                  {nextRowBody(a)}
+                </a>
+              )
+            }
+          </For>
+        </section>
+      </Show>
 
       <Show when={tab() === "work" && needsYouPRs().length}>
         <section class="work-sec">
@@ -848,126 +1045,26 @@ function Home() {
                 <Show when={multiRepo()}>
                   <h3 class="forest-repo-head">{group.repo}</h3>
                 </Show>
-                <For each={group.items}>
-            {(p) => {
-              const stuck = () => parked()?.project === p.name;
-              return (
-                <Link
-                  class="forest-row"
-                  classList={{ parked: stuck() }}
-                  // a non-loops forest opens straight on its root branch node (never the project
-                  // name, never a blank overview); loops keeps the map-first overview landing.
-                  to={{
-                    kind: "forest",
-                    name: p.name,
-                    repo: p.repo,
-                    node: p.repo !== "loops" ? (p.mergeable?.[0] ?? p.candidates?.[0]) : undefined,
-                  }}
-                  onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
-                  onMouseLeave={hideFtip}
-                  onContextMenu={(e) => {
-                    const branch = p.mergeable?.[0] ?? p.candidates?.[0];
-                    if (!branch || !canMutate) return; // no target → fall back to native menu
-                    e.preventDefault();
-                    hideFtip();
-                    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, branch, current: p.interest ?? 0 });
-                  }}
-                >
-                  <span
-                    class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
-                  />
-                  <span class="forest-name">{p.name}</span>
-                  <Show when={(p.interest ?? 0) > 0}>
-                    <span class="forest-ready" title={`interest ${p.interest} — promoted on Home`}>
-                      {interestPips(p.interest ?? 0)}
-                    </span>
-                  </Show>
-                  <span class="forest-meta">
-                    {p.branches} {p.branches === 1 ? "node" : "nodes"}
-                  </span>
-                  <Show when={prOf(p.name)}>
-                    {(pr) => (
-                      <span class="forest-pr" classList={{ draft: pr().draft }} title={pr().title}>
-                        {pr().draft ? "draft" : "PR"} #{pr().num}
-                      </span>
-                    )}
-                  </Show>
-                  <Show when={p.merged && mergedAgo(p.merged.at)}>
-                    {(rel) => (
-                      <span class="forest-merged" title={p.merged!.title}>
-                        ✨ merged {rel()} (#{p.merged!.pr})
-                      </span>
-                    )}
-                  </Show>
-                  <Switch fallback={<span class="forest-fresh fresh">✦ fresh</span>}>
-                    <Match when={deleteMode() && canMutate}>
-                      <ActionBar actions={[dropAction(p)]} />
-                    </Match>
-                    <Match when={stuck()}>
-                      <div class="forest-parked">
-                        <button
-                          class="forest-resolve"
-                          classList={{ open: menu() === p.name }}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setMenu(menu() === p.name ? null : p.name);
-                          }}
-                        >
-                          ⚠ parked at {leaf(parked()?.current || p.name)}
-                        </button>
-                        <Show when={menu() === p.name}>
-                          <div
-                            class="forest-popover"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                          >
-                            <p class="forest-popover-why">
-                              Rebase paused on a conflict
-                              {parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a
-                              worktree and blocks restacks until it’s cleared.
-                            </p>
-                            <Show when={parked()?.reason}>
-                              {(r) => <p class="forest-popover-reason">{r()}</p>}
-                            </Show>
-                            <div class="forest-popover-actions">
-                              <button
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  resolve(p.name);
-                                }}
-                              >
-                                ✦ resolve with Claude
-                              </button>
-                              <button
-                                class="danger"
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  abort(p.name);
-                                }}
-                              >
-                                ✕ abort & discard
-                              </button>
-                            </div>
-                          </div>
-                        </Show>
-                      </div>
-                    </Match>
-                    <Match when={p.behind > 0 && canMutate}>
-                      <ActionBar actions={[restackAction(p)]} />
-                    </Match>
-                    <Match when={p.behind > 0}>
-                      <span class="forest-meta">⟳ {p.behind} behind</span>
-                    </Match>
-                  </Switch>
-                </Link>
-              );
-            }}
+                <For each={group.tiers}>
+                  {(tier) => (
+                    <>
+                      <Show when={group.tiers.length > 1}>
+                        <div class="forest-tier-head">
+                          {tier.interest > 0 ? interestPips(tier.interest) : "no priority"}
+                        </div>
+                      </Show>
+                      <For each={tier.items}>{(p) => forestRow(p, false)}</For>
+                    </>
+                  )}
                 </For>
+                <Show when={group.merged.length}>
+                  <button class="forest-mfold" onClick={() => toggleMerged(group.repo)}>
+                    {mergedOpen(group.repo) ? "▾" : "▸"} {group.merged.length} recently merged
+                  </button>
+                  <Show when={mergedOpen(group.repo)}>
+                    <For each={group.merged}>{(p) => forestRow(p, true)}</For>
+                  </Show>
+                </Show>
               </>
             )}
           </For>

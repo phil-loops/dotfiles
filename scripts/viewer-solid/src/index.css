@@ -568,6 +568,30 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .work-state-landed  { --state: #8fb0a2; opacity: 0.8; }
 .work-row.work-state-landed .pr-title { color: var(--ink-dim); }
 
+/* NEXT queue — one ranked action list so you hop in at the top. Each row is a left-rail-coloured
+   action: verb · target · the one-line WHY that earns its rank. Tone = the blessing-spine palette. */
+.next-queue .nq-row {
+  position: relative; display: flex; align-items: baseline; gap: 10px;
+  padding: 8px 14px 8px 20px; border-radius: 9px; text-decoration: none; color: var(--ink);
+  transition: background 0.12s;
+}
+.nq-row::before {
+  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; border-radius: 2px;
+  background: var(--nq, var(--ink-faint)); box-shadow: 0 0 9px -1px var(--nq-glow, transparent);
+}
+.nq-row:hover { background: var(--vellum-raise); }
+.nq-icon { flex: none; width: 16px; text-align: center; color: var(--nq, var(--ink-dim)); font-size: 13px; }
+.nq-verb { flex: none; font-weight: 600; font-size: 13px; color: var(--nq, var(--ink)); letter-spacing: 0.02em; }
+.nq-target { flex: none; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.nq-why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 11px; color: var(--ink-faint); }
+.nq-ship     { --nq: #e0ad4e; --nq-glow: rgba(224,173,78,0.5); }
+.nq-block    { --nq: #e8794a; --nq-glow: rgba(232,121,74,0.5); }
+.nq-open     { --nq: #9ec6b6; }
+.nq-contract { --nq: #9d8d6b; }
+.nq-review   { --nq: #c9b896; }
+.nq-decide   { --nq: var(--ink-faint); }
+
 .forest-name { font-family: var(--display); font-style: italic; font-size: 17px; flex: 1; }
 .forest-meta { color: var(--ink-faint); font-size: 11px; flex: none; }
 /* a forest with an open PR is badged (not hidden) — understated, never gold (gold is earned) */
@@ -584,6 +608,30 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .forest-fresh.behind { color: var(--patina); }
 .forest-merged { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); opacity: 0.85; }
 .forest-ready { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); font-weight: 600; }
+/* fixed-width metadata cells so pips · nodes · PR line up down the column; the trailing cell
+   hugs the row's right edge, so behind/restack/merged all align to the right regardless of width. */
+.fcell { flex: none; font-size: 11px; color: var(--ink-faint); text-align: right; }
+.fcell.pips { width: 64px; }
+.fcell.nodes { width: 60px; }
+.fcell.pr { width: 80px; }
+/* constant width (not min-width) so a wider "16 behind" can't steal space from the flexible name
+   and shift the columns left; parked/merged badges are allowed to overflow this slot. */
+.fcell.trail { margin-left: 2px; width: 104px; display: flex; justify-content: flex-end; align-items: center; }
+.forest-row.folded .fcell.trail { width: auto; }
+/* behind / restack / fresh are restack state, not identity — they recede until the row is hovered */
+.forest-trail { opacity: 0; transition: opacity 0.12s; }
+.forest-row:hover .forest-trail { opacity: 1; }
+/* priority tiers: a faint pip header sets each level apart so same-priority forests cluster */
+.forest-tier-head { font-size: 12px; letter-spacing: 0.06em; color: var(--gold-deep); opacity: 0.85; margin: 15px 4px 6px; }
+.forest-tier-head:first-child { margin-top: 2px; }
+/* recently-merged fold — done work tucked out of the active list, collapsed until clicked */
+.forest-mfold {
+  display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 11px; letter-spacing: 0.03em; color: var(--ink-dim); padding: 9px 4px 5px; margin-top: 8px;
+}
+.forest-mfold:hover { color: var(--gold-leaf); }
+.forest-row.folded { opacity: 0.66; }
+.forest-row.folded:hover { opacity: 1; }
 
 /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
 .base-toggle { display: flex; align-items: center; gap: 6px; }
