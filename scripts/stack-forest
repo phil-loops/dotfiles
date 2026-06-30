@@ -82,6 +82,23 @@ def is_trunk(ref):
     so an upward walk must STOP at it without pulling it in as a phantom member."""
     return not ref or ref == MAIN or ref.startswith("origin/")
 
+
+# Every branch ultimately merges into origin/main, so the trunk DIFF base is the REMOTE trunk,
+# not local `main`. A stale local main lags a fetch and folds already-pushed commits into the
+# diff (the "garbage diff" — a clean branch rendering as dozens of unrelated files). Falls back
+# to local MAIN when there's no origin/<main> (no remote, or never fetched).
+REMOTE_MAIN = (
+    f"origin/{MAIN}"
+    if git_out(["rev-parse", "--verify", "--quiet", f"origin/{MAIN}"]).strip()
+    else MAIN
+)
+
+
+def trunk_base(parent):
+    """A node's diff/bless base: its parent, except the local trunk resolves to origin/main
+    (a non-trunk parent or an already-remote ref is returned unchanged)."""
+    return REMOTE_MAIN if (not parent or parent == MAIN) else parent
+
 # ---- one config read → parents / children / requires / project seeds ------
 parents, children, seeds, requires, archived = {}, {}, {}, {}, set()
 for line in git_out(["config", "--local", "--list"]).splitlines():
@@ -308,12 +325,16 @@ if node_mode:
     # "last blessed" is per-file — blessing keys on each file's blob, there is no blessed
     # ref to diff against — so each file's patch is rebuilt from its blessed blob below.
     since_blessed = base == "blessed"
-    diff_base = parent if since_blessed else (base or parent)
-    # the "diff vs main" button means the FRESH trunk — a stale local main lags
-    # origin and folds already-merged commits into the diff. Only on an explicit
-    # main request, so a root-on-main node's default parent view stays local.
-    if base == MAIN and git_out(["rev-parse", "--verify", "--quiet", f"origin/{MAIN}"]).strip():
-        diff_base = f"origin/{MAIN}"
+    # default view (and the explicit "vs main" button) diff against the REMOTE trunk, so a
+    # root-on-main node is honest against what it merges into — a stale local main no longer
+    # folds already-pushed commits into the diff. since-blessed keeps the local parent (it
+    # diffs each file's blessed blob); an explicit non-trunk base is used verbatim.
+    if since_blessed:
+        diff_base = parent
+    elif not base or base == MAIN:
+        diff_base = trunk_base(parent if not base else MAIN)
+    else:
+        diff_base = base
     rows, *_ = file_status(branch, diff_base)
     # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
     # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
@@ -375,7 +396,7 @@ else:
 
 def build(branch):
     parent = parents.get(branch, MAIN)
-    rows, clean, stale, unbl = file_status(branch, parent)
+    rows, clean, stale, unbl = file_status(branch, trunk_base(parent))
     # fan-in: a node CARRIES its `requires` deps' files (cherry-picked). Subtract
     # those paths so the node shows only its OWN work — clean counts, not the
     # carried content. (Path-level; the forest keeps one provider per file.)
