@@ -84,6 +84,27 @@ echo a > "$r/a"; git -C "$r" add .; git -C "$r" commit -qm "feat: a"
 code="$(cd "$r" && run_guard "(delete) $ZERO refs/heads/old $(sha "$r")")"
 [[ "$code" == 0 ]] && ok "ref deletion → allow (0)" || bad "deletion returned $code"
 
+# --- merge commit on a feature branch → block ------------------------------
+r="$(mkrepo)"
+echo a > "$r/a"; git -C "$r" add .; git -C "$r" commit -qm "feat: a"
+def="$(git -C "$r" rev-parse --abbrev-ref HEAD)"
+git -C "$r" checkout -qb side
+echo c > "$r/c"; git -C "$r" add .; git -C "$r" commit -qm "feat: c"
+git -C "$r" checkout -q "$def"
+echo b > "$r/b"; git -C "$r" add .; git -C "$r" commit -qm "feat: b"
+git -C "$r" merge -q --no-ff side -m "Merge branch 'side'"
+mergetip="$(sha "$r")"
+code="$(cd "$r" && run_guard "refs/heads/feature $mergetip refs/heads/feature $ZERO")"
+[[ "$code" == 1 ]] && ok "merge commit on feature branch → block (1)" || bad "merge commit returned $code"
+
+# --- merge commit + ALLOW_MERGE_PUSH escape hatch → allow ------------------
+code="$(cd "$r" && echo "refs/heads/feature $mergetip refs/heads/feature $ZERO" | ALLOW_MERGE_PUSH=1 "$guard" >/dev/null 2>&1; echo $?)"
+[[ "$code" == 0 ]] && ok "ALLOW_MERGE_PUSH=1 overrides → allow (0)" || bad "merge escape hatch returned $code"
+
+# --- merge commit but pushing to main → skipped, allow ---------------------
+code="$(cd "$r" && run_guard "refs/heads/main $mergetip refs/heads/main $ZERO")"
+[[ "$code" == 0 ]] && ok "merge to main → skip/allow (0)" || bad "merge-to-main returned $code"
+
 echo ""
 echo "  $pass passed, $fail failed"
 [[ "$fail" == 0 ]]
