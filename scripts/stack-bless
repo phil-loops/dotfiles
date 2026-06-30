@@ -82,6 +82,14 @@ fi
 [[ -n "$parent" ]] || parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 
+# the trunk bless-base is the REMOTE trunk (origin/main) — what the branch merges into — so a
+# stale local main can't shift the rebase-stable patch-id. Mirrors stack-forest's trunk_base, so
+# a bless WRITTEN here matches the contribution id stack-forest CHECKS against.
+_main=$(git config stack.main-branch 2>/dev/null || echo main)
+if [[ "$parent" == "$_main" ]] && git rev-parse --verify --quiet "origin/${_main}" >/dev/null; then
+  parent="origin/${_main}"
+fi
+
 if [[ -n "$file" ]]; then
   files=("$file")
 else
