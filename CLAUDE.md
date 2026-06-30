@@ -289,10 +289,12 @@ Run `task --list` to see all available tasks. Use the team's tools — don't rei
 Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done:
 
 ```bash
-./node_modules/.bin/tsgo --project tsconfig.node.json --noEmit   # ~1.5s; fast default
+npx tsc --project tsconfig.node.json --noEmit   # the repo's own CI typecheck
 ```
 
-Use `tsgo` (fast); fall back to `tsc --project tsconfig.node.json --noEmit` only if you need a discrepancy check. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
+This is the exact command CI runs, so it's the source of truth. Don't use `tsgo` — the global one rejects this repo's `moduleResolution=node10` and there's no compatible local copy, so it's pure friction. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
+
+**Caveat — the tRPC client type is a generated artifact.** A worktree with stale/missing generated types floods `tsc` with hundreds of `.tsx` errors that all trace to one collapsed type (`TS2339` "Property X does not exist on type '...collides with a built-in method...'" plus cascading implicit-`any` params). That's noise from un-built types, not your change. Filter to what you touched (`... --noEmit 2>&1 | grep <your-file>`) to read the real signal, or build the types first (`npx tsc --project tsconfig.trpc-types.json`).
 
 # Skills
 
