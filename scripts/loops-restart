@@ -10,6 +10,9 @@ set -euo pipefail
 #                  reseed + clickhouse:reset). Use for a clean slate.
 #   --keep         keep dev data: `task dev:watch` (rebuild packages + restart node
 #                  services only, no DB wipe). DEFAULT — right for a code/package change.
+#                  Also applies pending Postgres migrations (prisma migrate deploy) and
+#                  seeds when the DB is empty, so a relocated restart onto a fresh compose
+#                  volume doesn't leave the app 500ing on `relation "User" does not exist`.
 #   --no-restart   kill + docker-down only; don't relaunch.
 #   --dry-run      print what it WOULD kill / bring down / start; touch nothing.
 #
@@ -50,6 +53,37 @@ say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 
 cwd_of()  { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | grep '^n' | sed 's/^n//'; }
 pgid_of() { ps -o pgid= -p "$1" 2>/dev/null | tr -d ' '; }
+
+db_url_of() { grep -E '^DATABASE_URL=' "$1/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'; }
+
+# keep mode (`task dev:watch`) never migrates/seeds — so after a relocating restart the
+# compose Postgres can come up fresh+empty and the app 500s on `relation "User" does not
+# exist`. Bring the schema forward (idempotent, non-destructive — also picks up migrations
+# pulled since last run), then seed ONLY when the DB is empty (never re-seed a populated
+# one). `migrate deploy` never trips Prisma's AI-agent guard (only `migrate reset --force`
+# does), so this is safe to run unattended. Needs psql to detect emptiness; without it we
+# still migrate but skip auto-seed (don't seed blindly).
+ensure_db_ready() {
+  local dir="$1" url n
+  url="$(db_url_of "$dir")"
+  if command -v psql >/dev/null 2>&1 && [ -n "$url" ]; then
+    for _ in $(seq 1 20); do
+      if psql "$url" -c 'SELECT 1' >/dev/null 2>&1; then break; fi
+      sleep 1
+    done
+  else
+    sleep 3
+  fi
+  say "applying Postgres migrations (prisma migrate deploy)"
+  (cd "$dir" && npx prisma migrate deploy) 2>&1 | tail -3 || true
+  if command -v psql >/dev/null 2>&1 && [ -n "$url" ]; then
+    n="$(psql "$url" -t -A -c 'SELECT count(*) FROM "User";' 2>/dev/null | tr -d '[:space:]')"
+    if [ "$n" = "0" ]; then
+      say "fresh/empty DB — seeding (prisma db seed)"
+      (cd "$dir" && npx prisma db seed) 2>&1 | tail -3 || true
+    fi
+  fi
+}
 
 # Seed PIDs that DEFINE the running dev stack — precisely, not "anything sharing the
 # checkout cwd" (the main checkout is the cwd of the viewer, shells, editors… killing by
@@ -113,6 +147,7 @@ NEED_DOCKER_UP=$([ "$MODE" = keep ] && echo 1 || echo 0)
 
 if [ "$DRY" = 1 ]; then
   [ "$NEED_DOCKER_UP" = 1 ] && say "would: (cd $DIR && docker compose up -d --remove-orphans)"
+  [ "$NEED_DOCKER_UP" = 1 ] && say "would: (cd $DIR && npx prisma migrate deploy; seed if DB empty)"
   say "dry-run: not launching"
   exit 0
 fi
@@ -120,6 +155,7 @@ fi
 if [ "$NEED_DOCKER_UP" = 1 ]; then
   say "bringing up Docker compose project in $DIR"
   (cd "$DIR" && docker compose up -d --remove-orphans) 2>&1 | tail -3 || true
+  ensure_db_ready "$DIR"
 fi
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
