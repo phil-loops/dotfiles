@@ -12,9 +12,14 @@ trailer (how Claude/`stack-wip` stamp checkpoints), or a bare `wip`/`fixup!`/`sq
 subject. The squash-before-push flow consumes these in the happy path; this hook is
 the net for a push that skips the flow (e.g. straight from the laptop).
 
-Escape hatch: `ALLOW_WIP_PUSH=1 git push …` bypasses the guard for the one push.
+It also blocks **merge commits on a feature branch** — one means a `git pull`
+(merge) on a diverged branch, which (because PRs squash-merge) drags landed
+commits back in and bloats the PR with phantom "new" commits. Rebase onto
+origin/main instead.
 
-Exit 0 = clean (allow push). Exit 1 = WIP found (abort).
+Escape hatches (per guard, one push): `ALLOW_WIP_PUSH=1` / `ALLOW_MERGE_PUSH=1`.
+
+Exit 0 = clean (allow push). Exit 1 = blocked.
 """
 import os
 import re
@@ -61,36 +66,74 @@ def wip_commits(rev_args):
     return found
 
 
-def main():
-    if os.environ.get("ALLOW_WIP_PUSH", "").strip().lower() not in FALSEY:
-        return 0
+def merge_commits(rev_args):
+    """[(sha, subject)] for merge commits in the range, newest first."""
+    out = subprocess.run(
+        ["git", "log", "--merges", "--format=%H\x1f%s", *rev_args],
+        capture_output=True, text=True,
+    ).stdout
+    found = []
+    for line in out.splitlines():
+        if "\x1f" not in line:
+            continue
+        sha, subject = line.split("\x1f", 1)
+        found.append((sha[:9], subject))
+    return found
 
-    offenders = []
+
+def main():
+    refs = []
     for line in sys.stdin:
         cols = line.split()
         if len(cols) < 4:
             continue
-        _local_ref, local_sha, _remote_ref, remote_sha = cols[:4]
+        _local_ref, local_sha, remote_ref, remote_sha = cols[:4]
         if local_sha == ZERO:   # deleting a ref — nothing to scan
             continue
-        offenders += wip_commits(range_for(local_sha, remote_sha))
+        refs.append((local_sha, remote_ref, remote_sha))
 
-    if not offenders:
-        return 0
+    if os.environ.get("ALLOW_MERGE_PUSH", "").strip().lower() in FALSEY:
+        merges = []
+        for local_sha, remote_ref, remote_sha in refs:
+            if remote_ref.endswith("/main"):
+                continue
+            merges += merge_commits(range_for(local_sha, remote_sha))
+        if merges:
+            seen = set()
+            print("\n✋ push blocked — merge commit(s) on a feature branch:\n", file=sys.stderr)
+            for sha, subject in merges:
+                if sha in seen:
+                    continue
+                seen.add(sha)
+                print(f"   {sha}  {subject}", file=sys.stderr)
+            print(
+                "\nA `git pull` (merge) drags squash-merged commits back in. Rebase instead:\n"
+                "   git rebase origin/main\n"
+                "or, to override this one push: ALLOW_MERGE_PUSH=1 git push …\n",
+                file=sys.stderr,
+            )
+            return 1
 
-    seen = set()
-    print("\n✋ push blocked — work-in-progress commit(s) in this push:\n", file=sys.stderr)
-    for sha, subject, reason in offenders:
-        if sha in seen:
-            continue
-        seen.add(sha)
-        print(f"   {sha}  {subject}   ({reason})", file=sys.stderr)
-    print(
-        "\nSquash them away first (the viewer's 'prepare to push' / `stack-squash --unpushed`),\n"
-        "or, to override this one push: ALLOW_WIP_PUSH=1 git push …\n",
-        file=sys.stderr,
-    )
-    return 1
+    if os.environ.get("ALLOW_WIP_PUSH", "").strip().lower() in FALSEY:
+        offenders = []
+        for local_sha, _remote_ref, remote_sha in refs:
+            offenders += wip_commits(range_for(local_sha, remote_sha))
+        if offenders:
+            seen = set()
+            print("\n✋ push blocked — work-in-progress commit(s) in this push:\n", file=sys.stderr)
+            for sha, subject, reason in offenders:
+                if sha in seen:
+                    continue
+                seen.add(sha)
+                print(f"   {sha}  {subject}   ({reason})", file=sys.stderr)
+            print(
+                "\nSquash them away first (the viewer's 'prepare to push' / `stack-squash --unpushed`),\n"
+                "or, to override this one push: ALLOW_WIP_PUSH=1 git push …\n",
+                file=sys.stderr,
+            )
+            return 1
+
+    return 0
 
 
 if __name__ == "__main__":
