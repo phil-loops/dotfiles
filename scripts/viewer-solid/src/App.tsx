@@ -602,9 +602,13 @@ function Home() {
     const list = projects.data || [];
     return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list;
   });
-  // a forest whose tip merged inside the badge's recency window — "done", so it folds out of the
-  // active list into the recently-merged disclosure instead of cluttering the priority tiers.
-  const recentlyMerged = (p: Project): boolean => !!(p.merged && mergedAgo(p.merged.at));
+  // A forest folds into "recently merged" only once it's fully wrapped up: a recent merge AND no
+  // mergeable roots left (every branch landed AND got contracted). A forest where one base merged
+  // but others are still open/unpushed keeps mergeable roots, so it stays in the active list —
+  // that's the moment to restack and ship the rest, not bury it. (mergeable still lists squash-
+  // merged-but-uncontracted roots, so a just-merged forest lingers in active until you contract it.)
+  const recentlyMerged = (p: Project): boolean =>
+    !!(p.merged && mergedAgo(p.merged.at)) && !p.mergeable?.length;
   // Group the home list by repo (loops first, then alphabetical), then within each repo split the
   // active forests into PRIORITY TIERS (interest level, descending) so same-priority work stands
   // together, and pull recently-merged forests aside into their own fold.
