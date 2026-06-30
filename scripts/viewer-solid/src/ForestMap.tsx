@@ -1,9 +1,10 @@
 // ForestMap — the forest DAG as an SVG, read as a JOURNEY: `main` is pinned at the
 // TOP-LEFT (where you are) and the project's culmination — its "endstate" — is pinned
-// BOTTOM-RIGHT (where the work is headed). Every branch sits on the main→endstate
-// diagonal by its RANK (longest path from main over parent + fan-in edges), so each
-// step down the stack moves both right and down; repulsion + edge cohesion fan the
-// siblings off that axis. The endstate is the ghost ✦ node when a project has several
+// BOTTOM-RIGHT (where the work is headed). Y is a LAYERED RANK LANE: every branch sits
+// at rank·ROWH (longest path from main over parent + fan-in edges), so a child is always
+// strictly below its parent — edges only ever flow downward and never loop back through a
+// node. X is force-relaxed (repulsion + edge cohesion) to fan siblings within their lane,
+// so the sequence still reads top-left → bottom-right. The endstate is the ghost ✦ node when a project has several
 // tips (it fans them all in), else the single deepest tip. Deterministic (seeded by
 // rank + index, fixed iteration count, no requestAnimationFrame), so it never jitters.
 //
@@ -262,13 +263,14 @@ export function ForestMap(props: {
     let endId: string | null = null;
     ids.forEach((b) => { if (endId === null || rankCache[b] > rankCache[endId]) endId = b; });
 
-    // seed every node on its diagonal slot (rank → both x and y); siblings jittered off
-    // it deterministically (no Math.random). main + endstate are fixed anchors.
+    // seed each node in its rank lane (Y = rank·ROWH, fixed); X starts on the diagonal slot
+    // jittered off it deterministically (no Math.random) to break symmetry before the relax.
+    // main + endstate are fixed anchors.
     const diagOf = (id: string) => ({ x: (rankCache[id] || 0) * COLW, y: (rankCache[id] || 0) * ROWH });
     const P: Record<string, { x: number; y: number }> = {};
     ids.forEach((b, i) => {
       const d = diagOf(b);
-      P[b] = { x: d.x, y: d.y + ((i * 37) % 90) - 45 };
+      P[b] = { x: d.x + ((i * 37) % 90) - 45, y: d.y };
     });
     const MAIN = { x: 0, y: 0 };
     if (endId) P[endId] = diagOf(endId); // pin the endstate exactly on the diagonal's far corner
@@ -284,17 +286,16 @@ export function ForestMap(props: {
 
     let temp = K * 1.6;
     for (let it = 0; it < ITER; it++) {
-      // keep the endstate parked just past the bottom-right of everything else, so it
-      // reads as the literal destination corner no matter how wide the fan-in spreads
-      // (a rank slot alone gets overshot by scattered tips). Recomputed as the field settles.
+      // keep the endstate parked just past the RIGHT edge of everything else, so it reads as
+      // the destination corner no matter how wide the fan-in spreads (its rank lane already
+      // pins it to the bottom). Recomputed as the field settles.
       if (endId) {
-        let mx = -Infinity, my = -Infinity;
+        let mx = -Infinity;
         for (const b of ids) {
           if (b === endId) continue;
           if (P[b].x > mx) mx = P[b].x;
-          if (P[b].y > my) my = P[b].y;
         }
-        if (mx > -Infinity) P[endId] = { x: mx + COLW * 0.8, y: my + ROWH * 0.55 };
+        if (mx > -Infinity) P[endId] = { x: mx + COLW * 0.8, y: diagOf(endId).y };
       }
       const dsp: Record<string, { x: number; y: number }> = {};
       ids.forEach((b) => (dsp[b] = { x: 0, y: 0 }));
@@ -342,10 +343,10 @@ export function ForestMap(props: {
       ids.forEach((b) => {
         if (b === endId) return; // pinned bottom-right anchor — never moves
         const m = Math.hypot(dsp[b].x, dsp[b].y) || 0.01, s = Math.min(m, temp) / m;
-        P[b].x += dsp[b].x * s; P[b].y += dsp[b].y * s;
-        // keep everything down-right of main so main stays the top-left anchor.
+        P[b].x += dsp[b].x * s;
+        P[b].y = diagOf(b).y; // Y stays in its rank lane — only X relaxes
+        // keep everything right of main so main stays the top-left anchor.
         if (P[b].x < 56) P[b].x = 56;
-        if (P[b].y < 0) P[b].y = 0;
       });
       temp *= 0.985;
     }
