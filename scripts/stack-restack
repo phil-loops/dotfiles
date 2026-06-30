@@ -1018,16 +1018,20 @@ while (( ${#PENDING[@]} > 0 )); do
 
   # Cut point for replaying the branch's OWN commits. For a properly-stacked branch this IS
   # OLD_PARENT_SHA (the branch descends from the parent's old tip) — a no-op. For a DRIFTED branch
-  # (forked off main, not its declared parent, so OLD_PARENT_SHA isn't an ancestor), the range
-  # OLD_PARENT_SHA..BRANCH re-includes a COPY of the parent's commits → the rebase re-applies them
-  # and self-conflicts. Back the cut up to the real fork (merge-base) so we replay only the branch's
-  # divergence; git drops patch-identical carried parent commits, fixing the drift in place.
+  # (OLD_PARENT_SHA isn't an ancestor — forked off main, or stranded when the parent was rewritten
+  # under it), the range OLD_PARENT_SHA..BRANCH re-includes the parent's commits → re-applied,
+  # self-conflicting. Back the cut up to the tip BRANCH actually forked from.
   REBASE_CUT="$OLD_PARENT_SHA"
   if [[ -n "$OLD_PARENT_SHA" ]] && ! git merge-base --is-ancestor "$OLD_PARENT_SHA" "$BRANCH" 2>/dev/null; then
-    _mb=$(git merge-base "$OLD_PARENT_SHA" "$BRANCH" 2>/dev/null || true)
-    if [[ -n "$_mb" ]]; then
-      echo "  ⤺ ${BRANCH} drifted off ${PARENT_NAME} — cutting at the merge-base (${_mb[1,9]}), not the parent's stale tip"
-      REBASE_CUT="$_mb"
+    # --fork-point consults the parent's reflog to pin the exact tip BRANCH forked from, even when
+    # the parent was REWRITTEN under it: plain merge-base backs up to the last shared commit and
+    # re-includes the parent commits a rewrite renamed (not patch-identical → re-applied, reviving
+    # superseded parent work). merge-base is the fallback when the reflog can't reach the fork.
+    _cut=$(git merge-base --fork-point "$PARENT_NAME" "$BRANCH" 2>/dev/null || true)
+    [[ -z "$_cut" ]] && _cut=$(git merge-base "$OLD_PARENT_SHA" "$BRANCH" 2>/dev/null || true)
+    if [[ -n "$_cut" ]]; then
+      echo "  ⤺ ${BRANCH} drifted off ${PARENT_NAME} — cutting at its real fork (${_cut[1,9]}), not the parent's stale tip"
+      REBASE_CUT="$_cut"
     fi
   fi
 
