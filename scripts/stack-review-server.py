@@ -313,6 +313,8 @@ class H(BaseHTTPRequestHandler):
             return picker.drop_project(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
             return review.purpose_set(self, raw)
+        if self.path == "/ready":   # toggle the manual ready-to-PR flag (stack-branch.<b>.ready)
+            return review.ready_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background

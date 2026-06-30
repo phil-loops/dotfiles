@@ -26,6 +26,8 @@ export const NodeMeta = z.object({
   // deterministic merge-order depth (stack-merge-rank), grafted on by /model. Canonical
   // order = stable sort by mergeRank asc. Shared authority with stack-pr-body — see _enrich.
   mergeRank: z.number().optional(),
+  // Phil's manual ready-to-PR flag (stack-branch.<name>.ready), grafted on by /model.
+  ready: z.boolean().optional(),
   stale: z.number(),
   total: z.number(),
   clean: z.number(),
@@ -94,6 +96,7 @@ export const Project = z.object({
     .optional(), // most recent squash-merge into main attributed to this forest
   lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
+  hasReady: z.boolean().optional(), // a member branch is hand-flagged ready-to-PR → float this forest up
 });
 export type Project = z.infer<typeof Project>;
 

@@ -62,6 +62,8 @@ def _enrich(raw, branch):
         desc = ctx.run(["git", "config", f"branch.{bid}.description"]).stdout.strip()
         if desc:
             meta["description"] = desc
+        if ctx.run(["git", "config", f"stack-branch.{bid}.ready"]).stdout.strip() == "true":
+            meta["ready"] = True
         if bid in ranks:
             meta["mergeRank"] = ranks[bid]
     if order:
@@ -182,6 +184,19 @@ def purpose_set(req, raw):
     d = json.loads(raw or "{}")
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
     req._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
+
+
+def ready_set(req, raw):
+    # Toggle the manual ready-to-PR flag (stack-branch.<b>.ready). Promotes the branch's
+    # forest on Home and badges the node; purely Phil's signal, nothing reads it but the viewer.
+    d = json.loads(raw or "{}")
+    branch, ready = d.get("branch", ""), bool(d.get("ready"))
+    key = f"stack-branch.{branch}.ready"
+    if ready:
+        ctx.run(["git", "config", key, "true"])
+    else:
+        ctx.run(["git", "config", "--unset", key])
+    req._send(200, json.dumps({"ok": True, "branch": branch, "ready": ready}))
 
 
 def squash(req, raw):

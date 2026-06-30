@@ -589,7 +589,13 @@ function Home() {
     }
     return [...by.entries()]
       .sort(([a], [b]) => (a === "loops" ? -1 : b === "loops" ? 1 : a.localeCompare(b)))
-      .map(([repo, items]) => ({ repo, items: items.sort((a, b) => forestTs(b) - forestTs(a)) }));
+      .map(([repo, items]) => ({
+        repo,
+        // ready-flagged forests float to the top (next branch to PR), then by recency.
+        items: items.sort(
+          (a, b) => (b.hasReady ? 1 : 0) - (a.hasReady ? 1 : 0) || forestTs(b) - forestTs(a)
+        ),
+      }));
   });
   const multiRepo = createMemo(() => forestGroups().length > 1);
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
@@ -844,6 +850,11 @@ function Home() {
                     class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
                   />
                   <span class="forest-name">{p.name}</span>
+                  <Show when={p.hasReady}>
+                    <span class="forest-ready" title="a branch here is flagged ready to PR">
+                      ✅ ready
+                    </span>
+                  </Show>
                   <span class="forest-meta">
                     {p.branches} {p.branches === 1 ? "node" : "nodes"}
                   </span>
@@ -1108,6 +1119,7 @@ function NodeDetail() {
   const active = () =>
     nodeParam() || spine().find((n) => (n.total ?? 0) > 0)?.id || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
+  const readyOf = () => !!model.data?.nodes?.[active()]?.ready;
   // remember the node you're on, so popping back to the forest map highlights where you were.
   createEffect(() => active() && setCameFrom(active()));
 
@@ -1166,6 +1178,20 @@ function NodeDetail() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["node"] });
       qc.invalidateQueries({ queryKey: ["model"] });
+    },
+  }));
+
+  // toggle the manual ready-to-PR flag — promotes the forest on Home + badges the node.
+  const markReady = createMutation(() => ({
+    mutationFn: (ready: boolean) =>
+      fetch(withRepo("/ready"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: active(), ready }),
+      }).then((r) => r.json()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
     },
   }));
 
@@ -1566,6 +1592,11 @@ function NodeDetail() {
             >
               <span class="against">◂ main · all changes on this project</span>
             </Show>
+            <Show when={!isGhost() && readyOf()}>
+              <span class="nh-ready" title="flagged ready to PR — promoted on the Forests home">
+                ✅ ready
+              </span>
+            </Show>
             <Show when={!isGhost() && nodeHealth(active())?.drifted}>
               <span
                 class="nh-drift"
@@ -1640,6 +1671,17 @@ function NodeDetail() {
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
               <NodeActions branch={active()} isReview={location().kind === "review"} merged={nodeHealth(active())?.merged} ambient={nodeAmbient(active())} />
+            </Show>
+            <Show when={canMutate && !isGhost()}>
+              <button
+                class="icon-btn"
+                classList={{ on: readyOf() }}
+                disabled={markReady.isPending}
+                title={readyOf() ? "ready to PR — click to unflag" : "flag this branch ready to PR (promotes its forest on Home)"}
+                onClick={() => markReady.mutate(!readyOf())}
+              >
+                {readyOf() ? "✅ ready" : "○ ready"}
+              </button>
             </Show>
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">

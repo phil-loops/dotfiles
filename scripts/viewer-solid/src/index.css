@@ -159,6 +159,7 @@ body {
 .nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
 .nh-drift { font-size: 12px; color: var(--del); cursor: help; }
 .nh-ghost { font-size: 12px; color: var(--patina); cursor: help; }
+.nh-ready { font-size: 12px; color: var(--gold-leaf); cursor: help; letter-spacing: 0.02em; }
 .nh-amb { font-size: 12px; cursor: help; letter-spacing: 0.02em; }
 .nh-amb.amb-conflict { color: var(--del); }
 .nh-amb.amb-restack { color: var(--patina); }
@@ -561,6 +562,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .forest-fresh.fresh { color: var(--gold-leaf); }
 .forest-fresh.behind { color: var(--patina); }
 .forest-merged { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); opacity: 0.85; }
+.forest-ready { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); font-weight: 600; }
 
 /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
 .base-toggle { display: flex; align-items: center; gap: 6px; }
