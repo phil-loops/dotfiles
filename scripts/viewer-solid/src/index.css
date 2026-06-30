@@ -164,6 +164,23 @@ body {
 .interest-ctl .icon-btn { padding: 0 6px; line-height: 1.4; }
 .interest-val { min-width: 16px; text-align: center; font-size: 11px; color: var(--ink-faint); }
 .interest-val.on { color: var(--gold-leaf); letter-spacing: -1px; }
+.ctx-scrim { position: fixed; inset: 0; z-index: 90; }
+.ctx-menu {
+  position: fixed; z-index: 91; min-width: 150px; padding: 4px;
+  background: var(--raised, #1b1815); border: 1px solid var(--rule, #3a332b);
+  border-radius: 8px; box-shadow: 0 8px 26px rgba(0,0,0,0.45);
+}
+.ctx-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); padding: 4px 8px 6px; }
+.ctx-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; font: inherit; font-size: 12px;
+  text-align: left; cursor: pointer; padding: 5px 8px; border-radius: 6px; border: 0;
+  background: transparent; color: var(--ink-dim);
+}
+.ctx-item:hover { background: var(--vellum-edge); color: var(--ink); }
+.ctx-item.on { color: var(--gold-leaf); }
+.ctx-pips { min-width: 58px; color: var(--gold-leaf); letter-spacing: -1px; }
+.ctx-lbl { color: var(--ink-faint); }
+.ctx-item:hover .ctx-lbl, .ctx-item.on .ctx-lbl { color: inherit; }
 .nh-amb { font-size: 12px; cursor: help; letter-spacing: 0.02em; }
 .nh-amb.amb-conflict { color: var(--del); }
 .nh-amb.amb-restack { color: var(--patina); }

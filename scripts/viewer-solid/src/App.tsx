@@ -424,6 +424,20 @@ function Home() {
         cur?.map((r) => (r.number === number ? { ...r, imported: true } : r)));
     },
   }));
+  // right-click a forest card → set its importance (interest on the forest's entry branch). The
+  // forest sorts by max member interest, so this is what floats it up the Home list.
+  const [ctxMenu, setCtxMenu] = createSignal<
+    { x: number; y: number; repo: string; branch: string; current: number } | null
+  >(null);
+  const setInterest = createMutation(() => ({
+    mutationFn: (arg: { repo: string; branch: string; value: number }) =>
+      fetch(`/${arg.repo}/interest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: arg.branch, value: arg.value }),
+      }).then((r) => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  }));
 
   const { location, navigate } = useViewerLocation();
   const tab = (): HomeTab => {
@@ -851,6 +865,13 @@ function Home() {
                   }}
                   onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
                   onMouseLeave={hideFtip}
+                  onContextMenu={(e) => {
+                    const branch = p.mergeable?.[0] ?? p.candidates?.[0];
+                    if (!branch || !canMutate) return; // no target → fall back to native menu
+                    e.preventDefault();
+                    hideFtip();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, branch, current: p.interest ?? 0 });
+                  }}
                 >
                   <span
                     class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`}
@@ -978,6 +999,35 @@ function Home() {
           )}
         </Show>
       </main>
+      <Show when={ctxMenu()}>
+        {(m) => (
+          <>
+            <div
+              class="ctx-scrim"
+              onClick={() => setCtxMenu(null)}
+              onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
+            />
+            <div class="ctx-menu" style={{ left: `${m().x}px`, top: `${m().y}px` }}>
+              <div class="ctx-head">importance</div>
+              <For each={[5, 4, 3, 2, 1, 0]}>
+                {(lvl) => (
+                  <button
+                    class="ctx-item"
+                    classList={{ on: m().current === lvl }}
+                    onClick={() => {
+                      setInterest.mutate({ repo: m().repo, branch: m().branch, value: lvl });
+                      setCtxMenu(null);
+                    }}
+                  >
+                    <span class="ctx-pips">{lvl === 0 ? "—" : "▲".repeat(lvl)}</span>
+                    <span class="ctx-lbl">{lvl === 0 ? "none" : `level ${lvl}`}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </>
+        )}
+      </Show>
     </div>
   );
 }
