@@ -46,6 +46,11 @@ for link in node_modules .env .env.local; do
   [[ -e "$main_top/$link" && ! -e "$wt/$link" ]] && ln -s "$main_top/$link" "$wt/$link"
 done
 
+# .gen holds the generated tRPC client types — without it `tsc` floods with hundreds of
+# spurious .tsx errors as every trpc.*.useQuery collapses. COW-clone main's (not a symlink:
+# a regen in here would write through into main's .gen), rebuild in bg only if the router moved.
+seed-gen "$wt"
+
 if (( launch )); then
   echo "cw: $wt  (branch $name) → 🍺 launching claude (dangerously-skip-permissions)"
   cd "$wt" && exec claude --dangerously-skip-permissions "$@"
