@@ -4,8 +4,11 @@
 # homepage can list them and hop straight into the matching forest node.
 #
 # Output: JSON array, newest PR first:
-#   [{ num, title, url, branch, project|null, draft, review }]
-#   review = GitHub reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | ""
+#   [{ num, title, url, branch, project|null, draft, review, ci, mergeable, mergeState }]
+#   review     = GitHub reviewDecision: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" | ""
+#   ci         = rolled-up checks verdict: "passing" | "failing" | "pending" | "none"
+#   mergeState = GitHub mergeStateStatus: "CLEAN" | "BLOCKED" | "BEHIND" | "DIRTY" | "UNKNOWN" | ""
+#                (the list API often returns UNKNOWN — computed lazily — so treat it as non-blocking)
 #
 # SWR-cached exactly like stack-prs: a present cache is served instantly (even when
 # stale) and a stale read fires one detached background `gh` refresh for next time —
@@ -44,7 +47,7 @@ _refresh() {
   merged='[]'; ok=1
   for repo in $repos; do
     rows=$(gh pr list --repo "$repo" --author "@me" --state open -L 200 \
-             --json number,title,url,headRefName,isDraft,reviewDecision 2>/dev/null) || { ok=0; break; }
+             --json number,title,url,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeable,mergeStateStatus 2>/dev/null) || { ok=0; break; }
     merged=$(jq -n --argjson acc "$merged" --argjson rows "$rows" --argjson pm "$projmap" '
       $acc + ( $rows | map({
         num:     .number,
@@ -53,7 +56,18 @@ _refresh() {
         branch:  .headRefName,
         project: ($pm[.headRefName] // null),
         draft:   .isDraft,
-        review:  (.reviewDecision // "")
+        review:  (.reviewDecision // ""),
+        # roll the per-check array down to one CI verdict (a failing check beats a
+        # pending one beats all-green); CheckRuns carry .status/.conclusion, legacy
+        # StatusContexts carry .state — cover both shapes.
+        ci: ( (.statusCheckRollup // []) as $c
+              | if ($c | length) == 0 then "none"
+                elif any($c[]; (.conclusion // .state // "") as $o
+                      | $o == "FAILURE" or $o == "ERROR" or $o == "CANCELLED" or $o == "TIMED_OUT") then "failing"
+                elif any($c[]; .status == "IN_PROGRESS" or .status == "QUEUED" or .state == "PENDING") then "pending"
+                else "passing" end ),
+        mergeable:  (.mergeable // ""),
+        mergeState: (.mergeStateStatus // "")
       }) )')
   done
   (( ok )) || return 1

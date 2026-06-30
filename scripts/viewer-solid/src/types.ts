@@ -66,6 +66,9 @@ export const PR = z.object({
   branch: z.string(),
   draft: z.boolean().optional(),
   review: z.string().nullable().optional(), // "APPROVED" | "CHANGES_REQUESTED" | null
+  ci: z.string().optional(), // rolled-up checks: "passing" | "failing" | "pending" | "none"
+  mergeable: z.string().optional(), // "MERGEABLE" | "CONFLICTING" | "UNKNOWN"
+  mergeState: z.string().optional(), // "CLEAN" | "BLOCKED" | "BEHIND" | "DIRTY" | "UNKNOWN" (often UNKNOWN from list API)
 });
 export type PR = z.infer<typeof PR>;
 
