@@ -242,6 +242,32 @@ def _upstream_state(branch, main):
             "diverged": diverged, "ahead": ahead, "behind": behind}
 
 
+# rebase-classify (the PR-less merged-detection fallback) is a ~0.3s trial rebase, and health_many
+# runs it per PR-less node on every forest open AND every 15s the docked map re-polls. Its result is
+# a pure function of the branch tip and the trunk tip, so memoize on (branch_sha, trunk_sha): a
+# forest with no new commits re-reads instantly, and any moved branch / advanced main busts its own
+# key — it can never go stale wrongly. Tiny (one bool per distinct sha pair); cleared if it ever grows.
+_MERGED_CACHE = {}
+_MERGED_LOCK = threading.Lock()
+
+
+def _merged_prless(branch, trunk):
+    """Cached rebase-classify exit-20 (already-merged) for a PR-less branch vs the remote trunk."""
+    key = tuple(ctx.run(["git", "rev-parse", branch, trunk]).stdout.split())
+    if len(key) == 2:
+        with _MERGED_LOCK:
+            if key in _MERGED_CACHE:
+                return _MERGED_CACHE[key]
+    merged = ctx.run(
+        [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, trunk]).returncode == 20
+    if len(key) == 2:
+        with _MERGED_LOCK:
+            if len(_MERGED_CACHE) > 2000:
+                _MERGED_CACHE.clear()
+            _MERGED_CACHE[key] = merged
+    return merged
+
+
 def _node_health(branch, pr=None):
     """Forest-STRUCTURAL health (vs. state()'s fork-staleness):
       drifted — the node's configured parent is NOT a git ancestor, so it sits off the parent's
@@ -263,8 +289,7 @@ def _node_health(branch, pr=None):
     if pr is not None:
         merged = pr.get("state") == "MERGED"
     else:
-        merged = ctx.run(
-            [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, _trunk(main)]).returncode == 20
+        merged = _merged_prless(branch, _trunk(main))
     return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged), "parent": parent,
             "pr": pr, **_upstream_state(branch, main)}
 
