@@ -1143,7 +1143,90 @@ const FO_VIEWS_CSS = `
 }
 .fo-views button:hover { color: var(--ink-dim, #a89e8c); }
 .fo-views button.on { color: var(--gold, #e0ad4e); border-color: var(--rule, #3a332b); background: var(--raised, #1b1815); }
+
+/* Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs GitHub).
+   Ember, never the blessed gold; a delay guard keeps it off sub-second warm-cache loads. */
+.fo-warm { display: inline-flex; align-items: center; gap: 8px;
+  font-size: 11px; letter-spacing: 0.05em; white-space: nowrap; }
+.fo-warm.reading { color: var(--ember, #d2732a); }
+.fo-warm.read { color: var(--ink-dim, #a89e8c); animation: fo-warm-fade 0.4s ease both; }
+.fo-warm.refreshing { color: var(--ink-faint, #6f675a); }
+.fo-warm b { font-weight: 500; color: var(--gold-leaf, #e6b64e); }         /* the count that earns a look */
+.fo-warm .fo-coal {
+  width: 7px; height: 7px; border-radius: 50%; flex: none;
+  background: var(--ember, #d2732a); box-shadow: 0 0 8px var(--ember-wash, rgba(210,115,42,.12));
+}
+.fo-warm.reading .fo-coal { animation: fo-breathe 1.5s ease-in-out infinite; }
+.fo-warm.read .fo-coal { background: var(--gold-leaf, #e6b64e); box-shadow: 0 0 8px var(--gold-wash, rgba(230,182,78,.08)); }
+.fo-warm.refreshing .fo-coal { width: 5px; height: 5px; background: var(--ink-faint, #6f675a); box-shadow: none;
+  animation: fo-breathe 1.9s ease-in-out infinite; }
+
+@keyframes fo-breathe { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes fo-warm-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .fo-warm .fo-coal { animation: none !important; }
+  .fo-warm.reading .fo-coal { opacity: 1; }
+}
+@media (max-width: 600px) { .fo-warm { white-space: normal; } }
 `;
+
+// The forest header's warming indicator. Three honest states, straight from the health query —
+// which maps 1:1 to the server's SWR cache: pending-with-no-data = cold read (~5s vs GitHub),
+// fetching-with-data = a stale-while-revalidate background refresh, settled = read. A 400ms delay
+// guard keeps it off warm-cache loads (~0.35s) so only a genuine cold read reveals it.
+function WarmingRibbon(props: {
+  loading: boolean;              // health query in flight
+  hasData: boolean;             // some health already resolved (SWR shows it while refetching)
+  needsAttention: number;       // nodes with drift/ghost — the count worth surfacing
+}) {
+  const [shown, setShown] = createSignal(false);   // delay-guarded: only after 400ms of a cold read
+  const [justRead, setJustRead] = createSignal(false);
+  let revealT: ReturnType<typeof setTimeout> | undefined;
+  let readT: ReturnType<typeof setTimeout> | undefined;
+  const cold = () => props.loading && !props.hasData;
+
+  createEffect(() => {
+    if (cold()) {
+      clearTimeout(revealT);
+      revealT = setTimeout(() => setShown(true), 400);
+    } else {
+      clearTimeout(revealT);
+      if (shown()) {                                 // a cold read we actually surfaced just landed
+        setShown(false);
+        setJustRead(true);
+        clearTimeout(readT);
+        readT = setTimeout(() => setJustRead(false), 1600);
+      }
+    }
+  });
+  onCleanup(() => { clearTimeout(revealT); clearTimeout(readT); });
+
+  const state = (): "reading" | "read" | "refreshing" | "" => {
+    if (shown()) return "reading";
+    if (justRead()) return "read";
+    if (props.loading && props.hasData) return "refreshing";
+    return "";
+  };
+  const attn = () => props.needsAttention;
+
+  return (
+    <Show when={state()}>
+      {(s) => (
+        <span class={`fo-warm ${s()}`} aria-live="polite">
+          <span class="fo-coal" />
+          <Show when={s() === "reading"}>warming · reading branch health from GitHub</Show>
+          <Show when={s() === "read"}>
+            <Show when={attn() > 0} fallback={<>read · all clear</>}>
+              read · <b>{attn()}</b> {attn() === 1 ? "needs" : "need"} attention
+            </Show>
+          </Show>
+          <Show when={s() === "refreshing"}>· refreshing</Show>
+        </span>
+      )}
+    </Show>
+  );
+}
+
 
 function ForestOverview() {
   const { location, navigate } = useViewerLocation();
@@ -1198,6 +1281,9 @@ function ForestOverview() {
   // withNode keeps the location's repo so a monotoad node stays in monotoad.
   const open = (b: string) => navigate(withNode(location(), b));
   const nodeCount = () => spine().filter((n) => !n.id.startsWith("✦")).length;
+  // nodes the read turned up as needing a look — drifted off-parent or a merged ghost.
+  const needsAttention = () =>
+    Object.values(health.data || {}).filter((v) => v.drifted || v.merged).length;
 
   // hover a node in the map → float its branch purpose (cached; guard the async gap so a
   // pointer that left before /purpose resolved doesn't pop a stale tip).
@@ -1227,6 +1313,7 @@ function ForestOverview() {
         <span class="fo-project">{project()}</span>
         <Show when={spine().length}>
           <span class="fo-meta">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
+          <WarmingRibbon loading={health.isFetching} hasData={!!health.data} needsAttention={needsAttention()} />
           <div class="fo-views" role="group" aria-label="overview view">
             <button classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
             <button classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
