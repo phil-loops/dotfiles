@@ -191,25 +191,31 @@ def _upstream_state(branch, main):
             "diverged": diverged, "ahead": ahead, "behind": behind}
 
 
-def _node_health(branch):
+def _node_health(branch, pr=None):
     """Forest-STRUCTURAL health (vs. state()'s fork-staleness):
       drifted — the node's configured parent is NOT a git ancestor, so it sits off the parent's
                 tip and its parent...node diff balloons to ≈ main...node (the misleading 'looks
                 like the main diff' case).
-      merged  — the node's work already landed in origin/main (a ghost): rebase-classify exit 20,
-                compared against the REMOTE trunk so an upstream squash-merge is seen even before
-                local main is fast-forwarded. A stray 'Merge main' commit is caught (file-restricted).
+      merged  — the node's work already landed. AUTHORITATIVE from GitHub when the branch has a
+                PR (`pr.state == MERGED`); falls back to rebase-classify exit 20 (local patch-id
+                trial vs the REMOTE trunk) only for PR-less branches. GitHub is the source of
+                truth — a squash-merge is invisible to local git by sha, so the local check is
+                just the fallback.
+      pr      — the live GitHub PR {number,state,draft,url,review} or None.
     Read-only page-load signals; the fix for both is a restack (contracts ghosts, rebases drift)."""
     if not branch:
-        return {"branch": "", "drifted": False, "merged": False, "parent": ""}
+        return {"branch": "", "drifted": False, "merged": False, "parent": "", "pr": None}
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main
     drifted = parent != main and ctx.run(
         ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
-    merged = ctx.run(
-        [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, _trunk(main)]).returncode == 20
+    if pr is not None:
+        merged = pr.get("state") == "MERGED"
+    else:
+        merged = ctx.run(
+            [os.path.join(ctx.SCRIPTS, "rebase-classify"), branch, _trunk(main)]).returncode == 20
     return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged), "parent": parent,
-            **_upstream_state(branch, main)}
+            "pr": pr, **_upstream_state(branch, main)}
 
 
 def health_many(req, u):
@@ -217,8 +223,17 @@ def health_many(req, u):
     # overlays drifted/ghost badges + a "fix all" (restack) when anything's off.
     bs = [b for b in parse_qs(u.query).get("branch", []) if b]
     _freshen_trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
+    # Authoritative PR state from GitHub in ONE batched live call (see stack-forest --pr-state);
+    # GitHub is the source of truth for "merged?", rebase-classify is only the PR-less fallback.
+    pr_map = {}
+    prr = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--pr-state"])
+    if prr.returncode == 0:
+        try:
+            pr_map = json.loads(prr.stdout or "{}")
+        except ValueError:
+            pr_map = {}
     with ThreadPoolExecutor(max_workers=8) as ex:
-        out = dict(zip(bs, ex.map(_node_health, bs)))
+        out = dict(zip(bs, ex.map(lambda b: _node_health(b, pr_map.get(b)), bs)))
     req._send(200, json.dumps(out))
 
 

@@ -194,6 +194,55 @@ def landed(b):
     return bool(out) and all(ln[:1] == "-" for ln in out.splitlines())
 
 
+def _pr_rank(pr):
+    # Prefer a live PR over a historical one when a branch name has been reused.
+    return ({"OPEN": 3, "MERGED": 2, "CLOSED": 1}.get(pr["state"], 0), pr["number"] or 0)
+
+
+def fetch_pr_state():
+    """Authoritative per-branch PR state, read LIVE from GitHub — never cached.
+    One batched `gh pr list` → {headRefName: {number,state,draft,url,review}}.
+    GitHub is the source of truth for "merged?" (a squash-merge is invisible to
+    local git by sha, which is why `landed()` is only a fragile fallback). Returns
+    {} on any gh failure so the forest still renders. Checks rollup is omitted on
+    purpose: statusCheckRollup makes gh fetch per-PR check runs (~15s for 300 PRs
+    vs ~3s without) — fetch it lazily per open node instead."""
+    try:
+        r = subprocess.run(
+            ["gh", "pr", "list", "--state", "all", "--limit", "300", "--json",
+             "headRefName,number,state,isDraft,url,reviewDecision"],
+            capture_output=True, text=True, timeout=20,
+        )
+        prs = json.loads(r.stdout or "[]") if r.returncode == 0 else []
+    except Exception:
+        return {}
+    out = {}
+    for p in prs:
+        ref = p.get("headRefName")
+        if not ref:
+            continue
+        cur = {
+            "number": p.get("number"),
+            "state": p.get("state"),                    # OPEN | MERGED | CLOSED
+            "draft": bool(p.get("isDraft")),
+            "url": p.get("url"),
+            "review": p.get("reviewDecision") or None,  # APPROVED | CHANGES_REQUESTED | REVIEW_REQUIRED
+        }
+        if ref not in out or _pr_rank(cur) > _pr_rank(out[ref]):
+            out[ref] = cur
+    return out
+
+
+# ---- live PR state overlay -----------------------------------------------
+# {headRefName: {number,state,draft,url,review}} straight from GitHub, no git, no
+# cache. Kept OUT of the WAVE-1 tree so the graph paints instantly (git-only); the
+# browser fetches this separately and overlays authoritative merged/draft/review
+# badges when it resolves (~3s). GitHub is the source of truth for "merged?".
+if not node_mode and target == "--pr-state":
+    print(json.dumps(fetch_pr_state()))
+    sys.exit(0)
+
+
 # ---- project list (the picker) -------------------------------------------
 # names + branch counts + the mergeable seed branches — no git diffs, instant. The
 # browser shows these as buttons; clicking one opens ?branch=<name> (resolved below).
