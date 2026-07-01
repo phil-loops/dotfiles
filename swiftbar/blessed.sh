@@ -36,10 +36,16 @@ plist=$(git -C "$repo" config --get-regexp '^stack-project\..*\.branch$' 2>/dev/
   | sed -E 's/^stack-project\.(.*)\.branch .*/\1/' | sort -u)
 # drop archived projects (stack-project.<name>.archived=true) — kept registered,
 # just hidden here and in the chooser; `loops stack unarchive <name>` restores.
+# Read every archived flag in ONE git call — a `git config --bool` per project was O(N)
+# subprocess spawns and dominated the menu's open latency (refreshOnOpen re-runs this).
 if [[ -n "$plist" ]]; then
+  typeset -A archived
+  while IFS= read -r line; do
+    [[ "${line##* }" == "true" ]] || continue
+    name=${line%.archived *}; archived[${name#stack-project.}]=1
+  done < <(git -C "$repo" config --get-regexp '^stack-project\..*\.archived$' 2>/dev/null)
   plist=$(while IFS= read -r n; do
-    [[ -z "$n" ]] && continue
-    [[ "$(git -C "$repo" config --bool stack-project.${n}.archived 2>/dev/null)" == "true" ]] && continue
+    [[ -z "$n" || -n "${archived[$n]}" ]] && continue
     echo "$n"
   done <<< "$plist")
 fi
