@@ -1402,9 +1402,10 @@ function NodeDetail() {
   const isGhost = () => active() === GHOST;
   const nodeRef = () => (isGhost() ? `refs/stack/${project()}-integration` : active());
   const nodeBase = () => (isGhost() ? "main" : base() || undefined);
+  const nodeKey = () => ["node", repoKey(), nodeRef(), nodeBase() ?? ""];
 
   const node = createQuery(() => ({
-    queryKey: ["node", repoKey(), nodeRef(), nodeBase() ?? ""],
+    queryKey: nodeKey(),
     queryFn: () => provider.node(nodeRef(), nodeBase()),
     enabled: !!active(),
   }));
@@ -1414,6 +1415,23 @@ function NodeDetail() {
     enabled: !!active() && view() === "commits",
   }));
 
+  // flip one file's status in the cached node in place — only that row re-renders, every other
+  // diff card keeps its DOM (and the surface keeps its scroll). Blessing B·B·B down a branch
+  // stuttered because onSuccess re-fetched the whole node, replacing every FileDiff object and
+  // tearing down (then re-mounting) every card mid-scroll. The optimistic status matches what the
+  // server returns, so no node re-fetch is needed — only the spine count (model) is invalidated.
+  const patchFileStatus = (file: string, status: string) => {
+    const key = nodeKey();
+    const prev = qc.getQueryData<NodeData>(key);
+    if (prev) {
+      qc.setQueryData<NodeData>(key, {
+        ...prev,
+        files: prev.files.map((f) => (f.path === file ? { ...f, status } : f)),
+      });
+    }
+    return { key, prev };
+  };
+
   const bless = createMutation(() => ({
     mutationFn: (file: string) =>
       fetch(withRepo("/bless"), {
@@ -1421,10 +1439,9 @@ function NodeDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: active(), file }),
       }).then((r) => r.json()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["node"] });
-      qc.invalidateQueries({ queryKey: ["model"] });
-    },
+    onMutate: (file: string) => patchFileStatus(file, "clean"),
+    onError: (_e, _file, ctx) => { if (ctx?.prev) { qc.setQueryData(ctx.key, ctx.prev); } },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["model"] }); },
   }));
 
   const unbless = createMutation(() => ({
@@ -1434,10 +1451,9 @@ function NodeDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: active(), file, unbless: true }),
       }).then((r) => r.json()),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["node"] });
-      qc.invalidateQueries({ queryKey: ["model"] });
-    },
+    onMutate: (file: string) => patchFileStatus(file, "unblessed"),
+    onError: (_e, _file, ctx) => { if (ctx?.prev) { qc.setQueryData(ctx.key, ctx.prev); } },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["model"] }); },
   }));
 
   // promote/demote a branch's manual interest level — orders the forest on Home + badges the node.
@@ -1666,7 +1682,9 @@ function NodeDetail() {
     else if (e.key === "b") { e.preventDefault(); filterAutoOpenedPanel = false; setPanelOpen((v) => !v); } // show / hide the file panel
     // ⇧B blesses the focused file and advances (B·B·B down a branch, no mouse); ⇧U unblesses it in
     // place. Per-file only — there is deliberately no bless-all key.
-    else if (e.key === "B" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); fileCycle.next(); }
+    // advance in the next frame — after the just-blessed card collapses — so the scroll lands the
+    // next card at the toolbar line instead of over-shooting past the freed-up space.
+    else if (e.key === "B" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); requestAnimationFrame(() => fileCycle.next()); }
     else if (e.key === "U" && activeFile()) { e.preventDefault(); unbless.mutate(activeFile()); }
     else if (e.key === "?") { e.preventDefault(); setShowHelp((v) => !v); }
     else if (e.key === "m") {
