@@ -132,6 +132,57 @@ def get_many(req, u):
 _TRUNK_FETCH_AT = 0.0
 _TRUNK_FETCH_LOCK = threading.Lock()
 
+# `stack-forest --pr-state` is a live `gh pr list --state all --limit 300` — ~5s over a few hundred
+# PRs, and health_many runs it on EVERY forest open (its cost grows with total PR count, not the
+# forest's node count). PR state drifts on the order of minutes, so cache it stale-while-revalidate
+# like stack-prs does: a fresh entry serves with no gh call, a stale one serves immediately and
+# refreshes in the background, only a cold cache blocks once. Matches the 45s trunk-fetch throttle.
+_PR_STATE_TTL = 120
+_PR_STATE = {"at": 0.0, "data": None}
+_PR_STATE_LOCK = threading.Lock()
+_PR_STATE_REFRESHING = False
+
+
+def _fetch_pr_state():
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--pr-state"])
+    if r.returncode != 0:
+        return None
+    try:
+        return json.loads(r.stdout or "{}")
+    except ValueError:
+        return None
+
+
+def _refresh_pr_state():
+    global _PR_STATE_REFRESHING
+    try:
+        fresh = _fetch_pr_state()
+        if fresh is not None:
+            with _PR_STATE_LOCK:
+                _PR_STATE["data"], _PR_STATE["at"] = fresh, time.time()
+    finally:
+        _PR_STATE_REFRESHING = False
+
+
+def _pr_state_map():
+    global _PR_STATE_REFRESHING
+    now = time.time()
+    with _PR_STATE_LOCK:
+        data = _PR_STATE["data"]
+        if data is not None:
+            if now - _PR_STATE["at"] >= _PR_STATE_TTL and not _PR_STATE_REFRESHING:
+                _PR_STATE_REFRESHING = True
+                threading.Thread(target=_refresh_pr_state, daemon=True).start()
+            return data
+    # cold cache: block once to populate (fetch outside the lock so other endpoints don't wait)
+    fresh = _fetch_pr_state()
+    with _PR_STATE_LOCK:
+        if fresh is not None:
+            _PR_STATE["data"], _PR_STATE["at"] = fresh, time.time()
+        elif _PR_STATE["data"] is None:
+            _PR_STATE["data"] = {}  # cache empty on gh failure so we don't re-block every call
+        return _PR_STATE["data"]
+
 
 def _trunk(main):
     # merged-detection must compare against the REMOTE trunk: a squash-merge lands on
@@ -223,15 +274,10 @@ def health_many(req, u):
     # overlays drifted/ghost badges + a "fix all" (restack) when anything's off.
     bs = [b for b in parse_qs(u.query).get("branch", []) if b]
     _freshen_trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
-    # Authoritative PR state from GitHub in ONE batched live call (see stack-forest --pr-state);
-    # GitHub is the source of truth for "merged?", rebase-classify is only the PR-less fallback.
-    pr_map = {}
-    prr = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--pr-state"])
-    if prr.returncode == 0:
-        try:
-            pr_map = json.loads(prr.stdout or "{}")
-        except ValueError:
-            pr_map = {}
+    # Authoritative PR state from GitHub, served from a stale-while-revalidate cache (see
+    # _pr_state_map) so a forest open doesn't block ~5s on gh every time; GitHub is the source of
+    # truth for "merged?", rebase-classify is only the PR-less fallback.
+    pr_map = _pr_state_map()
     with ThreadPoolExecutor(max_workers=8) as ex:
         out = dict(zip(bs, ex.map(lambda b: _node_health(b, pr_map.get(b)), bs)))
     req._send(200, json.dumps(out))
