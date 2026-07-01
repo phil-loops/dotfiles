@@ -12,6 +12,8 @@
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
   --gold-deep: #6e521d;
   --gold-wash: rgba(230, 182, 78, 0.08);
+  --ember: #d2732a;       /* kiln heat — warming, deliberately not the blessed gold */
+  --ember-wash: rgba(210, 115, 42, 0.12);
   --patina: #7fa093;      /* stale — a blessing that tarnished since the branch moved */
   --rule: #2c2517;
   --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold */
