@@ -92,6 +92,9 @@ export function NodeActions(props: {
   const { armed, trigger } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
   const [done, setDone] = createSignal<string | null>(null);
+  // raises the result line to the ember alert style — a rebase conflict parks a worktree and
+  // blocks restacks, so it can't read as a quiet ✓ success like every other outcome.
+  const [doneAlert, setDoneAlert] = createSignal(false);
   // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
   const [contractKids, setContractKids] = createSignal<string[] | null>(null);
   // the ⋯ menu open/closed
@@ -274,7 +277,8 @@ export function NodeActions(props: {
         setContractKids(kids);
         setDone(`● already merged into origin/main — drop it & rewire ${kids.length} child${kids.length === 1 ? "" : "ren"} onto main?`);
       } else if (r.conflict) {
-        setDone("✓ conflict — Claude is resolving it in a worktree");
+        setDoneAlert(true);
+        setDone("⚠ rebase conflict — Claude is resolving it in a worktree; it holds a worktree and blocks restacks until cleared");
       } else {
         setDone("✓ rebasing on main — Claude is on it in a worktree");
       }
@@ -338,6 +342,7 @@ export function NodeActions(props: {
   const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
+    setDoneAlert(false);
     fn();
   };
 
@@ -497,7 +502,7 @@ export function NodeActions(props: {
       </Show>
 
       <Show when={done()}>
-        <span class="nh-done" title={done() ?? ""}>{done()}</span>
+        <span class="nh-done" classList={{ "nh-done-alert": doneAlert() }} title={done() ?? ""}>{done()}</span>
       </Show>
     </div>
   );
