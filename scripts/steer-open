@@ -33,8 +33,9 @@ wt=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" \
 # pick the file to steer: explicit arg → top-changed .ts/.tsx → first changed file
 relpath="$want"
 if [[ -z "$relpath" ]]; then
-  relpath=$(git diff --name-only "${parent}...${branch}" -- '*.ts' '*.tsx' 2>/dev/null | head -1)
-  [[ -n "$relpath" ]] || relpath=$(git diff --name-only "${parent}...${branch}" 2>/dev/null | head -1)
+  # || true: head -1 closes early, so git diff dies on SIGPIPE (141) — pipefail + set -e would abort
+  relpath=$(git diff --name-only "${parent}...${branch}" -- '*.ts' '*.tsx' 2>/dev/null | head -1) || true
+  [[ -n "$relpath" ]] || relpath=$(git diff --name-only "${parent}...${branch}" 2>/dev/null | head -1) || true
 fi
 
 # session/turn sidecars live beside each other in the shared git dir (survives worktrees).

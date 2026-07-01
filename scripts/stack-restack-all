@@ -53,7 +53,7 @@ worktree_of() {  # the worktree a branch is checked out in (mirrors stack-restac
 
 abort_park() {  # $1 = project whose just-finished run parked: undo its rebase + clear state
   local cur wt
-  [[ -f "$STATE" ]] && cur=$(sed -n 's/^CURRENT=//p' "$STATE" | head -1)
+  [[ -f "$STATE" ]] && cur=$(sed -n 's/^CURRENT=//p' "$STATE" | head -1) || true
   if [[ -n "${cur:-}" ]]; then
     wt=$(worktree_of "$cur")
     [[ -n "$wt" ]] && git -C "$wt" rebase --abort 2>/dev/null
@@ -71,7 +71,7 @@ on_signal() {
   echo "" >&2
   echo "  ✋ restack-all interrupted — aborting the in-progress rebase and stopping" >&2
   local cur wt
-  [[ -f "$STATE" ]] && cur=$(sed -n 's/^CURRENT=//p' "$STATE" | head -1)
+  [[ -f "$STATE" ]] && cur=$(sed -n 's/^CURRENT=//p' "$STATE" | head -1) || true
   if [[ -n "${cur:-}" ]]; then
     wt=$(worktree_of "$cur")
     [[ -n "$wt" ]] && git -C "$wt" rebase --abort 2>/dev/null
