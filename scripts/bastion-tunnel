@@ -107,8 +107,7 @@ main() {
   fi
 
   local row endpoint port
-  # || true: awk exits at the match, so printf dies on SIGPIPE (141) — pipefail + set -e would abort
-  row=$(printf "%s\n" "$clusters" | awk -F"\t" -v id="$identifier" '$1 == id {print; exit}') || true
+  row=$(printf "%s\n" "$clusters" | awk -F"\t" -v id="$identifier" '$1 == id {print; exit}')
   endpoint=$(echo "$row" | awk -F"\t" -v ec="$endpoint_col" '{print $ec}')
   port=$(echo "$row" | awk -F"\t" '{print $4}')
 
