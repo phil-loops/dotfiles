@@ -112,7 +112,8 @@ while IFS= read -r b; do
     0)  rows+=("$b	$parent	$behind	would-restack	auto-restack (silent)"); restack=$((restack+1)) ;;
     20) rows+=("$b	$parent	$behind	would-contract	drop & rewire (already merged)"); contract=$((contract+1)) ;;
     30) # name the culprit: the newest merged PR whose files overlap this branch's (no gh call)
-        top="$("$here/rebase-culprit" "$b" "$trunk" 2>/dev/null | head -1)"
+        # || true: head -1 closes early, so rebase-culprit dies on SIGPIPE (141) — pipefail + set -e would abort
+        top="$("$here/rebase-culprit" "$b" "$trunk" 2>/dev/null | head -1)" || true
         cpr="${top%%$'\t'*}"; ctitle=""; [[ "$top" == *$'\t'* ]] && ctitle="${top#*$'\t'}"
         wd="⚠ needs you — real collision"; [[ -n "$cpr" ]] && wd="⚠ conflicts with #$cpr"
         rows+=("$b	$parent	$behind	will-conflict	$wd	$cpr	$ctitle"); conflict=$((conflict+1)) ;;

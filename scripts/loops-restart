@@ -54,7 +54,8 @@ say() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 cwd_of()  { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | grep '^n' | sed 's/^n//'; }
 pgid_of() { ps -o pgid= -p "$1" 2>/dev/null | tr -d ' '; }
 
-db_url_of() { grep -E '^DATABASE_URL=' "$1/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'; }
+# || true: head -1 closes early, so grep dies on SIGPIPE (141) — pipefail + set -e would abort the caller
+db_url_of() { grep -E '^DATABASE_URL=' "$1/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"' || true; }
 
 # keep mode (`task dev:watch`) never migrates/seeds — so after a relocating restart the
 # compose Postgres can come up fresh+empty and the app 500s on `relation "User" does not

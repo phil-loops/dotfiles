@@ -183,9 +183,10 @@ if [[ "${1:-}" == "--await" ]]; then
 
   # 2) wait up to ~5 min for checks to attach (so the watcher won't false-fail on "no checks")
   for i in {1..30}; do
+    # || true: head -1 closes early, so gh/jq die on SIGPIPE (141) — pipefail + set -e would abort
     roll=$(gh pr list --repo "$arepo" --head "$branch" --state open \
              --json number,title,headRefName,statusCheckRollup --jq "$ROLL_JQ" 2>/dev/null \
-           | head -1 | cut -f2)
+           | head -1 | cut -f2) || true
     [[ -n "$roll" && "$roll" != *"no checks"* ]] && break
     sleep 10
   done

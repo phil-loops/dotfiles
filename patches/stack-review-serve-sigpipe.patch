@@ -1,0 +1,14 @@
+diff --git a/scripts/stack-review-serve b/scripts/stack-review-serve
+index 4a74366..fdac351 100755
+--- a/scripts/stack-review-serve
++++ b/scripts/stack-review-serve
+@@ -54,7 +54,8 @@ if [[ -n "$sig" ]]; then
+ 
+   # Foreign squatter (or a pre-/sig-repo server that can't identify itself).
+   live_pid=$(print -r -- "$sig" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("pid",""))' 2>/dev/null)
+-  [[ -z "$live_pid" ]] && live_pid=$(lsof -ti "TCP:${STABLE_PORT}" -sTCP:LISTEN 2>/dev/null | head -1)
++  # || true: head -1 closes early, so lsof dies on SIGPIPE (141) — pipefail + set -e would abort
++  [[ -z "$live_pid" ]] && live_pid=$(lsof -ti "TCP:${STABLE_PORT}" -sTCP:LISTEN 2>/dev/null | head -1) || true
+   other=$(basename "$(dirname "${live_repo:-?}")")
+   if [[ -n "$live_pid" ]]; then
+     kill "$live_pid" 2>/dev/null

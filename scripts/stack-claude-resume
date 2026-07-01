@@ -35,7 +35,8 @@ focus_terminal(){   # raise the GUI terminal hosting tmux so the resumed thread 
     ghostty|Ghostty) app=Ghostty ;;
     vscode|cursor)   return 0 ;;   # integrated terminal — don't yank focus away
     # inside tmux TERM_PROGRAM=tmux (useless) — fall back to whichever known GUI terminal is running
-    *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1)
+    # || true: head -1 closes early, so grep/ps die on SIGPIPE (141) — pipefail + set -e would abort
+    *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1) || true
        [[ -n "$app" ]] || app=Terminal ;;
   esac; fi
   [[ -n "$app" ]] || return 0
@@ -53,7 +54,8 @@ surface(){   # move the active client onto <session:window> (and its active pane
   # A client parked on another session won't follow select-window, so switch it explicitly — the
   # pop-out lands in '$SESSION' but you may be attached elsewhere. Switch only the most-recently
   # active client (not every client) so a secondary client parked elsewhere on purpose stays put.
-  client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+  # || true: head -1 closes early, so sort dies on SIGPIPE (141) — pipefail + set -e would abort
+  client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-) || true
   [[ -n "$client" ]] && tmux switch-client -c "$client" -t "$wt" 2>/dev/null || true
   focus_terminal
 }
