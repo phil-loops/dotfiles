@@ -2,6 +2,7 @@ import {
   createSignal,
   createMemo,
   createEffect,
+  on,
   Show,
   Switch,
   Match,
@@ -41,7 +42,6 @@ import type {
   ForestModel,
   SpineNode,
   FileDiff,
-  NodeData,
   PR,
   Project,
   Purpose,
@@ -1404,6 +1404,24 @@ function NodeDetail() {
   const nodeBase = () => (isGhost() ? "main" : base() || undefined);
   const nodeKey = () => ["node", repoKey(), nodeRef(), nodeBase() ?? ""];
 
+  // ⇧B/⇧U flip a file's blessed state through this local override, NOT the query cache. Writing
+  // status into the cache replaces the FileDiff object, so <For> tears the row down and re-mounts
+  // it — on unbless that re-renders the whole diff from scratch, which read as a refetch flash.
+  // path → blessed?; keeps the object identity stable so the row just expands/collapses in place.
+  // Cleared when the node changes (the next load carries fresh server truth). isBlessed reconciles.
+  const [blessOverride, setBlessOverride] = createSignal<Record<string, boolean>>({});
+  const blessedOf = (f: FileDiff): boolean => {
+    const o = blessOverride()[f.path];
+    return o === undefined ? isBlessed(f) : o;
+  };
+  const setOverride = (file: string, val: boolean | undefined) =>
+    setBlessOverride((m) => {
+      const n = { ...m };
+      if (val === undefined) { delete n[file]; } else { n[file] = val; }
+      return n;
+    });
+  createEffect(on(() => nodeKey().join("|"), () => setBlessOverride({}), { defer: true }));
+
   const node = createQuery(() => ({
     queryKey: nodeKey(),
     queryFn: () => provider.node(nodeRef(), nodeBase()),
@@ -1415,23 +1433,8 @@ function NodeDetail() {
     enabled: !!active() && view() === "commits",
   }));
 
-  // flip one file's status in the cached node in place — only that row re-renders, every other
-  // diff card keeps its DOM (and the surface keeps its scroll). Blessing B·B·B down a branch
-  // stuttered because onSuccess re-fetched the whole node, replacing every FileDiff object and
-  // tearing down (then re-mounting) every card mid-scroll. The optimistic status matches what the
-  // server returns, so no node re-fetch is needed — only the spine count (model) is invalidated.
-  const patchFileStatus = (file: string, status: string) => {
-    const key = nodeKey();
-    const prev = qc.getQueryData<NodeData>(key);
-    if (prev) {
-      qc.setQueryData<NodeData>(key, {
-        ...prev,
-        files: prev.files.map((f) => (f.path === file ? { ...f, status } : f)),
-      });
-    }
-    return { key, prev };
-  };
-
+  // Optimistic in the override, no cache write and no refetch on the keystroke — the row flips in
+  // place. onError restores the prior override so a failed POST snaps back.
   const bless = createMutation(() => ({
     mutationFn: (file: string) =>
       fetch(withRepo("/bless"), {
@@ -1439,9 +1442,8 @@ function NodeDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: active(), file }),
       }).then((r) => r.json()),
-    onMutate: (file: string) => patchFileStatus(file, "clean"),
-    onError: (_e, _file, ctx) => { if (ctx?.prev) { qc.setQueryData(ctx.key, ctx.prev); } },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["model"] }); },
+    onMutate: (file: string) => { const prev = blessOverride()[file]; setOverride(file, true); return { file, prev }; },
+    onError: (_e, _file, ctx) => { if (ctx) { setOverride(ctx.file, ctx.prev); } },
   }));
 
   const unbless = createMutation(() => ({
@@ -1451,9 +1453,8 @@ function NodeDetail() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: active(), file, unbless: true }),
       }).then((r) => r.json()),
-    onMutate: (file: string) => patchFileStatus(file, "unblessed"),
-    onError: (_e, _file, ctx) => { if (ctx?.prev) { qc.setQueryData(ctx.key, ctx.prev); } },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["model"] }); },
+    onMutate: (file: string) => { const prev = blessOverride()[file]; setOverride(file, false); return { file, prev }; },
+    onError: (_e, _file, ctx) => { if (ctx) { setOverride(ctx.file, ctx.prev); } },
   }));
 
   // promote/demote a branch's manual interest level — orders the forest on Home + badges the node.
@@ -1764,7 +1765,7 @@ function NodeDetail() {
                 <div class="spine-meta">
                   {isGhost()
                     ? `${data().files.length} files · ✦ all changes`
-                    : `${data().files.filter(isBlessed).length}/${data().files.length} files blessed`}
+                    : `${data().files.filter(blessedOf).length}/${data().files.length} files blessed`}
                 </div>
                 <Show
                   when={data().files.length}
@@ -1791,11 +1792,11 @@ function NodeDetail() {
                       {(f) => (
                         <li
                           class="file-item"
-                          classList={{ blessed: isBlessed(f), active: activeFile() === f.path }}
+                          classList={{ blessed: blessedOf(f), active: activeFile() === f.path }}
                           onClick={() => scrollToFile(f.path)}
                           title={f.path}
                         >
-                          <span class={`dot ${isBlessed(f) ? "blessed" : "unblessed"}`} />
+                          <span class={`dot ${blessedOf(f) ? "blessed" : "unblessed"}`} />
                           <span class="file-item-name">{fileSeg(f.path)}</span>
                           <span class="file-item-lines">
                             <span class="add">+{f.add ?? 0}</span>
@@ -1992,7 +1993,7 @@ function NodeDetail() {
               <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
                 <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
                   <For each={data().files.filter(matchFilter)}>
-                    {(f) => <FileEntry file={f} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
+                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
                   </For>
                 </Show>
               </Show>
@@ -2036,6 +2037,7 @@ function NodeDetail() {
 
 function FileEntry(props: {
   file: FileDiff;
+  blessed?: () => boolean;
   bless: { mutate: (file: string) => void };
   branch: string;
   readOnly?: boolean;
@@ -2043,15 +2045,21 @@ function FileEntry(props: {
 }) {
   const [foil, setFoil] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
-  const blessed = () => isBlessed(props.file);
+  // memo (not a bare accessor) so it only notifies on a real value change — a ⇧B on some *other*
+  // row bumps the shared override signal but leaves this one's value alone, so the follow effect
+  // below must not fire (it would clobber a manual expand/collapse).
+  const blessed = createMemo(() => (props.blessed ? props.blessed() : isBlessed(props.file)));
   // a blessed file starts collapsed — it's reviewed with nothing new since (a changed-since-
   // blessed file reads as 'stale', not blessed), so it shouldn't cost screen space. Stale and
   // unblessed files start open.
   const [collapsed, setCollapsed] = createSignal(blessed());
+  // follow bless state in place: ⇧B collapses this card, ⇧U expands it — no row teardown, so the
+  // diff isn't re-rendered from scratch (defer skips the initial value, keeping manual toggles).
+  createEffect(on(blessed, (b) => setCollapsed(b), { defer: true }));
   const chatWorking = () => threadWorking(props.branch, props.file.path);
   const chatUnseen = () => threadUnseenDone(props.branch, props.file.path);
   const doBless = () => {
-    setFoil(true); // play the foil on the click — feels instant; the steady gold lands on refetch
+    setFoil(true); // play the foil on the click; the steady gold lands as the override flips
     props.bless.mutate(props.file.path);
     setTimeout(() => setFoil(false), 750);
   };
