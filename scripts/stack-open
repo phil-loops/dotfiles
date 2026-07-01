@@ -74,7 +74,8 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without 
   local dir="$1" head marker src
   # source .gen from the MAIN checkout (first worktree), not wherever stack-open runs —
   # a sibling worktree has no .gen of its own (it's gitignored, only built in main).
-  src=$(git -C "$dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+  # `|| true`: awk exits on the first worktree, so `git worktree list` dies on SIGPIPE (141) — pipefail+set -e would abort the open
+  src=$(git -C "$dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}') || true
   [[ -n "$src" && -d "$src/.gen" ]] || return 0                # nothing to seed from
   [[ -d "$dir/.gen" ]] || cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
     || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || return 0   # COW clone, fall back to plain copy
@@ -129,7 +130,8 @@ focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actua
     ghostty|Ghostty) app=Ghostty ;;
     vscode|cursor)   return 0 ;;   # integrated terminal — don't yank focus away
     # inside tmux TERM_PROGRAM=tmux (useless) — fall back to whichever known GUI terminal is running
-    *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1)
+    # `|| true`: head -1 closes early, so ps/grep die on SIGPIPE (141) — pipefail+set -e would abort the whole open
+    *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1) || true
        [[ -n "$app" ]] || app=Terminal ;;
   esac; fi
   [[ -n "$app" ]] && open -a "$app" >/dev/null 2>&1 || true
