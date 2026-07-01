@@ -1618,8 +1618,9 @@ function NodeDetail() {
   // rows to a file via each .entry's existing data-path (see useDiffSelection).
   const { selection: claudeSel, clear: clearClaudeSel } = useDiffSelection();
 
-  // hover a diff line + press o (or click the gutter #) → open that exact line in the warm
-  // review-nvim. Event-delegated off the surface so it works on diff2html's raw HTML.
+  // hover a diff line + press o → open that exact line in the warm review-nvim. Hover-armed and
+  // event-delegated off the surface; there is deliberately no click-to-open — a mouse click on a
+  // line collided with the sweep-to-chat text selection, so opening is keyboard-only.
   const [hover, setHover] = createSignal<{ path: string; line: number } | null>(null);
   const [flash, setFlash] = createSignal("");
   let flashT: ReturnType<typeof setTimeout>;
@@ -1795,14 +1796,6 @@ function NodeDetail() {
           setHover((prev) => (prev?.path === h?.path && prev?.line === h?.line ? prev : h));
         }}
         onMouseLeave={() => setHover(null)}
-        onClick={(e) => {
-          // A live text selection means the user swept to chat (the AskClaude chip), not to
-          // open — don't hijack that into an nvim jump. A bare click (collapsed) still opens.
-          const sel = window.getSelection();
-          if (sel && !sel.isCollapsed && sel.toString().trim()) return;
-          const h = lineAt(e);
-          if (h) openInNvim(h.path, h.line);
-        }}
       >
         <header class="node-head">
           {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
