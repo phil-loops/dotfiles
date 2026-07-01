@@ -430,7 +430,7 @@ export function ForestMap(props: {
     >
       <style>{CSS}</style>
       <Show when={props.docked}>
-        <button class="fm-dock-close" title="close map (m)" onClick={() => props.onClose()}>
+        <button class="fm-dock-close" title="close map" onClick={() => props.onClose()}>
           ×
         </button>
       </Show>
