@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""comment-drift [<git-range>] — measure (don't enforce) heavy-comment drift.
+
+Scans a git diff for ADDED multi-line comment blocks in code files — the failure
+mode where explanatory prose accretes past what names/types can carry. Reports
+per-file blocks and appends one JSONL record per run to ~/.claude/comment-drift.jsonl,
+so over many runs we can SEE whether this rule is worth enforcing, instead of
+reflexively bolting on a hook per bruise. This is the ruler, not the guardrail.
+
+  comment-drift                 # HEAD vs merge-base with origin/main
+  comment-drift main...HEAD     # explicit range
+  comment-drift <sha> <sha>     # two-dot between refs
+"""
+import json, os, re, subprocess, sys
+from datetime import datetime, timezone
+
+# line-comment prefixes + block-comment continuation, keyed by extension family.
+LINE = {"//", "/*", "*", "#", "--"}
+CODE_EXT = {".ts", ".tsx", ".js", ".jsx", ".py", ".go", ".rs", ".java", ".sh",
+            ".sql", ".rb", ".lua", ".c", ".h", ".cpp", ".css", ".scss"}
+
+
+def is_comment(line: str) -> bool:
+    s = line.strip()
+    return any(s.startswith(p) for p in LINE)
+
+
+def run(args):
+    return subprocess.run(args, capture_output=True, text=True).stdout
+
+
+def main():
+    rng = sys.argv[1:] or None
+    if not rng:
+        base = run(["git", "merge-base", "HEAD", "origin/main"]).strip() or "HEAD~1"
+        rng = [f"{base}...HEAD"]
+    diff = run(["git", "diff", "--no-color", *rng])
+
+    blocks = {}          # path -> list of block sizes (>=2 lines)
+    comment_lines = {}   # path -> total added comment lines
+    path, run_len = None, 0
+
+    def flush():
+        nonlocal run_len
+        if path and run_len >= 2:
+            blocks.setdefault(path, []).append(run_len)
+        run_len = 0
+
+    for line in diff.splitlines():
+        if line.startswith("+++ b/"):
+            flush(); path = line[6:]; continue
+        if line.startswith("@@"):
+            flush(); continue
+        if not line.startswith("+") or line.startswith("+++"):
+            flush(); continue
+        added = line[1:]
+        _, ext = os.path.splitext(path or "")
+        if ext in CODE_EXT and is_comment(added):
+            run_len += 1
+            comment_lines[path] = comment_lines.get(path, 0) + 1
+        else:
+            flush()
+    flush()
+
+    total_blocks = sum(len(v) for v in blocks.values())
+    total_lines = sum(comment_lines.values())
+    print(f"range: {' '.join(rng)}")
+    if not blocks:
+        print("no multi-line comment blocks added — clean")
+    else:
+        for p in sorted(blocks):
+            sizes = ", ".join(str(s) for s in sorted(blocks[p], reverse=True))
+            print(f"  {p}: {len(blocks[p])} block(s) [{sizes} lines]")
+        print(f"total: {total_blocks} multi-line block(s), {total_lines} comment lines")
+
+    log = os.path.expanduser("~/.claude/comment-drift.jsonl")
+    rec = {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "cwd": os.path.basename(os.getcwd()),
+        "range": " ".join(rng),
+        "blocks": total_blocks,
+        "comment_lines": total_lines,
+        "files": {p: len(v) for p, v in blocks.items()},
+    }
+    try:
+        with open(log, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    main()
