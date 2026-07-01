@@ -739,8 +739,8 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .gnode.stale .gdot { fill: none; stroke: var(--patina); }
 .gnode.unblessed .gdot { fill: none; stroke: var(--ink-faint); }
 
-/* ── hover a diff line + o → open it in the warm nvim ─────────────────── */
-.d2h-code-side-linenumber, .d2h-code-linenumber { cursor: pointer; }
+/* ── hover a diff line to arm it, then press o to open it in the warm nvim (no click-to-open,
+   so mouse drags stay free for sweep-to-chat selection) ──────────────── */
 .d2h-code-side-linenumber:hover, .d2h-code-linenumber:hover { color: var(--ink); background: var(--vellum-edge); }
 .kbd-hint { margin-left: auto; color: var(--ink-faint); font-size: 10px; letter-spacing: 0.04em; }
 .kbd-hint b { color: var(--ink-dim); font-weight: 600; }
