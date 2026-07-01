@@ -207,15 +207,20 @@ def fetch_pr_state():
     {} on any gh failure so the forest still renders. Checks rollup is omitted on
     purpose: statusCheckRollup makes gh fetch per-PR check runs (~15s for 300 PRs
     vs ~3s without) — fetch it lazily per open node instead."""
+    limit = 500  # gh returns most-recent first, so the cap only drops OLDEST (inactive) PRs
     try:
         r = subprocess.run(
-            ["gh", "pr", "list", "--state", "all", "--limit", "300", "--json",
+            ["gh", "pr", "list", "--state", "all", "--limit", str(limit), "--json",
              "headRefName,number,state,isDraft,url,reviewDecision"],
-            capture_output=True, text=True, timeout=20,
+            capture_output=True, text=True, timeout=30,
         )
         prs = json.loads(r.stdout or "[]") if r.returncode == 0 else []
     except Exception:
         return {}
+    if len(prs) >= limit:
+        print(f"stack-forest: pr-state hit the {limit}-PR cap - the oldest PRs beyond it lose "
+              "merged/draft badges and fall back to a slower local check; bump `limit`.",
+              file=sys.stderr)
     out = {}
     for p in prs:
         ref = p.get("headRefName")
