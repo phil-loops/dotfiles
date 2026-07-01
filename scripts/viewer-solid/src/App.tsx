@@ -1709,6 +1709,10 @@ function NodeDetail() {
         }}
         onMouseLeave={() => setHover(null)}
         onClick={(e) => {
+          // A live text selection means the user swept to chat (the AskClaude chip), not to
+          // open — don't hijack that into an nvim jump. A bare click (collapsed) still opens.
+          const sel = window.getSelection();
+          if (sel && !sel.isCollapsed && sel.toString().trim()) return;
           const h = lineAt(e);
           if (h) openInNvim(h.path, h.line);
         }}
