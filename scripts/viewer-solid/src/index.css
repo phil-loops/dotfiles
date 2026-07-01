@@ -215,6 +215,15 @@ body {
   font-size: 12px; color: var(--patina); opacity: 0.9;
   max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* a rebase conflict isn't a quiet ✓ — it parks a worktree and blocks restacks. Raise it to the
+   ember alert language (matching .nh-blocked / .amb-conflict) and drop the 22ch truncation so the
+   consequence is legible at a glance. */
+.nh-done-alert {
+  color: var(--del); opacity: 1; font-weight: 600;
+  max-width: none; white-space: normal; overflow: visible;
+  border: 1px solid var(--del); border-radius: 5px;
+  padding: 2px 7px; background: var(--del-bg);
+}
 /* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
 .icon-btn {
   font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);
