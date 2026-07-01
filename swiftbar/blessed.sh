@@ -15,7 +15,9 @@
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 self="$0"
 repo="$HOME/coding/loops"
-port="${STACK_REVIEW_PORT:-62333}"
+# Resolve the repo's stable port via the same source of truth stack-review-serve uses, so
+# the liveness check pings where the server actually binds (per-repo, not the legacy :62333).
+port="$("$HOME/.dotfiles/scripts/stack-review-port" "$repo" 2>/dev/null || echo 62333)"
 base="http://127.0.0.1:${port}"
 
 # --- click action: open <project> (no arg → the project picker) ----------------------
