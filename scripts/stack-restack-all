@@ -83,10 +83,21 @@ on_signal() {
 }
 trap 'on_signal' INT TERM
 
+# Split leading --flags (forwarded to each stack-restack, e.g. --no-claude so the
+# ambient daemon parks conflicts instead of spawning AI) from the project names.
+typeset -a rflags projects
+rflags=(); projects=()
+for a in "$@"; do
+  case "$a" in
+    --*) rflags+=("$a") ;;
+    *)   projects+=("$a") ;;
+  esac
+done
+
 typeset -a problems
 problems=()
-for p in "$@"; do
-  if "$SCRIPTS/stack-restack" "$p"; then
+for p in "${projects[@]}"; do
+  if "$SCRIPTS/stack-restack" "$p" "${rflags[@]}"; then
     echo "✓ $p restacked"
   else
     echo "⚠ $p parked on a conflict — aborting to continue with the rest"
@@ -99,7 +110,7 @@ if (( ${#problems} > 0 )); then
   # Re-run the first problem so it re-parks and its branch surfaces the contextual
   # button. Leaves that worktree mid-rebase on purpose — do NOT detach over a live park.
   echo "↩ re-surfacing ${problems[1]} for review (${#problems} project(s) need attention)"
-  "$SCRIPTS/stack-restack" "${problems[1]}" || true
+  "$SCRIPTS/stack-restack" "${problems[1]}" "${rflags[@]}" || true
 else
   git -C "$PWD" checkout --detach >/dev/null 2>&1   # release the last branch held here
 fi
