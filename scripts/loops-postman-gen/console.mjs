@@ -188,57 +188,132 @@ const page = ({ endpoints, base }) => `<!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Loops API Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root { color-scheme: light dark; --bg:#0f1115; --panel:#171a21; --line:#272b35; --fg:#e6e8ec; --muted:#8b93a3; --accent:#a78bfa; --get:#34d399; --post:#60a5fa; --put:#fbbf24; --del:#f87171; }
+:root {
+  color-scheme: dark;
+  --ink:#151320; --panel:#1e1a2c; --well:#100e18; --edge:#302a45;
+  --fg:#eae7f4; --muted:#8f88a8;
+  --signal:#b79bff; --signal-dim:#7d6bb0; --patch:#ffc76b;
+  --get:#5fd0a6; --post:#79a6ff; --put:#f4c05b; --del:#f47c8c;
+  --mono: ui-monospace,SFMono-Regular,Menlo,monospace;
+  --ui: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
 * { box-sizing: border-box; }
-body { margin:0; font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; background:var(--bg); color:var(--fg); display:grid; grid-template-columns:300px 1fr 320px; height:100vh; }
-.col { overflow:auto; padding:12px; }
-#list { border-right:1px solid var(--line); }
-#store { border-left:1px solid var(--line); background:var(--panel); }
-h2 { font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--muted); margin:16px 0 6px; }
+body { margin:0; font:13px/1.55 var(--mono); background:var(--ink); color:var(--fg);
+  display:grid; grid-template-columns:280px 1fr 320px; grid-template-rows:auto 1fr; height:100vh; }
+
+.top { grid-column:1/-1; display:flex; align-items:center; gap:18px; padding:11px 16px;
+  border-bottom:1px solid var(--edge); background:var(--panel); }
+.brand { display:flex; align-items:center; gap:9px; font:600 14px/1 var(--ui); letter-spacing:.16em;
+  text-transform:uppercase; white-space:nowrap; }
+.brand .loop { color:var(--signal); font-size:17px; }
+.brand small { color:var(--muted); font-weight:500; letter-spacing:.16em; }
+.baseline { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+.baseline label { margin:0; }
+.live { display:flex; align-items:center; gap:7px; font:500 10px/1 var(--ui); letter-spacing:.14em;
+  text-transform:uppercase; color:var(--muted); white-space:nowrap; }
+.live .dot { width:7px; height:7px; border-radius:50%; background:var(--get); box-shadow:0 0 9px var(--get); }
+
+.col { overflow:auto; padding:14px; }
+#list { border-right:1px solid var(--edge); }
+#store { border-left:1px solid var(--edge); background:var(--panel); }
+#filter { margin-bottom:12px; }
+
+h2 { font:600 10px/1 var(--ui); text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin:20px 0 9px; }
 h2:first-child { margin-top:0; }
-.ep { padding:5px 7px; border-radius:6px; cursor:pointer; display:flex; gap:7px; align-items:baseline; }
-.ep:hover { background:var(--panel); }
-.ep.active { background:#222634; }
-.m { font-weight:700; font-size:10px; width:42px; flex:0 0 42px; }
+
+.ep { padding:5px 8px; border-radius:7px; cursor:pointer; display:flex; gap:10px; align-items:baseline;
+  border:1px solid transparent; }
+.ep:hover { background:var(--well); }
+.ep.active { background:var(--well); border-color:var(--signal-dim); }
+.m { font:700 10px/1.4 var(--mono); letter-spacing:.03em; flex:0 0 46px; text-align:right; }
 .GET{color:var(--get);} .POST{color:var(--post);} .PUT{color:var(--put);} .PATCH{color:var(--put);} .DELETE{color:var(--del);}
 .path { color:var(--fg); word-break:break-all; }
-.sum { color:var(--muted); font-size:11px; }
-label { display:block; color:var(--muted); margin:10px 0 3px; font-size:11px; }
-input, textarea, select { width:100%; background:#0b0d11; border:1px solid var(--line); color:var(--fg); border-radius:6px; padding:7px; font:inherit; }
-textarea { min-height:140px; resize:vertical; }
-button { background:var(--accent); color:#1a1330; border:none; border-radius:6px; padding:9px 14px; font:inherit; font-weight:700; cursor:pointer; }
-button.ghost { background:transparent; color:var(--accent); border:1px solid var(--line); padding:4px 9px; font-weight:400; }
+
+.reqline { display:flex; gap:12px; align-items:baseline; padding-bottom:10px; margin-bottom:12px;
+  border-bottom:1px solid var(--edge); }
+.reqline .m { flex:0 0 auto; font-size:12px; }
+.reqline .path { font:500 15px/1.3 var(--mono); }
+.sum { color:var(--muted); font-size:12px; margin:0 0 10px; }
+
+label { display:block; font:500 10px/1 var(--ui); letter-spacing:.15em; text-transform:uppercase;
+  color:var(--muted); margin:12px 0 5px; }
+input, textarea, select { width:100%; background:var(--well); border:1px solid var(--edge); color:var(--fg);
+  border-radius:7px; padding:8px 9px; font:13px/1.4 var(--mono); }
+input::placeholder, textarea::placeholder { color:var(--muted); opacity:.7; }
+input:focus, textarea:focus, select:focus { outline:none; border-color:var(--signal);
+  box-shadow:0 0 0 3px rgba(183,155,255,.16); }
+textarea { min-height:150px; resize:vertical; }
+
+.threaded > input { border-left:3px solid var(--patch);
+  background:linear-gradient(90deg, rgba(255,199,107,.10), var(--well) 42%); }
+.threaded > label::after { content:'◗ patched'; float:right; color:var(--patch); letter-spacing:.12em; }
+
+button { background:var(--signal); color:#1a1330; border:none; border-radius:7px; padding:10px 18px;
+  font:600 12px/1 var(--ui); letter-spacing:.07em; cursor:pointer; }
+button:hover { filter:brightness(1.09); }
+button:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
+button.ghost { background:transparent; color:var(--signal); border:1px solid var(--edge);
+  padding:5px 11px; font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; }
+button.ghost:hover { border-color:var(--signal); background:var(--well); filter:none; }
+
 .row { display:flex; gap:8px; align-items:center; }
-.bar { display:flex; gap:8px; align-items:center; margin-bottom:10px; }
-.status { font-weight:700; padding:2px 8px; border-radius:5px; }
-.ok{ background:#0c3; color:#021; } .bad{ background:#f55; color:#200; }
-pre { background:#0b0d11; border:1px solid var(--line); border-radius:6px; padding:10px; overflow:auto; max-height:42vh; white-space:pre-wrap; word-break:break-word; }
-.json .cap { color:var(--accent); cursor:pointer; border-bottom:1px dotted var(--muted); }
-.json .cap:hover { background:#2a2150; border-bottom-color:var(--accent); }
-.var { display:flex; justify-content:space-between; gap:6px; padding:4px 6px; border-radius:5px; cursor:pointer; }
-.var:hover { background:#222634; }
-.var b { color:var(--accent); font-weight:600; }
-.var span { color:var(--muted); max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.related a { display:block; color:var(--post); cursor:pointer; padding:3px 0; }
-.empty { color:var(--muted); font-style:italic; }
-code.b { color:var(--accent); }
+.bar { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
+#send { margin-top:14px; }
+
+.status { font:700 11px/1 var(--mono); letter-spacing:.03em; padding:5px 10px; border-radius:6px; }
+.ok { background:rgba(95,208,166,.16); color:var(--get); border:1px solid rgba(95,208,166,.38); }
+.bad { background:rgba(244,124,140,.16); color:var(--del); border:1px solid rgba(244,124,140,.42); }
+
+pre { background:var(--well); border:1px solid var(--edge); border-radius:8px; padding:12px; overflow:auto;
+  max-height:44vh; white-space:pre-wrap; word-break:break-word; }
+.json .cap { color:var(--signal); cursor:pointer; border-bottom:1px dashed var(--signal-dim); border-radius:3px; padding:0 1px; }
+.json .cap:hover { background:rgba(183,155,255,.18); border-bottom-color:var(--signal); }
+
+.var { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:8px; cursor:pointer;
+  border:1px solid var(--edge); background:var(--well); margin-bottom:6px; }
+.var:hover { border-color:var(--signal); }
+.var .jack { color:var(--signal); font-size:12px; line-height:1; }
+.var b { color:var(--fg); font-weight:600; }
+.var .val { color:var(--muted); margin-left:auto; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+.related a { display:block; color:var(--post); cursor:pointer; padding:4px 0; text-decoration:none; }
+.related a:hover { color:var(--signal); }
+.empty { color:var(--muted); font-size:12px; line-height:1.6; }
+code.b { color:var(--signal); }
+
+.sending { color:var(--signal); }
+@keyframes pulse { 0%,100%{opacity:.45} 50%{opacity:1} }
+@media (prefers-reduced-motion:no-preference) { .sending { animation:pulse 1.1s ease-in-out infinite; } }
+
+@media (max-width:900px) {
+  body { grid-template-columns:1fr; grid-template-rows:auto auto auto auto; height:auto; }
+  #list, #store { border:none; border-top:1px solid var(--edge); }
+  .top { flex-wrap:wrap; }
+}
 </style>
 </head>
 <body>
-<div id="list" class="col"></div>
+<header class="top">
+  <div class="brand"><span class="loop">◗</span>Loops <small>API Console</small></div>
+  <div class="baseline"><label>base</label><input id="base" value="${base}" /></div>
+  <div class="live"><span class="dot"></span>local</div>
+</header>
+<div id="list" class="col">
+  <input id="filter" placeholder="filter endpoints…" autocomplete="off" spellcheck="false" />
+  <div id="eps"></div>
+</div>
 <div id="main" class="col">
-  <div class="bar">
-    <label style="margin:0">base</label>
-    <input id="base" value="${base}" style="flex:1" />
-  </div>
-  <div id="form"><p class="empty">Pick an endpoint on the left.</p></div>
+  <div id="form"><p class="empty">Pick an endpoint on the left to build a request.</p></div>
 </div>
 <div id="store" class="col">
-  <h2>Captured ids</h2>
-  <div id="vars"><p class="empty">Send a request — ids in the response land here, then autofill matching params.</p></div>
-  <h2>Related to selection</h2>
-  <div id="related" class="related"><p class="empty">Click a captured id.</p></div>
+  <h2>Captured</h2>
+  <div id="vars"><p class="empty">Nothing captured yet. Send a request, then click a highlighted id in the response to keep it — it autofills matching params.</p></div>
+  <h2>Related</h2>
+  <div id="related" class="related"><p class="empty">Pick a captured id to see where it fits.</p></div>
 </div>
 <script>
 const ENDPOINTS = ${JSON.stringify(endpoints)};
@@ -249,17 +324,21 @@ let selectedVar = null;
 const el = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
 const byTag = ENDPOINTS.reduce((a,e)=>((a[e.tag]??=[]).push(e),a),{});
 
-function renderList() {
-  const list = document.getElementById('list');
+function renderList(q) {
+  const list = document.getElementById('eps');
+  q = (q||'').trim().toLowerCase();
   list.innerHTML = '';
   for (const tag of Object.keys(byTag)) {
+    const eps = byTag[tag].filter(e=> !q || (e.method+' '+e.path).toLowerCase().includes(q));
+    if (!eps.length) continue;
     list.appendChild(el('<h2>'+tag+'</h2>'));
-    for (const e of byTag[tag]) {
+    for (const e of eps) {
       const node = el('<div class="ep"><span class="m '+e.method+'">'+e.method+'</span><span class="path">'+e.path+'</span></div>');
       node.onclick = ()=>selectEndpoint(e, node);
       list.appendChild(node);
     }
   }
+  if (!list.children.length) list.appendChild(el('<p class="empty">No endpoints match “'+escapeHtml(q)+'”.</p>'));
 }
 
 function selectEndpoint(e, node) {
@@ -268,7 +347,7 @@ function selectEndpoint(e, node) {
   node?.classList.add('active');
   const form = document.getElementById('form');
   form.innerHTML = '';
-  form.appendChild(el('<div class="row"><span class="m '+e.method+'">'+e.method+'</span><b class="path">'+e.path+'</b></div>'));
+  form.appendChild(el('<div class="reqline"><span class="m '+e.method+'">'+e.method+'</span><b class="path">'+e.path+'</b></div>'));
   if (e.summary) form.appendChild(el('<p class="sum">'+e.summary+'</p>'));
   for (const p of e.pathParams) form.appendChild(field('path:'+p, p, lookupStore(p)));
   for (const q of e.queryParams) form.appendChild(field('query:'+q.name, q.name+(q.required?' *':''), lookupStore(q.name)));
@@ -289,8 +368,9 @@ function selectEndpoint(e, node) {
 
 function field(id, label, value) {
   const wrap = el('<div></div>');
+  if (value) wrap.classList.add('threaded');
   wrap.appendChild(el('<label>'+label+'</label>'));
-  const input = el('<input data-k="'+id+'" />'); input.value = value;
+  const input = el('<input data-k="'+id+'" autocomplete="off" spellcheck="false" />'); input.value = value;
   wrap.appendChild(input);
   return wrap;
 }
@@ -313,7 +393,7 @@ async function sendRequest() {
     catch (e) { return badJson('INVALID JSON', e.message); }
   }
   const payload = { method: current.method, path, query, base: document.getElementById('base').value, body: bodyEl?bodyEl.value:undefined };
-  resp.innerHTML = '<p class="empty">…sending</p>';
+  resp.innerHTML = '<p class="sending">◗ sending…</p>';
   let r;
   try {
     r = await fetch('/proxy', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }).then(r=>r.json());
@@ -425,7 +505,7 @@ function renderStore() {
   if (!keys.length) { vars.innerHTML='<p class="empty">No ids captured yet.</p>'; return; }
   vars.innerHTML='';
   for (const k of keys) {
-    const row = el('<div class="var"><b>'+k+'</b><span>'+escapeHtml(store[k])+'</span></div>');
+    const row = el('<div class="var"><span class="jack">◗</span><b>'+k+'</b><span class="val">'+escapeHtml(store[k])+'</span></div>');
     row.onclick = ()=>selectVar(k);
     vars.appendChild(row);
   }
@@ -446,7 +526,7 @@ function lookupStore(param) {
 
 function selectVar(k) {
   selectedVar = k;
-  document.querySelectorAll('[data-k]').forEach(i=>{ if (idMatch(i.dataset.k.split(':')[1], k)) i.value = store[k]; });
+  document.querySelectorAll('[data-k]').forEach(i=>{ if (idMatch(i.dataset.k.split(':')[1], k)) { i.value = store[k]; if (i.parentElement) i.parentElement.classList.add('threaded'); } });
   const rel = document.getElementById('related');
   const matches = ENDPOINTS.filter(e=>e.pathParams.some(p=>idMatch(p,k)) || e.queryParams.some(q=>idMatch(q.name,k)));
   if (!matches.length) { rel.innerHTML='<p class="empty">No endpoints use {'+k+'}.</p>'; return; }
@@ -460,6 +540,7 @@ function selectVar(k) {
 
 function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 renderList();
+document.getElementById('filter').oninput = (ev)=>renderList(ev.target.value);
 </script>
 </body>
 </html>`;
