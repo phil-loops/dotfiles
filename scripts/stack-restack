@@ -643,6 +643,7 @@ restack_sanity_check() {
 escalate_footprint() {
   local branch="$1" dir="$2" parent="$3" old_parent_sha="$4"
   save_state
+  journal parked
   cat >&2 <<EOF
 
 Restack halted: ${branch}'s rebased tip changed files it never owned (see ✗ above).
@@ -710,10 +711,19 @@ clear_state() {
   [[ -z "${STACK_RESTACK_LOCK_OWNER:-}" ]] && rm -f "$LOCK_FILE"
 }
 
+# Append-only run journal — the viewer's status endpoint reads the last line so a run
+# that finished (or parked) before anyone looked stays identifiable. $1 = done|parked|aborted.
+journal() {
+  local n=${COMPLETED+${#COMPLETED[@]}}
+  print -r -- "$(date +%s) ${PROJECT} $1 rebased=${n:-0} current=${CURRENT:-}" \
+    >> "${GIT_COMMON_DIR}/stack-restack-journal" 2>/dev/null || true
+}
+
 # ---------- main flows ----------
 
 if [[ "$MODE" == "abort" ]]; then
   clear_state
+  journal aborted
   echo "Restack state cleared. (Existing rebase, if any, untouched — abort it manually if needed.)"
   exit 0
 fi
@@ -1064,6 +1074,7 @@ while (( ${#PENDING[@]} > 0 )); do
     fi
 
     save_state
+    journal parked
     cat >&2 <<EOF
 
 Conflict during restack of ${BRANCH} — needs a human.
@@ -1247,6 +1258,7 @@ fi
 # ---------- done ----------
 
 clear_state
+journal done
 
 echo ""
 echo "✓ Restack of ${PROJECT} complete."
