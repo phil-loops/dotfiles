@@ -213,9 +213,13 @@ MAX_JOBS = 60         # bound memory; oldest FINISHED jobs evicted first (runnin
 
 
 class Job:
-    def __init__(self):
+    def __init__(self, meta=None):
         self.events = []          # [(event, obj)] — the full SSE log, replayable from 0
         self.done = False
+        self.ok = None            # terminal verdict — None while still running
+        self.status = "starting"
+        self.chars = 0            # answer characters streamed so far — the progress signal
+        self.meta = meta or {}    # branch/path/question/repo/project — where this chat lives
         self.session_id = ""
         self.proc = None
         self.created = time.time()
@@ -226,8 +230,14 @@ class Job:
             self.events.append((event, obj))
             if event == "session":
                 self.session_id = obj.get("session_id", self.session_id)
+            elif event == "token":
+                self.chars += len(obj.get("t", ""))
+            elif event == "status":
+                self.status = obj.get("s", self.status)
             if event in ("done", "error"):
                 self.done = True
+                self.ok = bool(obj.get("ok")) if event == "done" else False
+                self.status = "done" if event == "done" else "error"
             self.cond.notify_all()
 
 
@@ -326,6 +336,16 @@ def _subscribe(req, job, from_idx=0):
         pass   # THIS subscriber dropped (tab closed) — the job keeps running for a reconnect
 
 
+def jobs(req):   # GET /chat-jobs — every live/recent turn across repos, for the Home presence strip
+    with _JOBS_LOCK:
+        snap = list(_JOBS.items())
+    rows = [{"turn": turn, **j.meta, "status": j.status, "chars": j.chars,
+             "done": j.done, "ok": j.ok, "created": j.created}
+            for turn, j in snap if j.meta.get("branch")]
+    rows.sort(key=lambda r: (r["done"], -r["created"]))   # running first, then newest
+    req._send(200, json.dumps(rows))
+
+
 def stop(req, raw):   # POST /chat-stop {turn} — the ■ button: kill this turn's claude for real
     d = json.loads(raw or "{}")
     turn = (d.get("turn") or "").strip()
@@ -380,6 +400,12 @@ def start(req, raw):
             prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
         prompt = prompts.with_attachments(prompt, _valid_attachments(d.get("attachments")))
         cwd = _worktree_for(branch) or ctx.CWD
+        repo_dir = ctx.repo_cwd()
+        meta = {
+            "branch": branch, "path": path, "question": question[:120],
+            "repo": next((n for n, p in ctx.REPOS.items() if p == repo_dir), ""),
+            "project": ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip(),
+        }
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json",
                "--include-partial-messages",
@@ -392,7 +418,7 @@ def start(req, raw):
         with _JOBS_LOCK:
             job = _JOBS.get(turn)
             if job is None:
-                job = Job()
+                job = Job(meta)
                 _JOBS[turn] = job
                 _prune()
                 threading.Thread(target=_run_claude, args=(job, cmd, cwd), daemon=True).start()

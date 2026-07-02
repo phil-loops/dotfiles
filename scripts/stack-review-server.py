@@ -275,6 +275,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
+        elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
         else:
             self._send(404, "{}")
 
