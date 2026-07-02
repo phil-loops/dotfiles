@@ -5,7 +5,7 @@ import { thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./cha
 import { runtime, send, stop as runnerStop, unqueue, setViewingThread, clearViewingThread, ensureWatching } from "./chatRunner";
 import { drawerMinimized as minimized, setDrawerMinimized } from "./chatDrawer";
 import { renderMarkdown } from "./markdown";
-import { parseSegments, runAction, actionById, type ActionSpec } from "./chatActions";
+import { parseSegments, runAction, actionById, chatMessageFor, type ActionSpec } from "./chatActions";
 
 // One action Claude offered, rendered as a button. Destructive actions (registry `confirm`) arm on
 // the first click and fire on the second; the rest fire immediately. The endpoint's verdict shows
@@ -22,6 +22,14 @@ function ChatActionButton(props: { spec: ActionSpec; branch: string; path: strin
     }
     if (def?.confirm && phase() === "idle") {
       setPhase("armed");
+      return;
+    }
+    // A "/chat" action types its canned message into the drawer as a real turn — it streams
+    // below with the same machinery as anything you'd type, not a one-shot HTTP verdict.
+    const chatMsg = chatMessageFor(props.spec);
+    if (chatMsg) {
+      send(props.branch, props.path, { q: chatMsg, model: chatModel() });
+      setPhase("done");
       return;
     }
     setPhase("running");
@@ -50,7 +58,8 @@ function ChatActionButton(props: { spec: ActionSpec; branch: string; path: strin
       <Show when={phase() === "running"}>
         <span class="cp-action-spin">running…</span>
       </Show>
-      <Show when={phase() === "error"}>
+      {/* a query action (whats-next) shows its answer here; "done" is the mute default for do-X actions */}
+      <Show when={note() && note() !== "done" && (phase() === "done" || phase() === "error")}>
         <span class="cp-action-note">{note()}</span>
       </Show>
     </span>

@@ -15,13 +15,25 @@ export interface ActionDef {
   label: string;
   describe: string;
   params: { name: string; desc: string }[];
-  body: unknown;
+  body?: unknown;
+  message?: string; // chat-send actions (endpoint "/chat"): the canned first message to send
 }
 
 export interface ActionSpec {
   action: string;
   label?: string;
   params?: Record<string, unknown>;
+}
+
+// A "/chat" action isn't an HTTP call — it types a canned message into the drawer as a real chat
+// turn (streamed, with the facts+buttons machinery), which the generic fetch dispatch can't do.
+// Returns the message to send, or null for a normal HTTP action.
+export function chatMessageFor(spec: ActionSpec): string | null {
+  const def = actionById(spec.action);
+  if (!def || def.endpoint !== "/chat") {
+    return null;
+  }
+  return (spec.params?.message as string) || def.message || def.label;
 }
 
 export type Segment =
@@ -132,14 +144,15 @@ export async function runAction(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(resolve(def.body, spec, ctx)),
     });
-    let data: { ok?: boolean; err?: string } = {};
+    let data: { ok?: boolean; err?: string; summary?: string } = {};
     try {
       data = await res.json();
     } catch {
       // some endpoints answer empty on success — a 2xx with no body is still a win
     }
     const ok = res.ok && data.ok !== false;
-    return { ok, msg: ok ? "done" : data.err || `failed (${res.status})` };
+    // a query action (e.g. whats-next) returns a `summary` to show inline; a plain "do X" returns none
+    return { ok, msg: ok ? data.summary || "done" : data.err || `failed (${res.status})` };
   } catch (e) {
     return { ok: false, msg: e instanceof Error ? e.message : "couldn’t reach the server" };
   }

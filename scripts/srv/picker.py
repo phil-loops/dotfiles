@@ -187,6 +187,40 @@ def _interest_levels():
     return out
 
 
+# POST /next — read-only: the branch(es) in THIS branch's forest that can merge into main
+# now, in canonical order. Reuses the exact machinery the Forest cards build from
+# (stack-forest --projects + stack-prs → _ready_to_merge), so ordering never diverges.
+def whats_next(req, raw):
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    proj = _project_of(branch) if branch else None
+    if not proj:
+        return req._send(200, json.dumps({"ok": True, "project": None, "ready": [], "candidates": [],
+                                          "summary": "This branch isn't in a forest project — nothing to order."}))
+    fr = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--projects"])
+    pr = ctx.run([os.path.join(ctx.SCRIPTS, "stack-prs")])
+    try:
+        projs = json.loads(fr.stdout or "[]")
+    except Exception:
+        projs = []
+    try:
+        prmap = json.loads(pr.stdout or "{}")
+    except Exception:
+        prmap = {}
+    p = next((x for x in projs if x.get("name") == proj), None)
+    ready, candidates = _ready_to_merge(p.get("mergeable", []) if p else [], prmap)
+    if ready:
+        summary = f"Ready to merge into main now: {', '.join(ready)}"
+        if candidates:
+            summary += f" · then clear next: {', '.join(candidates)}"
+    elif candidates:
+        summary = f"No open PRs yet, but clear to merge into main: {', '.join(candidates)}"
+    else:
+        summary = f"Nothing in “{proj}” is mergeable into main right now."
+    return req._send(200, json.dumps({"ok": True, "project": proj, "ready": ready,
+                                      "candidates": candidates, "summary": summary}))
+
+
 # --- GET handlers ---
 
 def prs(req):
