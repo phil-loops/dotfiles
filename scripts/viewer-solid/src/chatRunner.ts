@@ -34,6 +34,7 @@ interface QueuedMsg {
   patch?: string; // seeds turn one only; ignored once a resume session exists
   model: ChatModel;
   attachments?: { name: string; path: string }[]; // dropped/pasted images, saved server-side
+  project?: string; // whole-forest chat → POST {project} instead of {branch, path}; server builds the seed
 }
 
 interface Runtime {
@@ -195,9 +196,12 @@ async function runTurn(branch: string, path: string, item: QueuedMsg) {
       headers: HEADERS,
       signal: ctrl.signal,
       body: JSON.stringify({
-        branch,
+        // a forest chat carries {project}; the server gathers the whole DAG. branch/path are the
+        // local thread key only, so they're omitted from the payload when project is set.
+        project: item.project || undefined,
+        branch: item.project ? undefined : branch,
         turn,
-        path: path || undefined,
+        path: item.project ? undefined : path || undefined,
         patch: resume ? undefined : item.patch, // diff only seeds turn one
         question: item.q,
         resume: resume || undefined,

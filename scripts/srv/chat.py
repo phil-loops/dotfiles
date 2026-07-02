@@ -121,6 +121,46 @@ def _node_diff(branch):
     return out[:3500]
 
 
+def _project_branches(project):
+    # the project's member branches (stack-project.<p>.branch multivar), order preserved, deduped
+    raw = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split()
+    seen, out = set(), []
+    for b in raw:
+        if b and b not in seen:
+            seen.add(b)
+            out.append(b)
+    return out
+
+
+def _project_integrator(project):
+    # the fan-in branch carries every base via `requires`, so its worktree sees the whole feature —
+    # the right cwd for read-only Read/Grep. Fall back to the first member, else the main checkout.
+    branches = _project_branches(project)
+    for b in branches:
+        if ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.strip():
+            return b
+    return branches[0] if branches else ""
+
+
+# The whole-forest seed: an edge list (structure at a glance) then per-branch purpose + parent +
+# requires + capped diff. Same multi-branch gather shape as merge_subjects, reusing _node_diff.
+def _project_seed(project):
+    branches = _project_branches(project)
+    edges, blocks = [], []
+    for b in branches:
+        parent = ctx.run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip() or "main"
+        requires = ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.split()
+        purpose = ctx.run(["git", "config", f"branch.{b}.description"]).stdout.strip()
+        req = f"; requires: {', '.join(requires)}" if requires else ""
+        edges.append(f"- {b}  (parent: {parent}{req})")
+        blocks.append(
+            f"### {b}\nPURPOSE: {purpose or '(none set)'}\nPARENT: {parent}\n"
+            + (f"REQUIRES: {', '.join(requires)}\n" if requires else "")
+            + f"DIFF (capped):\n{_node_diff(b)}"
+        )
+    return "EDGES:\n" + "\n".join(edges) + "\n\n" + "\n\n".join(blocks)
+
+
 def merge_subjects(req, raw):
     # POST /merge-subjects {scope, items:[{key, type, purpose}]} → {key: {subject, detail}}
     # One opt-in pass (the "polish" button) that, per node, crisps the plain purpose into a pithy
@@ -361,6 +401,7 @@ def stop(req, raw):   # POST /chat-stop {turn} — the ■ button: kill this tur
 def start(req, raw):
     d = json.loads(raw or "{}")
     branch = (d.get("branch") or "").strip()
+    project = (d.get("project") or "").strip()
     path = (d.get("path") or "").strip()
     question = (d.get("question") or "").strip()
     resume = (d.get("resume") or "").strip()
@@ -368,8 +409,8 @@ def start(req, raw):
     model = (d.get("model") or "").strip()
     if model not in ALLOWED_MODELS:
         model = DEFAULT_MODEL
-    if not branch or not turn:
-        req._send(400, json.dumps({"ok": False, "err": "need a branch + turn"}))
+    if not turn or not (branch or project):
+        req._send(400, json.dumps({"ok": False, "err": "need a branch or project + turn"}))
         return
 
     job = _JOBS.get(turn)
@@ -394,17 +435,20 @@ def start(req, raw):
         # the diff + ground rules: one file when a path is given, else the whole branch.
         if resume:
             prompt = question
+        elif project:
+            prompt = prompts.project_chat(project, _project_seed(project), question)
         elif path:
             prompt = prompts.file_chat(branch, path, d.get("patch", ""), question)
         else:
             prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
         prompt = prompts.with_attachments(prompt, _valid_attachments(d.get("attachments")))
-        cwd = _worktree_for(branch) or ctx.CWD
+        # a project chat runs in the integrator's worktree (it carries every base via requires)
+        cwd = _worktree_for(branch or _project_integrator(project)) or ctx.CWD
         repo_dir = ctx.repo_cwd()
         meta = {
             "branch": branch, "path": path, "question": question[:120],
             "repo": next((n for n, p in ctx.REPOS.items() if p == repo_dir), ""),
-            "project": ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip(),
+            "project": project or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip(),
         }
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json",

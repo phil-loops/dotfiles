@@ -12,7 +12,8 @@ import type { ViewerLocation } from "./router";
 // in-flight turn, so a restored drawer shows its history and live working…/done status. We persist
 // only the file PATH (not its diff) — a restored chat resumes by session id and never needs to
 // re-seed the diff.
-export type ChatTarget = { branch: string; origin: ViewerLocation; file: FileDiff | null };
+// project set → a whole-forest chat (branch holds the project name as the thread key, file null).
+export type ChatTarget = { branch: string; origin: ViewerLocation; file: FileDiff | null; project?: string };
 
 const KEY = "stack-chat-drawer";
 
@@ -23,7 +24,7 @@ function load(): { target: ChatTarget | null; minimized: boolean } {
       return { target: null, minimized: false };
     }
     const file = d.path ? { path: d.path, status: "modified" as const } : null;
-    return { target: { branch: d.branch, origin: d.origin, file }, minimized: !!d.minimized };
+    return { target: { branch: d.branch, origin: d.origin, file, project: d.project || undefined }, minimized: !!d.minimized };
   } catch {
     return { target: null, minimized: false };
   }
@@ -41,7 +42,7 @@ function persist() {
   }
   localStorage.setItem(
     KEY,
-    JSON.stringify({ branch: t.branch, origin: t.origin, path: t.file?.path ?? "", minimized: minimized() }),
+    JSON.stringify({ branch: t.branch, origin: t.origin, path: t.file?.path ?? "", project: t.project ?? "", minimized: minimized() }),
   );
 }
 

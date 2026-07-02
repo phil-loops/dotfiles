@@ -133,6 +133,27 @@ def branch_chat(branch, patch, question):
     ])
 
 
+# Whole-forest chat: `seed` is the DAG gather chat.py builds (edge list + per-branch purpose/
+# parent/requires/capped diff). No action menu — the per-branch verbs need a single branch; at
+# project altitude the chat is pure read-only Q&A about how the feature hangs together.
+def project_chat(project, seed, question):
+    return "\n".join([
+        f"You're reviewing the entire `{project}` forest of the Loops codebase — every branch in "
+        "the project and the DAG (parent + requires edges) that links them into one feature.",
+        HOUSE_STYLE,
+        "Here is the forest: an edge list first (so you see the shape), then each branch's purpose, "
+        "parent, requires, and a capped diff:",
+        "",
+        seed,
+        "",
+        _REVIEW_VOICE,
+        "Reason across the WHOLE feature — what it does end to end, where the gaps or unfinished "
+        "seams are, what's left to build. Read individual files when a branch's capped diff isn't enough.",
+        "",
+        f"Question: {question}",
+    ])
+
+
 # Dropped/pasted screenshots ride in as saved temp files — headless claude can't take image
 # input directly, but Read renders an image visually, so we just point it at the paths.
 def with_attachments(prompt, paths):

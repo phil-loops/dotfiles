@@ -241,6 +241,7 @@ function ChatDrawerHost() {
       <ChatPanel
         file={chatTarget()?.file ?? null}
         branch={chatTarget()?.branch ?? ""}
+        project={chatTarget()?.project}
         viewingBranch={viewingBranch()}
         onGoToBranch={() => { const t = chatTarget(); if (t) { navigate(t.origin); } }}
         onClose={() => closeChat()}
@@ -1190,6 +1191,11 @@ const FO_VIEWS_CSS = `
 }
 .fo-views button:hover { color: var(--ink-dim, #a89e8c); }
 .fo-views button.on { color: var(--gold, #e0ad4e); border-color: var(--rule, #3a332b); background: var(--raised, #1b1815); }
+.fo-chat {
+  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px; margin-left: 6px;
+  color: var(--ember, #d2732a); background: transparent; border: 1px solid var(--gold-deep, #6e521d);
+}
+.fo-chat:hover { color: var(--gold-leaf, #e6b64e); border-color: var(--gold-leaf, #e6b64e); }
 
 /* Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs GitHub).
    Ember, never the blessed gold; a delay guard keeps it off sub-second warm-cache loads. */
@@ -1365,6 +1371,13 @@ function ForestOverview() {
             <button classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
             <button classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
           </div>
+          <Show when={canMutate}>
+            <button
+              class="fo-chat"
+              title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
+              onClick={() => openChat({ branch: project(), file: null, origin: location(), project: project() })}
+            >✦ chat</button>
+          </Show>
         </Show>
         <style>{FO_VIEWS_CSS}</style>
       </header>

@@ -79,6 +79,7 @@ export default function ChatPanel(props: {
   file: FileDiff | null;
   branch: string; // the branch this chat is pinned to — stays put even as you navigate elsewhere
   viewingBranch: string; // the branch currently on screen; differs from `branch` once you nav away
+  project?: string; // set → a whole-forest chat: branch holds the project name (thread key), file null
   onGoToBranch: () => void; // navigate back to this chat's project + branch
   onClose: () => void;
 }) {
@@ -248,6 +249,7 @@ export default function ChatPanel(props: {
       patch: props.file?.patch,
       model: chatModel(),
       attachments: ready.map((a) => ({ name: a.name, path: a.path })),
+      project: props.project,
     });
     pin();
     inputEl?.focus();
@@ -315,7 +317,7 @@ export default function ChatPanel(props: {
           <div class="cp-title">
             <span class="cp-mark">✦</span>
             <span class="cp-path">
-              {props.file ? seg(props.file.path) : <b>whole branch</b>}
+              {props.file ? seg(props.file.path) : <b>{props.project ? "whole forest" : "whole branch"}</b>}
             </span>
           </div>
           <div class="cp-sub">
@@ -397,7 +399,9 @@ export default function ChatPanel(props: {
         <div class="cp-body" ref={scroller} onScroll={onScroll}>
           <Show when={!msgs().length}>
             <p class="cp-empty">
-              {props.file
+              {props.project
+                ? "Ask anything about this whole forest — what the feature does end to end, where the gaps are, what's left to build."
+                : props.file
                 ? "Ask anything about this diff — what it does, whether it's correct, what you'd change."
                 : "Ask anything about this whole branch — what it does, whether it hangs together, what you'd change."}
               {" "}Claude reads the diff and can look at related code (read-only).
@@ -517,7 +521,7 @@ export default function ChatPanel(props: {
         <div class="cp-pill" classList={{ working: streaming(), done: !streaming() && finished() }}>
           <button class="cp-pill-main" title="restore chat" onClick={restore}>
             <span class="cp-pill-mark">✦</span>
-            <span class="cp-pill-name">{props.file ? props.file.path.split("/").pop() : "whole branch"}</span>
+            <span class="cp-pill-name">{props.file ? props.file.path.split("/").pop() : props.project ? "✦ forest" : "whole branch"}</span>
             <span class="cp-pill-branch">{props.branch.split("/").pop()}</span>
             <Show when={streaming() || (finished() && !streaming())}>
               <span class="cp-pill-state">{streaming() ? status() || "working…" : "done ✓"}</span>
