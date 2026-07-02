@@ -273,8 +273,13 @@ function selectEndpoint(e, node) {
   for (const p of e.pathParams) form.appendChild(field('path:'+p, p, lookupStore(p)));
   for (const q of e.queryParams) form.appendChild(field('query:'+q.name, q.name+(q.required?' *':''), lookupStore(q.name)));
   if (e.bodyExample) {
-    form.appendChild(el('<label>body</label>'));
+    const head = el('<div class="bar" style="margin:0 0 4px"><label style="margin:0">body</label><button id="beautify" class="ghost" type="button">Beautify</button></div>');
+    form.appendChild(head);
     const ta = el('<textarea id="body"></textarea>'); ta.value = e.bodyExample; form.appendChild(ta);
+    head.querySelector('#beautify').onclick = ()=>{
+      try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); }
+      catch (e) { badJson('INVALID JSON', e.message); }
+    };
   }
   const send = el('<div class="bar" style="margin-top:12px"><button id="send">Send</button></div>');
   form.appendChild(send);
@@ -302,15 +307,30 @@ async function sendRequest() {
   for (const [k,v] of Object.entries(pathParams)) path = path.replace('{'+k+'}', encodeURIComponent(v));
   const query = collectInputs('query');
   const bodyEl = document.getElementById('body');
-  const payload = { method: current.method, path, query, base: document.getElementById('base').value, body: bodyEl?bodyEl.value:undefined };
   const resp = document.getElementById('resp');
+  if (bodyEl && bodyEl.value.trim()) {
+    try { JSON.parse(bodyEl.value); }
+    catch (e) { return badJson('INVALID JSON', e.message); }
+  }
+  const payload = { method: current.method, path, query, base: document.getElementById('base').value, body: bodyEl?bodyEl.value:undefined };
   resp.innerHTML = '<p class="empty">…sending</p>';
-  const r = await fetch('/proxy', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }).then(r=>r.json());
+  let r;
+  try {
+    r = await fetch('/proxy', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }).then(r=>r.json());
+  } catch (e) {
+    return badJson('PROXY UNREACHABLE', e.message + ' — is the console server running?');
+  }
   const ok = r.status>=200 && r.status<300;
   resp.innerHTML = '';
   resp.appendChild(el('<div class="bar" style="margin-top:10px"><span class="status '+(ok?'ok':'bad')+'">'+(r.status||'ERR')+' '+(r.statusText||'')+'</span><span class="sum">click any highlighted id to capture it</span></div>'));
   resp.appendChild(renderResp(r.body ?? r.error));
   capture(r.body);
+}
+
+function badJson(label, msg) {
+  const resp = document.getElementById('resp');
+  resp.innerHTML = '';
+  resp.appendChild(el('<div class="bar" style="margin-top:10px"><span class="status bad">'+label+'</span><span class="sum">'+escapeHtml(msg)+'</span></div>'));
 }
 
 function capture(body) {
