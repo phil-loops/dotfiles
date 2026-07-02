@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""claude-say <who> <message…>  [--send] — drop a message into another Claude Code
-session's prompt, over tmux.
+"""claude-say <who> <message…>  [--draft] — drop a message into another Claude Code
+session's prompt, over tmux, and submit it.
 
-DRAFT BY DEFAULT (no Enter): the text lands in the target's input line for a human
-to review and submit — one session can leave another a note without driving it.
---send also presses Enter (autonomous relay; crosses the human gate — use sparingly).
+SUBMIT BY DEFAULT (presses Enter): the text lands in the target's input line and is
+sent, so a note can't be silently lost in an unattended pane. --draft (alias
+--no-send) leaves the text WITHOUT Enter for a human to review and submit; --send is
+still accepted as a no-op for muscle memory.
 
 <who> picks a LIVE session (from the presence registry, see claude-sessions) by:
   • session-id prefix      claude-say 9272 "…"
@@ -106,8 +107,9 @@ def show(sessions, stream=sys.stdout):
 
 
 def main():
-    args = [a for a in sys.argv[1:] if a != "--send"]
-    send = "--send" in sys.argv[1:]
+    flags = {a for a in sys.argv[1:] if a.startswith("--")}
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    send = not ({"--draft", "--no-send"} & flags)   # submit by default; --draft keeps draft-only
 
     me = self_pid()
     others = [r for r in live_sessions() if r.get("pid") != me]
@@ -119,7 +121,7 @@ def main():
 
     who, msg = args[0], " ".join(args[1:]).strip()
     if not msg:
-        print("usage: claude-say <who> <message…> [--send]", file=sys.stderr)
+        print("usage: claude-say <who> <message…> [--draft]", file=sys.stderr)
         return 2
 
     w = who.lower()
