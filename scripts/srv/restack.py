@@ -148,11 +148,40 @@ def _state_path():
     return os.path.join(gd, "stack-restack-state", "state") if gd else ""
 
 
+def _running_msg():
+    # Name the blocker: an anonymous "already running" sends the user hunting through
+    # ps/reflogs for who's driving (a foreign session's run looks identical to a stuck one).
+    ds = _drivers()
+    if not ds:
+        return "a restack is already running"
+    d = ds[0]
+    what = d["project"] or ("all projects" if d["mode"] == "all" else d["mode"])
+    et = f" · {d['etime']} in" if d.get("etime") else ""
+    more = f" (+{len(ds) - 1} more)" if len(ds) > 1 else ""
+    return f"a restack is already running ({what}{et}{more})"
+
+
+def _journal_last():
+    # stack-restack appends one line per done/parked/aborted exit; the last line says what
+    # the most recent run was, so a run that ended before anyone looked stays identifiable.
+    try:
+        with open(os.path.join(_gitdir(), "stack-restack-journal")) as fh:
+            parts = fh.readlines()[-1].split()
+        entry = {"at": int(parts[0]), "project": parts[1], "result": parts[2]}
+        for kv in parts[3:]:
+            if "=" in kv:
+                k, v = kv.split("=", 1)
+                entry[k] = v
+        return entry
+    except Exception:
+        return None
+
+
 def blocked():
     # Don't start a restack while one is running or parked on a conflict — detaching
     # the scratch worktree under a live/paused rebase would corrupt it.
     if _running():
-        return "a restack is already running"
+        return _running_msg()
     sp = _state_path()
     if sp and os.path.exists(sp):
         return "a restack is parked on a conflict — resolve it first"
@@ -204,14 +233,16 @@ def ambient(req):
 
 
 def status(req, u):
-    # stack-restack writes <git-common-dir>/stack-restack-state/state on a conflict it
-    # can't auto-resolve (removed on success/abort). Its presence == paused.
+    # stack-restack rewrites <git-common-dir>/stack-restack-state/state before and after
+    # every branch of the walk (removed on success/abort), so during a run it's the live
+    # progress feed; it only means "parked" once no driver is alive to advance it.
     sd = _state_path()
     want = parse_qs(u.query).get("project", [""])[0]
-    paused, proj, cur = False, "", ""
+    state_present, proj, cur = False, "", ""
     done = total = 0
     completed, pending = [], []
     if sd and os.path.exists(sd):
+        state_present = True
         with open(sd) as fh:
             kv = dict(l.rstrip("\n").split("=", 1) for l in fh
                       if "=" in l and not l.startswith("SNAP"))
@@ -223,10 +254,11 @@ def status(req, u):
         pending = kv.get("PENDING", "").split()
         done = len(completed)
         total = done + len(pending) + (1 if cur else 0)
-        paused = (not want) or proj == want
-    # running==False + paused==True means "escalated, needs a human" (the parent
-    # stack-restack stays alive across the whole walk and exits when it escalates).
     running = _running()
+    # paused == "escalated, needs a human": state left behind with no driver alive. State
+    # + a live driver is just a walk in progress — reporting that as paused made the home
+    # screen paint every healthy run as a parked conflict.
+    paused = state_present and not running and ((not want) or proj == want)
     reason = ""
     if paused:
         try:
@@ -240,7 +272,8 @@ def status(req, u):
                                "running": running, "reason": reason,
                                "done": done, "total": total,
                                "completed": completed, "pending": pending,
-                               "drivers": _drivers(), "resolvers": _resolvers()}))
+                               "drivers": _drivers(), "resolvers": _resolvers(),
+                               "last": _journal_last()}))
 
 
 def restack(req, raw):
@@ -347,7 +380,8 @@ def restack_all(req, raw):
         req._send(400, json.dumps({"ok": False, "err": "no projects"}))
         return
     if _running():
-        req._send(409, json.dumps({"ok": False, "err": "a restack is already running"}))
+        req._send(409, json.dumps({"ok": False, "err": _running_msg(),
+                                   "drivers": _drivers()}))
         return
     parked, current = _parked()
     if parked and not d.get("abortParked"):
