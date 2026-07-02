@@ -8,6 +8,8 @@
 import json
 import os
 
+from . import ctx
+
 # The read-only chat stays read-only, but it can OFFER actions the viewer runs on a click.
 # The menu lives in ONE file (viewer-solid/src/chat-actions.json) that the frontend also reads
 # to dispatch the button — so what we teach here and what the click does can't drift.
@@ -62,6 +64,36 @@ _REVIEW_VOICE = (
 )
 
 
+def _is_test(p):
+    return ".test." in p or ".spec." in p or "__tests__/" in p or "/tests/" in p
+
+
+# The branch's real state, so the model judges which actions apply from FACT rather than guessing off
+# the diff — it's why set-purpose stops firing once a purpose exists. Cheap git reads via ctx.run (in
+# the selected repo); any one failing just blanks its fact, never breaks the chat. Kept here rather
+# than in chat.py so the whole action-relevance feature stays in one file the chat owns.
+def branch_state(branch):
+    def g(*args):
+        try:
+            return ctx.run(["git", *args]).stdout.strip()
+        except Exception:
+            return ""
+
+    parent = g("config", f"stack-branch.{branch}.parent") or "main"
+    names = [n for n in g("diff", "--name-only", f"{parent}...{branch}").splitlines() if n]
+    dirs = {n.rsplit("/", 1)[0] if "/" in n else "." for n in names}
+    purpose = g("config", f"branch.{branch}.description")
+    return "\n".join([
+        "Current branch state — judge which actions genuinely apply from THIS, not the diff alone; "
+        "don't offer one the state already rules out:",
+        f"  purpose: {chr(8220) + purpose + chr(8221) if purpose else '(none set — offering to set one makes sense)'}",
+        f"  commits on branch: {g('rev-list', '--count', f'{parent}..{branch}') or '?'}",
+        f"  behind origin/main: {g('rev-list', '--count', f'{branch}..origin/main') or '?'} commit(s)",
+        f"  files changed: {len(names)} across {len(dirs)} dir(s)",
+        f"  tests touched by this branch: {'yes' if any(_is_test(n) for n in names) else 'none'}",
+    ])
+
+
 def file_chat(branch, path, patch, question):
     patch = (patch or "").strip()
     return "\n".join([
@@ -74,6 +106,7 @@ def file_chat(branch, path, patch, question):
         "```",
         "",
         _REVIEW_VOICE,
+        branch_state(branch),
         action_menu("file"),
         "",
         f"Question: {question}",
@@ -93,6 +126,7 @@ def branch_chat(branch, patch, question):
         "```",
         "",
         _REVIEW_VOICE,
+        branch_state(branch),
         action_menu("branch"),
         "",
         f"Question: {question}",
