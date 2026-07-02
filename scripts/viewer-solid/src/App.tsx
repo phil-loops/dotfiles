@@ -260,6 +260,31 @@ function Home() {
     queryKey: ["projects"],
     queryFn: () => provider.projects(),
   }));
+  // live chat presence — server truth (srv/chat.py's job registry), not this browser's
+  // localStorage, so chats started in another tab (or surviving a closed one) still show.
+  type ChatJob = {
+    turn: string; branch: string; path: string; question: string; repo: string; project: string;
+    status: string; chars: number; done: boolean; ok: boolean | null; created: number;
+  };
+  const chatJobs = createQuery(() => ({
+    queryKey: ["chat-jobs"],
+    queryFn: () => fetch("/chat-jobs").then((r) => r.json() as Promise<ChatJob[]>),
+    refetchInterval: 5_000,
+  }));
+  const liveChats = createMemo(() => (chatJobs.data || []).filter((j) => !j.done));
+  // a finished chat lingers in the strip briefly as "done ✓" so an answer that landed while you
+  // were elsewhere gets seen; the server's own TTL bounds it, this just tightens the window.
+  const stripChats = createMemo(() =>
+    (chatJobs.data || []).filter((j) => !j.done || Date.now() - j.created * 1000 < 15 * 60_000));
+  const chatTarget = (j: ChatJob): ViewerLocation =>
+    j.project
+      ? { kind: "forest", name: j.project, repo: j.repo || undefined, node: j.branch }
+      : { kind: "forest", name: j.branch, repo: j.repo || undefined };
+  const fmtChars = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
+  const chatAgo = (createdSec: number) => {
+    const s = Math.max(0, Math.floor(Date.now() / 1000 - createdSec));
+    return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`;
+  };
   const checkOrigin = createMutation(() => ({
     mutationFn: () => fetch("/check-origin", { method: "POST", body: "{}" }).then((r) => r.json()),
     onSuccess: () => {
@@ -781,6 +806,9 @@ function Home() {
       >
         <span class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`} />
         <span class="forest-name">{p.name}</span>
+        <Show when={liveChats().some((j) => (j.project || j.branch) === p.name && (!j.repo || j.repo === p.repo))}>
+          <span class="forest-chat" title="a chat is running on this forest">✦</span>
+        </Show>
         <span class="fcell pips">
           <Show when={(p.interest ?? 0) > 0}>
             <span class="forest-ready" title={`interest ${p.interest} — promoted on Home`}>
@@ -894,6 +922,25 @@ function Home() {
         </header>
 
         <Hearth />
+
+      <Show when={stripChats().length}>
+        <section class="work-sec chat-live">
+          <h2 class="eyebrow">chats <span class="eyebrow-ask">— headless claudes on your branches</span></h2>
+          <div class="work-rule" />
+          <For each={stripChats()}>
+            {(j) => (
+              <Link class="chat-row" classList={{ done: j.done }} to={chatTarget(j)} title={j.question}>
+                <span class={`chat-mark ${j.done ? (j.ok === false ? "err" : "ok") : "live"}`}>✦</span>
+                <span class="chat-branch">{leaf(j.branch)}</span>
+                <span class="chat-file">{j.path ? leaf(j.path) : "whole branch"}</span>
+                <span class="chat-progress">
+                  {j.done ? (j.ok === false ? "✗ failed" : "done ✓") : `${j.status}…`} · {fmtChars(j.chars)} · {chatAgo(j.created)}
+                </span>
+              </Link>
+            )}
+          </For>
+        </section>
+      </Show>
 
       <Show when={tab() === "work" && nextActions().length}>
         <section class="work-sec next-queue">
