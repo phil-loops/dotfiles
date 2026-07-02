@@ -5,6 +5,57 @@ import { thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./cha
 import { runtime, send, stop as runnerStop, unqueue, setViewingThread, clearViewingThread, ensureWatching } from "./chatRunner";
 import { drawerMinimized as minimized, setDrawerMinimized } from "./chatDrawer";
 import { renderMarkdown } from "./markdown";
+import { parseSegments, runAction, actionById, type ActionSpec } from "./chatActions";
+
+// One action Claude offered, rendered as a button. Destructive actions (registry `confirm`) arm on
+// the first click and fire on the second; the rest fire immediately. The endpoint's verdict shows
+// inline, so a click never leaves the chat to learn whether it worked.
+function ChatActionButton(props: { spec: ActionSpec; branch: string; path: string }) {
+  const def = actionById(props.spec.action);
+  const [phase, setPhase] = createSignal<"idle" | "armed" | "running" | "done" | "error">("idle");
+  const [note, setNote] = createSignal("");
+  const label = () => props.spec.label || def?.label || props.spec.action;
+
+  const onClick = async () => {
+    if (phase() === "running" || phase() === "done") {
+      return;
+    }
+    if (def?.confirm && phase() === "idle") {
+      setPhase("armed");
+      return;
+    }
+    setPhase("running");
+    const r = await runAction(props.spec, { branch: props.branch, path: props.path });
+    setNote(r.msg);
+    setPhase(r.ok ? "done" : "error");
+  };
+
+  return (
+    <span class="cp-actions">
+      <button
+        class="cp-action"
+        classList={{
+          confirm: phase() === "armed",
+          ok: phase() === "done",
+          err: phase() === "error",
+        }}
+        disabled={phase() === "running" || phase() === "done"}
+        title={def?.describe}
+        onClick={onClick}
+      >
+        <Show when={phase() === "done"} fallback={<span>{phase() === "armed" ? `confirm — ${label()}` : label()}</span>}>
+          <span>✓ {label()}</span>
+        </Show>
+      </button>
+      <Show when={phase() === "running"}>
+        <span class="cp-action-spin">running…</span>
+      </Show>
+      <Show when={phase() === "error"}>
+        <span class="cp-action-note">{note()}</span>
+      </Show>
+    </span>
+  );
+}
 
 // ChatPanel — "chat about this file", with Claude's answer streaming in token-by-token.
 // A right-side drawer scoped to ONE file on ONE branch: the diff is the opening context, then
@@ -349,7 +400,20 @@ export default function ChatPanel(props: {
                 <span class="cp-who">{m.role}</span>
                 <div class="cp-text">
                   <Show when={m.role === "claude"} fallback={m.text}>
-                    <div class="cp-md" innerHTML={renderMarkdown(m.text)} />
+                    <For each={parseSegments(m.text)}>
+                      {(seg) => (
+                        <Show
+                          when={seg.kind === "action" ? seg : null}
+                          fallback={
+                            <Show when={seg.kind === "md" ? seg : null}>
+                              {(md) => <div class="cp-md" innerHTML={renderMarkdown(md().text)} />}
+                            </Show>
+                          }
+                        >
+                          {(a) => <ChatActionButton spec={a().spec} branch={props.branch} path={path()} />}
+                        </Show>
+                      )}
+                    </For>
                   </Show>
                   <Show when={streaming() && m.role === "claude" && i() === msgs().length - 1}>
                     <span class="cp-caret" />
