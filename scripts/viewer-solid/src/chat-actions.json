@@ -2,6 +2,26 @@
   "_doc": "The ONE registry of actions the read-only ✦ chat may offer as buttons. Both sides read this file: srv/prompts.py teaches Claude the menu from it, and src/chatActions.ts dispatches a clicked button from it — so the taught vocabulary and the wired dispatch can never drift. The chat itself stays read-only (Read/Grep/Glob); an action is a PROPOSAL the viewer renders and the human clicks to run against an endpoint that already exists. The editing actions (apply-change/add-file/reforest) all POST /claude — they hand a task the chat composed to a full editing Claude in the branch's worktree, which is how a read-only suggestion turns into real work.",
   "actions": [
     {
+      "id": "whats-next",
+      "endpoint": "/next",
+      "scope": "branch",
+      "confirm": false,
+      "label": "What merges next?",
+      "describe": "Read-only navigation: show which branch(es) in THIS branch's forest can merge into main right now, in canonical order, and what's clear next. Offer when the user asks what comes next, which branch lands next, or where this branch sits in the merge order. params: none.",
+      "params": [],
+      "body": { "branch": "$branch" }
+    },
+    {
+      "id": "catch-me-up",
+      "endpoint": "/chat",
+      "scope": "branch",
+      "confirm": false,
+      "label": "Catch me up",
+      "describe": "Read-only recall: summarize where this branch sits — its purpose, what parent..branch changes, what's still unblessed, and its place in the forest. Offer when the user asks 'remind me what this is' or 'where were we'. It sends itself as a normal chat message (reuses the ✦ chat), so the answer streams below. params: none.",
+      "params": [],
+      "message": "Catch me up on this branch: its purpose, what it changes versus its parent, what's still unblessed, and where it sits in the forest."
+    },
+    {
       "id": "apply-change",
       "endpoint": "/claude",
       "scope": "branch",
