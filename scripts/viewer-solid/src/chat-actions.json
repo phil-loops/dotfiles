@@ -7,7 +7,7 @@
       "scope": "branch",
       "confirm": false,
       "label": "What merges next?",
-      "describe": "Read-only navigation: show which branch(es) in THIS branch's forest can merge into main right now, in canonical order, and what's clear next. Offer when the user asks what comes next, which branch lands next, or where this branch sits in the merge order. params: none.",
+      "describe": "Read-only navigation: returns the LIVE, server-computed merge-readiness of this branch's forest — which branches have an open PR vs are clear to merge into main right now, in canonical order. This is state you CANNOT infer from the diff (it checks real PRs), so offer it whenever the user asks what comes next / which branch lands next / where this sits in the merge order — even if you can sketch the structure yourself, the button adds the current PR + mergeable status you don't have. params: none.",
       "params": [],
       "body": { "branch": "$branch" }
     },
