@@ -1,10 +1,10 @@
 #!/bin/zsh
-# SwiftBar plugin — blessed: your registered stack-projects, one click to the
-# blessing-ledger review viewer. Click a project → reuse-or-start the server and
-# open it. The menu-bar "stuff to review later" list.
+# SwiftBar plugin — blessed: menu-bar launcher for the blessing-ledger review viewer.
+# Three verbs — Start (background, no browser), Start + open in Chrome, and the loops
+# API Postman console (:7070). The badge ✦ is green when the viewer is live, grey when down.
 #
-# <bitbar.title>blessed projects</bitbar.title>
-# <bitbar.desc>Registered stack-projects; click one to open the blessing-ledger viewer.</bitbar.desc>
+# <bitbar.title>blessed viewer launcher</bitbar.title>
+# <bitbar.desc>Start/open the blessing-ledger viewer, or the loops API Postman console.</bitbar.desc>
 # <bitbar.author>phil</bitbar.author>
 # <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
@@ -19,55 +19,52 @@ repo="$HOME/coding/loops"
 # the liveness check pings where the server actually binds (per-repo, not the legacy :62333).
 port="$("$HOME/.dotfiles/scripts/stack-review-port" "$repo" 2>/dev/null || echo 62333)"
 base="http://127.0.0.1:${port}"
+serve="$HOME/.dotfiles/scripts/stack-review-serve"
+postman="$HOME/.dotfiles/scripts/loops-postman"
+spec="$repo/public/openapi.json"   # local spec → unreleased endpoints too
+pmport=7070; pmbase="http://127.0.0.1:${pmport}"
 
-# --- click action: open <project> (no arg → the project picker) ----------------------
-# stack-review-serve reuses a live server or starts one detached, then opens the URL.
-# Detach (nohup + subshell) so it survives SwiftBar reaping the click process.
-if [[ "$1" == "--open" ]]; then
-  ( cd "$repo" && nohup "$HOME/.dotfiles/scripts/stack-review-serve" "${2:-}" >/dev/null 2>&1 </dev/null & )
-  open -g "swiftbar://refreshplugin?name=blessed" 2>/dev/null
-  exit 0
-fi
+poke() { open -g "swiftbar://refreshplugin?name=blessed" 2>/dev/null; }
+# Detach (nohup + subshell) so the server survives SwiftBar reaping the click process.
+bg()   { ( cd "$repo" && nohup "$@" >/dev/null 2>&1 </dev/null & ); }
+
+# --- click actions -------------------------------------------------------------------
+case "${1:-}" in
+  --open)        # reuse-or-start the viewer AND open it (no arg → project picker)
+    bg "$serve" "${2:-}"; poke; exit 0 ;;
+  --start)       # full build + serve in the background, no browser
+    bg "$serve" --no-open; poke; exit 0 ;;
+  --restart)     # bounce the server, stay in the background
+    lsof -ti "tcp:${port}" 2>/dev/null | xargs kill 2>/dev/null
+    bg "$serve" --no-open; poke; exit 0 ;;
+  --postman)     # the API console. Warm (:7070 answers) → just focus it. Cold → fire it and return;
+    # `serve` opens the browser itself from its listen callback, so nobody has to guess startup time.
+    if curl -sf --max-time 1 "$pmbase" >/dev/null 2>&1; then
+      open "$pmbase"
+    else
+      ( nohup "$postman" serve --spec "$spec" >/dev/null 2>&1 </dev/null & )
+    fi
+    poke; exit 0 ;;
+esac
 
 # --- render the menu -----------------------------------------------------------------
 up=0; curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && up=1
-# unique project names from stack-project.<name>.branch (multivar → dedupe).
-# build only when non-empty — `("${(@f)$(empty)}")` is a 1-elem empty array, not empty.
-projects=()
-plist=$(git -C "$repo" config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null \
-  | sed -E 's/^stack-project\.(.*)\.branch .*/\1/' | sort -u)
-# drop archived projects (stack-project.<name>.archived=true) — kept registered,
-# just hidden here and in the chooser; `loops stack unarchive <name>` restores.
-# Read every archived flag in ONE git call — a `git config --bool` per project was O(N)
-# subprocess spawns and dominated the menu's open latency (refreshOnOpen re-runs this).
-if [[ -n "$plist" ]]; then
-  typeset -A archived
-  while IFS= read -r line; do
-    [[ "${line##* }" == "true" ]] || continue
-    name=${line%.archived *}; archived[${name#stack-project.}]=1
-  done < <(git -C "$repo" config --get-regexp '^stack-project\..*\.archived$' 2>/dev/null)
-  plist=$(while IFS= read -r n; do
-    [[ -z "$n" || -n "${archived[$n]}" ]] && continue
-    echo "$n"
-  done <<< "$plist")
-fi
-[[ -n "$plist" ]] && projects=("${(@f)plist}")
-n=${#projects}
 
-echo "✦ ${n}"            # menu-bar badge: number of registered projects
+# menu-bar badge: ✦ tinted green when the viewer is live, grey when it's down
+if (( up )); then
+  echo "✦ | color=#3fb950"
+else
+  echo "✦ | color=#8b949e"
+fi
 echo "---"
 if (( up )); then
-  echo "● viewer live · :${port} | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
+  echo "● viewer live · :${port} — open | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
+  echo "↻ Restart (background) | bash=\"$self\" param1=--restart terminal=false"
 else
-  echo "○ viewer down — click to launch | color=#d36a36 bash=\"$self\" param1=--open terminal=false"
+  echo "○ viewer down | color=#8b949e"
+  echo "▷ Start (background) | bash=\"$self\" param1=--start terminal=false"
+  echo "▷ Start + open in Chrome | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
 fi
-echo "---"
-if (( n == 0 )); then
-  echo "no stack projects registered | color=gray"
-else
-  for p in "${projects[@]}"; do
-    [[ -n "$p" ]] && echo "✦ ${p} | bash=\"$self\" param1=--open param2=${p} terminal=false"
-  done
-fi
+echo "⚡ Postman console · :${pmport} | bash=\"$self\" param1=--postman terminal=false"
 echo "---"
 echo "Refresh | refresh=true"
