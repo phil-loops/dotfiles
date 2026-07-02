@@ -5,6 +5,49 @@
 # HOUSE_STYLE points Claude at this repo's own CLAUDE.md conventions, so an answer
 # lands at the bar Phil reviews to — not generic senior-engineer advice.
 
+import json
+import os
+
+# The read-only chat stays read-only, but it can OFFER actions the viewer runs on a click.
+# The menu lives in ONE file (viewer-solid/src/chat-actions.json) that the frontend also reads
+# to dispatch the button — so what we teach here and what the click does can't drift.
+_ACTIONS_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "viewer-solid", "src", "chat-actions.json"
+)
+
+
+def _load_actions():
+    with open(_ACTIONS_PATH) as f:
+        return json.load(f).get("actions", [])
+
+
+# The paragraph that teaches Claude the action vocabulary, filtered to this chat's scope ("file"
+# chats get file+branch actions; "branch" chats get branch-only). Returns "" when nothing applies,
+# so a scope with no actions adds no noise.
+def action_menu(scope):
+    usable = [a for a in _load_actions() if a.get("scope") == "branch" or scope == "file"]
+    if not usable:
+        return ""
+    lines = [
+        "You can OFFER the user an action as a clickable button — this is how a suggestion of "
+        "yours gets executed, since you yourself stay read-only. To offer one, emit a fenced code "
+        "block whose language is `loops-action` holding a single JSON object: "
+        '{"action": "<id>", "label": "<short button text>", "params": {...}}. '
+        "Put it AFTER the prose that explains why. These are the ONLY actions — never invent an id:",
+    ]
+    for a in usable:
+        ps = a.get("params", [])
+        param_note = (
+            " — params: " + ", ".join(f"{p['name']} ({p['desc']})" for p in ps) if ps else ""
+        )
+        lines.append(f"- `{a['id']}`: {a['describe']}{param_note}")
+    lines.append(
+        "Offer an action only when it is clearly the next step, at most two or three at once, and "
+        "never fabricate one you're unsure applies. The user clicks to run it; you cannot run it."
+    )
+    return "\n".join(lines)
+
+
 HOUSE_STYLE = (
     "Hold this repo's CLAUDE.md conventions as the bar when you judge the diff: comments "
     "default to zero (a comment must be misleading-without-it, never just nice-to-have); "
@@ -31,6 +74,7 @@ def file_chat(branch, path, patch, question):
         "```",
         "",
         _REVIEW_VOICE,
+        action_menu("file"),
         "",
         f"Question: {question}",
     ])
@@ -49,6 +93,7 @@ def branch_chat(branch, patch, question):
         "```",
         "",
         _REVIEW_VOICE,
+        action_menu("branch"),
         "",
         f"Question: {question}",
     ])

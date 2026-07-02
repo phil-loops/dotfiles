@@ -1,0 +1,65 @@
+{
+  "_doc": "The ONE registry of actions the read-only ✦ chat may offer as buttons. Both sides read this file: srv/prompts.py teaches Claude the menu from it, and src/chatActions.ts dispatches a clicked button from it — so the taught vocabulary and the wired dispatch can never drift. The chat itself stays read-only (Read/Grep/Glob); an action is a PROPOSAL the viewer renders and the human clicks to run against an endpoint that already exists.",
+  "actions": [
+    {
+      "id": "set-purpose",
+      "endpoint": "/purpose",
+      "scope": "branch",
+      "confirm": false,
+      "label": "Set branch purpose",
+      "describe": "Save a one-line purpose as this branch's git description. Offer it when you can state, in plain language, what the branch is for.",
+      "params": [{ "name": "text", "desc": "the one-line purpose in plain language — what the branch does, not how it's coded" }],
+      "body": { "branch": "$branch", "text": "$text" }
+    },
+    {
+      "id": "bless-file",
+      "endpoint": "/bless",
+      "scope": "file",
+      "confirm": false,
+      "label": "Bless this file",
+      "describe": "Mark the file under review as blessed. Offer it only in a file-scoped chat when the file's change looks correct and complete.",
+      "params": [],
+      "body": { "branch": "$branch", "file": "$path" }
+    },
+    {
+      "id": "squash",
+      "endpoint": "/squash",
+      "scope": "branch",
+      "confirm": true,
+      "label": "Squash to working tree",
+      "describe": "Collapse the branch's parent..branch history into unstaged working-tree changes (Phil writes the commit himself). Offer when the branch has messy WIP commits worth flattening.",
+      "params": [],
+      "body": { "branch": "$branch" }
+    },
+    {
+      "id": "prep-to-merge",
+      "endpoint": "/prep",
+      "scope": "branch",
+      "confirm": true,
+      "label": "Prep to merge",
+      "describe": "Squash the whole branch into one clean, formatted commit for a single-commit PR. Offer when the branch is ready to ship.",
+      "params": [],
+      "body": { "branch": "$branch" }
+    },
+    {
+      "id": "restack",
+      "endpoint": "/sync",
+      "scope": "branch",
+      "confirm": true,
+      "label": "Restack onto origin/main",
+      "describe": "Rebase this unpublished root branch onto fresh origin/main. Offer when the branch has fallen behind main.",
+      "params": [],
+      "body": { "branch": "$branch" }
+    },
+    {
+      "id": "apply-change",
+      "endpoint": "/claude",
+      "scope": "file",
+      "confirm": true,
+      "label": "Apply this change",
+      "describe": "Hand a specific, concrete edit to a full (editing) Claude running in the branch's worktree — this is how a read-only suggestion gets executed. Offer only in a file-scoped chat, and only when you can state the exact change as a precise instruction.",
+      "params": [{ "name": "instruction", "desc": "a precise, self-contained instruction describing the edit to make to this file" }],
+      "body": { "branch": "$branch", "selections": [{ "path": "$path" }], "instruction": "$instruction" }
+    }
+  ]
+}
