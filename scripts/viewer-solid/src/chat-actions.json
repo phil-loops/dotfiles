@@ -1,13 +1,51 @@
 {
-  "_doc": "The ONE registry of actions the read-only ✦ chat may offer as buttons. Both sides read this file: srv/prompts.py teaches Claude the menu from it, and src/chatActions.ts dispatches a clicked button from it — so the taught vocabulary and the wired dispatch can never drift. The chat itself stays read-only (Read/Grep/Glob); an action is a PROPOSAL the viewer renders and the human clicks to run against an endpoint that already exists.",
+  "_doc": "The ONE registry of actions the read-only ✦ chat may offer as buttons. Both sides read this file: srv/prompts.py teaches Claude the menu from it, and src/chatActions.ts dispatches a clicked button from it — so the taught vocabulary and the wired dispatch can never drift. The chat itself stays read-only (Read/Grep/Glob); an action is a PROPOSAL the viewer renders and the human clicks to run against an endpoint that already exists. The editing actions (apply-change/add-file/reforest) all POST /claude — they hand a task the chat composed to a full editing Claude in the branch's worktree, which is how a read-only suggestion turns into real work.",
   "actions": [
+    {
+      "id": "apply-change",
+      "endpoint": "/claude",
+      "scope": "branch",
+      "confirm": true,
+      "label": "Apply this change",
+      "describe": "Hand a specific edit to an editing Claude in the branch's worktree — this is how your suggestion actually gets made. Offer whenever you've described a concrete change to an existing file. params: file (the file to edit; in a file chat, the file you're viewing), instruction (the exact change to make).",
+      "params": [
+        { "name": "file", "desc": "path of the file to edit" },
+        { "name": "instruction", "desc": "a precise, self-contained instruction describing the edit" }
+      ],
+      "body": { "branch": "$branch", "selections": [{ "path": "$file" }], "instruction": "$instruction" }
+    },
+    {
+      "id": "add-file",
+      "endpoint": "/claude",
+      "scope": "branch",
+      "confirm": true,
+      "label": "Add this file",
+      "describe": "Create a NEW file via an editing Claude in the worktree — most often a missing test. Offer when the change lacks a file it clearly should have. params: file (the new file's path), instruction (what it should contain).",
+      "params": [
+        { "name": "file", "desc": "path of the new file to create" },
+        { "name": "instruction", "desc": "what the new file should contain (e.g. the test cases to write, and for what)" }
+      ],
+      "body": { "branch": "$branch", "selections": [{ "path": "$file" }], "instruction": "$instruction" }
+    },
+    {
+      "id": "reforest",
+      "endpoint": "/claude",
+      "scope": "branch",
+      "confirm": true,
+      "label": "Reforest this branch",
+      "describe": "Hand the whole branch to an editing Claude to split it into a reviewable stacked forest — single-capability branches, each with its parent/purpose set, fanning in where an integrator needs several bases (the repo's forest conventions, which that Claude reads). Offer when the branch bundles several independent capabilities into one fat change. params: instruction (how to split it — name the capabilities you'd separate).",
+      "params": [
+        { "name": "instruction", "desc": "how to split the branch into a forest — the capabilities to separate, in plain language" }
+      ],
+      "body": { "branch": "$branch", "selections": [{ "path": "." }], "instruction": "$instruction" }
+    },
     {
       "id": "set-purpose",
       "endpoint": "/purpose",
       "scope": "branch",
       "confirm": false,
       "label": "Set branch purpose",
-      "describe": "Save a one-line purpose as this branch's git description. Offer it when you can state, in plain language, what the branch is for.",
+      "describe": "Save a one-line purpose as this branch's git description. Offer ONLY when the branch appears to have no purpose yet, or the user is explicitly asking about the branch's intent — never as a generic follow-up to an unrelated answer. params: text (the one-line purpose in plain language — what the branch does, not how it's coded).",
       "params": [{ "name": "text", "desc": "the one-line purpose in plain language — what the branch does, not how it's coded" }],
       "body": { "branch": "$branch", "text": "$text" }
     },
@@ -17,7 +55,7 @@
       "scope": "file",
       "confirm": false,
       "label": "Bless this file",
-      "describe": "Mark the file under review as blessed. Offer it only in a file-scoped chat when the file's change looks correct and complete.",
+      "describe": "Mark the file under review as blessed. Offer only in a file-scoped chat when the file's change looks correct and complete.",
       "params": [],
       "body": { "branch": "$branch", "file": "$path" }
     },
@@ -50,16 +88,6 @@
       "describe": "Rebase this unpublished root branch onto fresh origin/main. Offer when the branch has fallen behind main.",
       "params": [],
       "body": { "branch": "$branch" }
-    },
-    {
-      "id": "apply-change",
-      "endpoint": "/claude",
-      "scope": "file",
-      "confirm": true,
-      "label": "Apply this change",
-      "describe": "Hand a specific, concrete edit to a full (editing) Claude running in the branch's worktree — this is how a read-only suggestion gets executed. Offer only in a file-scoped chat, and only when you can state the exact change as a precise instruction.",
-      "params": [{ "name": "instruction", "desc": "a precise, self-contained instruction describing the edit to make to this file" }],
-      "body": { "branch": "$branch", "selections": [{ "path": "$path" }], "instruction": "$instruction" }
     }
   ]
 }
