@@ -18,6 +18,8 @@ type Proc = {
   age: string;
   project?: string;
   repo?: string;
+  working?: boolean;
+  count?: number;
 };
 
 const GLYPH: Record<string, string> = { chat: "✦", restack: "⟳", claude: "◆" };
@@ -29,7 +31,16 @@ export function Activity() {
     refetchInterval: 3000,
   }));
   const procs = () => q.data ?? [];
-  const running = () => procs().filter((p) => !p.done).length;
+  // the chip counts agents that are actually WORKING, not merely alive — a claude parked at its
+  // prompt for hours shouldn't inflate the number (that was the "random shit").
+  const running = () => procs().filter((p) => p.working !== false && !p.done).length;
+  // working first, then idle-but-alive, then done — the noisy stale rows sink to the bottom.
+  const rows = () =>
+    [...procs()].sort(
+      (a, b) =>
+        Number(a.done) - Number(b.done) ||
+        Number(b.working !== false) - Number(a.working !== false)
+    );
   // Collapsed to a count chip by default — an always-expanded list over every route reads as
   // noise; the ambient "something's running" signal is worth one glance-able dot, the detail is
   // opt-in on click.
@@ -53,11 +64,14 @@ export function Activity() {
         </button>
         <Show when={open()}>
           <div class="activity-list">
-            <For each={procs()}>
+            <For each={rows()}>
               {(p) => (
-                <div class="activity-row" classList={{ done: p.done, bad: p.ok === false }}>
+                <div class="activity-row" classList={{ done: p.done, bad: p.ok === false, idle: p.working === false }}>
                   <span class="glyph" data-kind={p.kind}>{GLYPH[p.kind] ?? "•"}</span>
                   <span class="label" title={`${p.kind} · ${p.target}`}>{p.label}</span>
+                  <Show when={(p.count ?? 1) > 1}>
+                    <span class="mult" title="two agents on one branch — probable duplicate spawn">×{p.count}</span>
+                  </Show>
                   <span class="status">{p.status}</span>
                   <Show when={p.kind === "chat"}>
                     <span class="detail">{p.detail}</span>

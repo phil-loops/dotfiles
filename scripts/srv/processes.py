@@ -37,6 +37,7 @@ def list_all(req):
             "status": "done" if j.done else j.status,
             "detail": f"{j.chars} chars",
             "done": j.done, "ok": j.ok, "age": _age(j.created),
+            "working": not j.done, "count": 1,
         })
 
     # restack drivers — a rebase walking a forest (Hearth alarms on tangles; this just lists them)
@@ -46,16 +47,20 @@ def list_all(req):
             "label": d["project"] or "all projects",
             "target": d["project"], "status": d["mode"],
             "detail": d["etime"].strip(), "done": False, "age": d["etime"].strip(),
+            "working": True, "count": 1,
         })
 
     # fired agents — every launcher registers itself when it spawns (agents.live()), so a new fire
-    # path can't go missing without any tmux/pgrep discovery. kind=resolver renders "resolving".
+    # path can't go missing without any tmux/pgrep discovery. Each carries a heartbeat (working?)
+    # and is deduped per branch; an idle-but-alive agent reads "idle", not "editing".
     for a in agents.live():
+        working = a.get("working", True)
         procs.append({
             "kind": "claude", "id": str(a["pid"]),
             "label": a["branch"] or a["kind"], "target": a["branch"], "repo": a.get("repo", ""),
-            "status": "resolving" if a["kind"] == "resolver" else "editing",
-            "detail": a["etime"], "done": False, "age": a["age"],
+            "status": ("resolving" if a["kind"] == "resolver" else "editing") if working else "idle",
+            "detail": a["etime"], "done": False, "age": a["age"] if working else a.get("idle_age", a["age"]),
+            "working": working, "count": a.get("count", 1),
         })
 
     procs.sort(key=lambda p: (p.get("done", False),))
