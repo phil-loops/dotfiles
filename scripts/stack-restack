@@ -90,6 +90,8 @@ typeset -ga CONTRACTED
 CONTRACTED=()
 typeset -ga SKIPPED_PUBLISHED
 SKIPPED_PUBLISHED=()
+typeset -ga FAILED_REBASE
+FAILED_REBASE=()
 # Auto-resolve conflicts via headless claude (conservative bar). On by default;
 # --no-claude reverts to the old behavior (pause + manual resolve + --continue).
 USE_CLAUDE=1
@@ -718,7 +720,8 @@ clear_state() {
 journal() {
   local n=${COMPLETED+${#COMPLETED[@]}}
   local s=${SKIPPED_PUBLISHED+${#SKIPPED_PUBLISHED[@]}}
-  print -r -- "$(date +%s) ${PROJECT} $1 rebased=${n:-0} skipped=${s:-0} current=${CURRENT:-}" \
+  local f=${FAILED_REBASE+${#FAILED_REBASE[@]}}
+  print -r -- "$(date +%s) ${PROJECT} $1 rebased=${n:-0} skipped=${s:-0} failed=${f:-0} current=${CURRENT:-}" \
     >> "${GIT_COMMON_DIR}/stack-restack-journal" 2>/dev/null || true
 }
 
@@ -1118,6 +1121,17 @@ EOF
     exit 1
   done
 
+  # A REFUSED rebase (dirty worktree, branch held by another checkout) leaves the tip
+  # untouched and prints only git's error — without this gate the walk marks the branch
+  # done and freezes a .base it never landed on (the stale-.base squash trap).
+  if ! git merge-base --is-ancestor "$PARENT_NAME" "$BRANCH" 2>/dev/null; then
+    echo "  ⚠ ${BRANCH} did not land on ${PARENT_NAME} — rebase refused (dirty or held worktree?); NOT marked done"
+    FAILED_REBASE+=("$BRANCH")
+    CURRENT=""
+    save_state
+    continue
+  fi
+
   # The rebase finished — but did it stay within the branch's own footprint?
   if ! restack_sanity_check "$REBASE_DIR" "$BRANCH" "$PARENT_NAME" "$OLD_PARENT_SHA" "${SNAPSHOT[$BRANCH]:-}"; then
     escalate_footprint "$BRANCH" "$REBASE_DIR" "$PARENT_NAME" "$OLD_PARENT_SHA"
@@ -1287,6 +1301,9 @@ echo "✓ Restack of ${PROJECT} complete."
 echo "  rebased: ${#COMPLETED[@]} branches"
 if (( ${#SKIPPED_PUBLISHED[@]} > 0 )); then
   echo "  left published branches alone: ${SKIPPED_PUBLISHED[*]}"
+fi
+if (( ${#FAILED_REBASE[@]} > 0 )); then
+  echo "  ⚠ NOT rebased (refused): ${FAILED_REBASE[*]}"
 fi
 if (( ${#TO_DROP[@]} > 0 )); then
   echo "  dropped: ${#TO_DROP[@]} branches"
