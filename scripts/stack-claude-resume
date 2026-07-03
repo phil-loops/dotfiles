@@ -14,6 +14,7 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 SESSION="${STACK_CLAUDE_TMUX:-${STACK_OPEN_TMUX:-loops}}"
+here="${0:A:h}"
 
 sid="${1:?usage: stack-claude-resume <session-id> <cwd> <branch> [<target>]}"
 dir="${2:?usage: stack-claude-resume <session-id> <cwd> <branch> [<target>]}"
@@ -68,8 +69,9 @@ if [[ -z "$target" || "$target" == "new" ]]; then
   if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
     print -r -- "DRY: tmux new-window -t $SESSION -n $win -c $dir '$cmd'"; exit 0
   fi
-  tmux new-window -t "$SESSION" -n "$win" -c "$dir" "$cmd" \
+  panepid=$(tmux new-window -t "$SESSION" -n "$win" -c "$dir" -PF '#{pane_pid}' "$cmd") \
     || { print -u2 "stack-claude-resume: couldn't open a tmux window (is the '$SESSION' session running?)"; exit 1; }
+  [[ -x "$here/agent-register" ]] && "$here/agent-register" chat-popout "$branch" "$panepid" "" "$dir" 2>/dev/null || true
   surface "$SESSION:$win"
   print -r -- "resumed $sid in a new window ($SESSION:$win) at $dir"
 else
@@ -79,8 +81,10 @@ else
   if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
     print -r -- "DRY: tmux split-window -t $target -c $dir '$cmd'"; exit 0
   fi
-  pane=$(tmux split-window -t "$target" -c "$dir" -P -F '#{pane_id}' "$cmd") \
+  out=$(tmux split-window -t "$target" -c "$dir" -P -F '#{pane_id} #{pane_pid}' "$cmd") \
     || { print -u2 "stack-claude-resume: couldn't split window '$target'"; exit 1; }
+  pane="${out%% *}"
+  [[ -x "$here/agent-register" ]] && "$here/agent-register" chat-popout "$branch" "${out##* }" "" "$dir" 2>/dev/null || true
   tmux select-pane -t "$pane" 2>/dev/null || true
   surface "$target"
   print -r -- "resumed $sid as a new pane in $target at $dir"

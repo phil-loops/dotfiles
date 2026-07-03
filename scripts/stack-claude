@@ -43,9 +43,10 @@ session_flag=""; [[ -n "$sid" ]] && session_flag="--session-id $sid "
 
 # Build (or refresh) the branch's worktree exactly the way file-open does, then resolve
 # its path the same way: a real worktree holding the branch wins, else the scratch dir.
+# || true: awk's early exit SIGPIPEs the still-writing producer (141 under pipefail).
 "$here/stack-open" --prepare "$branch"
 dir=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" '
-  /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}')
+  /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}') || true
 [[ -n "$dir" ]] || dir="$SCRATCH/${branch//\//_}"
 [[ -d "$dir" ]] || { print -u2 "stack-claude: no worktree for $branch at $dir"; exit 1; }
 
@@ -60,8 +61,10 @@ if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
   exit 0
 fi
 
-tmux new-window -t "$SESSION" -n "$win" -c "$dir" -e "STACK_CLAUDE_PROMPT=$prompt" \
-  "claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL" \
+panepid=$(tmux new-window -t "$SESSION" -n "$win" -c "$dir" -PF '#{pane_pid}' -e "STACK_CLAUDE_PROMPT=$prompt" \
+  "claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL") \
   || { print -u2 "stack-claude: couldn't open a tmux window (is the '$SESSION' session running?)"; exit 1; }
+repo=$(basename "$(dirname "$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null) || repo=""
+[[ -x "$here/agent-register" ]] && "$here/agent-register" claude "$branch" "$panepid" "$repo" "$dir" 2>/dev/null || true
 tmux select-window -t "$SESSION:$win" 2>/dev/null || true
 print -r -- "started claude on $branch in $dir${sid:+ (session $sid)}"
