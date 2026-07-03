@@ -128,6 +128,20 @@
 .activity-row.done .glyph {
   color: var(--ink-faint);
 }
+/* alive but parked at its prompt — dimmed, and its glyph loses the ember so it reads as at-rest. */
+.activity-row.idle {
+  opacity: 0.5;
+}
+.activity-row.idle .glyph {
+  color: var(--ink-faint);
+}
+/* ×N — two agents on one branch (probable duplicate spawn), flagged like a Hearth tangle. */
+.activity-row .mult {
+  flex: 0 0 auto;
+  color: var(--ember);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
 .activity-row.bad .glyph {
   color: var(--del);
 }
