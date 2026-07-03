@@ -43,6 +43,10 @@ git until they approve.
 - **Independent capabilities fork off `main` as siblings** — each its own base, independently
   mergeable. Only **chain** (set a non-main `parent`) on a *real* compile dependency. Integrators
   **fan in** via `requires`. Fan-in is the default; justify every chain. When unsure, split more.
+- **Query and model branches must carry tests** — a query branch ships with its query tests (real
+  DB, `createX` factories) and a model branch with its model tests (DI + `t.mock.fn()`), co-located.
+  A query/model branch without tests is mis-scoped the same way a non-compiling base is — plan the
+  tests into the branch, don't defer them to a later PR.
 - For each branch decide its `parent` (git rebase base) and any `requires` (fan-in deps it carries).
 
 ## 3 · Write plain purposes
@@ -89,9 +93,10 @@ Desktop concurrently). Walk the branches in dependency order; per branch:
   independent base). The parent relationship is implicit in the fork point.
 - Move the work onto it: cherry-pick the relevant commits, or `git restore -p` / `git checkout -p`
   the capability's hunks from the source, then commit (clean, single-purpose commit; no
-  Co-Authored-By; never amend). Each **base must compile on its own** — typecheck/build it
-  (`./node_modules/.bin/tsgo …` / `task`) before moving on. A base that won't compile alone is
-  mis-split — re-cut it.
+  Co-Authored-By; never amend). Each **base must compile on its own** — typecheck it
+  (`npx tsc --project tsconfig.node.json --noEmit`) before moving on. A base that won't compile
+  alone is mis-split — re-cut it. For query/model branches, run their tests too — untested
+  queries/models don't leave this step.
 - Set its config in the **same motion** (the forest config is hand-maintained; the viewer reads it):
   - `git config branch.<branch>.description "<purpose>"`
   - `git config stack-branch.<branch>.parent <parent>`
@@ -110,4 +115,5 @@ moment to delete narration that survived the first pass.
 - Plan before surgery; explicit approval before any git move.
 - Worktree, not the main checkout. No push, no PRs.
 - A base that doesn't compile on its own is mis-split — re-cut, don't ship.
+- Query and model branches ship with their tests — no test-less query/model PRs.
 - More small independently-mergeable bases beats one fused branch. When unsure, split.
