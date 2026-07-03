@@ -93,12 +93,19 @@ def _gh_pr(num):
         return None
 
 
+def _is_trunk(branch):
+    # A trunk anchor: an approved-but-unmerged node the forest treats as its base
+    # (stack-branch.<b>.trunk=true). Set/cleared via POST /trunk; dies with the branch.
+    return ctx.run(["git", "config", "--bool", f"stack-branch.{branch}.trunk"]).stdout.strip() == "true"
+
+
 def _base_of(branch):
-    # The ref a branch is measured for freshness against — and, later, rebased onto. Every mergeable
-    # root sits on origin/main today, so that's what this returns. It exists as the ONE seam so a
-    # forest's trunk anchor (an approved-but-unmerged node the forest treats as its base) can
-    # override main in a single place, instead of `origin/main` being hardcoded across freshness
-    # and restack. No behavior change yet — every branch's base is still origin/main.
+    # The ref a branch is measured for freshness against — and, later, rebased onto. A trunk anchor
+    # is frozen (approved, merges as-is), so it's measured against ITSELF → never "behind main," and
+    # later never rebased onto main (its descendants rebase onto it instead). Everything else sits on
+    # origin/main. This is the ONE seam so trunk overrides main in a single place, not scattered.
+    if _is_trunk(branch):
+        return branch
     return "origin/main"
 
 
@@ -230,6 +237,19 @@ def whats_next(req, raw):
                                       "candidates": candidates, "summary": summary}))
 
 
+def set_trunk(req, raw):   # POST /trunk {branch, on} — mark/unmark a branch as its forest's trunk anchor
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    on = d.get("on", True)
+    key = f"stack-branch.{branch}.trunk"
+    if on:
+        ctx.run(["git", "config", key, "true"])
+    else:
+        ctx.run(["git", "config", "--unset", key])
+    req._send(200, json.dumps({"ok": True, "branch": branch, "trunk": bool(on),
+                               "summary": f"“{branch}” is {'now the forest trunk — measured against itself, not main' if on else 'no longer the forest trunk'}."}))
+
+
 # --- GET handlers ---
 
 def prs(req):
@@ -297,6 +317,7 @@ def _projects_for(name, path):
         p["overlap"] = any(fresh[b][1] for b in bs)
         p["merged"] = merges.get(p["name"])
         branches = members.get(p["name"]) or bs
+        p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
         p["interest"] = max((interest.get(b, 0) for b in branches), default=0)
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
