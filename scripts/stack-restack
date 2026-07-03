@@ -90,6 +90,8 @@ typeset -ga CONTRACTED
 CONTRACTED=()
 typeset -ga SKIPPED_PUBLISHED
 SKIPPED_PUBLISHED=()
+typeset -ga SKIPPED_TRUNK
+SKIPPED_TRUNK=()
 typeset -ga FAILED_REBASE
 FAILED_REBASE=()
 # Auto-resolve conflicts via headless claude (conservative bar). On by default;
@@ -1029,6 +1031,16 @@ while (( ${#PENDING[@]} > 0 )); do
   BRANCH="${PENDING[1]}"
   PENDING=("${PENDING[@]:1}")
 
+  # A trunk anchor (stack-branch.<b>.trunk=true) is an approved-but-unmerged node the forest treats
+  # as its base, like main: never rebase it (that rewrites approved history + needs a force-push).
+  # Its children still rebase onto it below — its tip doesn't move, so SNAPSHOT[it]==current makes
+  # their `rebase --onto it it` a clean no-op when already stacked, or catches a stale child up.
+  if [[ "$(git config --bool "stack-branch.${BRANCH}.trunk" 2>/dev/null || true)" == "true" ]]; then
+    echo "  ❄ ${BRANCH} is the forest trunk (approved base) — frozen, not rebased; children rebase onto it"
+    SKIPPED_TRUNK+=("$BRANCH")
+    continue
+  fi
+
   if [[ "$OPEN_PR_HEADS" == *" $BRANCH "* ]]; then
     echo "  ⤼ ${BRANCH} left alone — open PR (published history); STACK_RESTACK_REWRITE_PUBLISHED=1 to rewrite deliberately"
     SKIPPED_PUBLISHED+=("$BRANCH")
@@ -1299,6 +1311,9 @@ journal done
 echo ""
 echo "✓ Restack of ${PROJECT} complete."
 echo "  rebased: ${#COMPLETED[@]} branches"
+if (( ${#SKIPPED_TRUNK[@]} > 0 )); then
+  echo "  froze trunk anchors (approved bases): ${SKIPPED_TRUNK[*]}"
+fi
 if (( ${#SKIPPED_PUBLISHED[@]} > 0 )); then
   echo "  left published branches alone: ${SKIPPED_PUBLISHED[*]}"
 fi
