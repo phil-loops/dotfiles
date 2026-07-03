@@ -1,0 +1,15 @@
+#!/usr/bin/env zsh
+# agent-register <kind> <branch> <pid> [<repo>] [<worktree>] — record a spawned background agent
+# for the viewer's Activity dock (/processes). Launching an agent and registering it are the SAME
+# motion, so a new fire path physically can't go missing from the dock — the reader (srv/agents.py
+# live()) reaps dead / pid-reused records. Canonical record shape is owned by srv/agents.py; the
+# python register() writes the identical thing for its Popen paths. Keep the two in lockstep.
+set -eu
+kind=$1; branch=$2; pid=$3; repo=${4:-}; worktree=${5:-}
+dir="$HOME/.claude/agents"; mkdir -p "$dir"
+# lstart is the pid-reuse guard: the reader compares it to the live pid's lstart and reaps on
+# mismatch (a recycled pid). Same guard session-presence uses. No lstart → pid already gone.
+started=$(ps -o lstart= -p "$pid" 2>/dev/null | awk '{$1=$1};1')
+[[ -n $started ]] || exit 0
+printf '{"kind":"%s","branch":"%s","repo":"%s","pid":%s,"started":"%s","worktree":"%s","at":%s}\n' \
+  "$kind" "$branch" "$repo" "$pid" "$started" "$worktree" "$(date +%s)" > "$dir/$pid.json"
