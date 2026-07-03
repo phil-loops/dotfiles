@@ -1,0 +1,122 @@
+/* The Activity dock — a read-only monitor of live background work (chat / restack /
+   claude). Ember marks work-in-motion, mirroring the Hearth; gold is never spent here
+   (blessed only). All tones are the global ledger tokens from index.css. */
+.activity-root {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 40;
+  width: 300px;
+  max-width: calc(100vw - 28px);
+  font-family: var(--mono);
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--vellum-raise);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 12px;
+  background: linear-gradient(90deg, var(--ember-wash), transparent 70%);
+  border: none;
+  border-left: 2px solid var(--ember);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+.activity-head .sig {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  flex: 0 0 auto;
+}
+.activity-head .sig.hot {
+  background: var(--ember);
+  animation: activity-breathe 1.6s ease-in-out infinite;
+}
+.activity-head .lede {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 15px;
+  color: #f0d3b6;
+}
+.activity-head .count {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ink-dim);
+}
+
+.activity-list {
+  border-top: 1px solid var(--rule);
+  max-height: 44vh;
+  overflow: auto;
+}
+.activity-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid rgba(44, 37, 23, 0.5);
+}
+.activity-row:last-child {
+  border-bottom: none;
+}
+.activity-row .glyph {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--ember);
+}
+.activity-row .glyph[data-kind="chat"] {
+  color: var(--patina);
+}
+.activity-row .glyph[data-kind="claude"] {
+  color: var(--ink);
+}
+.activity-row .label {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.activity-row .status {
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+  flex: 0 0 auto;
+}
+.activity-row .detail {
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+.activity-row .age {
+  margin-left: auto;
+  color: var(--ink-faint);
+  flex: 0 0 auto;
+}
+.activity-row.done {
+  opacity: 0.55;
+}
+.activity-row.done .glyph {
+  color: var(--ink-faint);
+}
+.activity-row.bad .glyph {
+  color: var(--del);
+}
+
+@keyframes activity-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-head .sig.hot { animation: none; }
+}
