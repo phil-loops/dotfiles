@@ -93,6 +93,15 @@ def _gh_pr(num):
         return None
 
 
+def _base_of(branch):
+    # The ref a branch is measured for freshness against — and, later, rebased onto. Every mergeable
+    # root sits on origin/main today, so that's what this returns. It exists as the ONE seam so a
+    # forest's trunk anchor (an approved-but-unmerged node the forest treats as its base) can
+    # override main in a single place, instead of `origin/main` being hardcoded across freshness
+    # and restack. No behavior change yet — every branch's base is still origin/main.
+    return "origin/main"
+
+
 def _project_of(branch):
     p = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
     if p:
@@ -259,16 +268,17 @@ def _projects_for(name, path):
     # commits touch files the branch also touches (overlap → a consequential restack vs
     # pure SHA churn). Fanned out through a thread pool (git releases the GIL).
     def _root_fresh(b):
-        n = ctx.run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip()
+        base = _base_of(b)
+        n = ctx.run(["git", "rev-list", "--count", f"{b}..{base}"]).stdout.strip()
         behind = int(n) if n.isdigit() else 0
         overlap = False
         if behind:
-            mb = ctx.run(["git", "merge-base", b, "origin/main"]).stdout.strip()
+            mb = ctx.run(["git", "merge-base", b, base]).stdout.strip()
             if mb:
-                main_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..origin/main"]).stdout.splitlines())
-                if main_files:
+                base_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{base}"]).stdout.splitlines())
+                if base_files:
                     branch_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
-                    overlap = bool(main_files & branch_files)
+                    overlap = bool(base_files & branch_files)
         return behind, overlap
     roots = sorted({b for p in projs for b in p.get("mergeable", [])})
     with ThreadPoolExecutor(max_workers=8, initializer=ctx.set_repo, initargs=(path,)) as ex:
