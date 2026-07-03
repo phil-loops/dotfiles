@@ -37,6 +37,7 @@ import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { Hearth } from "./Hearth";
+import { Activity } from "./Activity";
 import MobilePush from "./MobilePush";
 import type {
   ForestModel,
@@ -223,6 +224,7 @@ function Layout(props: { children?: JSX.Element }) {
       <ChatDrawerHost />
       <CommandPalette />
       <ServerStatus />
+      <Activity />
     </>
   );
 }
