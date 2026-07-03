@@ -19,26 +19,42 @@ def _age(created_sec):
     return f"{s}s" if s < 60 else f"{s // 60}m" if s < 3600 else f"{s // 3600}h"
 
 
+def _live_claude_pid(pane_pid):
+    # A fired claude may BE the pane's foreground process, or run as a CHILD of the pane's shell —
+    # /reconcile and /restack-resolve launch `claude` under zsh, so pane_current_command reads `zsh`
+    # while the agent is very much alive. So liveness is the pane's process tree, not the pane
+    # command: check the pane pid and its direct children for a claude/node. None → a bare shell
+    # (agent finished) → skip. Returns the agent's own pid so etime is its runtime, not the shell's.
+    kids = subprocess.run(["pgrep", "-P", str(pane_pid)], capture_output=True, text=True).stdout.split()
+    for p in (str(pane_pid), *kids):
+        comm = subprocess.run(["ps", "-o", "comm=", "-p", p], capture_output=True, text=True).stdout.strip()
+        if os.path.basename(comm) in ("claude", "node"):
+            return int(p)
+    return None
+
+
 def _fired_claudes():
-    # Fired coding agents — the ask-Claude chip, /reconcile, and /restack-resolve — each run in
-    # a tmux window named `claude:<branch>`. pgrep-ing one script name (stack-claude) missed
-    # reconcile/resolve entirely, so a running agent showed up as nothing. The window name is the
-    # reliable seam. A window whose foreground command is still `claude` is LIVE; once the agent
-    # finishes the pane drops to a shell, so filter on the command to skip spent windows.
-    fmt = "#{window_name}\t#{pane_current_command}\t#{pane_pid}"
+    # Fired coding agents — the ask-Claude chip, /reconcile, and /restack-resolve — each run in a
+    # tmux window named `claude:<branch>`. The window name is the seam; liveness is the pane's
+    # process tree (see _live_claude_pid) — filtering on pane_current_command missed reconcile/
+    # resolve, which run claude under the pane shell, so the exact agents this was meant to surface.
+    fmt = "#{window_name}\t#{pane_pid}"
     out = subprocess.run(["tmux", "list-windows", "-a", "-F", fmt],
                          capture_output=True, text=True).stdout
     by_branch = {}
     for line in out.splitlines():
         parts = line.split("\t")
-        if len(parts) < 3:
+        if len(parts) < 2:
             continue
-        name, cmd, pid = parts[0], parts[1], parts[2]
-        if not name.startswith("claude:") or cmd not in ("claude", "node"):
+        name, pid = parts[0], parts[1]
+        if not name.startswith("claude:") or not pid.isdigit():
             continue
         branch = name[len("claude:"):]
-        if branch and branch not in by_branch and pid.isdigit():
-            by_branch[branch] = int(pid)
+        if not branch or branch in by_branch:
+            continue
+        live = _live_claude_pid(int(pid))
+        if live:
+            by_branch[branch] = live
     if not by_branch:
         return []
     ps = subprocess.run(["ps", "-o", "pid=,etime=", "-p", ",".join(str(p) for p in by_branch.values())],
