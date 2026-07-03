@@ -30,16 +30,25 @@ export function Activity() {
   }));
   const procs = () => q.data ?? [];
   const running = () => procs().filter((p) => !p.done).length;
-  const [open, setOpen] = createSignal(true);
+  // Collapsed to a count chip by default — an always-expanded list over every route reads as
+  // noise; the ambient "something's running" signal is worth one glance-able dot, the detail is
+  // opt-in on click.
+  const [open, setOpen] = createSignal(false);
 
   return (
     <Show when={procs().length > 0}>
-      <div class="activity-root">
-        <button class="activity-head" onClick={() => setOpen(!open())}>
+      <div class="activity-root" classList={{ collapsed: !open() }}>
+        <button
+          class="activity-head"
+          onClick={() => setOpen(!open())}
+          title={open() ? "collapse" : `${running()} background ${running() === 1 ? "process" : "processes"} running — click to expand`}
+        >
           <span class="sig" classList={{ hot: running() > 0 }} />
-          <span class="lede">Activity</span>
+          <Show when={open()}>
+            <span class="lede">Activity</span>
+          </Show>
           <span class="count">
-            {running() > 0 ? `${running()} running` : "idle"}
+            {open() ? (running() > 0 ? `${running()} running` : "idle") : running() > 0 ? running() : ""}
           </span>
         </button>
         <Show when={open()}>

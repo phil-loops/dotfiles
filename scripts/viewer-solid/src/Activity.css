@@ -16,6 +16,25 @@
   overflow: hidden;
 }
 
+/* Collapsed: a small count chip, not a full panel — default state, expands on click. */
+.activity-root.collapsed {
+  width: auto;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+.activity-root.collapsed .activity-head {
+  padding: 6px 12px 6px 11px;
+  gap: 7px;
+  background: var(--vellum-raise);
+  border-left: none;
+}
+.activity-root.collapsed .count {
+  margin-left: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .activity-head {
   display: flex;
   align-items: center;
