@@ -16,6 +16,7 @@ import subprocess
 from urllib.parse import parse_qs
 
 from . import ctx
+from . import agents
 
 
 def _gitdir():
@@ -136,11 +137,10 @@ def _drivers():
 
 
 def _resolvers():
-    # Live headless `claude` conflict-resolvers. >1 on one conflict is the duplicate-spawn
-    # half of the tangle (today three piled up on the same job-status clash).
-    sig = "resolving a git rebase conflict during a stack restack"
-    out = subprocess.run(["pgrep", "-fc", sig], capture_output=True, text=True).stdout.strip()
-    return int(out) if out.isdigit() else 0
+    # Live conflict-resolvers, counted from the agent registry — each registers itself at _spawn
+    # below. >1 on one conflict is the duplicate-spawn half of the tangle. Was a prompt-signature
+    # pgrep (brittle: broke on any reword); now the resolvers register, so this counts their records.
+    return sum(1 for a in agents.live() if a.get("kind") == "resolver")
 
 
 def _state_path():
@@ -208,10 +208,14 @@ def cmd(project, wt, action=None):
     return " ".join(parts) + f" && git -C {shlex.quote(wt)} checkout --detach >/dev/null 2>&1"
 
 
-def _spawn(chain, wt):
+def _spawn(chain, wt, register_kind=None, register_branch=""):
     logpath = os.path.join(ctx.ROOT, "restack.log")
     with open(logpath, "ab") as lf:
-        subprocess.Popen(["zsh", "-c", chain], cwd=wt, stdout=lf, stderr=lf)
+        proc = subprocess.Popen(["zsh", "-c", chain], cwd=wt, stdout=lf, stderr=lf)
+    # a resolver handoff spawns its claude with no tmux window, so it registers itself here — that's
+    # how /processes surfaces the agent (the reaper walks this pid's tree to confirm it's live).
+    if register_kind:
+        agents.register(register_kind, register_branch, proc.pid, worktree=wt)
     return logpath
 
 
@@ -306,7 +310,7 @@ def resolve(req, raw):
         return
     wt = worktree()
     action = {"diagnose": "diagnose", "discard": "discard"}.get(mode, "handoff")
-    logpath = _spawn(cmd(project, wt, action=action), wt)
+    logpath = _spawn(cmd(project, wt, action=action), wt, register_kind="resolver", register_branch=project)
     req._send(200, json.dumps({"ok": True, "project": project, "mode": mode, "log": logpath}))
 
 

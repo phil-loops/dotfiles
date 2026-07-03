@@ -12,6 +12,7 @@ import time
 from . import ctx
 from . import chat
 from . import restack
+from . import agents
 
 
 def _age(created_sec):
@@ -120,16 +121,31 @@ def list_all(req):
             "detail": d["etime"].strip(), "done": False, "age": d["etime"].strip(),
         })
 
-    # fired claudes — coding agents in worktrees, otherwise invisible in the viewer
-    for f in _fired_claudes():
+    # fired agents — the registration seam (agents.live) is the source of truth: every launcher
+    # drops a record when it spawns, so a new fire path can't go missing. The old tmux/pgrep
+    # discovery below is a TRANSITION fallback, only for agents spawned BEFORE their launcher
+    # registered; dedup by pid. Drop the fallback (+ _fired_claudes/_resolver_agents/_live_claude_pid)
+    # once those pre-registration agents have cycled out.
+    seen = set()
+    for a in agents.live():
+        seen.add(a["pid"])
+        procs.append({
+            "kind": "claude", "id": str(a["pid"]),
+            "label": a["branch"] or a["kind"], "target": a["branch"], "repo": a.get("repo", ""),
+            "status": "resolving" if a["kind"] == "resolver" else "editing",
+            "detail": a["etime"], "done": False, "age": a["age"],
+        })
+    for f in _fired_claudes():          # transition fallback — remove once registration covers all
+        if f["pid"] in seen:
+            continue
         procs.append({
             "kind": "claude", "id": str(f["pid"]),
             "label": f["branch"] or "worktree", "target": f["branch"],
             "status": "editing", "detail": f["etime"], "done": False, "age": f["etime"],
         })
-
-    # restack conflict-resolvers — headless claudes with no tmux window, invisible to the above
-    for r in _resolver_agents():
+    for r in _resolver_agents():        # transition fallback — resolvers now self-register at _spawn
+        if r["pid"] in seen:
+            continue
         procs.append({
             "kind": "claude", "id": str(r["pid"]),
             "label": "restack conflict resolver", "target": "",
