@@ -51,16 +51,19 @@ def list_all(req):
         })
 
     # fired agents — every launcher registers itself when it spawns (agents.live()), so a new fire
-    # path can't go missing without any tmux/pgrep discovery. Each carries a heartbeat (working?)
-    # and is deduped per branch; an idle-but-alive agent reads "idle", not "editing".
+    # path can't go missing without any tmux/pgrep discovery. Each carries a heartbeat (working?) and
+    # is deduped per branch; an idle-but-alive agent reads "idle", a finished one lingers as "done".
     for a in agents.live():
-        working = a.get("working", True)
+        done = a.get("done", False)
+        working = a.get("working", False) and not done
         procs.append({
             "kind": "claude", "id": str(a["pid"]),
             "label": a["branch"] or a["kind"], "target": a["branch"], "repo": a.get("repo", ""),
-            "status": ("resolving" if a["kind"] == "resolver" else "editing") if working else "idle",
-            "detail": a["etime"], "done": False, "age": a["age"] if working else a.get("idle_age", a["age"]),
-            "working": working, "count": a.get("count", 1),
+            "status": "done" if done
+            else ("resolving" if a["kind"] == "resolver" else "editing") if working
+            else "idle",
+            "detail": a.get("etime", ""), "done": done, "working": working, "count": a.get("count", 1),
+            "age": a["age"] if (done or working) else a.get("idle_age", a["age"]),
         })
 
     procs.sort(key=lambda p: (p.get("done", False),))

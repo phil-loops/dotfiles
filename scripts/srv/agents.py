@@ -30,6 +30,7 @@ _activity = {}            # {claude_pid: {"cpu": float|None, "wall": int, "activ
 IDLE_SECONDS = 150        # no working-rate burst for this long → idle, not working
 CPU_RATE_WORKING = 0.08   # CPU seconds per wall second (~8% of a core) — above the parked-TUI hum
 _SAMPLE_MIN = 2           # min wall seconds between rate samples, so fast polls don't spike the rate
+LINGER_SECONDS = 900      # a finished agent lingers as a "done" row this long (like chat jobs), then reaps
 
 
 def _cpu_seconds(pid):
@@ -122,7 +123,24 @@ def live():
         pid = rec.get("pid")
         claude_pid = _claude_alive_under(pid) if pid else None
         if not pid or _lstart(pid) != rec.get("started") or not claude_pid:
-            _reap(path)
+            # finished — linger as a "done" row for LINGER_SECONDS (like chat jobs), then reap. The
+            # finished_at is stamped into the record, so the linger survives a server restart and
+            # can't be re-clocked by re-reads.
+            fin = rec.get("finished_at")
+            if fin is None:
+                fin = now
+                rec["finished_at"] = fin
+                try:
+                    with open(path, "w") as f:
+                        json.dump(rec, f)
+                except OSError:
+                    pass
+            if now - fin >= LINGER_SECONDS:
+                _reap(path)
+                continue
+            rows.append({"kind": rec.get("kind", "claude"), "branch": rec.get("branch", ""),
+                         "repo": rec.get("repo", ""), "pid": pid, "done": True, "working": False,
+                         "age": _age(fin), "active_at": fin})
             continue
         seen.add(claude_pid)
         cpu = _cpu_seconds(claude_pid)
@@ -141,20 +159,18 @@ def live():
         rows.append({"kind": rec.get("kind", "claude"), "branch": rec.get("branch", ""),
                      "repo": rec.get("repo", ""), "pid": pid, "etime": et, "age": _age(rec.get("at")),
                      "active_at": active_at, "working": (now - active_at) < IDLE_SECONDS,
-                     "idle_age": _age(active_at)})
+                     "idle_age": _age(active_at), "done": False})
     for dead in [p for p in _activity if p not in seen]:                    # forget gone pids — bounded cache
         del _activity[dead]
-    # dedupe by (kind, branch): one row per branch with a count. count>1 is a probable duplicate spawn
-    # (two agents racing one branch), surfaced like the Hearth's tangle hint.
-    grouped = {}
+    # dedupe by (kind, branch): one row per branch, keeping its best member — working beats idle beats
+    # done, ties broken by freshest activity. count = total members, so two agents on one branch read
+    # x2 (a probable duplicate spawn, surfaced like the Hearth's tangle hint).
+    groups = {}
     for r in rows:
-        key = (r["kind"], r["branch"])
-        g = grouped.get(key)
-        if g is None:
-            grouped[key] = {**r, "count": 1}
-        else:
-            g["count"] += 1
-            g["working"] = g["working"] or r["working"]
-            if r["active_at"] > g["active_at"]:
-                g["active_at"], g["age"], g["idle_age"], g["etime"] = r["active_at"], r["age"], r["idle_age"], r["etime"]
-    return list(grouped.values())
+        groups.setdefault((r["kind"], r["branch"]), []).append(r)
+
+    def _rank(m):
+        tier = 0 if m.get("done") else (2 if m.get("working") else 1)
+        return (tier, m.get("active_at", 0))
+
+    return [{**max(members, key=_rank), "count": len(members)} for members in groups.values()]
