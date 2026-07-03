@@ -43,6 +43,9 @@ while true; do
   rm -f "$LOCK_FILE"
 done
 export STACK_RESTACK_LOCK_OWNER=$$
+# One PR lookup for the whole batch — each child stack-restack reuses it for the
+# published-history guard instead of hitting the GitHub API per project.
+export STACK_RESTACK_OPEN_PR_HEADS=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ' || true) "
 
 worktree_of() {  # the worktree a branch is checked out in (mirrors stack-restack's helper)
   git worktree list --porcelain | awk -v b="refs/heads/$1" '

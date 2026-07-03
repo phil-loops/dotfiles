@@ -88,6 +88,8 @@ MODE="start"
 USE_CLASSIFY=1
 typeset -ga CONTRACTED
 CONTRACTED=()
+typeset -ga SKIPPED_PUBLISHED
+SKIPPED_PUBLISHED=()
 # Auto-resolve conflicts via headless claude (conservative bar). On by default;
 # --no-claude reverts to the old behavior (pause + manual resolve + --continue).
 USE_CLAUDE=1
@@ -715,7 +717,8 @@ clear_state() {
 # that finished (or parked) before anyone looked stays identifiable. $1 = done|parked|aborted.
 journal() {
   local n=${COMPLETED+${#COMPLETED[@]}}
-  print -r -- "$(date +%s) ${PROJECT} $1 rebased=${n:-0} current=${CURRENT:-}" \
+  local s=${SKIPPED_PUBLISHED+${#SKIPPED_PUBLISHED[@]}}
+  print -r -- "$(date +%s) ${PROJECT} $1 rebased=${n:-0} skipped=${s:-0} current=${CURRENT:-}" \
     >> "${GIT_COMMON_DIR}/stack-restack-journal" 2>/dev/null || true
 }
 
@@ -1006,9 +1009,37 @@ try_contracted_resolve() {
 
 # ---------- the rebase loop ----------
 
+# House rule (same as restack-dryrun's skip-open-pr): published history stays put.
+# A branch that's on a remote or has an open PR was seen by others — rewriting it here
+# forces a force-push and diverges every reviewer/CI copy. Routine restacks leave those
+# branches alone; rewriting one is a deliberate act via STACK_RESTACK_REWRITE_PUBLISHED=1.
+OPEN_PR_HEADS=""
+if [[ -z "${STACK_RESTACK_REWRITE_PUBLISHED:-}" ]]; then
+  if [[ -n "${STACK_RESTACK_OPEN_PR_HEADS:-}" ]]; then
+    OPEN_PR_HEADS="$STACK_RESTACK_OPEN_PR_HEADS"   # batch driver fetched once for all projects
+  else
+    OPEN_PR_HEADS=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ' || true) "
+  fi
+fi
+is_published() {
+  local b="$1" r
+  [[ -n "${STACK_RESTACK_REWRITE_PUBLISHED:-}" ]] && return 1
+  [[ "$OPEN_PR_HEADS" == *" $b "* ]] && return 0
+  for r in $(git remote); do
+    git show-ref --verify --quiet "refs/remotes/$r/$b" && return 0
+  done
+  return 1
+}
+
 while (( ${#PENDING[@]} > 0 )); do
   BRANCH="${PENDING[1]}"
   PENDING=("${PENDING[@]:1}")
+
+  if is_published "$BRANCH"; then
+    echo "  ⤼ ${BRANCH} left alone — published (open PR or on a remote); STACK_RESTACK_REWRITE_PUBLISHED=1 to rewrite deliberately"
+    SKIPPED_PUBLISHED+=("$BRANCH")
+    continue
+  fi
 
   PARENT_NAME=$(git config "stack-branch.${BRANCH}.parent" 2>/dev/null || true)
   if [[ -z "$PARENT_NAME" ]]; then
@@ -1263,6 +1294,9 @@ journal done
 echo ""
 echo "✓ Restack of ${PROJECT} complete."
 echo "  rebased: ${#COMPLETED[@]} branches"
+if (( ${#SKIPPED_PUBLISHED[@]} > 0 )); then
+  echo "  left published branches alone: ${SKIPPED_PUBLISHED[*]}"
+fi
 if (( ${#TO_DROP[@]} > 0 )); then
   echo "  dropped: ${#TO_DROP[@]} branches"
 fi
