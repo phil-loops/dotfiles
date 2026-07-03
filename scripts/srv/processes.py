@@ -34,12 +34,14 @@ def _live_claude_pid(pane_pid):
 
 
 def _fired_claudes():
-    # Fired coding agents — the ask-Claude chip, /reconcile, and /restack-resolve — each run in a
-    # tmux window named `claude:<branch>`. The window name is the seam; liveness is the pane's
-    # process tree (see _live_claude_pid) — filtering on pane_current_command missed reconcile/
-    # resolve, which run claude under the pane shell, so the exact agents this was meant to surface.
+    # Fired coding agents — the ask-Claude chip / apply-change eject and /reconcile open a
+    # `claude:<branch>` window; a chat popped out to tmux (stack-claude-resume) opens a
+    # `chat:<branch>` one — accept BOTH prefixes. Enumerate PANES, not windows, so a popout that
+    # split into an existing window is still seen (list-windows only reports a window's base pane).
+    # Liveness is the pane's process tree (see _live_claude_pid), since these run claude under the
+    # pane shell — filtering on pane_current_command missed exactly the agents this must surface.
     fmt = "#{window_name}\t#{pane_pid}"
-    out = subprocess.run(["tmux", "list-windows", "-a", "-F", fmt],
+    out = subprocess.run(["tmux", "list-panes", "-a", "-F", fmt],
                          capture_output=True, text=True).stdout
     by_branch = {}
     for line in out.splitlines():
@@ -47,9 +49,10 @@ def _fired_claudes():
         if len(parts) < 2:
             continue
         name, pid = parts[0], parts[1]
-        if not name.startswith("claude:") or not pid.isdigit():
+        prefix = next((p for p in ("claude:", "chat:") if name.startswith(p)), None)
+        if prefix is None or not pid.isdigit():
             continue
-        branch = name[len("claude:"):]
+        branch = name[len(prefix):]
         if not branch or branch in by_branch:
             continue
         live = _live_claude_pid(int(pid))
@@ -65,6 +68,24 @@ def _fired_claudes():
         if len(p) == 2 and p[0].isdigit():
             etimes[int(p[0])] = p[1].strip()
     return [{"pid": pid, "etime": etimes.get(pid, ""), "branch": b} for b, pid in by_branch.items()]
+
+
+def _resolver_agents():
+    # Restack conflict-resolvers (spawned by a `stack-restack --handoff`) run as viewer-server
+    # children with NO tmux window, so _fired_claudes can't see them — they'd be invisible as
+    # agents even though the feature promises to surface /restack-resolve. They carry the same
+    # fixed prompt signature restack._resolvers() counts; pgrep it for their pids + runtimes.
+    sig = "resolving a git rebase conflict during a stack restack"
+    pids = [p for p in subprocess.run(["pgrep", "-f", sig], capture_output=True, text=True).stdout.split() if p.isdigit()]
+    if not pids:
+        return []
+    ps = subprocess.run(["ps", "-o", "pid=,etime=", "-p", ",".join(pids)], capture_output=True, text=True).stdout
+    etimes = {}
+    for line in ps.splitlines():
+        f = line.split()
+        if len(f) == 2 and f[0].isdigit():
+            etimes[int(f[0])] = f[1].strip()
+    return [{"pid": int(p), "etime": etimes.get(int(p), "")} for p in pids]
 
 
 def list_all(req):
@@ -105,6 +126,14 @@ def list_all(req):
             "kind": "claude", "id": str(f["pid"]),
             "label": f["branch"] or "worktree", "target": f["branch"],
             "status": "editing", "detail": f["etime"], "done": False, "age": f["etime"],
+        })
+
+    # restack conflict-resolvers — headless claudes with no tmux window, invisible to the above
+    for r in _resolver_agents():
+        procs.append({
+            "kind": "claude", "id": str(r["pid"]),
+            "label": "restack conflict resolver", "target": "",
+            "status": "resolving", "detail": r["etime"], "done": False, "age": r["etime"],
         })
 
     procs.sort(key=lambda p: (p.get("done", False),))
