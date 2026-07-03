@@ -21,11 +21,15 @@ AGENTS_DIR = os.path.expanduser("~/.claude/agents")
 
 # Heartbeat: an agent's process can be alive but parked at its prompt for hours (it read as
 # "editing 4h"). Liveness != working. We sample the agent's cumulative CPU time each poll and call
-# it "working" only while that keeps advancing — a parked claude burns ~0 CPU. State is in-memory
-# (like chat._JOBS); it resets on server restart, re-baselining agents as working. CPU is a proxy:
-# a claude BLOCKED on a long model call also burns ~0, so the window is generous on purpose.
-_activity = {}          # {claude_pid: {"cpu": float|None, "active_at": int}}
-IDLE_SECONDS = 150      # no CPU advance for this long → idle, not working
+# it "working" only while its CPU *rate* clears a threshold — a parked claude still ticks ~0.5% of a
+# core (its TUI event loop), so "any increase" false-positives; a rate gate ignores that idle hum.
+# State is in-memory (like chat._JOBS); it resets on server restart, re-baselining old agents idle
+# (active_at = spawn) until a burst proves them working. CPU is a proxy: a claude BLOCKED on a long
+# model call also goes quiet, so the idle window is generous on purpose.
+_activity = {}            # {claude_pid: {"cpu": float|None, "wall": int, "active_at": int}}
+IDLE_SECONDS = 150        # no working-rate burst for this long → idle, not working
+CPU_RATE_WORKING = 0.08   # CPU seconds per wall second (~8% of a core) — above the parked-TUI hum
+_SAMPLE_MIN = 2           # min wall seconds between rate samples, so fast polls don't spike the rate
 
 
 def _cpu_seconds(pid):
@@ -124,12 +128,15 @@ def live():
         cpu = _cpu_seconds(claude_pid)
         prev = _activity.get(claude_pid)
         if prev is None:
-            active_at = rec.get("at", now)                                  # just-registered → working
-        elif cpu is not None and prev["cpu"] is not None and cpu > prev["cpu"]:
-            active_at = now                                                 # CPU advanced → working now
+            active_at = rec.get("at", now)                                  # first sight → assume idle-if-old
+            _activity[claude_pid] = {"cpu": cpu, "wall": now, "active_at": active_at}
+        elif cpu is None or prev["cpu"] is None or (now - prev["wall"]) < _SAMPLE_MIN:
+            active_at = prev["active_at"]                                   # too little interval → carry, don't
+            # ...reset the window: leave prev's cpu/wall so the next real sample spans enough time
         else:
-            active_at = prev["active_at"]                                   # flat → idle since last activity
-        _activity[claude_pid] = {"cpu": cpu, "active_at": active_at}
+            rate = (cpu - prev["cpu"]) / (now - prev["wall"])
+            active_at = now if rate > CPU_RATE_WORKING else prev["active_at"]
+            _activity[claude_pid] = {"cpu": cpu, "wall": now, "active_at": active_at}
         et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
         rows.append({"kind": rec.get("kind", "claude"), "branch": rec.get("branch", ""),
                      "repo": rec.get("repo", ""), "pid": pid, "etime": et, "age": _age(rec.get("at")),
