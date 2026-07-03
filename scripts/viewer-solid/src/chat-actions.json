@@ -12,6 +12,16 @@
       "body": { "branch": "$branch" }
     },
     {
+      "id": "set-trunk",
+      "endpoint": "/trunk",
+      "scope": "branch",
+      "confirm": false,
+      "label": "Mark as forest trunk",
+      "describe": "Mark this approved-but-unmerged branch as its forest's trunk anchor: the viewer then treats it like main — it stops reading as 'behind main', and its descendants measure/rebase against IT until it merges. Offer when a branch is approved, isn't merging today, and others build on it. params: none.",
+      "params": [],
+      "body": { "branch": "$branch", "on": true }
+    },
+    {
       "id": "catch-me-up",
       "endpoint": "/chat",
       "scope": "branch",
