@@ -1009,10 +1009,10 @@ try_contracted_resolve() {
 
 # ---------- the rebase loop ----------
 
-# House rule (same as restack-dryrun's skip-open-pr): published history stays put.
-# A branch that's on a remote or has an open PR was seen by others — rewriting it here
-# forces a force-push and diverges every reviewer/CI copy. Routine restacks leave those
-# branches alone; rewriting one is a deliberate act via STACK_RESTACK_REWRITE_PUBLISHED=1.
+# House rule (same as restack-dryrun's skip-open-pr): an open PR's history is published —
+# reviewers and CI are reading it, so rewriting it here diverges the pushed head and forces
+# a force-push. Routine restacks leave PR'd branches alone (pushed-but-no-PR stays free
+# game per the 2026-06-30 rule); rewriting one is deliberate via STACK_RESTACK_REWRITE_PUBLISHED=1.
 OPEN_PR_HEADS=""
 if [[ -z "${STACK_RESTACK_REWRITE_PUBLISHED:-}" ]]; then
   if [[ -n "${STACK_RESTACK_OPEN_PR_HEADS:-}" ]]; then
@@ -1021,22 +1021,13 @@ if [[ -z "${STACK_RESTACK_REWRITE_PUBLISHED:-}" ]]; then
     OPEN_PR_HEADS=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ' || true) "
   fi
 fi
-is_published() {
-  local b="$1" r
-  [[ -n "${STACK_RESTACK_REWRITE_PUBLISHED:-}" ]] && return 1
-  [[ "$OPEN_PR_HEADS" == *" $b "* ]] && return 0
-  for r in $(git remote); do
-    git show-ref --verify --quiet "refs/remotes/$r/$b" && return 0
-  done
-  return 1
-}
 
 while (( ${#PENDING[@]} > 0 )); do
   BRANCH="${PENDING[1]}"
   PENDING=("${PENDING[@]:1}")
 
-  if is_published "$BRANCH"; then
-    echo "  ⤼ ${BRANCH} left alone — published (open PR or on a remote); STACK_RESTACK_REWRITE_PUBLISHED=1 to rewrite deliberately"
+  if [[ "$OPEN_PR_HEADS" == *" $BRANCH "* ]]; then
+    echo "  ⤼ ${BRANCH} left alone — open PR (published history); STACK_RESTACK_REWRITE_PUBLISHED=1 to rewrite deliberately"
     SKIPPED_PUBLISHED+=("$BRANCH")
     continue
   fi
