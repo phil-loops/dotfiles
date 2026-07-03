@@ -23,9 +23,12 @@ AGENTS_DIR = os.path.expanduser("~/.claude/agents")
 def _lstart(pid):
     # ps start-time of a pid — the pid-reuse guard. On read we compare it to the record's stored
     # `started`; a mismatch means the pid was recycled onto a different process → the record is
-    # stale → reap. Exactly what ~/.claude/session-presence does.
-    return subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
-                          capture_output=True, text=True).stdout.strip()
+    # stale → reap. Exactly what ~/.claude/session-presence does. Whitespace is COLLAPSED (join on
+    # split) to match scripts/agent-register's `awk '{$1=$1}'` — ps double-spaces a single-digit
+    # day ("Jul  2"), so without this the shell-written records never match the reader and every
+    # launcher's agent would be reaped on sight. The two must normalize identically — it's the contract.
+    out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True).stdout
+    return " ".join(out.split())
 
 
 def register(kind, branch, pid, repo="", worktree=""):
