@@ -308,6 +308,10 @@ class H(BaseHTTPRequestHandler):
             return reviews.open_blob(self, raw)
         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
             return reviews.pull(self, raw)
+        if self.path == "/pr-forest":   # Chrome ext: forest membership + child seating for a PR
+            return reviews.pr_forest(self, raw)
+        if self.path == "/pr-reseat-children":   # Chrome ext: rebase orphaned children onto an approved PR branch
+            return reviews.pr_reseat(self, raw)
         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
             return usage.track(self, raw)
         if self.path == "/drop-project":   # forget a forest grouping (config only; branches kept)

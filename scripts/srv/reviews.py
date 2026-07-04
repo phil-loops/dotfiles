@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from urllib.parse import parse_qs
 
@@ -238,3 +239,143 @@ def pull(req, raw):
     after = ctx.run(["git", "rev-parse", branch]).stdout.strip()
     _remote_cache.pop(branch, None)   # local now matches remote → next hint check recomputes
     req._send(200, json.dumps({"ok": True, "before": before[:9], "after": after[:9], "changed": before != after}))
+
+
+# ── PR → forest: which forest is this PR part of, and are its children still seated on it? ──
+#
+#   POST /pr-forest           {number, repo} → {branch, project, decision, route, children:[{branch, seated}]}
+#   POST /pr-reseat-children  {number, repo} → rebase every orphaned child back onto the PR branch
+#
+# "Seated" = the child still contains the PR branch's tip. A squash/amend/rebase of the PR
+# branch (e.g. squashing commits before review) orphans every child — they keep the OLD tip in
+# their history and the viewer shows phantom parent commits in their diffs. Re-seating replays
+# each child's own commits onto the new tip: rebase --onto <parent> <recorded cut> <child>,
+# where the cut is the parent tip the child was last seated on (stack-branch.<child>.base,
+# maintained by the forest tooling; fork-point then merge-base as fallbacks).
+
+
+def _children_of(branch):
+    r = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"])
+    out = []
+    for line in r.stdout.splitlines():
+        key, _, val = line.partition(" ")
+        if val.strip() == branch:
+            out.append(key[len("stack-branch."):-len(".parent")])
+    return out
+
+
+def _seated(parent, child):
+    return ctx.run(["git", "merge-base", "--is-ancestor", parent, child]).returncode == 0
+
+
+def _cut_point(parent, child):
+    # the recorded parent tip the child was last rebased onto — NOT merge-base(parent, child):
+    # after the parent is rewritten that merge-base collapses to main and the rebase would
+    # replay the parent's old commits into the child.
+    base = ctx.run(["git", "config", f"stack-branch.{child}.base"]).stdout.strip()
+    if base and ctx.run(["git", "cat-file", "-e", f"{base}^{{commit}}"]).returncode == 0:
+        return base
+    r = ctx.run(["git", "merge-base", "--fork-point", parent, child])
+    if r.returncode == 0 and r.stdout.strip():
+        return r.stdout.strip()
+    return ctx.run(["git", "merge-base", parent, child]).stdout.strip()
+
+
+def _worktree_of(branch):
+    wt = None
+    for line in ctx.run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
+        if line.startswith("worktree "):
+            wt = line[len("worktree "):]
+        elif line == f"branch refs/heads/{branch}":
+            return wt
+    return None
+
+
+def _rebase_onto(child, parent, cut):
+    # a branch can only be rebased from the worktree it's checked out in; an un-checked-out
+    # branch gets a temp worktree for the duration.
+    wt, tmp = _worktree_of(child), None
+    if wt is not None and ctx.run(["git", "-C", wt, "status", "--porcelain"]).stdout.strip():
+        return False, "worktree dirty"
+    try:
+        if wt is None:
+            tmp = wt = tempfile.mkdtemp(prefix="gh-nvim-reseat-")
+            r = ctx.run(["git", "worktree", "add", "--quiet", "--force", tmp, child])
+            if r.returncode != 0:
+                return False, (r.stderr or "worktree add failed").strip()[:300]
+        r = ctx.run(["git", "-C", wt, "rebase", "--onto", parent, cut, child])
+        if r.returncode != 0:
+            ctx.run(["git", "-C", wt, "rebase", "--abort"])
+            return False, (r.stderr or "rebase failed").strip()[-300:]
+        return True, ""
+    finally:
+        if tmp is not None:
+            ctx.run(["git", "worktree", "remove", "--force", tmp])
+
+
+def _reseat_walk(parent, results):
+    # top-down: seat each child on its (possibly just-moved) parent, then descend. A subtree
+    # whose root conflicts is left alone — its own recorded cuts stay valid for a manual pass.
+    parent_tip = ctx.run(["git", "rev-parse", parent]).stdout.strip()
+    for child in _children_of(parent):
+        if _seated(parent, child):
+            results.append({"branch": child, "status": "seated"})
+        else:
+            ok, err = _rebase_onto(child, parent, _cut_point(parent, child))
+            if not ok:
+                results.append({"branch": child, "status": "conflict", "err": err})
+                continue
+            ctx.run(["git", "config", f"stack-branch.{child}.base", parent_tip])
+            results.append({"branch": child, "status": "reseated"})
+        _reseat_walk(child, results)
+
+
+def _decision(num):
+    r = ctx.run(["gh", "pr", "view", num, "--json", "reviewDecision", "--jq", ".reviewDecision"])
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def pr_forest(req, raw):   # POST /pr-forest — Chrome ext: forest membership + child seating for a PR
+    d = json.loads(raw or "{}")
+    repo_name, repo_path = _resolve_repo(d.get("repo"))
+    ctx.set_repo(repo_path)
+    num = str(d.get("number", "")).strip().lstrip("#")
+    if not num.isdigit():
+        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
+        return
+    branch = _local_branch_for_pr(num)
+    if not branch:
+        req._send(200, json.dumps({"ok": True, "branch": None}))   # not my local branch → no forest to show
+        return
+    project = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    children = [{"branch": c, "seated": _seated(branch, c)} for c in _children_of(branch)]
+    prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
+    route = f"/forests/{prefix}{project}/{branch}" if project else f"/branch/{branch}"
+    req._send(200, json.dumps({"ok": True, "branch": branch, "project": project or None,
+                               "decision": _decision(num), "route": route, "children": children}))
+
+
+def pr_reseat(req, raw):   # POST /pr-reseat-children — rebase orphaned children back onto an approved PR branch
+    d = json.loads(raw or "{}")
+    _name, repo_path = _resolve_repo(d.get("repo"))
+    ctx.set_repo(repo_path)
+    num = str(d.get("number", "")).strip().lstrip("#")
+    if not num.isdigit():
+        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
+        return
+    branch = _local_branch_for_pr(num)
+    if not branch:
+        req._send(404, json.dumps({"ok": False, "err": "no local branch for this PR"}))
+        return
+    # approval is the button's contract (and re-checked here); force is the escape hatch for
+    # a deliberate early reseat. Purely local either way — nothing is pushed.
+    if not d.get("force") and _decision(num) != "APPROVED":
+        req._send(409, json.dumps({"ok": False, "err": "PR not approved"}))
+        return
+    results = []
+    _reseat_walk(branch, results)
+    moved = [r["branch"] for r in results if r["status"] == "reseated"]
+    conflicts = [r for r in results if r["status"] == "conflict"]
+    req._send(200 if not conflicts else 207,
+              json.dumps({"ok": not conflicts, "branch": branch, "results": results,
+                          "moved": moved, "conflicts": conflicts}))
