@@ -31,6 +31,24 @@
   background: #da3633;
 }
 
+.gh-nvim-forest-chip {
+  padding: 6px 12px;
+  font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #c9d1d9;
+  background: #21262d;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  text-decoration: none;
+  white-space: pre;
+}
+
+.gh-nvim-forest-chip:hover {
+  color: #fff;
+  border-color: #1f6feb;
+  text-decoration: none;
+}
+
 #gh-nvim-toast {
   position: fixed;
   right: 16px;

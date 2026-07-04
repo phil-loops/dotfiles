@@ -223,7 +223,59 @@ function makeFab(pr) {
   });
 
   box.append(nvimBtn, viewer);
+  decorateForest(box, pr, viewer);
   return box;
+}
+
+// forest chip: which forest this PR's branch belongs to, straight from the same git config the
+// viewer reads. A local branch's chip IS the viewer link, so the redundant → viewer button is
+// dropped (it stays for non-local PRs, where it imports first). When the PR is approved and
+// children have fallen off its tip (a squash/amend orphans them), a ⤴ reseat button rebases
+// each child back on — locally only, nothing pushed.
+async function decorateForest(box, pr, viewerBtn) {
+  const res = await send({ number: pr.number, repo: pr.repo }, "/pr-forest");
+  const info = res?.status === 200 && res.body?.ok ? res.body : null;
+  if (!info?.branch) {
+    return;
+  }
+  const chip = document.createElement("a");
+  chip.className = "gh-nvim-forest-chip";
+  chip.textContent = `⧉ ${info.project || info.branch}`;
+  chip.href = `${VIEWER_URL}${info.route}`;
+  chip.target = "_blank";
+  const kids = info.children || [];
+  const orphans = kids.filter((c) => !c.seated);
+  chip.title = `${info.branch}${info.project ? ` · forest ${info.project}` : ""}` +
+    (kids.length ? `\nchildren: ${kids.map((c) => `${c.branch}${c.seated ? "" : " (orphaned)"}`).join(", ")}` : "");
+  viewerBtn.remove();
+  box.append(chip);
+
+  if (info.decision !== "APPROVED" || orphans.length === 0) {
+    return;
+  }
+  const btn = document.createElement("button");
+  btn.className = "gh-nvim-fab-btn";
+  btn.textContent = `⤴ reseat ${orphans.length}`;
+  btn.title = `PR approved — rebase ${orphans.map((c) => c.branch).join(", ")} back onto ${info.branch} (local only)`;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "…";
+    toast("⤴ reseating children…", true, true, true);
+    const r = await send({ number: pr.number, repo: pr.repo }, "/pr-reseat-children");
+    const body = r?.body || {};
+    if (r?.status === 200 && body.ok) {
+      toast(`✓ reseated ${body.moved.join(", ") || "nothing to move"}`, true);
+      btn.textContent = "✓";
+    } else if (body.conflicts?.length) {
+      toast(`⚠ ${body.conflicts.map((c) => `${c.branch}: ${c.err}`).join(" · ")}`, false, true);
+      btn.textContent = "⚠";
+    } else {
+      toast(`✗ ${reason(r)}`, false);
+      btn.textContent = "✗";
+    }
+    setTimeout(() => reset(btn, `⤴ reseat ${orphans.length}`), 5000);
+  });
+  box.append(btn);
 }
 
 function toast(text, ok, sticky, working) {
