@@ -100,11 +100,14 @@ async function diskMtime() {
 // session storage is wiped on a real extension reload but survives SW sleep/wake — so an
 // absent baseline means "freshly reloaded, this disk state is current"; a later higher
 // mtime means the source moved past what's loaded.
+let lastDiskMtime = null;   // what maybeAutoReload watches for quiet
+
 async function computeState() {
   const m = await diskMtime();
   if (m === null) {
     return "offline";
   }
+  lastDiskMtime = m;
   const { baseline } = await chrome.storage.session.get("baseline");
   if (baseline === undefined) {
     await chrome.storage.session.set({ baseline: m });
@@ -113,8 +116,47 @@ async function computeState() {
   return m > baseline ? "stale" : "fresh";
 }
 
+// stale no longer waits for a human: once the on-disk source stops moving (QUIET_MS with no
+// new mtime — mid-edit saves would otherwise reload per keystroke), self-reload via the same
+// flow as the popup button: flag the active tab IF our content script runs there (the query's
+// url filter is exactly our content_scripts matches), so the fresh SW re-injects into it.
+// SW sleep resets the quiet timer — worst case the reload waits for the next wake, never loops
+// (reload wipes the session baseline, so the new copy reads as fresh).
+const QUIET_MS = 5000;
+let staleMtime = null;
+let staleSince = 0;
+
+async function maybeAutoReload() {
+  if (lastDiskMtime !== staleMtime) {
+    staleMtime = lastDiskMtime;
+    staleSince = Date.now();
+    return;
+  }
+  if (Date.now() - staleSince < QUIET_MS) {
+    return;
+  }
+  try {
+    const [tab] = await chrome.tabs.query({
+      active: true, currentWindow: true,
+      url: ["https://github.com/*/*/pull/*", "https://github.com/*/*/commit/*", "https://github.com/*/*/compare/*"],
+    });
+    if (tab?.id != null) {
+      await chrome.storage.local.set({ refreshTab: tab.id });
+    }
+  } catch {
+    // url-filtered query needs host access — if Chrome disagrees, reload without the tab refresh
+  }
+  chrome.runtime.reload();
+}
+
 async function poll() {
-  await apply(await computeState());
+  const state = await computeState();
+  await apply(state);
+  if (state === "stale") {
+    await maybeAutoReload();
+  } else {
+    staleMtime = null;
+  }
 }
 
 // The popup asks for a fresh read the moment it opens.
