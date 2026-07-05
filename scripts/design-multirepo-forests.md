@@ -59,12 +59,37 @@ signature changes.
    "current repo" the app sets from the active route, and `HttpProvider` appends it to all URLs
    (model/node/commits/purpose/bless/standalone/…). Avoids changing each method signature.
 
-7. **`router.tsx`** — carry repo in the forest route: `/forests/<repo>/<project>/<branch>` (so a
-   deep-link / refresh into a monotoad node still resolves the right repo). Update parse + `toPath`.
-   `loops` can stay the implicit default if you want short URLs for the common case.
+7. **`router.tsx`** — carry repo as a **path segment**, NOT a `?repo=` query param (Phil dislikes
+   the query string): `/forests/<repo>/<project>/<branch>`, e.g.
+   `/forests/monotoad/dlq-redrive/chore/dlq-redrive-link`. Repo is the top of the forest hierarchy.
+   Update parse + `toPath`, and read repo from the path on the server. `loops` stays the implicit
+   default — `/forests/<project>/<branch>` still resolves to loops for short common-case URLs.
 
 8. **`App.tsx`** — in the Forests tab (~`:637`), group `filteredForests()` into `<For>` sections
    keyed by `repo`, each under a repo header. Links include the repo segment.
+
+### GitHub → nvim Chrome extension (`scripts/gh-to-nvim/`, server `srv/reviews.py`)
+
+The extension is **already multi-repo-ready on the client**: `parsePr`/`parseBlob` capture the
+GitHub `owner/repo` and every payload (`→ nvim`, `→ viewer`, `o`, ⌥-click, prewarm, `/open-blob`)
+sends `repo: "<owner>/<repo>"`. It relays to `:62497` and `→ viewer` opens `VIEWER_URL + the route
+the server returns`. So under the one-server model, the **client needs no relay change**.
+
+The gap is server-side — both handlers ignore that `repo` and act on `:62497`'s loops checkout:
+
+- **`srv/reviews.py` `from_github`** — read `d["repo"]` (GitHub slug), map it to a local checkout,
+  operate there (set the thread-local repo), and return the **repo-prefixed** route
+  `/forests/<repo>/<project>/<branch>` (so `→ viewer` lands on the right repo's node). Today it
+  builds `/forests/<project>/<branch>` via `ctx.run` in CWD.
+- **`srv/reviews.py` `open_blob`** — same: map `d["repo"]` → checkout, `picker.open_here` in *that*
+  repo, not CWD.
+- **Slug → local mapping**: for each `stack.viewer-repos` root, read its `git remote` URLs and
+  parse `owner/repo`; build a `slug → repo path` map (basename match is a fine fallback:
+  `*/monotoad` → `~/coding/monotoad`). Unknown slug → fall back to CWD (loops), preserving today's
+  behavior.
+
+Note: these are POST handlers that read `repo` from the JSON **body** (not the query string), so the
+generic `?repo=` dispatch hook won't cover them — they map the body's `repo` themselves.
 
 ### Out of scope (loops-centric, don't bother for monotoad)
 
