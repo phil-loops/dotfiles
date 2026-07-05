@@ -83,6 +83,9 @@ export function NodeActions(props: {
   isReview: boolean;
   merged?: boolean; // forest-health flagged this branch a merged ghost → offer contraction on load
   ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
+  interest?: number; // current Home-ordering interest — drives the ⋯ promote/demote items
+  onBump?: (delta: number) => void;
+  onAllChats?: () => void;
 }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
@@ -555,6 +558,23 @@ export function NodeActions(props: {
             <span class="nh-item-ic">⌂</span>
             {worktree.isPending ? "revealing…" : "reveal worktree"}
           </button>
+
+          {/* interest + all-threads — demoted off the header bar (strike-6 trim) */}
+          <Show when={props.onBump}>
+            <button class="nh-item" role="menuitem" onClick={() => props.onBump!(1)}>
+              <span class="nh-item-ic">▲</span> promote on Home{(props.interest ?? 0) > 0 ? ` (now ${props.interest})` : ""}
+            </button>
+            <Show when={(props.interest ?? 0) > 0}>
+              <button class="nh-item" role="menuitem" onClick={() => props.onBump!(-1)}>
+                <span class="nh-item-ic">▼</span> demote
+              </button>
+            </Show>
+          </Show>
+          <Show when={props.onAllChats}>
+            <button class="nh-item" role="menuitem" onClick={() => { setOpen(false); props.onAllChats!(); }}>
+              <span class="nh-item-ic">💬</span> all chat threads
+            </button>
+          </Show>
 
         </div>
       </Show>
