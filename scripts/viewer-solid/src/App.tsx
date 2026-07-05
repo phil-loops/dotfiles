@@ -1612,6 +1612,22 @@ function NodeDetail() {
     onSuccess: () => health.refetch(),
   }));
 
+  // scoped reseat for a drifted node: rebase the parent's off-tip children (this node and any
+  // orphaned siblings, recursively) back onto the parent's current tip — nothing else moves,
+  // unlike a full restack. Local only; conflicts leave that subtree parked for a manual pass.
+  const reseatChildren = createMutation(() => ({
+    mutationFn: (parent: string) =>
+      fetch("/reseat-children", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: parent }),
+      }).then((r) => r.json() as Promise<{ ok: boolean; moved: string[]; conflicts: { branch: string; err: string }[] }>),
+    onSuccess: () => {
+      health.refetch();
+      qc.invalidateQueries({ queryKey: ["model"] }); // children's SHAs moved — diffs are stale
+    },
+  }));
+
   // diverged-from-PR-head (local rebased, pushed head stale) → eject a standalone Claude in the
   // branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull.
   const reconcile = createMutation(() => ({
@@ -2010,9 +2026,28 @@ function NodeDetail() {
             <Show when={!isGhost() && nodeHealth(active())?.drifted}>
               <span
                 class="nh-drift"
-                title={`off its parent (${nodeHealth(active())?.parent ?? "?"}) — that branch isn't a git ancestor, so this 'diff vs parent' is effectively the diff vs main. Restack the forest to separate it.`}
+                title={`off its parent (${nodeHealth(active())?.parent ?? "?"}) — that branch isn't a git ancestor, so this 'diff vs parent' is effectively the diff vs main. Reseat rebases it (and any orphaned siblings) back onto the parent's current tip; a full restack also works but moves the whole forest.`}
               >
                 ⤺ off-parent · diff ≈ vs main
+                <button
+                  class="nh-fix"
+                  style={{ "margin-left": "8px" }}
+                  disabled={reseatChildren.isPending}
+                  title={`rebase ${active()} (and any orphaned siblings, recursively) back onto ${nodeHealth(active())?.parent ?? "its parent"}'s current tip — local only, nothing pushed, nothing else moves`}
+                  onClick={() => {
+                    const p = nodeHealth(active())?.parent;
+                    if (p) {
+                      reseatChildren.mutate(p);
+                    }
+                  }}
+                >
+                  {reseatChildren.isPending ? "reseating…" : "⤴ reseat"}
+                </button>
+                <Show when={reseatChildren.data && !reseatChildren.data.ok}>
+                  <span title={reseatChildren.data!.conflicts.map((c) => `${c.branch}: ${c.err}`).join("\n")}>
+                    {" "}⚠ {reseatChildren.data!.conflicts.length} conflicted — resolve by hand or restack
+                  </span>
+                </Show>
               </span>
             </Show>
             <Show when={!isGhost() && nodeHealth(active())?.merged}>

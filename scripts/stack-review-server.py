@@ -314,6 +314,8 @@ class H(BaseHTTPRequestHandler):
             return reviews.pr_forest(self, raw)
         if self.path == "/pr-reseat-children":   # Chrome ext: rebase orphaned children onto an approved PR branch
             return reviews.pr_reseat(self, raw)
+        if self.path == "/reseat-children":      # viewer: rebase drifted children back onto a rewritten branch
+            return reviews.reseat(self, raw)
         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
             return usage.track(self, raw)
         if self.path == "/drop-project":   # forget a forest grouping (config only; branches kept)
