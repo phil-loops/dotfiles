@@ -14,9 +14,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase, processes
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
+from srv import stage   # own line: the big srv import above is contested across sessions
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
@@ -231,6 +232,8 @@ class H(BaseHTTPRequestHandler):
             return sync.get_many(self, u)
         elif u.path == "/forest-health":  # batch drifted/merged-ghost per node (badges + fix-all)
             return sync.health_many(self, u)
+        elif u.path == "/diverged-detail":  # what a ⇄ divergence IS: per-side commits (patch-id twins) + net tip diff
+            return sync.diverged_detail(self, u)
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -278,6 +281,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/commits":        return review.commits(self, u)
         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
         elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
+        elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
         else:
             self._send(404, "{}")
 
@@ -300,6 +304,10 @@ class H(BaseHTTPRequestHandler):
             return review.bless(self, raw)
         if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list
             return picker.pin(self, raw)
+        if self.path == "/next":   # read-only: next mergeable branch(es) in this branch's forest
+            return picker.whats_next(self, raw)
+        if self.path == "/trunk":   # mark/unmark a branch as its forest's trunk anchor (frozen base)
+            return picker.set_trunk(self, raw)
         if self.path == "/promote":   # graduate a watched branch into its own forest project
             return picker.promote(self, raw)
         if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
@@ -354,6 +362,8 @@ class H(BaseHTTPRequestHandler):
             return push.push_origin(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
+        if self.path == "/stage":            # restack chain forward + move MAIN checkout onto the tip (dryRun supported)
+            return stage.stage(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
             return restack.resolve(self, raw)
         if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state
@@ -379,6 +389,8 @@ class H(BaseHTTPRequestHandler):
             return restack.restack_all(self, raw)
         if self.path == "/claude":           # select diff lines → start a fresh claude on them
             return assist.start(self, raw)
+        if self.path == "/claude-stream":    # chat-drawer edit action → headless claude, streamed (SSE)
+            return assist.stream(self, raw)
         if self.path == "/chat":             # start OR reconnect a chat turn (server-side job) → SSE replay+live
             return chat.start(self, raw)
         if self.path == "/chat-stop":        # ■ stop: kill this turn's headless claude for real
