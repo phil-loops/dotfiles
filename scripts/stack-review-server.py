@@ -18,6 +18,7 @@ from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, 
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
+from srv import prep    # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
@@ -234,6 +235,8 @@ class H(BaseHTTPRequestHandler):
             return sync.health_many(self, u)
         elif u.path == "/diverged-detail":  # what a ⇄ divergence IS: per-side commits (patch-id twins) + net tip diff
             return sync.diverged_detail(self, u)
+        elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
+            return prep.route(self, u)
         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
