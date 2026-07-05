@@ -272,6 +272,7 @@ def prep_push(req, raw):
     if branch in ("main", "master"):
         return req._send(200, json.dumps({"ok": False, "err": "trunk doesn't go through this door"}))
     published = branch in sync._open_pr_heads()
+    tip_before = _tip(branch)
     routed = []
 
     if not v["ff"]:
@@ -324,6 +325,16 @@ def prep_push(req, raw):
         else:
             return req._send(200, json.dumps({"ok": False, "err": "nothing to push — origin already has this", "routed": routed}))
 
+    # every mutating route moves the tip — reseat stacked children so they don't hang
+    # off the pre-prep commits (the external-amend-orphans failure mode)
+    if _tip(branch) != tip_before:
+        from srv import reviews
+        reseated = []
+        reviews._reseat_walk(branch, reseated)
+        moved = [x["branch"] for x in reseated if x.get("status") == "reseated"]
+        if moved:
+            routed.append(f"reseated {', '.join(moved)}")
+
     v = _origin_verdict(branch)
     return req._send(200, json.dumps({
         "ok": True, "routed": routed, "outgoing": v["outgoing"],
@@ -349,6 +360,9 @@ def prep_message(req, raw):
     tip = v["commit"]["sha"]
     if ctx.run(["git", "rev-parse", branch]).stdout.strip() != tip:
         return req._send(200, json.dumps({"ok": False, "err": "the outgoing commit isn't the branch tip — run prep first"}))
+    if len(ctx.run(["git", "rev-list", "--no-walk", "--merges", tip]).stdout.split()) > 0:
+        # commit-tree below writes ONE parent — rewording a merge would silently linearize it
+        return req._send(200, json.dumps({"ok": False, "err": "the tip is a merge commit — can't reword it safely"}))
     meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
     env = dict(os.environ)
     if len(meta) == 3:
@@ -366,4 +380,12 @@ def prep_message(req, raw):
         return req._send(200, json.dumps({"ok": False, "err": "branch moved while editing — reload and retry"}))
     if _GREEN_GATES.get(branch) == tip:
         _GREEN_GATES[branch] = new   # same tree ⇒ the gates verdict still holds
-    return req._send(200, json.dumps({"ok": True, "commit": {"sha": new, "subject": subject, "body": body}}))
+    # the tip sha moved — reseat any stacked children so they don't hang off the old commit
+    # (same tree, so these rebases are trivially clean)
+    from srv import reviews
+    reseated = []
+    reviews._reseat_walk(branch, reseated)
+    return req._send(200, json.dumps({
+        "ok": True, "commit": {"sha": new, "subject": subject, "body": body},
+        "reseated": [x for x in reseated if x.get("status") == "reseated"],
+    }))
