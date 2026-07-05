@@ -28,6 +28,13 @@ function parseBlob() {
   };
 }
 
+// a commit or compare page: /<owner>/<repo>/commit/<sha> or /compare/<range>. There's no PR, so a
+// selected diff line opens straight into the working checkout via /open-blob (like a blob view).
+function parseCommit() {
+  const m = location.pathname.match(/^\/([^/]+)\/([^/]+)\/(?:commit|compare)\//);
+  return m ? { repo: `${m[1]}/${m[2]}` } : null;
+}
+
 async function sha256hex(s) {
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
@@ -35,22 +42,39 @@ async function sha256hex(s) {
 
 // the line GitHub has selected (you clicked a line number): the URL hash is
 // #diff-<sha256(path)>R<line> (R = the new-file side). GitHub's diff is virtualized so the
-// anchor element often isn't in the DOM — resolve the path by hashing each RENDERED diff
-// table's path and matching the hash. null → caller falls back to the gm Diffview.
+// anchor element often isn't in the DOM — resolve the path via the hash→path cache, which
+// is warmed from every table that RENDERS (see warmDiffHashCache). null → gm Diffview.
+const diffHashCache = new Map();   // sha256(path) → path
+const hashedDiffPaths = new Set();
+// You can only select a line while its table is rendered, but the table may be virtualized
+// OUT again before the open gesture — warming on every tick guarantees the later lookup.
+async function warmDiffHashCache() {
+  for (const table of document.querySelectorAll('table[aria-label^="Diff for: "]')) {
+    const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
+    if (hashedDiffPaths.has(path)) {
+      continue;
+    }
+    hashedDiffPaths.add(path);
+    diffHashCache.set(await sha256hex(path), path);
+  }
+}
+
+let lastSelectionMiss = null;   // {line} when a hash was present but its file couldn't be resolved
 async function selectedLine() {
+  lastSelectionMiss = null;
   const m = location.hash.match(/^#diff-([0-9a-f]+)R(\d+)/);
   if (!m) {
     return null;
   }
   const wantHash = m[1];
   const line = Number(m[2]);
-  for (const table of document.querySelectorAll('table[aria-label^="Diff for: "]')) {
-    const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
-    if ((await sha256hex(path)) === wantHash) {
-      return { path, line };
-    }
+  await warmDiffHashCache();
+  const path = diffHashCache.get(wantHash);
+  if (path) {
+    return { path, line };
   }
-  console.warn(`[gh-to-nvim] line ${line} selected but its file isn't rendered — falling back to gm`);
+  lastSelectionMiss = { line };
+  console.warn(`[gh-to-nvim] line ${line} selected but its file was never seen rendered — falling back to gm`);
   return null;
 }
 
@@ -61,7 +85,10 @@ async function nvimRequest(pr) {
     return { payload: { number: pr.number, repo: pr.repo, path: sel.path, line: sel.line },
              short: `:${sel.line}`, full: `${sel.path}:${sel.line}` };
   }
-  return { payload: { number: pr.number, repo: pr.repo, view: "gm" }, short: "gm", full: "gm Diffview" };
+  const why = lastSelectionMiss
+    ? ` (line ${lastSelectionMiss.line} selected, but its file couldn't be resolved — jump lost)`
+    : "";
+  return { payload: { number: pr.number, repo: pr.repo, view: "gm" }, short: "gm", full: `gm Diffview${why}` };
 }
 
 function send(payload, endpoint) {
@@ -229,9 +256,9 @@ function makeFab(pr) {
 
 // forest chip: which forest this PR's branch belongs to, straight from the same git config the
 // viewer reads. A local branch's chip IS the viewer link, so the redundant → viewer button is
-// dropped (it stays for non-local PRs, where it imports first). When the PR is approved and
-// children have fallen off its tip (a squash/amend orphans them), a ⤴ reseat button rebases
-// each child back on — locally only, nothing pushed.
+// dropped (it stays for non-local PRs, where it imports first). Orphaned children (a squash/amend
+// knocks them off the tip) are flagged in the tooltip only — fixing them lives in the viewer
+// (Restack), not here; the chip is the one-click route to it.
 async function decorateForest(box, pr, viewerBtn) {
   const res = await send({ number: pr.number, repo: pr.repo }, "/pr-forest");
   const info = res?.status === 200 && res.body?.ok ? res.body : null;
@@ -244,38 +271,10 @@ async function decorateForest(box, pr, viewerBtn) {
   chip.href = `${VIEWER_URL}${info.route}`;
   chip.target = "_blank";
   const kids = info.children || [];
-  const orphans = kids.filter((c) => !c.seated);
   chip.title = `${info.branch}${info.project ? ` · forest ${info.project}` : ""}` +
     (kids.length ? `\nchildren: ${kids.map((c) => `${c.branch}${c.seated ? "" : " (orphaned)"}`).join(", ")}` : "");
   viewerBtn.remove();
   box.append(chip);
-
-  if (info.decision !== "APPROVED" || orphans.length === 0) {
-    return;
-  }
-  const btn = document.createElement("button");
-  btn.className = "gh-nvim-fab-btn";
-  btn.textContent = `⤴ reseat ${orphans.length}`;
-  btn.title = `PR approved — rebase ${orphans.map((c) => c.branch).join(", ")} back onto ${info.branch} (local only)`;
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.textContent = "…";
-    toast("⤴ reseating children…", true, true, true);
-    const r = await send({ number: pr.number, repo: pr.repo }, "/pr-reseat-children");
-    const body = r?.body || {};
-    if (r?.status === 200 && body.ok) {
-      toast(`✓ reseated ${body.moved.join(", ") || "nothing to move"}`, true);
-      btn.textContent = "✓";
-    } else if (body.conflicts?.length) {
-      toast(`⚠ ${body.conflicts.map((c) => `${c.branch}: ${c.err}`).join(" · ")}`, false, true);
-      btn.textContent = "⚠";
-    } else {
-      toast(`✗ ${reason(r)}`, false);
-      btn.textContent = "✗";
-    }
-    setTimeout(() => reset(btn, `⤴ reseat ${orphans.length}`), 5000);
-  });
-  box.append(btn);
 }
 
 function toast(text, ok, sticky, working) {
@@ -308,16 +307,25 @@ async function onLineClick(e) {
     return;
   }
   const table = cell.closest('table[aria-label^="Diff for: "]');
-  const pr = parsePr();
-  if (!table || !pr) {
+  if (!table) {
     return;
   }
-  e.preventDefault();
-  e.stopPropagation();
   const path = table.getAttribute("aria-label").replace(/^Diff for: /, "");
   const line = cell.getAttribute("data-line-number");
   const full = `${path}:${line}`;
-  resultToast(await openWithRecovery({ number: pr.number, repo: pr.repo, path, line }, undefined, full), full);
+  const pr = parsePr();
+  if (pr) {
+    e.preventDefault();
+    e.stopPropagation();
+    resultToast(await openWithRecovery({ number: pr.number, repo: pr.repo, path, line }, undefined, full), full);
+    return;
+  }
+  const commit = parseCommit();
+  if (commit) {
+    e.preventDefault();
+    e.stopPropagation();
+    resultToast(await openWithRecovery({ repo: commit.repo, path, line }, "/open-blob", full), full);
+  }
 }
 
 let prewarmedPr = null;
@@ -370,6 +378,7 @@ function injectFileButtons(pr) {
 }
 
 function tick() {
+  void warmDiffHashCache();
   const pr = parsePr();
   const fab = document.getElementById("gh-nvim-fab");
   if (!pr) {
@@ -416,6 +425,23 @@ async function onOpenKey(e) {
     e.stopPropagation();
     const { payload, full } = await nvimRequest(pr);
     resultToast(await openWithRecovery(payload, undefined, full), full);
+    return;
+  }
+  const commit = parseCommit();
+  if (commit) {
+    // no PR, no gm view — only act if a diff line is selected (#diff-<hash>R<n>); resolve it to the
+    // file+line and open in the working checkout.
+    const sel = await selectedLine();
+    if (!sel) {
+      return;
+    }
+    e.preventDefault();
+    e.stopPropagation();
+    const full = `${sel.path}:${sel.line}`;
+    resultToast(
+      await openWithRecovery({ repo: commit.repo, path: sel.path, line: sel.line }, "/open-blob", full),
+      full
+    );
     return;
   }
   const blob = parseBlob();
