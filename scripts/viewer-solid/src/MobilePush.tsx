@@ -2,12 +2,14 @@ import { createSignal, createMemo, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { useViewerLocation, forestKey, Link } from "./router";
 import { provider } from "./provider";
+import { fetchJSON } from "./api";
 import "./MobilePush.css";
 
-// The mobile "prepare to push" card: one branch, the part of the git workflow that's
-// actually better on a phone — squash unpushed → voiced subject → run gates (auto-rebasing
-// onto fresh main when that's what's stale). One tap gets the branch into a clean, pushable
-// local state and stops there; the push itself stays manual (Phil's GitHub Desktop → origin).
+// The "prepare to push" card: one branch — squash unpushed → voiced subject → run gates
+// (auto-rebasing onto fresh main when that's what's stale) → and, once every guard is
+// green, THE origin push (phase 1 of retiring GitHub Desktop; design doc in
+// ~/daily-log/2026-07-02-deprecate-gh-desktop/). The button is the only way that push
+// fires — a human finger, never Claude — and the server re-verifies every guard anyway.
 // A red gate is a clean "needs the laptop" stop, not fixable here.
 
 interface PrepResult {
@@ -31,6 +33,30 @@ interface GatesResult {
   ok: boolean;
   gates: Gate[];
   note?: string;
+  err?: string;
+}
+interface PushPreview {
+  ok: boolean;
+  outgoing: number;
+  ff: boolean;
+  originExists: boolean;
+  gatesGreen: boolean;
+  web: string;
+  reasons: string[];
+  wards: { k: string; label: string; ok: boolean; why: string }[];
+  commits: { sha: string; subject: string; date: string }[];
+  ageDays: number;
+  fork: { sha: string; date: string };
+  mainSince: number;
+  deployCritical: string[];
+  files: { path: string; add: number; del: number }[];
+  moreFiles: number;
+  commit?: { sha: string; subject: string; body: string } | null;
+}
+interface PushOriginResult {
+  ok: boolean;
+  web?: string;
+  out?: string;
   err?: string;
 }
 type StepKey = "squash" | "gates";
@@ -57,6 +83,34 @@ export default function MobilePush() {
 
   const started = createMemo(() => !!(prep() || gates()));
   const done = createMemo(() => !!(prep()?.ok && !prep()!.force && gates()?.ok));
+
+  // the origin door — read-only guard verdict + the one outgoing commit. The server owns
+  // this verdict (and recomputes it on the actual push); the card only renders it.
+  const preview = createQuery(() => ({
+    queryKey: ["push-preview", branch()],
+    queryFn: () => fetchJSON<PushPreview>("/push-preview?branch=" + encodeURIComponent(branch())),
+    enabled: !!branch(),
+  }));
+  const [armed, setArmed] = createSignal(false);
+  const [pushing, setPushing] = createSignal(false);
+  const [pushed, setPushed] = createSignal<PushOriginResult | null>(null);
+  let disarmTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const originClick = async () => {
+    if (!armed()) {
+      setArmed(true);
+      clearTimeout(disarmTimer);
+      disarmTimer = setTimeout(() => setArmed(false), 6000);
+      return;
+    }
+    clearTimeout(disarmTimer);
+    setArmed(false);
+    setPushing(true);
+    setPushed(await post<PushOriginResult>("/push-origin", branch()));
+    setPushing(false);
+    preview.refetch();
+    commits.refetch();
+  };
 
   // why the chain stopped short of a clean local state — what the laptop is needed for.
   const blocked = createMemo(() => {
@@ -106,6 +160,7 @@ export default function MobilePush() {
     setActive("gates");
     setGates(await post<GatesResult>("/gates", branch()));
     commits.refetch();
+    preview.refetch();
     setActive(null);
     setRunning(false);
   };
@@ -153,7 +208,7 @@ export default function MobilePush() {
         </button>
       }>
         <div class="mp-earned">
-          ready to push — over to the laptop
+          {pushed()?.ok ? "pushed — the team has it" : "ready for the origin door below"}
           <div class="mp-confetti" aria-hidden="true">
             <For each={Array.from({ length: 24 })}>{(_, i) => <i style={confettiStyle(i())} />}</For>
           </div>
@@ -218,6 +273,141 @@ export default function MobilePush() {
 
       <Show when={blocked()}>
         <div class="mp-blocked">{blocked()}</div>
+      </Show>
+
+      {/* the origin door — the ONE place this tooling touches shared history, rendered as
+          the crossing it is: everything that came before (your outgoing commits) on the
+          left, everything main did since you forked on the right, converging on the sealed
+          commit behind six wards. The server owns the verdict and re-verifies it on the
+          push; this section only renders it. PRs are authored on github.com, never here. */}
+      <Show when={preview.data && (preview.data!.outgoing > 0 || pushed())}>
+        <section class="mp-origin">
+          <div class="mp-origin-head">
+            origin — shared with the team
+            <span class="mp-origin-sub">
+              {(preview.data?.web.match(/github\.com\/([^/]+\/[^/]+)\//) || [])[1] ?? ""}
+            </span>
+          </div>
+
+          <div class="mp-cross">
+            <div class="mp-cross-col">
+              <div class="mp-cross-title">yours · since {preview.data?.fork.date}</div>
+              <div class="mp-cross-n">
+                <b>{preview.data?.outgoing}</b>
+                {preview.data?.outgoing === 1 ? " commit" : " commits"}
+                <Show when={(preview.data?.ageDays ?? 0) > 0}>
+                  {" · "}{preview.data?.ageDays}{preview.data?.ageDays === 1 ? " day" : " days"}
+                </Show>
+              </div>
+              <ul class="mp-cross-list">
+                <For each={preview.data?.commits}>
+                  {(c) => (
+                    <li>
+                      <span class="mp-cross-date">{c.date}</span>
+                      {c.subject}
+                    </li>
+                  )}
+                </For>
+                <Show when={(preview.data?.outgoing ?? 0) > 8}>
+                  <li class="mp-cross-more">+ {(preview.data?.outgoing ?? 0) - 8} more</li>
+                </Show>
+              </ul>
+            </div>
+            <div class="mp-cross-col mp-cross-right">
+              <div class="mp-cross-title">main · since you forked</div>
+              <div class="mp-cross-n">
+                <b>{preview.data?.mainSince}</b> commits landed
+              </div>
+              <Show
+                when={preview.data?.deployCritical.length}
+                fallback={<div class="mp-cross-ok">deploy watch clear</div>}
+              >
+                <div class="mp-cross-warn">
+                  {preview.data?.deployCritical.length} deploy-watched{" "}
+                  {preview.data?.deployCritical.length === 1 ? "file" : "files"} you lack
+                </div>
+              </Show>
+            </div>
+          </div>
+          <div class="mp-converge" aria-hidden="true">
+            <i /><span>⌄</span><i />
+          </div>
+
+          <div class="mp-seal">
+            <Show
+              when={preview.data?.commit}
+              fallback={
+                <div class="mp-seal-pending">
+                  prep seals {preview.data?.outgoing} commits into one voiced commit
+                </div>
+              }
+            >
+              {(c) => (
+                <>
+                  <div class="mp-seal-subject">{c().subject}</div>
+                  <Show when={c().body}>
+                    <pre class="mp-seal-body">{c().body}</pre>
+                  </Show>
+                </>
+              )}
+            </Show>
+            <ul class="mp-files">
+              <For each={preview.data?.files}>
+                {(f) => (
+                  <li>
+                    <span class="mp-file-path">{f.path}</span>
+                    <span class="mp-file-add">+{f.add}</span>
+                    <span class="mp-file-del">−{f.del}</span>
+                  </li>
+                )}
+              </For>
+              <Show when={preview.data?.moreFiles}>
+                <li class="mp-cross-more">+ {preview.data?.moreFiles} more files</li>
+              </Show>
+            </ul>
+          </div>
+
+          <ul class="mp-wards">
+            <For each={preview.data?.wards}>
+              {(w, i) => (
+                <li class="mp-ward" classList={{ lit: w.ok }} style={{ "--i": String(i()) }}>
+                  <span class="mp-ward-seal">{w.ok ? "◆" : "◇"}</span>
+                  <span class="mp-ward-label">{w.label}</span>
+                </li>
+              )}
+            </For>
+          </ul>
+          <Show when={!preview.data?.ok && !pushed()?.ok}>
+            <ul class="mp-origin-reasons">
+              <For each={preview.data?.reasons}>{(r) => <li>✗ {r}</li>}</For>
+            </ul>
+          </Show>
+
+          <Show
+            when={!pushed()?.ok}
+            fallback={
+              <div class="mp-origin-done">
+                ✓ pushed to origin —{" "}
+                <a href={pushed()!.web} target="_blank" rel="noreferrer">
+                  open on github.com
+                </a>{" "}
+                <span class="mp-dim">(PRs are authored there, never here)</span>
+              </div>
+            }
+          >
+            <button
+              class="mp-origin-btn"
+              classList={{ armed: armed() }}
+              disabled={!preview.data?.ok || pushing()}
+              onClick={originClick}
+            >
+              {pushing() ? "pushing…" : armed() ? "confirm: push to origin" : "⤴ push to origin"}
+            </button>
+            <Show when={pushed() && !pushed()!.ok}>
+              <div class="mp-blocked">{pushed()!.err || "push refused"}</div>
+            </Show>
+          </Show>
+        </section>
       </Show>
     </div>
   );

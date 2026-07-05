@@ -302,3 +302,269 @@
     animation: none;
   }
 }
+
+/* ── the origin door: two histories converge on a sealed commit behind six wards ── */
+.mp-origin {
+  margin-top: 26px;
+  border: 1px solid var(--ember);
+  border-radius: 12px;
+  padding: 16px 18px 18px;
+  background:
+    radial-gradient(120% 90% at 50% 108%, var(--ember-wash), transparent 60%),
+    var(--vellum-raise);
+}
+.mp-origin-head {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ember);
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.mp-origin-sub {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-faint);
+}
+
+/* the crossing — yours | main-since-fork */
+.mp-cross {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 18px;
+  margin-top: 14px;
+}
+.mp-cross-col {
+  min-width: 0;
+}
+.mp-cross-right {
+  border-left: 1px dashed var(--rule);
+  padding-left: 18px;
+}
+.mp-cross-title {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.mp-cross-right .mp-cross-title {
+  color: var(--patina);
+}
+.mp-cross-n {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+.mp-cross-n b {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 21px;
+  color: var(--ink);
+  margin-right: 2px;
+}
+.mp-cross-right .mp-cross-n b {
+  color: var(--patina);
+}
+.mp-cross-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+.mp-cross-list li {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mp-cross-date {
+  color: var(--ink-faint);
+  margin-right: 6px;
+}
+.mp-cross-more {
+  color: var(--ink-faint);
+  font-style: italic;
+}
+.mp-cross-ok {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--add);
+}
+.mp-cross-warn {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--del);
+  font-weight: 600;
+}
+
+/* convergence — the two lines meet above the seal */
+.mp-converge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 2px;
+  color: var(--ember);
+}
+.mp-converge i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(to right, transparent, var(--ember-wash) 30%, var(--ember));
+}
+.mp-converge i:last-child {
+  background: linear-gradient(to left, transparent, var(--ember-wash) 30%, var(--ember));
+}
+.mp-converge span {
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* the sealed commit — what origin receives */
+.mp-seal {
+  border: 1px solid var(--gold-deep);
+  border-radius: 9px;
+  padding: 13px 15px;
+  background: var(--gold-wash);
+}
+.mp-seal-subject {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 600;
+  font-size: 19px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+.mp-seal-pending {
+  font-size: 12px;
+  font-style: italic;
+  color: var(--ink-dim);
+}
+.mp-seal-body {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-dim);
+  max-height: 150px;
+  overflow-y: auto;
+}
+.mp-files {
+  margin: 10px 0 0;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--rule);
+  list-style: none;
+  font-size: 11px;
+}
+.mp-files li {
+  display: flex;
+  gap: 8px;
+  line-height: 1.6;
+}
+.mp-file-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-dim);
+}
+.mp-file-add {
+  color: var(--add);
+}
+.mp-file-del {
+  color: var(--del);
+}
+
+/* the wards — six seals; each lights gold as the server clears it, staggered so a
+   fresh green verdict reads as a left-to-right ignition */
+.mp-wards {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  justify-content: center;
+}
+.mp-ward {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  transition: color 0.4s ease calc(var(--i) * 90ms);
+}
+.mp-ward-seal {
+  font-size: 12px;
+  transition: inherit;
+}
+.mp-ward.lit {
+  color: var(--ink-dim);
+}
+.mp-ward.lit .mp-ward-seal {
+  color: var(--gold-leaf);
+  text-shadow: 0 0 8px var(--gold-wash);
+}
+.mp-origin-reasons {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--del);
+  font-size: 12px;
+  text-align: center;
+}
+.mp-origin-reasons li {
+  margin-top: 3px;
+}
+
+/* the door — dead while any ward is dark; warms after the last seal lights */
+.mp-origin-btn {
+  margin-top: 14px;
+  width: 100%;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 11px;
+  border-radius: 8px;
+  border: 1px solid var(--ember);
+  color: var(--ember);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.5s ease 640ms, color 0.5s ease 640ms, opacity 0.3s ease;
+}
+.mp-origin-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  transition-delay: 0ms;
+}
+.mp-origin-btn:not(:disabled):not(.armed):hover {
+  background: var(--ember-wash);
+}
+.mp-origin-btn.armed {
+  color: var(--vellum-night);
+  background: var(--ember);
+  transition-delay: 0ms;
+}
+.mp-origin-done {
+  margin-top: 14px;
+  text-align: center;
+  color: var(--add);
+  font-size: 13px;
+}
+.mp-origin-done a {
+  color: inherit;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mp-ward,
+  .mp-ward-seal,
+  .mp-origin-btn {
+    transition: none;
+  }
+}
