@@ -62,23 +62,31 @@ _pr_lock = threading.Lock()
 
 
 def _open_pr_heads():
-    """Branch names with an OPEN PR. PRs live on the phil-loops fork (gh's default
-    origin=Loops-so returns none), so query the repo derived from the phil-loops remote.
-    Cached ~30s + locked so the 8-way /syncs batch fires at most one gh call."""
+    """Branch names with an OPEN PR, unioned across ORIGIN and the phil-loops fork —
+    Phil's real PRs live on origin (Loops-so), the fork is the automation surface;
+    missing either side lets prep/squash rewrite a published branch (bit us on #9405).
+    Cached ~30s + locked so the 8-way /syncs batch fires at most one gh sweep."""
     if time.monotonic() - _pr_cache["at"] < _PR_TTL:
         return _pr_cache["heads"]
     with _pr_lock:
         if time.monotonic() - _pr_cache["at"] < _PR_TTL:
             return _pr_cache["heads"]
-        try:
-            url = ctx.run(["git", "remote", "get-url", "phil-loops"]).stdout.strip()
-            m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
-            repo = m.group(1) if m else "phil-loops/loops"
-            out = ctx.run(["gh", "pr", "list", "-R", repo, "--state", "open",
-                           "--json", "headRefName", "--limit", "300"]).stdout
-            _pr_cache["heads"] = {pr["headRefName"] for pr in json.loads(out or "[]")}
-        except Exception:
-            pass  # keep last-good heads on a transient gh failure
+        heads = set()
+        got_any = False
+        for remote in ("origin", "phil-loops"):
+            try:
+                url = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
+                m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
+                if not m:
+                    continue
+                out = ctx.run(["gh", "pr", "list", "-R", m.group(1), "--state", "open",
+                               "--json", "headRefName", "--limit", "300"]).stdout
+                heads |= {pr["headRefName"] for pr in json.loads(out or "[]")}
+                got_any = True
+            except Exception:
+                pass
+        if got_any:
+            _pr_cache["heads"] = heads   # keep last-good heads on a full gh outage
         _pr_cache["at"] = time.monotonic()
     return _pr_cache["heads"]
 
@@ -709,26 +717,20 @@ def _draft_additive_message(branch, diff_text):
             "Additive PR update - applies the local branch's content without rewriting history.")
 
 
-def diverged_additive(req, raw):
-    # POST /diverged-additive {branch} - draft the ADDITIVE resolution for a diverged PR branch:
-    # ONE commit on top of the pushed head carrying local's PR-frame content, on a new
-    # <branch>-additive push-vehicle branch. By construction the push is a fast-forward - the
-    # PR's reviewed history is preserved. Never pushes; never touches <branch> itself.
-    d = json.loads(raw or "{}")
-    branch = (d.get("branch") or "").strip()
-    if not branch:
-        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-        return
+def build_additive(branch):
+    """The ADDITIVE resolution for a diverged PR branch: ONE commit on top of the pushed
+    head carrying local's PR-frame content, on a <branch>-additive vehicle branch. Never
+    pushes; never touches <branch> itself. Returns the report dict — {ok: False, err,
+    code} on refusal (code = HTTP status for the endpoint), {ok: True, vehicle, sha,
+    shaFull, subject, prAfter, push} on success. Callable from /prep-push routing too."""
     r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     up = r.stdout.strip() if r.returncode == 0 else ""
     if not up:
-        req._send(404, json.dumps({"ok": False, "err": f"{branch} has no upstream"}))
-        return
+        return {"ok": False, "err": f"{branch} has no upstream", "code": 404}
     trunk = _trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
     vehicle = f"{branch}-additive"
     if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{vehicle}"]).returncode == 0:
-        req._send(409, json.dumps({"ok": False, "err": f"{vehicle} already exists - push it or delete it first"}))
-        return
+        return {"ok": False, "err": f"{vehicle} already exists - push it or delete it first", "code": 409}
 
     # Only files in either side's PR-frame diff (trunk...head) may enter the commit - restoring
     # whole-tree would drag main's advance into the PR. Restrict to paths whose PR diff changed.
@@ -743,45 +745,50 @@ def diverged_additive(req, raw):
     now_files, after_files = numstat(f"{trunk}...{up}"), numstat(f"{trunk}...{branch}")
     paths = sorted(p for p in set(now_files) | set(after_files) if now_files.get(p) != after_files.get(p))
     if not paths:
-        req._send(200, json.dumps({"ok": False, "err": "the PR's content already matches local - nothing to carry"}))
-        return
+        return {"ok": False, "err": "the PR's content already matches local - nothing to carry", "code": 200}
 
-    cwd = ctx.repo_cwd()
     tmp = tempfile.mkdtemp(prefix="additive-")
     try:
         r = ctx.run(["git", "worktree", "add", "--detach", tmp, up])
         if r.returncode != 0:
-            req._send(500, json.dumps({"ok": False, "err": (r.stderr or "worktree add failed").strip()[:300]}))
-            return
+            return {"ok": False, "err": (r.stderr or "worktree add failed").strip()[:300], "code": 500}
         in_branch = [p for p in paths
                      if ctx.run(["git", "cat-file", "-e", f"{branch}:{p}"]).returncode == 0]
         removed = [p for p in paths if p not in in_branch]
         if in_branch:
             r = ctx.run(["git", "-C", tmp, "restore", "--source", branch, "--worktree", "--", *in_branch])
             if r.returncode != 0:
-                req._send(500, json.dumps({"ok": False, "err": (r.stderr or "restore failed").strip()[:300]}))
-                return
+                return {"ok": False, "err": (r.stderr or "restore failed").strip()[:300], "code": 500}
         if removed:
             ctx.run(["git", "-C", tmp, "rm", "-q", "--ignore-unmatch", "--", *removed])
         ctx.run(["git", "-C", tmp, "add", "-A", "--", *paths])
         if ctx.run(["git", "-C", tmp, "diff", "--cached", "--quiet"]).returncode == 0:
-            req._send(200, json.dumps({"ok": False, "err": "nothing to commit - the PR files already match"}))
-            return
+            return {"ok": False, "err": "nothing to commit - the PR files already match", "code": 200}
         delta = ctx.run(["git", "-C", tmp, "diff", "--cached"]).stdout
         subject, body = _draft_additive_message(branch, delta)
         r = ctx.run(["git", "-C", tmp, "commit", "-q", "-m", subject + ("\n\n" + body if body else "")])
         if r.returncode != 0:
-            req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit failed").strip()[:300]}))
-            return
+            return {"ok": False, "err": (r.stderr or "commit failed").strip()[:300], "code": 500}
         sha = ctx.run(["git", "-C", tmp, "rev-parse", "HEAD"]).stdout.strip()
         ctx.run(["git", "branch", vehicle, sha])
         ctx.run(["git", "config", f"branch.{vehicle}.description",
                  f"Additive PR update for {branch}: carries the local rework onto the pushed head as one "
                  f"commit, so origin fast-forwards - no history rewrite. Push vehicle only, not a forest "
                  f"member; delete after pushing."])
-        req._send(200, json.dumps({
-            "ok": True, "vehicle": vehicle, "sha": sha[:10], "subject": subject,
+        return {
+            "ok": True, "vehicle": vehicle, "sha": sha[:10], "shaFull": sha, "subject": subject,
             "prAfter": ctx.run(["git", "diff", "--shortstat", f"{trunk}...{sha}"]).stdout.strip(),
-            "push": f"git push origin {vehicle}:{branch}"}))
+            "push": f"git push origin {vehicle}:{branch}"}
     finally:
         ctx.run(["git", "worktree", "remove", "--force", tmp])
+
+
+def diverged_additive(req, raw):
+    # POST /diverged-additive {branch} - see build_additive; this endpoint is the thin wrapper.
+    d = json.loads(raw or "{}")
+    branch = (d.get("branch") or "").strip()
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    res = build_additive(branch)
+    req._send(res.pop("code", 200), json.dumps(res))

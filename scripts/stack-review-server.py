@@ -348,6 +348,10 @@ class H(BaseHTTPRequestHandler):
             return sync.fix_upstream(self, raw)
         if self.path == "/diverged-additive":   # draft the additive PR update (push-vehicle branch, never pushes)
             return sync.diverged_additive(self, raw)
+        if self.path == "/prep-push":   # ONE state-routed prep: additive / restack / squash → one outgoing commit
+            return push.prep_push(self, raw)
+        if self.path == "/prep-message":   # edit the ONE unpushed commit's subject+body (tree untouched)
+            return push.prep_message(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
             return sync.post_reconcile(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit

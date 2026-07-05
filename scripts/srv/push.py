@@ -10,10 +10,11 @@
 import json
 import os
 import re
+import subprocess
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, sync
+from . import ctx, stage, sync
 
 
 def delta_tests(req, raw):
@@ -239,3 +240,130 @@ def push_origin(req, raw):
         "out": (r.stdout or "").strip(),
         "err": (r.stderr or "").strip(),
     }))
+
+
+# ── prep to push — ONE state-routed motion (design.md "the header is two buttons") ──
+
+def _squash_unpushed(branch, message=""):
+    """stack-squash --unpushed --format: collapse the unpushed tail to one voiced commit."""
+    cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format"]
+    if message:
+        cmd.append(f"--message={message}")
+    r = ctx.run([*cmd, branch])
+    try:
+        return json.loads(r.stdout)
+    except Exception:
+        return {"ok": False, "err": (r.stderr or r.stdout or "squash failed").strip()[:300]}
+
+
+def prep_push(req, raw):
+    """POST /prep-push {branch} — route by state and land on 'exactly one outgoing commit':
+      diverged + open PR    → build the additive vehicle, absorb it as the branch tip
+      diverged, no PR       → refuse (⋯ reconcile is the manual override)
+      behind + unpublished  → forward-rebase onto origin/main first (skipped on conflict)
+      unpushed tail > 1     → stack-squash --unpushed --format (voiced draft)
+      already one / nothing → no-op, report
+    Always returns the outgoing commit (sha/subject/body) so the editor can open on it."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    v = _origin_verdict(branch)
+    if v is None:
+        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
+    if branch in ("main", "master"):
+        return req._send(200, json.dumps({"ok": False, "err": "trunk doesn't go through this door"}))
+    published = branch in sync._open_pr_heads()
+    routed = []
+
+    if not v["ff"]:
+        if not published:
+            return req._send(200, json.dumps({
+                "ok": False,
+                "err": "diverged from origin without an open PR — reconcile (⋯ menu) to sort out the source of truth first"}))
+        res = sync.build_additive(branch)
+        if not res.get("ok"):
+            return req._send(res.pop("code", 200), json.dumps(res))
+        sha = res["shaFull"]
+        holder = next((p for p, b in stage._worktrees() if b == branch), None)
+        if holder and stage._dirty(holder):
+            ctx.run(["git", "branch", "-D", res["vehicle"]])
+            return req._send(200, json.dumps({
+                "ok": False, "err": f"{holder} holds {branch} with uncommitted changes — commit or stash first"}))
+        if holder:
+            ctx.run(["git", "-C", holder, "reset", "--hard", sha])
+        else:
+            ctx.run(["git", "branch", "-f", branch, sha])
+        ctx.run(["git", "branch", "-D", res["vehicle"]])
+        ctx.run(["git", "config", "--remove-section", f"branch.{res['vehicle']}"])
+        routed.append("carried your rework onto the PR head as one additive commit")
+    else:
+        state = sync.state(branch)
+        if state["behind"] > 0 and not published and state.get("parent") == "main" and v["outgoing"] > 0:
+            scratch = "/tmp/viewer-prep-scratch"
+            ctx.run(["git", "worktree", "remove", "--force", scratch])
+            if ctx.run(["git", "worktree", "add", "--detach", scratch, "origin/main"]).returncode == 0:
+                held = next((p for p, b in stage._worktrees() if b == branch and p != scratch), None)
+                cut = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
+                if held is None:
+                    r = ctx.run(["git", "-C", scratch, "rebase", "--onto", "origin/main", cut, branch])
+                    if r.returncode == 0:
+                        routed.append(f"restacked onto origin/main ({state['behind']} behind)")
+                    else:
+                        ctx.run(["git", "-C", scratch, "rebase", "--abort"])
+                        routed.append("restack skipped (would conflict) — pushing from the current base")
+                else:
+                    routed.append("restack skipped (branch is checked out) — pushing from the current base")
+                ctx.run(["git", "worktree", "remove", "--force", scratch])
+        v = _origin_verdict(branch)
+        if v["outgoing"] > 1:
+            sq = _squash_unpushed(branch)
+            if not sq.get("ok"):
+                return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "squash failed", "routed": routed}))
+            routed.append(f"sealed {v['outgoing']} unpushed commits into one" + (" (voiced)" if sq.get("voiced") else ""))
+        elif v["outgoing"] == 1:
+            routed.append("already one clean commit — nothing to do")
+        else:
+            return req._send(200, json.dumps({"ok": False, "err": "nothing to push — origin already has this", "routed": routed}))
+
+    v = _origin_verdict(branch)
+    return req._send(200, json.dumps({
+        "ok": True, "routed": routed, "outgoing": v["outgoing"],
+        "commit": v["commit"], "wardsOk": v["ok"], "reasons": v["reasons"],
+    }))
+
+
+def prep_message(req, raw):
+    """POST /prep-message {branch, subject, body} — rewrite the message of the ONE unpushed
+    tip commit, tree untouched (commit-tree + atomic update-ref, author preserved). Refuses
+    unless the outgoing set is exactly that commit, so pushed history can't be reworded."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    subject = (d.get("subject") or "").strip()
+    body = (d.get("body") or "").strip()
+    if not subject or _WIP_SUBJECT.match(subject):
+        return req._send(200, json.dumps({"ok": False, "err": "subject must be a real voiced line, not a placeholder"}))
+    v = _origin_verdict(branch)
+    if v is None:
+        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
+    if v["outgoing"] != 1 or not v["commit"]:
+        return req._send(200, json.dumps({"ok": False, "err": "message editing needs exactly one unpushed commit — run prep first"}))
+    tip = v["commit"]["sha"]
+    if ctx.run(["git", "rev-parse", branch]).stdout.strip() != tip:
+        return req._send(200, json.dumps({"ok": False, "err": "the outgoing commit isn't the branch tip — run prep first"}))
+    meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
+    env = dict(os.environ)
+    if len(meta) == 3:
+        env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
+    msg = subject + (f"\n\n{body}" if body else "")
+    parent = ctx.run(["git", "rev-parse", f"{tip}~1"]).stdout.strip()
+    r = subprocess.run(["git", "commit-tree", f"{tip}^{{tree}}", "-p", parent, "-m", msg],
+                       cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
+    new = r.stdout.strip()
+    if r.returncode != 0 or not new:
+        return req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
+    # atomic old-value check; the tree is unchanged, so this is safe under any checkout
+    r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", new, tip])
+    if r.returncode != 0:
+        return req._send(200, json.dumps({"ok": False, "err": "branch moved while editing — reload and retry"}))
+    if _GREEN_GATES.get(branch) == tip:
+        _GREEN_GATES[branch] = new   # same tree ⇒ the gates verdict still holds
+    return req._send(200, json.dumps({"ok": True, "commit": {"sha": new, "subject": subject, "body": body}}))
