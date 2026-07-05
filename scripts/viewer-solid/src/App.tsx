@@ -1631,7 +1631,32 @@ function NodeDetail() {
   // a containment verdict, and what origin's review diff shows today vs after pushing local.
   // Tip-to-tip diffs are deliberately absent: post-restack they're all main-advance noise.
   const [divergedOpen, setDivergedOpen] = createSignal(false);
-  createEffect(on(active, () => setDivergedOpen(false)));
+  createEffect(on(active, () => {
+    setDivergedOpen(false);
+    divergedAdditive.reset();
+  }));
+  // the additive resolution, drafted server-side: ONE commit on top of the pushed head carrying
+  // local's PR-frame content, on a <branch>-additive push-vehicle branch. Push (a fast-forward,
+  // history preserved) stays Phil's — the button only creates the local branch + message.
+  const divergedAdditive = createMutation(() => ({
+    mutationFn: (branch: string) =>
+      fetch("/diverged-additive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch }),
+      }).then(
+        (r) =>
+          r.json() as Promise<{
+            ok: boolean;
+            err?: string;
+            vehicle?: string;
+            sha?: string;
+            subject?: string;
+            prAfter?: string;
+            push?: string;
+          }>,
+      ),
+  }));
   const divergedDetail = createQuery(() => ({
     queryKey: ["diverged-detail", forestRepo(location()) ?? "loops", active()],
     queryFn: () =>
@@ -2061,6 +2086,15 @@ function NodeDetail() {
                 <button
                   class="nh-fix"
                   style={{ "margin-left": "8px" }}
+                  disabled={divergedAdditive.isPending || !!divergedAdditive.data?.ok}
+                  title="create <branch>-additive: one commit on top of the pushed head carrying local's PR content — pushing it is a plain fast-forward (history preserved, never a force-push). Push stays yours; this only drafts the branch + commit message."
+                  onClick={() => divergedAdditive.mutate(active())}
+                >
+                  {divergedAdditive.isPending ? "drafting…" : divergedAdditive.data?.ok ? "✓ drafted" : "⤴ draft additive"}
+                </button>
+                <button
+                  class="nh-fix"
+                  style={{ "margin-left": "8px" }}
                   disabled={reconcile.isPending}
                   title="eject a standalone Claude in this branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull"
                   onClick={() => reconcile.mutate(active())}
@@ -2070,6 +2104,39 @@ function NodeDetail() {
               </span>
             </Show>
           </div>
+          <Show when={divergedAdditive.data}>
+            <div
+              class="nh-diverged-detail"
+              style={{
+                margin: "6px 0 2px",
+                padding: "10px 12px",
+                border: "1px solid var(--line, #444)",
+                "border-radius": "8px",
+                "font-size": "12.5px",
+                "line-height": "1.55",
+              }}
+            >
+              <Show
+                when={divergedAdditive.data!.ok}
+                fallback={<span>✗ {divergedAdditive.data!.err}</span>}
+              >
+                <div>
+                  ✓ drafted <code>{divergedAdditive.data!.vehicle}</code> @ <code>{divergedAdditive.data!.sha}</code> —
+                  “{divergedAdditive.data!.subject}” · PR becomes: {divergedAdditive.data!.prAfter}
+                </div>
+                <div style={{ opacity: 0.75 }}>
+                  push it (fast-forward, history preserved): <code>{divergedAdditive.data!.push}</code>
+                  <button
+                    class="nh-fix"
+                    style={{ "margin-left": "8px" }}
+                    onClick={() => navigator.clipboard.writeText(divergedAdditive.data!.push!)}
+                  >
+                    ⎘ copy
+                  </button>
+                </div>
+              </Show>
+            </div>
+          </Show>
           <Show when={divergedOpen() && nodeHealth(active())?.diverged}>
             <div
               class="nh-diverged-detail"

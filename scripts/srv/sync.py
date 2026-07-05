@@ -7,6 +7,7 @@ import os
 import re
 import time
 import subprocess
+import tempfile
 import threading
 from urllib.parse import parse_qs
 from concurrent.futures import ThreadPoolExecutor
@@ -676,3 +677,111 @@ def diverged_detail(req, u):
         "containment": containment, "overlap": overlap,
         "prNow": shortstat(f"{trunk}...{up}"), "prAfter": shortstat(f"{trunk}...{branch}"),
         "prFiles": pr_files[:60]}))
+
+
+def _draft_additive_message(branch, diff_text):
+    # One opt-in claude pass (mirrors merge_subjects): draft the additive commit's message from
+    # the delta actually being carried. Deterministic fallback so the draft never blocks on it.
+    purpose = ctx.run(["git", "config", f"branch.{branch}.description"]).stdout.strip()
+    prompt = (
+        "This diff is an ADDITIVE update commit to an open PR - it lands on top of the "
+        "already-reviewed commits, so the message should describe THIS change, not the branch.\n"
+        f"Branch purpose: {purpose or '(none)'}\n"
+        "Write a git commit message. subject: 'type(scope): ...' - plain language, describe the "
+        "behavior in words, NO raw identifiers (function/table names, camelCase tokens), lower-case "
+        "first word after the colon, under 60 chars, no trailing period. body: 1-3 plain sentences; "
+        "HERE you may name a key function/field if load-bearing. "
+        'Return ONLY JSON {"subject": ..., "body": ...}. No prose, no fences.\n\n'
+        "DIFF (truncated):\n" + diff_text[:6000]
+    )
+    r = ctx.run(["claude", "-p", prompt, "--model", "sonnet"])
+    text = (r.stdout or "").strip()
+    try:
+        s, e = text.find("{"), text.rfind("}")
+        obj = json.loads(text[s:e + 1]) if 0 <= s < e else {}
+        subject = (obj.get("subject") or "").strip().rstrip(".")
+        body = (obj.get("body") or "").strip()
+        if subject:
+            return subject, body
+    except ValueError:
+        pass
+    return (f"refactor: carry local rework onto the pushed head of {branch.rsplit('/', 1)[-1]}",
+            "Additive PR update - applies the local branch's content without rewriting history.")
+
+
+def diverged_additive(req, raw):
+    # POST /diverged-additive {branch} - draft the ADDITIVE resolution for a diverged PR branch:
+    # ONE commit on top of the pushed head carrying local's PR-frame content, on a new
+    # <branch>-additive push-vehicle branch. By construction the push is a fast-forward - the
+    # PR's reviewed history is preserved. Never pushes; never touches <branch> itself.
+    d = json.loads(raw or "{}")
+    branch = (d.get("branch") or "").strip()
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
+    up = r.stdout.strip() if r.returncode == 0 else ""
+    if not up:
+        req._send(404, json.dumps({"ok": False, "err": f"{branch} has no upstream"}))
+        return
+    trunk = _trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
+    vehicle = f"{branch}-additive"
+    if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{vehicle}"]).returncode == 0:
+        req._send(409, json.dumps({"ok": False, "err": f"{vehicle} already exists - push it or delete it first"}))
+        return
+
+    # Only files in either side's PR-frame diff (trunk...head) may enter the commit - restoring
+    # whole-tree would drag main's advance into the PR. Restrict to paths whose PR diff changed.
+    def numstat(range_spec):
+        out = {}
+        for line in ctx.run(["git", "diff", "--numstat", range_spec]).stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                out[parts[2]] = (parts[0], parts[1])
+        return out
+
+    now_files, after_files = numstat(f"{trunk}...{up}"), numstat(f"{trunk}...{branch}")
+    paths = sorted(p for p in set(now_files) | set(after_files) if now_files.get(p) != after_files.get(p))
+    if not paths:
+        req._send(200, json.dumps({"ok": False, "err": "the PR's content already matches local - nothing to carry"}))
+        return
+
+    cwd = ctx.repo_cwd()
+    tmp = tempfile.mkdtemp(prefix="additive-")
+    try:
+        r = ctx.run(["git", "worktree", "add", "--detach", tmp, up])
+        if r.returncode != 0:
+            req._send(500, json.dumps({"ok": False, "err": (r.stderr or "worktree add failed").strip()[:300]}))
+            return
+        in_branch = [p for p in paths
+                     if ctx.run(["git", "cat-file", "-e", f"{branch}:{p}"]).returncode == 0]
+        removed = [p for p in paths if p not in in_branch]
+        if in_branch:
+            r = ctx.run(["git", "-C", tmp, "restore", "--source", branch, "--worktree", "--", *in_branch])
+            if r.returncode != 0:
+                req._send(500, json.dumps({"ok": False, "err": (r.stderr or "restore failed").strip()[:300]}))
+                return
+        if removed:
+            ctx.run(["git", "-C", tmp, "rm", "-q", "--ignore-unmatch", "--", *removed])
+        ctx.run(["git", "-C", tmp, "add", "-A", "--", *paths])
+        if ctx.run(["git", "-C", tmp, "diff", "--cached", "--quiet"]).returncode == 0:
+            req._send(200, json.dumps({"ok": False, "err": "nothing to commit - the PR files already match"}))
+            return
+        delta = ctx.run(["git", "-C", tmp, "diff", "--cached"]).stdout
+        subject, body = _draft_additive_message(branch, delta)
+        r = ctx.run(["git", "-C", tmp, "commit", "-q", "-m", subject + ("\n\n" + body if body else "")])
+        if r.returncode != 0:
+            req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit failed").strip()[:300]}))
+            return
+        sha = ctx.run(["git", "-C", tmp, "rev-parse", "HEAD"]).stdout.strip()
+        ctx.run(["git", "branch", vehicle, sha])
+        ctx.run(["git", "config", f"branch.{vehicle}.description",
+                 f"Additive PR update for {branch}: carries the local rework onto the pushed head as one "
+                 f"commit, so origin fast-forwards - no history rewrite. Push vehicle only, not a forest "
+                 f"member; delete after pushing."])
+        req._send(200, json.dumps({
+            "ok": True, "vehicle": vehicle, "sha": sha[:10], "subject": subject,
+            "prAfter": ctx.run(["git", "diff", "--shortstat", f"{trunk}...{sha}"]).stdout.strip(),
+            "push": f"git push origin {vehicle}:{branch}"}))
+    finally:
+        ctx.run(["git", "worktree", "remove", "--force", tmp])
