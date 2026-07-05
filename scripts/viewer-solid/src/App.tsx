@@ -2241,60 +2241,44 @@ function NodeDetail() {
           </Show>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
+          {/* tier-2 trim (Phil, strike 6: "20million buttons"): the diffs|commits pills and the
+              3-way diff-vs control collapse to one flip + one cycler — their keys (c, 1/2/3)
+              already existed, the pills were duplication. Interest ▼▲ and the all-threads list
+              moved into the ⋯ menu; telemetry keeps chat / prep / restack / bless first-class. */}
           <div class="nh-bar">
-            <div class="view-toggle">
-              <button class="view-pill" classList={{ on: view() === "diffs" }} onClick={() => setView("diffs")}>
-                diffs
-              </button>
-              <button class="view-pill" classList={{ on: view() === "commits" }} onClick={() => setView("commits")}>
-                commits
-              </button>
-            </div>
+            <button
+              class="view-pill on"
+              title="flip diffs ⇄ commits (key: c)"
+              onClick={() => setView((v) => (v === "commits" ? "diffs" : "commits"))}
+            >
+              ⇄ {view()}
+            </button>
             <Show when={view() === "diffs" && !isGhost()}>
-              <div class="base-toggle">
-                <span class="base-label">diff vs</span>
-                <For each={BASES}>
-                  {([v, lab]) => (
-                    <button class="base-pill" classList={{ on: base() === v }} onClick={() => setBase(v)}>
-                      {lab}
-                    </button>
-                  )}
-                </For>
-              </div>
+              <button
+                class="base-pill"
+                title="cycle the diff base — parent → main → last blessed (keys: 1 / 2 / 3)"
+                onClick={() => setBase((b) => (b === "" ? "main" : b === "main" ? "blessed" : ""))}
+              >
+                vs {(BASES.find(([v]) => v === base()) ?? BASES[0])[1]}
+              </button>
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
-              <NodeActions branch={active()} isReview={location().kind === "review"} merged={nodeHealth(active())?.merged} ambient={nodeAmbient(active())} />
-            </Show>
-            <Show when={canMutate && !isGhost()}>
-              <div class="interest-ctl" title="promote / demote — orders this branch's forest on Home">
-                <button
-                  class="icon-btn"
-                  disabled={bumpInterest.isPending || interestOf() <= 0}
-                  onClick={() => bumpInterest.mutate({ branch: active(), delta: -1 })}
-                >
-                  ▼
-                </button>
-                <span class="interest-val" classList={{ on: interestOf() > 0 }}>
-                  {interestOf() > 0 ? interestPips(interestOf()) : "—"}
-                </span>
-                <button
-                  class="icon-btn"
-                  disabled={bumpInterest.isPending}
-                  onClick={() => bumpInterest.mutate({ branch: active(), delta: 1 })}
-                >
-                  ▲
-                </button>
-              </div>
+              <NodeActions
+                branch={active()}
+                isReview={location().kind === "review"}
+                merged={nodeHealth(active())?.merged}
+                ambient={nodeAmbient(active())}
+                interest={canMutate ? interestOf() : undefined}
+                onBump={canMutate ? (delta) => bumpInterest.mutate({ branch: active(), delta }) : undefined}
+                onAllChats={() => setShowChats(true)}
+              />
             </Show>
             <Show when={canMutate}>
               <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">
                 ✦
               </button>
             </Show>
-            <button class="icon-btn" onClick={() => setShowChats(true)} title="all chat threads across the forest">
-              💬
-            </button>
           </div>
         </header>
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
@@ -2326,6 +2310,8 @@ function NodeDetail() {
             <div class="kbd-help-head">keyboard · reviewing a branch</div>
             <dl>
               <div><dt><span class="k">tab</span></dt><dd>next file</dd></div>
+              <div><dt><span class="k">c</span></dt><dd>flip diffs ⇄ commits</dd></div>
+              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span></dt><dd>diff vs parent / main / last blessed</dd></div>
               <div><dt><span class="k">b</span></dt><dd>show / hide the file panel</dd></div>
               <div><dt><span class="k">⌘F</span></dt><dd>filter files</dd></div>
               <div><dt><span class="k">⇧B</span></dt><dd>bless file &amp; advance</dd></div>
