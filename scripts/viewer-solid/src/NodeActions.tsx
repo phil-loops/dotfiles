@@ -22,6 +22,7 @@ import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-que
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
 import { useViewerLocation } from "./router";
+import RebaseStream from "./RebaseStream";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -41,6 +42,8 @@ interface SyncResult {
   ok?: boolean;
   err?: string;
   rebased?: boolean; // clean forward-rebase landed in place
+  ejected?: boolean; // couldn't rebase in place → handed to a headless claude, streamed
+  stream?: string; // the rebase job key to tail over /rebase-stream (set with ejected)
   conflict?: boolean; // hit a conflict → Claude resolving in a worktree
   contract?: boolean; // branch already merged into origin/main → drop & rewire instead
 }
@@ -97,6 +100,9 @@ export function NodeActions(props: {
   const [doneAlert, setDoneAlert] = createSignal(false);
   // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
   const [contractKids, setContractKids] = createSignal<string[] | null>(null);
+  // an eject to a headless rebase is live → tail its output stream inline (RebaseStream) instead
+  // of the old frozen "rebasing onto origin/main via Claude" line that couldn't show liveness.
+  const [rebaseStreaming, setRebaseStreaming] = createSignal(false);
   // the ⋯ menu open/closed
   const [open, setOpen] = createSignal(false);
   let root: HTMLDivElement | undefined;
@@ -153,12 +159,8 @@ export function NodeActions(props: {
           return { phase: "blocked" as const, msg: "already merged into origin/main — drop & rewire it instead (restack)" };
         }
         if (!sy.rebased) {
-          return {
-            phase: "blocked" as const,
-            msg: sy.conflict
-              ? "rebase conflicts with origin/main — Claude is resolving it in a worktree; re-run prep to merge when it's done"
-              : "rebasing onto origin/main via Claude in a worktree — re-run prep to merge when it's done",
-          };
+          // ejected to a headless rebase → stream it inline; re-run prep to merge once it lands.
+          return { phase: "streaming" as const };
         }
       }
       setDone("⤓ checking out onto your main checkout…");
@@ -193,6 +195,12 @@ export function NodeActions(props: {
       }
       if (r.phase === "blocked") {
         setDone(`● ${r.msg}`);
+        sync.refetch();
+        return;
+      }
+      if (r.phase === "streaming") {
+        setDone(null);
+        setRebaseStreaming(true); // the rebase is running headless — tail it inline below
         sync.refetch();
         return;
       }
@@ -246,6 +254,8 @@ export function NodeActions(props: {
   const behind = () => sync.data?.behind ?? 0;
   const critical = () => sync.data?.deployCritical ?? [];
   const blocked = () => critical().length > 0;
+  const shared = () => sync.data?.shared;
+  const aheadOfOrigin = () => sync.data?.aheadOfOrigin ?? 0;
   // ambient daemon's dry-run verdict for this branch — folded into the one restack button so a
   // predicted collision warns before you click, instead of living as its own duplicate badge.
   const willConflict = () => props.ambient?.verdict === "will-conflict";
@@ -276,11 +286,10 @@ export function NodeActions(props: {
         const kids = r.children ?? [];
         setContractKids(kids);
         setDone(`● already merged into origin/main — drop it & rewire ${kids.length} child${kids.length === 1 ? "" : "ren"} onto main?`);
-      } else if (r.conflict) {
-        setDoneAlert(true);
-        setDone("⚠ rebase conflict — Claude is resolving it in a worktree; it holds a worktree and blocks restacks until cleared");
       } else {
-        setDone("✓ rebasing on main — Claude is on it in a worktree");
+        // ejected (real conflict or unsafe layout) → headless rebase running; tail it inline.
+        setDone(null);
+        setRebaseStreaming(true);
       }
       sync.refetch();
     },
@@ -348,6 +357,33 @@ export function NodeActions(props: {
 
   return (
     <div class="node-actions" ref={root}>
+      {/* local-vs-shared chip — read-only: what (if anything) of this branch the team can
+          see on origin. ○ never pushed · ◐ origin behind by N · ● in sync · ✕ deleted on
+          origin (merged — contract it). Deliberately its own visual register, distinct from
+          the forest chips: those are local relations, this is the shared-with-the-team one. */}
+      <Show when={!isReview() && shared()}>
+        <span
+          class={`nh-shared nh-shared-${shared()}`}
+          title={
+            shared() === "local"
+              ? "local only — never pushed; the team cannot see this branch"
+              : shared() === "ahead"
+                ? `pushed, but origin is ${aheadOfOrigin()} commit${aheadOfOrigin() === 1 ? "" : "s"} behind your local`
+                : shared() === "synced"
+                  ? "in sync with origin — the team sees exactly this"
+                  : "origin's copy was deleted (squash-merged) — finished work; contract it"
+          }
+        >
+          {shared() === "local"
+            ? "○ local"
+            : shared() === "ahead"
+              ? `◐ ${aheadOfOrigin()}↑`
+              : shared() === "synced"
+                ? "● shared"
+                : "✕ merged"}
+        </span>
+      </Show>
+
       {/* fork-state vs origin/main — calm "behind", escalating to ember "push blocked" when
           main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
           When blocked the fix (rebase forward) surfaces inline next to the alarm; the full
@@ -503,6 +539,10 @@ export function NodeActions(props: {
 
       <Show when={done()}>
         <span class="nh-done" classList={{ "nh-done-alert": doneAlert() }} title={done() ?? ""}>{done()}</span>
+      </Show>
+
+      <Show when={rebaseStreaming()}>
+        <RebaseStream branch={props.branch} onClose={() => setRebaseStreaming(false)} />
       </Show>
     </div>
   );
