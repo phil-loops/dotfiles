@@ -409,6 +409,16 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't save the message"}`),
   }));
 
+  // what prep WOULD do — the read-only routed verdict, so the button teaches before it acts
+  const prepRoute = createQuery(() => ({
+    queryKey: ["prep-route", props.branch],
+    queryFn: () =>
+      fetch(withRepo("/prep-route") + "?branch=" + encodeURIComponent(props.branch)).then(
+        (r) => r.json() as Promise<{ route?: string; why?: string }>,
+      ),
+    enabled: !!props.branch && !props.isReview,
+  }));
+
   // push: the Phase-1 wards, mirrored from the /push card — server recomputes them all
   // at push time; this button only arms when the read-only verdict is green.
   const preview = createQuery(() => ({
@@ -506,7 +516,11 @@ export function NodeActions(props: {
         <button
           class="nh-fix nh-prep"
           disabled={busy()}
-          title="prep to push — one motion, routed by state: carry a diverged PR's rework as an additive commit / restack forward / seal the unpushed tail into one voiced commit — then edit its message before pushing"
+          title={
+            prepRoute.data?.route
+              ? `prep to push — would ${prepRoute.data.route}: ${prepRoute.data.why ?? ""}\nthen open the commit message in the editor`
+              : "prep to push — one motion, routed by state: carry a diverged PR's rework as an additive commit / restack forward / seal the unpushed tail into one voiced commit — then edit its message before pushing"
+          }
           onClick={fire(() => prepPush.mutate())}
         >
           {prepPush.isPending ? "prepping…" : "⌁ prep to push"}
