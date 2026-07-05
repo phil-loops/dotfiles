@@ -1198,6 +1198,15 @@ const FO_VIEWS_CSS = `
   color: var(--ember, #d2732a); background: transparent; border: 1px solid var(--gold-deep, #6e521d);
 }
 .fo-chat:hover { color: var(--gold-leaf, #e6b64e); border-color: var(--gold-leaf, #e6b64e); }
+.fo-stage {
+  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px; margin-left: 6px;
+  color: var(--patina, #7fa093); background: transparent; border: 1px solid var(--rule, #3a332b);
+}
+.fo-stage:hover:not(:disabled) { color: var(--ink, #e8dcc4); border-color: var(--patina, #7fa093); }
+.fo-stage:disabled { opacity: 0.5; cursor: default; }
+.fo-stage.armed { color: var(--vellum-night, #14110a); background: var(--patina, #7fa093); border-color: var(--patina, #7fa093); }
+.fo-stage-msg { font-size: 11px; margin-left: 6px; color: var(--ink-dim, #a89e8c); white-space: nowrap; }
+.fo-stage-msg.bad { color: var(--del, #c87a55); }
 
 /* Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs GitHub).
    Ember, never the blessed gold; a delay guard keeps it off sub-second warm-cache loads. */
@@ -1282,6 +1291,63 @@ function WarmingRibbon(props: {
   );
 }
 
+
+// "stage for testing" — restack this forest's chain forward onto fresh origin/main, then
+// move the MAIN working tree onto the tip so the :3000 dev server serves the whole feature.
+// Two-click armed (it moves Phil's checkout); every guard re-verified server-side, and a
+// mid-chain conflict restores all branches to their pre-stage snapshots.
+function StageButton(props: { project: string }) {
+  const [armed, setArmed] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [msg, setMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
+  let disarm: ReturnType<typeof setTimeout>;
+  const fire = async () => {
+    if (!armed()) {
+      setArmed(true);
+      clearTimeout(disarm);
+      disarm = setTimeout(() => setArmed(false), 6000);
+      return;
+    }
+    clearTimeout(disarm);
+    setArmed(false);
+    setBusy(true);
+    setMsg(null);
+    const r = await fetch(withRepo("/stage"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: props.project }),
+    })
+      .then((x) => x.json() as Promise<{ ok?: boolean; err?: string; tip?: string; moved?: string[]; alreadyStaged?: boolean }>)
+      .catch((e) => ({ ok: false, err: String(e) }));
+    setBusy(false);
+    if (r.ok) {
+      const re = r as { tip?: string; moved?: string[]; alreadyStaged?: boolean };
+      setMsg({
+        text: re.alreadyStaged
+          ? `✓ already staged — checkout is on ${re.tip}`
+          : `✓ ${re.tip} on your checkout${re.moved?.length ? ` · ${re.moved.length} rebased` : ""}`,
+      });
+    } else {
+      setMsg({ text: `✗ ${r.err || "stage failed"}`, bad: true });
+    }
+  };
+  return (
+    <>
+      <button
+        class="fo-stage"
+        classList={{ armed: armed() }}
+        disabled={busy()}
+        title="stage for testing — restack this chain onto fresh origin/main, then move your main checkout onto the tip so the dev server serves it. Refuses on a dirty checkout, an open PR in the chain, or anything but a single main-rooted line."
+        onClick={fire}
+      >
+        {busy() ? "staging…" : armed() ? "confirm: move my checkout" : "⇪ stage"}
+      </button>
+      <Show when={msg()}>
+        <span class="fo-stage-msg" classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
+      </Show>
+    </>
+  );
+}
 
 function ForestOverview() {
   const { location, navigate } = useViewerLocation();
@@ -1379,6 +1445,7 @@ function ForestOverview() {
               title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
               onClick={() => openChat({ branch: project(), file: null, origin: location(), project: project() })}
             >✦ chat</button>
+            <StageButton project={project()} />
           </Show>
         </Show>
         <style>{FO_VIEWS_CSS}</style>

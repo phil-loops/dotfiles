@@ -225,6 +225,8 @@ class H(BaseHTTPRequestHandler):
             return restack.ambient(self)
         elif u.path == "/sync":   # fork-staleness vs origin/main (single branch)
             return sync.get_one(self, u)
+        elif u.path == "/push-preview":  # read-only: outgoing-vs-origin commit + push-origin guard verdict
+            return push.preview(self, u)
         elif u.path == "/syncs":  # batch fork-staleness in one round-trip
             return sync.get_many(self, u)
         elif u.path == "/forest-health":  # batch drifted/merged-ghost per node (badges + fix-all)
@@ -346,6 +348,8 @@ class H(BaseHTTPRequestHandler):
             return push.delta_tests(self, raw)
         if self.path == "/push":     # mobile prepare-to-push: FF push to a safe (non-origin) remote
             return push.push(self, raw)
+        if self.path == "/push-origin":  # shared-history door: FF-only single-clean-commit push; human finger only
+            return push.push_origin(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
