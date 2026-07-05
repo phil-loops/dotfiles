@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
@@ -381,6 +381,10 @@ class H(BaseHTTPRequestHandler):
             return chat.popout(self, raw)
         if self.path == "/chat-attach":      # save a dropped/pasted image → temp file claude can Read
             return chat.attach(self, raw)
+        if self.path == "/rebase-stream":    # tail the ejected forward-rebase (headless claude) → SSE replay+live
+            return rebase.stream(self, raw)
+        if self.path == "/rebase-stop":      # ■ stop: kill the branch's ejected rebase job for real
+            return rebase.stop(self, raw)
         if self.path == "/merge-subjects":   # crisp the merge-story commit subjects (one haiku pass)
             return chat.merge_subjects(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?

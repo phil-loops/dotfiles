@@ -202,6 +202,8 @@ export const SyncState = z.object({
   syncable: z.boolean(), // safe to fast-forward-rebase (else stacked/published)
   why: z.string(), // when not syncable, the reason
   deployCritical: z.array(z.string()).optional(), // deploy-critical files origin/main changed that this branch lacks
+  shared: z.enum(["local", "ahead", "synced", "gone"]).optional(), // local-vs-origin: can the team see this branch?
+  aheadOfOrigin: z.number().optional(), // commits origin's copy lacks (shared === "ahead")
 });
 export type SyncState = z.infer<typeof SyncState>;
 

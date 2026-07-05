@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import ctx
 from . import prompts
+from . import rebase
 
 
 # ── deploy-critical detection (read-only) ────────────────────────────────────
@@ -80,6 +81,21 @@ def _open_pr_heads():
     return _pr_cache["heads"]
 
 
+def _shared(branch):
+    """Local-vs-shared vs origin: "local" (never pushed — the team can't see it),
+    "ahead" (origin's copy is N commits behind), "synced", or "gone" (deleted on
+    origin after merge). Reads the last fetch's refs — no network."""
+    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0:
+        raw = ctx.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"]).stdout.strip()
+        try:
+            ahead = int(raw)
+        except ValueError:
+            ahead = 0
+        return ("ahead" if ahead else "synced"), ahead
+    track = ctx.run(["git", "for-each-ref", f"refs/heads/{branch}", "--format=%(upstream:track)"]).stdout.strip()
+    return ("gone" if track == "[gone]" else "local"), 0
+
+
 def state(branch):
     """Fork-staleness of a branch vs origin/main — the signal behind the viewer's
     "N behind" badge.
@@ -92,6 +108,8 @@ def state(branch):
                   pushed commits (→ force-push); rebasing a *stacked* branch
                   detaches it from its parent (→ that's a restack, not a sync).
                   Neither is offered here — `why` explains the refusal.
+      shared    — local-vs-origin visibility (see _shared), with aheadOfOrigin
+                  the commit count origin's copy lacks.
     Pure inspection: no fetch, no mutation."""
     if not branch:
         return {"branch": "", "behind": 0, "syncable": False, "why": "no branch"}
@@ -110,8 +128,10 @@ def state(branch):
         why = f"stacked on {parent} — needs a restack, not a sync"
     elif published:
         why = "has an open PR — rebase would rewrite pushed commits"
+    shared, ahead = _shared(branch)
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
             "syncable": behind > 0 and parent == "main" and not published,
+            "shared": shared, "aheadOfOrigin": ahead,
             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
 
 
@@ -390,9 +410,22 @@ def _direct_rebase(branch):
     return "clean", f"replayed {n} commit{'' if n == '1' else 's'} onto origin/main"
 
 
+def _eject_worktree(branch):
+    # Build the branch's worktree the same way stack-open/stack-claude do, then resolve its path
+    # (a real worktree holding the branch wins, else the scratch dir stack-open lays down) so the
+    # headless rebase runs exactly where the interactive one used to.
+    ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch])
+    wt = _worktree_of(branch)
+    if wt:
+        return wt
+    scratch = os.environ.get("STACK_OPEN_DIR", "/tmp/stack-study")
+    return os.path.join(scratch, branch.replace("/", "_"))
+
+
 def _eject(branch):
-    # Fallback: hand the rebase to a standalone Claude in the branch's OWN worktree — it
-    # resolves conflicts in isolation and does NOT push or open a PR (Phil handles that).
+    # A real conflict / unsafe layout → hand the rebase to a headless claude in the branch's OWN
+    # worktree, STREAMED (srv/rebase). It resolves conflicts in isolation and does NOT push or
+    # open a PR (Phil handles that). Returns (ok, stream_key) — the key the client tails over SSE.
     prompt = (
         f"Rebase the branch `{branch}` forward onto the latest origin/main, here in this "
         f"worktree. Run `git fetch origin main` then `git rebase origin/main`. Resolve any "
@@ -400,9 +433,12 @@ def _eject(branch):
         f"and do NOT open a PR; leave pushing to me. When done, summarize what replayed and "
         f"any conflicts you resolved."
     )
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch, prompt])
-    ok = r.returncode == 0
-    return ok, ("" if ok else (r.stderr or r.stdout or "could not launch rebase session"))
+    try:
+        cwd = _eject_worktree(branch)
+        key = rebase.start(branch, cwd, prompt)
+        return True, key
+    except Exception as e:
+        return False, str(e)[:400]
 
 
 def _children_of(branch):
@@ -482,11 +518,12 @@ def post_sync(req, raw):
         req._send(200, json.dumps(
             {"ok": True, "contract": True, "branch": branch, "children": _children_of(branch)}))
         return
-    # genuine conflict or unsafe-to-rebase-in-place → eject to a standalone Claude.
-    ok, err = _eject(branch)
+    # genuine conflict or unsafe-to-rebase-in-place → eject to a headless claude, streamed.
+    ok, key = _eject(branch)
     req._send(200 if ok else 500, json.dumps(
         {"ok": ok, "ejected": ok, "conflict": status == "conflict",
-         "err": "" if ok else (err or "could not launch rebase session")}))
+         "stream": key if ok else "",
+         "err": "" if ok else (key or "could not launch rebase session")}))
 
 
 def post_contract(req, raw):
