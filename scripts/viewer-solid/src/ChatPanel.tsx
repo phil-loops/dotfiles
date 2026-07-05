@@ -5,7 +5,7 @@ import { thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./cha
 import { runtime, send, stop as runnerStop, unqueue, setViewingThread, clearViewingThread, ensureWatching } from "./chatRunner";
 import { drawerMinimized as minimized, setDrawerMinimized } from "./chatDrawer";
 import { renderMarkdown } from "./markdown";
-import { parseSegments, runAction, actionById, chatMessageFor, type ActionSpec } from "./chatActions";
+import { parseSegments, runAction, actionById, chatMessageFor, editStreamFor, type ActionSpec } from "./chatActions";
 
 // One action Claude offered, rendered as a button. Destructive actions (registry `confirm`) arm on
 // the first click and fire on the second; the rest fire immediately. The endpoint's verdict shows
@@ -29,6 +29,23 @@ function ChatActionButton(props: { spec: ActionSpec; branch: string; path: strin
     const chatMsg = chatMessageFor(props.spec);
     if (chatMsg) {
       send(props.branch, props.path, { q: chatMsg, model: chatModel() });
+      setPhase("done");
+      return;
+    }
+    // A "/claude-stream" action hands the edit to a headless editing claude and streams its run
+    // in below as a turn — the work, its activity, and the final summary stay in this chat.
+    const edit = editStreamFor(props.spec, { branch: props.branch, path: props.path });
+    if (edit) {
+      if (!edit.selections.length || !edit.instruction) {
+        setNote("this action needs a file + instruction — ask Claude to re-offer it");
+        setPhase("error");
+        return;
+      }
+      send(props.branch, props.path, {
+        q: `✎ ${edit.instruction}`,
+        model: chatModel(),
+        edit,
+      });
       setPhase("done");
       return;
     }

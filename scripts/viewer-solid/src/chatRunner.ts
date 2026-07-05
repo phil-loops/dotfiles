@@ -35,6 +35,10 @@ interface QueuedMsg {
   model: ChatModel;
   attachments?: { name: string; path: string }[]; // dropped/pasted images, saved server-side
   project?: string; // whole-forest chat → POST {project} instead of {branch, path}; server builds the seed
+  // an EDIT turn: the instruction goes to a headless EDITING claude via /claude-stream (a fresh
+  // session in the branch's worktree — never a resume); its run streams in as this turn. q stays
+  // display-only (it may carry a ✎ marker that must not reach the prompt).
+  edit?: { selections: { path: string }[]; instruction: string };
 }
 
 interface Runtime {
@@ -121,13 +125,20 @@ async function consume(
         if (payload.session_id) {
           setSession(branch, path, payload.session_id);
         }
-      } else if (event === "token") {
+      } else if (event === "token" || event === "tool") {
         setRt(k, "status", null);
         if (reset && !didReset) {
           setMsgText(branch, path, idx, () => ""); // first replayed token → rebuild from scratch
           didReset = true;
         }
-        setMsgText(branch, path, idx, (t) => t + (payload.t || ""));
+        if (event === "tool") {
+          // an editing job's activity trace — one inline-code line per tool call, in place in
+          // the prose, so "what is it doing right now" is readable without the tmux window.
+          const line = `\`⚙ ${payload.name || "tool"}${payload.arg ? " " + payload.arg : ""}\``;
+          setMsgText(branch, path, idx, (t) => t + (t && !t.endsWith("\n\n") ? "\n\n" : "") + line + "\n\n");
+        } else {
+          setMsgText(branch, path, idx, (t) => t + (payload.t || ""));
+        }
       } else if (event === "status") {
         setRt(k, "status", payload.s);
       } else if (event === "done") {
@@ -191,26 +202,30 @@ async function runTurn(branch: string, path: string, item: QueuedMsg) {
   const ctrl = new AbortController();
   aborts.set(k, ctrl);
   try {
-    const res = await fetch("/chat", {
+    const endpoint = item.edit ? "/claude-stream" : "/chat";
+    const body = item.edit
+      ? { turn, branch, selections: item.edit.selections, instruction: item.edit.instruction, model: item.model }
+      : {
+          // a forest chat carries {project}; the server gathers the whole DAG. branch/path are the
+          // local thread key only, so they're omitted from the payload when project is set.
+          project: item.project || undefined,
+          branch: item.project ? undefined : branch,
+          turn,
+          path: item.project ? undefined : path || undefined,
+          patch: resume ? undefined : item.patch, // diff only seeds turn one
+          question: item.q,
+          resume: resume || undefined,
+          model: item.model,
+          attachments: item.attachments?.map((a) => a.path),
+        };
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: HEADERS,
       signal: ctrl.signal,
-      body: JSON.stringify({
-        // a forest chat carries {project}; the server gathers the whole DAG. branch/path are the
-        // local thread key only, so they're omitted from the payload when project is set.
-        project: item.project || undefined,
-        branch: item.project ? undefined : branch,
-        turn,
-        path: item.project ? undefined : path || undefined,
-        patch: resume ? undefined : item.patch, // diff only seeds turn one
-        question: item.q,
-        resume: resume || undefined,
-        model: item.model,
-        attachments: item.attachments?.map((a) => a.path),
-      }),
+      body: JSON.stringify(body),
     });
     if (!res.ok || !res.body) {
-      throw new Error(`/chat → ${res.status}`);
+      throw new Error(`${endpoint} → ${res.status}`);
     }
     await consume(branch, path, res, idx, false);
   } catch (e) {

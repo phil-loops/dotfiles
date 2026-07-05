@@ -293,6 +293,20 @@ def _prune():
             del _JOBS[tid]
 
 
+# What a tool call is ABOUT, for the one-line activity trace: the input key that best names
+# the target, per tool. Everything else falls back to the first short string value.
+_TOOL_ARG_KEYS = {"Read": "file_path", "Edit": "file_path", "Write": "file_path",
+                  "Bash": "command", "Grep": "pattern", "Glob": "pattern"}
+
+
+def _tool_arg(name, inp):
+    v = inp.get(_TOOL_ARG_KEYS.get(name, ""), "")
+    if not isinstance(v, str) or not v:
+        v = next((x for x in inp.values() if isinstance(x, str) and x), "")
+    v = " ".join(v.split())
+    return v[:120] + ("…" if len(v) > 120 else "")
+
+
 def _run_claude(job, cmd, cwd):
     # The job's lifetime — runs to completion regardless of any client. Parses claude's
     # stream-json into the same SSE events the client already understands.
@@ -334,6 +348,14 @@ def _run_claude(job, cmd, cwd):
                         if text_seen:
                             job.emit("token", {"t": "\n\n"})
                         job.emit("status", {"s": "writing"})
+            elif t == "assistant":
+                # each completed assistant message carries its tool_use blocks with FULL input
+                # (the partial stream only has empty inputs) — emit one activity line per call so
+                # a watcher sees what the session is DOING, not just its prose between tools.
+                for block in ev.get("message", {}).get("content", []):
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        name = block.get("name", "")
+                        job.emit("tool", {"name": name, "arg": _tool_arg(name, block.get("input") or {})})
             elif t == "result":
                 job.emit("done", {"ok": not ev.get("is_error"), "session_id": job.session_id})
         proc.wait()

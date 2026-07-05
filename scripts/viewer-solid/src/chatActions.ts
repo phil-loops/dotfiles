@@ -36,6 +36,26 @@ export function chatMessageFor(spec: ActionSpec): string | null {
   return (spec.params?.message as string) || def.message || def.label;
 }
 
+// A "/claude-stream" action (apply-change/add-file/reforest) runs a headless EDITING claude in
+// the branch's worktree and streams the run into the drawer as a turn — the chatRunner owns that,
+// not the generic fetch dispatch. Returns the resolved payload, or null for a normal HTTP action.
+export function editStreamFor(
+  spec: ActionSpec,
+  ctx: { branch: string; path: string },
+): { selections: { path: string }[]; instruction: string } | null {
+  const def = actionById(spec.action);
+  if (!def || def.endpoint !== "/claude-stream") {
+    return null;
+  }
+  const body = resolve(def.body, spec, ctx) as { selections?: { path: string }[]; instruction?: string };
+  const selections = (body.selections || []).filter((s) => s.path);
+  const instruction = body.instruction || "";
+  if (!selections.length || !instruction) {
+    return { selections: [], instruction: "" }; // recognized but underspecified — caller shows the error
+  }
+  return { selections, instruction };
+}
+
 export type Segment =
   | { kind: "md"; text: string }
   | { kind: "action"; spec: ActionSpec }
