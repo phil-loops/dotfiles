@@ -361,7 +361,92 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't open worktree"}`),
   }));
 
-  const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending;
+  // ── the two-button flow (design.md "the header is two buttons") ──────────────
+  // prep to push: ONE state-routed motion (additive / restack / squash — the server
+  // decides) that always lands on exactly one outgoing commit, opened in the editor.
+  const [editorOpen, setEditorOpen] = createSignal(false);
+  const [msgSubject, setMsgSubject] = createSignal("");
+  const [msgBody, setMsgBody] = createSignal("");
+  const [routedNotes, setRoutedNotes] = createSignal<string[]>([]);
+  const refreshAfterPrep = () => {
+    qc.invalidateQueries({ queryKey: ["node", props.branch] });
+    qc.invalidateQueries({ queryKey: ["commits", props.branch] });
+    qc.invalidateQueries({ queryKey: ["model"] });
+    sync.refetch();
+    preview.refetch();
+  };
+  const prepPush = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
+        "/prep-push", { branch: props.branch }),
+    onSuccess: (r) => {
+      refreshAfterPrep();
+      if (!r.ok || !r.commit) {
+        setDone(`✗ ${r.err || "prep failed"}`);
+        return;
+      }
+      setRoutedNotes(r.routed ?? []);
+      setMsgSubject(r.commit.subject);
+      setMsgBody(r.commit.body);
+      setEditorOpen(true);
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "prep failed"}`),
+  }));
+  const saveMsg = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string }>("/prep-message", {
+        branch: props.branch, subject: msgSubject(), body: msgBody(),
+      }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        setDone(`✗ ${r.err || "couldn't save the message"}`);
+        return;
+      }
+      setDone("✓ message saved");
+      setEditorOpen(false);
+      refreshAfterPrep();
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't save the message"}`),
+  }));
+
+  // push: the Phase-1 wards, mirrored from the /push card — server recomputes them all
+  // at push time; this button only arms when the read-only verdict is green.
+  const preview = createQuery(() => ({
+    queryKey: ["push-preview", props.branch],
+    queryFn: () =>
+      fetch(withRepo("/push-preview") + "?branch=" + encodeURIComponent(props.branch)).then(
+        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string }>,
+      ),
+    enabled: !!props.branch && !props.isReview,
+  }));
+  const [pushedWeb, setPushedWeb] = createSignal<string | null>(null);
+  const pushOrigin = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string; web?: string }>("/push-origin", { branch: props.branch }),
+    onSuccess: (r) => {
+      refreshAfterPrep();
+      if (!r.ok) {
+        setDone(`✗ ${r.err || "push refused"}`);
+        return;
+      }
+      setDone("✓ pushed — origin has it");
+      setPushedWeb(r.web ?? null);
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "push failed"}`),
+  }));
+
+  // reconcile — the ⋯ override for a divergence prep can't route (no PR, or you want
+  // Claude to work out the source of truth in a worktree). No force-push, no blind pull.
+  const reconcile = createMutation(() => ({
+    mutationFn: () => post<{ ok?: boolean; err?: string }>("/reconcile", { branch: props.branch }),
+    onSuccess: (r) => {
+      setOpen(false);
+      setDone(r.ok ? "✦ Claude is reconciling in a worktree — watch the chat" : `✗ ${r.err || "reconcile refused"}`);
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "reconcile failed"}`),
+  }));
+
+  const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending || prepPush.isPending || pushOrigin.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
     setDoneAlert(false);
@@ -412,44 +497,32 @@ export function NodeActions(props: {
         </span>
       </Show>
 
-      {/* rebase onto origin/main — first-class + always visible (not just when behind, not buried
-          in ⋯). Disabled, reading "on origin/main", once current. Hidden on review nodes (there
-          "pull to their state" is the move). The /sync gate still refuses a stacked / open-PR
-          branch and explains why in the result line. */}
-      <Show when={!isReview()}>
-        <button
-          class="nh-fix nh-restack"
-          classList={{ "amb-conflict": willConflict() && behind() > 0 }}
-          disabled={busy() || behind() === 0}
-          title={
-            behind() === 0
-              ? "already up to date with origin/main"
-              : willConflict()
-                ? `rebasing onto origin/main collides with ${props.ambient?.conflict_title ? `#${props.ambient?.conflict_pr} ${props.ambient?.conflict_title}` : "a merged change"} — restacking will eject to Claude to resolve it in a worktree (ambient dry-run)`
-                : "rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict (never your main checkout); a stacked or open-PR branch is refused with the reason"
-          }
-          onClick={fire(() => rebase.mutate())}
-        >
-          {rebase.isPending
-            ? "rebasing…"
-            : behind() === 0
-              ? "✦ on origin/main"
-              : `${willConflict() ? "⚠" : "⟳"} restack · ${behind()} behind`}
-        </button>
-      </Show>
-
-      {/* prep to merge — the one-motion workflow: checkout onto this branch (GitHub Desktop
-          follows) + squash all unpushed into one voiced commit. Two-click arm (rewrites history);
-          you push from GitHub Desktop, where the pre-push hook runs the gates. */}
+      {/* the header is two buttons (Phil, design.md 2026-07-05): ⌁ prep routes by state —
+          additive vehicle for a diverged PR, restack-then-squash for a messy tail, no-op
+          when clean — and always opens the outgoing commit's message in the editor below.
+          ⇧ push is the Phase-1 warded door, mirrored here from the /push card. Everything
+          else (restack, prep-to-merge, reconcile) is an override in ⋯. */}
       <Show when={!isReview()}>
         <button
           class="nh-fix nh-prep"
-          classList={{ armed: armed() === "prepMerge" }}
           disabled={busy()}
-          title="prep to merge — move your main checkout onto this branch (GitHub Desktop follows), then squash all unpushed commits into one voiced commit. You review + push from GitHub Desktop, where the pre-push hook runs the gates."
-          onClick={fire(() => trigger("prepMerge", () => prepMerge.mutate(false)))}
+          title="prep to push — one motion, routed by state: carry a diverged PR's rework as an additive commit / restack forward / seal the unpushed tail into one voiced commit — then edit its message before pushing"
+          onClick={fire(() => prepPush.mutate())}
         >
-          {prepMerge.isPending ? "prepping…" : armed() === "prepMerge" ? "confirm prep to merge" : "↧ prep to merge"}
+          {prepPush.isPending ? "prepping…" : "⌁ prep to push"}
+        </button>
+        <button
+          class="nh-fix nh-push"
+          classList={{ armed: armed() === "pushOrigin" }}
+          disabled={busy() || !preview.data?.ok}
+          title={
+            preview.data?.ok
+              ? "push to origin — shared with the team the moment it lands (fast-forward, one reviewed commit)"
+              : `the wards aren't green yet:\n${(preview.data?.reasons ?? ["reading the branch…"]).join("\n")}`
+          }
+          onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate()))}
+        >
+          {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push"}
         </button>
       </Show>
 
@@ -531,19 +604,48 @@ export function NodeActions(props: {
             {checkout.isPending ? "checking out…" : "checkout here"}
           </button>
 
-          {/* prepare to push — the mobile card: squash unpushed → run gates → FF push.
-              Not for review nodes (those track someone else's PR — you don't push it). */}
+          {/* overrides — the old first-class buttons live here now (design.md: two buttons) */}
           <Show when={!isReview()}>
             <button
               class="nh-item"
               role="menuitem"
-              title="open the prepare-to-push card: squash unpushed → run gates → fast-forward push to a safe remote"
+              disabled={busy() || behind() === 0}
+              title="rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict; a stacked or open-PR branch is refused with the reason"
+              onClick={fire(() => rebase.mutate())}
+            >
+              <span class="nh-item-ic">⟳</span>
+              {rebase.isPending ? "restacking…" : behind() === 0 ? "on origin/main ✦" : `restack · ${behind()} behind`}
+            </button>
+            <button
+              class="nh-item"
+              role="menuitem"
+              disabled={busy()}
+              title="prep to merge — move your main checkout onto this branch, then squash all unpushed commits into one voiced commit"
+              onClick={() => trigger("prepMerge", () => { setOpen(false); prepMerge.mutate(false); })}
+            >
+              <span class="nh-item-ic">↧</span>
+              {prepMerge.isPending ? "prepping…" : armed() === "prepMerge" ? "confirm prep to merge" : "prep to merge (checkout)"}
+            </button>
+            <button
+              class="nh-item"
+              role="menuitem"
+              disabled={reconcile.isPending}
+              title="eject a standalone Claude in this branch's worktree to work out the source of truth on a divergence — no force-push, no blind pull"
+              onClick={() => reconcile.mutate()}
+            >
+              <span class="nh-item-ic">⚖</span>
+              {reconcile.isPending ? "ejecting…" : "reconcile divergence"}
+            </button>
+            <button
+              class="nh-item"
+              role="menuitem"
+              title="the full push card — the crossing, wards, and remote (phone) surface of the same flow"
               onClick={() => {
                 setOpen(false);
                 navigate({ kind: "push", branch: props.branch });
               }}
             >
-              <span class="nh-item-ic">↑</span> pre-push gates
+              <span class="nh-item-ic">⤢</span> open the push card
             </button>
           </Show>
 
@@ -581,6 +683,47 @@ export function NodeActions(props: {
 
       <Show when={done()}>
         <span class="nh-done" classList={{ "nh-done-alert": doneAlert() }} title={done() ?? ""}>{done()}</span>
+      </Show>
+      <Show when={pushedWeb()}>
+        <a class="nh-pushed-link" href={pushedWeb()!} target="_blank" rel="noreferrer">
+          open on github.com
+        </a>
+      </Show>
+
+      {/* the message editor — prep always ends here: the ONE outgoing commit's subject +
+          body, editable before the push. Saving rewrites only that unpushed commit
+          (server-verified); the tree, author, and gates verdict are untouched. */}
+      <Show when={editorOpen()}>
+        <div class="nh-editor">
+          <Show when={routedNotes().length}>
+            <div class="nh-editor-routed">{routedNotes().join(" · ")}</div>
+          </Show>
+          <input
+            class="nh-editor-subject"
+            value={msgSubject()}
+            placeholder="subject — the one line the team reads in history"
+            onInput={(e) => setMsgSubject(e.currentTarget.value)}
+          />
+          <textarea
+            class="nh-editor-body"
+            value={msgBody()}
+            placeholder="body — what ships and why"
+            rows={5}
+            onInput={(e) => setMsgBody(e.currentTarget.value)}
+          />
+          <div class="nh-editor-row">
+            <button
+              class="nh-fix nh-editor-save"
+              disabled={saveMsg.isPending || !msgSubject().trim()}
+              onClick={() => saveMsg.mutate()}
+            >
+              {saveMsg.isPending ? "saving…" : "save message"}
+            </button>
+            <button class="nh-editor-close" onClick={() => setEditorOpen(false)}>
+              close
+            </button>
+          </div>
+        </div>
       </Show>
 
       <Show when={rebaseStreaming()}>

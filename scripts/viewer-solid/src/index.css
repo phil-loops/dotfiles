@@ -157,7 +157,37 @@ body {
 .meta { margin-left: auto; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.06em; }
 
 /* ── branch state badge + ⋯ actions menu (NodeActions) ───────────────── */
-.node-actions { position: relative; display: flex; align-items: center; gap: 9px; }
+.node-actions { position: relative; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+
+/* the two-button header: prep is patina work, push is the ember door */
+.nh-fix.nh-push { color: var(--ember); border-color: var(--ember); font-weight: 600; }
+.nh-fix.nh-push:disabled { opacity: 0.35; }
+.nh-fix.nh-push.armed { color: var(--vellum-night); background: var(--ember); }
+.nh-pushed-link { font-size: 12px; color: var(--add); }
+
+/* the message editor — prep's landing: the one outgoing commit, editable pre-push */
+.nh-editor {
+  flex-basis: 100%;
+  display: flex; flex-direction: column; gap: 7px;
+  border: 1px solid var(--gold-deep); border-radius: 9px;
+  background: var(--gold-wash); padding: 12px 14px; margin-top: 4px;
+}
+.nh-editor-routed { font-size: 11px; color: var(--patina); font-style: italic; }
+.nh-editor-subject {
+  font-family: var(--display); font-style: italic; font-weight: 600; font-size: 17px;
+  color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid var(--rule);
+  padding: 3px 1px; outline: none;
+}
+.nh-editor-subject:focus { border-bottom-color: var(--gold-leaf); }
+.nh-editor-body {
+  font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--ink-dim);
+  background: transparent; border: 0; resize: vertical; outline: none; padding: 1px;
+}
+.nh-editor-row { display: flex; gap: 10px; align-items: center; }
+.nh-editor-save { color: var(--gold-leaf); border-color: var(--gold-deep); }
+.nh-editor-close {
+  font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer;
+}
 .nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
 .nh-drift { font-size: 12px; color: var(--del); cursor: help; }
 .nh-ghost { font-size: 12px; color: var(--patina); cursor: help; }
