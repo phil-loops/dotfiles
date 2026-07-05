@@ -14,6 +14,8 @@
   stack-squash --unstage <branch>  collapse parent..branch into UNSTAGED working-tree
                                    changes (reset --mixed base) — NO commit, no message;
                                    hand the commit to GitHub Desktop. Skips claude.
+  stack-squash --message=<msg> <b> use <msg> verbatim as the commit message (the
+                                   composer wrote it) — skips drafting entirely
 
 `--unpushed` + `--format` together is the "prep for push" combo. Flags compose and
 may appear in any order before <branch>.
@@ -82,6 +84,7 @@ def out(d):
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
 dry = unpushed = fmt = subject_only = unstage = False
+provided_msg = ""   # --message=<msg>: use this verbatim (the composer wrote it), skip drafting
 rest = []
 for a in argv:
     if a == "--dry":
@@ -94,6 +97,8 @@ for a in argv:
         subject_only = True
     elif a == "--unstage":
         unstage = True
+    elif a.startswith("--message="):
+        provided_msg = a[len("--message="):]
     else:
         rest.append(a)
 branch = (rest[0] if rest else "").strip()
@@ -232,19 +237,21 @@ are often just "wip" — rely on the DIFF below for what actually changed:
 
 Output ONLY the raw commit message — no preface, no explanation, no code fences."""
 
-voiced = False
-message = ""
-try:
-    cmd = [CLAUDE_BIN, "-p"]
-    if os.environ.get("SQUASH_MODEL"):
-        cmd += ["--model", os.environ["SQUASH_MODEL"]]
-    r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=120)
-    draft = (r.stdout or "").strip().strip("`").strip()
-    if draft:
-        message = draft
-        voiced = True
-except Exception:
-    pass
+# a composer-written message is used verbatim — it IS the voice, so no drafting call
+message = provided_msg.strip()
+voiced = bool(message)
+if not message:
+    try:
+        cmd = [CLAUDE_BIN, "-p"]
+        if os.environ.get("SQUASH_MODEL"):
+            cmd += ["--model", os.environ["SQUASH_MODEL"]]
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=120)
+        draft = (r.stdout or "").strip().strip("`").strip()
+        if draft:
+            message = draft
+            voiced = True
+    except Exception:
+        pass
 
 if not message:
     # mechanical fallback — the newest non-"wip" subject, else the top one, sans hash
