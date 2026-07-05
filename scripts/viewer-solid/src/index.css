@@ -659,7 +659,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .fcell.pr { width: 80px; }
 /* constant width (not min-width) so a wider "16 behind" can't steal space from the flexible name
    and shift the columns left; parked/merged badges are allowed to overflow this slot. */
-.fcell.trail { margin-left: 2px; width: 104px; display: flex; justify-content: flex-end; align-items: center; }
+.fcell.trail { margin-left: auto; width: auto; display: flex; justify-content: flex-end; align-items: center; }
 .forest-row.folded .fcell.trail { width: auto; }
 /* behind / restack / fresh are restack state, not identity — they recede until the row is hovered */
 .forest-trail { opacity: 0; transition: opacity 0.12s; }

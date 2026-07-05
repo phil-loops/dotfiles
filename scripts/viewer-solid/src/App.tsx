@@ -784,71 +784,59 @@ function Home() {
         <Show when={liveChats().some((j) => (j.project || j.branch) === p.name && (!j.repo || j.repo === p.repo))}>
           <span class="forest-chat" title="a chat is running on this forest">✦</span>
         </Show>
-        <span class="fcell pips">
-          <Show when={(p.interest ?? 0) > 0}>
-            <span class="forest-ready" title={`interest ${p.interest} — promoted on Home`}>
-              {interestPips(p.interest ?? 0)}
-            </span>
-          </Show>
-        </span>
-        <span class="fcell nodes">{p.branches} {p.branches === 1 ? "node" : "nodes"}</span>
-        <span class="fcell pr">
-          <Show when={prOf(p.name)}>
-            {(pr) => (
-              <span class="forest-pr" classList={{ draft: pr().draft }} title={pr().title}>
-                {pr().draft ? "draft" : "PR"} #{pr().num}
-              </span>
-            )}
-          </Show>
-        </span>
-        <Show
-          when={!folded}
-          fallback={
-            <span class="fcell trail">
+        {/* ONE status cell, by precedence (Phil, strike 5: "a row = name + one signal") —
+            drop-mode > parked repair > merged fold > behind count > open PR. Pips live on
+            the tier header, node count on the overview; no signal at all = fresh. */}
+        <span class="fcell trail">
+          <Switch
+            fallback={
+              <Show when={prOf(p.name)}>
+                {(pr) => (
+                  <span class="forest-pr" classList={{ draft: pr().draft }} title={pr().title}>
+                    {pr().draft ? "draft" : "PR"} #{pr().num}
+                  </span>
+                )}
+              </Show>
+            }
+          >
+            <Match when={deleteMode() && canMutate}>
+              <ActionBar actions={[dropAction(p)]} />
+            </Match>
+            <Match when={stuck()}>
+              <div class="forest-parked">
+                <button
+                  class="forest-resolve"
+                  classList={{ open: menu() === p.name }}
+                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(menu() === p.name ? null : p.name); }}
+                >
+                  ⚠ parked at {leaf(parked()?.current || p.name)}
+                </button>
+                <Show when={menu() === p.name}>
+                  <div class="forest-popover" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
+                    <p class="forest-popover-why">
+                      Rebase paused on a conflict{parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a worktree and blocks restacks until it’s cleared.
+                    </p>
+                    <Show when={parked()?.reason}>{(r) => <p class="forest-popover-reason">{r()}</p>}</Show>
+                    <div class="forest-popover-actions">
+                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); resolve(p.name); }}>✦ resolve with Claude</button>
+                      <button class="danger" onClick={(e) => { e.preventDefault(); e.stopPropagation(); abort(p.name); }}>✕ abort & discard</button>
+                    </div>
+                  </div>
+                </Show>
+              </div>
+            </Match>
+            <Match when={folded}>
               <Show when={p.merged && mergedAgo(p.merged.at)}>
                 {(rel) => (
                   <span class="forest-merged" title={p.merged!.title}>✨ {rel()} (#{p.merged!.pr})</span>
                 )}
               </Show>
-            </span>
-          }
-        >
-          <span class="fcell trail">
-            <Switch fallback={<span class="forest-trail"><span class="forest-fresh fresh">✦ fresh</span></span>}>
-              <Match when={deleteMode() && canMutate}>
-                <ActionBar actions={[dropAction(p)]} />
-              </Match>
-              <Match when={stuck()}>
-                <div class="forest-parked">
-                  <button
-                    class="forest-resolve"
-                    classList={{ open: menu() === p.name }}
-                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(menu() === p.name ? null : p.name); }}
-                  >
-                    ⚠ parked at {leaf(parked()?.current || p.name)}
-                  </button>
-                  <Show when={menu() === p.name}>
-                    <div class="forest-popover" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-                      <p class="forest-popover-why">
-                        Rebase paused on a conflict{parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a worktree and blocks restacks until it’s cleared.
-                      </p>
-                      <Show when={parked()?.reason}>{(r) => <p class="forest-popover-reason">{r()}</p>}</Show>
-                      <div class="forest-popover-actions">
-                        <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); resolve(p.name); }}>✦ resolve with Claude</button>
-                        <button class="danger" onClick={(e) => { e.preventDefault(); e.stopPropagation(); abort(p.name); }}>✕ abort & discard</button>
-                      </div>
-                    </div>
-                  </Show>
-                </div>
-              </Match>
-              {/* passive count only — the action lives in the header's restack-all pill and
-                  ⌘K's per-project restack (telemetry trim: 0.9 uses/day didn't earn N row pills) */}
-              <Match when={p.behind > 0}>
-                <span class="forest-trail">⟳ {p.behind} behind</span>
-              </Match>
-            </Switch>
-          </span>
-        </Show>
+            </Match>
+            <Match when={p.behind > 0}>
+              <span class="forest-trail">⟳ {p.behind} behind</span>
+            </Match>
+          </Switch>
+        </span>
       </Link>
     );
   };
