@@ -1,5 +1,5 @@
 {
-  "_doc": "The ONE registry of actions the read-only ✦ chat may offer as buttons. Both sides read this file: srv/prompts.py teaches Claude the menu from it, and src/chatActions.ts dispatches a clicked button from it — so the taught vocabulary and the wired dispatch can never drift. The chat itself stays read-only (Read/Grep/Glob); an action is a PROPOSAL the viewer renders and the human clicks to run against an endpoint that already exists. The editing actions (apply-change/add-file/reforest) all POST /claude — they hand a task the chat composed to a full editing Claude in the branch's worktree, which is how a read-only suggestion turns into real work.",
+  "_doc": "The ONE registry of actions the read-only ✦ chat may offer as buttons. Both sides read this file: srv/prompts.py teaches Claude the menu from it, and src/chatActions.ts dispatches a clicked button from it — so the taught vocabulary and the wired dispatch can never drift. The chat itself stays read-only (Read/Grep/Glob); an action is a PROPOSAL the viewer renders and the human clicks to run against an endpoint that already exists. The editing actions (apply-change/add-file/reforest) all POST /claude-stream — they hand a task the chat composed to a headless editing Claude in the branch's worktree, and its run STREAMS BACK into this chat as a normal turn (activity lines + prose + final summary), so the result and done-state land in the page instead of an invisible tmux window.",
   "actions": [
     {
       "id": "whats-next",
@@ -33,11 +33,11 @@
     },
     {
       "id": "apply-change",
-      "endpoint": "/claude",
+      "endpoint": "/claude-stream",
       "scope": "branch",
       "confirm": true,
       "label": "Apply this change",
-      "describe": "Hand a specific edit to an editing Claude in the branch's worktree — this is how your suggestion actually gets made. Offer whenever you've described a concrete change to an existing file. params: file (the file to edit; in a file chat, the file you're viewing), instruction (the exact change to make).",
+      "describe": "Hand a specific edit to an editing Claude in the branch's worktree — this is how your suggestion actually gets made; its run streams below as a turn in this chat. Offer whenever you've described a concrete change to an existing file. params: file (the file to edit; in a file chat, the file you're viewing), instruction (the exact change to make).",
       "params": [
         { "name": "file", "desc": "path of the file to edit" },
         { "name": "instruction", "desc": "a precise, self-contained instruction describing the edit" }
@@ -46,7 +46,7 @@
     },
     {
       "id": "add-file",
-      "endpoint": "/claude",
+      "endpoint": "/claude-stream",
       "scope": "branch",
       "confirm": true,
       "label": "Add this file",
@@ -59,7 +59,7 @@
     },
     {
       "id": "reforest",
-      "endpoint": "/claude",
+      "endpoint": "/claude-stream",
       "scope": "branch",
       "confirm": true,
       "label": "Reforest this branch",
