@@ -348,6 +348,16 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
   }));
 
+  // reveal-in-Finder — demoted from the work-tab rows into this menu (telemetry trim).
+  const worktree = createMutation(() => ({
+    mutationFn: () => post<{ ok?: boolean; err?: string }>("/worktree", { branch: props.branch }),
+    onSuccess: (r) => {
+      setOpen(false);
+      setDone(r.ok ? "⌂ revealed in Finder" : `✗ ${r.err || "couldn't open worktree"}`);
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't open worktree"}`),
+  }));
+
   const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending;
   const fire = (fn: () => void) => () => {
     setDone(null);
@@ -533,6 +543,18 @@ export function NodeActions(props: {
               <span class="nh-item-ic">↑</span> pre-push gates
             </button>
           </Show>
+
+          {/* worktree reveal — demoted here from the work-tab rows (telemetry trim) */}
+          <button
+            class="nh-item"
+            role="menuitem"
+            disabled={worktree.isPending}
+            title="reveal this branch's worktree in Finder — materialises a scratch one if it's checked out nowhere"
+            onClick={fire(() => worktree.mutate())}
+          >
+            <span class="nh-item-ic">⌂</span>
+            {worktree.isPending ? "revealing…" : "reveal worktree"}
+          </button>
 
         </div>
       </Show>

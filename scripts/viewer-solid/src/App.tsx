@@ -1638,6 +1638,34 @@ function NodeDetail() {
   }));
   const nodeAmbient = (b: string) => ambient.data?.report?.branches.find((x) => x.branch === b);
 
+  // the ⇄ diverged chip's inspect panel: what the divergence actually IS, in the PR's frame —
+  // each side's commits with patch-id twins flagged (a rebase reads as "same change, rewritten"),
+  // a containment verdict, and what origin's review diff shows today vs after pushing local.
+  // Tip-to-tip diffs are deliberately absent: post-restack they're all main-advance noise.
+  const [divergedOpen, setDivergedOpen] = createSignal(false);
+  createEffect(on(active, () => setDivergedOpen(false)));
+  const divergedDetail = createQuery(() => ({
+    queryKey: ["diverged-detail", forestRepo(location()) ?? "loops", active()],
+    queryFn: () =>
+      fetch(withRepo("/diverged-detail?branch=" + encodeURIComponent(active()))).then(
+        (r) =>
+          r.json() as Promise<{
+            ok: boolean;
+            err?: string;
+            upstream?: string;
+            trunk?: string;
+            ahead?: { sha: string; subject: string; matched: boolean; fromMain: boolean }[];
+            behind?: { sha: string; subject: string; matched: boolean }[];
+            containment?: "rebase" | "contained" | "clean-extra" | "overlap";
+            overlap?: string[];
+            prNow?: string;
+            prAfter?: string;
+            prFiles?: { path: string; status: "same" | "changed" | "enters" | "leaves"; now: string | null; after: string | null }[];
+          }>,
+      ),
+    enabled: divergedOpen() && !!nodeHealth(active())?.diverged,
+  }));
+
   // cross-forest chat index overlay (read-only; every thread in this browser).
   const [showChats, setShowChats] = createSignal(false);
   // a chat the index asked to open on a (possibly other) branch: navigate there, then open the
@@ -2037,6 +2065,14 @@ function NodeDetail() {
                 <button
                   class="nh-fix"
                   style={{ "margin-left": "8px" }}
+                  title="show exactly what diverged: each side's commits (rebased twins flagged) + what the PR's diff on origin shows now vs after an additive update"
+                  onClick={() => setDivergedOpen(!divergedOpen())}
+                >
+                  {divergedOpen() ? "hide" : "inspect"}
+                </button>
+                <button
+                  class="nh-fix"
+                  style={{ "margin-left": "8px" }}
                   disabled={reconcile.isPending}
                   title="eject a standalone Claude in this branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull"
                   onClick={() => reconcile.mutate(active())}
@@ -2046,6 +2082,108 @@ function NodeDetail() {
               </span>
             </Show>
           </div>
+          <Show when={divergedOpen() && nodeHealth(active())?.diverged}>
+            <div
+              class="nh-diverged-detail"
+              style={{
+                margin: "6px 0 2px",
+                padding: "10px 12px",
+                border: "1px solid var(--line, #444)",
+                "border-radius": "8px",
+                "font-size": "12.5px",
+                "line-height": "1.55",
+              }}
+            >
+              <Show when={divergedDetail.data} fallback={<span>reading both sides…</span>}>
+                <Show when={divergedDetail.data!.ok} fallback={<span>✗ {divergedDetail.data!.err}</span>}>
+                  <div style={{ "margin-bottom": "6px" }}>
+                    <Switch>
+                      <Match when={divergedDetail.data!.containment === "rebase"}>
+                        <span>
+                          only a local rebase — every pushed-head commit is patch-identical to a local one, so the PR's
+                          content already matches. Nothing to push; leave origin alone.
+                        </span>
+                      </Match>
+                      <Match when={divergedDetail.data!.containment === "contained"}>
+                        <span>
+                          local already contains everything the pushed head has (a squash/rework absorbed it). If the PR
+                          diff below changed, update it ADDITIVELY — a commit on top of the pushed head; an open PR's
+                          history is shared, never force-push it.
+                        </span>
+                      </Match>
+                      <Match when={divergedDetail.data!.containment === "clean-extra"}>
+                        <span>
+                          ⚠ the pushed head has work local lacks (it would merge cleanly) — bring it into local first
+                          (reconcile), then update the PR additively if anything remains.
+                        </span>
+                      </Match>
+                      <Match when={divergedDetail.data!.containment === "overlap"}>
+                        <span>
+                          local reworked what the pushed head has ({(divergedDetail.data!.overlap ?? []).join(", ")}) —
+                          update the PR ADDITIVELY: one commit on top of the pushed head carrying the rework (reconcile
+                          drafts exactly that; an open PR's history is shared, never force-push it).
+                        </span>
+                      </Match>
+                    </Switch>
+                    <div style={{ opacity: 0.75 }}>
+                      PR diff on origin today: {divergedDetail.data!.prNow || "empty"} → after carrying local's content:{" "}
+                      {divergedDetail.data!.prAfter || "empty"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: "24px", "flex-wrap": "wrap" }}>
+                    <div>
+                      <div style={{ opacity: 0.65 }}>only local ({(divergedDetail.data!.ahead ?? []).length}↑)</div>
+                      <For each={divergedDetail.data!.ahead}>
+                        {(c) => (
+                          <div>
+                            <code>{c.sha}</code> {c.subject}{" "}
+                            <span style={{ opacity: 0.6 }}>
+                              {c.matched ? "≡ rewritten twin" : c.fromMain ? "↳ main advance (restack)" : "◆ new work"}
+                            </span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                    <div>
+                      <div style={{ opacity: 0.65 }}>only pushed head ({(divergedDetail.data!.behind ?? []).length}↓)</div>
+                      <For each={divergedDetail.data!.behind}>
+                        {(c) => (
+                          <div>
+                            <code>{c.sha}</code> {c.subject}{" "}
+                            <span style={{ opacity: 0.6 }}>{c.matched ? "≡ rewritten twin" : "◆ no local twin"}</span>
+                          </div>
+                        )}
+                      </For>
+                    </div>
+                    <Show when={(divergedDetail.data!.prFiles ?? []).length > 0}>
+                      <div>
+                        <div style={{ opacity: 0.65 }}>
+                          the PR's diff, file by file (now → after an additive update)
+                        </div>
+                        <For each={divergedDetail.data!.prFiles}>
+                          {(f) => (
+                            <div>
+                              <code>{f.path}</code>{" "}
+                              <span style={{ opacity: 0.6 }}>
+                                <Switch>
+                                  <Match when={f.status === "same"}>{f.now} · unchanged</Match>
+                                  <Match when={f.status === "changed"}>
+                                    {f.now} → {f.after}
+                                  </Match>
+                                  <Match when={f.status === "enters"}>＋ enters the PR ({f.after})</Match>
+                                  <Match when={f.status === "leaves"}>－ leaves the PR (was {f.now})</Match>
+                                </Switch>
+                              </span>
+                            </div>
+                          )}
+                        </For>
+                      </div>
+                    </Show>
+                  </div>
+                </Show>
+              </Show>
+            </div>
+          </Show>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
           <div class="nh-bar">

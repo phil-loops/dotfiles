@@ -6,6 +6,7 @@ import json
 import os
 import re
 import time
+import subprocess
 import threading
 from urllib.parse import parse_qs
 from concurrent.futures import ThreadPoolExecutor
@@ -570,3 +571,108 @@ def post_reconcile(req, raw):
     req._send(200 if ok else 500, json.dumps(
         {"ok": ok, "ejected": ok,
          "err": "" if ok else (r.stderr or r.stdout or "could not launch reconcile session")}))
+
+
+def _patch_ids(range_spec):
+    # sha → patch-id for every commit in range_spec. Content-stable across rebases, so a
+    # rewritten commit matches its pre-rewrite twin even though the shas differ.
+    shas = ctx.run(["git", "rev-list", range_spec]).stdout
+    if not shas.strip():
+        return {}
+    cwd = ctx.repo_cwd()
+    diffs = subprocess.run(["git", "diff-tree", "--stdin", "-p"], input=shas,
+                           cwd=cwd, capture_output=True, text=True).stdout
+    pids = subprocess.run(["git", "patch-id", "--stable"], input=diffs,
+                          cwd=cwd, capture_output=True, text=True).stdout
+    out = {}
+    for line in pids.splitlines():
+        parts = line.split()
+        if len(parts) == 2:
+            out[parts[1]] = parts[0]
+    return out
+
+
+def diverged_detail(req, u):
+    # GET /diverged-detail?branch=X — what a ⇄ divergence actually IS, framed the way GitHub
+    # Desktop (and the PR page) frames it: each side's commits with patch-id twins flagged, a
+    # containment verdict, and the PR-DIFF comparison — what origin's review diff (trunk...head)
+    # shows today vs what it becomes after pushing local. Tip-to-tip diffs are deliberately NOT
+    # shown: after a restack they're dominated by main's advance, which reads as phantom churn.
+    branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
+    up = r.stdout.strip() if r.returncode == 0 else ""
+    if not up:
+        req._send(404, json.dumps({"ok": False, "err": f"{branch} has no upstream"}))
+        return
+    trunk = _trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
+
+    def commits(range_spec):
+        out = []
+        for line in ctx.run(["git", "log", "--format=%H\t%s", range_spec]).stdout.splitlines():
+            sha, _, subj = line.partition("\t")
+            if sha:
+                out.append({"full": sha, "sha": sha[:9], "subject": subj})
+        return out
+
+    ahead, behind = commits(f"{up}..{branch}"), commits(f"{branch}..{up}")
+    a_ids, b_ids = _patch_ids(f"{up}..{branch}"), _patch_ids(f"{branch}..{up}")
+    a_set, b_set = set(a_ids.values()), set(b_ids.values())
+    for c in ahead:
+        # a restacked branch carries trunk commits the pushed head predates — label them as
+        # main's advance, not this branch's new work (they'd read as phantom local commits).
+        c["fromMain"] = ctx.run(["git", "merge-base", "--is-ancestor", c["full"], trunk]).returncode == 0
+        c["matched"] = a_ids.get(c.pop("full"), "") in b_set
+    for c in behind:
+        c["matched"] = b_ids.get(c.pop("full"), "") in a_set
+    # Containment, tiered. Per-commit patch-ids only match a pure rebase; Phil's prep-to-merge
+    # SQUASHES (4 pushed commits -> 1 local), so also try an in-memory merge of the pushed head
+    # into local: same tree -> everything's already here; clean but different -> real remote-only
+    # additions; conflicts -> both sides changed the same regions (the file list names them).
+    if behind and all(c["matched"] for c in behind):
+        containment, overlap = "rebase", []
+    else:
+        mt = subprocess.run(["git", "merge-tree", "--write-tree", branch, up],
+                            cwd=ctx.repo_cwd(), capture_output=True, text=True)
+        if mt.returncode == 0:
+            local_tree = ctx.run(["git", "rev-parse", f"{branch}^{{tree}}"]).stdout.strip()
+            containment = "contained" if mt.stdout.split("\n", 1)[0].strip() == local_tree else "clean-extra"
+            overlap = []
+        else:
+            seen = set()
+            for line in mt.stdout.splitlines()[1:]:
+                parts = line.split("\t")
+                if len(parts) == 2 and parts[0].count(" ") == 2:   # "mode sha stage\tpath" rows
+                    seen.add(parts[1])
+            containment, overlap = "overlap", sorted(seen)[:30]
+
+    # The PR view: origin's review diff is trunk...head (three-dot, GitHub's own framing).
+    # "now" = against the pushed head; "after" = against local, i.e. what a push makes it.
+    def numstat(range_spec):
+        out = {}
+        for line in ctx.run(["git", "diff", "--numstat", range_spec]).stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3:
+                out[parts[2]] = (parts[0], parts[1])
+        return out
+
+    def shortstat(range_spec):
+        return ctx.run(["git", "diff", "--shortstat", range_spec]).stdout.strip()
+
+    now_files, after_files = numstat(f"{trunk}...{up}"), numstat(f"{trunk}...{branch}")
+    pr_files = []
+    for path in sorted(set(now_files) | set(after_files)):
+        n, a = now_files.get(path), after_files.get(path)
+        if n and a:
+            status = "same" if n == a else "changed"
+        else:
+            status = "enters" if a else "leaves"
+        pr_files.append({"path": path, "status": status,
+                         "now": n and f"+{n[0]} −{n[1]}", "after": a and f"+{a[0]} −{a[1]}"})
+    req._send(200, json.dumps({
+        "ok": True, "upstream": up, "trunk": trunk, "ahead": ahead, "behind": behind,
+        "containment": containment, "overlap": overlap,
+        "prNow": shortstat(f"{trunk}...{up}"), "prAfter": shortstat(f"{trunk}...{branch}"),
+        "prFiles": pr_files[:60]}))
