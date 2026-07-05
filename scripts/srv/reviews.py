@@ -379,3 +379,25 @@ def pr_reseat(req, raw):   # POST /pr-reseat-children — rebase orphaned childr
     req._send(200 if not conflicts else 207,
               json.dumps({"ok": not conflicts, "branch": branch, "results": results,
                           "moved": moved, "conflicts": conflicts}))
+
+
+def reseat(req, raw):   # POST /reseat-children {branch} — viewer: rebase drifted children back onto this branch
+    # The viewer-scoped sibling of pr_reseat: keyed by branch (the drifted node's parent), no
+    # PR-approval gate — the viewer IS the surgery surface. Same walk: every child off the tip
+    # is rebased back on from its recorded cut, recursively; seated children are untouched.
+    # Purely local — nothing is pushed.
+    d = json.loads(raw or "{}")
+    branch = (d.get("branch") or "").strip()
+    if not branch:
+        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+        return
+    if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode != 0:
+        req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
+        return
+    results = []
+    _reseat_walk(branch, results)
+    moved = [r["branch"] for r in results if r["status"] == "reseated"]
+    conflicts = [r for r in results if r["status"] == "conflict"]
+    req._send(200 if not conflicts else 207,
+              json.dumps({"ok": not conflicts, "branch": branch, "results": results,
+                          "moved": moved, "conflicts": conflicts}))
