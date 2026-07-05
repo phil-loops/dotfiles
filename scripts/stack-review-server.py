@@ -346,6 +346,8 @@ class H(BaseHTTPRequestHandler):
             return sync.post_contract(self, raw)
         if self.path == "/fix-upstream":   # neutralize a footgun tracking ref (unset upstream)
             return sync.fix_upstream(self, raw)
+        if self.path == "/diverged-additive":   # draft the additive PR update (push-vehicle branch, never pushes)
+            return sync.diverged_additive(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
             return sync.post_reconcile(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit
