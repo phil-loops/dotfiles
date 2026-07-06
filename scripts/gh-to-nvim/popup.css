@@ -76,9 +76,41 @@ body {
   text-decoration: none;
   color: inherit;
   cursor: pointer;
+  transition: border-color 0.25s, opacity 0.25s;
 }
 .forest:hover { border-color: #3fb950; }
 .forest[hidden] { display: none; }
 .forest-name { font-weight: 600; color: #7ee787; }
 .forest-detail { font-size: 11px; color: #8b949e; white-space: pre-line; }
 .forest-detail .orphan { color: #d29922; }
+
+/* pending: the chip holds its ground while /pr-forest resolves; a thin branch of green
+   grows across it — extends, settles, fades, grows again — then the forest appears. */
+.forest.pending {
+  pointer-events: none;
+  border-color: #1e3325;
+}
+.forest.pending .forest-name {
+  font-weight: 400;
+  color: #5b6e60;
+}
+.forest.pending::after {
+  content: "";
+  display: block;
+  height: 1px;
+  margin-top: 5px;
+  background: linear-gradient(90deg, #3fb950, #7ee787);
+  transform-origin: left;
+  animation: vine 1.4s ease-in-out infinite;
+}
+@keyframes vine {
+  0%   { transform: scaleX(0); opacity: 0.85; }
+  65%  { transform: scaleX(1); opacity: 0.45; }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .forest.pending::after { animation: none; opacity: 0.3; }
+}
+
+/* no forest to show (foreign PR, offline): bow out quietly instead of blinking off */
+.forest.gone { opacity: 0; }
