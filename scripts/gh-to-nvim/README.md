@@ -18,6 +18,10 @@ owns all parsing — PR vs blob vs commit, and resolving GitHub's
   commit page: the selected line's file (commit must exist locally).
 - **⌘⇧U — open in the forest viewer** (imports the PR if needed, opens its node).
 - **Toolbar popup → "→ nvim this page"** — same as ⌘⇧O, for the shortcut-averse.
+- **Toolbar popup on a PR** also shows the **forest chip**: which forest the PR's
+  branch belongs to, its review decision, and children (orphans flagged) — click
+  it to open the node in the viewer. Opening the popup is the activeTab gesture,
+  so this needs no page access either.
 
 Rebind either chord at `chrome://extensions/shortcuts` (bare single keys aren't
 possible — Chrome commands require a modifier chord; that's the price of not
@@ -79,4 +83,5 @@ the extension after the first install so Chrome picks up the `key` + permissions
   `:62497` (see `config.js`). Nothing leaves the machine.
 - Lost with the content script, deliberately: page-load pre-warm (first open of a
   PR eats the cold ~3s; the ↻ warming retry covers it), the bare `o` key, ⌥-click,
-  the floating pills/per-file buttons, and in-page toasts.
+  the floating pills/per-file buttons, and in-page toasts. The forest chip
+  survived by moving into the popup.

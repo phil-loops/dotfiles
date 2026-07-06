@@ -25,6 +25,46 @@ function refresh() {
 
 refresh();
 
+// The old in-page forest chip, relocated: opening the popup is the activeTab gesture, so the
+// tab URL is readable here — no page access needed. Shows which forest this PR's branch belongs
+// to (+ orphaned children), links to the viewer node. Quietly absent off PRs or when offline.
+async function showForest() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const m = (tab?.url || "").match(/^https:\/\/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+  if (!m) {
+    return;
+  }
+  let info = null;
+  try {
+    const r = await fetch(`${VIEWER_URL}/pr-forest`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: m[1], number: m[2] }),
+    });
+    info = r.ok ? await r.json() : null;
+  } catch {
+    return;
+  }
+  if (!info?.ok || !info.branch) {
+    return;
+  }
+  const box = document.getElementById("forest");
+  document.getElementById("forest-name").textContent = `⧉ ${info.project || info.branch}`;
+  const detail = document.getElementById("forest-detail");
+  detail.textContent = info.branch + (info.decision ? ` · ${info.decision.toLowerCase().replace(/_/g, " ")}` : "");
+  for (const c of info.children || []) {
+    detail.appendChild(document.createElement("br"));
+    const kid = document.createElement("span");
+    kid.textContent = c.seated ? `└ ${c.branch}` : `└ ${c.branch} (orphaned)`;
+    kid.className = c.seated ? "" : "orphan";
+    detail.appendChild(kid);
+  }
+  box.href = `${VIEWER_URL}${info.route}`;
+  box.hidden = false;
+}
+
+showForest();
+
 launchBtn.addEventListener("click", () => {
   launchBtn.disabled = true;
   launchBtn.textContent = "Launching…";
