@@ -1,0 +1,61 @@
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index 2c064fa..cc3bfdd 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -92,6 +92,9 @@ export function NodeActions(props: {
+   const { armed, trigger } = useArm(4000);
+   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
+   const [done, setDone] = createSignal<string | null>(null);
++  // raises the result line to the ember alert style — a rebase conflict parks a worktree and
++  // blocks restacks, so it can't read as a quiet ✓ success like every other outcome.
++  const [doneAlert, setDoneAlert] = createSignal(false);
+   // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
+   const [contractKids, setContractKids] = createSignal<string[] | null>(null);
+   // the ⋯ menu open/closed
+@@ -274,7 +277,8 @@ export function NodeActions(props: {
+         setContractKids(kids);
+         setDone(`● already merged into origin/main — drop it & rewire ${kids.length} child${kids.length === 1 ? "" : "ren"} onto main?`);
+       } else if (r.conflict) {
+-        setDone("✓ conflict — Claude is resolving it in a worktree");
++        setDoneAlert(true);
++        setDone("⚠ rebase conflict — Claude is resolving it in a worktree; it holds a worktree and blocks restacks until cleared");
+       } else {
+         setDone("✓ rebasing on main — Claude is on it in a worktree");
+       }
+@@ -338,6 +342,7 @@ export function NodeActions(props: {
+   const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending;
+   const fire = (fn: () => void) => () => {
+     setDone(null);
++    setDoneAlert(false);
+     fn();
+   };
+ 
+@@ -497,7 +502,7 @@ export function NodeActions(props: {
+       </Show>
+ 
+       <Show when={done()}>
+-        <span class="nh-done" title={done() ?? ""}>{done()}</span>
++        <span class="nh-done" classList={{ "nh-done-alert": doneAlert() }} title={done() ?? ""}>{done()}</span>
+       </Show>
+     </div>
+   );
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index cae00bc..345baf8 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -215,6 +215,15 @@ body {
+   font-size: 12px; color: var(--patina); opacity: 0.9;
+   max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+ }
++/* a rebase conflict isn't a quiet ✓ — it parks a worktree and blocks restacks. Raise it to the
++   ember alert language (matching .nh-blocked / .amb-conflict) and drop the 22ch truncation so the
++   consequence is legible at a glance. */
++.nh-done-alert {
++  color: var(--del); opacity: 1; font-weight: 600;
++  max-width: none; white-space: normal; overflow: visible;
++  border: 1px solid var(--del); border-radius: 5px;
++  padding: 2px 7px; background: var(--del-bg);
++}
+ /* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
+ .icon-btn {
+   font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);

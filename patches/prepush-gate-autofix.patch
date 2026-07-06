@@ -1,0 +1,253 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index 477f5e7..fc7fa4f 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -13,7 +13,9 @@ from . import ctx
+ def gates(req, raw):
+     d = json.loads(raw or "{}")
+     branch = d.get("branch", "")
+-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch])
++    # --fix: a red gate with a remediation (e.g. fresh → rebase onto origin/main, format
++    # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
++    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch, "--fix"])
+     # stack-gates always prints a JSON verdict on stdout and exits 0
+     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+ 
+diff --git a/scripts/stack-gates b/scripts/stack-gates
+index 500e6b6..0c7b9ab 100755
+--- a/scripts/stack-gates
++++ b/scripts/stack-gates
+@@ -71,8 +71,25 @@ def repo_local(cmd, cwd):
+     return local if os.path.exists(local) else None
+ 
+ 
++# Files where a behind-origin/main branch is a hard push-block, not just a warning —
++# kept in lockstep with the loops-pre-push hook's deploy-critical list (drift here =
++# the gate and the hook disagree on what blocks a push).
++DEPLOY_CRITICAL = (
++    "'k8s/charts/loops/values.staging.yaml' 'k8s/charts/loops/values.production.yaml' "
++    "'packages/prisma/migrations/*' 'clickhouse/migrations/*' "
++    "'jobs.ts' 'jobs/index.ts' '.env.template'"
++)
++
++
+ def default_gates(cwd):
+-    gates = []
++    # fresh: the pre-push hook rejects a branch behind origin/main on a deploy-critical
++    # file, so catch it here (with an auto-rebase fix) instead of at the push wall. Runs
++    # first — its rebase, when it fires, must land before typecheck/format see the tree.
++    gates = [("fresh",
++              '[ "$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)" -eq 0 ] && exit 0; '
++              f'miss="$(git diff HEAD..origin/main --name-only -- {DEPLOY_CRITICAL})"; '
++              '[ -z "$miss" ] && exit 0; '
++              'echo "behind origin/main, missing deploy-critical:"; echo "$miss"; exit 1')]
+     # Typecheck with the repo-PINNED compiler: a global tsgo dev build rejects
+     # configs the repo's own tsc accepts (e.g. moduleResolution=node10 removed),
+     # which surfaces as a false "blocked, needs the laptop". Prefer repo tsgo, else tsc.
+@@ -109,24 +126,32 @@ def configured_fixes(cwd):
+ 
+ 
+ def default_fixes(cwd, branch):
+-    """Built-in remediation for the format gate. A branch in a forest is fixed by the
+-    whole-forest cascade (stack-fmt — each layer formatted at its own branch; formatting
+-    only the leaf would leave its drifted ancestors red). A standalone branch folds an
+-    oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
++    """Built-in remediation. The fresh gate rebases the branch onto fresh origin/main —
++    but only a root branch (parent main/empty): rebasing a STACKED branch onto main would
++    tear it off its parent, so those stay red ("restack the forest from the laptop").
++    The format gate: a forest branch is fixed by the whole-forest cascade (stack-fmt —
++    formatting only the leaf leaves its drifted ancestors red); a standalone branch folds
++    an oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
+     self_dir = os.path.dirname(os.path.abspath(__file__))
++    fixes = {}
++    parent = gconf(f"stack-branch.{branch}.parent", cwd) if branch else ""
++    if parent in ("", "main"):
++        fixes["fresh"] = ("git fetch origin main -q && git rebase origin/main "
++                          "|| { git rebase --abort 2>/dev/null; exit 1; }")
+     project = gconf(f"stack-branch.{branch}.project", cwd) if branch else ""
+     if project and os.path.exists(os.path.join(self_dir, "stack-fmt")):
+-        return {"format": f"{self_dir}/stack-fmt {project}"}
++        fixes["format"] = f"{self_dir}/stack-fmt {project}"
++        return fixes
+     oxfmt = resolve("oxfmt", cwd)
+-    if not oxfmt:
+-        return {}
+-    return {"format": (
+-        "files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
+-        '[ -z "$files" ] && exit 0; '
+-        f'echo "$files" | xargs {oxfmt} --write; '
+-        'echo "$files" | xargs git add; '
+-        'git commit -q -m "style: oxfmt" --no-verify'
+-    )}
++    if oxfmt:
++        fixes["format"] = (
++            "files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
++            '[ -z "$files" ] && exit 0; '
++            f'echo "$files" | xargs {oxfmt} --write; '
++            'echo "$files" | xargs git add; '
++            'git commit -q -m "style: oxfmt" --no-verify'
++        )
++    return fixes
+ 
+ 
+ def last_lines(text, n=12):
+diff --git a/scripts/viewer-solid/src/MobilePush.tsx b/scripts/viewer-solid/src/MobilePush.tsx
+index eec5473..edfa3e5 100644
+--- a/scripts/viewer-solid/src/MobilePush.tsx
++++ b/scripts/viewer-solid/src/MobilePush.tsx
+@@ -5,9 +5,10 @@ import { provider } from "./provider";
+ import "./MobilePush.css";
+ 
+ // The mobile "prepare to push" card: one branch, the part of the git workflow that's
+-// actually better on a phone — squash unpushed → voiced subject → run gates → push.
+-// One tap runs the whole chain; it stops with a reason the moment a step can't proceed.
+-// A red gate or a needed force-push is a clean "needs the laptop" stop, not fixable here.
++// actually better on a phone — squash unpushed → voiced subject → run gates (auto-rebasing
++// onto fresh main when that's what's stale). One tap gets the branch into a clean, pushable
++// local state and stops there; the push itself stays manual (Phil's GitHub Desktop → origin).
++// A red gate is a clean "needs the laptop" stop, not fixable here.
+ 
+ interface PrepResult {
+   ok: boolean;
+@@ -24,6 +25,7 @@ interface Gate {
+   ok: boolean;
+   ms: number;
+   summary: string;
++  fixed?: boolean;
+ }
+ interface GatesResult {
+   ok: boolean;
+@@ -31,14 +33,7 @@ interface GatesResult {
+   note?: string;
+   err?: string;
+ }
+-interface PushResult {
+-  ok: boolean;
+-  remote?: string;
+-  out?: string;
+-  err?: string;
+-}
+-
+-type StepKey = "squash" | "gates" | "push";
++type StepKey = "squash" | "gates";
+ type StepState = "idle" | "run" | "ok" | "fail";
+ 
+ async function post<T>(path: string, branch: string): Promise<T> {
+@@ -59,15 +54,14 @@ export default function MobilePush() {
+   const [active, setActive] = createSignal<StepKey | null>(null);
+   const [prep, setPrep] = createSignal<PrepResult | null>(null);
+   const [gates, setGates] = createSignal<GatesResult | null>(null);
+-  const [pushed, setPushed] = createSignal<PushResult | null>(null);
+ 
+-  const started = createMemo(() => !!(prep() || gates() || pushed()));
+-  const done = createMemo(() => !!pushed()?.ok);
++  const started = createMemo(() => !!(prep() || gates()));
++  const done = createMemo(() => !!(prep()?.ok && !prep()!.force && gates()?.ok));
+ 
+-  // why the chain stopped short of a push — the one thing the laptop is needed for.
++  // why the chain stopped short of a clean local state — what the laptop is needed for.
+   const blocked = createMemo(() => {
+     if (prep()?.force) {
+-      return "This branch diverged from its remote. Force-push from the laptop.";
++      return "This branch diverged from its remote. Sort it out on the laptop.";
+     }
+     if (prep() && !prep()!.ok) {
+       return prep()!.err || "Couldn't prepare the branch.";
+@@ -88,23 +82,16 @@ export default function MobilePush() {
+       }
+       return prep()!.ok && !prep()!.force ? "ok" : "fail";
+     }
+-    if (key === "gates") {
+-      if (!gates()) {
+-        return "idle";
+-      }
+-      return gates()!.ok ? "ok" : "fail";
+-    }
+-    if (!pushed()) {
++    if (!gates()) {
+       return "idle";
+     }
+-    return pushed()!.ok ? "ok" : "fail";
++    return gates()!.ok ? "ok" : "fail";
+   };
+ 
+   const runAll = async () => {
+     setRunning(true);
+     setPrep(null);
+     setGates(null);
+-    setPushed(null);
+ 
+     setActive("squash");
+     const p = await post<PrepResult>("/prep", branch());
+@@ -117,16 +104,8 @@ export default function MobilePush() {
+     }
+ 
+     setActive("gates");
+-    const g = await post<GatesResult>("/gates", branch());
+-    setGates(g);
+-    if (!g.ok) {
+-      setActive(null);
+-      setRunning(false);
+-      return;
+-    }
+-
+-    setActive("push");
+-    setPushed(await post<PushResult>("/push", branch()));
++    setGates(await post<GatesResult>("/gates", branch()));
++    commits.refetch();
+     setActive(null);
+     setRunning(false);
+   };
+@@ -138,10 +117,7 @@ export default function MobilePush() {
+     if (active() === "gates") {
+       return "Running gates…";
+     }
+-    if (active() === "push") {
+-      return "Pushing…";
+-    }
+-    return started() ? "Run again" : "Prepare & push";
++    return started() ? "Run again" : "Get it ready";
+   });
+ 
+   return (
+@@ -164,7 +140,7 @@ export default function MobilePush() {
+           >
+             <span class="mp-state-n">{commits.data?.length}</span>
+             <span class="mp-dim">
+-              {commits.data?.length === 1 ? "commit" : "commits"} to squash and push
++              {commits.data?.length === 1 ? "commit" : "commits"} to squash
+             </span>
+           </Show>
+         </Show>
+@@ -177,7 +153,7 @@ export default function MobilePush() {
+         </button>
+       }>
+         <div class="mp-earned">
+-          pushed to {pushed()!.remote}
++          ready to push — over to the laptop
+           <div class="mp-confetti" aria-hidden="true">
+             <For each={Array.from({ length: 24 })}>{(_, i) => <i style={confettiStyle(i())} />}</For>
+           </div>
+@@ -222,6 +198,9 @@ export default function MobilePush() {
+                             {gate.ok ? "✓" : "✗"}
+                           </span>
+                           <span class="mp-gate-name">{gate.name}</span>
++                          <Show when={gate.fixed}>
++                            <em class="mp-flag mp-flag-on">auto-fixed</em>
++                          </Show>
+                           <span class="mp-dim">{gate.ms}ms</span>
+                           <Show when={!gate.ok}>
+                             <pre class="mp-gate-out">{gate.summary}</pre>
+@@ -234,12 +213,6 @@ export default function MobilePush() {
+               )}
+             </Show>
+           </Step>
+-
+-          <Step n={3} state={stepState("push")} name="push">
+-            <Show when={pushed() && !pushed()!.ok}>
+-              <span class="mp-detail-bad">{pushed()!.err || "push failed"}</span>
+-            </Show>
+-          </Step>
+         </ol>
+       </Show>
+ 

@@ -1,0 +1,26 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 143ed0f..0d869d8 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1669,6 +1669,12 @@ function NodeDetail() {
+     else if (e.key === "B" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); fileCycle.next(); }
+     else if (e.key === "U" && activeFile()) { e.preventDefault(); unbless.mutate(activeFile()); }
+     else if (e.key === "?") { e.preventDefault(); setShowHelp((v) => !v); }
++    else if (e.key === "m") {
++      // m → up to the forest view. The key reached for by muscle memory (Esc does it too).
++      e.preventDefault();
++      const p = project();
++      if (p) navigate({ kind: "forest", name: p, repo: forestRepo(location()) });
++    }
+     else if (e.key === "Escape") {
+       // up a level: help → close it; else (when the chat drawer isn't grabbing Esc) → the forest map
+       if (showHelp()) { setShowHelp(false); }
+@@ -1996,7 +2002,7 @@ function NodeDetail() {
+               <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span></dt><dd>base: branch / main / blessed</dd></div>
+               <div><dt><span class="k">c</span></dt><dd>commits ↔ diffs</dd></div>
+               <div><dt><span class="k">o</span></dt><dd>open hovered line in nvim</dd></div>
+-              <div><dt><span class="k">esc</span></dt><dd>up to the forest map</dd></div>
++              <div><dt><span class="k">m</span><span class="k">esc</span></dt><dd>up to the forest</dd></div>
+               <div><dt><span class="k">?</span></dt><dd>this help</dd></div>
+             </dl>
+           </div>

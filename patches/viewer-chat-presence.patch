@@ -1,0 +1,184 @@
+diff --git a/scripts/srv/chat.py b/scripts/srv/chat.py
+index 10cff2b..ce67c1f 100644
+--- a/scripts/srv/chat.py
++++ b/scripts/srv/chat.py
+@@ -213,9 +213,13 @@ MAX_JOBS = 60         # bound memory; oldest FINISHED jobs evicted first (runnin
+ 
+ 
+ class Job:
+-    def __init__(self):
++    def __init__(self, meta=None):
+         self.events = []          # [(event, obj)] — the full SSE log, replayable from 0
+         self.done = False
++        self.ok = None            # terminal verdict — None while still running
++        self.status = "starting"
++        self.chars = 0            # answer characters streamed so far — the progress signal
++        self.meta = meta or {}    # branch/path/question/repo/project — where this chat lives
+         self.session_id = ""
+         self.proc = None
+         self.created = time.time()
+@@ -226,8 +230,14 @@ class Job:
+             self.events.append((event, obj))
+             if event == "session":
+                 self.session_id = obj.get("session_id", self.session_id)
++            elif event == "token":
++                self.chars += len(obj.get("t", ""))
++            elif event == "status":
++                self.status = obj.get("s", self.status)
+             if event in ("done", "error"):
+                 self.done = True
++                self.ok = bool(obj.get("ok")) if event == "done" else False
++                self.status = "done" if event == "done" else "error"
+             self.cond.notify_all()
+ 
+ 
+@@ -326,6 +336,16 @@ def _subscribe(req, job, from_idx=0):
+         pass   # THIS subscriber dropped (tab closed) — the job keeps running for a reconnect
+ 
+ 
++def jobs(req):   # GET /chat-jobs — every live/recent turn across repos, for the Home presence strip
++    with _JOBS_LOCK:
++        snap = list(_JOBS.items())
++    rows = [{"turn": turn, **j.meta, "status": j.status, "chars": j.chars,
++             "done": j.done, "ok": j.ok, "created": j.created}
++            for turn, j in snap if j.meta.get("branch")]
++    rows.sort(key=lambda r: (r["done"], -r["created"]))   # running first, then newest
++    req._send(200, json.dumps(rows))
++
++
+ def stop(req, raw):   # POST /chat-stop {turn} — the ■ button: kill this turn's claude for real
+     d = json.loads(raw or "{}")
+     turn = (d.get("turn") or "").strip()
+@@ -380,6 +400,12 @@ def start(req, raw):
+             prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
+         prompt = prompts.with_attachments(prompt, _valid_attachments(d.get("attachments")))
+         cwd = _worktree_for(branch) or ctx.CWD
++        repo_dir = ctx.repo_cwd()
++        meta = {
++            "branch": branch, "path": path, "question": question[:120],
++            "repo": next((n for n, p in ctx.REPOS.items() if p == repo_dir), ""),
++            "project": ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip(),
++        }
+         cmd = ["claude", "-p", prompt,
+                "--output-format", "stream-json",
+                "--include-partial-messages",
+@@ -392,7 +418,7 @@ def start(req, raw):
+         with _JOBS_LOCK:
+             job = _JOBS.get(turn)
+             if job is None:
+-                job = Job()
++                job = Job(meta)
+                 _JOBS[turn] = job
+                 _prune()
+                 threading.Thread(target=_run_claude, args=(job, cmd, cwd), daemon=True).start()
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index f146bc4..a0bac1f 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -275,6 +275,7 @@ class H(BaseHTTPRequestHandler):
+         elif u.path == "/file":           return review.file(self, u)
+         elif u.path == "/commits":        return review.commits(self, u)
+         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
++        elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
+         else:
+             self._send(404, "{}")
+ 
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index feb874b..0beb2d0 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -260,6 +260,31 @@ function Home() {
+     queryKey: ["projects"],
+     queryFn: () => provider.projects(),
+   }));
++  // live chat presence — server truth (srv/chat.py's job registry), not this browser's
++  // localStorage, so chats started in another tab (or surviving a closed one) still show.
++  type ChatJob = {
++    turn: string; branch: string; path: string; question: string; repo: string; project: string;
++    status: string; chars: number; done: boolean; ok: boolean | null; created: number;
++  };
++  const chatJobs = createQuery(() => ({
++    queryKey: ["chat-jobs"],
++    queryFn: () => fetch("/chat-jobs").then((r) => r.json() as Promise<ChatJob[]>),
++    refetchInterval: 5_000,
++  }));
++  const liveChats = createMemo(() => (chatJobs.data || []).filter((j) => !j.done));
++  // a finished chat lingers in the strip briefly as "done ✓" so an answer that landed while you
++  // were elsewhere gets seen; the server's own TTL bounds it, this just tightens the window.
++  const stripChats = createMemo(() =>
++    (chatJobs.data || []).filter((j) => !j.done || Date.now() - j.created * 1000 < 15 * 60_000));
++  const chatTarget = (j: ChatJob): ViewerLocation =>
++    j.project
++      ? { kind: "forest", name: j.project, repo: j.repo || undefined, node: j.branch }
++      : { kind: "forest", name: j.branch, repo: j.repo || undefined };
++  const fmtChars = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
++  const chatAgo = (createdSec: number) => {
++    const s = Math.max(0, Math.floor(Date.now() / 1000 - createdSec));
++    return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`;
++  };
+   const checkOrigin = createMutation(() => ({
+     mutationFn: () => fetch("/check-origin", { method: "POST", body: "{}" }).then((r) => r.json()),
+     onSuccess: () => {
+@@ -781,6 +806,9 @@ function Home() {
+       >
+         <span class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`} />
+         <span class="forest-name">{p.name}</span>
++        <Show when={liveChats().some((j) => (j.project || j.branch) === p.name && (!j.repo || j.repo === p.repo))}>
++          <span class="forest-chat" title="a chat is running on this forest">✦</span>
++        </Show>
+         <span class="fcell pips">
+           <Show when={(p.interest ?? 0) > 0}>
+             <span class="forest-ready" title={`interest ${p.interest} — promoted on Home`}>
+@@ -895,6 +923,25 @@ function Home() {
+ 
+         <Hearth />
+ 
++      <Show when={stripChats().length}>
++        <section class="work-sec chat-live">
++          <h2 class="eyebrow">chats <span class="eyebrow-ask">— headless claudes on your branches</span></h2>
++          <div class="work-rule" />
++          <For each={stripChats()}>
++            {(j) => (
++              <Link class="chat-row" classList={{ done: j.done }} to={chatTarget(j)} title={j.question}>
++                <span class={`chat-mark ${j.done ? (j.ok === false ? "err" : "ok") : "live"}`}>✦</span>
++                <span class="chat-branch">{leaf(j.branch)}</span>
++                <span class="chat-file">{j.path ? leaf(j.path) : "whole branch"}</span>
++                <span class="chat-progress">
++                  {j.done ? (j.ok === false ? "✗ failed" : "done ✓") : `${j.status}…`} · {fmtChars(j.chars)} · {chatAgo(j.created)}
++                </span>
++              </Link>
++            )}
++          </For>
++        </section>
++      </Show>
++
+       <Show when={tab() === "work" && nextActions().length}>
+         <section class="work-sec next-queue">
+           <h2 class="eyebrow">next <span class="eyebrow-ask">— what to do, ranked</span></h2>
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index 30996f6..da053dd 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -635,6 +635,22 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
+ /* priority tiers: a faint pip header sets each level apart so same-priority forests cluster */
+ .forest-tier-head { font-size: 12px; letter-spacing: 0.06em; color: var(--gold-deep); opacity: 0.85; margin: 15px 4px 6px; }
+ .forest-tier-head:first-child { margin-top: 2px; }
++/* live-chat presence: the Home "chats" strip + the pulsing per-forest badge (/chat-jobs) */
++.chat-live .chat-row {
++  display: flex; align-items: baseline; gap: 10px; padding: 6px 9px; border-radius: 8px;
++  text-decoration: none; color: var(--ink); font-size: 13px;
++}
++.chat-live .chat-row:hover { background: var(--vellum-edge); }
++.chat-live .chat-row.done { opacity: 0.55; }
++.chat-mark { flex: none; }
++.chat-mark.live { color: var(--gold-leaf); animation: chat-pulse 1.6s ease-in-out infinite; }
++.chat-mark.ok { color: var(--add); }
++.chat-mark.err { color: var(--del); }
++.chat-branch { flex: none; font-weight: 600; }
++.chat-file { color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.chat-progress { margin-left: auto; flex: none; font-size: 12px; color: var(--ink-faint); }
++.forest-chat { flex: none; color: var(--gold-leaf); animation: chat-pulse 1.6s ease-in-out infinite; }
++@keyframes chat-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+ /* recently-merged fold — done work tucked out of the active list, collapsed until clicked */
+ .forest-mfold {
+   display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;

@@ -1,0 +1,71 @@
+diff --git a/scripts/srv/agents.py b/scripts/srv/agents.py
+index d4daa92..1ba8d64 100644
+--- a/scripts/srv/agents.py
++++ b/scripts/srv/agents.py
+@@ -20,12 +20,13 @@ import time
+ AGENTS_DIR = os.path.expanduser("~/.claude/agents")
+ 
+ # Heartbeat: an agent's process can be alive but parked at its prompt for hours (it read as
+-# "editing 4h"). Liveness != working. We sample the agent's cumulative CPU time each poll and call
+-# it "working" only while its CPU *rate* clears a threshold — a parked claude still ticks ~0.5% of a
+-# core (its TUI event loop), so "any increase" false-positives; a rate gate ignores that idle hum.
+-# State is in-memory (like chat._JOBS); it resets on server restart, re-baselining old agents idle
+-# (active_at = spawn) until a burst proves them working. CPU is a proxy: a claude BLOCKED on a long
+-# model call also goes quiet, so the idle window is generous on purpose.
++# "editing 4h"). Liveness != working. Two signals, whichever is fresher wins (see live()):
++#   1. session-presence last_active — hook-updated on real tool activity, no threshold to guess.
++#   2. CPU *rate* — for agents with no presence record; gated (~8% of a core) so a parked claude's
++#      ~0.5% TUI-loop hum doesn't read as work. CPU state is in-memory (like chat._JOBS) and resets
++#      on restart, re-baselining old agents idle until a burst proves them working.
++# Both go quiet when a claude is BLOCKED (long model call / slow tool), so the idle window is
++# generous on purpose — 150s of NO activity from either signal before an agent reads idle.
+ _activity = {}            # {claude_pid: {"cpu": float|None, "wall": int, "active_at": int}}
+ IDLE_SECONDS = 150        # no working-rate burst for this long → idle, not working
+ CPU_RATE_WORKING = 0.08   # CPU seconds per wall second (~8% of a core) — above the parked-TUI hum
+@@ -52,6 +53,27 @@ def _cpu_seconds(pid):
+     return days * 86400 + secs
+ 
+ 
++_PRESENCE_DIR = os.path.expanduser("~/.claude/session-presence")
++
++
++def _presence_active():
++    # {claude_pid: last_active_epoch} from the session-presence registry — a hook-updated activity
++    # timestamp every live claude already writes (SessionStart + PostToolUse). It advances on real
++    # tool activity, so it needs no CPU threshold: it's the truer "did this agent just do something"
++    # signal. Reader-only — no launcher change, because presence bridges pid → last_active for us.
++    out = {}
++    for path in glob.glob(os.path.join(_PRESENCE_DIR, "*.json")):
++        try:
++            with open(path) as f:
++                r = json.load(f)
++        except (OSError, ValueError):
++            continue
++        pid, la = r.get("pid"), r.get("last_active")
++        if pid and la:
++            out[pid] = max(out.get(pid, 0), la)
++    return out
++
++
+ def _lstart(pid):
+     # ps start-time of a pid — the pid-reuse guard. On read we compare it to the record's stored
+     # `started`; a mismatch means the pid was recycled onto a different process → the record is
+@@ -112,6 +134,7 @@ def live():
+     # deduped by (kind, branch) so one branch is one row. No system-wide discovery; each record is a
+     # KNOWN pid checked in O(1).
+     now = int(time.time())
++    presence = _presence_active()          # {claude_pid: last_active} — the hook-updated signal
+     rows, seen = [], set()
+     for path in glob.glob(os.path.join(AGENTS_DIR, "*.json")):
+         try:
+@@ -155,6 +178,10 @@ def live():
+             rate = (cpu - prev["cpu"]) / (now - prev["wall"])
+             active_at = now if rate > CPU_RATE_WORKING else prev["active_at"]
+             _activity[claude_pid] = {"cpu": cpu, "wall": now, "active_at": active_at}
++        # hybrid signal: the freshest evidence from EITHER the CPU rate above OR the hook-updated
++        # presence last_active. Presence advances on tool activity (no CPU threshold to guess); CPU
++        # covers agents with no presence record. Idle only when BOTH have been quiet past the window.
++        active_at = max(active_at, presence.get(claude_pid, 0))
+         et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+         rows.append({"kind": rec.get("kind", "claude"), "branch": rec.get("branch", ""),
+                      "repo": rec.get("repo", ""), "pid": pid, "etime": et, "age": _age(rec.get("at")),

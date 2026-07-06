@@ -1,0 +1,57 @@
+diff --git a/scripts/srv/processes.py b/scripts/srv/processes.py
+index dc67511..0f4ab4a 100644
+--- a/scripts/srv/processes.py
++++ b/scripts/srv/processes.py
+@@ -20,26 +20,35 @@ def _age(created_sec):
+ 
+ 
+ def _fired_claudes():
+-    # Every live `stack-claude` (ask-Claude chip / apply-change / reforest), pgrep'd exactly
+-    # like restack._drivers finds restacks. Drop the `zsh -c` wrapper so parent+child count once.
+-    base = os.path.join(ctx.SCRIPTS, "stack-claude")
+-    pids = subprocess.run(["pgrep", "-f", base], capture_output=True, text=True).stdout.split()
+-    if not pids:
+-        return []
+-    ps = subprocess.run(["ps", "-o", "pid=,etime=,command=", "-p", ",".join(pids)],
+-                        capture_output=True, text=True).stdout
+-    out = []
+-    for line in ps.splitlines():
+-        parts = line.strip().split(None, 2)
++    # Fired coding agents — the ask-Claude chip, /reconcile, and /restack-resolve — each run in
++    # a tmux window named `claude:<branch>`. pgrep-ing one script name (stack-claude) missed
++    # reconcile/resolve entirely, so a running agent showed up as nothing. The window name is the
++    # reliable seam. A window whose foreground command is still `claude` is LIVE; once the agent
++    # finishes the pane drops to a shell, so filter on the command to skip spent windows.
++    fmt = "#{window_name}\t#{pane_current_command}\t#{pane_pid}"
++    out = subprocess.run(["tmux", "list-windows", "-a", "-F", fmt],
++                         capture_output=True, text=True).stdout
++    by_branch = {}
++    for line in out.splitlines():
++        parts = line.split("\t")
+         if len(parts) < 3:
+             continue
+-        pid, etime, c = parts
+-        if (base + " ") not in c or "zsh -c" in c:
++        name, cmd, pid = parts[0], parts[1], parts[2]
++        if not name.startswith("claude:") or cmd not in ("claude", "node"):
+             continue
+-        after = c.split("stack-claude", 1)[1]
+-        branch = next((t for t in after.split() if not t.startswith("-")), "")
+-        out.append({"pid": int(pid), "etime": etime.strip(), "branch": branch})
+-    return out
++        branch = name[len("claude:"):]
++        if branch and branch not in by_branch and pid.isdigit():
++            by_branch[branch] = int(pid)
++    if not by_branch:
++        return []
++    ps = subprocess.run(["ps", "-o", "pid=,etime=", "-p", ",".join(str(p) for p in by_branch.values())],
++                        capture_output=True, text=True).stdout
++    etimes = {}
++    for line in ps.splitlines():
++        p = line.split()
++        if len(p) == 2 and p[0].isdigit():
++            etimes[int(p[0])] = p[1].strip()
++    return [{"pid": pid, "etime": etimes.get(pid, ""), "branch": b} for b, pid in by_branch.items()]
+ 
+ 
+ def list_all(req):

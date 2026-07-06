@@ -1,0 +1,205 @@
+diff --git a/scripts/srv/agents.py b/scripts/srv/agents.py
+index aca674b..1ef109d 100644
+--- a/scripts/srv/agents.py
++++ b/scripts/srv/agents.py
+@@ -19,6 +19,33 @@ import time
+ 
+ AGENTS_DIR = os.path.expanduser("~/.claude/agents")
+ 
++# Heartbeat: an agent's process can be alive but parked at its prompt for hours (it read as
++# "editing 4h"). Liveness != working. We sample the agent's cumulative CPU time each poll and call
++# it "working" only while that keeps advancing — a parked claude burns ~0 CPU. State is in-memory
++# (like chat._JOBS); it resets on server restart, re-baselining agents as working. CPU is a proxy:
++# a claude BLOCKED on a long model call also burns ~0, so the window is generous on purpose.
++_activity = {}          # {claude_pid: {"cpu": float|None, "active_at": int}}
++IDLE_SECONDS = 150      # no CPU advance for this long → idle, not working
++
++
++def _cpu_seconds(pid):
++    # Cumulative CPU time (utime+stime) of a pid, in seconds. macOS `ps -o time=` formats it
++    # [[DD-]HH:]MM:SS[.ss]; fold the colon groups into seconds. None if the pid is gone.
++    out = subprocess.run(["ps", "-o", "time=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
++    if not out:
++        return None
++    days = 0
++    if "-" in out:
++        d, out = out.split("-", 1)
++        days = int(d) if d.isdigit() else 0
++    try:
++        secs = 0.0
++        for part in out.split(":"):
++            secs = secs * 60 + float(part)
++    except ValueError:
++        return None
++    return days * 86400 + secs
++
+ 
+ def _lstart(pid):
+     # ps start-time of a pid — the pid-reuse guard. On read we compare it to the record's stored
+@@ -76,9 +103,11 @@ def _reap(path):
+ 
+ def live():
+     # The reader: every registered agent, minus the dead — pid gone, pid recycled (lstart mismatch),
+-    # or the agent finished though its shell lingers. Survivors normalized for /processes. No
+-    # system-wide discovery; each record is a KNOWN pid checked in O(1).
+-    out = []
++    # or the agent finished though its shell lingers. Survivors get a heartbeat (working?) and are
++    # deduped by (kind, branch) so one branch is one row. No system-wide discovery; each record is a
++    # KNOWN pid checked in O(1).
++    now = int(time.time())
++    rows, seen = [], set()
+     for path in glob.glob(os.path.join(AGENTS_DIR, "*.json")):
+         try:
+             with open(path) as f:
+@@ -87,10 +116,38 @@ def live():
+             _reap(path)
+             continue
+         pid = rec.get("pid")
+-        if not pid or _lstart(pid) != rec.get("started") or not _claude_alive_under(pid):
++        claude_pid = _claude_alive_under(pid) if pid else None
++        if not pid or _lstart(pid) != rec.get("started") or not claude_pid:
+             _reap(path)
+             continue
++        seen.add(claude_pid)
++        cpu = _cpu_seconds(claude_pid)
++        prev = _activity.get(claude_pid)
++        if prev is None:
++            active_at = rec.get("at", now)                                  # just-registered → working
++        elif cpu is not None and prev["cpu"] is not None and cpu > prev["cpu"]:
++            active_at = now                                                 # CPU advanced → working now
++        else:
++            active_at = prev["active_at"]                                   # flat → idle since last activity
++        _activity[claude_pid] = {"cpu": cpu, "active_at": active_at}
+         et = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+-        out.append({"kind": rec.get("kind", "claude"), "branch": rec.get("branch", ""),
+-                    "repo": rec.get("repo", ""), "pid": pid, "etime": et, "age": _age(rec.get("at"))})
+-    return out
++        rows.append({"kind": rec.get("kind", "claude"), "branch": rec.get("branch", ""),
++                     "repo": rec.get("repo", ""), "pid": pid, "etime": et, "age": _age(rec.get("at")),
++                     "active_at": active_at, "working": (now - active_at) < IDLE_SECONDS,
++                     "idle_age": _age(active_at)})
++    for dead in [p for p in _activity if p not in seen]:                    # forget gone pids — bounded cache
++        del _activity[dead]
++    # dedupe by (kind, branch): one row per branch with a count. count>1 is a probable duplicate spawn
++    # (two agents racing one branch), surfaced like the Hearth's tangle hint.
++    grouped = {}
++    for r in rows:
++        key = (r["kind"], r["branch"])
++        g = grouped.get(key)
++        if g is None:
++            grouped[key] = {**r, "count": 1}
++        else:
++            g["count"] += 1
++            g["working"] = g["working"] or r["working"]
++            if r["active_at"] > g["active_at"]:
++                g["active_at"], g["age"], g["idle_age"], g["etime"] = r["active_at"], r["age"], r["idle_age"], r["etime"]
++    return list(grouped.values())
+diff --git a/scripts/srv/processes.py b/scripts/srv/processes.py
+index abd1fdc..bc4202a 100644
+--- a/scripts/srv/processes.py
++++ b/scripts/srv/processes.py
+@@ -37,6 +37,7 @@ def list_all(req):
+             "status": "done" if j.done else j.status,
+             "detail": f"{j.chars} chars",
+             "done": j.done, "ok": j.ok, "age": _age(j.created),
++            "working": not j.done, "count": 1,
+         })
+ 
+     # restack drivers — a rebase walking a forest (Hearth alarms on tangles; this just lists them)
+@@ -46,16 +47,20 @@ def list_all(req):
+             "label": d["project"] or "all projects",
+             "target": d["project"], "status": d["mode"],
+             "detail": d["etime"].strip(), "done": False, "age": d["etime"].strip(),
++            "working": True, "count": 1,
+         })
+ 
+     # fired agents — every launcher registers itself when it spawns (agents.live()), so a new fire
+-    # path can't go missing without any tmux/pgrep discovery. kind=resolver renders "resolving".
++    # path can't go missing without any tmux/pgrep discovery. Each carries a heartbeat (working?)
++    # and is deduped per branch; an idle-but-alive agent reads "idle", not "editing".
+     for a in agents.live():
++        working = a.get("working", True)
+         procs.append({
+             "kind": "claude", "id": str(a["pid"]),
+             "label": a["branch"] or a["kind"], "target": a["branch"], "repo": a.get("repo", ""),
+-            "status": "resolving" if a["kind"] == "resolver" else "editing",
+-            "detail": a["etime"], "done": False, "age": a["age"],
++            "status": ("resolving" if a["kind"] == "resolver" else "editing") if working else "idle",
++            "detail": a["etime"], "done": False, "age": a["age"] if working else a.get("idle_age", a["age"]),
++            "working": working, "count": a.get("count", 1),
+         })
+ 
+     procs.sort(key=lambda p: (p.get("done", False),))
+diff --git a/scripts/viewer-solid/src/Activity.css b/scripts/viewer-solid/src/Activity.css
+index ad5267a..f186335 100644
+--- a/scripts/viewer-solid/src/Activity.css
++++ b/scripts/viewer-solid/src/Activity.css
+@@ -128,6 +128,20 @@
+ .activity-row.done .glyph {
+   color: var(--ink-faint);
+ }
++/* alive but parked at its prompt — dimmed, and its glyph loses the ember so it reads as at-rest. */
++.activity-row.idle {
++  opacity: 0.5;
++}
++.activity-row.idle .glyph {
++  color: var(--ink-faint);
++}
++/* ×N — two agents on one branch (probable duplicate spawn), flagged like a Hearth tangle. */
++.activity-row .mult {
++  flex: 0 0 auto;
++  color: var(--ember);
++  font-size: 10px;
++  font-variant-numeric: tabular-nums;
++}
+ .activity-row.bad .glyph {
+   color: var(--del);
+ }
+diff --git a/scripts/viewer-solid/src/Activity.tsx b/scripts/viewer-solid/src/Activity.tsx
+index 106783f..b34b11d 100644
+--- a/scripts/viewer-solid/src/Activity.tsx
++++ b/scripts/viewer-solid/src/Activity.tsx
+@@ -18,6 +18,8 @@ type Proc = {
+   age: string;
+   project?: string;
+   repo?: string;
++  working?: boolean;
++  count?: number;
+ };
+ 
+ const GLYPH: Record<string, string> = { chat: "✦", restack: "⟳", claude: "◆" };
+@@ -29,7 +31,16 @@ export function Activity() {
+     refetchInterval: 3000,
+   }));
+   const procs = () => q.data ?? [];
+-  const running = () => procs().filter((p) => !p.done).length;
++  // the chip counts agents that are actually WORKING, not merely alive — a claude parked at its
++  // prompt for hours shouldn't inflate the number (that was the "random shit").
++  const running = () => procs().filter((p) => p.working !== false && !p.done).length;
++  // working first, then idle-but-alive, then done — the noisy stale rows sink to the bottom.
++  const rows = () =>
++    [...procs()].sort(
++      (a, b) =>
++        Number(a.done) - Number(b.done) ||
++        Number(b.working !== false) - Number(a.working !== false)
++    );
+   // Collapsed to a count chip by default — an always-expanded list over every route reads as
+   // noise; the ambient "something's running" signal is worth one glance-able dot, the detail is
+   // opt-in on click.
+@@ -53,11 +64,14 @@ export function Activity() {
+         </button>
+         <Show when={open()}>
+           <div class="activity-list">
+-            <For each={procs()}>
++            <For each={rows()}>
+               {(p) => (
+-                <div class="activity-row" classList={{ done: p.done, bad: p.ok === false }}>
++                <div class="activity-row" classList={{ done: p.done, bad: p.ok === false, idle: p.working === false }}>
+                   <span class="glyph" data-kind={p.kind}>{GLYPH[p.kind] ?? "•"}</span>
+                   <span class="label" title={`${p.kind} · ${p.target}`}>{p.label}</span>
++                  <Show when={(p.count ?? 1) > 1}>
++                    <span class="mult" title="two agents on one branch — probable duplicate spawn">×{p.count}</span>
++                  </Show>
+                   <span class="status">{p.status}</span>
+                   <Show when={p.kind === "chat"}>
+                     <span class="detail">{p.detail}</span>

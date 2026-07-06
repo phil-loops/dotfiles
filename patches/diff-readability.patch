@@ -1,0 +1,81 @@
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index 520ee92..2c6839c 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -18,6 +18,22 @@
+   --add-bg: rgba(143, 174, 122, 0.09);
+   --del: #c87a55;         /* diff deletions: ember */
+   --del-bg: rgba(200, 122, 85, 0.09);
++  /* readable diff: the whole changed LINE is washed green/red (the primary add/del
++     signal, not a far-left hairline), text leans off-gold, the +/- prefix is bright,
++     and edited tokens sit on a solid chip with luminance-matched text (dark on the
++     bright green, light on the dim red). Gold stays reserved for UNCHANGED context. */
++  --diff-ink-add: #c7da86;
++  --diff-ink-del: #e4ba86;
++  --diff-prefix-add: #4fd64a;
++  --diff-prefix-del: #ef6a52;
++  --row-add: rgba(31, 179, 0, 0.18);
++  --row-del: rgba(204, 42, 24, 0.18);
++  --chip-add-bg: rgba(31, 179, 0, 0.82);
++  --chip-del-bg: rgba(204, 42, 24, 0.82);
++  --chip-add-text: #14110a;
++  --chip-del-text: #fbf7ee;
++  --stripe-add: #1fb300;
++  --stripe-del: #cc2a18;
+   --display: "Fraunces", Georgia, serif;
+   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+ }
+@@ -214,23 +230,29 @@ body {
+ .d2h-diff-table { font-family: var(--mono); font-size: 13px; }
+ .d2h-dark-color-scheme {
+   --d2h-dark-bg-color: transparent;
+-  /* quiet gutter-bar style: the margin stripe + the +/- prefix carry the signal,
+-     code sits on the plain dark surface. No intra-line word block — it landed on
+-     re-indented whitespace as ugly solid rectangles and fought the calm read. */
+-  --d2h-dark-ins-bg-color: transparent;
+-  --d2h-dark-del-bg-color: transparent;
+-  --d2h-dark-ins-highlight-bg-color: transparent;
+-  --d2h-dark-del-highlight-bg-color: transparent;
++  /* wash the WHOLE changed line green/red — that, not the far-left hairline, is what
++     makes add-vs-del legible at a glance. The intra-line highlight is the chip behind
++     edited tokens (luminance-matched text below, so no yellow-on-color mud). */
++  --d2h-dark-ins-bg-color: var(--row-add);
++  --d2h-dark-del-bg-color: var(--row-del);
++  --d2h-dark-ins-highlight-bg-color: var(--chip-add-bg);
++  --d2h-dark-del-highlight-bg-color: var(--chip-del-bg);
+   --d2h-dark-info-bg-color: var(--vellum-edge);
+   --d2h-dark-empty-placeholder-bg-color: rgba(0, 0, 0, 0.16);
+   background: transparent;
+ }
+-/* code text stays bright and readable; the +/- prefix and the row tint carry the
+-   add/del signal, so a whole-added file isn't a wall of dim green. */
+-.d2h-code-line-ctn, .d2h-ins .d2h-code-line-ctn, .d2h-del .d2h-code-line-ctn,
+-.d2h-ins ins, .d2h-del del { color: var(--diff-ink); font-weight: 500; }
+-.d2h-ins .d2h-code-line-prefix { color: var(--add); opacity: 1; }
+-.d2h-del .d2h-code-line-prefix { color: var(--del); opacity: 1; }
++/* gold is reserved for UNCHANGED context; add/del line text leans off-gold so the row
++   reads as changed without the wash fighting yellow text. */
++.d2h-code-line-ctn { color: var(--diff-ink); font-weight: 500; }
++.d2h-ins .d2h-code-line-ctn { color: var(--diff-ink-add); }
++.d2h-del .d2h-code-line-ctn { color: var(--diff-ink-del); }
++/* the edited token sits on a solid chip — its text is luminance-matched to the chip
++   (dark on the bright green, light on the dim red), never gold (that was the mud). */
++.d2h-ins ins, .d2h-del del { font-weight: 700; text-decoration: none; border-radius: 2px; padding: 0 1px; }
++.d2h-ins ins { color: var(--chip-add-text); }
++.d2h-del del { color: var(--chip-del-text); }
++.d2h-ins .d2h-code-line-prefix { color: var(--diff-prefix-add); opacity: 1; }
++.d2h-del .d2h-code-line-prefix { color: var(--diff-prefix-del); opacity: 1; }
+ .d2h-code-line-prefix { opacity: 0.6; }
+ /* the gutter bar: a stripe at the left of the code column (between line numbers and
+    code) marks add/del. Transparent on every content cell so context stays aligned;
+@@ -239,8 +261,8 @@ td.d2h-cntx:not(.d2h-code-side-linenumber),
+ td.d2h-info:not(.d2h-code-side-linenumber),
+ td.d2h-ins:not(.d2h-code-side-linenumber),
+ td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 5px solid transparent; }
+-td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: #0b8a14; }
+-td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: #cc2a18; }
++td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-add); }
++td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del); }
+ .d2h-info { color: var(--ink-faint); }
+ /* wrap long lines inside each side-by-side column instead of clipping at its edge */
+ .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }

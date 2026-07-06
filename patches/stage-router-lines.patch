@@ -1,0 +1,19 @@
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -17,6 +17,7 @@
+ from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase, processes
+ 
+ ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
++from srv import stage   # own line: the big srv import above is contested across sessions
+ srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
+ DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
+ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
+@@ -357,6 +358,8 @@
+             return push.push_origin(self, raw)
+         if self.path == "/restack":          # restack one project (background, scratch worktree)
+             return restack.restack(self, raw)
++        if self.path == "/stage":            # restack chain forward + move MAIN checkout onto the tip (dryRun supported)
++            return stage.stage(self, raw)
+         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
+             return restack.resolve(self, raw)
+         if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state
