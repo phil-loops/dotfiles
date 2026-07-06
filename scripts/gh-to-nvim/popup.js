@@ -34,6 +34,10 @@ async function showForest() {
   if (!m) {
     return;
   }
+  const box = document.getElementById("forest");
+  document.getElementById("forest-name").textContent = "⧉ finding forest…";
+  box.classList.add("pending");
+  box.hidden = false;
   let info = null;
   try {
     const r = await fetch(`${VIEWER_URL}/pr-forest`, {
@@ -43,12 +47,17 @@ async function showForest() {
     });
     info = r.ok ? await r.json() : null;
   } catch {
-    return;
+    info = null;
   }
   if (!info?.ok || !info.branch) {
+    box.classList.add("gone");
+    setTimeout(() => {
+      box.hidden = true;
+      box.classList.remove("gone", "pending");
+    }, 260);
     return;
   }
-  const box = document.getElementById("forest");
+  box.classList.remove("pending");
   document.getElementById("forest-name").textContent = `⧉ ${info.project || info.branch}`;
   const detail = document.getElementById("forest-detail");
   detail.textContent = info.branch + (info.decision ? ` · ${info.decision.toLowerCase().replace(/_/g, " ")}` : "");
@@ -60,7 +69,6 @@ async function showForest() {
     detail.appendChild(kid);
   }
   box.href = `${VIEWER_URL}${info.route}`;
-  box.hidden = false;
 }
 
 showForest();
