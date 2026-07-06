@@ -257,12 +257,36 @@ body {
 .nh-dirt-abort { color: var(--ink-dim); border-color: var(--rule); }
 
 /* uncommitted rail — working-tree dirt, visually apart from the committed review set */
-.uncommitted-rail { margin-top: 26px; border-top: 1px dashed var(--rule); padding-top: 12px; }
+.dirty-aside-note {
+  margin-top: 10px; padding: 5px 10px; font-size: 11px; font-weight: 600;
+  color: var(--del); border-left: 2px solid var(--del); font-variant-numeric: tabular-nums;
+}
+.uncommitted-rail { margin-top: 26px; border-top: 1px dashed var(--del); border-top-width: 2px; padding-top: 12px; }
 .ur-head {
   font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--ink-dim); margin: 0 2px 10px; display: flex; justify-content: space-between;
+  color: var(--del); margin: 0 2px 10px; display: flex; align-items: center; gap: 8px;
 }
-.ur-wt { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-faint); }
+.ur-label { flex: 1; }
+.ur-wt { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-faint); flex: none; }
+.ur-commit-btn {
+  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: none;
+  padding: 2px 8px; border: 1px solid var(--del); border-radius: 3px; background: transparent;
+  color: var(--del); cursor: pointer;
+}
+.ur-commit-btn:hover { background: var(--del-bg); }
+.ur-commit-form { display: flex; gap: 6px; margin: 0 2px 12px; }
+.ur-commit-input {
+  flex: 1; background: var(--vellum-edge); border: 1px solid var(--rule); border-radius: 3px;
+  color: var(--ink); font-size: 12px; padding: 4px 8px; outline: none;
+}
+.ur-commit-input:focus { border-color: var(--del); }
+.ur-commit-go {
+  flex: none; padding: 4px 10px; border: 1px solid var(--del); border-radius: 3px;
+  background: var(--del-bg); color: var(--del); font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.ur-commit-go:disabled { opacity: 0.4; cursor: not-allowed; }
+.ur-commit-go:not(:disabled):hover { background: var(--del); color: var(--vellum-night); }
+.ur-commit-err { font-size: 11px; color: var(--del); margin: -6px 2px 10px; }
 
 /* a blessing that tarnished: the file was blessed, then changed — patina, never gold */
 .gutter.tarnish { color: var(--patina); }
