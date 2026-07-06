@@ -23,6 +23,7 @@ import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
 import { useViewerLocation } from "./router";
 import RebaseStream from "./RebaseStream";
+import NodeSpine, { type Station, type SpineEdge } from "./NodeSpine";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -82,6 +83,7 @@ export function NodeActions(props: {
   branch: string;
   isReview: boolean;
   merged?: boolean; // forest-health flagged this branch a merged ghost → offer contraction on load
+  blessing?: { total: number; blessed: number }; // the node's review progress — the spine's review station + gold mark
   ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
   interest?: number; // current Home-ordering interest — drives the ⋯ promote/demote items
   onBump?: (delta: number) => void;
@@ -414,7 +416,7 @@ export function NodeActions(props: {
     queryKey: ["prep-route", props.branch],
     queryFn: () =>
       fetch(withRepo("/prep-route") + "?branch=" + encodeURIComponent(props.branch)).then(
-        (r) => r.json() as Promise<{ route?: string; why?: string }>,
+        (r) => r.json() as Promise<{ route?: string; why?: string; needsBody?: boolean }>,
       ),
     enabled: !!props.branch && !props.isReview,
   }));
@@ -457,6 +459,99 @@ export function NodeActions(props: {
   }));
 
   const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending || prepPush.isPending || pushOrigin.isPending;
+
+  // ── the waymark spine: one chip (station), one slot (edge) ──────────────────
+  // Station = where the branch stands on its real path — the DOMINANT position, not a
+  // gate: a branch can sit at "review" with shaping left; the slot still offers prep.
+  const blessedAll = () => !!props.blessing && props.blessing.total > 0 && props.blessing.blessed === props.blessing.total;
+  const station = (): Station => {
+    if (props.merged || shared() === "gone") {
+      return "merged";
+    }
+    const r = prepRoute.data?.route;
+    if (r === "nothing") {
+      return "shared";
+    }
+    if (r === "ready") {
+      return "ready";
+    }
+    if (props.blessing && props.blessing.blessed < props.blessing.total) {
+      return "review";
+    }
+    return "edit";
+  };
+  // Reasons live in the tooltip — why the branch sits at this station. What used to be
+  // four separate header chips (shared / blocked / behind / diverged) is this one string.
+  const reasons = () => {
+    const parts: string[] = [];
+    if (shared() === "local") {
+      parts.push("local only — never pushed; the team cannot see this branch");
+    } else if (shared() === "ahead") {
+      parts.push(`origin is ${aheadOfOrigin()} commit${aheadOfOrigin() === 1 ? "" : "s"} behind your local`);
+    } else if (shared() === "synced") {
+      parts.push("in sync with origin — the team sees exactly this");
+    }
+    if (blocked()) {
+      parts.push(`⚠ push blocked — origin/main changed deploy-critical files this branch lacks:\n${critical().join("\n")}`);
+    }
+    if (props.blessing && props.blessing.blessed < props.blessing.total) {
+      parts.push(`${props.blessing.blessed}/${props.blessing.total} files blessed`);
+    }
+    if (prepRoute.data?.why) {
+      parts.push(prepRoute.data.why);
+    }
+    return parts.join("\n\n");
+  };
+  // Edge = the single next step. null → at rest: the slot does not render at all.
+  const edge = (): SpineEdge | null => {
+    if (props.merged || contractKids()) {
+      return {
+        label: contractKids() ? `drop ghost & rewire ${contractKids()!.length} →` : "drop ghost & rewire →",
+        kind: "contract",
+        pending: contract.isPending,
+        title: "this branch's work already merged (a ghost) — drop it, rewire its children onto main, drop any requires edge on it",
+        onClick: fire(() => contract.mutate()),
+      };
+    }
+    const r = prepRoute.data?.route;
+    if (!r || r === "nothing") {
+      return null;
+    }
+    if (preview.data?.ok) {
+      return {
+        label: "⇧ push",
+        kind: "push",
+        pending: pushOrigin.isPending,
+        armed: armed() === "pushOrigin",
+        title: "push to origin — shared with the team the moment it lands (fast-forward, one reviewed commit)",
+        onClick: fire(() => trigger("pushOrigin", () => pushOrigin.mutate())),
+      };
+    }
+    if (r === "ready") {
+      return {
+        label: prepRoute.data?.needsBody ? "✎ edit the why" : "⌁ finish prep",
+        kind: "edit",
+        pending: prepPush.isPending,
+        title: (preview.data?.reasons ?? []).length
+          ? `the wards aren't green yet:\n${(preview.data?.reasons ?? []).join("\n")}`
+          : "open the outgoing commit's message in the editor",
+        onClick: fire(() => prepPush.mutate()),
+      };
+    }
+    const verb = r === "squash" ? "prep: seal the tail"
+      : r === "restack" ? "prep: restack"
+      : r === "additive" ? "prep: draft additive"
+      : r === "push-vehicle" ? "prep: push vehicle ready"
+      : "prep to push";
+    return {
+      label: `⌁ ${verb}`,
+      kind: "prep",
+      pending: prepPush.isPending,
+      title: `${prepRoute.data?.why ?? "one state-routed motion toward a single outgoing commit"}
+then the commit message opens in the editor`,
+      onClick: fire(() => prepPush.mutate()),
+    };
+  };
   const fire = (fn: () => void) => () => {
     setDone(null);
     setDoneAlert(false);
@@ -465,99 +560,18 @@ export function NodeActions(props: {
 
   return (
     <div class="node-actions" ref={root}>
-      {/* local-vs-shared chip — read-only: what (if anything) of this branch the team can
-          see on origin. ○ never pushed · ◐ origin behind by N · ● in sync · ✕ deleted on
-          origin (merged — contract it). Deliberately its own visual register, distinct from
-          the forest chips: those are local relations, this is the shared-with-the-team one. */}
-      <Show when={!isReview() && shared()}>
-        <span
-          class={`nh-shared nh-shared-${shared()}`}
-          title={
-            shared() === "local"
-              ? "local only — never pushed; the team cannot see this branch"
-              : shared() === "ahead"
-                ? `pushed, but origin is ${aheadOfOrigin()} commit${aheadOfOrigin() === 1 ? "" : "s"} behind your local`
-                : shared() === "synced"
-                  ? "in sync with origin — the team sees exactly this"
-                  : "origin's copy was deleted (squash-merged) — finished work; contract it"
-          }
-        >
-          {shared() === "local"
-            ? "○ local"
-            : shared() === "ahead"
-              ? `◐ ${aheadOfOrigin()}↑`
-              : shared() === "synced"
-                ? "● shared"
-                : "✕ merged"}
-        </span>
-      </Show>
-
-      {/* fork-state vs origin/main — calm "behind", escalating to ember "push blocked" when
-          main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
-          When blocked the fix (rebase forward) surfaces inline next to the alarm; the full
-          list of missing files lives in the tooltip rather than spread across the header. */}
-      {/* the plain "↓ N behind" count is folded into the restack button below; only the
-          escalated push-blocked alarm stays as its own ember badge. */}
-      <Show when={blocked()}>
-        <span
-          class="nh-blocked"
-          title={`origin/main changed deploy-critical files this branch is missing:\n${critical().join("\n")}\n\nrebase forward to clear the push block`}
-        >
-          ⚠ push blocked
-        </span>
-      </Show>
-
-      {/* the header is two buttons (Phil, design.md 2026-07-05): ⌁ prep routes by state —
-          additive vehicle for a diverged PR, restack-then-squash for a messy tail, no-op
-          when clean — and always opens the outgoing commit's message in the editor below.
-          ⇧ push is the Phase-1 warded door, mirrored here from the /push card. Everything
-          else (restack, prep-to-merge, reconcile) is an override in ⋯. */}
+      {/* the waymark spine — one chip (where the branch stands: edit → review → ready →
+          shared → merged, each station lit in its own material) and one slot (the single
+          next step, hidden at rest). What used to be the shared chip, the push-blocked
+          badge, the prep/push button pair, and the contract button is now: station,
+          reasons (tooltip), edge. */}
       <Show when={!isReview()}>
-        <button
-          class="nh-fix nh-prep"
-          disabled={busy()}
-          title={
-            prepRoute.data?.route
-              ? `prep to push — would ${prepRoute.data.route}: ${prepRoute.data.why ?? ""}\nthen open the commit message in the editor`
-              : "prep to push — one motion, routed by state: carry a diverged PR's rework as an additive commit / restack forward / seal the unpushed tail into one voiced commit — then edit its message before pushing"
-          }
-          onClick={fire(() => prepPush.mutate())}
-        >
-          {prepPush.isPending ? "prepping…" : "⌁ prep to push"}
-        </button>
-        <button
-          class="nh-fix nh-push"
-          classList={{ armed: armed() === "pushOrigin" }}
-          disabled={busy() || !preview.data?.ok}
-          title={
-            preview.data?.ok
-              ? "push to origin — shared with the team the moment it lands (fast-forward, one reviewed commit)"
-              : `the wards aren't green yet:\n${(preview.data?.reasons ?? ["reading the branch…"]).join("\n")}`
-          }
-          onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate()))}
-        >
-          {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push"}
-        </button>
-      </Show>
-
-      {/* already-merged ghost → offer the contraction directly. Two ways to get here: the page-load
-          health badge (props.merged, the common case — no need to restack-into-a-conflict to find it)
-          or /sync reporting an empty-rebase conflict (contractKids, with a known child count). Either
-          way /contract re-verifies already-merged server-side, then drops the branch + rewires its
-          children onto main AND drops any integrator's requires edge on it. */}
-      <Show when={!isReview() && (contractKids() || props.merged)}>
-        <button
-          class="nh-fix nh-contract"
-          disabled={busy()}
-          title="this branch's work already merged into origin/main (a ghost) — drop the empty branch, rewire its children onto main, and drop any integrator's requires edge on it (forest contraction). Do this BEFORE restacking an integrator that fans it in."
-          onClick={fire(() => contract.mutate())}
-        >
-          {contract.isPending
-            ? "contracting…"
-            : contractKids()
-              ? `drop ghost & rewire ${contractKids()!.length} →`
-              : "drop ghost & rewire →"}
-        </button>
+        <NodeSpine
+          station={station()}
+          blessedAll={blessedAll()}
+          reasons={reasons()}
+          edge={edge()}
+        />
       </Show>
 
       {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}
