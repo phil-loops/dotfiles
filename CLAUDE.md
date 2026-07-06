@@ -183,9 +183,6 @@ they exist before you assume a click is free:
   streams a headless **read-only** `claude -p` token-by-token over SSE; seeded with the
   file's diff, multi-turn via `--resume`). Backend: `srv/chat.py` → `POST /chat`. It's
   allowlisted to `Read`/`Grep`/`Glob` — it can read the branch's tree but never edits/runs/commits.
-- **Sweep-select diff text → floating "ask Claude" chip** — fires a *fresh* `claude` in the
-  branch's tmux worktree (`srv/assist.py` → `POST /claude` → `stack-claude`). Fire-and-forget,
-  not streamed.
 - **Mutating actions**: `/bless`, `/checkout` (moves the **main working tree** onto a branch),
   `/squash`, `/restack`, `/restack-all`, `/sync`, `/prep`. These rewrite history / move HEAD.
 
