@@ -117,12 +117,15 @@ else
 fi
 
 # ── tail them all, tagged and colored ───────────────────────────────
+# set -m: each background pipeline becomes its own PROCESS GROUP. Without it, bash
+# collapses `( cmd | awk ) &` so $! is only the awk side and async jobs ignore SIGINT —
+# Ctrl-C returned the prompt but left tail/docker-logs running. kill -- -pgid gets all.
+set -m
 COLORS=(36 33 35 32 34 91 92 93 94 95)
 pids=()
 cleanup() {
   for p in ${pids[@]+"${pids[@]}"}; do   # ${arr[@]+…}: empty array + set -u crashes bash 3.2
-    pkill -P "$p" 2>/dev/null
-    kill "$p" 2>/dev/null
+    kill -- -"$p" 2>/dev/null || kill "$p" 2>/dev/null
   done
 }
 trap cleanup EXIT INT TERM
