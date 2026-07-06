@@ -90,6 +90,11 @@ ensure_db_ready() {
       (cd "$dir" && npx tsx --tsconfig tsconfig.node.json --import dotenv/config seed-prisma/seed.ts) 2>&1 | tail -3 || true
     fi
   fi
+  # a compose down empties ALL three stores, not just the prisma one — croon 3D000s on a
+  # missing `mail` db and every CH query fails until migrated. All idempotent (dbmate up).
+  say "ensuring mail DB + ClickHouse schemas (idempotent)"
+  (cd "$dir" && task mail-pg:create-dev-db mail-pg:migrate mail-pg:seed-partitions:dev) 2>&1 | tail -2 || true
+  (cd "$dir" && task clickhouse:migrate) 2>&1 | tail -2 || true
 }
 
 # Seed PIDs that DEFINE the running loops instances — precisely, not "anything sharing
