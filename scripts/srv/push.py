@@ -277,9 +277,11 @@ def prep_push(req, raw):
 
     if not v["ff"]:
         if not published:
+            # not mechanically routable — the omni sync reads this flag and puts Claude in
+            # the middle (the /reconcile eject) instead of stopping at a refusal
             return req._send(200, json.dumps({
-                "ok": False,
-                "err": "diverged from origin without an open PR — reconcile (⋯ menu) to sort out the source of truth first"}))
+                "ok": False, "reconcile": True,
+                "err": "diverged from origin without an open PR — handing to Claude to work out the source of truth"}))
         res = sync.build_additive(branch)
         if not res.get("ok"):
             return req._send(res.pop("code", 200), json.dumps(res))

@@ -159,10 +159,11 @@ body {
 /* ── branch state badge + ⋯ actions menu (NodeActions) ───────────────── */
 .node-actions { position: relative; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 
-/* the two-button header: prep is patina work, push is the ember door */
-.nh-fix.nh-push { color: var(--ember); border-color: var(--ember); font-weight: 600; }
-.nh-fix.nh-push:disabled { opacity: 0.35; }
-.nh-fix.nh-push.armed { color: var(--vellum-night); background: var(--ember); }
+/* THE red button — the only control that touches origin; nothing else may wear this red */
+.nh-fix.nh-push-red { color: var(--del); border-color: var(--del); font-weight: 600; }
+.nh-fix.nh-push-red:disabled { opacity: 0.35; }
+.nh-fix.nh-push-red:hover:not(:disabled):not(.armed) { background: var(--del-bg); }
+.nh-fix.nh-push-red.armed { color: var(--vellum-night); background: var(--del); }
 .nh-pushed-link { font-size: 12px; color: var(--add); }
 
 /* the message editor — prep's landing: the one outgoing commit, editable pre-push */
