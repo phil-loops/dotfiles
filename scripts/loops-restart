@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# loops-restart — kill the running loops dev stack, rebuild packages, restart it cleanly.
+# loops-restart — find EVERY running loops instance (dev stack + previews), kill them
+# all, rebuild packages, restart the :3000 service and its dependencies cleanly.
 #
 #   loops-restart [--dir <checkout>] [--reset|--keep] [--no-restart] [--dry-run]
 #
@@ -9,24 +10,26 @@ set -euo pipefail
 #   --reset        full DB reset on start: `task dev` (prisma migrate reset --force +
 #                  reseed + clickhouse:reset). Use for a clean slate.
 #   --keep         keep dev data: `task dev:watch` (rebuild packages + restart node
-#                  services only, no DB wipe). DEFAULT — right for a code/package change.
-#                  Also applies pending Postgres migrations (prisma migrate deploy) and
-#                  seeds when the DB is empty, so a relocated restart onto a fresh compose
-#                  volume doesn't leave the app 500ing on `relation "User" does not exist`.
-#   --no-restart   kill + docker-down only; don't relaunch.
+#                  services only, no deliberate DB wipe). DEFAULT — right for a code/
+#                  package change. Also applies pending Postgres migrations (prisma
+#                  migrate deploy) and seeds when the DB is empty.
+#   --no-restart   kill (+ docker-down if relocating) only; don't relaunch.
 #   --dry-run      print what it WOULD kill / bring down / start; touch nothing.
 #
-# Why this exists: a dev server was found running out of a stale worktree
-# (loops-loo5170-verify), and killing the node processes was NOT enough — its Docker
-# compose project kept holding :9000 (minio) / :5432 (psql) / :8123 (clickhouse), so a
-# restart in another checkout died on "port is already allocated". This brings the
-# RUNNING checkout's compose project down before relaunching, so ports are free even
-# when relocating between checkouts.
+# Discovery casts a wide net on purpose: the `task …dev…` stack, `next dev` preview
+# servers (loops-preview worktrees on :3010+), and anything listening on the dev/preview
+# ports — every process group rooted in a ~/coding/loops* checkout is listed and killed.
+# Runaway previews left over from old sessions die with the stack; "kill all, then
+# restart :3000 and its dependencies" is the one behavior.
 #
-# Safety: only touches processes whose cwd is the discovered dev checkout, and never a
-# `claude` process. Docker volumes are preserved (`compose down` without -v). The server
-# runs in a detached tmux session `loops-dev`, logging to /tmp/loops-dev.log (which the
-# `dev-tail` skill reads), so it outlives your shell.
+# Docker: the compose project is brought down ONLY when relocating checkouts or on
+# --reset. The psql service has NO volume, so `compose down` DESTROYS the dev database —
+# a same-checkout keep-restart leaves the containers (and your data) running. When the
+# DB does come up empty, ensure_db_ready migrates + reseeds it.
+#
+# Safety: only touches process groups whose cwd is under ~/coding/loops*, and never a
+# `claude` process. The server runs in a detached tmux session `loops-dev`, logging to
+# /tmp/loops-dev.log (which the `dev-tail` skill reads), so it outlives your shell.
 
 DIR="$HOME/coding/loops"
 MODE="keep"        # keep | reset
@@ -34,7 +37,8 @@ RESTART=1
 DRY=0
 LOG=/tmp/loops-dev.log
 SESSION=loops-dev
-DEV_PORTS=(3000 3001 3002 3003 3004 3005 4000)
+# 3000–3005 + 4000 = the dev stack; 3010–3019 = loops-preview side servers
+DEV_PORTS=(3000 3001 3002 3003 3004 3005 4000 3010 3011 3012 3013 3014 3015 3016 3017 3018 3019)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -80,52 +84,75 @@ ensure_db_ready() {
   if command -v psql >/dev/null 2>&1 && [ -n "$url" ]; then
     n="$(psql "$url" -t -A -c 'SELECT count(*) FROM "User";' 2>/dev/null | tr -d '[:space:]')"
     if [ "$n" = "0" ]; then
-      say "fresh/empty DB — seeding (prisma db seed)"
-      (cd "$dir" && npx prisma db seed) 2>&1 | tail -3 || true
+      # not `prisma db seed`: Prisma 7 stopped loading .env for the seed subprocess, so
+      # the seed dies on missing DEV_EMAIL — load .env via tsx ourselves
+      say "fresh/empty DB — seeding (seed-prisma/seed.ts with .env loaded)"
+      (cd "$dir" && npx tsx --tsconfig tsconfig.node.json --import dotenv/config seed-prisma/seed.ts) 2>&1 | tail -3 || true
     fi
   fi
 }
 
-# Seed PIDs that DEFINE the running dev stack — precisely, not "anything sharing the
-# checkout cwd" (the main checkout is the cwd of the viewer, shells, editors… killing by
-# cwd there is a footgun). Two unambiguous signals: the `task …dev…` orchestrator, and
-# whoever LISTENS on the dev ports. Their process GROUPS are the whole tree to kill.
+# Seed PIDs that DEFINE the running loops instances — precisely, not "anything sharing
+# the checkout cwd" (the main checkout is the cwd of the viewer, shells, editors… killing
+# by cwd there is a footgun). Three unambiguous signals: the `task …dev…` orchestrator,
+# `next dev` preview servers, and whoever LISTENS on the dev/preview ports. Their process
+# GROUPS are the whole tree to kill; only groups rooted in ~/coding/loops* qualify.
 SELF_PGID="$(pgid_of $$)"
 seed_pids() {
   { pgrep -f 'task .*dev' 2>/dev/null || true
+    pgrep -f 'next dev' 2>/dev/null || true
     lsof -nP -sTCP:LISTEN $(printf -- '-iTCP:%s ' "${DEV_PORTS[@]}") -t 2>/dev/null || true
   } | sort -u
 }
 
 RUNNING=""
-declare -a KILL_PGIDS=()
+declare -a KILL_PGIDS=() KILL_LABELS=()
 for p in $(seed_pids); do
   cmd=$(ps -o command= -p "$p" 2>/dev/null || true)
   case "$cmd" in claude\ *|*/claude\ *|claude) continue ;; esac   # never a working session
+  wd="$(cwd_of "$p")"
+  case "$wd" in "$HOME/coding/loops"*) ;; *) continue ;; esac     # only loops checkouts
   g=$(pgid_of "$p"); [ -n "$g" ] || continue
   [ "$g" = "$SELF_PGID" ] && continue                              # never our own group
-  [ -z "$RUNNING" ] && RUNNING="$(cwd_of "$p")"
-  case " ${KILL_PGIDS[*]:-} " in *" $g "*) ;; *) KILL_PGIDS+=("$g") ;; esac
+  case "$cmd" in *task*dev*) [ -z "$RUNNING" ] && RUNNING="$wd" ;; esac  # compose lives with `task dev`, not previews
+  case " ${KILL_PGIDS[*]:-} " in *" $g "*) ;; *) KILL_PGIDS+=("$g"); KILL_LABELS+=("$wd") ;; esac
 done
+PREVIEW_SESSIONS="$(tmux ls -F '#{session_name}' 2>/dev/null | grep '^loops-preview-' | tr '\n' ' ' || true)"
+
+# compose down destroys the dev DB (psql has no volume) — only pay that when the compose
+# project must move checkouts, or the user asked for a reset anyway
+NEED_DOCKER_DOWN=0
+if [ -n "$RUNNING" ] && { [ "$MODE" = reset ] || [ "$RUNNING" != "$DIR" ]; }; then
+  NEED_DOCKER_DOWN=1
+fi
 
 if [ "${#KILL_PGIDS[@]}" -gt 0 ]; then
-  say "dev stack running in: ${RUNNING:-unknown}   (process groups: ${KILL_PGIDS[*]})"
+  say "found ${#KILL_PGIDS[@]} loops instance(s) — killing all:"
+  for i in "${!KILL_PGIDS[@]}"; do
+    say "  group ${KILL_PGIDS[$i]} — ${KILL_LABELS[$i]}"
+  done
+  [ -n "$PREVIEW_SESSIONS" ] && say "  preview tmux sessions: $PREVIEW_SESSIONS"
   if [ "$DRY" = 1 ]; then
     for g in "${KILL_PGIDS[@]}"; do
       say "would TERM→KILL process group $g:"; ps -o pid=,command= -g "$g" 2>/dev/null | sed 's/^/      /' | cut -c1-100
     done
-    [ -n "$RUNNING" ] && say "would: (cd $RUNNING && docker compose down)"
+    if [ "$NEED_DOCKER_DOWN" = 1 ]; then
+      say "would: (cd $RUNNING && docker compose down) — DESTROYS dev DB (psql has no volume)"
+    else
+      say "same-checkout keep restart — docker (and dev data) left running"
+    fi
   else
     for g in "${KILL_PGIDS[@]}"; do kill -TERM "-$g" 2>/dev/null || true; done
     sleep 2
     for g in "${KILL_PGIDS[@]}"; do kill -9 "-$g" 2>/dev/null || true; done
-    if [ -n "$RUNNING" ] && [ -f "$RUNNING/docker-compose.yml" -o -f "$RUNNING/compose.yml" -o -f "$RUNNING/docker-compose.yaml" ]; then
-      say "bringing down its Docker compose project (volumes preserved)"
+    for s in $PREVIEW_SESSIONS; do tmux kill-session -t "$s" 2>/dev/null || true; done
+    if [ "$NEED_DOCKER_DOWN" = 1 ] && [ -f "$RUNNING/docker-compose.yml" -o -f "$RUNNING/compose.yml" -o -f "$RUNNING/docker-compose.yaml" ]; then
+      say "bringing down its Docker compose project (dev DB is destroyed with it — psql has no volume)"
       (cd "$RUNNING" && docker compose down) 2>&1 | tail -3 || true
     fi
   fi
 else
-  say "no dev stack found (no 'task …dev…' process, nothing on dev ports) — nothing to kill"
+  say "no loops instances found (no 'task …dev…'/'next dev' process, nothing on dev/preview ports) — nothing to kill"
 fi
 
 # free-port sanity — anything still bound would fail the relaunch
