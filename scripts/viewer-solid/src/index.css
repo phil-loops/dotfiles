@@ -103,6 +103,23 @@ body {
 .dot.stale { background: transparent; border-color: var(--patina); box-shadow: inset 0 0 0 1.5px var(--patina); }
 .dot.unblessed { background: transparent; border-color: var(--ink-faint); }
 .dot.dirt { background: transparent; border: 1px dashed var(--ink-dim); }
+
+/* per-file dirt verdicts — accept commits the one file, reject destroys (armed) */
+.ur-file { position: relative; }
+.ur-file-acts {
+  display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+  margin: 10px 2px 4px;
+}
+.ur-file-accept, .ur-file-reject, .ur-file-x {
+  font: inherit; font-size: 11px; cursor: pointer; padding: 2px 10px; border-radius: 5px;
+  background: transparent;
+}
+.ur-file-accept { color: var(--add); border: 1px solid var(--add); opacity: 0.85; }
+.ur-file-accept:hover:not(:disabled) { opacity: 1; }
+.ur-file-reject { color: var(--del); border: 1px solid var(--del); opacity: 0.85; }
+.ur-file-reject:hover:not(:disabled) { opacity: 1; }
+.ur-file-reject.armed { color: var(--vellum-night); background: var(--del); font-weight: 600; }
+.ur-file-x { color: var(--ink-faint); border: 0; }
 .file-list-dirt-head {
   margin: 12px 2px 4px; padding-top: 9px; border-top: 1px dashed var(--rule);
   font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
