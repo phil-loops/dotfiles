@@ -63,3 +63,22 @@ body {
   font-size: 11px;
   color: #6e7681;
 }
+
+.forest {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 9px;
+  margin-top: 6px;
+  border: 1px solid #2d4a2d;
+  border-radius: 7px;
+  background: #12261a;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+.forest:hover { border-color: #3fb950; }
+.forest[hidden] { display: none; }
+.forest-name { font-weight: 600; color: #7ee787; }
+.forest-detail { font-size: 11px; color: #8b949e; white-space: pre-line; }
+.forest-detail .orphan { color: #d29922; }
