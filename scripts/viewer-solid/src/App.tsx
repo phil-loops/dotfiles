@@ -29,7 +29,7 @@ import { useDiffSelection } from "./useDiffSelection";
 import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
 import ChatIndex from "./ChatIndex";
-import { chatTarget, openChat, closeChat } from "./chatDrawer";
+import { chatTarget, openChat, closeChat, chatToTmux } from "./chatDrawer";
 import { threadMsgCount, threadWorking, threadUnseenDone } from "./chatStore";
 import { reconcile as reconcileChats } from "./chatRunner";
 import { useFileCycle } from "./useFileCycle";
@@ -1387,7 +1387,7 @@ function ForestOverview() {
             <button
               class="fo-chat"
               title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
-              onClick={() => openChat({ branch: project(), file: null, origin: location(), project: project() })}
+              onClick={() => chatToTmux({ project: project() })}
             >✦ chat</button>
             <StageButton project={project()} />
           </Show>
@@ -1916,6 +1916,19 @@ function NodeDetail() {
                       )}
                     </For>
                   </ul>
+                  <Show when={(data().dirty?.length ?? 0) > 0}>
+                    {/* not timid: say where the dirt lives and what it means for this page —
+                        it rides the checkout, it isn't part of the review set, and sync will
+                        stop to ask about it. Files up front; the rail below has the diffs. */}
+                    <div
+                      class="dirty-aside-note"
+                      title={(data().dirty ?? []).map((f) => f.path).join("\n")}
+                    >
+                      <b>± {data().dirty!.length} uncommitted</b> in {(data().worktree ?? "").replace(/.*\//, "") || "the checkout"} —{" "}
+                      {(data().dirty ?? []).slice(0, 2).map((f) => f.path.replace(/.*\//, "")).join(", ")}
+                      {(data().dirty?.length ?? 0) > 2 ? "…" : ""}. Rides the worktree, not this review; sync will ask. diffs below ↓
+                    </div>
+                  </Show>
                 </Show>
               </>
             )}
@@ -2134,7 +2147,7 @@ function NodeDetail() {
               />
             </Show>
             <Show when={canMutate}>
-              <button class="icon-btn" onClick={() => openChat({ branch: active(), origin: location(), file: null })} title="chat about this whole branch">
+              <button class="icon-btn" onClick={() => chatToTmux({ branch: active() })} title="chat about this whole branch — opens an interactive claude beside your tmux panes">
                 ✦
               </button>
             </Show>
@@ -2158,7 +2171,7 @@ function NodeDetail() {
               >
                 <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
                   <For each={data().files.filter(matchFilter)}>
-                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
+                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })} />}
                   </For>
                 </Show>
               </Show>
@@ -2169,23 +2182,14 @@ function NodeDetail() {
               is the local-vs-shared model's missing tier made visible (the dirty-sync incident:
               dirt was only ever discovered by tripping a guard). */}
           <Show when={(node.data?.dirty?.length ?? 0) > 0}>
-            <div class="uncommitted-rail">
-              <div class="ur-head">
-                ± uncommitted — working tree only
-                <span class="ur-wt">{node.data!.worktree}</span>
-              </div>
-              <For each={node.data!.dirty!}>
-                {(f) => (
-                  <FileEntry
-                    file={{ path: f.path, status: "dirty", patch: f.patch }}
-                    bless={bless}
-                    branch={active()}
-                    readOnly
-                    onChat={(file) => openChat({ branch: active(), origin: location(), file })}
-                  />
-                )}
-              </For>
-            </div>
+            <DirtyRail
+              dirty={node.data!.dirty!}
+              worktree={node.data!.worktree ?? ""}
+              branch={active()}
+              bless={bless}
+              onCommit={() => node.refetch()}
+              onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })}
+            />
           </Show>
         </Show>
       </main>
@@ -2218,6 +2222,98 @@ function NodeDetail() {
       <Show when={flash()}>
         <div class="flash">{flash()}</div>
       </Show>
+    </div>
+  );
+}
+
+function patchLineCounts(patch: string): { add: number; del: number } {
+  let add = 0, del = 0;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) add++;
+    else if (line.startsWith("-") && !line.startsWith("---")) del++;
+  }
+  return { add, del };
+}
+
+function DirtyRail(props: {
+  dirty: { path: string; code: string; patch: string }[];
+  worktree: string;
+  branch: string;
+  bless: { mutate: (file: string) => void };
+  onCommit: () => void;
+  onChat: (f: FileDiff) => void;
+}) {
+  const [msg, setMsg] = createSignal("");
+  const [err, setErr] = createSignal("");
+  const [busy, setBusy] = createSignal(false);
+  const [showForm, setShowForm] = createSignal(false);
+  let inputEl: HTMLInputElement | undefined;
+
+  const submit = async () => {
+    if (!msg().trim()) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await fetch(withRepo("/commit-dirty"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: props.branch, message: msg().trim() }),
+      });
+      const j = await r.json();
+      if (!j.ok) { setErr(j.err ?? "commit failed"); return; }
+      setMsg("");
+      setShowForm(false);
+      props.onCommit();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="uncommitted-rail">
+      <div class="ur-head">
+        <span class="ur-label">± uncommitted — working tree only</span>
+        <span class="ur-wt">{props.worktree.replace(/.*\//, "")}</span>
+        <button
+          class="ur-commit-btn"
+          title="commit all uncommitted changes to this branch"
+          onClick={() => { setShowForm((v) => !v); setTimeout(() => inputEl?.focus(), 0); }}
+        >
+          {showForm() ? "✕" : "↓ commit"}
+        </button>
+      </div>
+      <Show when={showForm()}>
+        <div class="ur-commit-form">
+          <input
+            ref={inputEl}
+            class="ur-commit-input"
+            placeholder="commit message…"
+            value={msg()}
+            onInput={(e) => setMsg(e.currentTarget.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+            disabled={busy()}
+          />
+          <button class="ur-commit-go" onClick={submit} disabled={busy() || !msg().trim()}>
+            {busy() ? "…" : "commit"}
+          </button>
+        </div>
+        <Show when={err()}>
+          <div class="ur-commit-err">{err()}</div>
+        </Show>
+      </Show>
+      <For each={props.dirty}>
+        {(f) => (
+          <FileEntry
+            file={{ path: f.path, status: "dirty", patch: f.patch, ...patchLineCounts(f.patch) }}
+            bless={props.bless}
+            branch={props.branch}
+            readOnly
+            onChat={props.onChat}
+          />
+        )}
+      </For>
     </div>
   );
 }

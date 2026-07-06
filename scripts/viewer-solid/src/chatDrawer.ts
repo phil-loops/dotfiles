@@ -49,6 +49,17 @@ function persist() {
 export const chatTarget = target;
 export const drawerMinimized = minimized;
 
+// ✦ buttons' target (Phil, 2026-07-06): the chat is most useful IN TMUX, beside his other
+// panes — the buttons launch an interactive claude there (split into the active window,
+// even-horizontal columns), seeded exactly like a drawer chat. Fire-and-forget; the pane
+// appearing is the feedback. The drawer stays for streamed edit-actions + running threads.
+export const chatToTmux = (body: { branch?: string; project?: string; path?: string; patch?: string }) =>
+  fetch("/chat-tmux", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then((r) => r.json() as Promise<{ ok?: boolean; err?: string }>);
+
 export const openChat = (t: ChatTarget) => {
   setTarget(t);
   setMinimized(false);
