@@ -165,6 +165,9 @@ body {
 .nh-fix.nh-push-red:hover:not(:disabled):not(.armed) { background: var(--del-bg); }
 .nh-fix.nh-push-red.armed { color: var(--vellum-night); background: var(--del); }
 .nh-pushed-link { font-size: 12px; color: var(--add); }
+/* result line + link fade in (inline in the header row — no height to animate) */
+.nh-done, .nh-pushed-link { transition: opacity 240ms ease; }
+@starting-style { .nh-done, .nh-pushed-link { opacity: 0; } }
 
 /* the message editor — prep's landing: the one outgoing commit, editable pre-push */
 .nh-editor {
@@ -190,19 +193,53 @@ body {
   font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer;
 }
 .nh-viewnote { font-size: 11px; color: var(--ink-faint); letter-spacing: 0.03em; }
-/* the sync step strip — the wards pattern for the motion; notes never truncate */
+/* ── the unfold grammar ───────────────────────────────────────────────────────
+   Nothing in the header teleports into layout: expandables GROW from the seam
+   under the header rule and arrive warm (an ember wash that settles into the
+   surface). Needs interpolate-size for auto-height transitions — older engines
+   simply skip the animation, which is the correct fallback. */
+:root { interpolate-size: allow-keywords; }
+.nh-strip, .nh-editor, .nh-dirt, .nh-step-note {
+  transition: height 300ms cubic-bezier(0.3, 0.7, 0.2, 1), opacity 220ms ease 70ms;
+  overflow: clip;
+}
+@starting-style {
+  .nh-strip, .nh-editor, .nh-dirt, .nh-step-note { height: 0; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { interpolate-size: numeric-only; }
+  .nh-strip, .nh-editor, .nh-dirt, .nh-step-note { transition: none; }
+}
+
+/* the sync step strip — the wards pattern for the motion; notes never truncate.
+   Capped with internal scroll so MID-MOTION arrivals (notes, the dirt gate) can
+   never move the page: the only page-level movement is the mount unfold itself. */
 .nh-strip {
   flex-basis: 100%;
   border: 1px solid var(--rule); border-radius: 9px;
-  background: var(--vellum-raise); padding: 9px 12px; margin-top: 4px;
+  padding: 9px 12px; margin-top: 4px;
   display: flex; flex-direction: column; gap: 6px;
+  background: var(--vellum-raise);
+  max-height: 200px; overflow-y: auto;
+  animation: nh-settle 900ms ease-out;
 }
-.nh-strip-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 11.5px; }
-.nh-step { color: var(--ink-faint); letter-spacing: 0.03em; white-space: nowrap; }
+@keyframes nh-settle {
+  from { background-color: rgba(210, 115, 42, 0.10); border-color: var(--ember); }
+  to   { background-color: var(--vellum-raise); border-color: var(--rule); }
+}
+.nh-strip-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 11.5px; min-height: 18px; }
+.nh-step { color: var(--ink-faint); letter-spacing: 0.03em; white-space: nowrap; transition: color 240ms ease; }
+.nh-step-ic { display: inline-block; width: 1.15em; text-align: center; font-style: normal; }
 .nh-step[data-state="ok"] { color: var(--add); }
 .nh-step[data-state="run"] { color: var(--ember); }
+.nh-step[data-state="run"] .nh-step-ic { animation: nh-breathe 1.5s ease-in-out infinite; }
+@keyframes nh-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 .nh-step[data-state="fail"] { color: var(--del); font-weight: 600; }
 .nh-step[data-state="skip"] { color: var(--ink-dim); }
+@media (prefers-reduced-motion: reduce) {
+  .nh-strip { animation: none; }
+  .nh-step[data-state="run"] .nh-step-ic { animation: none; }
+}
 .nh-strip-x {
   margin-left: auto; font: inherit; font-size: 12px; color: var(--ink-faint);
   background: none; border: 0; cursor: pointer;
