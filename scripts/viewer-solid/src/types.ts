@@ -27,8 +27,6 @@ export const NodeMeta = z.object({
   // deterministic merge-order depth (stack-merge-rank), grafted on by /model. Canonical
   // order = stable sort by mergeRank asc. Shared authority with stack-pr-body — see _enrich.
   mergeRank: z.number().optional(),
-  // Phil's manual promote/demote level (stack-branch.<name>.interest), grafted on by /model.
-  interest: z.number().optional(),
   stale: z.number(),
   total: z.number(),
   clean: z.number(),
@@ -46,6 +44,8 @@ export const ForestModel = z.object({
   // canonical merge order (stack-merge-rank), tie-break already baked in — render verbatim,
   // do NOT re-sort by NodeMeta.mergeRank (that loses the declared-order tie-break). See _enrich.
   mergeOrder: z.array(z.string()).optional(),
+  // Phil's manual promote/demote level (stack-project.<name>.interest), grafted on by /model.
+  interest: z.number().optional(),
 });
 export type ForestModel = z.infer<typeof ForestModel>;
 
@@ -105,7 +105,7 @@ export const Project = z.object({
     .optional(), // most recent squash-merge into main attributed to this forest
   lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
-  interest: z.number().optional(), // max member promote/demote level → orders this forest on Home
+  interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home
 });
 export type Project = z.infer<typeof Project>;
 

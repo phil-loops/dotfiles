@@ -191,13 +191,13 @@ def _branch_commit_unix():
 
 
 def _interest_levels():
-    # {branch: interest} — Phil's hand-set promote/demote level (stack-branch.<b>.interest N).
-    # One read for all; drives the Forests promotion order + the per-node ▲ pill. 0/absent = none.
+    # {project: interest} — Phil's hand-set promote/demote level (stack-project.<p>.interest N).
+    # One read for all; drives the Forests promotion order. 0/absent = none.
     out = {}
     for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-branch\..*\.interest$"]).stdout.splitlines():
+                         r"^stack-project\..*\.interest$"]).stdout.splitlines():
         key, _, val = line.partition(" ")
-        m = re.match(r"^stack-branch\.(.+)\.interest$", key)
+        m = re.match(r"^stack-project\.(.+)\.interest$", key)
         if m and val.strip().lstrip("-").isdigit() and int(val) > 0:
             out[m.group(1)] = int(val)
     return out
@@ -318,7 +318,7 @@ def _projects_for(name, path):
         p["merged"] = merges.get(p["name"])
         branches = members.get(p["name"]) or bs
         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
-        p["interest"] = max((interest.get(b, 0) for b in branches), default=0)
+        p["interest"] = interest.get(p["name"], 0)
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
                              if b in prmap and prmap[b].get("createdAt")), default=None)

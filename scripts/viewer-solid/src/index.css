@@ -669,6 +669,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   padding: 16px 24px; background: var(--vellum-night); border-bottom: 1px solid var(--rule); }
 .fo-head .brand { font-size: 22px; }
 .fo-project { font-family: var(--display); font-style: italic; font-size: 21px; color: var(--ink); }
+.fo-interest { color: var(--gold-leaf); font-size: 11px; letter-spacing: -1px; }
 .fo-meta { font-size: 12px; letter-spacing: 0.04em; color: var(--ink-faint); }
 .fo-empty { padding: 40px 24px; }
 /* the project name in the detail forest-strip doubles as a back-link to the overview map. */
