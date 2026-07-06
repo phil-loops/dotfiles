@@ -125,9 +125,9 @@ def _project_of(branch):
 
 def _scan_merges():
     # Walk new origin/main commits since the last scan; attribute each squash-merge
-    # (subject "… (#N)") to a project via its head branch's project tag, and keep the
-    # newest merge per project. The store persists, so the badge survives restarts and
-    # lingers after the now-empty node is contracted — until that project merges again.
+    # (subject "… (#N)") to a project via its head branch's project tag, and keep a
+    # newest-first history per project. The store persists, so the badges survive
+    # restarts and linger after the now-empty nodes are contracted.
     path = _merges_file()
     try:
         with open(path) as f:
@@ -144,7 +144,10 @@ def _scan_merges():
         rng, cap = ["origin/main"], ["-n", "12"]
     log = ctx.run(["git", "log", *cap, "--format=%cI%x09%s", *rng]).stdout.splitlines()
     merges = store.get("merges", {})
-    for line in reversed(log):   # oldest-first so a newer merge overwrites its project
+    for k, v in list(merges.items()):   # migrate pre-history stores (one dict per project)
+        if isinstance(v, dict):
+            merges[k] = [v]
+    for line in reversed(log):   # oldest-first so newer merges land at the head
         at, _, subj = line.partition("\t")
         nums = _PR_RE.findall(subj)
         if not nums:
@@ -155,7 +158,10 @@ def _scan_merges():
         branch, title = res
         proj = _project_of(branch) if branch else None
         if proj:
-            merges[proj] = {"pr": int(nums[-1]), "title": title or subj, "at": at, "branch": branch}
+            hist = merges.setdefault(proj, [])
+            hist[:] = [e for e in hist if e.get("pr") != int(nums[-1])]
+            hist.insert(0, {"pr": int(nums[-1]), "title": title or subj, "at": at, "branch": branch})
+            del hist[8:]
     try:
         if path:
             with open(path, "w") as f:
@@ -315,7 +321,9 @@ def _projects_for(name, path):
         bs = p.get("mergeable", [])
         p["behind"] = max((fresh[b][0] for b in bs), default=0)
         p["overlap"] = any(fresh[b][1] for b in bs)
-        p["merged"] = merges.get(p["name"])
+        landed = merges.get(p["name"]) or []
+        p["merged"] = landed[0] if landed else None
+        p["landed"] = landed
         branches = members.get(p["name"]) or bs
         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
         p["interest"] = interest.get(p["name"], 0)

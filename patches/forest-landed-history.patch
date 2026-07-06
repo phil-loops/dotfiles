@@ -1,0 +1,159 @@
+diff --git a/scripts/srv/picker.py b/scripts/srv/picker.py
+index 11659f4..3459c3c 100644
+--- a/scripts/srv/picker.py
++++ b/scripts/srv/picker.py
+@@ -125,9 +125,9 @@ def _project_of(branch):
+ 
+ def _scan_merges():
+     # Walk new origin/main commits since the last scan; attribute each squash-merge
+-    # (subject "… (#N)") to a project via its head branch's project tag, and keep the
+-    # newest merge per project. The store persists, so the badge survives restarts and
+-    # lingers after the now-empty node is contracted — until that project merges again.
++    # (subject "… (#N)") to a project via its head branch's project tag, and keep a
++    # newest-first history per project. The store persists, so the badges survive
++    # restarts and linger after the now-empty nodes are contracted.
+     path = _merges_file()
+     try:
+         with open(path) as f:
+@@ -144,7 +144,10 @@ def _scan_merges():
+         rng, cap = ["origin/main"], ["-n", "12"]
+     log = ctx.run(["git", "log", *cap, "--format=%cI%x09%s", *rng]).stdout.splitlines()
+     merges = store.get("merges", {})
+-    for line in reversed(log):   # oldest-first so a newer merge overwrites its project
++    for k, v in list(merges.items()):   # migrate pre-history stores (one dict per project)
++        if isinstance(v, dict):
++            merges[k] = [v]
++    for line in reversed(log):   # oldest-first so newer merges land at the head
+         at, _, subj = line.partition("\t")
+         nums = _PR_RE.findall(subj)
+         if not nums:
+@@ -155,7 +158,10 @@ def _scan_merges():
+         branch, title = res
+         proj = _project_of(branch) if branch else None
+         if proj:
+-            merges[proj] = {"pr": int(nums[-1]), "title": title or subj, "at": at, "branch": branch}
++            hist = merges.setdefault(proj, [])
++            hist[:] = [e for e in hist if e.get("pr") != int(nums[-1])]
++            hist.insert(0, {"pr": int(nums[-1]), "title": title or subj, "at": at, "branch": branch})
++            del hist[8:]
+     try:
+         if path:
+             with open(path, "w") as f:
+@@ -315,7 +321,9 @@ def _projects_for(name, path):
+         bs = p.get("mergeable", [])
+         p["behind"] = max((fresh[b][0] for b in bs), default=0)
+         p["overlap"] = any(fresh[b][1] for b in bs)
+-        p["merged"] = merges.get(p["name"])
++        landed = merges.get(p["name"]) or []
++        p["merged"] = landed[0] if landed else None
++        p["landed"] = landed
+         branches = members.get(p["name"]) or bs
+         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
+         p["interest"] = interest.get(p["name"], 0)
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 1714691..08d84ff 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -484,20 +484,20 @@ function Home() {
+   // hover a forest row → a card of its branches + one-line purposes ("what's in here").
+   // cached per project; a short delay keeps it from flickering as the pointer crosses rows.
+   type FPurpose = { branch: string; thesis: string };
+-  const [ftip, setFtip] = createSignal<{ rows: FPurpose[]; x: number; y: number } | null>(null);
++  const [ftip, setFtip] = createSignal<{ rows: FPurpose[]; landed: Project["landed"]; x: number; y: number } | null>(null);
+   const fpCache = new Map<string, FPurpose[]>();
+   let ftipFor: string | null = null;
+   let ftipTimer: ReturnType<typeof setTimeout> | undefined;
+-  const showFtip = (project: string, el: HTMLElement, repo?: string) => {
++  const showFtip = (project: string, el: HTMLElement, repo?: string, landed?: Project["landed"]) => {
+     clearTimeout(ftipTimer);
+     ftipFor = project;
+     const r = el.getBoundingClientRect();
+     const place = (rows: FPurpose[]) => {
+-      if (ftipFor !== project || !rows.length) return;
+-      const estH = 18 + rows.length * 44; // ~name + 2-line clamped thesis per row
++      if (ftipFor !== project || (!rows.length && !landed?.length)) return;
++      const estH = 18 + rows.length * 44 + (landed?.length ? 12 + landed.length * 18 : 0);
+       // flip above the row when there isn't room below, so the card stays on-screen
+       const y = window.innerHeight - r.bottom >= estH + 12 ? r.bottom + 6 : Math.max(8, r.top - estH - 6);
+-      setFtip({ rows, x: r.left + 18, y });
++      setFtip({ rows, landed, x: r.left + 18, y });
+     };
+     const key = (repo && repo !== "loops" ? repo + "/" : "") + project; // repo-qualify so names don't collide across repos
+     const cached = fpCache.get(key);
+@@ -767,7 +767,7 @@ function Home() {
+           repo: p.repo,
+           node: p.repo !== "loops" ? (p.mergeable?.[0] ?? p.candidates?.[0]) : undefined,
+         }}
+-        onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
++        onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo, p.landed)}
+         onMouseLeave={hideFtip}
+         onContextMenu={(e) => {
+           if (!canMutate) return;
+@@ -825,7 +825,9 @@ function Home() {
+             <Match when={folded}>
+               <Show when={p.merged && mergedAgo(p.merged.at)}>
+                 {(rel) => (
+-                  <span class="forest-merged" title={p.merged!.title}>✨ {rel()} (#{p.merged!.pr})</span>
++                  <span class="forest-merged" title={p.merged!.title}>
++                    ✨ {(p.landed?.length ?? 0) > 1 ? `${p.landed!.length} landed · ${rel()}` : `${rel()} (#${p.merged!.pr})`}
++                  </span>
+                 )}
+               </Show>
+             </Match>
+@@ -1087,6 +1089,19 @@ function Home() {
+                   </div>
+                 )}
+               </For>
++              <Show when={t().landed?.length}>
++                <div class="forest-tip-landed">
++                  <For each={t().landed}>
++                    {(m) => (
++                      <div class="forest-tip-landed-row" title={m.title}>
++                        <span class="landed-pr">#{m.pr}</span>
++                        <span class="landed-branch">{leaf(m.branch)}</span>
++                        <span class="landed-ago">{mergedAgo(m.at) ?? new Date(m.at).toLocaleDateString()}</span>
++                      </div>
++                    )}
++                  </For>
++                </div>
++              </Show>
+             </div>
+           )}
+         </Show>
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index 697c063..0aff84d 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -1003,6 +1003,18 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
+   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+ }
+ .forest-tip-thesis.none { color: var(--ink-faint); opacity: 0.7; }
++.forest-tip-landed {
++  margin-top: 5px; padding: 5px 14px 1px; border-top: 1px solid var(--rule);
++}
++.forest-tip-landed-row {
++  display: flex; gap: 10px; align-items: baseline; padding: 2px 0;
++  font-family: var(--mono); font-size: 11px;
++}
++.landed-pr { color: var(--gold-deep); }
++.landed-branch {
++  color: var(--ink-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
++}
++.landed-ago { color: var(--ink-faint); }
+ 
+ /* ── watching: opt-in pinned loose branches ──────────────────────────── */
+ .watch-pin {
+diff --git a/scripts/viewer-solid/src/types.ts b/scripts/viewer-solid/src/types.ts
+index 81a5dcf..deeec6b 100644
+--- a/scripts/viewer-solid/src/types.ts
++++ b/scripts/viewer-solid/src/types.ts
+@@ -103,6 +103,9 @@ export const Project = z.object({
+     .object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() })
+     .nullable()
+     .optional(), // most recent squash-merge into main attributed to this forest
++  landed: z
++    .array(z.object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() }))
++    .optional(), // merge history for this forest, newest first (merged = landed[0])
+   lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
+   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
+   interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home

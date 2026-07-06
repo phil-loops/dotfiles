@@ -484,20 +484,20 @@ function Home() {
   // hover a forest row → a card of its branches + one-line purposes ("what's in here").
   // cached per project; a short delay keeps it from flickering as the pointer crosses rows.
   type FPurpose = { branch: string; thesis: string };
-  const [ftip, setFtip] = createSignal<{ rows: FPurpose[]; x: number; y: number } | null>(null);
+  const [ftip, setFtip] = createSignal<{ rows: FPurpose[]; landed: Project["landed"]; x: number; y: number } | null>(null);
   const fpCache = new Map<string, FPurpose[]>();
   let ftipFor: string | null = null;
   let ftipTimer: ReturnType<typeof setTimeout> | undefined;
-  const showFtip = (project: string, el: HTMLElement, repo?: string) => {
+  const showFtip = (project: string, el: HTMLElement, repo?: string, landed?: Project["landed"]) => {
     clearTimeout(ftipTimer);
     ftipFor = project;
     const r = el.getBoundingClientRect();
     const place = (rows: FPurpose[]) => {
-      if (ftipFor !== project || !rows.length) return;
-      const estH = 18 + rows.length * 44; // ~name + 2-line clamped thesis per row
+      if (ftipFor !== project || (!rows.length && !landed?.length)) return;
+      const estH = 18 + rows.length * 44 + (landed?.length ? 12 + landed.length * 18 : 0);
       // flip above the row when there isn't room below, so the card stays on-screen
       const y = window.innerHeight - r.bottom >= estH + 12 ? r.bottom + 6 : Math.max(8, r.top - estH - 6);
-      setFtip({ rows, x: r.left + 18, y });
+      setFtip({ rows, landed, x: r.left + 18, y });
     };
     const key = (repo && repo !== "loops" ? repo + "/" : "") + project; // repo-qualify so names don't collide across repos
     const cached = fpCache.get(key);
@@ -767,7 +767,7 @@ function Home() {
           repo: p.repo,
           node: p.repo !== "loops" ? (p.mergeable?.[0] ?? p.candidates?.[0]) : undefined,
         }}
-        onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo)}
+        onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo, p.landed)}
         onMouseLeave={hideFtip}
         onContextMenu={(e) => {
           if (!canMutate) return;
@@ -825,7 +825,9 @@ function Home() {
             <Match when={folded}>
               <Show when={p.merged && mergedAgo(p.merged.at)}>
                 {(rel) => (
-                  <span class="forest-merged" title={p.merged!.title}>✨ {rel()} (#{p.merged!.pr})</span>
+                  <span class="forest-merged" title={p.merged!.title}>
+                    ✨ {(p.landed?.length ?? 0) > 1 ? `${p.landed!.length} landed · ${rel()}` : `${rel()} (#${p.merged!.pr})`}
+                  </span>
                 )}
               </Show>
             </Match>
@@ -1087,6 +1089,19 @@ function Home() {
                   </div>
                 )}
               </For>
+              <Show when={t().landed?.length}>
+                <div class="forest-tip-landed">
+                  <For each={t().landed}>
+                    {(m) => (
+                      <div class="forest-tip-landed-row" title={m.title}>
+                        <span class="landed-pr">#{m.pr}</span>
+                        <span class="landed-branch">{leaf(m.branch)}</span>
+                        <span class="landed-ago">{mergedAgo(m.at) ?? new Date(m.at).toLocaleDateString()}</span>
+                      </div>
+                    )}
+                  </For>
+                </div>
+              </Show>
             </div>
           )}
         </Show>
