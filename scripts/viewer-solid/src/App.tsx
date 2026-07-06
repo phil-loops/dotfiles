@@ -1827,7 +1827,7 @@ function NodeDetail() {
   const [showHelp, setShowHelp] = createSignal(false);
   let filterEl: HTMLInputElement | undefined;
   // file filter (⌘F): narrow both the sidebar list and the rendered diffs to matching paths.
-  const matchFilter = (f: FileDiff): boolean => {
+  const matchFilter = (f: { path: string }): boolean => {
     const q = fileFilter().trim().toLowerCase();
     return !q || f.path.toLowerCase().includes(q);
   };
@@ -1917,17 +1917,30 @@ function NodeDetail() {
                     </For>
                   </ul>
                   <Show when={(data().dirty?.length ?? 0) > 0}>
-                    {/* not timid: say where the dirt lives and what it means for this page —
-                        it rides the checkout, it isn't part of the review set, and sync will
-                        stop to ask about it. Files up front; the rail below has the diffs. */}
+                    {/* dirt files are DRIVABLE rows, same as the review set — click jumps to the
+                        card, tab already cycles through them (.entry[data-path]). The story lives
+                        in the divider's tooltip; the rows do the work. */}
                     <div
-                      class="dirty-aside-note"
-                      title={(data().dirty ?? []).map((f) => f.path).join("\n")}
+                      class="file-list-dirt-head"
+                      title={`uncommitted changes riding ${data().worktree || "the checkout"} — not part of this review, never blessed; ⟲ sync stops to ask about them`}
                     >
-                      <b>± {data().dirty!.length} uncommitted</b> in {(data().worktree ?? "").replace(/.*\//, "") || "the checkout"} —{" "}
-                      {(data().dirty ?? []).slice(0, 2).map((f) => f.path.replace(/.*\//, "")).join(", ")}
-                      {(data().dirty?.length ?? 0) > 2 ? "…" : ""}. Rides the worktree, not this review; sync will ask. diffs below ↓
+                      ± uncommitted · {(data().worktree ?? "").replace(/.*\//, "") || "checkout"}
                     </div>
+                    <ul class="file-list">
+                      <For each={data().dirty!.filter((f) => matchFilter(f))}>
+                        {(f) => (
+                          <li
+                            class="file-item dirt"
+                            classList={{ active: activeFile() === f.path }}
+                            onClick={() => scrollToFile(f.path)}
+                            title={f.path}
+                          >
+                            <span class="dot dirt" />
+                            <span class="file-item-name">{fileSeg(f.path)}</span>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
                   </Show>
                 </Show>
               </>
