@@ -761,7 +761,11 @@ export function NodeActions(props: {
             <For each={syncSteps()!}>
               {(s) => (
                 <span class="nh-step" data-state={s.state}>
-                  {s.state === "ok" ? "✓" : s.state === "fail" ? "✗" : s.state === "run" ? "⟳" : s.state === "skip" ? "↷" : "·"} {s.label}
+                  {/* fixed-width marker: the ·→⟳→✓ swaps must not nudge their neighbors */}
+                  <i class="nh-step-ic">
+                    {s.state === "ok" ? "✓" : s.state === "fail" ? "✗" : s.state === "run" ? "⟳" : s.state === "skip" ? "↷" : "·"}
+                  </i>
+                  {s.label}
                 </span>
               )}
             </For>
