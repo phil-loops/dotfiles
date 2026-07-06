@@ -58,13 +58,12 @@ launchBtn.addEventListener("click", () => {
   });
 });
 
-document.getElementById("reload").addEventListener("click", async () => {
-  // a content-script change can't reach an already-open tab on extension reload, so flag the
-  // active tab for the freshly-restarted background SW to refresh once the new code is live.
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id != null) {
-    await chrome.storage.local.set({ refreshTab: tab.id });
-  }
+document.getElementById("open-nvim").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "open-url", target: "nvim" });
+  window.close();   // result lands on the toolbar badge (and a notification on failure)
+});
+
+document.getElementById("reload").addEventListener("click", () => {
   chrome.runtime.reload();
   window.close();
 });
