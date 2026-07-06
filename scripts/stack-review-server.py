@@ -9,7 +9,7 @@
 Args: <servedir> <scriptsdir> <repodir>. Prints the chosen 127.0.0.1 port, then serves.
 The page is same-origin with the server, so /model and /bless are plain relative fetches.
 """
-import sys, os, json, subprocess, threading, time, hashlib, shlex
+import sys, os, json, re, subprocess, threading, time, hashlib, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -21,6 +21,7 @@ from srv import stage   # own line: the big srv import above is contested across
 from srv import prep    # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
+EXT_ORIGIN = "chrome-extension://icojbpfabggonphegfghfnmjemejofoi"   # gh-to-nvim, the one non-localhost caller
 IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
@@ -290,6 +291,10 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         last[0] = time.time()
+        # localhost is mixed-content-exempt, so any public webpage can lob simple-request POSTs here
+        origin = self.headers.get("Origin")
+        if origin and origin != EXT_ORIGIN and not re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", origin):
+            return self._send(403, '{"ok": false, "err": "cross-origin POST rejected"}')
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n).decode() if n else "{}"
         u = self._enter_repo(urlparse(self.path))
@@ -315,10 +320,6 @@ class H(BaseHTTPRequestHandler):
             return picker.promote(self, raw)
         if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
             return reviews.import_pr(self, raw)
-        if self.path == "/from-github":   # Chrome ext: import a PR + open <path> at <line> in warm nvim
-            return reviews.from_github(self, raw)
-        if self.path == "/open-blob":   # Chrome ext: open a GitHub blob's <path> at <line> in the working checkout
-            return reviews.open_blob(self, raw)
         if self.path == "/open-url":   # Chrome ext (URL-only): parse a raw GitHub URL → nvim or viewer route
             return reviews.open_url(self, raw)
         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive

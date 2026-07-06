@@ -122,11 +122,7 @@ def _path_for_diffhash(branch, want):
     return None
 
 
-def from_github(req, raw):   # POST /from-github — Chrome ext: open a PR's <path> at <line> in nvim
-    return _open_pr(req, json.loads(raw or "{}"))
-
-
-def _open_pr(req, d):
+def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a PR's <path> at <line> in nvim
     # The ext sends repo="<owner>/<repo>" in the body (not ?repo=), so map it ourselves and pin
     # the thread to that checkout — every ctx.run / picker.open below then acts on it. do_POST's
     # finally clears the thread-local. Unknown slug → CWD (loops), today's behavior.
@@ -191,11 +187,7 @@ def _open_pr(req, d):
               json.dumps({"ok": code == 0, "branch": branch, "path": route, "opened": code == 0, "local": local, "err": err}))
 
 
-def open_blob(req, raw):   # POST /open-blob — Chrome ext: open a GitHub blob's <path> at <line>
-    return _open_here(req, json.loads(raw or "{}"))
-
-
-def _open_here(req, d):
+def _open_here(req, d):   # via open_url (POST /open-url) — Chrome ext: open a GitHub blob's <path> at <line>
     # A blob view (github.com/.../blob/<ref>/<path>#L<n>) has no PR — just a file + line. Open it
     # in the MAIN working checkout (where you read/edit), not a scratch worktree of the ref; the
     # ref is informational. path is the repo-relative path straight from the URL.
