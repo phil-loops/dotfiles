@@ -86,3 +86,31 @@ Lifecycle: build → review → ship → merge → contract → observe.
    CONTRACT / dry-run-conflict / behind-N all fold into one button, "what will THIS click
    do" carries the whole safety story. Invariant: the button's label always states its
    plan (the ambient dry-run already does this); never just "restack."
+
+## Decisions (Q1 + Q2 — settled 2026-07-05, header lane)
+
+**Q1 — precedence is evaluated against the surface's NEXT MOTION, not globally.**
+Adopted: `blocks-next-motion > will-ambush-later > FYI`, with the ranking anchored to
+what each surface is FOR — the node view's motion is sync/push, a Home row's is
+open/merge/review. Rules:
+
+- A surface renders **at most one badge beyond its lifecycle chip**, and it comes from
+  the highest non-empty level; everything below folds into the chip's reasons/hover
+  (the spine already is that fold — this generalizes it).
+- Ties within a level: the state whose motion is nearest wins (push-motion states over
+  merge-motion over review-motion); then most-recent onset.
+- **Marks are not badges**: a ≤2-glyph annotation riding the chip (±N dirt, the gold
+  fill) is metadata and exempt from the slot — the slot is for standalone chrome.
+- States PROMOTE with context: deploy-watch gap is FYI while editing, blocks at the
+  door (the wards already encode this — a ward IS blocks-next-motion rendered at the
+  moment of the motion; a badge is its preview).
+- CI placement falls out: red-on-your-open-PR = ambush (it burns the merge you're
+  walking toward), running = hover, green = silence. The badge competes for the one
+  ambush slot instead of becoming chip #7 — most rows show nothing, which is the point.
+
+**Q2 — adopted, with a symmetric death rule.** Actions are click-gated (the cliff);
+faces are BORN by a named ambush-incident (dirty-sync → the ± tier; the #9405
+red-checks hunt → the CI face) and DIE by never-ranking: a face that hasn't won its
+slot anywhere for ~30 days demotes permanently to hover. And point 4's staleness rule
+binds every face: past its freshness stamp it renders as stale-unknown, never as its
+last value — a face that lies is worse than no face.
