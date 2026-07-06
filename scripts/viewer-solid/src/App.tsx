@@ -1572,17 +1572,6 @@ function NodeDetail() {
     },
   }));
 
-  // diverged-from-PR-head (local rebased, pushed head stale) → eject a standalone Claude in the
-  // branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull.
-  const reconcile = createMutation(() => ({
-    mutationFn: (branch: string) =>
-      fetch("/reconcile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch }),
-      }).then((r) => r.json()),
-  }));
-
   const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
   // The forest map is a destination (the /forests/<project> overview), never docked into
@@ -1631,32 +1620,7 @@ function NodeDetail() {
   // a containment verdict, and what origin's review diff shows today vs after pushing local.
   // Tip-to-tip diffs are deliberately absent: post-restack they're all main-advance noise.
   const [divergedOpen, setDivergedOpen] = createSignal(false);
-  createEffect(on(active, () => {
-    setDivergedOpen(false);
-    divergedAdditive.reset();
-  }));
-  // the additive resolution, drafted server-side: ONE commit on top of the pushed head carrying
-  // local's PR-frame content, on a <branch>-additive push-vehicle branch. Push (a fast-forward,
-  // history preserved) stays Phil's — the button only creates the local branch + message.
-  const divergedAdditive = createMutation(() => ({
-    mutationFn: (branch: string) =>
-      fetch("/diverged-additive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch }),
-      }).then(
-        (r) =>
-          r.json() as Promise<{
-            ok: boolean;
-            err?: string;
-            vehicle?: string;
-            sha?: string;
-            subject?: string;
-            prAfter?: string;
-            push?: string;
-          }>,
-      ),
-  }));
+  createEffect(on(active, () => setDivergedOpen(false)));
   const divergedDetail = createQuery(() => ({
     queryKey: ["diverged-detail", forestRepo(location()) ?? "loops", active()],
     queryFn: () =>
@@ -2020,123 +1984,20 @@ function NodeDetail() {
                 {interestPips(interestOf())}
               </span>
             </Show>
-            <Show when={!isGhost() && nodeHealth(active())?.drifted}>
+            {/* health badges folded into the spine (reasons tooltip + ⋯ overrides) — what
+                remains here is only the transient outcome of a repair fired from ⋯. */}
+            <Show when={reseatChildren.isPending || detachUpstream.isPending}>
+              <span class="nh-drift">{reseatChildren.isPending ? "⤴ reseating…" : "✂ detaching…"}</span>
+            </Show>
+            <Show when={reseatChildren.data && !reseatChildren.data.ok}>
               <span
                 class="nh-drift"
-                title={`off its parent (${nodeHealth(active())?.parent ?? "?"}) — that branch isn't a git ancestor, so this 'diff vs parent' is effectively the diff vs main. Reseat rebases it (and any orphaned siblings) back onto the parent's current tip; a full restack also works but moves the whole forest.`}
+                title={reseatChildren.data!.conflicts.map((c) => `${c.branch}: ${c.err}`).join("\n")}
               >
-                ⤺ off-parent · diff ≈ vs main
-                <button
-                  class="nh-fix"
-                  style={{ "margin-left": "8px" }}
-                  disabled={reseatChildren.isPending}
-                  title={`rebase ${active()} (and any orphaned siblings, recursively) back onto ${nodeHealth(active())?.parent ?? "its parent"}'s current tip — local only, nothing pushed, nothing else moves`}
-                  onClick={() => {
-                    const p = nodeHealth(active())?.parent;
-                    if (p) {
-                      reseatChildren.mutate(p);
-                    }
-                  }}
-                >
-                  {reseatChildren.isPending ? "reseating…" : "⤴ reseat"}
-                </button>
-                <Show when={reseatChildren.data && !reseatChildren.data.ok}>
-                  <span title={reseatChildren.data!.conflicts.map((c) => `${c.branch}: ${c.err}`).join("\n")}>
-                    {" "}⚠ {reseatChildren.data!.conflicts.length} conflicted — resolve by hand or restack
-                  </span>
-                </Show>
-              </span>
-            </Show>
-            <Show when={!isGhost() && nodeHealth(active())?.merged}>
-              <span class="nh-ghost" title="this branch's work already landed in main (a ghost) — restack to contract it (drop + rewire its children)">
-                ✦ merged — ghost
-              </span>
-            </Show>
-            <Show when={!isGhost() && nodeHealth(active())?.upstreamBad}>
-              <span class="nh-drift" title={nodeHealth(active())?.upstreamReason}>
-                ⚠ tracks {leaf(nodeHealth(active())!.upstream!)}
-                <Show when={(nodeHealth(active())?.ahead || nodeHealth(active())?.behind)}>
-                  {" "}({nodeHealth(active())?.ahead ?? 0}↑ {nodeHealth(active())?.behind ?? 0}↓)
-                </Show>
-                <button
-                  class="nh-fix"
-                  style={{ "margin-left": "8px" }}
-                  disabled={detachUpstream.isPending}
-                  title="unset this tracking ref so a Pull/Push can't merge the wrong remote in — keeps every commit"
-                  onClick={() => detachUpstream.mutate(active())}
-                >
-                  {detachUpstream.isPending ? "detaching…" : "detach"}
-                </button>
-              </span>
-            </Show>
-            <Show when={!isGhost() && nodeHealth(active())?.diverged}>
-              <span
-                class="nh-drift"
-                title={`local diverged from its pushed PR head ${leaf(nodeHealth(active())!.upstream!)} (${nodeHealth(active())?.ahead ?? 0}↑ ${nodeHealth(active())?.behind ?? 0}↓) — almost always a local rebase the pushed head hasn't caught. Don't Pull (it re-adds the stale commits); hand it to Claude to reconcile.`}
-              >
-                ⇄ diverged from {leaf(nodeHealth(active())!.upstream!)} ({nodeHealth(active())?.ahead ?? 0}↑ {nodeHealth(active())?.behind ?? 0}↓)
-                <button
-                  class="nh-fix"
-                  style={{ "margin-left": "8px" }}
-                  title="show exactly what diverged: each side's commits (rebased twins flagged) + what the PR's diff on origin shows now vs after an additive update"
-                  onClick={() => setDivergedOpen(!divergedOpen())}
-                >
-                  {divergedOpen() ? "hide" : "inspect"}
-                </button>
-                <button
-                  class="nh-fix"
-                  style={{ "margin-left": "8px" }}
-                  disabled={divergedAdditive.isPending || !!divergedAdditive.data?.ok}
-                  title="create <branch>-additive: one commit on top of the pushed head carrying local's PR content — pushing it is a plain fast-forward (history preserved, never a force-push). Push stays yours; this only drafts the branch + commit message."
-                  onClick={() => divergedAdditive.mutate(active())}
-                >
-                  {divergedAdditive.isPending ? "drafting…" : divergedAdditive.data?.ok ? "✓ drafted" : "⤴ draft additive"}
-                </button>
-                <button
-                  class="nh-fix"
-                  style={{ "margin-left": "8px" }}
-                  disabled={reconcile.isPending}
-                  title="eject a standalone Claude in this branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull"
-                  onClick={() => reconcile.mutate(active())}
-                >
-                  {reconcile.isPending ? "ejecting…" : "reconcile"}
-                </button>
+                ⚠ reseat: {reseatChildren.data!.conflicts.length} conflicted — resolve by hand or restack
               </span>
             </Show>
           </div>
-          <Show when={divergedAdditive.data}>
-            <div
-              class="nh-diverged-detail"
-              style={{
-                margin: "6px 0 2px",
-                padding: "10px 12px",
-                border: "1px solid var(--line, #444)",
-                "border-radius": "8px",
-                "font-size": "12.5px",
-                "line-height": "1.55",
-              }}
-            >
-              <Show
-                when={divergedAdditive.data!.ok}
-                fallback={<span>✗ {divergedAdditive.data!.err}</span>}
-              >
-                <div>
-                  ✓ drafted <code>{divergedAdditive.data!.vehicle}</code> @ <code>{divergedAdditive.data!.sha}</code> —
-                  “{divergedAdditive.data!.subject}” · PR becomes: {divergedAdditive.data!.prAfter}
-                </div>
-                <div style={{ opacity: 0.75 }}>
-                  push it (fast-forward, history preserved): <code>{divergedAdditive.data!.push}</code>
-                  <button
-                    class="nh-fix"
-                    style={{ "margin-left": "8px" }}
-                    onClick={() => navigator.clipboard.writeText(divergedAdditive.data!.push!)}
-                  >
-                    ⎘ copy
-                  </button>
-                </div>
-              </Show>
-            </div>
-          </Show>
           <Show when={divergedOpen() && nodeHealth(active())?.diverged}>
             <div
               class="nh-diverged-detail"
@@ -2259,6 +2120,10 @@ function NodeDetail() {
                 merged={nodeHealth(active())?.merged}
                 ambient={nodeAmbient(active())}
                 blessing={node.data ? { total: node.data.files.length, blessed: node.data.files.filter(blessedOf).length } : undefined}
+                health={nodeHealth(active())}
+                onReseat={() => { const p = nodeHealth(active())?.parent; if (p) reseatChildren.mutate(p); }}
+                onDetach={() => detachUpstream.mutate(active())}
+                onInspect={() => setDivergedOpen(!divergedOpen())}
                 interest={canMutate ? interestOf() : undefined}
                 onBump={canMutate ? (delta) => bumpInterest.mutate({ branch: active(), delta }) : undefined}
                 onAllChats={() => setShowChats(true)}

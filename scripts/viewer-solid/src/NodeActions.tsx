@@ -84,6 +84,15 @@ export function NodeActions(props: {
   isReview: boolean;
   merged?: boolean; // forest-health flagged this branch a merged ghost → offer contraction on load
   blessing?: { total: number; blessed: number }; // the node's review progress — the spine's review station + gold mark
+  // the old header health badges, folded into the spine's reasons + ⋯ overrides
+  health?: {
+    drifted?: boolean; parent?: string;
+    upstreamBad?: boolean; upstreamReason?: string; upstream?: string;
+    diverged?: boolean; ahead?: number; behind?: number;
+  } | null;
+  onReseat?: () => void; // rebase drifted children back onto the parent's tip (App owns the mutation)
+  onDetach?: () => void; // unset a footgun tracking ref
+  onInspect?: () => void; // toggle the diverged-inspect panel (lives in App below the header)
   ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
   interest?: number; // current Home-ordering interest — drives the ⋯ promote/demote items
   onBump?: (delta: number) => void;
@@ -500,6 +509,16 @@ export function NodeActions(props: {
     if (prepRoute.data?.why) {
       parts.push(prepRoute.data.why);
     }
+    const h = props.health;
+    if (h?.drifted) {
+      parts.push(`⤺ off its parent (${h.parent ?? "?"}) — not a git ancestor, so diff-vs-parent ≈ vs main (⋯ → reseat)`);
+    }
+    if (h?.upstreamBad) {
+      parts.push(`⚠ tracks ${h.upstream ?? "?"} — ${h.upstreamReason ?? "wrong remote"} (⋯ → detach)`);
+    }
+    if (h?.diverged) {
+      parts.push(`⇄ diverged from ${h.upstream ?? "its pushed head"} (${h.ahead ?? 0}↑ ${h.behind ?? 0}↓) — ⌁ prep carries it additively; ⋯ → inspect / reconcile`);
+    }
     return parts.join("\n\n");
   };
   // Edge = the single next step. null → at rest: the slot does not render at all.
@@ -664,6 +683,36 @@ then the commit message opens in the editor`,
               <span class="nh-item-ic">⚖</span>
               {reconcile.isPending ? "ejecting…" : "reconcile divergence"}
             </button>
+            <Show when={props.health?.drifted && props.onReseat}>
+              <button
+                class="nh-item"
+                role="menuitem"
+                title={`rebase this branch (and any orphaned siblings, recursively) back onto ${props.health?.parent ?? "its parent"}'s current tip — local only, nothing pushed, nothing else moves`}
+                onClick={() => { setOpen(false); props.onReseat!(); }}
+              >
+                <span class="nh-item-ic">⤴</span> reseat onto {props.health?.parent ?? "parent"}
+              </button>
+            </Show>
+            <Show when={props.health?.upstreamBad && props.onDetach}>
+              <button
+                class="nh-item"
+                role="menuitem"
+                title="unset this tracking ref so a Pull/Push can't merge the wrong remote in — keeps every commit"
+                onClick={() => { setOpen(false); props.onDetach!(); }}
+              >
+                <span class="nh-item-ic">✂</span> detach tracking ref
+              </button>
+            </Show>
+            <Show when={props.health?.diverged && props.onInspect}>
+              <button
+                class="nh-item"
+                role="menuitem"
+                title="show exactly what diverged: each side's commits (rebased twins flagged) + the PR's diff now vs after an additive update"
+                onClick={() => { setOpen(false); props.onInspect!(); }}
+              >
+                <span class="nh-item-ic">⇄</span> inspect divergence
+              </button>
+            </Show>
             <button
               class="nh-item"
               role="menuitem"
