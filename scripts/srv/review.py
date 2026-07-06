@@ -205,6 +205,88 @@ def interest_bump(req, raw):
     req._send(200, json.dumps({"ok": True, "branch": branch, "interest": nxt}))
 
 
+def _worktree_for_branch(branch):
+    r = ctx.run(["git", "worktree", "list", "--porcelain"])
+    if r.returncode != 0:
+        return None
+    wt_path = None
+    for line in r.stdout.splitlines():
+        if line.startswith("worktree "):
+            wt_path = line[9:]
+        elif line.startswith("branch refs/heads/") and line[18:] == branch:
+            return wt_path
+    return None
+
+
+def _dirty_paths_of(wt):
+    st = ctx.run(["git", "-C", wt, "status", "--porcelain"]).stdout.splitlines()
+    return {l[3:].split(" -> ", 1)[-1].strip().strip('"') for l in st if len(l) > 3}
+
+
+def commit_dirty(req, raw):
+    # {branch, message, path?} — path narrows the commit to ONE dirty file (the rail's
+    # per-file accept); membership in the worktree's actual dirt is the path guard.
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    message = (d.get("message") or "").strip()
+    path = (d.get("path") or "").strip()
+    if not branch or not message:
+        req._send(400, json.dumps({"ok": False, "err": "branch and message required"}))
+        return
+    wt = _worktree_for_branch(branch)
+    if not wt:
+        req._send(400, json.dumps({"ok": False, "err": f"{branch!r} is not checked out in any worktree"}))
+        return
+    if path and path not in _dirty_paths_of(wt):
+        req._send(400, json.dumps({"ok": False, "err": f"{path!r} isn't a dirty path in that worktree"}))
+        return
+    add_r = ctx.run(["git", "-C", wt, "add", "-A", *(["--", path] if path else [])])
+    if add_r.returncode != 0:
+        req._send(500, json.dumps({"ok": False, "err": add_r.stderr or "git add failed"}))
+        return
+    commit_r = ctx.run(["git", "-C", wt, "commit", "-m", message, *(["--", path] if path else [])])
+    if commit_r.returncode != 0:
+        req._send(500, json.dumps({"ok": False, "err": commit_r.stderr or "git commit failed"}))
+        return
+    req._send(200, json.dumps({"ok": True}))
+
+
+def discard_dirty(req, raw):
+    # {branch, path} — the rail's per-file reject: a tracked file restores to HEAD, an
+    # untracked one is deleted. Destructive by design (the UI arms it); path must be a
+    # member of the worktree's actual dirt and resolve inside the worktree.
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    path = (d.get("path") or "").strip()
+    if not branch or not path:
+        req._send(400, json.dumps({"ok": False, "err": "branch and path required"}))
+        return
+    wt = _worktree_for_branch(branch)
+    if not wt:
+        req._send(400, json.dumps({"ok": False, "err": f"{branch!r} is not checked out in any worktree"}))
+        return
+    if path not in _dirty_paths_of(wt):
+        req._send(400, json.dumps({"ok": False, "err": f"{path!r} isn't a dirty path in that worktree"}))
+        return
+    tracked = ctx.run(["git", "-C", wt, "ls-files", "--error-unmatch", "--", path]).returncode == 0
+    if tracked:
+        r = ctx.run(["git", "-C", wt, "restore", "--staged", "--worktree", "--", path])
+        if r.returncode != 0:
+            req._send(500, json.dumps({"ok": False, "err": r.stderr or "restore failed"}))
+            return
+    else:
+        fp = os.path.realpath(os.path.join(wt, path))
+        if not fp.startswith(os.path.realpath(wt) + os.sep):
+            req._send(400, json.dumps({"ok": False, "err": "path escapes the worktree"}))
+            return
+        try:
+            os.remove(fp)
+        except OSError as e:
+            req._send(500, json.dumps({"ok": False, "err": str(e)}))
+            return
+    req._send(200, json.dumps({"ok": True, "discarded": path, "was": "tracked" if tracked else "untracked"}))
+
+
 def squash(req, raw):
     d = json.loads(raw or "{}")
     # squash button → collapse parent..branch into UNSTAGED working-tree changes, no commit

@@ -2317,16 +2317,122 @@ function DirtyRail(props: {
         </Show>
       </Show>
       <For each={props.dirty}>
-        {(f) => (
-          <FileEntry
-            file={{ path: f.path, status: "dirty", patch: f.patch, ...patchLineCounts(f.patch) }}
-            bless={props.bless}
-            branch={props.branch}
-            readOnly
-            onChat={props.onChat}
-          />
-        )}
+        {(f) => <DirtFile f={f} branch={props.branch} bless={props.bless} onChat={props.onChat} onDone={props.onCommit} />}
       </For>
+    </div>
+  );
+}
+
+// One dirty file with its verdict: accept (commit just this file, message inline) or
+// reject (tracked → restore to HEAD, untracked → delete; armed — it destroys work).
+function DirtFile(props: {
+  f: { path: string; code: string; patch: string };
+  branch: string;
+  bless: { mutate: (file: string) => void };
+  onChat: (f: FileDiff) => void;
+  onDone: () => void;
+}) {
+  const [form, setForm] = createSignal(false);
+  const [msg, setMsg] = createSignal("");
+  const [armed, setArmed] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [err, setErr] = createSignal("");
+  let disarm: ReturnType<typeof setTimeout>;
+  let inputEl: HTMLInputElement | undefined;
+  const post = async (url: string, body: unknown) => {
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await fetch(withRepo(url), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json();
+      if (!j.ok) {
+        setErr(j.err ?? "failed");
+        return;
+      }
+      props.onDone();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const reject = () => {
+    if (!armed()) {
+      setArmed(true);
+      clearTimeout(disarm);
+      disarm = setTimeout(() => setArmed(false), 5000);
+      return;
+    }
+    clearTimeout(disarm);
+    setArmed(false);
+    post("/discard-dirty", { branch: props.branch, path: props.f.path });
+  };
+  return (
+    <div class="ur-file">
+      <div class="ur-file-acts">
+        <Show
+          when={!form()}
+          fallback={
+            <>
+              <input
+                ref={inputEl}
+                class="ur-commit-input"
+                placeholder={`message for ${props.f.path.replace(/.*\//, "")}…`}
+                value={msg()}
+                onInput={(e) => setMsg(e.currentTarget.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && msg().trim()) {
+                    e.preventDefault();
+                    post("/commit-dirty", { branch: props.branch, message: msg().trim(), path: props.f.path });
+                  }
+                  if (e.key === "Escape") { e.stopPropagation(); setForm(false); }
+                }}
+                disabled={busy()}
+              />
+              <button
+                class="ur-commit-go"
+                disabled={busy() || !msg().trim()}
+                onClick={() => post("/commit-dirty", { branch: props.branch, message: msg().trim(), path: props.f.path })}
+              >
+                {busy() ? "…" : "commit"}
+              </button>
+              <button class="ur-file-x" onClick={() => setForm(false)}>✕</button>
+            </>
+          }
+        >
+          <button
+            class="ur-file-accept"
+            disabled={busy()}
+            title="accept — commit just this file to the branch (message next)"
+            onClick={() => { setForm(true); setTimeout(() => inputEl?.focus(), 0); }}
+          >
+            ✓ accept
+          </button>
+          <button
+            class="ur-file-reject"
+            classList={{ armed: armed() }}
+            disabled={busy()}
+            title="reject — a tracked file restores to HEAD, an untracked one is deleted. This destroys the uncommitted work; two clicks."
+            onClick={reject}
+          >
+            {busy() ? "…" : armed() ? "confirm: discard" : "✕ reject"}
+          </button>
+        </Show>
+        <Show when={err()}>
+          <span class="ur-commit-err">{err()}</span>
+        </Show>
+      </div>
+      <FileEntry
+        file={{ path: props.f.path, status: "dirty", patch: props.f.patch, ...patchLineCounts(props.f.patch) }}
+        bless={props.bless}
+        branch={props.branch}
+        readOnly
+        onChat={props.onChat}
+      />
     </div>
   );
 }

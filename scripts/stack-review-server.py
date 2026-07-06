@@ -362,6 +362,8 @@ class H(BaseHTTPRequestHandler):
             return push.dirty_resolve(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
             return sync.post_reconcile(self, raw)
+        if self.path == "/discard-dirty":  # per-file reject: restore a tracked file to HEAD / delete an untracked one
+            return review.discard_dirty(self, raw)
         if self.path == "/commit-dirty":  # commit all uncommitted worktree changes to the branch
             return review.commit_dirty(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit
