@@ -17,7 +17,7 @@
 //                                       collapse parent..branch to unstaged changes, no commit)
 //   POST /sync     {branch}          → {ok, rebased?, ejected?, conflict?, summary?} | 409
 //                                       (rebase forward: in place when clean, else eject Claude)
-import { createSignal, Show, onCleanup } from "solid-js";
+import { createSignal, For, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
@@ -165,51 +165,102 @@ export function NodeActions(props: {
   // (additive for a diverged PR, squash for a messy tail) → advisory tests → the message
   // editor. When a step isn't mechanically routable, Claude goes in the middle (reconcile
   // eject). NOTHING here touches origin — the shared world moves only via the red button.
+  //
+  // The motion narrates as a STEP STRIP (the wards pattern — dirty-sync incident): every
+  // step visible, the failing one carrying its reason IN FULL, never truncated.
+  type SyncStep = { id: string; label: string; state: "idle" | "run" | "ok" | "skip" | "fail"; note?: string };
+  const [syncSteps, setSyncSteps] = createSignal<SyncStep[] | null>(null);
+  const [dirtGate, setDirtGate] = createSignal(false);      // paused on the dirt decision
+  const [stashedRun, setStashedRun] = createSignal(false);  // a sync-stash to pop when the motion ends
+  const stepSet = (id: string, state: SyncStep["state"], note?: string) =>
+    setSyncSteps((s) => (s ?? []).map((x) => (x.id === id ? { ...x, state, note: note ?? x.note } : x)));
+  const beginSteps = () => {
+    const steps: SyncStep[] = [{ id: "dirt", label: "working tree", state: "idle" }];
+    if (props.health?.drifted) {
+      steps.push({ id: "reseat", label: "reseat", state: "idle" });
+    }
+    if (behind() > 0 && sync.data?.syncable) {
+      steps.push({ id: "rebase", label: "rebase forward", state: "idle" });
+    }
+    steps.push(
+      { id: "checkout", label: "checkout", state: "idle" },
+      { id: "route", label: "one commit", state: "idle" },
+      { id: "tests", label: "tests", state: "idle" },
+      { id: "editor", label: "editor", state: "idle" },
+    );
+    setSyncSteps(steps);
+  };
   const omniSync = createMutation(() => ({
     mutationFn: async (force: boolean) => {
+      if (!syncSteps()) {
+        beginSteps();
+      }
+      stepSet("dirt", "ok", stashedRun() ? "stashed for the run" : undefined);
       if (props.health?.drifted && props.health.parent) {
-        setDone("⤴ reseating onto its parent…");
+        stepSet("reseat", "run");
         await post("/reseat-children", { branch: props.health.parent });
+        stepSet("reseat", "ok");
       }
       if (behind() > 0 && sync.data?.syncable) {
-        setDone("⟳ fetching origin/main + rebasing…");
+        stepSet("rebase", "run");
         const sy = await post<SyncResult>("/sync", { branch: props.branch });
         if (sy.ok && sy.contract) {
-          return { phase: "blocked" as const, msg: "already merged into origin/main — drop & rewire (the spine's edge offers it)" };
+          stepSet("rebase", "fail", "already merged into origin/main — drop & rewire (the spine's edge offers it)");
+          return { phase: "blocked" as const };
         }
         if (sy.ok && !sy.rebased) {
-          // ejected to a headless rebase → stream it inline; run sync again once it lands.
+          stepSet("rebase", "run", "conflict — ejected to a headless rebase, streaming below; run sync again once it lands");
           return { phase: "streaming" as const };
         }
-        // a refusal (stacked / open PR) is fine — those route through prep-push below
+        stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
       }
-      setDone("⤓ checking out onto your main checkout…");
+      stepSet("checkout", "run");
       const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force });
       if (!co.ok) {
         if (co.worktree) {
+          stepSet("checkout", "fail", `held by ${co.worktree} — free it below to continue`);
           return { phase: "held" as const, held: co.worktree };
         }
-        return { phase: "error" as const, msg: co.err || "checkout failed" };
+        stepSet("checkout", "fail", co.err || "checkout failed");
+        return { phase: "error" as const };
       }
-      setDone("⊟ routing to one outgoing commit…");
+      stepSet("checkout", "ok");
+      stepSet("route", "run");
       const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
         "/prep-push", { branch: props.branch });
       if (!pr.ok) {
         if (pr.reconcile) {
+          stepSet("route", "fail", pr.err || "no mechanical route — handing to Claude");
           return { phase: "claude" as const };
         }
         if ((pr.err ?? "").startsWith("nothing to push")) {
+          stepSet("route", "ok", "nothing to push — origin already has this");
+          stepSet("tests", "skip");
+          stepSet("editor", "skip", "no outgoing commit");
           return { phase: "done" as const, routed: ["nothing to push — origin already has this"], commit: null };
         }
-        return { phase: "error" as const, msg: pr.err || "prep failed" };
+        stepSet("route", "fail", pr.err || "prep failed");
+        return { phase: "error" as const };
       }
-      setDone("⧗ running changed tests…");
+      stepSet("route", "ok", (pr.routed ?? []).join(" · ") || undefined);
+      stepSet("tests", "run");
       let tests: DeltaTestResult | null = null;
       try {
         tests = await post<DeltaTestResult>("/delta-tests", { branch: props.branch });
       } catch {
         tests = null; // tests are advisory — a runner crash never blocks a local sync
       }
+      stepSet(
+        "tests",
+        tests && tests.ran && !tests.ok ? "fail" : "ok",
+        tests
+          ? tests.noTests
+            ? "no changed tests"
+            : tests.ran
+              ? tests.ok ? `${tests.passed ?? "?"} ✓` : `${tests.failed ?? "?"} FAILED (advisory — the motion continues):\n${tests.summary ?? ""}`
+              : "couldn't run"
+          : "couldn't run",
+      );
       return { phase: "done" as const, routed: pr.routed ?? [], commit: pr.commit ?? null, tests };
     },
     onSuccess: (r) => {
@@ -219,13 +270,13 @@ export function NodeActions(props: {
         setHeldAt(r.held);
         return;
       }
-      if (r.phase === "blocked") {
-        setDone(`● ${r.msg}`);
+      if (r.phase === "blocked" || r.phase === "error") {
+        // the failing step carries its full reason in the strip — nothing more to say here
         sync.refetch();
+        qc.invalidateQueries({ queryKey: ["head"] });
         return;
       }
       if (r.phase === "streaming") {
-        setDone(null);
         setRebaseStreaming(true); // the rebase is running headless — tail it inline below
         sync.refetch();
         return;
@@ -234,28 +285,21 @@ export function NodeActions(props: {
         reconcile.mutate(); // divergence with no mechanical route — Claude in the middle
         return;
       }
-      if (r.phase === "error") {
-        setDone(`✗ ${r.msg}`);
-        qc.invalidateQueries({ queryKey: ["head"] });
-        return;
-      }
       setHeldAt(null);
-      let t = "";
-      if (r.tests) {
-        if (r.tests.noTests) {
-          t = " · no changed tests";
-        } else if (r.tests.ran) {
-          t = r.tests.ok ? ` · tests ${r.tests.passed ?? "?"}✓` : ` · ✗ tests ${r.tests.failed ?? "?"} FAILED`;
-        } else {
-          t = " · ⚠ tests couldn't run";
-        }
-      }
-      setDone(`✓ synced — ${(r.routed ?? []).join(" · ") || "clean"}${t}`);
       if (r.commit) {
         setRoutedNotes(r.routed ?? []);
         setMsgSubject(r.commit.subject);
         setMsgBody(r.commit.body);
         setEditorOpen(true);
+        stepSet("editor", "ok");
+      }
+      if (stashedRun()) {
+        // the dirt decision was stash-and-continue — bring it back now that the motion is done
+        post<{ ok?: boolean; err?: string }>("/dirty-resolve", { branch: props.branch, action: "pop" }).then((p) => {
+          stepSet("dirt", p.ok ? "ok" : "fail", p.ok ? "stash popped — your uncommitted changes are back" : `stash pop failed (still stashed):\n${p.err}`);
+          setStashedRun(false);
+          sync.refetch();
+        });
       }
       qc.invalidateQueries({ queryKey: ["head"] });
       qc.invalidateQueries({ queryKey: ["commits", props.branch] });
@@ -265,8 +309,44 @@ export function NodeActions(props: {
       sync.refetch();
       preview.refetch();
     },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "sync failed"}`),
+    onError: (e) => {
+      // a transport-level failure still lands in the strip, in full — never a truncated one-liner
+      setSyncSteps((s) => (s ?? []).map((x) => (x.state === "run" ? { ...x, state: "fail" as const, note: (e as Error).message || "sync failed" } : x)));
+    },
   }));
+
+  // the sync entry point: dirt is a ROUTED DECISION, not a dead end — a dirty holding
+  // worktree pauses the motion at step one with the files listed and three explicit
+  // choices. Nothing automatic: the incident file was foreign WIP on the wrong branch.
+  const startSync = () => {
+    setSyncSteps(null);
+    setStashedRun(false);
+    if ((sync.data?.dirty?.length ?? 0) > 0) {
+      beginSteps();
+      stepSet("dirt", "fail", `uncommitted changes in ${sync.data?.dirtyWorktree || "the holding worktree"} — decide below; the motion waits`);
+      setDirtGate(true);
+      return;
+    }
+    omniSync.mutate(false);
+  };
+  const dirtDecide = async (action: "include" | "stash" | "abort") => {
+    setDirtGate(false);
+    if (action === "abort") {
+      stepSet("dirt", "fail", "aborted — working tree untouched");
+      return;
+    }
+    const r = await post<{ ok?: boolean; err?: string }>("/dirty-resolve", { branch: props.branch, action });
+    if (!r.ok) {
+      stepSet("dirt", "fail", r.err || `${action} failed`);
+      setDirtGate(true);
+      return;
+    }
+    if (action === "stash") {
+      setStashedRun(true);
+    }
+    sync.refetch();
+    omniSync.mutate(false);
+  };
 
   // free the worktree that 409'd, then resume whichever action hit it.
   const freeAndContinue = () => {
@@ -473,6 +553,9 @@ export function NodeActions(props: {
     if (h?.diverged) {
       parts.push(`⇄ diverged from ${h.upstream ?? "its pushed head"} (${h.ahead ?? 0}↑ ${h.behind ?? 0}↓) — ⌁ prep carries it additively; ⋯ → inspect / reconcile`);
     }
+    if ((sync.data?.dirty?.length ?? 0) > 0) {
+      parts.push(`± ${sync.data!.dirty!.length} uncommitted in ${sync.data!.dirtyWorktree}:\n${sync.data!.dirty!.join("\n")}`);
+    }
     return parts.join("\n\n");
   };
   // Edge = the single LOCAL next step (Phil: "whatever we do here locally is fine").
@@ -509,7 +592,7 @@ export function NodeActions(props: {
       kind: "prep",
       pending: omniSync.isPending,
       title: `sync — everything local, in one motion:\n· ${steps.join("\n· ")}\n(Claude steps in when a divergence has no mechanical route)`,
-      onClick: fire(() => omniSync.mutate(false)),
+      onClick: fire(startSync),
     };
   };
   const fire = (fn: () => void) => () => {
@@ -531,6 +614,7 @@ export function NodeActions(props: {
           blessedAll={blessedAll()}
           reasons={reasons()}
           edge={edge()}
+          dirty={sync.data?.dirty?.length ?? 0}
         />
       </Show>
 
@@ -665,6 +749,49 @@ export function NodeActions(props: {
             </button>
           </Show>
 
+        </div>
+      </Show>
+
+      {/* the sync step strip — the wards pattern for the motion itself: every step visible,
+          a failing step carrying its reason IN FULL (never truncated), and the dirt decision
+          rendered inline when the working tree needs a human call. */}
+      <Show when={syncSteps()}>
+        <div class="nh-strip">
+          <div class="nh-strip-row">
+            <For each={syncSteps()!}>
+              {(s) => (
+                <span class="nh-step" data-state={s.state}>
+                  {s.state === "ok" ? "✓" : s.state === "fail" ? "✗" : s.state === "run" ? "⟳" : s.state === "skip" ? "↷" : "·"} {s.label}
+                </span>
+              )}
+            </For>
+            <button class="nh-strip-x" title="dismiss" onClick={() => { setSyncSteps(null); setDirtGate(false); }}>×</button>
+          </div>
+          <For each={syncSteps()!.filter((s) => s.note)}>
+            {(s) => (
+              <div class="nh-step-note" data-state={s.state}>
+                <b>{s.label}:</b> {s.note}
+              </div>
+            )}
+          </For>
+          <Show when={dirtGate()}>
+            <div class="nh-dirt">
+              <div class="nh-dirt-files">
+                <For each={sync.data?.dirty ?? []}>{(f) => <code>{f}</code>}</For>
+              </div>
+              <div class="nh-dirt-acts">
+                <button class="nh-fix" onClick={() => dirtDecide("include")} title="stage + commit everything in the holding worktree; the squash folds it into the outgoing commit">
+                  fold into the commit
+                </button>
+                <button class="nh-fix" onClick={() => dirtDecide("stash")} title="stash (incl. untracked), run the motion, pop the stash after — your changes come back">
+                  stash &amp; continue
+                </button>
+                <button class="nh-fix nh-dirt-abort" onClick={() => dirtDecide("abort")} title="stop — the working tree stays exactly as it is">
+                  abort
+                </button>
+              </div>
+            </div>
+          </Show>
         </div>
       </Show>
 

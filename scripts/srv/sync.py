@@ -139,9 +139,24 @@ def state(branch):
     elif published:
         why = "has an open PR — rebase would rewrite pushed commits"
     shared, ahead = _shared(branch)
+    # working-tree dirt of the worktree HOLDING this branch (incl. untracked — clean-tree
+    # guards trip on those too). Dirt is per-worktree state; it ambushes whatever branch
+    # the checkout holds, which is why it rides the branch payload.
+    dirty, dirty_wt = [], ""
+    wt_path, cur = None, None
+    for ln in ctx.run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
+        if ln.startswith("worktree "):
+            cur = ln[len("worktree "):]
+        elif ln.startswith("branch ") and ln[len("branch "):].replace("refs/heads/", "", 1) == branch:
+            wt_path = cur
+    if wt_path:
+        st = ctx.run(["git", "-C", wt_path, "status", "--porcelain"]).stdout.splitlines()
+        dirty = [l[3:].split(" -> ", 1)[-1].strip().strip('"') for l in st if len(l) > 3][:20]
+        dirty_wt = wt_path if dirty else ""
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
             "syncable": behind > 0 and parent == "main" and not published,
             "shared": shared, "aheadOfOrigin": ahead,
+            "dirty": dirty, "dirtyWorktree": dirty_wt,
             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
 
 

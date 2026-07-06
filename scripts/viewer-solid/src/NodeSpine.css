@@ -121,3 +121,7 @@
     transition: none;
   }
 }
+
+/* uncommitted-changes mark — working-tree state, not path state; details live in the
+   reasons tooltip and the file rail's uncommitted section */
+.spine-dirt { margin-left: 6px; font-size: 10px; color: var(--ink-dim, #9a8e78); letter-spacing: 0; }

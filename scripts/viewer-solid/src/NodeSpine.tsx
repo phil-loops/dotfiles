@@ -33,6 +33,7 @@ export default function NodeSpine(props: {
   blessedAll: boolean; // review's mark takes gold only when every file is blessed
   reasons: string; // why the branch sits at this station — the chip's tooltip
   edge: SpineEdge | null; // null → at rest: the slot does not render
+  dirty?: number; // uncommitted files in the holding worktree — a small ± mark, details in reasons + the rail
 }) {
   const reached = () => STATIONS.findIndex((s) => s.id === props.station);
   return (
@@ -55,6 +56,9 @@ export default function NodeSpine(props: {
           </For>
         </span>
         <span class="spine-word">{props.station}</span>
+        <Show when={(props.dirty ?? 0) > 0}>
+          <span class="spine-dirt">±{props.dirty}</span>
+        </Show>
       </span>
       <Show when={props.edge}>
         <button
