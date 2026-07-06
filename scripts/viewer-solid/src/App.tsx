@@ -1624,6 +1624,10 @@ function NodeDetail() {
   // Tip-to-tip diffs are deliberately absent: post-restack they're all main-advance noise.
   const [divergedOpen, setDivergedOpen] = createSignal(false);
   createEffect(on(active, () => setDivergedOpen(false)));
+  // a dirt verdict's receipt — outlives the rail, which unmounts the moment the tree goes
+  // clean (success must not read as disappearance).
+  const [dirtReceipt, setDirtReceipt] = createSignal<string | null>(null);
+  let dirtReceiptT: ReturnType<typeof setTimeout>;
   const divergedDetail = createQuery(() => ({
     queryKey: ["diverged-detail", forestRepo(location()) ?? "loops", active()],
     queryFn: () =>
@@ -2200,9 +2204,19 @@ function NodeDetail() {
               worktree={node.data!.worktree ?? ""}
               branch={active()}
               bless={bless}
-              onCommit={() => node.refetch()}
+              onCommit={(receipt) => {
+                node.refetch();
+                if (receipt) {
+                  setDirtReceipt(receipt);
+                  clearTimeout(dirtReceiptT);
+                  dirtReceiptT = setTimeout(() => setDirtReceipt(null), 8000);
+                }
+              }}
               onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })}
             />
+          </Show>
+          <Show when={dirtReceipt()}>
+            <p class="dirt-receipt">{dirtReceipt()}{(node.data?.dirty?.length ?? 0) === 0 ? " · working tree clean" : ""}</p>
           </Show>
         </Show>
       </main>
@@ -2253,7 +2267,7 @@ function DirtyRail(props: {
   worktree: string;
   branch: string;
   bless: { mutate: (file: string) => void };
-  onCommit: () => void;
+  onCommit: (receipt?: string) => void;
   onChat: (f: FileDiff) => void;
 }) {
   const [msg, setMsg] = createSignal("");
@@ -2276,7 +2290,7 @@ function DirtyRail(props: {
       if (!j.ok) { setErr(j.err ?? "commit failed"); return; }
       setMsg("");
       setShowForm(false);
-      props.onCommit();
+      props.onCommit("✓ all uncommitted changes committed to the branch");
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -2330,7 +2344,7 @@ function DirtFile(props: {
   branch: string;
   bless: { mutate: (file: string) => void };
   onChat: (f: FileDiff) => void;
-  onDone: () => void;
+  onDone: (receipt?: string) => void;
 }) {
   const [form, setForm] = createSignal(false);
   const [msg, setMsg] = createSignal("");
@@ -2353,7 +2367,12 @@ function DirtFile(props: {
         setErr(j.err ?? "failed");
         return;
       }
-      props.onDone();
+      const name = props.f.path.replace(/.*\//, "");
+      props.onDone(
+        url === "/discard-dirty"
+          ? `✕ ${name} ${j.was === "tracked" ? "restored to HEAD" : "deleted"} — the uncommitted change is gone`
+          : `✓ ${name} committed to the branch`,
+      );
     } catch (e) {
       setErr(String(e));
     } finally {

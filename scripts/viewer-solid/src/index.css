@@ -120,6 +120,11 @@ body {
 .ur-file-reject:hover:not(:disabled) { opacity: 1; }
 .ur-file-reject.armed { color: var(--vellum-night); background: var(--del); font-weight: 600; }
 .ur-file-x { color: var(--ink-faint); border: 0; }
+.dirt-receipt {
+  margin: 14px 2px; font-size: 12px; color: var(--add);
+  transition: opacity 240ms ease;
+}
+@starting-style { .dirt-receipt { opacity: 0; } }
 .file-list-dirt-head {
   margin: 12px 2px 4px; padding-top: 9px; border-top: 1px dashed var(--rule);
   font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
