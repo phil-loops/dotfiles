@@ -1,0 +1,100 @@
+diff --git a/scripts/srv/reviews.py b/scripts/srv/reviews.py
+index 9bc8412..9ccb471 100644
+--- a/scripts/srv/reviews.py
++++ b/scripts/srv/reviews.py
+@@ -379,3 +379,25 @@ def pr_reseat(req, raw):   # POST /pr-reseat-children — rebase orphaned childr
+     req._send(200 if not conflicts else 207,
+               json.dumps({"ok": not conflicts, "branch": branch, "results": results,
+                           "moved": moved, "conflicts": conflicts}))
++
++
++def reseat(req, raw):   # POST /reseat-children {branch} — viewer: rebase drifted children back onto this branch
++    # The viewer-scoped sibling of pr_reseat: keyed by branch (the drifted node's parent), no
++    # PR-approval gate — the viewer IS the surgery surface. Same walk: every child off the tip
++    # is rebased back on from its recorded cut, recursively; seated children are untouched.
++    # Purely local — nothing is pushed.
++    d = json.loads(raw or "{}")
++    branch = (d.get("branch") or "").strip()
++    if not branch:
++        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
++        return
++    if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode != 0:
++        req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
++        return
++    results = []
++    _reseat_walk(branch, results)
++    moved = [r["branch"] for r in results if r["status"] == "reseated"]
++    conflicts = [r for r in results if r["status"] == "conflict"]
++    req._send(200 if not conflicts else 207,
++              json.dumps({"ok": not conflicts, "branch": branch, "results": results,
++                          "moved": moved, "conflicts": conflicts}))
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index fc25dbf..5195296 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -320,6 +320,8 @@ class H(BaseHTTPRequestHandler):
+             return reviews.pr_forest(self, raw)
+         if self.path == "/pr-reseat-children":   # Chrome ext: rebase orphaned children onto an approved PR branch
+             return reviews.pr_reseat(self, raw)
++        if self.path == "/reseat-children":      # viewer: rebase drifted children back onto a rewritten branch
++            return reviews.reseat(self, raw)
+         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl
+             return usage.track(self, raw)
+         if self.path == "/drop-project":   # forget a forest grouping (config only; branches kept)
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 850fd2d..0c107e2 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1612,6 +1612,22 @@ function NodeDetail() {
+     onSuccess: () => health.refetch(),
+   }));
+ 
++  // scoped reseat for a drifted node: rebase the parent's off-tip children (this node and any
++  // orphaned siblings, recursively) back onto the parent's current tip — nothing else moves,
++  // unlike a full restack. Local only; conflicts leave that subtree parked for a manual pass.
++  const reseatChildren = createMutation(() => ({
++    mutationFn: (parent: string) =>
++      fetch("/reseat-children", {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ branch: parent }),
++      }).then((r) => r.json() as Promise<{ ok: boolean; moved: string[]; conflicts: { branch: string; err: string }[] }>),
++    onSuccess: () => {
++      health.refetch();
++      qc.invalidateQueries({ queryKey: ["model"] }); // children's SHAs moved — diffs are stale
++    },
++  }));
++
+   // diverged-from-PR-head (local rebased, pushed head stale) → eject a standalone Claude in the
+   // branch's worktree to work out the source of truth and reconcile — no force-push, no blind pull.
+   const reconcile = createMutation(() => ({
+@@ -2010,9 +2026,28 @@ function NodeDetail() {
+             <Show when={!isGhost() && nodeHealth(active())?.drifted}>
+               <span
+                 class="nh-drift"
+-                title={`off its parent (${nodeHealth(active())?.parent ?? "?"}) — that branch isn't a git ancestor, so this 'diff vs parent' is effectively the diff vs main. Restack the forest to separate it.`}
++                title={`off its parent (${nodeHealth(active())?.parent ?? "?"}) — that branch isn't a git ancestor, so this 'diff vs parent' is effectively the diff vs main. Reseat rebases it (and any orphaned siblings) back onto the parent's current tip; a full restack also works but moves the whole forest.`}
+               >
+                 ⤺ off-parent · diff ≈ vs main
++                <button
++                  class="nh-fix"
++                  style={{ "margin-left": "8px" }}
++                  disabled={reseatChildren.isPending}
++                  title={`rebase ${active()} (and any orphaned siblings, recursively) back onto ${nodeHealth(active())?.parent ?? "its parent"}'s current tip — local only, nothing pushed, nothing else moves`}
++                  onClick={() => {
++                    const p = nodeHealth(active())?.parent;
++                    if (p) {
++                      reseatChildren.mutate(p);
++                    }
++                  }}
++                >
++                  {reseatChildren.isPending ? "reseating…" : "⤴ reseat"}
++                </button>
++                <Show when={reseatChildren.data && !reseatChildren.data.ok}>
++                  <span title={reseatChildren.data!.conflicts.map((c) => `${c.branch}: ${c.err}`).join("\n")}>
++                    {" "}⚠ {reseatChildren.data!.conflicts.length} conflicted — resolve by hand or restack
++                  </span>
++                </Show>
+               </span>
+             </Show>
+             <Show when={!isGhost() && nodeHealth(active())?.merged}>

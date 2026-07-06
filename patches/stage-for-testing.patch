@@ -1,0 +1,254 @@
+diff --git a/scripts/srv/stage.py b/scripts/srv/stage.py
+new file mode 100644
+index 0000000..57c1605
+--- /dev/null
++++ b/scripts/srv/stage.py
+@@ -0,0 +1,135 @@
++# srv/stage.py — "stage for testing": restack a forest's chain forward onto fresh
++# origin/main, then move the MAIN working tree onto the tip so the dev server
++# serves the whole feature. One button for the motion Phil otherwise does by hand
++# (rebase bottom-up in a scratch worktree, detach squatting worktrees, checkout).
++#
++#   POST /stage {project, dryRun?} — dryRun reports the plan without moving anything.
++#
++# Guards, all server-side: single-chain forests only, dirty main checkout refuses,
++# any chain branch with an OPEN PR refuses (pushed history is never rewritten), a
++# dirty squatting worktree refuses. A conflict mid-walk aborts and restores every
++# branch to its pre-stage snapshot — all-or-nothing.
++import json
++
++from . import ctx, sync
++
++
++def _parent(branch):
++    return ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
++
++
++def _chain(project):
++    """Root→tip chain of the forest's live branches, or (None, why)."""
++    out = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split()
++    live = [b for b in out
++            if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{b}"]).returncode == 0]
++    if not live:
++        return None, "no live branches registered for this forest"
++    parents = {b: _parent(b) for b in live}
++    tips = [b for b in live if b not in set(parents.values())]
++    if len(tips) != 1:
++        return None, f"forest isn't a single chain ({len(tips)} tips) — stage handles a line for now"
++    chain = [tips[0]]
++    while parents.get(chain[-1]) in live:
++        chain.append(parents[chain[-1]])
++    chain.reverse()
++    return chain, None
++
++
++def _worktrees():
++    """[(path, branch-or-None)], main working tree first (git's order)."""
++    wts, path, br = [], None, None
++    for ln in ctx.run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
++        if ln.startswith("worktree "):
++            if path:
++                wts.append((path, br))
++            path, br = ln[len("worktree "):], None
++        elif ln.startswith("branch refs/heads/"):
++            br = ln[len("branch refs/heads/"):]
++    if path:
++        wts.append((path, br))
++    return wts
++
++
++def _dirty(path):
++    # tracked changes only — untracked files don't block a checkout
++    return bool(ctx.run(["git", "-C", path, "status", "--porcelain", "-uno"]).stdout.strip())
++
++
++def stage(req, raw):
++    d = json.loads(raw or "{}")
++    project = d.get("project", "")
++    dry = bool(d.get("dryRun"))
++    chain, err = _chain(project)
++    if err:
++        return req._send(400 if "no live branches" in err else 200,
++                         json.dumps({"ok": False, "err": err}))
++    root_parent = _parent(chain[0])
++    if root_parent not in ("main", "master"):
++        return req._send(200, json.dumps({"ok": False, "err": f"chain roots off {root_parent}, not main — stage only handles main-rooted lines"}))
++
++    wts = _worktrees()
++    root, root_branch = wts[0]
++    if _dirty(root):
++        return req._send(200, json.dumps({"ok": False, "err": "your main checkout has uncommitted changes — commit or stash before staging"}))
++    published = sync._open_pr_heads()
++    prd = [b for b in chain if b in published]
++    if prd:
++        return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — staging rebases, and pushed history is never rewritten"}))
++
++    ctx.run(["git", "fetch", "origin", "main"])
++    tip = chain[-1]
++    behind = int(ctx.run(["git", "rev-list", "--count", f"{tip}..origin/main"]).stdout.strip() or "0")
++    squatters = [(p, b) for p, b in wts[1:] if b in chain]
++    dirty_squat = [p for p, _ in squatters if _dirty(p)]
++    if dirty_squat:
++        return req._send(200, json.dumps({"ok": False, "err": f"worktree {dirty_squat[0]} holds a chain branch with uncommitted changes"}))
++
++    plan = {
++        "ok": True, "project": project, "chain": chain, "tip": tip, "behind": behind,
++        "rootBranch": root_branch, "detach": [p for p, _ in squatters],
++        "alreadyStaged": behind == 0 and root_branch == tip,
++    }
++    if dry:
++        return req._send(200, json.dumps(plan))
++    if plan["alreadyStaged"]:
++        return req._send(200, json.dumps({**plan, "moved": [], "checkedOut": True}))
++
++    snapshots = {b: ctx.run(["git", "rev-parse", b]).stdout.strip() for b in chain}
++    if root_branch in chain:
++        ctx.run(["git", "-C", root, "checkout", "--detach"])
++    for p, _ in squatters:
++        ctx.run(["git", "-C", p, "checkout", "--detach"])
++
++    moved = []
++    if behind > 0:
++        scratch = "/tmp/viewer-stage-scratch"
++        ctx.run(["git", "worktree", "remove", "--force", scratch])
++        r = ctx.run(["git", "worktree", "add", "--detach", scratch, "origin/main"])
++        if r.returncode != 0:
++            return req._send(200, json.dumps({"ok": False, "err": f"couldn't make a scratch worktree: {r.stderr.strip()}"}))
++        try:
++            new_base = "origin/main"
++            for i, b in enumerate(chain):
++                cut = (ctx.run(["git", "merge-base", b, "origin/main"]).stdout.strip()
++                       if i == 0 else snapshots[chain[i - 1]])
++                r = ctx.run(["git", "-C", scratch, "rebase", "--onto", new_base, cut, b])
++                if r.returncode != 0:
++                    ctx.run(["git", "-C", scratch, "rebase", "--abort"])
++                    for rb, sha in snapshots.items():
++                        ctx.run(["git", "branch", "-f", rb, sha])
++                    if root_branch in chain:
++                        ctx.run(["git", "-C", root, "checkout", root_branch])
++                    return req._send(200, json.dumps({
++                        "ok": False, "conflict": b,
++                        "err": f"rebase of {b} hit a conflict — everything restored to where it was",
++                    }))
++                moved.append(b)
++                new_base = b
++        finally:
++            ctx.run(["git", "worktree", "remove", "--force", scratch])
++
++    r = ctx.run(["git", "-C", root, "checkout", tip])
++    if r.returncode != 0:
++        return req._send(200, json.dumps({"ok": False, "err": f"restack done but checkout refused: {r.stderr.strip()}"}))
++    req._send(200, json.dumps({**plan, "moved": moved, "checkedOut": True, "alreadyStaged": False}))
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 383c4b0..b76c729 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the s
+ from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage
+ 
+ ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
++from srv import stage   # own line: the big srv import above is contested across sessions
+ srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
+ DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
+ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
+@@ -348,6 +349,8 @@ class H(BaseHTTPRequestHandler):
+             return push.push(self, raw)
+         if self.path == "/restack":          # restack one project (background, scratch worktree)
+             return restack.restack(self, raw)
++        if self.path == "/stage":            # restack chain forward + move MAIN checkout onto the tip (dryRun supported)
++            return stage.stage(self, raw)
+         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
+             return restack.resolve(self, raw)
+         if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 11bc008..850fd2d 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1198,6 +1198,15 @@ const FO_VIEWS_CSS = `
+   color: var(--ember, #d2732a); background: transparent; border: 1px solid var(--gold-deep, #6e521d);
+ }
+ .fo-chat:hover { color: var(--gold-leaf, #e6b64e); border-color: var(--gold-leaf, #e6b64e); }
++.fo-stage {
++  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px; margin-left: 6px;
++  color: var(--patina, #7fa093); background: transparent; border: 1px solid var(--rule, #3a332b);
++}
++.fo-stage:hover:not(:disabled) { color: var(--ink, #e8dcc4); border-color: var(--patina, #7fa093); }
++.fo-stage:disabled { opacity: 0.5; cursor: default; }
++.fo-stage.armed { color: var(--vellum-night, #14110a); background: var(--patina, #7fa093); border-color: var(--patina, #7fa093); }
++.fo-stage-msg { font-size: 11px; margin-left: 6px; color: var(--ink-dim, #a89e8c); white-space: nowrap; }
++.fo-stage-msg.bad { color: var(--del, #c87a55); }
+ 
+ /* Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs GitHub).
+    Ember, never the blessed gold; a delay guard keeps it off sub-second warm-cache loads. */
+@@ -1283,6 +1292,63 @@ function WarmingRibbon(props: {
+ }
+ 
+ 
++// "stage for testing" — restack this forest's chain forward onto fresh origin/main, then
++// move the MAIN working tree onto the tip so the :3000 dev server serves the whole feature.
++// Two-click armed (it moves Phil's checkout); every guard re-verified server-side, and a
++// mid-chain conflict restores all branches to their pre-stage snapshots.
++function StageButton(props: { project: string }) {
++  const [armed, setArmed] = createSignal(false);
++  const [busy, setBusy] = createSignal(false);
++  const [msg, setMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
++  let disarm: ReturnType<typeof setTimeout>;
++  const fire = async () => {
++    if (!armed()) {
++      setArmed(true);
++      clearTimeout(disarm);
++      disarm = setTimeout(() => setArmed(false), 6000);
++      return;
++    }
++    clearTimeout(disarm);
++    setArmed(false);
++    setBusy(true);
++    setMsg(null);
++    const r = await fetch(withRepo("/stage"), {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ project: props.project }),
++    })
++      .then((x) => x.json() as Promise<{ ok?: boolean; err?: string; tip?: string; moved?: string[]; alreadyStaged?: boolean }>)
++      .catch((e) => ({ ok: false, err: String(e) }));
++    setBusy(false);
++    if (r.ok) {
++      const re = r as { tip?: string; moved?: string[]; alreadyStaged?: boolean };
++      setMsg({
++        text: re.alreadyStaged
++          ? `✓ already staged — checkout is on ${re.tip}`
++          : `✓ ${re.tip} on your checkout${re.moved?.length ? ` · ${re.moved.length} rebased` : ""}`,
++      });
++    } else {
++      setMsg({ text: `✗ ${r.err || "stage failed"}`, bad: true });
++    }
++  };
++  return (
++    <>
++      <button
++        class="fo-stage"
++        classList={{ armed: armed() }}
++        disabled={busy()}
++        title="stage for testing — restack this chain onto fresh origin/main, then move your main checkout onto the tip so the dev server serves it. Refuses on a dirty checkout, an open PR in the chain, or anything but a single main-rooted line."
++        onClick={fire}
++      >
++        {busy() ? "staging…" : armed() ? "confirm: move my checkout" : "⇪ stage"}
++      </button>
++      <Show when={msg()}>
++        <span class="fo-stage-msg" classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
++      </Show>
++    </>
++  );
++}
++
+ function ForestOverview() {
+   const { location, navigate } = useViewerLocation();
+   const project = () => forestKey(location());
+@@ -1379,6 +1445,7 @@ function ForestOverview() {
+               title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
+               onClick={() => openChat({ branch: project(), file: null, origin: location(), project: project() })}
+             >✦ chat</button>
++            <StageButton project={project()} />
+           </Show>
+         </Show>
+         <style>{FO_VIEWS_CSS}</style>

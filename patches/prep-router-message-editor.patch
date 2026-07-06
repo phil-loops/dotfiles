@@ -1,0 +1,210 @@
+diff --git a/scripts/srv/prep.py b/scripts/srv/prep.py
+new file mode 100644
+index 0000000..ed3eeae
+--- /dev/null
++++ b/scripts/srv/prep.py
+@@ -0,0 +1,172 @@
++# srv/prep.py — the "prep to push" state router + the outgoing-commit message editor.
++# The node header's ONE prep button asks the router what motion this branch needs next and
++# delegates to the endpoint that already does it — the verdict machinery lives here, not in
++# a row of peer buttons. The editor is the missing piece of "one clean voiced commit
++# outgoing": /prep drafts a subject with no body; the push ward requires a why; this is
++# where the why gets written.
++#
++#   GET  /prep-route?branch=X       what prep would do next: {route, why, next?, outgoing}
++#   GET  /outgoing-commit?branch=X  the ONE outgoing commit's message {sha, subject, body, stat}
++#   POST /outgoing-commit {branch, subject, body}  rewrite the unpushed tip's message
++#
++# Message edits rewrite ONLY the unpushed tail (refused unless the outgoing set is exactly
++# that one tip commit) — origin history is never touched, per the additive-only rule.
++import json
++import os
++import subprocess
++from urllib.parse import parse_qs
++
++from . import ctx
++from . import push
++from . import reviews
++from . import sync
++
++
++def _outgoing(branch):
++    # commits origin doesn't have, newest first — the same rule /push-preview enforces:
++    # a stacked branch's parent commits (already on origin via the parent) never count.
++    has_remote = ctx.run(["git", "rev-parse", "--verify", "-q",
++                          f"refs/remotes/origin/{branch}"]).returncode == 0
++    range_args = [f"origin/{branch}..{branch}"] if has_remote else [branch, "--not", "--remotes=origin"]
++    return ctx.run(["git", "rev-list", *range_args]).stdout.split()
++
++
++def _commit(sha):
++    subject = ctx.run(["git", "log", "-1", "--format=%s", sha]).stdout.strip()
++    body = ctx.run(["git", "log", "-1", "--format=%b", sha]).stdout.strip()
++    stat = ctx.run(["git", "show", "--shortstat", "--format=", sha]).stdout.strip()
++    return {"sha": sha[:10], "subject": subject, "body": body, "stat": stat}
++
++
++def route(req, u):
++    # GET /prep-route?branch=X — read-only: classify the branch and name the ONE next motion.
++    # Routes, in precedence order:
++    #   push-vehicle — diverged w/ open PR and the additive vehicle exists: push it (no next)
++    #   additive     — diverged w/ open PR: draft the vehicle        → POST /diverged-additive
++    #   restack      — behind origin/main, unpublished root          → POST /sync
++    #   nothing      — outgoing set is empty: everything is shared
++    #   squash       — >1 outgoing, or a WIP subject: collapse/voice → POST /prep
++    #   ready        — exactly one voiced commit (needsBody flags an empty why)
++    branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
++    if not branch or ctx.run(["git", "rev-parse", "--verify", "--quiet",
++                              f"refs/heads/{branch}"]).returncode != 0:
++        req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
++        return
++    h = sync.state(branch)
++    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
++    up = sync._upstream_state(branch, main)
++
++    def send(route_name, why, next_call=None, **extra):
++        req._send(200, json.dumps({"ok": True, "branch": branch, "route": route_name,
++                                   "why": why, "next": next_call, **extra}))
++
++    if up.get("diverged") and h.get("published"):
++        vehicle = f"{branch}-additive"
++        if ctx.run(["git", "rev-parse", "--verify", "--quiet",
++                    f"refs/heads/{vehicle}"]).returncode == 0:
++            send("push-vehicle",
++                 f"the additive update is drafted on {vehicle} — pushing it fast-forwards the PR",
++                 push_cmd=f"git push origin {vehicle}:{branch}", vehicle=vehicle)
++            return
++        send("additive",
++             "local diverged from the pushed PR head — draft one commit on top of it "
++             "carrying local's content (history preserved, never a force-push)",
++             {"method": "POST", "path": "/diverged-additive", "body": {"branch": branch}})
++        return
++
++    if h.get("syncable"):
++        send("restack",
++             f"{h.get('behind', 0)} behind origin/{main} and safely rebasable "
++             "(unpublished root) — restack first so the push carries a current base",
++             {"method": "POST", "path": "/sync", "body": {"branch": branch}})
++        return
++
++    outgoing = _outgoing(branch)
++    if not outgoing:
++        send("nothing", "everything here is already shared with origin", outgoing=None)
++        return
++    tip = _commit(outgoing[0])
++    if len(outgoing) > 1 or push._WIP_SUBJECT.match(tip["subject"]):
++        send("squash",
++             (f"{len(outgoing)} unpushed commits" if len(outgoing) > 1
++              else "the unpushed commit has a WIP subject")
++             + " — collapse the unpushed tail to one voiced commit",
++             {"method": "POST", "path": "/prep", "body": {"branch": branch}},
++             outgoing={"count": len(outgoing), "tip": tip})
++        return
++    send("ready",
++         "one voiced commit outgoing"
++         + ("" if tip["body"] else " — its body is empty; the push ward wants a why (edit the message)"),
++         outgoing={"count": 1, "tip": tip}, needsBody=not tip["body"])
++
++
++def get_message(req, u):
++    # GET /outgoing-commit?branch=X — the one outgoing commit, for the editor to show.
++    branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
++    if not branch:
++        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
++        return
++    outgoing = _outgoing(branch)
++    if len(outgoing) != 1:
++        req._send(409, json.dumps({"ok": False, "err":
++                                   f"outgoing is {len(outgoing)} commits — prep to one first"}))
++        return
++    req._send(200, json.dumps({"ok": True, "branch": branch, **_commit(outgoing[0])}))
++
++
++def set_message(req, raw):
++    # POST /outgoing-commit {branch, subject, body} — rewrite the unpushed tip's message.
++    # Tree and parent are untouched; only the message moves. Children stacked on the old tip
++    # are reseated onto the new one in the same motion (a rewrite that strands them is a bug).
++    d = json.loads(raw or "{}")
++    branch = (d.get("branch") or "").strip()
++    subject = " ".join((d.get("subject") or "").split())
++    body = (d.get("body") or "").strip()
++    if not branch or not subject:
++        req._send(400, json.dumps({"ok": False, "err": "need a branch + a non-empty subject"}))
++        return
++    if push._WIP_SUBJECT.match(subject):
++        req._send(400, json.dumps({"ok": False, "err": "subject is a WIP/fixup placeholder — say what ships"}))
++        return
++    outgoing = _outgoing(branch)
++    if len(outgoing) != 1:
++        req._send(409, json.dumps({"ok": False, "err":
++                                   f"outgoing is {len(outgoing)} commits — prep to one first"}))
++        return
++    tip = outgoing[0]
++    if ctx.run(["git", "rev-parse", f"{branch}"]).stdout.strip() != \
++       ctx.run(["git", "rev-parse", tip]).stdout.strip():
++        req._send(409, json.dumps({"ok": False, "err": "the outgoing commit is not the branch tip"}))
++        return
++    parents = ctx.run(["git", "log", "-1", "--format=%P", tip]).stdout.split()
++    if len(parents) != 1:
++        req._send(409, json.dumps({"ok": False, "err": "tip is a merge/root commit — edit by hand"}))
++        return
++    msg = subject + ("\n\n" + body if body else "")
++    # same commit tree + parent + author under the new message, then move the ref. Done via
++    # commit-tree (not amend-in-worktree) so a dirty checkout can never leak into the commit.
++    an = ctx.run(["git", "log", "-1", "--format=%an", tip]).stdout.strip()
++    ae = ctx.run(["git", "log", "-1", "--format=%ae", tip]).stdout.strip()
++    ad = ctx.run(["git", "log", "-1", "--format=%ad", tip]).stdout.strip()
++    env = dict(os.environ, GIT_AUTHOR_NAME=an, GIT_AUTHOR_EMAIL=ae, GIT_AUTHOR_DATE=ad)
++    r = subprocess.run(["git", "commit-tree", f"{tip}^{{tree}}", "-p", parents[0], "-m", msg],
++                       cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
++    new = r.stdout.strip()
++    if r.returncode != 0 or not new:
++        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
++        return
++    # move the branch ref: `branch -f` refuses a checked-out branch, so update HEAD in its
++    # worktree instead (soft — the tree is identical, nothing in the checkout moves).
++    wt = reviews._worktree_of(branch)
++    if wt:
++        r = ctx.run(["git", "-C", wt, "reset", "--soft", new])
++    else:
++        r = ctx.run(["git", "branch", "-f", branch, new])
++    if r.returncode != 0:
++        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "ref update failed").strip()[:300]}))
++        return
++    results = []
++    reviews._reseat_walk(branch, results)
++    req._send(200, json.dumps({"ok": True, "branch": branch, **_commit(new),
++                               "reseated": [x["branch"] for x in results if x["status"] == "reseated"],
++                               "conflicts": [x for x in results if x["status"] == "conflict"]}))
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 30e64b2..793cb30 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -18,6 +18,7 @@ from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist,
+ 
+ ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
+ from srv import stage   # own line: the big srv import above is contested across sessions
++from srv import prep    # own line: same reason
+ srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
+ DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
+ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
+@@ -234,6 +235,10 @@ class H(BaseHTTPRequestHandler):
+             return sync.health_many(self, u)
+         elif u.path == "/diverged-detail":  # what a ⇄ divergence IS: per-side commits (patch-id twins) + net tip diff
+             return sync.diverged_detail(self, u)
++        elif u.path == "/prep-route":  # what "prep to push" would do next (read-only verdict + delegate)
++            return prep.route(self, u)
++        elif u.path == "/outgoing-commit":  # the one outgoing commit's message, for the editor
++            return prep.get_message(self, u)
+         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
+             self.send_response(200)
+             self.send_header("Content-Type", "text/event-stream")
+@@ -356,6 +361,8 @@ class H(BaseHTTPRequestHandler):
+             return sync.post_reconcile(self, raw)
+         if self.path == "/squash":   # collapse parent..branch into one voiced commit
+             return review.squash(self, raw)
++        if self.path == "/outgoing-commit":   # rewrite the unpushed tip's message (subject + body)
++            return prep.set_message(self, raw)
+         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
+             return review.prep(self, raw)
+         if self.path == "/gates":    # mobile prepare-to-push: run repo gates → per-gate verdict

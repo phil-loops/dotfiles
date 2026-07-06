@@ -1,0 +1,712 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index 3f3fbcd..63ec1f0 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -1,14 +1,19 @@
+ # srv/push.py — the "prepare to push" mobile flow's gate + push endpoints.
+ #
+-#   POST /gates  {branch}  → run stack-gates in the branch's worktree; JSON verdict
+-#   POST /push   {branch}  → fast-forward push to a SAFE remote (never origin); the
+-#                            repo's pre-push hook (stack-prepush-guard) still runs,
+-#                            so WIP commits are blocked at the door regardless.
++#   POST /gates        {branch}  → run stack-gates in the branch's worktree; JSON verdict
++#   POST /push         {branch}  → fast-forward push to a SAFE remote (never origin); the
++#                                  repo's pre-push hook (stack-prepush-guard) still runs,
++#                                  so WIP commits are blocked at the door regardless.
++#   GET  /push-preview ?branch=  → read-only: the outgoing-vs-origin commit + guard verdict
++#   POST /push-origin  {branch}  → THE shared-history door. Human finger only (viewer button);
++#                                  Claude never calls this. Every guard re-verified server-side.
+ import json
+ import os
+ import re
++import time
++from urllib.parse import parse_qs
+ 
+-from . import ctx
++from . import ctx, sync
+ 
+ 
+ def delta_tests(req, raw):
+@@ -46,6 +51,11 @@ def gates(req, raw):
+     # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
+     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch, "--fix"])
+     # stack-gates always prints a JSON verdict on stdout and exits 0
++    try:
++        if json.loads(r.stdout).get("ok"):
++            _GREEN_GATES[branch] = _tip(branch)
++    except Exception:
++        pass
+     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+ 
+ 
+@@ -84,3 +94,148 @@ def push(req, raw):
+         "out": (r.stdout or "").strip(),
+         "err": (r.stderr or "").strip(),
+     }))
++
++
++# ── origin push — the shared-history door ────────────────────────────────────
++# Design + boundaries: ~/daily-log/2026-07-02-deprecate-gh-desktop/design.md.
++# Phil's rules: FF-only, never force; outgoing must be exactly ONE commit with a
++# voiced subject + real body; gates green for that exact tip; the app never
++# authors PRs (at most a plain github.com link). Claude never calls /push-origin.
++
++_GREEN_GATES = {}   # branch → tip sha stack-gates last passed at (server-recorded, not client-claimed)
++
++_WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
++
++
++def _tip(branch):
++    return ctx.run(["git", "rev-parse", branch]).stdout.strip()
++
++
++def _origin_web(branch):
++    """Plain github.com compare link for the branch — the GitHub website is where
++    PR authoring happens (never this app). No prefilled params, ever."""
++    url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
++    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
++    return f"https://github.com/{m.group(1)}/compare/main...{branch}" if m else ""
++
++
++def _origin_verdict(branch):
++    """Every /push-origin guard, recomputed from git — shared by the read-only
++    preview (drives the crossing view + wards + arming) and the push itself
++    (never trusts the client's copy of this verdict). The preview renders the
++    whole threshold: what came before (the outgoing commits), what main has
++    done since the fork, and the wards holding the door."""
++    if not branch or ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode != 0:
++        return None
++    hard = []   # refusals outside the normal ward path
++    if branch in ("main", "master"):
++        hard.append("refusing to push trunk from here")
++    has_remote = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0
++    ff = True
++    if has_remote:
++        ff = ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode == 0
++    # outgoing = commits origin doesn't have. On a first push, --not --remotes=origin keeps a
++    # stacked branch's parent commits (already on origin via the parent) out of the count.
++    range_args = [f"origin/{branch}..{branch}"] if has_remote else [branch, "--not", "--remotes=origin"]
++    log = ctx.run(["git", "log", "--format=%H\x1f%s\x1f%ad\x1f%at", "--date=format:%b %e", *range_args]).stdout
++    outgoing = []
++    for rec in log.splitlines():
++        parts = rec.split("\x1f")
++        if len(parts) == 4:
++            outgoing.append({"sha": parts[0], "subject": parts[1], "date": parts[2], "at": int(parts[3])})
++    age_days = max(0, int((time.time() - outgoing[-1]["at"]) / 86400)) if outgoing else 0
++
++    # the other side of the crossing: how far shared history moved since this work forked
++    fork = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
++    fork_date = ctx.run(["git", "log", "-1", "--format=%ad", "--date=format:%b %e", fork]).stdout.strip() if fork else ""
++    main_since = 0
++    if fork:
++        raw = ctx.run(["git", "rev-list", "--count", f"{fork}..origin/main"]).stdout.strip()
++        main_since = int(raw) if raw.isdigit() else 0
++    deploy_critical = sync._deploy_critical(branch)
++
++    # what origin receives: per-file churn over the whole outgoing range (numstat lines
++    # are "add<TAB>del<TAB>path"; binary files report "-"). Base = parent of the oldest
++    # outgoing commit, which is right for first pushes and re-pushes alike.
++    files = []
++    if outgoing:
++        numstat = ctx.run(["git", "diff", "--numstat", f"{outgoing[-1]['sha']}~1..{branch}"])
++        for ln in (numstat.stdout or "").splitlines():
++            p = ln.split("\t")
++            if len(p) == 3:
++                files.append({
++                    "path": p[2],
++                    "add": int(p[0]) if p[0].isdigit() else 0,
++                    "del": int(p[1]) if p[1].isdigit() else 0,
++                })
++
++    commit = None
++    voiced = said_why = not_merge = False
++    if len(outgoing) == 1:
++        sha = outgoing[0]["sha"]
++        subject = outgoing[0]["subject"]
++        body = ctx.run(["git", "log", "-1", "--format=%b", sha]).stdout.strip()
++        voiced = not _WIP_SUBJECT.match(subject)
++        said_why = bool(re.sub(r"^X-WIP:.*$", "", body, flags=re.IGNORECASE | re.MULTILINE).strip())
++        not_merge = not ctx.run(["git", "rev-list", "--no-walk", "--merges", sha]).stdout.strip()
++        commit = {"sha": sha, "subject": subject, "body": body}
++    tip = _tip(branch)
++    gates_green = _GREEN_GATES.get(branch) == tip
++
++    def ward(k, label, ok, why):
++        return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why}
++    wards = [
++        ward("one", "one commit", len(outgoing) == 1 and not_merge,
++             "nothing to push — origin already has this" if not outgoing
++             else f"{len(outgoing)} commits — prep seals them into one" if len(outgoing) > 1
++             else "outgoing commit is a merge commit"),
++        ward("voiced", "voiced subject", voiced and len(outgoing) == 1,
++             "" if len(outgoing) != 1 else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
++        ward("why", "says why", said_why and len(outgoing) == 1,
++             "" if len(outgoing) != 1 else "commit body is empty — say what ships and why"),
++        ward("ff", "fast-forward", ff,
++             "diverged from origin — reconcile first; shared history is never overwritten"),
++        ward("watch", "deploy watch clear", not deploy_critical,
++             f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
++        ward("gates", "gates green", gates_green,
++             "not green for this exact commit — run the pipeline above"),
++    ]
++    reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"]]
++    return {
++        "branch": branch, "originExists": has_remote, "ff": ff, "outgoing": len(outgoing),
++        "commits": outgoing[:8], "ageDays": age_days,
++        "fork": {"sha": fork, "date": fork_date}, "mainSince": main_since,
++        "deployCritical": deploy_critical,
++        "files": files[:20], "moreFiles": max(0, len(files) - 20),
++        "commit": commit, "gatesGreen": gates_green, "web": _origin_web(branch),
++        "wards": wards, "ok": not reasons, "reasons": reasons,
++    }
++
++
++def preview(req, u):
++    branch = parse_qs(u.query).get("branch", [""])[0]
++    v = _origin_verdict(branch)
++    if v is None:
++        return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
++    req._send(200, json.dumps(v))
++
++
++def push_origin(req, raw):
++    d = json.loads(raw or "{}")
++    branch = d.get("branch", "")
++    v = _origin_verdict(branch)
++    if v is None:
++        return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
++    if not v["ok"]:
++        return req._send(200, json.dumps({"ok": False, "err": "; ".join(v["reasons"]), "verdict": v}))
++    # plain push — no --force under any circumstance; the pre-push hook still runs
++    # underneath as the last net (WIP trailers, merge commits, deploy-critical gap).
++    r = ctx.run(["git", "push", "origin", branch])
++    ok = r.returncode == 0
++    req._send(200, json.dumps({
++        "ok": ok,
++        "remote": "origin",
++        "web": v["web"],
++        "out": (r.stdout or "").strip(),
++        "err": (r.stderr or "").strip(),
++    }))
+diff --git a/scripts/viewer-solid/src/MobilePush.css b/scripts/viewer-solid/src/MobilePush.css
+index 44deebf..8d34b0a 100644
+--- a/scripts/viewer-solid/src/MobilePush.css
++++ b/scripts/viewer-solid/src/MobilePush.css
+@@ -302,3 +302,269 @@
+     animation: none;
+   }
+ }
++
++/* ── the origin door: two histories converge on a sealed commit behind six wards ── */
++.mp-origin {
++  margin-top: 26px;
++  border: 1px solid var(--ember);
++  border-radius: 12px;
++  padding: 16px 18px 18px;
++  background:
++    radial-gradient(120% 90% at 50% 108%, var(--ember-wash), transparent 60%),
++    var(--vellum-raise);
++}
++.mp-origin-head {
++  font-size: 11px;
++  font-weight: 600;
++  letter-spacing: 0.1em;
++  text-transform: uppercase;
++  color: var(--ember);
++  display: flex;
++  justify-content: space-between;
++  align-items: baseline;
++}
++.mp-origin-sub {
++  font-weight: 400;
++  text-transform: none;
++  letter-spacing: 0;
++  color: var(--ink-faint);
++}
++
++/* the crossing — yours | main-since-fork */
++.mp-cross {
++  display: grid;
++  grid-template-columns: 1fr 1fr;
++  gap: 0 18px;
++  margin-top: 14px;
++}
++.mp-cross-col {
++  min-width: 0;
++}
++.mp-cross-right {
++  border-left: 1px dashed var(--rule);
++  padding-left: 18px;
++}
++.mp-cross-title {
++  font-size: 10px;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++  color: var(--ink-faint);
++}
++.mp-cross-right .mp-cross-title {
++  color: var(--patina);
++}
++.mp-cross-n {
++  margin-top: 5px;
++  font-size: 12px;
++  color: var(--ink-dim);
++}
++.mp-cross-n b {
++  font-family: var(--display);
++  font-style: italic;
++  font-weight: 600;
++  font-size: 21px;
++  color: var(--ink);
++  margin-right: 2px;
++}
++.mp-cross-right .mp-cross-n b {
++  color: var(--patina);
++}
++.mp-cross-list {
++  margin: 8px 0 0;
++  padding: 0;
++  list-style: none;
++  font-size: 11px;
++  line-height: 1.5;
++  color: var(--ink-dim);
++}
++.mp-cross-list li {
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++.mp-cross-date {
++  color: var(--ink-faint);
++  margin-right: 6px;
++}
++.mp-cross-more {
++  color: var(--ink-faint);
++  font-style: italic;
++}
++.mp-cross-ok {
++  margin-top: 8px;
++  font-size: 11px;
++  color: var(--add);
++}
++.mp-cross-warn {
++  margin-top: 8px;
++  font-size: 11px;
++  color: var(--del);
++  font-weight: 600;
++}
++
++/* convergence — the two lines meet above the seal */
++.mp-converge {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin: 12px 0 2px;
++  color: var(--ember);
++}
++.mp-converge i {
++  flex: 1;
++  height: 1px;
++  background: linear-gradient(to right, transparent, var(--ember-wash) 30%, var(--ember));
++}
++.mp-converge i:last-child {
++  background: linear-gradient(to left, transparent, var(--ember-wash) 30%, var(--ember));
++}
++.mp-converge span {
++  font-size: 13px;
++  line-height: 1;
++}
++
++/* the sealed commit — what origin receives */
++.mp-seal {
++  border: 1px solid var(--gold-deep);
++  border-radius: 9px;
++  padding: 13px 15px;
++  background: var(--gold-wash);
++}
++.mp-seal-subject {
++  font-family: var(--display);
++  font-style: italic;
++  font-weight: 600;
++  font-size: 19px;
++  line-height: 1.25;
++  color: var(--ink);
++}
++.mp-seal-pending {
++  font-size: 12px;
++  font-style: italic;
++  color: var(--ink-dim);
++}
++.mp-seal-body {
++  margin: 8px 0 0;
++  white-space: pre-wrap;
++  font: inherit;
++  font-size: 12px;
++  line-height: 1.55;
++  color: var(--ink-dim);
++  max-height: 150px;
++  overflow-y: auto;
++}
++.mp-files {
++  margin: 10px 0 0;
++  padding: 8px 0 0;
++  border-top: 1px solid var(--rule);
++  list-style: none;
++  font-size: 11px;
++}
++.mp-files li {
++  display: flex;
++  gap: 8px;
++  line-height: 1.6;
++}
++.mp-file-path {
++  flex: 1;
++  min-width: 0;
++  overflow: hidden;
++  text-overflow: ellipsis;
++  white-space: nowrap;
++  color: var(--ink-dim);
++}
++.mp-file-add {
++  color: var(--add);
++}
++.mp-file-del {
++  color: var(--del);
++}
++
++/* the wards — six seals; each lights gold as the server clears it, staggered so a
++   fresh green verdict reads as a left-to-right ignition */
++.mp-wards {
++  margin: 14px 0 0;
++  padding: 0;
++  list-style: none;
++  display: flex;
++  flex-wrap: wrap;
++  gap: 4px 14px;
++  justify-content: center;
++}
++.mp-ward {
++  display: flex;
++  align-items: center;
++  gap: 5px;
++  font-size: 10px;
++  letter-spacing: 0.05em;
++  text-transform: uppercase;
++  color: var(--ink-faint);
++  transition: color 0.4s ease calc(var(--i) * 90ms);
++}
++.mp-ward-seal {
++  font-size: 12px;
++  transition: inherit;
++}
++.mp-ward.lit {
++  color: var(--ink-dim);
++}
++.mp-ward.lit .mp-ward-seal {
++  color: var(--gold-leaf);
++  text-shadow: 0 0 8px var(--gold-wash);
++}
++.mp-origin-reasons {
++  margin: 10px 0 0;
++  padding: 0;
++  list-style: none;
++  color: var(--del);
++  font-size: 12px;
++  text-align: center;
++}
++.mp-origin-reasons li {
++  margin-top: 3px;
++}
++
++/* the door — dead while any ward is dark; warms after the last seal lights */
++.mp-origin-btn {
++  margin-top: 14px;
++  width: 100%;
++  font: inherit;
++  font-size: 14px;
++  font-weight: 600;
++  padding: 11px;
++  border-radius: 8px;
++  border: 1px solid var(--ember);
++  color: var(--ember);
++  background: transparent;
++  cursor: pointer;
++  transition: background 0.5s ease 640ms, color 0.5s ease 640ms, opacity 0.3s ease;
++}
++.mp-origin-btn:disabled {
++  opacity: 0.35;
++  cursor: default;
++  transition-delay: 0ms;
++}
++.mp-origin-btn:not(:disabled):not(.armed):hover {
++  background: var(--ember-wash);
++}
++.mp-origin-btn.armed {
++  color: var(--vellum-night);
++  background: var(--ember);
++  transition-delay: 0ms;
++}
++.mp-origin-done {
++  margin-top: 14px;
++  text-align: center;
++  color: var(--add);
++  font-size: 13px;
++}
++.mp-origin-done a {
++  color: inherit;
++}
++@media (prefers-reduced-motion: reduce) {
++  .mp-ward,
++  .mp-ward-seal,
++  .mp-origin-btn {
++    transition: none;
++  }
++}
+diff --git a/scripts/viewer-solid/src/MobilePush.tsx b/scripts/viewer-solid/src/MobilePush.tsx
+index edfa3e5..0116da3 100644
+--- a/scripts/viewer-solid/src/MobilePush.tsx
++++ b/scripts/viewer-solid/src/MobilePush.tsx
+@@ -2,12 +2,14 @@ import { createSignal, createMemo, Show, For } from "solid-js";
+ import { createQuery } from "@tanstack/solid-query";
+ import { useViewerLocation, forestKey, Link } from "./router";
+ import { provider } from "./provider";
++import { fetchJSON } from "./api";
+ import "./MobilePush.css";
+ 
+-// The mobile "prepare to push" card: one branch, the part of the git workflow that's
+-// actually better on a phone — squash unpushed → voiced subject → run gates (auto-rebasing
+-// onto fresh main when that's what's stale). One tap gets the branch into a clean, pushable
+-// local state and stops there; the push itself stays manual (Phil's GitHub Desktop → origin).
++// The "prepare to push" card: one branch — squash unpushed → voiced subject → run gates
++// (auto-rebasing onto fresh main when that's what's stale) → and, once every guard is
++// green, THE origin push (phase 1 of retiring GitHub Desktop; design doc in
++// ~/daily-log/2026-07-02-deprecate-gh-desktop/). The button is the only way that push
++// fires — a human finger, never Claude — and the server re-verifies every guard anyway.
+ // A red gate is a clean "needs the laptop" stop, not fixable here.
+ 
+ interface PrepResult {
+@@ -33,6 +35,30 @@ interface GatesResult {
+   note?: string;
+   err?: string;
+ }
++interface PushPreview {
++  ok: boolean;
++  outgoing: number;
++  ff: boolean;
++  originExists: boolean;
++  gatesGreen: boolean;
++  web: string;
++  reasons: string[];
++  wards: { k: string; label: string; ok: boolean; why: string }[];
++  commits: { sha: string; subject: string; date: string }[];
++  ageDays: number;
++  fork: { sha: string; date: string };
++  mainSince: number;
++  deployCritical: string[];
++  files: { path: string; add: number; del: number }[];
++  moreFiles: number;
++  commit?: { sha: string; subject: string; body: string } | null;
++}
++interface PushOriginResult {
++  ok: boolean;
++  web?: string;
++  out?: string;
++  err?: string;
++}
+ type StepKey = "squash" | "gates";
+ type StepState = "idle" | "run" | "ok" | "fail";
+ 
+@@ -58,6 +84,34 @@ export default function MobilePush() {
+   const started = createMemo(() => !!(prep() || gates()));
+   const done = createMemo(() => !!(prep()?.ok && !prep()!.force && gates()?.ok));
+ 
++  // the origin door — read-only guard verdict + the one outgoing commit. The server owns
++  // this verdict (and recomputes it on the actual push); the card only renders it.
++  const preview = createQuery(() => ({
++    queryKey: ["push-preview", branch()],
++    queryFn: () => fetchJSON<PushPreview>("/push-preview?branch=" + encodeURIComponent(branch())),
++    enabled: !!branch(),
++  }));
++  const [armed, setArmed] = createSignal(false);
++  const [pushing, setPushing] = createSignal(false);
++  const [pushed, setPushed] = createSignal<PushOriginResult | null>(null);
++  let disarmTimer: ReturnType<typeof setTimeout> | undefined;
++
++  const originClick = async () => {
++    if (!armed()) {
++      setArmed(true);
++      clearTimeout(disarmTimer);
++      disarmTimer = setTimeout(() => setArmed(false), 6000);
++      return;
++    }
++    clearTimeout(disarmTimer);
++    setArmed(false);
++    setPushing(true);
++    setPushed(await post<PushOriginResult>("/push-origin", branch()));
++    setPushing(false);
++    preview.refetch();
++    commits.refetch();
++  };
++
+   // why the chain stopped short of a clean local state — what the laptop is needed for.
+   const blocked = createMemo(() => {
+     if (prep()?.force) {
+@@ -106,6 +160,7 @@ export default function MobilePush() {
+     setActive("gates");
+     setGates(await post<GatesResult>("/gates", branch()));
+     commits.refetch();
++    preview.refetch();
+     setActive(null);
+     setRunning(false);
+   };
+@@ -153,7 +208,7 @@ export default function MobilePush() {
+         </button>
+       }>
+         <div class="mp-earned">
+-          ready to push — over to the laptop
++          {pushed()?.ok ? "pushed — the team has it" : "ready for the origin door below"}
+           <div class="mp-confetti" aria-hidden="true">
+             <For each={Array.from({ length: 24 })}>{(_, i) => <i style={confettiStyle(i())} />}</For>
+           </div>
+@@ -219,6 +274,141 @@ export default function MobilePush() {
+       <Show when={blocked()}>
+         <div class="mp-blocked">{blocked()}</div>
+       </Show>
++
++      {/* the origin door — the ONE place this tooling touches shared history, rendered as
++          the crossing it is: everything that came before (your outgoing commits) on the
++          left, everything main did since you forked on the right, converging on the sealed
++          commit behind six wards. The server owns the verdict and re-verifies it on the
++          push; this section only renders it. PRs are authored on github.com, never here. */}
++      <Show when={preview.data && (preview.data!.outgoing > 0 || pushed())}>
++        <section class="mp-origin">
++          <div class="mp-origin-head">
++            origin — shared with the team
++            <span class="mp-origin-sub">
++              {(preview.data?.web.match(/github\.com\/([^/]+\/[^/]+)\//) || [])[1] ?? ""}
++            </span>
++          </div>
++
++          <div class="mp-cross">
++            <div class="mp-cross-col">
++              <div class="mp-cross-title">yours · since {preview.data?.fork.date}</div>
++              <div class="mp-cross-n">
++                <b>{preview.data?.outgoing}</b>
++                {preview.data?.outgoing === 1 ? " commit" : " commits"}
++                <Show when={(preview.data?.ageDays ?? 0) > 0}>
++                  {" · "}{preview.data?.ageDays}{preview.data?.ageDays === 1 ? " day" : " days"}
++                </Show>
++              </div>
++              <ul class="mp-cross-list">
++                <For each={preview.data?.commits}>
++                  {(c) => (
++                    <li>
++                      <span class="mp-cross-date">{c.date}</span>
++                      {c.subject}
++                    </li>
++                  )}
++                </For>
++                <Show when={(preview.data?.outgoing ?? 0) > 8}>
++                  <li class="mp-cross-more">+ {(preview.data?.outgoing ?? 0) - 8} more</li>
++                </Show>
++              </ul>
++            </div>
++            <div class="mp-cross-col mp-cross-right">
++              <div class="mp-cross-title">main · since you forked</div>
++              <div class="mp-cross-n">
++                <b>{preview.data?.mainSince}</b> commits landed
++              </div>
++              <Show
++                when={preview.data?.deployCritical.length}
++                fallback={<div class="mp-cross-ok">deploy watch clear</div>}
++              >
++                <div class="mp-cross-warn">
++                  {preview.data?.deployCritical.length} deploy-watched{" "}
++                  {preview.data?.deployCritical.length === 1 ? "file" : "files"} you lack
++                </div>
++              </Show>
++            </div>
++          </div>
++          <div class="mp-converge" aria-hidden="true">
++            <i /><span>⌄</span><i />
++          </div>
++
++          <div class="mp-seal">
++            <Show
++              when={preview.data?.commit}
++              fallback={
++                <div class="mp-seal-pending">
++                  prep seals {preview.data?.outgoing} commits into one voiced commit
++                </div>
++              }
++            >
++              {(c) => (
++                <>
++                  <div class="mp-seal-subject">{c().subject}</div>
++                  <Show when={c().body}>
++                    <pre class="mp-seal-body">{c().body}</pre>
++                  </Show>
++                </>
++              )}
++            </Show>
++            <ul class="mp-files">
++              <For each={preview.data?.files}>
++                {(f) => (
++                  <li>
++                    <span class="mp-file-path">{f.path}</span>
++                    <span class="mp-file-add">+{f.add}</span>
++                    <span class="mp-file-del">−{f.del}</span>
++                  </li>
++                )}
++              </For>
++              <Show when={preview.data?.moreFiles}>
++                <li class="mp-cross-more">+ {preview.data?.moreFiles} more files</li>
++              </Show>
++            </ul>
++          </div>
++
++          <ul class="mp-wards">
++            <For each={preview.data?.wards}>
++              {(w, i) => (
++                <li class="mp-ward" classList={{ lit: w.ok }} style={{ "--i": String(i()) }}>
++                  <span class="mp-ward-seal">{w.ok ? "◆" : "◇"}</span>
++                  <span class="mp-ward-label">{w.label}</span>
++                </li>
++              )}
++            </For>
++          </ul>
++          <Show when={!preview.data?.ok && !pushed()?.ok}>
++            <ul class="mp-origin-reasons">
++              <For each={preview.data?.reasons}>{(r) => <li>✗ {r}</li>}</For>
++            </ul>
++          </Show>
++
++          <Show
++            when={!pushed()?.ok}
++            fallback={
++              <div class="mp-origin-done">
++                ✓ pushed to origin —{" "}
++                <a href={pushed()!.web} target="_blank" rel="noreferrer">
++                  open on github.com
++                </a>{" "}
++                <span class="mp-dim">(PRs are authored there, never here)</span>
++              </div>
++            }
++          >
++            <button
++              class="mp-origin-btn"
++              classList={{ armed: armed() }}
++              disabled={!preview.data?.ok || pushing()}
++              onClick={originClick}
++            >
++              {pushing() ? "pushing…" : armed() ? "confirm: push to origin" : "⤴ push to origin"}
++            </button>
++            <Show when={pushed() && !pushed()!.ok}>
++              <div class="mp-blocked">{pushed()!.err || "push refused"}</div>
++            </Show>
++          </Show>
++        </section>
++      </Show>
+     </div>
+   );
+ }

@@ -1,0 +1,122 @@
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index 69a2c04..e1fb3c7 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -80,6 +80,21 @@ def _open_pr_heads():
+     return _pr_cache["heads"]
+ 
+ 
++def _shared(branch):
++    """Local-vs-shared vs origin: "local" (never pushed — the team can't see it),
++    "ahead" (origin's copy is N commits behind), "synced", or "gone" (deleted on
++    origin after merge). Reads the last fetch's refs — no network."""
++    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0:
++        raw = ctx.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"]).stdout.strip()
++        try:
++            ahead = int(raw)
++        except ValueError:
++            ahead = 0
++        return ("ahead" if ahead else "synced"), ahead
++    track = ctx.run(["git", "for-each-ref", f"refs/heads/{branch}", "--format=%(upstream:track)"]).stdout.strip()
++    return ("gone" if track == "[gone]" else "local"), 0
++
++
+ def state(branch):
+     """Fork-staleness of a branch vs origin/main — the signal behind the viewer's
+     "N behind" badge.
+@@ -92,6 +107,8 @@ def state(branch):
+                   pushed commits (→ force-push); rebasing a *stacked* branch
+                   detaches it from its parent (→ that's a restack, not a sync).
+                   Neither is offered here — `why` explains the refusal.
++      shared    — local-vs-origin visibility (see _shared), with aheadOfOrigin
++                  the commit count origin's copy lacks.
+     Pure inspection: no fetch, no mutation."""
+     if not branch:
+         return {"branch": "", "behind": 0, "syncable": False, "why": "no branch"}
+@@ -110,8 +127,10 @@ def state(branch):
+         why = f"stacked on {parent} — needs a restack, not a sync"
+     elif published:
+         why = "has an open PR — rebase would rewrite pushed commits"
++    shared, ahead = _shared(branch)
+     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
+             "syncable": behind > 0 and parent == "main" and not published,
++            "shared": shared, "aheadOfOrigin": ahead,
+             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
+ 
+ 
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index cc3bfdd..c223b4f 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -246,6 +246,8 @@ export function NodeActions(props: {
+   const behind = () => sync.data?.behind ?? 0;
+   const critical = () => sync.data?.deployCritical ?? [];
+   const blocked = () => critical().length > 0;
++  const shared = () => sync.data?.shared;
++  const aheadOfOrigin = () => sync.data?.aheadOfOrigin ?? 0;
+   // ambient daemon's dry-run verdict for this branch — folded into the one restack button so a
+   // predicted collision warns before you click, instead of living as its own duplicate badge.
+   const willConflict = () => props.ambient?.verdict === "will-conflict";
+@@ -348,6 +350,33 @@ export function NodeActions(props: {
+ 
+   return (
+     <div class="node-actions" ref={root}>
++      {/* local-vs-shared chip — read-only: what (if anything) of this branch the team can
++          see on origin. ○ never pushed · ◐ origin behind by N · ● in sync · ✕ deleted on
++          origin (merged — contract it). Deliberately its own visual register, distinct from
++          the forest chips: those are local relations, this is the shared-with-the-team one. */}
++      <Show when={!isReview() && shared()}>
++        <span
++          class={`nh-shared nh-shared-${shared()}`}
++          title={
++            shared() === "local"
++              ? "local only — never pushed; the team cannot see this branch"
++              : shared() === "ahead"
++                ? `pushed, but origin is ${aheadOfOrigin()} commit${aheadOfOrigin() === 1 ? "" : "s"} behind your local`
++                : shared() === "synced"
++                  ? "in sync with origin — the team sees exactly this"
++                  : "origin's copy was deleted (squash-merged) — finished work; contract it"
++          }
++        >
++          {shared() === "local"
++            ? "○ local"
++            : shared() === "ahead"
++              ? `◐ ${aheadOfOrigin()}↑`
++              : shared() === "synced"
++                ? "● shared"
++                : "✕ merged"}
++        </span>
++      </Show>
++
+       {/* fork-state vs origin/main — calm "behind", escalating to ember "push blocked" when
+           main changed deploy-critical files this branch lacks (what the pre-push hook rejects).
+           When blocked the fix (rebase forward) surfaces inline next to the alarm; the full
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index da053dd..b762022 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -188,6 +188,11 @@ body {
+ .nh-amb.amb-restack { color: var(--patina); }
+ .nh-blocked { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
+ .nh-pushed { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
++.nh-shared { font-size: 12px; cursor: help; white-space: nowrap; letter-spacing: 0.02em; }
++.nh-shared-local { color: var(--ink-faint); }
++.nh-shared-ahead { color: var(--ember); }
++.nh-shared-synced { color: var(--add); }
++.nh-shared-gone { color: var(--ink-dim); text-decoration: line-through; }
+ .nh-fix {
+   font: inherit; font-size: 12px; color: var(--del); background: transparent;
+   border: 1px solid var(--del); border-radius: 5px; padding: 3px 9px; cursor: pointer; opacity: 0.9;
+diff --git a/scripts/viewer-solid/src/types.ts b/scripts/viewer-solid/src/types.ts
+index d4e52d9..df7a6f0 100644
+--- a/scripts/viewer-solid/src/types.ts
++++ b/scripts/viewer-solid/src/types.ts
+@@ -202,6 +202,8 @@ export const SyncState = z.object({
+   syncable: z.boolean(), // safe to fast-forward-rebase (else stacked/published)
+   why: z.string(), // when not syncable, the reason
+   deployCritical: z.array(z.string()).optional(), // deploy-critical files origin/main changed that this branch lacks
++  shared: z.enum(["local", "ahead", "synced", "gone"]).optional(), // local-vs-origin: can the team see this branch?
++  aheadOfOrigin: z.number().optional(), // commits origin's copy lacks (shared === "ahead")
+ });
+ export type SyncState = z.infer<typeof SyncState>;
+ 

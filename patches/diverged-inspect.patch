@@ -1,0 +1,267 @@
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index 7f7f226..da29371 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -6,6 +6,7 @@ import json
+ import os
+ import re
+ import time
++import subprocess
+ import threading
+ from urllib.parse import parse_qs
+ from concurrent.futures import ThreadPoolExecutor
+@@ -570,3 +571,91 @@ def post_reconcile(req, raw):
+     req._send(200 if ok else 500, json.dumps(
+         {"ok": ok, "ejected": ok,
+          "err": "" if ok else (r.stderr or r.stdout or "could not launch reconcile session")}))
++
++
++def _patch_ids(range_spec):
++    # sha → patch-id for every commit in range_spec. Content-stable across rebases, so a
++    # rewritten commit matches its pre-rewrite twin even though the shas differ.
++    shas = ctx.run(["git", "rev-list", range_spec]).stdout
++    if not shas.strip():
++        return {}
++    cwd = ctx.repo_cwd()
++    diffs = subprocess.run(["git", "diff-tree", "--stdin", "-p"], input=shas,
++                           cwd=cwd, capture_output=True, text=True).stdout
++    pids = subprocess.run(["git", "patch-id", "--stable"], input=diffs,
++                          cwd=cwd, capture_output=True, text=True).stdout
++    out = {}
++    for line in pids.splitlines():
++        parts = line.split()
++        if len(parts) == 2:
++            out[parts[1]] = parts[0]
++    return out
++
++
++def diverged_detail(req, u):
++    # GET /diverged-detail?branch=X — what a ⇄ divergence actually IS: each side's commits with
++    # patch-id twins flagged (after a rebase the "behind" commits are the same changes under new
++    # shas, not lost work), plus the net tree diff between the two tips — i.e. exactly what a
++    # force-push would change on the remote. Read-only.
++    branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
++    if not branch:
++        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
++        return
++    r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
++    up = r.stdout.strip() if r.returncode == 0 else ""
++    if not up:
++        req._send(404, json.dumps({"ok": False, "err": f"{branch} has no upstream"}))
++        return
++
++    def commits(range_spec):
++        out = []
++        for line in ctx.run(["git", "log", "--format=%H\t%s", range_spec]).stdout.splitlines():
++            sha, _, subj = line.partition("\t")
++            if sha:
++                out.append({"full": sha, "sha": sha[:9], "subject": subj})
++        return out
++
++    ahead, behind = commits(f"{up}..{branch}"), commits(f"{branch}..{up}")
++    a_ids, b_ids = _patch_ids(f"{up}..{branch}"), _patch_ids(f"{branch}..{up}")
++    a_set, b_set = set(a_ids.values()), set(b_ids.values())
++    for c in ahead:
++        c["matched"] = a_ids.get(c.pop("full"), "") in b_set
++    for c in behind:
++        c["matched"] = b_ids.get(c.pop("full"), "") in a_set
++    # Containment, tiered. Per-commit patch-ids only match a pure rebase; Phil's prep-to-merge
++    # SQUASHES (4 pushed commits -> 1 local), so also try an in-memory merge of the pushed head
++    # into local: same tree -> everything's already here; clean but different -> real remote-only
++    # additions; conflicts -> both sides changed the same regions (the file list names them).
++    if behind and all(c["matched"] for c in behind):
++        containment, overlap = "rebase", []
++    else:
++        mt = subprocess.run(["git", "merge-tree", "--write-tree", branch, up],
++                            cwd=ctx.repo_cwd(), capture_output=True, text=True)
++        if mt.returncode == 0:
++            local_tree = ctx.run(["git", "rev-parse", f"{branch}^{{tree}}"]).stdout.strip()
++            containment = "contained" if mt.stdout.split("\n", 1)[0].strip() == local_tree else "clean-extra"
++            overlap = []
++        else:
++            seen = set()
++            for line in mt.stdout.splitlines()[1:]:
++                parts = line.split("\t")
++                if len(parts) == 2 and parts[0].count(" ") == 2:   # "mode sha stage\tpath" rows
++                    seen.add(parts[1])
++            containment, overlap = "overlap", sorted(seen)[:30]
++
++    def work_stat(range_spec):
++        # each side's own work over their common ground (three-dot), so the restack's
++        # main-advance noise doesn't drown the real divergence.
++        return ctx.run(["git", "diff", "--shortstat", range_spec]).stdout.strip()
++
++    files = []
++    for line in ctx.run(["git", "diff", "--numstat", up, branch]).stdout.splitlines():
++        parts = line.split("\t")
++        if len(parts) == 3:
++            files.append({"path": parts[2], "plus": parts[0], "minus": parts[1]})
++    req._send(200, json.dumps({
++        "ok": True, "upstream": up, "ahead": ahead, "behind": behind,
++        "containment": containment, "overlap": overlap,
++        "localWork": work_stat(f"{up}...{branch}"), "remoteWork": work_stat(f"{branch}...{up}"),
++        "shortstat": ctx.run(["git", "diff", "--shortstat", up, branch]).stdout.strip(),
++        "files": files[:50]}))
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 5195296..ed3f639 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -232,6 +232,8 @@ class H(BaseHTTPRequestHandler):
+             return sync.get_many(self, u)
+         elif u.path == "/forest-health":  # batch drifted/merged-ghost per node (badges + fix-all)
+             return sync.health_many(self, u)
++        elif u.path == "/diverged-detail":  # what a ⇄ divergence IS: per-side commits (patch-id twins) + net tip diff
++            return sync.diverged_detail(self, u)
+         elif u.path == "/events":   # SSE: one push stream per tab, replaces the /heartbeat + /sig + /?_hot polls
+             self.send_response(200)
+             self.send_header("Content-Type", "text/event-stream")
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 291c5a5..70cb60e 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1656,6 +1656,33 @@ function NodeDetail() {
+   }));
+   const nodeAmbient = (b: string) => ambient.data?.report?.branches.find((x) => x.branch === b);
+ 
++  // the ⇄ diverged chip's inspect panel: what the divergence actually IS — each side's commits
++  // with patch-id twins flagged (a rebase reads as "same change, rewritten", not lost work) and
++  // the net tip-to-tip diff (what a force-push would change on the remote). Fetched on open only.
++  const [divergedOpen, setDivergedOpen] = createSignal(false);
++  createEffect(on(active, () => setDivergedOpen(false)));
++  const divergedDetail = createQuery(() => ({
++    queryKey: ["diverged-detail", forestRepo(location()) ?? "loops", active()],
++    queryFn: () =>
++      fetch(withRepo("/diverged-detail?branch=" + encodeURIComponent(active()))).then(
++        (r) =>
++          r.json() as Promise<{
++            ok: boolean;
++            err?: string;
++            upstream?: string;
++            ahead?: { sha: string; subject: string; matched: boolean }[];
++            behind?: { sha: string; subject: string; matched: boolean }[];
++            containment?: "rebase" | "contained" | "clean-extra" | "overlap";
++            overlap?: string[];
++            localWork?: string;
++            remoteWork?: string;
++            shortstat?: string;
++            files?: { path: string; plus: string; minus: string }[];
++          }>,
++      ),
++    enabled: divergedOpen() && !!nodeHealth(active())?.diverged,
++  }));
++
+   // cross-forest chat index overlay (read-only; every thread in this browser).
+   const [showChats, setShowChats] = createSignal(false);
+   // a chat the index asked to open on a (possibly other) branch: navigate there, then open the
+@@ -2052,6 +2079,14 @@ function NodeDetail() {
+                 title={`local diverged from its pushed PR head ${leaf(nodeHealth(active())!.upstream!)} (${nodeHealth(active())?.ahead ?? 0}↑ ${nodeHealth(active())?.behind ?? 0}↓) — almost always a local rebase the pushed head hasn't caught. Don't Pull (it re-adds the stale commits); hand it to Claude to reconcile.`}
+               >
+                 ⇄ diverged from {leaf(nodeHealth(active())!.upstream!)} ({nodeHealth(active())?.ahead ?? 0}↑ {nodeHealth(active())?.behind ?? 0}↓)
++                <button
++                  class="nh-fix"
++                  style={{ "margin-left": "8px" }}
++                  title="show exactly what diverged: each side's commits (rebased twins flagged) + the net content difference between the two tips"
++                  onClick={() => setDivergedOpen(!divergedOpen())}
++                >
++                  {divergedOpen() ? "hide" : "inspect"}
++                </button>
+                 <button
+                   class="nh-fix"
+                   style={{ "margin-left": "8px" }}
+@@ -2064,6 +2099,96 @@ function NodeDetail() {
+               </span>
+             </Show>
+           </div>
++          <Show when={divergedOpen() && nodeHealth(active())?.diverged}>
++            <div
++              class="nh-diverged-detail"
++              style={{
++                margin: "6px 0 2px",
++                padding: "10px 12px",
++                border: "1px solid var(--line, #444)",
++                "border-radius": "8px",
++                "font-size": "12.5px",
++                "line-height": "1.55",
++              }}
++            >
++              <Show when={divergedDetail.data} fallback={<span>reading both sides…</span>}>
++                <Show when={divergedDetail.data!.ok} fallback={<span>✗ {divergedDetail.data!.err}</span>}>
++                  <div style={{ "margin-bottom": "6px" }}>
++                    <Switch>
++                      <Match when={divergedDetail.data!.containment === "rebase"}>
++                        <span>
++                          every pushed-head commit is patch-identical to a local one — this is a rebase, the pushed head
++                          is just stale; a force-push loses nothing.
++                        </span>
++                      </Match>
++                      <Match when={divergedDetail.data!.containment === "contained"}>
++                        <span>
++                          the pushed head's content is fully present locally (squash/rework absorbed it) — a force-push
++                          loses nothing.
++                        </span>
++                      </Match>
++                      <Match when={divergedDetail.data!.containment === "clean-extra"}>
++                        <span>
++                          ⚠ the pushed head has changes NOT present locally (they'd merge cleanly) — real remote-only
++                          work; reconcile before any force-push.
++                        </span>
++                      </Match>
++                      <Match when={divergedDetail.data!.containment === "overlap"}>
++                        <span>
++                          both sides changed the same regions differently — local rework supersedes (or conflicts with)
++                          the pushed head in: {(divergedDetail.data!.overlap ?? []).join(", ")}
++                        </span>
++                      </Match>
++                    </Switch>
++                    <div style={{ opacity: 0.75 }}>
++                      local work over common ground: {divergedDetail.data!.localWork || "none"} · pushed-head work over
++                      common ground: {divergedDetail.data!.remoteWork || "none"} · tip-to-tip (includes any main
++                      advance): {divergedDetail.data!.shortstat || "identical trees"}
++                    </div>
++                  </div>
++                  <div style={{ display: "flex", gap: "24px", "flex-wrap": "wrap" }}>
++                    <div>
++                      <div style={{ opacity: 0.65 }}>only local ({(divergedDetail.data!.ahead ?? []).length}↑)</div>
++                      <For each={divergedDetail.data!.ahead}>
++                        {(c) => (
++                          <div>
++                            <code>{c.sha}</code> {c.subject}{" "}
++                            <span style={{ opacity: 0.6 }}>{c.matched ? "≡ rewritten twin" : "◆ new here"}</span>
++                          </div>
++                        )}
++                      </For>
++                    </div>
++                    <div>
++                      <div style={{ opacity: 0.65 }}>only pushed head ({(divergedDetail.data!.behind ?? []).length}↓)</div>
++                      <For each={divergedDetail.data!.behind}>
++                        {(c) => (
++                          <div>
++                            <code>{c.sha}</code> {c.subject}{" "}
++                            <span style={{ opacity: 0.6 }}>{c.matched ? "≡ rewritten twin" : "◆ no local twin"}</span>
++                          </div>
++                        )}
++                      </For>
++                    </div>
++                    <Show when={(divergedDetail.data!.files ?? []).length > 0}>
++                      <div>
++                        <div style={{ opacity: 0.65 }}>net changed files</div>
++                        <For each={divergedDetail.data!.files}>
++                          {(f) => (
++                            <div>
++                              <code>{f.path}</code>{" "}
++                              <span style={{ opacity: 0.6 }}>
++                                +{f.plus} −{f.minus}
++                              </span>
++                            </div>
++                          )}
++                        </For>
++                      </div>
++                    </Show>
++                  </div>
++                </Show>
++              </Show>
++            </div>
++          </Show>
+           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
+               The blessed count lives in the spine; the map opens from the spine + `m`. */}
+           <div class="nh-bar">

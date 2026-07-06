@@ -1,0 +1,19 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 4a816f4..feb874b 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -2012,14 +2012,11 @@ function NodeDetail() {
+           <div class="kbd-help" onClick={(e) => e.stopPropagation()}>
+             <div class="kbd-help-head">keyboard · reviewing a branch</div>
+             <dl>
+-              <div><dt><span class="k">j</span><span class="k">k</span></dt><dd>previous / next branch</dd></div>
+               <div><dt><span class="k">tab</span></dt><dd>next file</dd></div>
+               <div><dt><span class="k">b</span></dt><dd>show / hide the file panel</dd></div>
+               <div><dt><span class="k">⌘F</span></dt><dd>filter files</dd></div>
+               <div><dt><span class="k">⇧B</span></dt><dd>bless file &amp; advance</dd></div>
+               <div><dt><span class="k">⇧U</span></dt><dd>unbless file</dd></div>
+-              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span></dt><dd>base: branch / main / blessed</dd></div>
+-              <div><dt><span class="k">c</span></dt><dd>commits ↔ diffs</dd></div>
+               <div><dt><span class="k">o</span></dt><dd>open hovered line in nvim</dd></div>
+               <div><dt><span class="k">m</span><span class="k">esc</span></dt><dd>up to the forest</dd></div>
+               <div><dt><span class="k">?</span></dt><dd>this help</dd></div>

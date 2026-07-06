@@ -1,0 +1,98 @@
+diff --git a/scripts/srv/picker.py b/scripts/srv/picker.py
+index 82eb2ad..3963fe9 100644
+--- a/scripts/srv/picker.py
++++ b/scripts/srv/picker.py
+@@ -327,10 +327,10 @@ def promote(req, raw):   # POST /promote — graduate a watched branch into its
+     req._send(200, json.dumps({"ok": True, "project": project}))
+ 
+ 
+-def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
+-    d = json.loads(raw or "{}")
+-    args = [os.path.join(ctx.SCRIPTS, "stack-open"), d.get("branch", ""), d.get("path", "")]
+-    pos = d.get("pos") or d.get("line")   # opaque locator; forwarded verbatim — stack-open owns the grammar
++def open_on_branch(branch, path, pos=None):   # open <path> on <branch> in the warm review-nvim
++    # pos is an opaque locator forwarded verbatim — stack-open owns the grammar ("<line>" or "<line>:<col>").
++    # Returns (code, out, err); code 504 marks a wedged-nvim timeout. Stamps recency on success.
++    args = [os.path.join(ctx.SCRIPTS, "stack-open"), branch, path]
+     if pos:
+         args.append(str(pos))
+     # Bound it: stack-open probes the warm review-nvim, which hangs indefinitely if that
+@@ -348,12 +348,20 @@ def open_file(req, raw):   # POST /open — open a file on a branch in the warm
+         except ProcessLookupError:
+             pass
+         proc.communicate()
+-        req._send(504, json.dumps({"ok": False, "err": "stack-open timed out — the review-nvim is unresponsive (wedged on a prompt?)"}))
+-        return
++        return 504, "", "stack-open timed out — the review-nvim is unresponsive (wedged on a prompt?)"
+     if proc.returncode == 0:
+-        _record_open(d.get("branch", ""))   # stamp recency for the no-PR picker ordering
+-    req._send(200 if proc.returncode == 0 else 500,
+-              json.dumps({"ok": proc.returncode == 0, "out": out, "err": err}))
++        _record_open(branch)   # stamp recency for the no-PR picker ordering
++    return proc.returncode, out, err
++
++
++def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim
++    d = json.loads(raw or "{}")
++    code, out, err = open_on_branch(d.get("branch", ""), d.get("path", ""), d.get("pos") or d.get("line"))
++    if code == 504:
++        req._send(504, json.dumps({"ok": False, "err": err}))
++        return
++    req._send(200 if code == 0 else 500,
++              json.dumps({"ok": code == 0, "out": out, "err": err}))
+ 
+ 
+ def drop_project(req, raw):   # POST /drop-project — forget a forest grouping (config only; branches kept)
+diff --git a/scripts/srv/reviews.py b/scripts/srv/reviews.py
+index 2d1741e..f02141d 100644
+--- a/scripts/srv/reviews.py
++++ b/scripts/srv/reviews.py
+@@ -13,6 +13,7 @@ import time
+ from urllib.parse import parse_qs
+ 
+ from srv import ctx
++from srv import picker
+ 
+ _cache = {"at": 0.0, "json": "[]"}
+ _TTL = 30   # gh search is a ~1s network round-trip and the review queue barely moves
+@@ -56,6 +57,27 @@ def import_pr(req, raw):
+     req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
+ 
+ 
++def from_github(req, raw):   # POST /from-github — Chrome ext: import a PR, then open <path> at <line> in nvim
++    d = json.loads(raw or "{}")
++    num = str(d.get("number", "")).strip().lstrip("#")
++    if not num.isdigit():
++        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
++        return
++    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
++    if r.returncode != 0:
++        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
++        return
++    _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
++    branch = r.stdout.strip()
++    path = (d.get("path") or "").strip()
++    if not path:
++        req._send(200, json.dumps({"ok": True, "branch": branch, "opened": False}))
++        return
++    code, _out, err = picker.open_on_branch(branch, path, d.get("line"))
++    req._send(200 if code == 0 else (504 if code == 504 else 500),
++              json.dumps({"ok": code == 0, "branch": branch, "opened": code == 0, "err": err}))
++
++
+ # Cheap "did they push?" check for the node-load hint: ls-remote the PR head and compare to
+ # the local branch tip. Network, so cache per branch briefly — a node can re-render often.
+ _remote_cache = {}   # branch -> (at, payload)
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 6b3c750..493d835 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -237,6 +237,8 @@ class H(BaseHTTPRequestHandler):
+             return picker.promote(self, raw)
+         if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
+             return reviews.import_pr(self, raw)
++        if self.path == "/from-github":   # Chrome ext: import a PR + open <path> at <line> in warm nvim
++            return reviews.from_github(self, raw)
+         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
+             return reviews.pull(self, raw)
+         if self.path == "/track":   # append one local usage event to .git/stack-usage.jsonl

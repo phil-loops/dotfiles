@@ -1,0 +1,22 @@
+diff --git a/scripts/stack-squash b/scripts/stack-squash
+index a078734..408747a 100755
+--- a/scripts/stack-squash
++++ b/scripts/stack-squash
+@@ -114,6 +114,17 @@ parent = git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN
+ # force-push); if the branch was never published, fall back to the frozen base.
+ sb = subprocess.run([STACK_BASE, branch], capture_output=True, text=True)
+ base = sb.stdout.strip() or git(["merge-base", parent, branch]).stdout.strip() or parent
++# Clamp a ROOT branch's base FORWARD to its real fork with origin/main. The frozen
++# .base goes stale-OLD when a restack rebases the branch onto a NEWER origin/main but
++# leaves .base at the old fork: `reset --soft <old-base>` would then fold origin/main's
++# whole advance (every commit between the old base and the new tip) into the squash —
++# the bug that swept 5 upstream PRs into a one-file goal commit. For a branch rooted on
++# main the true fork point is merge-base(origin/main, branch); use it whenever the frozen
++# base sits strictly behind it. (Stacked branches keep their parent fork — untouched.)
++if parent == MAIN:
++    omb = git(["merge-base", "origin/main", branch]).stdout.strip()
++    if omb and omb != base and git(["merge-base", "--is-ancestor", base, omb]).returncode == 0:
++        base = omb
+ force = False   # will pushing the squashed branch need a force? (true once published history is rewritten)
+ if unpushed:
+     up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])

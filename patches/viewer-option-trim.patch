@@ -1,0 +1,124 @@
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -473,26 +473,15 @@
+     return l.kind === "home" ? l.tab : "work";
+   };
+   const [forestQuery, setForestQuery] = createSignal("");
+-  // Forests recency sort — local commit / PR open / merge-to-main, persisted across loads.
+-  const FOREST_SORTS = [
+-    ["local", "worked on"],
+-    ["pr", "PR opened"],
+-    ["merged", "merged"],
+-  ] as const;
+-  type ForestSort = (typeof FOREST_SORTS)[number][0];
+-  const [forestSort, setForestSortRaw] = createSignal<ForestSort>(
+-    (localStorage.getItem("forestSort") as ForestSort) || "local",
+-  );
+-  const setForestSort = (s: ForestSort) => {
+-    localStorage.setItem("forestSort", s);
+-    setForestSortRaw(s);
+-  };
+-  const forestTs = (p: Project): number => {
+-    const mode = forestSort();
+-    if (mode === "pr") return p.prOpened ? Date.parse(p.prOpened) : 0;
+-    if (mode === "merged") return p.merged?.at ? Date.parse(p.merged.at) : 0;
+-    return (p.lastCommit ?? 0) * 1000;
+-  };
++  // Forests recency — one opinionated order, no sort knobs (Phil, 2026-07-05, third strike
++  // on option-proliferation). "Most recently alive": the latest of local commit, PR opened,
++  // and merge-to-main. The individual timestamps stay as passive per-card metadata.
++  const forestTs = (p: Project): number =>
++    Math.max(
++      (p.lastCommit ?? 0) * 1000,
++      p.prOpened ? Date.parse(p.prOpened) : 0,
++      p.merged?.at ? Date.parse(p.merged.at) : 0,
++    );
+ 
+   // hover a forest row → a card of its branches + one-line purposes ("what's in here").
+   // cached per project; a short delay keeps it from flickering as the pointer crosses rows.
+@@ -654,7 +643,7 @@
+         const levels = [...new Set(active.map((p) => p.interest ?? 0))].sort((a, b) => b - a);
+         const tiers = levels.map((interest) => ({
+           interest,
+-          // within a tier, most-recently-worked first (forestTs follows the active sort tab).
++          // within a tier, most-recently-alive first (blended commit/PR/merge recency).
+           items: active
+             .filter((p) => (p.interest ?? 0) === interest)
+             .sort((a, b) => forestTs(b) - forestTs(a)),
+@@ -736,15 +725,6 @@
+     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
+ 
+   const restacking = (name: string) => () => running() === name || running() === "__all__";
+-  const restackAction = (p: Project): Action => ({
+-    id: "restack:" + p.name,
+-    class: "forest-restack",
+-    arm: true,
+-    busy: restacking(p.name),
+-    label: () => (restacking(p.name)() ? "⤳ restacking…" : `⟳ ${p.behind} behind`),
+-    armLabel: () => "restack?",
+-    run: () => start(p.name),
+-  });
+   const dropAction = (p: Project): Action => ({
+     id: "drop:" + p.name,
+     class: "forest-drop",
+@@ -764,23 +744,15 @@
+     run: () => start("__all__"),
+   });
+ 
+-  const openWorktree = (branch: string) =>
+-    post("/worktree", { branch }).then((r) =>
+-      note(r.ok ? `⌂ revealed ${leaf(branch)} in Finder` : `✗ ${r.err || "couldn’t open worktree"}`));
+-  const worktreeAction = (branch: string): Action => ({
+-    id: "wt:" + branch,
+-    title: "reveal this branch's worktree in Finder — materialises a scratch one if it's checked out nowhere",
+-    label: () => "⌂ worktree",
+-    run: () => openWorktree(branch),
+-  });
+   const githubAction = (url: string, branch: string): Action => ({
+     id: "gh:" + branch,
+     title: "open on GitHub",
+     label: () => "↗ GitHub",
+     run: () => window.open(url, "_blank"),
+   });
+-  const workRowActions = (p: PR): Action[] =>
+-    [githubAction(p.url, p.branch), ...(canMutate ? [worktreeAction(p.branch)] : [])];
++  // GitHub link only — the worktree reveal moved to the node ⋯ menu (telemetry trim:
++  // ≤4 uses in 10d didn't earn a pill on every work row).
++  const workRowActions = (p: PR): Action[] => [githubAction(p.url, p.branch)];
+ 
+   // one forest row, shared by the priority tiers and the recently-merged fold. Metadata sits in
+   // fixed-width cells (pips · nodes · PR) so the columns line up down the list; the trailing cell
+@@ -869,9 +841,8 @@
+                   </Show>
+                 </div>
+               </Match>
+-              <Match when={p.behind > 0 && canMutate}>
+-                <span class="forest-trail"><ActionBar actions={[restackAction(p)]} /></span>
+-              </Match>
++              {/* passive count only — the action lives in the header's restack-all pill and
++                  ⌘K's per-project restack (telemetry trim: 0.9 uses/day didn't earn N row pills) */}
+               <Match when={p.behind > 0}>
+                 <span class="forest-trail">⟳ {p.behind} behind</span>
+               </Match>
+@@ -1059,21 +1030,6 @@
+           <Show when={canMutate && (projects.data || []).some((p) => p.behind > 0)}>
+             <ActionBar actions={[restackAllAction()]} />
+           </Show>
+-          <Show when={(projects.data || []).length > 1}>
+-            <span class="forest-sort">
+-              <For each={FOREST_SORTS}>
+-                {([key, label]) => (
+-                  <button
+-                    class="forest-sort-btn"
+-                    classList={{ active: forestSort() === key }}
+-                    onClick={() => setForestSort(key)}
+-                  >
+-                    {label}
+-                  </button>
+-                )}
+-              </For>
+-            </span>
+-          </Show>
+         </div>
+         <Show when={(projects.data || []).length > 6}>
+           <input

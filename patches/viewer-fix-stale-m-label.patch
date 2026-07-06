@@ -1,0 +1,13 @@
+diff --git a/scripts/viewer-solid/src/ForestMap.tsx b/scripts/viewer-solid/src/ForestMap.tsx
+index 645e7ec..5cd7b1e 100644
+--- a/scripts/viewer-solid/src/ForestMap.tsx
++++ b/scripts/viewer-solid/src/ForestMap.tsx
+@@ -430,7 +430,7 @@ export function ForestMap(props: {
+     >
+       <style>{CSS}</style>
+       <Show when={props.docked}>
+-        <button class="fm-dock-close" title="close map (m)" onClick={() => props.onClose()}>
++        <button class="fm-dock-close" title="close map" onClick={() => props.onClose()}>
+           ×
+         </button>
+       </Show>

@@ -1,0 +1,471 @@
+diff --git a/scripts/srv/rebase.py b/scripts/srv/rebase.py
+new file mode 100644
+index 0000000..27bb2dc
+--- /dev/null
++++ b/scripts/srv/rebase.py
+@@ -0,0 +1,87 @@
++# srv/rebase.py — the ejected forward-rebase, STREAMED. When /sync can't rebase a branch in
++# place (a real conflict, or an unsafe-to-rebase layout) it used to hand the work to an
++# interactive `claude` in a tmux window — and the viewer just showed a frozen "rebasing onto
++# origin/main via Claude" line that looked identical whether the session was grinding away or
++# long dead. Here we run that same rebase as a HEADLESS claude job and stream its output to
++# the browser over SSE, reusing chat.py's job model wholesale (buffered, replayable, survives a
++# closed tab). So "is it still working?" is answered by watching it work.
++#
++# Unlike chat (read-only), this job edits files + runs git to resolve conflicts — but it never
++# pushes and never opens a PR; publishing stays Phil's, exactly like the old interactive eject.
++# The escape hatch to take over by hand is the existing /chat-popout (resume the session id in
++# an interactive tmux claude) — the job is a plain chat.Job, so its session id works there.
++#
++#   rebase.start(branch, cwd, prompt)          → job key; launches once (idempotent per branch)
++#   POST /rebase-stream {branch}               → text/event-stream: replay + live-tail the job
++#   POST /rebase-stop   {branch}               → SIGKILL the branch's rebase job
++import json
++import os
++import signal
++import threading
++
++from srv import chat
++
++# git plumbing + conflict edits. No push/PR tool — landing stays Phil's, so even a runaway
++# session can't publish. Bare "Bash" pre-approves git; headless claude never prompts, so a tool
++# outside this list is denied rather than blocking.
++REBASE_TOOLS = ["Bash", "Read", "Edit", "Write", "Grep", "Glob"]
++
++
++def job_key(branch):
++    # one rebase per branch — a double "prep to merge" re-attaches instead of spawning a second.
++    return f"rebase:{branch}"
++
++
++def start(branch, cwd, prompt, model="sonnet"):
++    """Launch (once) a headless claude that rebases `branch` onto origin/main in `cwd`, as a
++    chat.Job keyed by the branch so any subscriber can replay + tail it. A live job for this
++    branch is reused, not re-spawned. Returns the job key to stream from."""
++    key = job_key(branch)
++    cmd = ["claude", "-p", prompt,
++           "--output-format", "stream-json",
++           "--include-partial-messages",
++           "--verbose",
++           "--model", model,
++           # variadic — keep it LAST so it doesn't swallow a following flag's value
++           "--allowedTools", *REBASE_TOOLS]
++    with chat._JOBS_LOCK:
++        job = chat._JOBS.get(key)
++        if job is not None and not job.done:
++            return key
++        job = chat.Job()
++        chat._JOBS[key] = job
++        chat._prune()
++        threading.Thread(target=chat._run_claude, args=(job, cmd, cwd), daemon=True).start()
++    return key
++
++
++def _send_gone(req):
++    req.send_response(200)
++    req.send_header("Content-Type", "text/event-stream")
++    req.send_header("Cache-Control", "no-store")
++    req.end_headers()
++    try:
++        req.wfile.write(b"event: gone\ndata: {}\n\n")
++        req.wfile.flush()
++    except (OSError, BrokenPipeError):
++        pass
++
++
++def stream(req, raw):   # POST /rebase-stream {branch} → SSE replay + live-tail of the rebase job
++    branch = (json.loads(raw or "{}").get("branch") or "").strip()
++    job = chat._JOBS.get(job_key(branch)) if branch else None
++    if job is None:
++        _send_gone(req)   # no job (expired / server restarted / never ejected) — client stops tailing
++        return
++    chat._subscribe(req, job, 0)
++
++
++def stop(req, raw):   # POST /rebase-stop {branch} — kill the branch's rebase job for real
++    branch = (json.loads(raw or "{}").get("branch") or "").strip()
++    job = chat._JOBS.get(job_key(branch)) if branch else None
++    if job and job.proc and job.proc.poll() is None:
++        try:
++            os.killpg(os.getpgid(job.proc.pid), signal.SIGKILL)
++        except (ProcessLookupError, OSError):
++            pass
++    req._send(200, json.dumps({"ok": True}))
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index 69a2c04..940c715 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
+ 
+ from . import ctx
+ from . import prompts
++from . import rebase
+ 
+ 
+ # ── deploy-critical detection (read-only) ────────────────────────────────────
+@@ -390,9 +391,22 @@ def _direct_rebase(branch):
+     return "clean", f"replayed {n} commit{'' if n == '1' else 's'} onto origin/main"
+ 
+ 
++def _eject_worktree(branch):
++    # Build the branch's worktree the same way stack-open/stack-claude do, then resolve its path
++    # (a real worktree holding the branch wins, else the scratch dir stack-open lays down) so the
++    # headless rebase runs exactly where the interactive one used to.
++    ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch])
++    wt = _worktree_of(branch)
++    if wt:
++        return wt
++    scratch = os.environ.get("STACK_OPEN_DIR", "/tmp/stack-study")
++    return os.path.join(scratch, branch.replace("/", "_"))
++
++
+ def _eject(branch):
+-    # Fallback: hand the rebase to a standalone Claude in the branch's OWN worktree — it
+-    # resolves conflicts in isolation and does NOT push or open a PR (Phil handles that).
++    # A real conflict / unsafe layout → hand the rebase to a headless claude in the branch's OWN
++    # worktree, STREAMED (srv/rebase). It resolves conflicts in isolation and does NOT push or
++    # open a PR (Phil handles that). Returns (ok, stream_key) — the key the client tails over SSE.
+     prompt = (
+         f"Rebase the branch `{branch}` forward onto the latest origin/main, here in this "
+         f"worktree. Run `git fetch origin main` then `git rebase origin/main`. Resolve any "
+@@ -400,9 +414,12 @@ def _eject(branch):
+         f"and do NOT open a PR; leave pushing to me. When done, summarize what replayed and "
+         f"any conflicts you resolved."
+     )
+-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-claude"), branch, prompt])
+-    ok = r.returncode == 0
+-    return ok, ("" if ok else (r.stderr or r.stdout or "could not launch rebase session"))
++    try:
++        cwd = _eject_worktree(branch)
++        key = rebase.start(branch, cwd, prompt)
++        return True, key
++    except Exception as e:
++        return False, str(e)[:400]
+ 
+ 
+ def _children_of(branch):
+@@ -482,11 +499,12 @@ def post_sync(req, raw):
+         req._send(200, json.dumps(
+             {"ok": True, "contract": True, "branch": branch, "children": _children_of(branch)}))
+         return
+-    # genuine conflict or unsafe-to-rebase-in-place → eject to a standalone Claude.
+-    ok, err = _eject(branch)
++    # genuine conflict or unsafe-to-rebase-in-place → eject to a headless claude, streamed.
++    ok, key = _eject(branch)
+     req._send(200 if ok else 500, json.dumps(
+         {"ok": ok, "ejected": ok, "conflict": status == "conflict",
+-         "err": "" if ok else (err or "could not launch rebase session")}))
++         "stream": key if ok else "",
++         "err": "" if ok else (key or "could not launch rebase session")}))
+ 
+ 
+ def post_contract(req, raw):
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index f146bc4..aed5f91 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+ from urllib.parse import urlparse, parse_qs
+ 
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
+-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage
++from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase
+ 
+ ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
+ srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
+@@ -376,6 +376,10 @@ class H(BaseHTTPRequestHandler):
+             return chat.popout(self, raw)
+         if self.path == "/chat-attach":      # save a dropped/pasted image → temp file claude can Read
+             return chat.attach(self, raw)
++        if self.path == "/rebase-stream":    # tail the ejected forward-rebase (headless claude) → SSE replay+live
++            return rebase.stream(self, raw)
++        if self.path == "/rebase-stop":      # ■ stop: kill the branch's ejected rebase job for real
++            return rebase.stop(self, raw)
+         if self.path == "/merge-subjects":   # crisp the merge-story commit subjects (one haiku pass)
+             return chat.merge_subjects(self, raw)
+         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index cc3bfdd..8e9654a 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -22,6 +22,7 @@ import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-que
+ import { provider, canMutate, withRepo } from "./provider";
+ import { useArm } from "./actions";
+ import { useViewerLocation } from "./router";
++import RebaseStream from "./RebaseStream";
+ 
+ interface CheckoutResult {
+   ok?: boolean;
+@@ -41,6 +42,8 @@ interface SyncResult {
+   ok?: boolean;
+   err?: string;
+   rebased?: boolean; // clean forward-rebase landed in place
++  ejected?: boolean; // couldn't rebase in place → handed to a headless claude, streamed
++  stream?: string; // the rebase job key to tail over /rebase-stream (set with ejected)
+   conflict?: boolean; // hit a conflict → Claude resolving in a worktree
+   contract?: boolean; // branch already merged into origin/main → drop & rewire instead
+ }
+@@ -97,6 +100,9 @@ export function NodeActions(props: {
+   const [doneAlert, setDoneAlert] = createSignal(false);
+   // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
+   const [contractKids, setContractKids] = createSignal<string[] | null>(null);
++  // an eject to a headless rebase is live → tail its output stream inline (RebaseStream) instead
++  // of the old frozen "rebasing onto origin/main via Claude" line that couldn't show liveness.
++  const [rebaseStreaming, setRebaseStreaming] = createSignal(false);
+   // the ⋯ menu open/closed
+   const [open, setOpen] = createSignal(false);
+   let root: HTMLDivElement | undefined;
+@@ -153,12 +159,8 @@ export function NodeActions(props: {
+           return { phase: "blocked" as const, msg: "already merged into origin/main — drop & rewire it instead (restack)" };
+         }
+         if (!sy.rebased) {
+-          return {
+-            phase: "blocked" as const,
+-            msg: sy.conflict
+-              ? "rebase conflicts with origin/main — Claude is resolving it in a worktree; re-run prep to merge when it's done"
+-              : "rebasing onto origin/main via Claude in a worktree — re-run prep to merge when it's done",
+-          };
++          // ejected to a headless rebase → stream it inline; re-run prep to merge once it lands.
++          return { phase: "streaming" as const };
+         }
+       }
+       setDone("⤓ checking out onto your main checkout…");
+@@ -196,6 +198,12 @@ export function NodeActions(props: {
+         sync.refetch();
+         return;
+       }
++      if (r.phase === "streaming") {
++        setDone(null);
++        setRebaseStreaming(true); // the rebase is running headless — tail it inline below
++        sync.refetch();
++        return;
++      }
+       if (r.phase === "error") {
+         setDone(`✗ ${r.msg}`);
+         qc.invalidateQueries({ queryKey: ["head"] });
+@@ -276,11 +284,10 @@ export function NodeActions(props: {
+         const kids = r.children ?? [];
+         setContractKids(kids);
+         setDone(`● already merged into origin/main — drop it & rewire ${kids.length} child${kids.length === 1 ? "" : "ren"} onto main?`);
+-      } else if (r.conflict) {
+-        setDoneAlert(true);
+-        setDone("⚠ rebase conflict — Claude is resolving it in a worktree; it holds a worktree and blocks restacks until cleared");
+       } else {
+-        setDone("✓ rebasing on main — Claude is on it in a worktree");
++        // ejected (real conflict or unsafe layout) → headless rebase running; tail it inline.
++        setDone(null);
++        setRebaseStreaming(true);
+       }
+       sync.refetch();
+     },
+@@ -504,6 +511,10 @@ export function NodeActions(props: {
+       <Show when={done()}>
+         <span class="nh-done" classList={{ "nh-done-alert": doneAlert() }} title={done() ?? ""}>{done()}</span>
+       </Show>
++
++      <Show when={rebaseStreaming()}>
++        <RebaseStream branch={props.branch} onClose={() => setRebaseStreaming(false)} />
++      </Show>
+     </div>
+   );
+ }
+diff --git a/scripts/viewer-solid/src/RebaseStream.tsx b/scripts/viewer-solid/src/RebaseStream.tsx
+new file mode 100644
+index 0000000..0349f5e
+--- /dev/null
++++ b/scripts/viewer-solid/src/RebaseStream.tsx
+@@ -0,0 +1,156 @@
++import { createSignal, onCleanup, onMount, Show } from "solid-js";
++import { withRepo } from "./provider";
++import { renderMarkdown } from "./markdown";
++
++// RebaseStream — watch the ejected forward-rebase work, live. When /sync can't rebase a branch
++// in place it hands the job to a headless claude (srv/rebase); this panel tails that job's
++// output over SSE so the old frozen "rebasing onto origin/main via Claude" line becomes a
++// moving stream you can trust is alive. Self-contained: it owns its fetch + SSE parse (a
++// trimmed twin of chatRunner.consume — no chatStore, no multi-turn), so it drops in under
++// NodeActions with one mount line and tears its connection down on unmount.
++//
++//   <RebaseStream branch={b} onClose={() => …} />
++//
++// Terminal states: `done` (claude finished — re-run prep to merge), `gone` (no job: it
++// expired, or the server restarted mid-rebase), `error`. "Take over" pops the same session
++// out into an interactive tmux claude via the existing /chat-popout.
++const HEADERS = { "Content-Type": "application/json" };
++
++async function post(url: string, body: unknown) {
++  await fetch(withRepo(url), { method: "POST", headers: HEADERS, body: JSON.stringify(body) }).catch(() => {});
++}
++
++export default function RebaseStream(props: { branch: string; onClose: () => void }) {
++  const [text, setText] = createSignal("");
++  const [status, setStatus] = createSignal<string | null>("starting");
++  const [phase, setPhase] = createSignal<"streaming" | "done" | "gone" | "error">("streaming");
++  const [err, setErr] = createSignal<string | null>(null);
++  const [session, setSession] = createSignal<string | null>(null);
++  const ctrl = new AbortController();
++  let scroller: HTMLDivElement | undefined;
++  // sticky-bottom: follow new output only while parked at the bottom, so scrolling up to read
++  // back doesn't get yanked down on the next token.
++  let stick = true;
++  const onScroll = () => {
++    if (!scroller) return;
++    stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
++  };
++  const follow = () => {
++    if (stick && scroller) scroller.scrollTop = scroller.scrollHeight;
++  };
++
++  async function consume() {
++    let res: Response;
++    try {
++      res = await fetch(withRepo("/rebase-stream"), {
++        method: "POST",
++        headers: HEADERS,
++        signal: ctrl.signal,
++        body: JSON.stringify({ branch: props.branch }),
++      });
++    } catch (e) {
++      if (!ctrl.signal.aborted) {
++        setErr(e instanceof Error ? e.message : String(e));
++        setPhase("error");
++      }
++      return;
++    }
++    if (!res.ok || !res.body) {
++      setErr(`/rebase-stream → ${res.status}`);
++      setPhase("error");
++      return;
++    }
++    const reader = res.body.getReader();
++    const dec = new TextDecoder();
++    let buf = "";
++    let finished = false;
++    for (;;) {
++      const { done, value } = await reader.read();
++      if (done) break;
++      buf += dec.decode(value, { stream: true });
++      let nl: number;
++      while ((nl = buf.indexOf("\n\n")) >= 0) {
++        const frame = buf.slice(0, nl);
++        buf = buf.slice(nl + 2);
++        let event = "message";
++        let data = "";
++        for (const ln of frame.split("\n")) {
++          if (ln.startsWith("event:")) event = ln.slice(6).trim();
++          else if (ln.startsWith("data:")) data += ln.slice(5).trim();
++        }
++        if (!data) continue; // keepalive ping
++        const payload = JSON.parse(data);
++        if (event === "session") {
++          if (payload.session_id) setSession(payload.session_id);
++        } else if (event === "token") {
++          setStatus(null);
++          setText((t) => t + (payload.t || ""));
++          follow();
++        } else if (event === "status") {
++          setStatus(payload.s);
++        } else if (event === "done") {
++          if (payload.session_id) setSession(payload.session_id);
++          setPhase("done");
++          finished = true;
++        } else if (event === "gone") {
++          setPhase("gone");
++          finished = true;
++        } else if (event === "error") {
++          setErr(payload.err || "stream error");
++          setPhase("error");
++          finished = true;
++        }
++      }
++      if (finished) {
++        await reader.cancel().catch(() => {});
++        break;
++      }
++    }
++  }
++
++  onMount(() => void consume());
++  onCleanup(() => ctrl.abort());
++
++  const streaming = () => phase() === "streaming";
++  const takeOver = () => {
++    const s = session();
++    if (s) void post("/chat-popout", { session: s, branch: props.branch });
++  };
++  const stop = () => {
++    void post("/rebase-stop", { branch: props.branch });
++    setPhase("done");
++  };
++
++  return (
++    <div class="rebase-stream">
++      <div class="rs-head">
++        <span class="rs-title" classList={{ "rs-live": streaming() }}>
++          <Show when={streaming()} fallback={phase() === "done" ? "✓" : phase() === "gone" ? "◌" : "✗"}>
++            <span class="rs-spin">⟳</span>
++          </Show>{" "}
++          {streaming()
++            ? `rebasing ${props.branch} onto origin/main${status() ? ` — ${status()}` : "…"}`
++            : phase() === "done"
++              ? "rebase session finished — re-run prep to merge"
++              : phase() === "gone"
++                ? "rebase job gone (expired or server restarted) — re-run prep to merge to check"
++                : `rebase stream error: ${err() ?? "?"}`}
++        </span>
++        <span class="rs-btns">
++          <Show when={streaming() && session()}>
++            <button class="rs-btn" title="take over by hand — resume this rebase in an interactive tmux claude" onClick={takeOver}>
++              take over
++            </button>
++          </Show>
++          <Show when={streaming()}>
++            <button class="rs-btn" title="kill the rebase job for real" onClick={stop}>■ stop</button>
++          </Show>
++          <button class="rs-btn" title="hide this stream (the job keeps running)" onClick={props.onClose}>✕</button>
++        </span>
++      </div>
++      <Show when={text()}>
++        <div class="rs-body" ref={scroller} onScroll={onScroll} innerHTML={renderMarkdown(text())} />
++      </Show>
++    </div>
++  );
++}
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index 30996f6..4769899 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -226,6 +226,33 @@ body {
+   border: 1px solid var(--del); border-radius: 5px;
+   padding: 2px 7px; background: var(--del-bg);
+ }
++/* ── ejected-rebase live stream (RebaseStream) ──────────────────────────
++   floats below the actions row like .nh-menu; replaces the old frozen
++   "rebasing onto origin/main via Claude" line with the job's live output. */
++.rebase-stream {
++  position: absolute; top: calc(100% + 8px); right: 0; z-index: 25;
++  width: min(560px, 78vw); display: flex; flex-direction: column; gap: 8px;
++  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
++  padding: 10px 12px; box-shadow: 0 12px 34px -14px rgba(0, 0, 0, 0.75);
++  text-align: left;
++}
++.rs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
++.rs-title { font-size: 12px; color: var(--patina); }
++.rs-title.rs-live { color: var(--ember); }
++.rs-spin { display: inline-block; animation: rs-spin 1.1s linear infinite; }
++@keyframes rs-spin { to { transform: rotate(360deg); } }
++.rs-btns { display: flex; gap: 6px; flex: none; }
++.rs-btn {
++  font: inherit; font-size: 11px; color: var(--ink-dim); cursor: pointer;
++  background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 2px 7px;
++}
++.rs-btn:hover { color: var(--ink); border-color: var(--patina); }
++.rs-body {
++  max-height: 340px; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--ink-dim);
++  border-top: 1px solid var(--rule); padding-top: 8px;
++}
++.rs-body pre { white-space: pre-wrap; word-break: break-word; }
++
+ /* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
+ .icon-btn {
+   font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);
