@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# loops-tail — one combined, colored tail of the loops dev stack's logs.
+#
+#   loops-tail                 tail your default sources (loops-tail.conf)
+#   loops-tail -p | --pick     fzf multi-select sources (TAB toggles), then tail
+#   loops-tail -l | --list     list available sources (● = in your defaults)
+#   loops-tail <source…>       tail exactly these sources
+#
+# Sources (discovered live):
+#   server            the :3000 dev server (/tmp/loops-dev.log, written by loops-restart's tee)
+#   preview:<name>    a loops-preview side server (/tmp/loops-preview-<name>.log)
+#   docker:<name>     a running container (docker logs -f)
+#
+# Defaults live in ~/.dotfiles/loops-tail.conf — one source per line, # comments fine.
+# Each line of output is prefixed with a colored [source] tag; Ctrl-C stops everything.
+set -uo pipefail
+
+CONF="$HOME/.dotfiles/loops-tail.conf"
+TAIL_N="${LOOPS_TAIL_LINES:-50}"
+
+sources() {
+  [ -f /tmp/loops-dev.log ] && echo "server"
+  for f in /tmp/loops-preview-*.log; do
+    [ -e "$f" ] || continue
+    b="${f#/tmp/loops-preview-}"
+    echo "preview:${b%.log}"
+  done
+  docker ps --format '{{.Names}}' 2>/dev/null | sed 's/^/docker:/' | sort
+}
+
+defaults() {
+  if [ -s "$CONF" ]; then
+    grep -vE '^[[:space:]]*#' "$CONF" | awk 'NF'
+  else
+    echo "server"
+  fi
+}
+
+list() {
+  local defs; defs=" $(defaults | tr '\n' ' ') "
+  sources | while IFS= read -r s; do
+    case "$defs" in *" $s "*) echo "● $s" ;; *) echo "  $s" ;; esac
+  done
+}
+
+cmd_for() {
+  case "$1" in
+    server)     echo "tail -n $TAIL_N -F /tmp/loops-dev.log" ;;
+    preview:*)  echo "tail -n $TAIL_N -F /tmp/loops-preview-${1#preview:}.log" ;;
+    docker:*)   echo "docker logs -f --tail $TAIL_N ${1#docker:}" ;;
+    *)          return 1 ;;
+  esac
+}
+
+# ── pick the sources ────────────────────────────────────────────────
+picked=()
+case "${1:-}" in
+  -l|--list)
+    list; exit 0 ;;
+  -p|--pick)
+    while IFS= read -r s; do picked+=("${s#? }"); done < <(
+      list | fzf --multi --height=50% --reverse \
+        --prompt='tail ▸ ' --header='TAB marks several · ENTER tails · ● = default'
+    )
+    [ "${#picked[@]}" -gt 0 ] || exit 0 ;;
+  "")
+    while IFS= read -r s; do picked+=("$s"); done < <(defaults) ;;
+  *)
+    picked=("$@") ;;
+esac
+
+# ── tail them all, tagged and colored ───────────────────────────────
+COLORS=(36 33 35 32 34 91 92 93 94 95)
+pids=()
+cleanup() {
+  for p in "${pids[@]}"; do
+    pkill -P "$p" 2>/dev/null
+    kill "$p" 2>/dev/null
+  done
+}
+trap cleanup EXIT INT TERM
+
+i=0
+for s in "${picked[@]}"; do
+  cmd="$(cmd_for "$s")" || { echo "loops-tail: unknown source '$s' (try --list)" >&2; continue; }
+  c="${COLORS[$((i % ${#COLORS[@]}))]}"
+  i=$((i + 1))
+  (
+    $cmd 2>&1 | awk -v tag="$(printf '\033[%sm[%s]\033[0m' "$c" "$s")" '{ print tag, $0; fflush() }'
+  ) &
+  pids+=($!)
+done
+
+[ "${#pids[@]}" -gt 0 ] || { echo "loops-tail: nothing to tail" >&2; exit 1; }
+wait

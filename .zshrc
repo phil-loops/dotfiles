@@ -23,6 +23,7 @@ alias db="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion
 alias db:rw="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion-tunnel --writer"
 alias db:prod="LOCAL_PORT=54322 aws-vault exec prod -- ~/.dotfiles/scripts/bastion-tunnel --cluster db-loops-production"
 alias refresh="rm -fr .next node_modules && task dev"
+alias lt="$HOME/.dotfiles/scripts/loops-tail"  # combined dev-stack log tail; lt -p to fzf-pick sources, defaults in loops-tail.conf
 alias docs="cd ~/coding/docs && mintlify dev"
 
 ppl() {
