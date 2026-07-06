@@ -58,3 +58,31 @@ Lifecycle: build → review → ship → merge → contract → observe.
 - When Phil says "too many X," run stack-usage first, then trim holistically, not per-shot.
 
 *Items 1–2 are where the next effort goes. 3 is yours already. 4 is small. 5 waits.*
+
+## Open questions — settle 1 and 2 BEFORE the CI badge ships
+
+1. **State precedence order (the principle contradicts its own guardrail).** "Every state
+   has a face" collides with "one status signal per level" the moment a node is behind-main
+   AND CI-red AND unseated — more states than slots (six chips per row was the original
+   complaint). Decide the ranking once: each level shows only the single most
+   action-relevant state — roughly *blocks-your-next-motion > will-ambush-later > FYI* —
+   and the rest fold into hover. Without this, the CI badge is just chip number seven.
+2. **Telemetry gates ACTIONS, not faces.** Applied literally, "under 1 use/day → ⋯" kills
+   the CI badge (zero clicks, because it doesn't exist — invisible things can't be
+   clicked). Faces are gated by ambush frequency: how often did this state silently burn a
+   motion (the #9405 red-checks hunt = one incident). Actions stay click-gated.
+3. **The Work-tab spine needs its own design pass.** "Lifecycle state + progress" names
+   the shape, not the derivation: what are the canonical states
+   (building → reviewing → shipping → contracting?), and what's each one's source of
+   truth — blessing coverage, PR state, git config? Manual pips already failed BECAUSE
+   manual. Deriving intent from observable state is the hard problem here; don't write UI
+   until the states are enumerated with their sources.
+4. **Cross-cutting state lives in a registry, not in per-request shell-outs.** CI truth
+   comes from prwatch --sweep, dev-server truth from loops-restart's world. Follow the
+   agent-registration precedent: pollers WRITE one file, the viewer only READS, and every
+   badge carries a staleness timestamp — a green badge from 20 minutes ago on a now-red PR
+   is its own ambush. A face that lies is worse than no face.
+5. **Verdict-folding makes the restack button modal — keep the label contract.** As
+   CONTRACT / dry-run-conflict / behind-N all fold into one button, "what will THIS click
+   do" carries the whole safety story. Invariant: the button's label always states its
+   plan (the ambient dry-run already does this); never just "restack."
