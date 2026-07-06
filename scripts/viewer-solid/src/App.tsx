@@ -2237,9 +2237,14 @@ function FileEntry(props: {
       /* clipboard blocked (insecure origin / denied) — silently no-op */
     }
   };
+  // a stale file (blessed once, changed since) can flip between its FULL diff and just the
+  // delta past the blessed state — the part that's actually unreviewed.
+  const tarnished = () => props.file.status === "stale" && !blessed();
+  const [deltaView, setDeltaView] = createSignal(false);
+  const shownPatch = () => (deltaView() && props.file.stale ? props.file.stale : props.file.patch);
   const html = () =>
-    props.file.patch
-      ? Diff2Html.html(props.file.patch, {
+    shownPatch()
+      ? Diff2Html.html(shownPatch()!, {
           drawFileList: false,
           outputFormat: "side-by-side",
           matching: "lines",
@@ -2260,12 +2265,22 @@ function FileEntry(props: {
         >
           {collapsed() ? "▸" : "▾"}
         </button>
-        <span class="gutter">{blessed() || foil() ? "✦" : ""}</span>
+        <span class="gutter" classList={{ tarnish: tarnished() }}>{blessed() || foil() || tarnished() ? "✦" : ""}</span>
         <span class="path" onClick={() => setCollapsed((c) => !c)}>{seg(props.file.path)}</span>
         <span class="lines">
           <span class="add">+{props.file.add ?? 0}</span>
           <span class="del">−{props.file.del ?? 0}</span>
         </span>
+        <Show when={tarnished() && props.file.stale}>
+          <button
+            class="file-act tarnish-chip"
+            classList={{ on: deltaView() }}
+            title="blessed once, changed since — flip between the full diff and just the delta past the blessed state (the unreviewed part)"
+            onClick={() => { setDeltaView((v) => !v); setCollapsed(false); }}
+          >
+            {deltaView() ? "Δ vs blessed" : "✦ tarnished"}
+          </button>
+        </Show>
         <button
           class="file-act"
           title="copy a paste-ready file + branch reference for a Claude conversation"
