@@ -102,6 +102,14 @@ export default function ChatPanel(props: {
 }) {
   const path = () => props.file?.path ?? "";
   const away = () => props.viewingBranch !== props.branch; // you've navigated off this chat's branch
+  // Navigating off this chat's branch docks it to the corner pill: a full drawer on another
+  // branch's page reads as THAT page's chat (Phil, 2026-07-05 — "same chat on two branches").
+  // The ✦ presence badge + pill still advertise it; restoring while away is deliberate and sticks.
+  createEffect(on(away, (a, prev) => {
+    if (a && prev === false) {
+      setDrawerMinimized(true);
+    }
+  }, { defer: true }));
   const msgs = () => thread(props.branch, path()).msgs;
   const session = () => thread(props.branch, path()).session;
   const rt = () => runtime(props.branch, path());
@@ -334,7 +342,9 @@ export default function ChatPanel(props: {
           <div class="cp-title">
             <span class="cp-mark">✦</span>
             <span class="cp-path">
-              {props.file ? seg(props.file.path) : <b>{props.project ? "whole forest" : "whole branch"}</b>}
+              {props.file
+                ? seg(props.file.path)
+                : <b>{props.project ? "whole forest" : away() ? `whole branch · ${props.branch.split("/").pop()}` : "whole branch"}</b>}
             </span>
           </div>
           <div class="cp-sub">
@@ -538,7 +548,7 @@ export default function ChatPanel(props: {
         <div class="cp-pill" classList={{ working: streaming(), done: !streaming() && finished() }}>
           <button class="cp-pill-main" title="restore chat" onClick={restore}>
             <span class="cp-pill-mark">✦</span>
-            <span class="cp-pill-name">{props.file ? props.file.path.split("/").pop() : props.project ? "✦ forest" : "whole branch"}</span>
+            <span class="cp-pill-name">{props.file ? props.file.path.split("/").pop() : props.project ? `✦ ${props.project}` : `✦ ${props.branch.split("/").pop()}`}</span>
             <span class="cp-pill-branch">{props.branch.split("/").pop()}</span>
             <Show when={streaming() || (finished() && !streaming())}>
               <span class="cp-pill-state">{streaming() ? status() || "working…" : "done ✓"}</span>
