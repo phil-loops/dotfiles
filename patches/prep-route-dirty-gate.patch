@@ -1,0 +1,32 @@
+diff --git a/scripts/srv/prep.py b/scripts/srv/prep.py
+index 56e03dd..0ea504e 100644
+--- a/scripts/srv/prep.py
++++ b/scripts/srv/prep.py
+@@ -32,6 +32,7 @@ def _commit(sha):
+ def route(req, u):
+     # GET /prep-route?branch=X — read-only: classify the branch and name the ONE next motion.
+     # Routes, in precedence order:
++    #   dirty        — uncommitted files in the holding worktree: fold or stash → POST /dirty-resolve
+     #   push-vehicle — diverged w/ open PR and the additive vehicle exists: push it (no next)
+     #   additive     — diverged w/ open PR: draft the vehicle        → POST /diverged-additive
+     #   restack      — behind origin/main, unpublished root          → POST /sync
+@@ -51,6 +52,19 @@ def route(req, u):
+         req._send(200, json.dumps({"ok": True, "branch": branch, "route": route_name,
+                                    "why": why, "next": next_call, **extra}))
+ 
++    # dirt outranks everything: every motion below (additive draft, rebase, squash) needs a
++    # clean tree, and a "ready" verdict over uncommitted files lies to the push button.
++    if h.get("dirty"):
++        n = len(h["dirty"])
++        send("dirty",
++             f"{n} uncommitted file{'s' if n != 1 else ''} in "
++             f"{h.get('dirtyWorktree') or 'the holding worktree'} — fold into the outgoing "
++             "commit or stash before this branch can be ready",
++             {"method": "POST", "path": "/dirty-resolve",
++              "body": {"branch": branch, "action": "include | stash"}},
++             dirty=h["dirty"], dirtyWorktree=h.get("dirtyWorktree", ""))
++        return
++
+     if up.get("diverged") and h.get("published"):
+         vehicle = f"{branch}-additive"
+         if ctx.run(["git", "rev-parse", "--verify", "--quiet",
