@@ -2258,6 +2258,7 @@ function NodeDetail() {
                 isReview={location().kind === "review"}
                 merged={nodeHealth(active())?.merged}
                 ambient={nodeAmbient(active())}
+                blessing={node.data ? { total: node.data.files.length, blessed: node.data.files.filter(blessedOf).length } : undefined}
                 interest={canMutate ? interestOf() : undefined}
                 onBump={canMutate ? (delta) => bumpInterest.mutate({ branch: active(), delta }) : undefined}
                 onAllChats={() => setShowChats(true)}
