@@ -1,48 +1,56 @@
 # GitHub → nvim (Chrome extension)
 
-Routes a GitHub PR into the local forest viewer's warm nvim. Backend is the
-viewer's `POST /from-github` (import the PR → optionally open a file at a line).
-See `../design-github-to-nvim-extension.md` for the full design.
+Opens the current GitHub page (PR, blob, or commit) in the local forest viewer's
+warm nvim, or the PR's node in the viewer itself.
 
-## Status — feature-complete (steps 1–5)
+**URL-only by design.** There is no content script and no github.com host access:
+the extension can never read or mutate a GitHub page. A user gesture (keyboard
+shortcut or the popup button) grants `activeTab` just long enough to read the tab's
+URL string, which is POSTed verbatim to the viewer's `POST /open-url`. The server
+owns all parsing — PR vs blob vs commit, and resolving GitHub's
+`#diff-<sha256(path)>R<n>` selected-line hash against the branch's changed files.
 
-- **Floating buttons (bottom-right):** `→ nvim` imports the current PR;
-  `→ viewer` imports it and opens the node in the forest viewer (new tab).
-- **Per-file `nvim` button** in each diff file header — opens that file at line 1.
-- **⌥-click a diff line number** (right/new side) → opens that exact file+line in
-  the warm nvim. A blue outline appears on hover while ⌥ is held to advertise it.
-- A toast (bottom-right) reports the file:line result of a line-click.
+## Use it
 
-All paths hit the viewer's `POST /from-github`.
+- **⌘⇧O — open in nvim.** On a PR: the selected line if one is in the URL (click a
+  line number first — GitHub writes it into the hash), else the whole-PR `gm`
+  Diffview. On a blob view: that file at `#L<n>` in the working checkout. On a
+  commit page: the selected line's file (commit must exist locally).
+- **⌘⇧U — open in the forest viewer** (imports the PR if needed, opens its node).
+- **Toolbar popup → "→ nvim this page"** — same as ⌘⇧O, for the shortcut-averse.
+
+Rebind either chord at `chrome://extensions/shortcuts` (bare single keys aren't
+possible — Chrome commands require a modifier chord; that's the price of not
+having a page-level key listener).
+
+Feedback is the toolbar badge (… working, ⏻ launching, ◷ waiting, ↻ warming,
+✓/⚠/✗ result) plus a notification on failures and cursor-placement warnings.
 
 ## Load it
 
-1. Make sure the viewer is serving the new endpoint (restart it so `/from-github`
-   is live), then smoke-test:
+1. Make sure the viewer serves the endpoint (restart it so `/open-url` is live),
+   then smoke-test:
    ```
-   curl -s localhost:62497/from-github -d '{"number":"__nope__"}'
-   # → {"ok": false, "err": "no pr number"}   (400)
+   curl -s localhost:62497/open-url -d '{"url":"https://example.com/nope"}'
+   # → {"ok": false, "err": "unsupported GitHub URL …"}   (400)
    ```
 2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
    pick this `gh-to-nvim/` directory.
-3. Open any PR on github.com and try:
-   - the `→ nvim` / `→ viewer` pills (bottom-right),
-   - the `nvim` button in any file's header (opens at line 1),
-   - **⌥-click** a line number on the new/right side (opens that file+line).
+3. Open any PR on github.com, click a line number, hit **⌘⇧O**.
+
 ## Dev loop (toolbar icon)
 
 The toolbar icon is the dev console — no `chrome://extensions` trip:
 
 - **green** → loaded copy matches disk.
-- **amber ●** → you edited a source file; the loaded copy is stale.
+- **amber ●** → you edited a source file; the loaded copy is stale (it self-reloads
+  once the source goes quiet for 5s).
 - **grey ×** → the viewer isn't reachable on `:62497` (its `/ext-mtime` is the
   staleness signal; a service worker can't read disk itself).
 
-**Click the icon to open the menu** (`popup.html`): current status + a **Reload
-extension** button + a link to the forest viewer. Reload from there, then refresh
-the GitHub tab to re-inject `content.js`. Staleness is computed against the
-viewer's `/ext-mtime`; the baseline lives in `storage.session`, which Chrome
-wipes on a real reload — so a fresh reload re-baselines to "green" automatically.
+Staleness is computed against the viewer's `/ext-mtime`; the baseline lives in
+`storage.session`, which Chrome wipes on a real reload — so a fresh reload
+re-baselines to "green" automatically.
 
 ## Launch the viewer from the popup (native messaging)
 
@@ -50,7 +58,9 @@ When the viewer is **offline (grey ×)** the popup shows a **▶ Launch viewer**
 button. An extension can't run a shell command, so a registered native-messaging
 host (`../gh-to-nvim-host`) does it: Chrome spawns it on demand, it runs
 `stack-review-serve` in `~/coding/loops`, and the popup polls until the viewer is
-reachable. Nothing stays resident — the host exits as soon as the server is detached.
+reachable. Nothing stays resident — the host exits as soon as the server is
+detached. The nvim/viewer commands run the same launch automatically when the
+viewer is down, so the button is mostly a manual fallback.
 
 One-time install (registers the host + whitelists the extension's pinned ID):
 
@@ -60,14 +70,13 @@ One-time install (registers the host + whitelists the extension's pinned ID):
 
 The ID is pinned by the `"key"` in `manifest.json` (derived from `.ext-key.pem`,
 git-ignored), so it survives reloads and matches what the host whitelists. Reload
-the extension after the first install so Chrome picks up the `key` + `nativeMessaging`.
+the extension after the first install so Chrome picks up the `key` + permissions.
 
 ## Notes
 
-- The floating pills are fixed-position on purpose — robust to GitHub's
-  virtualized React diff DOM. Per-file/line affordances live inside the diff and
-  are (re)attached via a `MutationObserver` as rows mount on scroll.
-- ⌥-click is the line trigger so we don't hijack GitHub's own click-to-select-line.
 - `host_permissions` is `http://localhost/*` (any port) so the per-repo viewer
   port can move without re-permissioning; the viewer URL itself is pinned to
-  `:62497` (the loops repo's hash). Nothing leaves the machine.
+  `:62497` (see `config.js`). Nothing leaves the machine.
+- Lost with the content script, deliberately: page-load pre-warm (first open of a
+  PR eats the cold ~3s; the ↻ warming retry covers it), the bare `o` key, ⌥-click,
+  the floating pills/per-file buttons, and in-page toasts.

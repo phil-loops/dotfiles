@@ -2,55 +2,136 @@ importScripts("./config.js");   // VIEWER_URL — single source of truth (see co
 
 const HOST = "com.loops.gh_to_nvim";   // native host that launches the viewer (idempotent stack-review-serve)
 
-// Content scripts can't reach the native host — relay a launch request through the SW. The host
-// runs stack-review-serve (a no-op if already up), so the o-key recovery path can auto-start a
-// dead viewer instead of just reporting "offline".
-chrome.runtime.onMessage.addListener((msg, _s, respond) => {
-  if (msg?.type !== "launch") {
-    return;
-  }
-  try {
-    chrome.runtime.sendNativeMessage(HOST, { action: "launch" }, (res) => {
-      respond(chrome.runtime.lastError ? { ok: false, err: chrome.runtime.lastError.message } : (res || { ok: false, err: "no response" }));
-    });
-  } catch (e) {
-    respond({ ok: false, err: String(e) });
-  }
-  return true;
-});
+// ── URL-only by design ──
+// There is no content script and no github.com host access: a user gesture (keyboard command
+// or popup button) grants activeTab just long enough to read the tab's URL, and the server's
+// POST /open-url owns ALL parsing — PR vs blob vs commit, and resolving GitHub's
+// #diff-<sha256(path)>R<n> selected-line hash against the branch's changed files.
 
-// after a popup "reload extension": the new content script isn't in the tab that was open, and
-// reloading the extension can't re-inject it — so the popup flags the active tab here and this
-// (freshly-restarted) SW refreshes it once the new code is live.
-chrome.storage.local.get("refreshTab").then(({ refreshTab }) => {
-  if (refreshTab == null) return;
-  chrome.storage.local.remove("refreshTab");
-  chrome.tabs.reload(refreshTab).catch(() => {});
-});
-
-// The content script runs on https://github.com and can't fetch http://localhost
-// (mixed content) — the service worker can, via host_permissions, so relay here.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type !== "from-github") {
-    return;
-  }
-  // default endpoint is the PR opener; a blob open targets /open-blob (same relay past the wall)
-  const endpoint = msg.endpoint || "/from-github";
-  console.log("[gh-to-nvim] relay →", `${VIEWER_URL}${endpoint}`, msg.payload);
-  fetch(`${VIEWER_URL}${endpoint}`, {
+function post(payload) {
+  return fetch(`${VIEWER_URL}/open-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(msg.payload),
+    body: JSON.stringify(payload),
   })
-    .then(async (r) => {
-      const body = await r.json().catch(() => null);
-      console.log("[gh-to-nvim] relay ←", r.status, body);
-      sendResponse({ status: r.status, body });
-    })
-    .catch((err) => {
-      console.error("[gh-to-nvim] relay fetch failed:", String(err));
-      sendResponse({ status: 0, error: String(err) });
-    });
+    .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }))
+    .catch((err) => ({ status: 0, error: String(err) }));
+}
+
+function launchViewer() {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(HOST, { action: "launch" }, (res) => {
+        resolve(chrome.runtime.lastError ? { ok: false, err: chrome.runtime.lastError.message } : (res || { ok: false, err: "no response" }));
+      });
+    } catch (e) {
+      resolve({ ok: false, err: String(e) });
+    }
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function waitForViewer(timeoutMs) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if ((await diskMtime()) !== null) {
+      return true;
+    }
+    await sleep(500);
+  }
+  return false;
+}
+
+// Toolbar feedback in place of the old in-page toast: badge stages while working, ✓/✗ result,
+// plus a notification for failures/warnings (a badge alone is easy to miss on a wrong jump).
+let feedbackUntil = 0;   // apply() leaves the badge alone until this passes
+
+async function badge(text, color, holdMs) {
+  feedbackUntil = Date.now() + holdMs;
+  shown = null;   // force the next poll to repaint the state badge once the hold expires
+  await chrome.action.setBadgeText({ text });
+  await chrome.action.setBadgeBackgroundColor({ color });
+}
+
+function notify(text) {
+  chrome.notifications.create({
+    type: "basic",
+    iconUrl: "icons/fresh-128.png",
+    title: "GitHub → nvim",
+    message: text,
+  });
+}
+
+const reason = (res) => res?.body?.err || res?.error || `status ${res?.status}`;
+
+// Self-healing open: dead viewer → native-host launch + wait + one retry; cold first open
+// (504 — the worktree/nvim still warming) → brief wait + retry.
+async function openWithRecovery(payload) {
+  await badge("…", "#58A6FF", 30000);
+  let res = await post(payload);
+  if (res.status === 0) {
+    await badge("⏻", "#58A6FF", 30000);
+    const launched = await launchViewer();
+    if (!launched.ok) {
+      return { status: 0, error: `couldn't launch viewer — ${launched.err}` };
+    }
+    await badge("◷", "#58A6FF", 30000);
+    if (!(await waitForViewer(15000))) {
+      return { status: 0, error: "viewer didn't come up" };
+    }
+    res = await post(payload);
+  }
+  for (let i = 0; i < 2 && res.status === 504; i++) {
+    await badge("↻", "#58A6FF", 30000);
+    await sleep(1200 + i * 800);
+    res = await post(payload);
+  }
+  return res;
+}
+
+async function openActiveTab(target) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const url = tab?.url || "";   // readable only because the gesture granted activeTab
+  if (!url.startsWith("https://github.com/")) {
+    await badge("✗", "#F85149", 4000);
+    notify("not a GitHub page");
+    return;
+  }
+  const res = await openWithRecovery({ url, open: target });
+  const ok = res.status === 200 && res.body?.ok;
+  if (!ok) {
+    await badge("✗", "#F85149", 4000);
+    notify(String(reason(res)).slice(0, 200));
+    return;
+  }
+  if (target === "viewer" && res.body.path) {
+    chrome.tabs.create({ url: `${VIEWER_URL}${res.body.path}` });
+  }
+  // a success can still carry a warning — the stack-open stale/force-push backstop landed the
+  // cursor at EOF because this checkout differs from GitHub; never let that be a silent wrong jump
+  const warn = res.body.err && String(res.body.err).trim().replace(/^stack-open:\s*/, "");
+  await badge(warn ? "⚠" : "✓", warn ? "#D29922" : "#3FB950", 4000);
+  if (warn) {
+    notify(warn.slice(0, 200));
+  }
+}
+
+chrome.commands.onCommand.addListener((cmd) => {
+  if (cmd === "open-in-nvim") {
+    openActiveTab("nvim");
+  } else if (cmd === "open-in-viewer") {
+    openActiveTab("viewer");
+  }
+});
+
+// The popup's "→ nvim this page" button routes here — opening the popup is itself the
+// activeTab gesture, so the tab URL is readable for the click that follows.
+chrome.runtime.onMessage.addListener((msg, _s, respond) => {
+  if (msg?.type !== "open-url") {
+    return;
+  }
+  openActiveTab(msg.target || "nvim").then(() => respond({ ok: true }));
   return true;
 });
 
@@ -73,7 +154,7 @@ let shown = null;   // last-painted state — repaint only on change, so the 2s 
 
 async function apply(state) {
   await chrome.storage.session.set({ state });   // the popup reads this
-  if (state === shown) {
+  if (Date.now() < feedbackUntil || state === shown) {
     return;
   }
   shown = state;
@@ -116,17 +197,16 @@ async function computeState() {
   return m > baseline ? "stale" : "fresh";
 }
 
-// stale no longer waits for a human: once the on-disk source stops moving (QUIET_MS with no
-// new mtime — mid-edit saves would otherwise reload per keystroke), self-reload via the same
-// flow as the popup button: flag the active tab IF our content script runs there (the query's
-// url filter is exactly our content_scripts matches), so the fresh SW re-injects into it.
+// stale doesn't wait for a human: once the on-disk source stops moving (QUIET_MS with no new
+// mtime — mid-edit saves would otherwise reload per keystroke), self-reload. No content script
+// anymore, so there's nothing to re-inject into open tabs — a bare reload is the whole story.
 // SW sleep resets the quiet timer — worst case the reload waits for the next wake, never loops
 // (reload wipes the session baseline, so the new copy reads as fresh).
 const QUIET_MS = 5000;
 let staleMtime = null;
 let staleSince = 0;
 
-async function maybeAutoReload() {
+function maybeAutoReload() {
   if (lastDiskMtime !== staleMtime) {
     staleMtime = lastDiskMtime;
     staleSince = Date.now();
@@ -135,17 +215,6 @@ async function maybeAutoReload() {
   if (Date.now() - staleSince < QUIET_MS) {
     return;
   }
-  try {
-    const [tab] = await chrome.tabs.query({
-      active: true, currentWindow: true,
-      url: ["https://github.com/*/*/pull/*", "https://github.com/*/*/commit/*", "https://github.com/*/*/compare/*"],
-    });
-    if (tab?.id != null) {
-      await chrome.storage.local.set({ refreshTab: tab.id });
-    }
-  } catch {
-    // url-filtered query needs host access — if Chrome disagrees, reload without the tab refresh
-  }
   chrome.runtime.reload();
 }
 
@@ -153,7 +222,7 @@ async function poll() {
   const state = await computeState();
   await apply(state);
   if (state === "stale") {
-    await maybeAutoReload();
+    maybeAutoReload();
   } else {
     staleMtime = null;
   }
