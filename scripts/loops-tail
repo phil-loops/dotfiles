@@ -5,6 +5,7 @@
 #   loops-tail -p | --pick     fzf multi-select sources (TAB toggles), then tail
 #   loops-tail -l | --list     list available sources (● = in your defaults)
 #   loops-tail <source…>       tail exactly these sources
+#   loops-tail --all …         include dead servers' leftover logs (post-mortem tail)
 #
 # Sources (discovered live):
 #   server            the :3000 dev server (/tmp/loops-dev.log, written by loops-restart's tee)
@@ -17,13 +18,22 @@ set -uo pipefail
 
 CONF="$HOME/.dotfiles/loops-tail.conf"
 TAIL_N="${LOOPS_TAIL_LINES:-50}"
+ALL=0   # --all: include sources whose server is gone but whose log file remains (post-mortem)
+
+# a log file alone isn't a source — dead preview servers leave their /tmp logs behind.
+# live = the tmux session that tees the log still exists (loops-restart / loops-preview naming).
+alive() { tmux has-session -t "$1" 2>/dev/null; }
 
 sources() {
-  [ -f /tmp/loops-dev.log ] && echo "server"
+  if [ -f /tmp/loops-dev.log ] && { [ "$ALL" = 1 ] || alive loops-dev; }; then
+    echo "server"
+  fi
   for f in /tmp/loops-preview-*.log; do
     [ -e "$f" ] || continue
-    b="${f#/tmp/loops-preview-}"
-    echo "preview:${b%.log}"
+    b="${f#/tmp/}"
+    if [ "$ALL" = 1 ] || alive "${b%.log}"; then
+      echo "preview:${b#loops-preview-}" | sed 's/\.log$//'
+    fi
   done
   docker ps --format '{{.Names}}' 2>/dev/null | sed 's/^/docker:/' | sort
 }
@@ -52,15 +62,26 @@ cmd_for() {
   esac
 }
 
+# defaults-first ordering so the picker's top rows are the usual suspects
+ordered() {
+  local all defs
+  all="$(sources)"
+  defs="$(defaults)"
+  { grep -Fx "$defs" <<<"$all"; grep -Fxv "$defs" <<<"$all"; } 2>/dev/null | awk 'NF'
+}
+
 # ── pick the sources ────────────────────────────────────────────────
+if [ "${1:-}" = "-a" ] || [ "${1:-}" = "--all" ]; then
+  ALL=1; shift
+fi
 picked=()
 case "${1:-}" in
   -l|--list)
     list; exit 0 ;;
   -p|--pick)
-    while IFS= read -r s; do picked+=("${s#? }"); done < <(
-      list | fzf --multi --height=50% --reverse \
-        --prompt='tail ▸ ' --header='TAB marks several · ENTER tails · ● = default'
+    while IFS= read -r s; do picked+=("$s"); done < <(
+      ordered | fzf --multi --height=50% --reverse --no-info \
+        --prompt='tail ▸ ' --header='TAB: mark several · ENTER: tail'
     )
     [ "${#picked[@]}" -gt 0 ] || exit 0 ;;
   "")
