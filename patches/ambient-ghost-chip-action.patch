@@ -1,0 +1,79 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 1714691..52fee04 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -426,6 +426,11 @@ function Home() {
+         .map((b) => `  ${b.branch}${b.conflict_pr ? ` → #${b.conflict_pr} ${b.conflict_title ?? ""}` : ""}`)
+         .join("\n");
+     }
++    const ghosts = a.report.branches.filter((b) => b.verdict === "would-contract");
++    if (ghosts.length) {
++      title += "\n\nalready merged — click drops each & rewires its children:\n"
++        + ghosts.map((b) => `  ${b.branch}`).join("\n");
++    }
+     if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
+     if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title };
+     if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title };
+@@ -433,6 +438,25 @@ function Home() {
+     return { cls: "amb-clean", text: "✦ forest clean", title };
+   };
+ 
++  // the ⊘ chip's fix: drop every already-merged ghost the daemon found. Each POST /contract
++  // re-verifies merged-ness server-side (409 otherwise), so a stale report can't drop real work.
++  const dropGhosts = createMutation(() => ({
++    mutationFn: async () => {
++      const ghosts = (ambient.data?.report?.branches ?? []).filter((b) => b.verdict === "would-contract");
++      for (const g of ghosts) {
++        await fetch("/contract", {
++          method: "POST",
++          headers: { "Content-Type": "application/json" },
++          body: JSON.stringify({ branch: g.branch }),
++        }).then((r) => r.json());
++      }
++    },
++    onSuccess: () => {
++      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
++      qc.invalidateQueries({ queryKey: ["projects"] });
++    },
++  }));
++
+   const reviewReqs = createQuery(() => ({
+     queryKey: ["review-requests"],
+     queryFn: () => provider.reviewRequests(),
+@@ -867,7 +891,21 @@ function Home() {
+             <span class="brand-mark">✦</span> blessed
+           </div>
+           <Show when={ambientChip()}>
+-            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
++            {(c) => (
++              <Show
++                when={c().cls === "amb-contract" && canMutate}
++                fallback={<span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
++              >
++                <button
++                  class="amb-chip amb-contract amb-act"
++                  title={c().title}
++                  disabled={dropGhosts.isPending}
++                  onClick={() => dropGhosts.mutate()}
++                >
++                  {dropGhosts.isPending ? "⊘ dropping…" : c().text}
++                </button>
++              </Show>
++            )}
+           </Show>
+           <Show when={canMutate}>
+             <button
+diff --git a/scripts/viewer-solid/src/index.css b/scripts/viewer-solid/src/index.css
+index 697c063..4bbfca3 100644
+--- a/scripts/viewer-solid/src/index.css
++++ b/scripts/viewer-solid/src/index.css
+@@ -694,6 +694,9 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
+ .amb-chip.amb-clean { color: var(--gold-leaf); border-color: var(--gold-deep); }
+ .amb-chip.amb-restack { color: var(--patina); }
+ .amb-chip.amb-contract { color: var(--patina); border-color: var(--gold-deep); }
++button.amb-chip.amb-act { cursor: pointer; font: inherit; font-size: 11px; }
++button.amb-chip.amb-act:hover { color: var(--gold-leaf); }
++button.amb-chip.amb-act:disabled { opacity: 0.5; cursor: default; }
+ .amb-chip.amb-conflict { color: var(--del); border-color: var(--del); }
+ .amb-chip.amb-stale { color: var(--ink-faint); }
+ .eyebrow {

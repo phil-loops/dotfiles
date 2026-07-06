@@ -426,12 +426,36 @@ function Home() {
         .map((b) => `  ${b.branch}${b.conflict_pr ? ` → #${b.conflict_pr} ${b.conflict_title ?? ""}` : ""}`)
         .join("\n");
     }
+    const ghosts = a.report.branches.filter((b) => b.verdict === "would-contract");
+    if (ghosts.length) {
+      title += "\n\nalready merged — click drops each & rewires its children:\n"
+        + ghosts.map((b) => `  ${b.branch}`).join("\n");
+    }
     if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
     if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title };
     if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title };
     if (s.would_restack > 0) return { cls: "amb-restack", text: `⟳ ${s.would_restack} would restack`, title };
     return { cls: "amb-clean", text: "✦ forest clean", title };
   };
+
+  // the ⊘ chip's fix: drop every already-merged ghost the daemon found. Each POST /contract
+  // re-verifies merged-ness server-side (409 otherwise), so a stale report can't drop real work.
+  const dropGhosts = createMutation(() => ({
+    mutationFn: async () => {
+      const ghosts = (ambient.data?.report?.branches ?? []).filter((b) => b.verdict === "would-contract");
+      for (const g of ghosts) {
+        await fetch("/contract", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ branch: g.branch }),
+        }).then((r) => r.json());
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  }));
 
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
@@ -869,7 +893,21 @@ function Home() {
             <span class="brand-mark">✦</span> blessed
           </div>
           <Show when={ambientChip()}>
-            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
+            {(c) => (
+              <Show
+                when={c().cls === "amb-contract" && canMutate}
+                fallback={<span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
+              >
+                <button
+                  class="amb-chip amb-contract amb-act"
+                  title={c().title}
+                  disabled={dropGhosts.isPending}
+                  onClick={() => dropGhosts.mutate()}
+                >
+                  {dropGhosts.isPending ? "⊘ dropping…" : c().text}
+                </button>
+              </Show>
+            )}
           </Show>
           <Show when={canMutate}>
             <button

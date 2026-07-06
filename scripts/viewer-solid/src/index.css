@@ -694,6 +694,9 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .amb-chip.amb-clean { color: var(--gold-leaf); border-color: var(--gold-deep); }
 .amb-chip.amb-restack { color: var(--patina); }
 .amb-chip.amb-contract { color: var(--patina); border-color: var(--gold-deep); }
+button.amb-chip.amb-act { cursor: pointer; font: inherit; font-size: 11px; }
+button.amb-chip.amb-act:hover { color: var(--gold-leaf); }
+button.amb-chip.amb-act:disabled { opacity: 0.5; cursor: default; }
 .amb-chip.amb-conflict { color: var(--del); border-color: var(--del); }
 .amb-chip.amb-stale { color: var(--ink-faint); }
 .eyebrow {
