@@ -2241,26 +2241,15 @@ function NodeDetail() {
           </Show>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
-          {/* tier-2 trim (Phil, strike 6: "20million buttons"): the diffs|commits pills and the
-              3-way diff-vs control collapse to one flip + one cycler — their keys (c, 1/2/3)
-              already existed, the pills were duplication. Interest ▼▲ and the all-threads list
-              moved into the ⋯ menu; telemetry keeps chat / prep / restack / bless first-class. */}
+          {/* tier-2 (Phil, strikes 6+7): no view controls at all — c flips diffs⇄commits,
+              1/2/3 set the diff base, both taught in ? help. The base shows as passive text
+              only when it's not the default, so a non-parent diff can't masquerade. */}
           <div class="nh-bar">
-            <button
-              class="view-pill on"
-              title="flip diffs ⇄ commits (key: c)"
-              onClick={() => setView((v) => (v === "commits" ? "diffs" : "commits"))}
-            >
-              ⇄ {view()}
-            </button>
-            <Show when={view() === "diffs" && !isGhost()}>
-              <button
-                class="base-pill"
-                title="cycle the diff base — parent → main → last blessed (keys: 1 / 2 / 3)"
-                onClick={() => setBase((b) => (b === "" ? "main" : b === "main" ? "blessed" : ""))}
-              >
-                vs {(BASES.find(([v]) => v === base()) ?? BASES[0])[1]}
-              </button>
+            <Show when={view() === "commits"}>
+              <span class="nh-viewnote">commits · c for diffs</span>
+            </Show>
+            <Show when={view() === "diffs" && base() !== "" && !isGhost()}>
+              <span class="nh-viewnote">vs {(BASES.find(([v]) => v === base()) ?? BASES[0])[1]} · 1 for parent</span>
             </Show>
             <div class="nh-spacer" />
             <Show when={!isGhost()}>
