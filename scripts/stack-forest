@@ -384,7 +384,9 @@ if node_mode:
     # folds already-pushed commits into the diff. since-blessed keeps the local parent (it
     # diffs each file's blessed blob); an explicit non-trunk base is used verbatim.
     if since_blessed:
-        diff_base = parent
+        # trunk-honest like the default view: a root's unblessed files show their whole
+        # contribution vs origin/main, not vs a possibly-stale local main.
+        diff_base = trunk_base(parent)
     elif not base or base == MAIN:
         diff_base = trunk_base(parent if not base else MAIN)
     else:
@@ -392,7 +394,7 @@ if node_mode:
     rows, *_ = file_status(branch, diff_base)
     # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
     # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
-    reqs = requires.get(branch, []) if diff_base == parent else []
+    reqs = requires.get(branch, []) if diff_base in (parent, trunk_base(parent)) else []
     if reqs:
         carried = set()
         for r in reqs:
@@ -409,7 +411,9 @@ if node_mode:
     for r in rows:
         stale = ""
         if r["status"] == "stale" and r["blessed"] and r["current"]:
-            stale = git_out(["diff", r["blessed"], r["current"]])
+            # blob_diff, not raw diff — a blob-to-blob patch names files by hash, which
+            # renders as gibberish anywhere this payload is shown
+            stale = blob_diff(r["blessed"], r["current"], r["path"])
         if since_blessed:
             # what you haven't reviewed yet: an unblessed file shows its whole contribution;
             # a blessed file shows only the delta past its blessed blob (nothing if clean).

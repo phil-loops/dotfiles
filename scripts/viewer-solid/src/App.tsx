@@ -1474,7 +1474,10 @@ function NodeDetail() {
   const GHOST = "~integration";
   const isGhost = () => active() === GHOST;
   const nodeRef = () => (isGhost() ? `refs/stack/${project()}-integration` : active());
-  const nodeBase = () => (isGhost() ? "main" : base() || undefined);
+  // "@origin" = the OUTGOING view: exactly what the red button would send (origin/<branch>…branch).
+  // Resolved here because the sentinel must survive branch navigation; stack-forest takes the
+  // resolved ref verbatim.
+  const nodeBase = () => (isGhost() ? "main" : base() === "@origin" ? `origin/${active()}` : base() || undefined);
   const nodeKey = () => ["node", repoKey(), nodeRef(), nodeBase() ?? ""];
 
   // ⇧B/⇧U flip a file's blessed state through this local override, NOT the query cache. Writing
@@ -1573,7 +1576,7 @@ function NodeDetail() {
   }));
 
   const goto = (b: string) => navigate(withNode(location(), b));
-  const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"]];
+  const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"], ["@origin", "outgoing"]];
   // The forest map is a destination (the /forests/<project> overview), never docked into
   // the review surface — the diff gets the full width. "back to the forest map" lives in the
   // node header (nh-forest-back).
@@ -1784,6 +1787,7 @@ function NodeDetail() {
     else if (e.key === "1") setBase("");
     else if (e.key === "2") setBase("main");
     else if (e.key === "3") setBase("blessed");
+    else if (e.key === "4") setBase("@origin");
     else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
     else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
     else if (e.key === "b") { e.preventDefault(); filterAutoOpenedPanel = false; setPanelOpen((v) => !v); } // show / hide the file panel
@@ -2142,7 +2146,16 @@ function NodeDetail() {
           </div>
           <Show when={node.data} fallback={<p class="loading">loading…</p>}>
             {(data) => (
-              <Show when={data().files.length} fallback={<p class="loading">nothing to review here ✦</p>}>
+              <Show
+                when={data().files.length}
+                fallback={
+                  <p class="loading">
+                    {base() === "@origin"
+                      ? "nothing outgoing — origin already has all of this (or the branch was never pushed; vs parent shows everything)"
+                      : "nothing to review here ✦"}
+                  </p>
+                }
+              >
                 <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
                   <For each={data().files.filter(matchFilter)}>
                     {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => openChat({ branch: active(), origin: location(), file })} />}
@@ -2166,7 +2179,7 @@ function NodeDetail() {
             <dl>
               <div><dt><span class="k">tab</span></dt><dd>next file</dd></div>
               <div><dt><span class="k">c</span></dt><dd>flip diffs ⇄ commits</dd></div>
-              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span></dt><dd>diff vs parent / main / last blessed</dd></div>
+              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span><span class="k">4</span></dt><dd>diff vs parent / main / last blessed / outgoing (what a push sends)</dd></div>
               <div><dt><span class="k">b</span></dt><dd>show / hide the file panel</dd></div>
               <div><dt><span class="k">⌘F</span></dt><dd>filter files</dd></div>
               <div><dt><span class="k">⇧B</span></dt><dd>bless file &amp; advance</dd></div>
