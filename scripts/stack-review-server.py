@@ -358,6 +358,8 @@ class H(BaseHTTPRequestHandler):
             return push.prep_push(self, raw)
         if self.path == "/prep-message":   # edit the ONE unpushed commit's subject+body (tree untouched)
             return push.prep_message(self, raw)
+        if self.path == "/dirty-resolve":   # sync's routed decision on a dirty tree: include / stash / pop
+            return push.dirty_resolve(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
             return sync.post_reconcile(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit

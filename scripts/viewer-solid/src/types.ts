@@ -56,6 +56,11 @@ export type SpineNode = NodeMeta & { id: string; depth: number };
 export const NodeData = z.object({
   branch: z.string(),
   files: z.array(FileDiff),
+  // working-tree dirt of the worktree holding this branch — read-only, unblessable
+  // (blessing keys on committed content); dirt is per-worktree, it ambushes whatever
+  // branch the checkout holds
+  dirty: z.array(z.object({ path: z.string(), code: z.string(), patch: z.string() })).optional(),
+  worktree: z.string().optional(),
 });
 export type NodeData = z.infer<typeof NodeData>;
 
@@ -205,6 +210,8 @@ export const SyncState = z.object({
   deployCritical: z.array(z.string()).optional(), // deploy-critical files origin/main changed that this branch lacks
   shared: z.enum(["local", "ahead", "synced", "gone"]).optional(), // local-vs-origin: can the team see this branch?
   aheadOfOrigin: z.number().optional(), // commits origin's copy lacks (shared === "ahead")
+  dirty: z.array(z.string()).optional(), // uncommitted paths (incl. untracked) in the worktree HOLDING this branch
+  dirtyWorktree: z.string().optional(),
 });
 export type SyncState = z.infer<typeof SyncState>;
 

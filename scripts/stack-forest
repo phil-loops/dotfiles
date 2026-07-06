@@ -372,6 +372,22 @@ def file_status(branch, parent):
     return rows, clean, stale, unbl
 
 
+def _worktree_branches():
+    # [(worktree path, branch)] — defined above both waves; node mode needs it for the
+    # uncommitted rail, wave 1 for the dirt dams.
+    res, path = [], None
+    for line in git_out(["worktree", "list", "--porcelain"]).splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line.startswith("branch "):
+            if path:
+                res.append((path, line[len("branch "):].replace("refs/heads/", "", 1)))
+            path = None
+        elif not line:
+            path = None
+    return res
+
+
 # ---- WAVE 2: one node's diffs --------------------------------------------
 if node_mode:
     branch = target
@@ -427,7 +443,26 @@ if node_mode:
             patch = chunks.get(r["path"], "")
         files.append({"path": r["path"], "status": r["status"], "add": r["add"], "del": r["del"],
                       "patch": patch, "stale": stale})
-    print(json.dumps({"branch": branch, "files": files}))
+    # Working-tree dirt of the worktree HOLDING this branch — dirt is per-WORKTREE state
+    # that ambushes whatever branch the checkout holds, so it rides the node payload as
+    # read-only rows (no blessing: blessing keys on committed content). Untracked files
+    # ARE included here — a sync's clean-tree guard trips on them even though rebase won't.
+    dirty_rows, wt = [], next((p for p, b in _worktree_branches() if b == branch), None)
+    if wt:
+        for ln in subprocess.run(["git", "-C", wt, "status", "--porcelain"],
+                                 capture_output=True, text=True).stdout.splitlines():
+            if len(ln) < 4:
+                continue
+            code = ln[:2].strip()
+            p = ln[3:].split(" -> ", 1)[-1].strip().strip('"')
+            if code == "??":
+                d = subprocess.run(["git", "-C", wt, "diff", "--no-index", "--", "/dev/null", p],
+                                   capture_output=True, text=True).stdout
+            else:
+                d = subprocess.run(["git", "-C", wt, "diff", "HEAD", "--", p],
+                                   capture_output=True, text=True).stdout
+            dirty_rows.append({"path": p, "code": code, "patch": d[:20000]})
+    print(json.dumps({"branch": branch, "files": files, "dirty": dirty_rows, "worktree": wt or ""}))
     sys.exit(0)
 
 # ---- WAVE 1: the fast structural model -----------------------------------
@@ -499,20 +534,7 @@ roots = [b for b in members if parents.get(b, MAIN) not in members]
 # node's own diff: once the dirt commits, those descendants conflict on rebase.
 # Untracked (??) paths are excluded — rebase never touches them, so they can't
 # conflict. Cheap: one `worktree list` + a `status` per member worktree.
-def _worktree_branches():
-    res, path = [], None
-    for line in git_out(["worktree", "list", "--porcelain"]).splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-        elif line.startswith("branch "):
-            if path:
-                res.append((path, line[len("branch "):].replace("refs/heads/", "", 1)))
-            path = None
-        elif not line:
-            path = None
-    return res
-
-
+# (_worktree_branches lives above wave 2 — the node payload's uncommitted rail shares it.)
 def _dirty_paths(wt_path):
     out = subprocess.run(["git", "-C", wt_path, "status", "--porcelain"],
                          capture_output=True, text=True).stdout

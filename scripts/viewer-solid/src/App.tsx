@@ -2164,6 +2164,29 @@ function NodeDetail() {
               </Show>
             )}
           </Show>
+          {/* uncommitted — working-tree dirt of the worktree holding this branch. Read-only:
+              blessing keys on committed content, and dirt isn't committed anywhere yet. This
+              is the local-vs-shared model's missing tier made visible (the dirty-sync incident:
+              dirt was only ever discovered by tripping a guard). */}
+          <Show when={(node.data?.dirty?.length ?? 0) > 0}>
+            <div class="uncommitted-rail">
+              <div class="ur-head">
+                ± uncommitted — working tree only
+                <span class="ur-wt">{node.data!.worktree}</span>
+              </div>
+              <For each={node.data!.dirty!}>
+                {(f) => (
+                  <FileEntry
+                    file={{ path: f.path, status: "dirty", patch: f.patch }}
+                    bless={bless}
+                    branch={active()}
+                    readOnly
+                    onChat={(file) => openChat({ branch: active(), origin: location(), file })}
+                  />
+                )}
+              </For>
+            </div>
+          </Show>
         </Show>
       </main>
       <Show when={canMutate}>

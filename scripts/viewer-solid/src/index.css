@@ -190,6 +190,43 @@ body {
   font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer;
 }
 .nh-viewnote { font-size: 11px; color: var(--ink-faint); letter-spacing: 0.03em; }
+/* the sync step strip — the wards pattern for the motion; notes never truncate */
+.nh-strip {
+  flex-basis: 100%;
+  border: 1px solid var(--rule); border-radius: 9px;
+  background: var(--vellum-raise); padding: 9px 12px; margin-top: 4px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.nh-strip-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; font-size: 11.5px; }
+.nh-step { color: var(--ink-faint); letter-spacing: 0.03em; white-space: nowrap; }
+.nh-step[data-state="ok"] { color: var(--add); }
+.nh-step[data-state="run"] { color: var(--ember); }
+.nh-step[data-state="fail"] { color: var(--del); font-weight: 600; }
+.nh-step[data-state="skip"] { color: var(--ink-dim); }
+.nh-strip-x {
+  margin-left: auto; font: inherit; font-size: 12px; color: var(--ink-faint);
+  background: none; border: 0; cursor: pointer;
+}
+.nh-step-note {
+  font-size: 11.5px; line-height: 1.5; color: var(--ink-dim);
+  white-space: pre-wrap; word-break: break-word;   /* refusals NEVER truncate */
+}
+.nh-step-note[data-state="fail"] { color: var(--del); }
+.nh-step-note b { color: inherit; font-weight: 600; }
+.nh-dirt { display: flex; flex-direction: column; gap: 7px; padding-top: 2px; }
+.nh-dirt-files { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+.nh-dirt-files code { font-size: 11px; color: var(--ink); background: var(--vellum-edge); padding: 1px 6px; border-radius: 4px; }
+.nh-dirt-acts { display: flex; gap: 9px; }
+.nh-dirt-abort { color: var(--ink-dim); border-color: var(--rule); }
+
+/* uncommitted rail — working-tree dirt, visually apart from the committed review set */
+.uncommitted-rail { margin-top: 26px; border-top: 1px dashed var(--rule); padding-top: 12px; }
+.ur-head {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--ink-dim); margin: 0 2px 10px; display: flex; justify-content: space-between;
+}
+.ur-wt { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-faint); }
+
 /* a blessing that tarnished: the file was blessed, then changed — patina, never gold */
 .gutter.tarnish { color: var(--patina); }
 .file-act.tarnish-chip { color: var(--patina); border-color: var(--patina); }

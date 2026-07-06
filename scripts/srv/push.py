@@ -391,3 +391,33 @@ def prep_message(req, raw):
         "ok": True, "commit": {"sha": new, "subject": subject, "body": body},
         "reseated": [x for x in reseated if x.get("status") == "reseated"],
     }))
+
+
+def dirty_resolve(req, raw):
+    """POST /dirty-resolve {branch, action} — the sync flow's routed decision on a dirty
+    working tree, NOTHING automatic (the incident file was foreign WIP on the wrong
+    branch — auto-include is the ledger-scripts-in-.zshrc failure at commit level).
+      include → stage + commit everything in the holding worktree (the squash folds it)
+      stash   → stash incl. untracked;  pop → bring a sync-stash back after the motion
+    """
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    action = d.get("action", "")
+    wt = next((p for p, b in stage._worktrees() if b == branch), None)
+    if not wt:
+        return req._send(404, json.dumps({"ok": False, "err": f"no worktree holds {branch}"}))
+    if action == "include":
+        ctx.run(["git", "-C", wt, "add", "-A"])
+        r = ctx.run(["git", "-C", wt, "commit", "-m", "wip: uncommitted working-tree changes, folded in via sync"])
+    elif action == "stash":
+        r = ctx.run(["git", "-C", wt, "stash", "push", "-u", "-m", f"sync-stash {branch}"])
+    elif action == "pop":
+        r = ctx.run(["git", "-C", wt, "stash", "pop"])
+    else:
+        return req._send(400, json.dumps({"ok": False, "err": f"unknown action {action!r}"}))
+    ok = r.returncode == 0
+    req._send(200, json.dumps({
+        "ok": ok,
+        "out": (r.stdout or "").strip(),
+        "err": "" if ok else (r.stderr or r.stdout or f"{action} failed").strip(),
+    }))
