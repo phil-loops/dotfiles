@@ -21,7 +21,6 @@ import { createSignal, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
-import { useViewerLocation } from "./router";
 import RebaseStream from "./RebaseStream";
 import NodeSpine, { type Station, type SpineEdge } from "./NodeSpine";
 
@@ -100,11 +99,10 @@ export function NodeActions(props: {
 }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
-  const { navigate } = useViewerLocation();
   // 409 stash: the worktree holding the branch, awaiting a force-confirm — plus which action
-  // hit it, so freeing the worktree resumes the right one (plain checkout vs full prep-to-merge).
+  // hit it, so freeing the worktree resumes the right one (plain checkout vs the omni sync).
   const [heldAt, setHeldAt] = createSignal<string | null>(null);
-  const [heldFor, setHeldFor] = createSignal<"checkout" | "prepMerge">("checkout");
+  const [heldFor, setHeldFor] = createSignal<"checkout" | "omniSync">("checkout");
   // squashing rewrites history → two-click arm (shared useArm) before it fires.
   const { armed, trigger } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
@@ -161,21 +159,29 @@ export function NodeActions(props: {
   //   4. delta-tests → run the tests related to the diff (warn, never block)
   // You review + push from GitHub Desktop, where the pre-push hook runs the gates. Each stage
   // narrates via done(); a stale main, a held worktree, or a conflict stops early with the reason.
-  const prepMerge = createMutation(() => ({
+  // ── ⟲ sync — the omni local motion (Phil, 2026-07-05): "whatever we do here locally is
+  // fine." One button that makes this branch RIGHT and YOURS: reseat if drifted → rebase
+  // forward if behind (streams on eject) → checkout here → route to one outgoing commit
+  // (additive for a diverged PR, squash for a messy tail) → advisory tests → the message
+  // editor. When a step isn't mechanically routable, Claude goes in the middle (reconcile
+  // eject). NOTHING here touches origin — the shared world moves only via the red button.
+  const omniSync = createMutation(() => ({
     mutationFn: async (force: boolean) => {
-      if (behind() > 0) {
+      if (props.health?.drifted && props.health.parent) {
+        setDone("⤴ reseating onto its parent…");
+        await post("/reseat-children", { branch: props.health.parent });
+      }
+      if (behind() > 0 && sync.data?.syncable) {
         setDone("⟳ fetching origin/main + rebasing…");
         const sy = await post<SyncResult>("/sync", { branch: props.branch });
-        if (!sy.ok) {
-          return { phase: "blocked" as const, msg: sy.err || "rebase onto origin/main refused" };
+        if (sy.ok && sy.contract) {
+          return { phase: "blocked" as const, msg: "already merged into origin/main — drop & rewire (the spine's edge offers it)" };
         }
-        if (sy.contract) {
-          return { phase: "blocked" as const, msg: "already merged into origin/main — drop & rewire it instead (restack)" };
-        }
-        if (!sy.rebased) {
-          // ejected to a headless rebase → stream it inline; re-run prep to merge once it lands.
+        if (sy.ok && !sy.rebased) {
+          // ejected to a headless rebase → stream it inline; run sync again once it lands.
           return { phase: "streaming" as const };
         }
+        // a refusal (stacked / open PR) is fine — those route through prep-push below
       }
       setDone("⤓ checking out onto your main checkout…");
       const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force });
@@ -185,26 +191,32 @@ export function NodeActions(props: {
         }
         return { phase: "error" as const, msg: co.err || "checkout failed" };
       }
-      setDone("⊟ squashing the branch + oxfmt…");
-      const pr = await post<PrepResult>("/prep", { branch: props.branch });
+      setDone("⊟ routing to one outgoing commit…");
+      const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
+        "/prep-push", { branch: props.branch });
       if (!pr.ok) {
-        return { phase: "error" as const, msg: `checked out, but squash failed: ${pr.err || "?"}` };
+        if (pr.reconcile) {
+          return { phase: "claude" as const };
+        }
+        if ((pr.err ?? "").startsWith("nothing to push")) {
+          return { phase: "done" as const, routed: ["nothing to push — origin already has this"], commit: null };
+        }
+        return { phase: "error" as const, msg: pr.err || "prep failed" };
       }
       setDone("⧗ running changed tests…");
       let tests: DeltaTestResult | null = null;
       try {
         tests = await post<DeltaTestResult>("/delta-tests", { branch: props.branch });
       } catch {
-        tests = null; // tests are advisory — a runner crash never blocks the merge prep
+        tests = null; // tests are advisory — a runner crash never blocks a local sync
       }
-      return { phase: "done" as const, n: pr.n ?? 0, header: pr.header, formatted: pr.formatted, tests };
+      return { phase: "done" as const, routed: pr.routed ?? [], commit: pr.commit ?? null, tests };
     },
     onSuccess: (r) => {
       setOpen(false);
       if (r.phase === "held") {
-        setHeldFor("prepMerge");
+        setHeldFor("omniSync");
         setHeldAt(r.held);
-        sync.refetch(); // the rebase already ran → retry skips it (behind == 0)
         return;
       }
       if (r.phase === "blocked") {
@@ -218,16 +230,16 @@ export function NodeActions(props: {
         sync.refetch();
         return;
       }
+      if (r.phase === "claude") {
+        reconcile.mutate(); // divergence with no mechanical route — Claude in the middle
+        return;
+      }
       if (r.phase === "error") {
         setDone(`✗ ${r.msg}`);
         qc.invalidateQueries({ queryKey: ["head"] });
         return;
       }
       setHeldAt(null);
-      const n = r.n ?? 0;
-      const fmt = r.formatted ? `, fmt ${r.formatted}` : "";
-      const squashed = n > 1 ? `squashed ${n} → 1${fmt}` : `1 commit${fmt}`;
-      const head = r.header ? `: ${r.header}` : "";
       let t = "";
       if (r.tests) {
         if (r.tests.noTests) {
@@ -238,22 +250,29 @@ export function NodeActions(props: {
           t = " · ⚠ tests couldn't run";
         }
       }
-      setDone(`✓ ready — checked out + ${squashed}${head}${t} — push from GitHub Desktop`);
+      setDone(`✓ synced — ${(r.routed ?? []).join(" · ") || "clean"}${t}`);
+      if (r.commit) {
+        setRoutedNotes(r.routed ?? []);
+        setMsgSubject(r.commit.subject);
+        setMsgBody(r.commit.body);
+        setEditorOpen(true);
+      }
       qc.invalidateQueries({ queryKey: ["head"] });
       qc.invalidateQueries({ queryKey: ["commits", props.branch] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
       qc.invalidateQueries({ queryKey: ["model"] });
       qc.invalidateQueries({ queryKey: ["restack-ambient"] });
       sync.refetch();
+      preview.refetch();
     },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "prep to merge failed"}`),
+    onError: (e) => setDone(`✗ ${(e as Error).message || "sync failed"}`),
   }));
 
   // free the worktree that 409'd, then resume whichever action hit it.
   const freeAndContinue = () => {
     setOpen(false);
-    if (heldFor() === "prepMerge") {
-      prepMerge.mutate(true);
+    if (heldFor() === "omniSync") {
+      omniSync.mutate(true);
     } else {
       checkout.mutate(true);
     }
@@ -273,42 +292,6 @@ export function NodeActions(props: {
   // ambient daemon's dry-run verdict for this branch — folded into the one restack button so a
   // predicted collision warns before you click, instead of living as its own duplicate badge.
   const willConflict = () => props.ambient?.verdict === "will-conflict";
-
-  // rebase forward onto origin/main. The server rebases in place when the branch is behind a
-  // clean main (the common 1-behind case) → {rebased:true} lands instantly; a real conflict or
-  // an unsafe layout ejects to a standalone Claude in an isolated worktree → {ejected:true}.
-  // Non-syncable branches (open PR / stacked) come back 409 with the reason, surfaced via done().
-  const rebase = createMutation(() => ({
-    mutationFn: () =>
-      post<{ ok?: boolean; err?: string; rebased?: boolean; ejected?: boolean; conflict?: boolean; contract?: boolean; children?: string[]; summary?: string }>(
-        "/sync",
-        { branch: props.branch },
-      ),
-    onSuccess: (r) => {
-      setOpen(false);
-      if (!r.ok) {
-        setDone(`✗ ${r.err || "rebase failed"}`);
-        return;
-      }
-      if (r.rebased) {
-        setDone(`✓ rebased — ${r.summary || "up to date with origin/main"}`);
-        qc.invalidateQueries({ queryKey: ["node", props.branch] });
-        qc.invalidateQueries({ queryKey: ["commits", props.branch] });
-        qc.invalidateQueries({ queryKey: ["model"] });
-        qc.invalidateQueries({ queryKey: ["restack-ambient"] });
-      } else if (r.contract) {
-        const kids = r.children ?? [];
-        setContractKids(kids);
-        setDone(`● already merged into origin/main — drop it & rewire ${kids.length} child${kids.length === 1 ? "" : "ren"} onto main?`);
-      } else {
-        // ejected (real conflict or unsafe layout) → headless rebase running; tail it inline.
-        setDone(null);
-        setRebaseStreaming(true);
-      }
-      sync.refetch();
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "rebase failed"}`),
-  }));
 
   // Confirm of the already-merged offer above: drop the empty branch and rewire its children
   // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
@@ -362,19 +345,7 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "pull failed"}`),
   }));
 
-  // reveal-in-Finder — demoted from the work-tab rows into this menu (telemetry trim).
-  const worktree = createMutation(() => ({
-    mutationFn: () => post<{ ok?: boolean; err?: string }>("/worktree", { branch: props.branch }),
-    onSuccess: (r) => {
-      setOpen(false);
-      setDone(r.ok ? "⌂ revealed in Finder" : `✗ ${r.err || "couldn't open worktree"}`);
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't open worktree"}`),
-  }));
-
-  // ── the two-button flow (design.md "the header is two buttons") ──────────────
-  // prep to push: ONE state-routed motion (additive / restack / squash — the server
-  // decides) that always lands on exactly one outgoing commit, opened in the editor.
+  // ── the editor — where every sync lands: the one outgoing commit, editable pre-push ──
   const [editorOpen, setEditorOpen] = createSignal(false);
   const [msgSubject, setMsgSubject] = createSignal("");
   const [msgBody, setMsgBody] = createSignal("");
@@ -386,23 +357,6 @@ export function NodeActions(props: {
     sync.refetch();
     preview.refetch();
   };
-  const prepPush = createMutation(() => ({
-    mutationFn: () =>
-      post<{ ok?: boolean; err?: string; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
-        "/prep-push", { branch: props.branch }),
-    onSuccess: (r) => {
-      refreshAfterPrep();
-      if (!r.ok || !r.commit) {
-        setDone(`✗ ${r.err || "prep failed"}`);
-        return;
-      }
-      setRoutedNotes(r.routed ?? []);
-      setMsgSubject(r.commit.subject);
-      setMsgBody(r.commit.body);
-      setEditorOpen(true);
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "prep failed"}`),
-  }));
   const saveMsg = createMutation(() => ({
     mutationFn: () =>
       post<{ ok?: boolean; err?: string }>("/prep-message", {
@@ -467,7 +421,7 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "reconcile failed"}`),
   }));
 
-  const busy = () => checkout.isPending || prepMerge.isPending || rebase.isPending || pull.isPending || contract.isPending || prepPush.isPending || pushOrigin.isPending;
+  const busy = () => checkout.isPending || omniSync.isPending || pull.isPending || contract.isPending || pushOrigin.isPending;
 
   // ── the waymark spine: one chip (station), one slot (edge) ──────────────────
   // Station = where the branch stands on its real path — the DOMINANT position, not a
@@ -521,7 +475,8 @@ export function NodeActions(props: {
     }
     return parts.join("\n\n");
   };
-  // Edge = the single next step. null → at rest: the slot does not render at all.
+  // Edge = the single LOCAL next step (Phil: "whatever we do here locally is fine").
+  // The shared world never moves from this slot — that's the red button's sole job.
   const edge = (): SpineEdge | null => {
     if (props.merged || contractKids()) {
       return {
@@ -533,42 +488,28 @@ export function NodeActions(props: {
       };
     }
     const r = prepRoute.data?.route;
-    if (!r || r === "nothing") {
-      return null;
+    const idle = (!r || r === "nothing") && !props.health?.drifted && behind() === 0;
+    if (idle) {
+      return null; // truly at rest — the slot does not render
     }
-    if (preview.data?.ok) {
-      return {
-        label: "⇧ push",
-        kind: "push",
-        pending: pushOrigin.isPending,
-        armed: armed() === "pushOrigin",
-        title: "push to origin — shared with the team the moment it lands (fast-forward, one reviewed commit)",
-        onClick: fire(() => trigger("pushOrigin", () => pushOrigin.mutate())),
-      };
+    const steps: string[] = [];
+    if (props.health?.drifted) {
+      steps.push("reseat onto its parent");
     }
-    if (r === "ready") {
-      return {
-        label: prepRoute.data?.needsBody ? "✎ edit the why" : "⌁ finish prep",
-        kind: "edit",
-        pending: prepPush.isPending,
-        title: (preview.data?.reasons ?? []).length
-          ? `the wards aren't green yet:\n${(preview.data?.reasons ?? []).join("\n")}`
-          : "open the outgoing commit's message in the editor",
-        onClick: fire(() => prepPush.mutate()),
-      };
+    if (behind() > 0 && sync.data?.syncable) {
+      steps.push(`rebase forward (${behind()} behind)`);
     }
-    const verb = r === "squash" ? "prep: seal the tail"
-      : r === "restack" ? "prep: restack"
-      : r === "additive" ? "prep: draft additive"
-      : r === "push-vehicle" ? "prep: push vehicle ready"
-      : "prep to push";
+    steps.push("checkout here");
+    if (r && r !== "nothing" && r !== "ready") {
+      steps.push(prepRoute.data?.why ?? "route to one outgoing commit");
+    }
+    steps.push("open the message editor");
     return {
-      label: `⌁ ${verb}`,
+      label: "⟲ sync",
       kind: "prep",
-      pending: prepPush.isPending,
-      title: `${prepRoute.data?.why ?? "one state-routed motion toward a single outgoing commit"}
-then the commit message opens in the editor`,
-      onClick: fire(() => prepPush.mutate()),
+      pending: omniSync.isPending,
+      title: `sync — everything local, in one motion:\n· ${steps.join("\n· ")}\n(Claude steps in when a divergence has no mechanical route)`,
+      onClick: fire(() => omniSync.mutate(false)),
     };
   };
   const fire = (fn: () => void) => () => {
@@ -593,6 +534,27 @@ then the commit message opens in the editor`,
         />
       </Show>
 
+      {/* THE red button — the only way anything here reaches origin (Phil: "whatever is
+          being shared publicly needs to be with me at the helm"). Deliberately not the
+          spine's slot: local motions and the shared-history door never share a control.
+          Appears only when a commit is actually outgoing; arms only when the wards are
+          green; the server re-verifies everything at push time regardless. */}
+      <Show when={!isReview() && (preview.data?.outgoing ?? 0) > 0}>
+        <button
+          class="nh-fix nh-push-red"
+          classList={{ armed: armed() === "pushOrigin" }}
+          disabled={busy() || !preview.data?.ok}
+          title={
+            preview.data?.ok
+              ? "push to origin — the team sees this the moment it lands (fast-forward, one reviewed commit)"
+              : `not pushable yet:\n${(preview.data?.reasons ?? ["reading the branch…"]).join("\n")}`
+          }
+          onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate()))}
+        >
+          {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push to origin"}
+        </button>
+      </Show>
+
       {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}
       <Show when={isReview() && remote.data?.available}>
         <span
@@ -611,27 +573,25 @@ then the commit message opens in the editor`,
         </button>
       </Show>
 
-      {/* held-elsewhere banner: checkout / prep-to-merge 409'd because another worktree holds the
-          branch. Offer to free it and resume whichever action hit it. Lives outside the menu so it
-          shows even when the primary prep-to-merge button triggered it. */}
+      {/* held-elsewhere banner: checkout / sync 409'd because another worktree holds the
+          branch. Offer to free it and resume whichever action hit it. */}
       <Show when={heldAt()}>
         <span class="nh-held">
           held in {heldAt()}
           <button class="nh-held-btn" disabled={busy()} onClick={freeAndContinue}>
-            free &amp; {heldFor() === "prepMerge" ? "prep" : "checkout"}
+            free &amp; {heldFor() === "omniSync" ? "sync" : "checkout"}
           </button>
           <button class="nh-held-btn" onClick={() => setHeldAt(null)}>cancel</button>
         </span>
       </Show>
 
-      {/* ⋯ menu — the rarer branch actions (view-only checkout, pre-push gates), collapsed off
-          the header. The merge-prep workflow is the primary button above. */}
+      {/* ⋯ menu — plain checkout, conditional repairs, interest, chats. */}
       <button
         class="icon-btn"
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}
-        title="branch actions — checkout, pre-push gates"
+        title="branch actions — checkout, conditional repairs, interest, chats"
         onClick={() => setOpen((o) => !o)}
       >
         ⋯
@@ -651,38 +611,11 @@ then the commit message opens in the editor`,
             {checkout.isPending ? "checking out…" : "checkout here"}
           </button>
 
-          {/* overrides — the old first-class buttons live here now (design.md: two buttons) */}
+          {/* conditional repairs — appear only with their condition; everything routine
+              lives in ⟲ sync (Phil's menu cull, 2026-07-05: restack / reconcile / push-card /
+              worktree crossed out — "the more I look at this menu the more I want an omni
+              sync button") */}
           <Show when={!isReview()}>
-            <button
-              class="nh-item"
-              role="menuitem"
-              disabled={busy() || behind() === 0}
-              title="rebase this branch forward onto origin/main — lands instantly when clean, ejects to Claude on a conflict; a stacked or open-PR branch is refused with the reason"
-              onClick={fire(() => rebase.mutate())}
-            >
-              <span class="nh-item-ic">⟳</span>
-              {rebase.isPending ? "restacking…" : behind() === 0 ? "on origin/main ✦" : `restack · ${behind()} behind`}
-            </button>
-            <button
-              class="nh-item"
-              role="menuitem"
-              disabled={busy()}
-              title="prep to merge — move your main checkout onto this branch, then squash all unpushed commits into one voiced commit"
-              onClick={() => trigger("prepMerge", () => { setOpen(false); prepMerge.mutate(false); })}
-            >
-              <span class="nh-item-ic">↧</span>
-              {prepMerge.isPending ? "prepping…" : armed() === "prepMerge" ? "confirm prep to merge" : "prep to merge (checkout)"}
-            </button>
-            <button
-              class="nh-item"
-              role="menuitem"
-              disabled={reconcile.isPending}
-              title="eject a standalone Claude in this branch's worktree to work out the source of truth on a divergence — no force-push, no blind pull"
-              onClick={() => reconcile.mutate()}
-            >
-              <span class="nh-item-ic">⚖</span>
-              {reconcile.isPending ? "ejecting…" : "reconcile divergence"}
-            </button>
             <Show when={props.health?.drifted && props.onReseat}>
               <button
                 class="nh-item"
@@ -713,30 +646,7 @@ then the commit message opens in the editor`,
                 <span class="nh-item-ic">⇄</span> inspect divergence
               </button>
             </Show>
-            <button
-              class="nh-item"
-              role="menuitem"
-              title="the full push card — the crossing, wards, and remote (phone) surface of the same flow"
-              onClick={() => {
-                setOpen(false);
-                navigate({ kind: "push", branch: props.branch });
-              }}
-            >
-              <span class="nh-item-ic">⤢</span> open the push card
-            </button>
           </Show>
-
-          {/* worktree reveal — demoted here from the work-tab rows (telemetry trim) */}
-          <button
-            class="nh-item"
-            role="menuitem"
-            disabled={worktree.isPending}
-            title="reveal this branch's worktree in Finder — materialises a scratch one if it's checked out nowhere"
-            onClick={fire(() => worktree.mutate())}
-          >
-            <span class="nh-item-ic">⌂</span>
-            {worktree.isPending ? "revealing…" : "reveal worktree"}
-          </button>
 
           {/* interest + all-threads — demoted off the header bar (strike-6 trim) */}
           <Show when={props.onBump}>
