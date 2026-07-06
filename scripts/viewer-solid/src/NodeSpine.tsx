@@ -35,20 +35,17 @@ export default function NodeSpine(props: {
   edge: SpineEdge | null; // null → at rest: the slot does not render
   dirty?: number; // uncommitted files in the holding worktree — a small ± mark, details in reasons + the rail
 }) {
-  const reached = () => STATIONS.findIndex((s) => s.id === props.station);
   return (
     <span class="spine-wrap">
       <span class={`spine-chip at-${props.station}`} title={props.reasons}>
+        {/* one mark only — the current station (plus the review ✦ when it's earned gold);
+            the journey's other stations live in the tooltip, not the chrome */}
         <span class="spine-path" aria-hidden="true">
-          <For each={STATIONS}>
-            {(s, i) => (
+          <For each={STATIONS.filter((s) => s.id === props.station || (s.id === "review" && props.blessedAll))}>
+            {(s) => (
               <span
                 class={`spine-mark m-${s.id}`}
-                classList={{
-                  here: s.id === props.station,
-                  past: i() < reached(),
-                  lit: s.id === "review" && props.blessedAll,
-                }}
+                classList={{ here: s.id === props.station, lit: s.id === "review" && props.blessedAll }}
               >
                 {s.mark}
               </span>
