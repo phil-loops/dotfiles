@@ -231,6 +231,41 @@ case "$pos" in
   *)         echo "stack-open: unrecognized <pos> '$pos' — opening at top" >&2 ;;
 esac
 
+# ── editor seam ──────────────────────────────────────────────────────
+# STACK_OPEN_EDITOR=hx (or `git config stack.open-editor hx`) routes file opens to Helix.
+# Helix has no remote-control socket, so "warm" is a tmux trick: reuse a review-hx window
+# via send-keys (:open + <n>gg), else launch `hx` cold — the CLI takes file:line directly.
+# The --review Diffview stays nvim-only either way (it IS a nvim feature).
+EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
+if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
+  case "$pos" in <->) hxline="$pos";; <->:<->) hxline="${pos%%:*}";; *) hxline="";; esac
+  win=$(tmux list-panes -s -t "$SESSION" \
+          -F '#{window_index} #{pane_current_command} #{window_name}' 2>/dev/null \
+        | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
+  if [[ -n "${win:-}" ]]; then
+    # Escape must land ALONE: ESC immediately followed by ':' reads as Alt-: and the
+    # ':' never opens helix's command line — 'open …' then types into the buffer ('o'
+    # = insert line). The sleeps keep each chord a separate terminal event.
+    tmux send-keys -t "${SESSION}:${win}" Escape
+    sleep 0.2
+    tmux send-keys -t "${SESSION}:${win}" ":open ${file}" Enter
+    if [[ -n "$hxline" ]]; then
+      sleep 0.2
+      tmux send-keys -t "${SESSION}:${win}" "${hxline}gg"
+    fi
+  else
+    target="$file"; [[ -n "$hxline" ]] && target="$file:$hxline"
+    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
+      || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
+    win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
+  fi
+  [[ -n "${win:-}" ]] && tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
+  focus_terminal
+  [[ -n "$stale_warn" ]] && echo "stack-open: $stale_warn" >&2 || true
+  echo "opened $rel on $branch → review-hx ($dir)"
+  exit 0
+fi
+
 # Bound every --server call: a WEDGED review-nvim (stuck on a swap/other prompt) makes
 # any --server request hang forever — that hangs /open and spins the viewer's hover+o
 # indefinitely. macOS has no `timeout`; perl's alarm caps each call (the exec'd nvim
