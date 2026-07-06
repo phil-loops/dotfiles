@@ -6,4 +6,7 @@ mcp-servers/*/node_modules/
 
 # Externally-installed agent skills (npx skills add) — symlinks into ~/.agents/skills, not ours to track
 .claude/skills/loops-*
+# …but these two are real hand-written skills that happen to share the prefix
+!.claude/skills/loops-restart/
+!.claude/skills/loops-preview/
 scripts/gh-to-nvim/.ext-key.pem
