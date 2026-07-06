@@ -217,13 +217,7 @@ body {
 .nh-amb { font-size: 12px; cursor: help; letter-spacing: 0.02em; }
 .nh-amb.amb-conflict { color: var(--del); }
 .nh-amb.amb-restack { color: var(--patina); }
-.nh-blocked { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
 .nh-pushed { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
-.nh-shared { font-size: 12px; cursor: help; white-space: nowrap; letter-spacing: 0.02em; }
-.nh-shared-local { color: var(--ink-faint); }
-.nh-shared-ahead { color: var(--ember); }
-.nh-shared-synced { color: var(--add); }
-.nh-shared-gone { color: var(--ink-dim); text-decoration: line-through; }
 .nh-fix {
   font: inherit; font-size: 12px; color: var(--del); background: transparent;
   border: 1px solid var(--del); border-radius: 5px; padding: 3px 9px; cursor: pointer; opacity: 0.9;
