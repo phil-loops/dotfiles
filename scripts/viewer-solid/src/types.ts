@@ -14,6 +14,7 @@ export const FileDiff = z.object({
   add: z.number().optional(),
   del: z.number().optional(),
   patch: z.string().optional(),
+  stale: z.string().optional(), // stale files only: the blessed-blob → current delta (what's unreviewed)
 });
 export type FileDiff = z.infer<typeof FileDiff>;
 
