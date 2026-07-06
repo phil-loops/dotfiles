@@ -362,6 +362,8 @@ class H(BaseHTTPRequestHandler):
             return push.dirty_resolve(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
             return sync.post_reconcile(self, raw)
+        if self.path == "/commit-dirty":  # commit all uncommitted worktree changes to the branch
+            return review.commit_dirty(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit
             return review.squash(self, raw)
         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
@@ -411,6 +413,8 @@ class H(BaseHTTPRequestHandler):
             return chat.stop(self, raw)
         if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
             return chat.popout(self, raw)
+        if self.path == "/chat-tmux":        # ✦ buttons: seeded chat straight into tmux (join + even-horizontal)
+            return assist.chat_tmux(self, raw)
         if self.path == "/chat-attach":      # save a dropped/pasted image → temp file claude can Read
             return chat.attach(self, raw)
         if self.path == "/rebase-stream":    # tail the ejected forward-rebase (headless claude) → SSE replay+live

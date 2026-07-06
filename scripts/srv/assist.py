@@ -140,3 +140,35 @@ def stream(req, raw):
                 threading.Thread(target=chat._run_claude, args=(job, cmd, cwd), daemon=True).start()
 
     chat._subscribe(req, job, 0)
+
+
+def chat_tmux(req, raw):
+    """POST /chat-tmux {branch, project?, path?, patch?} — the ✦ buttons' target: the same
+    seeded chat, straight into an INTERACTIVE claude beside Phil's tmux panes
+    (STACK_CLAUDE_PLACE=join → split the active window, even-horizontal columns).
+    The drawer stays for streamed edit-actions and running threads; conversation
+    itself lives in tmux, where it can act."""
+    d = json.loads(raw or "{}")
+    branch = (d.get("branch") or "").strip()
+    project = (d.get("project") or "").strip()
+    path = (d.get("path") or "").strip()
+    if not (branch or project):
+        req._send(400, json.dumps({"ok": False, "err": "need a branch or project"}))
+        return
+    opener = ("Phil popped this open from the viewer — orient him briefly: what is this, "
+              "does it hang together, what would you change? Then take his questions.")
+    if project:
+        prompt = prompts.project_chat(project, chat._project_seed(project), opener)
+        target = chat._project_integrator(project) or branch or project
+    elif path:
+        prompt = prompts.file_chat(branch, path, d.get("patch", ""), opener)
+        target = branch
+    else:
+        prompt = prompts.branch_chat(branch, chat._branch_diff(branch), opener)
+        target = branch
+    env = dict(os.environ, STACK_CLAUDE_PLACE="join")
+    r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), target], input=prompt,
+                       env=env, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+    ok = r.returncode == 0
+    req._send(200 if ok else 500,
+              json.dumps({"ok": ok, "out": (r.stdout or "").strip(), "err": (r.stderr or "").strip()}))
