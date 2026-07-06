@@ -30,7 +30,18 @@
 /* the path at rest: faint marks, a journey drawn in pencil */
 .spine-mark {
   color: var(--ink-faint);
-  transition: color 160ms ease, text-shadow 160ms ease;
+  transition: color 160ms ease, text-shadow 160ms ease, opacity 200ms ease;
+  /* at rest only the CURRENT station (and an earned gold review mark) shows — the
+     full path is a hover reveal, in place, so nothing shifts (Phil: "don't know
+     why it shows all those icons all the time") */
+  opacity: 0;
+}
+.spine-mark.here,
+.spine-mark.lit {
+  opacity: 1;
+}
+.spine-chip:hover .spine-mark {
+  opacity: 1;
 }
 .spine-mark.past {
   color: var(--ink-dim);
