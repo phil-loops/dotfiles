@@ -25,8 +25,6 @@ import { NodeActions } from "./NodeActions";
 import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
 import { overviewView, setOverviewView } from "./overviewView";
-import { useDiffSelection } from "./useDiffSelection";
-import AskClaudeChip from "./AskClaudeChip";
 import ChatPanel from "./ChatPanel";
 import ChatIndex from "./ChatIndex";
 import { chatTarget, openChat, closeChat, chatToTmux } from "./chatDrawer";
@@ -1744,13 +1742,9 @@ function NodeDetail() {
       : [<span class="file-dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
   };
 
-  // sweep-select diff text → floating "ask Claude" chip → POST /claude. Attributes selected
-  // rows to a file via each .entry's existing data-path (see useDiffSelection).
-  const { selection: claudeSel, clear: clearClaudeSel } = useDiffSelection();
-
   // hover a diff line + press o → open that exact line in the warm review-nvim. Hover-armed and
   // event-delegated off the surface; there is deliberately no click-to-open — a mouse click on a
-  // line collided with the sweep-to-chat text selection, so opening is keyboard-only.
+  // line collided with plain text selection, so opening is keyboard-only.
   const [hover, setHover] = createSignal<{ path: string; line: number } | null>(null);
   const [flash, setFlash] = createSignal("");
   let flashT: ReturnType<typeof setTimeout>;
@@ -2220,9 +2214,6 @@ function NodeDetail() {
           </Show>
         </Show>
       </main>
-      <Show when={canMutate}>
-        <AskClaudeChip selection={claudeSel} branch={active} onClear={clearClaudeSel} />
-      </Show>
       <Show when={showChats()}>
         <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
       </Show>
