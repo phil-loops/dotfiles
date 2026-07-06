@@ -319,6 +319,8 @@ class H(BaseHTTPRequestHandler):
             return reviews.from_github(self, raw)
         if self.path == "/open-blob":   # Chrome ext: open a GitHub blob's <path> at <line> in the working checkout
             return reviews.open_blob(self, raw)
+        if self.path == "/open-url":   # Chrome ext (URL-only): parse a raw GitHub URL → nvim or viewer route
+            return reviews.open_url(self, raw)
         if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
             return reviews.pull(self, raw)
         if self.path == "/pr-forest":   # Chrome ext: forest membership + child seating for a PR
