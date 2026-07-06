@@ -93,7 +93,7 @@ export function NodeActions(props: {
   onDetach?: () => void; // unset a footgun tracking ref
   onInspect?: () => void; // toggle the diverged-inspect panel (lives in App below the header)
   ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
-  interest?: number; // current Home-ordering interest — drives the ⋯ promote/demote items
+  interest?: number; // the forest's Home-ordering interest — drives the ⋯ promote/demote items
   onBump?: (delta: number) => void;
   onAllChats?: () => void;
 }) {
@@ -735,7 +735,7 @@ export function NodeActions(props: {
           {/* interest + all-threads — demoted off the header bar (strike-6 trim) */}
           <Show when={props.onBump}>
             <button class="nh-item" role="menuitem" onClick={() => props.onBump!(1)}>
-              <span class="nh-item-ic">▲</span> promote on Home{(props.interest ?? 0) > 0 ? ` (now ${props.interest})` : ""}
+              <span class="nh-item-ic">▲</span> promote forest on Home{(props.interest ?? 0) > 0 ? ` (now ${props.interest})` : ""}
             </button>
             <Show when={(props.interest ?? 0) > 0}>
               <button class="nh-item" role="menuitem" onClick={() => props.onBump!(-1)}>

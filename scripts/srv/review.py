@@ -13,7 +13,7 @@ import os
 import json
 from urllib.parse import parse_qs
 
-from . import ctx
+from . import ctx, picker
 
 _mcache = {}  # (branch, model_sig) -> model json — recompute only when something changed
 
@@ -62,11 +62,13 @@ def _enrich(raw, branch):
         desc = ctx.run(["git", "config", f"branch.{bid}.description"]).stdout.strip()
         if desc:
             meta["description"] = desc
-        iv = ctx.run(["git", "config", f"stack-branch.{bid}.interest"]).stdout.strip()
-        if iv.lstrip("-").isdigit() and int(iv) > 0:
-            meta["interest"] = int(iv)
         if bid in ranks:
             meta["mergeRank"] = ranks[bid]
+    proj = picker._project_of(branch)
+    if proj:
+        iv = ctx.run(["git", "config", f"stack-project.{proj}.interest"]).stdout.strip()
+        if iv.lstrip("-").isdigit() and int(iv) > 0:
+            data["interest"] = int(iv)
     if order:
         data["mergeOrder"] = order
     return json.dumps(data)
@@ -188,12 +190,14 @@ def purpose_set(req, raw):
 
 
 def interest_bump(req, raw):
-    # Promote/demote a branch's manual interest level (stack-branch.<b>.interest). Body carries
-    # {branch, delta} (+1 promote / -1 demote) or {branch, value} (absolute). Clamped ≥0; 0 unsets.
-    # Orders the Forests home + badges the node; purely Phil's signal, viewer-only.
+    # Promote/demote a forest's manual interest level (stack-project.<p>.interest). Body carries
+    # {project, delta} (+1 promote / -1 demote) or {project, value} (absolute); {branch} resolves
+    # to its project. Clamped ≥0; 0 unsets. Orders the Forests home; purely Phil's signal.
     d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    key = f"stack-branch.{branch}.interest"
+    proj = d.get("project", "") or (picker._project_of(d["branch"]) if d.get("branch") else "")
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project for interest"}))
+    key = f"stack-project.{proj}.interest"
     cur = ctx.run(["git", "config", key]).stdout.strip()
     cur = int(cur) if cur.lstrip("-").isdigit() else 0
     nxt = int(d["value"]) if "value" in d else cur + int(d.get("delta", 0))
@@ -202,7 +206,7 @@ def interest_bump(req, raw):
         ctx.run(["git", "config", key, str(nxt)])
     else:
         ctx.run(["git", "config", "--unset", key])
-    req._send(200, json.dumps({"ok": True, "branch": branch, "interest": nxt}))
+    req._send(200, json.dumps({"ok": True, "project": proj, "interest": nxt}))
 
 
 def _worktree_for_branch(branch):
