@@ -245,8 +245,10 @@ def push_origin(req, raw):
 # ── prep to push — ONE state-routed motion (design.md "the header is two buttons") ──
 
 def _squash_unpushed(branch, message=""):
-    """stack-squash --unpushed --format: collapse the unpushed tail to one voiced commit."""
-    cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format"]
+    """stack-squash --unpushed --format --no-voice: collapse the unpushed tail to one commit
+    with the mechanical message — the claude voicing is opt-in via /draft-message, so prep
+    never blocks on a model call."""
+    cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format", "--no-voice"]
     if message:
         cmd.append(f"--message={message}")
     r = ctx.run([*cmd, branch])
@@ -321,7 +323,7 @@ def prep_push(req, raw):
             sq = _squash_unpushed(branch)
             if not sq.get("ok"):
                 return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "squash failed", "routed": routed}))
-            routed.append(f"sealed {v['outgoing']} unpushed commits into one" + (" (voiced)" if sq.get("voiced") else ""))
+            routed.append(f"sealed {v['outgoing']} unpushed commits into one" + (" (voiced)" if sq.get("voiced") else " — ✦ voice drafts a message"))
         elif v["outgoing"] == 1:
             routed.append("already one clean commit — nothing to do")
         else:
@@ -341,6 +343,32 @@ def prep_push(req, raw):
     return req._send(200, json.dumps({
         "ok": True, "routed": routed, "outgoing": v["outgoing"],
         "commit": v["commit"], "wardsOk": v["ok"], "reasons": v["reasons"],
+    }))
+
+
+def draft_message(req, raw):
+    """POST /draft-message {branch} — the opt-in claude pass: draft the ONE outgoing
+    commit's message in the author's voice (stack-squash --dry drafts, nothing moves).
+    Nothing is applied until the editor saves it through /prep-message."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    v = _origin_verdict(branch)
+    if v is None:
+        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
+    if v["outgoing"] != 1 or not v["commit"]:
+        return req._send(200, json.dumps({"ok": False, "err": "drafting needs exactly one unpushed commit — run prep first"}))
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--dry", "--unpushed", branch])
+    try:
+        sq = json.loads(r.stdout)
+    except Exception:
+        return req._send(200, json.dumps({"ok": False, "err": (r.stderr or r.stdout or "draft failed").strip()[:300]}))
+    if not sq.get("ok") or not sq.get("voiced"):
+        return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "claude unavailable — keep the mechanical message or write your own"}))
+    lines = (sq.get("message") or "").splitlines()
+    return req._send(200, json.dumps({
+        "ok": True,
+        "subject": lines[0].strip() if lines else "",
+        "body": "\n".join(lines[1:]).strip(),
     }))
 
 

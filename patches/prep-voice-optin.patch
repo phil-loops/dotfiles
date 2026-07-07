@@ -1,0 +1,116 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index 56d8844..5be0883 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -245,8 +245,10 @@ def push_origin(req, raw):
+ # ── prep to push — ONE state-routed motion (design.md "the header is two buttons") ──
+ 
+ def _squash_unpushed(branch, message=""):
+-    """stack-squash --unpushed --format: collapse the unpushed tail to one voiced commit."""
+-    cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format"]
++    """stack-squash --unpushed --format --no-voice: collapse the unpushed tail to one commit
++    with the mechanical message — the claude voicing is opt-in via /draft-message, so prep
++    never blocks on a model call."""
++    cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format", "--no-voice"]
+     if message:
+         cmd.append(f"--message={message}")
+     r = ctx.run([*cmd, branch])
+@@ -321,7 +323,7 @@ def prep_push(req, raw):
+             sq = _squash_unpushed(branch)
+             if not sq.get("ok"):
+                 return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "squash failed", "routed": routed}))
+-            routed.append(f"sealed {v['outgoing']} unpushed commits into one" + (" (voiced)" if sq.get("voiced") else ""))
++            routed.append(f"sealed {v['outgoing']} unpushed commits into one" + (" (voiced)" if sq.get("voiced") else " — ✦ voice drafts a message"))
+         elif v["outgoing"] == 1:
+             routed.append("already one clean commit — nothing to do")
+         else:
+@@ -344,6 +346,32 @@ def prep_push(req, raw):
+     }))
+ 
+ 
++def draft_message(req, raw):
++    """POST /draft-message {branch} — the opt-in claude pass: draft the ONE outgoing
++    commit's message in the author's voice (stack-squash --dry drafts, nothing moves).
++    Nothing is applied until the editor saves it through /prep-message."""
++    d = json.loads(raw or "{}")
++    branch = d.get("branch", "")
++    v = _origin_verdict(branch)
++    if v is None:
++        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
++    if v["outgoing"] != 1 or not v["commit"]:
++        return req._send(200, json.dumps({"ok": False, "err": "drafting needs exactly one unpushed commit — run prep first"}))
++    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--dry", "--unpushed", branch])
++    try:
++        sq = json.loads(r.stdout)
++    except Exception:
++        return req._send(200, json.dumps({"ok": False, "err": (r.stderr or r.stdout or "draft failed").strip()[:300]}))
++    if not sq.get("ok") or not sq.get("voiced"):
++        return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "claude unavailable — keep the mechanical message or write your own"}))
++    lines = (sq.get("message") or "").splitlines()
++    return req._send(200, json.dumps({
++        "ok": True,
++        "subject": lines[0].strip() if lines else "",
++        "body": "\n".join(lines[1:]).strip(),
++    }))
++
++
+ def prep_message(req, raw):
+     """POST /prep-message {branch, subject, body} — rewrite the message of the ONE unpushed
+     tip commit, tree untouched (commit-tree + atomic update-ref, author preserved). Refuses
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 0f255b3..d9b75ff 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -361,6 +361,8 @@ class H(BaseHTTPRequestHandler):
+             return push.prep_push(self, raw)
+         if self.path == "/prep-message":   # edit the ONE unpushed commit's subject+body (tree untouched)
+             return push.prep_message(self, raw)
++        if self.path == "/draft-message":   # opt-in claude draft of the outgoing commit's message
++            return push.draft_message(self, raw)
+         if self.path == "/dirty-resolve":   # sync's routed decision on a dirty tree: include / stash / pop
+             return push.dirty_resolve(self, raw)
+         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index d609b51..b507307 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -482,6 +482,24 @@ export function NodeActions(props: {
+     onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't save the message"}`),
+   }));
+ 
++  // the opt-in claude pass — prep commits with a mechanical message so it never waits
++  // on a model; this button is the only thing that asks claude to voice it
++  const draftMsg = createMutation(() => ({
++    mutationFn: () =>
++      post<{ ok?: boolean; err?: string; subject?: string; body?: string }>("/draft-message", {
++        branch: props.branch,
++      }),
++    onSuccess: (r) => {
++      if (!r.ok || !r.subject) {
++        setDone(`✗ ${r.err || "couldn't draft the message"}`);
++        return;
++      }
++      setMsgSubject(r.subject);
++      setMsgBody(r.body ?? "");
++    },
++    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't draft the message"}`),
++  }));
++
+   // what prep WOULD do — the read-only routed verdict, so the button teaches before it acts
+   const prepRoute = createQuery(() => ({
+     queryKey: ["prep-route", props.branch],
+@@ -865,6 +883,14 @@ export function NodeActions(props: {
+             >
+               {saveMsg.isPending ? "saving…" : "save message"}
+             </button>
++            <button
++              class="nh-editor-close"
++              disabled={draftMsg.isPending}
++              title="ask claude to draft the message in your voice from the outgoing diff"
++              onClick={() => draftMsg.mutate()}
++            >
++              {draftMsg.isPending ? "voicing…" : "✦ voice"}
++            </button>
+             <button class="nh-editor-close" onClick={() => setEditorOpen(false)}>
+               close
+             </button>
