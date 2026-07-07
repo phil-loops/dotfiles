@@ -1919,8 +1919,8 @@ function NodeDetail() {
     // place. Per-file only — there is deliberately no bless-all key.
     // advance in the next frame — after the just-blessed card collapses — so the scroll lands the
     // next card at the toolbar line instead of over-shooting past the freed-up space.
-    else if (e.key === "B" && activeFile()) { e.preventDefault(); bless.mutate(activeFile()); requestAnimationFrame(() => fileCycle.next()); }
-    else if (e.key === "U" && activeFile()) { e.preventDefault(); unbless.mutate(activeFile()); }
+    else if (e.key === "B" && activeFile() && base() === "") { e.preventDefault(); bless.mutate(activeFile()); requestAnimationFrame(() => fileCycle.next()); }
+    else if (e.key === "U" && activeFile() && base() === "") { e.preventDefault(); unbless.mutate(activeFile()); }
     else if (e.key === "?") { e.preventDefault(); setShowHelp((v) => !v); }
     else if (e.key === "m") {
       // m → up to the forest view. The key reached for by muscle memory (Esc does it too).
@@ -2307,8 +2307,9 @@ function NodeDetail() {
                 }
               >
                 <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
+                  {/* off-parent bases are view-only — bless keys on the parent...child patch-id, not the shown diff */}
                   <For each={data().files.filter(matchFilter)}>
-                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost()} onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })} />}
+                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost() || base() !== ""} onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })} />}
                   </For>
                 </Show>
               </Show>
