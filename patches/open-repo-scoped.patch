@@ -1,0 +1,13 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index eec5b62..a01303f 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1878,7 +1878,7 @@ function NodeDetail() {
+   const openInNvim = (path: string, line: number | null) =>
+     !canMutate
+       ? undefined // static snapshot: no live nvim to open into
+-      : fetch("/open", {
++      : fetch(withRepo("/open"), {
+       method: "POST",
+       headers: { "Content-Type": "application/json" },
+       body: JSON.stringify({ branch: nodeRef(), path, ...(line != null ? { pos: String(line) } : {}) }),

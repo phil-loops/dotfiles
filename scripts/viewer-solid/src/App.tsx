@@ -1878,7 +1878,7 @@ function NodeDetail() {
   const openInNvim = (path: string, line: number | null) =>
     !canMutate
       ? undefined // static snapshot: no live nvim to open into
-      : fetch("/open", {
+      : fetch(withRepo("/open"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch: nodeRef(), path, ...(line != null ? { pos: String(line) } : {}) }),
