@@ -1,0 +1,93 @@
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index b7caeae..0ebd836 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1418,6 +1418,7 @@ function ShipButton(props: { project: string }) {
+ function ForestOverview() {
+   const { location, navigate } = useViewerLocation();
+   const project = () => forestKey(location());
++  const ovQc = useQueryClient();
+   const [ovView, setOvView] = [overviewView, setOverviewView]; // shared module signal so ⌘K can open straight into a view
+   const model = createQuery(() => ({
+     // repo in the key so loops/monotoad forests with the same name don't share a cache entry
+@@ -1525,6 +1526,16 @@ function ForestOverview() {
+               onClose={() => {}}
+               onHoverNode={showTip}
+               onLeaveNode={hideTip}
++              onContract={canMutate ? async (branch) => {
++                await fetch(withRepo("/contract"), {
++                  method: "POST",
++                  headers: { "Content-Type": "application/json" },
++                  body: JSON.stringify({ branch }),
++                }).then((r) => r.json());
++                ovQc.invalidateQueries({ queryKey: ["model"] });
++                ovQc.invalidateQueries({ queryKey: ["forest-health"] });
++                ovQc.invalidateQueries({ queryKey: ["projects"] });
++              } : undefined}
+             />
+           }
+         >
+diff --git a/scripts/viewer-solid/src/ForestMap.tsx b/scripts/viewer-solid/src/ForestMap.tsx
+index 1df49f5..afa36b4 100644
+--- a/scripts/viewer-solid/src/ForestMap.tsx
++++ b/scripts/viewer-solid/src/ForestMap.tsx
+@@ -64,10 +64,14 @@ export function ForestMap(props: {
+   page?: boolean;
+   onHoverNode?: (branch: string, el: HTMLElement) => void;
+   onLeaveNode?: () => void;
++  // the merged-ghost badge's contextual next step: drop this branch + rewire its children
++  // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
++  onContract?: (branch: string) => Promise<unknown>;
+ }) {
+   const nhealth = (id: string) => props.health?.()?.[id];
+   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
+   const [hov, setHov] = createSignal<string | null>(null);
++  const [contracting, setContracting] = createSignal<string | null>(null);
+ 
+   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
+   // the project's leaves on main in an ephemeral ref (read-only, never pushed) — does the whole
+@@ -508,16 +512,32 @@ export function ForestMap(props: {
+                   <Show when={!dams().damSet.has(n.id) && (nhealth(n.id)?.drifted || nhealth(n.id)?.merged)}>
+                     <title>
+                       {nhealth(n.id)?.merged
+-                        ? "merged into main (ghost) — restack to contract it (drop + rewire children)"
++                        ? props.onContract
++                          ? "already merged into main — click drops this branch and rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
++                          : "merged into main (ghost) — restack to contract it (drop + rewire children)"
+                         : "off its parent (not a git ancestor) — its diff is effectively vs main; restack to separate"}
+                     </title>
+                     <text
+                       class="fm-warn"
+-                      classList={{ drift: !!nhealth(n.id)?.drifted, ghost: !!nhealth(n.id)?.merged }}
++                      classList={{
++                        drift: !!nhealth(n.id)?.drifted,
++                        ghost: !!nhealth(n.id)?.merged,
++                        act: !!nhealth(n.id)?.merged && !!props.onContract,
++                      }}
+                       x={w / 2}
+                       y={NODE_H / 2 + 12}
++                      onClick={async (e) => {
++                        if (!nhealth(n.id)?.merged || !props.onContract || contracting()) return;
++                        e.stopPropagation();
++                        setContracting(n.id);
++                        try { await props.onContract(n.id); } finally { setContracting(null); }
++                      }}
+                     >
+-                      {nhealth(n.id)?.merged ? "✦ ghost · merged" : "⤺ off-parent"}
++                      {nhealth(n.id)?.merged
++                        ? contracting() === n.id
++                          ? "⊘ dropping & rewiring…"
++                          : `✦ ghost · merged${props.onContract ? " — ⊘ drop & rewire" : ""}`
++                        : "⤺ off-parent"}
+                     </text>
+                   </Show>
+                   <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
+@@ -627,6 +647,8 @@ const CSS = `
+ .fm-warn { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; letter-spacing: .03em; }
+ .fm-warn.drift { fill: var(--del); }
+ .fm-warn.ghost { fill: var(--patina); }
++.fm-warn.act { cursor: pointer; }
++.fm-warn.act:hover { fill: var(--gold-leaf); }
+ .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
+ .fm-node.active text { fill: var(--ink); }
+ .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }

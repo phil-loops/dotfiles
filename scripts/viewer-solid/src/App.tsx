@@ -1418,6 +1418,7 @@ function ShipButton(props: { project: string }) {
 function ForestOverview() {
   const { location, navigate } = useViewerLocation();
   const project = () => forestKey(location());
+  const ovQc = useQueryClient();
   const [ovView, setOvView] = [overviewView, setOverviewView]; // shared module signal so ⌘K can open straight into a view
   const model = createQuery(() => ({
     // repo in the key so loops/monotoad forests with the same name don't share a cache entry
@@ -1525,6 +1526,16 @@ function ForestOverview() {
               onClose={() => {}}
               onHoverNode={showTip}
               onLeaveNode={hideTip}
+              onContract={canMutate ? async (branch) => {
+                await fetch(withRepo("/contract"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ branch }),
+                }).then((r) => r.json());
+                ovQc.invalidateQueries({ queryKey: ["model"] });
+                ovQc.invalidateQueries({ queryKey: ["forest-health"] });
+                ovQc.invalidateQueries({ queryKey: ["projects"] });
+              } : undefined}
             />
           }
         >
