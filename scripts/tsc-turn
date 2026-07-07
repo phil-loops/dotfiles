@@ -1,0 +1,30 @@
+#!/bin/zsh
+# tsc-turn — cross-session compile queue. Wraps any heavy command (typecheck, build)
+# so at most N run machine-wide; extra callers wait their turn instead of stacking
+# seven concurrent tsc runs (the 2026-07-06 CPU pile-up).
+#
+#   tsc-turn npx tsc --project tsconfig.node.json --noEmit
+#   TSC_TURN_SLOTS=1 tsc-turn npm run build
+set -u
+slots=${TSC_TURN_SLOTS:-2}
+lockroot=${TSC_TURN_DIR:-/tmp/tsc-turn}
+mkdir -p "$lockroot"
+waited=0
+while true; do
+  for i in $(seq 1 "$slots"); do
+    d="$lockroot/slot$i"
+    if mkdir "$d" 2>/dev/null; then
+      echo $$ > "$d/pid"
+      trap 'rm -rf "$d"' EXIT INT TERM
+      (( waited )) && echo "tsc-turn: slot free after ${waited}s — running" >&2
+      "$@"
+      exit $?
+    fi
+    pid=$(cat "$d/pid" 2>/dev/null)
+    if [[ -n "${pid:-}" ]] && ! kill -0 "$pid" 2>/dev/null; then
+      rm -rf "$d"   # holder died without cleanup — reap so the queue can't wedge
+    fi
+  done
+  (( waited == 0 )) && echo "tsc-turn: all $slots slots busy — waiting" >&2
+  sleep 2; (( waited += 2 ))
+done
