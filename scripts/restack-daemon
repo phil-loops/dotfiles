@@ -23,6 +23,8 @@ set -euo pipefail
 # PR numbers parse locally from old-tip..new-tip; one gh call enriches (title, author,
 # whose) and a macOS notification fires — loud when one of YOUR PRs landed, quiet
 # otherwise. Best-effort: no gh / offline → numbers only; never blocks the classify.
+# The move also fast-forwards the LOCAL main ref (stale-main is the real signal) —
+# skipped with a log line if main is checked out in some worktree.
 #
 # State (under the common git dir, so all worktrees share it):
 #   restack-ambient.json   { mode, at, pid, interval, trunk_tip, report:{…dryrun…} }
@@ -112,6 +114,20 @@ attribute_merges() {
   fi
 }
 
+# A trunk move is also the signal that the LOCAL main ref went stale. Fast-forward it so
+# viewer diffs read against true main, not yesterday's (pure ref move — git itself refuses
+# if main is checked out in some worktree, in which case we log and leave it alone).
+refresh_local_main() {
+  local tip="$1" cur
+  cur="$(git rev-parse --verify --quiet "refs/heads/$MAIN" || echo "")"
+  [[ -n "$cur" && -n "$tip" && "$cur" != "$tip" ]] || return 0
+  if git branch -f "$MAIN" "$tip" >/dev/null 2>&1; then
+    logline "local $MAIN refreshed ${cur:0:9} → ${tip:0:9}"
+  else
+    logline "local $MAIN stale (${cur:0:9} → ${tip:0:9}) but checked out — left alone"
+  fi
+}
+
 child=""   # pid of the in-flight restack-dryrun, so --stop can kill a slow --deep pass
 
 # wrap restack-dryrun --json with daemon metadata, write atomically (tmp + mv in the
@@ -184,6 +200,7 @@ case "$mode" in
     tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
     prev_tip="$(jq -r '.trunk_tip // empty' "$state" 2>/dev/null || true)"
     [[ -n "$prev_tip" && -n "$tip" ]] && attribute_merges "$prev_tip" "$tip"
+    refresh_local_main "$tip"
     reclassify "" "$tip"
     apply_if_safe "" "$tip"
     echo "restack-daemon: single $( (( apply )) && echo apply || echo dry-run) pass written → $state"
@@ -268,6 +285,7 @@ while (( running )); do
   if [[ -n "$tip" && "$tip" != "$last_tip" ]]; then
     base="${last_tip:-$prev_tip}"
     [[ -n "$base" ]] && attribute_merges "$base" "$tip"
+    refresh_local_main "$tip"
     reclassify "$$" "$tip" && { last_tip="$tip"; apply_if_safe "$$" "$tip"; }
   fi
   # interruptible sleep: a TERM during the sleep wakes us, the trap clears `running`,
