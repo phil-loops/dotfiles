@@ -227,6 +227,8 @@ class H(BaseHTTPRequestHandler):
             return restack.status(self, u)
         elif u.path == "/restack-ambient":  # ambient daemon's latest dry-run report → the status chip
             return restack.ambient(self)
+        elif u.path == "/restack-merges":  # daemon's what-just-merged attribution → "just landed" chip
+            return restack.merges(self)
         elif u.path == "/sync":   # fork-staleness vs origin/main (single branch)
             return sync.get_one(self, u)
         elif u.path == "/push-preview":  # read-only: outgoing-vs-origin commit + push-origin guard verdict

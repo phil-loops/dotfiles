@@ -236,6 +236,22 @@ def ambient(req):
     req._send(200, json.dumps(data))
 
 
+def merges(req):
+    # restack-daemon also writes restack-merges.json on every trunk move: which PRs the
+    # new commits belong to (parsed from the squash subjects, enriched via one gh call)
+    # and whether any are the user's own. Served verbatim for the "just landed" chip.
+    path = os.path.join(_gitdir(), "restack-merges.json")
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        req._send(200, json.dumps({"available": False}))
+        return
+    data["available"] = True
+    data["age_s"] = int(time.time() - data.get("at", 0)) if data.get("at") else None
+    req._send(200, json.dumps(data))
+
+
 def status(req, u):
     # stack-restack rewrites <git-common-dir>/stack-restack-state/state before and after
     # every branch of the walk (removed on success/abort), so during a run it's the live
