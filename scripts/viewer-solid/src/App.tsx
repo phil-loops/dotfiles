@@ -428,7 +428,7 @@ function Home() {
     }
     const ghosts = a.report.branches.filter((b) => b.verdict === "would-contract");
     if (ghosts.length) {
-      title += "\n\nalready merged — click drops each & rewires its children:\n"
+      title += "\n\nalready merged — a forest's ▸ ready button drops these:\n"
         + ghosts.map((b) => `  ${b.branch}`).join("\n");
     }
     if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
@@ -437,25 +437,6 @@ function Home() {
     if (s.would_restack > 0) return { cls: "amb-restack", text: `⟳ ${s.would_restack} would restack`, title };
     return { cls: "amb-clean", text: "✦ forest clean", title };
   };
-
-  // the ⊘ chip's fix: drop every already-merged ghost the daemon found. Each POST /contract
-  // re-verifies merged-ness server-side (409 otherwise), so a stale report can't drop real work.
-  const dropGhosts = createMutation(() => ({
-    mutationFn: async () => {
-      const ghosts = (ambient.data?.report?.branches ?? []).filter((b) => b.verdict === "would-contract");
-      for (const g of ghosts) {
-        await fetch("/contract", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ branch: g.branch }),
-        }).then((r) => r.json());
-      }
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
-      qc.invalidateQueries({ queryKey: ["projects"] });
-    },
-  }));
 
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
@@ -893,21 +874,7 @@ function Home() {
             <span class="brand-mark">✦</span> blessed
           </div>
           <Show when={ambientChip()}>
-            {(c) => (
-              <Show
-                when={c().cls === "amb-contract" && canMutate}
-                fallback={<span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
-              >
-                <button
-                  class="amb-chip amb-contract amb-act"
-                  title={c().title}
-                  disabled={dropGhosts.isPending}
-                  onClick={() => dropGhosts.mutate()}
-                >
-                  {dropGhosts.isPending ? "⊘ dropping…" : c().text}
-                </button>
-              </Show>
-            )}
+            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
           </Show>
           <Show when={canMutate}>
             <button
@@ -1343,6 +1310,73 @@ function StageButton(props: { project: string }) {
   );
 }
 
+// The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
+// restacks every survivor onto fresh origin/main (trees included), and reports the push
+// order. Prep/push stay per-node so the outgoing commit message remains editable.
+function ShipButton(props: { project: string }) {
+  const qc = useQueryClient();
+  const [armed, setArmed] = createSignal(false);
+  const [busy, setBusy] = createSignal(false);
+  const [msg, setMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
+  let disarm: ReturnType<typeof setTimeout>;
+  const fire = async () => {
+    if (!armed()) {
+      setArmed(true);
+      clearTimeout(disarm);
+      disarm = setTimeout(() => setArmed(false), 6000);
+      return;
+    }
+    clearTimeout(disarm);
+    setArmed(false);
+    setBusy(true);
+    setMsg(null);
+    const r = await fetch(withRepo("/ship"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: props.project }),
+    })
+      .then((x) => x.json() as Promise<{
+        ok?: boolean; err?: string; alreadyReady?: boolean; moved?: string[];
+        contracted?: { branch: string }[]; order?: { branch: string; unpushed: boolean }[];
+      }>)
+      .catch((e) => ({ ok: false, err: String(e) }));
+    setBusy(false);
+    if (r.ok) {
+      const re = r as { alreadyReady?: boolean; moved?: string[]; contracted?: { branch: string }[]; order?: { branch: string; unpushed: boolean }[] };
+      const pushList = (re.order ?? []).filter((o) => o.unpushed).map((o) => leaf(o.branch));
+      const did = [
+        re.contracted?.length ? `${re.contracted.length} merged dropped` : "",
+        re.moved?.length ? `${re.moved.length} rebased` : "",
+      ].filter(Boolean).join(" · ");
+      setMsg({
+        text: (re.alreadyReady ? "✓ already ready" : `✓ ready — ${did}`)
+          + (pushList.length ? ` · push: ${pushList.join(" → ")}` : " · nothing to push"),
+      });
+      qc.invalidateQueries({ queryKey: ["model"] });
+      qc.invalidateQueries({ queryKey: ["forest-health"] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    } else {
+      setMsg({ text: `✗ ${r.err || "ship failed"}`, bad: true });
+    }
+  };
+  return (
+    <>
+      <button
+        class="fo-stage"
+        classList={{ armed: armed() }}
+        disabled={busy()}
+        title="ready to ship — drop any member that already merged (rewiring its children), restack the whole forest onto fresh origin/main, then list what to push in order. Refuses if a member has an open PR or a dirty worktree; a conflict restores everything."
+        onClick={fire}
+      >
+        {busy() ? "readying…" : armed() ? "confirm: contract + restack" : "▸ ready"}
+      </button>
+      <Show when={msg()}>
+        <span class="fo-stage-msg" classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
+      </Show>
+    </>
+  );
+}
+
 function ForestOverview() {
   const { location, navigate } = useViewerLocation();
   const project = () => forestKey(location());
@@ -1430,6 +1464,7 @@ function ForestOverview() {
               title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
               onClick={() => chatToTmux({ project: project() })}
             >✦ chat</button>
+            <ShipButton project={project()} />
             <StageButton project={project()} />
           </Show>
         </Show>

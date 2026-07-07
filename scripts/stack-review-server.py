@@ -18,6 +18,7 @@ from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, 
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
+from srv import ship    # own line: same reason
 from srv import prep    # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -382,6 +383,8 @@ class H(BaseHTTPRequestHandler):
             return restack.restack(self, raw)
         if self.path == "/stage":            # restack chain forward + move MAIN checkout onto the tip (dryRun supported)
             return stage.stage(self, raw)
+        if self.path == "/ship":             # ready-to-ship: contract ghosts + restack forest + push order (dryRun supported)
+            return ship.ship(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
             return restack.resolve(self, raw)
         if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state
