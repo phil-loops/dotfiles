@@ -19,8 +19,14 @@ set -euo pipefail
 #   restack-daemon [--apply] install    run it ambiently via launchd (bakes --apply in)
 #   restack-daemon uninstall       stop + remove the launchd agent
 #
+# On every trunk move it also names WHAT merged: squash subjects carry "(#N)", so the
+# PR numbers parse locally from old-tip..new-tip; one gh call enriches (title, author,
+# whose) and a macOS notification fires — loud when one of YOUR PRs landed, quiet
+# otherwise. Best-effort: no gh / offline → numbers only; never blocks the classify.
+#
 # State (under the common git dir, so all worktrees share it):
 #   restack-ambient.json   { mode, at, pid, interval, trunk_tip, report:{…dryrun…} }
+#   restack-merges.json    { at, from, to, direct, prs:[{number,title,branch,author,mine,mergedAt}] }
 #   restack-ambient.log    one summary line per re-classify
 #   restack-ambient.pid    running loop's pid (single-instance guard)
 
@@ -54,6 +60,57 @@ pidf="$gd/restack-ambient.pid"
 
 now() { date +%s; }
 logline() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log"; }
+
+# ---- merge attribution: trunk moved → which PRs, and were any mine? ----
+merges_state="$gd/restack-merges.json"
+me_login=""
+my_login() {
+  [[ -n "$me_login" ]] || me_login="$(gh api user -q .login 2>/dev/null || echo '?')"
+  [[ "$me_login" == "?" ]] || printf '%s' "$me_login"
+}
+notify() {
+  command -v osascript >/dev/null 2>&1 || return 0
+  osascript -e "display notification \"${2//\"/\\\"}\" with title \"${1//\"/\\\"}\" sound name \"Glass\"" 2>/dev/null || true
+}
+attribute_merges() {
+  local old="$1" new="$2" slug subjects nums direct n
+  [[ -n "$old" && -n "$new" && "$old" != "$new" ]] || return 0
+  n="$(git rev-list --count "$old..$new" 2>/dev/null || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) || return 0
+  if (( n > 200 )); then
+    logline "merges: ${old:0:9}..${new:0:9} is $n commits — baseline too old, skipped"; return 0
+  fi
+  slug="$(git remote get-url origin 2>/dev/null | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
+  subjects="$(git log --format='%s' "$old..$new" 2>/dev/null)"
+  [[ -n "$subjects" ]] || return 0
+  nums="$(grep -oE '\(#[0-9]+\)$' <<<"$subjects" | tr -cd '0-9\n' | sort -un | paste -s -d, -)"
+  direct="$(grep -cvE '\(#[0-9]+\)$' <<<"$subjects" || true)"
+  local merged='[]' prs='[]'
+  if [[ -n "$nums" ]] && command -v gh >/dev/null 2>&1; then
+    merged="$(gh pr list --repo "$slug" --state merged --limit 50 \
+      --json number,title,author,headRefName,mergedAt 2>/dev/null || echo '[]')"
+  fi
+  prs="$(jq -n --argjson want "[${nums:-}]" --argjson merged "$merged" --arg me "$(my_login || true)" '
+    [ $want[] as $n |
+      (first($merged[] | select(.number == $n)) // {number: $n}) |
+      { number: $n, title: (.title // null), branch: (.headRefName // null),
+        author: (.author.login // null), mergedAt: (.mergedAt // null),
+        mine: (if (.author != null and $me != "") then (.author.login == $me) else null end) } ]' \
+    2>/dev/null || echo '[]')"
+  local tmp="$merges_state.tmp.$$"
+  jq -n --arg from "$old" --arg to "$new" --argjson at "$(now)" \
+    --argjson prs "$prs" --argjson direct "${direct:-0}" \
+    '{at:$at, from:$from, to:$to, direct:$direct, prs:$prs}' > "$tmp" && mv "$tmp" "$merges_state"
+  local total mine_ct
+  total="$(jq 'length' <<<"$prs")"
+  mine_ct="$(jq '[.[] | select(.mine == true)] | length' <<<"$prs")"
+  logline "trunk moved (+$n commits): $total PR(s), $mine_ct mine, ${direct:-0} direct $(jq -r '[.[] | "#\(.number)"] | join(" ")' <<<"$prs")"
+  if (( mine_ct > 0 )); then
+    notify "🎉 Your PR merged" "$(jq -r '[.[] | select(.mine == true) | "#\(.number) " + (.title // "")] | join(" · ")' <<<"$prs")"
+  elif (( total > 0 )); then
+    notify "main moved" "$total PR(s) merged$( (( ${direct:-0} > 0 )) && echo ", ${direct} direct" || true )"
+  fi
+}
 
 child=""   # pid of the in-flight restack-dryrun, so --stop can kill a slow --deep pass
 
@@ -125,6 +182,8 @@ case "$mode" in
   once)
     git fetch -q origin "$MAIN" 2>/dev/null || true
     tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
+    prev_tip="$(jq -r '.trunk_tip // empty' "$state" 2>/dev/null || true)"
+    [[ -n "$prev_tip" && -n "$tip" ]] && attribute_merges "$prev_tip" "$tip"
     reclassify "" "$tip"
     apply_if_safe "" "$tip"
     echo "restack-daemon: single $( (( apply )) && echo apply || echo dry-run) pass written → $state"
@@ -199,11 +258,16 @@ trap 'running=0; [[ -n "$child" ]] && kill -TERM -"$child" 2>/dev/null || true' 
 trap 'rm -f "$pidf"' EXIT
 
 logline "daemon start pid=$$ interval=${interval}s ($( (( apply )) && echo 'APPLY — auto-restacks clean cases, parks conflicts' || echo 'DRY-RUN — moves nothing'))"
+# attribution baseline survives restarts via the state file's trunk_tip; last_tip stays
+# empty so a fresh daemon still re-classifies once on startup.
+prev_tip="$(jq -r '.trunk_tip // empty' "$state" 2>/dev/null || true)"
 last_tip=""
 while (( running )); do
   git fetch -q origin "$MAIN" 2>/dev/null || true
   tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
   if [[ -n "$tip" && "$tip" != "$last_tip" ]]; then
+    base="${last_tip:-$prev_tip}"
+    [[ -n "$base" ]] && attribute_merges "$base" "$tip"
     reclassify "$$" "$tip" && { last_tip="$tip"; apply_if_safe "$$" "$tip"; }
   fi
   # interruptible sleep: a TERM during the sleep wakes us, the trap clears `running`,
