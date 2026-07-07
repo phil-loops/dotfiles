@@ -286,8 +286,10 @@ Run `task --list` to see all available tasks. Use the team's tools — don't rei
 Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done:
 
 ```bash
-npx tsc --project tsconfig.node.json --noEmit   # the repo's own CI typecheck
+tsc-turn npx tsc --project tsconfig.node.json --noEmit   # the repo's own CI typecheck, queued
 ```
+
+`tsc-turn` (`~/.dotfiles/scripts/tsc-turn`) is a machine-wide compile queue: at most 2 heavy checks run at once, extra callers wait their turn. With several Claude sessions live, seven concurrent `tsc` runs flatten the machine (2026-07-06) — always route full typechecks and builds through it; it adds nothing when the machine is idle.
 
 This is the exact command CI runs, so it's the source of truth. Don't use `tsgo` — the global one rejects this repo's `moduleResolution=node10` and there's no compatible local copy, so it's pure friction. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
 
