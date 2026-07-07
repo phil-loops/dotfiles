@@ -482,6 +482,24 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't save the message"}`),
   }));
 
+  // the opt-in claude pass — prep commits with a mechanical message so it never waits
+  // on a model; this button is the only thing that asks claude to voice it
+  const draftMsg = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string; subject?: string; body?: string }>("/draft-message", {
+        branch: props.branch,
+      }),
+    onSuccess: (r) => {
+      if (!r.ok || !r.subject) {
+        setDone(`✗ ${r.err || "couldn't draft the message"}`);
+        return;
+      }
+      setMsgSubject(r.subject);
+      setMsgBody(r.body ?? "");
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't draft the message"}`),
+  }));
+
   // what prep WOULD do — the read-only routed verdict, so the button teaches before it acts
   const prepRoute = createQuery(() => ({
     queryKey: ["prep-route", props.branch],
@@ -864,6 +882,14 @@ export function NodeActions(props: {
               onClick={() => saveMsg.mutate()}
             >
               {saveMsg.isPending ? "saving…" : "save message"}
+            </button>
+            <button
+              class="nh-editor-close"
+              disabled={draftMsg.isPending}
+              title="ask claude to draft the message in your voice from the outgoing diff"
+              onClick={() => draftMsg.mutate()}
+            >
+              {draftMsg.isPending ? "voicing…" : "✦ voice"}
             </button>
             <button class="nh-editor-close" onClick={() => setEditorOpen(false)}>
               close
