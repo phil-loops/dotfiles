@@ -131,11 +131,18 @@ def state(branch):
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
     # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
     published = branch in _open_pr_heads()
+    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    # A stacked branch behind main can't forward-rebase alone, but its PROJECT can — sync
+    # delegates those to the restack machine instead of shrugging (the button leads to the
+    # rebase and executes it).
+    restack = behind > 0 and parent != "main" and bool(proj) and not published
     why = ""
     if behind == 0:
         why = "up to date with origin/main"
+    elif restack:
+        why = f"stacked on {parent} — sync restacks {proj} onto origin/main"
     elif parent != "main":
-        why = f"stacked on {parent} — needs a restack, not a sync"
+        why = f"stacked on {parent} with no project tag — restack it by hand"
     elif published:
         why = "has an open PR — rebase would rewrite pushed commits"
     shared, ahead = _shared(branch)
@@ -155,6 +162,7 @@ def state(branch):
         dirty_wt = wt_path if dirty else ""
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
             "syncable": behind > 0 and parent == "main" and not published,
+            "restack": restack, "project": proj,
             "shared": shared, "aheadOfOrigin": ahead,
             "dirty": dirty, "dirtyWorktree": dirty_wt,
             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
@@ -531,6 +539,9 @@ def post_sync(req, raw):
     ctx.run(["git", "fetch", "origin", "main"])   # fresh origin/main before gating + rebasing
     st = state(branch)   # re-check server-side: never rebase a published/stacked branch on a stale client view
     if not st.get("syncable"):
+        if st.get("restack"):   # stacked chain behind main → the restack machine owns this rebase
+            req._send(200, json.dumps({"ok": True, "restack": True, "project": st.get("project", "")}))
+            return
         req._send(409, json.dumps({"ok": False, "err": st.get("why", "not syncable")}))
         return
     status, summary = _direct_rebase(branch)

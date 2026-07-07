@@ -1,0 +1,117 @@
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index c10170b..cc9bb14 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -131,11 +131,18 @@ def state(branch):
+     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+     # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
+     published = branch in _open_pr_heads()
++    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
++    # A stacked branch behind main can't forward-rebase alone, but its PROJECT can — sync
++    # delegates those to the restack machine instead of shrugging (the button leads to the
++    # rebase and executes it).
++    restack = behind > 0 and parent != "main" and bool(proj) and not published
+     why = ""
+     if behind == 0:
+         why = "up to date with origin/main"
++    elif restack:
++        why = f"stacked on {parent} — sync restacks {proj} onto origin/main"
+     elif parent != "main":
+-        why = f"stacked on {parent} — needs a restack, not a sync"
++        why = f"stacked on {parent} with no project tag — restack it by hand"
+     elif published:
+         why = "has an open PR — rebase would rewrite pushed commits"
+     shared, ahead = _shared(branch)
+@@ -155,6 +162,7 @@ def state(branch):
+         dirty_wt = wt_path if dirty else ""
+     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
+             "syncable": behind > 0 and parent == "main" and not published,
++            "restack": restack, "project": proj,
+             "shared": shared, "aheadOfOrigin": ahead,
+             "dirty": dirty, "dirtyWorktree": dirty_wt,
+             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
+@@ -531,6 +539,9 @@ def post_sync(req, raw):
+     ctx.run(["git", "fetch", "origin", "main"])   # fresh origin/main before gating + rebasing
+     st = state(branch)   # re-check server-side: never rebase a published/stacked branch on a stale client view
+     if not st.get("syncable"):
++        if st.get("restack"):   # stacked chain behind main → the restack machine owns this rebase
++            req._send(200, json.dumps({"ok": True, "restack": True, "project": st.get("project", "")}))
++            return
+         req._send(409, json.dumps({"ok": False, "err": st.get("why", "not syncable")}))
+         return
+     status, summary = _direct_rebase(branch)
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index a50ba14..18a3d88 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -46,6 +46,8 @@ interface SyncResult {
+   stream?: string; // the rebase job key to tail over /rebase-stream (set with ejected)
+   conflict?: boolean; // hit a conflict → Claude resolving in a worktree
+   contract?: boolean; // branch already merged into origin/main → drop & rewire instead
++  restack?: boolean; // stacked chain behind main → the restack machine owns this rebase
++  project?: string; // the project to hand to POST /restack (set with restack)
+ }
+ 
+ interface DeltaTestResult {
+@@ -179,8 +181,12 @@ export function NodeActions(props: {
+     if (props.health?.drifted) {
+       steps.push({ id: "reseat", label: "reseat", state: "idle" });
+     }
+-    if (behind() > 0 && sync.data?.syncable) {
+-      steps.push({ id: "rebase", label: "rebase forward", state: "idle" });
++    if (behind() > 0 && (sync.data?.syncable || sync.data?.restack)) {
++      steps.push({
++        id: "rebase",
++        label: sync.data?.restack ? "restack onto origin/main" : "rebase forward",
++        state: "idle",
++      });
+     }
+     steps.push(
+       { id: "checkout", label: "checkout", state: "idle" },
+@@ -201,9 +207,18 @@ export function NodeActions(props: {
+         await post("/reseat-children", { branch: props.health.parent });
+         stepSet("reseat", "ok");
+       }
+-      if (behind() > 0 && sync.data?.syncable) {
++      if (behind() > 0 && (sync.data?.syncable || sync.data?.restack)) {
+         stepSet("rebase", "run");
+         const sy = await post<SyncResult>("/sync", { branch: props.branch });
++        if (sy.ok && sy.restack) {
++          const rs = await post<{ ok?: boolean; err?: string }>("/restack", { project: sy.project });
++          if (rs.ok) {
++            stepSet("rebase", "run", `restacking ${sy.project} in the background — rerun sync once it lands`);
++            return { phase: "restacking" as const };
++          }
++          stepSet("rebase", "fail", rs.err || "restack refused");
++          return { phase: "blocked" as const };
++        }
+         if (sy.ok && sy.contract) {
+           stepSet("rebase", "fail", "already merged into origin/main — drop & rewire (the spine's edge offers it)");
+           return { phase: "blocked" as const };
+@@ -281,6 +296,13 @@ export function NodeActions(props: {
+         sync.refetch();
+         return;
+       }
++      if (r.phase === "restacking") {
++        // the restack machine has the walk (journal, parking, resolve) — the strip's note
++        // says to rerun sync once it lands; nothing to tail here.
++        sync.refetch();
++        qc.invalidateQueries({ queryKey: ["head"] });
++        return;
++      }
+       if (r.phase === "claude") {
+         reconcile.mutate(); // divergence with no mechanical route — Claude in the middle
+         return;
+diff --git a/scripts/viewer-solid/src/types.ts b/scripts/viewer-solid/src/types.ts
+index deeec6b..9d2d415 100644
+--- a/scripts/viewer-solid/src/types.ts
++++ b/scripts/viewer-solid/src/types.ts
+@@ -209,6 +209,8 @@ export type RestackAmbient = z.infer<typeof RestackAmbient>;
+ export const SyncState = z.object({
+   behind: z.number(), // commits on origin/main not yet in this branch
+   syncable: z.boolean(), // safe to fast-forward-rebase (else stacked/published)
++  restack: z.boolean().optional(), // stacked chain behind main — sync delegates to POST /restack
++  project: z.string().optional(), // the project a restack delegation hands to the restack machine
+   why: z.string(), // when not syncable, the reason
+   deployCritical: z.array(z.string()).optional(), // deploy-critical files origin/main changed that this branch lacks
+   shared: z.enum(["local", "ahead", "synced", "gone"]).optional(), // local-vs-origin: can the team see this branch?

@@ -209,6 +209,8 @@ export type RestackAmbient = z.infer<typeof RestackAmbient>;
 export const SyncState = z.object({
   behind: z.number(), // commits on origin/main not yet in this branch
   syncable: z.boolean(), // safe to fast-forward-rebase (else stacked/published)
+  restack: z.boolean().optional(), // stacked chain behind main — sync delegates to POST /restack
+  project: z.string().optional(), // the project a restack delegation hands to the restack machine
   why: z.string(), // when not syncable, the reason
   deployCritical: z.array(z.string()).optional(), // deploy-critical files origin/main changed that this branch lacks
   shared: z.enum(["local", "ahead", "synced", "gone"]).optional(), // local-vs-origin: can the team see this branch?
