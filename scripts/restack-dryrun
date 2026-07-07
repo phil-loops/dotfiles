@@ -85,6 +85,11 @@ while IFS= read -r b; do
   if [[ "$open_pr_heads" == *" $b "* ]]; then
     rows+=("$b	$parent	-	skip-open-pr	left alone — has an open PR"); skipped=$((skipped+1)); continue
   fi
+  # keep-forever branches (bench harnesses, throwaway probes) that live on a foreign base by
+  # design and never merge — pinned out so their permanent "conflict" stops inflating the alarm.
+  if [[ "$(git config --bool "stack-branch.$b.ambient-ignore" 2>/dev/null)" == "true" ]]; then
+    rows+=("$b	$parent	-	skip-ignored	pinned out of ambient (ambient-ignore) — never auto-rebases"); skipped=$((skipped+1)); continue
+  fi
   if [[ "$parent" != "$MAIN" ]]; then
     rows+=("$b	$parent	-	skip-stacked	parent=$parent — forest walk handles it"); skipped=$((skipped+1)); continue
   fi
