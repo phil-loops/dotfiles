@@ -438,6 +438,29 @@ function Home() {
     return { cls: "amb-clean", text: "✦ forest clean", title };
   };
 
+  // what just landed on main (the daemon's merge attribution) → a second quiet chip.
+  // Gold + PR numbers when any of it is YOURS; a dim count otherwise; gone after a day.
+  const merges = createQuery(() => ({
+    queryKey: ["restack-merges"],
+    queryFn: () => provider.restackMerges(),
+    refetchInterval: 15000,
+  }));
+  const landedChip = (): { cls: string; text: string; title: string } | null => {
+    const m = merges.data;
+    if (!m?.available || !m.prs?.length) return null;
+    if ((m.age_s ?? Infinity) > 24 * 3600) return null; // yesterday's news isn't "just" landed
+    const age = m.age_s == null ? "" : m.age_s < 90 ? "just now"
+      : m.age_s < 3600 ? `${Math.round(m.age_s / 60)}m ago` : `${Math.round(m.age_s / 3600)}h ago`;
+    const mine = m.prs.filter((p) => p.mine === true);
+    const title = m.prs
+      .map((p) => `#${p.number} ${p.title ?? ""}${p.mine ? " — yours" : p.author ? ` — ${p.author}` : ""}`)
+      .join("\n") + (m.direct ? `\n+ ${m.direct} direct push(es)` : "") + `\n\nlanded ${age}`;
+    if (mine.length) {
+      return { cls: "landed-mine", text: `⛳ ${mine.map((p) => `#${p.number}`).join(" ")} landed — yours`, title };
+    }
+    return { cls: "landed-other", text: `⛳ ${m.prs.length} landed ${age}`, title };
+  };
+
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
     queryFn: () => provider.reviewRequests(),
@@ -885,6 +908,9 @@ function Home() {
           <div class="brand big">
             <span class="brand-mark">✦</span> blessed
           </div>
+          <Show when={landedChip()}>
+            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
+          </Show>
           <Show when={ambientChip()}>
             {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
           </Show>
