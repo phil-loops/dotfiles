@@ -227,6 +227,27 @@ def interest_bump(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "interest": nxt}))
 
 
+def _scratch_worktree_for(branch):
+    # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
+    # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.
+    r = ctx.run(["git", "worktree", "list", "--porcelain"])
+    if r.returncode != 0:
+        return None
+    for line in r.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        path = line[9:]
+        gd = ctx.run(["git", "-C", path, "rev-parse", "--absolute-git-dir"]).stdout.strip()
+        if not gd:
+            continue
+        try:
+            if open(os.path.join(gd, "stack-open-branch")).read().strip() == branch:
+                return path
+        except OSError:
+            pass
+    return None
+
+
 def _worktree_for_branch(branch):
     r = ctx.run(["git", "worktree", "list", "--porcelain"])
     if r.returncode != 0:
@@ -237,7 +258,7 @@ def _worktree_for_branch(branch):
             wt_path = line[9:]
         elif line.startswith("branch refs/heads/") and line[18:] == branch:
             return wt_path
-    return None
+    return _scratch_worktree_for(branch)
 
 
 def _dirty_paths_of(wt):
