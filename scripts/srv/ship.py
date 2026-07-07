@@ -1,0 +1,138 @@
+# srv/ship.py — "ready to ship": one verb that makes a whole forest pushable.
+# Fetches origin/main, CONTRACTS already-merged members (drop + rewire, sync's
+# recipe), RESTACKS every survivor bottom-up onto fresh main — trees welcome,
+# this is /stage's chain walk generalized over parent depth — then reports the
+# push order. It never moves the main checkout (that's /stage) and never preps
+# or pushes: the outgoing commit stays editable at the node's prep/push buttons.
+#
+#   POST /ship {project, dryRun?} — dryRun reports the plan without moving anything.
+#
+# Guards mirror /stage: an open PR on any member refuses (pushed history is never
+# rewritten), a dirty worktree holding a member refuses. A conflict mid-walk
+# restores every branch to its pre-ship snapshot — all-or-nothing.
+import json
+
+from . import ctx, sync
+from .stage import _parent, _worktrees, _dirty
+
+
+def _members(project):
+    """The forest's live branches: config seeds ∪ .project tags, expanded along
+    parent edges (a child follows its forest even when its own tag rotted)."""
+    seeds = set(ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split())
+    for line in ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.project$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        if val.strip() == project:
+            seeds.add(key[len("stack-branch."):-len(".project")])
+    parents = {}
+    for line in ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    grew = True
+    while grew:
+        grew = False
+        for b, p in parents.items():
+            if p in seeds and b not in seeds:
+                seeds.add(b)
+                grew = True
+    return [b for b in seeds
+            if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{b}"]).returncode == 0]
+
+
+def _topo(members):
+    """Members ordered parents-before-children (depth along parent links, roots first)."""
+    ms = set(members)
+    def depth(b, seen=()):
+        p = _parent(b)
+        if p not in ms or b in seen:
+            return 0
+        return 1 + depth(p, (*seen, b))
+    return sorted(members, key=lambda b: (depth(b), b))
+
+
+def ship(req, raw):
+    d = json.loads(raw or "{}")
+    project = d.get("project", "")
+    dry = bool(d.get("dryRun"))
+    ctx.run(["git", "fetch", "origin", "main"])
+
+    members = _topo(_members(project))
+    if not members:
+        return req._send(400, json.dumps({"ok": False, "err": "no live branches in this forest"}))
+
+    published = sync._open_pr_heads()
+    prd = [b for b in members if b in published]
+    if prd:
+        return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — ship rebases, and pushed history is never rewritten"}))
+
+    ghosts = [b for b in members if sync._already_merged(b)]
+    wts = _worktrees()
+    root, root_branch = wts[0]
+    squatters = [(p, b) for p, b in wts if b in members]
+    dirty_squat = [p for p, b in squatters if b not in ghosts and _dirty(p)]
+    if dirty_squat:
+        return req._send(200, json.dumps({"ok": False, "err": f"worktree {dirty_squat[0]} holds a forest branch with uncommitted changes"}))
+
+    survivors = [b for b in members if b not in ghosts]
+    behind = max((int(ctx.run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip() or "0")
+                  for b in survivors), default=0)
+    plan = {"ok": True, "project": project, "ghosts": ghosts, "members": survivors, "behind": behind,
+            "alreadyReady": not ghosts and behind == 0}
+    if dry:
+        return req._send(200, json.dumps(plan))
+
+    contracted = []
+    for g in ghosts:
+        kids, deps, parent = sync._contract(g)
+        contracted.append({"branch": g, "children": kids, "deps": deps, "parent": parent})
+    survivors = _topo([b for b in _members(project) if b in survivors])
+
+    moved = []
+    if behind > 0 or contracted:
+        snapshots = {b: ctx.run(["git", "rev-parse", b]).stdout.strip() for b in survivors}
+        for p, b in _worktrees():
+            if b in survivors and not _dirty(p):
+                ctx.run(["git", "-C", p, "checkout", "--detach"])
+        scratch = "/tmp/viewer-ship-scratch"
+        ctx.run(["git", "worktree", "remove", "--force", scratch])
+        r = ctx.run(["git", "worktree", "add", "--detach", scratch, "origin/main"])
+        if r.returncode != 0:
+            return req._send(200, json.dumps({"ok": False, "err": f"couldn't make a scratch worktree: {r.stderr.strip()}"}))
+        try:
+            ms = set(survivors)
+            for b in survivors:
+                p = _parent(b)
+                onto = p if p in ms else "origin/main"
+                cut = (snapshots[p] if p in ms
+                       else ctx.run(["git", "merge-base", b, "origin/main"]).stdout.strip())
+                if ctx.run(["git", "rev-parse", b]).stdout.strip() == cut:
+                    continue  # empty branch (all its commits were the cut) — nothing to replay
+                r = ctx.run(["git", "-C", scratch, "rebase", "--onto", onto, cut, b])
+                if r.returncode != 0:
+                    ctx.run(["git", "-C", scratch, "rebase", "--abort"])
+                    for rb, sha in snapshots.items():
+                        ctx.run(["git", "branch", "-f", rb, sha])
+                    if root_branch in ms:
+                        ctx.run(["git", "-C", root, "checkout", root_branch])
+                    return req._send(200, json.dumps({
+                        "ok": False, "conflict": b,
+                        "err": f"rebase of {b} hit a conflict — every branch restored to where it was",
+                    }))
+                moved.append(b)
+        finally:
+            ctx.run(["git", "worktree", "remove", "--force", scratch])
+        if root_branch in set(survivors):
+            ctx.run(["git", "-C", root, "checkout", root_branch])
+
+    if not any(b == "main" for _, b in _worktrees()):
+        ctx.run(["git", "branch", "-f", "main", "origin/main"])
+
+    order = []
+    for b in survivors:
+        p = _parent(b)
+        commits = int(ctx.run(["git", "rev-list", "--count", f"{p if p in set(survivors) else 'origin/main'}..{b}"]).stdout.strip() or "0")
+        up = ctx.run(["git", "rev-parse", "--verify", "-q", f"{b}@{{upstream}}"]).stdout.strip()
+        order.append({"branch": b, "commits": commits,
+                      "unpushed": not up or up != ctx.run(["git", "rev-parse", b]).stdout.strip()})
+    req._send(200, json.dumps({**plan, "alreadyReady": not moved and not contracted,
+                               "contracted": contracted, "moved": moved, "order": order}))
