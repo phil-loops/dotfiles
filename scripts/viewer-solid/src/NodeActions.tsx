@@ -46,6 +46,8 @@ interface SyncResult {
   stream?: string; // the rebase job key to tail over /rebase-stream (set with ejected)
   conflict?: boolean; // hit a conflict → Claude resolving in a worktree
   contract?: boolean; // branch already merged into origin/main → drop & rewire instead
+  restack?: boolean; // stacked chain behind main → the restack machine owns this rebase
+  project?: string; // the project to hand to POST /restack (set with restack)
 }
 
 interface DeltaTestResult {
@@ -179,8 +181,12 @@ export function NodeActions(props: {
     if (props.health?.drifted) {
       steps.push({ id: "reseat", label: "reseat", state: "idle" });
     }
-    if (behind() > 0 && sync.data?.syncable) {
-      steps.push({ id: "rebase", label: "rebase forward", state: "idle" });
+    if (behind() > 0 && (sync.data?.syncable || sync.data?.restack)) {
+      steps.push({
+        id: "rebase",
+        label: sync.data?.restack ? "restack onto origin/main" : "rebase forward",
+        state: "idle",
+      });
     }
     steps.push(
       { id: "checkout", label: "checkout", state: "idle" },
@@ -201,9 +207,18 @@ export function NodeActions(props: {
         await post("/reseat-children", { branch: props.health.parent });
         stepSet("reseat", "ok");
       }
-      if (behind() > 0 && sync.data?.syncable) {
+      if (behind() > 0 && (sync.data?.syncable || sync.data?.restack)) {
         stepSet("rebase", "run");
         const sy = await post<SyncResult>("/sync", { branch: props.branch });
+        if (sy.ok && sy.restack) {
+          const rs = await post<{ ok?: boolean; err?: string }>("/restack", { project: sy.project });
+          if (rs.ok) {
+            stepSet("rebase", "run", `restacking ${sy.project} in the background — rerun sync once it lands`);
+            return { phase: "restacking" as const };
+          }
+          stepSet("rebase", "fail", rs.err || "restack refused");
+          return { phase: "blocked" as const };
+        }
         if (sy.ok && sy.contract) {
           stepSet("rebase", "fail", "already merged into origin/main — drop & rewire (the spine's edge offers it)");
           return { phase: "blocked" as const };
@@ -279,6 +294,13 @@ export function NodeActions(props: {
       if (r.phase === "streaming") {
         setRebaseStreaming(true); // the rebase is running headless — tail it inline below
         sync.refetch();
+        return;
+      }
+      if (r.phase === "restacking") {
+        // the restack machine has the walk (journal, parking, resolve) — the strip's note
+        // says to rerun sync once it lands; nothing to tail here.
+        sync.refetch();
+        qc.invalidateQueries({ queryKey: ["head"] });
         return;
       }
       if (r.phase === "claude") {
