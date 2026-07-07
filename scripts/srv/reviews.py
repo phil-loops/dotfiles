@@ -376,6 +376,15 @@ def _rebase_onto(child, parent, cut):
     wt, tmp = _worktree_of(child), None
     if wt is not None and ctx.run(["git", "-C", wt, "status", "--porcelain"]).stdout.strip():
         return False, "worktree dirty"
+    if wt is None:
+        # replay writes the ref with no checkout — a full temp-worktree materialisation per
+        # child made message-only reseats crawl; any refusal falls through to the real rebase
+        r = ctx.run(["git", "replay", "--onto", parent, f"{cut}..{child}"])
+        if r.returncode == 0 and r.stdout.strip():
+            u = subprocess.run(["git", "update-ref", "--stdin"], input=r.stdout,
+                               cwd=ctx.repo_cwd(), capture_output=True, text=True)
+            if u.returncode == 0:
+                return True, ""
     try:
         if wt is None:
             tmp = wt = tempfile.mkdtemp(prefix="gh-nvim-reseat-")
