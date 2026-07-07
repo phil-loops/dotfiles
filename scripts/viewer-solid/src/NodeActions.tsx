@@ -334,6 +334,11 @@ export function NodeActions(props: {
     onError: (e) => {
       // a transport-level failure still lands in the strip, in full — never a truncated one-liner
       setSyncSteps((s) => (s ?? []).map((x) => (x.state === "run" ? { ...x, state: "fail" as const, note: (e as Error).message || "sync failed" } : x)));
+      // the request died mid-motion (server bounce) — re-derive from live state so the panel
+      // can't pin a stale holder or verdict (the soft-lock incident, 2026-07-06)
+      sync.refetch();
+      qc.invalidateQueries({ queryKey: ["head"] });
+      qc.invalidateQueries({ queryKey: ["node", props.branch] });
     },
   }));
 
@@ -342,6 +347,7 @@ export function NodeActions(props: {
   // choices. Nothing automatic: the incident file was foreign WIP on the wrong branch.
   const startSync = () => {
     setSyncSteps(null);
+    setHeldAt(null); // a held banner from an earlier run names a holder that may have moved
     setStashedRun(false);
     if ((sync.data?.dirty?.length ?? 0) > 0) {
       beginSteps();
