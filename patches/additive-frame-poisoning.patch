@@ -1,0 +1,44 @@
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index cc9bb14..a82873f 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -758,18 +758,28 @@ def build_additive(branch):
+     if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{vehicle}"]).returncode == 0:
+         return {"ok": False, "err": f"{vehicle} already exists - push it or delete it first", "code": 409}
+ 
+-    # Only files in either side's PR-frame diff (trunk...head) may enter the commit - restoring
+-    # whole-tree would drag main's advance into the PR. Restrict to paths whose PR diff changed.
+-    def numstat(range_spec):
+-        out = {}
+-        for line in ctx.run(["git", "diff", "--numstat", range_spec]).stdout.splitlines():
+-            parts = line.split("\t")
+-            if len(parts) == 3:
+-                out[parts[2]] = (parts[0], parts[1])
+-        return out
++    # Frame poisoning: a pushed head carrying trunk's history DUPLICATED under foreign SHAs
++    # (a backwards rebase) drags merge-base(trunk, head) into the ancient past, so the PR
++    # renders the whole world no matter what lands on top. Additive fixes content divergence
++    # only — a poisoned frame needs the head itself rewritten (human force-with-lease).
++    dup = sum(1 for l in ctx.run(["git", "cherry", trunk, up]).stdout.splitlines() if l.startswith("-"))
++    if dup >= 10:
++        mb = ctx.run(["git", "merge-base", trunk, up]).stdout.strip()
++        behind = ctx.run(["git", "rev-list", "--count", f"{mb}..{trunk}"]).stdout.strip() if mb else "?"
++        return {"ok": False, "code": 409, "poisoned": True,
++                "err": f"the pushed head duplicates {dup} of {trunk}'s commits under foreign SHAs "
++                       f"(the PR frame's base is {behind} behind {trunk}) — additive can't fix a "
++                       f"poisoned frame; rebuild the branch locally, then force-with-lease it yourself"}
+ 
+-    now_files, after_files = numstat(f"{trunk}...{up}"), numstat(f"{trunk}...{branch}")
+-    paths = sorted(p for p in set(now_files) | set(after_files) if now_files.get(p) != after_files.get(p))
++    # Only files in either side's PR-frame diff (trunk...head) may enter the commit - restoring
++    # whole-tree would drag main's advance into the PR. Restrict to frame paths whose CONTENT
++    # actually differs between the two heads (tree diff = blob OIDs; numstat add/del pairs
++    # collide on equal counts with different content).
++    def frame_paths(head):
++        return set(ctx.run(["git", "diff", "--name-only", f"{trunk}...{head}"]).stdout.splitlines())
++
++    differing = set(ctx.run(["git", "diff", "--name-only", up, branch]).stdout.splitlines())
++    paths = sorted(p for p in (frame_paths(up) | frame_paths(branch)) if p and p in differing)
+     if not paths:
+         return {"ok": False, "err": "the PR's content already matches local - nothing to carry", "code": 200}
+ 
