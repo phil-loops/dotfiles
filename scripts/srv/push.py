@@ -371,8 +371,10 @@ def prep_message(req, raw):
         env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
     msg = subject + (f"\n\n{body}" if body else "")
     parent = ctx.run(["git", "rev-parse", f"{tip}~1"]).stdout.strip()
-    r = subprocess.run(["git", "commit-tree", f"{tip}^{{tree}}", "-p", parent, "-m", msg],
-                       cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
+    cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", parent, "-m", msg]
+    if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
+        cmd.insert(2, "-S")   # plumbing ignores commit.gpgsign — unsigned reword pushes as Unverified
+    r = subprocess.run(cmd, cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
     new = r.stdout.strip()
     if r.returncode != 0 or not new:
         return req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
