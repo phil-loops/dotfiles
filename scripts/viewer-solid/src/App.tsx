@@ -592,6 +592,11 @@ function Home() {
 
   // one work row, state-rail on the left. Forest-backed PRs route in-app and carry recessive
   // hover actions; a bare PR is itself the GitHub link, so it needs no action bar.
+  // A landed row's answer to "what now": the forest's first mergeable root still
+  // without a PR — the natural next push after a merge contracts the stack.
+  const nextUp = (p: PR): string | undefined =>
+    p.project ? forestOf(p.project)?.candidates?.[0] : undefined;
+
   const workRow = (p: PR) => {
     const state = prState(p);
     const body = (
@@ -606,6 +611,13 @@ function Home() {
         <Link class="work-link" to={{ kind: "forest", name: p.project, node: p.branch }}>{body}</Link>
         <Show when={state !== "landed"}>
           <span class="work-acts"><ActionBar actions={workRowActions(p)} /></span>
+        </Show>
+        <Show when={state === "landed" && nextUp(p)}>
+          {(n) => (
+            <Link class="work-next" to={{ kind: "forest", name: p.project!, node: n() }}>
+              next ▸ {leaf(n())}
+            </Link>
+          )}
         </Show>
       </div>
     ) : (

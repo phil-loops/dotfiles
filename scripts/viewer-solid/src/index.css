@@ -760,6 +760,12 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 /* actions recede until the row is hovered — they stop competing with the title down the column */
 .work-acts { flex: none; opacity: 0; transition: opacity 0.12s; }
 .work-row:hover .work-acts, .work-acts:focus-within { opacity: 1; }
+.work-next {
+  flex: none; font-family: var(--mono); font-size: 11px; color: var(--gold-deep);
+  text-decoration: none; white-space: nowrap; padding: 1px 6px;
+  border: 1px solid transparent; border-radius: 5px;
+}
+.work-next:hover { border-color: var(--rule); background: var(--vellum-raise); }
 
 .work-state-changes { --state: #e8794a; --state-edge: var(--del); --state-glow: rgba(232,121,74,0.5); }
 .work-state-review  { --state: #f2c258; --state-edge: var(--gold-deep); --state-glow: rgba(242,194,88,0.45); }
