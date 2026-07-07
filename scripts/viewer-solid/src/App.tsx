@@ -667,9 +667,32 @@ function Home() {
   // Group the home list by repo (loops first, then alphabetical), then within each repo split the
   // active forests into PRIORITY TIERS (interest level, descending) so same-priority work stands
   // together, and pull recently-merged forests aside into their own fold.
+  // A project's identity is (repo, name) — the same forest name can exist in two repos.
+  const pkey = (p: Project) => (p.repo || "loops") + " " + p.name;
+  // Cross-repo "epic" clusters: same stack-project.<name>.epic tag spanning ≥2 repos folds into one
+  // card at the top (ranked by its members' max interest). A single-repo epic is left in its normal
+  // repo bucket — pulling one row out into a lone "cluster" would only fragment the list.
+  const epicClusters = createMemo(() => {
+    const byEpic = new Map<string, Project[]>();
+    for (const p of filteredForests()) {
+      if (!p.epic || recentlyMerged(p)) continue;
+      (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
+    }
+    return [...byEpic.entries()]
+      .filter(([, items]) => new Set(items.map((p) => p.repo || "loops")).size >= 2)
+      .map(([epic, items]) => ({
+        epic,
+        interest: Math.max(...items.map((p) => p.interest ?? 0)),
+        items: items.sort((a, b) => forestTs(b) - forestTs(a)),
+      }))
+      .sort((a, b) => b.interest - a.interest || b.items.length - a.items.length);
+  });
+  const clusteredKeys = createMemo(() => new Set(epicClusters().flatMap((c) => c.items.map(pkey))));
   const forestGroups = createMemo(() => {
+    const clustered = clusteredKeys();
     const by = new Map<string, Project[]>();
     for (const p of filteredForests()) {
+      if (clustered.has(pkey(p))) continue; // shown in an epic cluster above, not under its repo header
       const r = p.repo || "loops";
       (by.get(r) ?? by.set(r, []).get(r)!).push(p);
     }
@@ -1079,6 +1102,23 @@ function Home() {
             </p>
           }
         >
+          <For each={epicClusters()}>
+            {(cluster) => (
+              <div class="epic-cluster">
+                <h3 class="epic-head" title="one effort spanning repos, linked by epic tag (advisory — each half still merges on its own main)">
+                  ⇌ {cluster.epic}
+                </h3>
+                <For each={cluster.items}>
+                  {(p) => (
+                    <div class="epic-subrow">
+                      <span class="epic-repo-badge">{p.repo || "loops"}</span>
+                      {forestRow(p, false)}
+                    </div>
+                  )}
+                </For>
+              </div>
+            )}
+          </For>
           <For each={forestGroups()}>
             {(group) => (
               <>

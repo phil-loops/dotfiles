@@ -95,6 +95,7 @@ export const BranchPRMap = z.record(z.string(), BranchPR);
 export const Project = z.object({
   name: z.string(),
   repo: z.string().default("loops"), // which registry repo this forest lives in (Forests home groups by it)
+  epic: z.string().nullable().optional(), // stack-project.<name>.epic — cross-repo grouping id (advisory, never a rebase base)
   branches: z.number(),
   behind: z.number(),
   mergeable: z.array(z.string()).optional(), // topo-mergeable roots; [0] is the entry node a non-loops card opens
