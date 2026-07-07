@@ -16,6 +16,9 @@
                                    hand the commit to GitHub Desktop. Skips claude.
   stack-squash --message=<msg> <b> use <msg> verbatim as the commit message (the
                                    composer wrote it) — skips drafting entirely
+  stack-squash --no-voice <b>      skip the claude draft: commit with the mechanical
+                                   message (newest non-wip subject) — instant; voice
+                                   the message later, on demand
 
 `--unpushed` + `--format` together is the "prep for push" combo. Flags compose and
 may appear in any order before <branch>.
@@ -83,7 +86,7 @@ def out(d):
 
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
-dry = unpushed = fmt = subject_only = unstage = False
+dry = unpushed = fmt = subject_only = unstage = no_voice = False
 provided_msg = ""   # --message=<msg>: use this verbatim (the composer wrote it), skip drafting
 rest = []
 for a in argv:
@@ -97,13 +100,15 @@ for a in argv:
         subject_only = True
     elif a == "--unstage":
         unstage = True
+    elif a == "--no-voice":
+        no_voice = True
     elif a.startswith("--message="):
         provided_msg = a[len("--message="):]
     else:
         rest.append(a)
 branch = (rest[0] if rest else "").strip()
 if not branch:
-    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] [--unstage] <branch>"})
+    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] [--unstage] [--no-voice] <branch>"})
 
 # branch must exist
 if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
@@ -240,7 +245,7 @@ Output ONLY the raw commit message — no preface, no explanation, no code fence
 # a composer-written message is used verbatim — it IS the voice, so no drafting call
 message = provided_msg.strip()
 voiced = bool(message)
-if not message:
+if not message and not no_voice:
     try:
         cmd = [CLAUDE_BIN, "-p"]
         if os.environ.get("SQUASH_MODEL"):
