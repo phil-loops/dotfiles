@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, unquote
 
 from srv import ctx
 from srv import picker
+from srv import sync
 
 
 def _resolve_repo(slug):
@@ -434,9 +435,15 @@ def _reseat_walk(parent, results):
     # top-down: seat each child on its (possibly just-moved) parent, then descend. A subtree
     # whose root conflicts is left alone — its own recorded cuts stay valid for a manual pass.
     parent_tip = ctx.run(["git", "rev-parse", parent]).stdout.strip()
+    published = sync._open_pr_heads()
     for child in _children_of(parent):
         if _seated(parent, child):
             results.append({"branch": child, "status": "seated"})
+        elif child in published:
+            # replaying a child with an open PR diverges its pushed copy — only a force-push lands that, so skip
+            results.append({"branch": child, "status": "held-pr",
+                            "err": "open PR — reseat would diverge the pushed branch (force-push); reconcile by hand"})
+            continue
         else:
             ok, err = _rebase_onto(child, parent, _cut_point(parent, child))
             if not ok:
@@ -493,9 +500,10 @@ def pr_reseat(req, raw):   # POST /pr-reseat-children — rebase orphaned childr
     _reseat_walk(branch, results)
     moved = [r["branch"] for r in results if r["status"] == "reseated"]
     conflicts = [r for r in results if r["status"] == "conflict"]
+    held = [r for r in results if r["status"] == "held-pr"]
     req._send(200 if not conflicts else 207,
               json.dumps({"ok": not conflicts, "branch": branch, "results": results,
-                          "moved": moved, "conflicts": conflicts}))
+                          "moved": moved, "conflicts": conflicts, "held": held}))
 
 
 def reseat(req, raw):   # POST /reseat-children {branch} — viewer: rebase drifted children back onto this branch
@@ -515,6 +523,7 @@ def reseat(req, raw):   # POST /reseat-children {branch} — viewer: rebase drif
     _reseat_walk(branch, results)
     moved = [r["branch"] for r in results if r["status"] == "reseated"]
     conflicts = [r for r in results if r["status"] == "conflict"]
+    held = [r for r in results if r["status"] == "held-pr"]
     req._send(200 if not conflicts else 207,
               json.dumps({"ok": not conflicts, "branch": branch, "results": results,
-                          "moved": moved, "conflicts": conflicts}))
+                          "moved": moved, "conflicts": conflicts, "held": held}))

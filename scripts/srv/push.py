@@ -338,6 +338,9 @@ def prep_push(req, raw):
         moved = [x["branch"] for x in reseated if x.get("status") == "reseated"]
         if moved:
             routed.append(f"reseated {', '.join(moved)}")
+        held = [x["branch"] for x in reseated if x.get("status") == "held-pr"]
+        if held:
+            routed.append(f"left {', '.join(held)} untouched — open PR, reseat would need a force-push")
 
     v = _origin_verdict(branch)
     return req._send(200, json.dumps({
