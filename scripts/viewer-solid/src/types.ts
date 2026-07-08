@@ -194,6 +194,7 @@ export const RestackAmbientBranch = z.object({
 });
 export const RestackAmbient = z.object({
   available: z.boolean(),
+  tier: z.string().optional(), // the daemon's action tier: dry-run | contract | apply (scripts/restack-daemon)
   at: z.number().optional(),
   age_s: z.number().nullable().optional(),
   trunk_tip: z.string().optional(),

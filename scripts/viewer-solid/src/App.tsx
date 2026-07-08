@@ -433,11 +433,18 @@ function Home() {
         .map((b) => `  ${b.branch}${b.conflict_pr ? ` → #${b.conflict_pr} ${b.conflict_title ?? ""}` : ""}`)
         .join("\n");
     }
+    // in an auto-drop tier the daemon already deletes merged ghosts, so anything still showing
+    // is HELD (checked out in a worktree); in dry-run nothing is being dropped, so it's a to-do.
+    const autoDrops = a.tier === "contract" || a.tier === "apply";
     const ghosts = a.report.branches.filter((b) => b.verdict === "would-contract");
     if (ghosts.length) {
-      title += "\n\nalready merged — the daemon's --contract tier auto-drops these; any left are"
-        + " held (checked out), and a forest's ▸ ready button clears them:\n"
-        + ghosts.map((b) => `  ${b.branch}`).join("\n");
+      title += autoDrops
+        ? "\n\nalready merged — the --contract daemon auto-drops these; any still here are held"
+          + " (checked out in a worktree). Check out elsewhere, or a forest's ▸ ready button clears them:\n"
+          + ghosts.map((b) => `  ${b.branch}`).join("\n")
+        : "\n\nalready merged — the daemon isn't auto-dropping (dry-run); a forest's ▸ ready button drops"
+          + " these, or reinstall it with `restack-daemon --contract install`:\n"
+          + ghosts.map((b) => `  ${b.branch}`).join("\n");
     }
     // route a click to the forest carrying the most actionable branches (or Work when they
     // span several) — the chip surfaces the drift, the forest's ▸ ready button stages the fix.
@@ -453,7 +460,10 @@ function Home() {
       : counts.size > 1 ? { kind: "home", tab: "work" } : undefined;
     if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
     if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title, to };
-    if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title, to };
+    if (s.would_contract > 0) {
+      const text = autoDrops ? `⊘ ${s.would_contract} merged — held` : `⊘ ${s.would_contract} merged — drop?`;
+      return { cls: "amb-contract", text, title, to };
+    }
     if (s.would_restack > 0) return { cls: "amb-restack", text: `⟳ ${s.would_restack} would restack`, title, to };
     return { cls: "amb-clean", text: "✦ forest clean", title };
   };
