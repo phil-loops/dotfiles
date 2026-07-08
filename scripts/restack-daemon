@@ -69,9 +69,9 @@ pidf="$gd/restack-ambient.pid"
 
 # one human-readable tier label, reused by install / status / start-log. --apply is the
 # superset (it contracts too), so it wins the label even when --contract is also passed.
-if   (( apply ));    then mode_desc="APPLY — auto-restacks clean cases, parks conflicts"
-elif (( contract )); then mode_desc="CONTRACT — auto-drops merged ghosts, parks rebases"
-else                      mode_desc="DRY-RUN — moves nothing"
+if   (( apply ));    then tier="apply";    mode_desc="APPLY — auto-restacks clean cases, parks conflicts"
+elif (( contract )); then tier="contract"; mode_desc="CONTRACT — auto-drops merged ghosts, parks rebases"
+else                      tier="dry-run";  mode_desc="DRY-RUN — moves nothing"
 fi
 
 now() { date +%s; }
@@ -158,11 +158,11 @@ reclassify() {
     rm -f "$reportf"; logline "reclassify FAILED/interrupted (rc=$rc)"; return 1
   fi
   tmp="$state.tmp.$$"
-  jq --slurpfile r "$reportf" -n --arg mode "dry-run" \
+  jq --slurpfile r "$reportf" -n --arg mode "dry-run" --arg tier "$tier" \
     --argjson at "$(now)" --argjson interval "$interval" \
     --arg pid "$pid" '
       ($r[0]) as $report |
-      {mode:$mode, at:$at, pid:(if $pid=="" then null else ($pid|tonumber) end),
+      {mode:$mode, tier:$tier, at:$at, pid:(if $pid=="" then null else ($pid|tonumber) end),
        interval:$interval, trunk_tip:$report.trunk_tip, report:$report}' > "$tmp"
   mv "$tmp" "$state"; rm -f "$reportf"
   local s; s="$(jq -r '.report.summary | "clean=\(.clean) restack=\(.would_restack) contract=\(.would_contract) conflict=\(.will_conflict) skipped=\(.skipped)"' "$state")"
