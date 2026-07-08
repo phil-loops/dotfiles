@@ -12,6 +12,11 @@ set -euo pipefail
 #                                  rebase the clean cases (stack-restack-all --no-claude,
 #                                  LOCAL refs only — never pushes), leaving real conflicts
 #                                  PARKED as a badge. Opt-in; try `--apply --once` first.
+#   restack-daemon --contract      the SAFE subset of --apply: auto-DROP already-merged
+#                                  ghosts + rewire their children's parent (pure metadata,
+#                                  no rebase → nothing can conflict, no working tree touched),
+#                                  leaving the children's rebase-forward PARKED as would-restack
+#                                  for a human's ▸ ready button. The middle tier: dry-run < contract < apply.
 #   restack-daemon --once          single pass (cron / manual refresh), then exit
 #   restack-daemon --interval N    seconds between trunk polls (default 60)
 #   restack-daemon --status        print the current state file and exit
@@ -38,6 +43,7 @@ MAIN="$(git config stack.main-branch 2>/dev/null || echo main)"
 interval=60
 mode="loop"
 apply=0   # opt-in: --apply auto-runs the (proven, local-only, conflict-parking) restack
+contract=0  # opt-in: --contract auto-drops merged ghosts only (metadata, no rebase); < --apply
 [[ -x "$dryrun" ]] || { echo "restack-daemon: restack-dryrun not found next to this script" >&2; exit 2; }
 
 while (( $# )); do
@@ -48,8 +54,9 @@ while (( $# )); do
     install)    mode="install"; shift ;;
     uninstall)  mode="uninstall"; shift ;;
     --apply)    apply=1; shift ;;
+    --contract) contract=1; shift ;;
     --interval) interval="${2:-}"; shift 2 ;;
-    -h|--help)  sed -n '3,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "restack-daemon: unknown arg $1" >&2; exit 2 ;;
   esac
 done
@@ -59,6 +66,13 @@ gd="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || { e
 state="$gd/restack-ambient.json"
 log="$gd/restack-ambient.log"
 pidf="$gd/restack-ambient.pid"
+
+# one human-readable tier label, reused by install / status / start-log. --apply is the
+# superset (it contracts too), so it wins the label even when --contract is also passed.
+if   (( apply ));    then mode_desc="APPLY — auto-restacks clean cases, parks conflicts"
+elif (( contract )); then mode_desc="CONTRACT — auto-drops merged ghosts, parks rebases"
+else                      mode_desc="DRY-RUN — moves nothing"
+fi
 
 now() { date +%s; }
 logline() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log"; }
@@ -184,6 +198,59 @@ apply_if_safe() {
   reclassify "$1" "$2"   # refresh state to post-restack reality
 }
 
+# --contract (opt-in): the SAFE subset of --apply. On a trunk move, act on the would-contract
+# ghosts ONLY — drop each already-merged branch and rewire its children's parent onto the
+# ghost's parent. Pure metadata + a merged-branch delete: NO rebase, so nothing can conflict
+# and no working tree is touched. The children's actual rebase-forward stays PARKED as
+# would-restack for a human (the viewer's ▸ ready button). Purpose-invariant — a contracted
+# child implements the same parent…child delta, so descriptions never need refreshing. A ghost
+# checked out in some worktree can't be deleted → left exactly as it was, logged.
+contracted_n=0
+contract_ghosts() {
+  contracted_n=0
+  (( contract )) || return 0
+  [[ -f "$state" ]] || return 0
+  local ghosts g parent key val child proj
+  ghosts="$(jq -r '.report.branches[]|select(.verdict=="would-contract")|.branch' "$state" 2>/dev/null || true)"
+  [[ -n "${ghosts// }" ]] || return 0
+  while IFS= read -r g; do
+    [[ -n "$g" ]] || continue
+    parent="$(git config "stack-branch.$g.parent" 2>/dev/null || echo "$MAIN")"
+    [[ -n "$parent" ]] || parent="$MAIN"
+    # delete FIRST — if the ghost is checked out in some worktree it can't be dropped; bail
+    # before touching any config so a non-deletable ghost leaves the graph exactly as it was.
+    if ! git branch -D "$g" >/dev/null 2>&1; then
+      logline "contract: $g merged but not deletable (checked out?) — left for the ▸ ready button"
+      continue
+    fi
+    # rewire every child that pointed at the ghost onto the ghost's parent (metadata only —
+    # the child's history still carries the merged commits until its own parked restack replays it)
+    while IFS=' ' read -r key val; do
+      [[ -z "$key" ]] && continue
+      [[ "$val" == "$g" ]] || continue
+      child="${key#stack-branch.}"; child="${child%.parent}"
+      git config "stack-branch.$child.parent" "$parent"
+      git config --unset "stack-branch.$child.base" 2>/dev/null || true
+      logline "contract: rewire $child parent → $parent"
+    done < <(git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true)
+    # drop the ghost from any integrator's fan-in list — its work is main-native now
+    while IFS=' ' read -r key val; do
+      [[ -z "$key" ]] && continue
+      [[ "$val" == "$g" ]] || continue
+      child="${key#stack-branch.}"; child="${child%.requires}"
+      git config --unset-all --fixed-value "stack-branch.$child.requires" "$g" 2>/dev/null || true
+      logline "contract: drop fan-in requires $g from $child"
+    done < <(git config --get-regexp '^stack-branch\..*\.requires$' 2>/dev/null || true)
+    proj="$(git config "stack-branch.$g.project" 2>/dev/null || true)"
+    [[ -n "$proj" ]] && git config --unset-all --fixed-value "stack-project.$proj.branch" "$g" 2>/dev/null || true
+    git config --remove-section "stack-branch.$g" 2>/dev/null || true
+    contracted_n=$((contracted_n+1))
+    logline "contract: dropped merged ghost $g (children now rebase onto $parent)"
+  done <<< "$ghosts"
+  (( contracted_n > 0 )) && logline "contract: $contracted_n ghost(s) auto-dropped on this trunk move"
+  return 0
+}
+
 case "$mode" in
   status)
     [[ -f "$state" ]] && cat "$state" || { echo "restack-daemon: no state yet ($state)"; exit 1; }
@@ -202,8 +269,12 @@ case "$mode" in
     [[ -n "$prev_tip" && -n "$tip" ]] && attribute_merges "$prev_tip" "$tip"
     refresh_local_main "$tip"
     reclassify "" "$tip"
-    apply_if_safe "" "$tip"
-    echo "restack-daemon: single $( (( apply )) && echo apply || echo dry-run) pass written → $state"
+    if (( apply )); then
+      apply_if_safe "" "$tip"
+    elif (( contract )); then
+      contract_ghosts; (( contracted_n )) && reclassify "" "$tip"
+    fi
+    echo "restack-daemon: single $( (( apply )) && echo apply || { (( contract )) && echo contract || echo dry-run; } ) pass written → $state"
     exit 0 ;;
   install)
     label="com.philbrockman.restack-daemon"
@@ -211,6 +282,7 @@ case "$mode" in
     repo="$(git rev-parse --show-toplevel)"
     self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     applyarg=""; (( apply )) && applyarg="<string>--apply</string>"
+    contractarg=""; (( contract )) && contractarg="<string>--contract</string>"
     mkdir -p "$(dirname "$plist")"
     # KeepAlive restarts it if it dies; WorkingDirectory pins the watched repo (origin/main +
     # forest config are per-repo). Stop = uninstall (KeepAlive would relaunch a --stop'd one).
@@ -221,7 +293,7 @@ case "$mode" in
 <dict>
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
-  <array><string>/bin/bash</string><string>$self</string><string>--interval</string><string>$interval</string>$applyarg</array>
+  <array><string>/bin/bash</string><string>$self</string><string>--interval</string><string>$interval</string>$applyarg$contractarg</array>
   <key>WorkingDirectory</key><string>$repo</string>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
@@ -244,7 +316,7 @@ EOF
       sleep 1
     done
     if (( ok )); then
-      echo "restack-daemon: installed + started (watching $repo every ${interval}s, $( (( apply )) && echo 'APPLY — auto-restacks clean, parks conflicts' || echo 'DRY-RUN'))"
+      echo "restack-daemon: installed + started (watching $repo every ${interval}s, $mode_desc)"
       echo "  state: $state    logs: $gd/restack-ambient.agent.*.log    stop: restack-daemon uninstall"
     else
       echo "restack-daemon: launchctl bootstrap failed (still loaded? try: restack-daemon uninstall)" >&2; exit 1
@@ -274,7 +346,7 @@ set -m
 trap 'running=0; [[ -n "$child" ]] && kill -TERM -"$child" 2>/dev/null || true' TERM INT
 trap 'rm -f "$pidf"' EXIT
 
-logline "daemon start pid=$$ interval=${interval}s ($( (( apply )) && echo 'APPLY — auto-restacks clean cases, parks conflicts' || echo 'DRY-RUN — moves nothing'))"
+logline "daemon start pid=$$ interval=${interval}s ($mode_desc)"
 # attribution baseline survives restarts via the state file's trunk_tip; last_tip stays
 # empty so a fresh daemon still re-classifies once on startup.
 prev_tip="$(jq -r '.trunk_tip // empty' "$state" 2>/dev/null || true)"
@@ -286,7 +358,11 @@ while (( running )); do
     base="${last_tip:-$prev_tip}"
     [[ -n "$base" ]] && attribute_merges "$base" "$tip"
     refresh_local_main "$tip"
-    reclassify "$$" "$tip" && { last_tip="$tip"; apply_if_safe "$$" "$tip"; }
+    if reclassify "$$" "$tip"; then
+      last_tip="$tip"
+      if (( apply )); then apply_if_safe "$$" "$tip"
+      elif (( contract )); then contract_ghosts; (( contracted_n )) && reclassify "$$" "$tip"; fi
+    fi
   fi
   # interruptible sleep: a TERM during the sleep wakes us, the trap clears `running`,
   # and the while-check exits — so --stop is honoured within one fetch cycle, not one interval.

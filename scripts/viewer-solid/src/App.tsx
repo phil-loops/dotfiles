@@ -408,9 +408,16 @@ function Home() {
     queryFn: () => provider.restackAmbient(),
     refetchInterval: 15000,
   }));
+  // shared cache with the Cmd+K index — lets the ambient chip resolve which forest its
+  // actionable branches live in, so a click routes straight to that forest's ▸ ready button.
+  const forestBranches = createQuery(() => ({
+    queryKey: ["forest-branches"],
+    queryFn: () => provider.forestBranches(),
+    refetchInterval: 60000,
+  }));
   // collapse the summary to the single most-urgent signal: a real conflict outranks an
   // already-merged ghost outranks pending restacks; all-zero behind = the forest is clean.
-  const ambientChip = (): { cls: string; text: string; title: string } | null => {
+  const ambientChip = (): { cls: string; text: string; title: string; to?: ViewerLocation } | null => {
     const a = ambient.data;
     if (!a?.available || !a.report) return null;
     const s = a.report.summary;
@@ -428,13 +435,26 @@ function Home() {
     }
     const ghosts = a.report.branches.filter((b) => b.verdict === "would-contract");
     if (ghosts.length) {
-      title += "\n\nalready merged — a forest's ▸ ready button drops these:\n"
+      title += "\n\nalready merged — the daemon's --contract tier auto-drops these; any left are"
+        + " held (checked out), and a forest's ▸ ready button clears them:\n"
         + ghosts.map((b) => `  ${b.branch}`).join("\n");
     }
+    // route a click to the forest carrying the most actionable branches (or Work when they
+    // span several) — the chip surfaces the drift, the forest's ▸ ready button stages the fix.
+    const projectOf = (branch: string) => (forestBranches.data || []).find((fb) => fb.branch === branch)?.project;
+    const counts = new Map<string, number>();
+    for (const b of a.report.branches) {
+      if (b.verdict !== "will-conflict" && b.verdict !== "would-restack" && b.verdict !== "would-contract") continue;
+      const p = projectOf(b.branch);
+      if (p) counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+    const to: ViewerLocation | undefined = counts.size === 1
+      ? { kind: "forest", name: [...counts.keys()][0] }
+      : counts.size > 1 ? { kind: "home", tab: "work" } : undefined;
     if (stale) return { cls: "amb-stale", text: "✦ daemon idle", title };
-    if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title };
-    if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title };
-    if (s.would_restack > 0) return { cls: "amb-restack", text: `⟳ ${s.would_restack} would restack`, title };
+    if (s.will_conflict > 0) return { cls: "amb-conflict", text: `⚠ ${s.will_conflict} will conflict`, title, to };
+    if (s.would_contract > 0) return { cls: "amb-contract", text: `⊘ ${s.would_contract} merged — drop?`, title, to };
+    if (s.would_restack > 0) return { cls: "amb-restack", text: `⟳ ${s.would_restack} would restack`, title, to };
     return { cls: "amb-clean", text: "✦ forest clean", title };
   };
 
@@ -935,7 +955,9 @@ function Home() {
             {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
           </Show>
           <Show when={ambientChip()}>
-            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
+            {(c) => c().to
+              ? <Link class={`amb-chip amb-link ${c().cls}`} to={c().to!} title={c().title}>{c().text}</Link>
+              : <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
           </Show>
           <Show when={canMutate}>
             <button
@@ -1397,6 +1419,30 @@ function ShipButton(props: { project: string }) {
   const [busy, setBusy] = createSignal(false);
   const [msg, setMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
   let disarm: ReturnType<typeof setTimeout>;
+  // shared cache with Home's chip — the daemon already classified this forest, so the confirm
+  // step previews exactly what it'll do (drop merged ghosts, rebase the rest) rather than firing blind.
+  const shipAmbient = createQuery(() => ({
+    queryKey: ["restack-ambient"], queryFn: () => provider.restackAmbient(), refetchInterval: 15000,
+  }));
+  const shipForestBranches = createQuery(() => ({
+    queryKey: ["forest-branches"], queryFn: () => provider.forestBranches(), refetchInterval: 60000,
+  }));
+  const preview = () => {
+    const a = shipAmbient.data;
+    if (!a?.available || !a.report) return null;
+    const inProj = new Set((shipForestBranches.data || []).filter((fb) => fb.project === props.project).map((fb) => fb.branch));
+    const b = a.report.branches.filter((x) => inProj.has(x.branch));
+    const contract = b.filter((x) => x.verdict === "would-contract").length;
+    const rebase = b.filter((x) => x.verdict === "would-restack").length;
+    const conflict = b.filter((x) => x.verdict === "will-conflict").length;
+    return contract || rebase || conflict ? { contract, rebase, conflict } : null;
+  };
+  const confirmLabel = () => {
+    const p = preview();
+    if (!p) return "confirm: contract + restack";
+    const parts = [p.contract && `drop ${p.contract}`, p.rebase && `rebase ${p.rebase}`].filter(Boolean);
+    return `confirm: ${parts.join(" · ") || "restack"}`;
+  };
   const fire = async () => {
     if (!armed()) {
       setArmed(true);
@@ -1446,8 +1492,13 @@ function ShipButton(props: { project: string }) {
         title="ready to ship — drop any member that already merged (rewiring its children), restack the whole forest onto fresh origin/main, then list what to push in order. Refuses if a member has an open PR or a dirty worktree; a conflict restores everything."
         onClick={fire}
       >
-        {busy() ? "readying…" : armed() ? "confirm: contract + restack" : "▸ ready"}
+        {busy() ? "readying…" : armed() ? confirmLabel() : "▸ ready"}
       </button>
+      <Show when={armed() && (preview()?.conflict ?? 0) > 0}>
+        <span class="fo-stage-msg bad" title="a conflicting rebase restores every branch to where it was — nothing is left half-done">
+          ⚠ {preview()!.conflict} may conflict
+        </span>
+      </Show>
       <Show when={msg()}>
         <span class="fo-stage-msg" classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
       </Show>

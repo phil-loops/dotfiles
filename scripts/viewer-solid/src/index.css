@@ -703,6 +703,8 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .amb-chip.amb-contract { color: var(--patina); border-color: var(--gold-deep); }
 .amb-chip.amb-conflict { color: var(--del); border-color: var(--del); }
 .amb-chip.amb-stale { color: var(--ink-faint); }
+.amb-chip.amb-link { cursor: pointer; text-decoration: none; }
+.amb-chip.amb-link:hover { border-color: currentColor; filter: brightness(1.12); }
 .amb-chip.landed-mine, .amb-chip.landed-other { margin-right: 0; }
 .amb-chip.landed-mine { color: var(--gold-leaf); border-color: var(--gold-deep); }
 .amb-chip.landed-other { color: var(--ink-faint); }
