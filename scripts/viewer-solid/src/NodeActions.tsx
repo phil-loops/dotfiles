@@ -523,14 +523,16 @@ export function NodeActions(props: {
   const [pushedWeb, setPushedWeb] = createSignal<string | null>(null);
   const pushOrigin = createMutation(() => ({
     mutationFn: () =>
-      post<{ ok?: boolean; err?: string; web?: string }>("/push-origin", { branch: props.branch }),
+      post<{ ok?: boolean; err?: string; web?: string; opened?: boolean }>("/push-origin", { branch: props.branch }),
     onSuccess: (r) => {
       refreshAfterPrep();
       if (!r.ok) {
         setDone(`✗ ${r.err || "push refused"}`);
         return;
       }
-      setDone("✓ pushed — origin has it");
+      // The server opens the compare view in the local browser on success; the link
+      // below stays as the fallback (mobile, or a headless host with no `open`).
+      setDone(r.opened ? "✓ pushed — opening the compare view to author the PR" : "✓ pushed — origin has it");
       setPushedWeb(r.web ?? null);
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "push failed"}`),
@@ -850,7 +852,7 @@ export function NodeActions(props: {
       </Show>
       <Show when={pushedWeb()}>
         <a class="nh-pushed-link" href={pushedWeb()!} target="_blank" rel="noreferrer">
-          open on github.com
+          author PR on github.com ↗
         </a>
       </Show>
 
