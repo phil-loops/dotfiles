@@ -57,10 +57,17 @@ HOUSE_STYLE = (
     "code untouched. Call out where the diff drifts from these, not only generic issues."
 )
 
-# Read-only chats can look around but never touch the tree.
+# Read-only chats (the SSE drawer) can look around but never touch the tree.
 _REVIEW_VOICE = (
     "Answer concisely, in plain prose for a senior engineer. You may use Read/Grep/Glob "
     "to inspect related code, but you cannot and must not modify anything."
+)
+
+# The tmux launch is a full interactive session in the branch's worktree — it can act, so it
+# drops the read-only clause and the click-to-run action menu (both are drawer-only affordances).
+_EDIT_VOICE = (
+    "Answer concisely, in plain prose for a senior engineer. You're in the branch's worktree in "
+    "a terminal and can read, edit, and run — make changes directly when asked, don't just review."
 )
 
 
@@ -94,9 +101,9 @@ def branch_state(branch):
     ])
 
 
-def file_chat(branch, path, patch, question):
+def file_chat(branch, path, patch, question, interactive=False):
     patch = (patch or "").strip()
-    return "\n".join([
+    parts = [
         f"You're reviewing the file `{path}` on git branch `{branch}` of the Loops codebase.",
         HOUSE_STYLE,
         "Here is its diff against the branch's parent:",
@@ -105,17 +112,19 @@ def file_chat(branch, path, patch, question):
         patch or "(no textual diff was provided — read the file if you need its contents)",
         "```",
         "",
-        _REVIEW_VOICE,
+        _EDIT_VOICE if interactive else _REVIEW_VOICE,
         branch_state(branch),
-        action_menu("file"),
-        "",
-        f"Question: {question}",
-    ])
+    ]
+    if not interactive:
+        parts.append(action_menu("file"))
+    if question:
+        parts += ["", f"Question: {question}"]
+    return "\n".join(parts)
 
 
-def branch_chat(branch, patch, question):
+def branch_chat(branch, patch, question, interactive=False):
     patch = (patch or "").strip()
-    return "\n".join([
+    parts = [
         f"You're reviewing the whole git branch `{branch}` of the Loops codebase — "
         "every file it changes against its parent.",
         HOUSE_STYLE,
@@ -125,19 +134,21 @@ def branch_chat(branch, patch, question):
         patch or "(no textual diff was provided — read the files if you need their contents)",
         "```",
         "",
-        _REVIEW_VOICE,
+        _EDIT_VOICE if interactive else _REVIEW_VOICE,
         branch_state(branch),
-        action_menu("branch"),
-        "",
-        f"Question: {question}",
-    ])
+    ]
+    if not interactive:
+        parts.append(action_menu("branch"))
+    if question:
+        parts += ["", f"Question: {question}"]
+    return "\n".join(parts)
 
 
 # Whole-forest chat: `seed` is the DAG gather chat.py builds (edge list + per-branch purpose/
 # parent/requires/capped diff). No action menu — the per-branch verbs need a single branch; at
 # project altitude the chat is pure read-only Q&A about how the feature hangs together.
-def project_chat(project, seed, question):
-    return "\n".join([
+def project_chat(project, seed, question, interactive=False):
+    parts = [
         f"You're reviewing the entire `{project}` forest of the Loops codebase — every branch in "
         "the project and the DAG (parent + requires edges) that links them into one feature.",
         HOUSE_STYLE,
@@ -146,12 +157,13 @@ def project_chat(project, seed, question):
         "",
         seed,
         "",
-        _REVIEW_VOICE,
+        _EDIT_VOICE if interactive else _REVIEW_VOICE,
         "Reason across the WHOLE feature — what it does end to end, where the gaps or unfinished "
         "seams are, what's left to build. Read individual files when a branch's capped diff isn't enough.",
-        "",
-        f"Question: {question}",
-    ])
+    ]
+    if question:
+        parts += ["", f"Question: {question}"]
+    return "\n".join(parts)
 
 
 # Dropped/pasted screenshots ride in as saved temp files — headless claude can't take image
