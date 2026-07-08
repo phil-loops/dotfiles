@@ -124,7 +124,7 @@ attribute_merges() {
   if (( mine_ct > 0 )); then
     notify "🎉 Your PR merged" "$(jq -r '[.[] | select(.mine == true) | "#\(.number) " + (.title // "")] | join(" · ")' <<<"$prs")"
   elif (( total > 0 )); then
-    notify "main moved" "$total PR(s) merged$( (( ${direct:-0} > 0 )) && echo ", ${direct} direct" || true )"
+    notify "main moved" "$(jq -r '[.[] | "#\(.number) " + (.branch // .title // "?")] | join(" · ")' <<<"$prs")$( (( ${direct:-0} > 0 )) && echo " · ${direct} direct" || true )"
   fi
 }
 
@@ -195,7 +195,46 @@ apply_if_safe() {
   # shellcheck disable=SC2046  — intentional word-split of newline-separated project names
   ( cd "$scratch" && "$here/stack-restack-all" --no-claude $(echo "$projects") ) >> "$log" 2>&1 \
     && logline "apply: done" || logline "apply: restack-all nonzero (some parked → surfaced as badge)"
-  reclassify "$1" "$2"   # refresh state to post-restack reality
+  prep_next_bases "$projects"   # collapse each newly-exposed next base's unpushed tail → one voiced commit
+  reclassify "$1" "$2"   # refresh state to post-restack+prep reality
+}
+
+# --apply, final leg: once the survivors restack onto fresh main, PREP each project's next base
+# for push — collapse its UNPUSHED tail to one voiced commit (the same stack-squash --unpushed
+# --format the viewer's prep button runs). Local-only, never pushes; the drafted subject stays
+# editable. "next base" = stack-forest's mergeable roots — the same set the viewer's candidates
+# chip reads, so the daemon and the chip name the same branch.
+#
+# Two guards keep the squash safe. (1) Skip any base with a PUSHED counterpart — it may carry an
+# open PR, and prep must never risk diverging a PR head; an unpushed root is the true next-to-push.
+# (2) Skip any base with STACKED CHILDREN — stack-squash moves the tip but does NOT reseat
+# descendants (the viewer's prep button reseats via _reseat_walk; the daemon has no equivalent),
+# so squashing a base with children would orphan them on the pre-squash tip. A childless root is
+# the common fan-in case (one self-contained base); multi-child stacks stay on the human's prep
+# button until the daemon can reseat too.
+prep_next_bases() {
+  (( apply )) || return 0
+  local projects="$1" proj b bases
+  [[ -n "${projects// }" ]] || return 0
+  for proj in $projects; do
+    bases="$("$here/stack-forest" --projects 2>/dev/null \
+      | jq -r --arg p "$proj" '.[]|select(.name==$p)|.mergeable[]?' 2>/dev/null || true)"
+    [[ -n "${bases// }" ]] || continue
+    while IFS= read -r b; do
+      [[ -n "$b" ]] || continue
+      git rev-parse --verify -q "refs/remotes/origin/$b" >/dev/null 2>&1 && continue
+      if git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
+           | awk -v b="$b" '$2==b{found=1} END{exit !found}'; then
+        logline "prep: next base $b has stacked children — skipping (squash would orphan them; use the viewer's prep button, which reseats)"
+        continue
+      fi
+      if "$here/stack-squash" --unpushed --format --subject-only "$b" >> "$log" 2>&1; then
+        logline "prep: next base $b squashed to one voiced commit (local, no push)"
+      else
+        logline "prep: next base $b left as-is (nothing to squash or squash declined)"
+      fi
+    done <<< "$bases"
+  done
 }
 
 # --contract (opt-in): the SAFE subset of --apply. On a trunk move, act on the would-contract
