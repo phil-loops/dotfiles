@@ -79,5 +79,9 @@ def move(req, raw):
             req._send(500, json.dumps({"ok": False, "err": "could not free worktree: " + (rd.stderr or rd.stdout)}))
             return
     r = ctx.run(["git", "-C", main_wt, "checkout", branch])
-    req._send(200 if r.returncode == 0 else 500,
-              json.dumps({"ok": r.returncode == 0, "worktree": main_wt, "out": r.stdout, "err": r.stderr}))
+    if r.returncode == 0:
+        req._send(200, json.dumps({"ok": True, "worktree": main_wt, "out": r.stdout}))
+        return
+    # no `worktree` on failure: the client reads that key as "held in another tree, offer to
+    # free it", so echoing main_wt here masks a dirty-tree refusal as a held state (silent loop).
+    req._send(500, json.dumps({"ok": False, "err": (r.stderr or r.stdout or "checkout failed").strip()}))
