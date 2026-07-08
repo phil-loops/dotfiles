@@ -120,6 +120,20 @@ def _origin_web(branch):
     return f"https://github.com/{m.group(1)}/compare/main...{branch}" if m else ""
 
 
+def _open_web(url):
+    """Hand the compare view to the local default browser (`open`). Only ever reached
+    via Phil's push-origin click — the tab popping is the point, not automation — so
+    this stays a browser hand-off, never a `gh pr create`. Best-effort: a missing
+    `open` (non-mac) just leaves the frontend link as the fallback."""
+    if not url:
+        return False
+    try:
+        subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
 def _origin_verdict(branch):
     """Every /push-origin guard, recomputed from git — shared by the read-only
     preview (drives the crossing view + wards + arming) and the push itself
@@ -233,10 +247,12 @@ def push_origin(req, raw):
     # underneath as the last net (WIP trailers, merge commits, deploy-critical gap).
     r = ctx.run(["git", "push", "origin", branch])
     ok = r.returncode == 0
+    opened = _open_web(v["web"]) if ok else False
     req._send(200, json.dumps({
         "ok": ok,
         "remote": "origin",
         "web": v["web"],
+        "opened": opened,
         "out": (r.stdout or "").strip(),
         "err": (r.stderr or "").strip(),
     }))
