@@ -144,10 +144,11 @@ def stream(req, raw):
 
 def chat_tmux(req, raw):
     """POST /chat-tmux {branch, project?, path?, patch?} — the ✦ buttons' target: the same
-    seeded chat, straight into an INTERACTIVE claude beside Phil's tmux panes
+    seeded context, straight into an INTERACTIVE claude beside Phil's tmux panes
     (STACK_CLAUDE_PLACE=join → split the active window, even-horizontal columns).
-    The drawer stays for streamed edit-actions and running threads; conversation
-    itself lives in tmux, where it can act."""
+    The prompt is DRAFTED into the input unsent (STACK_CLAUDE_DRAFT) so Phil adds his own
+    question and sends it himself; the seed carries no read-only clause or action menu since
+    this session can act. The drawer stays for streamed edit-actions and running threads."""
     d = json.loads(raw or "{}")
     branch = (d.get("branch") or "").strip()
     project = (d.get("project") or "").strip()
@@ -155,18 +156,16 @@ def chat_tmux(req, raw):
     if not (branch or project):
         req._send(400, json.dumps({"ok": False, "err": "need a branch or project"}))
         return
-    opener = ("Phil popped this open from the viewer — orient him briefly: what is this, "
-              "does it hang together, what would you change? Then take his questions.")
     if project:
-        prompt = prompts.project_chat(project, chat._project_seed(project), opener)
+        prompt = prompts.project_chat(project, chat._project_seed(project), "", interactive=True)
         target = chat._project_integrator(project) or branch or project
     elif path:
-        prompt = prompts.file_chat(branch, path, d.get("patch", ""), opener)
+        prompt = prompts.file_chat(branch, path, d.get("patch", ""), "", interactive=True)
         target = branch
     else:
-        prompt = prompts.branch_chat(branch, chat._branch_diff(branch), opener)
+        prompt = prompts.branch_chat(branch, chat._branch_diff(branch), "", interactive=True)
         target = branch
-    env = dict(os.environ, STACK_CLAUDE_PLACE="join")
+    env = dict(os.environ, STACK_CLAUDE_PLACE="join", STACK_CLAUDE_DRAFT="1")
     r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), target], input=prompt,
                        env=env, cwd=ctx.repo_cwd(), capture_output=True, text=True)
     ok = r.returncode == 0
