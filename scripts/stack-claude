@@ -85,8 +85,10 @@ surface(){   # move the active client onto the new pane's window, then raise the
 draft_deliver(){   # paste the seed into the fresh claude pane as an UNSENT draft: bracketed paste
                    # keeps a multi-line diff as one input block, and no Enter leaves Phil to send it
   local pane="$1" i
-  for i in {1..80}; do   # wait for claude's composer footer (~20s cap), then paste anyway
-    tmux capture-pane -p -t "$pane" 2>/dev/null | grep -qE 'shift\+tab|for shortcuts' && break
+  for i in {1..80}; do   # wait for claude's composer footer (~20s cap), then paste anyway.
+    # Match the footer's LEADING words: claude truncates it to the pane width, so a narrow join
+    # column drops "shift+tab"/"to cycle" — only "bypass permissions" (or "for shortcuts") survives.
+    tmux capture-pane -p -t "$pane" 2>/dev/null | grep -qE 'for shortcuts|bypass permissions' && break
     sleep 0.25
   done
   print -r -- "$prompt" | tmux load-buffer -b stack-claude-draft - 2>/dev/null || return
