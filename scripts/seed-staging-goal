@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# One-shot "button": seed a goal-campaign on STAGING via the run-script workflow.
+# Fires Loops-so/loops' run-script Action, which runs the script in staging (loopsctl
+# injects staging's DATABASE_URL server-side — you can't do this from a local checkout).
+#
+#   seed-staging-goal                 # seedGoalCampaign (draft campaign + new goal), REAL run
+#   seed-staging-goal -t <teamId>     # different team
+#   seed-staging-goal --dry           # dry run (DRY_RUN=true)
+#   seed-staging-goal --sent          # seedGoal instead: SENT campaign + 5000 contacts + CH funnel
+#   seed-staging-goal --sent 10000 spread 21   # seedGoal with count/mode/measurementDays
+set -euo pipefail
+
+REPO="Loops-so/loops"
+TEAM="cm8rpdx270006zbgomvk271qe"
+SCRIPT="seedGoalCampaign"
+DRY="false"
+
+rest=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -t|--team) TEAM="$2"; shift 2 ;;
+    --dry)     DRY="true"; shift ;;
+    --sent)    SCRIPT="seedGoal"; shift ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    *)         rest+=("$1"); shift ;;
+  esac
+done
+
+# seedGoal wants count/mode/days after the team; default to a sensible funnel if none given.
+if [ "$SCRIPT" = "seedGoal" ] && [ ${#rest[@]} -eq 0 ]; then
+  rest=(5000 random 14)
+fi
+ARGS="$TEAM${rest[*]:+ ${rest[*]}}"
+
+echo "→ dispatching run-script ($SCRIPT)"
+echo "  env=staging team=$TEAM dry_run=$DRY args=\"$ARGS\""
+gh workflow run run-script -R "$REPO" \
+  -f env=staging \
+  -f script_name="$SCRIPT" \
+  -f args="$ARGS" \
+  -f dry_run="$DRY"
+
+# gh doesn't return the run URL; grab the newest run best-effort so you can follow it.
+sleep 3
+url=$(gh run list -R "$REPO" --workflow=run-script -L 1 --json url -q '.[0].url' 2>/dev/null || true)
+if [ -n "${url:-}" ]; then
+  echo "→ $url"
+else
+  echo "→ https://github.com/$REPO/actions/workflows/run-script.yml"
+fi
