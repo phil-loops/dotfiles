@@ -302,6 +302,13 @@ body {
   color: var(--del); cursor: pointer;
 }
 .ur-commit-btn:hover { background: var(--del-bg); }
+.ur-stash-btn {
+  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: none;
+  padding: 2px 8px; border: 1px solid var(--ink-faint); border-radius: 3px; background: transparent;
+  color: var(--ink-faint); cursor: pointer;
+}
+.ur-stash-btn:hover:not(:disabled) { background: var(--vellum-raise); color: var(--ink); }
+.ur-stash-btn:disabled { opacity: 0.5; cursor: default; }
 .ur-commit-form { display: flex; gap: 6px; margin: 0 2px 12px; }
 .ur-commit-input {
   flex: 1; background: var(--vellum-edge); border: 1px solid var(--rule); border-radius: 3px;

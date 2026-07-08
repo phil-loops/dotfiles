@@ -2434,6 +2434,27 @@ function DirtyRail(props: {
   const [showForm, setShowForm] = createSignal(false);
   let inputEl: HTMLInputElement | undefined;
 
+  // the other half of "commit or stash first": set the whole working tree aside (incl.
+  // untracked) so a blocked squash/prep gets its clean checkout — recoverable via git stash pop.
+  const stashAll = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const r = await fetch(withRepo("/dirty-resolve"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: props.branch, action: "stash" }),
+      });
+      const j = await r.json();
+      if (!j.ok) { setErr(j.err ?? "stash failed"); return; }
+      props.onCommit("✓ stashed all uncommitted changes — pop them back with git stash pop");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const submit = async () => {
     if (!msg().trim()) return;
     setBusy(true);
@@ -2461,6 +2482,14 @@ function DirtyRail(props: {
       <div class="ur-head">
         <span class="ur-label">± uncommitted — working tree only</span>
         <span class="ur-wt">{props.worktree.replace(/.*\//, "")}</span>
+        <button
+          class="ur-stash-btn"
+          title="stash all uncommitted changes (incl. untracked) — clears the tree for a blocked squash; recover with git stash pop"
+          disabled={busy()}
+          onClick={stashAll}
+        >
+          ⇤ stash all
+        </button>
         <button
           class="ur-commit-btn"
           title="commit all uncommitted changes to this branch"
