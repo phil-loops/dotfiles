@@ -4,12 +4,12 @@
 # on your fork and hands it to prwatch, which streams status then fires a
 # clickable notification + bell on Done/Failed (click opens the run).
 #
-#   build-watch                 watch the latest build-and-test run on phil-loops/loops
+#   build-watch                 watch the latest build-and-test run on Loops-so/loops
 #   build-watch <run-id|url>    watch a specific run
-#   build-watch -R owner/repo   watch the latest run in another repo (default phil-loops/loops)
+#   build-watch -R owner/repo   watch the latest run in another repo (default Loops-so/loops)
 set -euo pipefail
 
-REPO="phil-loops/loops"
+REPO="Loops-so/loops"
 target=""
 while [ $# -gt 0 ]; do
   case "$1" in

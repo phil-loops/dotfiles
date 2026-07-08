@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# build-notify — ambient monitor: when one of MY PRs merges to main, the build-and-test
+# image build fires automatically; this taps me on the shoulder when THAT build finishes,
+# so I never track it by hand. Designed as a launchd StartInterval sweep (one pass per
+# invocation — see com.philbrockman.build-notify.plist).
+#
+# Correlation: a merged PR's mergeCommit.oid == the main build's headSha, so each of my
+# merged PRs maps to exactly one build-and-test run. First run seeds already-finished
+# builds silently (no backlog spam); thereafter only new completions notify.
+#
+#   build-notify            one sweep (what launchd runs)
+#   BUILD_NOTIFY_REPO=...   override repo (default Loops-so/loops)
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+REPO="${BUILD_NOTIFY_REPO:-Loops-so/loops}"
+statedir="$HOME/.cache/build-notify"; mkdir -p "$statedir"
+seen="$statedir/notified"
+firstrun=0; [ -f "$seen" ] || { : > "$seen"; firstrun=1; }
+
+notify() {  # $1 title  $2 msg  $3 url
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -title "build-notify · $1" -message "$2" -sound Glass \
+      -open "$3" >/dev/null 2>&1 || true
+  else
+    printf '\a'; echo "build-notify: $1 — $2 ($3)"
+  fi
+}
+
+# my merged PRs → "mergeSha<TAB>number<TAB>title"
+prs=$(gh pr list -R "$REPO" --author @me --state merged -L 20 \
+  --json number,title,mergeCommit \
+  -q '.[] | select(.mergeCommit.oid != null) | "\(.mergeCommit.oid)\t\(.number)\t\(.title)"' 2>/dev/null || true)
+[ -n "$prs" ] || exit 0
+
+# main build-and-test runs → "headSha<TAB>runId<TAB>status<TAB>conclusion"
+runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 30 \
+  --json databaseId,headSha,status,conclusion \
+  -q '.[] | "\(.headSha)\t\(.databaseId)\t\(.status)\t\(.conclusion)"' 2>/dev/null || true)
+[ -n "$runs" ] || exit 0
+
+while IFS=$'\t' read -r sha num title; do
+  [ -n "$sha" ] || continue
+  match=$(printf '%s\n' "$runs" | awk -F'\t' -v s="$sha" '$1==s{print; exit}')
+  [ -n "$match" ] || continue
+  rid=$(printf '%s' "$match" | cut -f2)
+  status=$(printf '%s' "$match" | cut -f3)
+  concl=$(printf '%s' "$match" | cut -f4)
+  grep -qx "$rid" "$seen" && continue
+  [ "$status" = "completed" ] || continue          # still building — catch it next sweep
+  if [ "$firstrun" = "1" ]; then
+    echo "$rid" >> "$seen"; continue               # seed history silently
+  fi
+  url="https://github.com/$REPO/actions/runs/$rid"
+  if [ "$concl" = "success" ]; then
+    notify "✓ image built" "PR #$num merged → build done: $title" "$url"
+  else
+    notify "✗ build ${concl:-failed}" "PR #$num image build ${concl:-failed}: $title" "$url"
+  fi
+  echo "$rid" >> "$seen"
+done <<< "$prs"
+
+tail -n 300 "$seen" > "$seen.tmp" 2>/dev/null && mv "$seen.tmp" "$seen"
