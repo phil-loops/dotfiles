@@ -50,6 +50,27 @@ def _topo(members):
     return sorted(members, key=lambda b: (depth(b), b))
 
 
+def _rebase_delete_wins(scratch, onto, cut, b):
+    """Rebase b (--onto onto, replay from cut), auto-resolving ONLY modify/delete conflicts
+    where the branch deletes the file: a removal branch exists to drop that file, so the
+    base's edits to a doomed file are moot — the deletion wins. Any other conflict class is
+    left parked (rebase in progress) for the caller to abort + restore.
+    Returns True if it landed (clean or delete-resolved), False on a real conflict."""
+    r = ctx.run(["git", "-C", scratch, "rebase", "--onto", onto, cut, b])
+    while r.returncode != 0:
+        unmerged = [ln for ln in ctx.run(["git", "-C", scratch, "status", "--porcelain"]).stdout.splitlines()
+                    if ln[:2] in ("UD", "DU", "UU", "AA", "DD", "AU", "UA")]
+        # UD = ours (the base) modified, theirs (this branch's commit) deleted → delete wins.
+        if not unmerged or any(ln[:2] != "UD" for ln in unmerged):
+            return False
+        for ln in unmerged:
+            # bail if a removal can't be staged, so a stuck resolution can't spin forever
+            if ctx.run(["git", "-C", scratch, "rm", "-q", "--", ln[3:]]).returncode != 0:
+                return False
+        r = ctx.run(["git", "-c", "core.editor=true", "-C", scratch, "rebase", "--continue"])
+    return True
+
+
 def ship(req, raw):
     d = json.loads(raw or "{}")
     project = d.get("project", "")
@@ -107,8 +128,7 @@ def ship(req, raw):
                        else ctx.run(["git", "merge-base", b, "origin/main"]).stdout.strip())
                 if ctx.run(["git", "rev-parse", b]).stdout.strip() == cut:
                     continue  # empty branch (all its commits were the cut) — nothing to replay
-                r = ctx.run(["git", "-C", scratch, "rebase", "--onto", onto, cut, b])
-                if r.returncode != 0:
+                if not _rebase_delete_wins(scratch, onto, cut, b):
                     ctx.run(["git", "-C", scratch, "rebase", "--abort"])
                     for rb, sha in snapshots.items():
                         ctx.run(["git", "branch", "-f", rb, sha])
@@ -116,7 +136,8 @@ def ship(req, raw):
                         ctx.run(["git", "-C", root, "checkout", root_branch])
                     return req._send(200, json.dumps({
                         "ok": False, "conflict": b,
-                        "err": f"rebase of {b} hit a conflict — every branch restored to where it was",
+                        "err": f"rebase of {b} hit a real conflict (a delete/modify would auto-resolve) "
+                               "— every branch restored to where it was",
                     }))
                 moved.append(b)
         finally:

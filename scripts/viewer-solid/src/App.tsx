@@ -475,18 +475,35 @@ function Home() {
     queryFn: () => provider.restackMerges(),
     refetchInterval: 15000,
   }));
-  const landedChip = (): { cls: string; text: string; title: string } | null => {
+  const landedChip = (): { cls: string; text: string; title: string; to?: ViewerLocation } | null => {
     const m = merges.data;
     if (!m?.available || !m.prs?.length) return null;
     if ((m.age_s ?? Infinity) > 24 * 3600) return null; // yesterday's news isn't "just" landed
     const age = m.age_s == null ? "" : m.age_s < 90 ? "just now"
       : m.age_s < 3600 ? `${Math.round(m.age_s / 60)}m ago` : `${Math.round(m.age_s / 3600)}h ago`;
     const mine = m.prs.filter((p) => p.mine === true);
+    const nums = mine.map((p) => `#${p.number}`).join(" ");
     const title = m.prs
       .map((p) => `#${p.number} ${p.title ?? ""}${p.mine ? " — yours" : p.author ? ` — ${p.author}` : ""}`)
       .join("\n") + (m.direct ? `\n+ ${m.direct} direct push(es)` : "") + `\n\nlanded ${age}`;
     if (mine.length) {
-      return { cls: "landed-mine", text: `⛳ ${mine.map((p) => `#${p.number}`).join(" ")} landed — yours`, title };
+      // the daemon's --apply pass has already contracted these merged branches and restacked +
+      // prepped the survivors, so the chip's job shifts from "what landed" to "what's next": each
+      // landed PR maps to its forest via the merge fact, and that forest's first mergeable base is
+      // the just-prepped next-to-push — link straight to it.
+      const nextForest = mine
+        .map((p) => (projects.data || []).find((f) => f.merged && (f.merged.pr === p.number || f.merged.branch === p.branch)))
+        .find((f) => f?.candidates?.length);
+      const base = nextForest?.candidates?.[0];
+      if (base && nextForest) {
+        return {
+          cls: "landed-mine",
+          text: `⛳ ${nums} landed — next ▸ ${leaf(base)}`,
+          title: `${title}\n\nadvanced: forest restacked onto fresh main; next base ${base} prepped for push`,
+          to: { kind: "forest", name: nextForest.name, node: base },
+        };
+      }
+      return { cls: "landed-mine", text: `⛳ ${nums} landed — yours`, title };
     }
     return { cls: "landed-other", text: `⛳ ${m.prs.length} landed ${age}`, title };
   };
@@ -962,7 +979,9 @@ function Home() {
             <span class="brand-mark">✦</span> blessed
           </div>
           <Show when={landedChip()}>
-            {(c) => <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
+            {(c) => c().to
+              ? <Link class={`amb-chip amb-link ${c().cls}`} to={c().to!} title={c().title}>{c().text}</Link>
+              : <span class={`amb-chip ${c().cls}`} title={c().title}>{c().text}</span>}
           </Show>
           <Show when={ambientChip()}>
             {(c) => c().to
