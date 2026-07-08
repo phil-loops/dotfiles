@@ -1,0 +1,40 @@
+diff --git a/models/contact/index.test.ts b/models/contact/index.test.ts
+index 3a306f4f0a..a626850fa6 100644
+--- a/models/contact/index.test.ts
++++ b/models/contact/index.test.ts
+@@ -1,5 +1,6 @@
+ import "../../testing/default-env";
+ import { describe, it } from "node:test";
++import cuid from "cuid";
+ import {
+   assertCalledOnce,
+   assertCalledWith,
+@@ -15,6 +16,15 @@ import assert from "../../testing/assert";
+ type IndexContactDeps = Deps<typeof ContactModel.index>;
+ 
+ describe("models/contact index", () => {
++  it("updateId stays lexically time-sortable — the CDC fold's same-at ordering contract", () => {
++    // streamOrderedChanges ORDER BY (contactId, at, updateId): two updates in the same
++    // millisecond keep their creation order only because cuid v1 is timestamp+counter
++    // prefixed. A switch to cuid2/uuid (unordered) would silently scramble same-at
++    // updates in the fold — this pins the contract.
++    const ids = Array.from({ length: 500 }, () => cuid());
++    assert.deepEqual([...ids].sort(), ids);
++  });
++
+   it("skips when attributes are unchanged", async (t) => {
+     const oldContact = fakeContact({ attributes: { a: 1 } });
+     const newContact = fakeContact({ ...oldContact });
+diff --git a/models/contact/index.ts b/models/contact/index.ts
+index 0485f46640..31e3cbaaea 100644
+--- a/models/contact/index.ts
++++ b/models/contact/index.ts
+@@ -81,6 +81,8 @@ export async function index(
+   if (captured.length > 0) {
+     // one id per index() call: groups an update's multi-key rows and disambiguates two updates that
+     // land in the same `at` (millisecond) — so the fold groups/orders by update, not by timestamp.
++    // Must stay lexically time-sortable (cuid v1 = timestamp+counter): the fold's ORDER BY
++    // (contactId, at, updateId) relies on it to keep same-at updates in creation order.
+     await deps.enqueue("captureContactAttributeChanges", {
+       teamId: newContact.teamId,
+       contactId: newContact.id,

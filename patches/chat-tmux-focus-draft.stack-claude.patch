@@ -1,0 +1,105 @@
+diff --git a/scripts/stack-claude b/scripts/stack-claude
+index f7f5096..8e55f46 100755
+--- a/scripts/stack-claude
++++ b/scripts/stack-claude
+@@ -50,33 +50,92 @@ dir=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" '
+ [[ -n "$dir" ]] || dir="$SCRATCH/${branch//\//_}"
+ [[ -d "$dir" ]] || { print -u2 "stack-claude: no worktree for $branch at $dir"; exit 1; }
+ 
++focus_terminal(){   # raise the GUI terminal hosting tmux so a popped-open chat is actually visible
++  local app="${STACK_CLAUDE_TERMINAL:-${STACK_OPEN_TERMINAL:-}}"
++  if [[ -z "$app" ]]; then case "${TERM_PROGRAM:-}" in
++    iTerm.app)       app=iTerm ;;
++    Apple_Terminal)  app=Terminal ;;
++    WezTerm)         app=WezTerm ;;
++    ghostty|Ghostty) app=Ghostty ;;
++    vscode|cursor)   return 0 ;;   # integrated terminal — don't yank focus away
++    # inside tmux TERM_PROGRAM=tmux (useless) — fall back to whichever known GUI terminal is running
++    # || true: head -1 closes early, so grep/ps die on SIGPIPE (141) — pipefail + set -e would abort
++    *) app=$(ps -axo comm 2>/dev/null | grep -ioE 'iTerm|WezTerm|Alacritty|kitty|Ghostty|Terminal' | head -1) || true
++       [[ -n "$app" ]] || app=Terminal ;;
++  esac; fi
++  [[ -n "$app" ]] || return 0
++  # `activate` alone often only bounces the dock when the caller (the browser) is frontmost —
++  # macOS focus-stealing prevention raises the window faint/non-key. Forcing frontmost via System
++  # Events makes it the actual key window. Best-effort: needs Accessibility, may no-op.
++  osascript >/dev/null 2>&1 \
++    -e "tell application \"$app\" to activate" \
++    -e "tell application \"System Events\" to set frontmost of (first process whose name is \"$app\") to true" \
++    || true
++}
++surface(){   # move the active client onto the new pane's window, then raise the GUI terminal
++  local wt="$1" client
++  tmux select-window -t "$wt" 2>/dev/null || true
++  # A client parked on another session won't follow select-window, so switch the most-recently
++  # active one explicitly (leave a deliberately-parked secondary client alone).
++  # || true: head -1 closes early, so sort dies on SIGPIPE (141) — pipefail + set -e would abort
++  client=$(tmux list-clients -F '#{client_activity} #{client_name}' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-) || true
++  [[ -n "$client" ]] && tmux switch-client -c "$client" -t "$wt" 2>/dev/null || true
++  focus_terminal
++}
++draft_deliver(){   # paste the seed into the fresh claude pane as an UNSENT draft: bracketed paste
++                   # keeps a multi-line diff as one input block, and no Enter leaves Phil to send it
++  local pane="$1" i
++  for i in {1..80}; do   # wait out claude's cold start (~20s cap) before pasting
++    tmux capture-pane -p -t "$pane" 2>/dev/null | grep -q 'for shortcuts' && break
++    sleep 0.25
++  done
++  print -r -- "$prompt" | tmux load-buffer -b stack-claude-draft - 2>/dev/null || return
++  tmux paste-buffer -p -d -b stack-claude-draft -t "$pane" 2>/dev/null || true
++}
++
+ # tmux -e passes the prompt as an env var → zero quoting headaches for multi-line /
+-# special-char prompts. The pane runs `claude "$STACK_CLAUDE_PROMPT"` and, when claude
+-# exits, drops to a shell so the window (and claude's output) sticks around.
++# special-char prompts. Normally the pane runs `claude "$STACK_CLAUDE_PROMPT"` (sent as the
++# first message); with STACK_CLAUDE_DRAFT set it runs bare `claude` and the seed is pasted in
++# unsent (see draft_deliver). Either way, when claude exits it drops to a shell so the window
++# (and claude's output) sticks around.
+ #
+ # Placement (STACK_CLAUDE_PLACE): "window" (default) = its own tmux window;
+ # "join" = split into the session's ACTIVE window and even out the columns —
+ # Phil's C-a M-1 arrangement, the claude landing beside the panes he's already in.
+ place="${STACK_CLAUDE_PLACE:-window}"
++draft="${STACK_CLAUDE_DRAFT:-}"
+ win="claude:${branch##*/}"
++if [[ -n "$draft" ]]; then
++  run="claude ${model_flag}${session_flag}; exec \$SHELL"
++else
++  run="claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL"
++fi
+ if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
+-  print -r -- "DRY: dir=$dir place=$place"
+-  print -r -- "DRY: tmux new-window/split-window -t $SESSION -c $dir -e STACK_CLAUDE_PROMPT=<prompt> 'claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL'"
++  print -r -- "DRY: dir=$dir place=$place draft=${draft:-0}"
++  print -r -- "DRY: tmux new-window/split-window -t $SESSION -c $dir -e STACK_CLAUDE_PROMPT=<prompt> '$run'"
+   print -r -- "DRY: prompt:"; print -r -- "$prompt"
+   exit 0
+ fi
+ 
+ if [[ "$place" == "join" ]]; then
+-  panepid=$(tmux split-window -h -t "$SESSION:" -c "$dir" -PF '#{pane_pid}' -e "STACK_CLAUDE_PROMPT=$prompt" \
+-    "claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL") \
++  out=$(tmux split-window -h -t "$SESSION:" -c "$dir" -PF '#{pane_id} #{pane_pid}' -e "STACK_CLAUDE_PROMPT=$prompt" \
++    "$run") \
+     || { print -u2 "stack-claude: couldn't split into '$SESSION' (is the session running?)"; exit 1; }
+   tmux select-layout -t "$SESSION:" even-horizontal 2>/dev/null || true
+ else
+-  panepid=$(tmux new-window -t "$SESSION" -n "$win" -c "$dir" -PF '#{pane_pid}' -e "STACK_CLAUDE_PROMPT=$prompt" \
+-    "claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL") \
++  out=$(tmux new-window -t "$SESSION" -n "$win" -c "$dir" -PF '#{pane_id} #{pane_pid}' -e "STACK_CLAUDE_PROMPT=$prompt" \
++    "$run") \
+     || { print -u2 "stack-claude: couldn't open a tmux window (is the '$SESSION' session running?)"; exit 1; }
+   tmux select-window -t "$SESSION:$win" 2>/dev/null || true
+ fi
++pane="${out%% *}"; panepid="${out##* }"
++tmux select-pane -t "$pane" 2>/dev/null || true
++# The chat placement (join) is Phil actively popping a session open → raise the GUI terminal so it
++# lands in front. The fire-and-forget chip (window) stays put so it never steals focus mid-select.
++[[ "$place" == "join" ]] && surface "$pane"
++# Draft the seed in asynchronously: claude's cold start can outlast this request, so detach from
++# the caller's captured pipes (</dev/null, &!) and let the HTTP response return immediately.
++[[ -n "$draft" ]] && { draft_deliver "$pane"; } >/dev/null 2>&1 </dev/null &!
+ repo=$(basename "$(dirname "$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")" 2>/dev/null) || repo=""
+ [[ -x "$here/agent-register" ]] && "$here/agent-register" claude "$branch" "$panepid" "$repo" "$dir" 2>/dev/null || true
+ print -r -- "started claude on $branch in $dir${sid:+ (session $sid)} (${place})"

@@ -74,7 +74,7 @@ const proxy = async ({ method, path, query, body, base }, token) => {
     method,
     headers: { authorization: `Bearer ${token}` },
   };
-  if (body && method !== "GET" && method !== "DELETE") {
+  if (body && method !== "GET") {
     init.headers["content-type"] = "application/json";
     init.body = body;
   }
@@ -158,6 +158,14 @@ const sample = (schema, spec, key) => {
 };
 
 const sampleString = (key) => {
+  // Auto-chaining placeholders: {{var}} is substituted from the last response's captured
+  // ids at send time, so multi-step flows don't need manual id/revision copying.
+  if (/^expectedRevisionId$/.test(key)) {
+    return "{{workflowRevisionId}}";
+  }
+  if (/^(fromNodeId|toNodeId)$/.test(key)) {
+    return key === "fromNodeId" ? "n1" : "n2";
+  }
   if (/email/i.test(key)) {
     return "hello@example.com";
   }
@@ -311,7 +319,7 @@ code.b { color:var(--signal); }
 </div>
 <div id="store" class="col">
   <h2>Captured</h2>
-  <div id="vars"><p class="empty">Nothing captured yet. Send a request, then click a highlighted id in the response to keep it — it autofills matching params.</p></div>
+  <div id="vars"><p class="empty">Nothing captured yet. Every response's ids &amp; workflowRevisionId are captured automatically — reference them in the body/params as <b>{{workflowRevisionId}}</b>, <b>{{id}}</b>, etc. and they fill in at send. (Click a highlighted id to pin it too.)</p></div>
   <h2>Related</h2>
   <div id="related" class="related"><p class="empty">Pick a captured id to see where it fits.</p></div>
 </div>
@@ -381,18 +389,28 @@ function collectInputs(prefix) {
   return out;
 }
 
+// Replace {{name}} with the captured store value (last response's ids/revision). Unknown
+// vars are left as-is so a missing capture is visible rather than silently blanked.
+function subst(str) {
+  return typeof str === 'string'
+    ? str.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (m, k) => (store[k] != null ? store[k] : m))
+    : str;
+}
+
 async function sendRequest() {
   const pathParams = collectInputs('path');
   let path = current.path;
-  for (const [k,v] of Object.entries(pathParams)) path = path.replace('{'+k+'}', encodeURIComponent(v));
+  for (const [k,v] of Object.entries(pathParams)) path = path.replace('{'+k+'}', encodeURIComponent(subst(v)));
   const query = collectInputs('query');
+  for (const k of Object.keys(query)) query[k] = subst(query[k]);
   const bodyEl = document.getElementById('body');
   const resp = document.getElementById('resp');
-  if (bodyEl && bodyEl.value.trim()) {
-    try { JSON.parse(bodyEl.value); }
+  const bodyStr = bodyEl ? subst(bodyEl.value) : undefined;
+  if (bodyStr && bodyStr.trim()) {
+    try { JSON.parse(bodyStr); }
     catch (e) { return badJson('INVALID JSON', e.message); }
   }
-  const payload = { method: current.method, path, query, base: document.getElementById('base').value, body: bodyEl?bodyEl.value:undefined };
+  const payload = { method: current.method, path, query, base: document.getElementById('base').value, body: bodyStr };
   resp.innerHTML = '<p class="sending">◗ sending…</p>';
   let r;
   try {

@@ -23,6 +23,7 @@ serve="$HOME/.dotfiles/scripts/stack-review-serve"
 postman="$HOME/.dotfiles/scripts/loops-postman"
 spec="$repo/public/openapi.json"   # local spec → unreleased endpoints too
 pmport=7070; pmbase="http://127.0.0.1:${pmport}"
+bugdoc="$HOME/daily-log/2026-07-07-workflow-api-bugs.md"   # workflow-API adversarial findings (repro via the Postman console above)
 
 poke() { open -g "swiftbar://refreshplugin?name=blessed" 2>/dev/null; }
 # Detach (nohup + subshell) so the server survives SwiftBar reaping the click process.
@@ -66,5 +67,6 @@ else
   echo "▷ Start + open in Chrome | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
 fi
 echo "⚡ Postman console · :${pmport} | bash=\"$self\" param1=--postman terminal=false"
+[ -f "$bugdoc" ] && echo "🐞 Workflow API bugs (doc) | bash=\"/usr/bin/open\" param1=\"$bugdoc\" terminal=false"
 echo "---"
 echo "Refresh | refresh=true"
