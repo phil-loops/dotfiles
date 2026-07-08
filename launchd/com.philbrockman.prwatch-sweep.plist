@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.philbrockman.prwatch-sweep</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/zsh</string><string>/Users/philbrockman/.dotfiles/scripts/prwatch</string><string>--sweep</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>WorkingDirectory</key><string>/Users/philbrockman/coding/loops</string>
+  <key>StartInterval</key><integer>300</integer>
+  <key>RunAtLoad</key><true/>
+  <key>Nice</key><integer>10</integer>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/Users/philbrockman/.cache/prwatch/agent.out.log</string>
+  <key>StandardErrorPath</key><string>/Users/philbrockman/.cache/prwatch/agent.err.log</string>
+</dict>
+</plist>

@@ -38,8 +38,9 @@ completion, then report — and if it failed, immediately diagnose (step 2):
 ## Repos & passive monitoring
 - Default repos: `phil-loops/loops` (the fork — **no CI**) and `Loops-so/loops` (where CI actually runs).
   Override via `git config stack.pr-repos "owner/repo …"`.
-- A launchd agent (`prwatch --sweep`, label `com.phil.prwatch-sweep`) already pings the user when an
-  open PR goes red. For ongoing/passive monitoring, point them at that — don't sit in a foreground watch.
+- A launchd agent (`prwatch --sweep`, label `com.philbrockman.prwatch-sweep`, every 5 min) pings the
+  user when an open PR newly fails, recovers, first appears green, or MERGES. For ongoing/passive
+  monitoring — including "tell me when it merges" — point them at that; don't sit in a foreground watch.
 
 ## prwatch CLI reference (for the user's own terminal)
 `prwatch` (fzf-pick + watch) · `prwatch <n>` · `prwatch <github-url>` (PR or run) · `prwatch -l` (list) ·
