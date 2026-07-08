@@ -39,7 +39,7 @@ install_followup_hook(){   # idempotently install the detached-HEAD → branch-f
   # checkout without a stack-open marker, so it's safe in the shared hooks dir.
   local dir="$1" hooks hook
   hooks=$(git -C "$dir" rev-parse --git-path hooks); hook="$hooks/post-commit"
-  [[ -e "$hook" ]] && ! grep -q stack-open-branch "$hook" 2>/dev/null && return 0   # foreign hook — don't clobber
+  [[ -s "$hook" ]] && ! grep -q stack-open-branch "$hook" 2>/dev/null && return 0   # non-empty foreign hook — don't clobber (empty file carries no logic to protect)
   mkdir -p "$hooks"
   cat > "$hook" <<'HOOK'
 #!/bin/sh
