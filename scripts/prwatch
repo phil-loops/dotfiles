@@ -11,10 +11,11 @@
 #                        notify & exit — backgrounded by the pre-push hook (on-demand)
 #   prwatch --tracking   list the PRs whose CI is being watched right now (the live
 #                        --await processes); also what the SwiftBar menu badge reads
-#   prwatch --sweep      one quiet polling pass (for launchd): notify on PRs that
-#                        newly fail, recover, or first appear already green — a
-#                        source-agnostic "PR opened"
-#                        monitor (catches PRs opened on the web). See prwatch.plist.
+#   prwatch --sweep      one quiet polling pass (for launchd): notify on a PR that
+#                        newly fails, recovers, first appears green, or MERGES —
+#                        the standing counterpart to --await, and the only thing
+#                        that catches a merge (a merged PR drops off the open scan).
+#                        Installed as launchd/com.philbrockman.prwatch-sweep.plist.
 #
 # "Watch" streams gh's check status until every check passes or one fails, then
 # fires a desktop notification (+ a terminal bell). It scans your fork AND the
@@ -208,6 +209,67 @@ if [[ "${1:-}" == "--tracking" || "${1:-}" == "--watching" ]]; then
     print -P "%F{yellow}👁%f ${repo}#${num} — ${title}  %F{8}${url}%f"
   done
   (( active )) || echo "no PRs are being watched"
+  exit 0
+fi
+
+# --- sweep: prwatch --sweep — one quiet launchd pass --------------------------
+# Diff every open PR (authored by me, across repos) against the previous pass and
+# notify ONLY on a transition worth knowing: newly failing · recovered (fail→pass)
+# · first-seen already green · MERGED. Merge is the gap --await can't fill — a
+# merged PR drops off the open scan, so we remember last pass's open set and ask
+# GitHub about any that vanished. First run with no prior state seeds silently.
+if [[ "${1:-}" == "--sweep" ]]; then
+  sweeprepos=(${=$(git config prwatch.sweep-repos 2>/dev/null || true)})
+  (( ${#sweeprepos} )) && repos=($sweeprepos)
+  state="$HOME/.cache/prwatch/sweep-state.tsv"
+  mkdir -p "${state:h}"
+
+  rows="$(collect || true)"
+  # transient gh/network failure: an empty poll while we hold state is almost
+  # certainly a bad fetch, not "every PR merged at once" — skip, keep last state.
+  [[ -z "$rows" && -s "$state" ]] && exit 0
+
+  typeset -A prev prevtitle
+  if [[ -f "$state" ]]; then
+    while IFS=$'\t' read -r k st title _url; do
+      [[ -n "$k" ]] && { prev[$k]=$st; prevtitle[$k]=$title }
+    done <"$state"
+  fi
+  firstrun=0; [[ -f "$state" ]] || firstrun=1
+
+  typeset -A cur
+  newstate=""
+  while IFS=$'\t' read -r repo num rollup title _branch; do
+    [[ -n "$num" ]] || continue
+    key="$repo#$num"; url="https://github.com/$repo/pull/$num"
+    case "$rollup" in
+      (*✗*) st=fail ;; (*●*) st=running ;; (*✓*) st=pass ;; (*) st=none ;;
+    esac
+    cur[$key]=1
+    newstate+="$key"$'\t'"$st"$'\t'"$title"$'\t'"$url"$'\n'
+    (( firstrun )) && continue
+    was="${prev[$key]:-}"
+    if [[ $st == fail && $was != fail ]]; then
+      notify "✗ failing" "$key — $title" "$url"
+    elif [[ $st == pass && $was == fail ]]; then
+      notify "✓ recovered" "$key — checks green again" "$url"
+    elif [[ $st == pass && -z $was ]]; then
+      notify "✓ passing" "$key — $title" "$url"
+    fi
+  done <<< "$rows"
+
+  # merges: a PR open last pass but gone now — did it land (vs just close)?
+  if (( ! firstrun )); then
+    for key in ${(k)prev}; do
+      [[ -n "${cur[$key]:-}" ]] && continue
+      repo="${key%\#*}"; num="${key##*\#}"
+      if [[ "$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" == MERGED ]]; then
+        notify "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
+      fi
+    done
+  fi
+
+  printf '%s' "$newstate" >"$state"   # atomic-ish single write; merged/closed drop off
   exit 0
 fi
 
