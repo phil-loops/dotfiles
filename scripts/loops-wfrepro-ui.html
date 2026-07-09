@@ -48,6 +48,8 @@
   .kv b { color:var(--ink); font-weight:600; }
   #graph:empty::after { content:"no workflow yet — create one above"; color:var(--faint); font-size:12px; }
   .hint { color:var(--bad); font-size:11px; margin-top:6px; min-height:14px; }
+  .chk { display:flex; gap:6px; align-items:center; margin-top:8px; color:var(--faint); font-size:12px; cursor:pointer; }
+  .chk input { width:auto; }
   @keyframes flash { 0%{ background:#3a2f1a; } 100%{ background:#100e0a; } }
   .flash { animation:flash .6s ease-out; }
 </style>
@@ -82,17 +84,19 @@
         <div><label>fromNodeId</label><input id="fromId" placeholder="e.g. n1 — or click a chip" /></div>
         <div><label>toNodeId</label><input id="toId" placeholder="e.g. n2 — or click a chip" /></div>
       </div>
+      <label class="chk"><input type="checkbox" id="nullFrom" /> fromNodeId = <b>null</b> (insert before toNodeId)</label>
       <button id="btn-add" style="margin-top:8px;width:100%" disabled>add node</button>
       <div class="muted" style="margin-top:4px;font-size:11px">tip: click a node's <b>from</b>/<b>to</b> chip in the graph to fill these</div>
       <div id="addHint" class="hint"></div>
     </fieldset>
 
     <fieldset>
-      <legend>3 · delete node (single, non-recursive)</legend>
+      <legend>3 · delete node</legend>
       <div class="row">
         <div><label>nodeId</label><input id="delId" placeholder="click a node's ×del chip" /></div>
         <button id="btn-del" disabled>delete</button>
       </div>
+      <label class="chk"><input type="checkbox" id="recursive" /> <b>recursive</b> (delete the whole subtree)</label>
       <div id="delHint" class="hint"></div>
     </fieldset>
 
@@ -153,12 +157,14 @@ function renderGraph(wf){
   $("rev").textContent = (wf?.workflowRevisionId ?? "null");
   const g = $("graph"); g.innerHTML = "";
   const nodes = wf?.nodes || {};
+  const root = wf?.rootNodeId;
   const violations = [];
   for (const [id, node] of Object.entries(nodes)){
     const ty = node.typeName;
     const next = node.nextNodeIds || [];
     let bad = false;
     if (isBranch(ty)) for (const c of next){ if (!isFilter(nodes[c]?.typeName)){ bad = true; violations.push(`${id}(${ty}) → ${c}(${nodes[c]?.typeName || "?"}) is not an AudienceFilter`); } }
+    if (root && next.includes(root)){ bad = true; violations.push(`${id} → ${root} gives the trigger (root) an inbound edge`); }
     const el = document.createElement("div");
     el.className = "node" + (bad ? " invalid" : "");
     el.innerHTML = `<span class="id">${id}</span><span class="ty">${ty}</span>`
@@ -169,12 +175,14 @@ function renderGraph(wf){
     el.appendChild(mkBtn("×del", () => { fill("delId", id); $("delHint").textContent = ""; }));
     g.appendChild(el);
   }
+  // C1: rootNodeId still references a node that was deleted → the workflow lost its trigger.
+  if (root && !nodes[root]) violations.push(`rootNodeId "${root}" points at a deleted node — the workflow has no trigger (unrunnable)`);
   suggestFromTo(wf);
   const v = $("valid"), w = $("warn");
   if (Object.keys(nodes).length === 0){ v.innerHTML = ""; w.innerHTML = ""; return; }
   if (violations.length){
     v.innerHTML = `<span class="badge bad" id="verdict-bad">invalid graph</span>`;
-    w.innerHTML = `<div class="warn"><b>validate() would reject:</b> a node immediately after a Branch node must be an Audience Filter.<br>` + violations.map(x=>"• "+x).join("<br>") + `</div>`;
+    w.innerHTML = `<div class="warn"><b>structural problems (validate() would reject):</b><br>` + violations.map(x=>"• "+x).join("<br>") + `</div>`;
   } else {
     v.innerHTML = `<span class="badge ok" id="verdict-ok">valid</span>`; w.innerHTML = "";
   }
@@ -210,6 +218,7 @@ function record(method, path, body, r){
 }
 
 $("ntype").onchange = () => { $("ntypeCustom").style.display = $("ntype").value === "__custom__" ? "block" : "none"; };
+$("nullFrom").onchange = () => { const on = $("nullFrom").checked; $("fromId").disabled = on; $("fromId").style.opacity = on ? 0.4 : 1; };
 
 $("btn-new").onclick = async () => {
   steps = []; wfId = null; rev = null; setReady(false);
@@ -224,12 +233,13 @@ $("btn-new").onclick = async () => {
 $("btn-add").onclick = async () => {
   if (!wfId) return;
   const custom = $("ntype").value === "__custom__";
+  const nullFrom = $("nullFrom").checked;
   if (custom && need("ntypeCustom", "addHint", "enter a custom typeName")) return;
-  if (need("fromId", "addHint", "pick a fromNodeId — click a node's 'from' chip, or type an id")) return;
+  if (!nullFrom && need("fromId", "addHint", "pick a fromNodeId — click a node's 'from' chip, or type an id")) return;
   if (need("toId", "addHint", "pick a toNodeId — click a node's 'to' chip, or type an id")) return;
   $("addHint").textContent = "";
   const nodeTypeName = custom ? $("ntypeCustom").value.trim() : $("ntype").value;
-  const body = { nodeTypeName, fromNodeId: $("fromId").value.trim(), toNodeId: $("toId").value.trim(), expectedRevisionId: rev };
+  const body = { nodeTypeName, fromNodeId: nullFrom ? null : $("fromId").value.trim(), toNodeId: $("toId").value.trim(), expectedRevisionId: rev };
   const r = await api("POST", `/v1/workflows/${wfId}/nodes`, body);
   record("POST", `/v1/workflows/${wfId}/nodes`, body, r);
   await refresh();
@@ -240,14 +250,15 @@ $("btn-del").onclick = async () => {
   if (need("delId", "delHint", "pick a nodeId — click a node's '×del' chip, or type an id")) return;
   $("delHint").textContent = "";
   const nodeId = $("delId").value.trim();
+  const path = `/v1/workflows/${wfId}/nodes/${nodeId}` + ($("recursive").checked ? "/recursive" : "");
   const body = { expectedRevisionId: rev };
-  const r = await api("DELETE", `/v1/workflows/${wfId}/nodes/${nodeId}`, body);
-  record("DELETE", `/v1/workflows/${wfId}/nodes/${nodeId}`, body, r);
+  const r = await api("DELETE", path, body);
+  record("DELETE", path, body, r);
   $("delId").value = "";
   await refresh();
 };
 
-$("btn-reset").onclick = () => { steps=[]; wfId=null; rev=null; setReady(false); $("graph").innerHTML=""; $("warn").innerHTML=""; $("valid").innerHTML=""; $("wfid").textContent="—"; $("rev").textContent="—"; $("fromId").value=""; $("toId").value=""; $("delId").value=""; $("addHint").textContent=""; $("delHint").textContent=""; renderSteps(); };
+$("btn-reset").onclick = () => { steps=[]; wfId=null; rev=null; setReady(false); $("graph").innerHTML=""; $("warn").innerHTML=""; $("valid").innerHTML=""; $("wfid").textContent="—"; $("rev").textContent="—"; $("fromId").value=""; $("toId").value=""; $("delId").value=""; $("addHint").textContent=""; $("delHint").textContent=""; $("nullFrom").checked=false; $("recursive").checked=false; $("fromId").disabled=false; $("fromId").style.opacity=1; renderSteps(); };
 
 $("btn-copy").onclick = async () => {
   const lines = ["## Repro", "", "Revision id is threaded automatically (each step reads the current `workflowRevisionId`). You only choose the sequence of moves.", ""];
