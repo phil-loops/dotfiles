@@ -113,11 +113,33 @@ def _tip(branch):
 
 
 def _origin_web(branch):
-    """Plain github.com compare link for the branch — the GitHub website is where
-    PR authoring happens (never this app). No prefilled params, ever."""
+    """github.com compare link for the branch, opened straight to the 'Open a pull
+    request' form (?expand=1). Authoring still happens on the website — this only
+    opens the form; it never prefills a title/body or calls gh pr create."""
     url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
-    return f"https://github.com/{m.group(1)}/compare/main...{branch}" if m else ""
+    return f"https://github.com/{m.group(1)}/compare/main...{branch}?expand=1" if m else ""
+
+
+def _open_pr_url(branch):
+    """URL of an OPEN PR whose head is this branch — checked origin then the fork
+    (Phil's PRs live on origin; the fork is the automation surface). Empty if none.
+    Called ONLY at push time (never in the preview poll), so its gh calls stay rare:
+    once a PR exists, a re-push jumps to it instead of the compare-and-create form."""
+    for remote in ("origin", "phil-loops"):
+        try:
+            url = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
+            m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
+            if not m:
+                continue
+            out = ctx.run(["gh", "pr", "list", "-R", m.group(1), "--head", branch,
+                           "--state", "open", "--json", "url", "--limit", "1"]).stdout
+            arr = json.loads(out or "[]")
+            if arr:
+                return arr[0].get("url", "")
+        except Exception:
+            pass
+    return ""
 
 
 def _open_web(url):
@@ -247,11 +269,13 @@ def push_origin(req, raw):
     # underneath as the last net (WIP trailers, merge commits, deploy-critical gap).
     r = ctx.run(["git", "push", "origin", branch])
     ok = r.returncode == 0
-    opened = _open_web(v["web"]) if ok else False
+    # An open PR already exists → jump to it; otherwise the compare-and-create form.
+    target = (_open_pr_url(branch) or v["web"]) if ok else v["web"]
+    opened = _open_web(target) if ok else False
     req._send(200, json.dumps({
         "ok": ok,
         "remote": "origin",
-        "web": v["web"],
+        "web": target,
         "opened": opened,
         "out": (r.stdout or "").strip(),
         "err": (r.stderr or "").strip(),
