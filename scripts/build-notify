@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# build-notify — ambient monitor: when one of MY PRs merges to main, the build-and-test
-# image build fires automatically; this taps me on the shoulder when THAT build finishes,
-# so I never track it by hand. Designed as a launchd StartInterval sweep (one pass per
-# invocation — see com.philbrockman.build-notify.plist).
+# build-notify — ambient monitor for build-and-test MAIN image builds. Taps me on the
+# shoulder when a main build finishes, so I never track it by hand. launchd StartInterval
+# sweep (one pass per invocation — see com.philbrockman.build-notify.plist).
 #
-# Correlation: a merged PR's mergeCommit.oid == the main build's headSha, so each of my
-# merged PRs maps to exactly one build-and-test run. First run seeds already-finished
-# builds silently (no backlog spam); thereafter only new completions notify.
+# Notifies on EVERY completed main build (merged-PR, direct push, or re-run), deduped by
+# run-id. When a build maps to one of my merged PRs (its headSha == my PR's mergeCommit),
+# the notification is enriched with the PR # and the ready-to-paste seed command. First run
+# (and the v2 scope-widening) seeds finished builds silently — no backlog spam.
 #
 #   build-notify            one sweep (what launchd runs)
 #   BUILD_NOTIFY_REPO=...   override repo (default Loops-so/loops)
@@ -17,53 +17,56 @@ REPO="${BUILD_NOTIFY_REPO:-Loops-so/loops}"
 statedir="$HOME/.cache/build-notify"; mkdir -p "$statedir"
 seen="$statedir/notified"
 firstrun=0; [ -f "$seen" ] || { : > "$seen"; firstrun=1; }
+# v2 widened scope (PR-only → all main builds); migrate silently the first time we see the old file.
+grep -qx '#v2' "$seen" 2>/dev/null || firstrun=1
 
 notify() {  # $1 title  $2 msg  $3 url
   if command -v terminal-notifier >/dev/null 2>&1; then
-    terminal-notifier -title "build-notify · $1" -message "$2" -sound Glass \
-      -open "$3" >/dev/null 2>&1 || true
+    terminal-notifier -title "build-notify · $1" -message "$2" -sound Glass -open "$3" >/dev/null 2>&1 || true
   else
     printf '\a'; echo "build-notify: $1 — $2 ($3)"
   fi
 }
+dur_of() {  # $1 startedAt  $2 updatedAt (ISO) -> "Nm" or ""
+  [ -n "$1" ] && [ -n "$2" ] || return 0
+  local s e; s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null) || return 0
+  e=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$2" +%s 2>/dev/null) || return 0
+  echo "$(( (e - s) / 60 ))m"
+}
 
-# my merged PRs → "mergeSha<TAB>number<TAB>title"
-prs=$(gh pr list -R "$REPO" --author @me --state merged -L 20 \
-  --json number,title,mergeCommit \
-  -q '.[] | select(.mergeCommit.oid != null) | "\(.mergeCommit.oid)\t\(.number)\t\(.title)"' 2>/dev/null || true)
-[ -n "$prs" ] || exit 0
+# my merged PRs → "mergeSha<TAB>number" (for enrichment + seed suggestion)
+prs=$(gh pr list -R "$REPO" --author @me --state merged -L 30 --json number,mergeCommit \
+  -q '.[] | select(.mergeCommit.oid != null) | "\(.mergeCommit.oid)\t\(.number)"' 2>/dev/null || true)
 
-# main build-and-test runs → "headSha<TAB>runId<TAB>status<TAB>conclusion<TAB>runNumber<TAB>headBranch"
+# completed build-and-test main runs
 runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 30 \
-  --json databaseId,headSha,status,conclusion,number,headBranch \
-  -q '.[] | "\(.headSha)\t\(.databaseId)\t\(.status)\t\(.conclusion)\t\(.number)\t\(.headBranch)"' 2>/dev/null || true)
-[ -n "$runs" ] || exit 0
+  --json databaseId,headSha,conclusion,number,headBranch,startedAt,updatedAt,event,url,status \
+  -q '.[] | select(.status=="completed") | [.databaseId,.headSha,.conclusion,.number,.headBranch,.startedAt,.updatedAt,.event,.url] | @tsv' 2>/dev/null || true)
+[ -n "$runs" ] || { grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"; exit 0; }
 
-while IFS=$'\t' read -r sha num title; do
-  [ -n "$sha" ] || continue
-  # first matching run for this merge commit (no early awk exit → SIGPIPE-safe under pipefail)
-  match=$(printf '%s\n' "$runs" | awk -F'\t' -v s="$sha" '$1==s && !f {print; f=1}')
-  [ -n "$match" ] || continue
-  rid=$(printf '%s' "$match" | cut -f2)
-  status=$(printf '%s' "$match" | cut -f3)
-  concl=$(printf '%s' "$match" | cut -f4)
-  runnum=$(printf '%s' "$match" | cut -f5)
-  headbr=$(printf '%s' "$match" | cut -f6)
+while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event url; do
+  [ -n "$rid" ] || continue
   grep -qx "$rid" "$seen" && continue
-  [ "$status" = "completed" ] || continue          # still building — catch it next sweep
-  if [ "$firstrun" = "1" ]; then
-    echo "$rid" >> "$seen"; continue               # seed history silently
-  fi
-  url="https://github.com/$REPO/actions/runs/$rid"
+  if [ "$firstrun" = "1" ]; then echo "$rid" >> "$seen"; continue; fi   # seed silently
+  tag="${headbr}-${runnum}-1"
+  dur=$(dur_of "$startedAt" "$updatedAt")
+  # PR match (no early awk exit → SIGPIPE-safe)
+  prnum=$(printf '%s\n' "$prs" | awk -F'\t' -v s="$sha" '$1==s && !f{print $2; f=1}')
   if [ "$concl" = "success" ]; then
-    # build tag = <branch>-<run_number>-<attempt>; attempt is ~always 1 (re-runs rare)
-    tag="${headbr}-${runnum}-1"
-    notify "✓ image built" "PR #$num → $tag. Seed staging: seed-staging-goal --tag $tag" "$url"
-    echo "build-notify: ✓ $tag built (PR #$num) — seed staging with: seed-staging-goal --tag $tag"
+    if [ -n "$prnum" ]; then
+      msg="PR #$prnum → $tag${dur:+ in $dur}. Seed staging: seed-staging-goal --tag $tag"
+    elif [ "$event" != "pull_request" ]; then
+      msg="main build $tag (direct push)${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
+    else
+      msg="$tag built${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
+    fi
+    notify "✓ image built" "$msg" "$url"
+    echo "build-notify: ✓ $tag${dur:+ ($dur)} — seed-staging-goal --tag $tag"
   else
-    notify "✗ build ${concl:-failed}" "PR #$num image build ${concl:-failed}: $title" "$url"
+    notify "✗ build ${concl:-failed}" "$tag ${concl:-failed}${dur:+ after $dur}. Re-run at the run page ↗" "$url"
   fi
   echo "$rid" >> "$seen"
-done <<< "$prs"
+done <<< "$runs"
 
+grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"
 tail -n 300 "$seen" > "$seen.tmp" 2>/dev/null && mv "$seen.tmp" "$seen"
