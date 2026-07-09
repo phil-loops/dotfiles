@@ -1,4 +1,4 @@
-import { createSignal, createMemo, createEffect, onCleanup, Show, For, Switch, Match } from "solid-js";
+import { createSignal, createMemo, Show, For, Switch, Match } from "solid-js";
 import { useQueryClient, createQuery, createMutation } from "@tanstack/solid-query";
 import { Link, useViewerLocation, type HomeTab, type ViewerLocation } from "./router";
 import { provider, canMutate } from "./provider";
@@ -7,8 +7,9 @@ import { ActionBar, type Action } from "./actions";
 import { Hearth } from "./Hearth";
 import { NextQueue } from "./NextQueue";
 import { ForestRow } from "./ForestRow";
+import { useRestack } from "./useRestack";
 import { leaf, mergedAgo, interestPips } from "./shared";
-import type { Parked, Project, PR, ReviewRequest } from "./types";
+import type { Project, PR, ReviewRequest } from "./types";
 
 // ── home: the ledger summary ─────────────────────────────────────────
 export function Home() {
@@ -54,113 +55,18 @@ export function Home() {
     },
   }));
 
-  // ── restack: two-click arm (via ActionBar) → run (background) → poll → parked? hand to Claude ──
-  const [running, setRunning] = createSignal<string | null>(null); // project (or "__all__") restacking now
-  const [parked, setParked] = createSignal<Parked | null>(null); // set on a conflict
-  const [restackErr, setRestackErr] = createSignal<string | null>(null);
-  const [flash, setFlash] = createSignal<string | null>(null);
-  let flashT: ReturnType<typeof setTimeout>;
-  const note = (m: string) => {
-    setFlash(m);
-    clearTimeout(flashT);
-    flashT = setTimeout(() => setFlash(null), 2400);
-  };
-  const [menu, setMenu] = createSignal<string | null>(null); // project whose parked-action popover is open
   const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
     fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json());
-  const behindNames = () => (projects.data || []).filter((p) => p.behind > 0).map((p) => p.name);
-  const start = (key: string) => {
-    setRestackErr(null);
-    // restack-all clears any pre-existing park first (server frees the worktree, then the
-    // resilient walk restacks the rest); a single-project restack never auto-drops a park.
-    const body =
-      key === "__all__"
-        ? { projects: behindNames(), abortParked: !!parked() }
-        : { project: key };
-    post(key === "__all__" ? "/restack-all" : "/restack", body).then((r) => {
-      if (r.ok) {
-        setParked(null);
-        setRunning(key);
-      } else {
-        // Don't swallow it — a stale park 409s here; surface why + refresh so the parked
-        // branch's contextual button appears on its row.
-        setRestackErr(r.err ?? "couldn’t start restack");
-        homeStatus.refetch();
-      }
+  const { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, behindNames } =
+    useRestack({
+      projectsData: () => projects.data,
+      refetchProjects: () => projects.refetch(),
+      refetchPrs: () => prs.refetch(),
     });
-  };
-  const abort = (project: string) =>
-    post("/restack-abort", { project }).then((r) => {
-      if (r.ok) {
-        setParked(null);
-        setRestackErr(null);
-        setMenu(null);
-        projects.refetch();
-        homeStatus.refetch();
-      } else {
-        setRestackErr(r.err ?? "couldn’t abort");
-      }
-    });
-  // ── delete mode: forget an old forest grouping (config only; branches kept) ──
-  const [dropping, setDropping] = createSignal<string | null>(null);
-  const dropProject = (project: string) => {
-    setDropping(project);
-    post("/drop-project", { project }).then((r) => {
-      setDropping(null);
-      if (r.ok) {
-        projects.refetch();
-        prs.refetch();
-      } else {
-        setRestackErr(r.err ?? "couldn’t drop forest");
-      }
-    });
-  };
-  onCleanup(() => setDeleteMode(false)); // leaving home always exits delete mode
-  const status = createQuery(() => ({
-    queryKey: ["restack-status", running()],
-    queryFn: () =>
-      provider.restackStatus(
-        running() && running() !== "__all__" ? running()! : undefined
-      ),
-    enabled: !!running(),
-    refetchInterval: (q) => (q.state.data?.running === false ? false : 2500),
-  }));
-  createEffect(() => {
-    if (!running()) return;
-    const d = status.data;
-    if (!d || d.running) return; // still churning through the topo walk
-    if (d.paused)
-      setParked({ project: d.project ?? "", current: d.current ?? "", reason: d.reason ?? "" });
-    setRunning(null);
-    projects.refetch();
-  });
-  const resolve = (project: string) =>
-    post("/restack-resolve", { project }).then((r) => {
-      if (r.ok) {
-        setParked(null);
-        setMenu(null);
-        setRunning(project); // re-poll while Claude resolves + resumes
-      }
-    });
-  // Surface a parked conflict on the home screen even when nothing is running — without
-  // this a stale park silently 409s every restack with no clue which branch is stuck.
-  const homeStatus = createQuery(() => ({
-    queryKey: ["home-restack-status"],
-    queryFn: () => provider.restackStatus(),
-    refetchInterval: 5000,
-  }));
-  createEffect(() => {
-    if (running()) return; // the running-restack effect owns `parked` mid-walk
-    const d = homeStatus.data;
-    if (!d) return;
-    setParked(
-      d.paused ? { project: d.project ?? "", current: d.current ?? "", reason: d.reason ?? "" } : null
-    );
-  });
 
   // the ambient daemon's dry-run forest verdict (scripts/restack-daemon) → one quiet chip
   const ambient = createQuery(() => ({
