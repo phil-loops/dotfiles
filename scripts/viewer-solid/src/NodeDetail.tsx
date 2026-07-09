@@ -1,10 +1,11 @@
-import { createSignal, createMemo, createEffect, on, onCleanup, Show, For, Switch, Match, type JSX } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, Show, For, type JSX } from "solid-js";
 import { useQueryClient, createQuery, createMutation } from "@tanstack/solid-query";
 import { useViewerLocation, Link, forestKey, withNode, forestRepo } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, isBlessed, interestPips, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
 import { DirtyRail, FileEntry, CommitsList } from "./FileRail";
+import { DivergedDetailPanel } from "./DivergedDetailPanel";
 import { NodeActions } from "./NodeActions";
 import ChatIndex from "./ChatIndex";
 import { chatTarget, openChat, chatToTmux } from "./chatDrawer";
@@ -642,106 +643,7 @@ export function NodeDetail() {
             </Show>
           </div>
           <Show when={divergedOpen() && nodeHealth(active())?.diverged}>
-            <div
-              class="nh-diverged-detail"
-              style={{
-                margin: "6px 0 2px",
-                padding: "10px 12px",
-                border: "1px solid var(--line, #444)",
-                "border-radius": "8px",
-                "font-size": "12.5px",
-                "line-height": "1.55",
-              }}
-            >
-              <Show when={divergedDetail.data} fallback={<span>reading both sides…</span>}>
-                <Show when={divergedDetail.data!.ok} fallback={<span>✗ {divergedDetail.data!.err}</span>}>
-                  <div style={{ "margin-bottom": "6px" }}>
-                    <Switch>
-                      <Match when={divergedDetail.data!.containment === "rebase"}>
-                        <span>
-                          only a local rebase — every pushed-head commit is patch-identical to a local one, so the PR's
-                          content already matches. Nothing to push; leave origin alone.
-                        </span>
-                      </Match>
-                      <Match when={divergedDetail.data!.containment === "contained"}>
-                        <span>
-                          local already contains everything the pushed head has (a squash/rework absorbed it). If the PR
-                          diff below changed, update it ADDITIVELY — a commit on top of the pushed head; an open PR's
-                          history is shared, never force-push it.
-                        </span>
-                      </Match>
-                      <Match when={divergedDetail.data!.containment === "clean-extra"}>
-                        <span>
-                          ⚠ the pushed head has work local lacks (it would merge cleanly) — bring it into local first
-                          (reconcile), then update the PR additively if anything remains.
-                        </span>
-                      </Match>
-                      <Match when={divergedDetail.data!.containment === "overlap"}>
-                        <span>
-                          local reworked what the pushed head has ({(divergedDetail.data!.overlap ?? []).join(", ")}) —
-                          update the PR ADDITIVELY: one commit on top of the pushed head carrying the rework (reconcile
-                          drafts exactly that; an open PR's history is shared, never force-push it).
-                        </span>
-                      </Match>
-                    </Switch>
-                    <div style={{ opacity: 0.75 }}>
-                      PR diff on origin today: {divergedDetail.data!.prNow || "empty"} → after carrying local's content:{" "}
-                      {divergedDetail.data!.prAfter || "empty"}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: "24px", "flex-wrap": "wrap" }}>
-                    <div>
-                      <div style={{ opacity: 0.65 }}>only local ({(divergedDetail.data!.ahead ?? []).length}↑)</div>
-                      <For each={divergedDetail.data!.ahead}>
-                        {(c) => (
-                          <div>
-                            <code>{c.sha}</code> {c.subject}{" "}
-                            <span style={{ opacity: 0.6 }}>
-                              {c.matched ? "≡ rewritten twin" : c.fromMain ? "↳ main advance (restack)" : "◆ new work"}
-                            </span>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                    <div>
-                      <div style={{ opacity: 0.65 }}>only pushed head ({(divergedDetail.data!.behind ?? []).length}↓)</div>
-                      <For each={divergedDetail.data!.behind}>
-                        {(c) => (
-                          <div>
-                            <code>{c.sha}</code> {c.subject}{" "}
-                            <span style={{ opacity: 0.6 }}>{c.matched ? "≡ rewritten twin" : "◆ no local twin"}</span>
-                          </div>
-                        )}
-                      </For>
-                    </div>
-                    <Show when={(divergedDetail.data!.prFiles ?? []).length > 0}>
-                      <div>
-                        <div style={{ opacity: 0.65 }}>
-                          the PR's diff, file by file (now → after an additive update)
-                        </div>
-                        <For each={divergedDetail.data!.prFiles}>
-                          {(f) => (
-                            <div>
-                              <code>{f.path}</code>{" "}
-                              <span style={{ opacity: 0.6 }}>
-                                <Switch>
-                                  <Match when={f.status === "same"}>{f.now} · unchanged</Match>
-                                  <Match when={f.status === "changed"}>
-                                    {f.now} → {f.after}
-                                  </Match>
-                                  <Match when={f.status === "enters"}>＋ enters the PR ({f.after})</Match>
-                                  <Match when={f.status === "leaves"}>－ leaves the PR (was {f.now})</Match>
-                                </Switch>
-                              </span>
-                            </div>
-                          )}
-                        </For>
-                      </div>
-                    </Show>
-                  </div>
-                </Show>
-              </Show>
-            </div>
+            <DivergedDetailPanel data={divergedDetail.data} />
           </Show>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}
