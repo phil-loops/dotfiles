@@ -290,7 +290,7 @@ export function ForestOverview() {
     queryKey: ["forest-health", forestRepo(location()) ?? "loops", healthIds().join(",")],
     queryFn: () =>
       fetch(withRepo("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&"))).then(
-        (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean }>>,
+        (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean; contractable: boolean }>>,
       ),
     enabled: canMutate && healthIds().length > 0,
   }));
