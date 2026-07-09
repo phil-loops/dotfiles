@@ -14,7 +14,9 @@ REPO="${BUILD_STATUS_REPO:-Loops-so/loops}"
 
 elapsed() {  # ISO startedAt -> "Nm"
   [ -n "$1" ] || { echo "?"; return; }
-  local s now; s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null) || { echo "?"; return; }
+  # -u: startedAt is UTC (trailing Z). Without it BSD `date` parses the time as LOCAL, so
+  # `now - s` came out ~7h negative (the PDT offset) — the "-414m" bug.
+  local s now; s=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null) || { echo "?"; return; }
   now=$(date +%s); echo "$(( (now - s) / 60 ))m"
 }
 
