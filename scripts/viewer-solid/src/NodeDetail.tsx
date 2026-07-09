@@ -6,6 +6,7 @@ import { leaf, isBlessed, interestPips, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
 import { DirtyRail, FileEntry, CommitsList } from "./FileRail";
 import { DivergedDetailPanel } from "./DivergedDetailPanel";
+import { FilePanel } from "./FilePanel";
 import { NodeActions } from "./NodeActions";
 import ChatIndex from "./ChatIndex";
 import { chatTarget, openChat, chatToTmux } from "./chatDrawer";
@@ -469,99 +470,22 @@ export function NodeDetail() {
           ›
         </button>
       </Show>
-      <aside class="spine">
-        <button
-          class="panel-collapse"
-          title="collapse the file panel for more diff width (b)"
-          onClick={() => setPanelOpen(false)}
-        >
-          ‹
-        </button>
-        <Link class="brand" to={{ kind: "home", tab: "forests" }}>
-          <span class="brand-mark">✦</span> blessed
-        </Link>
-        {/* the branch tree migrated to the docked map (the navigator); the spine is now the
-            file list for the active branch. */}
-        <Show when={spine().length} fallback={<div class="spine-empty">{project()}</div>}>
-          <Show when={node.data} fallback={<div class="spine-meta">loading…</div>}>
-            {(data) => (
-              <>
-                <div class="spine-meta">
-                  {isGhost()
-                    ? `${data().files.length} files · ✦ all changes`
-                    : `${data().files.filter(blessedOf).length}/${data().files.length} files blessed`}
-                </div>
-                <Show
-                  when={data().files.length}
-                  fallback={<div class="spine-empty">nothing to review</div>}
-                >
-                  <input
-                    class="file-filter"
-                    ref={filterEl}
-                    placeholder="filter files… (⌘F)"
-                    value={fileFilter()}
-                    onInput={(e) => setFileFilter(e.currentTarget.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Escape") {
-                        e.preventDefault();
-                        e.stopPropagation(); // don't let the global Esc fire (would jump to the map)
-                        if (fileFilter()) { setFileFilter(""); } else { filterEl?.blur(); restorePanel(); }
-                      } else if ((e.metaKey || e.ctrlKey) && e.key === "f") {
-                        restorePanel(); // a 2nd ⌘F bubbles to native find; fold an auto-opened panel back
-                      }
-                    }}
-                  />
-                  <ul class="file-list">
-                    <For each={data().files.filter(matchFilter)}>
-                      {(f) => (
-                        <li
-                          class="file-item"
-                          classList={{ blessed: blessedOf(f), active: activeFile() === f.path }}
-                          onClick={() => scrollToFile(f.path)}
-                          title={f.path}
-                        >
-                          <span class={`dot ${blessedOf(f) ? "blessed" : "unblessed"}`} />
-                          <span class="file-item-name">{fileSeg(f.path)}</span>
-                          <span class="file-item-lines">
-                            <span class="add">+{f.add ?? 0}</span>
-                            <span class="del">−{f.del ?? 0}</span>
-                          </span>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                  <Show when={(data().dirty?.length ?? 0) > 0}>
-                    {/* dirt files are DRIVABLE rows, same as the review set — click jumps to the
-                        card, tab already cycles through them (.entry[data-path]). The story lives
-                        in the divider's tooltip; the rows do the work. */}
-                    <div
-                      class="file-list-dirt-head"
-                      title={`uncommitted changes riding ${data().worktree || "the checkout"} — not part of this review, never blessed; ⟲ sync stops to ask about them`}
-                    >
-                      ± uncommitted · {(data().worktree ?? "").replace(/.*\//, "") || "checkout"}
-                    </div>
-                    <ul class="file-list">
-                      <For each={data().dirty!.filter((f) => matchFilter(f))}>
-                        {(f) => (
-                          <li
-                            class="file-item dirt"
-                            classList={{ active: activeFile() === f.path }}
-                            onClick={() => scrollToFile(f.path)}
-                            title={f.path}
-                          >
-                            <span class="dot dirt" />
-                            <span class="file-item-name">{fileSeg(f.path)}</span>
-                          </li>
-                        )}
-                      </For>
-                    </ul>
-                  </Show>
-                </Show>
-              </>
-            )}
-          </Show>
-        </Show>
-      </aside>
+      <FilePanel
+        spine={spine}
+        project={project}
+        nodeData={() => node.data}
+        isGhost={isGhost}
+        blessedOf={blessedOf}
+        activeFile={activeFile}
+        fileFilter={fileFilter}
+        setFileFilter={setFileFilter}
+        matchFilter={matchFilter}
+        scrollToFile={scrollToFile}
+        fileSeg={fileSeg}
+        onPanelClose={() => setPanelOpen(false)}
+        onFilterEl={(el) => (filterEl = el)}
+        onRestorePanel={restorePanel}
+      />
 
       <main
         class="surface"
