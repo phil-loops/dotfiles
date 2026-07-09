@@ -156,6 +156,7 @@ export function NodeDetail() {
               {
                 drifted: boolean;
                 merged: boolean;
+                contractable?: boolean;
                 parent?: string;
                 upstream?: string;
                 upstreamBad?: boolean;

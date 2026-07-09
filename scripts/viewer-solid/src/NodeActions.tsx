@@ -87,7 +87,7 @@ export function NodeActions(props: {
   blessing?: { total: number; blessed: number }; // the node's review progress — the spine's review station + gold mark
   // the old header health badges, folded into the spine's reasons + ⋯ overrides
   health?: {
-    drifted?: boolean; parent?: string;
+    drifted?: boolean; contractable?: boolean; parent?: string;
     upstreamBad?: boolean; upstreamReason?: string; upstream?: string;
     diverged?: boolean; ahead?: number; behind?: number;
   } | null;
@@ -634,13 +634,25 @@ export function NodeActions(props: {
   // Edge = the single LOCAL next step (Phil: "whatever we do here locally is fine").
   // The shared world never moves from this slot — that's the red button's sole job.
   const edge = (): SpineEdge | null => {
-    if (props.merged || contractKids()) {
+    // contractable = droppable NOW (rebase-classify exit 20); contractKids() means /sync already
+    // verified it. A merged PR with a follow-on commit is merged but NOT contractable — /contract
+    // refuses it, so offer the forward rebase (push the follow-on) instead of a dead drop.
+    if (contractKids() || (props.merged && props.health?.contractable)) {
       return {
         label: contractKids() ? `drop ghost & rewire ${contractKids()!.length} →` : "drop ghost & rewire →",
         kind: "contract",
         pending: contract.isPending,
         title: "this branch's work already merged (a ghost) — drop it, rewire its children onto main, drop any requires edge on it",
         onClick: fire(() => contract.mutate()),
+      };
+    }
+    if (props.merged) {
+      return {
+        label: "↑ rebase forward →",
+        kind: "prep",
+        pending: omniSync.isPending,
+        title: "the PR merged but a newer commit rides on top — not droppable. ⟲ sync rebases it forward onto fresh origin/main: the merged commit drops (already upstream), the follow-on stays, then routes to one commit to push.",
+        onClick: fire(startSync),
       };
     }
     const r = prepRoute.data?.route;
