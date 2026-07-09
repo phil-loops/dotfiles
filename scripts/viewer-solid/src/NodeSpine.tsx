@@ -37,7 +37,11 @@ export default function NodeSpine(props: {
 }) {
   return (
     <span class="spine-wrap">
-      <span class={`spine-chip at-${props.station}`} title={props.reasons}>
+      <span
+        class={`spine-chip at-${props.station}`}
+        classList={{ actionable: props.station === "merged" && !!props.edge }}
+        title={props.reasons}
+      >
         {/* one mark only — the current station (plus the review ✦ when it's earned gold);
             the journey's other stations live in the tooltip, not the chrome */}
         <span class="spine-path" aria-hidden="true">
