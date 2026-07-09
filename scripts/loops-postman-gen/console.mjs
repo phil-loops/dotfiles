@@ -2,9 +2,38 @@ import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { resolve } from "node:path";
+import { mergeWorkflowOverlay } from "./workflow-overlay.mjs";
 
 const DEV_TOKEN = "00112233445566778899aabbccddeeff";
 const DEFAULT_SPEC = "https://app.loops.so/openapi.json";
+
+// Business rules the OpenAPI schema can't express: an enum field the spec lists in full
+// but the server only accepts a subset of for a given endpoint (the rest 400). First value
+// is the default the sample body loads with. Key = "METHOD path::field".
+const ENUM_HINTS = {
+  "POST /v1/workflows/{workflowId}/nodes::nodeTypeName": [
+    "SendEmailAction",
+    "TimerAction",
+    "AudienceFilter",
+    "ExitAction",
+    "BranchNode",
+    "ExperimentBranchNode",
+  ],
+};
+const enumHint = (method, path, field) => ENUM_HINTS[`${method} ${path}::${field}`];
+
+// Restrict a produced sample object's hinted enum fields to legal values (mutates in place).
+const applyHints = (obj, method, path) => {
+  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
+    for (const k of Object.keys(obj)) {
+      const allow = enumHint(method, path, k);
+      if (allow?.length && !allow.includes(obj[k])) {
+        obj[k] = allow[0];
+      }
+    }
+  }
+  return obj;
+};
 
 export const serve = async (opts) => {
   const args = {
@@ -20,6 +49,7 @@ export const serve = async (opts) => {
     ? await (await fetch(args.spec)).text()
     : await readFile(resolve(args.spec), "utf8");
   const spec = JSON.parse(rawSpec);
+  mergeWorkflowOverlay(spec); // overlay the workflow builder writes the upstream spec omits
   const endpoints = extractEndpoints(spec);
 
   const html = page({ endpoints, base: args.base });
@@ -100,26 +130,101 @@ const extractEndpoints = (spec) => {
       const queryParams = (op.parameters ?? [])
         .filter((p) => p.in === "query")
         .map((p) => ({ name: p.name, required: !!p.required }));
+      const METHOD = method.toUpperCase();
+      const variants = bodyVariants(op, spec, METHOD, path);
       out.push({
-        method: method.toUpperCase(),
+        method: METHOD,
         path,
         tag: op.tags?.[0] ?? "Other",
         summary: op.summary ?? "",
         pathParams,
         queryParams,
-        bodyExample: bodyExample(op, spec),
+        bodyExample: variants?.length
+          ? JSON.stringify(variants[0].sample, null, 2)
+          : bodyExample(op, spec, METHOD, path),
+        bodyVariants: variants,
+        bodyEnums: enumSlots(op, spec, METHOD, path),
       });
     }
   }
   return out;
 };
 
-const bodyExample = (op, spec) => {
+const bodyExample = (op, spec, method, path) => {
   const schema = op.requestBody?.content?.["application/json"]?.schema;
   if (!schema) {
     return null;
   }
-  return JSON.stringify(sample(deref(schema, spec), spec, ""), null, 2);
+  const obj = applyHints(sample(deref(schema, spec), spec, ""), method, path);
+  return JSON.stringify(obj, null, 2);
+};
+
+// Each branch of a oneOf/anyOf body → a labeled, ready-to-load sample. Label is the
+// branch's discriminator value (e.g. each nodeTypeName), else its single-value field.
+// A discriminator hint (ENUM_HINTS keyed on the discriminator prop) trims branches to the
+// legal ones and orders them, so the default is a value the server actually accepts.
+const bodyVariants = (op, spec, method, path) => {
+  const schema = deref(op.requestBody?.content?.["application/json"]?.schema, spec);
+  const branches = schema?.oneOf ?? schema?.anyOf;
+  if (!branches?.length) {
+    return null;
+  }
+  const discrimProp = schema.discriminator?.propertyName;
+  const allow = discrimProp ? enumHint(method, path, discrimProp) : null;
+  let out = branches.map((b, i) => {
+    const bs = deref(b, spec);
+    const value = discrimProp ? singleEnumValue(bs, spec, discrimProp) : null;
+    return {
+      value,
+      label: value ?? variantLabel(bs, spec, i),
+      sample: applyHints(sample(bs, spec, ""), method, path),
+    };
+  });
+  if (allow?.length) {
+    out = out
+      .filter((v) => v.value == null || allow.includes(v.value))
+      .sort((a, b) => allow.indexOf(a.value) - allow.indexOf(b.value));
+  }
+  return out.length ? out : null;
+};
+
+const singleEnumValue = (schema, spec, prop) => {
+  const vs = deref(schema.properties?.[prop], spec);
+  const vals = vs?.enum ?? (vs?.const !== undefined ? [vs.const] : null);
+  return vals?.length ? String(vals[0]) : null;
+};
+
+const variantLabel = (schema, spec, i) => {
+  for (const [k] of Object.entries(schema.properties ?? {})) {
+    const v = singleEnumValue(schema, spec, k);
+    if (v != null) {
+      return v;
+    }
+  }
+  return `variant ${i + 1}`;
+};
+
+// Top-level multi-value enum fields in the body → a pill row that swaps that field's value.
+// Uses the first oneOf branch as representative; hinted fields are trimmed to legal values.
+const enumSlots = (op, spec, method, path) => {
+  let schema = deref(op.requestBody?.content?.["application/json"]?.schema, spec);
+  const branches = schema.oneOf ?? schema.anyOf;
+  if (branches?.length) {
+    schema = deref(branches[0], spec);
+  }
+  const slots = [];
+  for (const [field, v] of Object.entries(schema.properties ?? {})) {
+    const vs = deref(v, spec);
+    if (!vs.enum || vs.enum.length < 2) {
+      continue;
+    }
+    const allow = enumHint(method, path, field);
+    const values = allow ? vs.enum.filter((x) => allow.includes(x)) : vs.enum;
+    if (values.length > 1) {
+      slots.push({ field, values });
+    }
+  }
+  return slots.length ? slots : null;
 };
 
 const deref = (schema, spec) => {
@@ -137,6 +242,16 @@ const sample = (schema, spec, key) => {
   }
   if (schema.enum) {
     return schema.enum[0];
+  }
+  if (schema.allOf) {
+    return schema.allOf.reduce(
+      (acc, s) => Object.assign(acc, sample(s, spec, key)),
+      {}
+    );
+  }
+  const branches = schema.oneOf ?? schema.anyOf;
+  if (branches?.length) {
+    return sample(branches[0], spec, key);
   }
   if (schema.type === "object" || schema.properties) {
     const obj = {};
@@ -268,6 +383,14 @@ button.ghost { background:transparent; color:var(--signal); border:1px solid var
   padding:5px 11px; font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; }
 button.ghost:hover { border-color:var(--signal); background:var(--well); filter:none; }
 
+.pills { display:flex; flex-direction:column; gap:6px; margin:2px 0 9px; }
+.pillrow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.pilllabel { font:500 9px/1 var(--ui); letter-spacing:.14em; text-transform:uppercase;
+  color:var(--muted); min-width:58px; }
+.pill { background:var(--well); color:var(--signal); border:1px solid var(--edge);
+  border-radius:999px; padding:4px 11px; font:500 11px/1 var(--mono); letter-spacing:.02em; cursor:pointer; }
+.pill:hover { border-color:var(--signal); background:rgba(183,155,255,.13); filter:none; }
+
 .row { display:flex; gap:8px; align-items:center; }
 .bar { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
 #send { margin-top:14px; }
@@ -362,7 +485,33 @@ function selectEndpoint(e, node) {
   if (e.bodyExample) {
     const head = el('<div class="bar" style="margin:0 0 4px"><label style="margin:0">body</label><button id="beautify" class="ghost" type="button">Beautify</button></div>');
     form.appendChild(head);
-    const ta = el('<textarea id="body"></textarea>'); ta.value = e.bodyExample; form.appendChild(ta);
+    const ta = el('<textarea id="body"></textarea>'); ta.value = e.bodyExample;
+    if ((e.bodyVariants && e.bodyVariants.length > 1) || (e.bodyEnums && e.bodyEnums.length)) {
+      const pills = el('<div class="pills"></div>');
+      if (e.bodyVariants && e.bodyVariants.length > 1) {
+        const row = el('<div class="pillrow"><span class="pilllabel">variant</span></div>');
+        for (const v of e.bodyVariants) {
+          const b = el('<button type="button" class="pill">'+escapeHtml(v.label)+'</button>');
+          b.onclick = ()=>{ ta.value = JSON.stringify(v.sample, null, 2); };
+          row.appendChild(b);
+        }
+        pills.appendChild(row);
+      }
+      for (const slot of (e.bodyEnums||[])) {
+        const row = el('<div class="pillrow"><span class="pilllabel">'+escapeHtml(slot.field)+'</span></div>');
+        for (const val of slot.values) {
+          const b = el('<button type="button" class="pill">'+escapeHtml(val)+'</button>');
+          b.onclick = ()=>{
+            try { const o = JSON.parse(ta.value); o[slot.field] = val; ta.value = JSON.stringify(o, null, 2); }
+            catch (err) { badJson('INVALID JSON', 'fix the body before switching '+slot.field); }
+          };
+          row.appendChild(b);
+        }
+        pills.appendChild(row);
+      }
+      form.appendChild(pills);
+    }
+    form.appendChild(ta);
     head.querySelector('#beautify').onclick = ()=>{
       try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); }
       catch (e) { badJson('INVALID JSON', e.message); }
