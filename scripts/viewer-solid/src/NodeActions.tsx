@@ -164,8 +164,9 @@ export function NodeActions(props: {
   // ── ⟲ sync — the omni local motion (Phil, 2026-07-05): "whatever we do here locally is
   // fine." One button that makes this branch RIGHT and YOURS: reseat if drifted → rebase
   // forward if behind (streams on eject) → checkout here → route to one outgoing commit
-  // (additive for a diverged PR, squash for a messy tail) → advisory tests → the message
-  // editor. When a step isn't mechanically routable, Claude goes in the middle (reconcile
+  // (additive for a diverged PR, squash for a messy tail) → advisory tests + the push
+  // gates (detached — their green is what unlocks the red button) → the message editor.
+  // When a step isn't mechanically routable, Claude goes in the middle (reconcile
   // eject). NOTHING here touches origin — the shared world moves only via the red button.
   //
   // The motion narrates as a STEP STRIP (the wards pattern — dirty-sync incident): every
@@ -192,9 +193,42 @@ export function NodeActions(props: {
       { id: "checkout", label: "checkout", state: "idle" },
       { id: "route", label: "one commit", state: "idle" },
       { id: "tests", label: "tests", state: "idle" },
+      { id: "gates", label: "push gates", state: "idle" },
       { id: "editor", label: "editor", state: "idle" },
     );
     setSyncSteps(steps);
+  };
+  // The push gates (repo-configured stack-gates: typecheck + format in loops) are what the
+  // red button's `gates` ward reads — green is recorded server-side keyed to the tip sha,
+  // so this run is what unlocks push. It's tsc-length, so it runs DETACHED: the motion and
+  // the editor never wait on it; the strip updates when it lands. A run token keeps a stale
+  // finish from writing into a newer strip; the server answers from cache when this tip
+  // already passed, so re-syncs are instant. fix:false — a gate auto-fix that commits or
+  // rebases would move the tip out from under the commit the route step just sealed.
+  let gatesRun = 0;
+  const runPushGates = () => {
+    const token = ++gatesRun;
+    stepSet("gates", "run", "typecheck + format — push unlocks when green");
+    post<{ ok?: boolean; cached?: boolean; gates?: { name: string; ok: boolean; summary?: string }[] }>(
+      "/gates", { branch: props.branch, fix: false, useCache: true },
+    )
+      .then((g) => {
+        if (token !== gatesRun) return;
+        const parts = (g.gates ?? []).map((x) => `${x.name} ${x.ok ? "✓" : "✗"}`).join(" · ");
+        const fails = (g.gates ?? []).filter((x) => !x.ok && x.summary).map((x) => x.summary!.trim()).join("\n");
+        stepSet(
+          "gates",
+          g.ok ? "ok" : "fail",
+          g.ok
+            ? `${g.cached ? "already green for this commit" : parts || "green"} — push unlocked`
+            : `${parts} (advisory — the motion continues; push stays locked)${fails ? ":\n" + fails : ""}`,
+        );
+        preview.refetch();
+      })
+      .catch((e) => {
+        if (token !== gatesRun) return;
+        stepSet("gates", "fail", `${(e as Error).message || "gates crashed"} — push stays locked`);
+      });
   };
   const omniSync = createMutation(() => ({
     mutationFn: async (force: boolean) => {
@@ -251,6 +285,7 @@ export function NodeActions(props: {
         if ((pr.err ?? "").startsWith("nothing to push")) {
           stepSet("route", "ok", "nothing to push — origin already has this");
           stepSet("tests", "skip");
+          stepSet("gates", "skip");
           stepSet("editor", "skip", "no outgoing commit");
           return { phase: "done" as const, routed: ["nothing to push — origin already has this"], commit: null };
         }
@@ -258,6 +293,7 @@ export function NodeActions(props: {
         return { phase: "error" as const };
       }
       stepSet("route", "ok", (pr.routed ?? []).join(" · ") || undefined);
+      runPushGates(); // detached — the editor opens without waiting on a typecheck
       stepSet("tests", "run");
       let tests: DeltaTestResult | null = null;
       try {
@@ -724,17 +760,19 @@ export function NodeActions(props: {
         </button>
       </Show>
 
-      {/* nothing outgoing but the branch IS on origin: the push button would be dead, yet the PR
-          page is still one click away. Open the PR (view) or the compare-and-create form (author)
-          — no push, no gh pr create. This is the exit from the "pushed, no PR" stranding. */}
-      <Show when={!isReview() && (preview.data?.outgoing ?? 0) === 0 && preview.data?.originExists}>
+      {/* the branch IS on origin: the PR page is one click away regardless of outgoing state.
+          Open the PR (view/tweak) or the compare-and-create form (author) — no push, no gh pr
+          create. With a commit still outgoing it shows what origin has NOW; push adds yours. */}
+      <Show when={!isReview() && preview.data?.originExists}>
         <button
           class="nh-fix nh-open-pr"
           disabled={busy() || openPr.isPending}
           title={
             preview.data?.published
-              ? "up-to-date on origin and already has an open PR — opens it in a browser (no push)"
-              : "pushed to origin but no PR yet — opens the compare-and-create page to author it (no push, no gh pr create)"
+              ? "opens this branch's open PR in a browser — tweak it on github.com (no push)"
+              : (preview.data?.outgoing ?? 0) > 0
+                ? "opens the compare-and-create page for what origin already has — author or tweak the PR there; the outgoing commit joins it once you push (no push, no gh pr create)"
+                : "pushed to origin but no PR yet — opens the compare-and-create page to author it (no push, no gh pr create)"
           }
           onClick={() => openPr.mutate()}
         >
