@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+// loops-wfrepro — a standalone workflow-graph repro builder, like loops-postman:
+// its own tiny server on a side port that serves the UI and PROXIES /api/* to the
+// loops dev app, injecting the bearer key server-side. Same-origin for the browser
+// (no CORS), our own server (no CSP coupling to the app), no key in the page.
+//
+//   loops-wfrepro                 serve on :3009, proxy → http://localhost:3000
+//   PORT=4100 loops-wfrepro       pick the port
+//   UPSTREAM=http://... loops-wfrepro   point at a different dev app
+//   LOOPS_DEV_KEY=... loops-wfrepro     override the seeded dev key
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
+const PORT = process.env.PORT || 3009;
+const UPSTREAM = process.env.UPSTREAM || "http://localhost:3000";
+const KEY = process.env.LOOPS_DEV_KEY || "00112233445566778899aabbccddeeff";
+const UI = path.join(__dirname, "loops-wfrepro-ui.html");
+
+const server = http.createServer((req, res) => {
+  if (req.url === "/" || req.url === "/index.html") {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return res.end(fs.readFileSync(UI));
+  }
+  if (req.url.startsWith("/api/")) {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => {
+      const body = Buffer.concat(chunks);
+      const target = new URL(req.url, UPSTREAM);
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + KEY,
+      };
+      // forward an explicit Content-Length — without it the body goes chunked and the
+      // dev app rejects a DELETE-with-body (empty 400) even though POST tolerated it.
+      if (body.length) headers["Content-Length"] = body.length;
+      const up = http.request(
+        target,
+        { method: req.method, headers },
+        (pr) => {
+          res.writeHead(pr.statusCode || 502, { "Content-Type": "application/json" });
+          pr.pipe(res);
+        }
+      );
+      up.on("error", (e) =>
+        res.writeHead(502, { "Content-Type": "application/json" }) &&
+        res.end(JSON.stringify({ error: `proxy → ${UPSTREAM} failed: ${e.message}` }))
+      );
+      if (body.length) up.write(body);
+      up.end();
+    });
+    return;
+  }
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("not found");
+});
+
+server.listen(PORT, () => {
+  console.log(`loops-wfrepro → http://localhost:${PORT}   (proxying /api → ${UPSTREAM})`);
+});

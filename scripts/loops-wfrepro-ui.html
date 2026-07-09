@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>workflow graph repro builder</title>
+<style>
+  :root { --bg:#14120e; --panel:#1c1a15; --ink:#e8dcc4; --faint:#8a7f6a; --line:#332e25;
+          --ok:#7fae6a; --bad:#c87a55; --accent:#c9a45b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  header { padding:14px 18px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:baseline; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; letter-spacing:.04em; }
+  .sub { color:var(--faint); font-size:12px; }
+  main { display:grid; grid-template-columns:340px 1fr; gap:0; min-height:calc(100vh - 52px); }
+  .col { padding:16px 18px; }
+  .col.left { border-right:1px solid var(--line); }
+  fieldset { border:1px solid var(--line); border-radius:6px; margin:0 0 14px; padding:12px; }
+  legend { color:var(--accent); font-size:11px; letter-spacing:.08em; text-transform:uppercase; padding:0 6px; }
+  label { display:block; color:var(--faint); font-size:11px; margin:8px 0 2px; }
+  input, select { width:100%; background:#100e0a; color:var(--ink); border:1px solid var(--line); border-radius:4px; padding:6px 8px; font:inherit; }
+  button { background:transparent; color:var(--ink); border:1px solid var(--line); border-radius:4px; padding:6px 10px; font:inherit; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { border-color:var(--accent); color:var(--accent); }
+  .row { display:flex; gap:8px; align-items:end; }
+  .row > * { flex:1; }
+  .row > button { flex:none; }
+  .node { display:flex; gap:6px; align-items:center; padding:5px 8px; border:1px solid var(--line); border-radius:4px; margin:4px 0; }
+  .node .id { font-weight:700; }
+  .node .ty { color:var(--faint); }
+  .node .arr { color:var(--faint); }
+  .node .mini { font-size:11px; padding:1px 6px; }
+  .badge { padding:1px 7px; border-radius:3px; font-size:11px; }
+  .badge.ok { color:var(--ok); border:1px solid var(--ok); }
+  .badge.bad { color:var(--bad); border:1px solid var(--bad); }
+  .invalid { border-color:var(--bad)!important; }
+  .warn { color:var(--bad); border:1px solid var(--bad); border-radius:6px; padding:8px 10px; margin:0 0 12px; font-size:12px; }
+  .step { border:1px solid var(--line); border-radius:6px; margin:0 0 10px; }
+  .step > .h { display:flex; gap:8px; align-items:center; padding:7px 10px; border-bottom:1px solid var(--line); }
+  .step .n { color:var(--accent); font-weight:700; }
+  .step .m { color:var(--faint); }
+  .step pre { margin:0; padding:8px 10px; white-space:pre-wrap; word-break:break-word; font-size:12px; color:#d9cdae; }
+  .step .err { color:var(--bad); }
+  .muted { color:var(--faint); }
+  .bar { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+  .kv { font-size:12px; color:var(--faint); }
+  .kv b { color:var(--ink); font-weight:600; }
+  #graph:empty::after { content:"no workflow yet — create one above"; color:var(--faint); font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>workflow graph repro builder</h1>
+  <span class="sub">click moves → payloads populate + rev threads automatically → copy a shareable repro</span>
+</header>
+<main>
+  <section class="col left">
+    <fieldset>
+      <legend>1 · new workflow</legend>
+      <div class="row">
+        <div><label>name</label><input id="wfname" value="repro" /></div>
+        <button class="primary" id="btn-new">create</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>2 · add node</legend>
+      <label>nodeTypeName</label>
+      <select id="ntype">
+        <option>BranchNode</option>
+        <option>TimerAction</option>
+        <option>AudienceFilter</option>
+        <option>EmailAction</option>
+        <option>__custom__</option>
+      </select>
+      <input id="ntypeCustom" placeholder="custom typeName" style="display:none;margin-top:6px" />
+      <div class="row" style="margin-top:8px">
+        <div><label>fromNodeId</label><input id="fromId" placeholder="n1" /></div>
+        <div><label>toNodeId</label><input id="toId" placeholder="n2" /></div>
+      </div>
+      <button id="btn-add" style="margin-top:8px;width:100%">add node</button>
+      <div class="muted" style="margin-top:4px;font-size:11px">tip: click a node's <b>from</b>/<b>to</b> chip below to fill these</div>
+    </fieldset>
+
+    <fieldset>
+      <legend>3 · delete node (single, non-recursive)</legend>
+      <div class="row">
+        <div><label>nodeId</label><input id="delId" placeholder="n4" /></div>
+        <button id="btn-del">delete</button>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>share</legend>
+      <button id="btn-copy" style="width:100%">copy markdown repro</button>
+      <button id="btn-reset" style="width:100%;margin-top:6px">reset</button>
+    </fieldset>
+  </section>
+
+  <section class="col">
+    <div class="bar">
+      <span class="kv">workflow: <b id="wfid">—</b></span>
+      <span class="kv">rev: <b id="rev">—</b> <span class="muted">(threaded automatically)</span></span>
+      <span id="valid"></span>
+    </div>
+    <div id="warn"></div>
+    <div id="graph"></div>
+    <h1 style="font-size:12px;color:var(--accent);letter-spacing:.08em;margin:18px 0 8px">MOVES</h1>
+    <div id="steps"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// same-origin: this page's server (the standalone tool) proxies /api → the dev app,
+// injecting the bearer key server-side. No CORS, no CSP coupling, no key in the page.
+const api_base = "/api";
+const jsonHeaders = () => ({ "Content-Type": "application/json" });
+
+let wfId = null;
+let rev = null;              // current workflowRevisionId (null for a fresh workflow)
+let steps = [];             // { method, path, body|null, ok, status, note }
+
+function isFilter(ty){ return /filter/i.test(ty || ""); }
+function isBranch(ty){ return /branch/i.test(ty || ""); }
+
+function renderGraph(wf){
+  $("wfid").textContent = wf?.id || "—";
+  $("rev").textContent = (wf?.workflowRevisionId ?? "null");
+  const g = $("graph"); g.innerHTML = "";
+  const nodes = wf?.nodes || {};
+  const violations = [];
+  for (const [id, node] of Object.entries(nodes)){
+    const ty = node.typeName;
+    const next = node.nextNodeIds || [];
+    let bad = false;
+    if (isBranch(ty)) for (const c of next){ if (!isFilter(nodes[c]?.typeName)){ bad = true; violations.push(`${id}(${ty}) → ${c}(${nodes[c]?.typeName || "?"}) is not an AudienceFilter`); } }
+    const el = document.createElement("div");
+    el.className = "node" + (bad ? " invalid" : "");
+    el.innerHTML = `<span class="id">${id}</span><span class="ty">${ty}</span>`
+      + `<span class="arr">→ ${next.join(", ") || "∅"}</span>`;
+    const mkBtn = (t, fn) => { const b=document.createElement("button"); b.className="mini"; b.textContent=t; b.onclick=fn; return b; };
+    el.appendChild(mkBtn("from", () => $("fromId").value = id));
+    el.appendChild(mkBtn("to", () => $("toId").value = id));
+    el.appendChild(mkBtn("×del", () => $("delId").value = id));
+    g.appendChild(el);
+  }
+  const v = $("valid"), w = $("warn");
+  if (Object.keys(nodes).length === 0){ v.innerHTML = ""; w.innerHTML = ""; return; }
+  if (violations.length){
+    v.innerHTML = `<span class="badge bad" id="verdict-bad">invalid graph</span>`;
+    w.innerHTML = `<div class="warn"><b>validate() would reject:</b> a node immediately after a Branch node must be an Audience Filter.<br>` + violations.map(x=>"• "+x).join("<br>") + `</div>`;
+  } else {
+    v.innerHTML = `<span class="badge ok" id="verdict-ok">valid</span>`; w.innerHTML = "";
+  }
+}
+
+function renderSteps(){
+  const s = $("steps"); s.innerHTML = "";
+  steps.forEach((st, i) => {
+    const el = document.createElement("div"); el.className = "step";
+    const badge = st.ok ? `<span class="badge ok">${st.status}</span>` : `<span class="badge bad">${st.status}</span>`;
+    el.innerHTML = `<div class="h"><span class="n">${i+1}</span><span class="m">${st.method}</span><code>${st.path}</code>${badge}</div>`
+      + (st.body ? `<pre>${JSON.stringify(st.body, null, 2)}</pre>` : "")
+      + (st.note ? `<pre class="${st.ok?'':'err'}">${st.note}</pre>` : "");
+    s.appendChild(el);
+  });
+}
+
+async function api(method, path, body){
+  const res = await fetch(api_base + path, { method, headers: jsonHeaders(), body: body ? JSON.stringify(body) : undefined });
+  let json = null; try { json = await res.json(); } catch {}
+  return { ok: res.ok, status: res.status, json };
+}
+async function refresh(){
+  if (!wfId) return;
+  const r = await api("GET", `/v1/workflows/${wfId}`);
+  if (r.ok && r.json){ rev = r.json.workflowRevisionId ?? null; renderGraph(r.json); }
+  return r;
+}
+function record(method, path, body, r){
+  steps.push({ method, path, body: body ?? null, ok: r.ok, status: r.status,
+               note: r.ok ? null : (r.json ? JSON.stringify(r.json) : "request failed") });
+  renderSteps();
+}
+
+$("ntype").onchange = () => { $("ntypeCustom").style.display = $("ntype").value === "__custom__" ? "block" : "none"; };
+
+$("btn-new").onclick = async () => {
+  steps = []; wfId = null; rev = null;
+  const body = { name: $("wfname").value };
+  const r = await api("POST", "/v1/workflows", body);
+  record("POST", "/v1/workflows", body, r);
+  if (r.ok && r.json){ wfId = r.json.id; rev = r.json.workflowRevisionId ?? null; renderGraph(r.json); }
+  renderSteps();
+};
+
+$("btn-add").onclick = async () => {
+  if (!wfId) return alert("create a workflow first");
+  const nodeTypeName = $("ntype").value === "__custom__" ? $("ntypeCustom").value : $("ntype").value;
+  const body = { nodeTypeName, fromNodeId: $("fromId").value, toNodeId: $("toId").value, expectedRevisionId: rev };
+  const r = await api("POST", `/v1/workflows/${wfId}/nodes`, body);
+  record("POST", `/v1/workflows/${wfId}/nodes`, body, r);
+  await refresh();
+};
+
+$("btn-del").onclick = async () => {
+  if (!wfId) return alert("create a workflow first");
+  const nodeId = $("delId").value;
+  const body = { expectedRevisionId: rev };
+  const r = await api("DELETE", `/v1/workflows/${wfId}/nodes/${nodeId}`, body);
+  record("DELETE", `/v1/workflows/${wfId}/nodes/${nodeId}`, body, r);
+  await refresh();
+};
+
+$("btn-reset").onclick = () => { steps=[]; wfId=null; rev=null; $("graph").innerHTML=""; $("warn").innerHTML=""; $("valid").innerHTML=""; $("wfid").textContent="—"; $("rev").textContent="—"; renderSteps(); };
+
+$("btn-copy").onclick = async () => {
+  const lines = ["## Repro", "", "Revision id is threaded automatically (each step reads the current `workflowRevisionId`). You only choose the sequence of moves.", ""];
+  steps.forEach((st, i) => {
+    lines.push(`${i+1}. \`${st.method} ${st.path.replace(wfId, "{workflowId}")}\` → **${st.status}**`);
+    if (st.body){
+      const shown = { ...st.body };
+      if ("expectedRevisionId" in shown) shown.expectedRevisionId = "{{rev}}";
+      lines.push("   ```json"); lines.push("   " + JSON.stringify(shown, null, 2).replace(/\n/g, "\n   ")); lines.push("   ```");
+    }
+    if (!st.ok && st.note) lines.push(`   > ${st.note}`);
+  });
+  const invalid = $("warn").textContent.trim();
+  if (invalid) lines.push("", "**Resulting graph is invalid:** " + invalid.replace(/\s+/g, " "));
+  const md = lines.join("\n");
+  try { await navigator.clipboard.writeText(md); $("btn-copy").textContent = "copied ✓"; setTimeout(()=>$("btn-copy").textContent="copy markdown repro", 1500); }
+  catch { const w = window.open("", "_blank"); w.document.write("<pre>"+md.replace(/</g,"&lt;")+"</pre>"); }
+};
+</script>
+</body>
+</html>
