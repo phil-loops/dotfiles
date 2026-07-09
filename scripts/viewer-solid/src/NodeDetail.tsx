@@ -1,15 +1,14 @@
 import { createSignal, createMemo, createEffect, on, onCleanup, Show, For, type JSX } from "solid-js";
 import { useQueryClient, createQuery } from "@tanstack/solid-query";
-import { useViewerLocation, Link, forestKey, withNode, forestRepo } from "./router";
+import { useViewerLocation, forestKey, withNode, forestRepo } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
-import { leaf, isBlessed, interestPips, flattenForest } from "./shared";
+import { leaf, isBlessed, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
 import { DirtyRail, FileEntry, CommitsList } from "./FileRail";
-import { DivergedDetailPanel } from "./DivergedDetailPanel";
 import { FilePanel } from "./FilePanel";
 import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
-import { NodeActions } from "./NodeActions";
+import { NodeHeader } from "./NodeHeader";
 import ChatIndex from "./ChatIndex";
 import { openChat, chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
@@ -424,115 +423,28 @@ export function NodeDetail() {
         }}
         onMouseLeave={() => setHover(null)}
       >
-        <header class="node-head">
-          {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
-              branch control bar so forest-scope actions stop bleeding into branch controls. */}
-          <div
-            class="nh-forest"
-            style={{
-              display: "flex",
-              "align-items": "center",
-              gap: "10px",
-              "padding-bottom": "10px",
-              "border-bottom": "1px solid var(--rule)",
-            }}
-          >
-            <Show
-              when={location().kind === "forest"}
-              fallback={
-                <span
-                  style={{
-                    "font-size": "11px",
-                    "letter-spacing": "0.07em",
-                    "text-transform": "uppercase",
-                    color: "var(--ink-faint)",
-                  }}
-                >
-                  {project()}
-                </span>
-              }
-            >
-              <Link
-                class="nh-forest-back"
-                to={{ kind: "forest", name: project(), repo: forestRepo(location()) }}
-                title="back to the forest map — your current node stays highlighted there"
-              >
-                ⊞ {project()}
-              </Link>
-            </Show>
-            <div class="nh-spacer" />
-          </div>
-          {/* branch strip — identity: the branch name + what it's diffed against + health badges. */}
-          <div class="nh-id">
-            <h1>{isGhost() ? `✦ ${project()}` : leaf(active()) || "—"}</h1>
-            <Show
-              when={isGhost()}
-              fallback={
-                <Show when={parentOf()}>
-                  <span class="against">◂ {leaf(parentOf())}</span>
-                </Show>
-              }
-            >
-              <span class="against">◂ main · all changes on this project</span>
-            </Show>
-            <Show when={!isGhost() && interestOf() > 0}>
-              <span class="nh-ready" title={`interest ${interestOf()} — this forest is promoted on the Forests home`}>
-                {interestPips(interestOf())}
-              </span>
-            </Show>
-            {/* health badges folded into the spine (reasons tooltip + ⋯ overrides) — what
-                remains here is only the transient outcome of a repair fired from ⋯. */}
-            <Show when={reseatChildren.isPending || detachUpstream.isPending}>
-              <span class="nh-drift">{reseatChildren.isPending ? "⤴ reseating…" : "✂ detaching…"}</span>
-            </Show>
-            <Show when={reseatChildren.data && !reseatChildren.data.ok}>
-              <span
-                class="nh-drift"
-                title={reseatChildren.data!.conflicts.map((c) => `${c.branch}: ${c.err}`).join("\n")}
-              >
-                ⚠ reseat: {reseatChildren.data!.conflicts.length} conflicted — resolve by hand or restack
-              </span>
-            </Show>
-          </div>
-          <Show when={divergedOpen() && nodeHealth(active())?.diverged}>
-            <DivergedDetailPanel data={divergedDetail.data} />
-          </Show>
-          {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
-              The blessed count lives in the spine; the map opens from the spine + `m`. */}
-          {/* tier-2 (Phil, strikes 6+7): no view controls at all — c flips diffs⇄commits,
-              1/2/3 set the diff base, both taught in ? help. The base shows as passive text
-              only when it's not the default, so a non-parent diff can't masquerade. */}
-          <div class="nh-bar">
-            <Show when={view() === "commits"}>
-              <span class="nh-viewnote">commits · c for diffs</span>
-            </Show>
-            <Show when={view() === "diffs" && base() !== "" && !isGhost()}>
-              <span class="nh-viewnote">vs {(BASES.find(([v]) => v === base()) ?? BASES[0])[1]} · 1 for parent</span>
-            </Show>
-            <div class="nh-spacer" />
-            <Show when={!isGhost()}>
-              <NodeActions
-                branch={active()}
-                isReview={location().kind === "review"}
-                merged={nodeHealth(active())?.merged}
-                ambient={nodeAmbient(active())}
-                blessing={node.data ? { total: node.data.files.length, blessed: node.data.files.filter(blessedOf).length } : undefined}
-                health={nodeHealth(active())}
-                onReseat={() => { const p = nodeHealth(active())?.parent; if (p) reseatChildren.mutate(p); }}
-                onDetach={() => detachUpstream.mutate(active())}
-                onInspect={() => setDivergedOpen(!divergedOpen())}
-                interest={canMutate ? interestOf() : undefined}
-                onBump={canMutate ? (delta) => bumpInterest.mutate({ project: project(), delta }) : undefined}
-                onAllChats={() => setShowChats(true)}
-              />
-            </Show>
-            <Show when={canMutate}>
-              <button class="icon-btn" onClick={() => chatToTmux({ branch: active() })} title="chat about this whole branch — opens an interactive claude beside your tmux panes">
-                ✦
-              </button>
-            </Show>
-          </div>
-        </header>
+        <NodeHeader
+          location={location}
+          project={project}
+          isGhost={isGhost}
+          active={active}
+          parentOf={parentOf}
+          interestOf={interestOf}
+          reseatChildren={reseatChildren}
+          detachUpstream={detachUpstream}
+          bumpInterest={bumpInterest}
+          divergedOpen={divergedOpen}
+          setDivergedOpen={setDivergedOpen}
+          nodeHealth={nodeHealth}
+          divergedData={() => divergedDetail.data}
+          view={view}
+          base={base}
+          BASES={BASES}
+          nodeAmbient={nodeAmbient}
+          nodeData={() => node.data}
+          blessedOf={blessedOf}
+          setShowChats={setShowChats}
+        />
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
           <div class="diff-hint">
             <span class="kbd-hint"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
