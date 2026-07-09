@@ -48,9 +48,18 @@ def delta_tests(req, raw):
 def gates(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
+    # useCache: the sync strip re-runs on every motion — when this tip already passed,
+    # answer green instantly instead of re-paying the typecheck.
+    if d.get("useCache") and branch and _GREEN_GATES.get(branch) == _tip(branch):
+        return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
     # --fix: a red gate with a remediation (e.g. fresh → rebase onto origin/main, format
     # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch, "--fix"])
+    # The sync strip passes fix:false — its route step already sealed the ONE outgoing
+    # commit, and a fix that commits (format cascade) or rebases would move the tip under it.
+    cmd = [os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
+    if d.get("fix", True):
+        cmd.append("--fix")
+    r = ctx.run(cmd)
     # stack-gates always prints a JSON verdict on stdout and exits 0
     try:
         if json.loads(r.stdout).get("ok"):
@@ -235,7 +244,7 @@ def _origin_verdict(branch):
         ward("watch", "deploy watch clear", not deploy_critical,
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
         ward("gates", "gates green", gates_green,
-             "not green for this exact commit — run the pipeline above"),
+             "not green for this exact commit — ⟲ sync runs the gates"),
     ]
     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
     return {
