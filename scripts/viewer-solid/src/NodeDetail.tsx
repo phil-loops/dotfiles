@@ -9,6 +9,7 @@ import { FilePanel } from "./FilePanel";
 import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
+import { useScrollSpy } from "./useScrollSpy";
 import ChatIndex from "./ChatIndex";
 import { openChat, chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
@@ -257,43 +258,7 @@ export function NodeDetail() {
       .querySelector(`.entry[data-path="${CSS.escape(path)}"]`)
       ?.scrollIntoView({ behavior: "instant", block: "start" });
   };
-  // keep the lit sidebar row on screen when Tab cycles to a file scrolled out of the list
-  // (block:nearest is a no-op when it's already visible, e.g. right after a click).
-  createEffect(() => {
-    if (!activeFile()) return;
-    queueMicrotask(() =>
-      document.querySelector(".file-item.active")?.scrollIntoView({ block: "nearest" })
-    );
-  });
-  // scroll-spy: as you just scroll the diff surface, light the row for the card you're reading —
-  // the last card whose top has passed under the toolbar line. rAF-throttled; also seeds the Tab
-  // cursor so cycling continues from where you scrolled. (Tab/click route through here too via
-  // their own scroll, so all three motions converge on the same lit row.)
-  const SPY_OFFSET = 100;
-  let spyRaf = 0;
-  const onScroll = () => {
-    if (spyRaf) return;
-    spyRaf = requestAnimationFrame(() => {
-      spyRaf = 0;
-      const cards = document.querySelectorAll<HTMLElement>(".entry[data-path]");
-      if (!cards.length) return;
-      let pick = cards[0];
-      for (const el of cards) {
-        if (el.getBoundingClientRect().top <= SPY_OFFSET) pick = el;
-        else break;
-      }
-      const path = pick.getAttribute("data-path") || "";
-      if (path && path !== activeFile()) {
-        setActiveFile(path);
-        fileCycle.setCurrent(path);
-      }
-    });
-  };
-  window.addEventListener("scroll", onScroll, { passive: true });
-  onCleanup(() => {
-    window.removeEventListener("scroll", onScroll);
-    if (spyRaf) cancelAnimationFrame(spyRaf);
-  });
+  useScrollSpy({ activeFile, setActiveFile, fileCycle });
   // dir/base split so the sidebar greys the folder and bolds the filename (like GitHub).
   const fileSeg = (p: string): JSX.Element => {
     const i = p.lastIndexOf("/");
