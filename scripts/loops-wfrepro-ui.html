@@ -47,6 +47,9 @@
   .kv { font-size:12px; color:var(--faint); }
   .kv b { color:var(--ink); font-weight:600; }
   #graph:empty::after { content:"no workflow yet — create one above"; color:var(--faint); font-size:12px; }
+  .hint { color:var(--bad); font-size:11px; margin-top:6px; min-height:14px; }
+  @keyframes flash { 0%{ background:#3a2f1a; } 100%{ background:#100e0a; } }
+  .flash { animation:flash .6s ease-out; }
 </style>
 </head>
 <body>
@@ -76,19 +79,21 @@
       </select>
       <input id="ntypeCustom" placeholder="custom typeName" style="display:none;margin-top:6px" />
       <div class="row" style="margin-top:8px">
-        <div><label>fromNodeId</label><input id="fromId" placeholder="n1" /></div>
-        <div><label>toNodeId</label><input id="toId" placeholder="n2" /></div>
+        <div><label>fromNodeId</label><input id="fromId" placeholder="e.g. n1 — or click a chip" /></div>
+        <div><label>toNodeId</label><input id="toId" placeholder="e.g. n2 — or click a chip" /></div>
       </div>
-      <button id="btn-add" style="margin-top:8px;width:100%">add node</button>
-      <div class="muted" style="margin-top:4px;font-size:11px">tip: click a node's <b>from</b>/<b>to</b> chip below to fill these</div>
+      <button id="btn-add" style="margin-top:8px;width:100%" disabled>add node</button>
+      <div class="muted" style="margin-top:4px;font-size:11px">tip: click a node's <b>from</b>/<b>to</b> chip in the graph to fill these</div>
+      <div id="addHint" class="hint"></div>
     </fieldset>
 
     <fieldset>
       <legend>3 · delete node (single, non-recursive)</legend>
       <div class="row">
-        <div><label>nodeId</label><input id="delId" placeholder="n4" /></div>
-        <button id="btn-del">delete</button>
+        <div><label>nodeId</label><input id="delId" placeholder="click a node's ×del chip" /></div>
+        <button id="btn-del" disabled>delete</button>
       </div>
+      <div id="delHint" class="hint"></div>
     </fieldset>
 
     <fieldset>
@@ -118,6 +123,24 @@ const $ = (id) => document.getElementById(id);
 const api_base = "/api";
 const jsonHeaders = () => ({ "Content-Type": "application/json" });
 
+// --- hand-holding helpers ---
+function fill(inputId, val){ const el = $(inputId); el.value = val; el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash"); }
+function setReady(on){ ["btn-add","btn-del","btn-copy"].forEach(id => $(id).disabled = !on); }
+function need(inputId, hintId, msg){
+  const el = $(inputId);
+  if (el.value.trim()) return false;
+  el.style.borderColor = "var(--bad)"; setTimeout(() => el.style.borderColor = "", 900);
+  $(hintId).textContent = msg;
+  return true;
+}
+// keep the add fields pointing at something real: default to the root and its next.
+function suggestFromTo(wf){
+  const nodes = wf?.nodes || {}; const root = wf?.rootNodeId;
+  if (!$("fromId").value.trim() && root && nodes[root]) $("fromId").value = root;
+  const next = root ? (nodes[root]?.nextNodeIds || [])[0] : null;
+  if (!$("toId").value.trim() && next) $("toId").value = next;
+}
+
 let wfId = null;
 let rev = null;              // current workflowRevisionId (null for a fresh workflow)
 let steps = [];             // { method, path, body|null, ok, status, note }
@@ -141,11 +164,12 @@ function renderGraph(wf){
     el.innerHTML = `<span class="id">${id}</span><span class="ty">${ty}</span>`
       + `<span class="arr">→ ${next.join(", ") || "∅"}</span>`;
     const mkBtn = (t, fn) => { const b=document.createElement("button"); b.className="mini"; b.textContent=t; b.onclick=fn; return b; };
-    el.appendChild(mkBtn("from", () => $("fromId").value = id));
-    el.appendChild(mkBtn("to", () => $("toId").value = id));
-    el.appendChild(mkBtn("×del", () => $("delId").value = id));
+    el.appendChild(mkBtn("from", () => { fill("fromId", id); $("addHint").textContent = ""; }));
+    el.appendChild(mkBtn("to", () => { fill("toId", id); $("addHint").textContent = ""; }));
+    el.appendChild(mkBtn("×del", () => { fill("delId", id); $("delHint").textContent = ""; }));
     g.appendChild(el);
   }
+  suggestFromTo(wf);
   const v = $("valid"), w = $("warn");
   if (Object.keys(nodes).length === 0){ v.innerHTML = ""; w.innerHTML = ""; return; }
   if (violations.length){
@@ -188,33 +212,42 @@ function record(method, path, body, r){
 $("ntype").onchange = () => { $("ntypeCustom").style.display = $("ntype").value === "__custom__" ? "block" : "none"; };
 
 $("btn-new").onclick = async () => {
-  steps = []; wfId = null; rev = null;
-  const body = { name: $("wfname").value };
+  steps = []; wfId = null; rev = null; setReady(false);
+  $("addHint").textContent = ""; $("delHint").textContent = "";
+  const body = { name: $("wfname").value.trim() || "repro" };
   const r = await api("POST", "/v1/workflows", body);
   record("POST", "/v1/workflows", body, r);
-  if (r.ok && r.json){ wfId = r.json.id; rev = r.json.workflowRevisionId ?? null; renderGraph(r.json); }
+  if (r.ok && r.json){ wfId = r.json.id; rev = r.json.workflowRevisionId ?? null; setReady(true); renderGraph(r.json); }
   renderSteps();
 };
 
 $("btn-add").onclick = async () => {
-  if (!wfId) return alert("create a workflow first");
-  const nodeTypeName = $("ntype").value === "__custom__" ? $("ntypeCustom").value : $("ntype").value;
-  const body = { nodeTypeName, fromNodeId: $("fromId").value, toNodeId: $("toId").value, expectedRevisionId: rev };
+  if (!wfId) return;
+  const custom = $("ntype").value === "__custom__";
+  if (custom && need("ntypeCustom", "addHint", "enter a custom typeName")) return;
+  if (need("fromId", "addHint", "pick a fromNodeId — click a node's 'from' chip, or type an id")) return;
+  if (need("toId", "addHint", "pick a toNodeId — click a node's 'to' chip, or type an id")) return;
+  $("addHint").textContent = "";
+  const nodeTypeName = custom ? $("ntypeCustom").value.trim() : $("ntype").value;
+  const body = { nodeTypeName, fromNodeId: $("fromId").value.trim(), toNodeId: $("toId").value.trim(), expectedRevisionId: rev };
   const r = await api("POST", `/v1/workflows/${wfId}/nodes`, body);
   record("POST", `/v1/workflows/${wfId}/nodes`, body, r);
   await refresh();
 };
 
 $("btn-del").onclick = async () => {
-  if (!wfId) return alert("create a workflow first");
-  const nodeId = $("delId").value;
+  if (!wfId) return;
+  if (need("delId", "delHint", "pick a nodeId — click a node's '×del' chip, or type an id")) return;
+  $("delHint").textContent = "";
+  const nodeId = $("delId").value.trim();
   const body = { expectedRevisionId: rev };
   const r = await api("DELETE", `/v1/workflows/${wfId}/nodes/${nodeId}`, body);
   record("DELETE", `/v1/workflows/${wfId}/nodes/${nodeId}`, body, r);
+  $("delId").value = "";
   await refresh();
 };
 
-$("btn-reset").onclick = () => { steps=[]; wfId=null; rev=null; $("graph").innerHTML=""; $("warn").innerHTML=""; $("valid").innerHTML=""; $("wfid").textContent="—"; $("rev").textContent="—"; renderSteps(); };
+$("btn-reset").onclick = () => { steps=[]; wfId=null; rev=null; setReady(false); $("graph").innerHTML=""; $("warn").innerHTML=""; $("valid").innerHTML=""; $("wfid").textContent="—"; $("rev").textContent="—"; $("fromId").value=""; $("toId").value=""; $("delId").value=""; $("addHint").textContent=""; $("delHint").textContent=""; renderSteps(); };
 
 $("btn-copy").onclick = async () => {
   const lines = ["## Repro", "", "Revision id is threaded automatically (each step reads the current `workflowRevisionId`). You only choose the sequence of moves.", ""];
