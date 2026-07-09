@@ -8,7 +8,7 @@ import { NodeActions } from "./NodeActions";
 import type { NodeData, FileDiff } from "./types";
 
 type HealthEntry = {
-  drifted?: boolean; merged?: boolean; parent?: string;
+  drifted?: boolean; merged?: boolean; contractable?: boolean; parent?: string;
   upstream?: string; upstreamBad?: boolean; upstreamReason?: string;
   diverged?: boolean; ahead?: number; behind?: number;
 };
