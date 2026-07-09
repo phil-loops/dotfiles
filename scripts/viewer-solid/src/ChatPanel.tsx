@@ -1,5 +1,6 @@
 import { createEffect, on, onCleanup, onMount, createSignal, For, Show, type JSX } from "solid-js";
-import { createStore, produce } from "solid-js/store";
+import { useImageAttachments } from "./useImageAttachments";
+import { usePopout } from "./usePopout";
 import type { FileDiff } from "./types";
 import { thread, clearThread, chatModel, setChatModel, CHAT_MODELS } from "./chatStore";
 import { runtime, send, stop as runnerStop, unqueue, setViewingThread, clearViewingThread, ensureWatching } from "./chatRunner";
@@ -158,104 +159,11 @@ export default function ChatPanel(props: {
   // ── pop out: hand this chat's headless session to an interactive claude in tmux ──
   // The thread already carries a resume session-id; `claude --resume` continues the same
   // conversation in a real terminal (now able to edit/run, not just read). Bonus: pick which
-  // tmux window to drop it into — a fresh window, or split an existing one into a new pane.
-  const [popoutOpen, setPopoutOpen] = createSignal(false);
-  const [targets, setTargets] = createStore<{ target: string; name: string; panes: number }[]>([]);
-  const [popoutMsg, setPopoutMsg] = createSignal<string | null>(null);
-  const togglePopout = async () => {
-    if (popoutOpen()) {
-      setPopoutOpen(false);
-      return;
-    }
-    setPopoutMsg(null);
-    setPopoutOpen(true);
-    try {
-      const r = await fetch("/tmux-targets").then((res) => res.json());
-      setTargets(Array.isArray(r) ? r : []);
-    } catch {
-      setTargets([]);
-    }
-  };
-  const popOut = async (target: string) => {
-    setPopoutOpen(false);
-    setPopoutMsg("opening…");
-    try {
-      const r = await fetch("/chat-popout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ session: session(), branch: props.branch, target }),
-      }).then((res) => res.json());
-      setPopoutMsg(r.ok ? "✦ opened in tmux" : r.err || "couldn’t open");
-    } catch {
-      setPopoutMsg("couldn’t reach the server");
-    }
-    setTimeout(() => setPopoutMsg(null), 4000);
-  };
+  const { popoutOpen, setPopoutOpen, targets, popoutMsg, togglePopout, popOut } = usePopout({ session, branch: () => props.branch });
 
   // ── attached images: drop or paste a screenshot, we upload it to a temp file claude can Read ──
   // Each carries a blob URL for the live thumbnail + the server path that rides with the message.
-  type Att = { id: number; name: string; path: string; url: string; uploading: boolean };
-  const [atts, setAtts] = createStore<Att[]>([]);
-  const [dragOver, setDragOver] = createSignal(false);
-  let attSeq = 0;
-
-  const toB64 = (buf: ArrayBuffer): string => {
-    const bytes = new Uint8Array(buf);
-    let bin = "";
-    for (let i = 0; i < bytes.length; i += 0x8000) {
-      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-    }
-    return btoa(bin);
-  };
-  const dropAtt = (id: number) => {
-    const it = atts.find((a) => a.id === id);
-    if (it) {
-      URL.revokeObjectURL(it.url);
-    }
-    setAtts(produce((list) => {
-      const i = list.findIndex((a) => a.id === id);
-      if (i >= 0) {
-        list.splice(i, 1);
-      }
-    }));
-  };
-  const addImage = async (file: File) => {
-    const id = ++attSeq;
-    const name = file.name || "pasted.png";
-    setAtts(produce((list) => {
-      list.push({ id, name, path: "", url: URL.createObjectURL(file), uploading: true });
-    }));
-    try {
-      const r = await fetch("/chat-attach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, dataB64: toB64(await file.arrayBuffer()) }),
-      }).then((res) => res.json());
-      if (r.ok && r.path) {
-        setAtts(produce((list) => {
-          const it = list.find((a) => a.id === id);
-          if (it) {
-            it.path = r.path;
-            it.uploading = false;
-          }
-        }));
-      } else {
-        dropAtt(id);
-      }
-    } catch {
-      dropAtt(id);
-    }
-  };
-  const takeImages = (files: FileList | null | undefined): boolean => {
-    let took = false;
-    for (const f of files ?? []) {
-      if (f.type.startsWith("image/")) {
-        void addImage(f);
-        took = true;
-      }
-    }
-    return took;
-  };
+  const { atts, setAtts, dragOver, setDragOver, dropAtt, addImage, takeImages } = useImageAttachments();
 
   // Fire a message any time — even while Claude is still answering: the runner queues it and
   // auto-sends in order when the current turn ends. A just-sent message should yank the view down.
