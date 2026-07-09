@@ -11,7 +11,15 @@
 // re-read it from each response/GET before the next write.
 
 const rev = { type: "string", nullable: true, description: "Optimistic-concurrency token — the current workflowRevisionId (null on a fresh workflow)." };
-const nodeType = { type: "string", description: "LoopNodeTypeName, e.g. TimerAction · SendEmailAction · BranchNode · ExperimentBranchNode.", example: "TimerAction" };
+const nodeType = {
+  type: "string",
+  enum: ["TimerAction", "SendEmailAction", "BranchNode", "ExperimentBranchNode", "AudienceFilter", "VariantNode"],
+  example: "TimerAction",
+  description:
+    "Node to create. Actions: TimerAction, SendEmailAction. Branches: BranchNode / ExperimentBranchNode (each auto-creates its arms). " +
+    "AudienceFilter / VariantNode are valid only directly under a branch / experiment. " +
+    "Triggers (Signup/Event/ContactProperty/AddToList/Blank) and ExitAction cannot be created.",
+};
 const queuedPolicy = { type: "string", enum: ["fail", "discard"], description: "What to do with contacts queued on the deleted node." };
 const wfId = { name: "workflowId", in: "path", required: true, schema: { type: "string" } };
 const nodeId = { name: "nodeId", in: "path", required: true, schema: { type: "string" } };
