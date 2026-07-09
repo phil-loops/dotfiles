@@ -530,9 +530,17 @@ export function NodeActions(props: {
         setDone(`✗ ${r.err || "push refused"}`);
         return;
       }
-      // The server opens the compare view in the local browser on success; the link
-      // below stays as the fallback (mobile, or a headless host with no `open`).
-      setDone(r.opened ? "✓ pushed — opening the compare view to author the PR" : "✓ pushed — origin has it");
+      // The server opens the target in the local browser on success (the open PR if one
+      // exists, else the compare-and-create form); the link below is the fallback
+      // (mobile, or a headless host with no `open`).
+      const isPr = (r.web ?? "").includes("/pull/");
+      setDone(
+        r.opened
+          ? isPr
+            ? "✓ pushed — opening the open PR"
+            : "✓ pushed — opening the compare view to author the PR"
+          : "✓ pushed — origin has it",
+      );
       setPushedWeb(r.web ?? null);
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "push failed"}`),
@@ -852,7 +860,7 @@ export function NodeActions(props: {
       </Show>
       <Show when={pushedWeb()}>
         <a class="nh-pushed-link" href={pushedWeb()!} target="_blank" rel="noreferrer">
-          author PR on github.com ↗
+          {pushedWeb()!.includes("/pull/") ? "view the open PR ↗" : "author PR on github.com ↗"}
         </a>
       </Show>
 
