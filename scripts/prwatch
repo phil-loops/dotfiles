@@ -76,6 +76,19 @@ notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click
   fi
 }
 
+poke_viewers() {  # a PR just merged — nudge every live forest viewer to refresh trunk + PR state
+  # Viewer ports are derived per-repo in the [62333, 63332] band (stack-review-port), so
+  # rather than mapping repo-slug → local checkout → port, poke every Python listener in the
+  # band; /pr-poke on a viewer for an unrelated repo is a cheap no-op fetch.
+  local ports p
+  ports=$(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null \
+    | awk '$1 ~ /^[Pp]ython/ && match($9, /:(62[3-9][0-9][0-9]|63[0-3][0-9][0-9])$/) {print substr($9, RSTART+1)}' \
+    | sort -u) || true
+  for p in ${(f)ports}; do
+    [[ -n "$p" ]] && curl -s -m 20 -X POST "http://127.0.0.1:$p/pr-poke" -o /dev/null || true
+  done
+}
+
 register_watch() {  # $1 key  $2 repo  $3 id  $4 title  $5 url — track a live watch for the badge
   local d="$HOME/.cache/prwatch/tracking"; mkdir -p "$d"
   _marker="$d/$1.tsv"   # process-global so the EXIT trap can see it
@@ -260,13 +273,16 @@ if [[ "${1:-}" == "--sweep" ]]; then
 
   # merges: a PR open last pass but gone now — did it land (vs just close)?
   if (( ! firstrun )); then
+    any_merged=0
     for key in ${(k)prev}; do
       [[ -n "${cur[$key]:-}" ]] && continue
       repo="${key%\#*}"; num="${key##*\#}"
       if [[ "$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" == MERGED ]]; then
         notify "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
+        any_merged=1
       fi
     done
+    (( any_merged )) && poke_viewers
   fi
 
   printf '%s' "$newstate" >"$state"   # atomic-ish single write; merged/closed drop off
