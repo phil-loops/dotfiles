@@ -353,6 +353,8 @@ class H(BaseHTTPRequestHandler):
             return sync.post_sync(self, raw)
         if self.path == "/contract":   # drop an already-merged branch + rewire its children onto main
             return sync.post_contract(self, raw)
+        if self.path == "/pr-poke":   # merge-watcher nudge: fetch trunk + refresh PR state NOW
+            return sync.pr_poke(self, raw)
         if self.path == "/fix-upstream":   # neutralize a footgun tracking ref (unset upstream)
             return sync.fix_upstream(self, raw)
         if self.path == "/diverged-additive":   # draft the additive PR update (push-vehicle branch, never pushes)

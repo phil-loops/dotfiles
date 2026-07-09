@@ -367,6 +367,21 @@ def health_many(req, u):
     req._send(200, json.dumps(out))
 
 
+def pr_poke(req, raw):
+    # A merge-watcher (prwatch) just saw one of our PRs land. Both freshness layers here are
+    # lazy — the PR map serves a ≤120s-stale SWR entry and the trunk fetch is throttled +
+    # backgrounded — so the page load the merge notification sends the user to would still
+    # show the pre-merge world. Skip the throttles ONCE, synchronously: fetch origin/<main>
+    # and re-pull the gh PR map now, so the very next /forest-health already shows the ghost.
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    global _TRUNK_FETCH_AT
+    with _TRUNK_FETCH_LOCK:
+        _TRUNK_FETCH_AT = time.time()
+    ctx.run(["git", "fetch", "origin", main])
+    _refresh_pr_state()
+    req._send(200, json.dumps({"ok": True}))
+
+
 def fix_upstream(req, raw):
     # Neutralize a footgun tracking ref: unset the branch's upstream so a Pull/Push can no
     # longer merge the wrong remote in. Config-only, non-destructive — the branch keeps all

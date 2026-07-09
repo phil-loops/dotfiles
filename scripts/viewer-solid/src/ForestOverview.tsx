@@ -293,6 +293,10 @@ export function ForestOverview() {
         (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean; contractable: boolean }>>,
       ),
     enabled: canMutate && healthIds().length > 0,
+    // health must wake on focus (global default is refetchOnWindowFocus: false) and converge
+    // unattended, else a merge only surfaces on a full reload.
+    refetchOnWindowFocus: true,
+    refetchInterval: 180_000,
   }));
   // open PRs keyed by head branch — drives the per-node PR badge in the map. The rich /prs
   // map (base/toMain/review) is filtered to MY PRs via /myprs, so a node only badges a PR I own.
