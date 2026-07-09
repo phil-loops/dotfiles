@@ -219,8 +219,8 @@ def _origin_verdict(branch):
     tip = _tip(branch)
     gates_green = _GREEN_GATES.get(branch) == tip
 
-    def ward(k, label, ok, why):
-        return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why}
+    def ward(k, label, ok, why, advisory=False):
+        return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
     wards = [
         ward("one", "one commit", len(outgoing) == 1 and not_merge,
              "nothing to push — origin already has this" if not outgoing
@@ -229,7 +229,7 @@ def _origin_verdict(branch):
         ward("voiced", "voiced subject", voiced and len(outgoing) == 1,
              "" if len(outgoing) != 1 else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
         ward("why", "says why", said_why and len(outgoing) == 1,
-             "" if len(outgoing) != 1 else "commit body is empty — say what ships and why"),
+             "" if len(outgoing) != 1 else "no commit body — optional; add a why if it helps a reviewer", advisory=True),
         ward("ff", "fast-forward", ff,
              "diverged from origin — reconcile first; shared history is never overwritten"),
         ward("watch", "deploy watch clear", not deploy_critical,
@@ -237,7 +237,7 @@ def _origin_verdict(branch):
         ward("gates", "gates green", gates_green,
              "not green for this exact commit — run the pipeline above"),
     ]
-    reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"]]
+    reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
     return {
         "branch": branch, "originExists": has_remote, "ff": ff, "outgoing": len(outgoing),
         "commits": outgoing[:8], "ageDays": age_days,

@@ -101,5 +101,5 @@ def route(req, u):
         return
     send("ready",
          "one voiced commit outgoing"
-         + ("" if tip["body"] else " — its body is empty; the push ward wants a why (edit the message)"),
+         + ("" if tip["body"] else " — no body (optional; add a why if it helps a reviewer)"),
          outgoing={"count": 1, "tip": tip}, needsBody=not tip["body"])
