@@ -339,11 +339,17 @@ def _node_health(branch, pr=None):
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main
     drifted = parent != main and ctx.run(
         ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
+    trunk = _trunk(main)
     if pr is not None:
         merged = pr.get("state") == "MERGED"
     else:
-        merged = _merged_prless(branch, _trunk(main))
-    return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged), "parent": parent,
+        merged = _merged_prless(branch, trunk)
+    # contractable = droppable RIGHT NOW (rebase-classify exit 20: every remaining commit is
+    # patch-identical to trunk). A merged PR with a follow-on commit reads merged=True but is
+    # NOT contractable — /contract refuses it. The badge keys its verb off this, not merged.
+    contractable = bool(_merged_prless(branch, trunk)) if merged else False
+    return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged),
+            "contractable": contractable, "parent": parent,
             "pr": pr, **_upstream_state(branch, main)}
 
 

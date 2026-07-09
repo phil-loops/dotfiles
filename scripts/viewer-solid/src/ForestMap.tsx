@@ -41,7 +41,7 @@ const edgePath = (e: { x1: number; y1: number; x2: number; y2: number }): string
 export function ForestMap(props: {
   spine: () => SpineNode[];
   active: () => string;
-  health?: () => Record<string, { drifted: boolean; merged: boolean }> | undefined;
+  health?: () => Record<string, { drifted: boolean; merged: boolean; contractable: boolean }> | undefined;
   prs?: () => Record<string, BranchPR> | undefined;
   onPick: (b: string) => void;
   onClose: () => void;
@@ -59,6 +59,22 @@ export function ForestMap(props: {
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
   const [contracting, setContracting] = createSignal<string | null>(null);
+  // the merged-ghost next step, keyed off CONTRACTABLE (rebase-classify exit 20), not merged:
+  //   drop    — fully contractable + we can mutate → ⊘ drop & rewire (POST /contract)
+  //   forward — merged PR but a newer commit rides on top → not droppable; go rebase it forward
+  //   merged  — contractable but read-only → passive ghost, no action
+  const ghostMode = (id: string): "drop" | "forward" | "merged" | null => {
+    const h = nhealth(id);
+    if (!h?.merged) return null;
+    if (h.contractable) return props.onContract ? "drop" : "merged";
+    return "forward";
+  };
+  const ghostLabel = (id: string): string => {
+    if (contracting() === id) return "⊘ dropping & rewiring…";
+    const m = ghostMode(id);
+    return m === "drop" ? "⊘ drop & rewire →" : m === "forward" ? "↑ rebase forward →" : "✦ merged ghost";
+  };
+  const pillW = (s: string): number => [...s].length * 6.9 + 18;
 
   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
   // the project's leaves on main in an ephemeral ref (read-only, never pushed) — does the whole
@@ -309,35 +325,42 @@ export function ForestMap(props: {
                     <title>dirty — downstream conflict on {dams().dirtyOf(n.id).join(", ")}</title>
                   </Show>
                   <Show when={!dams().damSet.has(n.id) && (nhealth(n.id)?.drifted || nhealth(n.id)?.merged)}>
-                    <title>
-                      {nhealth(n.id)?.merged
-                        ? props.onContract
-                          ? "already merged into main — click drops this branch and rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
-                          : "merged into main (ghost) — restack to contract it (drop + rewire children)"
-                        : "off its parent (not a git ancestor) — its diff is effectively vs main; restack to separate"}
-                    </title>
-                    <text
-                      class="fm-warn"
-                      classList={{
-                        drift: !!nhealth(n.id)?.drifted,
-                        ghost: !!nhealth(n.id)?.merged,
-                        act: !!nhealth(n.id)?.merged && !!props.onContract,
-                      }}
-                      x={w / 2}
-                      y={NODE_H / 2 + 12}
-                      onClick={async (e) => {
-                        if (!nhealth(n.id)?.merged || !props.onContract || contracting()) return;
-                        e.stopPropagation();
-                        setContracting(n.id);
-                        try { await props.onContract(n.id); } finally { setContracting(null); }
-                      }}
+                    <Show
+                      when={nhealth(n.id)?.merged}
+                      fallback={
+                        <text class="fm-warn drift" x={w / 2} y={NODE_H / 2 + 12}>
+                          <title>off its parent (not a git ancestor) — its diff is effectively vs main; restack to separate</title>
+                          ⤺ off-parent
+                        </text>
+                      }
                     >
-                      {nhealth(n.id)?.merged
-                        ? contracting() === n.id
-                          ? "⊘ dropping & rewiring…"
-                          : `✦ ghost · merged${props.onContract ? " — ⊘ drop & rewire" : ""}`
-                        : "⤺ off-parent"}
-                    </text>
+                      <g
+                        class="fm-ghost-pill"
+                        classList={{ drop: ghostMode(n.id) === "drop", forward: ghostMode(n.id) === "forward" }}
+                        transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (contracting() === n.id) return;
+                          const m = ghostMode(n.id);
+                          if (m === "drop") {
+                            setContracting(n.id);
+                            Promise.resolve(props.onContract!(n.id)).finally(() => setContracting(null));
+                          } else if (m === "forward") {
+                            props.onPick(n.id); // not droppable — go rebase forward + push at the node
+                          }
+                        }}
+                      >
+                        <title>
+                          {ghostMode(n.id) === "drop"
+                            ? "already merged AND fully contractable — drops this branch, rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
+                            : ghostMode(n.id) === "forward"
+                              ? "the PR merged but a newer commit rides on top — not droppable. Open the node to rebase forward: the merged commit drops, the follow-on stays, then push it."
+                              : "merged into main (ghost)"}
+                        </title>
+                        <rect x={-pillW(ghostLabel(n.id)) / 2} y={-11} rx={9} width={pillW(ghostLabel(n.id))} height={22} />
+                        <text x={0} y={4}>{ghostLabel(n.id)}</text>
+                      </g>
+                    </Show>
                   </Show>
                   <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
                   <circle class="dot" cx="16" cy="0" r="5" />
@@ -368,7 +391,7 @@ export function ForestMap(props: {
                       </text>
                     )}
                   </Show>
-                  <Show when={!isGhostId(n.id) && n.description}>
+                  <Show when={!isGhostId(n.id) && n.description && !nhealth(n.id)?.merged}>
                     <text class="fm-purpose" x={w / 2} y={NODE_H / 2 + 13}>
                       <title>{n.description}</title>
                       {fitPurpose(n.description!, w)}
@@ -445,9 +468,19 @@ const CSS = `
 .fm-node.merged rect { stroke: var(--patina); stroke-width: 2.2; stroke-dasharray: 2 3; filter: drop-shadow(0 0 6px var(--patina)); }
 .fm-warn { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; letter-spacing: .03em; }
 .fm-warn.drift { fill: var(--del); }
-.fm-warn.ghost { fill: var(--patina); }
-.fm-warn.act { cursor: pointer; }
-.fm-warn.act:hover { fill: var(--gold-leaf); }
+/* merged-ghost next-step pill: a backed rect so the verb is legible OVER the edges, in ember
+   (drop & rewire — the clean ghost) or gold-leaf (rebase forward — merged PR + follow-on). */
+.fm-ghost-pill { cursor: pointer; }
+.fm-ghost-pill rect { fill: var(--vellum-night, #14110a); stroke: var(--rule, #3a332b); stroke-width: 1.2; }
+.fm-ghost-pill text { font-family: var(--mono); font-size: 11.5px; text-anchor: middle; letter-spacing: .02em; font-weight: 500; fill: var(--ink-dim, #a89e8c); }
+.fm-ghost-pill.drop rect { stroke: var(--ember, #d2732a); }
+.fm-ghost-pill.drop text { fill: var(--ember, #d2732a); }
+.fm-ghost-pill.drop:hover rect { fill: var(--ember, #d2732a); stroke: var(--ember, #d2732a); }
+.fm-ghost-pill.drop:hover text { fill: var(--vellum-night, #14110a); }
+.fm-ghost-pill.forward rect { stroke: var(--gold-leaf, #e6b64e); }
+.fm-ghost-pill.forward text { fill: var(--gold-leaf, #e6b64e); }
+.fm-ghost-pill.forward:hover rect { fill: var(--gold-leaf, #e6b64e); stroke: var(--gold-leaf, #e6b64e); }
+.fm-ghost-pill.forward:hover text { fill: var(--vellum-night, #14110a); }
 .fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
 .fm-node.active text { fill: var(--ink); }
 .fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }
