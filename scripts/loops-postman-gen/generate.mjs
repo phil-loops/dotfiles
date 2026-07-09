@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import Converter from "openapi-to-postmanv2";
+import { mergeWorkflowOverlay } from "./workflow-overlay.mjs";
 
 const DEFAULT_SPEC = "https://app.loops.so/openapi.json";
 
@@ -86,6 +87,19 @@ const loadSpec = async (src) => {
 };
 
 const sampleFor = (key, current) => {
+  // workflow-builder fields — specific samples before the generic name/Id heuristics below
+  if (/^nodeTypeName$/i.test(key)) {
+    return "TimerAction";
+  }
+  if (/^(fromNodeId|beforeNodeId)$/i.test(key)) {
+    return "n1";
+  }
+  if (/^toNodeId$/i.test(key)) {
+    return "n2";
+  }
+  if (/^queuedContactPolicy$/i.test(key)) {
+    return "discard";
+  }
   if (/email/i.test(key)) {
     return "hello@example.com";
   }
@@ -219,7 +233,9 @@ const main = async () => {
   const spec = JSON.parse(rawSpec);
   const baseUrl = spec.servers?.[0]?.url ?? "https://app.loops.so/api";
 
-  const collection = await convert(rawSpec);
+  // the upstream spec documents read routes only — overlay the workflow builder writes.
+  const overlaid = mergeWorkflowOverlay(spec);
+  const collection = await convert(JSON.stringify(spec));
 
   collection.info.name = args.name;
   collection.info.description = `Generated from ${args.spec} by loops-postman.`;
@@ -260,7 +276,7 @@ const main = async () => {
   writeFileSync(environmentPath, JSON.stringify(environment, null, 2) + "\n");
 
   console.log(
-    `Wrote ${collectionPath}\n  ${collection.item.length} folders, ${requests} requests (spec v${spec.info?.version ?? "?"})`,
+    `Wrote ${collectionPath}\n  ${collection.item.length} folders, ${requests} requests (spec v${spec.info?.version ?? "?"}; +${overlaid} workflow-builder ops overlaid)`,
   );
   console.log(`Wrote ${environmentPath}`);
 
