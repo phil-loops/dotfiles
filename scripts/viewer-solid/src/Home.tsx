@@ -5,6 +5,7 @@ import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { ActionBar, type Action } from "./actions";
 import { Hearth } from "./Hearth";
+import { NextQueue } from "./NextQueue";
 import { leaf, mergedAgo, interestPips } from "./shared";
 import type { Parked, Project, PR, ReviewRequest } from "./types";
 
@@ -529,64 +530,6 @@ export function Home() {
     });
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
 
-  // NEXT — one ranked queue of concrete next actions, so you hop in at the top instead of
-  // triaging buckets. Pure function of signals already on hand: PR review/ci/mergeState,
-  // forest merged/behind/prOpened, and review-requested-of-you. Tier sets the order; each row
-  // carries a one-line WHY (the thing that justifies the rank) and a one-click target.
-  type NextAction = {
-    id: string; tier: number; tone: string; icon: string; verb: string;
-    target: string; why: string; title?: string;
-    href?: string; to?: ViewerLocation;
-  };
-  const STALE_BEHIND = 60; // a forest this far behind is rot to decide on, not work to open
-  const nextActions = createMemo<NextAction[]>(() => {
-    const out: NextAction[] = [];
-    const prList = prs.data || [];
-    const projs = projects.data || [];
-    const blockedMerge = (s?: string) => s === "BLOCKED" || s === "DIRTY";
-    const tag = (p: PR) => `#${p.num}${p.project ? " " + p.project : " " + leaf(p.branch)}`;
-    for (const p of prList) {
-      if (p.draft || landedRecently(p)) continue;
-      if (p.review === "APPROVED" && p.ci === "passing" && !blockedMerge(p.mergeState)) {
-        out.push({ id: "merge:" + p.num, tier: 0, tone: "ship", icon: "⬆", verb: "merge",
-          target: tag(p), why: "approved · CI green", title: p.title, href: p.url });
-      } else if (p.review === "APPROVED" && (p.ci === "failing" || blockedMerge(p.mergeState))) {
-        out.push({ id: "unblock:" + p.num, tier: 1, tone: "block",
-          icon: p.ci === "failing" ? "↻" : "⚠", verb: p.ci === "failing" ? "fix CI" : "unblock",
-          target: tag(p), why: p.ci === "failing" ? "approved · CI failing" : "approved · merge blocked",
-          title: p.title, href: p.url });
-      }
-    }
-    const hasPR = new Set(prList.filter((p) => p.project).map((p) => p.project));
-    for (const pr of projs) {
-      const loc: ViewerLocation = { kind: "forest", name: pr.name, repo: pr.repo };
-      if (pr.merged) {
-        out.push({ id: "contract:" + pr.name, tier: 3, tone: "contract", icon: "✂",
-          verb: "contract", target: pr.name, why: "merged · node lingering", to: loc });
-      } else if (!pr.prOpened && !hasPR.has(pr.name) && pr.mergeable?.length && pr.behind < STALE_BEHIND) {
-        out.push({ id: "open:" + pr.name, tier: 2, tone: "open", icon: "↗", verb: "open PR",
-          target: pr.name, why: pr.behind > 0 ? `${pr.behind} behind · no PR yet` : "clean · no PR yet", to: loc });
-      } else if (!pr.merged && pr.behind >= STALE_BEHIND) {
-        out.push({ id: "decide:" + pr.name, tier: 5, tone: "decide", icon: "✦",
-          verb: "decide", target: pr.name, why: `${pr.behind} behind · revive or drop`, to: loc });
-      }
-    }
-    for (const r of reviewReqs.data || []) {
-      out.push({ id: "review:" + r.number, tier: 4, tone: "review", icon: "\u{1F441}",
-        verb: "review", target: `#${r.number}`, why: `requested of you · @${r.author}`,
-        title: r.title, href: r.url });
-    }
-    return out.sort((a, b) => a.tier - b.tier);
-  });
-  const nextRowBody = (a: NextAction) => (
-    <>
-      <span class="nq-icon">{a.icon}</span>
-      <span class="nq-verb">{a.verb}</span>
-      <span class="nq-target">{a.target}</span>
-      <span class="nq-why">{a.why}</span>
-    </>
-  );
-
   const review = (r?: string | null): [string, string] =>
     r === "APPROVED" ? ["✓", "ok"] : r === "CHANGES_REQUESTED" ? ["▲", "chg"] : ["•", "req"];
 
@@ -778,25 +721,13 @@ export function Home() {
         </section>
       </Show>
 
-      <Show when={tab() === "work" && nextActions().length}>
-        <section class="work-sec next-queue">
-          <h2 class="eyebrow">next <span class="eyebrow-ask">— what to do, ranked</span></h2>
-          <div class="work-rule" />
-          <For each={nextActions()}>
-            {(a) =>
-              a.to ? (
-                <Link class={`nq-row nq-${a.tone}`} to={a.to} title={a.title}>
-                  {nextRowBody(a)}
-                </Link>
-              ) : (
-                <a class={`nq-row nq-${a.tone}`} href={a.href} target="_blank" rel="noopener" title={a.title}>
-                  {nextRowBody(a)}
-                </a>
-              )
-            }
-          </For>
-        </section>
-      </Show>
+      <NextQueue
+        prs={() => prs.data}
+        projects={() => projects.data}
+        reviewReqs={() => reviewReqs.data}
+        tab={tab}
+        landedRecently={landedRecently}
+      />
 
       <Show when={tab() === "work" && needsYouPRs().length}>
         <section class="work-sec">
