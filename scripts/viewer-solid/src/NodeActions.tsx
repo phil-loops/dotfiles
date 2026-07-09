@@ -516,7 +516,7 @@ export function NodeActions(props: {
     queryKey: ["push-preview", props.branch],
     queryFn: () =>
       fetch(withRepo("/push-preview") + "?branch=" + encodeURIComponent(props.branch)).then(
-        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string }>,
+        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string; originExists?: boolean; published?: boolean }>,
       ),
     enabled: !!props.branch && !props.isReview,
   }));
@@ -544,6 +544,23 @@ export function NodeActions(props: {
       setPushedWeb(r.web ?? null);
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "push failed"}`),
+  }));
+
+  // outgoing==0 but the branch is up-to-date on origin: no push to make, so open the PR page
+  // directly — the open PR if one exists (view), else the compare-and-create form (author).
+  // The push-less exit from the dead-push-button trap; opens a browser tab, never gh pr create.
+  const openPr = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; web?: string; opened?: boolean; hadPr?: boolean }>("/open-pr", { branch: props.branch }),
+    onSuccess: (r) => {
+      if (!r.ok) {
+        setDone("✗ no origin remote to open");
+        return;
+      }
+      setDone(r.opened ? (r.hadPr ? "✓ opening the open PR" : "✓ opening the compare view to author the PR") : "✓ PR page ready");
+      setPushedWeb(r.web ?? null);
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn’t open"}`),
   }));
 
   // reconcile — the ⋯ override for a divergence prep can't route (no PR, or you want
@@ -692,6 +709,24 @@ export function NodeActions(props: {
           onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate()))}
         >
           {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push to origin"}
+        </button>
+      </Show>
+
+      {/* nothing outgoing but the branch IS on origin: the push button would be dead, yet the PR
+          page is still one click away. Open the PR (view) or the compare-and-create form (author)
+          — no push, no gh pr create. This is the exit from the "pushed, no PR" stranding. */}
+      <Show when={!isReview() && (preview.data?.outgoing ?? 0) === 0 && preview.data?.originExists}>
+        <button
+          class="nh-fix nh-open-pr"
+          disabled={busy() || openPr.isPending}
+          title={
+            preview.data?.published
+              ? "up-to-date on origin and already has an open PR — opens it in a browser (no push)"
+              : "pushed to origin but no PR yet — opens the compare-and-create page to author it (no push, no gh pr create)"
+          }
+          onClick={() => openPr.mutate()}
+        >
+          {openPr.isPending ? "opening…" : preview.data?.published ? "↗ view PR" : "↗ open PR"}
         </button>
       </Show>
 

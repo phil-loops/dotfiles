@@ -383,6 +383,8 @@ class H(BaseHTTPRequestHandler):
             return push.push(self, raw)
         if self.path == "/push-origin":  # shared-history door: FF-only single-clean-commit push; human finger only
             return push.push_origin(self, raw)
+        if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser
+            return push.open_pr(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
         if self.path == "/stage":            # restack chain forward + move MAIN checkout onto the tip (dryRun supported)
