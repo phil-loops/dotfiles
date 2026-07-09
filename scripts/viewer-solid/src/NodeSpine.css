@@ -70,6 +70,15 @@
   text-decoration: line-through;
   text-decoration-color: var(--patina);
 }
+/* an actionable merged ghost is NOT done: the slot offers the next move (drop & rewire), so the
+   station reads active in ember — not the struck-through patina of a truly closed branch. */
+.spine-chip.at-merged.actionable .spine-word {
+  color: var(--ember);
+  text-decoration: none;
+}
+.spine-chip.at-merged.actionable .spine-mark.here.m-merged {
+  color: var(--ember);
+}
 .spine-chip.at-shared .spine-word {
   color: var(--add);
 }
