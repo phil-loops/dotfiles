@@ -1,4 +1,4 @@
-import { createSignal, createMemo, createEffect, on, onCleanup, Show, For, type JSX } from "solid-js";
+import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
 import { useQueryClient, createQuery } from "@tanstack/solid-query";
 import { useViewerLocation, forestKey, withNode, forestRepo } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
@@ -10,8 +10,10 @@ import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
 import { useScrollSpy } from "./useScrollSpy";
+import { useNodeChat } from "./useNodeChat";
+import { useOpenInNvim } from "./useOpenInNvim";
 import ChatIndex from "./ChatIndex";
-import { openChat, chatToTmux } from "./chatDrawer";
+import { chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
 import type { FileDiff } from "./types";
 
@@ -209,40 +211,11 @@ export function NodeDetail() {
     enabled: divergedOpen() && !!nodeHealth(active())?.diverged,
   }));
 
-  // cross-forest chat index overlay (read-only; every thread in this browser).
-  const [showChats, setShowChats] = createSignal(false);
-  // a chat the index asked to open on a (possibly other) branch: navigate there, then open the
-  // drawer once that node's files have loaded (see the effect below). Cleared once opened.
-  const [pendingChat, setPendingChat] = createSignal<{ branch: string; path: string } | null>(null);
-
-  // resolve a chat target into the drawer: prefer the real FileDiff (carries the patch); else
-  // synthesize a minimal one so the server computes the diff for that path. "" path → whole branch.
-  const openChatFor = (path: string) => {
-    const at = { branch: active(), origin: location() };
-    if (!path) {
-      openChat({ ...at, file: null });
-      return;
-    }
-    const real = node.data?.files.find((f) => f.path === path);
-    openChat({ ...at, file: real ?? { path, status: "modified" } });
-  };
-  // from the index: open a chat in its own branch+file context. Same branch → open now; another
-  // branch → navigate (as a standalone node) and let the effect open it once its files arrive.
-  const openChatInContext = (branch: string, path: string) => {
-    setShowChats(false);
-    if (branch === active()) {
-      openChatFor(path);
-    } else {
-      setPendingChat({ branch, path });
-      navigate({ kind: "standalone", branch });
-    }
-  };
-  createEffect(() => {
-    const p = pendingChat();
-    if (p && active() === p.branch && node.data?.files) {
-      openChatFor(p.path);
-      setPendingChat(null);
-    }
+  const { showChats, setShowChats, openChatInContext } = useNodeChat({
+    active,
+    location,
+    nodeData: () => node.data,
+    navigate,
   });
 
   // the sidebar is a GitHub-PR-style file list for the active node; clicking a row
@@ -267,35 +240,7 @@ export function NodeDetail() {
       : [<span class="file-dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
   };
 
-  // hover a diff line + press o → open that exact line in the warm review-nvim. Hover-armed and
-  // event-delegated off the surface; there is deliberately no click-to-open — a mouse click on a
-  // line collided with plain text selection, so opening is keyboard-only.
-  const [hover, setHover] = createSignal<{ path: string; line: number } | null>(null);
-  const [flash, setFlash] = createSignal("");
-  let flashT: ReturnType<typeof setTimeout>;
-  const note = (m: string) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
-  const openInNvim = (path: string, line: number | null) =>
-    !canMutate
-      ? undefined // static snapshot: no live nvim to open into
-      : fetch(withRepo("/open"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ branch: nodeRef(), path, ...(line != null ? { pos: String(line) } : {}) }),
-    })
-      .then((r) => r.json())
-      .then((r) => note(r.ok ? `⌁ ${leaf(path)}:${line ?? ""} → nvim` : "⌁ open failed — see server"))
-      .catch(() => note("⌁ open failed — server unreachable"));
-  const lineAt = (e: MouseEvent): { path: string; line: number } | null => {
-    const target = e.target as Element | null;
-    const ent = target?.closest<HTMLElement>(".entry");
-    const tr = target?.closest<HTMLElement>("tr");
-    if (!ent || !tr) return null;
-    // arm anywhere in the row (code OR gutter) by reading that row's line-number cell —
-    // not only when the cursor is over the tiny number itself
-    const ln = tr.querySelector<HTMLElement>(".d2h-code-side-linenumber, .d2h-code-linenumber");
-    const n = parseInt((ln?.textContent || "").trim(), 10);
-    return Number.isFinite(n) ? { path: ent.dataset.path ?? "", line: n } : null;
-  };
+  const { hover, setHover, flash, openInNvim, lineAt } = useOpenInNvim({ nodeRef });
 
 
   // on node change: jump to top, keep the active spine entry in view.
