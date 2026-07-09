@@ -33,19 +33,22 @@ prs=$(gh pr list -R "$REPO" --author @me --state merged -L 20 \
   -q '.[] | select(.mergeCommit.oid != null) | "\(.mergeCommit.oid)\t\(.number)\t\(.title)"' 2>/dev/null || true)
 [ -n "$prs" ] || exit 0
 
-# main build-and-test runs → "headSha<TAB>runId<TAB>status<TAB>conclusion"
+# main build-and-test runs → "headSha<TAB>runId<TAB>status<TAB>conclusion<TAB>runNumber<TAB>headBranch"
 runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 30 \
-  --json databaseId,headSha,status,conclusion \
-  -q '.[] | "\(.headSha)\t\(.databaseId)\t\(.status)\t\(.conclusion)"' 2>/dev/null || true)
+  --json databaseId,headSha,status,conclusion,number,headBranch \
+  -q '.[] | "\(.headSha)\t\(.databaseId)\t\(.status)\t\(.conclusion)\t\(.number)\t\(.headBranch)"' 2>/dev/null || true)
 [ -n "$runs" ] || exit 0
 
 while IFS=$'\t' read -r sha num title; do
   [ -n "$sha" ] || continue
-  match=$(printf '%s\n' "$runs" | awk -F'\t' -v s="$sha" '$1==s{print; exit}')
+  # first matching run for this merge commit (no early awk exit → SIGPIPE-safe under pipefail)
+  match=$(printf '%s\n' "$runs" | awk -F'\t' -v s="$sha" '$1==s && !f {print; f=1}')
   [ -n "$match" ] || continue
   rid=$(printf '%s' "$match" | cut -f2)
   status=$(printf '%s' "$match" | cut -f3)
   concl=$(printf '%s' "$match" | cut -f4)
+  runnum=$(printf '%s' "$match" | cut -f5)
+  headbr=$(printf '%s' "$match" | cut -f6)
   grep -qx "$rid" "$seen" && continue
   [ "$status" = "completed" ] || continue          # still building — catch it next sweep
   if [ "$firstrun" = "1" ]; then
@@ -53,7 +56,10 @@ while IFS=$'\t' read -r sha num title; do
   fi
   url="https://github.com/$REPO/actions/runs/$rid"
   if [ "$concl" = "success" ]; then
-    notify "✓ image built" "PR #$num merged → build done: $title" "$url"
+    # build tag = <branch>-<run_number>-<attempt>; attempt is ~always 1 (re-runs rare)
+    tag="${headbr}-${runnum}-1"
+    notify "✓ image built" "PR #$num → $tag. Seed staging: seed-staging-goal --tag $tag" "$url"
+    echo "build-notify: ✓ $tag built (PR #$num) — seed staging with: seed-staging-goal --tag $tag"
   else
     notify "✗ build ${concl:-failed}" "PR #$num image build ${concl:-failed}: $title" "$url"
   fi
