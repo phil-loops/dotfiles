@@ -8,9 +8,10 @@ import { DirtyRail, FileEntry, CommitsList } from "./FileRail";
 import { DivergedDetailPanel } from "./DivergedDetailPanel";
 import { FilePanel } from "./FilePanel";
 import { useNodeMutations } from "./useNodeMutations";
+import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeActions } from "./NodeActions";
 import ChatIndex from "./ChatIndex";
-import { chatTarget, openChat, chatToTmux } from "./chatDrawer";
+import { openChat, chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
 import type { FileDiff } from "./types";
 
@@ -332,44 +333,6 @@ export function NodeDetail() {
     return Number.isFinite(n) ? { path: ent.dataset.path ?? "", line: n } : null;
   };
 
-  // keyboard: j/k walk the spine; 1/2/3 switch the diff base; b toggles the file panel; ? for all.
-  const onKey = (e: KeyboardEvent) => {
-    // already typing (incl. the filter box) → let everything bubble: a 2nd ⌘F reaches native find
-    if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
-    if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); focusFilter(); return; }
-    if (e.metaKey || e.ctrlKey || e.altKey) return; // leave OS/browser chords alone
-    const list = spine();
-    const i = list.findIndex((n) => n.id === active());
-    if (e.key === "j" && i < list.length - 1) { e.preventDefault(); goto(list[i + 1].id); }
-    else if (e.key === "k" && i > 0) { e.preventDefault(); goto(list[i - 1].id); }
-    else if (e.key === "1") setBase("");
-    else if (e.key === "2") setBase("main");
-    else if (e.key === "3") setBase("blessed");
-    else if (e.key === "4") setBase("@origin");
-    else if (e.key === "o" && hover()) { e.preventDefault(); const h = hover()!; openInNvim(h.path, h.line); }
-    else if (e.key === "c") setView((v) => (v === "commits" ? "diffs" : "commits"));
-    else if (e.key === "b") { e.preventDefault(); filterAutoOpenedPanel = false; setPanelOpen((v) => !v); } // show / hide the file panel
-    // ⇧B blesses the focused file and advances (B·B·B down a branch, no mouse); ⇧U unblesses it in
-    // place. Per-file only — there is deliberately no bless-all key.
-    // advance in the next frame — after the just-blessed card collapses — so the scroll lands the
-    // next card at the toolbar line instead of over-shooting past the freed-up space.
-    else if (e.key === "B" && activeFile() && base() === "") { e.preventDefault(); bless.mutate(activeFile()); requestAnimationFrame(() => fileCycle.next()); }
-    else if (e.key === "U" && activeFile() && base() === "") { e.preventDefault(); unbless.mutate(activeFile()); }
-    else if (e.key === "?") { e.preventDefault(); setShowHelp((v) => !v); }
-    else if (e.key === "m") {
-      // m → up to the forest view. The key reached for by muscle memory (Esc does it too).
-      e.preventDefault();
-      const p = project();
-      if (p) navigate({ kind: "forest", name: p, repo: forestRepo(location()) });
-    }
-    else if (e.key === "Escape") {
-      // up a level: help → close it; else (when the chat drawer isn't grabbing Esc) → the forest map
-      if (showHelp()) { setShowHelp(false); }
-      else if (!chatTarget()) { const p = project(); if (p) { navigate({ kind: "forest", name: p, repo: forestRepo(location()) }); } }
-    }
-  };
-  window.addEventListener("keydown", onKey);
-  onCleanup(() => window.removeEventListener("keydown", onKey));
 
   // on node change: jump to top, keep the active spine entry in view.
   createEffect(() => {
@@ -406,6 +369,28 @@ export function NodeDetail() {
       setPanelOpen(false);
     }
   };
+  useNodeKeyboard({
+    focusFilter,
+    spine,
+    active,
+    goto,
+    setBase,
+    hover,
+    openInNvim,
+    setView,
+    togglePanel: () => { filterAutoOpenedPanel = false; setPanelOpen((v) => !v); },
+    activeFile,
+    base,
+    onBless: (f) => bless.mutate(f),
+    onFileCycleNext: () => fileCycle.next(),
+    onUnbless: (f) => unbless.mutate(f),
+    showHelp,
+    setShowHelp,
+    setShowHelpTo: setShowHelp,
+    project,
+    navigate,
+    location,
+  });
   return (
     <div class="shell" classList={{ "panel-collapsed": !panelOpen() }}>
       <Show when={!panelOpen()}>
