@@ -52,6 +52,12 @@
   .chk input { width:auto; }
   .presets { display:flex; flex-wrap:wrap; gap:6px; }
   .presets button { font-weight:700; letter-spacing:.03em; }
+  .guide { border:1px solid var(--accent); border-radius:6px; padding:8px 10px; margin-top:8px; font-size:12px; color:var(--ink); }
+  .guide.done { border-color:var(--ok); color:var(--ok); }
+  .guide .step-n { color:var(--accent); font-weight:700; }
+  fieldset.active-step { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  fieldset.active-step legend { color:var(--accent); }
+  fieldset.active-step .send:not(:disabled) { box-shadow:0 0 12px rgba(201,164,91,.30); }
   /* live request card — the signature: the HTTP request this action will send */
   .req { margin-top:10px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#100e0a; transition:border-color .15s, box-shadow .15s; }
   .req.post { border-left:2px solid var(--ok); }
@@ -91,7 +97,8 @@
     <fieldset>
       <legend>known-bug patterns</legend>
       <div id="presets" class="presets"></div>
-      <div class="muted" style="margin-top:6px;font-size:11px">runs the full sequence, then <b>copy markdown repro</b> to share it</div>
+      <div class="muted" style="margin-top:6px;font-size:11px">loads a sequence — step through it by clicking each request's <b>send</b>; then <b>copy markdown repro</b></div>
+      <div id="guide"></div>
     </fieldset>
 
     <fieldset>
@@ -182,6 +189,7 @@ function suggestFromTo(wf){
 let wfId = null;
 let rev = null;              // current workflowRevisionId (null for a fresh workflow)
 let steps = [];             // { method, path, body|null, ok, status, note }
+let guided = null;          // { key, moves, cursor } when stepping through a preset
 
 function isFilter(ty){ return /filter/i.test(ty || ""); }
 function isBranch(ty){ return /branch/i.test(ty || ""); }
@@ -336,10 +344,12 @@ function resetAll(){
   $("fromId").value=""; $("toId").value=""; $("delId").value="";
   $("addHint").textContent=""; $("delHint").textContent="";
   $("nullFrom").checked=false; $("recursive").checked=false; $("fromId").disabled=false; $("fromId").style.opacity=1;
+  guided = null; $("guide").innerHTML = "";
+  document.querySelectorAll("fieldset.active-step").forEach(f => f.classList.remove("active-step"));
   renderSteps();
 }
 
-$("btn-new").onclick = () => createWorkflow($("wfname").value);
+$("btn-new").onclick = async () => { const r = await createWorkflow($("wfname").value); guidedAfter("create", r); };
 $("btn-reset").onclick = resetAll;
 
 $("btn-add").onclick = async () => {
@@ -351,15 +361,17 @@ $("btn-add").onclick = async () => {
   if (need("toId", "addHint", "pick a toNodeId — click a node's 'to' chip, or type an id")) return;
   $("addHint").textContent = "";
   const nodeTypeName = custom ? $("ntypeCustom").value.trim() : $("ntype").value;
-  await addNode({ nodeTypeName, fromNodeId: nullFrom ? null : $("fromId").value.trim(), toNodeId: $("toId").value.trim() });
+  const r = await addNode({ nodeTypeName, fromNodeId: nullFrom ? null : $("fromId").value.trim(), toNodeId: $("toId").value.trim() });
+  guidedAfter("add", r);
 };
 
 $("btn-del").onclick = async () => {
   if (!wfId) return;
   if (need("delId", "delHint", "pick a nodeId — click a node's '×del' chip, or type an id")) return;
   $("delHint").textContent = "";
-  await deleteNode({ nodeId: $("delId").value.trim(), recursive: $("recursive").checked });
+  const r = await deleteNode({ nodeId: $("delId").value.trim(), recursive: $("recursive").checked });
   $("delId").value = "";
+  guidedAfter("del", r);
 };
 
 // --- known-bug patterns: named move-sequences that reproduce a finding in one click.
@@ -387,18 +399,66 @@ const PRESETS = {
     { op:"del", nodeId:"n5", recursive:false },
   ]},
 };
-async function runPreset(key){
+// presets LOAD a sequence into a guided stepper — you send each request yourself,
+// one at a time, so you can read the payload + response before advancing.
+function loadPreset(key){
   const p = PRESETS[key]; if (!p) return;
   resetAll();
-  for (const m of p.moves){
-    if (m.op === "create") await createWorkflow(m.name);
-    else if (m.op === "add") await addNode(m);
-    else if (m.op === "del") await deleteNode(m);
+  guided = { key, moves: p.moves, cursor: 0 };
+  applyStep(); renderGuide();
+}
+function markActive(btnId){
+  document.querySelectorAll("fieldset.active-step").forEach(f => f.classList.remove("active-step"));
+  const fs = $(btnId).closest("fieldset"); if (fs) fs.classList.add("active-step");
+}
+function applyStep(){
+  const m = guided.moves[guided.cursor];
+  if (m.op === "create"){ $("wfname").value = m.name || "repro"; markActive("btn-new"); }
+  else if (m.op === "add"){
+    const known = [...$("ntype").options].some(o => o.value === m.nodeTypeName);
+    $("ntype").value = known ? m.nodeTypeName : "__custom__";
+    $("ntypeCustom").style.display = known ? "none" : "block";
+    if (!known) $("ntypeCustom").value = m.nodeTypeName;
+    const nf = m.fromNodeId === null;
+    $("nullFrom").checked = nf; $("fromId").disabled = nf; $("fromId").style.opacity = nf ? 0.4 : 1;
+    $("fromId").value = nf ? "" : (m.fromNodeId || "");
+    $("toId").value = m.toNodeId || "";
+    markActive("btn-add");
+  } else if (m.op === "del"){
+    $("delId").value = m.nodeId || "";
+    $("recursive").checked = !!m.recursive;
+    markActive("btn-del");
+  }
+  renderPreview();
+}
+function stepDesc(m){
+  return m.op === "create" ? `create workflow "${m.name}"`
+    : m.op === "add" ? `add ${m.nodeTypeName}` + (m.fromNodeId === null ? ` before ${m.toNodeId}` : ` on ${m.fromNodeId}→${m.toNodeId}`)
+    : `${m.recursive ? "recursive-" : ""}delete ${m.nodeId}`;
+}
+function renderGuide(){
+  if (!guided){ $("guide").innerHTML = ""; return; }
+  const m = guided.moves[guided.cursor], n = guided.moves.length;
+  $("guide").innerHTML = `<div class="guide"><b>${esc(guided.key)}</b> · <span class="step-n">step ${guided.cursor+1} of ${n}</span> — ${esc(stepDesc(m))}`
+    + `<br><span class="muted">the highlighted request is ready — read the payload, then click <b>send</b></span></div>`;
+}
+function guidedAfter(op, r){
+  if (!guided) return;
+  const m = guided.moves[guided.cursor];
+  if (!m || m.op !== op) return;      // an off-script send — leave the guide where it is
+  if (r && r.ok === false) return;    // send failed — stay on this step so you can inspect it
+  guided.cursor++;
+  if (guided.cursor >= guided.moves.length){
+    const key = guided.key; guided = null;
+    document.querySelectorAll("fieldset.active-step").forEach(f => f.classList.remove("active-step"));
+    $("guide").innerHTML = `<div class="guide done"><b>${esc(key)}</b> · sequence complete — see the graph + verdict, then <b>copy markdown repro</b></div>`;
+  } else {
+    applyStep(); renderGuide();
   }
 }
 for (const [key, p] of Object.entries(PRESETS)){
   const b = document.createElement("button");
-  b.textContent = key; b.title = p.title; b.onclick = () => runPreset(key);
+  b.textContent = key; b.title = p.title; b.onclick = () => loadPreset(key);
   $("presets").appendChild(b);
 }
 
