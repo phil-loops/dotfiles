@@ -6,6 +6,7 @@ import { deleteMode, setDeleteMode } from "./deleteMode";
 import { ActionBar, type Action } from "./actions";
 import { Hearth } from "./Hearth";
 import { NextQueue } from "./NextQueue";
+import { ForestRow } from "./ForestRow";
 import { leaf, mergedAgo, interestPips } from "./shared";
 import type { Parked, Project, PR, ReviewRequest } from "./types";
 
@@ -563,93 +564,31 @@ export function Home() {
   // ≤4 uses in 10d didn't earn a pill on every work row).
   const workRowActions = (p: PR): Action[] => [githubAction(p.url, p.branch)];
 
-  // one forest row, shared by the priority tiers and the recently-merged fold. Metadata sits in
-  // fixed-width cells (pips · nodes · PR) so the columns line up down the list; the trailing cell
-  // hugs the right edge. `folded` rows swap the behind/restack trail for a static ✨-merged badge.
-  const forestRow = (p: Project, folded: boolean) => {
-    const stuck = () => parked()?.project === p.name;
-    return (
-      <Link
-        class="forest-row"
-        classList={{ parked: stuck(), folded }}
-        to={{
-          kind: "forest",
-          name: p.name,
-          repo: p.repo,
-          node: p.repo !== "loops" ? (p.mergeable?.[0] ?? p.candidates?.[0]) : undefined,
-        }}
-        onMouseEnter={(e) => showFtip(p.name, e.currentTarget as HTMLElement, p.repo, p.landed)}
-        onMouseLeave={hideFtip}
-        onContextMenu={(e) => {
-          if (!canMutate) return;
-          e.preventDefault();
-          hideFtip();
-          setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0 });
-        }}
-      >
-        <span class={`forest-dot ${stuck() ? "parked" : p.behind > 0 ? "behind" : "fresh"}`} />
-        <span class="forest-name">{p.name}</span>
-        <Show when={liveChats().some((j) => (j.project || j.branch) === p.name && (!j.repo || j.repo === p.repo))}>
-          <span class="forest-chat" title="a chat is running on this forest">✦</span>
-        </Show>
-        {/* ONE status cell, by precedence (Phil, strike 5: "a row = name + one signal") —
-            drop-mode > parked repair > merged fold > behind count > open PR. Pips live on
-            the tier header, node count on the overview; no signal at all = fresh. */}
-        <span class="fcell trail">
-          <Switch
-            fallback={
-              <Show when={prOf(p.name)}>
-                {(pr) => (
-                  <span class="forest-pr" classList={{ draft: pr().draft }} title={pr().title}>
-                    {pr().draft ? "draft" : "PR"} #{pr().num}
-                  </span>
-                )}
-              </Show>
-            }
-          >
-            <Match when={deleteMode() && canMutate}>
-              <ActionBar actions={[dropAction(p)]} />
-            </Match>
-            <Match when={stuck()}>
-              <div class="forest-parked">
-                <button
-                  class="forest-resolve"
-                  classList={{ open: menu() === p.name }}
-                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); setMenu(menu() === p.name ? null : p.name); }}
-                >
-                  ⚠ parked at {leaf(parked()?.current || p.name)}
-                </button>
-                <Show when={menu() === p.name}>
-                  <div class="forest-popover" onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}>
-                    <p class="forest-popover-why">
-                      Rebase paused on a conflict{parked()?.current ? ` rebasing ${leaf(parked()!.current)}` : ""}. It holds a worktree and blocks restacks until it’s cleared.
-                    </p>
-                    <Show when={parked()?.reason}>{(r) => <p class="forest-popover-reason">{r()}</p>}</Show>
-                    <div class="forest-popover-actions">
-                      <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); resolve(p.name); }}>✦ resolve with Claude</button>
-                      <button class="danger" onClick={(e) => { e.preventDefault(); e.stopPropagation(); abort(p.name); }}>✕ abort & discard</button>
-                    </div>
-                  </div>
-                </Show>
-              </div>
-            </Match>
-            <Match when={folded}>
-              <Show when={p.merged && mergedAgo(p.merged.at)}>
-                {(rel) => (
-                  <span class="forest-merged" title={p.merged!.title}>
-                    ✨ {(p.landed?.length ?? 0) > 1 ? `${p.landed!.length} landed · ${rel()}` : `${rel()} (#${p.merged!.pr})`}
-                  </span>
-                )}
-              </Show>
-            </Match>
-            <Match when={p.behind > 0}>
-              <span class="forest-trail">⟳ {p.behind} behind</span>
-            </Match>
-          </Switch>
-        </span>
-      </Link>
-    );
+  const hasLiveChat = (p: Project) =>
+    liveChats().some((j) => (j.project || j.branch) === p.name && (!j.repo || j.repo === p.repo));
+  const onContext = (e: MouseEvent, p: Project) => {
+    if (!canMutate) return;
+    e.preventDefault();
+    hideFtip();
+    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0 });
   };
+  const forestRow = (p: Project, folded: boolean) => (
+    <ForestRow
+      p={p}
+      folded={folded}
+      parked={parked}
+      menu={menu}
+      setMenu={setMenu}
+      showFtip={showFtip}
+      hideFtip={hideFtip}
+      onContext={onContext}
+      hasLiveChat={hasLiveChat}
+      prOf={prOf}
+      dropAction={dropAction}
+      resolve={resolve}
+      abort={abort}
+    />
+  );
 
   return (
     <div class="ledger">
