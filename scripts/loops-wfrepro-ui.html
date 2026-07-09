@@ -52,6 +52,31 @@
   .chk input { width:auto; }
   .presets { display:flex; flex-wrap:wrap; gap:6px; }
   .presets button { font-weight:700; letter-spacing:.03em; }
+  /* live request card — the signature: the HTTP request this action will send */
+  .req { margin-top:10px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:#100e0a; transition:border-color .15s, box-shadow .15s; }
+  .req.post { border-left:2px solid var(--ok); }
+  .req.del  { border-left:2px solid var(--bad); }
+  .req:hover { border-color:var(--faint); box-shadow:0 1px 12px rgba(0,0,0,.35); }
+  .req-head { display:flex; align-items:center; gap:8px; padding:6px 9px; border-bottom:1px solid var(--line); }
+  .method { font-weight:800; font-size:10px; letter-spacing:.16em; padding:2px 7px; border-radius:3px; flex:none; }
+  .method.post { color:var(--ok); border:1px solid var(--ok); }
+  .method.del  { color:var(--bad); border:1px solid var(--bad); }
+  .path { font-size:11.5px; word-break:break-all; }
+  .path .seg  { color:var(--faint); }
+  .path .pill { color:var(--accent); }
+  .req-body { margin:0; padding:8px 10px; font-size:11.5px; line-height:1.65; white-space:pre-wrap; }
+  .req-body .k   { color:var(--faint); }
+  .req-body .s   { color:#cdbf9e; }
+  .req-body .nul { color:var(--bad); font-style:italic; }
+  .req-body .ref { color:var(--accent); }
+  .req-body .rev { color:var(--accent); background:rgba(201,164,91,.12); border:1px solid rgba(201,164,91,.35); border-radius:3px; padding:0 5px; font-size:10.5px; }
+  .node[data-id] { transition:border-color .12s, box-shadow .12s; }
+  .node.glow { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent) inset; }
+  .send { width:100%; margin-top:8px; font-weight:700; letter-spacing:.05em; }
+  .send.post { border-color:var(--ok); color:var(--ok); }
+  .send.post:hover:not(:disabled) { background:rgba(127,174,106,.10); }
+  .send.del  { border-color:var(--bad); color:var(--bad); }
+  .send.del:hover:not(:disabled)  { background:rgba(200,122,85,.10); }
   @keyframes flash { 0%{ background:#3a2f1a; } 100%{ background:#100e0a; } }
   .flash { animation:flash .6s ease-out; }
 </style>
@@ -71,10 +96,10 @@
 
     <fieldset>
       <legend>1 · new workflow</legend>
-      <div class="row">
-        <div><label>name</label><input id="wfname" value="repro" /></div>
-        <button class="primary" id="btn-new">create</button>
-      </div>
+      <label>name</label>
+      <input id="wfname" value="repro" />
+      <div id="newPreview" class="req post"></div>
+      <button class="send post" id="btn-new">send POST</button>
     </fieldset>
 
     <fieldset>
@@ -93,18 +118,19 @@
         <div><label>toNodeId</label><input id="toId" placeholder="e.g. n2 — or click a chip" /></div>
       </div>
       <label class="chk"><input type="checkbox" id="nullFrom" /> fromNodeId = <b>null</b> (insert before toNodeId)</label>
-      <button id="btn-add" style="margin-top:8px;width:100%" disabled>add node</button>
+      <div id="addPreview" class="req post"></div>
+      <button id="btn-add" class="send post" disabled>send POST</button>
       <div class="muted" style="margin-top:4px;font-size:11px">tip: click a node's <b>from</b>/<b>to</b> chip in the graph to fill these</div>
       <div id="addHint" class="hint"></div>
     </fieldset>
 
     <fieldset>
       <legend>3 · delete node</legend>
-      <div class="row">
-        <div><label>nodeId</label><input id="delId" placeholder="click a node's ×del chip" /></div>
-        <button id="btn-del" disabled>delete</button>
-      </div>
+      <label>nodeId</label>
+      <input id="delId" placeholder="click a node's ×del chip" />
       <label class="chk"><input type="checkbox" id="recursive" /> <b>recursive</b> (delete the whole subtree)</label>
+      <div id="delPreview" class="req del"></div>
+      <button id="btn-del" class="send del" disabled>send DELETE</button>
       <div id="delHint" class="hint"></div>
     </fieldset>
 
@@ -160,6 +186,51 @@ let steps = [];             // { method, path, body|null, ok, status, note }
 function isFilter(ty){ return /filter/i.test(ty || ""); }
 function isBranch(ty){ return /branch/i.test(ty || ""); }
 
+// --- live request preview: the exact endpoint + payload each button will send ---
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+function jsonVal(key, v, refKeys){
+  if (v === null) return `<span class="nul">null</span>`;
+  if (key === "expectedRevisionId") return `<span class="rev" title="threaded automatically from the last response — you never set this">⟳ ${rev ? esc(rev.slice(-6)) : "auto"}</span>`;
+  if (typeof v === "string"){
+    const isRef = refKeys.includes(key) && v;
+    return `<span class="${isRef ? "ref" : "s"}"${isRef ? ` data-node="${esc(v)}"` : ""}>"${esc(v)}"</span>`;
+  }
+  return `<span class="s">${esc(v)}</span>`;
+}
+function bodyHtml(obj, refKeys){
+  return "{\n" + Object.entries(obj).map(([k,v]) => `  <span class="k">"${esc(k)}"</span>: ${jsonVal(k, v, refKeys)}`).join(",\n") + "\n}";
+}
+function pathHtml(parts){
+  return parts.map(p => `<span class="${p.pill ? "pill" : "seg"}"${p.node ? ` data-node="${esc(p.v)}"` : ""}>${esc(p.v)}</span>`).join("");
+}
+function reqCard(cls, method, parts, body, refKeys){
+  return `<div class="req-head"><span class="method ${cls}">${method}</span><code class="path">${pathHtml(parts)}</code></div>`
+    + `<pre class="req-body">${bodyHtml(body, refKeys)}</pre>`;
+}
+function idPill(){ return wfId ? wfId.slice(-6) : "{workflowId}"; }
+function renderPreview(){
+  $("newPreview").innerHTML = reqCard("post","POST",[{v:"/v1/workflows"}], { name: $("wfname").value.trim() || "repro" }, []);
+  const custom = $("ntype").value === "__custom__", nullFrom = $("nullFrom").checked;
+  $("addPreview").innerHTML = reqCard("post","POST",
+    [{v:"/v1/workflows/"},{v:idPill(),pill:true},{v:"/nodes"}],
+    { nodeTypeName: custom ? ($("ntypeCustom").value.trim() || "…") : $("ntype").value,
+      fromNodeId: nullFrom ? null : ($("fromId").value.trim() || ""),
+      toNodeId: $("toId").value.trim() || "",
+      expectedRevisionId: rev }, ["fromNodeId","toNodeId"]);
+  const nodeId = $("delId").value.trim(), rec = $("recursive").checked;
+  $("delPreview").innerHTML = reqCard("del","DELETE",
+    [{v:"/v1/workflows/"},{v:idPill(),pill:true},{v:"/nodes/"},{v:nodeId||"…",pill:true,node:!!nodeId},...(rec?[{v:"/recursive"}]:[])],
+    { expectedRevisionId: rev }, []);
+  wireCardHover();
+}
+function glowNode(id, on){ const sel = (window.CSS && CSS.escape) ? CSS.escape(id) : id; const n = document.querySelector(`.node[data-id="${sel}"]`); if (n) n.classList.toggle("glow", on); }
+function wireCardHover(){
+  document.querySelectorAll(".req").forEach(card => {
+    card.onmouseenter = () => card.querySelectorAll("[data-node]").forEach(r => glowNode(r.dataset.node, true));
+    card.onmouseleave = () => document.querySelectorAll(".node.glow").forEach(n => n.classList.remove("glow"));
+  });
+}
+
 function renderGraph(wf){
   $("wfid").textContent = wf?.id || "—";
   $("rev").textContent = (wf?.workflowRevisionId ?? "null");
@@ -175,6 +246,7 @@ function renderGraph(wf){
     if (root && next.includes(root)){ bad = true; violations.push(`${id} → ${root} gives the trigger (root) an inbound edge`); }
     const el = document.createElement("div");
     el.className = "node" + (bad ? " invalid" : "");
+    el.dataset.id = id;
     el.innerHTML = `<span class="id">${id}</span><span class="ty">${ty}</span>`
       + `<span class="arr">→ ${next.join(", ") || "∅"}</span>`;
     const mkBtn = (t, fn) => { const b=document.createElement("button"); b.className="mini"; b.textContent=t; b.onclick=fn; return b; };
@@ -187,13 +259,14 @@ function renderGraph(wf){
   if (root && !nodes[root]) violations.push(`rootNodeId "${root}" points at a deleted node — the workflow has no trigger (unrunnable)`);
   suggestFromTo(wf);
   const v = $("valid"), w = $("warn");
-  if (Object.keys(nodes).length === 0){ v.innerHTML = ""; w.innerHTML = ""; return; }
+  if (Object.keys(nodes).length === 0){ v.innerHTML = ""; w.innerHTML = ""; renderPreview(); return; }
   if (violations.length){
     v.innerHTML = `<span class="badge bad" id="verdict-bad">invalid graph</span>`;
     w.innerHTML = `<div class="warn"><b>structural problems (validate() would reject):</b><br>` + violations.map(x=>"• "+x).join("<br>") + `</div>`;
   } else {
     v.innerHTML = `<span class="badge ok" id="verdict-ok">valid</span>`; w.innerHTML = "";
   }
+  renderPreview();
 }
 
 function renderSteps(){
@@ -346,6 +419,13 @@ $("btn-copy").onclick = async () => {
   try { await navigator.clipboard.writeText(md); $("btn-copy").textContent = "copied ✓"; setTimeout(()=>$("btn-copy").textContent="copy markdown repro", 1500); }
   catch { const w = window.open("", "_blank"); w.document.write("<pre>"+md.replace(/</g,"&lt;")+"</pre>"); }
 };
+
+// keep the request previews live as the fields change
+["wfname","ntype","ntypeCustom","fromId","toId","delId","nullFrom","recursive"].forEach(id => {
+  $(id).addEventListener("input", renderPreview);
+  $(id).addEventListener("change", renderPreview);
+});
+renderPreview();
 </script>
 </body>
 </html>
