@@ -245,16 +245,42 @@ def _origin_verdict(branch):
         "deployCritical": deploy_critical,
         "files": files[:20], "moreFiles": max(0, len(files) - 20),
         "commit": commit, "gatesGreen": gates_green, "web": _origin_web(branch),
+        # published (cached open-PR set, no per-poll gh call): with outgoing==0 it splits the
+        # dead push button into 'view PR ↗' (has one) vs 'open PR ↗' (pushed, none yet).
+        "published": branch in sync._open_pr_heads(),
         "wards": wards, "ok": not reasons, "reasons": reasons,
     }
 
 
 def preview(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
+    # keep origin/main loosely fresh (throttled bg fetch) so the deploy-watch / behind wards
+    # stop trailing a stale origin — they were computed against whatever the last fetch left.
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    sync._freshen_trunk(main)
     v = _origin_verdict(branch)
     if v is None:
         return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
     req._send(200, json.dumps(v))
+
+
+def open_pr(req, raw):
+    """POST /open-pr {branch} — open the branch's PR page WITHOUT pushing: the OPEN PR if one
+    exists (view it), else the compare-and-create form (author it). The push-less exit for a
+    branch already up-to-date on origin (outgoing==0) that would otherwise face a dead push
+    button. Human-finger only, same as push-origin: opens a browser tab, never gh pr create."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    if not branch:
+        return req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+    # a real local branch only — else a garbage name would open a junk compare tab (the URL is
+    # built from the string, not a resolved ref). The frontend only fires this for real branches.
+    if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode != 0:
+        return req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
+    pr_url = _open_pr_url(branch)
+    url = pr_url or _origin_web(branch)
+    opened = _open_web(url)
+    req._send(200, json.dumps({"ok": bool(url), "web": url, "opened": opened, "hadPr": bool(pr_url)}))
 
 
 def push_origin(req, raw):
