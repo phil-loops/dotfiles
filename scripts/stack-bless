@@ -13,6 +13,10 @@
 #   stack-bless <branch> [--parent <p>]             bless every file in <p>...<branch>
 #   stack-bless <branch> --file <path>               bless a single file
 #   stack-bless <branch> --unbless [--file <path>]   remove a bless (file, or whole branch)
+#   stack-bless refs/stack/<project>-integration [--file <path>] [--unbless]
+#       ghost fan-out: blessing the integration node blesses each file on the project
+#       branch(es) whose parent...branch diff owns it — same per-branch ledger entries
+#       a direct bless would write, so branch nodes and the ghost node agree.
 #
 # Parent defaults to stack-branch.<branch>.parent, then stack.main-branch, then main.
 set -euo pipefail
@@ -30,6 +34,52 @@ while (( $# )); do
   esac
 done
 [[ -n "$branch" ]] || { echo "usage: stack-bless <branch> [--parent p] [--file path] [--unbless]" >&2; exit 2; }
+
+if [[ "$branch" == refs/stack/*-integration ]]; then
+  git rev-parse --verify --quiet "$branch" >/dev/null \
+    || { echo "stack-bless: no such integration ref: $branch" >&2; exit 1; }
+  project="${${branch#refs/stack/}%-integration}"
+  main_b=$(git config stack.main-branch 2>/dev/null || echo main)
+  typeset -A seen; typeset -a targets
+  {
+    git config --get-all "stack-project.${project}.branch" 2>/dev/null || true
+    git config --get-regexp '^stack-branch\..*\.project$' 2>/dev/null \
+      | awk -v p="$project" '$2==p {sub(/^stack-branch\./,"",$1); sub(/\.project$/,"",$1); print $1}'
+  } | while IFS= read -r b; do
+    [[ -n "$b" ]] || continue
+    (( ${+seen[$b]} )) && continue
+    seen[$b]=1
+    git rev-parse --verify --quiet "refs/heads/$b" >/dev/null || continue
+    targets+=("$b")
+  done
+  (( ${#targets[@]} )) || { echo "stack-bless: no live branches in project $project" >&2; exit 1; }
+
+  fanflags=()
+  (( unbless )) && fanflags+=(--unbless)
+  count=0
+  for b in "${targets[@]}"; do
+    if [[ -n "$file" ]]; then
+      bp=$(git config "stack-branch.${b}.parent" 2>/dev/null || true)
+      [[ -n "$bp" ]] || bp="$main_b"
+      if [[ "$bp" == "$main_b" ]] && git rev-parse --verify --quiet "origin/${main_b}" >/dev/null; then
+        bp="origin/${main_b}"
+      fi
+      git diff --name-only "${bp}...${b}" -- "$file" 2>/dev/null | grep -q . || continue
+      "$0" "$b" --file "$file" "${fanflags[@]}" >/dev/null
+    else
+      "$0" "$b" "${fanflags[@]}" >/dev/null
+    fi
+    count=$((count + 1))
+  done
+  if (( count == 0 )); then
+    echo "stack-bless: no branch in $project owns ${file:-any files}" >&2
+    exit 1
+  fi
+  if (( unbless )); then verb="unblessed"; else verb="blessed"; fi
+  echo "$verb ${file:-all files} on $count branch(es) via $project integration"
+  exit 0
+fi
+
 git rev-parse --verify --quiet "refs/heads/$branch" >/dev/null \
   || { echo "stack-bless: no such branch: $branch" >&2; exit 1; }
 
