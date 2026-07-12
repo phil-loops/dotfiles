@@ -54,10 +54,15 @@ for f in "$trackdir"/*.tsv; do
 done
 w=0; [ -n "$watches" ] && w=$(printf '%s' "$watches" | grep -c .)
 
-badge="🔨"
-[ "$n" -gt 0 ] && badge="🔨×$n"
-[ "$d" -gt 0 ] && badge="$badge 🚀"
-[ "$w" -gt 0 ] && badge="$badge 👁$w"
+# ONE glyph in the menu bar, always — stacking glyphs reads as separate menu-bar items.
+# Overlapping states show the most urgent (deploy > main build > watches > idle); the
+# menu below lists everything regardless.
+if   [ "$d" -gt 1 ]; then badge="🚀×$d"
+elif [ "$d" -gt 0 ]; then badge="🚀"
+elif [ "$n" -gt 0 ]; then badge="🔨×$n"
+elif [ "$w" -gt 0 ]; then badge="👁$w"
+else badge="🔨"
+fi
 echo "$badge"
 echo "---"
 if [ "$n" -eq 0 ] && [ "$d" -eq 0 ]; then
