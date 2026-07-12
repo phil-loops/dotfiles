@@ -8,7 +8,7 @@ import { Hearth } from "./Hearth";
 import { NextQueue } from "./NextQueue";
 import { ForestRow } from "./ForestRow";
 import { useRestack } from "./useRestack";
-import { ambientChip, landedChip } from "./homeModel";
+import { ambientChip, landedChip, type NextStep } from "./homeModel";
 import { WorkTab } from "./WorkTab";
 import { ForestsList } from "./ForestsList";
 import { leaf, mergedAgo } from "./shared";
@@ -216,10 +216,11 @@ export function Home() {
     hideFtip();
     setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0 });
   };
-  const forestRow = (p: Project, folded: boolean) => (
+  const forestRow = (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => (
     <ForestRow
       p={p}
       folded={folded}
+      next={next}
       parked={parked}
       menu={menu}
       setMenu={setMenu}

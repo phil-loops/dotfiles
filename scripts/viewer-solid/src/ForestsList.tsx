@@ -3,20 +3,21 @@ import { deleteMode, setDeleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
+import { nextStep, type NextStep } from "./homeModel";
 import type { Project, Parked, PR } from "./types";
 
 // The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
 // is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
 // folds for dormant + recently-merged. One opinionated order (Phil, 2026-07-11): the manual
-// interest pips no longer rank the page (they demoted to passive row metadata); recency only
-// orders *within* a band. Owns its own filter/fold state; the row itself comes in as a prop
-// (Home wires its hover/ctx/parked handlers).
+// interest pips no longer rank the page (they demoted to passive row metadata); shipping
+// orders by next-step urgency, other bands by recency. Owns its own filter/fold state; the
+// row itself comes in as a prop (Home wires its hover/ctx/parked handlers).
 export function ForestsList(props: {
   tab: () => string;
   projects: () => Project[] | undefined;
   restackErr: () => string | null;
   restackAllAction: () => Action;
-  forestRow: (p: Project, folded: boolean) => JSX.Element;
+  forestRow: (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => JSX.Element;
   parked: () => Parked | null;
   prOf: (name: string) => PR | undefined;
 }) {
@@ -86,15 +87,33 @@ export function ForestsList(props: {
       }));
   });
   const clusteredKeys = createMemo(() => new Set(epicClusters().flatMap((c) => c.items.map(pkey))));
+  // shipping rows carry their concrete next step (nextStep, homeModel); the band sorts
+  // your-move steps above waiting-on-others so the top of shipping IS the priority order.
+  // Other bands keep the plain recency sort.
+  const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
     const clustered = clusteredKeys();
     const active = filteredForests().filter((p) => !recentlyMerged(p) && !clustered.has(pkey(p)));
     return BANDS.map((band, i) => ({
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
-      items: active.filter((p) => bandIdx(p) === i).sort((a, b) => forestTs(b) - forestTs(a)),
+      items: active.filter((p) => bandIdx(p) === i).sort((a, b) =>
+        (i === 1 ? (stepOf(a)?.rank ?? 9) - (stepOf(b)?.rank ?? 9) : 0) || forestTs(b) - forestTs(a)),
     })).filter((b) => b.items.length || b.clusters.length);
   });
+  // "if I don't know what to do next, start here" — exactly one row wears the start tag:
+  // the first your-move step in shipping's render order (cluster members, then items).
+  const startKey = createMemo(() => {
+    const shipping = bands().find((b) => b.key === "shipping");
+    const ordered = shipping ? [...shipping.clusters.flatMap((c) => c.items), ...shipping.items] : [];
+    const first = ordered.find((p) => bandIdx(p) === 1 && stepOf(p)?.yourMove);
+    return first ? pkey(first) : null;
+  });
+  const stepInfo = (p: Project, folded: boolean) => {
+    if (folded || bandIdx(p) !== 1) return undefined;
+    const step = stepOf(p);
+    return step ? { step, start: pkey(p) === startKey() } : undefined;
+  };
   const merged = createMemo(() =>
     filteredForests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
   const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
@@ -103,10 +122,10 @@ export function ForestsList(props: {
     multiRepo() && (p.repo || "loops") !== "loops" ? (
       <div class="epic-subrow">
         <span class="epic-repo-badge">{p.repo}</span>
-        {props.forestRow(p, folded)}
+        {props.forestRow(p, folded, stepInfo(p, folded))}
       </div>
     ) : (
-      props.forestRow(p, folded)
+      props.forestRow(p, folded, stepInfo(p, folded))
     );
   // dormant + recently-merged fold closed until clicked — context, not to-dos.
   const [dormantOpen, setDormantOpen] = createSignal(false);
@@ -175,7 +194,7 @@ export function ForestsList(props: {
                         {(p) => (
                           <div class="epic-subrow">
                             <span class="epic-repo-badge">{p.repo || "loops"}</span>
-                            {props.forestRow(p, false)}
+                            {props.forestRow(p, false, stepInfo(p, false))}
                           </div>
                         )}
                       </For>
