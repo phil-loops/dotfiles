@@ -604,8 +604,20 @@ def _contract(branch):
     proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
     for key in ("parent", "project", "base"):
         ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.{key}"])
-    if proj:
-        ctx.run(["git", "config", "--unset", f"stack-project.{proj}.branch", esc])
+    # Sweep EVERY project's branch list, not just .project's — a dangling entry under some
+    # other project is exactly the phantom-forest rot contraction exists to clean.
+    projs = {proj} if proj else set()
+    out = ctx.run(["git", "config", "--get-regexp", r"^stack-project\..+\.branch$"]).stdout
+    for line in out.splitlines():
+        key, _, val = line.partition(" ")
+        if val.strip() == branch:
+            projs.add(key[len("stack-project."):-len(".branch")])
+    for p in projs:
+        ctx.run(["git", "config", "--unset", f"stack-project.{p}.branch", esc])
+        # Last node contracted → the forest itself is done: drop the whole section
+        # (interest/epic included) so no empty forest card lingers.
+        if not ctx.run(["git", "config", "--get-all", f"stack-project.{p}.branch"]).stdout.strip():
+            ctx.run(["git", "config", "--remove-section", f"stack-project.{p}"])
     return kids, deps, parent
 
 
@@ -647,7 +659,11 @@ def post_contract(req, raw):
         return
     ctx.run(["git", "fetch", "origin", "main"])
     exists = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode == 0
-    if not exists and not ctx.run(
+    listed = any(
+        line.partition(" ")[2].strip() == branch
+        for line in ctx.run(["git", "config", "--get-regexp",
+                             r"^stack-project\..+\.branch$"]).stdout.splitlines())
+    if not exists and not listed and not ctx.run(
             ["git", "config", "--get-regexp", rf"^stack-branch\.{re.escape(branch)}\."]).stdout.strip():
         req._send(404, json.dumps({"ok": False, "err": f"no branch or stack config named {branch!r}"}))
         return
