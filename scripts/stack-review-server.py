@@ -233,6 +233,8 @@ class H(BaseHTTPRequestHandler):
             return sync.get_one(self, u)
         elif u.path == "/push-preview":  # read-only: outgoing-vs-origin commit + push-origin guard verdict
             return push.preview(self, u)
+        elif u.path == "/gates-progress":  # live per-gate journal of a detached /gates run
+            return push.gates_progress(self, u)
         elif u.path == "/syncs":  # batch fork-staleness in one round-trip
             return sync.get_many(self, u)
         elif u.path == "/forest-health":  # batch drifted/merged-ghost per node (badges + fix-all)
