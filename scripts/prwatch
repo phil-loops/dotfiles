@@ -120,24 +120,16 @@ notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click
   fi
 }
 
-notify_alert() {  # $1 status  $2 detail  $3 url — banner PLUS a dialog that waits to be
-                  # dismissed. The completion of something explicitly asked for must
-                  # survive a glance away; banners evaporate, this doesn't. Detached
-                  # (nohup) so a launchd sweep exiting doesn't reap the open dialog;
-                  # gives up after 4h so an abandoned machine doesn't stack them forever.
+DONEDIR="$HOME/.cache/prwatch/done"
+notify_sticky() {  # $1 status  $2 detail  $3 url — banner now, PLUS a ✅ that persists in
+                   # the 🔨 menu-bar badge until dismissed there. The completion of
+                   # something explicitly asked for must survive a glance away; banners
+                   # evaporate, and a modal dialog parked mid-screen was too distracting.
   notify "$@"
-  local t="prwatch · $1" m="${2:-$1}" u="${3:-}"
-  t=${t//\\/\\\\}; t=${t//\"/\\\"}; m=${m//\\/\\\\}; m=${m//\"/\\\"}
-  if [[ -n "$u" ]]; then
-    ( nohup osascript \
-        -e "set r to display dialog \"$m\" with title \"$t\" buttons {\"OK\", \"Open\"} default button \"Open\" giving up after 14400" \
-        -e "if button returned of r is \"Open\" then open location \"$u\"" \
-        </dev/null >/dev/null 2>&1 & )
-  else
-    ( nohup osascript \
-        -e "display dialog \"$m\" with title \"$t\" buttons {\"OK\"} default button \"OK\" giving up after 14400" \
-        </dev/null >/dev/null 2>&1 & )
-  fi
+  mkdir -p "$DONEDIR"
+  local slug="$1 $2"; slug="${slug//[^A-Za-z0-9._-]/-}"; slug="${slug[1,80]}"
+  print -r -- "$1"$'\t'"${2:-}"$'\t'"${3:-}"$'\t'"$(date +%s)" > "$DONEDIR/$slug.tsv"
+  poke_swiftbar
 }
 
 poke_viewers() {  # a PR just merged — nudge every live forest viewer to refresh trunk + PR state
@@ -183,11 +175,11 @@ watch_pr() {  # $1 repo  $2 number
     st="✗ failed" msg="${repo}#${num} — a check failed"
   fi
   # --await watchers (one per push) stay banner-tier and out of the mute list; an
-  # EXPLICIT watch gets the sit-there-until-dismissed dialog and mutes ambient repeats
+  # EXPLICIT watch gets the sticky ✅ badge and mutes ambient repeats
   if [[ "${PRWATCH_AWAIT:-0}" == 1 ]]; then
     notify "$st" "$msg" "$url"
   else
-    notify_alert "$st" "$msg" "$url"
+    notify_sticky "$st" "$msg" "$url"
     mark_answered "$repo#$num"
   fi
 }
@@ -198,10 +190,10 @@ watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
   print -P "%F{yellow}⟳%f watching run ${repo} #${rid} — ctrl-c to stop"
   if gh run watch "$rid" --repo "$repo" --exit-status; then
     print -P "%F{green}✓ run ${rid} — succeeded%f"
-    notify_alert "✓ run passed" "${repo} run ${rid} succeeded" "$url"
+    notify_sticky "✓ run passed" "${repo} run ${rid} succeeded" "$url"
   else
     print -P "%F{red}✗ run ${rid} — failed%f"
-    notify_alert "✗ run failed" "${repo} run ${rid} failed" "$url"
+    notify_sticky "✗ run failed" "${repo} run ${rid} failed" "$url"
   fi
   mark_answered "$repo/$rid"
 }
@@ -337,13 +329,13 @@ if [[ "${1:-}" == "--sweep" ]]; then
       notify_quiet "$@"
     fi
   }
-  salert() {  # my dispatched deploys finishing: dialog-tier — a banner evaporates
+  salert() {  # my dispatched deploys finishing: sticky-tier — a banner evaporates
               # while you look away, and a deploy landing is exactly the thing to miss
     if (( digest )); then
       digest_lines+=("$1 · $2")
       "$HOME/.dotfiles/scripts/notify-journal" prwatch digest "$1" "${2:-}" "${3:-}" 2>/dev/null || true
     else
-      notify_alert "$@"
+      notify_sticky "$@"
     fi
   }
   # clear last pass's quiet banner — quiet notifications live one sweep interval, tops

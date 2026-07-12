@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # SwiftBar plugin — build-status: shows in-progress build-and-test MAIN image builds,
-# my own dispatched deploy-v2 runs (`task release:staging|production VERSION=…`), AND
-# active prwatch watches (~/.cache/prwatch/tracking) in the menu bar. Badge 🔨×N while
-# building, +🚀 while one of my deploys is in flight, +👁N while watching, plain 🔨 when
+# my own dispatched deploy-v2 runs (`task release:staging|production VERSION=…`),
+# active prwatch watches (~/.cache/prwatch/tracking), and unacknowledged sticky
+# completions (~/.cache/prwatch/done — prwatch notify_sticky). Badge is ONE glyph,
+# most-urgent state: ✅ unacked done > 🚀 deploy > 🔨×N building > 👁N watching > 🔨
 # idle (SwiftBar renders an empty title as a [?] placeholder, so true hiding isn't an
 # option). Complements build-notify / the prwatch sweep (which fire the completion
-# desktop notifications); this is the in-flight glance.
+# desktop notifications); this is the in-flight glance + the can't-miss-it residue.
 #
 # No refreshOnOpen: the gh calls take seconds, and refreshOnOpen blocks the menu on
 # them. The 60s poll + prwatch's pokes (swiftbar://refreshplugin?name=build-status on
@@ -18,6 +19,17 @@
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 REPO="${BUILD_STATUS_REPO:-Loops-so/loops}"
+donedir="$HOME/.cache/prwatch/done"
+
+# click actions: acknowledge sticky ✅ completions (prwatch notify_sticky writes them)
+if [ "${1:-}" = "--ack" ]; then
+  rm -f "$donedir/$2.tsv"
+  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null; exit 0
+fi
+if [ "${1:-}" = "--ack-all" ]; then
+  rm -f "$donedir"/*.tsv
+  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null; exit 0
+fi
 
 elapsed() {  # ISO startedAt -> "Nm"
   [ -n "$1" ] || { echo "?"; return; }
@@ -54,10 +66,21 @@ for f in "$trackdir"/*.tsv; do
 done
 w=0; [ -n "$watches" ] && w=$(printf '%s' "$watches" | grep -c .)
 
+# unacknowledged sticky completions (deploy landed / explicit watch finished)
+dones=""
+for f in "$donedir"/*.tsv; do
+  [ -e "$f" ] || continue
+  IFS=$'\t' read -r dst dmsg durl _ < "$f"
+  dones="${dones}$(basename "$f" .tsv)"$'\t'"$dst"$'\t'"$dmsg"$'\t'"$durl"$'\n'
+done
+k=0; [ -n "$dones" ] && k=$(printf '%s' "$dones" | grep -c .)
+
 # ONE glyph in the menu bar, always — stacking glyphs reads as separate menu-bar items.
-# Overlapping states show the most urgent (deploy > main build > watches > idle); the
-# menu below lists everything regardless.
-if   [ "$d" -gt 1 ]; then badge="🚀×$d"
+# Overlapping states show the most urgent (unacked done > deploy > main build > watches
+# > idle); the menu below lists everything regardless.
+if   [ "$k" -gt 1 ]; then badge="✅×$k"
+elif [ "$k" -gt 0 ]; then badge="✅"
+elif [ "$d" -gt 1 ]; then badge="🚀×$d"
 elif [ "$d" -gt 0 ]; then badge="🚀"
 elif [ "$n" -gt 0 ]; then badge="🔨×$n"
 elif [ "$w" -gt 0 ]; then badge="👁$w"
@@ -81,6 +104,15 @@ if [ "$d" -gt 0 ]; then
   done <<< "$deploys"
 fi
 echo "---"
+if [ "$k" -gt 0 ]; then
+  while IFS=$'\t' read -r key dst dmsg durl; do
+    [ -n "$key" ] || continue
+    echo "${dst} ${dmsg} | href=${durl}"
+    echo "-- ✔ dismiss | bash=\"$0\" param1=--ack param2=${key} terminal=false"
+  done <<< "$dones"
+  echo "✔ clear all | bash=\"$0\" param1=--ack-all terminal=false"
+  echo "---"
+fi
 if [ "$w" -gt 0 ]; then
   while IFS=$'\t' read -r key wrepo wid wtitle wurl; do
     [ -n "$key" ] || continue
