@@ -11,6 +11,7 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from urllib.parse import parse_qs
 
@@ -45,6 +46,9 @@ def delta_tests(req, raw):
     }))
 
 
+_GATE_JOBS = {}  # branch → {"path": progress jsonl, "proc": Popen, "t0": epoch, "tip": sha at spawn}
+
+
 def gates(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
@@ -59,6 +63,19 @@ def gates(req, raw):
     cmd = [os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
     if d.get("fix", True):
         cmd.append("--fix")
+    # detach: spawn with a progress journal and return at once — the strip tails
+    # GET /gates-progress for live per-gate position instead of freezing for a tsc.
+    if d.get("detach"):
+        old = _GATE_JOBS.get(branch)
+        if old and old["proc"].poll() is None:
+            return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
+        path = os.path.join(
+            tempfile.gettempdir(),
+            f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
+        proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _GATE_JOBS[branch] = {"path": path, "proc": proc, "t0": time.time(), "tip": _tip(branch)}
+        return req._send(200, json.dumps({"ok": True, "started": True}))
     r = ctx.run(cmd)
     # stack-gates always prints a JSON verdict on stdout and exits 0
     try:
@@ -67,6 +84,36 @@ def gates(req, raw):
     except Exception:
         pass
     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+
+
+def gates_progress(req, u):
+    qs = parse_qs(u.query)
+    branch = (qs.get("branch") or [""])[0]
+    job = _GATE_JOBS.get(branch)
+    if not job:
+        return req._send(200, json.dumps({"running": False, "err": "no gates run for this branch"}))
+    events = []
+    try:
+        with open(job["path"]) as f:
+            for ln in f:
+                try:
+                    events.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    result = next((e for e in events if e.get("event") == "result"), None)
+    if result and result.get("ok"):
+        # green is recorded against the tip the run was spawned on — the tip may have
+        # moved since, and a verdict for a commit that no longer exists must not unlock push
+        _GREEN_GATES[branch] = job["tip"]
+    running = job["proc"].poll() is None
+    out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
+    if result:
+        out["result"] = {"ok": result.get("ok"), "gates": result.get("gates", []), "note": result.get("note")}
+    elif not running:
+        out["dead"] = True
+    return req._send(200, json.dumps(out))
 
 
 def _safe_remote(branch):

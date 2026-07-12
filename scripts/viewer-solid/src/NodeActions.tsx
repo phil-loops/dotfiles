@@ -171,12 +171,19 @@ export function NodeActions(props: {
   //
   // The motion narrates as a STEP STRIP (the wards pattern — dirty-sync incident): every
   // step visible, the failing one carrying its reason IN FULL, never truncated.
-  type SyncStep = { id: string; label: string; state: "idle" | "run" | "ok" | "skip" | "fail"; note?: string };
+  type SyncStep = { id: string; label: string; state: "idle" | "run" | "ok" | "skip" | "fail"; note?: string; startedAt?: number };
   const [syncSteps, setSyncSteps] = createSignal<SyncStep[] | null>(null);
   const [dirtGate, setDirtGate] = createSignal(false);      // paused on the dirt decision
   const [stashedRun, setStashedRun] = createSignal(false);  // a sync-stash to pop when the motion ends
+  // 1s heartbeat for the running-step elapsed counters — only strip rows that render a
+  // counter subscribe, so an idle header pays nothing for it.
+  const [nowTick, setNowTick] = createSignal(Date.now());
+  const tickTimer = setInterval(() => setNowTick(Date.now()), 1000);
+  onCleanup(() => clearInterval(tickTimer));
   const stepSet = (id: string, state: SyncStep["state"], note?: string) =>
-    setSyncSteps((s) => (s ?? []).map((x) => (x.id === id ? { ...x, state, note: note ?? x.note } : x)));
+    setSyncSteps((s) => (s ?? []).map((x) => (x.id === id
+      ? { ...x, state, note: note ?? x.note, startedAt: state === "run" ? (x.startedAt ?? Date.now()) : x.startedAt }
+      : x)));
   const beginSteps = () => {
     const steps: SyncStep[] = [{ id: "dirt", label: "working tree", state: "idle" }];
     if (props.health?.drifted) {
@@ -206,24 +213,55 @@ export function NodeActions(props: {
   // already passed, so re-syncs are instant. fix:false — a gate auto-fix that commits or
   // rebases would move the tip out from under the commit the route step just sealed.
   let gatesRun = 0;
+  type GatesVerdict = { ok?: boolean; cached?: boolean; started?: boolean; note?: string; gates?: { name: string; ok: boolean; summary?: string }[] };
+  type GateEvent = { event: string; gate?: string; ok?: boolean; ts?: number; gates?: string[] };
   const runPushGates = () => {
     const token = ++gatesRun;
-    stepSet("gates", "run", "typecheck + format — push unlocks when green");
-    post<{ ok?: boolean; cached?: boolean; gates?: { name: string; ok: boolean; summary?: string }[] }>(
-      "/gates", { branch: props.branch, fix: false, useCache: true },
-    )
+    stepSet("gates", "run", "starting — push unlocks when green");
+    const finalize = (g: GatesVerdict) => {
+      const parts = (g.gates ?? []).map((x) => `${x.name} ${x.ok ? "✓" : "✗"}`).join(" · ");
+      const fails = (g.gates ?? []).filter((x) => !x.ok && x.summary).map((x) => x.summary!.trim()).join("\n");
+      stepSet(
+        "gates",
+        g.ok ? "ok" : "fail",
+        g.ok
+          ? `${g.cached ? "already green for this commit" : parts || "green"} — push unlocked`
+          : `${parts} (advisory — the motion continues; push stays locked)${fails ? ":\n" + fails : ""}`,
+      );
+      preview.refetch();
+    };
+    // per-gate position from the run's progress journal: done gates carry their verdict,
+    // the running one its live seconds, the rest wait as dots.
+    const progressLine = (events: GateEvent[]): string => {
+      const plan = events.find((e) => e.event === "plan")?.gates ?? [];
+      const done = new Map(events.filter((e) => e.event === "done").map((e) => [e.gate, e.ok]));
+      const started = new Map(events.filter((e) => e.event === "start").map((e) => [e.gate, e.ts]));
+      const line = plan.map((g) => {
+        if (done.has(g)) return `${g} ${done.get(g) ? "✓" : "✗"}`;
+        const ts = started.get(g);
+        return ts ? `${g} ⟳ ${Math.max(0, Math.floor(Date.now() / 1000 - ts))}s` : `${g} ·`;
+      }).join(" · ");
+      return `${line || "running"} — push unlocks when green`;
+    };
+    const poll = () => setTimeout(async () => {
+      if (token !== gatesRun) return;
+      try {
+        const p = await fetch(withRepo("/gates-progress") + "?branch=" + encodeURIComponent(props.branch))
+          .then((r) => r.json() as Promise<{ running?: boolean; dead?: boolean; result?: GatesVerdict; events?: GateEvent[] }>);
+        if (token !== gatesRun) return;
+        if (p.result) return finalize(p.result);
+        if (p.dead) return stepSet("gates", "fail", "gates run died without a verdict — push stays locked");
+        stepSet("gates", "run", progressLine(p.events ?? []));
+        poll();
+      } catch {
+        poll(); // transient poll failure (server bounce) — keep tailing; the token bounds it
+      }
+    }, 1500);
+    post<GatesVerdict>("/gates", { branch: props.branch, fix: false, useCache: true, detach: true })
       .then((g) => {
         if (token !== gatesRun) return;
-        const parts = (g.gates ?? []).map((x) => `${x.name} ${x.ok ? "✓" : "✗"}`).join(" · ");
-        const fails = (g.gates ?? []).filter((x) => !x.ok && x.summary).map((x) => x.summary!.trim()).join("\n");
-        stepSet(
-          "gates",
-          g.ok ? "ok" : "fail",
-          g.ok
-            ? `${g.cached ? "already green for this commit" : parts || "green"} — push unlocked`
-            : `${parts} (advisory — the motion continues; push stays locked)${fails ? ":\n" + fails : ""}`,
-        );
-        preview.refetch();
+        if (g.started) return void poll();
+        finalize(g); // cached green answers inline; an older server ran the gates synchronously
       })
       .catch((e) => {
         if (token !== gatesRun) return;
@@ -908,6 +946,9 @@ export function NodeActions(props: {
                     {s.state === "ok" ? "✓" : s.state === "fail" ? "✗" : s.state === "run" ? "⟳" : s.state === "skip" ? "↷" : "·"}
                   </i>
                   {s.label}
+                  <Show when={s.state === "run" && s.startedAt && nowTick() - s.startedAt > 2500}>
+                    <span class="nh-step-s">{Math.floor((nowTick() - s.startedAt!) / 1000)}s</span>
+                  </Show>
                 </span>
               )}
             </For>

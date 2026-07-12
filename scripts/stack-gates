@@ -14,7 +14,12 @@ Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With 
 config, falls back to auto-detected defaults (tsgo if tsconfig.node.json exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
-  stack-gates [--branch <b>] [--fix]   run in the worktree of <b> if it has one, else cwd
+  stack-gates [--branch <b>] [--fix] [--progress <file>]
+                                       run in the worktree of <b> if it has one, else cwd
+
+--progress: append JSONL events to <file> as gates run — {"event":"plan","gates":[...]},
+then start/done per gate, then {"event":"result",...} mirroring stdout. Lets a caller
+that spawned this detached (srv/push.py /gates) show live per-gate progress.
 
 --fix: a red gate with a registered remediation (`stack-gates.fix "<name>::<cmd>"`, or a
 built-in) gets one fix attempt + re-check. The built-in format fix cascades stack-fmt
@@ -166,21 +171,35 @@ def main():
     if "--branch" in argv:
         i = argv.index("--branch")
         branch = argv[i + 1] if i + 1 < len(argv) else ""
+    progress_path = ""
+    if "--progress" in argv:
+        i = argv.index("--progress")
+        progress_path = argv[i + 1] if i + 1 < len(argv) else ""
 
     do_fix = "--fix" in argv
+
+    prog = open(progress_path, "w", buffering=1) if progress_path else None
+
+    def emit(obj):
+        if prog:
+            prog.write(json.dumps(obj) + "\n")
 
     cwd = worktree_of(branch, os.getcwd())
     gates = configured_gates(cwd) or default_gates(cwd)
     fixes = (configured_fixes(cwd) or default_fixes(cwd, branch)) if do_fix else {}
 
     if not gates:
-        print(json.dumps({"ok": True, "gates": [], "note": "no gates configured for this repo"}))
+        verdict = {"ok": True, "gates": [], "note": "no gates configured for this repo"}
+        emit({"event": "result", **verdict})
+        print(json.dumps(verdict))
         return 0
 
+    emit({"event": "plan", "gates": [name for name, _ in gates]})
     results = []
     all_ok = True
     for name, cmd in gates:
         t0 = time.time()
+        emit({"event": "start", "gate": name, "ts": t0})
         r = run(["bash", "-lc", cmd], cwd)
         ok = r.returncode == 0
         fixed = False
@@ -198,8 +217,11 @@ def main():
         if fixed:
             entry["fixed"] = True
         results.append(entry)
+        emit({"event": "done", "gate": name, "ok": ok, "ms": ms})
 
-    print(json.dumps({"ok": all_ok, "gates": results}))
+    verdict = {"ok": all_ok, "gates": results}
+    emit({"event": "result", **verdict})
+    print(json.dumps(verdict))
     return 0 if all_ok else 0   # always exit 0: the JSON carries the verdict; the caller reads ok
 
 
