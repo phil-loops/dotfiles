@@ -9,4 +9,4 @@ mcp-servers/*/node_modules/
 # …but these two are real hand-written skills that happen to share the prefix
 !.claude/skills/loops-restart/
 !.claude/skills/loops-preview/
-scripts/gh-to-nvim/.ext-key.pem
+scripts/gh-to-nvim/dist/

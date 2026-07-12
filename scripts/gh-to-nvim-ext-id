@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# gh-to-nvim-ext-id [prod|dev] — print the extension's Chrome ID(s).
+#   prod — from gh-to-nvim-key.pem (the CRX the policy force-installs)
+#   dev  — from the source dir's absolute path (what "Load unpacked" assigns,
+#          since manifest.json carries no "key")
+# No arg prints both, labeled.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+prod_id() {
+  openssl rsa -in "$here/gh-to-nvim-key.pem" -pubout -outform DER 2>/dev/null |
+    python3 -c "
+import hashlib, sys
+h = hashlib.sha256(sys.stdin.buffer.read()).hexdigest()[:32]
+print(''.join(chr(ord('a') + int(c, 16)) for c in h))
+"
+}
+
+dev_id() {
+  python3 -c "
+import hashlib
+h = hashlib.sha256('$here/gh-to-nvim'.encode()).hexdigest()[:32]
+print(''.join(chr(ord('a') + int(c, 16)) for c in h))
+"
+}
+
+case "${1:-both}" in
+  prod) prod_id ;;
+  dev) dev_id ;;
+  both)
+    echo "prod $(prod_id)"
+    echo "dev  $(dev_id)"
+    ;;
+  *) echo "usage: gh-to-nvim-ext-id [prod|dev]" >&2; exit 1 ;;
+esac
