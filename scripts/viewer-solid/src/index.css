@@ -845,6 +845,16 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 /* behind / restack / fresh are restack state, not identity — they recede until the row is hovered */
 .forest-trail { opacity: 0; transition: opacity 0.12s; }
 .forest-row:hover .forest-trail { opacity: 1; }
+/* a shipping row's next step — rank already orders the band, so the text stays quiet ink
+   (faint while it waits on others); ember marks ONLY the start-here row (never gold). */
+.forest-step { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
+.forest-step.wait { color: var(--ink-faint); }
+.forest-step.start { color: var(--ember); }
+.forest-step.start::before {
+  content: "start"; margin-right: 8px; padding: 1px 6px;
+  border: 1px solid var(--ember); border-radius: 8px; background: var(--ember-wash);
+  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ember);
+}
 /* lifecycle bands: the page's one grouping — what state the work is in, most urgent first */
 .forest-band-head { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--gold-deep); opacity: 0.85; margin: 16px 4px 7px; }
 .forest-band-head:first-child { margin-top: 2px; }

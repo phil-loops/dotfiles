@@ -4,6 +4,7 @@ import { deleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { leaf, mergedAgo, interestPips } from "./shared";
+import type { NextStep } from "./homeModel";
 import type { Project, Parked, PR } from "./types";
 
 // one forest row, shared by the priority tiers and the recently-merged fold. Metadata sits in
@@ -23,6 +24,7 @@ export function ForestRow(props: {
   dropAction: (p: Project) => Action;
   resolve: (name: string) => void;
   abort: (name: string) => void;
+  next?: { step: NextStep; start: boolean };
 }) {
   const stuck = () => props.parked()?.project === props.p.name;
   return (
@@ -97,6 +99,19 @@ export function ForestRow(props: {
                 </span>
               )}
             </Show>
+          </Match>
+          {/* the shipping row's next step (nextStep, homeModel) — subsumes the PR badge and
+              the behind trail (the dot still carries behind); ember when it's your move */}
+          <Match when={props.next}>
+            {(n) => (
+              <span
+                class="forest-step"
+                classList={{ start: n().start, wait: !n().step.yourMove }}
+                title={n().step.title}
+              >
+                {n().step.text}
+              </span>
+            )}
           </Match>
           <Match when={props.p.behind > 0}>
             <span class="forest-trail">⟳ {props.p.behind} behind</span>
