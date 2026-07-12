@@ -81,7 +81,7 @@ def ship(req, raw):
     if not members:
         return req._send(400, json.dumps({"ok": False, "err": "no live branches in this forest"}))
 
-    published = sync._open_pr_heads()
+    published = sync._open_pr_heads(fresh=True)
     prd = [b for b in members if b in published]
     if prd:
         return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — ship rebases, and pushed history is never rewritten"}))

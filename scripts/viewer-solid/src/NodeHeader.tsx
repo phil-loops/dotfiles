@@ -1,8 +1,9 @@
-import { Show } from "solid-js";
+import { Show, createSignal } from "solid-js";
 import { Link, forestRepo, type ViewerLocation } from "./router";
 import { leaf, interestPips } from "./shared";
 import { canMutate } from "./provider";
 import { chatToTmux } from "./chatDrawer";
+import { SessionPicker } from "./SessionPicker";
 import { DivergedDetailPanel, type DivergedDetail } from "./DivergedDetailPanel";
 import { NodeActions } from "./NodeActions";
 import type { NodeData, FileDiff } from "./types";
@@ -38,6 +39,7 @@ export function NodeHeader(props: {
   blessedOf: (f: FileDiff) => boolean;
   setShowChats: (v: boolean) => void;
 }) {
+  const [chatPick, setChatPick] = createSignal(false);
   return (
         <header class="node-head">
           {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
@@ -142,9 +144,17 @@ export function NodeHeader(props: {
               />
             </Show>
             <Show when={canMutate}>
-              <button class="icon-btn" onClick={() => chatToTmux({ branch: props.active() })} title="chat about this whole branch — opens an interactive claude beside your tmux panes">
-                ✦
-              </button>
+              <span class="sp-anchor">
+                <button class="icon-btn" onClick={() => setChatPick((v) => !v)} title="chat about this whole branch — pick a live claude session or a new pane beside you">
+                  ✦
+                </button>
+                <Show when={chatPick()}>
+                  <SessionPicker
+                    onClose={() => setChatPick(false)}
+                    onPick={(session) => { setChatPick(false); chatToTmux({ branch: props.active(), session }); }}
+                  />
+                </Show>
+              </span>
             </Show>
           </div>
         </header>

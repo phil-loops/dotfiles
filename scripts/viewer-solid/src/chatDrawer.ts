@@ -53,12 +53,22 @@ export const drawerMinimized = minimized;
 // panes — the buttons launch an interactive claude there (split into the active window,
 // even-horizontal columns), seeded exactly like a drawer chat. Fire-and-forget; the pane
 // appearing is the feedback. The drawer stays for streamed edit-actions + running threads.
-export const chatToTmux = (body: { branch?: string; project?: string; path?: string; patch?: string }) =>
+// `session` (a live session id from /claude-sessions) redirects the seed: instead of spawning
+// a pane, the one-liner is drafted (never submitted) into that session's composer.
+export const chatToTmux = (body: { branch?: string; project?: string; path?: string; patch?: string; session?: string }) =>
   fetch("/chat-tmux", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   }).then((r) => r.json() as Promise<{ ok?: boolean; err?: string }>);
+
+// The live Claude Code sessions the ✦ picker can draft into (presence registry, pane-resolved).
+export type LiveSession = {
+  session_id: string; repo_name: string; branch: string; area: string;
+  pane: string; addr: string; idle_s: number;
+};
+export const claudeSessions = () =>
+  fetch("/claude-sessions").then((r) => r.json() as Promise<{ sessions: LiveSession[] }>);
 
 export const openChat = (t: ChatTarget) => {
   setTarget(t);

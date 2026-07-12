@@ -4,6 +4,7 @@ import { ColorSchemeType } from "diff2html/lib/types";
 import { withRepo, canMutate } from "./provider";
 import { isBlessed } from "./shared";
 import { threadWorking, threadUnseenDone, threadMsgCount } from "./chatStore";
+import { SessionPicker } from "./SessionPicker";
 import type { FileDiff, Commit } from "./types";
 
 function patchLineCounts(patch: string): { add: number; del: number } {
@@ -21,7 +22,7 @@ export function DirtyRail(props: {
   branch: string;
   bless: { mutate: (file: string) => void };
   onCommit: (receipt?: string) => void;
-  onChat: (f: FileDiff) => void;
+  onChat: (f: FileDiff, session?: string) => void;
 }) {
   const [msg, setMsg] = createSignal("");
   const [err, setErr] = createSignal("");
@@ -125,7 +126,7 @@ function DirtFile(props: {
   f: { path: string; code: string; patch: string };
   branch: string;
   bless: { mutate: (file: string) => void };
-  onChat: (f: FileDiff) => void;
+  onChat: (f: FileDiff, session?: string) => void;
   onDone: (receipt?: string) => void;
 }) {
   const [form, setForm] = createSignal(false);
@@ -244,7 +245,7 @@ export function FileEntry(props: {
   bless: { mutate: (file: string) => void };
   branch: string;
   readOnly?: boolean;
-  onChat: (f: FileDiff) => void;
+  onChat: (f: FileDiff, session?: string) => void;
 }) {
   const [foil, setFoil] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
@@ -261,6 +262,7 @@ export function FileEntry(props: {
   createEffect(on(blessed, (b) => setCollapsed(b), { defer: true }));
   const chatWorking = () => threadWorking(props.branch, props.file.path);
   const chatUnseen = () => threadUnseenDone(props.branch, props.file.path);
+  const [pick, setPick] = createSignal(false);
   const doBless = () => {
     setFoil(true); // play the foil on the click; the steady gold lands as the override flips
     props.bless.mutate(props.file.path);
@@ -333,20 +335,28 @@ export function FileEntry(props: {
           </span>
         </Show>
         <Show when={canMutate}>
-          <button
-            class="file-act chat-act"
-            classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
-            title={
-              chatWorking()
-                ? "Claude is still answering on this file — click to watch"
-                : chatUnseen()
-                  ? "Claude finished while the drawer was closed — click to read"
-                  : "chat about this file with Claude — streamed right here"
-            }
-            onClick={() => props.onChat(props.file)}
-          >
-            {chatWorking() ? "✦ working…" : chatUnseen() ? "✦ done ✓" : "✦ chat"}
-          </button>
+          <span class="sp-anchor">
+            <button
+              class="file-act chat-act"
+              classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
+              title={
+                chatWorking()
+                  ? "Claude is still answering on this file — click to watch"
+                  : chatUnseen()
+                    ? "Claude finished while the drawer was closed — click to read"
+                    : "chat about this file with Claude — pick a live session or a new pane"
+              }
+              onClick={() => setPick((v) => !v)}
+            >
+              {chatWorking() ? "✦ working…" : chatUnseen() ? "✦ done ✓" : "✦ chat"}
+            </button>
+            <Show when={pick()}>
+              <SessionPicker
+                onClose={() => setPick(false)}
+                onPick={(session) => { setPick(false); props.onChat(props.file, session); }}
+              />
+            </Show>
+          </span>
           <Show when={!props.readOnly}>
             <button class="bless-btn" disabled={blessed()} onClick={doBless}>
               {blessed() ? "blessed" : "bless ✦"}

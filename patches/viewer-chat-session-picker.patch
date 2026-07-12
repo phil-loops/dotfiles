@@ -1,0 +1,446 @@
+diff --git a/scripts/claude-say b/scripts/claude-say
+index dc3b797..a864b84 100755
+--- a/scripts/claude-say
++++ b/scripts/claude-say
+@@ -13,6 +13,8 @@ still accepted as a no-op for muscle memory.
+   • a substring of what it's working on (recent files / branch / area)
+                            claude-say goal-attachment "…"
+ Empty, --list, ambiguous, or no-match → prints the addressable sessions.
++--json (no <who>) → the same list as JSON with each session's tmux pane + address,
++for machine callers (the viewer's ✦ session picker).
+ 
+ The current session is excluded (you can't message yourself).
+ """
+@@ -114,6 +116,26 @@ def main():
+     me = self_pid()
+     others = [r for r in live_sessions() if r.get("pid") != me]
+ 
++    if "--json" in flags and not args:
++        out = []
++        for r in sorted(others, key=lambda r: -(r.get("last_active") or 0)):
++            pane = pane_of(r)
++            if not pane:   # no pane = undeliverable; the picker only lists reachable sessions
++                continue
++            addr = sh(["tmux", "display-message", "-p", "-t", pane,
++                       "#{session_name}:#{window_index}.#{pane_index} · #{window_name}"]).strip()
++            out.append({
++                "session_id": r.get("session_id", ""),
++                "repo_name": r.get("repo_name", ""),
++                "branch": r.get("branch", "") or "",
++                "area": area(r),
++                "pane": pane,
++                "addr": addr,
++                "idle_s": max(0, int(time.time()) - int(r.get("last_active") or 0)),
++            })
++        print(json.dumps(out))
++        return 0
++
+     if not args or args[0] == "--list":
+         print("addressable sessions:")
+         show(others)
+diff --git a/scripts/srv/assist.py b/scripts/srv/assist.py
+index 70a461d..42c937a 100644
+--- a/scripts/srv/assist.py
++++ b/scripts/srv/assist.py
+@@ -142,23 +142,45 @@ def stream(req, raw):
+     chat._subscribe(req, job, 0)
+ 
+ 
++def claude_sessions(req):
++    """GET /claude-sessions — the live Claude Code sessions a seed can be drafted into
++    (presence registry, pane-resolved), for the ✦ buttons' session picker."""
++    r = subprocess.run([os.path.join(ctx.SCRIPTS, "claude-say"), "--json"],
++                       capture_output=True, text=True)
++    try:
++        sessions = json.loads(r.stdout or "[]")
++    except ValueError:
++        sessions = []
++    req._send(200, json.dumps({"sessions": sessions}))
++
++
+ def chat_tmux(req, raw):
+-    """POST /chat-tmux {branch, project?, path?, patch?} — the ✦ buttons' target: the same
+-    seeded context, straight into an INTERACTIVE claude beside Phil's tmux panes
++    """POST /chat-tmux {branch, project?, path?, patch?, session?} — the ✦ buttons' target: the
++    same seeded context, straight into an INTERACTIVE claude beside Phil's tmux panes
+     (STACK_CLAUDE_PLACE=join → split the active window, even-horizontal columns).
+     The heavy seed (house style + full diff + branch state) is written to a tmp .txt file and
+     only a one-line "read it, then answer:" reference is DRAFTED into the input unsent
+     (STACK_CLAUDE_DRAFT) — so nothing large is pasted into the composer and Phil just adds his
+     own question. The seed carries no read-only clause or action menu since this session can act.
++    With `session` (a live session id from /claude-sessions) no pane is spawned: the same
++    one-liner is drafted into THAT session's composer via claude-say --draft — never submitted,
++    so it can't hijack whatever that session is mid-way through.
+     The drawer stays for streamed edit-actions and running threads."""
+     d = json.loads(raw or "{}")
+     branch = (d.get("branch") or "").strip()
+     project = (d.get("project") or "").strip()
+     path = (d.get("path") or "").strip()
++    session = (d.get("session") or "").strip()
+     if not (branch or project):
+         req._send(400, json.dumps({"ok": False, "err": "need a branch or project"}))
+         return
+-    if project:
++    if project and path:
++        # a file card on the ~integration ghost: seed against the project's real integrator
++        # branch — "~integration" is a viewer sentinel no git command can resolve.
++        target = chat._project_integrator(project) or project
++        seed = prompts.file_chat(target, path, d.get("patch", ""), "", interactive=True)
++        key = f"proj-{project}--{path}"
++    elif project:
+         seed = prompts.project_chat(project, chat._project_seed(project), "", interactive=True)
+         target = chat._project_integrator(project) or branch or project
+         key = f"proj-{project}"
+@@ -175,10 +197,14 @@ def chat_tmux(req, raw):
+     seed_path = f"/tmp/stack-claude-seed-{key.replace('/', '~')}.txt"
+     with open(seed_path, "w") as f:
+         f.write(seed)
+-    prompt = f"Read {seed_path} — it has this chat's diff, the house-style bar, and the branch state. Then answer:\n\n"
+-    env = dict(os.environ, STACK_CLAUDE_PLACE="join", STACK_CLAUDE_DRAFT="1")
+-    r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), target], input=prompt,
+-                       env=env, cwd=ctx.repo_cwd(), capture_output=True, text=True)
++    prompt = f"Read {seed_path} — it has this chat's diff, the house-style bar, and the branch state. Then answer:"
++    if session:
++        r = subprocess.run([os.path.join(ctx.SCRIPTS, "claude-say"), session, prompt, "--draft"],
++                           cwd=ctx.repo_cwd(), capture_output=True, text=True)
++    else:
++        env = dict(os.environ, STACK_CLAUDE_PLACE="join", STACK_CLAUDE_DRAFT="1")
++        r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), target], input=prompt + "\n\n",
++                           env=env, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+     ok = r.returncode == 0
+     req._send(200 if ok else 500,
+               json.dumps({"ok": ok, "out": (r.stdout or "").strip(), "err": (r.stderr or "").strip()}))
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 398b24e..a782dae 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -287,6 +287,7 @@ class H(BaseHTTPRequestHandler):
+         elif u.path == "/file":           return review.file(self, u)
+         elif u.path == "/commits":        return review.commits(self, u)
+         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
++        elif u.path == "/claude-sessions": return assist.claude_sessions(self)   # live sessions for the ✦ picker
+         elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
+         elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
+         else:
+diff --git a/scripts/viewer-solid/src/FileRail.tsx b/scripts/viewer-solid/src/FileRail.tsx
+index 90f85bf..2beded3 100644
+--- a/scripts/viewer-solid/src/FileRail.tsx
++++ b/scripts/viewer-solid/src/FileRail.tsx
+@@ -4,6 +4,7 @@ import { ColorSchemeType } from "diff2html/lib/types";
+ import { withRepo, canMutate } from "./provider";
+ import { isBlessed } from "./shared";
+ import { threadWorking, threadUnseenDone, threadMsgCount } from "./chatStore";
++import { SessionPicker } from "./SessionPicker";
+ import type { FileDiff, Commit } from "./types";
+ 
+ function patchLineCounts(patch: string): { add: number; del: number } {
+@@ -21,7 +22,7 @@ export function DirtyRail(props: {
+   branch: string;
+   bless: { mutate: (file: string) => void };
+   onCommit: (receipt?: string) => void;
+-  onChat: (f: FileDiff) => void;
++  onChat: (f: FileDiff, session?: string) => void;
+ }) {
+   const [msg, setMsg] = createSignal("");
+   const [err, setErr] = createSignal("");
+@@ -125,7 +126,7 @@ function DirtFile(props: {
+   f: { path: string; code: string; patch: string };
+   branch: string;
+   bless: { mutate: (file: string) => void };
+-  onChat: (f: FileDiff) => void;
++  onChat: (f: FileDiff, session?: string) => void;
+   onDone: (receipt?: string) => void;
+ }) {
+   const [form, setForm] = createSignal(false);
+@@ -244,7 +245,7 @@ export function FileEntry(props: {
+   bless: { mutate: (file: string) => void };
+   branch: string;
+   readOnly?: boolean;
+-  onChat: (f: FileDiff) => void;
++  onChat: (f: FileDiff, session?: string) => void;
+ }) {
+   const [foil, setFoil] = createSignal(false);
+   const [copied, setCopied] = createSignal(false);
+@@ -261,6 +262,7 @@ export function FileEntry(props: {
+   createEffect(on(blessed, (b) => setCollapsed(b), { defer: true }));
+   const chatWorking = () => threadWorking(props.branch, props.file.path);
+   const chatUnseen = () => threadUnseenDone(props.branch, props.file.path);
++  const [pick, setPick] = createSignal(false);
+   const doBless = () => {
+     setFoil(true); // play the foil on the click; the steady gold lands as the override flips
+     props.bless.mutate(props.file.path);
+@@ -333,20 +335,28 @@ export function FileEntry(props: {
+           </span>
+         </Show>
+         <Show when={canMutate}>
+-          <button
+-            class="file-act chat-act"
+-            classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
+-            title={
+-              chatWorking()
+-                ? "Claude is still answering on this file — click to watch"
+-                : chatUnseen()
+-                  ? "Claude finished while the drawer was closed — click to read"
+-                  : "chat about this file with Claude — streamed right here"
+-            }
+-            onClick={() => props.onChat(props.file)}
+-          >
+-            {chatWorking() ? "✦ working…" : chatUnseen() ? "✦ done ✓" : "✦ chat"}
+-          </button>
++          <span class="sp-anchor">
++            <button
++              class="file-act chat-act"
++              classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
++              title={
++                chatWorking()
++                  ? "Claude is still answering on this file — click to watch"
++                  : chatUnseen()
++                    ? "Claude finished while the drawer was closed — click to read"
++                    : "chat about this file with Claude — pick a live session or a new pane"
++              }
++              onClick={() => setPick((v) => !v)}
++            >
++              {chatWorking() ? "✦ working…" : chatUnseen() ? "✦ done ✓" : "✦ chat"}
++            </button>
++            <Show when={pick()}>
++              <SessionPicker
++                onClose={() => setPick(false)}
++                onPick={(session) => { setPick(false); props.onChat(props.file, session); }}
++              />
++            </Show>
++          </span>
+           <Show when={!props.readOnly}>
+             <button class="bless-btn" disabled={blessed()} onClick={doBless}>
+               {blessed() ? "blessed" : "bless ✦"}
+diff --git a/scripts/viewer-solid/src/ForestOverview.tsx b/scripts/viewer-solid/src/ForestOverview.tsx
+index 2cf3f74..bde531d 100644
+--- a/scripts/viewer-solid/src/ForestOverview.tsx
++++ b/scripts/viewer-solid/src/ForestOverview.tsx
+@@ -8,6 +8,7 @@ import { overviewView, setOverviewView } from "./overviewView";
+ import { ForestMap } from "./ForestMap";
+ import MergeStory from "./MergeStory";
+ import { chatToTmux } from "./chatDrawer";
++import { SessionPicker } from "./SessionPicker";
+ import type { Purpose } from "./types";
+ 
+ // ── forest overview: the map as the landing hero (no node selected) ──────
+@@ -338,6 +339,7 @@ export function ForestOverview() {
+     setTip({ text: p.thesis, x: r.right + 12, y: r.top });
+   };
+   const hideTip = () => { tipBranch = null; setTip(null); };
++  const [chatPick, setChatPick] = createSignal(false);
+ 
+   return (
+     <div class="forest-overview">
+@@ -359,11 +361,19 @@ export function ForestOverview() {
+             <button classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
+           </div>
+           <Show when={canMutate}>
+-            <button
+-              class="fo-chat"
+-              title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
+-              onClick={() => chatToTmux({ project: project() })}
+-            >✦ chat</button>
++            <span class="sp-anchor">
++              <button
++                class="fo-chat"
++                title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
++                onClick={() => setChatPick((v) => !v)}
++              >✦ chat</button>
++              <Show when={chatPick()}>
++                <SessionPicker
++                  onClose={() => setChatPick(false)}
++                  onPick={(session) => { setChatPick(false); chatToTmux({ project: project(), session }); }}
++                />
++              </Show>
++            </span>
+             <ShipButton project={project()} />
+             <StageButton project={project()} />
+           </Show>
+diff --git a/scripts/viewer-solid/src/NodeDetail.tsx b/scripts/viewer-solid/src/NodeDetail.tsx
+index 8694e00..96ce1dd 100644
+--- a/scripts/viewer-solid/src/NodeDetail.tsx
++++ b/scripts/viewer-solid/src/NodeDetail.tsx
+@@ -380,7 +380,8 @@ export function NodeDetail() {
+                 <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
+                   {/* off-parent bases are view-only — bless keys on the parent...child patch-id, not the shown diff */}
+                   <For each={data().files.filter(matchFilter)}>
+-                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost() || base() !== ""} onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })} />}
++                    {/* the ghost has no real branch — send the project so the seed resolves the integrator ref */}
++                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost() || base() !== ""} onChat={(file, session) => chatToTmux(isGhost() ? { project: project(), path: file.path, patch: file.patch, session } : { branch: active(), path: file.path, patch: file.patch, session })} />}
+                   </For>
+                 </Show>
+               </Show>
+@@ -404,7 +405,7 @@ export function NodeDetail() {
+                   dirtReceiptT = setTimeout(() => setDirtReceipt(null), 8000);
+                 }
+               }}
+-              onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })}
++              onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })}
+             />
+           </Show>
+           <Show when={dirtReceipt()}>
+diff --git a/scripts/viewer-solid/src/NodeHeader.tsx b/scripts/viewer-solid/src/NodeHeader.tsx
+index 611fc7c..0b4b10a 100644
+--- a/scripts/viewer-solid/src/NodeHeader.tsx
++++ b/scripts/viewer-solid/src/NodeHeader.tsx
+@@ -1,8 +1,9 @@
+-import { Show } from "solid-js";
++import { Show, createSignal } from "solid-js";
+ import { Link, forestRepo, type ViewerLocation } from "./router";
+ import { leaf, interestPips } from "./shared";
+ import { canMutate } from "./provider";
+ import { chatToTmux } from "./chatDrawer";
++import { SessionPicker } from "./SessionPicker";
+ import { DivergedDetailPanel, type DivergedDetail } from "./DivergedDetailPanel";
+ import { NodeActions } from "./NodeActions";
+ import type { NodeData, FileDiff } from "./types";
+@@ -38,6 +39,7 @@ export function NodeHeader(props: {
+   blessedOf: (f: FileDiff) => boolean;
+   setShowChats: (v: boolean) => void;
+ }) {
++  const [chatPick, setChatPick] = createSignal(false);
+   return (
+         <header class="node-head">
+           {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
+@@ -142,9 +144,17 @@ export function NodeHeader(props: {
+               />
+             </Show>
+             <Show when={canMutate}>
+-              <button class="icon-btn" onClick={() => chatToTmux({ branch: props.active() })} title="chat about this whole branch — opens an interactive claude beside your tmux panes">
+-                ✦
+-              </button>
++              <span class="sp-anchor">
++                <button class="icon-btn" onClick={() => setChatPick((v) => !v)} title="chat about this whole branch — pick a live claude session or a new pane beside you">
++                  ✦
++                </button>
++                <Show when={chatPick()}>
++                  <SessionPicker
++                    onClose={() => setChatPick(false)}
++                    onPick={(session) => { setChatPick(false); chatToTmux({ branch: props.active(), session }); }}
++                  />
++                </Show>
++              </span>
+             </Show>
+           </div>
+         </header>
+diff --git a/scripts/viewer-solid/src/SessionPicker.tsx b/scripts/viewer-solid/src/SessionPicker.tsx
+new file mode 100644
+index 0000000..afe9c9c
+--- /dev/null
++++ b/scripts/viewer-solid/src/SessionPicker.tsx
+@@ -0,0 +1,85 @@
++import { createResource, For, Show, onMount, onCleanup } from "solid-js";
++import { claudeSessions } from "./chatDrawer";
++
++// The ✦ buttons' destination picker (Phil, 2026-07-11): a seeded chat shouldn't always spawn a
++// fresh pane — he keeps his Claude sessions parked in one tmux window and wants the seed drafted
++// into one of THEM. The popover lists every live session (from /claude-sessions) plus the old
++// "new pane" spawn as the first row. Render it inside a `position: relative` wrapper
++// (`.sp-anchor`), gated by the caller's open signal; picking or clicking away closes it.
++// onPick(undefined) = new pane; onPick(session_id) = draft into that session.
++export function SessionPicker(props: { onPick: (session?: string) => void; onClose: () => void }) {
++  const [sessions] = createResource(async () => (await claudeSessions()).sessions ?? []);
++  let el: HTMLDivElement | undefined;
++  const away = (e: MouseEvent) => {
++    if (el && !el.contains(e.target as Node)) {
++      props.onClose();
++    }
++  };
++  const key = (e: KeyboardEvent) => {
++    if (e.key === "Escape") {
++      e.stopPropagation();
++      props.onClose();
++    }
++  };
++  onMount(() => {
++    // capture phase, registered after the opening click's mousedown already fired — so the
++    // very next press anywhere outside dismisses, even on stopPropagation-happy targets.
++    document.addEventListener("mousedown", away, true);
++    document.addEventListener("keydown", key, true);
++  });
++  onCleanup(() => {
++    document.removeEventListener("mousedown", away, true);
++    document.removeEventListener("keydown", key, true);
++  });
++  const idle = (s: number) => (s < 60 ? "now" : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`);
++  return (
++    <div class="session-pop" ref={el}>
++      <div class="sp-head">seed into…</div>
++      <button class="sp-item" onClick={() => props.onPick(undefined)}>
++        <span class="sp-target">＋ new pane</span>
++        <span class="sp-name">split beside you</span>
++      </button>
++      <Show when={sessions()} fallback={<div class="sp-empty">finding live sessions…</div>}>
++        {(list) => (
++          <>
++            <For each={list()}>
++              {(s) => (
++                <button class="sp-item" onClick={() => props.onPick(s.session_id)}>
++                  <span class="sp-target">{s.repo_name}</span>
++                  <span class="sp-name">{s.branch || s.area}</span>
++                  <span class="sp-where">{s.addr || s.pane} · {idle(s.idle_s)}</span>
++                </button>
++              )}
++            </For>
++            <Show when={!list().length}>
++              <div class="sp-empty">no other live sessions — new pane it is</div>
++            </Show>
++          </>
++        )}
++      </Show>
++      <style>{SP_CSS}</style>
++    </div>
++  );
++}
++
++const SP_CSS = `
++.sp-anchor { position: relative; display: inline-flex; }
++.session-pop {
++  position: absolute; top: calc(100% + 6px); right: 0; z-index: 62; width: 260px;
++  padding: 5px; border-radius: 8px; border: 1px solid var(--line, #3a332b);
++  background: var(--raised, #1b1815); box-shadow: 0 12px 32px rgba(0,0,0,.5);
++  display: flex; flex-direction: column; gap: 1px; cursor: default; text-align: left;
++  font-size: 11.5px; font-style: normal; letter-spacing: normal; text-transform: none;
++}
++.sp-head { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint, #6f675a); padding: 4px 8px 5px; }
++.sp-item {
++  display: flex; align-items: baseline; gap: 8px; width: 100%;
++  font: inherit; text-align: left; cursor: pointer;
++  color: var(--ink, #e9e2d4); background: transparent; border: 0; border-radius: 5px; padding: 6px 8px;
++}
++.sp-item:hover { background: var(--panel, #221e1a); }
++.sp-target { color: var(--patina, #8a9a6b); flex: none; }
++.sp-name { color: var(--dim, #a89e8c); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++.sp-where { margin-left: auto; flex: none; color: var(--faint, #6f675a); font-size: 10px; white-space: nowrap; }
++.sp-empty { font-size: 10.5px; color: var(--faint, #6f675a); padding: 4px 8px 6px; font-style: italic; }
++`;
+diff --git a/scripts/viewer-solid/src/chatDrawer.ts b/scripts/viewer-solid/src/chatDrawer.ts
+index 14ad939..ad8d57a 100644
+--- a/scripts/viewer-solid/src/chatDrawer.ts
++++ b/scripts/viewer-solid/src/chatDrawer.ts
+@@ -53,13 +53,23 @@ export const drawerMinimized = minimized;
+ // panes — the buttons launch an interactive claude there (split into the active window,
+ // even-horizontal columns), seeded exactly like a drawer chat. Fire-and-forget; the pane
+ // appearing is the feedback. The drawer stays for streamed edit-actions + running threads.
+-export const chatToTmux = (body: { branch?: string; project?: string; path?: string; patch?: string }) =>
++// `session` (a live session id from /claude-sessions) redirects the seed: instead of spawning
++// a pane, the one-liner is drafted (never submitted) into that session's composer.
++export const chatToTmux = (body: { branch?: string; project?: string; path?: string; patch?: string; session?: string }) =>
+   fetch("/chat-tmux", {
+     method: "POST",
+     headers: { "Content-Type": "application/json" },
+     body: JSON.stringify(body),
+   }).then((r) => r.json() as Promise<{ ok?: boolean; err?: string }>);
+ 
++// The live Claude Code sessions the ✦ picker can draft into (presence registry, pane-resolved).
++export type LiveSession = {
++  session_id: string; repo_name: string; branch: string; area: string;
++  pane: string; addr: string; idle_s: number;
++};
++export const claudeSessions = () =>
++  fetch("/claude-sessions").then((r) => r.json() as Promise<{ sessions: LiveSession[] }>);
++
+ export const openChat = (t: ChatTarget) => {
+   setTarget(t);
+   setMinimized(false);

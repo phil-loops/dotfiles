@@ -435,7 +435,7 @@ def _reseat_walk(parent, results):
     # top-down: seat each child on its (possibly just-moved) parent, then descend. A subtree
     # whose root conflicts is left alone — its own recorded cuts stay valid for a manual pass.
     parent_tip = ctx.run(["git", "rev-parse", parent]).stdout.strip()
-    published = sync._open_pr_heads()
+    published = sync._open_pr_heads(fresh=True)
     for child in _children_of(parent):
         if _seated(parent, child):
             results.append({"branch": child, "status": "seated"})

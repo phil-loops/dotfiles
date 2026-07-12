@@ -287,6 +287,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
+        elif u.path == "/claude-sessions": return assist.claude_sessions(self)   # live sessions for the ✦ picker
         elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
         elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
         else:
@@ -481,7 +482,20 @@ def watcher():
             pass
 
 
+def warm():
+    # prune dead worktree registrations (each rotted entry costs stack-forest a subprocess on
+    # every /node sweep), then pre-sweep the gh PR caches so a session's first /forest-health
+    # and /syncs never block on a cold multi-second gh call.
+    srvctx.run(["git", "worktree", "prune"])
+    try:
+        sync._pr_state_map()
+        sync._open_pr_heads()
+    except Exception:
+        pass
+
+
 _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()   # seed so the first /events stream sees real values
+threading.Thread(target=warm, daemon=True).start()
 threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()

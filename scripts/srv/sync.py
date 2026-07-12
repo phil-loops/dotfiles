@@ -57,38 +57,79 @@ def _deploy_critical(branch):
 
 # ── published = has an OPEN PR (on the fork; origin=Loops-so has none) ────────
 _PR_TTL = 30.0
-_pr_cache = {"at": -1e9, "heads": set()}
+_PR_FRESH_TTL = 5.0   # fresh=True reuses a sweep this recent (dedupes a reseat walk's per-parent checks)
+_pr_cache = {"at": -1e9, "heads": None}   # heads=None → never swept
 _pr_lock = threading.Lock()
+_pr_refreshing = False
 
 
-def _open_pr_heads():
+def _pr_slugs():
+    # owner/repo slugs resolved in the CALLING thread — ctx.run's repo binding is
+    # thread-local, so the background refresher can't resolve them itself.
+    slugs = []
+    for remote in ("origin", "phil-loops"):
+        url = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
+        m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url) if url else None
+        if m:
+            slugs.append(m.group(1))
+    return slugs
+
+
+def _sweep_pr_heads(slugs):
+    """One gh sweep across both remotes, in parallel. None = total gh outage."""
+    def one(slug):
+        try:
+            out = ctx.run(["gh", "pr", "list", "-R", slug, "--state", "open",
+                           "--json", "headRefName", "--limit", "300"]).stdout
+            return {pr["headRefName"] for pr in json.loads(out or "[]")}
+        except Exception:
+            return None
+    heads, got_any = set(), False
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        for res in ex.map(one, slugs):
+            if res is not None:
+                heads |= res
+                got_any = True
+    return heads if got_any else None
+
+
+def _store_pr_heads(swept):
+    with _pr_lock:
+        if swept is not None:
+            _pr_cache["heads"] = swept   # keep last-good heads on a full gh outage
+        elif _pr_cache["heads"] is None:
+            _pr_cache["heads"] = set()   # cache empty on outage so we don't re-block every call
+        _pr_cache["at"] = time.monotonic()
+        return _pr_cache["heads"]
+
+
+def _refresh_pr_heads(slugs):
+    global _pr_refreshing
+    try:
+        _store_pr_heads(_sweep_pr_heads(slugs))
+    finally:
+        _pr_refreshing = False
+
+
+def _open_pr_heads(fresh=False):
     """Branch names with an OPEN PR, unioned across ORIGIN and the phil-loops fork —
     Phil's real PRs live on origin (Loops-so), the fork is the automation surface;
     missing either side lets prep/squash rewrite a published branch (bit us on #9405).
-    Cached ~30s + locked so the 8-way /syncs batch fires at most one gh sweep."""
-    if time.monotonic() - _pr_cache["at"] < _PR_TTL:
-        return _pr_cache["heads"]
+    Stale-while-revalidate: a fresh set serves with no gh call, a stale one serves
+    immediately and re-sweeps in the background; only a never-swept cache blocks once.
+    fresh=True (the mutating callers: sync/prep/push/ship/reseat guards) blocks on a
+    live sweep unless one just landed — never rewrite a branch on a stale head-set."""
+    global _pr_refreshing
+    now = time.monotonic()
     with _pr_lock:
-        if time.monotonic() - _pr_cache["at"] < _PR_TTL:
-            return _pr_cache["heads"]
-        heads = set()
-        got_any = False
-        for remote in ("origin", "phil-loops"):
-            try:
-                url = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
-                m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
-                if not m:
-                    continue
-                out = ctx.run(["gh", "pr", "list", "-R", m.group(1), "--state", "open",
-                               "--json", "headRefName", "--limit", "300"]).stdout
-                heads |= {pr["headRefName"] for pr in json.loads(out or "[]")}
-                got_any = True
-            except Exception:
-                pass
-        if got_any:
-            _pr_cache["heads"] = heads   # keep last-good heads on a full gh outage
-        _pr_cache["at"] = time.monotonic()
-    return _pr_cache["heads"]
+        heads, age = _pr_cache["heads"], now - _pr_cache["at"]
+        if heads is not None and (age < _PR_FRESH_TTL if fresh else True):
+            if not fresh and age >= _PR_TTL and not _pr_refreshing:
+                _pr_refreshing = True
+                threading.Thread(target=_refresh_pr_heads, args=(_pr_slugs(),), daemon=True).start()
+            return heads
+    # cold cache, or a mutator demanding freshness: block on one sweep
+    return _store_pr_heads(_sweep_pr_heads(_pr_slugs()))
 
 
 def _shared(branch):
@@ -106,7 +147,7 @@ def _shared(branch):
     return ("gone" if track == "[gone]" else "local"), 0
 
 
-def state(branch):
+def state(branch, fresh_prs=False):
     """Fork-staleness of a branch vs origin/main — the signal behind the viewer's
     "N behind" badge.
       behind    — commits on origin/main not yet in this branch (two-dot count,
@@ -130,7 +171,7 @@ def state(branch):
         behind = 0   # origin/main absent or bad ref → treat as up-to-date (no badge)
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
     # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
-    published = branch in _open_pr_heads()
+    published = branch in _open_pr_heads(fresh=fresh_prs)
     proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
     # A stacked branch behind main can't forward-rebase alone, but its PROJECT can — sync
     # delegates those to the restack machine instead of shrugging (the button leads to the
@@ -561,7 +602,7 @@ def post_sync(req, raw):
         req._send(400, json.dumps({"ok": False, "err": "no branch"}))
         return
     ctx.run(["git", "fetch", "origin", "main"])   # fresh origin/main before gating + rebasing
-    st = state(branch)   # re-check server-side: never rebase a published/stacked branch on a stale client view
+    st = state(branch, fresh_prs=True)   # re-check server-side: never rebase a published/stacked branch on a stale client view
     if not st.get("syncable"):
         if st.get("restack"):   # stacked chain behind main → the restack machine owns this rebase
             req._send(200, json.dumps({"ok": True, "restack": True, "project": st.get("project", "")}))

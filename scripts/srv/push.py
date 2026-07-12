@@ -348,7 +348,7 @@ def prep_push(req, raw):
         return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
     if branch in ("main", "master"):
         return req._send(200, json.dumps({"ok": False, "err": "trunk doesn't go through this door"}))
-    published = branch in sync._open_pr_heads()
+    published = branch in sync._open_pr_heads(fresh=True)
     tip_before = _tip(branch)
     routed = []
 
@@ -376,7 +376,7 @@ def prep_push(req, raw):
         ctx.run(["git", "config", "--remove-section", f"branch.{res['vehicle']}"])
         routed.append("carried your rework onto the PR head as one additive commit")
     else:
-        state = sync.state(branch)
+        state = sync.state(branch, fresh_prs=True)
         if state["behind"] > 0 and not published and state.get("parent") == "main" and v["outgoing"] > 0:
             scratch = "/tmp/viewer-prep-scratch"
             ctx.run(["git", "worktree", "remove", "--force", scratch])

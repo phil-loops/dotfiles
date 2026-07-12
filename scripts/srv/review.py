@@ -11,11 +11,36 @@
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import json
+import hashlib
+import threading
 from urllib.parse import parse_qs
 
 from . import ctx, picker
 
-_mcache = {}  # (branch, model_sig) -> model json — recompute only when something changed
+# (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
+# tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
+# forest's model, and switching between forests stays warm instead of clear()-on-miss.
+_mcache = {}
+_MCACHE_MAX = 8
+_mcache_lock = threading.Lock()
+
+
+def _forest_sig(branches):
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    pats = [f"refs/heads/{b}" for b in branches]
+    pats += [f"refs/heads/{main}", f"refs/remotes/origin/{main}"]
+    refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)", *pats]).stdout
+    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+
+    def mt(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0
+    stamp = (refs + str(mt(os.path.join(gd, "config")))
+             + str(mt(os.path.join(gd, "stack-blessed.json")))
+             + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
+    return hashlib.sha1(stamp.encode()).hexdigest()
 
 
 def _known_forest_name(name):
@@ -35,9 +60,12 @@ def _known_forest_name(name):
 
 def model(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
-    ck = (branch, ctx.model_sig())
-    if ck in _mcache:
-        req._send(200, _mcache[ck])
+    ck = (ctx.repo_cwd(), branch)
+    with _mcache_lock:
+        ent = _mcache.get(ck)
+    pre_sig = _forest_sig(ent["branches"]) if ent else None
+    if ent and ent["sig"] == pre_sig:
+        req._send(200, ent["out"])
         return
     if not _known_forest_name(branch):
         req._send(404, json.dumps({"error": f"no branch or forest named {branch!r}"}))
@@ -47,8 +75,18 @@ def model(req, u):
         req._send(500, json.dumps({"error": r.stderr}))
     else:
         out = _enrich(r.stdout, branch)
-        _mcache.clear()
-        _mcache[ck] = out
+        try:
+            branches = list((json.loads(out) or {}).get("nodes") or {})
+        except ValueError:
+            branches = []
+        # a ref moving DURING the build must not be masked by a post-build sig — reuse the
+        # pre-build sig when membership is unchanged so the next request rebuilds instead.
+        sig = pre_sig if (ent and ent["branches"] == branches) else _forest_sig(branches)
+        with _mcache_lock:
+            _mcache.pop(ck, None)
+            _mcache[ck] = {"sig": sig, "branches": branches, "out": out}
+            while len(_mcache) > _MCACHE_MAX:
+                _mcache.pop(next(iter(_mcache)))
         req._send(200, out)
 
 
