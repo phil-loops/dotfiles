@@ -1,0 +1,21 @@
+#!/bin/zsh
+# oxfmt-stdin <ext> — stdin→stdout oxfmt for Helix's `formatter` seam (:fmt).
+# oxfmt is a repo devDependency, not a global; Helix runs the formatter from its own
+# cwd, which in the review loop is a scratch worktree with NO node_modules. Resolve
+# upward from cwd, then fall back to the main loops checkout. <ext> (ts|tsx) feeds
+# --stdin-filepath so oxfmt picks the right parser — Helix formatter args are static,
+# so each language passes its own extension from languages.toml.
+set -euo pipefail
+ext="${1:-ts}"
+dir="$PWD"
+while [[ "$dir" != "/" ]]; do
+  if [[ -x "$dir/node_modules/.bin/oxfmt" ]]; then
+    exec "$dir/node_modules/.bin/oxfmt" "--stdin-filepath=stdin.$ext"
+  fi
+  dir="${dir:h}"
+done
+if [[ -x "$HOME/coding/loops/node_modules/.bin/oxfmt" ]]; then
+  exec "$HOME/coding/loops/node_modules/.bin/oxfmt" "--stdin-filepath=stdin.$ext"
+fi
+echo "oxfmt-stdin: no oxfmt found (node_modules/.bin upward from $PWD)" >&2
+exit 1
