@@ -59,5 +59,7 @@ if [ "$d" -gt 0 ]; then
   done <<< "$deploys"
 fi
 echo "---"
+# delegates to the prwatch plugin's prompt: dialog → detached prwatch → notify on done/failed
+echo "➕ Watch a PR or run… | bash=\"$HOME/.dotfiles/swiftbar/prwatch.sh\" param1=--prompt terminal=false refresh=true"
 echo "Actions ↗ | href=https://github.com/$REPO/actions/workflows/build-and-test.yml"
 echo "Refresh | refresh=true"
