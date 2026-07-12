@@ -2,10 +2,16 @@
 command = "tsgo"
 args = ["--lsp", "--stdio"]
 
+# formatter = oxfmt (the repo's own, via task lint) — :fmt formats the buffer in place
+# WITHOUT saving. auto-format stays off so :w / space-v never surprise-reformat.
 [[language]]
 name = "typescript"
 language-servers = ["tsgo", "oxlint"]
+auto-format = false
+formatter = { command = "oxfmt-stdin", args = ["ts"] }
 
 [[language]]
 name = "tsx"
 language-servers = ["tsgo", "oxlint"]
+auto-format = false
+formatter = { command = "oxfmt-stdin", args = ["tsx"] }
