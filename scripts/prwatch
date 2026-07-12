@@ -17,10 +17,11 @@
 #                        that catches a merge (a merged PR drops off the open scan).
 #                        Installed as launchd/com.philbrockman.prwatch-sweep.plist.
 #                        Two loudness tiers: LOUD (sound, persistent) = newly-failing
-#                        CI, a PR's FIRST approval, deploy landings, run failures;
+#                        CI, a PR's FIRST approval, deploy landings, and sweep-workflows
+#                        run completions (those are runs *I* dispatched — high signal);
 #                        QUIET (no sound, self-dismissing — replaced by the next quiet
 #                        banner and cleared at the next pass) = merged, passing,
-#                        recovered, run-succeeded. Everything lands in notify-log.
+#                        recovered. Everything lands in notify-log.
 #                        Also watches dispatched workflow runs (deploys) — set
 #                          git config prwatch.sweep-workflows "owner/repo:deploy-v2.yml …"
 #                        and each of your runs notifies once when it succeeds or fails.
@@ -399,7 +400,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
         was="${rprev[$key]:-}"
         [[ "$st" == "$was" ]] && continue
         case "$st" in
-          (success) squiet "🚀 run succeeded" "$title" "$url" ;;
+          (success) snotify "🚀 run succeeded" "$title" "$url" ;;
           (failure|timed_out|startup_failure|cancelled) snotify "✗ run $st" "$title" "$url" ;;
         esac   # in-flight states record silently — Slack already announces the start
       done <<< "$rrows"
