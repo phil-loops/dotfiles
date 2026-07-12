@@ -9,7 +9,6 @@ import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { Activity } from "./Activity";
-import MobilePush from "./MobilePush";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
 import { ForestOverview } from "./ForestOverview";
@@ -37,9 +36,6 @@ function Routes() {
     <Switch>
       <Match when={location().kind === "home"}>
         <Home />
-      </Match>
-      <Match when={location().kind === "push"}>
-        <MobilePush />
       </Match>
       <Match when={isForestOverview(location())}>
         <ForestOverview />

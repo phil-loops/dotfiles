@@ -1,12 +1,11 @@
-# srv/push.py — the "prepare to push" mobile flow's gate + push endpoints.
+# srv/push.py — the prepare-to-push gate + push endpoints (the node header's sync strip).
 #
-#   POST /gates        {branch}  → run stack-gates in the branch's worktree; JSON verdict
-#   POST /push         {branch}  → fast-forward push to a SAFE remote (never origin); the
-#                                  repo's pre-push hook (stack-prepush-guard) still runs,
-#                                  so WIP commits are blocked at the door regardless.
-#   GET  /push-preview ?branch=  → read-only: the outgoing-vs-origin commit + guard verdict
-#   POST /push-origin  {branch}  → THE shared-history door. Human finger only (viewer button);
-#                                  Claude never calls this. Every guard re-verified server-side.
+#   POST /gates          {branch}  → run stack-gates in the branch's worktree; JSON verdict.
+#                                    {detach:true} spawns it with a progress journal instead.
+#   GET  /gates-progress ?branch=  → live per-gate journal of a detached /gates run
+#   GET  /push-preview   ?branch=  → read-only: the outgoing-vs-origin commit + guard verdict
+#   POST /push-origin    {branch}  → THE shared-history door. Human finger only (viewer button);
+#                                    Claude never calls this. Every guard re-verified server-side.
 import json
 import os
 import re
@@ -114,43 +113,6 @@ def gates_progress(req, u):
     elif not running:
         out["dead"] = True
     return req._send(200, json.dumps(out))
-
-
-def _safe_remote(branch):
-    """A non-origin remote to push to, or (None, reason). origin is read-only here."""
-    configured = ctx.run(["git", "config", "stack-push.remote"]).stdout.strip()
-    if configured:
-        if configured == "origin":
-            return None, "stack-push.remote is set to origin — refusing (origin is read-only)"
-        return configured, None
-    up = ctx.run(["git", "config", f"branch.{branch}.remote"]).stdout.strip()
-    if up and up != "origin":
-        return up, None
-    if up == "origin":
-        return None, "branch tracks origin — refusing to push there; set stack-push.remote to a fork"
-    return None, "no push remote configured — set `git config stack-push.remote <fork>`"
-
-
-def push(req, raw):
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    if not branch:
-        return req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-
-    remote, reason = _safe_remote(branch)
-    if not remote:
-        return req._send(200, json.dumps({"ok": False, "err": reason}))
-
-    # plain push: never --force (only unpushed commits exist after prep, so it's a
-    # fast-forward), and the pre-push guard fires here to block any stray WIP commit.
-    r = ctx.run(["git", "push", remote, branch])
-    ok = r.returncode == 0
-    req._send(200, json.dumps({
-        "ok": ok,
-        "remote": remote,
-        "out": (r.stdout or "").strip(),
-        "err": (r.stderr or "").strip(),
-    }))
 
 
 # ── origin push — the shared-history door ────────────────────────────────────
