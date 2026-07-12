@@ -1,0 +1,20 @@
+diff --git a/scripts/viewer-solid/vite.config.js b/scripts/viewer-solid/vite.config.js
+index 1e4427a..e7ba758 100644
+--- a/scripts/viewer-solid/vite.config.js
++++ b/scripts/viewer-solid/vite.config.js
+@@ -52,6 +52,15 @@ function keepBackendAlive() {
+ 
+ export default defineConfig({
+   plugins: [solid(), keepBackendAlive()],
++  build: {
++    rollupOptions: {
++      output: {
++        // vendor in its own hashed chunk: app edits stop re-downloading the ~400kB of
++        // solid/tanstack/deps (the single 511kB index chunk churned its hash every build)
++        manualChunks: (id) => (id.includes("node_modules") ? "vendor" : undefined),
++      },
++    },
++  },
+   server: {
+     port: 5174,
+     strictPort: true,

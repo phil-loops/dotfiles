@@ -133,6 +133,7 @@ export function NodeDetail() {
 
   const { bless, unbless, bumpInterest, detachUpstream, reseatChildren } = useNodeMutations({
     active,
+    blessTarget: nodeRef,
     blessOverride,
     setOverride,
     qc,
