@@ -1,16 +1,14 @@
-// ForestMap — the forest DAG as an SVG, read as a JOURNEY: `main` is pinned at the
-// TOP-LEFT (where you are) and the project's culmination — its "endstate" — is pinned
-// BOTTOM-RIGHT (where the work is headed). Y is a LAYERED RANK LANE: every branch sits
-// at rank·ROWH (longest path from main over parent + fan-in edges), so a child is always
-// strictly below its parent — edges only ever flow downward and never loop back through a
-// node. X is force-relaxed (repulsion + edge cohesion) to fan siblings within their lane,
-// so the sequence still reads top-left → bottom-right. The endstate is the ghost ✦ node when a project has several
-// tips (it fans them all in), else the single deepest tip. Deterministic (seeded by
-// rank + index, fixed iteration count, no requestAnimationFrame), so it never jitters.
+// ForestMap — the forest as a STORY-ALIGNED TREE, laid out exactly like the merge-story
+// text: one branch per row, indentation = depth in the parent tree, vertical order =
+// landing order (merge rank), ghost culmination last. The parent relationship is carried
+// by geometry — a thin file-tree elbow from the guardian's dot into the child's left edge —
+// so the resting picture is a TREE with zero edge crossings. `requires` (fan-in) never
+// draws a resting edge: it rides as a ⤿ pill beside the node, and its arc materializes
+// only under the hover spotlight. Deterministic, no force relaxation, never jitters.
 //
 // Hover a node to SPOTLIGHT its dependency neighborhood: everything that flows IN
 // (its upstream blockers, gold) and OUT (its downstream dependents, ember) lights
-// up, the connecting edges flow toward their targets, and the rest dims away.
+// up, requires arcs appear, and the rest dims away.
 //
 // Fully self-contained (own class names + <style>): drops into App.tsx with one
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
@@ -28,14 +26,15 @@ const fitPurpose = (s: string, w: number): string => {
   return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
 };
 
-// edges flow pill-bottom → pill-top as a vertical cubic bézier: control points pushed
-// down off the source and up off the target so the line leaves and enters vertically.
-// Reads as a routed flow instead of a straight diagonal, so siblings stop crossing in a
-// tangle, and the vertical entry tangent lands the arrowhead squarely on the target's top.
-const edgePath = (e: { x1: number; y1: number; x2: number; y2: number }): string => {
-  const c = Math.max(28, Math.abs(e.y2 - e.y1) * 0.5);
-  return `M${e.x1},${e.y1} C${e.x1},${e.y1 + c} ${e.x2},${e.y2 - c} ${e.x2},${e.y2}`;
-};
+// parent edges are file-tree elbow guides: drop from the guardian's dot column, turn
+// into the child's left edge. The arrowhead rides the horizontal run, so it always
+// enters a node level from the left — indentation and the elbow agree by construction.
+// `requires` (fanin) edges appear only under the hover spotlight, as a right-lane arc
+// from the prerequisite's right edge down to the dependent's right edge.
+const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: string }): string =>
+  e.kind === "fanin"
+    ? `M${e.x1},${e.y1} C${e.x1 + 58},${e.y1} ${e.x2 + 58},${e.y2} ${e.x2},${e.y2}`
+    : `M${e.x1},${e.y1} L${e.x1},${e.y2} L${e.x2},${e.y2}`;
 
 
 export function ForestMap(props: {
@@ -267,7 +266,7 @@ export function ForestMap(props: {
             <path d="M0.5,0.5 L7.5,4 L0.5,7.5 Z" fill="context-stroke" />
           </marker>
         </defs>
-        <For each={layout().edges}>
+        <For each={layout().edges.filter((e) => e.kind !== "fanin")}>
           {(e, i) => (
             <path
               class={`fm-edge ${e.kind}`}
@@ -276,6 +275,15 @@ export function ForestMap(props: {
               marker-end="url(#fm-arrow)"
               d={edgePath(e)}
             />
+          )}
+        </For>
+        {/* requires edges live in the ⤿ pill at rest; the arc materializes only when the
+            hover spotlight lights both of its ends. */}
+        <For each={layout().edges.filter((e) => e.kind === "fanin")}>
+          {(e) => (
+            <Show when={litEdge(e.from, e.to)}>
+              <path class="fm-edge fanin lit" marker-end="url(#fm-arrow)" d={edgePath(e)} />
+            </Show>
           )}
         </For>
         <g
@@ -383,6 +391,12 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
                   </Show>
+                  <Show when={!isGhostId(n.id) && (n.requires || []).some((r) => layout().pos[r])}>
+                    <text class="fm-req" x={w + 10} y="4.5">
+                      <title>fan-in: merges after {(n.requires || []).join(", ")} (hover to trace)</title>
+                      ⤿ after {(n.requires || []).filter((r) => layout().pos[r]).map(leafOf).join(" · ")}
+                    </text>
+                  </Show>
                   <Show when={!isGhostId(n.id) && prOf(n.id)}>
                     {(pr) => (
                       <text
@@ -465,11 +479,16 @@ const CSS = `
 .fm-dock-close:hover { color: var(--ink); }
 /* every edge flows gently by default — the forest is "live water": work is
    integration-ready and the world downstream is coherent. A dam (below) stops it. */
-.fm-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.6; opacity: 0;
-  stroke-dasharray: 5 6; animation: fm-fade .8s ease forwards; }
+.fm-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.4; opacity: 0;
+  animation: fm-fade .8s ease forwards; }
 .fm-edge.blessed { stroke: var(--gold-deep); }
 .fm-edge.stale { stroke: var(--del); }
-.fm-edge.fanin { stroke: var(--patina); stroke-width: 1.3; stroke-dasharray: 11 3 2 3; animation-delay: .25s; }
+/* the requires arc exists only while the spotlight lights it — fade fast, read distinct. */
+.fm-edge.fanin { stroke: var(--patina); stroke-width: 1.6; stroke-dasharray: 7 4; animation: fm-fade .18s ease forwards; }
+/* ⤿ fan-in pill: rests quiet beside the node; wakes with its node's hover (which also
+   draws the arc to the prerequisite). */
+.fm-req { fill: var(--patina); font-family: var(--mono); font-size: 9.5px; text-anchor: start; opacity: .62; }
+.fm-node:hover .fm-req, .fm-node.lit .fm-req { opacity: 1; }
 .fm-node { cursor: pointer; opacity: 0; animation: fm-fade .45s ease forwards; }
 .fm-node rect { fill: var(--vellum-raise); stroke: var(--rule); stroke-width: 1.2; transition: stroke .15s, fill .15s; }
 .fm-node:hover rect { stroke: var(--ink-faint); fill: var(--vellum-edge); }
