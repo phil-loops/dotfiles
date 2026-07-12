@@ -1,12 +1,12 @@
 # Helix config — lives in ~/.dotfiles/helix, symlinked from ~/.config/helix
 # (same pattern as nvim).
 
-# space-o / space-O = open the selection on GitHub, main / current branch
+# space-o = "open on GitHub" menu: m → on main, b → on current branch
 # (the nvim <leader>go / <leader>gO port; space-g stays the stock changed-file picker).
-[keys.normal.space]
-o = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
-O = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+[keys.normal.space.o]
+m = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+b = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
 
-[keys.select.space]
-o = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
-O = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+[keys.select.space.o]
+m = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+b = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
