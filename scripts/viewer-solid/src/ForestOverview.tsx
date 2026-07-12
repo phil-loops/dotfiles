@@ -397,6 +397,16 @@ export function ForestOverview() {
                 ovQc.invalidateQueries({ queryKey: ["forest-health"] });
                 ovQc.invalidateQueries({ queryKey: ["projects"] });
               } : undefined}
+              onReady={canMutate ? async () => {
+                await fetch(withRepo("/ship"), {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ project: project() }),
+                }).then((r) => r.json());
+                ovQc.invalidateQueries({ queryKey: ["model"] });
+                ovQc.invalidateQueries({ queryKey: ["forest-health"] });
+                ovQc.invalidateQueries({ queryKey: ["projects"] });
+              } : undefined}
             />
           }
         >
