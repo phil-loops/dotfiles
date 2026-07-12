@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# gh-open — open a file (with an optional line range) on GitHub in the browser.
+# The CLI behind Helix's space-g-o (the nvim <leader>go / :GBrowse main:% equivalent).
+#
+#   gh-open <file> [start-line] [end-line]    open on MAIN
+#   gh-open --branch <file> [start] [end]     open on the current branch instead
+#   gh-open --print ...                       print the URL instead of opening it
+#
+# Repo + path resolve from the file's location (works from any worktree); the URL
+# targets the ORIGIN remote (the canonical repo — for loops that's Loops-so/loops).
+set -euo pipefail
+
+ref="main"; print=0; args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    (--branch) ref="" ;;
+    (--print)  print=1 ;;
+    (*)        args+=("$1") ;;
+  esac
+  shift
+done
+file="${args[0]:?usage: gh-open [--branch] [--print] <file> [start-line] [end-line]}"
+start="${args[1]:-}"; end="${args[2]:-}"
+
+dir=$(cd "$(dirname "$file")" && pwd)
+root=$(git -C "$dir" rev-parse --show-toplevel)
+rel="${dir#"$root"}/$(basename "$file")"; rel="${rel#/}"
+[ -n "$ref" ] || ref=$(git -C "$dir" symbolic-ref --short HEAD)
+
+remote=$(git -C "$dir" remote get-url origin)
+remote="${remote%.git}"
+remote="${remote/git@github.com:/https://github.com/}"
+
+frag=""
+if [ -n "$start" ]; then
+  frag="#L$start"
+  if [ -n "$end" ] && [ "$end" != "$start" ]; then frag="$frag-L$end"; fi
+fi
+
+url="$remote/blob/$ref/$rel$frag"
+if [ "$print" = "1" ]; then echo "$url"; else open "$url"; fi

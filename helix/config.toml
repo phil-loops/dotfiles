@@ -1,0 +1,14 @@
+# Helix config — lives in ~/.dotfiles/helix, symlinked from ~/.config/helix
+# (same pattern as nvim).
+
+# space-g grew a submenu: the default changed-file picker moved to space-g-g so
+# space-g-o / space-g-O could mirror nvim's <leader>go / <leader>gO (GBrowse).
+[keys.normal.space.g]
+g = "changed_file_picker"
+o = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+O = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+
+[keys.select.space.g]
+g = "changed_file_picker"
+o = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+O = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"

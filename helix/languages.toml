@@ -1,0 +1,11 @@
+[language-server.tsgo]
+command = "tsgo"
+args = ["--lsp", "--stdio"]
+
+[[language]]
+name = "typescript"
+language-servers = ["tsgo", "oxlint"]
+
+[[language]]
+name = "tsx"
+language-servers = ["tsgo", "oxlint"]
