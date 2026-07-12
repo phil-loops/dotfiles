@@ -491,6 +491,7 @@ def warm():
         sync._pr_state_map()
         sync._open_pr_heads()
         reviews._refresh_requests(srvctx.CWD)   # Home's /review-requests: ~1.4s gh search, warm it too
+        picker.warm_projects()   # the Forests home's body: disk-snapshot hit or the ~3s fan-out, off-request
     except Exception:
         pass
 
