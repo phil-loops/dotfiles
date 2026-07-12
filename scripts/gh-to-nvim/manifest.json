@@ -1,11 +1,17 @@
 {
   "manifest_version": 3,
   "name": "GitHub → nvim",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Open the current GitHub page (PR / blob / commit) in the local forest viewer's warm nvim. URL-only: no page access.",
-  "permissions": ["storage", "nativeMessaging", "activeTab", "notifications"],
-  "host_permissions": ["http://localhost/*"],
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA3hjEpbAdpr9v1Lcoj8sXTLDRh66jA+a/rAUHIU4KGkMSvKKQdwmHkfPvBnp3AfM3/89kVvkq3A7jASy1o+5ZkNp02JD5BSNgNOPLNyZfWG8lVg+TLdW6b5Hu05MEHUlBRURiJMV9IICLfPnA9JxuG4HWajVfOqtDiisYI4pgk2UOSx99mMQ3qJu7DX5j1TOUeAGHfF0UOP7Ks0TI+Y06neYHIIy8N4bKz3H4R+f6Vm0Z77dTNiQsQYtvrVodAZN1YnK6TVqwGlaosiJkbIfWSJ3D84p/UWYxuA1O/Ntl94sSB1h6cO0eoGv9EFtUrIk7LHKFBuoCG+FR6drri9RqnQIDAQAB",
+  "permissions": [
+    "storage",
+    "nativeMessaging",
+    "activeTab",
+    "notifications"
+  ],
+  "host_permissions": [
+    "http://localhost/*"
+  ],
   "icons": {
     "16": "icons/fresh-16.png",
     "32": "icons/fresh-32.png",
@@ -24,13 +30,21 @@
   },
   "commands": {
     "open-in-nvim": {
-      "suggested_key": { "default": "Ctrl+Shift+O", "mac": "Command+Shift+O" },
+      "suggested_key": {
+        "default": "Ctrl+Shift+O",
+        "mac": "Command+Shift+O"
+      },
       "description": "Open this GitHub page in nvim (selected line, else whole-PR Diffview)"
     },
     "open-in-viewer": {
-      "suggested_key": { "default": "Ctrl+Shift+U", "mac": "Command+Shift+U" },
+      "suggested_key": {
+        "default": "Ctrl+Shift+U",
+        "mac": "Command+Shift+U"
+      },
       "description": "Open this PR in the forest viewer"
     }
   },
-  "background": { "service_worker": "background.js" }
+  "background": {
+    "service_worker": "background.js"
+  }
 }

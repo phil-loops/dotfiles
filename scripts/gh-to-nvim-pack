@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# gh-to-nvim-pack — bump the patch version, pack the extension into dist/ (CRX
+# signed with gh-to-nvim-key.pem), and refresh dist/updates.xml.
+#
+# The launchd static server (gh-to-nvim-forceinstall) serves dist/ on
+# 127.0.0.1:62530; the force-installed copy notices its source is ahead (stale ●
+# badge) and asks the updater, which pulls this pack. So the ship loop is:
+# edit → gh-to-nvim-pack → installed copy hot-swaps within ~a minute.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$here/gh-to-nvim"
+KEY="$here/gh-to-nvim-key.pem"
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+# Chrome only installs a strictly higher version — every pack must bump.
+VERSION="$(python3 - "$SRC/manifest.json" <<'EOF'
+import json, sys
+path = sys.argv[1]
+m = json.load(open(path))
+parts = m["version"].split(".")
+parts[-1] = str(int(parts[-1]) + 1)
+m["version"] = ".".join(parts)
+with open(path, "w") as f:
+    json.dump(m, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+print(m["version"])
+EOF
+)"
+
+stage_root="$(mktemp -d)"
+stage="$stage_root/gh-to-nvim"
+mkdir -p "$stage"
+rsync -a --exclude dist --exclude .DS_Store --exclude README.md "$SRC/" "$stage/"
+
+"$CHROME" --pack-extension="$stage" --pack-extension-key="$KEY" >/dev/null
+
+EXT_ID="$("$here/gh-to-nvim-ext-id" prod)"
+mkdir -p "$SRC/dist"
+mv "$stage.crx" "$SRC/dist/gh-to-nvim.crx"
+rm -rf "$stage_root"
+
+cat > "$SRC/dist/updates.xml" <<XML
+<?xml version='1.0' encoding='UTF-8'?>
+<gupdate xmlns='http://www.google.com/update2/response' protocol='2.0'>
+  <app appid='$EXT_ID'>
+    <updatecheck codebase='http://localhost:62530/dist/gh-to-nvim.crx' version='$VERSION' />
+  </app>
+</gupdate>
+XML
+
+echo "packed v$VERSION → dist/gh-to-nvim.crx (id $EXT_ID)"

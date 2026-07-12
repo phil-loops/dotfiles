@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# gh-to-nvim-forceinstall — make Chrome own (re)installing the extension, so an
+# unclean shutdown can never drop it again. An unpacked extension lives only in
+# the profile's HMAC-signed Secure Preferences; a hard kill mid-write corrupts
+# the entry and Chrome silently discards it. A policy-installed CRX gets
+# reconciled (reinstalled from the local server) on every launch instead.
+#
+# Idempotent. Sets up three things:
+#   1. launchd static server on 127.0.0.1:62530 serving the extension dir
+#      (dist/ holds the CRX + updates.xml; the source files also serve, which is
+#      what the stale-detection HEADs would hit if the viewer is down)
+#   2. ExtensionInstallForcelist policy → Chrome shows "Managed by your
+#      organization"; that's the cost of self-healing
+#   3. native-messaging allowlist for BOTH ids (prod CRX + unpacked dev copy)
+#
+# After running: relaunch Chrome, then REMOVE the old hand-loaded unpacked copy
+# at chrome://extensions (old id icojb…) — the forced copy replaces it.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC="$here/gh-to-nvim"
+PORT=62530
+LABEL="com.philbrockman.gh-to-nvim-static"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+
+[[ -f "$SRC/dist/gh-to-nvim.crx" ]] || "$here/gh-to-nvim-pack"
+PROD_ID="$("$here/gh-to-nvim-ext-id" prod)"
+
+cat > "$PLIST" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>-m</string>
+    <string>http.server</string>
+    <string>$PORT</string>
+    <string>--bind</string>
+    <string>127.0.0.1</string>
+    <string>--directory</string>
+    <string>$SRC</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
+XML
+
+launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$(id -u)" "$PLIST"
+echo "✓ static server :$PORT ($LABEL)"
+
+ENTRY="$PROD_ID;http://localhost:$PORT/dist/updates.xml"
+if ! defaults read com.google.Chrome ExtensionInstallForcelist 2>/dev/null | grep -q "$PROD_ID"; then
+  defaults write com.google.Chrome ExtensionInstallForcelist -array-add "$ENTRY"
+  echo "✓ ExtensionInstallForcelist += $ENTRY"
+else
+  echo "✓ ExtensionInstallForcelist already lists $PROD_ID"
+fi
+
+"$here/gh-to-nvim-install"
+
+echo
+echo "Relaunch Chrome; the forced copy appears on its own. Then remove the old"
+echo "hand-loaded unpacked copy at chrome://extensions."

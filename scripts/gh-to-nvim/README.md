@@ -30,27 +30,54 @@ having a page-level key listener).
 Feedback is the toolbar badge (… working, ⏻ launching, ◷ waiting, ↻ warming,
 ✓/⚠/✗ result) plus a notification on failures and cursor-placement warnings.
 
-## Load it
+## Install it (self-healing force-install)
 
-1. Make sure the viewer serves the endpoint (restart it so `/open-url` is live),
-   then smoke-test:
-   ```
-   curl -s localhost:62497/open-url -d '{"url":"https://example.com/nope"}'
-   # → {"ok": false, "err": "unsupported GitHub URL …"}   (400)
-   ```
-2. `chrome://extensions` → enable **Developer mode** → **Load unpacked** →
-   pick this `gh-to-nvim/` directory.
-3. Open any PR on github.com, click a line number, hit **⌘⇧O**.
+An unpacked extension lives only in the profile's HMAC-signed Secure Preferences;
+a hard shutdown mid-write corrupts the entry and Chrome silently discards it —
+"the extension uninstalled itself after restart." So the daily-driver copy is
+**policy force-installed from a local CRX** instead: Chrome reconciles policy on
+every launch and reinstalls from the local server if the record ever rots.
+
+```
+~/.dotfiles/scripts/gh-to-nvim-forceinstall
+```
+
+sets up all of it (idempotent): a launchd static server on `127.0.0.1:62530`
+serving this dir, the `ExtensionInstallForcelist` policy pointing at
+`dist/updates.xml`, and the native-messaging allowlist for both ids. Relaunch
+Chrome afterwards; the extension appears on its own. Costs the "Managed by your
+organization" badge in Chrome's menu.
+
+Two ids, both derived, both whitelisted for the native host:
+
+- **prod** — from `../gh-to-nvim-key.pem` (committed; losing it means a new id
+  and a rerun of the installer): `gh-to-nvim-ext-id prod`
+- **dev** — what "Load unpacked" assigns this directory (path-derived; the
+  manifest deliberately carries no `"key"`): `gh-to-nvim-ext-id dev`
 
 ## Dev loop (toolbar icon)
 
 The toolbar icon is the dev console — no `chrome://extensions` trip:
 
 - **green** → loaded copy matches disk.
-- **amber ●** → you edited a source file; the loaded copy is stale (it self-reloads
-  once the source goes quiet for 5s).
+- **amber ●** → you edited a source file; the loaded copy is stale.
 - **grey ×** → the viewer isn't reachable on `:62497` (its `/ext-mtime` is the
   staleness signal; a service worker can't read disk itself).
+
+What stale does next depends on which copy is running (`installType`):
+
+- **unpacked dev copy** → self-reloads once the source goes quiet for 5s —
+  `runtime.reload()` re-reads from disk, so this is the live-edit loop.
+- **force-installed copy** → reloading would rerun the same installed bytes and
+  lie "fresh", so it asks the updater instead (at most once a minute). Run
+  `gh-to-nvim-pack` to publish your edits — it bumps the patch version, signs a
+  new CRX into `dist/`, and the installed copy hot-swaps on its next ask. Until
+  you pack, the amber ● is truthfully saying "installed ≠ disk".
+
+For heavy hacking sessions, load the unpacked copy (`chrome://extensions` →
+Load unpacked → this dir), toggle the forced copy off while you work (two copies
+means duplicate toolbar icons and one of them loses the keyboard chords), and
+`gh-to-nvim-pack` when done.
 
 Staleness is computed against the viewer's `/ext-mtime`; the baseline lives in
 `storage.session`, which Chrome wipes on a real reload — so a fresh reload
@@ -66,15 +93,12 @@ reachable. Nothing stays resident — the host exits as soon as the server is
 detached. The nvim/viewer commands run the same launch automatically when the
 viewer is down, so the button is mostly a manual fallback.
 
-One-time install (registers the host + whitelists the extension's pinned ID):
+`gh-to-nvim-forceinstall` runs the host registration; to re-run just that part
+(e.g. after moving the checkout, which changes the dev id):
 
 ```
 ~/.dotfiles/scripts/gh-to-nvim-install   # writes the NativeMessagingHosts manifest
 ```
-
-The ID is pinned by the `"key"` in `manifest.json` (derived from `.ext-key.pem`,
-git-ignored), so it survives reloads and matches what the host whitelists. Reload
-the extension after the first install so Chrome picks up the `key` + permissions.
 
 ## Notes
 

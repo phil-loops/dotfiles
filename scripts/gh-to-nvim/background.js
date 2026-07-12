@@ -206,6 +206,19 @@ const QUIET_MS = 5000;
 let staleMtime = null;
 let staleSince = 0;
 
+// "development" = unpacked (runtime.reload re-reads source from disk = real HMR).
+// Anything else = the force-installed CRX, where runtime.reload would rerun the SAME
+// installed bytes and then read as fresh — a silent lie. That copy asks the updater
+// instead, which pulls whatever gh-to-nvim-pack last published to the local server.
+let installType = "development";   // safe default until getSelf resolves
+chrome.management.getSelf((info) => {
+  installType = info.installType;
+});
+chrome.runtime.onUpdateAvailable.addListener(() => chrome.runtime.reload());
+
+const UPDATE_ASK_MS = 60000;   // requestUpdateCheck throttles hard callers — pace it
+let lastUpdateAsk = 0;
+
 function maybeAutoReload() {
   if (lastDiskMtime !== staleMtime) {
     staleMtime = lastDiskMtime;
@@ -215,7 +228,15 @@ function maybeAutoReload() {
   if (Date.now() - staleSince < QUIET_MS) {
     return;
   }
-  chrome.runtime.reload();
+  if (installType === "development") {
+    chrome.runtime.reload();
+    return;
+  }
+  if (Date.now() - lastUpdateAsk < UPDATE_ASK_MS) {
+    return;
+  }
+  lastUpdateAsk = Date.now();
+  chrome.runtime.requestUpdateCheck(() => {});
 }
 
 async function poll() {
