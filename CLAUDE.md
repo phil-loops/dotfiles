@@ -34,6 +34,13 @@ directly races/clobbers the other session. Instead:
 Apply when the file goes quiet, or hand the `.patch` to the session that owns the file. This is the
 standard for any contested file — it turns "two hands on one file" into a clean merge-or-conflict.
 
+**Messaging another session: `claude-say <who> "<note>"` — SEND, don't draft.** The tool submits by
+default (types into the target pane and presses Enter); that's the right default for session-to-session
+notes (fold-in heads-ups, lane handoffs) — a drafted note in an unattended pane is silently lost. Never
+pass `--draft` for these. `--draft` exists only for text a human must finish before sending (e.g. the
+viewer's ✦ seeded prompt stubs). The tool already guards the risky cases itself: it refuses non-Claude
+panes and auto-downgrades to draft if the target composer already holds text.
+
 ## Script Placement
 
 **Never put scripts in ~/bin.** Always place scripts in `~/.dotfiles/` so they're version controlled:
