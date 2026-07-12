@@ -1,0 +1,63 @@
+#!/bin/zsh
+# hx-wc <file> [msg...] — the Helix side of nvim's :wc (nvim/lua/custom/wc.lua): commit
+# JUST this file so the blessing viewer (which renders committed diffs) sees the edit
+# immediately. Helix has no user-defined typed commands, so helix/config.toml binds
+#   space-v = [":write", ":sh hx-wc %{buffer_name}"]
+# — the :write happens in Helix before we run; a custom message is the typed form
+#   :w  then  :sh hx-wc %{buffer_name} your message here
+# The scratch review worktree is a detached HEAD, but stack-open installs a post-commit
+# follow-hook there, so this plain commit advances the branch ref like :wc does.
+#
+# Refocus mirrors wc.lua's two gotchas: only flip to Chrome when we're in the review-hx
+# tmux window stack-open drives (never your daily Helix), and raise Chrome with `open -a`
+# (LaunchServices) — under a detached tmux macOS denies Apple events (-1743), so the
+# osascript tab-select is best-effort on top of the guaranteed `open -a` raise.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+file="${1:?usage: hx-wc <file> [msg...]}"
+shift || true
+msg="${*:-wip}"
+file="${file:A}"   # absolutize: %{buffer_name} is cwd-relative, git -C below re-anchors paths
+dir="${file:h}"
+
+git -C "$dir" add -- "$file"
+if ! out=$(git -C "$dir" commit -m "$msg" -- "$file" 2>&1); then
+  echo "hx-wc: ${out}" >&2   # e.g. "nothing to commit"
+  exit 1
+fi
+sha=$(git -C "$dir" rev-parse --short HEAD)
+
+back=""
+if [[ -n "${TMUX:-}" && "$(tmux display-message -p '#{window_name}' 2>/dev/null)" == "review-hx" ]] \
+   && pgrep -xq "Google Chrome" 2>/dev/null; then
+  # tab-select needles in priority order: :5174 = Solid dev viewer, else this repo's
+  # per-repo stable port (stack-review-port derives it from the git common dir, so the
+  # scratch worktree resolves to the same port as the main checkout).
+  port=$("$HOME/.dotfiles/scripts/stack-review-port" "$dir" 2>/dev/null || true)
+  for needle in ":5174" ${port:+":$port"}; do
+    hit=$(osascript \
+      -e 'on run argv' \
+      -e 'set needle to item 1 of argv' \
+      -e 'tell application "Google Chrome"' \
+      -e 'repeat with w in windows' \
+      -e 'set i to 0' \
+      -e 'repeat with t in (tabs of w)' \
+      -e 'set i to i + 1' \
+      -e 'if (URL of t contains needle) then' \
+      -e 'set active tab index of w to i' \
+      -e 'set index of w to 1' \
+      -e 'return "1"' \
+      -e 'end if' \
+      -e 'end repeat' \
+      -e 'end repeat' \
+      -e 'return ""' \
+      -e 'end tell' \
+      -e 'end run' \
+      "$needle" 2>/dev/null) || true
+    [[ "${hit:-}" == *1* ]] && break
+  done
+  open -a "Google Chrome" 2>/dev/null && back="  ↩ viewer"
+fi
+
+echo "✦ committed ${sha}  ${msg}${back}"

@@ -1,6 +1,12 @@
 # Helix config — lives in ~/.dotfiles/helix, symlinked from ~/.config/helix
 # (same pattern as nvim).
 
+# space-v = the nvim :wc port (custom/wc.lua): write + commit JUST this file, then flip
+# back to the blessing viewer — the hover+o → edit → commit review loop. Custom message:
+# :w then :sh hx-wc %{buffer_name} your message
+[keys.normal.space]
+v = [":write", ":sh hx-wc %{buffer_name}"]
+
 # space-o = "open on GitHub" menu: m → on main, b → on current branch
 # (the nvim <leader>go / <leader>gO port; space-g stays the stock changed-file picker).
 [keys.normal.space.o]
