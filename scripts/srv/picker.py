@@ -21,7 +21,7 @@ from urllib.parse import parse_qs
 from . import ctx
 
 _pcache = {}  # repo-name -> ((model_sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
-_PROJ_SNAP_V = 2  # projects card shape version — bump when a build adds a field, else the
+_PROJ_SNAP_V = 3  # projects card shape version — bump when a build adds a field, else the
                   # disk snapshot (keyed only on repo state) keeps serving the old shape
 _PR_RE = re.compile(r"\(#(\d+)\)")
 
@@ -350,6 +350,18 @@ def myprs(req):
     req._send(200, r.stdout or "[]")
 
 
+def _shelved_set():
+    # {project} — forests Phil marked deliberately paused (stack-project.<p>.shelved true).
+    # A shelved forest leaves the active bands regardless of PR/merge state, until unshelved.
+    out = set()
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.shelved$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        if key.endswith(".shelved") and val.strip() == "true":
+            out.add(key[len("stack-project."):-len(".shelved")])
+    return out
+
+
 def _projects_snapshot_file():
     gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
     return os.path.join(gd, "stack-projects-cache.json") if gd else ""
@@ -430,6 +442,7 @@ def _projects_build(name, path, pck):
     shipped = _shipped_by_project(name, pck[1], merges, members)
     commits = _branch_commit_unix()
     interest = _interest_levels()
+    shelved = _shelved_set()
     for p in projs:
         p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
@@ -443,6 +456,7 @@ def _projects_build(name, path, pck):
         branches = members.get(p["name"]) or bs
         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
         p["interest"] = interest.get(p["name"], 0)
+        p["shelved"] = p["name"] in shelved
         p["epic"] = ctx.run(["git", "config", f"stack-project.{p['name']}.epic"]).stdout.strip() or None
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches

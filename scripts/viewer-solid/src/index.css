@@ -351,6 +351,8 @@ body {
 }
 .ctx-item:hover { background: var(--vellum-edge); color: var(--ink); }
 .ctx-item.on { color: var(--gold-leaf); }
+/* shelve sits apart from the interest levels — a state flip, not a ranking */
+.ctx-shelve { border-top: 1px solid var(--vellum-edge); margin-top: 4px; padding-top: 7px; }
 .ctx-pips { min-width: 58px; color: var(--gold-leaf); letter-spacing: -1px; }
 .ctx-lbl { color: var(--ink-faint); }
 .ctx-item:hover .ctx-lbl, .ctx-item.on .ctx-lbl { color: inherit; }

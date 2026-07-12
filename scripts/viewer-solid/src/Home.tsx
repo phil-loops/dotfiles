@@ -113,7 +113,7 @@ export function Home() {
   // right-click a forest card → set its importance (stack-project.<name>.interest) — what
   // floats the forest up the Home list.
   const [ctxMenu, setCtxMenu] = createSignal<
-    { x: number; y: number; repo: string; project: string; current: number } | null
+    { x: number; y: number; repo: string; project: string; current: number; shelved: boolean } | null
   >(null);
   const setInterest = createMutation(() => ({
     mutationFn: (arg: { repo: string; project: string; value: number }) =>
@@ -121,6 +121,15 @@ export function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: arg.project, value: arg.value }),
+      }).then((r) => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  }));
+  const setShelved = createMutation(() => ({
+    mutationFn: (arg: { repo: string; project: string; on: boolean }) =>
+      fetch(`/${arg.repo}/shelve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: arg.project, on: arg.on }),
       }).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
@@ -214,7 +223,7 @@ export function Home() {
     if (!canMutate) return;
     e.preventDefault();
     hideFtip();
-    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0 });
+    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved });
   };
   const forestRow = (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => (
     <ForestRow
@@ -391,6 +400,17 @@ export function Home() {
                   </button>
                 )}
               </For>
+              <button
+                class="ctx-item ctx-shelve"
+                title={m().shelved ? "bring this forest back into the active bands" : "deliberately pause this forest — it moves to the shelved fold no matter its PR state"}
+                onClick={() => {
+                  setShelved.mutate({ repo: m().repo, project: m().project, on: !m().shelved });
+                  setCtxMenu(null);
+                }}
+              >
+                <span class="ctx-pips">{m().shelved ? "▶" : "⏸"}</span>
+                <span class="ctx-lbl">{m().shelved ? "unshelve" : "shelve"}</span>
+              </button>
             </div>
           </>
         )}

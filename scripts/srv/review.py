@@ -265,6 +265,23 @@ def interest_bump(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "interest": nxt}))
 
 
+def shelve(req, raw):
+    # Mark/unmark a forest deliberately paused (stack-project.<p>.shelved true). Phil's own
+    # signal — a shelved forest leaves the active bands for the shelved fold until unshelved,
+    # no matter its PR/merge state.
+    d = json.loads(raw or "{}")
+    proj = d.get("project", "")
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
+    key = f"stack-project.{proj}.shelved"
+    on = bool(d.get("on", True))
+    if on:
+        ctx.run(["git", "config", key, "true"])
+    else:
+        ctx.run(["git", "config", "--unset", key])
+    req._send(200, json.dumps({"ok": True, "project": proj, "shelved": on}))
+
+
 def _scratch_worktree_for(branch):
     # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
     # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.

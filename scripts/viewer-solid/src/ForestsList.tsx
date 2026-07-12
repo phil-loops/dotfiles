@@ -79,7 +79,7 @@ export function ForestsList(props: {
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
     for (const p of filteredForests()) {
-      if (!p.epic || recentlyMerged(p)) continue;
+      if (!p.epic || recentlyMerged(p) || p.shelved) continue;
       (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
     }
     return [...byEpic.entries()]
@@ -98,7 +98,7 @@ export function ForestsList(props: {
   const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
     const clustered = clusteredKeys();
-    const active = filteredForests().filter((p) => !recentlyMerged(p) && !clustered.has(pkey(p)));
+    const active = filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && !clustered.has(pkey(p)));
     return BANDS.map((band, i) => ({
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
@@ -116,12 +116,15 @@ export function ForestsList(props: {
     return first ? pkey(first) : null;
   });
   const stepInfo = (p: Project, folded: boolean) => {
-    if (folded || !isPrBand(bandIdx(p))) return undefined;
+    if (folded || p.shelved || !isPrBand(bandIdx(p))) return undefined;
     const step = stepOf(p);
     return step ? { step, start: pkey(p) === startKey() } : undefined;
   };
   const merged = createMemo(() =>
     filteredForests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
+  // deliberately paused — Phil's explicit mark (right-click → shelve); a shelf, not a band
+  const shelvedList = createMemo(() =>
+    filteredForests().filter((p) => p.shelved && !recentlyMerged(p)).sort((a, b) => forestTs(b) - forestTs(a)));
   const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
   // repo demoted from group header to a quiet per-row badge (non-loops rows only)
   const row = (p: Project, folded: boolean) =>
@@ -133,8 +136,9 @@ export function ForestsList(props: {
     ) : (
       props.forestRow(p, folded, stepInfo(p, folded))
     );
-  // dormant + recently-merged fold closed until clicked — context, not to-dos.
+  // dormant + shelved + recently-merged folds closed until clicked — context, not to-dos.
   const [dormantOpen, setDormantOpen] = createSignal(false);
+  const [shelvedOpen, setShelvedOpen] = createSignal(false);
   const [mergedOpen, setMergedOpen] = createSignal(false);
   return (
       <Show when={props.tab() === "forests"}>
@@ -211,6 +215,14 @@ export function ForestsList(props: {
               </Show>
             )}
           </For>
+          <Show when={shelvedList().length}>
+            <button class="forest-mfold" onClick={() => setShelvedOpen(!shelvedOpen())} title="deliberately paused (right-click a forest → shelve); unshelve the same way">
+              {shelvedOpen() ? "▾" : "▸"} {shelvedList().length} shelved
+            </button>
+            <Show when={shelvedOpen()}>
+              <For each={shelvedList()}>{(p) => row(p, false)}</For>
+            </Show>
+          </Show>
           <Show when={merged().length}>
             <button class="forest-mfold" onClick={() => setMergedOpen(!mergedOpen())}>
               {mergedOpen() ? "▾" : "▸"} {merged().length} recently merged
