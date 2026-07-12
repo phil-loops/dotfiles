@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # SwiftBar plugin — build-status: shows in-progress build-and-test MAIN image builds in the
-# menu bar. Badge 🔨×N while building, hidden when idle. Complements build-notify (which
-# fires the completion desktop notification); this is the "is an image building right now" glance.
+# menu bar. Badge 🔨×N while building, plain 🔨 when idle (matching prwatch's 👁 grammar;
+# SwiftBar renders an empty title as a [?] placeholder, so true hiding isn't an option).
+# Complements build-notify (which fires the completion desktop notification); this is the
+# "is an image building right now" glance.
 #
 # <bitbar.title>main build status</bitbar.title>
 # <bitbar.desc>In-progress build-and-test main image builds (loops).</bitbar.desc>
@@ -27,7 +29,7 @@ rows=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main --stat
 n=0; [ -n "$rows" ] && n=$(printf '%s\n' "$rows" | grep -c .)
 
 if [ "$n" -eq 0 ]; then
-  echo ""                       # idle → hidden menu-bar item
+  echo "🔨"                     # idle → plain glyph (an empty title renders SwiftBar's [?] box)
   echo "---"
   echo "no main build in progress | color=gray"
 else
