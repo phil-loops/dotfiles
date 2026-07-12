@@ -261,5 +261,24 @@ chrome.runtime.onMessage.addListener((msg, _s, respond) => {
   return true;
 });
 
+// The toolbar action only lights up where it can act — github.com. declarativeContent
+// keeps the URL-only contract: the matcher runs inside the browser, no tabs/page access.
+// Keyboard chords still fire everywhere (openActiveTab already rejects non-GitHub URLs).
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.action.disable();
+  chrome.declarativeContent.onPageChanged.removeRules(undefined, () => {
+    chrome.declarativeContent.onPageChanged.addRules([
+      {
+        conditions: [
+          new chrome.declarativeContent.PageStateMatcher({
+            pageUrl: { hostEquals: "github.com", schemes: ["https"] },
+          }),
+        ],
+        actions: [new chrome.declarativeContent.ShowAction()],
+      },
+    ]);
+  });
+});
+
 poll();
 setInterval(poll, 2000);
