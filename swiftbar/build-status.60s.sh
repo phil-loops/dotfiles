@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# SwiftBar plugin — build-status: shows in-progress build-and-test MAIN image builds AND
-# my own dispatched deploy-v2 runs (`task release:staging|production VERSION=…`) in the
-# menu bar. Badge 🔨×N while building, +🚀 while one of my deploys is in flight, plain 🔨
-# when idle (matching prwatch's 👁 grammar; SwiftBar renders an empty title as a [?]
-# placeholder, so true hiding isn't an option). Complements build-notify / the prwatch
-# sweep (which fire the completion desktop notifications); this is the in-flight glance.
+# SwiftBar plugin — build-status: shows in-progress build-and-test MAIN image builds,
+# my own dispatched deploy-v2 runs (`task release:staging|production VERSION=…`), AND
+# active prwatch watches (~/.cache/prwatch/tracking) in the menu bar. Badge 🔨×N while
+# building, +🚀 while one of my deploys is in flight, +👁N while watching, plain 🔨 when
+# idle (SwiftBar renders an empty title as a [?] placeholder, so true hiding isn't an
+# option). Complements build-notify / the prwatch sweep (which fire the completion
+# desktop notifications); this is the in-flight glance.
+#
+# No refreshOnOpen: the gh calls take seconds, and refreshOnOpen blocks the menu on
+# them. The 60s poll + prwatch's pokes (swiftbar://refreshplugin?name=build-status on
+# watch start/stop/finish) keep it fresh; opening the menu shows the last render.
 #
 # <bitbar.title>main build status</bitbar.title>
-# <bitbar.desc>In-progress build-and-test main image builds (loops).</bitbar.desc>
+# <bitbar.desc>In-progress build-and-test main image builds (loops) + prwatch watches.</bitbar.desc>
 # <bitbar.author>phil</bitbar.author>
-# <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
@@ -38,9 +42,22 @@ if [ -n "$me" ]; then
 fi
 d=0; [ -n "$deploys" ] && d=$(printf '%s\n' "$deploys" | grep -c .)
 
+# active prwatch watches — local marker files, no network; prune markers whose watcher died
+trackdir="$HOME/.cache/prwatch/tracking"
+watches=""
+for f in "$trackdir"/*.tsv; do
+  [ -e "$f" ] || continue
+  IFS=$'\t' read -r wrepo wid wtitle wurl _ wpid < "$f"
+  kill -0 "$wpid" 2>/dev/null || { rm -f "$f"; continue; }
+  key=$(basename "$f" .tsv)
+  watches="${watches}${key}"$'\t'"${wrepo}"$'\t'"${wid}"$'\t'"${wtitle}"$'\t'"${wurl}"$'\n'
+done
+w=0; [ -n "$watches" ] && w=$(printf '%s' "$watches" | grep -c .)
+
 badge="🔨"
 [ "$n" -gt 0 ] && badge="🔨×$n"
 [ "$d" -gt 0 ] && badge="$badge 🚀"
+[ "$w" -gt 0 ] && badge="$badge 👁$w"
 echo "$badge"
 echo "---"
 if [ "$n" -eq 0 ] && [ "$d" -eq 0 ]; then
@@ -59,7 +76,15 @@ if [ "$d" -gt 0 ]; then
   done <<< "$deploys"
 fi
 echo "---"
+if [ "$w" -gt 0 ]; then
+  while IFS=$'\t' read -r key wrepo wid wtitle wurl; do
+    [ -n "$key" ] || continue
+    echo "👁 ${wrepo}#${wid} — ${wtitle} | href=${wurl}"
+    echo "-- ✗ Stop watching | bash=\"$HOME/.dotfiles/swiftbar/prwatch.sh\" param1=--stop param2=${key} terminal=false"
+  done <<< "$watches"
+fi
 # delegates to the prwatch plugin's prompt: dialog → detached prwatch → notify on done/failed
-echo "➕ Watch a PR or run… | bash=\"$HOME/.dotfiles/swiftbar/prwatch.sh\" param1=--prompt terminal=false refresh=true"
+echo "➕ Watch a PR or run… | bash=\"$HOME/.dotfiles/swiftbar/prwatch.sh\" param1=--prompt terminal=false"
+echo "---"
 echo "Actions ↗ | href=https://github.com/$REPO/actions/workflows/build-and-test.yml"
 echo "Refresh | refresh=true"

@@ -52,7 +52,11 @@ repos=(${=$(git config stack.pr-repos 2>/dev/null || true)})
 # fires the instant that function returns — which would delete the marker
 # register_watch just wrote. _marker is a process-global set by register_watch.
 _marker=""
-trap '[[ -n "$_marker" ]] && rm -f "$_marker"; open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null' EXIT INT TERM
+poke_swiftbar() {  # watch state changed — both the 👁 and 🔨 plugins render the watch list
+  open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null
+  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null
+}
+trap '[[ -n "$_marker" ]] && rm -f "$_marker"; poke_swiftbar' EXIT INT TERM
 
 # jq program: one open PR → "number<TAB>rollup<TAB>title<TAB>branch"
 # (single-quoted so no shell interpolation; statusCheckRollup states vary by
@@ -77,6 +81,14 @@ def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
   .headRefName,
   (if ([.latestReviews[]? | select(.state=="APPROVED")] | length) > 0 then "approved" else "-" end)
 ] | @tsv'
+
+# one-shot mute: an EXPLICIT watch (URL/number/fzf — not --await) records its key here
+# after its single notification; every ambient notifier (sweep transitions, approved,
+# merged, landing, build-notify success) skips answered keys forever. Keys lowercased —
+# URL-parsed repos are lowercase ("loops-so/loops") while config repos are "Loops-so/loops".
+ANSWERED="$HOME/.cache/prwatch/answered.txt"
+answered() { grep -qxF "${(L)1}" "$ANSWERED" 2>/dev/null }
+mark_answered() { mkdir -p "${ANSWERED:h}"; print -r -- "${(L)1}" >> "$ANSWERED" }
 
 QUIET_GROUP="prwatch-quiet"
 notify_quiet() {  # $1 status  $2 detail  $3 url — no sound, replaces the previous quiet
@@ -127,14 +139,14 @@ register_watch() {  # $1 key  $2 repo  $3 id  $4 title  $5 url — track a live 
   if [[ -f "$_marker" ]]; then                       # dedup: a live watcher on this key → reuse
     local epid=$(cut -f6 "$_marker" 2>/dev/null)
     if [[ -n "$epid" ]] && kill -0 "$epid" 2>/dev/null; then
-      open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null
+      poke_swiftbar
       echo "prwatch: already watching $2#$3 (pid $epid)"; exit 0
     fi
   fi
   print -r -- "$2"$'\t'"$3"$'\t'"$4"$'\t'"$5"$'\t'"$(date +%s)"$'\t'"$$" > "$_marker"
   # cleanup trap lives at top level (set near the script header) — a function-local
   # `trap ... EXIT` would fire on return and delete the marker we just wrote.
-  open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null   # no-op until SwiftBar installed
+  poke_swiftbar   # no-op until SwiftBar installed
 }
 
 watch_pr() {  # $1 repo  $2 number
@@ -149,6 +161,8 @@ watch_pr() {  # $1 repo  $2 number
     print -P "%F{red}✗ ${repo}#${num} — a check failed (or none reported)%f"
     notify "✗ failed" "${repo}#${num} — a check failed" "$url"
   fi
+  # --await watchers stay out of the mute list: their PRs keep merge/landing notifications
+  [[ "${PRWATCH_AWAIT:-0}" == 1 ]] || mark_answered "$repo#$num"
 }
 
 watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
@@ -162,6 +176,7 @@ watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
     print -P "%F{red}✗ run ${rid} — failed%f"
     notify "✗ run failed" "${repo} run ${rid} failed" "$url"
   fi
+  mark_answered "$repo/$rid"
 }
 
 # rows: "repo<TAB>number<TAB>rollup<TAB>title<TAB>branch" across all repos
@@ -239,7 +254,7 @@ if [[ "${1:-}" == "--await" ]]; then
 
   # 3) block until checks resolve, then notify. watch_pr registers the tracking
   #    marker (badge + --tracking) and prunes it on exit.
-  watch_pr "$arepo" "$anum"
+  PRWATCH_AWAIT=1 watch_pr "$arepo" "$anum"
   exit 0
 fi
 
@@ -328,10 +343,11 @@ if [[ "${1:-}" == "--sweep" ]]; then
     cur[$key]=1
     newstate+="$key"$'\t'"$st"$'\t'"$title"$'\t'"$url"$'\n'
     if [[ "$approved" == approved ]] && ! grep -qxF "$key" "$aseen" 2>/dev/null; then
-      (( afirst || firstrun )) || snotify "✅ approved" "$key — $title" "$url"
+      (( afirst || firstrun )) || answered "$key" || snotify "✅ approved" "$key — $title" "$url"
       print -r -- "$key" >> "$aseen"
     fi
     (( firstrun )) && continue
+    answered "$key" && continue   # explicit watch already notified — state recorded above, no taps
     was="${prev[$key]:-}"
     if [[ $st == fail && $was != fail ]]; then
       snotify "✗ failing" "$key — $title" "$url"
@@ -351,7 +367,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
       repo="${key%\#*}"; num="${key##*\#}"
       prstate="$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" || prstate=""
       if [[ "$prstate" == MERGED ]]; then
-        squiet "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
+        answered "$key" || squiet "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
         merged_now+=("$key")   # hand off to deploy-landing tracking below
         any_merged=1
       elif [[ "$prstate" != CLOSED ]]; then
@@ -399,6 +415,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
         (( rfirst )) && continue
         was="${rprev[$key]:-}"
         [[ "$st" == "$was" ]] && continue
+        answered "$key" && continue   # run was explicitly watched — its one notification fired
         case "$st" in
           (success) snotify "🚀 run succeeded" "$title" "$url" ;;
           (failure|timed_out|startup_failure|cancelled) snotify "✗ run $st" "$title" "$url" ;;
@@ -418,6 +435,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
   # ingest PRs that merged THIS pass, recording their merge commit
   for key in ${merged_now[@]:-}; do
     [[ -n "$key" ]] || continue
+    answered "$key" && continue   # explicit watch already notified — no landing taps either
     lrepo="${key%\#*}"; lnum="${key##*\#}"
     if [[ -f "$lstate" ]] && grep -q "^${key}"$'\t' "$lstate"; then continue; fi   # already tracked
     msha=$(gh pr view "$lnum" --repo "$lrepo" --json mergeCommit --jq '.mergeCommit.oid' 2>/dev/null) || msha=""
