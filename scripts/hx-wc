@@ -21,9 +21,15 @@ msg="${*:-wip}"
 file="${file:A}"   # absolutize: %{buffer_name} is cwd-relative, git -C below re-anchors paths
 dir="${file:h}"
 
+# pre-check instead of letting commit fail: detached-HEAD commit failure output is a noisy
+# two-liner ("Not currently on any branch." + "nothing to commit") in the hx popup
+if [[ -z "$(git -C "$dir" status --porcelain -- "$file")" ]]; then
+  echo "hx-wc: nothing to commit"
+  exit 0
+fi
 git -C "$dir" add -- "$file"
 if ! out=$(git -C "$dir" commit -m "$msg" -- "$file" 2>&1); then
-  echo "hx-wc: ${out}" >&2   # e.g. "nothing to commit"
+  echo "hx-wc: ${out}" >&2
   exit 1
 fi
 sha=$(git -C "$dir" rev-parse --short HEAD)
