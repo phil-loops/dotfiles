@@ -845,9 +845,11 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 /* behind / restack / fresh are restack state, not identity — they recede until the row is hovered */
 .forest-trail { opacity: 0; transition: opacity 0.12s; }
 .forest-row:hover .forest-trail { opacity: 1; }
-/* priority tiers: a faint pip header sets each level apart so same-priority forests cluster */
-.forest-tier-head { font-size: 12px; letter-spacing: 0.06em; color: var(--gold-deep); opacity: 0.85; margin: 15px 4px 6px; }
-.forest-tier-head:first-child { margin-top: 2px; }
+/* lifecycle bands: the page's one grouping — what state the work is in, most urgent first */
+.forest-band-head { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--gold-deep); opacity: 0.85; margin: 16px 4px 7px; }
+.forest-band-head:first-child { margin-top: 2px; }
+/* interest pips: passive per-row metadata (they no longer rank the page) */
+.forest-pips { flex: none; font-size: 10px; letter-spacing: 0.14em; color: var(--ink-faint); margin-right: 8px; }
 /* live-chat presence: the Home "chats" strip + the pulsing per-forest badge (/chat-jobs) */
 .chat-live .chat-row {
   display: flex; align-items: baseline; gap: 10px; padding: 6px 9px; border-radius: 8px;

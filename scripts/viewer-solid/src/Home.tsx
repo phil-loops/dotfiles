@@ -327,6 +327,8 @@ export function Home() {
         restackErr={restackErr}
         restackAllAction={restackAllAction}
         forestRow={forestRow}
+        parked={parked}
+        prOf={prOf}
       />
 
 
