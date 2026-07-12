@@ -120,6 +120,7 @@ export const Project = z.object({
   lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
   interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home
+  shelved: z.boolean().optional(), // deliberately paused (stack-project.<name>.shelved) — out of the active bands until unshelved
 });
 export type Project = z.infer<typeof Project>;
 

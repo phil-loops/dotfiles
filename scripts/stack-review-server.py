@@ -344,6 +344,8 @@ class H(BaseHTTPRequestHandler):
             return review.purpose_set(self, raw)
         if self.path == "/interest":   # promote/demote a branch's manual interest (stack-branch.<b>.interest)
             return review.interest_bump(self, raw)
+        if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
+            return review.shelve(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
