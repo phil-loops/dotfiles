@@ -16,7 +16,10 @@ Empty, --list, ambiguous, or no-match → prints the addressable sessions.
 --json (no <who>) → the same list as JSON with each session's tmux pane + address,
 for machine callers (the viewer's ✦ session picker).
 
-The current session is excluded (you can't message yourself).
+The current session can't be MESSAGED, but --json/--list still show it (flagged
+"(you)" / self:true) — a session introspecting its own address must see the truth,
+not conclude it's unregistered and hand-guess a pane id (that guess once landed a
+reply in a Helix pane as raw normal-mode keystrokes).
 """
 import os, sys, json, glob, time, subprocess
 
@@ -103,9 +106,10 @@ def pane_of(r):
     return ""
 
 
-def show(sessions, stream=sys.stdout):
+def show(sessions, stream=sys.stdout, me=None):
     for r in sessions:
-        print("  %-10s %-28s %s" % (r.get("session_id", "")[:8], area(r), r.get("repo_name", "")), file=stream)
+        you = "  (you)" if r.get("pid") == me else ""
+        print("  %-10s %-28s %s%s" % (r.get("session_id", "")[:8], area(r), r.get("repo_name", ""), you), file=stream)
 
 
 def main():
@@ -114,11 +118,12 @@ def main():
     send = not ({"--draft", "--no-send"} & flags)   # submit by default; --draft keeps draft-only
 
     me = self_pid()
-    others = [r for r in live_sessions() if r.get("pid") != me]
+    everyone = live_sessions()
+    others = [r for r in everyone if r.get("pid") != me]
 
     if "--json" in flags and not args:
         out = []
-        for r in sorted(others, key=lambda r: -(r.get("last_active") or 0)):
+        for r in sorted(everyone, key=lambda r: -(r.get("last_active") or 0)):
             pane = pane_of(r)
             if not pane:   # no pane = undeliverable; the picker only lists reachable sessions
                 continue
@@ -132,13 +137,14 @@ def main():
                 "pane": pane,
                 "addr": addr,
                 "idle_s": max(0, int(time.time()) - int(r.get("last_active") or 0)),
+                "self": r.get("pid") == me,
             })
         print(json.dumps(out))
         return 0
 
     if not args or args[0] == "--list":
         print("addressable sessions:")
-        show(others)
+        show(everyone, me=me)
         return 0
 
     who, msg = args[0], " ".join(args[1:]).strip()
@@ -169,6 +175,19 @@ def main():
     if not pane:
         print("matched %s but found no tmux pane (not under tmux?) — can't deliver." % tgt.get("session_id", "")[:8], file=sys.stderr)
         return 1
+
+    # never type into a pane that isn't a Claude prompt: a stale registry/pane mapping would
+    # feed the message to whatever runs there as raw keystrokes (an editor eats them as
+    # normal-mode commands — this typed a handback note into a Helix scratch buffer once).
+    cmd = sh(["tmux", "display-message", "-p", "-t", pane, "#{pane_current_command}"]).strip()
+    if cmd not in ("claude", "node"):
+        print("pane %s is running %r, not a Claude prompt — refusing to type into it." % (pane, cmd), file=sys.stderr)
+        return 1
+
+    # a leading "/" would make the target's CLI parse the message as a slash command
+    # (and eat it as "Unknown command: /<word>") — a leading space defuses the parse.
+    if msg.startswith("/"):
+        msg = " " + msg
 
     subprocess.run(["tmux", "send-keys", "-t", pane, "-l", msg])   # literal text, NO Enter
     if send:
