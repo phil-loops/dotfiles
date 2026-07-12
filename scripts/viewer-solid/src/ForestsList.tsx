@@ -60,9 +60,11 @@ export function ForestsList(props: {
   const DORMANT_AFTER_MS = 14 * 24 * 3600 * 1000;
   const bandIdx = (p: Project): number => {
     if (props.parked()?.project === p.name) return 0;
-    // sticky: once anything lands, stay shipping while unmerged roots remain — a base
-    // merging must not demote a mid-flight forest between pushes
-    if (p.prOpened || props.prOf(p.name) || (p.merged && p.mergeable?.length)) return 1;
+    // shipping = outward motion NOW: an open PR, or a fresh merge (mergedAgo's 7-day
+    // horizon) with more roots to push. A merge never demotes — it extends the window —
+    // but a forest idle past it isn't shipping anymore, it's paused mid-forest.
+    if (p.prOpened || props.prOf(p.name)) return 1;
+    if (p.merged && mergedAgo(p.merged.at) && p.mergeable?.length) return 1;
     return forestTs(p) > Date.now() - DORMANT_AFTER_MS ? 2 : 3;
   };
 
