@@ -54,25 +54,33 @@ export function ForestMap(props: {
   // the merged-ghost badge's contextual next step: drop this branch + rewire its children
   // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
   onContract?: (branch: string) => Promise<unknown>;
+  // the merged-with-follow-on ghost's next step: ready the WHOLE forest (POST /ship —
+  // contract merged work first, then restack survivors onto fresh main, in that order).
+  // A node-local rebase here would move the node off its parent mid-graph; the forest
+  // walk is the only ordering that keeps children seated. Absent → badge is read-only.
+  onReady?: () => Promise<unknown>;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
   const [contracting, setContracting] = createSignal<string | null>(null);
+  const [readying, setReadying] = createSignal(false);
   // the merged-ghost next step, keyed off CONTRACTABLE (rebase-classify exit 20), not merged:
   //   drop    — fully contractable + we can mutate → ⊘ drop & rewire (POST /contract)
-  //   forward — merged PR but a newer commit rides on top → not droppable; go rebase it forward
-  //   merged  — contractable but read-only → passive ghost, no action
+  //   forward — merged PR but a newer commit rides on top → not droppable alone; the verb is
+  //             the whole-forest ready motion (contract first, THEN restack — never a
+  //             node-local rebase, which would unseat the graph mid-chain)
+  //   merged  — read-only → passive ghost, no action
   const ghostMode = (id: string): "drop" | "forward" | "merged" | null => {
     const h = nhealth(id);
     if (!h?.merged) return null;
     if (h.contractable) return props.onContract ? "drop" : "merged";
-    return "forward";
+    return props.onReady ? "forward" : "merged";
   };
   const ghostLabel = (id: string): string => {
-    if (contracting() === id) return "⊘ dropping & rewiring…";
+    if (contracting() === id) return readying() ? "▸ readying forest…" : "⊘ dropping & rewiring…";
     const m = ghostMode(id);
-    return m === "drop" ? "⊘ drop & rewire →" : m === "forward" ? "↑ rebase forward →" : "✦ merged ghost";
+    return m === "drop" ? "⊘ drop & rewire →" : m === "forward" ? "▸ ready forest →" : "✦ merged ghost";
   };
   const pillW = (s: string): number => [...s].length * 6.9 + 18;
 
@@ -346,7 +354,14 @@ export function ForestMap(props: {
                             setContracting(n.id);
                             Promise.resolve(props.onContract!(n.id)).finally(() => setContracting(null));
                           } else if (m === "forward") {
-                            props.onPick(n.id); // not droppable — go rebase forward + push at the node
+                            // not droppable alone — run the whole ready motion: contract merged
+                            // work into fresh main FIRST, then restack survivors root-down.
+                            setContracting(n.id);
+                            setReadying(true);
+                            Promise.resolve(props.onReady!()).finally(() => {
+                              setContracting(null);
+                              setReadying(false);
+                            });
                           }
                         }}
                       >
@@ -354,7 +369,7 @@ export function ForestMap(props: {
                           {ghostMode(n.id) === "drop"
                             ? "already merged AND fully contractable — drops this branch, rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
                             : ghostMode(n.id) === "forward"
-                              ? "the PR merged but a newer commit rides on top — not droppable. Open the node to rebase forward: the merged commit drops, the follow-on stays, then push it."
+                              ? "the PR merged but a newer commit rides on top — not droppable alone. Readies the whole forest: merged work contracts into fresh main first, then everything (the follow-on included) restacks in order. A conflict restores every branch."
                               : "merged into main (ghost)"}
                         </title>
                         <rect x={-pillW(ghostLabel(n.id)) / 2} y={-11} rx={9} width={pillW(ghostLabel(n.id))} height={22} />
@@ -469,7 +484,7 @@ const CSS = `
 .fm-warn { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; letter-spacing: .03em; }
 .fm-warn.drift { fill: var(--del); }
 /* merged-ghost next-step pill: a backed rect so the verb is legible OVER the edges, in ember
-   (drop & rewire — the clean ghost) or gold-leaf (rebase forward — merged PR + follow-on). */
+   (drop & rewire — the clean ghost) or gold-leaf (ready forest — merged PR + follow-on). */
 .fm-ghost-pill { cursor: pointer; }
 .fm-ghost-pill rect { fill: var(--vellum-night, #14110a); stroke: var(--rule, #3a332b); stroke-width: 1.2; }
 .fm-ghost-pill text { font-family: var(--mono); font-size: 11.5px; text-anchor: middle; letter-spacing: .02em; font-weight: 500; fill: var(--ink-dim, #a89e8c); }
