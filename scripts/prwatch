@@ -25,6 +25,9 @@
 #                        time, so rollbacks and PR-branch staging tests don't false-fire).
 #                        Watched repo: git config prwatch.landing-repos "owner/repo …"
 #                        (default Loops-so/loops).
+#                        After a long offline gap (> PRWATCH_SWEEP_GAP_H, default 6h —
+#                        reboot, weekend) the pass's notifications collapse into ONE
+#                        "while you were away" digest instead of a per-event storm.
 #
 # "Watch" streams gh's check status until every check passes or one fails, then
 # fires a desktop notification (+ a terminal bell). It scans your fork AND the
@@ -69,6 +72,7 @@ def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
 ] | @tsv'
 
 notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click it)
+  "$HOME/.dotfiles/scripts/notify-journal" prwatch notified "$1" "${2:-}" "${3:-}" 2>/dev/null || true
   print -n '\a'
   # Prefer terminal-notifier: posts under its own identity (clicking opens $3, the
   # PR/run — not Script Editor) and lands in Notification Center. Fall back to
@@ -248,6 +252,25 @@ if [[ "${1:-}" == "--sweep" ]]; then
   state="$HOME/.cache/prwatch/sweep-state.tsv"
   mkdir -p "${state:h}"
 
+  # gap-aware digest: after a long offline stretch (reboot, weekend) every transition
+  # that happened while away would fire its own notification in one burst. If the last
+  # completed pass is older than PRWATCH_SWEEP_GAP_H (default 6h), collect this pass's
+  # notifications into ONE "while you were away" summary instead.
+  stamp="$HOME/.cache/prwatch/sweep-last-pass"
+  now_s=$(date +%s)
+  last_s=0; [[ -f "$stamp" ]] && last_s=$(<"$stamp")
+  digest=0
+  (( last_s > 0 && now_s - last_s > ${PRWATCH_SWEEP_GAP_H:-6} * 3600 )) && digest=1
+  digest_lines=()
+  snotify() {
+    if (( digest )); then
+      digest_lines+=("$1 · $2")
+      "$HOME/.dotfiles/scripts/notify-journal" prwatch digest "$1" "${2:-}" "${3:-}" 2>/dev/null || true
+    else
+      notify "$@"
+    fi
+  }
+
   rows="$(collect || true)"
   # transient gh/network failure: an empty poll while we hold state is almost
   # certainly a bad fetch, not "every PR merged at once" — skip, keep last state.
@@ -274,11 +297,11 @@ if [[ "${1:-}" == "--sweep" ]]; then
     (( firstrun )) && continue
     was="${prev[$key]:-}"
     if [[ $st == fail && $was != fail ]]; then
-      notify "✗ failing" "$key — $title" "$url"
+      snotify "✗ failing" "$key — $title" "$url"
     elif [[ $st == pass && $was == fail ]]; then
-      notify "✓ recovered" "$key — checks green again" "$url"
+      snotify "✓ recovered" "$key — checks green again" "$url"
     elif [[ $st == pass && -z $was ]]; then
-      notify "✓ passing" "$key — $title" "$url"
+      snotify "✓ passing" "$key — $title" "$url"
     fi
   done <<< "$rows"
 
@@ -289,10 +312,15 @@ if [[ "${1:-}" == "--sweep" ]]; then
     for key in ${(k)prev}; do
       [[ -n "${cur[$key]:-}" ]] && continue
       repo="${key%\#*}"; num="${key##*\#}"
-      if [[ "$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" == MERGED ]]; then
-        notify "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
+      prstate="$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" || prstate=""
+      if [[ "$prstate" == MERGED ]]; then
+        snotify "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
         merged_now+=("$key")   # hand off to deploy-landing tracking below
         any_merged=1
+      elif [[ "$prstate" != CLOSED ]]; then
+        # still open (or unverifiable) yet missing from the scan — a partial gh fetch
+        # dropped it; carry it over so its green doesn't re-announce when it reappears
+        newstate+="$key"$'\t'"${prev[$key]}"$'\t'"${prevtitle[$key]:-}"$'\t'"https://github.com/$repo/pull/$num"$'\n'
       fi
     done
     (( any_merged )) && poke_viewers
@@ -335,8 +363,8 @@ if [[ "${1:-}" == "--sweep" ]]; then
         was="${rprev[$key]:-}"
         [[ "$st" == "$was" ]] && continue
         case "$st" in
-          (success) notify "🚀 run succeeded" "$title" "$url" ;;
-          (failure|timed_out|startup_failure|cancelled) notify "✗ run $st" "$title" "$url" ;;
+          (success) snotify "🚀 run succeeded" "$title" "$url" ;;
+          (failure|timed_out|startup_failure|cancelled) snotify "✗ run $st" "$title" "$url" ;;
         esac   # in-flight states record silently — Slack already announces the start
       done <<< "$rrows"
       printf '%s' "$rnew" >"$rstate"
@@ -393,16 +421,24 @@ if [[ "${1:-}" == "--sweep" ]]; then
       [[ -n "$key" ]] || continue
       lrepo="${key%\#*}"; lnum="${key##*\#}"; lurl="https://github.com/$lrepo/pull/$lnum"
       if [[ "$staged" != 1 ]] && _pr_in_deploy "$lrepo" "$msha" ${stag[@]:-}; then
-        notify "🚀 landed in staging" "$key — $title" "$lurl"; staged=1
+        snotify "🚀 landed in staging" "$key — $title" "$lurl"; staged=1
       fi
       if [[ "$prodded" != 1 ]] && _pr_in_deploy "$lrepo" "$msha" ${prod[@]:-}; then
-        notify "🚀 landed in production" "$key — $title" "$lurl"; prodded=1
+        snotify "🚀 landed in production" "$key — $title" "$lurl"; prodded=1
       fi
       [[ "$staged" == 1 && "$prodded" == 1 ]] && continue   # fully landed → drop from tracking
       lnew+="$key"$'\t'"$msha"$'\t'"$title"$'\t'"$staged"$'\t'"$prodded"$'\n'
     done < "$lstate"
     printf '%s' "$lnew" >"$lstate"
   fi
+
+  if (( ${#digest_lines} )); then
+    dmsg="${(j:; :)digest_lines[1,3]}"
+    (( ${#digest_lines} > 3 )) && dmsg+=" … +$(( ${#digest_lines} - 3 )) more"
+    notify "⏰ while you were away (${#digest_lines})" "$dmsg" "https://github.com/pulls"
+    for dl in $digest_lines; do echo "prwatch: (away) $dl"; done
+  fi
+  print -r -- "$now_s" >"$stamp"
   exit 0
 fi
 

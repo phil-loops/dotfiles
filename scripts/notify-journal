@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# notify-journal — append one event to the ambient-notification journal.
+# Storm guards (build-notify age cutoff, prwatch away-digest) may suppress or
+# collapse desktop notifications; every event still lands here, so nothing is
+# lost — `notify-log` plays the journal back.
+#
+#   notify-journal <source> <disposition> <title> <message> [url]
+#     disposition: notified | digest | silent-age | silent-superseded
+set -euo pipefail
+log="$HOME/.cache/notify-journal/events.tsv"
+mkdir -p "${log%/*}"
+src="${1:?source}"; disp="${2:?disposition}"; title="${3:?title}"; msg="${4:-}"; url="${5:-}"
+printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$(date +%s)" "$src" "$disp" \
+  "${title//$'\t'/ }" "${msg//$'\t'/ }" "$url" >> "$log"
+if [ "$(wc -l < "$log")" -gt 5000 ]; then
+  tail -n 2500 "$log" > "$log.tmp" && mv "$log.tmp" "$log"
+fi

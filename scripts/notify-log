@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# notify-log — play back the ambient-notification journal (see notify-journal),
+# including events the storm guards suppressed or folded into a digest.
+#
+#   notify-log [hours]      events from the last N hours (default 24)
+#   notify-log --missed     only events that never got their own popup
+#                           (digest-folded + silenced), last 48h
+set -euo pipefail
+log="$HOME/.cache/notify-journal/events.tsv"
+[ -s "$log" ] || { echo "notify-log: no events journaled yet"; exit 0; }
+
+hours=24; missed=0
+if [ "${1:-}" = "--missed" ]; then missed=1; hours="${2:-48}"; else hours="${1:-24}"; fi
+cutoff=$(( $(date +%s) - hours * 3600 ))
+
+awk -F'\t' -v c="$cutoff" -v m="$missed" \
+  '$1 >= c && (m == 0 || $3 != "notified")' "$log" \
+| while IFS=$'\t' read -r ts src disp title msg url; do
+    printf '%s  %-12s %-18s %s — %s\n' \
+      "$(date -r "$ts" '+%m-%d %H:%M')" "$src" "[$disp]" "$title" "$msg"
+  done
