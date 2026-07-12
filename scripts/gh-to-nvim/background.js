@@ -282,3 +282,12 @@ chrome.runtime.onInstalled.addListener(() => {
 
 poll();
 setInterval(poll, 2000);
+
+// setInterval dies with the sleeping service worker; an alarm wakes it so the badge
+// stays honest and the force-installed copy pulls new packs without a human poke.
+chrome.alarms.create("poll", { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((a) => {
+  if (a.name === "poll") {
+    poll();
+  }
+});
