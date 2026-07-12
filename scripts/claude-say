@@ -191,10 +191,25 @@ def main():
 
     subprocess.run(["tmux", "send-keys", "-t", pane, "-l", msg])   # literal text, NO Enter
     if send:
+        # never submit into a composer that already held text: a stray char there fuses with
+        # this message and our Enter executes the hybrid (a lone "/" + a note once ran as the
+        # slash command "/disregard"). Positively-seen residue → leave as draft; can't-tell →
+        # submit as before (a silently-lost note in an unattended pane is the worse failure).
+        time.sleep(0.3)   # let the target TUI paint the typed text before inspecting it
+        snippet = msg.strip()[:24]
+        line = next((l for l in reversed(sh(["tmux", "capture-pane", "-t", pane, "-p"]).splitlines())
+                     if snippet and snippet in l), "")
+        residue = line.split(snippet)[0].strip(" │|┃▌>❯›∙·⏵") if line else ""
+        if residue:
+            print("composer already held %r — NOT submitting; left as a draft to review in that pane."
+                  % residue[-20:], file=sys.stderr)
+            send = False
+    if send:
         subprocess.run(["tmux", "send-keys", "-t", pane, "Enter"])
     print("%s → %s · %s  (pane %s)" % (
         "sent+entered" if send else "drafted (no Enter — review & send in that pane)",
         tgt.get("session_id", "")[:8], area(tgt), pane))
+    sys.stdout.flush()
     time.sleep(0.4)   # let the target TUI repaint so the confirmation shows the landed text
     tail = [l for l in sh(["tmux", "capture-pane", "-t", pane, "-p"]).splitlines() if l.strip()][-3:]
     for l in tail:
