@@ -2,22 +2,27 @@ import { createSignal, createMemo, Show, For, type JSX } from "solid-js";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
-import { interestPips, mergedAgo } from "./shared";
-import type { Project } from "./types";
+import { mergedAgo } from "./shared";
+import type { Project, Parked, PR } from "./types";
 
-// The Forests tab: the complete forest index grouped by repo → priority tiers, with cross-repo
-// epic clusters pulled to the top and a per-repo recently-merged fold. Owns its own filter/fold
-// state; the row itself comes in as a prop (Home wires its hover/ctx/parked handlers).
+// The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
+// is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
+// folds for dormant + recently-merged. One opinionated order (Phil, 2026-07-11): the manual
+// interest pips no longer rank the page (they demoted to passive row metadata); recency only
+// orders *within* a band. Owns its own filter/fold state; the row itself comes in as a prop
+// (Home wires its hover/ctx/parked handlers).
 export function ForestsList(props: {
   tab: () => string;
   projects: () => Project[] | undefined;
   restackErr: () => string | null;
   restackAllAction: () => Action;
   forestRow: (p: Project, folded: boolean) => JSX.Element;
+  parked: () => Parked | null;
+  prOf: (name: string) => PR | undefined;
 }) {
   const [forestQuery, setForestQuery] = createSignal("");
-  // Forests recency — one opinionated order (Phil, 2026-07-05). "Most recently alive": the latest
-  // of local commit, PR opened, and merge-to-main.
+  // Forests recency — "most recently alive": the latest of local commit, PR opened, and
+  // merge-to-main. The within-band sort, never the grouping.
   const forestTs = (p: Project): number =>
     Math.max(
       (p.lastCommit ?? 0) * 1000,
@@ -36,14 +41,33 @@ export function ForestsList(props: {
   // merged-but-uncontracted roots, so a just-merged forest lingers in active until you contract it.)
   const recentlyMerged = (p: Project): boolean =>
     !!(p.merged && mergedAgo(p.merged.at)) && !p.mergeable?.length;
-  // Group the home list by repo (loops first, then alphabetical), then within each repo split the
-  // active forests into PRIORITY TIERS (interest level, descending) so same-priority work stands
-  // together, and pull recently-merged forests aside into their own fold.
+
+  // ── lifecycle bands, most urgent first ──────────────────────────────────
+  //   needs a hand — parked on a rebase conflict: blocked until someone resolves it
+  //   shipping     — an open PR is riding to main
+  //   building     — alive in the last two weeks, nothing shipping yet
+  //   dormant      — no life in two weeks (folded: it's context, not a to-do)
+  // Deliberately NOT bands: behind-main (when origin/main advances everything is behind at
+  // once — ambient restack weather, owned by the row dot + restack-all) and mergeable roots
+  // (nearly every built forest has one — a signal that's always on ranks nothing).
+  const BANDS = [
+    { key: "hand", label: "needs a hand", hint: "a rebase parked on a conflict — blocked until it's resolved or aborted" },
+    { key: "shipping", label: "shipping", hint: "an open PR — riding to main" },
+    { key: "building", label: "building", hint: "commits in the last two weeks; nothing shipping yet" },
+    { key: "dormant", label: "dormant", hint: "no movement in two weeks" },
+  ] as const;
+  const DORMANT_AFTER_MS = 14 * 24 * 3600 * 1000;
+  const bandIdx = (p: Project): number => {
+    if (props.parked()?.project === p.name) return 0;
+    if (p.prOpened || props.prOf(p.name)) return 1;
+    return forestTs(p) > Date.now() - DORMANT_AFTER_MS ? 2 : 3;
+  };
+
   // A project's identity is (repo, name) — the same forest name can exist in two repos.
   const pkey = (p: Project) => (p.repo || "loops") + " " + p.name;
-  // Cross-repo "epic" clusters: same stack-project.<name>.epic tag spanning ≥2 repos folds into one
-  // card at the top (ranked by its members' max interest). A single-repo epic is left in its normal
-  // repo bucket — pulling one row out into a lone "cluster" would only fragment the list.
+  // Cross-repo "epic" clusters: same stack-project.<name>.epic tag spanning ≥2 repos folds into
+  // one card, placed in the band of its most urgent member. A single-repo epic is left in its
+  // normal band — pulling one row out into a lone "cluster" would only fragment the list.
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
     for (const p of filteredForests()) {
@@ -54,46 +78,37 @@ export function ForestsList(props: {
       .filter(([, items]) => new Set(items.map((p) => p.repo || "loops")).size >= 2)
       .map(([epic, items]) => ({
         epic,
-        interest: Math.max(...items.map((p) => p.interest ?? 0)),
+        band: Math.min(...items.map(bandIdx)),
+        ts: Math.max(...items.map(forestTs)),
         items: items.sort((a, b) => forestTs(b) - forestTs(a)),
-      }))
-      .sort((a, b) => b.interest - a.interest || b.items.length - a.items.length);
+      }));
   });
   const clusteredKeys = createMemo(() => new Set(epicClusters().flatMap((c) => c.items.map(pkey))));
-  const forestGroups = createMemo(() => {
+  const bands = createMemo(() => {
     const clustered = clusteredKeys();
-    const by = new Map<string, Project[]>();
-    for (const p of filteredForests()) {
-      if (clustered.has(pkey(p))) continue; // shown in an epic cluster above, not under its repo header
-      const r = p.repo || "loops";
-      (by.get(r) ?? by.set(r, []).get(r)!).push(p);
-    }
-    return [...by.entries()]
-      .sort(([a], [b]) => (a === "loops" ? -1 : b === "loops" ? 1 : a.localeCompare(b)))
-      .map(([repo, items]) => {
-        const merged = items.filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a));
-        const active = items.filter((p) => !recentlyMerged(p));
-        const levels = [...new Set(active.map((p) => p.interest ?? 0))].sort((a, b) => b - a);
-        const tiers = levels.map((interest) => ({
-          interest,
-          // within a tier, most-recently-alive first (blended commit/PR/merge recency).
-          items: active
-            .filter((p) => (p.interest ?? 0) === interest)
-            .sort((a, b) => forestTs(b) - forestTs(a)),
-        }));
-        return { repo, tiers, merged };
-      });
+    const active = filteredForests().filter((p) => !recentlyMerged(p) && !clustered.has(pkey(p)));
+    return BANDS.map((band, i) => ({
+      ...band,
+      clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
+      items: active.filter((p) => bandIdx(p) === i).sort((a, b) => forestTs(b) - forestTs(a)),
+    })).filter((b) => b.items.length || b.clusters.length);
   });
-  const multiRepo = createMemo(() => forestGroups().length > 1);
-  // recently-merged fold is collapsed per repo until clicked.
-  const [mergedOpenSet, setMergedOpenSet] = createSignal<Set<string>>(new Set());
-  const mergedOpen = (r: string) => mergedOpenSet().has(r);
-  const toggleMerged = (r: string) =>
-    setMergedOpenSet((s) => {
-      const n = new Set(s);
-      if (n.has(r)) { n.delete(r); } else { n.add(r); }
-      return n;
-    });
+  const merged = createMemo(() =>
+    filteredForests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
+  const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
+  // repo demoted from group header to a quiet per-row badge (non-loops rows only)
+  const row = (p: Project, folded: boolean) =>
+    multiRepo() && (p.repo || "loops") !== "loops" ? (
+      <div class="epic-subrow">
+        <span class="epic-repo-badge">{p.repo}</span>
+        {props.forestRow(p, folded)}
+      </div>
+    ) : (
+      props.forestRow(p, folded)
+    );
+  // dormant + recently-merged fold closed until clicked — context, not to-dos.
+  const [dormantOpen, setDormantOpen] = createSignal(false);
+  const [mergedOpen, setMergedOpen] = createSignal(false);
   return (
       <Show when={props.tab() === "forests"}>
       <section>
@@ -130,52 +145,53 @@ export function ForestsList(props: {
             </p>
           }
         >
-          <For each={epicClusters()}>
-            {(cluster) => (
-              <div class="epic-cluster">
-                <h3 class="epic-head" title="one effort spanning repos, linked by epic tag (advisory — each half still merges on its own main)">
-                  ⇌ {cluster.epic}
-                </h3>
-                <For each={cluster.items}>
-                  {(p) => (
-                    <div class="epic-subrow">
-                      <span class="epic-repo-badge">{p.repo || "loops"}</span>
-                      {props.forestRow(p, false)}
+          <For each={bands()}>
+            {(band) => (
+              <Show
+                when={band.key !== "dormant"}
+                fallback={
+                  <>
+                    <button class="forest-mfold" onClick={() => setDormantOpen(!dormantOpen())}>
+                      {dormantOpen() ? "▾" : "▸"} {band.items.length + band.clusters.reduce((n, c) => n + c.items.length, 0)} dormant
+                    </button>
+                    <Show when={dormantOpen()}>
+                      {/* a fully-dormant epic cluster flattens to plain rows here — the fold is
+                          an archive shelf, not a place to preserve cluster framing */}
+                      <For each={[...band.clusters.flatMap((c) => c.items), ...band.items]}>{(p) => row(p, false)}</For>
+                    </Show>
+                  </>
+                }
+              >
+                <div class="forest-band-head" title={band.hint}>{band.label}</div>
+                <For each={band.clusters}>
+                  {(cluster) => (
+                    <div class="epic-cluster">
+                      <h3 class="epic-head" title="one effort spanning repos, linked by epic tag (advisory — each half still merges on its own main)">
+                        ⇌ {cluster.epic}
+                      </h3>
+                      <For each={cluster.items}>
+                        {(p) => (
+                          <div class="epic-subrow">
+                            <span class="epic-repo-badge">{p.repo || "loops"}</span>
+                            {props.forestRow(p, false)}
+                          </div>
+                        )}
+                      </For>
                     </div>
                   )}
                 </For>
-              </div>
+                <For each={band.items}>{(p) => row(p, false)}</For>
+              </Show>
             )}
           </For>
-          <For each={forestGroups()}>
-            {(group) => (
-              <>
-                <Show when={multiRepo()}>
-                  <h3 class="forest-repo-head">{group.repo}</h3>
-                </Show>
-                <For each={group.tiers}>
-                  {(tier) => (
-                    <>
-                      <Show when={group.tiers.length > 1}>
-                        <div class="forest-tier-head">
-                          {tier.interest > 0 ? interestPips(tier.interest) : "no priority"}
-                        </div>
-                      </Show>
-                      <For each={tier.items}>{(p) => props.forestRow(p, false)}</For>
-                    </>
-                  )}
-                </For>
-                <Show when={group.merged.length}>
-                  <button class="forest-mfold" onClick={() => toggleMerged(group.repo)}>
-                    {mergedOpen(group.repo) ? "▾" : "▸"} {group.merged.length} recently merged
-                  </button>
-                  <Show when={mergedOpen(group.repo)}>
-                    <For each={group.merged}>{(p) => props.forestRow(p, true)}</For>
-                  </Show>
-                </Show>
-              </>
-            )}
-          </For>
+          <Show when={merged().length}>
+            <button class="forest-mfold" onClick={() => setMergedOpen(!mergedOpen())}>
+              {mergedOpen() ? "▾" : "▸"} {merged().length} recently merged
+            </button>
+            <Show when={mergedOpen()}>
+              <For each={merged()}>{(p) => row(p, true)}</For>
+            </Show>
+          </Show>
         </Show>
       </section>
       </Show>

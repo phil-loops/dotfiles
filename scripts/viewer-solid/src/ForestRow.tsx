@@ -3,7 +3,7 @@ import { Link } from "./router";
 import { deleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
-import { leaf, mergedAgo } from "./shared";
+import { leaf, mergedAgo, interestPips } from "./shared";
 import type { Project, Parked, PR } from "./types";
 
 // one forest row, shared by the priority tiers and the recently-merged fold. Metadata sits in
@@ -41,12 +41,16 @@ export function ForestRow(props: {
     >
       <span class={`forest-dot ${stuck() ? "parked" : props.p.behind > 0 ? "behind" : "fresh"}`} />
       <span class="forest-name">{props.p.name}</span>
+      {/* interest pips demoted to passive metadata — lifecycle bands order the page now */}
+      <Show when={(props.p.interest ?? 0) > 0}>
+        <span class="forest-pips">{interestPips(props.p.interest!)}</span>
+      </Show>
       <Show when={props.hasLiveChat(props.p)}>
         <span class="forest-chat" title="a chat is running on this forest">✦</span>
       </Show>
       {/* ONE status cell, by precedence (Phil, strike 5: "a row = name + one signal") —
-          drop-mode > parked repair > merged fold > behind count > open PR. Pips live on
-          the tier header, node count on the overview; no signal at all = fresh. */}
+          drop-mode > parked repair > merged fold > behind count > open PR. Pips sit dim
+          after the name, node count on the overview; no signal at all = fresh. */}
       <span class="fcell trail">
         <Switch
           fallback={
