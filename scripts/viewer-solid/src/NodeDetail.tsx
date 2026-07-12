@@ -1,5 +1,5 @@
 import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
-import { useQueryClient, createQuery } from "@tanstack/solid-query";
+import { useQueryClient, createQuery, keepPreviousData } from "@tanstack/solid-query";
 import { useViewerLocation, forestKey, withNode, forestRepo } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, isBlessed, flattenForest } from "./shared";
@@ -63,6 +63,7 @@ export function NodeDetail() {
     queryKey: ["model", repoKey(), project()],
     queryFn: () => provider.model(project()),
     enabled: !!project(),
+    placeholderData: keepPreviousData,
   }));
   const spine = createMemo(() => flattenForest(model.data));
   // default to the first node with actual files — a fan-in forest's first root is often an empty
@@ -121,11 +122,13 @@ export function NodeDetail() {
     queryKey: nodeKey(),
     queryFn: () => provider.node(nodeRef(), nodeBase()),
     enabled: !!active(),
+    placeholderData: keepPreviousData,
   }));
   const commits = createQuery(() => ({
     queryKey: ["commits", repoKey(), active()],
     queryFn: () => provider.commits(active()),
     enabled: !!active() && view() === "commits",
+    placeholderData: keepPreviousData,
   }));
 
   const { bless, unbless, bumpInterest, detachUpstream, reseatChildren } = useNodeMutations({
@@ -169,6 +172,7 @@ export function NodeDetail() {
           >,
       ),
     enabled: canMutate && healthIds().length > 0,
+    placeholderData: keepPreviousData,
     // health is "did the world change while I was away" — the one query that must wake on
     // focus (the global default is refetchOnWindowFocus: false) and converge unattended,
     // else a merge only surfaces on a full reload.
@@ -197,6 +201,7 @@ export function NodeDetail() {
   let dirtReceiptT: ReturnType<typeof setTimeout>;
   const divergedDetail = createQuery(() => ({
     queryKey: ["diverged-detail", forestRepo(location()) ?? "loops", active()],
+    placeholderData: keepPreviousData,
     queryFn: () =>
       fetch(withRepo("/diverged-detail?branch=" + encodeURIComponent(active()))).then(
         (r) =>
@@ -380,7 +385,8 @@ export function NodeDetail() {
                 <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
                   {/* off-parent bases are view-only — bless keys on the parent...child patch-id, not the shown diff */}
                   <For each={data().files.filter(matchFilter)}>
-                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost() || base() !== ""} onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })} />}
+                    {/* the ghost has no real branch — send the project so the seed resolves the integrator ref */}
+                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost() || base() !== ""} onChat={(file, session) => chatToTmux(isGhost() ? { project: project(), path: file.path, patch: file.patch, session } : { branch: active(), path: file.path, patch: file.patch, session })} />}
                   </For>
                 </Show>
               </Show>
@@ -404,7 +410,7 @@ export function NodeDetail() {
                   dirtReceiptT = setTimeout(() => setDirtReceipt(null), 8000);
                 }
               }}
-              onChat={(file) => chatToTmux({ branch: active(), path: file.path, patch: file.patch })}
+              onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })}
             />
           </Show>
           <Show when={dirtReceipt()}>

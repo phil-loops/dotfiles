@@ -13,6 +13,8 @@ still accepted as a no-op for muscle memory.
   • a substring of what it's working on (recent files / branch / area)
                            claude-say goal-attachment "…"
 Empty, --list, ambiguous, or no-match → prints the addressable sessions.
+--json (no <who>) → the same list as JSON with each session's tmux pane + address,
+for machine callers (the viewer's ✦ session picker).
 
 The current session is excluded (you can't message yourself).
 """
@@ -113,6 +115,26 @@ def main():
 
     me = self_pid()
     others = [r for r in live_sessions() if r.get("pid") != me]
+
+    if "--json" in flags and not args:
+        out = []
+        for r in sorted(others, key=lambda r: -(r.get("last_active") or 0)):
+            pane = pane_of(r)
+            if not pane:   # no pane = undeliverable; the picker only lists reachable sessions
+                continue
+            addr = sh(["tmux", "display-message", "-p", "-t", pane,
+                       "#{session_name}:#{window_index}.#{pane_index} · #{window_name}"]).strip()
+            out.append({
+                "session_id": r.get("session_id", ""),
+                "repo_name": r.get("repo_name", ""),
+                "branch": r.get("branch", "") or "",
+                "area": area(r),
+                "pane": pane,
+                "addr": addr,
+                "idle_s": max(0, int(time.time()) - int(r.get("last_active") or 0)),
+            })
+        print(json.dumps(out))
+        return 0
 
     if not args or args[0] == "--list":
         print("addressable sessions:")

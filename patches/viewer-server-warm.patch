@@ -1,0 +1,25 @@
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 398b24e..2d9800c 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -481,7 +481,20 @@ def watcher():
+             pass
+ 
+ 
++def warm():
++    # prune dead worktree registrations (each rotted entry costs stack-forest a subprocess on
++    # every /node sweep), then pre-sweep the gh PR caches so a session's first /forest-health
++    # and /syncs never block on a cold multi-second gh call.
++    srvctx.run(["git", "worktree", "prune"])
++    try:
++        sync._pr_state_map()
++        sync._open_pr_heads()
++    except Exception:
++        pass
++
++
+ _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()   # seed so the first /events stream sees real values
++threading.Thread(target=warm, daemon=True).start()
+ threading.Thread(target=reaper, daemon=True).start()
+ threading.Thread(target=watcher, daemon=True).start()
+ threading.Thread(target=pulse, daemon=True).start()

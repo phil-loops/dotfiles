@@ -8,6 +8,7 @@ import { overviewView, setOverviewView } from "./overviewView";
 import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
 import { chatToTmux } from "./chatDrawer";
+import { SessionPicker } from "./SessionPicker";
 import type { Purpose } from "./types";
 
 // ── forest overview: the map as the landing hero (no node selected) ──────
@@ -338,6 +339,7 @@ export function ForestOverview() {
     setTip({ text: p.thesis, x: r.right + 12, y: r.top });
   };
   const hideTip = () => { tipBranch = null; setTip(null); };
+  const [chatPick, setChatPick] = createSignal(false);
 
   return (
     <div class="forest-overview">
@@ -359,11 +361,19 @@ export function ForestOverview() {
             <button classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
           </div>
           <Show when={canMutate}>
-            <button
-              class="fo-chat"
-              title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
-              onClick={() => chatToTmux({ project: project() })}
-            >✦ chat</button>
+            <span class="sp-anchor">
+              <button
+                class="fo-chat"
+                title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
+                onClick={() => setChatPick((v) => !v)}
+              >✦ chat</button>
+              <Show when={chatPick()}>
+                <SessionPicker
+                  onClose={() => setChatPick(false)}
+                  onPick={(session) => { setChatPick(false); chatToTmux({ project: project(), session }); }}
+                />
+              </Show>
+            </span>
             <ShipButton project={project()} />
             <StageButton project={project()} />
           </Show>

@@ -44,7 +44,7 @@ def route(req, u):
                               f"refs/heads/{branch}"]).returncode != 0:
         req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
         return
-    h = sync.state(branch)
+    h = sync.state(branch, fresh_prs=True)
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     up = sync._upstream_state(branch, main)
 

@@ -72,7 +72,7 @@ def stage(req, raw):
     root, root_branch = wts[0]
     if _dirty(root):
         return req._send(200, json.dumps({"ok": False, "err": "your main checkout has uncommitted changes — commit or stash before staging"}))
-    published = sync._open_pr_heads()
+    published = sync._open_pr_heads(fresh=True)
     prd = [b for b in chain if b in published]
     if prd:
         return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — staging rebases, and pushed history is never rewritten"}))

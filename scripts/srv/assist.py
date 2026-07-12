@@ -142,23 +142,45 @@ def stream(req, raw):
     chat._subscribe(req, job, 0)
 
 
+def claude_sessions(req):
+    """GET /claude-sessions — the live Claude Code sessions a seed can be drafted into
+    (presence registry, pane-resolved), for the ✦ buttons' session picker."""
+    r = subprocess.run([os.path.join(ctx.SCRIPTS, "claude-say"), "--json"],
+                       capture_output=True, text=True)
+    try:
+        sessions = json.loads(r.stdout or "[]")
+    except ValueError:
+        sessions = []
+    req._send(200, json.dumps({"sessions": sessions}))
+
+
 def chat_tmux(req, raw):
-    """POST /chat-tmux {branch, project?, path?, patch?} — the ✦ buttons' target: the same
-    seeded context, straight into an INTERACTIVE claude beside Phil's tmux panes
+    """POST /chat-tmux {branch, project?, path?, patch?, session?} — the ✦ buttons' target: the
+    same seeded context, straight into an INTERACTIVE claude beside Phil's tmux panes
     (STACK_CLAUDE_PLACE=join → split the active window, even-horizontal columns).
     The heavy seed (house style + full diff + branch state) is written to a tmp .txt file and
     only a one-line "read it, then answer:" reference is DRAFTED into the input unsent
     (STACK_CLAUDE_DRAFT) — so nothing large is pasted into the composer and Phil just adds his
     own question. The seed carries no read-only clause or action menu since this session can act.
+    With `session` (a live session id from /claude-sessions) no pane is spawned: the same
+    one-liner is drafted into THAT session's composer via claude-say --draft — never submitted,
+    so it can't hijack whatever that session is mid-way through.
     The drawer stays for streamed edit-actions and running threads."""
     d = json.loads(raw or "{}")
     branch = (d.get("branch") or "").strip()
     project = (d.get("project") or "").strip()
     path = (d.get("path") or "").strip()
+    session = (d.get("session") or "").strip()
     if not (branch or project):
         req._send(400, json.dumps({"ok": False, "err": "need a branch or project"}))
         return
-    if project:
+    if project and path:
+        # a file card on the ~integration ghost: seed against the project's real integrator
+        # branch — "~integration" is a viewer sentinel no git command can resolve.
+        target = chat._project_integrator(project) or project
+        seed = prompts.file_chat(target, path, d.get("patch", ""), "", interactive=True)
+        key = f"proj-{project}--{path}"
+    elif project:
         seed = prompts.project_chat(project, chat._project_seed(project), "", interactive=True)
         target = chat._project_integrator(project) or branch or project
         key = f"proj-{project}"
@@ -175,10 +197,14 @@ def chat_tmux(req, raw):
     seed_path = f"/tmp/stack-claude-seed-{key.replace('/', '~')}.txt"
     with open(seed_path, "w") as f:
         f.write(seed)
-    prompt = f"Read {seed_path} — it has this chat's diff, the house-style bar, and the branch state. Then answer:\n\n"
-    env = dict(os.environ, STACK_CLAUDE_PLACE="join", STACK_CLAUDE_DRAFT="1")
-    r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), target], input=prompt,
-                       env=env, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+    prompt = f"Read {seed_path} — it has this chat's diff, the house-style bar, and the branch state. Then answer:"
+    if session:
+        r = subprocess.run([os.path.join(ctx.SCRIPTS, "claude-say"), session, prompt, "--draft"],
+                           cwd=ctx.repo_cwd(), capture_output=True, text=True)
+    else:
+        env = dict(os.environ, STACK_CLAUDE_PLACE="join", STACK_CLAUDE_DRAFT="1")
+        r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-claude"), target], input=prompt + "\n\n",
+                           env=env, cwd=ctx.repo_cwd(), capture_output=True, text=True)
     ok = r.returncode == 0
     req._send(200 if ok else 500,
               json.dumps({"ok": ok, "out": (r.stdout or "").strip(), "err": (r.stderr or "").strip()}))

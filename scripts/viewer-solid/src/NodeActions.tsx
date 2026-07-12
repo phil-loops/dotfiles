@@ -18,7 +18,7 @@
 //   POST /sync     {branch}          → {ok, rebased?, ejected?, conflict?, summary?} | 409
 //                                       (rebase forward: in place when clean, else eject Claude)
 import { createSignal, For, Show, onCleanup } from "solid-js";
-import { createMutation, createQuery, useQueryClient } from "@tanstack/solid-query";
+import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
 import RebaseStream from "./RebaseStream";
@@ -427,6 +427,7 @@ export function NodeActions(props: {
     queryKey: ["sync", props.branch],
     queryFn: () => provider.sync(props.branch),
     enabled: !!props.branch,
+    placeholderData: keepPreviousData,
   }));
   const behind = () => sync.data?.behind ?? 0;
   const critical = () => sync.data?.deployCritical ?? [];
