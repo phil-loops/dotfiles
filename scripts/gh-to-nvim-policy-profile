@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# gh-to-nvim-policy-profile — generate (and open) the .mobileconfig that delivers
+# ExtensionInstallForcelist as a MANAGED preference.
+#
+# Why a profile: `defaults write com.google.Chrome …` lands at policy level
+# "Recommended", and Chrome only honors force-install at "Mandatory" (chrome://policy
+# showed Source=Platform, Level=Recommended, Status=OK — well-formed, ignored).
+# A configuration profile's MCX payload is a managed source, which is Mandatory.
+#
+# Regenerate + reinstall the profile after a key rotation — the extension id is
+# baked into the payload. Installing is a human step by macOS design:
+# this script `open`s the profile; approve it under
+# System Settings → General → Device Management.
+set -euo pipefail
+
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT=62530
+PROD_ID="$("$here/gh-to-nvim-ext-id" prod)"
+OUT="$here/gh-to-nvim/dist/gh-to-nvim-chrome-policy.mobileconfig"
+
+mkdir -p "$(dirname "$OUT")"
+cat > "$OUT" <<XML
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>PayloadContent</key>
+  <array>
+    <dict>
+      <key>PayloadType</key><string>com.apple.ManagedClient.preferences</string>
+      <key>PayloadVersion</key><integer>1</integer>
+      <key>PayloadIdentifier</key><string>com.philbrockman.gh-to-nvim.chrome-policy.mcx</string>
+      <key>PayloadUUID</key><string>$(uuidgen)</string>
+      <key>PayloadDisplayName</key><string>Chrome: force-install gh-to-nvim</string>
+      <key>PayloadContent</key>
+      <dict>
+        <key>com.google.Chrome</key>
+        <dict>
+          <key>Forced</key>
+          <array>
+            <dict>
+              <key>mcx_preference_settings</key>
+              <dict>
+                <key>ExtensionInstallForcelist</key>
+                <array>
+                  <string>$PROD_ID;http://localhost:$PORT/dist/updates.xml</string>
+                </array>
+              </dict>
+            </dict>
+          </array>
+        </dict>
+      </dict>
+    </dict>
+  </array>
+  <key>PayloadDescription</key><string>Force-installs the local gh-to-nvim extension from 127.0.0.1:$PORT so Chrome self-heals it after unclean shutdowns. Nothing leaves the machine.</string>
+  <key>PayloadDisplayName</key><string>gh-to-nvim Chrome policy</string>
+  <key>PayloadIdentifier</key><string>com.philbrockman.gh-to-nvim.chrome-policy</string>
+  <key>PayloadOrganization</key><string>philbrockman (local)</string>
+  <key>PayloadRemovalDisallowed</key><false/>
+  <key>PayloadScope</key><string>User</string>
+  <key>PayloadType</key><string>Configuration</string>
+  <key>PayloadUUID</key><string>$(uuidgen)</string>
+  <key>PayloadVersion</key><integer>1</integer>
+</dict>
+</plist>
+XML
+
+echo "wrote $OUT (id $PROD_ID)"
+open "$OUT"
+echo "→ approve it: System Settings → General → Device Management"

@@ -45,6 +45,8 @@ cat > "$PLIST" <<XML
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/gh-to-nvim-static.log</string>
+  <key>StandardErrorPath</key><string>/tmp/gh-to-nvim-static.log</string>
 </dict>
 </plist>
 XML
@@ -74,6 +76,13 @@ print(f"✓ ExtensionInstallForcelist = {entry}" + (f" (+{len(kept)} kept)" if k
 EOF
 
 "$here/gh-to-nvim-install"
+
+# The defaults write above only reaches policy level "Recommended", which Chrome
+# ignores for force-install; the profile is what lands it as Mandatory. Human
+# approval is a macOS requirement — regenerate + re-approve after key rotations.
+if ! profiles list 2>/dev/null | grep -q "com.philbrockman.gh-to-nvim.chrome-policy"; then
+  "$here/gh-to-nvim-policy-profile"
+fi
 
 echo
 echo "Relaunch Chrome; the forced copy appears on its own. Then remove the old"
