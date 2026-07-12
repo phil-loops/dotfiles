@@ -163,8 +163,8 @@ def chat_tmux(req, raw):
     (STACK_CLAUDE_DRAFT) — so nothing large is pasted into the composer and Phil just adds his
     own question. The seed carries no read-only clause or action menu since this session can act.
     With `session` (a live session id from /claude-sessions) no pane is spawned: the same
-    one-liner is drafted into THAT session's composer via claude-say --draft — never submitted,
-    so it can't hijack whatever that session is mid-way through.
+    one-liner is SENT into THAT session via claude-say (submit-by-default — a drafted note in
+    an unattended pane is silently lost; claude-say itself downgrades to draft on composer residue).
     The drawer stays for streamed edit-actions and running threads."""
     d = json.loads(raw or "{}")
     branch = (d.get("branch") or "").strip()
@@ -199,7 +199,9 @@ def chat_tmux(req, raw):
         f.write(seed)
     prompt = f"Read {seed_path} — it has this chat's diff, the house-style bar, and the branch state. Then answer:"
     if session:
-        r = subprocess.run([os.path.join(ctx.SCRIPTS, "claude-say"), session, prompt, "--draft"],
+        # auto-submitted, so the prompt must stand alone — Phil's question arrives as a follow-up
+        sent = f"Read {seed_path} — it has this chat's diff, the house-style bar, and the branch state. Give your read; Phil may follow up here."
+        r = subprocess.run([os.path.join(ctx.SCRIPTS, "claude-say"), session, sent],
                            cwd=ctx.repo_cwd(), capture_output=True, text=True)
     else:
         env = dict(os.environ, STACK_CLAUDE_PLACE="join", STACK_CLAUDE_DRAFT="1")
