@@ -50,6 +50,7 @@ if [[ "$1" == "--prompt" ]]; then
   ( cd "$HOME/coding/loops" && nohup "$HOME/.dotfiles/scripts/prwatch" "$input" \
       >> "$log/prompt.log" 2>&1 </dev/null & )                  # reuses all input forms
   open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null
+  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null  # 🔨 menu renders watches too
   exit 0
 fi
 
@@ -62,6 +63,7 @@ if [[ "$1" == "--stop" ]]; then
     rm -f "$marker"
   fi
   open -g "swiftbar://refreshplugin?name=prwatch" 2>/dev/null
+  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null  # 🔨 menu renders watches too
   exit 0
 fi
 

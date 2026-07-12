@@ -71,6 +71,15 @@ while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event ur
   dur=$(dur_of "$startedAt" "$updatedAt")
   # PR match (no early awk exit → SIGPIPE-safe)
   prnum=$(printf '%s\n' "$prs" | awk -F'\t' -v s="$sha" '$1==s && !f{print $2; f=1}')
+  # one-shot mute: an explicit prwatch on this PR already fired its single notification —
+  # its post-merge image-build success seeds silently (failures still notify: pipeline alert)
+  answered_key=$(printf '%s#%s' "$REPO" "${prnum:-}" | tr '[:upper:]' '[:lower:]')
+  if [ -n "$prnum" ] && [ "$concl" = "success" ] \
+     && grep -qxF "$answered_key" "$HOME/.cache/prwatch/answered.txt" 2>/dev/null; then
+    echo "build-notify: · $tag (PR #$prnum) muted — explicit watch already notified"
+    journal_silent silent-answered "$tag" "PR #$prnum already answered by an explicit watch" "$url"
+    echo "$rid" >> "$seen"; continue
+  fi
   if [ "$concl" = "success" ]; then
     if [ "$success_notified" = "1" ]; then   # runs arrive newest-first; a newer success already notified
       echo "build-notify: · $tag superseded this sweep — seeded silently"
