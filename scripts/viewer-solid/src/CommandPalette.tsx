@@ -28,7 +28,7 @@ export default function CommandPalette() {
   // forestKey = the server's branch/project name for the current location; node = active branch.
   const ctx = createMemo(() => {
     const l = location();
-    return { project: forestKey(l), node: l.kind === "home" || l.kind === "push" ? "" : l.node || "" };
+    return { project: forestKey(l), node: l.kind === "home" ? "" : l.node || "" };
   });
   let inputRef: HTMLInputElement | undefined;
 

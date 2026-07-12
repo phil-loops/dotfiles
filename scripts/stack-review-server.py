@@ -380,12 +380,10 @@ class H(BaseHTTPRequestHandler):
             return review.squash(self, raw)
         if self.path == "/prep":     # prep-for-push: squash UNPUSHED commits → one, then oxfmt
             return review.prep(self, raw)
-        if self.path == "/gates":    # mobile prepare-to-push: run repo gates → per-gate verdict
+        if self.path == "/gates":    # sync strip: run repo gates → per-gate verdict (detach:true → journal)
             return push.gates(self, raw)
         if self.path == "/delta-tests":  # prep-to-merge: run the tests related to the branch's delta
             return push.delta_tests(self, raw)
-        if self.path == "/push":     # mobile prepare-to-push: FF push to a safe (non-origin) remote
-            return push.push(self, raw)
         if self.path == "/push-origin":  # shared-history door: FF-only single-clean-commit push; human finger only
             return push.push_origin(self, raw)
         if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser

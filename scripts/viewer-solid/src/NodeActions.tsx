@@ -30,14 +30,6 @@ interface CheckoutResult {
   worktree?: string; // set on 409: the worktree currently holding the branch
 }
 
-interface PrepResult {
-  ok?: boolean;
-  n?: number; // unpushed commits collapsed into one
-  header?: string; // the new voiced subject
-  formatted?: number; // files oxfmt touched
-  err?: string;
-}
-
 interface SyncResult {
   ok?: boolean;
   err?: string;

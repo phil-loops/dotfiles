@@ -24,8 +24,7 @@ export type ViewerLocation =
   | { kind: "home"; tab: HomeTab }
   | { kind: "forest"; name: string; node?: string; repo?: string }
   | { kind: "standalone"; branch: string; node?: string }
-  | { kind: "review"; pr: number; node?: string }
-  | { kind: "push"; branch: string };
+  | { kind: "review"; pr: number; node?: string };
 
 const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(s);
 
@@ -69,10 +68,6 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   if (head === "branch" && rest.length) {
     return { kind: "standalone", branch: rest.join("/") };
   }
-  // /push/<branch...> — the mobile prepare-to-push card for one branch
-  if (head === "push" && rest.length) {
-    return { kind: "push", branch: rest.join("/") };
-  }
   if (head === "review" && rest.length) {
     const pr = parseInt(rest[0], 10);
     if (Number.isFinite(pr)) {
@@ -94,8 +89,6 @@ export function buildPath(loc: ViewerLocation): string {
       return "/branch/" + loc.branch;
     case "review":
       return "/review/" + loc.pr;
-    case "push":
-      return "/push/" + loc.branch;
   }
 }
 
@@ -112,14 +105,12 @@ export function forestKey(loc: ViewerLocation): string {
       return loc.branch;
     case "review":
       return "review/pr-" + loc.pr;
-    case "push":
-      return loc.branch;
   }
 }
 
 // Re-target the active node within the current location (the j/k spine walk, click-to-open).
 export function withNode(loc: ViewerLocation, node: string): ViewerLocation {
-  return loc.kind === "home" || loc.kind === "push" ? loc : { ...loc, node };
+  return loc.kind === "home" ? loc : { ...loc, node };
 }
 
 // The repo a location belongs to — only a forest can live in a non-loops repo; everything

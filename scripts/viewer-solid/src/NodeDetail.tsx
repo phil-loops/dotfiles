@@ -56,7 +56,7 @@ export function NodeDetail() {
   const repoKey = () => forestRepo(location()) ?? "loops"; // segregates query caches per repo
   const nodeParam = (): string | undefined => {
     const l = location();
-    return l.kind === "home" || l.kind === "push" ? undefined : l.node;
+    return l.kind === "home" ? undefined : l.node;
   };
 
   const model = createQuery(() => ({
