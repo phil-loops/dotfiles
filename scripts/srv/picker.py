@@ -21,6 +21,8 @@ from urllib.parse import parse_qs
 from . import ctx
 
 _pcache = {}  # repo-name -> ((model_sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
+_PROJ_SNAP_V = 2  # projects card shape version — bump when a build adds a field, else the
+                  # disk snapshot (keyed only on repo state) keeps serving the old shape
 _PR_RE = re.compile(r"\(#(\d+)\)")
 
 
@@ -172,6 +174,85 @@ def _scan_merges():
     return merges
 
 
+_shipped_cache = {}  # repo name → ((origin-main-sha, since-date), {project: shipped}) — one gh call per main move
+
+
+def _shipped_by_project(name, tip, merges, members):
+    # Merged-PR history per project over the past month, asked of GitHub itself — the local
+    # merge journal only knows merges the daemon witnessed (it missed e.g. deps-helper #9491),
+    # and this is what classes a forest as "shipping" on the home. Head branches map to
+    # projects via branch config (stack-project lists keep entries for deleted branches,
+    # which is exactly what resolves already-contracted heads), journal attributions as
+    # fallback. gh failure → last known map, never a stall and never a lost class.
+    since = time.strftime("%Y-%m-%d", time.localtime(time.time() - 30 * 86400))
+    key = (tip, since)
+    cached = _shipped_cache.get(name)
+    if cached and cached[0] == key:
+        return cached[1]
+    try:
+        r = subprocess.run(["gh", "pr", "list", "--state", "merged", "--author", "@me",
+                            "--search", f"merged:>={since}", "--limit", "100",
+                            "--json", "number,headRefName,mergedAt,title"],
+                           cwd=ctx.repo_cwd(), capture_output=True, text=True, timeout=20)
+        prs = json.loads(r.stdout or "[]") if r.returncode == 0 else None
+    except Exception:
+        prs = None
+    if prs is None:
+        return cached[1] if cached else {}
+    to_proj = {}
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.branch$"]).stdout.splitlines():
+        k, _, b = line.partition(" ")
+        if b and k.endswith(".branch"):
+            to_proj.setdefault(b.strip(), k[len("stack-project."):-len(".branch")])
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-branch\..*\.project$"]).stdout.splitlines():
+        k, _, proj = line.partition(" ")
+        if proj and k.endswith(".project"):
+            to_proj[k[len("stack-branch."):-len(".project")]] = proj.strip()
+    # journal fallback, LIVE projects only — journal keys outlive their forests by design,
+    # and a dead name (a renamed effort like goal-metrics-page-job) would both steal the
+    # head from its live successor and poison the prefix family into ambiguity.
+    live = set(members) | set(to_proj.values())
+    for proj, hist in merges.items():
+        if proj not in live:
+            continue
+        for e in hist:
+            if e.get("branch"):
+                to_proj.setdefault(e["branch"], proj)
+    # contracted heads lose their config — recover them through name families, but only
+    # when unambiguous: a head named exactly like a project, or a slash-prefix owned by
+    # exactly one project (goal-metrics/* → goal-metrics-dedup). Ambiguous (goals/*
+    # spans several forests) stays unmapped rather than guessed.
+    names = live
+    fam = {}
+    for b, proj in list(to_proj.items()) + [(b, p) for p, bs in members.items() for b in bs]:
+        if "/" in b:
+            fam.setdefault(b.split("/", 1)[0], set()).add(proj)
+
+    def resolve(head):
+        if not head:
+            return None
+        if head in to_proj:
+            return to_proj[head]
+        if head in names:
+            return head
+        owners = fam.get(head.split("/", 1)[0]) if "/" in head else None
+        return next(iter(owners)) if owners and len(owners) == 1 else None
+
+    out = {}
+    for pr in sorted(prs, key=lambda x: x.get("mergedAt") or "", reverse=True):
+        proj = resolve(pr.get("headRefName"))
+        if not proj:
+            continue
+        s = out.setdefault(proj, {"count": 0, "latest": pr.get("mergedAt"), "prs": []})
+        s["count"] += 1
+        if len(s["prs"]) < 8:
+            s["prs"].append({"pr": pr["number"], "title": pr.get("title"), "at": pr.get("mergedAt")})
+    _shipped_cache[name] = (key, out)
+    return out
+
+
 def _project_members():
     # {project: [branch, ...]} from the hand-maintained stack-project.<name>.branch config.
     # Keys are stack-project.<NAME>.branch where NAME may itself contain dots, so peel the
@@ -305,7 +386,7 @@ def _projects_build(name, path, pck):
     if snap_file and os.path.exists(snap_file):
         try:
             snap = json.load(open(snap_file))
-            if tuple(snap.get("pck") or ()) == pck:
+            if tuple(snap.get("pck") or ()) == pck and snap.get("v") == _PROJ_SNAP_V:
                 _pcache[name] = (pck, snap["projs"])
                 return snap["projs"]
         except Exception:
@@ -346,6 +427,7 @@ def _projects_build(name, path, pck):
     # Recency signals for the Forests sort: newest local commit (unix secs) across every member
     # branch, and newest PR open-date — so a forest's whole tree counts, not just its roots.
     members = _project_members()
+    shipped = _shipped_by_project(name, pck[1], merges, members)
     commits = _branch_commit_unix()
     interest = _interest_levels()
     for p in projs:
@@ -357,6 +439,7 @@ def _projects_build(name, path, pck):
         landed = merges.get(p["name"]) or []
         p["merged"] = landed[0] if landed else None
         p["landed"] = landed
+        p["shipped"] = shipped.get(p["name"])
         branches = members.get(p["name"]) or bs
         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
         p["interest"] = interest.get(p["name"], 0)
@@ -368,7 +451,7 @@ def _projects_build(name, path, pck):
     if snap_file:
         try:
             with open(snap_file, "w") as f:
-                json.dump({"pck": list(pck), "projs": projs}, f)
+                json.dump({"pck": list(pck), "v": _PROJ_SNAP_V, "projs": projs}, f)
         except OSError:
             pass
     return projs

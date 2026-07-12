@@ -9,8 +9,8 @@ import type { Project, Parked, PR } from "./types";
 // The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
 // is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
 // folds for dormant + recently-merged. One opinionated order (Phil, 2026-07-11): the manual
-// interest pips no longer rank the page (they demoted to passive row metadata); shipping
-// orders by next-step urgency, other bands by recency. Owns its own filter/fold state; the
+// interest pips no longer rank the page (they demoted to passive row metadata); the PR bands
+// order by next-step urgency, other bands by recency. Owns its own filter/fold state; the
 // row itself comes in as a prop (Home wires its hover/ctx/parked handlers).
 export function ForestsList(props: {
   tab: () => string;
@@ -45,28 +45,31 @@ export function ForestsList(props: {
 
   // ── lifecycle bands, most urgent first ──────────────────────────────────
   //   needs a hand — parked on a rebase conflict: blocked until someone resolves it
-  //   shipping     — riding to main: an open PR, or bases landed with more roots to ship
-  //   building     — alive in the last two weeks, nothing shipping yet
+  //   shipping     — landed a PR this month (gh-backed p.shipped) with work remaining:
+  //                  the proven class (Phil, 2026-07-12: "once a project has a PR merged,
+  //                  that's a class of projects on itself")
+  //   first PR out — an open PR but nothing merged yet: the second, lower class
+  //   building     — alive in the last two weeks, no PR activity
   //   dormant      — no life in two weeks (folded: it's context, not a to-do)
   // Deliberately NOT bands: behind-main (when origin/main advances everything is behind at
   // once — ambient restack weather, owned by the row dot + restack-all) and mergeable roots
   // (nearly every built forest has one — a signal that's always on ranks nothing).
   const BANDS = [
     { key: "hand", label: "needs a hand", hint: "a rebase parked on a conflict — blocked until it's resolved or aborted" },
-    { key: "shipping", label: "shipping", hint: "riding to main — an open PR, or landed bases with more still to ship" },
-    { key: "building", label: "building", hint: "commits in the last two weeks; nothing shipping yet" },
+    { key: "shipping", label: "shipping", hint: "landed PRs this month, more to ship — the proven class" },
+    { key: "opening", label: "first PR out", hint: "an open PR, nothing merged yet" },
+    { key: "building", label: "building", hint: "commits in the last two weeks; no PR activity" },
     { key: "dormant", label: "dormant", hint: "no movement in two weeks" },
   ] as const;
   const DORMANT_AFTER_MS = 14 * 24 * 3600 * 1000;
   const bandIdx = (p: Project): number => {
     if (props.parked()?.project === p.name) return 0;
-    // shipping = outward motion NOW: an open PR, or a fresh merge (mergedAgo's 7-day
-    // horizon) with more roots to push. A merge never demotes — it extends the window —
-    // but a forest idle past it isn't shipping anymore, it's paused mid-forest.
-    if (p.prOpened || props.prOf(p.name)) return 1;
-    if (p.merged && mergedAgo(p.merged.at) && p.mergeable?.length) return 1;
-    return forestTs(p) > Date.now() - DORMANT_AFTER_MS ? 2 : 3;
+    const open = !!(p.prOpened || props.prOf(p.name));
+    if ((p.shipped?.count ?? 0) > 0 && (open || p.mergeable?.length)) return 1;
+    if (open) return 2;
+    return forestTs(p) > Date.now() - DORMANT_AFTER_MS ? 3 : 4;
   };
+  const isPrBand = (i: number) => i === 1 || i === 2;
 
   // A project's identity is (repo, name) — the same forest name can exist in two repos.
   const pkey = (p: Project) => (p.repo || "loops") + " " + p.name;
@@ -89,8 +92,8 @@ export function ForestsList(props: {
       }));
   });
   const clusteredKeys = createMemo(() => new Set(epicClusters().flatMap((c) => c.items.map(pkey))));
-  // shipping rows carry their concrete next step (nextStep, homeModel); the band sorts
-  // your-move steps above waiting-on-others so the top of shipping IS the priority order.
+  // rows in the two PR bands carry their concrete next step (nextStep, homeModel); each
+  // band sorts your-move steps above waiting-on-others so its top IS the priority order.
   // Other bands keep the plain recency sort.
   const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
@@ -100,19 +103,20 @@ export function ForestsList(props: {
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
       items: active.filter((p) => bandIdx(p) === i).sort((a, b) =>
-        (i === 1 ? (stepOf(a)?.rank ?? 9) - (stepOf(b)?.rank ?? 9) : 0) || forestTs(b) - forestTs(a)),
+        (isPrBand(i) ? (stepOf(a)?.rank ?? 9) - (stepOf(b)?.rank ?? 9) : 0) || forestTs(b) - forestTs(a)),
     })).filter((b) => b.items.length || b.clusters.length);
   });
   // "if I don't know what to do next, start here" — exactly one row wears the start tag:
-  // the first your-move step in shipping's render order (cluster members, then items).
+  // the first your-move step in render order across shipping then first-PR-out.
   const startKey = createMemo(() => {
-    const shipping = bands().find((b) => b.key === "shipping");
-    const ordered = shipping ? [...shipping.clusters.flatMap((c) => c.items), ...shipping.items] : [];
-    const first = ordered.find((p) => bandIdx(p) === 1 && stepOf(p)?.yourMove);
+    const ordered = bands()
+      .filter((b) => b.key === "shipping" || b.key === "opening")
+      .flatMap((b) => [...b.clusters.flatMap((c) => c.items), ...b.items]);
+    const first = ordered.find((p) => isPrBand(bandIdx(p)) && stepOf(p)?.yourMove);
     return first ? pkey(first) : null;
   });
   const stepInfo = (p: Project, folded: boolean) => {
-    if (folded || bandIdx(p) !== 1) return undefined;
+    if (folded || !isPrBand(bandIdx(p))) return undefined;
     const step = stepOf(p);
     return step ? { step, start: pkey(p) === startKey() } : undefined;
   };
