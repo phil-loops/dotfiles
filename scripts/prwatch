@@ -16,6 +16,11 @@
 #                        the standing counterpart to --await, and the only thing
 #                        that catches a merge (a merged PR drops off the open scan).
 #                        Installed as launchd/com.philbrockman.prwatch-sweep.plist.
+#                        Two loudness tiers: LOUD (sound, persistent) = newly-failing
+#                        CI, a PR's FIRST approval, deploy landings, run failures;
+#                        QUIET (no sound, self-dismissing — replaced by the next quiet
+#                        banner and cleared at the next pass) = merged, passing,
+#                        recovered, run-succeeded. Everything lands in notify-log.
 #                        Also watches dispatched workflow runs (deploys) — set
 #                          git config prwatch.sweep-workflows "owner/repo:deploy-v2.yml …"
 #                        and each of your runs notifies once when it succeeds or fails.
@@ -68,8 +73,19 @@ def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
       elif $np>0  then "● \($np) running"
       else             "✓ all pass" end ),
   .title,
-  .headRefName
+  .headRefName,
+  (if ([.latestReviews[]? | select(.state=="APPROVED")] | length) > 0 then "approved" else "-" end)
 ] | @tsv'
+
+QUIET_GROUP="prwatch-quiet"
+notify_quiet() {  # $1 status  $2 detail  $3 url — no sound, replaces the previous quiet
+                  # banner (same -group), removed at the next sweep pass: self-dismissing
+  "$HOME/.dotfiles/scripts/notify-journal" prwatch quiet "$1" "${2:-}" "${3:-}" 2>/dev/null || true
+  if command -v terminal-notifier >/dev/null 2>&1; then
+    terminal-notifier -title "prwatch · $1" -message "${2:-$1}" -group "$QUIET_GROUP" \
+      ${3:+-open "$3"} </dev/null >/dev/null 2>&1 || true
+  fi
+}
 
 notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click it)
   "$HOME/.dotfiles/scripts/notify-journal" prwatch notified "$1" "${2:-}" "${3:-}" 2>/dev/null || true
@@ -152,7 +168,7 @@ collect() {
   local repo
   for repo in $repos; do
     gh pr list --repo "$repo" --author @me --state open \
-      --json number,title,headRefName,statusCheckRollup --jq "$ROLL_JQ" 2>/dev/null \
+      --json number,title,headRefName,statusCheckRollup,latestReviews --jq "$ROLL_JQ" 2>/dev/null \
       | awk -v r="$repo" 'NF{print r"\t"$0}'   # awk \t = a real tab (BSD sed won't)
   done
 }
@@ -270,6 +286,17 @@ if [[ "${1:-}" == "--sweep" ]]; then
       notify "$@"
     fi
   }
+  squiet() {
+    if (( digest )); then
+      digest_lines+=("$1 · $2")
+      "$HOME/.dotfiles/scripts/notify-journal" prwatch digest "$1" "${2:-}" "${3:-}" 2>/dev/null || true
+    else
+      notify_quiet "$@"
+    fi
+  }
+  # clear last pass's quiet banner — quiet notifications live one sweep interval, tops
+  command -v terminal-notifier >/dev/null 2>&1 && \
+    { terminal-notifier -remove "$QUIET_GROUP" </dev/null >/dev/null 2>&1 || true; }
 
   rows="$(collect || true)"
   # transient gh/network failure: an empty poll while we hold state is almost
@@ -284,9 +311,14 @@ if [[ "${1:-}" == "--sweep" ]]; then
   fi
   firstrun=0; [[ -f "$state" ]] || firstrun=1
 
+  # first approvals: a PR notifies ONCE, ever, when it first shows an approving
+  # review — re-approvals after new pushes stay quiet. Missing file = seed silently.
+  aseen="$HOME/.cache/prwatch/sweep-approved.txt"
+  afirst=0; [[ -f "$aseen" ]] || afirst=1
+
   typeset -A cur
   newstate=""
-  while IFS=$'\t' read -r repo num rollup title _branch; do
+  while IFS=$'\t' read -r repo num rollup title _branch approved; do
     [[ -n "$num" ]] || continue
     key="$repo#$num"; url="https://github.com/$repo/pull/$num"
     case "$rollup" in
@@ -294,14 +326,18 @@ if [[ "${1:-}" == "--sweep" ]]; then
     esac
     cur[$key]=1
     newstate+="$key"$'\t'"$st"$'\t'"$title"$'\t'"$url"$'\n'
+    if [[ "$approved" == approved ]] && ! grep -qxF "$key" "$aseen" 2>/dev/null; then
+      (( afirst || firstrun )) || snotify "✅ approved" "$key — $title" "$url"
+      print -r -- "$key" >> "$aseen"
+    fi
     (( firstrun )) && continue
     was="${prev[$key]:-}"
     if [[ $st == fail && $was != fail ]]; then
       snotify "✗ failing" "$key — $title" "$url"
     elif [[ $st == pass && $was == fail ]]; then
-      snotify "✓ recovered" "$key — checks green again" "$url"
+      squiet "✓ recovered" "$key — checks green again" "$url"
     elif [[ $st == pass && -z $was ]]; then
-      snotify "✓ passing" "$key — $title" "$url"
+      squiet "✓ passing" "$key — $title" "$url"
     fi
   done <<< "$rows"
 
@@ -314,7 +350,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
       repo="${key%\#*}"; num="${key##*\#}"
       prstate="$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" || prstate=""
       if [[ "$prstate" == MERGED ]]; then
-        snotify "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
+        squiet "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
         merged_now+=("$key")   # hand off to deploy-landing tracking below
         any_merged=1
       elif [[ "$prstate" != CLOSED ]]; then
@@ -363,7 +399,7 @@ if [[ "${1:-}" == "--sweep" ]]; then
         was="${rprev[$key]:-}"
         [[ "$st" == "$was" ]] && continue
         case "$st" in
-          (success) snotify "🚀 run succeeded" "$title" "$url" ;;
+          (success) squiet "🚀 run succeeded" "$title" "$url" ;;
           (failure|timed_out|startup_failure|cancelled) snotify "✗ run $st" "$title" "$url" ;;
         esac   # in-flight states record silently — Slack already announces the start
       done <<< "$rrows"

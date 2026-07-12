@@ -14,7 +14,7 @@ if [ "${1:-}" = "--missed" ]; then missed=1; hours="${2:-48}"; else hours="${1:-
 cutoff=$(( $(date +%s) - hours * 3600 ))
 
 awk -F'\t' -v c="$cutoff" -v m="$missed" \
-  '$1 >= c && (m == 0 || $3 != "notified")' "$log" \
+  '$1 >= c && (m == 0 || ($3 != "notified" && $3 != "quiet"))' "$log" \
 | while IFS=$'\t' read -r ts src disp title msg url; do
     printf '%s  %-12s %-18s %s — %s\n' \
       "$(date -r "$ts" '+%m-%d %H:%M')" "$src" "[$disp]" "$title" "$msg"
