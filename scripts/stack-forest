@@ -435,6 +435,32 @@ if node_mode:
     else:
         diff_base = base
     rows, *_ = file_status(branch, diff_base)
+    # ghost integration node (refs/stack/<project>-integration): the octopus ref has no
+    # ledger entry of its own — stack-bless fans a ghost bless out to the branches that
+    # own each file, so read the state back the same way: a file is clean when every
+    # owning branch's copy is clean, unblessed when none is blessed, stale otherwise.
+    ghost = re.match(r"^refs/stack/(.+)-integration$", branch)
+    if ghost and ghost.group(1) in seeds:
+        own_status, own_blessed = {}, {}
+        for b in sorted(expand(seeds[ghost.group(1)])):
+            mrows, *_ = file_status(b, trunk_base(parents.get(b, MAIN)))
+            for mr in mrows:
+                own_status.setdefault(mr["path"], []).append(mr["status"])
+                own_blessed.setdefault(mr["path"], []).append(mr["blessed"])
+        for r in rows:
+            sts = own_status.get(r["path"])
+            if not sts:
+                continue
+            if all(s == "clean" for s in sts):
+                r["status"] = "clean"
+            elif all(s == "unblessed" for s in sts):
+                r["status"] = "unblessed"
+            else:
+                r["status"] = "stale"
+            # single owner → carry its blessed blob so the stale slice / since-blessed
+            # delta renders; multi-owner blobs are per-branch, no one blob fits.
+            if len(sts) == 1 and own_blessed[r["path"]][0]:
+                r["blessed"] = own_blessed[r["path"]][0]
     # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
     # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
     reqs = requires.get(branch, []) if diff_base in (parent, trunk_base(parent)) else []
