@@ -3,17 +3,24 @@
 # shoulder when a main build finishes, so I never track it by hand. launchd StartInterval
 # sweep (one pass per invocation — see com.philbrockman.build-notify.plist).
 #
-# Notifies on EVERY completed main build (merged-PR, direct push, or re-run), deduped by
+# Notifies on completed main builds (merged-PR, direct push, or re-run), deduped by
 # run-id. When a build maps to one of my merged PRs (its headSha == my PR's mergeCommit),
 # the notification is enriched with the PR # and the ready-to-paste seed command. First run
 # (and the v2 scope-widening) seeds finished builds silently — no backlog spam.
 #
-#   build-notify            one sweep (what launchd runs)
-#   BUILD_NOTIFY_REPO=...   override repo (default Loops-so/loops)
+# Storm guards (the machine-was-off-for-two-days case): unseen builds that finished more
+# than BUILD_NOTIFY_MAX_AGE_H ago seed silently, and only the NEWEST fresh success
+# notifies per sweep — older successes in the same pass are superseded (logged, seeded).
+# Failures still notify individually.
+#
+#   build-notify                 one sweep (what launchd runs)
+#   BUILD_NOTIFY_REPO=...        override repo (default Loops-so/loops)
+#   BUILD_NOTIFY_MAX_AGE_H=...   notify horizon in hours (default 6)
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 REPO="${BUILD_NOTIFY_REPO:-Loops-so/loops}"
+MAX_AGE_H="${BUILD_NOTIFY_MAX_AGE_H:-6}"
 statedir="$HOME/.cache/build-notify"; mkdir -p "$statedir"
 seen="$statedir/notified"
 firstrun=0; [ -f "$seen" ] || { : > "$seen"; firstrun=1; }
@@ -21,11 +28,15 @@ firstrun=0; [ -f "$seen" ] || { : > "$seen"; firstrun=1; }
 grep -qx '#v2' "$seen" 2>/dev/null || firstrun=1
 
 notify() {  # $1 title  $2 msg  $3 url
+  "$HOME/.dotfiles/scripts/notify-journal" build-notify notified "$1" "$2" "$3" 2>/dev/null || true
   if command -v terminal-notifier >/dev/null 2>&1; then
     terminal-notifier -title "build-notify · $1" -message "$2" -sound Glass -open "$3" >/dev/null 2>&1 || true
   else
     printf '\a'; echo "build-notify: $1 — $2 ($3)"
   fi
+}
+journal_silent() {  # $1 disposition  $2 title  $3 msg  $4 url
+  "$HOME/.dotfiles/scripts/notify-journal" build-notify "$1" "$2" "$3" "$4" 2>/dev/null || true
 }
 dur_of() {  # $1 startedAt  $2 updatedAt (ISO) -> "Nm" or ""
   [ -n "$1" ] && [ -n "$2" ] || return 0
@@ -44,15 +55,29 @@ runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 30 
   -q '.[] | select(.status=="completed") | [.databaseId,.headSha,.conclusion,.number,.headBranch,.startedAt,.updatedAt,.event,.url] | @tsv' 2>/dev/null || true)
 [ -n "$runs" ] || { grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"; exit 0; }
 
+now_s=$(date +%s)
+success_notified=0
 while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event url; do
   [ -n "$rid" ] || continue
   grep -qx "$rid" "$seen" && continue
   if [ "$firstrun" = "1" ]; then echo "$rid" >> "$seen"; continue; fi   # seed silently
   tag="${headbr}-${runnum}-1"
+  end_s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updatedAt" +%s 2>/dev/null || echo 0)
+  if [ "$end_s" -gt 0 ] && [ $(( now_s - end_s )) -gt $(( MAX_AGE_H * 3600 )) ]; then
+    echo "build-notify: · $tag finished >${MAX_AGE_H}h ago — seeded silently"
+    journal_silent silent-age "$tag" "${concl:-?} build finished >${MAX_AGE_H}h ago" "$url"
+    echo "$rid" >> "$seen"; continue
+  fi
   dur=$(dur_of "$startedAt" "$updatedAt")
   # PR match (no early awk exit → SIGPIPE-safe)
   prnum=$(printf '%s\n' "$prs" | awk -F'\t' -v s="$sha" '$1==s && !f{print $2; f=1}')
   if [ "$concl" = "success" ]; then
+    if [ "$success_notified" = "1" ]; then   # runs arrive newest-first; a newer success already notified
+      echo "build-notify: · $tag superseded this sweep — seeded silently"
+      journal_silent silent-superseded "$tag" "built, superseded by a newer build this sweep" "$url"
+      echo "$rid" >> "$seen"; continue
+    fi
+    success_notified=1
     if [ -n "$prnum" ]; then
       msg="PR #$prnum → $tag${dur:+ in $dur}. Seed staging: seed-staging-goal --tag $tag"
     elif [ "$event" != "pull_request" ]; then
