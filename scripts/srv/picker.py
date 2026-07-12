@@ -13,6 +13,7 @@ import re
 import json
 import time
 import signal
+import threading
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs
@@ -268,6 +269,17 @@ def myprs(req):
     req._send(200, r.stdout or "[]")
 
 
+def _projects_snapshot_file():
+    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+    return os.path.join(gd, "stack-projects-cache.json") if gd else ""
+
+
+# single-flight: N concurrent cold /projects each ran their OWN multi-second git fan-out
+# (dozens of subprocesses), starving the accept queue into connection-refused. Misses now
+# queue on one build and re-check the cache inside the lock.
+_pbuild_lock = threading.Lock()
+
+
 def _projects_for(name, path):
     # Build one repo's project cards. The active repo is already pinned on this (request)
     # thread, but the fan-out pools below run on WORKER threads that don't inherit the
@@ -277,6 +289,27 @@ def _projects_for(name, path):
     cached = _pcache.get(name)
     if cached and cached[0] == pck:
         return cached[1]
+    with _pbuild_lock:
+        cached = _pcache.get(name)   # a queued waiter finds the winner's build here
+        if cached and cached[0] == pck:
+            return cached[1]
+        return _projects_build(name, path, pck)
+
+
+def _projects_build(name, path, pck):
+    # The in-memory cache dies with the process, and the server re-execs on every srv/*.py
+    # edit — so a restarted server's first /projects paid the full ~3s fan-out even when
+    # nothing in the repo moved. A disk snapshot keyed on the same validation pair survives
+    # restarts: sig matches → serve it instantly, sig differs → fall through and rebuild.
+    snap_file = _projects_snapshot_file()
+    if snap_file and os.path.exists(snap_file):
+        try:
+            snap = json.load(open(snap_file))
+            if tuple(snap.get("pck") or ()) == pck:
+                _pcache[name] = (pck, snap["projs"])
+                return snap["projs"]
+        except Exception:
+            pass
     # stack-forest --projects and stack-prs are independent → run concurrently.
     with ThreadPoolExecutor(max_workers=2, initializer=ctx.set_repo, initargs=(path,)) as ex:
         fr = ex.submit(ctx.run, [os.path.join(ctx.SCRIPTS, "stack-forest"), "--projects"])
@@ -332,7 +365,27 @@ def _projects_for(name, path):
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
                              if b in prmap and prmap[b].get("createdAt")), default=None)
     _pcache[name] = (pck, projs)   # one cached build per repo (keyed by its own model_sig)
+    if snap_file:
+        try:
+            with open(snap_file, "w") as f:
+                json.dump({"pck": list(pck), "projs": projs}, f)
+        except OSError:
+            pass
     return projs
+
+
+def warm_projects():
+    """Boot-time warm: build (or disk-load) every repo's project cards before the first
+    page load asks — the Forests home's body is /projects, and cold it's a ~3s fan-out."""
+    repos = ctx.REPOS or {os.path.basename(ctx.CWD): ctx.CWD}
+    for name, path in repos.items():
+        ctx.set_repo(path)
+        try:
+            _projects_for(name, path)
+        except Exception:
+            pass
+        finally:
+            ctx.clear_repo()
 
 
 def projects(req):
