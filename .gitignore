@@ -10,3 +10,4 @@ mcp-servers/*/node_modules/
 !.claude/skills/loops-restart/
 !.claude/skills/loops-preview/
 scripts/gh-to-nvim/dist/
+scripts/gh-to-nvim-key.pem
