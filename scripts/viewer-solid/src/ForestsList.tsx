@@ -44,7 +44,7 @@ export function ForestsList(props: {
 
   // ── lifecycle bands, most urgent first ──────────────────────────────────
   //   needs a hand — parked on a rebase conflict: blocked until someone resolves it
-  //   shipping     — an open PR is riding to main
+  //   shipping     — riding to main: an open PR, or bases landed with more roots to ship
   //   building     — alive in the last two weeks, nothing shipping yet
   //   dormant      — no life in two weeks (folded: it's context, not a to-do)
   // Deliberately NOT bands: behind-main (when origin/main advances everything is behind at
@@ -52,14 +52,16 @@ export function ForestsList(props: {
   // (nearly every built forest has one — a signal that's always on ranks nothing).
   const BANDS = [
     { key: "hand", label: "needs a hand", hint: "a rebase parked on a conflict — blocked until it's resolved or aborted" },
-    { key: "shipping", label: "shipping", hint: "an open PR — riding to main" },
+    { key: "shipping", label: "shipping", hint: "riding to main — an open PR, or landed bases with more still to ship" },
     { key: "building", label: "building", hint: "commits in the last two weeks; nothing shipping yet" },
     { key: "dormant", label: "dormant", hint: "no movement in two weeks" },
   ] as const;
   const DORMANT_AFTER_MS = 14 * 24 * 3600 * 1000;
   const bandIdx = (p: Project): number => {
     if (props.parked()?.project === p.name) return 0;
-    if (p.prOpened || props.prOf(p.name)) return 1;
+    // sticky: once anything lands, stay shipping while unmerged roots remain — a base
+    // merging must not demote a mid-flight forest between pushes
+    if (p.prOpened || props.prOf(p.name) || (p.merged && p.mergeable?.length)) return 1;
     return forestTs(p) > Date.now() - DORMANT_AFTER_MS ? 2 : 3;
   };
 
