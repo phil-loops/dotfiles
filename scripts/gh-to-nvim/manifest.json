@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GitHub → nvim",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "Open the current GitHub page (PR / blob / commit) in the local forest viewer's warm nvim. URL-only: no page access.",
   "permissions": [
     "storage",
@@ -48,5 +48,6 @@
   },
   "background": {
     "service_worker": "background.js"
-  }
+  },
+  "update_url": "http://localhost:62530/dist/updates.xml"
 }
