@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# build-pick — fzf-pick a successfully built MAIN image and get the deploy command
+# on the clipboard. The deploy VERSION is derived from the build-and-test run:
+# <run UTC date, dotted>-<runNumber>-<attempt> (e.g. 2026.07.10-20234-1) — the same
+# shape deploy-v2.yml's "[env] deploying <version>" titles show.
+#
+#   build-pick               pick a build → copy `task release:staging VERSION=<v>`
+#   build-pick production    same, release:production
+#   build-pick --list        just print the candidates (no fzf, no clipboard)
+#   BUILD_PICK_REPO=...      override repo (default Loops-so/loops)
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+REPO="${BUILD_PICK_REPO:-Loops-so/loops}"
+env="staging"; list=0
+case "${1:-}" in
+  (production|staging) env="$1" ;;
+  (--list|-l) list=1 ;;
+  ("") ;;
+  (*) echo "build-pick: unknown arg '$1' (want staging|production|--list)" >&2; exit 2 ;;
+esac
+
+rows=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main --status success -L 25 \
+  --json number,attempt,createdAt,displayTitle,url \
+  -q '.[] | [((.createdAt[0:10]) | gsub("-";".")) + "-" + (.number|tostring) + "-" + (.attempt|tostring),
+             .createdAt[5:16], .displayTitle, .url] | @tsv')
+[ -n "$rows" ] || { echo "build-pick: no successful main builds found on $REPO" >&2; exit 1; }
+
+if [ "$list" = "1" ]; then
+  printf '%s\n' "$rows" | awk -F'\t' '{printf "%-22s %-12s %s\n", $1, $2, $3}'
+  exit 0
+fi
+
+picked=$(printf '%s\n' "$rows" \
+  | awk -F'\t' '{printf "%s\t%-22s %-12s %s\n", $1, $1, $2, $3}' \
+  | fzf --with-nth=2.. --delimiter=$'\t' --prompt="deploy to $env > " --height=40% --reverse) \
+  || exit 130
+version="${picked%%$'\t'*}"
+
+cmd="task release:$env VERSION=$version"
+printf '%s' "$cmd" | pbcopy
+echo "copied: $cmd"
+echo "run it from the loops repo (dispatches deploy-v2.yml)."
