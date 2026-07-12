@@ -7,6 +7,8 @@
 #   - [ ] plain text
 #   - [ ] [label](url)
 #   - [ ] label https://url        (or a bare URL — auto-linked with a readable label)
+#   - [ ] 2026-07-12 label url     (a REMINDER: parked in a dim "upcoming" section
+#                                   until that day, then surfaces with an ⏰ badge)
 #
 # <bitbar.title>todo parking lot</bitbar.title>
 # <bitbar.desc>One-line tasks to pick up later; edit ~/todo.md in nvim.</bitbar.desc>
@@ -15,7 +17,8 @@
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 #
-# No refresh interval → refreshes on open + via swiftbar://refreshplugin?name=todo.
+# 30m interval (in the filename) so date reminders surface without a manual refresh;
+# also refreshes on open + via swiftbar://refreshplugin?name=todo.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 self="$0"
 file="$HOME/todo.md"
@@ -93,25 +96,52 @@ fi
 items=()
 open_lines=$(grep -nE '^- \[ \] ' "$file" 2>/dev/null)   # "lineno:- [ ] text"
 [[ -n "$open_lines" ]] && items=("${(@f)open_lines}")
-n=${#items}
-(( n )) && echo "📝 $n" || echo "📝"
+today=$(date +%F)
+
+due_rows=(); upcoming_rows=(); reminder_due=0
+for it in "${items[@]}"; do
+  lineno="${it%%:*}"
+  text="${${it#*:}#- \[ \] }"
+  when=""
+  first="${text%% *}"
+  if [[ "$first" =~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' && "$text" == *" "* ]]; then
+    when="$first"; text="${text#* }"
+  fi
+  IFS=$'\t' read -r label url <<<"$(parse_item "$text")"
+  done_row="-- ✓ mark done | bash=\"$self\" param1=--done param2=${lineno} terminal=false refresh=true"
+  if [[ -n "$when" && "$when" > "$today" ]]; then
+    row="⏳ ${when#[0-9][0-9][0-9][0-9]-} ${label} | color=gray"
+    [[ -n "$url" ]] && row+=" bash=\"$self\" param1=--open param2=\"${url}\" terminal=false"
+    upcoming_rows+=("$row"$'\n'"$done_row")
+  else
+    pfx="☐"
+    [[ -n "$when" ]] && { pfx="⏰"; reminder_due=1 }
+    if [[ -n "$url" ]]; then
+      row="${pfx} ${label} | bash=\"$self\" param1=--open param2=\"${url}\" terminal=false"
+    else
+      row="${pfx} ${label}"
+    fi
+    due_rows+=("$row"$'\n'"$done_row")
+  fi
+done
+
+n=${#due_rows}
+if (( reminder_due )); then echo "⏰ $n"
+elif (( n )); then echo "📝 $n"
+else echo "📝"
+fi
 echo "---"
 echo "✎ Edit in nvim | bash=\"$self\" param1=--edit terminal=false"
 echo "---"
 if (( n == 0 )); then
   echo "nothing parked — ✎ Edit to add | color=gray"
 else
-  for it in "${items[@]}"; do
-    lineno="${it%%:*}"
-    text="${${it#*:}#- \[ \] }"
-    IFS=$'\t' read -r label url <<<"$(parse_item "$text")"
-    if [[ -n "$url" ]]; then
-      echo "☐ ${label} | bash=\"$self\" param1=--open param2=\"${url}\" terminal=false"
-    else
-      echo "☐ ${label}"
-    fi
-    echo "-- ✓ mark done | bash=\"$self\" param1=--done param2=${lineno} terminal=false refresh=true"
-  done
+  for r in "${due_rows[@]}"; do print -r -- "$r"; done
+fi
+if (( ${#upcoming_rows} )); then
+  echo "---"
+  echo "upcoming | color=gray"
+  for r in "${upcoming_rows[@]}"; do print -r -- "$r"; done
 fi
 echo "---"
 echo "Refresh | refresh=true"
