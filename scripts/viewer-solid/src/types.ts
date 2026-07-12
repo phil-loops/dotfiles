@@ -107,6 +107,16 @@ export const Project = z.object({
   landed: z
     .array(z.object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() }))
     .optional(), // merge history for this forest, newest first (merged = landed[0])
+  shipped: z
+    .object({
+      count: z.number(),
+      latest: z.string().nullable().optional(),
+      prs: z
+        .array(z.object({ pr: z.number(), title: z.string().nullable().optional(), at: z.string().nullable().optional() }))
+        .optional(),
+    })
+    .nullable()
+    .optional(), // merged PRs attributed to this forest in the past month (gh-backed, not the daemon journal)
   lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
   interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home
