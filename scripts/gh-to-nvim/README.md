@@ -50,8 +50,10 @@ organization" badge in Chrome's menu.
 
 Two ids, both derived, both whitelisted for the native host:
 
-- **prod** — from `../gh-to-nvim-key.pem` (committed; losing it means a new id
-  and a rerun of the installer): `gh-to-nvim-ext-id prod`
+- **prod** — from `../gh-to-nvim-key.pem` (git-ignored — this repo is PUBLIC and
+  the native host trusts the id the key signs, so it never goes in git; losing
+  it just means a rerun of `gh-to-nvim-forceinstall`, which rotates the id
+  everywhere): `gh-to-nvim-ext-id prod`
 - **dev** — what "Load unpacked" assigns this directory (path-derived; the
   manifest deliberately carries no `"key"`): `gh-to-nvim-ext-id dev`
 

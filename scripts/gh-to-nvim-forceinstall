@@ -53,13 +53,25 @@ launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "$PLIST"
 echo "✓ static server :$PORT ($LABEL)"
 
-ENTRY="$PROD_ID;http://localhost:$PORT/dist/updates.xml"
-if ! defaults read com.google.Chrome ExtensionInstallForcelist 2>/dev/null | grep -q "$PROD_ID"; then
-  defaults write com.google.Chrome ExtensionInstallForcelist -array-add "$ENTRY"
-  echo "✓ ExtensionInstallForcelist += $ENTRY"
-else
-  echo "✓ ExtensionInstallForcelist already lists $PROD_ID"
-fi
+# Replace (not append) our entry: a key rotation changes the id, and a stale
+# entry would leave Chrome force-installing a dead id forever.
+python3 - "$PROD_ID" "http://localhost:$PORT/dist/updates.xml" <<'EOF'
+import subprocess, sys
+prod_id, url = sys.argv[1], sys.argv[2]
+entry = f"{prod_id};{url}"
+out = subprocess.run(
+    ["defaults", "read", "com.google.Chrome", "ExtensionInstallForcelist"],
+    capture_output=True, text=True,
+).stdout
+kept = [
+    line.strip().strip('",')
+    for line in out.splitlines()
+    if ";" in line and url not in line
+]
+args = ["defaults", "write", "com.google.Chrome", "ExtensionInstallForcelist", "-array", *kept, entry]
+subprocess.run(args, check=True)
+print(f"✓ ExtensionInstallForcelist = {entry}" + (f" (+{len(kept)} kept)" if kept else ""))
+EOF
 
 "$here/gh-to-nvim-install"
 
