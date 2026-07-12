@@ -356,7 +356,16 @@ def project_opened(req):
     req._send(200, json.dumps(_opened_load()))
 
 
+_standalone_cache = {}   # repo -> (model_sig, json) — stack-forest --standalone is ~1s of git fan-out
+
+
 def standalone_list(req):
+    repo = ctx.repo_cwd()
+    sig = ctx.model_sig()
+    hit = _standalone_cache.get(repo)
+    if hit and hit[0] == sig:
+        req._send(200, hit[1])
+        return
     raw = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--standalone"]).stdout
     try:
         items = json.loads(raw or "[]")
@@ -374,7 +383,11 @@ def standalone_list(req):
             ctx.run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", b])
             continue
         kept.append(it)
-    req._send(200, json.dumps(kept))
+    payload = json.dumps(kept)
+    # an unpin above touched config → sig already moved; storing the pre-unpin sig just
+    # means one extra rebuild next call, then it settles.
+    _standalone_cache[repo] = (sig, payload)
+    req._send(200, payload)
 
 
 def _repo_web_url(remote):   # git@github.com:o/r.git | https://github.com/o/r.git → https web url

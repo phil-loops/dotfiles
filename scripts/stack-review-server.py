@@ -490,6 +490,7 @@ def warm():
     try:
         sync._pr_state_map()
         sync._open_pr_heads()
+        reviews._refresh_requests(srvctx.CWD)   # Home's /review-requests: ~1.4s gh search, warm it too
     except Exception:
         pass
 

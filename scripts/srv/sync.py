@@ -58,9 +58,13 @@ def _deploy_critical(branch):
 # ── published = has an OPEN PR (on the fork; origin=Loops-so has none) ────────
 _PR_TTL = 30.0
 _PR_FRESH_TTL = 5.0   # fresh=True reuses a sweep this recent (dedupes a reseat walk's per-parent checks)
-_pr_cache = {"at": -1e9, "heads": None}   # heads=None → never swept
+_pr_cache = {}   # repo -> {"at", "heads"} — per-repo: monotoad's PRs are not loops' PRs
 _pr_lock = threading.Lock()
-_pr_refreshing = False
+_pr_refreshing = set()   # repos with a background sweep in flight
+
+
+def _pr_ent(repo):
+    return _pr_cache.setdefault(repo, {"at": -1e9, "heads": None})   # heads=None → never swept
 
 
 def _pr_slugs():
@@ -93,22 +97,22 @@ def _sweep_pr_heads(slugs):
     return heads if got_any else None
 
 
-def _store_pr_heads(swept):
+def _store_pr_heads(repo, swept):
     with _pr_lock:
+        ent = _pr_ent(repo)
         if swept is not None:
-            _pr_cache["heads"] = swept   # keep last-good heads on a full gh outage
-        elif _pr_cache["heads"] is None:
-            _pr_cache["heads"] = set()   # cache empty on outage so we don't re-block every call
-        _pr_cache["at"] = time.monotonic()
-        return _pr_cache["heads"]
+            ent["heads"] = swept   # keep last-good heads on a full gh outage
+        elif ent["heads"] is None:
+            ent["heads"] = set()   # cache empty on outage so we don't re-block every call
+        ent["at"] = time.monotonic()
+        return ent["heads"]
 
 
-def _refresh_pr_heads(slugs):
-    global _pr_refreshing
+def _refresh_pr_heads(repo, slugs):
     try:
-        _store_pr_heads(_sweep_pr_heads(slugs))
+        _store_pr_heads(repo, _sweep_pr_heads(slugs))
     finally:
-        _pr_refreshing = False
+        _pr_refreshing.discard(repo)
 
 
 def _open_pr_heads(fresh=False):
@@ -119,17 +123,18 @@ def _open_pr_heads(fresh=False):
     immediately and re-sweeps in the background; only a never-swept cache blocks once.
     fresh=True (the mutating callers: sync/prep/push/ship/reseat guards) blocks on a
     live sweep unless one just landed — never rewrite a branch on a stale head-set."""
-    global _pr_refreshing
+    repo = ctx.repo_cwd()
     now = time.monotonic()
     with _pr_lock:
-        heads, age = _pr_cache["heads"], now - _pr_cache["at"]
+        ent = _pr_ent(repo)
+        heads, age = ent["heads"], now - ent["at"]
         if heads is not None and (age < _PR_FRESH_TTL if fresh else True):
-            if not fresh and age >= _PR_TTL and not _pr_refreshing:
-                _pr_refreshing = True
-                threading.Thread(target=_refresh_pr_heads, args=(_pr_slugs(),), daemon=True).start()
+            if not fresh and age >= _PR_TTL and repo not in _pr_refreshing:
+                _pr_refreshing.add(repo)
+                threading.Thread(target=_refresh_pr_heads, args=(repo, _pr_slugs()), daemon=True).start()
             return heads
     # cold cache, or a mutator demanding freshness: block on one sweep
-    return _store_pr_heads(_sweep_pr_heads(_pr_slugs()))
+    return _store_pr_heads(repo, _sweep_pr_heads(_pr_slugs()))
 
 
 def _shared(branch):
@@ -232,9 +237,13 @@ _TRUNK_FETCH_LOCK = threading.Lock()
 # like stack-prs does: a fresh entry serves with no gh call, a stale one serves immediately and
 # refreshes in the background, only a cold cache blocks once. Matches the 45s trunk-fetch throttle.
 _PR_STATE_TTL = 120
-_PR_STATE = {"at": 0.0, "data": None}
+_PR_STATE = {}   # repo -> {"at", "data"} — per-repo: this cache served ONE map to every repo
 _PR_STATE_LOCK = threading.Lock()
-_PR_STATE_REFRESHING = False
+_PR_STATE_REFRESHING = set()   # repos with a background fetch in flight
+
+
+def _pr_state_ent(repo):
+    return _PR_STATE.setdefault(repo, {"at": 0.0, "data": None})
 
 
 def _fetch_pr_state():
@@ -247,35 +256,39 @@ def _fetch_pr_state():
         return None
 
 
-def _refresh_pr_state():
-    global _PR_STATE_REFRESHING
+def _refresh_pr_state(repo=None):
+    repo = repo or ctx.repo_cwd()
     try:
+        ctx.set_repo(repo)   # background thread: no inherited thread-local, pin explicitly
         fresh = _fetch_pr_state()
         if fresh is not None:
             with _PR_STATE_LOCK:
-                _PR_STATE["data"], _PR_STATE["at"] = fresh, time.time()
+                ent = _pr_state_ent(repo)
+                ent["data"], ent["at"] = fresh, time.time()
     finally:
-        _PR_STATE_REFRESHING = False
+        _PR_STATE_REFRESHING.discard(repo)
 
 
 def _pr_state_map():
-    global _PR_STATE_REFRESHING
+    repo = ctx.repo_cwd()
     now = time.time()
     with _PR_STATE_LOCK:
-        data = _PR_STATE["data"]
+        ent = _pr_state_ent(repo)
+        data = ent["data"]
         if data is not None:
-            if now - _PR_STATE["at"] >= _PR_STATE_TTL and not _PR_STATE_REFRESHING:
-                _PR_STATE_REFRESHING = True
-                threading.Thread(target=_refresh_pr_state, daemon=True).start()
+            if now - ent["at"] >= _PR_STATE_TTL and repo not in _PR_STATE_REFRESHING:
+                _PR_STATE_REFRESHING.add(repo)
+                threading.Thread(target=_refresh_pr_state, args=(repo,), daemon=True).start()
             return data
     # cold cache: block once to populate (fetch outside the lock so other endpoints don't wait)
     fresh = _fetch_pr_state()
     with _PR_STATE_LOCK:
+        ent = _pr_state_ent(repo)
         if fresh is not None:
-            _PR_STATE["data"], _PR_STATE["at"] = fresh, time.time()
-        elif _PR_STATE["data"] is None:
-            _PR_STATE["data"] = {}  # cache empty on gh failure so we don't re-block every call
-        return _PR_STATE["data"]
+            ent["data"], ent["at"] = fresh, time.time()
+        elif ent["data"] is None:
+            ent["data"] = {}  # cache empty on gh failure so we don't re-block every call
+        return ent["data"]
 
 
 def _trunk(main):

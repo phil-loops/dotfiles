@@ -12,6 +12,7 @@ import os
 import re
 import subprocess
 import tempfile
+import threading
 import time
 from urllib.parse import parse_qs, unquote
 
@@ -38,8 +39,10 @@ def _resolve_repo(slug):
     hit = base.get(slug.split("/")[-1])
     return hit if hit else (None, ctx.CWD)
 
-_cache = {"at": 0.0, "json": "[]"}
+_cache = {}   # repo -> {"at", "json"} — per-repo: a monotoad tab must not serve loops' queue
 _TTL = 30   # gh search is a ~1s network round-trip and the review queue barely moves
+_cache_lock = threading.Lock()
+_refreshing = set()   # repos with a background re-search in flight
 
 
 def _imported(num):
@@ -47,11 +50,7 @@ def _imported(num):
                     f"refs/heads/review/pr-{num}"]).returncode == 0
 
 
-def requests(req):
-    now = time.time()
-    if now - _cache["at"] < _TTL:
-        req._send(200, _cache["json"])
-        return
+def _compute_requests():
     repo = ctx.run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]).stdout.strip()
     r = ctx.run(["gh", "search", "prs", "--review-requested=@me", "--state=open",
                  "--repo", repo, "--json", "number,title,author,url"])
@@ -59,11 +58,38 @@ def requests(req):
         prs = json.loads(r.stdout or "[]")
     except json.JSONDecodeError:
         prs = []
-    out = [{"number": p["number"], "title": p["title"],
-            "author": (p.get("author") or {}).get("login", ""),
-            "url": p["url"], "imported": _imported(p["number"])} for p in prs]
-    _cache["at"], _cache["json"] = now, json.dumps(out)
-    req._send(200, _cache["json"])
+    return json.dumps([{"number": p["number"], "title": p["title"],
+                        "author": (p.get("author") or {}).get("login", ""),
+                        "url": p["url"], "imported": _imported(p["number"])} for p in prs])
+
+
+def _refresh_requests(repo_path):
+    try:
+        ctx.set_repo(repo_path)
+        payload = _compute_requests()
+        with _cache_lock:
+            _cache[repo_path] = {"at": time.time(), "json": payload}
+    finally:
+        _refreshing.discard(repo_path)
+        ctx.clear_repo()
+
+
+def requests(req):
+    # SWR: serve the cached queue instantly; a stale entry re-searches gh in the background
+    # (the ~1s network call used to block every Home load past the TTL). Cold blocks once.
+    repo_path = ctx.repo_cwd()
+    with _cache_lock:
+        ent = _cache.get(repo_path)
+        if ent:
+            if time.time() - ent["at"] >= _TTL and repo_path not in _refreshing:
+                _refreshing.add(repo_path)
+                threading.Thread(target=_refresh_requests, args=(repo_path,), daemon=True).start()
+            req._send(200, ent["json"])
+            return
+    payload = _compute_requests()
+    with _cache_lock:
+        _cache[repo_path] = {"at": time.time(), "json": payload}
+    req._send(200, payload)
 
 
 def import_pr(req, raw):
@@ -76,7 +102,7 @@ def import_pr(req, raw):
     if r.returncode != 0:
         req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
         return
-    _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
+    _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
     req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
 
 
@@ -144,7 +170,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
             if r.returncode != 0:
                 req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
                 return
-            _cache["at"] = 0.0   # force the next /review-requests to re-flag this PR as imported
+            _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
             branch = r.stdout.strip()
     # Canonical viewer route — mirrors how the viewer opens a node: a forest member
     # (tagged stack-branch.<b>.project) lives at /forests/<project>/<branch>, an untagged
