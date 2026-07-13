@@ -1,0 +1,29 @@
+diff --git a/scripts/stack-forest b/scripts/stack-forest
+index 281042d..b41ccd1 100755
+--- a/scripts/stack-forest
++++ b/scripts/stack-forest
+@@ -585,16 +585,19 @@ for _wt, _br in _worktree_branches():
+         if dp:
+             nodes[_br]["dirty"] = sorted(dp)
+ 
+-# ---- ghost "feature" node: the single culmination of a multi-leaf project. A
++# ---- ghost "feature" node: the single culmination of a multi-node project. A
+ # phantom (no branch, no diff/bless) that fans in the project's un-subsumed TIPS —
+ # leaves not already carried by another node's `requires`. It maps to the ephemeral
+-# integration ref (stack-integrate octopus-merges the same tips), so its only action
+-# is an integrate preview. Emitted ONLY when >1 tip exists; a single-tip project
+-# already culminates in that tip. Pure topology — zero extra git calls.
++# integration ref (stack-integrate octopus-merges the same tips; a single tip just
++# points the ref at it), so its only action is an integrate preview — the cumulative
++# feature diff vs main. Emitted whenever the project spans >1 node: a chain's tip
++# node only shows its own parent...tip delta, so the ghost is the one whole-feature
++# view; a single-node project IS its own culmination, no ghost. Pure topology —
++# zero extra git calls.
+ if project and project != "whole forest":
+     required = {r for b in members for r in requires.get(b, []) if r in members}
+     tips = sorted(b for b in members if not nodes[b]["children"] and b not in required)
+-    if len(tips) > 1:
++    if len(tips) >= 1 and len(members) > 1:
+         ghost = f"✦ {project}"   # ✦ <project> — sentinel key, never a real branch
+         nodes[ghost] = {
+             "branch": ghost, "parent": MAIN, "ghost": True, "status": "ghost",

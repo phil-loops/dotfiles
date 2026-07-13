@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# check-bash32 — flag bash-4+ constructs in scripts that must run under macOS /bin/bash (3.2.57).
+#
+# The trap this exists to kill: `bash -n` PASSES on bash-4-only builtins (declare -A, mapfile, …)
+# because they parse fine on 3.2 — they only fail at RUNTIME. launchd runs our daemons as
+# `/bin/bash <self>`, and 3.2 is the only bash on this machine, so a bash-4 construct ships a
+# latent crash that no syntax check catches. This greps for the common offenders instead.
+#
+#   check-bash32 <file>...     scan the given scripts
+#   check-bash32               scan every tracked script launched under /bin/bash (default set)
+#
+# Exit 0 = clean, 1 = offenders found (prints file:line: construct), 2 = usage error.
+# Heuristic (line-grep, not a parser): strips trailing comments before matching to avoid flagging
+# prose, but a construct inside a string may still trip it — quote-or-rename if it does.
+
+# construct → why it's bash-4+
+patterns=(
+  'declare[[:space:]]+-[A-Za-z]*A'        # associative arrays (declare -A / local -A)
+  'local[[:space:]]+-[A-Za-z]*A'
+  'declare[[:space:]]+-[A-Za-z]*g'        # declare -g (global from a function)
+  '\bmapfile\b'                           # mapfile / readarray
+  '\breadarray\b'
+  '\$\{[A-Za-z_][A-Za-z0-9_]*\^\^?[}:]'   # ${v^} / ${v^^} uppercase
+  '\$\{[A-Za-z_][A-Za-z0-9_]*,,?[}:]'     # ${v,} / ${v,,} lowercase
+  '\$\{[A-Za-z_][A-Za-z0-9_]*\[-'         # negative array index ${a[-1]}
+)
+
+files=()
+if (( $# )); then
+  files=("$@")
+else
+  # default: scripts we know launchd/hooks run under /bin/bash
+  for f in restack-daemon; do
+    [[ -f "$(dirname "$0")/$f" ]] && files+=("$(dirname "$0")/$f")
+  done
+fi
+(( ${#files[@]} )) || { echo "check-bash32: no files to scan" >&2; exit 2; }
+
+rc=0
+for f in "${files[@]}"; do
+  [[ -f "$f" ]] || { echo "check-bash32: no such file: $f" >&2; rc=2; continue; }
+  # strip full-line and trailing comments (rough) so prose doesn't false-positive
+  stripped="$(sed -E 's/[[:space:]]#.*$//; /^[[:space:]]*#/d' "$f")"
+  for pat in "${patterns[@]}"; do
+    while IFS= read -r hit; do
+      [[ -n "$hit" ]] || continue
+      # map the match back to a line number in the original file
+      n="$(grep -nE "$pat" "$f" | head -1 | cut -d: -f1)"
+      echo "$f:${n:-?}: bash-4 construct → ${hit#*:}"
+      rc=1
+    done < <(grep -nE "$pat" <<<"$stripped" || true)
+  done
+done
+(( rc == 0 )) && echo "check-bash32: clean (${#files[@]} file(s))"
+exit "$rc"
