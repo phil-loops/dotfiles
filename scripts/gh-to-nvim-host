@@ -12,6 +12,7 @@ Message out: {"ok": bool, "started": bool, "err": str?}
 `stack-review-serve` is idempotent (a live server on the repo's port is reused),
 so a launch while already-up is a harmless no-op.
 """
+import datetime
 import json
 import os
 import struct
@@ -43,16 +44,20 @@ def launch(repo):
     if not os.path.exists(SERVE):
         return {"ok": False, "started": False, "err": f"missing {SERVE}"}
     # Detach fully: the host process exits as soon as it replies, and Chrome would
-    # otherwise reap the child. start_new_session + closed stdio = survives our exit.
-    subprocess.Popen(
-        [SERVE],
-        cwd=repo,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    return {"ok": True, "started": True}
+    # otherwise reap the child. start_new_session + non-tty stdio = survives our exit.
+    # Output goes to a log, not DEVNULL — a launch that dies mid-build was undiagnosable.
+    log_path = os.path.expanduser("~/Library/Logs/gh-to-nvim-host.log")
+    with open(log_path, "ab") as log:
+        log.write(f"\n── launch {repo} @ {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ──\n".encode())
+        subprocess.Popen(
+            [SERVE],
+            cwd=repo,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=log,
+            start_new_session=True,
+        )
+    return {"ok": True, "started": True, "log": log_path}
 
 
 def main():
