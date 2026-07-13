@@ -29,8 +29,8 @@ const fitPurpose = (s: string, w: number): string => {
 // parent edges are file-tree elbow guides: drop from the guardian's dot column, turn
 // into the child's left edge. The arrowhead rides the horizontal run, so it always
 // enters a node level from the left — indentation and the elbow agree by construction.
-// `requires` (fanin) edges appear only under the hover spotlight, as a right-lane arc
-// from the prerequisite's right edge down to the dependent's right edge.
+// `requires` (fanin) edges rest as a right-lane arc from the prerequisite's right edge
+// down to the dependent's right edge (block sorting keeps the prerequisite higher).
 const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: string }): string =>
   e.kind === "fanin"
     ? `M${e.x1},${e.y1} C${e.x1 + 58},${e.y1} ${e.x2 + 58},${e.y2} ${e.x2},${e.y2}`
@@ -277,13 +277,13 @@ export function ForestMap(props: {
             />
           )}
         </For>
-        {/* requires edges live in the ⤿ pill at rest; the arc materializes only when the
-            hover spotlight lights both of its ends. */}
+        {/* requires edges rest faint in the right lane — the geometry says "lands after"
+            without words; the hover spotlight brightens the arc. */}
         <For each={layout().edges.filter((e) => e.kind === "fanin")}>
           {(e) => (
-            <Show when={litEdge(e.from, e.to)}>
-              <path class="fm-edge fanin lit" marker-end="url(#fm-arrow)" d={edgePath(e)} />
-            </Show>
+            <path class="fm-edge fanin" classList={{ lit: litEdge(e.from, e.to) }} marker-end="url(#fm-arrow)" d={edgePath(e)}>
+              <title>fan-in: merges after {leafOf(e.from)}</title>
+            </path>
           )}
         </For>
         <g
@@ -391,12 +391,6 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
                   </Show>
-                  <Show when={!isGhostId(n.id) && (n.requires || []).some((r) => layout().pos[r])}>
-                    <text class="fm-req" x={w + 10} y="4.5">
-                      <title>fan-in: merges after {(n.requires || []).join(", ")} (hover to trace)</title>
-                      ⤿ after {(n.requires || []).filter((r) => layout().pos[r]).map(leafOf).join(" · ")}
-                    </text>
-                  </Show>
                   <Show when={!isGhostId(n.id) && prOf(n.id)}>
                     {(pr) => (
                       <text
@@ -483,12 +477,8 @@ const CSS = `
   animation: fm-fade .8s ease forwards; }
 .fm-edge.blessed { stroke: var(--gold-deep); }
 .fm-edge.stale { stroke: var(--del); }
-/* the requires arc exists only while the spotlight lights it — fade fast, read distinct. */
-.fm-edge.fanin { stroke: var(--patina); stroke-width: 1.6; stroke-dasharray: 7 4; animation: fm-fade .18s ease forwards; }
-/* ⤿ fan-in pill: rests quiet beside the node; wakes with its node's hover (which also
-   draws the arc to the prerequisite). */
-.fm-req { fill: var(--patina); font-family: var(--mono); font-size: 9.5px; text-anchor: start; opacity: .62; }
-.fm-node:hover .fm-req, .fm-node.lit .fm-req { opacity: 1; }
+/* the requires arc rests faint (dashed = carried, not based-on) and reads full under the spotlight. */
+.fm-edge.fanin { stroke: var(--patina); stroke-width: 1.6; stroke-dasharray: 7 4; animation: fm-fade-half .8s ease forwards; }
 .fm-node { cursor: pointer; opacity: 0; animation: fm-fade .45s ease forwards; }
 .fm-node rect { fill: var(--vellum-raise); stroke: var(--rule); stroke-width: 1.2; transition: stroke .15s, fill .15s; }
 .fm-node:hover rect { stroke: var(--ink-faint); fill: var(--vellum-edge); }
@@ -596,10 +586,12 @@ const CSS = `
 .fm-node.kiln-parked .dot { fill: var(--del); stroke: var(--del); animation: fm-pulse 1.6s ease-in-out infinite; }
 
 @keyframes fm-fade { to { opacity: 1; } }
+@keyframes fm-fade-half { to { opacity: .5; } }
 @keyframes fm-kiln-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
 @keyframes fm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) {
   .fm-edge, .fm-node { animation: none; opacity: 1; }
+  .fm-edge.fanin { opacity: .5; }
   .fm-node.kiln-current .dot, .fm-node.kiln-parked .dot { animation: none; }
 }
 `;

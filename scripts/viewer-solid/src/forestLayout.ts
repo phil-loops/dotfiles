@@ -16,10 +16,11 @@ export function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
 
 // Story-aligned tree layout: the map reads exactly like the merge-story text. Each branch
 // is a ROW; depth in the parent tree is an INDENT column, so the parent relationship is
-// carried by geometry (a thin elbow guide, drawn always). `requires` fan-in never draws a
-// resting edge — it renders as a ⤿ pill on the node and its edge appears only under the
-// hover spotlight. Roots sort by merge rank so the vertical order IS the landing order;
-// the ghost culmination sorts last (it's the destination, not work). Pure and deterministic.
+// carried by geometry (a thin elbow guide, drawn always). `requires` fan-in draws as a
+// resting dashed arc in the right-side lane, always flowing downward: sibling blocks are
+// topo-sorted over cross-block requires, so the vertical order IS the landing order and
+// a prerequisite always sits above its dependent. The ghost culmination sorts last (it's
+// the destination, not work). Pure and deterministic.
 export function computeForestLayout(model: { list: SpineNode[]; byId: Record<string, SpineNode> }) {
     const { list, byId } = model;
     const ids = list.map((n) => n.id);
@@ -58,8 +59,40 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
       (isGhostId(a) ? 1 : 0) - (isGhostId(b) ? 1 : 0) ||
       rankOf(a) - rankOf(b) ||
       declared[a] - declared[b];
-    roots.sort(order);
-    Object.values(kids).forEach((c) => c.sort(order));
+    // A sibling's whole subtree renders as one contiguous block, so "vertical order is the
+    // landing order" holds only if any block containing a prerequisite sorts above the block
+    // whose member requires it. Rank alone can't see that (the block tops may tie — a rank-1
+    // root can hide a rank-2 dependent), so topo-sort the blocks over cross-block requires,
+    // tie-breaking with the plain comparator. Cycle (bad config) → comparator order.
+    const members: Record<string, Set<string>> = {};
+    const collect = (id: string): Set<string> => {
+      const s = new Set([id]);
+      (kids[id] || []).forEach((c) => collect(c).forEach((m) => s.add(m)));
+      return (members[id] = s);
+    };
+    const sortBlocks = (siblings: string[]): string[] => {
+      siblings.forEach(collect);
+      const blockOf = (node: string) => siblings.find((s) => members[s].has(node));
+      const before: Record<string, Set<string>> = {};
+      siblings.forEach((s) => (before[s] = new Set()));
+      siblings.forEach((s) => {
+        members[s].forEach((m) => {
+          (byId[m]?.requires || []).forEach((rq) => {
+            const b = blockOf(rq);
+            if (b && b !== s) before[s].add(b);
+          });
+        });
+      });
+      const sorted: string[] = [];
+      const pending = [...siblings].sort(order);
+      while (pending.length) {
+        const i = pending.findIndex((s) => [...before[s]].every((b) => sorted.includes(b)));
+        sorted.push(...pending.splice(Math.max(i, 0), 1));
+      }
+      return sorted;
+    };
+    roots.splice(0, roots.length, ...sortBlocks(roots));
+    Object.keys(kids).forEach((p) => (kids[p] = sortBlocks(kids[p])));
 
     // DFS: row per node, indent per depth — parent always directly above its subtree.
     const pos: Record<string, { x: number; y: number }> = {};
@@ -74,21 +107,16 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     roots.forEach((r) => place(r, 0));
 
     const mainPos = { x: LEFT - 62, y: TOP - ROW_H * 0.62 };
-    // the ⤿ fan-in pill rides OUTSIDE the node rect, so it counts toward the canvas width.
-    const reqPillW = (n: SpineNode): number => {
-      const names = (n.requires || []).filter((r) => pos[r]).map(leafOf).join(" · ");
-      return names ? (8 + names.length) * 5.8 + 26 : 0;
-    };
     let maxX = mainPos.x + 60;
-    list.forEach((n) => { if (pos[n.id]) maxX = Math.max(maxX, pos[n.id].x + nodeW(n.id) + reqPillW(n)); });
+    list.forEach((n) => { if (pos[n.id]) maxX = Math.max(maxX, pos[n.id].x + nodeW(n.id)); });
     const W = maxX + PAD_R;
     const H = TOP + row * ROW_H + PAD_B;
 
     // Edges. Parent edges are ELBOW GUIDES (file-tree style): drop from the guardian's dot,
     // then turn into the child's left edge — geometry the renderer draws as M x1,y1 V y2 H x2.
     // The guardian is the parent node, or main for roots (main's spine runs down the left).
-    // `requires` edges carry kind "fanin" and their own right-side lane geometry; the
-    // renderer shows them only when the hover spotlight lights both ends.
+    // `requires` edges carry kind "fanin" and their own right-side lane geometry; block
+    // topo-sorting above guarantees the prerequisite row is higher, so the arc flows down.
     type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string };
     const edges: Edge[] = [];
     list.forEach((n) => {
