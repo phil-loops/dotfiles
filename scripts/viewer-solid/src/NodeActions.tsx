@@ -28,6 +28,22 @@ interface CheckoutResult {
   ok?: boolean;
   err?: string;
   worktree?: string; // set on 409: the worktree currently holding the branch
+  freed?: string; // set on ok: a clean, session-less worktree the server auto-freed en route
+  dirty?: number; // set on 409: uncommitted paths in the holding worktree
+  session?: { pane?: string; idleSeconds?: number } | null; // set on 409: live Claude session in it
+}
+
+const shortWt = (p: string) => p.split("/").pop() || p;
+
+function holdReason(r: CheckoutResult): string {
+  const parts: string[] = [];
+  if (r.session) {
+    parts.push(`⚠ live Claude session${r.session.idleSeconds != null ? ` (idle ${r.session.idleSeconds}s)` : ""}`);
+  }
+  if (r.dirty) {
+    parts.push(`± ${r.dirty} uncommitted`);
+  }
+  return parts.join(" · ");
 }
 
 interface SyncResult {
@@ -97,6 +113,9 @@ export function NodeActions(props: {
   // hit it, so freeing the worktree resumes the right one (plain checkout vs the omni sync).
   const [heldAt, setHeldAt] = createSignal<string | null>(null);
   const [heldFor, setHeldFor] = createSignal<"checkout" | "omniSync">("checkout");
+  // why the server refused to auto-free it — a clean, session-less hold never gets here
+  // (the server frees those itself); this names the dirt or the live session instead.
+  const [heldWhy, setHeldWhy] = createSignal<string>("");
   // squashing rewrites history → two-click arm (shared useArm) before it fires.
   const { armed, trigger } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
@@ -134,10 +153,11 @@ export function NodeActions(props: {
       if (r.ok) {
         setHeldAt(null);
         setOpen(false);
-        setDone(`✓ checked out in ${r.worktree || "your main checkout"}`);
+        setDone(`✓ checked out in ${r.worktree || "your main checkout"}${r.freed ? ` (freed ${shortWt(r.freed)} — clean, no live session)` : ""}`);
         qc.invalidateQueries({ queryKey: ["head"] });
       } else if (r.worktree) {
         setHeldFor("checkout");
+        setHeldWhy(holdReason(r));
         setHeldAt(r.worktree); // held elsewhere → offer to free it
       } else {
         setDone(`✗ ${r.err || "checkout failed"}`);
@@ -297,13 +317,14 @@ export function NodeActions(props: {
       const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force });
       if (!co.ok) {
         if (co.worktree) {
-          stepSet("checkout", "fail", `held by ${co.worktree} — free it below to continue`);
+          setHeldWhy(holdReason(co));
+          stepSet("checkout", "fail", `held by ${co.worktree}${holdReason(co) ? ` (${holdReason(co)})` : ""} — free it below to continue`);
           return { phase: "held" as const, held: co.worktree };
         }
         stepSet("checkout", "fail", co.err || "checkout failed");
         return { phase: "error" as const };
       }
-      stepSet("checkout", "ok");
+      stepSet("checkout", "ok", co.freed ? `freed ${shortWt(co.freed)} — clean, no live session` : undefined);
       stepSet("route", "run");
       const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
         "/prep-push", { branch: props.branch });
@@ -833,7 +854,7 @@ export function NodeActions(props: {
           branch. Offer to free it and resume whichever action hit it. */}
       <Show when={heldAt()}>
         <span class="nh-held">
-          held in {heldAt()}
+          held in {heldAt()}{heldWhy() ? ` — ${heldWhy()}` : ""}
           <button class="nh-held-btn" disabled={busy()} onClick={freeAndContinue}>
             free &amp; {heldFor() === "omniSync" ? "sync" : "checkout"}
           </button>
