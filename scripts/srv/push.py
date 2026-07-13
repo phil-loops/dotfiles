@@ -45,7 +45,52 @@ def delta_tests(req, raw):
     }))
 
 
-_GATE_JOBS = {}  # branch → {"path": progress jsonl, "proc": Popen, "t0": epoch, "tree": tree sha at spawn}
+# branch → {"path": progress jsonl, "proc": Popen | "pid": int, "t0": epoch, "tree": tree sha
+# at spawn}. The dict is just a warm cache: every spawn also writes a sidecar json next to the
+# journal, so a bounced server re-adopts the still-running detached child instead of losing it.
+_GATE_JOBS = {}
+
+
+def _job_file(branch):
+    return os.path.join(tempfile.gettempdir(), f"stack-gates-{branch.replace('/', '-')}.job.json")
+
+
+def _adopt_job(branch):
+    """Re-attach to a detached gates run this server process didn't spawn (the child is
+    disowned and survives a server bounce; only the in-memory pointer died with us)."""
+    try:
+        with open(_job_file(branch)) as f:
+            j = json.load(f)
+        job = {"path": j["path"], "pid": int(j["pid"]), "t0": float(j["t0"]), "tree": j["tree"]}
+    except Exception:
+        return None
+    _GATE_JOBS[branch] = job
+    return job
+
+
+def _job_running(job):
+    proc = job.get("proc")
+    if proc is not None:
+        return proc.poll() is None
+    try:
+        os.kill(job["pid"], 0)
+        return True
+    except OSError:
+        return False
+
+
+def _journal_events(path):
+    events = []
+    try:
+        with open(path) as f:
+            for ln in f:
+                try:
+                    events.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return events
 
 
 def gates(req, raw):
@@ -53,7 +98,7 @@ def gates(req, raw):
     branch = d.get("branch", "")
     # useCache: the sync strip re-runs on every motion — when this tree already passed,
     # answer green instantly instead of re-paying the typecheck.
-    if d.get("useCache") and branch and _GREEN_GATES.get(branch) == _tree(branch):
+    if d.get("useCache") and branch and _green_tree(branch) == _tree(branch):
         return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
     # --fix: a red gate with a remediation (e.g. fresh → rebase onto origin/main, format
     # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
@@ -65,21 +110,31 @@ def gates(req, raw):
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
-        old = _GATE_JOBS.get(branch)
-        if old and old["proc"].poll() is None:
+        old = _GATE_JOBS.get(branch) or _adopt_job(branch)
+        if old and _job_running(old):
             return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
+        if old and old["tree"] == _tree(branch):
+            # an orphaned run finished while no server was watching — harvest its verdict
+            # instead of re-paying the typecheck for the same tree
+            result = next((e for e in _journal_events(old["path"]) if e.get("event") == "result"), None)
+            if result and result.get("ok"):
+                _record_green(branch, old["tree"])
+                return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
         path = os.path.join(
             tempfile.gettempdir(),
             f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
         proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        _GATE_JOBS[branch] = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
+        job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
+        _GATE_JOBS[branch] = job
+        with open(_job_file(branch), "w") as f:
+            json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
         return req._send(200, json.dumps({"ok": True, "started": True}))
     r = ctx.run(cmd)
     # stack-gates always prints a JSON verdict on stdout and exits 0
     try:
         if json.loads(r.stdout).get("ok"):
-            _GREEN_GATES[branch] = _tree(branch)
+            _record_green(branch, _tree(branch))
     except Exception:
         pass
     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
@@ -88,26 +143,17 @@ def gates(req, raw):
 def gates_progress(req, u):
     qs = parse_qs(u.query)
     branch = (qs.get("branch") or [""])[0]
-    job = _GATE_JOBS.get(branch)
+    job = _GATE_JOBS.get(branch) or _adopt_job(branch)
     if not job:
         return req._send(200, json.dumps({"running": False, "err": "no gates run for this branch"}))
-    events = []
-    try:
-        with open(job["path"]) as f:
-            for ln in f:
-                try:
-                    events.append(json.loads(ln))
-                except ValueError:
-                    pass
-    except OSError:
-        pass
+    events = _journal_events(job["path"])
     result = next((e for e in events if e.get("event") == "result"), None)
     if result and result.get("ok"):
         # green is recorded against the TREE the run was spawned on — a message-only reword
         # while the gates ran keeps the same tree, so the verdict carries; any content change
         # (rebase, new commit) makes a new tree and the door stays locked
-        _GREEN_GATES[branch] = job["tree"]
-    running = job["proc"].poll() is None
+        _record_green(branch, job["tree"])
+    running = _job_running(job)
     out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
     if result:
         out["result"] = {"ok": result.get("ok"), "gates": result.get("gates", []), "note": result.get("note")}
@@ -122,10 +168,17 @@ def gates_progress(req, u):
 # voiced subject + real body; gates green for the exact tree pushed; the app never
 # authors PRs (at most a plain github.com link). Claude never calls /push-origin.
 
-# branch → TREE sha stack-gates last passed at (server-recorded, not client-claimed).
-# Keyed by tree, not commit: the gates read file contents only, so a message reword
-# must not relock push — the tip-sha key stranded green on rewords (2026-07-12).
-_GREEN_GATES = {}
+# Gates-green lives in git config (stack-branch.<b>.gates-green-tree), server-recorded and
+# never client-claimed. Keyed by TREE sha, not commit: the gates read file contents only, so
+# a message reword must not relock push — the tip-sha key stranded green on rewords
+# (2026-07-12). Config, not process memory, so a server bounce doesn't relock push either.
+def _green_tree(branch):
+    return ctx.run(["git", "config", "--get", f"stack-branch.{branch}.gates-green-tree"]).stdout.strip()
+
+
+def _record_green(branch, tree):
+    ctx.run(["git", "config", f"stack-branch.{branch}.gates-green-tree", tree])
+
 
 _WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
 
@@ -243,7 +296,7 @@ def _origin_verdict(branch):
         not_merge = not ctx.run(["git", "rev-list", "--no-walk", "--merges", sha]).stdout.strip()
         commit = {"sha": sha, "subject": subject, "body": body}
     tip = _tip(branch)
-    gates_green = _GREEN_GATES.get(branch) == _tree(tip)
+    gates_green = _green_tree(branch) == _tree(tip)
 
     def ward(k, label, ok, why, advisory=False):
         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
@@ -505,7 +558,7 @@ def prep_message(req, raw):
     r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", new, tip])
     if r.returncode != 0:
         return req._send(200, json.dumps({"ok": False, "err": "branch moved while editing — reload and retry"}))
-    # (no gates bookkeeping: _GREEN_GATES is tree-keyed and a reword keeps the tree)
+    # (no gates bookkeeping: gates-green is tree-keyed and a reword keeps the tree)
     # the tip sha moved — reseat any stacked children so they don't hang off the old commit
     # (same tree, so these rebases are trivially clean)
     from srv import reviews
