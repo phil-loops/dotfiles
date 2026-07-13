@@ -18,6 +18,10 @@
 # (matching the PR's current head) completes — with the ready-to-paste
 # `task release:staging VERSION=...` deploy command. Seeds silently on first v3 run.
 #
+# v4 adds the staging-flip sweep: after a [staging] deploy-v2 enqueue completes, watch
+# app.l3s.email's Next.js buildId and notify when staging is ACTUALLY serving a new
+# build (the enqueue run itself finishes in ~10s and proves nothing).
+#
 #   build-notify                 one sweep (what launchd runs)
 #   BUILD_NOTIFY_REPO=...        override repo (default Loops-so/loops)
 #   BUILD_NOTIFY_MAX_AGE_H=...   notify horizon in hours (default 6)
@@ -33,6 +37,8 @@ firstrun=0; [ -f "$seen" ] || { : > "$seen"; firstrun=1; }
 grep -qx '#v2' "$seen" 2>/dev/null || firstrun=1
 # v3 added the staging sweep; its first pass seeds already-finished branch builds silently.
 v3first=0; grep -qx '#v3' "$seen" 2>/dev/null || v3first=1
+# v4 added the staging-flip sweep; same silent first-pass seeding for deploy-v2 enqueues.
+v4first=0; grep -qx '#v4' "$seen" 2>/dev/null || v4first=1
 
 notify() {  # $1 title  $2 msg  $3 url
   "$HOME/.dotfiles/scripts/notify-journal" build-notify notified "$1" "$2" "$3" 2>/dev/null || true
@@ -145,6 +151,61 @@ while IFS=$'\t' read -r prnum prbranch prsha; do
   echo "$rid" >> "$seen"
 done <<< "$stprs"
 
+# --- staging-flip sweep: notify when staging is ACTUALLY running a new build ----------
+# deploy-v2 "success" = ENQUEUED only (10s shim: Slack announce + `loopsctl deploy` → SQS;
+# the deployer worker does the helm rollout and reports to the Slack thread). The
+# machine-side "go test" signal is staging serving a NEW Next.js buildId, so: arm a
+# pending watch on a completed [staging] deploy-v2 enqueue, then notify when the buildId
+# flips — or nag if it hasn't after BUILD_NOTIFY_STAGING_STALL_MIN. Enqueue failures
+# notify immediately. kubectl would be exact but needs an interactive aws-vault unlock.
+STAGING_URL="${BUILD_NOTIFY_STAGING_URL:-https://app.l3s.email/}"
+STALL_MIN="${BUILD_NOTIFY_STAGING_STALL_MIN:-45}"
+pend="$statedir/staging-pending"
+
+# the 404 shell also embeds buildId, so no auth needed (no head/exit → SIGPIPE-safe)
+bid_now=$(curl -sS --max-time 8 "$STAGING_URL" 2>/dev/null | sed -n 's/.*"buildId":"\([^"]*\)".*/\1/p' | awk 'NR==1' || true)
+
+deps=$(gh run list -R "$REPO" --workflow=deploy-v2.yml -L 10 \
+  --json databaseId,displayTitle,status,conclusion,updatedAt,url \
+  -q '.[] | select(.status=="completed" and (.displayTitle | startswith("[staging]"))) | [(.databaseId|tostring),.conclusion,.displayTitle,.updatedAt,.url] | @tsv' 2>/dev/null || true)
+
+while IFS=$'\t' read -r rid concl title updatedAt url; do
+  [ -n "$rid" ] || continue
+  grep -qx "$rid" "$seen" && continue
+  if [ "$firstrun" = "1" ] || [ "$v4first" = "1" ]; then echo "$rid" >> "$seen"; continue; fi
+  end_s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updatedAt" +%s 2>/dev/null || echo 0)
+  if [ "$end_s" -gt 0 ] && [ $(( now_s - end_s )) -gt $(( MAX_AGE_H * 3600 )) ]; then
+    journal_silent silent-age "$title" "${concl:-?} enqueue finished >${MAX_AGE_H}h ago" "$url"
+    echo "$rid" >> "$seen"; continue
+  fi
+  ver="${title#\[staging\] deploying }"
+  if [ "$concl" = "success" ]; then
+    actor=$(gh api "repos/$REPO/actions/runs/$rid" -q '.actor.login' 2>/dev/null || echo "?")
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rid" "$now_s" "${bid_now:-unknown}" "$ver" "$actor" "$url" > "$pend"
+    echo "build-notify: ⛴ staging deploy $ver enqueued by $actor — watching for buildId flip"
+    journal_silent armed "staging $ver" "enqueued by $actor; watching for the buildId flip" "$url"
+  else
+    notify "✗ staging enqueue ${concl:-failed}" "$title — deploy never enqueued. Re-run at the run page ↗" "$url"
+  fi
+  echo "$rid" >> "$seen"
+done <<< "$deps"
+
+if [ -s "$pend" ] && [ -n "$bid_now" ]; then
+  IFS=$'\t' read -r prid parm_s pbid pver pactor purl < "$pend"
+  if [ "$pbid" = "unknown" ]; then   # baseline fetch failed at arm time; take it now
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$prid" "$parm_s" "$bid_now" "$pver" "$pactor" "$purl" > "$pend"
+  elif [ "$bid_now" != "$pbid" ]; then
+    mins=$(( (now_s - parm_s) / 60 ))
+    notify "⛴ staging flipped" "$pver ($pactor) is live ~${mins}m after enqueue — go test" "$STAGING_URL"
+    echo "build-notify: ⛴ staging flipped to $pver (${mins}m)"
+    : > "$pend"
+  elif [ $(( now_s - parm_s )) -gt $(( STALL_MIN * 60 )) ]; then
+    notify "⏳ staging deploy stalled" "$pver enqueued >${STALL_MIN}m ago and staging's buildId hasn't changed — check the Slack thread" "$purl"
+    : > "$pend"
+  fi
+fi
+
 grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"
 grep -qx '#v3' "$seen" 2>/dev/null || echo '#v3' >> "$seen"
+grep -qx '#v4' "$seen" 2>/dev/null || echo '#v4' >> "$seen"
 tail -n 300 "$seen" > "$seen.tmp" 2>/dev/null && mv "$seen.tmp" "$seen"
