@@ -19,14 +19,21 @@
   stack-squash --no-voice <b>      skip the claude draft: commit with the mechanical
                                    message (newest non-wip subject) — instant; voice
                                    the message later, on demand
+  stack-squash --reseat <b>        after the squash moves the tip, REPLAY the descendant
+                                   subtree onto it (cut at each old parent tip, parent-first)
+                                   so stacked children don't orphan. Refuses (leaving the base
+                                   un-squashed) if any descendant is checked out or pushed; a
+                                   rebase conflict rolls the whole subtree back. Reports
+                                   `reseated:[...]`. Without it, squash punts the reseat to the
+                                   caller (the interactive viewer still does its own _reseat_walk).
 
-`--unpushed` + `--format` together is the "prep for push" combo. Flags compose and
-may appear in any order before <branch>.
+`--unpushed` + `--format` together is the "prep for push" combo; add `--reseat` to also
+carry the stack. Flags compose and may appear in any order before <branch>.
 
-Safe-by-default: refuses on a dirty working tree. Does NOT restack descendants — the
-caller (viewer) hands that off to `stack-restack`. Emits a JSON report on stdout:
-{ok, branch, parent, base, n, sha, header, message, voiced, formatted, err}. `voiced`
-is false when claude was unavailable and we fell back to a mechanical message.
+Safe-by-default: refuses on a dirty working tree. Without --reseat it does NOT restack
+descendants. Emits a JSON report on stdout: {ok, branch, parent, base, n, sha, header,
+message, voiced, formatted, reseated, err}. `voiced` is false when claude was unavailable
+and we fell back to a mechanical message.
 
 Env: CLAUDE_BIN (default "claude"), SQUASH_MODEL (optional --model passthrough),
 MAIN_BRANCH (default "main").
@@ -84,9 +91,76 @@ def out(d):
     sys.exit(0 if d.get("ok") else 1)
 
 
+def children_of(b):
+    """branches whose stack-branch.<child>.parent points at b (direct children)."""
+    kids = []
+    for ln in git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout.splitlines():
+        key, _, val = ln.partition(" ")
+        if val.strip() == b and key.startswith("stack-branch.") and key.endswith(".parent"):
+            kids.append(key[len("stack-branch."):-len(".parent")])
+    return kids
+
+
+def subtree(base):
+    """(node, parent) pairs for base + all descendants, BFS parent-before-child order."""
+    order, frontier = [(base, None)], [base]
+    while frontier:
+        node = frontier.pop(0)
+        for c in children_of(node):
+            order.append((c, node)); frontier.append(c)
+    return order
+
+
+def reseat_gate(base):
+    """Reason a base's subtree can't be safely reseated, or None. Run BEFORE squashing so an
+    unreseatable base is left untouched (no squash) rather than squashed-then-orphaned. A
+    descendant checked out in a worktree can't be rewritten under a live session; a pushed one
+    would need a force-push."""
+    live = {b for _, b in worktrees() if b}
+    for node, _ in subtree(base)[1:]:
+        if f"refs/heads/{node}" in live:
+            return f"{node} is checked out — reseat would rewrite a live worktree"
+        if git(["rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{node}"]).returncode == 0:
+            return f"{node} is pushed — reseat would need a force-push"
+    return None
+
+
+def reseat_cascade(base, old_base_tip, base_wt):
+    """After the base tip moved (old_base_tip → HEAD), replay every descendant onto its parent's
+    NEW tip, cut at the parent's OLD tip, parent-first — the reseat stack-squash historically
+    punted to the caller. Conflict → roll the WHOLE subtree back to pre-squash tips (undoing the
+    squash: base via reset --hard in its worktree, descendants via branch -f) so a failed reseat
+    never leaves a half-moved or orphaned stack. Returns {reseated:[...]} | {conflict:branch}."""
+    order = subtree(base)
+    if len(order) == 1:
+        return {"reseated": []}
+    snap = {node: git(["rev-parse", node]).stdout.strip() for node, _ in order}
+    snap[base] = old_base_tip   # base already moved; its pre-squash tip is the rollback + cut point
+
+    def rollback():
+        for nb, sha in snap.items():
+            if nb == base and base_wt:
+                git(["reset", "--hard", sha], cwd=base_wt)
+            else:
+                git(["branch", "-f", nb, sha], cwd=None)
+
+    scratch = subprocess.run(["mktemp", "-d", "-t", "squash-reseat"], capture_output=True, text=True).stdout.strip()
+    git(["worktree", "add", "--detach", scratch, base], cwd=None)
+    try:
+        for node, par in order[1:]:
+            oldp, newp = snap[par], git(["rev-parse", par]).stdout.strip()
+            if git(["rebase", "--onto", newp, oldp, node], cwd=scratch).returncode != 0:
+                git(["rebase", "--abort"], cwd=scratch)
+                rollback()
+                return {"conflict": node}
+        return {"reseated": [n for n, _ in order[1:]]}
+    finally:
+        git(["worktree", "remove", "--force", scratch], cwd=None)
+
+
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
-dry = unpushed = fmt = subject_only = unstage = no_voice = False
+dry = unpushed = fmt = subject_only = unstage = no_voice = reseat = False
 provided_msg = ""   # --message=<msg>: use this verbatim (the composer wrote it), skip drafting
 rest = []
 for a in argv:
@@ -102,6 +176,8 @@ for a in argv:
         unstage = True
     elif a == "--no-voice":
         no_voice = True
+    elif a == "--reseat":
+        reseat = True
     elif a.startswith("--message="):
         provided_msg = a[len("--message="):]
     else:
@@ -113,6 +189,8 @@ if not branch:
 # branch must exist
 if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
     out({"ok": False, "branch": branch, "err": f"no such branch: {branch}"})
+
+orig_tip = git(["rev-parse", branch]).stdout.strip()   # pre-squash tip: reseat cut + rollback point
 
 parent = git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN
 
@@ -280,6 +358,15 @@ def report(**extra):
 if dry:
     out(report(dry=True, unpushed=unpushed))
 
+# --reseat gate: refuse BEFORE squashing if the subtree can't be safely reseated, so an
+# unreseatable base is left wholly untouched rather than squashed-then-orphaned.
+if reseat:
+    skip = reseat_gate(branch)
+    if skip:
+        out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
+             "header": header, "message": message, "voiced": voiced,
+             "err": f"reseat refused: {skip}", "reseat": "refused"})
+
 # ---- squash --------------------------------------------------------------
 def fail(err):
     out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
@@ -342,4 +429,16 @@ if fmt:
             git(["commit", "--amend", "--no-edit"])
 
 new_sha = git(["rev-parse", "--short", "HEAD"]).stdout.strip()
-out(report(sha=new_sha, formatted=formatted, unpushed=unpushed))
+
+# ---- --reseat: replay the descendant subtree onto the moved base ---------
+reseated = None
+if reseat:
+    res = reseat_cascade(branch, orig_tip, _cwd)
+    if "conflict" in res:
+        out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": n,
+             "header": header, "message": message, "voiced": voiced,
+             "err": f"reseat conflict on {res['conflict']} — squash rolled back, subtree restored",
+             "reseat": "conflict"})
+    reseated = res.get("reseated", [])
+
+out(report(sha=new_sha, formatted=formatted, unpushed=unpushed, reseated=reseated))

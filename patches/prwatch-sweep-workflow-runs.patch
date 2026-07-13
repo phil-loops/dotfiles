@@ -1,0 +1,64 @@
+diff --git a/scripts/prwatch b/scripts/prwatch
+index 1f98389..a8172ec 100755
+--- a/scripts/prwatch
++++ b/scripts/prwatch
+@@ -16,6 +16,9 @@
+ #                        the standing counterpart to --await, and the only thing
+ #                        that catches a merge (a merged PR drops off the open scan).
+ #                        Installed as launchd/com.philbrockman.prwatch-sweep.plist.
++#                        Also watches dispatched workflow runs (deploys) — set
++#                          git config prwatch.sweep-workflows "owner/repo:deploy-v2.yml …"
++#                        and each of your runs notifies once when it succeeds or fails.
+ #
+ # "Watch" streams gh's check status until every check passes or one fails, then
+ # fires a desktop notification (+ a terminal bell). It scans your fork AND the
+@@ -286,6 +289,49 @@ if [[ "${1:-}" == "--sweep" ]]; then
+   fi
+ 
+   printf '%s' "$newstate" >"$state"   # atomic-ish single write; merged/closed drop off
++
++  # workflow runs (deploys): the PR scan can't see a workflow_dispatch run, so a
++  # `task release:production` deploy would otherwise finish unannounced. Track the
++  # configured workflows' recent runs (mine only) and notify once on completion.
++  sweepwfs=(${=$(git config prwatch.sweep-workflows 2>/dev/null || true)})
++  if (( ${#sweepwfs} )); then
++    rstate="$HOME/.cache/prwatch/sweep-runs-state.tsv"
++    me=$(gh api user --jq .login 2>/dev/null) || me=""
++    uflag=(); [[ -n "$me" ]] && uflag=(--user "$me")
++    rrows=""
++    for spec in $sweepwfs; do
++      wrepo="${spec%%:*}"; wfile="${spec#*:}"
++      chunk=$(gh run list --repo "$wrepo" --workflow "$wfile" $uflag --limit 10 \
++        --json databaseId,status,conclusion,displayTitle 2>/dev/null \
++        | jq -r --arg r "$wrepo" '.[] | [$r, (.databaseId|tostring),
++            (if .status=="completed" then .conclusion else .status end),
++            .displayTitle] | @tsv') || chunk=""
++      [[ -n "$chunk" ]] && rrows+="$chunk"$'\n'
++    done
++
++    # empty poll = transient gh failure (or no runs yet) — keep last state untouched
++    if [[ -n "$rrows" ]]; then
++      typeset -A rprev
++      rfirst=0; [[ -f "$rstate" ]] || rfirst=1
++      if [[ -f "$rstate" ]]; then
++        while IFS=$'\t' read -r k st _; do [[ -n "$k" ]] && rprev[$k]=$st; done <"$rstate"
++      fi
++      rnew=""
++      while IFS=$'\t' read -r wrepo rid st title; do
++        [[ -n "$rid" ]] || continue
++        key="$wrepo/$rid"; url="https://github.com/$wrepo/actions/runs/$rid"
++        rnew+="$key"$'\t'"$st"$'\n'
++        (( rfirst )) && continue
++        was="${rprev[$key]:-}"
++        [[ "$st" == "$was" ]] && continue
++        case "$st" in
++          (success) notify "🚀 run succeeded" "$title" "$url" ;;
++          (failure|timed_out|startup_failure|cancelled) notify "✗ run $st" "$title" "$url" ;;
++        esac   # in-flight states record silently — Slack already announces the start
++      done <<< "$rrows"
++      printf '%s' "$rnew" >"$rstate"
++    fi
++  fi
+   exit 0
+ fi
+ 

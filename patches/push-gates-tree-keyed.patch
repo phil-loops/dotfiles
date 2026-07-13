@@ -1,0 +1,99 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index a183343..56ff5ed 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -45,15 +45,15 @@ def delta_tests(req, raw):
+     }))
+ 
+ 
+-_GATE_JOBS = {}  # branch → {"path": progress jsonl, "proc": Popen, "t0": epoch, "tip": sha at spawn}
++_GATE_JOBS = {}  # branch → {"path": progress jsonl, "proc": Popen, "t0": epoch, "tree": tree sha at spawn}
+ 
+ 
+ def gates(req, raw):
+     d = json.loads(raw or "{}")
+     branch = d.get("branch", "")
+-    # useCache: the sync strip re-runs on every motion — when this tip already passed,
++    # useCache: the sync strip re-runs on every motion — when this tree already passed,
+     # answer green instantly instead of re-paying the typecheck.
+-    if d.get("useCache") and branch and _GREEN_GATES.get(branch) == _tip(branch):
++    if d.get("useCache") and branch and _GREEN_GATES.get(branch) == _tree(branch):
+         return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
+     # --fix: a red gate with a remediation (e.g. fresh → rebase onto origin/main, format
+     # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
+@@ -73,13 +73,13 @@ def gates(req, raw):
+             f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
+         proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+-        _GATE_JOBS[branch] = {"path": path, "proc": proc, "t0": time.time(), "tip": _tip(branch)}
++        _GATE_JOBS[branch] = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
+         return req._send(200, json.dumps({"ok": True, "started": True}))
+     r = ctx.run(cmd)
+     # stack-gates always prints a JSON verdict on stdout and exits 0
+     try:
+         if json.loads(r.stdout).get("ok"):
+-            _GREEN_GATES[branch] = _tip(branch)
++            _GREEN_GATES[branch] = _tree(branch)
+     except Exception:
+         pass
+     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+@@ -103,9 +103,10 @@ def gates_progress(req, u):
+         pass
+     result = next((e for e in events if e.get("event") == "result"), None)
+     if result and result.get("ok"):
+-        # green is recorded against the tip the run was spawned on — the tip may have
+-        # moved since, and a verdict for a commit that no longer exists must not unlock push
+-        _GREEN_GATES[branch] = job["tip"]
++        # green is recorded against the TREE the run was spawned on — a message-only reword
++        # while the gates ran keeps the same tree, so the verdict carries; any content change
++        # (rebase, new commit) makes a new tree and the door stays locked
++        _GREEN_GATES[branch] = job["tree"]
+     running = job["proc"].poll() is None
+     out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
+     if result:
+@@ -118,10 +119,13 @@ def gates_progress(req, u):
+ # ── origin push — the shared-history door ────────────────────────────────────
+ # Design + boundaries: ~/daily-log/2026-07-02-deprecate-gh-desktop/design.md.
+ # Phil's rules: FF-only, never force; outgoing must be exactly ONE commit with a
+-# voiced subject + real body; gates green for that exact tip; the app never
++# voiced subject + real body; gates green for the exact tree pushed; the app never
+ # authors PRs (at most a plain github.com link). Claude never calls /push-origin.
+ 
+-_GREEN_GATES = {}   # branch → tip sha stack-gates last passed at (server-recorded, not client-claimed)
++# branch → TREE sha stack-gates last passed at (server-recorded, not client-claimed).
++# Keyed by tree, not commit: the gates read file contents only, so a message reword
++# must not relock push — the tip-sha key stranded green on rewords (2026-07-12).
++_GREEN_GATES = {}
+ 
+ _WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
+ 
+@@ -130,6 +134,10 @@ def _tip(branch):
+     return ctx.run(["git", "rev-parse", branch]).stdout.strip()
+ 
+ 
++def _tree(rev):
++    return ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
++
++
+ def _origin_web(branch):
+     """github.com compare link for the branch, opened straight to the 'Open a pull
+     request' form (?expand=1). Authoring still happens on the website — this only
+@@ -235,7 +243,7 @@ def _origin_verdict(branch):
+         not_merge = not ctx.run(["git", "rev-list", "--no-walk", "--merges", sha]).stdout.strip()
+         commit = {"sha": sha, "subject": subject, "body": body}
+     tip = _tip(branch)
+-    gates_green = _GREEN_GATES.get(branch) == tip
++    gates_green = _GREEN_GATES.get(branch) == _tree(tip)
+ 
+     def ward(k, label, ok, why, advisory=False):
+         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
+@@ -497,8 +505,7 @@ def prep_message(req, raw):
+     r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", new, tip])
+     if r.returncode != 0:
+         return req._send(200, json.dumps({"ok": False, "err": "branch moved while editing — reload and retry"}))
+-    if _GREEN_GATES.get(branch) == tip:
+-        _GREEN_GATES[branch] = new   # same tree ⇒ the gates verdict still holds
++    # (no gates bookkeeping: _GREEN_GATES is tree-keyed and a reword keeps the tree)
+     # the tip sha moved — reseat any stacked children so they don't hang off the old commit
+     # (same tree, so these rebases are trivially clean)
+     from srv import reviews
