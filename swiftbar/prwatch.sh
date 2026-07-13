@@ -76,18 +76,18 @@ for f in "$trackdir"/*.tsv(N); do
 done
 
 n=${#rows}
-if (( n )); then echo "👁 $n"; else echo "👁"; fi   # menu-bar badge
+if (( n )); then echo ":eye: $n"; else echo ":eye:"; fi   # menu-bar badge (template SF symbol)
 echo "---"
-echo "➕ Watch a PR or run… | bash=\"$self\" param1=--prompt terminal=false refresh=true"
-echo "---"
+echo "WATCHING | color=gray size=11"
 if (( n == 0 )); then
-  echo "No PRs being watched | color=gray"
+  echo "No PRs or runs being watched | color=gray"
 else
   for r in "${rows[@]}"; do
     IFS=$'\t' read -r key repo id title url <<<"$r"
-    echo "${repo}#${id} — ${title} | href=${url}"
-    echo "-- ✗ Stop watching | bash=\"$self\" param1=--stop param2=${key} terminal=false refresh=true"
+    echo ":eye: ${repo}#${id} — ${title} | href=${url}"
+    echo "-- Stop watching | bash=\"$self\" param1=--stop param2=${key} terminal=false refresh=true"
   done
 fi
 echo "---"
+echo "Watch a PR or run… | bash=\"$self\" param1=--prompt terminal=false refresh=true"
 echo "Refresh | refresh=true"
