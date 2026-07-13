@@ -63,6 +63,21 @@ function notify(text) {
   });
 }
 
+// macOS can deny Chrome's alert helper its notification permission (it's a separate entry in
+// System Settings), silently dropping every notify() — so a failure also opens the popup, the
+// one surface the OS can't suppress. The popup renders lastError from session storage.
+async function fail(text) {
+  await chrome.storage.session.set({ lastError: { text, at: Date.now() } });
+  await badge("✗", "#F85149", 10000);
+  await chrome.action.setTitle({ title: `GitHub → nvim — failed: ${text}` });
+  notify(text.slice(0, 200));
+  try {
+    await chrome.action.openPopup();
+  } catch {
+    // no focused window / popup already open — badge + title still carry the error
+  }
+}
+
 const reason = (res) => res?.body?.err || res?.error || `status ${res?.status}`;
 
 // Self-healing open: dead viewer → native-host launch + wait + one retry; cold first open
@@ -94,15 +109,13 @@ async function openActiveTab(target) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url || "";   // readable only because the gesture granted activeTab
   if (!url.startsWith("https://github.com/")) {
-    await badge("✗", "#F85149", 4000);
-    notify("not a GitHub page");
+    await fail("not a GitHub page");
     return;
   }
   const res = await openWithRecovery({ url, open: target });
   const ok = res.status === 200 && res.body?.ok;
   if (!ok) {
-    await badge("✗", "#F85149", 4000);
-    notify(String(reason(res)).slice(0, 200));
+    await fail(String(reason(res)));
     return;
   }
   if (target === "viewer" && res.body.path) {
@@ -113,6 +126,7 @@ async function openActiveTab(target) {
   const warn = res.body.err && String(res.body.err).trim().replace(/^stack-open:\s*/, "");
   await badge(warn ? "⚠" : "✓", warn ? "#D29922" : "#3FB950", 4000);
   if (warn) {
+    await chrome.storage.session.set({ lastError: { text: warn, at: Date.now(), warn: true } });
     notify(warn.slice(0, 200));
   }
 }

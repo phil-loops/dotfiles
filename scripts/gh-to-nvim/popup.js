@@ -25,6 +25,23 @@ function refresh() {
 
 refresh();
 
+// The failure surface: background's fail() opens this popup after storing the error (macOS may
+// have swallowed the notification), so a recent lastError renders as a red strip up top.
+chrome.storage.session.get("lastError").then(({ lastError }) => {
+  if (!lastError || Date.now() - lastError.at > 5 * 60 * 1000) {
+    return;
+  }
+  const el = document.getElementById("last-error");
+  el.classList.toggle("warn", !!lastError.warn);
+  el.textContent = `${lastError.warn ? "⚠" : "✗"} ${lastError.text}`;
+  const when = document.createElement("span");
+  when.className = "when";
+  const secs = Math.round((Date.now() - lastError.at) / 1000);
+  when.textContent = secs < 5 ? "just now" : secs < 120 ? `${secs}s ago` : `${Math.round(secs / 60)}m ago`;
+  el.appendChild(when);
+  el.hidden = false;
+});
+
 // The old in-page forest chip, relocated: opening the popup is the activeTab gesture, so the
 // tab URL is readable here — no page access needed. Shows which forest this PR's branch belongs
 // to (+ orphaned children), links to the viewer node. Quietly absent off PRs or when offline.

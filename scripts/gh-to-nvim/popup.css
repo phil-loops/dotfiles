@@ -34,6 +34,20 @@ body {
 .dot.offline { background: #6e7681; color: #6e7681; box-shadow: none; }
 
 .lines { display: flex; flex-direction: column; min-width: 0; }
+
+.last-error {
+  padding: 7px 9px;
+  margin-bottom: 9px;
+  border: 1px solid #6e2c2c;
+  border-radius: 7px;
+  background: #2d1215;
+  color: #ff7b72;
+  font-size: 12px;
+  word-break: break-word;
+}
+.last-error.warn { border-color: #6e5a1e; background: #2b2111; color: #d29922; }
+.last-error .when { display: block; color: #8b949e; font-size: 11px; }
+.last-error[hidden] { display: none; }
 .label { font-weight: 600; }
 .detail { font-size: 11px; color: #8b949e; }
 
