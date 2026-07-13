@@ -121,10 +121,12 @@ notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click
 }
 
 DONEDIR="$HOME/.cache/prwatch/done"
-notify_sticky() {  # $1 status  $2 detail  $3 url — banner now, PLUS a ✅ that persists in
-                   # the 🔨 menu-bar badge until dismissed there. The completion of
-                   # something explicitly asked for must survive a glance away; banners
-                   # evaporate, and a modal dialog parked mid-screen was too distracting.
+notify_sticky() {  # $1 status  $2 detail  $3 url — banner now, PLUS a row that persists in
+                   # the build-status menu (FINISHED section) until dismissed there. The
+                   # completion of something explicitly asked for must survive a glance away;
+                   # banners evaporate, and a modal dialog parked mid-screen was too
+                   # distracting. The menu derives its symbol from $1 (fail words → xmark)
+                   # and renders $2 as the row — keep $1 a plain word, $2 self-contained.
   notify "$@"
   mkdir -p "$DONEDIR"
   local slug="$1 $2"; slug="${slug//[^A-Za-z0-9._-]/-}"; slug="${slug[1,80]}"
@@ -169,10 +171,10 @@ watch_pr() {  # $1 repo  $2 number
   local st msg
   if gh pr checks "$num" --repo "$repo" --watch; then
     print -P "%F{green}✓ ${repo}#${num} — all checks passed%f"
-    st="✓ passed" msg="${repo}#${num} — all checks green"
+    st="passed" msg="${repo}#${num} — all checks green"
   else
     print -P "%F{red}✗ ${repo}#${num} — a check failed (or none reported)%f"
-    st="✗ failed" msg="${repo}#${num} — a check failed"
+    st="failed" msg="${repo}#${num} — a check failed"
   fi
   # --await watchers (one per push) stay banner-tier and out of the mute list; an
   # EXPLICIT watch gets the sticky ✅ badge and mutes ambient repeats
@@ -190,10 +192,10 @@ watch_run() {  # $1 repo  $2 run-id — watch a single Actions run to completion
   print -P "%F{yellow}⟳%f watching run ${repo} #${rid} — ctrl-c to stop"
   if gh run watch "$rid" --repo "$repo" --exit-status; then
     print -P "%F{green}✓ run ${rid} — succeeded%f"
-    notify_sticky "✓ run passed" "${repo} run ${rid} succeeded" "$url"
+    notify_sticky "run passed" "${repo} run ${rid} succeeded" "$url"
   else
     print -P "%F{red}✗ run ${rid} — failed%f"
-    notify_sticky "✗ run failed" "${repo} run ${rid} failed" "$url"
+    notify_sticky "run failed" "${repo} run ${rid} failed" "$url"
   fi
   mark_answered "$repo/$rid"
 }
@@ -338,6 +340,13 @@ if [[ "${1:-}" == "--sweep" ]]; then
       notify_sticky "$@"
     fi
   }
+  deploy_title() {  # gh displayTitle "[staging] deploying 2026.07.13-20248-1" → "2026.07.13-20248-1 to staging"
+    if [[ "$1" =~ '^\[([a-z-]+)\][[:space:]]+deploying[[:space:]]+(.+)$' ]]; then
+      print -r -- "${match[2]} to ${match[1]}"
+    else
+      print -r -- "$1"
+    fi
+  }
   # clear last pass's quiet banner — quiet notifications live one sweep interval, tops
   command -v terminal-notifier >/dev/null 2>&1 && \
     { terminal-notifier -remove "$QUIET_GROUP" </dev/null >/dev/null 2>&1 || true; }
@@ -445,8 +454,9 @@ if [[ "${1:-}" == "--sweep" ]]; then
         [[ "$st" == "$was" ]] && continue
         answered "$key" && continue   # run was explicitly watched — its one notification fired
         case "$st" in
-          (success) salert "🚀 run succeeded" "$title" "$url" ;;
-          (failure|timed_out|startup_failure|cancelled) salert "✗ run $st" "$title" "$url" ;;
+          (success) salert "deployed" "Deployed $(deploy_title "$title")" "$url" ;;
+          (failure|timed_out|startup_failure|cancelled)
+            salert "deploy failed" "Deploy ${st//_/ } — $(deploy_title "$title")" "$url" ;;
         esac   # in-flight states record silently — Slack already announces the start
       done <<< "$rrows"
       printf '%s' "$rnew" >"$rstate"
