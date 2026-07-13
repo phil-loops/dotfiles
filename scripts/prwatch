@@ -82,6 +82,18 @@ def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
   (if ([.latestReviews[]? | select(.state=="APPROVED")] | length) > 0 then "approved" else "-" end)
 ] | @tsv'
 
+# jq program: one PR (gh pr view --json statusCheckRollup) → fail | pending | pass | none.
+# Same state buckets as ROLL_JQ; used to double-check gh pr checks' exit code, which
+# conflates "a check failed" with "no checks on this head yet" (both exit non-zero).
+VERDICT_JQ='
+def f: ["FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED"];
+def p: ["PENDING","IN_PROGRESS","QUEUED","EXPECTED","WAITING","REQUESTED"];
+[.statusCheckRollup[]? | ((.conclusion | select(. != "")) // .status // .state // "PENDING")] as $st
+| if   ($st|length)==0 then "none"
+  elif ([$st[] | select(. as $x | f | index($x))] | length) > 0 then "fail"
+  elif ([$st[] | select(. as $x | p | index($x))] | length) > 0 then "pending"
+  else "pass" end'
+
 # one-shot mute: an EXPLICIT watch (URL/number/fzf — not --await) records its key here
 # after its single notification; every ambient notifier (sweep transitions, approved,
 # merged, landing, build-notify success) skips answered keys forever. Keys lowercased —
@@ -168,14 +180,35 @@ watch_pr() {  # $1 repo  $2 number
   local title=$(gh pr view "$num" --repo "$repo" --json title --jq .title 2>/dev/null)
   register_watch "${repo//\//-}-${num}" "$repo" "$num" "${title:-PR #$num}" "$url"
   print -P "%F{yellow}⟳%f watching ${repo}#${num} — ctrl-c to stop"
-  local st msg
-  if gh pr checks "$num" --repo "$repo" --watch; then
-    print -P "%F{green}✓ ${repo}#${num} — all checks passed%f"
-    st="passed" msg="${repo}#${num} — all checks green"
-  else
-    print -P "%F{red}✗ ${repo}#${num} — a check failed (or none reported)%f"
-    st="failed" msg="${repo}#${num} — a check failed"
-  fi
+  local st msg verdict empties=0
+  while true; do
+    if gh pr checks "$num" --repo "$repo" --watch; then
+      print -P "%F{green}✓ ${repo}#${num} — all checks passed%f"
+      st="passed" msg="${repo}#${num} — all checks green"
+      break
+    fi
+    # gh pr checks exits non-zero for "no checks reported" too — for a few seconds
+    # after a push the new head has zero check runs, so a watcher started against
+    # the old head false-fails right as CI is queueing. Trust the exit code only
+    # when the rollup actually shows a failure; otherwise re-enter the watch
+    # (which also follows a mid-watch push onto the fresh head's checks).
+    if verdict=$(gh pr view "$num" --repo "$repo" --json statusCheckRollup --jq "$VERDICT_JQ" 2>/dev/null); then
+      case "$verdict" in
+        (fail)
+          print -P "%F{red}✗ ${repo}#${num} — a check failed%f"
+          st="failed" msg="${repo}#${num} — a check failed"
+          break ;;
+        (none)
+          if (( ++empties >= 30 )); then   # ~5 min with zero checks → report that, not "failed"
+            print -P "%F{red}○ ${repo}#${num} — no checks reported%f"
+            st="no checks" msg="${repo}#${num} — no checks reported"
+            break
+          fi ;;
+        (*) empties=0 ;;   # pending/pass: gh flinched (push race, transient hiccup) — re-watch
+      esac
+    fi                     # rollup fetch failed = transient gh/network error — just re-watch
+    sleep 10
+  done
   # --await watchers (one per push) stay banner-tier and out of the mute list; an
   # EXPLICIT watch gets the sticky ✅ badge and mutes ambient repeats
   if [[ "${PRWATCH_AWAIT:-0}" == 1 ]]; then
