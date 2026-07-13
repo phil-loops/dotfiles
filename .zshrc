@@ -20,7 +20,7 @@ alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles";
 alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design doc (see scripts/dd-design)
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
 alias db="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion-tunnel"
-alias db:rw="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion-tunnel --writer"
+alias db:rw="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion-tunnel --writer --cluster db-loops-staging"
 alias db:prod="LOCAL_PORT=54322 aws-vault exec prod -- ~/.dotfiles/scripts/bastion-tunnel --cluster db-loops-production"
 alias refresh="rm -fr .next node_modules && task dev"
 alias lt="$HOME/.dotfiles/scripts/loops-tail"  # combined dev-stack log tail; lt -p to fzf-pick sources, defaults in loops-tail.conf
