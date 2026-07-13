@@ -15,7 +15,9 @@ config, falls back to auto-detected defaults (tsgo if tsconfig.node.json exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
   stack-gates [--branch <b>] [--fix] [--progress <file>]
-                                       run in the worktree of <b> if it has one, else cwd
+                                       run in the worktree of <b>; if none exists, materialize
+                                       its stack-open scratch checkout (detached at the tip) —
+                                       never gates an unrelated tree
 
 --progress: append JSONL events to <file> as gates run — {"event":"plan","gates":[...]},
 then start/done per gate, then {"event":"result",...} mirroring stdout. Lets a caller
@@ -41,8 +43,9 @@ def run(cmd, cwd):
 
 
 def worktree_of(branch, cwd):
+    """Path of the worktree holding <branch>, or None if it isn't checked out anywhere."""
     if not branch:
-        return cwd
+        return None
     path = None
     out = run(["git", "worktree", "list", "--porcelain"], cwd).stdout
     for ln in out.splitlines():
@@ -50,7 +53,27 @@ def worktree_of(branch, cwd):
             path = ln[len("worktree "):]
         elif ln == f"branch refs/heads/{branch}" and path:
             return path
-    return cwd
+    return None
+
+
+def scratch_checkout(branch, cwd):
+    """Materialize <branch> in its stack-open scratch worktree (detached at the tip,
+    node_modules symlinked, .gen seeded) and return (path, err). Gating cwd's tree
+    instead would verify whatever bytes the caller's checkout happens to hold — a
+    verdict recorded against a branch that was never actually checked."""
+    stack_open = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-open")
+    r = run([stack_open, "--path", branch], cwd)
+    lines = [ln.strip() for ln in (r.stdout or "").splitlines() if ln.strip()]
+    path = lines[-1] if lines else ""
+    if r.returncode != 0 or not os.path.isdir(path):
+        return None, f"scratch checkout failed: {last_lines(r.stderr or r.stdout or '', 3)}"
+    tip = run(["git", "rev-parse", branch], cwd).stdout.strip()
+    head = run(["git", "rev-parse", "HEAD"], path).stdout.strip()
+    if head != tip:
+        return None, f"scratch worktree {path} is pinned off the branch tip"
+    if run(["git", "status", "--porcelain"], path).stdout.strip():
+        return None, f"scratch worktree {path} has uncommitted edits (in-flight work?)"
+    return path, ""
 
 
 def configured_gates(cwd):
@@ -130,7 +153,7 @@ def configured_fixes(cwd):
     return fixes
 
 
-def default_fixes(cwd, branch):
+def default_fixes(cwd, branch, borrowed=False):
     """Built-in remediation. The fresh gate rebases the branch onto fresh origin/main —
     but only a root branch (parent main/empty): rebasing a STACKED branch onto main would
     tear it off its parent, so those stay red ("restack the forest from the laptop").
@@ -140,7 +163,16 @@ def default_fixes(cwd, branch):
     self_dir = os.path.dirname(os.path.abspath(__file__))
     fixes = {}
     parent = gconf(f"stack-branch.{branch}.parent", cwd) if branch else ""
-    if parent in ("", "main"):
+    if parent in ("", "main") and borrowed:
+        # Detached scratch: a bare rebase moves only the detached HEAD, and stack-open's
+        # post-commit follow-hook force-moves the branch at EVERY replayed commit — so pin
+        # the outcome explicitly: branch → rebased tip on success, restored tip on abort.
+        fixes["fresh"] = (
+            f'old=$(git rev-parse "refs/heads/{branch}") && git fetch origin main -q && '
+            f'git rebase origin/main && git branch -f "{branch}" HEAD '
+            f'|| {{ git rebase --abort 2>/dev/null; git branch -f "{branch}" "$old"; exit 1; }}'
+        )
+    elif parent in ("", "main"):
         fixes["fresh"] = ("git fetch origin main -q && git rebase origin/main "
                           "|| { git rebase --abort 2>/dev/null; exit 1; }")
     project = gconf(f"stack-branch.{branch}.project", cwd) if branch else ""
@@ -184,9 +216,24 @@ def main():
         if prog:
             prog.write(json.dumps(obj) + "\n")
 
-    cwd = worktree_of(branch, os.getcwd())
+    cwd = os.getcwd()
+    borrowed = False
+    if branch:
+        wt = worktree_of(branch, cwd)
+        if not wt:
+            wt, err = scratch_checkout(branch, cwd)
+            borrowed = True
+            if not wt:
+                verdict = {"ok": False, "gates": [
+                    {"name": "worktree", "ok": False, "ms": 0,
+                     "summary": f"no checkout holds {branch} — {err}"}]}
+                emit({"event": "plan", "gates": ["worktree"]})
+                emit({"event": "result", **verdict})
+                print(json.dumps(verdict))
+                return 0
+        cwd = wt
     gates = configured_gates(cwd) or default_gates(cwd)
-    fixes = (configured_fixes(cwd) or default_fixes(cwd, branch)) if do_fix else {}
+    fixes = (configured_fixes(cwd) or default_fixes(cwd, branch, borrowed)) if do_fix else {}
 
     if not gates:
         verdict = {"ok": True, "gates": [], "note": "no gates configured for this repo"}
