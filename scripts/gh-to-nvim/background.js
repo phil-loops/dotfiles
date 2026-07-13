@@ -153,12 +153,36 @@ const ICONS = {
   fresh: iconSet("fresh"),
   stale: iconSet("stale"),
   offline: iconSet("offline"),
+  unbound: iconSet("stale"),
 };
 const STATE = {
   fresh: { badge: "", color: "#3FB950", title: "GitHub → nvim — up to date" },
   stale: { badge: "●", color: "#D29922", title: "GitHub → nvim — source changed (click for menu)" },
   offline: { badge: "×", color: "#6E7681", title: `GitHub → nvim — viewer offline (${VIEWER_URL})` },
+  unbound: { badge: "!", color: "#D29922", title: "GitHub → nvim — ⌘⇧O isn't bound (click to fix)" },
 };
+
+// A key rotation changes the extension id, and Chrome's shortcut registry keys on the OLD id
+// without following — the chords then do nothing at all: no SW wake, no badge, no log, so every
+// failure surface we built stays silent. getAll() is the only honest read (the on-disk
+// Preferences entry can name the live id and still be dead), and only a human re-typing them at
+// chrome://extensions/shortcuts can rebind.
+const CHORDS = ["open-in-nvim", "open-in-viewer"];
+
+async function chordsUnbound() {
+  const cmds = await chrome.commands.getAll();
+  return CHORDS.some((name) => !cmds.find((c) => c.name === name)?.shortcut);
+}
+
+// Only the forced copy owns the chords; an unpacked copy loaded for hacking never holds them,
+// and flagging that would just nag — and mask its stale→reload HMR path.
+async function stateWithChords() {
+  const state = await computeState();
+  if (state !== "fresh" || installType === "development") {
+    return state;
+  }
+  return (await chordsUnbound()) ? "unbound" : "fresh";
+}
 
 function iconSet(name) {
   return { 16: `icons/${name}-16.png`, 32: `icons/${name}-32.png`, 48: `icons/${name}-48.png`, 128: `icons/${name}-128.png` };
@@ -254,7 +278,7 @@ function maybeAutoReload() {
 }
 
 async function poll() {
-  const state = await computeState();
+  const state = await stateWithChords();
   await apply(state);
   if (state === "stale") {
     maybeAutoReload();
@@ -268,7 +292,7 @@ chrome.runtime.onMessage.addListener((msg, _s, respond) => {
   if (msg?.type !== "ext-state") {
     return;
   }
-  computeState().then((state) => {
+  stateWithChords().then((state) => {
     apply(state);
     respond({ state });
   });

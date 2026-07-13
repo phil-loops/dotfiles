@@ -3,11 +3,13 @@ const COPY = {
   fresh: { label: "Up to date", detail: "loaded copy matches disk" },
   stale: { label: "Source changed", detail: "reload to apply your edits" },
   offline: { label: "Viewer offline", detail: `unreachable on ${VIEWER_URL}` },
+  unbound: { label: "Shortcuts unbound", detail: "Chrome dropped them — rebind to restore ⌘⇧O" },
   unknown: { label: "Checking…", detail: `viewer :${VIEWER_PORT}` },
 };
 
 const HOST = "com.loops.gh_to_nvim";
 const launchBtn = document.getElementById("launch");
+const bindBtn = document.getElementById("bind");
 
 function render(state) {
   const c = COPY[state] || COPY.unknown;
@@ -15,7 +17,15 @@ function render(state) {
   document.getElementById("label").textContent = c.label;
   document.getElementById("detail").textContent = c.detail;
   launchBtn.hidden = state !== "offline";
+  bindBtn.hidden = state !== "unbound";
 }
+
+// Chrome won't let anything but a human assign a shortcut — not the extension, not an edit to the
+// Preferences file (it persists and is ignored). So the most we can do is drive them to the page.
+bindBtn.addEventListener("click", () => {
+  chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
+  window.close();
+});
 
 function refresh() {
   chrome.runtime.sendMessage({ type: "ext-state" }, (res) => {
