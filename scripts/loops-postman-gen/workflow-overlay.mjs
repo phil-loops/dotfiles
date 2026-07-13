@@ -10,6 +10,8 @@
 // token: pass the workflow's current `workflowRevisionId` (null on a fresh workflow),
 // re-read it from each response/GET before the next write.
 
+import { NODE_PAYLOAD_SHAPES } from "./node-payloads.mjs";
+
 const rev = { type: "string", nullable: true, description: "Optimistic-concurrency token — the current workflowRevisionId (null on a fresh workflow)." };
 const nodeType = {
   type: "string",
@@ -71,7 +73,18 @@ export const WORKFLOW_OVERLAY = {
       tags: ["Workflows"],
       summary: "Update a node's payload",
       parameters: [wfId, nodeId],
-      requestBody: jsonBody({ type: "object", required: ["payload"], properties: { payload: { type: "object", description: "Node-type-specific fields, e.g. { \"amount\": 3, \"unit\": \"d\" } for a TimerAction.", example: { amount: 3, unit: "d" } }, expectedRevisionId: rev } }),
+      requestBody: jsonBody({
+        type: "object",
+        required: ["payload"],
+        properties: {
+          payload: {
+            type: "object",
+            description: "The fields depend on the type of the node you are updating — pick it above.",
+            "x-shapes": { label: "node type", shapes: NODE_PAYLOAD_SHAPES },
+          },
+          expectedRevisionId: rev,
+        },
+      }),
       responses: ok,
     },
     delete: {

@@ -9,7 +9,7 @@ const DEFAULT_SPEC = "https://app.loops.so/openapi.json";
 
 // Business rules the OpenAPI schema can't express: an enum field the spec lists in full
 // but the server only accepts a subset of for a given endpoint (the rest 400). First value
-// is the default the sample body loads with. Key = "METHOD path::field".
+// is the default. Key = "METHOD path::field".
 const ENUM_HINTS = {
   "POST /v1/workflows/{workflowId}/nodes::nodeTypeName": [
     "SendEmailAction",
@@ -22,18 +22,16 @@ const ENUM_HINTS = {
 };
 const enumHint = (method, path, field) => ENUM_HINTS[`${method} ${path}::${field}`];
 
-// Restrict a produced sample object's hinted enum fields to legal values (mutates in place).
-const applyHints = (obj, method, path) => {
-  if (obj && typeof obj === "object" && !Array.isArray(obj)) {
-    for (const k of Object.keys(obj)) {
-      const allow = enumHint(method, path, k);
-      if (allow?.length && !allow.includes(obj[k])) {
-        obj[k] = allow[0];
-      }
-    }
-  }
-  return obj;
+// "You must provide one of these" rules the spec only states in prose. Key = "METHOD path",
+// value = groups of field names; the first of each group is the one loaded by default.
+const ONE_OF_HINTS = {
+  "PUT /v1/contacts/update": [["email", "userId"]],
+  "DELETE /v1/contacts/delete": [["email", "userId"]],
+  "GET /v1/contacts/find": [["email", "userId"]],
+  "GET /v1/contacts/suppression": [["email", "userId"]],
+  "POST /v1/events/send": [["email", "userId"]],
 };
+const oneOfHint = (method, path) => ONE_OF_HINTS[`${method} ${path}`] ?? null;
 
 export const serve = async (opts) => {
   const args = {
@@ -100,10 +98,7 @@ const proxy = async ({ method, path, query, body, base }, token) => {
       url.searchParams.set(k, v);
     }
   }
-  const init = {
-    method,
-    headers: { authorization: `Bearer ${token}` },
-  };
+  const init = { method, headers: { authorization: `Bearer ${token}` } };
   if (body && method !== "GET") {
     init.headers["content-type"] = "application/json";
     init.body = body;
@@ -119,113 +114,7 @@ const proxy = async ({ method, path, query, body, base }, token) => {
   return { status: res.status, statusText: res.statusText, body: parsed };
 };
 
-const extractEndpoints = (spec) => {
-  const out = [];
-  for (const [path, methods] of Object.entries(spec.paths ?? {})) {
-    for (const [method, op] of Object.entries(methods)) {
-      if (!["get", "post", "put", "patch", "delete"].includes(method)) {
-        continue;
-      }
-      const pathParams = [...path.matchAll(/\{([^}]+)\}/g)].map((m) => m[1]);
-      const queryParams = (op.parameters ?? [])
-        .filter((p) => p.in === "query")
-        .map((p) => ({ name: p.name, required: !!p.required }));
-      const METHOD = method.toUpperCase();
-      const variants = bodyVariants(op, spec, METHOD, path);
-      out.push({
-        method: METHOD,
-        path,
-        tag: op.tags?.[0] ?? "Other",
-        summary: op.summary ?? "",
-        pathParams,
-        queryParams,
-        bodyExample: variants?.length
-          ? JSON.stringify(variants[0].sample, null, 2)
-          : bodyExample(op, spec, METHOD, path),
-        bodyVariants: variants,
-        bodyEnums: enumSlots(op, spec, METHOD, path),
-      });
-    }
-  }
-  return out;
-};
-
-const bodyExample = (op, spec, method, path) => {
-  const schema = op.requestBody?.content?.["application/json"]?.schema;
-  if (!schema) {
-    return null;
-  }
-  const obj = applyHints(sample(deref(schema, spec), spec, ""), method, path);
-  return JSON.stringify(obj, null, 2);
-};
-
-// Each branch of a oneOf/anyOf body → a labeled, ready-to-load sample. Label is the
-// branch's discriminator value (e.g. each nodeTypeName), else its single-value field.
-// A discriminator hint (ENUM_HINTS keyed on the discriminator prop) trims branches to the
-// legal ones and orders them, so the default is a value the server actually accepts.
-const bodyVariants = (op, spec, method, path) => {
-  const schema = deref(op.requestBody?.content?.["application/json"]?.schema, spec);
-  const branches = schema?.oneOf ?? schema?.anyOf;
-  if (!branches?.length) {
-    return null;
-  }
-  const discrimProp = schema.discriminator?.propertyName;
-  const allow = discrimProp ? enumHint(method, path, discrimProp) : null;
-  let out = branches.map((b, i) => {
-    const bs = deref(b, spec);
-    const value = discrimProp ? singleEnumValue(bs, spec, discrimProp) : null;
-    return {
-      value,
-      label: value ?? variantLabel(bs, spec, i),
-      sample: applyHints(sample(bs, spec, ""), method, path),
-    };
-  });
-  if (allow?.length) {
-    out = out
-      .filter((v) => v.value == null || allow.includes(v.value))
-      .sort((a, b) => allow.indexOf(a.value) - allow.indexOf(b.value));
-  }
-  return out.length ? out : null;
-};
-
-const singleEnumValue = (schema, spec, prop) => {
-  const vs = deref(schema.properties?.[prop], spec);
-  const vals = vs?.enum ?? (vs?.const !== undefined ? [vs.const] : null);
-  return vals?.length ? String(vals[0]) : null;
-};
-
-const variantLabel = (schema, spec, i) => {
-  for (const [k] of Object.entries(schema.properties ?? {})) {
-    const v = singleEnumValue(schema, spec, k);
-    if (v != null) {
-      return v;
-    }
-  }
-  return `variant ${i + 1}`;
-};
-
-// Top-level multi-value enum fields in the body → a pill row that swaps that field's value.
-// Uses the first oneOf branch as representative; hinted fields are trimmed to legal values.
-const enumSlots = (op, spec, method, path) => {
-  let schema = deref(op.requestBody?.content?.["application/json"]?.schema, spec);
-  const branches = schema.oneOf ?? schema.anyOf;
-  if (branches?.length) {
-    schema = deref(branches[0], spec);
-  }
-  const slots = [];
-  for (const [field, v] of Object.entries(schema.properties ?? {})) {
-    const vs = deref(v, spec);
-    if (!vs.enum || vs.enum.length < 2) {
-      continue;
-    }
-    const allow = enumHint(method, path, field);
-    const values = allow ? vs.enum.filter((x) => allow.includes(x)) : vs.enum;
-    if (values.length > 1) {
-      slots.push({ field, values });
-    }
-  }
-  return slots.length ? slots : null;
-};
+/* ---------- spec → param model ------------------------------------------------------ */
 
 const deref = (schema, spec) => {
   if (schema?.$ref) {
@@ -235,19 +124,194 @@ const deref = (schema, spec) => {
   return schema ?? {};
 };
 
+// Fold allOf into a single {properties, required, additionalProperties} view.
+const flatten = (schema, spec) => {
+  const s = deref(schema, spec);
+  if (!s.allOf) {
+    return s;
+  }
+  const out = { type: "object", properties: {}, required: [] };
+  for (const part of [...s.allOf, s]) {
+    const p = flatten(part, spec);
+    Object.assign(out.properties, p.properties ?? {});
+    out.required.push(...(p.required ?? []));
+    if (p.additionalProperties) {
+      out.additionalProperties = p.additionalProperties;
+    }
+  }
+  return out;
+};
+
+const typeOf = (s) => {
+  if (Array.isArray(s.type)) {
+    return s.type.find((t) => t !== "null") ?? "string";
+  }
+  return s.type ?? (s.properties ? "object" : s.items ? "array" : "string");
+};
+
+const fieldOf = (name, raw, spec, required, method, path) => {
+  const s = flatten(raw, spec);
+  const allow = enumHint(method, path, name);
+  const values = allow ?? (s.enum ? s.enum.map(String) : null);
+  const shapes = s["x-shapes"];
+  const f = {
+    name,
+    type: shapes ? "object" : typeOf(s),
+    required: required.includes(name),
+    nullable: !!s.nullable || (Array.isArray(s.type) && s.type.includes("null")),
+    description: s.description ?? null,
+    values,
+    sample: values ? values[0] : sample(s, spec, name),
+  };
+  if (shapes) {
+    f.shapesLabel = shapes.label;
+    f.shapes = Object.entries(shapes.shapes).map(([label, def]) =>
+      shapeOf(label, def, spec, method, path)
+    );
+  }
+  return f;
+};
+
+// A hand-written shape (node-payloads.mjs) → the same model the spec-derived shapes use.
+const shapeOf = (label, def, spec, method, path) => ({
+  label,
+  note: def.note ?? null,
+  atLeastOne: !!def.atLeastOne,
+  exclusive: def.exclusive ?? null,
+  oneOf: null,
+  additional: null,
+  fields: Object.entries(def.properties ?? {}).map(([n, p]) =>
+    fieldOf(n, p, spec, def.required ?? [], method, path)
+  ),
+});
+
+const objectShape = (schema, spec, method, path, label) => {
+  const s = flatten(schema, spec);
+  const extra = s.additionalProperties;
+  return {
+    label,
+    note: s.description ?? null,
+    atLeastOne: false,
+    exclusive: null,
+    oneOf: oneOfHint(method, path),
+    additional: extra && extra !== false ? additionalTypes(extra, spec) : null,
+    fields: Object.entries(s.properties ?? {}).map(([n, p]) =>
+      fieldOf(n, p, spec, s.required ?? [], method, path)
+    ),
+  };
+};
+
+const additionalTypes = (extra, spec) => {
+  const s = deref(extra, spec);
+  const branches = s.oneOf ?? s.anyOf;
+  const types = branches ? branches.map((b) => typeOf(deref(b, spec))) : [typeOf(s)];
+  return [...new Set(types)];
+};
+
+const shapeLabel = (s, spec, discriminator, i) => {
+  if (s.title) {
+    return s.title;
+  }
+  if (discriminator) {
+    const v = singleEnumValue(s, spec, discriminator);
+    if (v) {
+      return v;
+    }
+  }
+  for (const k of Object.keys(s.properties ?? {})) {
+    const v = singleEnumValue(s, spec, k);
+    if (v) {
+      return v;
+    }
+  }
+  return `variant ${i + 1}`;
+};
+
+const singleEnumValue = (schema, spec, prop) => {
+  const vs = deref(schema.properties?.[prop], spec);
+  const vals = vs?.enum ?? (vs?.const !== undefined ? [vs.const] : null);
+  return vals?.length === 1 ? String(vals[0]) : null;
+};
+
+// A oneOf/anyOf body becomes several shapes the user picks between; a plain object, one.
+// A discriminator hint trims the branches to the ones the server actually accepts.
+const bodyOf = (op, spec, method, path) => {
+  const schema = flatten(op.requestBody?.content?.["application/json"]?.schema, spec);
+  const branches = schema.oneOf ?? schema.anyOf;
+  if (!branches?.length && !schema.properties) {
+    return null;
+  }
+  const head = {
+    required: op.requestBody?.required !== false,
+    description: op.requestBody?.description ?? null,
+    selector: null,
+  };
+  if (!branches?.length) {
+    return { ...head, shapes: [objectShape(schema, spec, method, path, "body")] };
+  }
+  const discriminator = schema.discriminator?.propertyName;
+  const allow = discriminator ? enumHint(method, path, discriminator) : null;
+  let shapes = branches.map((b, i) => {
+    const s = flatten(b, spec);
+    return {
+      ...objectShape(s, spec, method, path, shapeLabel(s, spec, discriminator, i)),
+      value: discriminator ? singleEnumValue(s, spec, discriminator) : null,
+    };
+  });
+  if (allow?.length) {
+    shapes = shapes
+      .filter((s) => s.value == null || allow.includes(s.value))
+      .sort((a, b) => allow.indexOf(a.value) - allow.indexOf(b.value));
+  }
+  return { ...head, selector: "body shape", shapes };
+};
+
+const extractEndpoints = (spec) => {
+  const out = [];
+  for (const [path, methods] of Object.entries(spec.paths ?? {})) {
+    for (const [method, op] of Object.entries(methods)) {
+      if (!["get", "post", "put", "patch", "delete"].includes(method)) {
+        continue;
+      }
+      const METHOD = method.toUpperCase();
+      const params = op.parameters ?? [];
+      out.push({
+        method: METHOD,
+        path,
+        tag: op.tags?.[0] ?? "Other",
+        summary: op.summary ?? "",
+        description: op.description ?? "",
+        pathParams: [...path.matchAll(/\{([^}]+)\}/g)].map((m) => {
+          const p = params.find((x) => x.in === "path" && x.name === m[1]);
+          return { name: m[1], description: p?.description ?? null };
+        }),
+        queryParams: params
+          .filter((p) => p.in === "query")
+          .map((p) => ({
+            ...fieldOf(p.name, p.schema ?? {}, spec, p.required ? [p.name] : [], METHOD, path),
+            description: p.description ?? null,
+          })),
+        queryOneOf: oneOfHint(METHOD, path),
+        body: bodyOf(op, spec, METHOD, path),
+      });
+    }
+  }
+  return out;
+};
+
 const sample = (schema, spec, key) => {
   schema = deref(schema, spec);
   if (schema.example !== undefined) {
     return schema.example;
   }
+  if (schema.examples?.length) {
+    return schema.examples[0];
+  }
   if (schema.enum) {
     return schema.enum[0];
   }
   if (schema.allOf) {
-    return schema.allOf.reduce(
-      (acc, s) => Object.assign(acc, sample(s, spec, key)),
-      {}
-    );
+    return schema.allOf.reduce((acc, s) => Object.assign(acc, sample(s, spec, key)), {});
   }
   const branches = schema.oneOf ?? schema.anyOf;
   if (branches?.length) {
@@ -264,7 +328,7 @@ const sample = (schema, spec, key) => {
     return [sample(schema.items ?? {}, spec, key)];
   }
   if (schema.type === "boolean") {
-    return /(subscribed|enabled|active)/i.test(key);
+    return /(subscribed|enabled|active|eligible)/i.test(key);
   }
   if (schema.type === "integer" || schema.type === "number") {
     return 1;
@@ -273,8 +337,8 @@ const sample = (schema, spec, key) => {
 };
 
 const sampleString = (key) => {
-  // Auto-chaining placeholders: {{var}} is substituted from the last response's captured
-  // ids at send time, so multi-step flows don't need manual id/revision copying.
+  // {{var}} placeholders are substituted from captured response ids at send time, so
+  // multi-step flows don't need manual id copying.
   if (/^expectedRevisionId$/.test(key)) {
     return "{{workflowRevisionId}}";
   }
@@ -305,285 +369,702 @@ const sampleString = (key) => {
   return "example";
 };
 
+/* ---------- page --------------------------------------------------------------------- */
+
 const page = ({ endpoints, base }) => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Loops API Console</title>
+<title>Loops API Bench</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
 :root {
   color-scheme: dark;
-  --ink:#151320; --panel:#1e1a2c; --well:#100e18; --edge:#302a45;
-  --fg:#eae7f4; --muted:#8f88a8;
-  --signal:#b79bff; --signal-dim:#7d6bb0; --patch:#ffc76b;
-  --get:#5fd0a6; --post:#79a6ff; --put:#f4c05b; --del:#f47c8c;
-  --mono: ui-monospace,SFMono-Regular,Menlo,monospace;
-  --ui: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  --ink:#0F1417; --panel:#151C20; --well:#0A0F11; --edge:#222E33; --edge-lit:#33444B;
+  --fg:#DCE5E4; --muted:#7B8F92; --faint:#4E6165;
+  --GET:#4FD1A5; --POST:#6FA8FF; --PUT:#F2B347; --PATCH:#F2B347; --DELETE:#FF7A85;
+  --verb:#6FA8FF;                      /* retinted to the selected endpoint's method */
+  --warn:#F2B347;
+  --mono:'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --ui:'Bricolage Grotesque', ui-sans-serif, system-ui, sans-serif;
 }
-* { box-sizing: border-box; }
+* { box-sizing:border-box; }
 body { margin:0; font:13px/1.55 var(--mono); background:var(--ink); color:var(--fg);
-  display:grid; grid-template-columns:280px 1fr 320px; grid-template-rows:auto 1fr; height:100vh; }
+  display:grid; grid-template-columns:264px 1fr 300px; grid-template-rows:auto 1fr; height:100vh; }
 
-.top { grid-column:1/-1; display:flex; align-items:center; gap:18px; padding:11px 16px;
+/* the one display face, used only for the wordmark and the small caps labels */
+.wordmark { font:700 15px/1 var(--ui); font-stretch:100%; letter-spacing:-.01em; }
+.wordmark em { font-style:normal; color:var(--muted); font-weight:500; }
+h2, .cap { font:600 9px/1 var(--ui); text-transform:uppercase; letter-spacing:.17em; color:var(--muted); }
+
+.top { grid-column:1/-1; display:flex; align-items:center; gap:20px; padding:12px 16px;
   border-bottom:1px solid var(--edge); background:var(--panel); }
-.brand { display:flex; align-items:center; gap:9px; font:600 14px/1 var(--ui); letter-spacing:.16em;
-  text-transform:uppercase; white-space:nowrap; }
-.brand .loop { color:var(--signal); font-size:17px; }
-.brand small { color:var(--muted); font-weight:500; letter-spacing:.16em; }
-.baseline { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
-.baseline label { margin:0; }
-.live { display:flex; align-items:center; gap:7px; font:500 10px/1 var(--ui); letter-spacing:.14em;
-  text-transform:uppercase; color:var(--muted); white-space:nowrap; }
-.live .dot { width:7px; height:7px; border-radius:50%; background:var(--get); box-shadow:0 0 9px var(--get); }
+.rule { flex:1; height:1px; background:linear-gradient(90deg, var(--edge), transparent); }
+.baseline { display:flex; align-items:center; gap:9px; min-width:340px; }
+.baseline input { font-size:12px; padding:6px 9px; }
+.live { display:flex; align-items:center; gap:7px; white-space:nowrap; }
+.live .dot { width:6px; height:6px; border-radius:50%; background:var(--GET); box-shadow:0 0 8px var(--GET); }
 
 .col { overflow:auto; padding:14px; }
 #list { border-right:1px solid var(--edge); }
 #store { border-left:1px solid var(--edge); background:var(--panel); }
-#filter { margin-bottom:12px; }
-
-h2 { font:600 10px/1 var(--ui); text-transform:uppercase; letter-spacing:.18em; color:var(--muted); margin:20px 0 9px; }
+#main { padding:18px 22px 60px; }
+h2 { margin:20px 0 8px; }
 h2:first-child { margin-top:0; }
 
-.ep { padding:5px 8px; border-radius:7px; cursor:pointer; display:flex; gap:10px; align-items:baseline;
-  border:1px solid transparent; }
+.ep { padding:5px 8px; border-radius:6px; cursor:pointer; display:flex; gap:9px; align-items:baseline;
+  border-left:2px solid transparent; }
 .ep:hover { background:var(--well); }
-.ep.active { background:var(--well); border-color:var(--signal-dim); }
-.m { font:700 10px/1.4 var(--mono); letter-spacing:.03em; flex:0 0 46px; text-align:right; }
-.GET{color:var(--get);} .POST{color:var(--post);} .PUT{color:var(--put);} .PATCH{color:var(--put);} .DELETE{color:var(--del);}
-.path { color:var(--fg); word-break:break-all; }
+.ep.active { background:var(--well); border-left-color:var(--verb); }
+.m { font:700 9px/1.5 var(--mono); letter-spacing:.04em; flex:0 0 44px; text-align:right; }
+.GET{color:var(--GET);} .POST{color:var(--POST);} .PUT{color:var(--PUT);} .PATCH{color:var(--PATCH);} .DELETE{color:var(--DELETE);}
+.ep .path { word-break:break-all; font-size:12px; }
 
-.reqline { display:flex; gap:12px; align-items:baseline; padding-bottom:10px; margin-bottom:12px;
+/* the request line: path params are editable slots inside the real URL */
+.reqline { display:flex; gap:12px; align-items:center; flex-wrap:wrap; padding-bottom:12px;
   border-bottom:1px solid var(--edge); }
-.reqline .m { flex:0 0 auto; font-size:12px; }
-.reqline .path { font:500 15px/1.3 var(--mono); }
-.sum { color:var(--muted); font-size:12px; margin:0 0 10px; }
+.reqline .m { flex:0 0 auto; font-size:11px; padding:4px 8px; border-radius:5px;
+  border:1px solid currentColor; text-align:center; }
+.url { font:500 15px/1.9 var(--mono); word-break:break-all; }
+.slot { display:inline-block; background:var(--well); border:1px solid var(--edge-lit); border-bottom:2px solid var(--verb);
+  border-radius:5px 5px 3px 3px; color:var(--fg); font:500 14px/1 var(--mono); padding:5px 7px; width:11ch;
+  transition:width .12s ease; }
+.slot:focus { outline:none; border-color:var(--verb); box-shadow:0 0 0 3px color-mix(in srgb, var(--verb) 16%, transparent); }
+.slot.filled { color:var(--verb); }
+.sum { color:var(--muted); font-size:12px; margin:12px 0 0; max-width:70ch; }
+.sum a, .sum code { color:var(--fg); }
 
-label { display:block; font:500 10px/1 var(--ui); letter-spacing:.15em; text-transform:uppercase;
-  color:var(--muted); margin:12px 0 5px; }
+/* param rack — the spine of the bench */
+.rack { margin-top:22px; }
+.band { display:flex; align-items:center; gap:9px; margin:20px 0 8px; }
+.band .n { color:var(--verb); font-weight:700; }
+.band .rule { height:1px; }
+.hint { color:var(--faint); font-size:11px; margin:-2px 0 8px; }
+.hint b { color:var(--muted); font-weight:500; }
+
+.p { display:grid; grid-template-columns:minmax(120px,180px) 1fr auto; gap:10px; align-items:start;
+  padding:8px 10px; border-radius:7px; border:1px solid transparent; }
+.p + .p { margin-top:2px; }
+.p.on { background:var(--well); border-color:var(--edge); }
+.p.off { cursor:pointer; opacity:.62; }
+.p.off:hover { opacity:1; background:var(--well); }
+.p.blocked { opacity:.4; }
+.p.blocked:hover { opacity:.75; }
+.p.extra { border-color:color-mix(in srgb, var(--warn) 40%, transparent);
+  background:color-mix(in srgb, var(--warn) 7%, var(--well)); }
+.p .k { display:flex; flex-direction:column; gap:3px; padding-top:6px; }
+.p .k b { font:500 13px/1.2 var(--mono); color:var(--fg); }
+.p.off .k b { color:var(--muted); }
+.p .meta { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.t { font:500 9px/1 var(--ui); letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+.t.req { color:var(--verb); }
+.t.warn { color:var(--warn); }
+.p .d { color:var(--faint); font-size:11px; line-height:1.5; grid-column:2; margin-top:5px; }
+.p.off .v { display:none; }
+.p.off .d { grid-column:2; margin-top:6px; }
+.act { display:flex; gap:4px; align-items:center; padding-top:3px; }
+
 input, textarea, select { width:100%; background:var(--well); border:1px solid var(--edge); color:var(--fg);
-  border-radius:7px; padding:8px 9px; font:13px/1.4 var(--mono); }
-input::placeholder, textarea::placeholder { color:var(--muted); opacity:.7; }
-input:focus, textarea:focus, select:focus { outline:none; border-color:var(--signal);
-  box-shadow:0 0 0 3px rgba(183,155,255,.16); }
-textarea { min-height:150px; resize:vertical; }
+  border-radius:6px; padding:7px 9px; font:13px/1.4 var(--mono); }
+.p.on input, .p.on textarea, .p.on select { background:var(--ink); }
+input::placeholder { color:var(--faint); }
+input:focus, textarea:focus, select:focus { outline:none; border-color:var(--verb);
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--verb) 15%, transparent); }
+textarea { min-height:76px; resize:vertical; }
+input.nulled { color:var(--faint); font-style:italic; }
+.seg { display:flex; gap:0; }
+.seg button { border-radius:0; border:1px solid var(--edge); background:var(--well); color:var(--muted);
+  padding:7px 14px; font:500 12px/1.4 var(--mono); letter-spacing:0; }
+.seg button:first-child { border-radius:6px 0 0 6px; }
+.seg button:last-child { border-radius:0 6px 6px 0; border-left:none; }
+.seg button[aria-pressed="true"] { background:color-mix(in srgb, var(--verb) 18%, var(--well));
+  color:var(--verb); border-color:var(--verb); }
 
-.threaded > input { border-left:3px solid var(--patch);
-  background:linear-gradient(90deg, rgba(255,199,107,.10), var(--well) 42%); }
-.threaded > label::after { content:'◗ patched'; float:right; color:var(--patch); letter-spacing:.12em; }
-
-button { background:var(--signal); color:#1a1330; border:none; border-radius:7px; padding:10px 18px;
-  font:600 12px/1 var(--ui); letter-spacing:.07em; cursor:pointer; }
-button:hover { filter:brightness(1.09); }
+button { background:var(--verb); color:var(--ink); border:none; border-radius:6px; padding:10px 20px;
+  font:600 12px/1 var(--ui); letter-spacing:.06em; cursor:pointer; }
+button:hover { filter:brightness(1.1); }
 button:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
-button.ghost { background:transparent; color:var(--signal); border:1px solid var(--edge);
-  padding:5px 11px; font-size:10px; font-weight:500; letter-spacing:.12em; text-transform:uppercase; }
-button.ghost:hover { border-color:var(--signal); background:var(--well); filter:none; }
+.x { background:transparent; color:var(--faint); border:1px solid transparent; padding:5px 8px;
+  font:500 13px/1 var(--mono); letter-spacing:0; }
+.x:hover { color:var(--DELETE); border-color:var(--edge); filter:none; }
+.null { background:transparent; color:var(--faint); border:1px solid var(--edge); padding:5px 8px;
+  font:500 11px/1 var(--mono); letter-spacing:0; border-radius:5px; }
+.null:hover { color:var(--fg); border-color:var(--edge-lit); filter:none; }
+.null[aria-pressed="true"] { color:var(--verb); border-color:var(--verb);
+  background:color-mix(in srgb, var(--verb) 14%, transparent); }
+.add { color:var(--verb); background:transparent; border:1px dashed var(--edge-lit); width:100%;
+  text-align:left; padding:9px 11px; font:500 12px/1 var(--mono); letter-spacing:0; }
+.add:hover { border-color:var(--verb); border-style:solid; background:var(--well); filter:none; }
 
-.pills { display:flex; flex-direction:column; gap:6px; margin:2px 0 9px; }
-.pillrow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-.pilllabel { font:500 9px/1 var(--ui); letter-spacing:.14em; text-transform:uppercase;
-  color:var(--muted); min-width:58px; }
-.pill { background:var(--well); color:var(--signal); border:1px solid var(--edge);
-  border-radius:999px; padding:4px 11px; font:500 11px/1 var(--mono); letter-spacing:.02em; cursor:pointer; }
-.pill:hover { border-color:var(--signal); background:rgba(183,155,255,.13); filter:none; }
+.pills { display:flex; flex-wrap:wrap; gap:5px; align-items:center; margin:6px 0 2px; }
+.pill { background:var(--well); color:var(--muted); border:1px solid var(--edge); border-radius:999px;
+  padding:5px 12px; font:500 11px/1 var(--mono); letter-spacing:0; }
+.pill:hover { border-color:var(--edge-lit); color:var(--fg); filter:none; }
+.pill[aria-pressed="true"] { background:color-mix(in srgb, var(--verb) 16%, transparent);
+  color:var(--verb); border-color:var(--verb); }
 
-.row { display:flex; gap:8px; align-items:center; }
-.bar { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
-#send { margin-top:14px; }
+.sub { grid-column:1/-1; margin:10px 0 2px; padding:12px 0 4px 14px;
+  border-left:1px solid var(--edge); }
+.tabs { display:flex; gap:2px; margin:0 0 10px; }
+.tab { background:transparent; color:var(--muted); border:none; border-bottom:2px solid transparent;
+  border-radius:0; padding:6px 12px; font:600 10px/1 var(--ui); letter-spacing:.14em; text-transform:uppercase; }
+.tab:hover { color:var(--fg); filter:none; }
+.tab[aria-pressed="true"] { color:var(--fg); border-bottom-color:var(--verb); }
+#raw { min-height:220px; }
 
-.status { font:700 11px/1 var(--mono); letter-spacing:.03em; padding:5px 10px; border-radius:6px; }
-.ok { background:rgba(95,208,166,.16); color:var(--get); border:1px solid rgba(95,208,166,.38); }
-.bad { background:rgba(244,124,140,.16); color:var(--del); border:1px solid rgba(244,124,140,.42); }
+.bar { display:flex; gap:12px; align-items:center; margin-top:22px; }
+.status { font:700 11px/1 var(--mono); padding:6px 10px; border-radius:5px; }
+.ok { background:color-mix(in srgb, var(--GET) 15%, transparent); color:var(--GET); border:1px solid color-mix(in srgb, var(--GET) 40%, transparent); }
+.bad { background:color-mix(in srgb, var(--DELETE) 15%, transparent); color:var(--DELETE); border:1px solid color-mix(in srgb, var(--DELETE) 42%, transparent); }
+pre { background:var(--well); border:1px solid var(--edge); border-radius:8px; padding:13px; overflow:auto;
+  max-height:42vh; white-space:pre-wrap; word-break:break-word; margin-top:12px; }
+.json .cap2 { color:var(--verb); cursor:pointer; border-bottom:1px dashed color-mix(in srgb, var(--verb) 55%, transparent); }
+.json .cap2:hover { background:color-mix(in srgb, var(--verb) 18%, transparent); }
 
-pre { background:var(--well); border:1px solid var(--edge); border-radius:8px; padding:12px; overflow:auto;
-  max-height:44vh; white-space:pre-wrap; word-break:break-word; }
-.json .cap { color:var(--signal); cursor:pointer; border-bottom:1px dashed var(--signal-dim); border-radius:3px; padding:0 1px; }
-.json .cap:hover { background:rgba(183,155,255,.18); border-bottom-color:var(--signal); }
+.var { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:6px; cursor:pointer;
+  border:1px solid var(--edge); background:var(--well); margin-bottom:5px; }
+.var:hover { border-color:var(--verb); }
+.var b { color:var(--fg); font-weight:500; font-size:12px; }
+.var .val { color:var(--faint); margin-left:auto; max-width:130px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:11px; }
+.related a { display:block; color:var(--muted); cursor:pointer; padding:4px 0; font-size:12px; }
+.related a:hover { color:var(--fg); }
+.empty { color:var(--faint); font-size:11px; line-height:1.7; }
+code.b { color:var(--verb); }
+.note { color:var(--muted); font-size:11px; line-height:1.6; border-left:2px solid var(--edge-lit);
+  padding:2px 0 2px 10px; margin:10px 0; }
+.note.warn { border-left-color:var(--warn); color:var(--warn); }
 
-.var { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:8px; cursor:pointer;
-  border:1px solid var(--edge); background:var(--well); margin-bottom:6px; }
-.var:hover { border-color:var(--signal); }
-.var .jack { color:var(--signal); font-size:12px; line-height:1; }
-.var b { color:var(--fg); font-weight:600; }
-.var .val { color:var(--muted); margin-left:auto; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-
-.related a { display:block; color:var(--post); cursor:pointer; padding:4px 0; text-decoration:none; }
-.related a:hover { color:var(--signal); }
-.empty { color:var(--muted); font-size:12px; line-height:1.6; }
-code.b { color:var(--signal); }
-
-.sending { color:var(--signal); }
-@keyframes pulse { 0%,100%{opacity:.45} 50%{opacity:1} }
-@media (prefers-reduced-motion:no-preference) { .sending { animation:pulse 1.1s ease-in-out infinite; } }
-
-@media (max-width:900px) {
+.sending { color:var(--verb); }
+@keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+@keyframes lift { from { opacity:0; transform:translateY(5px); } }
+@media (prefers-reduced-motion:no-preference) {
+  .sending { animation:pulse 1.1s ease-in-out infinite; }
+  .p.on.fresh { animation:lift .18s ease-out; }
+}
+@media (max-width:980px) {
   body { grid-template-columns:1fr; grid-template-rows:auto auto auto auto; height:auto; }
   #list, #store { border:none; border-top:1px solid var(--edge); }
   .top { flex-wrap:wrap; }
+  .baseline { min-width:0; flex:1; }
+  .p { grid-template-columns:1fr; }
+  .p .d, .p .v { grid-column:1; }
 }
 </style>
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="loop">◗</span>Loops <small>API Console</small></div>
-  <div class="baseline"><label>base</label><input id="base" value="${base}" /></div>
-  <div class="live"><span class="dot"></span>local</div>
+  <div class="wordmark">Loops <em>API bench</em></div>
+  <div class="rule"></div>
+  <div class="baseline"><span class="cap">base</span><input id="base" value="${base}" spellcheck="false" /></div>
+  <div class="live"><span class="dot"></span><span class="cap">local</span></div>
 </header>
+
 <div id="list" class="col">
-  <input id="filter" placeholder="filter endpoints…" autocomplete="off" spellcheck="false" />
+  <input id="filter" placeholder="filter endpoints…" autocomplete="off" spellcheck="false" style="margin-bottom:12px" />
   <div id="eps"></div>
 </div>
+
 <div id="main" class="col">
-  <div id="form"><p class="empty">Pick an endpoint on the left to build a request.</p></div>
+  <div id="form"><p class="empty">Pick an endpoint to build a request.</p></div>
 </div>
+
 <div id="store" class="col">
   <h2>Captured</h2>
-  <div id="vars"><p class="empty">Nothing captured yet. Every response's ids &amp; workflowRevisionId are captured automatically — reference them in the body/params as <b>{{workflowRevisionId}}</b>, <b>{{id}}</b>, etc. and they fill in at send. (Click a highlighted id to pin it too.)</p></div>
+  <div id="vars"></div>
   <h2>Related</h2>
-  <div id="related" class="related"><p class="empty">Pick a captured id to see where it fits.</p></div>
+  <div id="related" class="related"><p class="empty">Pick a captured id to see which endpoints take it.</p></div>
 </div>
+
 <script>
 const ENDPOINTS = ${JSON.stringify(endpoints)};
-const store = {};      // varName -> value
-let current = null;
+const store = {};        // captured ids: name -> value
+let current = null;      // selected endpoint
+let st = null;           // request state for the selected endpoint
 let selectedVar = null;
 
-const el = (h) => { const d=document.createElement('div'); d.innerHTML=h; return d.firstElementChild; };
-const byTag = ENDPOINTS.reduce((a,e)=>((a[e.tag]??=[]).push(e),a),{});
+const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Spec descriptions are written for the docs site: backticked code, <br>, markdown links.
+const md = (s) => esc(s)
+  .replace(/&lt;br&gt;/g, '<br>')
+  .replace(/\`([^\`]+)\`/g, '<code class="b">$1</code>')
+  .replace(/\\[([^\\]]+)\\]\\(([^)]+)\\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
+// Every path is under /v1 — the index reads better without it, and stops wrapping mid-word.
+const shortPath = (p) => (p.startsWith('/v1/') ? p.slice(4) : p);
+const byTag = ENDPOINTS.reduce((a,e) => ((a[e.tag] ??= []).push(e), a), {});
+
+/* ---------- endpoint index ---------- */
 
 function renderList(q) {
   const list = document.getElementById('eps');
-  q = (q||'').trim().toLowerCase();
+  q = (q || '').trim().toLowerCase();
   list.innerHTML = '';
   for (const tag of Object.keys(byTag)) {
-    const eps = byTag[tag].filter(e=> !q || (e.method+' '+e.path).toLowerCase().includes(q));
+    const eps = byTag[tag].filter(e => !q || (e.method + ' ' + e.path + ' ' + e.summary).toLowerCase().includes(q));
     if (!eps.length) continue;
-    list.appendChild(el('<h2>'+tag+'</h2>'));
+    list.appendChild(el('<h2>' + esc(tag) + '</h2>'));
     for (const e of eps) {
-      const node = el('<div class="ep"><span class="m '+e.method+'">'+e.method+'</span><span class="path">'+e.path+'</span></div>');
-      node.onclick = ()=>selectEndpoint(e, node);
+      const node = el('<div class="ep"><span class="m ' + e.method + '">' + e.method + '</span><span class="path">' + esc(shortPath(e.path)) + '</span></div>');
+      node.onclick = () => selectEndpoint(e, node);
       list.appendChild(node);
     }
   }
-  if (!list.children.length) list.appendChild(el('<p class="empty">No endpoints match “'+escapeHtml(q)+'”.</p>'));
+  if (!list.children.length) list.appendChild(el('<p class="empty">No endpoint matches that.</p>'));
 }
+
+/* ---------- request state ---------- */
+
+// One entry per field: on (is it in the request), value (always a string — parsed at build),
+// isNull (send an explicit null), sub (nested rack for a field whose shape depends on a pick).
+function entryFor(f) {
+  return {
+    on: false,
+    isNull: false,
+    value: f.shapes ? '' : toStr(f.sample),
+    sub: f.shapes ? subState(f, f.shapes[0].label) : null,
+  };
+}
+function subState(f, label) {
+  const shape = f.shapes.find(s => s.label === label) || f.shapes[0];
+  return { label: shape.label, fields: seedFields(shape), extra: {}, custom: [] };
+}
+function seedFields(shape) {
+  const fields = {};
+  for (const f of shape.fields) fields[f.name] = entryFor(f);
+  for (const f of shape.fields) if (f.required) fields[f.name].on = true;
+  for (const g of (shape.oneOf || [])) if (!g.some(n => fields[n]?.on)) { if (fields[g[0]]) fields[g[0]].on = true; }
+  // "at least one field" shapes have nothing required, so open with the first real field on —
+  // an empty body is never a legal request for them.
+  if (shape.atLeastOne && !Object.values(fields).some(e => e.on)) {
+    const first = shape.fields.find(f => f.name !== 'typeName');
+    if (first) fields[first.name].on = true;
+  }
+  return fields;
+}
+function toStr(v) {
+  if (v == null) return '';
+  return typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+}
+function shapeOfState(sh, s) { return sh.find(x => x.label === s.label) || sh[0]; }
 
 function selectEndpoint(e, node) {
   current = e;
-  document.querySelectorAll('.ep').forEach(n=>n.classList.remove('active'));
-  node?.classList.add('active');
-  const form = document.getElementById('form');
-  form.innerHTML = '';
-  form.appendChild(el('<div class="reqline"><span class="m '+e.method+'">'+e.method+'</span><b class="path">'+e.path+'</b></div>'));
-  if (e.summary) form.appendChild(el('<p class="sum">'+e.summary+'</p>'));
-  for (const p of e.pathParams) form.appendChild(field('path:'+p, p, lookupStore(p)));
-  for (const q of e.queryParams) form.appendChild(field('query:'+q.name, q.name+(q.required?' *':''), lookupStore(q.name)));
-  if (e.bodyExample) {
-    const head = el('<div class="bar" style="margin:0 0 4px"><label style="margin:0">body</label><button id="beautify" class="ghost" type="button">Beautify</button></div>');
-    form.appendChild(head);
-    const ta = el('<textarea id="body"></textarea>'); ta.value = e.bodyExample;
-    if ((e.bodyVariants && e.bodyVariants.length > 1) || (e.bodyEnums && e.bodyEnums.length)) {
-      const pills = el('<div class="pills"></div>');
-      if (e.bodyVariants && e.bodyVariants.length > 1) {
-        const row = el('<div class="pillrow"><span class="pilllabel">variant</span></div>');
-        for (const v of e.bodyVariants) {
-          const b = el('<button type="button" class="pill">'+escapeHtml(v.label)+'</button>');
-          b.onclick = ()=>{ ta.value = JSON.stringify(v.sample, null, 2); };
-          row.appendChild(b);
-        }
-        pills.appendChild(row);
-      }
-      for (const slot of (e.bodyEnums||[])) {
-        const row = el('<div class="pillrow"><span class="pilllabel">'+escapeHtml(slot.field)+'</span></div>');
-        for (const val of slot.values) {
-          const b = el('<button type="button" class="pill">'+escapeHtml(val)+'</button>');
-          b.onclick = ()=>{
-            try { const o = JSON.parse(ta.value); o[slot.field] = val; ta.value = JSON.stringify(o, null, 2); }
-            catch (err) { badJson('INVALID JSON', 'fix the body before switching '+slot.field); }
-          };
-          row.appendChild(b);
-        }
-        pills.appendChild(row);
-      }
-      form.appendChild(pills);
-    }
-    form.appendChild(ta);
-    head.querySelector('#beautify').onclick = ()=>{
-      try { ta.value = JSON.stringify(JSON.parse(ta.value), null, 2); }
-      catch (e) { badJson('INVALID JSON', e.message); }
-    };
-  }
-  const send = el('<div class="bar" style="margin-top:12px"><button id="send">Send</button></div>');
-  form.appendChild(send);
-  document.getElementById('send').onclick = sendRequest;
-  form.appendChild(el('<div id="resp"></div>'));
+  document.body.style.setProperty('--verb', getComputedStyle(document.body).getPropertyValue('--' + e.method));
+  document.querySelectorAll('.ep').forEach(n => n.classList.remove('active'));
+  if (node) node.classList.add('active');
+  else document.querySelectorAll('.ep').forEach(n => {
+    if (n.querySelector('.path').textContent === e.path && n.querySelector('.m').textContent === e.method) n.classList.add('active');
+  });
+  st = {
+    path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.name)])),
+    query: { fields: seedFields({ fields: e.queryParams, oneOf: e.queryOneOf }), extra: {}, custom: null },
+    body: e.body ? subState({ shapes: e.body.shapes }, e.body.shapes[0].label) : null,
+    tab: 'fields',
+    raw: '',
+  };
+  render();
 }
 
-function field(id, label, value) {
-  const wrap = el('<div></div>');
-  if (value) wrap.classList.add('threaded');
-  wrap.appendChild(el('<label>'+label+'</label>'));
-  const input = el('<input data-k="'+id+'" autocomplete="off" spellcheck="false" />'); input.value = value;
-  wrap.appendChild(input);
+/* ---------- render ---------- */
+
+function render() {
+  const e = current, form = document.getElementById('form');
+  const resp = document.getElementById('resp');
+  const keep = resp ? resp.innerHTML : '';
+  form.innerHTML = '';
+
+  const line = el('<div class="reqline"><span class="m ' + e.method + '">' + e.method + '</span></div>');
+  line.appendChild(urlLine(e));
+  form.appendChild(line);
+  if (e.summary) form.appendChild(el('<p class="sum">' + esc(e.summary) + '</p>'));
+  if (e.description) form.appendChild(el('<p class="sum">' + md(e.description) + '</p>'));
+
+  const rack = el('<div class="rack"></div>');
+  if (e.queryParams.length) {
+    rack.appendChild(bandOf('query', null));
+    if (e.queryOneOf) rack.appendChild(oneOfHint(e.queryOneOf));
+    renderRack(rack, { fields: e.queryParams, oneOf: e.queryOneOf }, st.query, () => render());
+  }
+  if (e.body) renderBody(rack, e);
+  form.appendChild(rack);
+
+  const send = el('<div class="bar"><button id="send">Send ' + e.method + '</button></div>');
+  form.appendChild(send);
+  document.getElementById('send').onclick = sendRequest;
+  const box = el('<div id="resp"></div>');
+  box.innerHTML = keep;
+  form.appendChild(box);
+  if (keep) rewireCaptures(box);
+}
+
+// The path renders as the URL you're about to hit, with each {param} an editable slot.
+function urlLine(e) {
+  const wrap = el('<div class="url"></div>');
+  const parts = e.path.split(/(\\{[^}]+\\})/);
+  for (const part of parts) {
+    const m = part.match(/^\\{([^}]+)\\}$/);
+    if (!m) { wrap.appendChild(document.createTextNode(part)); continue; }
+    const name = m[1];
+    const input = el('<input class="slot" spellcheck="false" autocomplete="off" placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
+    input.value = st.path[name] || '';
+    const fit = () => {
+      input.style.width = (Math.max(name.length, input.value.length) + 2) + 'ch';
+      input.classList.toggle('filled', !!input.value);
+    };
+    fit();
+    input.oninput = () => { st.path[name] = input.value; fit(); };
+    wrap.appendChild(input);
+  }
   return wrap;
 }
 
-function collectInputs(prefix) {
+function bandOf(label, n) {
+  const count = n == null ? '' : ' <span class="n">' + n + '</span>';
+  return el('<div class="band"><span class="cap">' + esc(label) + count + '</span><span class="rule"></span></div>');
+}
+
+function oneOfHint(groups) {
+  const txt = groups.map(g => g.map(n => '<b>' + esc(n) + '</b>').join(' or ')).join(', ');
+  return el('<p class="hint">Provide at least one of ' + txt + '.</p>');
+}
+
+function renderBody(rack, e) {
+  const shapes = e.body.shapes;
+  const shape = shapeOfState(shapes, st.body);
+
+  const head = el('<div class="band"><span class="cap">body</span><span class="rule"></span></div>');
+  const tabs = el('<div class="tabs"></div>');
+  for (const t of ['fields', 'json']) {
+    const b = el('<button class="tab" aria-pressed="' + (st.tab === t) + '">' + t + '</button>');
+    b.onclick = () => switchTab(t);
+    tabs.appendChild(b);
+  }
+  head.appendChild(tabs);
+  rack.appendChild(head);
+
+  if (st.tab === 'json') {
+    const ta = el('<textarea id="raw" spellcheck="false"></textarea>');
+    ta.value = st.raw || JSON.stringify(buildShape(shape, st.body), null, 2);
+    ta.oninput = () => { st.raw = ta.value; };
+    rack.appendChild(ta);
+    rack.appendChild(el('<p class="hint">Edited here, then switch back to <b>fields</b> — anything the schema does not name shows up as an unknown parameter.</p>'));
+    return;
+  }
+
+  if (shapes.length > 1) rack.appendChild(picker(e.body.selector || 'shape', shapes, st.body.label, l => {
+    st.body = subState({ shapes }, l);
+    render();
+  }));
+  if (e.body.description) rack.appendChild(el('<p class="hint">' + md(e.body.description) + '</p>'));
+  renderRack(rack, shape, st.body, () => render());
+}
+
+function picker(label, shapes, active, onPick) {
+  const row = el('<div class="pills"></div>');
+  row.appendChild(el('<span class="cap" style="margin-right:4px">' + esc(label) + '</span>'));
+  for (const s of shapes) {
+    const b = el('<button class="pill" aria-pressed="' + (s.label === active) + '">' + esc(s.label) + '</button>');
+    b.onclick = () => onPick(s.label);
+    row.appendChild(b);
+  }
+  return row;
+}
+
+// The rack: what the request is sending, then every parameter it could still take.
+function renderRack(rack, shape, state, redraw) {
+  const fields = shape.fields;
+  const on = fields.filter(f => state.fields[f.name]?.on);
+  const off = fields.filter(f => !state.fields[f.name]?.on);
+  const extras = Object.keys(state.extra || {});
+
+  if (shape.note) rack.appendChild(el('<p class="note">' + esc(shape.note) + '</p>'));
+  if (shape.oneOf) rack.appendChild(oneOfHint(shape.oneOf));
+  if (shape.atLeastOne && !on.length) rack.appendChild(el('<p class="note warn">This node type needs at least one field — add one below.</p>'));
+
+  if (on.length && off.length) rack.appendChild(bandOf('sending', on.length));
+  for (const f of on) rack.appendChild(paramOn(f, shape, state, redraw));
+  for (const k of extras) rack.appendChild(paramExtra(k, state, redraw));
+
+  if (state.custom) {
+    for (let i = 0; i < state.custom.length; i++) rack.appendChild(paramCustom(i, state, redraw));
+  }
+
+  if (off.length || shape.additional) {
+    rack.appendChild(bandOf('can also send', off.length + (shape.additional ? 1 : 0)));
+    for (const f of off) rack.appendChild(paramOff(f, shape, state, redraw));
+    if (shape.additional) {
+      const b = el('<button class="add">+ custom property &nbsp;<span class="t">' + shape.additional.join(' · ') + '</span></button>');
+      b.onclick = () => { state.custom.push({ key: '', value: '' }); redraw(); };
+      rack.appendChild(b);
+    }
+  }
+}
+
+const blockers = (f, shape, state) =>
+  (shape.exclusive || [])
+    .filter(g => g.includes(f.name))
+    .flatMap(g => g.filter(n => n !== f.name && state.fields[n]?.on));
+
+function meta(f, extra) {
+  const bits = [];
+  bits.push('<span class="t">' + esc(f.type) + (f.nullable ? ' | null' : '') + '</span>');
+  if (f.required) bits.push('<span class="t req">required</span>');
+  return bits.concat(extra || []).join('');
+}
+
+function paramOn(f, shape, state, redraw) {
+  const e = state.fields[f.name];
+  const row = el('<div class="p on fresh"></div>');
+  row.appendChild(el('<div class="k"><b>' + esc(f.name) + '</b><span class="meta">' + meta(f) + '</span></div>'));
+
+  const v = el('<div class="v"></div>');
+  if (f.shapes) {
+    const sub = el('<div class="sub"></div>');
+    const shapeNow = shapeOfState(f.shapes, e.sub);
+    if (f.description) sub.appendChild(el('<p class="hint">' + md(f.description) + '</p>'));
+    sub.appendChild(picker(f.shapesLabel, f.shapes, e.sub.label, l => { e.sub = subState(f, l); redraw(); }));
+    renderRack(sub, shapeNow, e.sub, redraw);
+    row.appendChild(el('<div class="v"></div>'));
+    row.appendChild(el('<div class="act"></div>'));
+    row.appendChild(sub);
+    return row;
+  } else if (e.isNull) {
+    const i = el('<input class="nulled" value="null" readonly />');
+    v.appendChild(i);
+  } else if (f.values) {
+    const sel = el('<select></select>');
+    for (const val of f.values) sel.appendChild(el('<option ' + (String(e.value) === String(val) ? 'selected' : '') + '>' + esc(val) + '</option>'));
+    sel.onchange = () => { e.value = sel.value; };
+    v.appendChild(sel);
+  } else if (f.type === 'boolean') {
+    const seg = el('<div class="seg"></div>');
+    for (const val of ['true', 'false']) {
+      const b = el('<button aria-pressed="' + (e.value === val) + '">' + val + '</button>');
+      b.onclick = () => { e.value = val; redraw(); };
+      seg.appendChild(b);
+    }
+    v.appendChild(seg);
+  } else if (f.type === 'object' || f.type === 'array') {
+    const ta = el('<textarea spellcheck="false"></textarea>');
+    ta.value = e.value;
+    ta.oninput = () => { e.value = ta.value; };
+    v.appendChild(ta);
+  } else {
+    const i = el('<input spellcheck="false" autocomplete="off" data-k="' + esc(f.name) + '" />');
+    i.value = e.value;
+    i.oninput = () => { e.value = i.value; };
+    v.appendChild(i);
+  }
+
+  if (!f.shapes) {
+    row.appendChild(v);
+    const act = el('<div class="act"></div>');
+    if (f.nullable) {
+      const nb = el('<button class="null" aria-pressed="' + e.isNull + '" title="send an explicit null">null</button>');
+      nb.onclick = () => { e.isNull = !e.isNull; redraw(); };
+      act.appendChild(nb);
+    }
+    if (!f.required) {
+      const x = el('<button class="x" title="remove from the request">✕</button>');
+      x.onclick = () => { e.on = false; redraw(); };
+      act.appendChild(x);
+    }
+    row.appendChild(act);
+  }
+  if (f.description) row.appendChild(el('<p class="d">' + md(f.description) + '</p>'));
+  setTimeout(() => row.classList.remove('fresh'), 250);
+  return row;
+}
+
+function paramOff(f, shape, state, redraw) {
+  const blocked = blockers(f, shape, state);
+  const row = el('<div class="p off' + (blocked.length ? ' blocked' : '') + '"></div>');
+  const note = blocked.length
+    ? '<span class="t warn">swaps out ' + esc(blocked.join(', ')) + '</span>'
+    : '';
+  row.appendChild(el('<div class="k"><b>+ ' + esc(f.name) + '</b><span class="meta">' + meta(f, [note]) + '</span></div>'));
+  if (f.description) row.appendChild(el('<p class="d">' + md(f.description) + '</p>'));
+  row.onclick = () => {
+    for (const b of blocked) state.fields[b].on = false;
+    state.fields[f.name].on = true;
+    redraw();
+  };
+  return row;
+}
+
+// A key the endpoint's schema doesn't name — kept, but flagged: these endpoints are strict.
+function paramExtra(key, state, redraw) {
+  const row = el('<div class="p on extra"></div>');
+  row.appendChild(el('<div class="k"><b>' + esc(key) + '</b><span class="meta"><span class="t warn">unknown parameter</span></span></div>'));
+  const v = el('<div class="v"></div>');
+  const i = el('<input spellcheck="false" />');
+  i.value = toStr(state.extra[key]);
+  i.oninput = () => { state.extra[key] = i.value; };
+  v.appendChild(i);
+  row.appendChild(v);
+  const act = el('<div class="act"></div>');
+  const x = el('<button class="x">✕</button>');
+  x.onclick = () => { delete state.extra[key]; redraw(); };
+  act.appendChild(x);
+  row.appendChild(act);
+  row.appendChild(el('<p class="d">Not in the schema. Most endpoints reject a body they do not recognise.</p>'));
+  return row;
+}
+
+function paramCustom(i, state, redraw) {
+  const c = state.custom[i];
+  const row = el('<div class="p on"></div>');
+  const k = el('<div class="k"></div>');
+  const ki = el('<input placeholder="property name" spellcheck="false" />');
+  ki.value = c.key;
+  ki.oninput = () => { c.key = ki.value; };
+  k.appendChild(ki);
+  row.appendChild(k);
+  const v = el('<div class="v"></div>');
+  const vi = el('<input placeholder="value" spellcheck="false" />');
+  vi.value = c.value;
+  vi.oninput = () => { c.value = vi.value; };
+  v.appendChild(vi);
+  row.appendChild(v);
+  const act = el('<div class="act"></div>');
+  const x = el('<button class="x">✕</button>');
+  x.onclick = () => { state.custom.splice(i, 1); redraw(); };
+  act.appendChild(x);
+  row.appendChild(act);
+  return row;
+}
+
+/* ---------- fields ⇄ json ---------- */
+
+function switchTab(t) {
+  if (t === st.tab) return;
+  const shapes = current.body.shapes;
+  const shape = shapeOfState(shapes, st.body);
+  if (t === 'json') {
+    st.raw = JSON.stringify(buildShape(shape, st.body), null, 2);
+  } else {
+    let parsed;
+    try { parsed = JSON.parse(st.raw || '{}'); }
+    catch (err) { return fail('INVALID JSON', err.message); }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return fail('INVALID JSON', 'the body must be an object');
+    hydrate(shape, st.body, parsed);
+  }
+  st.tab = t;
+  render();
+}
+
+// Re-seat a hand-edited body onto the rack: named keys light up their field, the rest are
+// held as unknown parameters rather than silently dropped.
+function hydrate(shape, state, obj) {
+  state.extra = {};
+  for (const f of shape.fields) {
+    const e = state.fields[f.name];
+    const has = Object.prototype.hasOwnProperty.call(obj, f.name);
+    e.on = has;
+    e.isNull = has && obj[f.name] === null;
+    if (!has || e.isNull) continue;
+    if (f.shapes) {
+      const sub = obj[f.name] || {};
+      const guess = f.shapes.find(s => s.label === sub.typeName) || shapeOfState(f.shapes, e.sub);
+      e.sub = subState(f, guess.label);
+      hydrate(guess, e.sub, sub);
+    } else {
+      e.value = toStr(obj[f.name]);
+    }
+  }
+  const named = new Set(shape.fields.map(f => f.name));
+  for (const [k, v] of Object.entries(obj)) if (!named.has(k)) state.extra[k] = v;
+}
+
+function buildShape(shape, state) {
   const out = {};
-  document.querySelectorAll('[data-k^="'+prefix+':"]').forEach(i=>{ out[i.dataset.k.split(':')[1]] = i.value; });
+  for (const f of shape.fields) {
+    const e = state.fields[f.name];
+    if (!e || !e.on) continue;
+    if (e.isNull) { out[f.name] = null; continue; }
+    if (f.shapes) { const s = shapeOfState(f.shapes, e.sub); out[f.name] = buildShape(s, e.sub); continue; }
+    out[f.name] = coerce(f, e.value);
+  }
+  for (const c of (state.custom || [])) if (c.key) out[c.key] = coerce({ type: 'auto' }, c.value);
+  for (const [k, v] of Object.entries(state.extra || {})) out[k] = v;
   return out;
 }
 
-// Replace {{name}} with the captured store value (last response's ids/revision). Unknown
-// vars are left as-is so a missing capture is visible rather than silently blanked.
-function subst(str) {
-  return typeof str === 'string'
-    ? str.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (m, k) => (store[k] != null ? store[k] : m))
-    : str;
+function coerce(f, raw) {
+  const v = subst(raw);
+  if (f.type === 'boolean') return v === 'true';
+  if (f.type === 'number' || f.type === 'integer') return Number(v);
+  if (f.type === 'object' || f.type === 'array') { try { return JSON.parse(v); } catch { return v; } }
+  if (f.type === 'auto') {
+    if (v === 'true' || v === 'false') return v === 'true';
+    if (v !== '' && !isNaN(Number(v))) return Number(v);
+    return v;
+  }
+  return v;
 }
 
+// {{name}} → the captured value. Unknown names are left alone so a missing capture is visible.
+function subst(s) {
+  return typeof s === 'string'
+    ? s.replace(/\\{\\{\\s*([A-Za-z0-9_]+)\\s*\\}\\}/g, (m, k) => (store[k] != null ? store[k] : m))
+    : s;
+}
+
+/* ---------- send ---------- */
+
 async function sendRequest() {
-  const pathParams = collectInputs('path');
   let path = current.path;
-  for (const [k,v] of Object.entries(pathParams)) path = path.replace('{'+k+'}', encodeURIComponent(subst(v)));
-  const query = collectInputs('query');
-  for (const k of Object.keys(query)) query[k] = subst(query[k]);
-  const bodyEl = document.getElementById('body');
-  const resp = document.getElementById('resp');
-  const bodyStr = bodyEl ? subst(bodyEl.value) : undefined;
-  if (bodyStr && bodyStr.trim()) {
-    try { JSON.parse(bodyStr); }
-    catch (e) { return badJson('INVALID JSON', e.message); }
+  for (const [k, v] of Object.entries(st.path)) path = path.replace('{' + k + '}', encodeURIComponent(subst(v || '')));
+
+  const query = {};
+  for (const f of current.queryParams) {
+    const e = st.query.fields[f.name];
+    if (e?.on && !e.isNull) query[f.name] = subst(e.value);
   }
-  const payload = { method: current.method, path, query, base: document.getElementById('base').value, body: bodyStr };
-  resp.innerHTML = '<p class="sending">◗ sending…</p>';
+
+  let body;
+  if (current.body) {
+    if (st.tab === 'json') {
+      try { JSON.parse(st.raw || '{}'); }
+      catch (err) { return fail('INVALID JSON', err.message); }
+      body = subst(st.raw);
+    } else {
+      body = JSON.stringify(buildShape(shapeOfState(current.body.shapes, st.body), st.body));
+    }
+  }
+
+  const resp = document.getElementById('resp');
+  resp.innerHTML = '<p class="sending">sending…</p>';
   let r;
   try {
-    r = await fetch('/proxy', { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(payload) }).then(r=>r.json());
-  } catch (e) {
-    return badJson('PROXY UNREACHABLE', e.message + ' — is the console server running?');
+    r = await fetch('/proxy', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ method: current.method, path, query, base: document.getElementById('base').value, body }),
+    }).then(x => x.json());
+  } catch (err) {
+    return fail('PROXY UNREACHABLE', err.message + ' — is the bench still running?');
   }
-  const ok = r.status>=200 && r.status<300;
+  const ok = r.status >= 200 && r.status < 300;
   resp.innerHTML = '';
-  resp.appendChild(el('<div class="bar" style="margin-top:10px"><span class="status '+(ok?'ok':'bad')+'">'+(r.status||'ERR')+' '+(r.statusText||'')+'</span><span class="sum">click any highlighted id to capture it</span></div>'));
+  resp.appendChild(el('<div class="bar" style="margin-top:14px"><span class="status ' + (ok ? 'ok' : 'bad') + '">' + (r.status || 'ERR') + ' ' + esc(r.statusText || '') + '</span><span class="empty">click a highlighted id to capture it</span></div>'));
   resp.appendChild(renderResp(r.body ?? r.error));
   capture(r.body);
 }
 
-function badJson(label, msg) {
+function fail(label, msg) {
   const resp = document.getElementById('resp');
   resp.innerHTML = '';
-  resp.appendChild(el('<div class="bar" style="margin-top:10px"><span class="status bad">'+label+'</span><span class="sum">'+escapeHtml(msg)+'</span></div>'));
+  resp.appendChild(el('<div class="bar" style="margin-top:14px"><span class="status bad">' + esc(label) + '</span><span class="empty">' + esc(msg) + '</span></div>'));
 }
 
-function capture(body) {
-  walk(body, '', childResourceParam(current?.path));
-  renderStore();
-}
+/* ---------- captured ids ---------- */
+
+function capture(body) { walk(body, '', childResourceParam(current?.path)); renderStore(); }
 
 function captureValue(name, val) {
   store[name] = val;
@@ -597,45 +1078,41 @@ function isIdish(key, val) {
   if (/(^id$|Id$)/.test(key)) return true;
   return typeof val === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{14,}$/.test(val) && /[0-9]/.test(val);
 }
-
 function capSpan(name, val, inner) {
-  return '<span class="cap" data-cn="'+escapeHtml(name)+'" data-cv="'+escapeHtml(val)+'">'+inner+'</span>';
+  return '<span class="cap2" data-cn="' + esc(name) + '" data-cv="' + esc(val) + '">' + inner + '</span>';
 }
-
 function renderJson(v, key, indent) {
   const pad = '  '.repeat(indent);
   if (Array.isArray(v)) {
     if (!v.length) return '[]';
-    return '[\\n' + v.map(x=>'  '.repeat(indent+1)+renderJson(x, key, indent+1)).join(',\\n') + '\\n'+pad+']';
+    return '[\\n' + v.map(x => '  '.repeat(indent + 1) + renderJson(x, key, indent + 1)).join(',\\n') + '\\n' + pad + ']';
   }
   if (v && typeof v === 'object') {
     const keys = Object.keys(v);
     if (!keys.length) return '{}';
-    const param = key.endsWith('s') && isIdMap(v) ? key.slice(0,-1)+'Id' : null;
+    const param = key.endsWith('s') && isIdMap(v) ? key.slice(0, -1) + 'Id' : null;
     const keyIsId = param && paramExists(param);
-    const rows = keys.map(k=>{
-      const label = keyIsId ? capSpan(param, k, '"'+escapeHtml(k)+'"') : '"'+escapeHtml(k)+'"';
-      return '  '.repeat(indent+1) + label + ': ' + renderJson(v[k], k, indent+1);
+    const rows = keys.map(k => {
+      const label = keyIsId ? capSpan(param, k, '"' + esc(k) + '"') : '"' + esc(k) + '"';
+      return '  '.repeat(indent + 1) + label + ': ' + renderJson(v[k], k, indent + 1);
     }).join(',\\n');
-    return '{\\n'+rows+'\\n'+pad+'}';
+    return '{\\n' + rows + '\\n' + pad + '}';
   }
   if (typeof v === 'string') {
-    const inner = '"'+escapeHtml(v)+'"';
-    return isIdish(key, v) ? capSpan(key||'value', v, inner) : inner;
+    const inner = '"' + esc(v) + '"';
+    return isIdish(key, v) ? capSpan(key || 'value', v, inner) : inner;
   }
-  if (typeof v === 'number') {
-    return isIdish(key, v) ? capSpan(key||'value', String(v), String(v)) : String(v);
-  }
-  return escapeHtml(String(v));
+  if (typeof v === 'number') return isIdish(key, v) ? capSpan(key || 'value', String(v), String(v)) : String(v);
+  return esc(String(v));
 }
-
 function renderResp(body) {
   const pre = el('<pre class="json"></pre>');
   pre.innerHTML = renderJson(body, '', 0);
-  pre.querySelectorAll('.cap').forEach(s=>{
-    s.onclick = ()=>captureValue(s.dataset.cn, s.dataset.cv);
-  });
+  rewireCaptures(pre);
   return pre;
+}
+function rewireCaptures(root) {
+  root.querySelectorAll('.cap2').forEach(s => { s.onclick = () => captureValue(s.dataset.cn, s.dataset.cv); });
 }
 function childResourceParam(path) {
   if (!path) return null;
@@ -648,19 +1125,24 @@ function childResourceParam(path) {
   }
   return null;
 }
-function paramExists(p){ return ENDPOINTS.some(e=>e.pathParams.some(pp=>idMatch(pp,p)) || e.queryParams.some(q=>idMatch(q.name,p))); }
-function isIdMap(o){ const ks=Object.keys(o); return ks.length>0 && ks.every(k=>k.length<=40) && Object.values(o).every(x=>x && (typeof x==='object'||typeof x==='boolean')); }
+function paramExists(p) {
+  return ENDPOINTS.some(e => e.pathParams.some(pp => idMatch(pp.name, p)) || e.queryParams.some(q => idMatch(q.name, p)));
+}
+function isIdMap(o) {
+  const ks = Object.keys(o);
+  return ks.length > 0 && ks.every(k => k.length <= 40) && Object.values(o).every(x => x && (typeof x === 'object' || typeof x === 'boolean'));
+}
 function walk(v, key, childParam) {
-  if (Array.isArray(v)) { v.forEach(x=>walk(x, key, childParam)); return; }
+  if (Array.isArray(v)) { v.forEach(x => walk(x, key, childParam)); return; }
   if (v && typeof v === 'object') {
     if (key.endsWith('s') && isIdMap(v)) {
-      const param = key.slice(0,-1) + 'Id';
-      if (paramExists(param)) { for (const mk of Object.keys(v)) store[param] = String(mk); }
+      const param = key.slice(0, -1) + 'Id';
+      if (paramExists(param)) for (const mk of Object.keys(v)) store[param] = String(mk);
     }
-    for (const [k,val] of Object.entries(v)) walk(val, k, childParam);
+    for (const [k, val] of Object.entries(v)) walk(val, k, childParam);
     return;
   }
-  if (/(^id$|Id$)/.test(key) && (typeof v==='string'||typeof v==='number')) {
+  if (/(^id$|Id$)/.test(key) && (typeof v === 'string' || typeof v === 'number')) {
     store[key] = String(v);
     if (key === 'id' && childParam) store[childParam] = String(v);
   }
@@ -669,11 +1151,14 @@ function walk(v, key, childParam) {
 function renderStore() {
   const vars = document.getElementById('vars');
   const keys = Object.keys(store);
-  if (!keys.length) { vars.innerHTML='<p class="empty">No ids captured yet.</p>'; return; }
-  vars.innerHTML='';
+  if (!keys.length) {
+    vars.innerHTML = '<p class="empty">Ids from every response are captured here. Reference one anywhere as <code class="b">{{name}}</code> and it fills in when you send.</p>';
+    return;
+  }
+  vars.innerHTML = '';
   for (const k of keys) {
-    const row = el('<div class="var"><span class="jack">◗</span><b>'+k+'</b><span class="val">'+escapeHtml(store[k])+'</span></div>');
-    row.onclick = ()=>selectVar(k);
+    const row = el('<div class="var"><b>' + esc(k) + '</b><span class="val">' + esc(store[k]) + '</span></div>');
+    row.onclick = () => selectVar(k);
     vars.appendChild(row);
   }
 }
@@ -687,27 +1172,30 @@ function idMatch(param, key) {
 }
 function lookupStore(param) {
   if (store[param] != null) return store[param];
-  const k = Object.keys(store).find(k=>idMatch(param, k));
+  const k = Object.keys(store).find(k => idMatch(param, k));
   return k ? store[k] : '';
 }
 
 function selectVar(k) {
   selectedVar = k;
-  document.querySelectorAll('[data-k]').forEach(i=>{ if (idMatch(i.dataset.k.split(':')[1], k)) { i.value = store[k]; if (i.parentElement) i.parentElement.classList.add('threaded'); } });
+  if (st) {
+    for (const p of current.pathParams) if (idMatch(p.name, k)) st.path[p.name] = store[k];
+    render();
+  }
   const rel = document.getElementById('related');
-  const matches = ENDPOINTS.filter(e=>e.pathParams.some(p=>idMatch(p,k)) || e.queryParams.some(q=>idMatch(q.name,k)));
-  if (!matches.length) { rel.innerHTML='<p class="empty">No endpoints use {'+k+'}.</p>'; return; }
-  rel.innerHTML='<p class="sum">Endpoints using <code class="b">'+k+'</code>:</p>';
+  const matches = ENDPOINTS.filter(e => e.pathParams.some(p => idMatch(p.name, k)) || e.queryParams.some(q => idMatch(q.name, k)));
+  if (!matches.length) { rel.innerHTML = '<p class="empty">No endpoint takes ' + esc(k) + '.</p>'; return; }
+  rel.innerHTML = '<p class="empty">Endpoints taking <code class="b">' + esc(k) + '</code></p>';
   for (const e of matches) {
-    const a = el('<a><span class="m '+e.method+'">'+e.method+'</span> '+e.path+'</a>');
-    a.onclick = ()=>{ selectEndpoint(e); setTimeout(()=>selectVar(k),0); };
+    const a = el('<a><span class="m ' + e.method + '">' + e.method + '</span> ' + esc(e.path) + '</a>');
+    a.onclick = () => selectEndpoint(e);
     rel.appendChild(a);
   }
 }
 
-function escapeHtml(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 renderList();
-document.getElementById('filter').oninput = (ev)=>renderList(ev.target.value);
+renderStore();
+document.getElementById('filter').oninput = (ev) => renderList(ev.target.value);
 </script>
 </body>
 </html>`;
