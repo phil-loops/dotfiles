@@ -133,7 +133,14 @@ document.getElementById("reload").addEventListener("click", () => {
   window.close();
 });
 
-document.getElementById("viewer").addEventListener("click", () => {
-  chrome.tabs.create({ url: VIEWER_URL });
+// Same route as ⌘⇧U on a PR: the server resolves the branch's forest node (importing the PR if
+// it isn't local yet) and the SW opens it. Off a PR there's no node to aim at, so: viewer home.
+document.getElementById("viewer").addEventListener("click", async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/.test(tab?.url || "")) {
+    chrome.runtime.sendMessage({ type: "open-url", target: "viewer" });
+  } else {
+    chrome.tabs.create({ url: VIEWER_URL });
+  }
   window.close();
 });

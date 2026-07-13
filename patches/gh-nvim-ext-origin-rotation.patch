@@ -1,0 +1,37 @@
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 39de291..3e3d67f 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -22,7 +22,22 @@ from srv import ship    # own line: same reason
+ from srv import prep    # own line: same reason
+ srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
+ DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
+-EXT_ORIGIN = "chrome-extension://icojbpfabggonphegfghfnmjemejofoi"   # gh-to-nvim, the one non-localhost caller
++
++
++def _ext_origins():
++    # gh-to-nvim is the one non-localhost caller. Its id is derived (prod from the signing key,
++    # dev from the source path) and ROTATES whenever the key does — a hardcoded id silently 403s
++    # the popup's fetches after a rotation, so ask the same script the installer asks.
++    ids = set()
++    for mode in ("prod", "dev"):
++        r = subprocess.run([os.path.join(SCRIPTS, "gh-to-nvim-ext-id"), mode],
++                           capture_output=True, text=True)
++        if r.returncode == 0 and r.stdout.strip():
++            ids.add("chrome-extension://" + r.stdout.strip())
++    return ids
++
++
++EXT_ORIGINS = _ext_origins()
+ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts pay a
+              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
+ last = [time.time()]
+@@ -299,7 +314,7 @@ class H(BaseHTTPRequestHandler):
+         last[0] = time.time()
+         # localhost is mixed-content-exempt, so any public webpage can lob simple-request POSTs here
+         origin = self.headers.get("Origin")
+-        if origin and origin != EXT_ORIGIN and not re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", origin):
++        if origin and origin not in EXT_ORIGINS and not re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", origin):
+             return self._send(403, '{"ok": false, "err": "cross-origin POST rejected"}')
+         n = int(self.headers.get("Content-Length", 0) or 0)
+         raw = self.rfile.read(n).decode() if n else "{}"
