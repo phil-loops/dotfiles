@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Codex operating manual — working the way Phil works</title>
+<style>
+  :root {
+    --bg: #fdfcf9; --fg: #1c1c1c; --muted: #6b6b6b; --accent: #2a6f4e;
+    --card: #ffffff; --border: #e3e0d8; --code-bg: #f3f1ea; --warn-bg: #fdf3e7;
+    --warn-border: #e8b06a; --danger-bg: #fbeaea; --danger-border: #d98a8a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181a; --fg: #e8e6e1; --muted: #9a9a94; --accent: #7fc9a3;
+      --card: #1e2124; --border: #33373b; --code-bg: #24282c; --warn-bg: #2c2418;
+      --warn-border: #8a6a35; --danger-bg: #2e1d1d; --danger-border: #7a4444;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.6 -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+  h1 { font-size: 1.9rem; line-height: 1.25; margin: 0 0 .4rem; }
+  .sub { color: var(--muted); margin: 0 0 2.5rem; }
+  h2 { font-size: 1.3rem; margin: 3rem 0 .8rem; border-bottom: 1px solid var(--border); padding-bottom: .35rem; }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 .5rem; }
+  p, li { max-width: 72ch; }
+  code {
+    font: 0.86em ui-monospace, "SF Mono", Menlo, monospace;
+    background: var(--code-bg); padding: .12em .35em; border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: .9rem 1.1rem; overflow-x: auto; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .notice {
+    border: 1px solid var(--warn-border); background: var(--warn-bg);
+    border-radius: 8px; padding: .8rem 1.1rem; margin: 1rem 0;
+  }
+  .danger {
+    border: 1px solid var(--danger-border); background: var(--danger-bg);
+    border-radius: 8px; padding: .8rem 1.1rem; margin: 1rem 0;
+  }
+  .notice b, .danger b { display: block; margin-bottom: .2rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }
+  th, td { border: 1px solid var(--border); padding: .5rem .7rem; text-align: left; vertical-align: top; }
+  th { background: var(--code-bg); }
+  .toc { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.4rem; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .tablewrap { overflow-x: auto; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Codex operating manual</h1>
+<p class="sub">How to operate the way Phil's sessions have been running for the past weeks —
+what's expected, what Codex is missing out of the box, and sketches for closing each gap.</p>
+
+<div class="toc">
+  <b>Contents</b>
+  <ol>
+    <li><a href="#gaps">What Codex is missing out of the box</a></li>
+    <li><a href="#guardrails">Non-negotiable guardrails</a></li>
+    <li><a href="#forest">The forest workflow (branches as a DAG)</a></li>
+    <li><a href="#code">Code standards in the loops repo</a></li>
+    <li><a href="#tooling">Tooling map</a></li>
+    <li><a href="#sketches">Sketches: wiring Codex up to all of this</a></li>
+  </ol>
+</div>
+
+<h2 id="gaps">1. What Codex is missing out of the box</h2>
+<p>The Claude setup here is not vanilla — weeks of conventions live in three places Codex
+doesn't read automatically:</p>
+<ul>
+  <li><b>Global instructions</b> — <code>~/.claude/CLAUDE.md</code> holds the operating rules
+      (forest workflow, comment policy, push policy, dotfiles safety). Codex reads
+      <code>AGENTS.md</code> files instead, and it has none yet.</li>
+  <li><b>Persistent memory</b> — <code>~/.claude/projects/-Users-philbrockman-coding-loops/memory/</code>
+      is a directory of one-fact-per-file markdown notes indexed by <code>MEMORY.md</code>.
+      It records active projects, known bugs, feedback, and hard-won reference facts
+      (e.g. "never parallel count() in ClickHouse"). Codex starts every session amnesiac.</li>
+  <li><b>The forest metadata convention</b> — stacked branches are described entirely in
+      plain git config (<code>stack-branch.*</code>, <code>stack-project.*</code>, branch
+      descriptions). No tool sets these for you; the agent maintains them by hand as part of
+      every branch operation. Codex doesn't know these keys exist.</li>
+  <li><b>Session coordination</b> — multiple agent sessions run concurrently on this machine.
+      They avoid collisions via lanes (<code>own</code> + <code>~/.dotfiles/OWNERS</code>),
+      a patch protocol for contested files, and <code>claude-say</code> for messaging.
+      Codex knows none of this and will happily clobber a live file.</li>
+</ul>
+
+<h2 id="guardrails">2. Non-negotiable guardrails</h2>
+
+<div class="danger">
+  <b>Never push to origin. Never open PRs on origin.</b>
+  In the loops repo, <code>origin</code> (Loops-so/loops) is read-only for agents. Push
+  branches and open PRs only on <code>phil-loops</code> (Phil's fork) — and even then, Phil
+  usually does the pushing and PR-opening himself. When in doubt: commit locally, stop,
+  and tell Phil what's ready.
+</div>
+
+<div class="danger">
+  <b>Never amend, never rewrite shared history, never force-push.</b>
+  Always create new commits — PRs are squash-merged so local history doesn't matter.
+  Never add Co-Authored-By lines. A cosmetically wrong commit message on a pushed branch
+  stays wrong; rewriting it clobbers other sessions.
+</div>
+
+<div class="danger">
+  <b>In ~/.dotfiles: never <code>git add -A</code>, never <code>zsource</code>.</b>
+  Phil often has concurrent uncommitted work there. Run <code>git status</code> first,
+  stage explicit paths only, then commit and push. Before editing any dotfiles file, run
+  <code>own who &lt;path&gt;</code> — if another lane owns it (especially ⚠ ACTIVE), author
+  in a throwaway worktree, capture a <code>.patch</code>, and land with
+  <code>git apply --3way</code>.
+</div>
+
+<div class="notice">
+  <b>Comments default to zero.</b>
+  Names and types carry intent. A comment must be (a) preventing a wrong change,
+  (b) unrecoverable from the code, and (c) one line — fail any bar, delete it.
+  Most diffs should add no comments at all; narration ("fetch users", "so that…") is banned.
+</div>
+
+<div class="notice">
+  <b>Heavy typechecks go through the queue.</b>
+  Full typecheck is <code>tsc-turn npx tsc --project tsconfig.node.json --noEmit</code>
+  (that exact command is what CI runs). <code>tsc-turn</code> caps the machine at 2
+  concurrent heavy compiles — with several agent sessions live, bypassing it flattens
+  the machine. Don't use <code>tsgo</code> in this repo; oxlint/oxfmt are not typecheckers.
+</div>
+
+<div class="notice">
+  <b>The forest viewer (:62333) has mutating endpoints.</b>
+  <code>POST /checkout</code>, <code>/squash</code>, <code>/restack</code> etc. rewrite
+  history or move the main working tree's HEAD. Never probe them with a real branch name;
+  use a nonexistent one (<code>__probe__</code>) and expect 400/404. Never hand-write the
+  <code>gates-green-tree</code> config key — that forges a green CI verdict.
+</div>
+
+<h2 id="forest">3. The forest workflow (branches as a DAG)</h2>
+<p>Work ships as a <b>forest</b> of small stacked PRs, not fat branches. The mental model:
+branches form a DAG; each has one git <code>parent</code> (its rebase base) and optionally
+<code>requires</code> (fan-in deps it carries as cherry-picks). Every PR merges into
+<code>main</code>, squash-merged, history always linear — never a merge commit.</p>
+
+<h3>The unit of work</h3>
+<ul>
+  <li>One branch = one reviewable capability that compiles on its own, named with one verb
+      (<code>add X</code>, <code>emit X</code>, <code>use X in Y</code>).</li>
+  <li><b>Independent capabilities fork off main as siblings</b> — never chained into a false
+      line just to make the graph linear. Chain only on a real compile/semantic dependency.</li>
+  <li>An integrator that needs several bases records them as <code>requires</code> (fan-in)
+      and carries their commits — metadata over linear history, not merges.</li>
+  <li><b>The one-dep test:</b> needing exactly ONE other branch's content (compile/build/
+      runtime) is a chain — set <code>parent = &lt;dep&gt;</code>. <code>requires</code> is
+      reserved for converging <b>two or more</b> independent bases; a single
+      <code>requires</code> on a main-rooted branch is a mis-encoded chain and makes its
+      review diff re-review the dep.</li>
+  <li>Order bottom-up: schema → queries → models → wiring → cleanup. Tests co-locate with
+      the code they test. Prefer 3 × 80-line PRs over 1 × 240-line PR.</li>
+</ul>
+
+<h3>The metadata (hand-maintained git config — the viewer only reads it)</h3>
+<pre><code># the rebase base (set at creation, update on every reparent)
+git config stack-branch.&lt;name&gt;.parent &lt;parent&gt;
+
+# fan-in deps (multivar)
+git config --add stack-branch.&lt;name&gt;.requires &lt;dep&gt;
+
+# forest membership (both directions; the project list ROTS on rename/delete — prune by hand)
+git config stack-branch.&lt;name&gt;.project &lt;project&gt;
+git config --add stack-project.&lt;project&gt;.branch &lt;name&gt;
+
+# one-line purpose, plain language, set THE MOMENT the branch exists — never ask, just do it
+git config branch.&lt;name&gt;.description "&lt;what this branch does&gt;"</code></pre>
+<p>A freshly created branch with no description is an unfinished operation. Any ancestry
+change (reparent, rebase-onto, rename) invalidates descriptions — refreshing them is part
+of the operation, not a follow-up.</p>
+
+<h3>Restacking after a merge (raw git, no wrapper)</h3>
+<pre><code>git fetch origin main && git branch -f main origin/main   # 1. refresh main
+# 2. snapshot every member's SHA BEFORE moving anything
+# 3. bottom-up: roots onto main, children onto their MOVED parent
+git rebase --onto &lt;new-parent&gt; &lt;old-parent-sha&gt; &lt;branch&gt;</code></pre>
+<p>After any rebase that empties a branch (diff vs parent is empty / work already in main):
+<b>contract the graph</b> — delete the branch, rewire its children's <code>parent</code> to
+the dropped node's parent, migrate all four config keys. Never leave a zero-diff node and
+never just report "the branch is empty". Squash-merged commits won't match by SHA — use
+<code>git diff main...branch</code> / <code>git cherry</code>, never rev-list, to decide
+mergedness. Resolve conflicts in the rebase yourself; a real overlapping-logic conflict
+means stop and ask Phil.</p>
+
+<h2 id="code">4. Code standards in the loops repo</h2>
+<ul>
+  <li><b>Layering: queries → models → wiring.</b> Queries are one-DB-call wrappers, no logic,
+      no auth. Models hold business logic with dependency injection. tRPC routers / API
+      routes / job handlers are wiring — they call models, never queries directly. Anything
+      touching multiple tables, conditionals, or auth belongs in models.</li>
+  <li><b>Files kebab-case</b> (<code>goal-contact-window.ts</code>); query imports as full
+      namespace imports (<code>import * as GoalContactWindowQueries from …</code>, no
+      abbreviations).</li>
+  <li><b>Inline object-parameter types</b> in signatures —
+      <code>function update(input: { id: string; name?: string })</code> — no standalone
+      <code>type UpdateInput = …</code> aliases for input shapes.</li>
+  <li><b>Testing conventions:</b> <code>createX</code> helpers live on query branches (real
+      DB), <code>fakeX</code> on model branches (DI + <code>t.mock.fn()</code>). No
+      pre-emptive helpers.</li>
+  <li><b>Taskfile over raw commands:</b> <code>task lint</code>, <code>task ci:run</code>,
+      <code>task clickhouse:migrate</code> — run <code>task --list</code> before reinventing.</li>
+  <li><b>Script runner:</b> one-off scripts go in <code>script-runner/</code>, registered in
+      its <code>index.ts</code>, DRY_RUN=true by default.</li>
+  <li><b>Restraint:</b> simple over generic, minimal diffs, no churn for purity, migrations
+      carry zero behavior change (offer cleanups as separate branches).</li>
+</ul>
+
+<h2 id="tooling">5. Tooling map</h2>
+<div class="tablewrap">
+<table>
+  <tr><th>Tool</th><th>What it is</th><th>Codex needs to know</th></tr>
+  <tr><td><code>loops stack web</code></td><td>Forest viewer on :62333 — Phil's primary review surface. Reads git config live.</td><td>Keep the config keys correct; the viewer just renders them. Bouncing the server is safe (crash-only state).</td></tr>
+  <tr><td><code>tsc-turn</code></td><td>Machine-wide compile queue (2 slots), in <code>~/.dotfiles/scripts/</code>.</td><td>Route every full typecheck/build through it.</td></tr>
+  <tr><td><code>own</code> / <code>OWNERS</code></td><td>Per-lane file ownership for concurrent sessions in ~/.dotfiles.</td><td>Claim a lane before dotfiles work; patch-protocol for other lanes' files.</td></tr>
+  <tr><td><code>claude-say</code></td><td>The only session-to-session channel — types into the target tmux pane and sends.</td><td>Use it to announce cross-lane work; don't draft, send.</td></tr>
+  <tr><td><code>wt</code></td><td>fzf worktree picker + full cumulative diff vs main.</td><td>Many sibling worktrees exist (<code>loops-wt-*</code>); a branch checked out elsewhere can't be rebased from here — use its worktree.</td></tr>
+  <tr><td><code>task</code></td><td>go-task runner in the loops repo.</td><td>Always prefer it over raw npm/npx.</td></tr>
+  <tr><td>Script placement</td><td>—</td><td>Never <code>~/bin</code>; shell functions in <code>~/.dotfiles/.zshrc</code>, scripts in <code>~/.dotfiles/scripts/</code>.</td></tr>
+</table>
+</div>
+
+<h2 id="sketches">6. Sketches: wiring Codex up to all of this</h2>
+
+<h3>a. Instructions — port CLAUDE.md into AGENTS.md</h3>
+<p>Codex merges instruction files top-down: <code>~/.codex/AGENTS.md</code> (global), then
+<code>AGENTS.md</code> at each repo root and subdirectory. Sketch:</p>
+<pre><code># global rules (guardrails, dotfiles safety, forest workflow)
+cp ~/.claude/CLAUDE.md ~/.codex/AGENTS.md   # then edit: strip Claude-tool specifics
+
+# repo-level rules (layering, Taskfile, typecheck command) → loops repo root AGENTS.md
+# (keep it out of origin — either .git/info/exclude it or park it in the fork)</code></pre>
+<p>Strip anything that references Claude-only machinery (Skill/agents/artifact tooling);
+keep every guardrail, the forest sections, and the code standards verbatim.</p>
+
+<h3>b. Memory — reuse the existing memory directory read-only</h3>
+<p>The memory format is plain markdown with frontmatter; nothing about it is
+Claude-specific. Sketch: add to the global AGENTS.md —</p>
+<pre><code>At session start, read
+/Users/philbrockman/.claude/projects/-Users-philbrockman-coding-loops/memory/MEMORY.md
+and open any linked file relevant to the task. Treat it as background context that may
+be stale — verify files/flags it names still exist. If you learn a durable fact, append
+a new one-fact file in the same format and add an index line.</code></pre>
+<p>Sharing one memory store beats forking it — but if write-contention with Claude sessions
+becomes an issue, give Codex its own <code>memory-codex/</code> next door and cross-link.</p>
+
+<h3>c. Forest awareness — teach the config schema, not a tool</h3>
+<p>There is deliberately no wrapper to learn: branch creation, reparenting, restacking are
+raw git plus the four config keys in §3. The definition-of-done for any branch operation is:
+<code>parent</code> set, <code>project</code> tagged both directions, description written,
+and (after ancestry edits) descriptions of every touched branch re-verified. Put that
+checklist in AGENTS.md verbatim — it's the single highest-leverage paste.</p>
+
+<h3>d. Approvals/sandbox — match the trust model</h3>
+<p>Codex's approval modes map cleanly: workspace-write sandbox with on-request approval
+approximates how Claude sessions run here. Never grant it network-unrestricted git push;
+the "never push origin" rule should be enforced by habit <i>and</i> by not approving
+pushes to origin. Consider a <code>pre-push</code> hook in the loops clone that blocks
+non-fork remotes as a belt-and-braces backstop.</p>
+
+<h3>e. Session coordination — register presence, respect lanes</h3>
+<p>Codex sessions should follow the same protocol Claude sessions do: claim a lane before
+dotfiles work (<code>own claim &lt;lane&gt;</code>), check <code>own who</code> before edits,
+use the worktree→patch→<code>apply --3way</code> protocol for contested files, and message
+other sessions via <code>claude-say</code> (it targets tmux panes; a Codex pane can receive
+too). The warm-pool tmux sessions (<code>cw-pool-*</code>) and their worktrees are
+pre-booted Claude sessions — never treat them as strays or reap them.</p>
+
+<h3>f. What "done" means here</h3>
+<ul>
+  <li>Change compiles: <code>tsc-turn npx tsc --project tsconfig.node.json --noEmit</code>
+      clean (filter to touched files if the worktree has stale generated tRPC types).</li>
+  <li>Forest config complete (§6c checklist) and descriptions accurate.</li>
+  <li>Committed locally in clean, self-contained commits — <b>not pushed</b>.</li>
+  <li>A short plain-language report to Phil: what's ready, in which worktree, what the
+      merge order is. Phil pushes and opens PRs.</li>
+</ul>
+
+</main>
+</body>
+</html>
