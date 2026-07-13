@@ -32,6 +32,7 @@ body {
 .dot.fresh { background: #3fb950; color: #3fb950; }
 .dot.stale { background: #d29922; color: #d29922; }
 .dot.offline { background: #6e7681; color: #6e7681; box-shadow: none; }
+.dot.unbound { background: #d29922; color: #d29922; }
 
 .lines { display: flex; flex-direction: column; min-width: 0; }
 
@@ -69,6 +70,8 @@ body {
 .btn.primary:hover { background: #2ea043; }
 .btn.launch { background: #1f6feb; border-color: #388bfd; color: #fff; font-weight: 600; }
 .btn.launch:hover { background: #388bfd; }
+.btn.bind { background: #9e6a03; border-color: #d29922; color: #fff; font-weight: 600; }
+.btn.bind:hover { background: #bb8009; }
 .btn:disabled { opacity: 0.6; cursor: default; }
 .btn[hidden] { display: none; }
 
