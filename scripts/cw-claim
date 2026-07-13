@@ -1,0 +1,46 @@
+#!/bin/zsh
+# cw-claim <window_id> <pane_current_path> — the tmux Ctrl-a C target.
+#
+# If cw-warm has a pre-booted claude session for this repo, adopt its pane into
+# the current window (join-pane: instant, claude already finished booting),
+# fast-forward the slot's branch onto main if main moved since warming, and
+# re-warm in the background. Otherwise fall back to the cold path (split +
+# `cw`), which also kicks the warmer so the NEXT launch is instant.
+emulate -L zsh; set -uo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+win="${1:?window_id}"; cur="${2:?pane_current_path}"
+
+cold() {
+  tmux split-window -h -t "$win" -c "$cur"
+  tmux send-keys -t "$win" "cw" Enter
+  tmux select-layout -t "$win" even-horizontal
+  ( "$HOME/.dotfiles/scripts/cw-warm" "$cur" >/dev/null 2>&1 & )
+  exit 0
+}
+
+main_top=$(git -C "$cur" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}') || true
+[[ -n "${main_top:-}" ]] || cold
+repo=$(basename "$main_top")
+sess="cw-pool-$repo"
+
+tmux has-session -t "=$sess" 2>/dev/null || cold
+IFS='|' read -r pane pane_pid wt <<< "$(tmux list-panes -s -t "=$sess" -F '#{pane_id}|#{pane_pid}|#{pane_current_path}' | head -1)"
+# tmux wraps the pool command in `zsh -c`, so pane_current_command is useless; claude is
+# alive iff the pane process still has it as a child (the exec'd fallback shell has none)
+if [[ -z "${pane:-}" ]] || ! ps -o command= -p "$(pgrep -P "${pane_pid:-0}" | tr '\n' ',' | sed 's/,$//')" 2>/dev/null | grep -q claude; then
+  tmux kill-session -t "=$sess" 2>/dev/null || true   # claude died in the pool; cw-warm reaps the tree
+  cold
+fi
+
+tmux join-pane -h -s "$pane" -t "$win"
+tmux select-layout -t "$win" even-horizontal
+rm -f "$HOME/.cache/cw-pool/$repo"
+
+# the slot forked off main at warm time; its tree is clean, so this is a no-op or a fast-forward
+if [[ -d "${wt:-}" ]]; then
+  mainbranch=$(git -C "$main_top" config stack.main-branch 2>/dev/null || echo main)
+  git -C "$wt" merge --ff-only "$mainbranch" >/dev/null 2>&1 || true
+fi
+
+( "$HOME/.dotfiles/scripts/cw-warm" "$main_top" >/dev/null 2>&1 & )

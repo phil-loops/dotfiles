@@ -1,0 +1,53 @@
+#!/bin/zsh
+# cw-warm [repo-path] — keep ONE pre-booted claude ready to claim (see cw-claim).
+#
+# Prepares a normal cw worktree (`cw -n wt-<HHMMSS>` — identical to what a cold
+# `cw` would make, so a claimed slot needs no rename) and boots claude inside a
+# detached tmux session `cw-pool-<repo>`. cw-claim adopts that pane into the
+# user's window via join-pane, which is instant because claude finished its
+# startup (settings, memory, MCP handshakes) back when this ran.
+#
+# Idempotent + single-flight: exits quietly if a slot is already warm/booting.
+# If the previous slot's claude died unclaimed (its tmux session is gone), the
+# untouched worktree is reaped before warming a fresh one.
+emulate -L zsh; set -uo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+repo_dir="${1:-$PWD}"
+main_top=$(git -C "$repo_dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}') || true
+[[ -n "${main_top:-}" ]] || { echo "cw-warm: not in a git repo" >&2; exit 1; }
+repo=$(basename "$main_top")
+sess="cw-pool-$repo"
+state_dir="$HOME/.cache/cw-pool"; mkdir -p "$state_dir"
+state="$state_dir/$repo"
+
+lock="$state_dir/$repo.lock"
+mkdir "$lock" 2>/dev/null || exit 0
+trap 'rmdir "$lock" 2>/dev/null' EXIT
+
+tmux has-session -t "=$sess" 2>/dev/null && exit 0
+
+# previous slot died unclaimed → reap, but only if provably untouched
+if [[ -f "$state" ]]; then
+  old=$(cat "$state")
+  if [[ -d "$old" && -z "$(git -C "$old" status --porcelain 2>/dev/null)" ]]; then
+    br=$(git -C "$old" branch --show-current 2>/dev/null) || true
+    mainbranch=$(git -C "$main_top" config stack.main-branch 2>/dev/null || echo main)
+    if [[ -n "${br:-}" && -z "$(git -C "$main_top" rev-list "$mainbranch..$br" 2>/dev/null)" ]]; then
+      git -C "$main_top" worktree remove --force "$old" 2>/dev/null || true
+      git -C "$main_top" branch -D "$br" 2>/dev/null || true
+      git -C "$main_top" config --remove-section "stack-branch.$br" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$state"
+fi
+
+# cw -n's stdout mixes in git's "HEAD is now at …" line; the worktree path is the only line starting with /
+wt=$(cd "$main_top" && "$HOME/.dotfiles/scripts/cw" -n "wt-$(date +%H%M%S)" | grep -m1 '^/')
+[[ -d "${wt:-}" ]] || { echo "cw-warm: worktree prep failed" >&2; exit 1; }
+echo "$wt" > "$state"
+
+# `exec zsh` after claude so a post-claim exit leaves a shell, and a pool pane
+# whose current command is zsh unambiguously means "claude died here"
+tmux new-session -d -s "$sess" -c "$wt" \
+  "$HOME/.local/bin/claude --dangerously-skip-permissions; exec /bin/zsh -l"
