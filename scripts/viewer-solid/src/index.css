@@ -1010,16 +1010,19 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .c-subject { color: var(--ink); flex: 1; }
 .c-meta { color: var(--ink-faint); font-size: 10.5px; flex: none; }
 
-/* ── purpose tooltip: a margin gloss floated beside a hovered spine node ── */
+/* ── purpose caption: the hovered map node's full thesis, pinned to the bottom edge
+   so it never occludes the graph ── */
 .purpose-tip {
-  position: fixed; z-index: 60; max-width: 286px; pointer-events: none;
+  position: fixed; z-index: 60; left: 50%; bottom: 16px; transform: translateX(-50%);
+  max-width: min(680px, calc(100vw - 48px)); pointer-events: none;
   background: var(--vellum-raise); color: var(--ink-dim);
   border: 1px solid var(--rule); border-left: 2px solid var(--gold-deep);
-  border-radius: 9px; padding: 10px 13px;
+  border-radius: 9px; padding: 9px 14px;
   font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
   box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
   animation: tip-in .12s ease-out;
 }
+.purpose-tip b { color: var(--ink); font-weight: 500; }
 @keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .purpose-tip { animation: none; } }
 /* forest hover card: each branch in the forest + its one-line purpose */

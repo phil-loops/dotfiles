@@ -321,12 +321,13 @@ export function ForestOverview() {
   const needsAttention = () =>
     Object.values(health.data || {}).filter((v) => v.drifted || v.merged).length;
 
-  // hover a node in the map → float its branch purpose (cached; guard the async gap so a
-  // pointer that left before /purpose resolved doesn't pop a stale tip).
+  // hover a node in the map → gloss its full purpose in a caption strip pinned to the
+  // bottom edge, never floating over the graph (cached; guard the async gap so a pointer
+  // that left before /purpose resolved doesn't pop a stale tip).
   const purposeCache = new Map<string, Purpose>();
-  const [tip, setTip] = createSignal<{ text: string; x: number; y: number } | null>(null);
+  const [tip, setTip] = createSignal<{ branch: string; text: string } | null>(null);
   let tipBranch: string | null = null;
-  const showTip = async (branch: string, el: HTMLElement) => {
+  const showTip = async (branch: string) => {
     tipBranch = branch;
     let p = purposeCache.get(branch);
     if (!p) {
@@ -335,8 +336,7 @@ export function ForestOverview() {
       purposeCache.set(branch, p);
     }
     if (tipBranch !== branch || !p.thesis) return;
-    const r = el.getBoundingClientRect();
-    setTip({ text: p.thesis, x: r.right + 12, y: r.top });
+    setTip({ branch, text: p.thesis });
   };
   const hideTip = () => { tipBranch = null; setTip(null); };
   const [chatPick, setChatPick] = createSignal(false);
@@ -425,8 +425,8 @@ export function ForestOverview() {
       </Show>
       <Show when={tip()}>
         {(t) => (
-          <div class="purpose-tip" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
-            {t().text}
+          <div class="purpose-tip">
+            <b>{leaf(t().branch)}</b> — {t().text}
           </div>
         )}
       </Show>

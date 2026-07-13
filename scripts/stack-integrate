@@ -5,10 +5,17 @@
 #
 # Usage: loops stack integrate <project>            # build, print ref name
 #        loops stack integrate <project> --check    # exit 0 if clean, 1 if conflicts
+#        loops stack integrate <project> --worktree # build + check out into a playground worktree, print its path
 #        loops stack integrate --all                # build for every project
 #
 # Ref name: refs/stack/<project>-integration  (under refs/stack/, not refs/heads/
 # — invisible to `git branch`, ephemeral, never pushed). Refreshed on every call.
+#
+# Leaves = the DAG's tips over BOTH edge kinds: a member is not a leaf if another
+# member's `parent` is it, OR if another member `requires` (carries) it — the
+# carried copy already rides inside the requiring branch's history, adapted to
+# that context, so merging the carried branch's own tip too would conflict with
+# its adapted copy by construction.
 #
 # On conflict, exits 1 and prints which leaves conflict. Caller can then review
 # leaves individually instead.
@@ -17,16 +24,40 @@ set -e
 
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 CHECK_ONLY=0
+WORKTREE=0
 ALL=0
 PROJECT=""
 for arg in "$@"; do
   case "$arg" in
     --check) CHECK_ONLY=1 ;;
+    --worktree) WORKTREE=1 ;;
     --all) ALL=1 ;;
     --*) echo "unknown flag: $arg" >&2; exit 2 ;;
     *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
   esac
 done
+
+# Check the integration ref out into a persistent playground worktree (detached
+# HEAD, sibling of the main repo: <repo>-integ-<project>) and print its path.
+# Refreshed on every call; a dirty playground is left untouched so experiments
+# survive a rebuild.
+materialize_worktree() {
+  local project="$1" ref="$2"
+  local sha=$(git rev-parse "$ref")
+  local common=$(git rev-parse --path-format=absolute --git-common-dir)
+  local main_root=$(dirname "$common")
+  local wt_path="$(dirname "$main_root")/$(basename "$main_root")-integ-${project}"
+  if git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
+    if [[ -n $(git -C "$wt_path" status --porcelain 2>/dev/null) ]]; then
+      echo "playground has local changes — left as-is (not refreshed to $sha)" >&2
+    elif [[ $(git -C "$wt_path" rev-parse HEAD) != "$sha" ]]; then
+      git -C "$wt_path" checkout --detach "$sha" >/dev/null 2>&1
+    fi
+  else
+    git worktree add --detach "$wt_path" "$sha" >/dev/null 2>&1
+  fi
+  echo "$wt_path"
+}
 
 build_integration() {
   local project="$1"
@@ -46,7 +77,17 @@ build_integration() {
   local -A is_member
   for m in "${members[@]}"; do is_member[$m]=1; done
 
-  # Leaves = project members with no project-member child.
+  # Branches carried by another member via `requires` — their content already
+  # rides inside the requiring branch's history, so they are covered, not leaves.
+  local -A is_carried
+  local r
+  for m in "${members[@]}"; do
+    while IFS= read -r r; do
+      [[ -n "$r" ]] && is_carried[$r]=1
+    done < <(git config --get-all "stack-branch.${m}.requires" 2>/dev/null || true)
+  done
+
+  # Leaves = project members with no project-member child and no carrier.
   local -a leaves
   for m in "${members[@]}"; do
     local has_child=0
@@ -55,7 +96,7 @@ build_integration() {
       local op=$(git config "stack-branch.${other}.parent" 2>/dev/null || true)
       if [[ "$op" == "$m" ]]; then has_child=1; break; fi
     done
-    (( has_child == 0 )) && leaves+=("$m")
+    (( has_child == 0 )) && [[ -z "${is_carried[$m]:-}" ]] && leaves+=("$m")
   done
 
   if (( ${#leaves[@]} == 0 )); then
@@ -69,6 +110,7 @@ build_integration() {
   if (( ${#leaves[@]} == 1 )); then
     git update-ref "$ref" "refs/heads/${leaves[1]}"
     if (( CHECK_ONLY )); then return 0; fi
+    if (( WORKTREE )); then materialize_worktree "$project" "$ref"; return 0; fi
     echo "$ref"
     return 0
   fi
@@ -103,7 +145,7 @@ build_integration() {
           fi
         done
       done
-      echo "Resolve by linearizing the conflicting leaves (rebase one onto the other), or review them separately."
+      echo "Resolve by linearizing the conflicting leaves (rebase one onto the other), carrying one into the other (requires), or review them separately."
     } >&2
 
     git worktree remove --force "$tmp_wt" >/dev/null 2>&1 || true
@@ -116,6 +158,7 @@ build_integration() {
   git worktree remove --force "$tmp_wt" >/dev/null 2>&1 || true
 
   if (( CHECK_ONLY )); then return 0; fi
+  if (( WORKTREE )); then materialize_worktree "$project" "$ref"; return 0; fi
   echo "$ref"
   return 0
 }

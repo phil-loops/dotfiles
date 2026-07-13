@@ -6,9 +6,9 @@
 // draws a resting edge: it rides as a ⤿ pill beside the node, and its arc materializes
 // only under the hover spotlight. Deterministic, no force relaxation, never jitters.
 //
-// Hover a node to SPOTLIGHT its dependency neighborhood: everything that flows IN
-// (its upstream blockers, gold) and OUT (its downstream dependents, ember) lights
-// up, requires arcs appear, and the rest dims away.
+// Hover a node to SPOTLIGHT its dependency neighborhood: everything upstream and
+// downstream stays lit while the rest dims away — one treatment, with the lit
+// edges' arrowheads carrying the direction.
 //
 // Fully self-contained (own class names + <style>): drops into App.tsx with one
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
@@ -48,7 +48,7 @@ export function ForestMap(props: {
   // page = the forest's landing hero (full-bleed, no backdrop, no close): the map IS the view
   // at /forests/<project>, not a rail beside a diff. docked = right-rail navigator in detail.
   page?: boolean;
-  onHoverNode?: (branch: string, el: HTMLElement) => void;
+  onHoverNode?: (branch: string) => void;
   onLeaveNode?: () => void;
   // the merged-ghost badge's contextual next step: drop this branch + rewire its children
   // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
@@ -165,11 +165,10 @@ export function ForestMap(props: {
     const h = hov();
     if (!h) return null;
     if (h === "main") {
-      const down = new Set(model().list.filter((n) => n.depth === 0).map((n) => n.id));
-      return { h, up: new Set<string>(), down, lit: new Set<string>(["main", ...down]) };
+      const roots = model().list.filter((n) => n.depth === 0).map((n) => n.id);
+      return { h, lit: new Set<string>(["main", ...roots]) };
     }
-    const up = upstreamOf(h), down = downstreamOf(h);
-    return { h, up, down, lit: new Set<string>([h, "main", ...up, ...down]) };
+    return { h, lit: new Set<string>([h, "main", ...upstreamOf(h), ...downstreamOf(h)]) };
   });
 
   // CHEAP dirty-conflict "dams". A node with uncommitted (tracked) working-tree
@@ -310,8 +309,6 @@ export function ForestMap(props: {
                     head: heads().has(n.id),
                     active: n.id === props.active(),
                     lit: !!spot() && spot()!.lit.has(n.id),
-                    up: !!spot() && spot()!.up.has(n.id),
-                    down: !!spot() && spot()!.down.has(n.id),
                     hov: hov() === n.id,
                     dam: dams().damSet.has(n.id),
                     conflict: dams().conflictSet.has(n.id),
@@ -325,12 +322,12 @@ export function ForestMap(props: {
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
                   onClick={() => props.onPick(isGhostId(n.id) ? "~integration" : n.id)}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={() => {
                     setHov(n.id);
                     // hover the ghost → run the integrate-preview badge once (clean/dirty); clicking
                     // it now SELECTS it — its diff is main..refs/stack/<project>-integration.
                     if (isGhostId(n.id) && !integ()[ghostProject(n.id)]) runIntegrate(n.id);
-                    else if (!isGhostId(n.id)) props.onHoverNode?.(n.id, e.currentTarget as unknown as HTMLElement);
+                    else if (!isGhostId(n.id)) props.onHoverNode?.(n.id);
                   }}
                   onMouseLeave={() => {
                     setHov(null);
@@ -554,13 +551,13 @@ const CSS = `
 .fm-node.conflict rect { stroke: var(--del); stroke-dasharray: 4 3; }
 
 /* spotlight: hovering a node dims the field and lights its dependency neighborhood.
+   Lit nodes keep their resting colors — no per-direction recolor (gold/ember already
+   mean blessed/kiln elsewhere); the lit edges' arrowheads carry the direction.
    !important beats the entrance animation's forwards-fill on opacity. */
 .fm-svg.focusing .fm-node { opacity: .16 !important; transition: opacity .14s; }
 .fm-svg.focusing .fm-edge { opacity: .05 !important; transition: opacity .14s; }
 .fm-svg.focusing .fm-node.lit, .fm-svg.focusing .fm-main.lit { opacity: 1 !important; }
-.fm-svg.focusing .fm-node.up rect { stroke: var(--gold-leaf); stroke-width: 1.8; filter: drop-shadow(0 0 8px var(--gold-wash)); }     /* flows IN  — blockers */
-.fm-svg.focusing .fm-node.down rect { stroke: var(--del); stroke-width: 1.8; filter: drop-shadow(0 0 8px var(--del)); }              /* flows OUT — dependents */
-.fm-svg.focusing .fm-node.hov rect { stroke: var(--ink); stroke-width: 2; filter: drop-shadow(0 0 10px var(--gold-wash)); }          /* the hovered node */
+.fm-svg.focusing .fm-node.hov rect { stroke: var(--ink); stroke-width: 2; filter: drop-shadow(0 0 10px var(--gold-wash)); }
 .fm-svg.focusing .fm-edge.lit { opacity: 1 !important; stroke: var(--gold-leaf) !important; stroke-width: 2.3;
   transition: opacity .14s, stroke .14s; }
 /* a frozen edge stays frozen even when the spotlight would otherwise light it */
