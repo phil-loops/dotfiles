@@ -1,6 +1,17 @@
 # Helix config — lives in ~/.dotfiles/helix, symlinked from ~/.config/helix
 # (same pattern as nvim).
 
+# Implicitly trust the loops worktrees and the hover+o scratch worktrees
+# (/tmp/stack-study via stack-open; macOS canonicalizes /tmp → /private/tmp).
+# Scratch worktrees get a fresh path per open, so without this every hover+o
+# re-prompts "Trust this workspace?".
+[editor.workspace-trust]
+trusted = [
+  "~/coding/loops*",
+  "/tmp/stack-study/*",
+  "/private/tmp/stack-study/*",
+]
+
 # space-v = the nvim :wc port (custom/wc.lua): write + commit JUST this file, then flip
 # back to the blessing viewer — the hover+o → edit → commit review loop. Custom message:
 # :w then :sh hx-wc %{buffer_name} your message
