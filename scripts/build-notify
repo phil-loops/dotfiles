@@ -13,6 +13,11 @@
 # notifies per sweep — older successes in the same pass are superseded (logged, seeded).
 # Failures still notify individually.
 #
+# v3 adds the staging sweep: my OPEN PRs whose body carries the Traffic Cop
+# "Tested in staging" checklist get a notification when their PR-branch image build
+# (matching the PR's current head) completes — with the ready-to-paste
+# `task release:staging VERSION=...` deploy command. Seeds silently on first v3 run.
+#
 #   build-notify                 one sweep (what launchd runs)
 #   BUILD_NOTIFY_REPO=...        override repo (default Loops-so/loops)
 #   BUILD_NOTIFY_MAX_AGE_H=...   notify horizon in hours (default 6)
@@ -26,6 +31,8 @@ seen="$statedir/notified"
 firstrun=0; [ -f "$seen" ] || { : > "$seen"; firstrun=1; }
 # v2 widened scope (PR-only → all main builds); migrate silently the first time we see the old file.
 grep -qx '#v2' "$seen" 2>/dev/null || firstrun=1
+# v3 added the staging sweep; its first pass seeds already-finished branch builds silently.
+v3first=0; grep -qx '#v3' "$seen" 2>/dev/null || v3first=1
 
 notify() {  # $1 title  $2 msg  $3 url
   "$HOME/.dotfiles/scripts/notify-journal" build-notify notified "$1" "$2" "$3" 2>/dev/null || true
@@ -102,5 +109,42 @@ while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event ur
   echo "$rid" >> "$seen"
 done <<< "$runs"
 
+# --- staging sweep: open PRs with the "Tested in staging" marker ---------------------
+# Notify when the build for the PR's CURRENT head completes — a new push makes a new run
+# (new run-id), so re-pushes re-notify naturally. Dedup shares $seen (run ids are global).
+stprs=$(gh pr list -R "$REPO" --author @me --state open \
+  --json number,headRefName,headRefOid,body \
+  -q '.[] | select(.body | test("tested in staging"; "i")) | [(.number|tostring),.headRefName,.headRefOid] | @tsv' 2>/dev/null || true)
+
+while IFS=$'\t' read -r prnum prbranch prsha; do
+  [ -n "$prnum" ] || continue
+  runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch "$prbranch" -L 15 \
+    --json databaseId,headSha,conclusion,status,number,attempt,createdAt,startedAt,updatedAt,url \
+    -q '.[] | select(.status=="completed") | [(.databaseId|tostring),.headSha,.conclusion,(.number|tostring),(.attempt|tostring),.createdAt,.startedAt,.updatedAt,.url] | @tsv' 2>/dev/null || true)
+  [ -n "$runs" ] || continue
+  # newest completed run on the PR's current head (no early awk exit → SIGPIPE-safe)
+  line=$(printf '%s\n' "$runs" | awk -F'\t' -v s="$prsha" '$2==s && !f{print; f=1}')
+  [ -n "$line" ] || continue
+  IFS=$'\t' read -r rid sha concl runnum attempt createdAt startedAt updatedAt url <<< "$line"
+  grep -qx "$rid" "$seen" && continue
+  if [ "$firstrun" = "1" ] || [ "$v3first" = "1" ]; then echo "$rid" >> "$seen"; continue; fi
+  end_s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updatedAt" +%s 2>/dev/null || echo 0)
+  if [ "$end_s" -gt 0 ] && [ $(( now_s - end_s )) -gt $(( MAX_AGE_H * 3600 )) ]; then
+    echo "build-notify: · PR #$prnum staging build finished >${MAX_AGE_H}h ago — seeded silently"
+    journal_silent silent-age "PR #$prnum staging build" "${concl:-?} finished >${MAX_AGE_H}h ago" "$url"
+    echo "$rid" >> "$seen"; continue
+  fi
+  dur=$(dur_of "$startedAt" "$updatedAt")
+  d="${createdAt:0:10}"; version="${d//-/.}-$runnum-$attempt"
+  if [ "$concl" = "success" ]; then
+    notify "⇪ staging build ready" "PR #$prnum ($prbranch) built${dur:+ in $dur}. Deploy: task release:staging VERSION=$version" "$url"
+    echo "build-notify: ⇪ PR #$prnum staging build ready — task release:staging VERSION=$version"
+  else
+    notify "✗ staging build ${concl:-failed}" "PR #$prnum ($prbranch) ${concl:-failed}${dur:+ after $dur}. Re-run at the run page ↗" "$url"
+  fi
+  echo "$rid" >> "$seen"
+done <<< "$stprs"
+
 grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"
+grep -qx '#v3' "$seen" 2>/dev/null || echo '#v3' >> "$seen"
 tail -n 300 "$seen" > "$seen.tmp" 2>/dev/null && mv "$seen.tmp" "$seen"
