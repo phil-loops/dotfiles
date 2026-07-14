@@ -685,6 +685,10 @@ let graph = null;        // last workflow seen: { rootNodeId, nodes: { id -> { t
 
 const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+// A JSON payload is read as a shape, not a paragraph — a box that shows four lines of an
+// eleven-line body hides the shape and makes you drag before you can read what you're sending.
+const autosize = (ta, max = 24) => { ta.rows = Math.min(Math.max(ta.value.split('\\n').length, 3), max); };
 // Spec descriptions are written for the docs site: backticked code, <br>, markdown links.
 const md = (s) => esc(s)
   .replace(/&lt;br&gt;/g, '<br>')
@@ -810,6 +814,7 @@ function urlLine(e) {
     const m = part.match(/^\\{([^}]+)\\}$/);
     if (!m) { wrap.appendChild(document.createTextNode(part)); continue; }
     const name = m[1];
+    if (isNodeField(name) && graph && nodeOrder().length) { wrap.appendChild(nodeSlot(name)); continue; }
     const input = el('<input class="slot" spellcheck="false" autocomplete="off" placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
     input.value = st.path[name] || '';
     const fit = () => {
@@ -822,6 +827,24 @@ function urlLine(e) {
     wrap.appendChild(input);
   }
   return wrap;
+}
+
+// Once the graph is known, the node slot is a closed set — so it picks, it doesn't type. A datalist
+// looked like a dropdown but filtered its options against whatever the slot already held, so a slot
+// reading "n3" offered only n3 and the trigger looked unreachable. A select cannot hide a node.
+function nodeSlot(name) {
+  const sel = el('<select class="slot" title="' + esc(name) + '"></select>');
+  const ids = nodeOrder();
+  if (!ids.includes(st.path[name])) st.path[name] = ids[0];
+  for (const id of ids) {
+    const opt = el('<option value="' + esc(id) + '">' + esc(nodeLabel(id)) + '</option>');
+    if (id === st.path[name]) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  sel.classList.add('filled');
+  sel.style.width = 'auto';
+  sel.onchange = () => { st.path[name] = sel.value; render(); };
+  return sel;
 }
 
 
@@ -891,7 +914,8 @@ function renderBody(rack, e) {
   if (st.tab === 'json') {
     const ta = el('<textarea id="raw" spellcheck="false"></textarea>');
     ta.value = st.raw || JSON.stringify(buildShape(shape, st.body), null, 2);
-    ta.oninput = () => { st.raw = ta.value; };
+    ta.oninput = () => { st.raw = ta.value; autosize(ta); };
+    autosize(ta, 36);
     rack.appendChild(ta);
     rack.appendChild(el('<p class="hint">Edited here, then switch back to <b>fields</b> — anything the schema does not name shows up as an unknown parameter.</p>'));
     return;
@@ -995,7 +1019,8 @@ function paramOn(f, shape, state, redraw) {
   } else if (f.type === 'object' || f.type === 'array') {
     const ta = el('<textarea spellcheck="false"></textarea>');
     ta.value = e.value;
-    ta.oninput = () => { e.value = ta.value; };
+    ta.oninput = () => { e.value = ta.value; autosize(ta); };
+    autosize(ta);
     v.appendChild(ta);
   } else {
     const i = el('<input spellcheck="false" autocomplete="off" data-k="' + esc(f.name) + '" />');
