@@ -456,6 +456,8 @@ class H(BaseHTTPRequestHandler):
             return chat.merge_subjects(self, raw)
         if self.path == "/integrate":        # ghost "feature" node → does the whole project land on main cleanly?
             return integrate.check(self, raw)
+        if self.path == "/integrate-here":   # …and put that integration in the MAIN checkout (detached)
+            return integrate.here(self, raw)
         self._send(404, "{}")
 
 
