@@ -1,0 +1,39 @@
+#!/bin/sh
+# Seed the forest plan into the commit message BEFORE it is written.
+#
+# The plan used to be bolted on afterwards (`stack-commit-body --apply`), which rewrites the
+# tip commit — and rewriting a tip moves the base its children forked from, so every child has
+# to be reseated. Seeding it here means the commit is born with its plan: nothing to rewrite,
+# nothing to reseat, and the text is in the editor where it can be edited like any other prose.
+#
+# $1 = path to the commit message file, $2 = source (message|template|merge|squash|commit|"")
+set -eu
+
+msg_file="$1"
+source="${2:-}"
+
+case "$source" in
+  merge | squash) exit 0 ;; # generated messages — not ours to touch
+esac
+
+branch=$(git symbolic-ref --short -q HEAD) || exit 0
+
+grep -q '^Part of ' "$msg_file" && exit 0 # already carries a plan
+
+section=$("$HOME/.dotfiles/scripts/stack-commit-body" "$branch" --section 2>/dev/null) || exit 0
+[ -n "$section" ] || exit 0
+
+# Insert the plan after the author's prose and above git's comment block, so the editor opens
+# with the subject line still empty and waiting.
+first_comment=$(grep -n '^#' "$msg_file" | head -1 | cut -d: -f1 || true)
+
+{
+  if [ -n "$first_comment" ]; then
+    head -n $((first_comment - 1)) "$msg_file"
+    printf '%s\n\n' "$section"
+    tail -n +"$first_comment" "$msg_file"
+  else
+    cat "$msg_file"
+    printf '\n%s\n' "$section"
+  fi
+} >"$msg_file.forest" && mv "$msg_file.forest" "$msg_file"
