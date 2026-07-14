@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Block a push to the SHARED repo when the branch adds TODOs.
+#
+# TODO markers are fine as local scaffolding — they're how we park a decision
+# while keeping types honest. This guard is the ratchet that stops that debt
+# from reaching the team's repo: finish the TODO, or push to your fork.
+#
+# Called from .git/hooks/pre-push with the hook's own args ("$@"):
+#   $1 = remote name   $2 = remote URL
+# Does NOT read stdin (stack-prepush-guard already consumed it).
+#
+# Bypass: TODO_GUARD=0 git push ...   (or git push --no-verify)
+set -uo pipefail
+
+remote_url="${2:-}"
+
+[ "${TODO_GUARD:-1}" = "0" ] && exit 0
+
+# Only guard the shared repo. Forks (phil-loops) and anything else push freely.
+case "$remote_url" in
+  *Loops-so/loops*) ;;
+  *) exit 0 ;;
+esac
+
+base=$(git merge-base HEAD origin/main 2>/dev/null) || exit 0
+[ -n "$base" ] || exit 0
+
+added=$(git diff -U0 --diff-filter=ACMR "$base...HEAD" 2>/dev/null | awk '
+  /^\+\+\+ b\// { file = substr($0, 7); next }
+  /^@@/ {
+    match($0, /\+[0-9]+/)
+    line = substr($0, RSTART + 1, RLENGTH - 1) + 0
+    next
+  }
+  /^\+/ {
+    if ($0 ~ /TODO/) printf "  %s:%d:%s\n", file, line, substr($0, 2)
+    line++
+  }
+')
+
+[ -z "$added" ] && exit 0
+
+count=$(printf '%s\n' "$added" | wc -l | tr -d ' ')
+echo "🚫 push blocked: this branch adds $count TODO$([ "$count" = 1 ] || echo s) and its destination is the shared repo."
+echo
+printf '%s\n' "$added" | cut -c1-140
+echo
+echo "   Resolve them, or push to your fork instead:  git push phil-loops HEAD"
+echo "   Deliberate exception:                        TODO_GUARD=0 git push …"
+exit 1

@@ -6,6 +6,9 @@ export PATH="$HOME/.volta/bin:$PATH"
 # Reads the ref lines git pipes in on stdin; the rest of this hook doesn't use stdin.
 "$HOME/.dotfiles/scripts/stack-prepush-guard" || exit 1
 
+# Block TODOs from reaching the shared repo (forks still push freely).
+"$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
+
 # Warn if branch is behind main
 behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
 if [ "$behind" -gt 0 ] 2>/dev/null; then
