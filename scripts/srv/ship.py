@@ -103,7 +103,14 @@ def ship(req, raw):
     if prd:
         return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — ship rebases, and pushed history is never rewritten"}))
 
-    ghosts = [b for b in members if sync._already_merged(b)]
+    # A ghost is exactly what the map's drop pill calls droppable: merged — GitHub-authoritative
+    # when the branch has a PR — AND contractable. The local exit-20 probe alone missed a node
+    # whose work had landed but whose branch was already restacked onto that landing, so ship
+    # walked past it reporting "already ready" while the dead node sat in the graph forever.
+    # Merged-ness is what keeps this off a branch you just forked (also empty, never merged).
+    pr_map = sync._pr_state_map()
+    health = {b: sync._node_health(b, pr_map.get(b)) for b in members}
+    ghosts = [b for b in members if health[b]["merged"] and health[b]["contractable"]]
     wts = _worktrees()
     squatters = [(p, b) for p, b in wts if b in members]
     dirty_squat = [p for p, b in squatters if b not in ghosts and _dirty(p)]
