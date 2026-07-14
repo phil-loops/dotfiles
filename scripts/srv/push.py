@@ -495,10 +495,11 @@ def prep_push(req, raw):
 
 
 def _forest_section(branch):
-    """The section the project writes about itself: where this change sits in the merge order,
-    a link to the whole feature assembled on the fork, and the forest as a Mermaid map (GitHub
-    renders it in the PR body, which a one-commit branch prefills from this message). Free —
-    every fact comes from git config. Silent when the branch is in no project."""
+    """The one line the project writes about itself: where this change sits in the merge order and
+    what it builds on. Free — every fact comes from git config. Silent outside a project.
+    The Mermaid map and the integration link deliberately do NOT go here: this repo has a PR
+    template, so GitHub prefills a PR body from the TEMPLATE and never from the commit message —
+    a diagram in a commit would reach git history and nothing else. `stack-pr-body` carries them."""
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-commit-body"), branch, "--section"])
     return r.stdout.strip() if r.returncode == 0 else ""
 
@@ -507,7 +508,11 @@ def _with_forest(body, branch):
     section = _forest_section(branch)
     if not section:
         return body
-    prose = body.split("-- forest --")[0].strip()
+    # regenerate: drop any previously generated line (and the old "-- forest --" fence)
+    prose = "\n".join(
+        line for line in body.split("-- forest --")[0].splitlines()
+        if not line.startswith("Part of ")
+    ).strip()
     return f"{prose}\n\n{section}" if prose else section
 
 

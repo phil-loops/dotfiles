@@ -78,7 +78,12 @@ SHAPE — exactly these parts, in this order:
 1. One plain sentence: what this PR does (the opening line; use the purpose below near-verbatim).
 2. "### Where it fits" — name the project/feature, what this builds on, what it pulls in via
    requires, and what it unblocks. Open the body with this (where it sits comes before the change).
-3. "### The change" — what the diff actually does, in plain language.
+3. "### The change" — what the diff actually does, in plain language. Follow the HOUSE STYLE this
+   repo's reviewers already read: group the work under short bold/plain sub-headings by concern
+   (e.g. "Mailing-list mutation response", "Tests"), each a few bullets, and END EACH GROUP with a
+   "- Related files: `path`, `path`" line naming the files that group touched. Give tests their own
+   group. Add an "Out of scope" group only when something a reviewer would expect is deliberately
+   left out.
 4. "### Sequencing" — ONLY include this heading if this branch builds on a sibling (a parent that
    is not main) or pulls in requires; state the merge-order plainly, following the CANONICAL MERGE
    ORDER below verbatim (do NOT invent your own order). OMIT the whole section for an independent
@@ -115,10 +120,20 @@ EOF
 
 resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
 [[ -n "$resp" ]] || resp=$'_(could not draft — is `claude` on PATH?)_'
+
+# Suggested TITLE — the house style carries the stack position (cf. api-review-changes/13).
+pos=$(print -r -- "$order_list" | awk -v n="$(print -r -- "$order_list" | grep -c .)" '/THIS PR/{print NR"/"n}')
+subject=$(git log -1 --format=%s "${parent}..${branch}")
+[[ -n "$project" && -n "$pos" ]] && printf 'Title: %s/%s — %s\n\n---\n\n' "$project" "${pos%%/*}" "${subject#*: }"
+
 printf '%s\n' "$resp"
 
-# The map itself is FREE (git config, no model) — the same section the push flow bakes into the
-# commit body, so a pasted PR body and a pushed commit tell the same story.
+# The map and the link are FREE (git config, no model). GitHub renders Mermaid in a PR body, and
+# this repo's PR template means nothing here arrives by prefill — paste it above the Traffic Cop
+# block. `stack-commit-body` keeps only the one-line position, so these two live here alone.
 if [[ -n "$project" ]]; then
-  printf '\n%s\n' "$("${0:A:h}/stack-commit-body" "$branch" --section | sed '1d')"
+  printf '\n### Where this sits in the forest\n\n%s\n' "$("${0:A:h}/stack-commit-body" "$branch" --section)"
+  url=$("${0:A:h}/stack-integ-publish" --url "$project" 2>/dev/null || true)
+  [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
+  printf '\n%s\n' "$("${0:A:h}/stack-forest-mermaid" "$branch" --fence)"
 fi

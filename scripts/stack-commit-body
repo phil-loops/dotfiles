@@ -1,16 +1,18 @@
 #!/bin/zsh
-# stack-commit-body — compose the default commit body for ONE branch of a forest: the author's
-# own prose, then the forest section the project generates for itself (where this change sits,
-# a hardlink to the whole feature assembled on the fork, and the forest as a Mermaid map).
-# FREE (no LLM) — every fact comes from git config. GitHub prefills a PR body from a single
-# commit's message, so this is what carries the change's place in the whole through to review.
+# stack-commit-body — compose the default commit body for ONE branch of a forest: the author's own
+# prose, then ONE generated line placing the change in the project (its position in the merge order
+# and what it builds on / pulls in). FREE (no LLM) — every fact comes from git config.
+#
+# Deliberately just one line. This repo has a PR template, so GitHub prefills a PR body from the
+# TEMPLATE, never from the commit message — a diagram here would reach git history and nothing else.
+# The Mermaid map and the integration link live in `stack-pr-body`, which you paste into the PR.
 #
 #   stack-commit-body <branch>            → full body on stdout (author prose preserved)
-#   stack-commit-body <branch> --section  → just the generated forest section
+#   stack-commit-body <branch> --section  → just the generated line
 #   stack-commit-body <branch> --apply    → rewrite the branch's unpushed tip commit to carry it
 #
-# Idempotent: an existing forest section is replaced, never stacked up. --apply refuses to touch a
-# commit that is already on a remote — shared history is never rewritten.
+# Idempotent: the generated line is replaced, never stacked up. --apply refuses to touch a commit
+# that is already on a remote — shared history is never rewritten.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
@@ -20,7 +22,8 @@ branch="${1:-}"
 section_only=0; [[ "${2:-}" == "--section" ]] && section_only=1
 apply=0; [[ "${2:-}" == "--apply" ]] && apply=1
 
-MARKER="-- forest --"
+# the generated line is its own marker — regenerating replaces any line that opens with it
+MARKER="Part of "
 
 project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
 [[ -n "$project" ]] || { echo "stack-commit-body: ${branch} is not in a project" >&2; exit 1; }
@@ -58,16 +61,7 @@ while read -r r; do [[ -n "$r" ]] && reqs+=("“$(desc_of "$r")”"); done \
 (( ${#reqs} )) && sits+=", and pulls in ${(j:, and :)reqs} (fan-in — merges first)"
 sits+="."
 
-# THE WHOLE, ASSEMBLED — the integration ref published to the fork (see stack-integ-publish).
-fork_url=$("$here/stack-integ-publish" --url "$project" 2>/dev/null || true)
-
-section="${MARKER}
-${sits}"
-[[ -n "$fork_url" ]] && section+="
-Whole feature assembled: ${fork_url}"
-section+="
-
-$("$here/stack-forest-mermaid" "$branch" --fence)"
+section="${sits}"
 
 if (( section_only )); then
   print -r -- "$section"
@@ -75,7 +69,11 @@ if (( section_only )); then
 fi
 
 # The author's prose is whatever precedes the marker in the current commit body — preserved as-is.
-prose=$(git log -1 --format=%b "$branch" | awk -v m="$MARKER" 'index($0, m)==1 {exit} {print}' | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')
+# "-- forest --" was an earlier form's fence; drop it so regenerating an old body doesn't keep it.
+prose=$(git log -1 --format=%b "$branch" \
+  | awk -v m="$MARKER" 'index($0, m)==1 {exit} {print}' \
+  | grep -vx -- "-- forest --" \
+  | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')
 
 body=""
 [[ -n "$prose" ]] && body+="${prose}"$'\n\n'
