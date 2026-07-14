@@ -590,6 +590,10 @@ button:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
 .pill[aria-pressed="true"] { background:color-mix(in srgb, var(--verb) 16%, transparent);
   color:var(--verb); border-color:var(--verb); }
 
+.node { cursor:pointer; }
+.node:hover { border-color:var(--edge-lit); }
+.node.picked { border-color:var(--verb); background:color-mix(in srgb, var(--verb) 10%, transparent); }
+
 .file { display:flex; align-items:center; gap:10px; margin:8px 0 2px; }
 .file label { cursor:pointer; }
 .file .fname { font:400 11px/1 var(--mono); color:var(--fg); }
@@ -762,6 +766,7 @@ function selectEndpoint(e, node, push = true) {
     raw: '',
   };
   render();
+  ensureGraph();
 }
 
 /* ---------- render ---------- */
@@ -814,6 +819,7 @@ function urlLine(e) {
     };
     fit();
     input.oninput = () => { st.path[name] = input.value; fit(); };
+    if (name === 'workflowId') input.onchange = () => ensureGraph();
     wrap.appendChild(input);
   }
   if (graph) {
@@ -1083,6 +1089,32 @@ function paramCustom(i, state, redraw) {
 
 /* ---------- the workflow you are operating on ---------- */
 
+// Knowing the workflowId is knowing the graph — every node field on the endpoint is about a node
+// of THAT workflow, so fetch it rather than make you GET the workflow first to fill the picker.
+let graphFetch = null;   // the workflowId we last went and got, so a 404 isn't asked for twice
+
+async function ensureGraph() {
+  const id = current?.pathParams?.some((p) => p.name === 'workflowId')
+    ? subst(st.path.workflowId || '')
+    : null;
+  if (!id || id === graphFetch || graph?.workflowId === id) return;
+  graphFetch = id;
+  const r = await fetch('/proxy', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      method: 'GET',
+      path: '/v1/workflows/' + encodeURIComponent(id),
+      base: document.getElementById('base').value,
+    }),
+  }).then((x) => x.json()).catch(() => null);
+  if (!r || r.status < 200 || r.status >= 300) return;
+  readGraph(r.body);
+  renderStore();
+  renderGraph();
+  render();
+}
+
 // Any response carrying an id -> node map is a workflow: remember its graph, so node ids
 // stop being placeholders you have to know and become the nodes that actually exist.
 function readGraph(body) {
@@ -1155,22 +1187,43 @@ function nodeSelect(f, e, state, redraw) {
   return wrap;
 }
 
+// Depth from the root along nextNodeIds: the branch a node sits on is the thing you are picking
+// between, so the list is indented by it rather than flattened into arrival order.
+function graphDepths() {
+  const depth = {};
+  const queue = graph.rootNodeId ? [[graph.rootNodeId, 0]] : [];
+  while (queue.length) {
+    const [id, d] = queue.shift();
+    if (!graph.nodes[id] || depth[id] !== undefined) continue;
+    depth[id] = d;
+    for (const next of graph.nodes[id].next) queue.push([next, d + 1]);
+  }
+  return depth;
+}
+
 function renderGraph() {
   const box = document.getElementById('nodes');
   if (!graph) {
-    box.innerHTML = '<p class="empty">GET a workflow and its nodes show up here — node-id fields then pick from the real graph instead of a placeholder.</p>';
+    box.innerHTML = '<p class="empty">Fill in a workflowId and its nodes show up here — node-id fields then pick from the real graph instead of a placeholder.</p>';
     return;
   }
   box.innerHTML = '';
+  const depth = graphDepths();
+  const picked = new Set(current.pathParams.filter((p) => isNodeField(p.name)).map((p) => st.path[p.name]));
   for (const id of nodeOrder()) {
     const n = graph.nodes[id];
     const root = id === graph.rootNodeId;
-    const row = el('<div class="var"><b>' + esc(n.typeName) + (root ? ' <span class="t req">root</span>' : '') + '</b><span class="val">' + esc(id) + '</span></div>');
+    const d = depth[id] ?? 0;
+    const fan = n.next.length > 1 ? ' <span class="t">' + n.next.length + ' ways</span>' : '';
+    const row = el('<div class="var node' + (picked.has(id) ? ' picked' : '') + '" style="padding-left:' + (8 + d * 12) + 'px">'
+      + '<b>' + esc(n.typeName) + (root ? ' <span class="t req">root</span>' : '') + fan + '</b>'
+      + '<span class="val">' + esc(id) + '</span></div>');
     row.onclick = () => {
-      for (const p of current.pathParams) if (p.name === 'nodeId') st.path[p.name] = id;
+      for (const p of current.pathParams) if (isNodeField(p.name)) st.path[p.name] = id;
       store.nodeId = id;
       renderStore();
       render();
+      renderGraph();
     };
     box.appendChild(row);
   }
