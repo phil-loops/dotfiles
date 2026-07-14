@@ -86,7 +86,12 @@ export function ForestMap(props: {
   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
   // the project's leaves on main in an ephemeral ref (read-only, never pushed) — does the whole
   // thing land clean? Result keyed by project, shown as a badge on the ghost.
-  type Integ = { loading?: boolean; clean?: boolean; detail?: string };
+  type Playground = { path?: string; exists?: boolean; dirty?: boolean; fresh?: boolean };
+  type Integ = {
+    loading?: boolean; opening?: boolean; clean?: boolean; detail?: string;
+    playground?: Playground; cdCopied?: boolean; armReset?: boolean;
+    hereBusy?: boolean; hereDone?: boolean; herePrev?: string; hereErr?: string;
+  };
   const [integ, setInteg] = createSignal<Record<string, Integ>>({});
   const ghostProject = (id: string) => id.replace(/^✦\s*/, "");
   const runIntegrate = async (id: string) => {
@@ -100,10 +105,118 @@ export function ForestMap(props: {
         body: JSON.stringify({ project }),
       });
       const d = await r.json();
-      setInteg((s) => ({ ...s, [project]: { clean: !!d.clean, detail: d.detail || "" } }));
+      setInteg((s) => ({ ...s, [project]: { clean: !!d.clean, detail: d.detail || "", playground: d.playground || {} } }));
     } catch {
       setInteg((s) => ({ ...s, [project]: { clean: false, detail: "integrate check failed — is the server up?" } }));
     }
+  };
+  // clean integration → the ghost grows a pill (the ghost-verb slot): check the whole
+  // feature out into the persistent playground worktree (<repo>-integ-<project>, detached
+  // HEAD). Refresh only ever moves a playground with NO tracked edits; discarding edits
+  // is the armed two-click reset below — never a side effect of anything else.
+  const checkoutIntegration = async (id: string, reset = false) => {
+    if (!canMutate) return;
+    const project = ghostProject(id);
+    const cur = integ()[project];
+    if (!cur?.clean || cur.loading || cur.opening) return;
+    setInteg((s) => ({ ...s, [project]: { ...cur, opening: true, armReset: false } }));
+    try {
+      const r = await fetch("/integrate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project, ...(reset ? { reset: true } : { checkout: true }) }),
+      });
+      const d = await r.json();
+      const pg: Playground = d.playground || {};
+      let cdCopied = false;
+      if (d.clean && pg.path && pg.fresh && !pg.dirty) {
+        try { await navigator.clipboard.writeText(`cd ${pg.path}`); cdCopied = true; } catch {}
+      }
+      setInteg((s) => ({ ...s, [project]: { clean: !!d.clean, detail: d.detail || "", playground: pg, cdCopied } }));
+    } catch {
+      setInteg((s) => ({ ...s, [project]: { ...cur, opening: false } }));
+    }
+  };
+  // a dirty playground never resets on a plain click: first click ARMS the reset
+  // (label turns into the question), second click within 5s fires it, anything else disarms.
+  const clickPlayPill = (id: string) => {
+    const project = ghostProject(id);
+    const s = integ()[project];
+    if (!s?.clean || s.loading || s.opening) return;
+    if (s.playground?.exists && s.playground.dirty) {
+      if (!s.armReset) {
+        setInteg((m) => ({ ...m, [project]: { ...s, armReset: true } }));
+        window.setTimeout(() => {
+          setInteg((m) => (m[project]?.armReset ? { ...m, [project]: { ...m[project], armReset: false } } : m));
+        }, 5000);
+      } else {
+        checkoutIntegration(id, true);
+      }
+      return;
+    }
+    checkoutIntegration(id);
+  };
+  // the pill's one label per state — same noun ("playground") through the whole flow.
+  const playLabel = (project: string): string | null => {
+    const s = integ()[project];
+    if (!s?.clean) return null;
+    if (s.opening) return "⌗ opening playground…";
+    const pg = s.playground;
+    if (pg?.exists && pg.dirty) return s.armReset ? "↺ discard edits & reset?" : "⌗ playground has edits — kept";
+    if (pg?.exists && pg.fresh) return s.cdCopied ? "⌗ playground ready · cd copied" : "⌗ playground ready";
+    if (pg?.exists) return "⌗ update playground →";
+    return "⌗ open playground →";
+  };
+  // the playground's sibling verb: put the same integration in the PRIMARY checkout — the tree
+  // the dev server already runs from — instead of a scratch worktree you have to cd into.
+  // Detached HEAD on the ephemeral ref; the branch you were on is offered back as the way out.
+  const bringHere = async (id: string) => {
+    if (!canMutate) return;
+    const project = ghostProject(id);
+    const cur = integ()[project];
+    if (!cur?.clean || cur.loading || cur.opening || cur.hereBusy) return;
+    setInteg((s) => ({ ...s, [project]: { ...cur, hereBusy: true, hereErr: "", hereDone: false } }));
+    try {
+      const r = await fetch("/integrate-here", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project }),
+      });
+      const d = await r.json();
+      setInteg((s) => ({ ...s, [project]: {
+        ...s[project], hereBusy: false, hereDone: !!d.ok,
+        herePrev: d.prev || "", hereErr: d.ok ? "" : (d.err || "could not move the checkout"),
+      } }));
+    } catch {
+      setInteg((s) => ({ ...s, [project]: { ...s[project], hereBusy: false, hereErr: "the server did not answer" } }));
+    }
+  };
+  const hereLabel = (project: string): string | null => {
+    const s = integ()[project];
+    if (!s?.clean) return null;
+    if (s.hereBusy) return "⇤ moving your checkout…";
+    if (s.hereErr) return "⚠ checkout blocked";
+    if (s.hereDone) return "⇤ in your checkout";
+    return "⇤ bring to my checkout";
+  };
+  const hereTitle = (project: string): string => {
+    const s = integ()[project];
+    if (s?.hereErr) return s.hereErr;
+    if (s?.hereDone) {
+      const back = s.herePrev ? `git checkout ${s.herePrev}` : "git checkout -";
+      return `your main checkout is now on the whole integrated feature (detached — no branch was created or moved). run the dev server against it; \`${back}\` puts it back`;
+    }
+    return "checks the whole feature out into your MAIN checkout — the tree the dev server runs from — instead of the scratch playground. detached HEAD on the same ephemeral ref: nothing is branched or pushed";
+  };
+  const playTitle = (project: string): string => {
+    const s = integ()[project];
+    const pg = s?.playground;
+    const path = pg?.path ? `${pg.path}\n` : "";
+    if (s?.armReset) return `${path}click again to discard the playground's tracked edits and check out the latest integration — they are not recoverable`;
+    if (pg?.exists && pg.dirty) return `${path}the playground has uncommitted edits (yours, or left from an older integration) — nothing touches them. click once to arm ↺ reset, click again to discard & update`;
+    if (pg?.exists && pg.fresh) return `${path}up to date with the latest integration — click to copy the cd command again`;
+    if (pg?.exists) return `${path}the branches moved since this playground was opened — click to update it (it has no edits to lose)`;
+    return "checks the whole feature out into a scratch worktree you can run and edit — refreshed on each open, your edits there are never clobbered; copies the cd command";
   };
 
   const model = createMemo(() => {
@@ -441,6 +554,57 @@ export function ForestMap(props: {
                       </Show>
                     </text>
                   </Show>
+                  <Show when={isGhostId(n.id) && canMutate && playLabel(ghostProject(n.id))}>
+                    {(label) => {
+                      // the two destinations for a clean integration sit side by side in the
+                      // ghost's verb slot: the scratch playground, or your own checkout.
+                      const proj = () => ghostProject(n.id);
+                      const pw = () => pillW(label());
+                      const hw = () => pillW(hereLabel(proj()) || "");
+                      const row = () => pw() + 8 + hw();
+                      return (
+                        <g transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}>
+                          <g
+                            class="fm-ghost-pill play"
+                            classList={{
+                              ready: !!integ()[proj()]?.playground?.fresh && !integ()[proj()]?.playground?.dirty,
+                              dirty: !!integ()[proj()]?.playground?.dirty && !integ()[proj()]?.armReset,
+                              armed: !!integ()[proj()]?.armReset,
+                            }}
+                            transform={`translate(${-row() / 2 + pw() / 2}, 0)`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              clickPlayPill(n.id);
+                            }}
+                          >
+                            <title>{playTitle(proj())}</title>
+                            <rect x={-pw() / 2} y={-11} rx={9} width={pw()} height={22} />
+                            <text x={0} y={4}>{label()}</text>
+                          </g>
+                          <Show when={hereLabel(proj())}>
+                            {(hlabel) => (
+                              <g
+                                class="fm-ghost-pill here"
+                                classList={{
+                                  done: !!integ()[proj()]?.hereDone,
+                                  err: !!integ()[proj()]?.hereErr,
+                                }}
+                                transform={`translate(${row() / 2 - hw() / 2}, 0)`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  bringHere(n.id);
+                                }}
+                              >
+                                <title>{hereTitle(proj())}</title>
+                                <rect x={-hw() / 2} y={-11} rx={9} width={hw()} height={22} />
+                                <text x={0} y={4}>{hlabel()}</text>
+                              </g>
+                            )}
+                          </Show>
+                        </g>
+                      );
+                    }}
+                  </Show>
                 </g>
               </Show>
             );
@@ -539,6 +703,37 @@ const CSS = `
 .fm-node.ghost text { fill: var(--ink-dim); font-family: var(--display); font-style: normal; font-size: 13.5px; }
 .fm-node.ghost .dot { display: none; }
 .fm-node.ghost:hover rect { stroke: var(--patina); fill: none; }
+/* playground pill — the ✦ endstate's verb, earned by a clean integrate check (moss, the
+   same material as "✓ lands clean"). Scoped under .fm-node.ghost so the ghost's own
+   dashed/display treatment (above, same specificity but later otherwise) can't bleed in.
+   States: verb (moss) → ready (settles quiet) → dirty (ember fact: edits kept) →
+   armed (filled ember question: one more click discards). */
+.fm-node.ghost .fm-ghost-pill.play rect { fill: var(--vellum-night, #14110a); stroke: var(--moss, #7c9a6b); stroke-dasharray: none; }
+.fm-node.ghost .fm-ghost-pill.play text { font-family: var(--mono); font-size: 11.5px; fill: var(--moss, #7c9a6b); }
+.fm-node.ghost .fm-ghost-pill.play:hover rect { fill: var(--moss, #7c9a6b); }
+.fm-node.ghost .fm-ghost-pill.play:hover text { fill: var(--vellum-night, #14110a); }
+.fm-node.ghost .fm-ghost-pill.play.ready rect { stroke: var(--rule, #3a332b); }
+.fm-node.ghost .fm-ghost-pill.play.ready text { fill: var(--ink-dim, #a89e8c); }
+.fm-node.ghost .fm-ghost-pill.play.ready:hover rect { fill: none; stroke: var(--moss, #7c9a6b); }
+.fm-node.ghost .fm-ghost-pill.play.ready:hover text { fill: var(--moss, #7c9a6b); }
+.fm-node.ghost .fm-ghost-pill.play.dirty rect { stroke: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.play.dirty text { fill: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.play.dirty:hover rect { fill: none; stroke: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.play.dirty:hover text { fill: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.play.armed rect { fill: var(--ember, #d2732a); stroke: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.play.armed text { fill: var(--vellum-night, #14110a); }
+.fm-node.ghost .fm-ghost-pill.here rect { fill: var(--vellum-night, #14110a); stroke: var(--gold-leaf, #e6b64e); stroke-dasharray: none; }
+.fm-node.ghost .fm-ghost-pill.here text { fill: var(--gold-leaf, #e6b64e); }
+.fm-node.ghost .fm-ghost-pill.here:hover rect { fill: var(--gold-leaf, #e6b64e); }
+.fm-node.ghost .fm-ghost-pill.here:hover text { fill: var(--vellum-night, #14110a); }
+.fm-node.ghost .fm-ghost-pill.here.done rect { stroke: var(--rule, #3a332b); }
+.fm-node.ghost .fm-ghost-pill.here.done text { fill: var(--ink-dim, #a89e8c); }
+.fm-node.ghost .fm-ghost-pill.here.done:hover rect { fill: none; stroke: var(--gold-leaf, #e6b64e); }
+.fm-node.ghost .fm-ghost-pill.here.done:hover text { fill: var(--gold-leaf, #e6b64e); }
+.fm-node.ghost .fm-ghost-pill.here.err rect { stroke: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.here.err text { fill: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.here.err:hover rect { fill: none; stroke: var(--ember, #d2732a); }
+.fm-node.ghost .fm-ghost-pill.here.err:hover text { fill: var(--ember, #d2732a); }
 
 /* DAMS: a dirty branch whose uncommitted paths collide with a downstream node's
    own diff. The dam (red, pulsing) stops the water — every edge below it freezes
