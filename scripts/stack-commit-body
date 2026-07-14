@@ -58,6 +58,23 @@ def job(b):
     s = s.split(": ", 1)[1] if ": " in s else s
     return s or git("config", f"branch.{b}.description") or b
 
+
+def pr(b):
+    """Once a branch has a PR, name it by that: '#9560 (merged)'. GitHub turns the bare #ref into a
+    live cross-link, so a commit still waiting to land points at the ones that already did."""
+    r = subprocess.run(
+        ["gh", "pr", "list", "--head", b, "--state", "all", "--limit", "1",
+         "--json", "number,state"],
+        capture_output=True, text=True)
+    try:
+        j = json.loads(r.stdout)
+    except Exception:
+        return ""
+    if not j:
+        return ""
+    state = j[0]["state"].lower()
+    return " #%s%s" % (j[0]["number"], " (merged)" if state == "merged" else "")
+
 try:
     order = json.load(sys.stdin).get("order", [])
 except ValueError:
@@ -68,7 +85,7 @@ if not order:
 
 rank = {b: i + 1 for i, b in enumerate(order)}
 for b in order:
-    print("  %d. %s%s" % (rank[b], job(b), "   <- this branch" if b == me else ""))
+    print("  %d.%s %s%s" % (rank[b], pr(b), job(b), "   <- this branch" if b == me else ""))
 ' <<< "$order")
 
 position=$(print -r -- "$plan" | grep -c .)
