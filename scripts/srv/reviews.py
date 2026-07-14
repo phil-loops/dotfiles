@@ -106,6 +106,36 @@ def import_pr(req, raw):
     req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
 
 
+_WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
+_WARM_MAX = 5       # bound the git work — the queue is normally 1-2 PRs
+
+
+def _warm_review_requests():
+    # Being asked to review a PR is the one signal that reliably predicts the next ⌘⇧O: those files
+    # are the ones you're about to jump into. Import the head and build its worktree while the PR is
+    # still just sitting in the queue, so the first jump is warm (~0.5s) instead of paying a fetch
+    # plus a cold worktree build (~1.4s) at the moment you press the key.
+    prs = json.loads(_compute_requests())
+    for p in prs[:_WARM_MAX]:
+        num = str(p["number"])
+        if not p.get("imported") and \
+                ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num]).returncode != 0:
+            continue
+        picker.prepare_branch(f"review/pr-{num}")
+
+
+def warm_requests_forever():
+    while True:
+        try:
+            ctx.set_repo(ctx.CWD)
+            _warm_review_requests()
+        except Exception:
+            pass   # a warm is a nicety — never let it kill the thread (or the next cycle)
+        finally:
+            ctx.clear_repo()
+        time.sleep(_WARM_EVERY)
+
+
 _branch_cache = {}   # pr-num -> (at, own_local_branch_or_None)
 _BRANCH_TTL = 120
 
