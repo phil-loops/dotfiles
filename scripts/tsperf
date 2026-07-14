@@ -139,19 +139,18 @@ def cmd_run(args):
     print(f"\nmedian check: {med:.2f}s   ({runs[0]['errors']} errors)")
 
 
-def cmd_pareto(args):
-    root = repo_root()
-    require_deps(root)
+def trace_once(root, engine):
     trace_dir = Path(tempfile.mkdtemp(prefix="tsperf-trace-"))
     cfg = write_bench_tsconfig(root, trace_dir=str(trace_dir))
     try:
-        sh([engine_bin(root, args.engine), "-p", str(cfg)], cwd=root)
+        sh([engine_bin(root, engine), "-p", str(cfg)], cwd=root)
         trace = next(trace_dir.glob("trace*.json"), None)
         if not trace:
             sys.exit(f"tsperf: no trace emitted into {trace_dir}")
         events = json.loads(trace.read_text())
     finally:
         cfg.unlink(missing_ok=True)
+        shutil.rmtree(trace_dir, ignore_errors=True)
 
     # checkSourceFile arrives as B/E pairs, NOT X spans — pair them with a stack.
     stack, per_file = [], {}
@@ -164,25 +163,42 @@ def cmd_pareto(args):
             b = stack.pop()
             path = (b.get("args") or {}).get("path", "?")
             per_file[path] = per_file.get(path, 0) + (e["ts"] - b["ts"]) / 1000.0
-
     if not per_file:
         sys.exit("tsperf: trace had zero checkSourceFile events "
                  "(incremental reuse? stale .tsbuildinfo?)")
+    return per_file
 
-    ranked = sorted(per_file.items(), key=lambda kv: -kv[1])
-    total = sum(per_file.values())
-    print(f"check time {total/1000:.1f}s across {len(ranked)} files\n")
-    cum = 0.0
-    for i, (path, ms) in enumerate(ranked[:args.top], 1):
-        cum += ms
+
+def cmd_pareto(args):
+    root = repo_root()
+    require_deps(root)
+
+    # A single trace INVENTS hot files: wall-clock attribution absorbs whatever
+    # machine load hit while that file was being checked. Two identical runs once
+    # disagreed on 5 of their top 6. Only a file that stays hot across runs is real,
+    # so score each file by its MEDIAN and show the spread.
+    runs = []
+    for i in range(args.n):
+        runs.append(trace_once(root, args.engine))
+        print(f"  traced {i+1}/{args.n} "
+              f"({sum(runs[-1].values())/1000:.1f}s check)", file=sys.stderr)
+
+    files = set().union(*runs)
+    scored = {f: [r.get(f, 0.0) for r in runs] for f in files}
+    ranked = sorted(scored.items(), key=lambda kv: -statistics.median(kv[1]))
+    total = statistics.median([sum(r.values()) for r in runs])
+
+    print(f"\ncheck time {total/1000:.1f}s across {len(ranked)} files "
+          f"(median of {args.n} traces)\n")
+    for i, (path, samples) in enumerate(ranked[:args.top], 1):
+        med = statistics.median(samples)
         rel = os.path.relpath(path, root)
-        print(f"{i:>3}. {ms:>8.0f}ms  {ms/total*100:>5.1f}%  "
-              f"(cum {cum/total*100:>4.1f}%)  {rel}")
-    for n in (5, 20, 100):
-        if n <= len(ranked):
-            head = sum(ms for _, ms in ranked[:n])
-            print(f"\n  top {n:>3}: {head/total*100:.1f}% of check")
-    shutil.rmtree(trace_dir, ignore_errors=True)
+        spread = f"{min(samples):.0f}–{max(samples):.0f}"
+        flag = "" if args.n < 2 or min(samples) > 0.4 * max(samples) else "  ⚠ unstable"
+        print(f"{i:>3}. {med:>7.0f}ms  {med/total*100:>4.1f}%  "
+              f"[{spread:>11}ms]  {rel}{flag}")
+    if args.n < 3:
+        print("\n  ⚠ fewer than 3 traces — treat any single-run ranking as noise")
 
 
 def cmd_ab(args):
@@ -247,6 +263,8 @@ def main():
 
     pa = sub.add_parser("pareto", help="per-file check-time Pareto")
     pa.add_argument("--top", type=int, default=25)
+    pa.add_argument("-n", type=int, default=3,
+                    help="traces to median over — 1 trace invents hot files")
     # tsgo's --generateTrace never finished a repo-scale run (20min+ CPU, killed);
     # tsc traces in ~30s and the file RANKING is what we act on.
     pa.add_argument("--engine", choices=("tsgo", "tsc"), default="tsc")
