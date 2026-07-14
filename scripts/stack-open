@@ -144,6 +144,8 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
 }
 focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actually visible
   local app="${STACK_OPEN_TERMINAL:-}"
+  [[ "$app" == none ]] && return 0   # STACK_OPEN_TERMINAL=none — for scripted/batch opens, which
+                                     # otherwise yank the user's focus once per call
   if [[ -z "$app" ]]; then case "${TERM_PROGRAM:-}" in
     iTerm.app)       app=iTerm ;;
     Apple_Terminal)  app=Terminal ;;
