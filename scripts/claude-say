@@ -80,6 +80,26 @@ def area(r):
     return r.get("branch", "") or "—"
 
 
+def pid_under_pane(pid, pane):
+    """Is the session's process a descendant of the pane's own shell?"""
+    if not pid or not pane:
+        return False
+    pane_pid = sh(["tmux", "display-message", "-p", "-t", pane, "#{pane_pid}"]).strip()
+    if not pane_pid:
+        return False
+    p = int(pid)
+    for _ in range(30):
+        if not p or p <= 1:
+            return False
+        if str(p) == pane_pid:
+            return True
+        try:
+            p = int(sh(["ps", "-o", "ppid=", "-p", str(p)]))
+        except Exception:
+            return False
+    return False
+
+
 def pane_of(r):
     """The session's tmux pane: the captured one, else reverse-map pid → pane."""
     if r.get("tmux_pane"):
@@ -179,9 +199,12 @@ def main():
     # never type into a pane that isn't a Claude prompt: a stale registry/pane mapping would
     # feed the message to whatever runs there as raw keystrokes (an editor eats them as
     # normal-mode commands — this typed a handback note into a Helix scratch buffer once).
+    # Claude retitles its own process to its version ("2.1.207"), so the pane's command name
+    # alone can't confirm it; proving the session's pid lives under this pane's shell can.
     cmd = sh(["tmux", "display-message", "-p", "-t", pane, "#{pane_current_command}"]).strip()
-    if cmd not in ("claude", "node"):
-        print("pane %s is running %r, not a Claude prompt — refusing to type into it." % (pane, cmd), file=sys.stderr)
+    if cmd not in ("claude", "node") and not pid_under_pane(tgt.get("pid"), pane):
+        print("pane %s is running %r and does not host session pid %s — refusing to type into it."
+              % (pane, cmd, tgt.get("pid")), file=sys.stderr)
         return 1
 
     # a leading "/" would make the target's CLI parse the message as a slash command
