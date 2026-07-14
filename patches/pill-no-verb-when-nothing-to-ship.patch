@@ -1,0 +1,86 @@
+diff --git a/scripts/viewer-solid/src/ForestOverview.tsx b/scripts/viewer-solid/src/ForestOverview.tsx
+index 3e533e4..9e06f8e 100644
+--- a/scripts/viewer-solid/src/ForestOverview.tsx
++++ b/scripts/viewer-solid/src/ForestOverview.tsx
+@@ -215,31 +215,46 @@ async function runShip(project: string, qc: ReturnType<typeof useQueryClient>):
+   return r;
+ }
+ 
+-// The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
+-// restacks every survivor onto fresh origin/main (trees included), and reports the push
+-// order. Prep/push stay per-node so the outgoing commit message remains editable.
+-function ShipButton(props: { project: string }) {
+-  const qc = useQueryClient();
+-  const [armed, setArmed] = createSignal(false);
+-  const [busy, setBusy] = createSignal(false);
+-  let disarm: ReturnType<typeof setTimeout>;
+-  // shared cache with Home's chip — the daemon already classified this forest, so the confirm
+-  // step previews exactly what it'll do (drop merged ghosts, rebase the rest) rather than firing blind.
++// What /ship would actually do here, off the daemon's ambient classification (shared cache with
++// Home's chip). null = the daemon can't say — callers treat that as "assume there's work", so a
++// verb never vanishes just because the classification is missing.
++function useShipPlan(project: () => string) {
+   const shipAmbient = createQuery(() => ({
+     queryKey: ["restack-ambient"], queryFn: () => provider.restackAmbient(), refetchInterval: 15000,
+   }));
+   const shipForestBranches = createQuery(() => ({
+     queryKey: ["forest-branches"], queryFn: () => provider.forestBranches(), refetchInterval: 60000,
+   }));
+-  const preview = () => {
++  return () => {
+     const a = shipAmbient.data;
+     if (!a?.available || !a.report) return null;
+-    const inProj = new Set((shipForestBranches.data || []).filter((fb) => fb.project === props.project).map((fb) => fb.branch));
++    const inProj = new Set((shipForestBranches.data || []).filter((fb) => fb.project === project()).map((fb) => fb.branch));
+     const b = a.report.branches.filter((x) => inProj.has(x.branch));
+-    const contract = b.filter((x) => x.verdict === "would-contract").length;
+-    const rebase = b.filter((x) => x.verdict === "would-restack").length;
+-    const conflict = b.filter((x) => x.verdict === "will-conflict").length;
+-    return contract || rebase || conflict ? { contract, rebase, conflict } : null;
++    return {
++      contract: b.filter((x) => x.verdict === "would-contract").length,
++      rebase: b.filter((x) => x.verdict === "would-restack").length,
++      conflict: b.filter((x) => x.verdict === "will-conflict").length,
++    };
++  };
++}
++
++const shipHasWork = (plan: { contract: number; rebase: number; conflict: number } | null) =>
++  !plan || plan.contract > 0 || plan.rebase > 0 || plan.conflict > 0;
++
++// The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
++// restacks every survivor onto fresh origin/main (trees included), and reports the push
++// order. Prep/push stay per-node so the outgoing commit message remains editable.
++function ShipButton(props: { project: string }) {
++  const qc = useQueryClient();
++  const [armed, setArmed] = createSignal(false);
++  const [busy, setBusy] = createSignal(false);
++  let disarm: ReturnType<typeof setTimeout>;
++  const shipPlan = useShipPlan(() => props.project);
++  // the confirm step previews exactly what it'll do (drop merged ghosts, rebase the rest)
++  // rather than firing blind.
++  const preview = () => {
++    const p = shipPlan();
++    return p && (p.contract || p.rebase || p.conflict) ? p : null;
+   };
+   const confirmLabel = () => {
+     const p = preview();
+@@ -349,6 +364,7 @@ export function ForestOverview() {
+     setTip({ branch, text: p.thesis });
+   };
+   const hideTip = () => { tipBranch = null; setTip(null); };
++  const ovShipPlan = useShipPlan(project);
+   const [chatPick, setChatPick] = createSignal(false);
+ 
+   return (
+@@ -417,7 +433,9 @@ export function ForestOverview() {
+                 ovQc.invalidateQueries({ queryKey: ["forest-health"] });
+                 ovQc.invalidateQueries({ queryKey: ["projects"] });
+               } : undefined}
+-              onReady={canMutate ? () => runShip(project(), ovQc) : undefined}
++              // a forest with nothing to ship gets no verb — the merged-with-follow-on node stays a
++              // passive ghost instead of a "ready forest →" that fires and reports "already ready".
++              onReady={canMutate && shipHasWork(ovShipPlan()) ? () => runShip(project(), ovQc) : undefined}
+             />
+           }
+         >
