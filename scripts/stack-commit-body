@@ -1,127 +1,33 @@
 #!/bin/zsh
 # stack-commit-body — compose the default commit body for ONE branch of a forest: the author's own
-# prose, then ONE generated line placing the change in the project (its position in the merge order
-# and what it builds on / pulls in). FREE (no LLM) — every fact comes from git config.
+# prose, then the project's plan (every step's job in merge order, this one marked, each step that
+# already landed naming its PR). The plan comes from stack_facts.py, which owns every fact.
 #
-# Deliberately just one line. This repo has a PR template, so GitHub prefills a PR body from the
-# TEMPLATE, never from the commit message — a diagram here would reach git history and nothing else.
-# The Mermaid map and the integration link live in `stack-pr-body`, which you paste into the PR.
+# Deliberately no Mermaid here. This repo has a PR template, so GitHub prefills a PR body from the
+# TEMPLATE and never from the commit message — a diagram in a commit reaches git history and nothing
+# else. The map lives in `stack-pr-body`, which is pasted into the PR.
 #
 #   stack-commit-body <branch>            → full body on stdout (author prose preserved)
-#   stack-commit-body <branch> --section  → just the generated line
+#   stack-commit-body <branch> --section  → just the generated plan
 #   stack-commit-body <branch> --apply    → rewrite the branch's unpushed tip commit to carry it
 #
-# Idempotent: the generated line is replaced, never stacked up. --apply refuses to touch a commit
+# Idempotent: the generated plan is replaced, never stacked up. --apply refuses to touch a commit
 # that is already on a remote — shared history is never rewritten.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 here="${0:A:h}"
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-commit-body <branch> [--section]" >&2; exit 2; }
-section_only=0; [[ "${2:-}" == "--section" ]] && section_only=1
-apply=0; [[ "${2:-}" == "--apply" ]] && apply=1
+[[ -n "$branch" ]] || { echo "usage: stack-commit-body <branch> [--section|--apply]" >&2; exit 2; }
+mode="${2:-}"
 
-# the generated line is its own marker — regenerating replaces any line that opens with it
+# the generated block is its own marker — regenerating replaces any line that opens with it
 MARKER="Part of "
 
-project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
-[[ -n "$project" ]] || { echo "stack-commit-body: ${branch} is not in a project" >&2; exit 1; }
+section=$(python3 "$here/stack_facts.py" plan "$branch")
+[[ -n "$section" ]] || { echo "stack-commit-body: ${branch} is not in a project" >&2; exit 1; }
 
-parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
-
-# WHERE IT SITS — position in the canonical merge order, plus what it builds on / pulls in, each
-# named by what it DOES, never by branch name. A branch's own commit subject (minus the
-# conventional-commit prefix) is that name: already voiced, already short.
-desc_of() {
-  local p; p=$(git config "stack-branch.$1.parent" 2>/dev/null || echo main)
-  local s; s=$(git log -1 --format=%s "${p}..$1" 2>/dev/null || true)
-  [[ -n "$s" ]] || s=$(git config "branch.$1.description" 2>/dev/null || echo "$1")
-  print -r -- "${s#*: }"
-}
-
-# THE WHOLE PLAN, not just this branch's coordinates. A position ("1 of 4") tells a reader where
-# this sits but nothing about what the other three DO — so spell out every branch's job, in merge
-# order, and mark this one. The forest knows all of it; a commit that names only itself is thinner
-# than the facts we hold.
-order=$("$here/stack-merge-rank" "$branch" 2>/dev/null || echo '{}')
-
-plan=$(ME="$branch" PROJECT="$project" python3 -c '
-import json, os, subprocess, sys
-
-def git(*a):
-    return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
-
-def job(b):
-    p = git("config", f"stack-branch.{b}.parent") or "main"
-    s = git("log", "-1", "--format=%s", f"{p}..{b}")
-    s = s.split(": ", 1)[1] if ": " in s else s
-    return s or git("config", f"branch.{b}.description") or b
-
-
-def pr(b):
-    # Once a branch has a PR, name it by that. GitHub turns the bare #ref into a live cross-link,
-    # so a commit still waiting to land points at the ones that already did.
-    r = subprocess.run(
-        ["gh", "pr", "list", "--head", b, "--state", "all", "--limit", "1",
-         "--json", "number,state"],
-        capture_output=True, text=True)
-    try:
-        j = json.loads(r.stdout)
-    except Exception:
-        return ""
-    if not j:
-        return ""
-    state = j[0]["state"].lower()
-    return " #%s%s" % (j[0]["number"], " (merged)" if state == "merged" else "")
-
-def landed(project):
-    # Steps that already merged. The forest CONTRACTS as bases land — the branch is dropped and its
-    # config with it — so the live config alone would make the plan forget its own history exactly
-    # when it matters most. The merge ledger the viewer keeps outlives them, so read the story there.
-    gd = git("rev-parse", "--git-common-dir")
-    if gd and not os.path.isabs(gd):
-        gd = os.path.join(os.getcwd(), gd)
-    try:
-        with open(os.path.join(gd, "stack-project-merges.json")) as f:
-            hist = json.load(f).get("merges", {}).get(project, [])
-    except Exception:
-        return []
-    if isinstance(hist, dict):
-        hist = [hist]
-    out = []
-    for e in reversed(hist):            # ledger is newest-first; the plan reads oldest-first
-        title = e.get("title", "")
-        out.append((e.get("pr"), title.split(": ", 1)[1] if ": " in title else title))
-    return out
-
-
-try:
-    order = json.load(sys.stdin).get("order", [])
-except ValueError:
-    order = []
-me = os.environ["ME"]
-project = os.environ["PROJECT"]
-done = landed(project)
-if not order and not done:
-    sys.exit(0)
-
-n = 0
-for pr_num, title in done:
-    n += 1
-    print("  %d. #%s (merged) %s" % (n, pr_num, title))
-for b in order:
-    n += 1
-    print("  %d.%s %s%s" % (n, pr(b), job(b), "   <- this branch" if b == me else ""))
-' <<< "$order")
-
-position=$(print -r -- "$plan" | grep -c .)
-mine=$(print -r -- "$plan" | awk "/this branch/{print NR}")
-
-section="Part of ${project} — ${mine:-?} of ${position:-?}, which lands as:
-${plan}"
-
-if (( section_only )); then
+if [[ "$mode" == "--section" ]]; then
   print -r -- "$section"
   exit 0
 fi
@@ -137,13 +43,13 @@ body=""
 [[ -n "$prose" ]] && body+="${prose}"$'\n\n'
 body+="$section"
 
-if (( ! apply )); then
+if [[ "$mode" != "--apply" ]]; then
   print -r -- "$body"
   exit 0
 fi
 
-# --apply: re-message the tip commit in place (tree, author and parents preserved), the same
-# motion the viewer's message editor uses. Shared history is never rewritten.
+# --apply: re-message the tip commit in place (tree, author and parents preserved), the same motion
+# the viewer's message editor uses. Shared history is never rewritten.
 tip=$(git rev-parse "$branch")
 if git branch -r --contains "$tip" 2>/dev/null | grep -q .; then
   echo "stack-commit-body: ${branch}'s tip is already on a remote — refusing to rewrite it" >&2
