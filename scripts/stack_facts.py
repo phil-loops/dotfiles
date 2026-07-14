@@ -165,7 +165,7 @@ def facts(branch):
 def render_plan(f):
     if not f["project"] or not f["plan"]:
         return ""
-    lines = [f'Part of {f["project"]} — {f["position"] or "?"} of {f["total"]}, which lands as:']
+    lines = [f'Part of {f["project"]}:']
     for s in f["plan"]:
         ref = ""
         if s.get("pr"):
