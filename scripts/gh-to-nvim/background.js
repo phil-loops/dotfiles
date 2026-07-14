@@ -139,6 +139,38 @@ chrome.commands.onCommand.addListener((cmd) => {
   }
 });
 
+// ── prewarm ──
+// The PR page you're LOOKING at is the best predictor of the next ⌘⇧O, so pay the cold cost
+// (import the head, build the worktree — together ~1.4s, plus a fetch for someone else's PR)
+// while you're still reading the diff, instead of at the instant you press the key.
+//
+// This is why the extension takes "tabs": it needs to know you landed on a PR without you
+// pressing anything. That grants URL visibility across tabs and NOTHING else — no DOM, no
+// injection, no fetching github.com as you (a github.com host grant would allow that, which is
+// the worse trade while the signing key is public). Enforced below: the ONLY thing that ever
+// leaves the browser is a URL matching PR_RE.
+const PR_RE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
+let lastPrewarmed = "";
+
+function prewarm(url) {
+  const m = (url || "").match(PR_RE);
+  if (!m || m[0] === lastPrewarmed) {
+    return;   // not a PR, or the same one — clicking a line rewrites the hash, not the PR
+  }
+  lastPrewarmed = m[0];
+  fetch(`${VIEWER_URL}/open-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: m[0], open: "prewarm" }),
+  }).catch(() => {});   // viewer down → the chord's recovery ladder still handles it
+}
+
+chrome.tabs.onUpdated.addListener((_id, info, tab) => {
+  if (info.status === "complete") {
+    prewarm(tab?.url);
+  }
+});
+
 // The popup's "→ nvim this page" button routes here — opening the popup is itself the
 // activeTab gesture, so the tab URL is readable for the click that follows.
 chrome.runtime.onMessage.addListener((msg, _s, respond) => {

@@ -288,8 +288,11 @@ def open_url(req, raw):   # POST /open-url {url, open?} — Chrome ext (URL-only
     m = _GH_PR.match(url)
     if m:
         p = {"repo": m.group(1), "number": m.group(2)}
-        if d.get("open") == "viewer":
-            return _open_pr(req, p)   # path-less: import + prewarm, respond with the viewer route
+        if d.get("open") in ("viewer", "prewarm"):
+            # Both are path-less: import the head + build the worktree, open nothing, return the
+            # route. "viewer" means the ext will open that route in a tab; "prewarm" means it won't
+            # — it's just landing on the PR page, paying the cold cost now so the jump is warm.
+            return _open_pr(req, p)
         h = _DIFF_HASH.search(url)
         if h:
             p["diffhash"], p["hashline"] = h.group(1), int(h.group(2))
