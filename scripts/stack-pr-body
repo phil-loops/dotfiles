@@ -8,7 +8,9 @@
 # the merge order with each branch's PR number, the Mermaid map — is COMPUTED from git config + gh.
 # A relation we know exactly is never re-narrated by an LLM.
 #
-#   stack-pr-body <branch>   → GitHub-flavored markdown PR body on stdout
+#   stack-pr-body <branch>          → GitHub-flavored markdown PR body on stdout
+#   stack-pr-body <branch> --link   → also link the fork's assembled integration (opt-in: that
+#                                     link is the one fact the forest cannot vouch for itself)
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
@@ -141,7 +143,12 @@ printf '\n### The change\n\n%s\n' "$resp"
 
 if [[ -n "$project" ]]; then
   printf '\n### Merge order\n\n%s\n' "$order_list"
-  url=$("${0:A:h}/stack-integ-publish" --url "$project" 2>/dev/null || true)
-  [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
+  # The fork's integration link is OPT-IN (--link): everything else in this body is derivable from
+  # git config + the open PRs, so it stays true on its own. The link depends on a fork push and on
+  # whether a reviewer can even see the fork — the one fact the forest cannot vouch for itself.
+  if [[ "${2:-}" == "--link" ]]; then
+    url=$("${0:A:h}/stack-integ-publish" --url "$project" 2>/dev/null || true)
+    [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
+  fi
   printf '\n%s\n' "$("${0:A:h}/stack-forest-mermaid" "$branch" --prs --fence)"
 fi
