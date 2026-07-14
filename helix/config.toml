@@ -5,6 +5,11 @@
 [editor]
 clipboard-provider = "pasteboard"
 
+# space-f otherwise skips dot-prefixed files (.npmrc, .gitignore, …); git-ignore
+# stays on, so ignored files are still filtered out.
+[editor.file-picker]
+hidden = false
+
 # Off by default: without it, a gd issued while tsgo is still loading the loops
 # project queues silently and the editor looks hung.
 [editor.lsp]
