@@ -308,7 +308,7 @@ export function NodeActions(props: {
           return { phase: "blocked" as const };
         }
         if (sy.ok && !sy.rebased) {
-          stepSet("rebase", "run", "conflict — ejected to a headless rebase, streaming below; run sync again once it lands");
+          stepSet("rebase", "run", "conflict — resolving in a headless rebase, streaming below; the motion continues on its own once it lands");
           return { phase: "streaming" as const };
         }
         stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
@@ -1049,7 +1049,26 @@ export function NodeActions(props: {
       </Show>
 
       <Show when={rebaseStreaming()}>
-        <RebaseStream branch={props.branch} onClose={() => setRebaseStreaming(false)} />
+        <RebaseStream
+          branch={props.branch}
+          onClose={() => setRebaseStreaming(false)}
+          onSettled={(outcome) => {
+            if (outcome === "done") {
+              // the headless rebase landed cleanly — the branch now contains origin/main, so
+              // pick the motion back up where it ejected (checkout → one commit → gates → editor)
+              // instead of stranding a ticking spinner that waits on a manual re-click.
+              stepSet("rebase", "ok", "landed — merging it in");
+              setRebaseStreaming(false);
+              sync.refetch().then(() => omniSync.mutate(false));
+            } else if (outcome === "stopped") {
+              stepSet("rebase", "fail", "stopped — re-run sync to retry the rebase");
+            } else if (outcome === "gone") {
+              stepSet("rebase", "fail", "rebase job gone (expired or server restarted) — re-run sync to see where it landed");
+            } else {
+              stepSet("rebase", "fail", "rebase stream errored — re-run sync to retry");
+            }
+          }}
+        />
       </Show>
     </div>
   );
