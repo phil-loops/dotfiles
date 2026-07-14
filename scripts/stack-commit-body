@@ -34,10 +34,13 @@ fi
 
 # The author's prose is whatever precedes the marker in the current commit body — preserved as-is.
 # "-- forest --" was an earlier form's fence; drop it so regenerating an old body doesn't keep it.
-prose=$(git log -1 --format=%b "$branch" \
+# A body that is ONLY the generated plan leaves grep with no input, and grep exits 1 for
+# "nothing selected" — under pipefail that killed the whole script, so the commits most in
+# need of a refresh were the ones it silently refused to touch.
+prose=$( { git log -1 --format=%b "$branch" \
   | awk -v m="$MARKER" 'index($0, m)==1 {exit} {print}' \
   | grep -vx -- "-- forest --" \
-  | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')
+  | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}'; } || true )
 
 body=""
 [[ -n "$prose" ]] && body+="${prose}"$'\n\n'
