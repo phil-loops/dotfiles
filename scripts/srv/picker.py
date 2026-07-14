@@ -126,6 +126,24 @@ def _project_of(branch):
     return None
 
 
+def _live_roster():
+    """Every branch's project, read from the live config."""
+    out = {}
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.branch$"]).stdout.splitlines():
+        k, _, v = line.partition(" ")
+        m = re.match(r"^stack-project\.(.+)\.branch$", k)
+        if m and v.strip():
+            out[v.strip()] = m.group(1)
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-branch\..*\.project$"]).stdout.splitlines():
+        k, _, v = line.partition(" ")
+        m = re.match(r"^stack-branch\.(.+)\.project$", k)
+        if m and v.strip():
+            out[m.group(1)] = v.strip()
+    return out
+
+
 def _scan_merges():
     # Walk new origin/main commits since the last scan; attribute each squash-merge
     # (subject "… (#N)") to a project via its head branch's project tag, and keep a
@@ -150,6 +168,13 @@ def _scan_merges():
     for k, v in list(merges.items()):   # migrate pre-history stores (one dict per project)
         if isinstance(v, dict):
             merges[k] = [v]
+    # A merge DESTROYS the very config that says which project the branch belonged to: GitHub
+    # deletes the head branch, and contraction drops its tags. Merging on GitHub (rather than
+    # through this viewer) meant the scan below always arrived too late and dropped the merge
+    # silently — the project forgot a step it had shipped. So carry a roster forward: it is
+    # refreshed from live config on every scan, while the branches are still alive.
+    roster = store.get("roster", {})
+    roster.update(_live_roster())
     for line in reversed(log):   # oldest-first so newer merges land at the head
         at, _, subj = line.partition("\t")
         nums = _PR_RE.findall(subj)
@@ -159,7 +184,7 @@ def _scan_merges():
         if not res:
             continue
         branch, title = res
-        proj = _project_of(branch) if branch else None
+        proj = (_project_of(branch) or roster.get(branch)) if branch else None
         if proj:
             hist = merges.setdefault(proj, [])
             hist[:] = [e for e in hist if e.get("pr") != int(nums[-1])]
@@ -168,7 +193,7 @@ def _scan_merges():
     try:
         if path:
             with open(path, "w") as f:
-                json.dump({"tip": tip, "merges": merges}, f)
+                json.dump({"tip": tip, "merges": merges, "roster": roster}, f)
     except Exception:
         pass
     return merges
