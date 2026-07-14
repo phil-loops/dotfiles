@@ -280,9 +280,17 @@ let staleSince = 0;
 // Anything else = the force-installed CRX, where runtime.reload would rerun the SAME
 // installed bytes and then read as fresh — a silent lie. That copy asks the updater
 // instead, which pulls whatever gh-to-nvim-pack last published to the local server.
-let installType = "development";   // safe default until getSelf resolves
+//
+// Default to NOT development: defaulting the other way is what wedged the forced copy — if
+// getSelf never lands, every stale tick called runtime.reload(), which re-ran the same bytes and
+// reseeded the baseline to "fresh", so requestUpdateCheck was never reached and the installed copy
+// could not update itself at all (0.3.9 took ~2h to land, via Chrome's own slow cycle). Guessing
+// "packed" costs a dev copy one wasted update check; guessing "dev" costs the real copy every update.
+let installType = "admin";
 chrome.management.getSelf((info) => {
-  installType = info.installType;
+  if (info?.installType) {
+    installType = info.installType;
+  }
 });
 chrome.runtime.onUpdateAvailable.addListener(() => chrome.runtime.reload());
 

@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "GitHub → nvim",
-  "version": "0.3.10",
+  "version": "0.3.11",
   "description": "Open the current GitHub page (PR / blob / commit) in the local forest viewer's warm nvim. URL-only: no page access.",
   "permissions": [
+    "management",
     "storage",
     "nativeMessaging",
     "activeTab",
