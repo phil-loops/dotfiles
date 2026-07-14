@@ -573,6 +573,8 @@ code.b { color:var(--verb); }
 </div>
 
 <div id="store" class="col">
+  <h2>Workflow</h2>
+  <div id="nodes"></div>
   <h2>Captured</h2>
   <div id="vars"></div>
   <h2>Related</h2>
@@ -585,6 +587,7 @@ const store = {};        // captured ids: name -> value
 let current = null;      // selected endpoint
 let st = null;           // request state for the selected endpoint
 let selectedVar = null;
+let graph = null;        // last workflow seen: { rootNodeId, nodes: { id -> { typeName, nextNodeIds } } }
 
 const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
 const esc = (s) => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -709,7 +712,8 @@ function urlLine(e) {
     const m = part.match(/^\\{([^}]+)\\}$/);
     if (!m) { wrap.appendChild(document.createTextNode(part)); continue; }
     const name = m[1];
-    const input = el('<input class="slot" spellcheck="false" autocomplete="off" placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
+    const list = isNodeField(name) && graph ? ' list="graphnodes"' : '';
+    const input = el('<input class="slot" spellcheck="false" autocomplete="off"' + list + ' placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
     input.value = st.path[name] || '';
     const fit = () => {
       input.style.width = (Math.max(name.length, input.value.length) + 2) + 'ch';
@@ -718,6 +722,11 @@ function urlLine(e) {
     fit();
     input.oninput = () => { st.path[name] = input.value; fit(); };
     wrap.appendChild(input);
+  }
+  if (graph) {
+    const dl = el('<datalist id="graphnodes"></datalist>');
+    for (const id of nodeOrder()) dl.appendChild(el('<option value="' + esc(id) + '">' + esc(nodeLabel(id)) + '</option>'));
+    wrap.appendChild(dl);
   }
   return wrap;
 }
@@ -835,6 +844,8 @@ function paramOn(f, shape, state, redraw) {
   } else if (e.isNull) {
     const i = el('<input class="nulled" value="null" readonly />');
     v.appendChild(i);
+  } else if (isNodeField(f.name) && graph) {
+    v.appendChild(nodeSelect(f, e, state, redraw));
   } else if (f.values) {
     const sel = el('<select></select>');
     for (const val of f.values) sel.appendChild(el('<option ' + (String(e.value) === String(val) ? 'selected' : '') + '>' + esc(val) + '</option>'));
@@ -936,6 +947,101 @@ function paramCustom(i, state, redraw) {
   act.appendChild(x);
   row.appendChild(act);
   return row;
+}
+
+/* ---------- the workflow you are operating on ---------- */
+
+// Any response carrying an id -> node map is a workflow: remember its graph, so node ids
+// stop being placeholders you have to know and become the nodes that actually exist.
+function readGraph(body) {
+  const nodes = body && typeof body === 'object' ? body.nodes : null;
+  if (!nodes || typeof nodes !== 'object' || Array.isArray(nodes)) return;
+  const entries = Object.entries(nodes).filter(([, n]) => n && typeof n === 'object' && n.typeName);
+  if (!entries.length) return;
+  graph = {
+    rootNodeId: body.rootNodeId ?? null,
+    workflowId: body.id ?? null,
+    nodes: Object.fromEntries(entries.map(([id, n]) => [id, { typeName: n.typeName, next: n.nextNodeIds ?? [] }])),
+  };
+}
+
+const isNodeField = (name) => /^(from|to|before|after|root|next)?[Nn]odeId$/.test(name);
+
+// Root first, then each node's children — the order you'd read the workflow in.
+function nodeOrder() {
+  if (!graph) return [];
+  const seen = [], queue = graph.rootNodeId ? [graph.rootNodeId] : [];
+  while (queue.length) {
+    const id = queue.shift();
+    if (!graph.nodes[id] || seen.includes(id)) continue;
+    seen.push(id);
+    queue.push(...graph.nodes[id].next);
+  }
+  for (const id of Object.keys(graph.nodes)) if (!seen.includes(id)) seen.push(id);
+  return seen;
+}
+
+// toNodeId only makes sense as a node fromNodeId actually points at — insert-between needs a
+// real edge, and the API rejects a pair that isn't one.
+function nodeChoices(name, state) {
+  if (!graph) return null;
+  if (name === 'toNodeId') {
+    const from = state.fields.fromNodeId;
+    if (from?.on && graph.nodes[from.value]) {
+      return { ids: graph.nodes[from.value].next, why: 'the nodes ' + from.value + ' points at' };
+    }
+  }
+  return { ids: nodeOrder(), why: null };
+}
+
+function nodeLabel(id) {
+  const n = graph?.nodes[id];
+  return n ? n.typeName + '  ·  ' + id : id;
+}
+
+// Only real nodes are offered. A value that isn't one of them (the spec's "n1" placeholder,
+// or a node from a workflow you've since navigated away from) is a guaranteed 400, so it is
+// replaced rather than preselected.
+function nodeSelect(f, e, state, redraw) {
+  const choice = nodeChoices(f.name, state);
+  const wrap = el('<div></div>');
+  const ids = choice.ids;
+  if (!ids.length) {
+    wrap.appendChild(el('<p class="note warn">' + esc(f.name === 'toNodeId'
+      ? 'Nothing comes after that node, so there is no gap to insert between.'
+      : 'This workflow has no nodes yet.') + '</p>'));
+    return wrap;
+  }
+  if (!ids.includes(e.value)) e.value = ids[0];
+  const sel = el('<select></select>');
+  for (const id of ids) {
+    sel.appendChild(el('<option value="' + esc(id) + '"' + (e.value === id ? ' selected' : '') + '>' + esc(nodeLabel(id)) + '</option>'));
+  }
+  sel.onchange = () => { e.value = sel.value; redraw(); };
+  wrap.appendChild(sel);
+  if (choice.why) wrap.appendChild(el('<p class="d" style="margin-left:0">Limited to ' + esc(choice.why) + '.</p>'));
+  return wrap;
+}
+
+function renderGraph() {
+  const box = document.getElementById('nodes');
+  if (!graph) {
+    box.innerHTML = '<p class="empty">GET a workflow and its nodes show up here — node-id fields then pick from the real graph instead of a placeholder.</p>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const id of nodeOrder()) {
+    const n = graph.nodes[id];
+    const root = id === graph.rootNodeId;
+    const row = el('<div class="var"><b>' + esc(n.typeName) + (root ? ' <span class="t req">root</span>' : '') + '</b><span class="val">' + esc(id) + '</span></div>');
+    row.onclick = () => {
+      for (const p of current.pathParams) if (p.name === 'nodeId') st.path[p.name] = id;
+      store.nodeId = id;
+      renderStore();
+      render();
+    };
+    box.appendChild(row);
+  }
 }
 
 /* ---------- fields ⇄ json ---------- */
@@ -1064,7 +1170,23 @@ function fail(label, msg) {
 
 /* ---------- captured ids ---------- */
 
-function capture(body) { walk(body, '', childResourceParam(current?.path)); renderStore(); }
+function capture(body) {
+  readGraph(body);
+  // GET /v1/workflows/{workflowId} answers with { id }: that id IS the workflowId, so the
+  // next endpoint down the path opens with it already filled.
+  const self = selfParam(current?.path);
+  if (self && body && typeof body === 'object' && body.id != null) store[self] = String(body.id);
+  walk(body, '', childResourceParam(current?.path));
+  renderStore();
+  renderGraph();
+  if (graph) render();
+}
+
+function selfParam(path) {
+  if (!path || !path.endsWith('}')) return null;
+  const m = path.match(/\\{([^}]+)\\}$/);
+  return m ? m[1] : null;
+}
 
 function captureValue(name, val) {
   store[name] = val;
@@ -1195,6 +1317,7 @@ function selectVar(k) {
 
 renderList();
 renderStore();
+renderGraph();
 document.getElementById('filter').oninput = (ev) => renderList(ev.target.value);
 </script>
 </body>
