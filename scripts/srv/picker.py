@@ -189,7 +189,10 @@ def _scan_merges():
             hist = merges.setdefault(proj, [])
             hist[:] = [e for e in hist if e.get("pr") != int(nums[-1])]
             hist.insert(0, {"pr": int(nums[-1]), "title": title or subj, "at": at, "branch": branch})
-            del hist[8:]
+            # The plan numbers every step a project ever shipped, so this history is the only
+            # record of the early ones — the branches are long gone. Keep enough that a long
+            # forest never renumbers itself by forgetting where it started.
+            del hist[64:]
     try:
         if path:
             with open(path, "w") as f:
