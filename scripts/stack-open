@@ -159,6 +159,11 @@ focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actua
   esac; fi
   [[ -n "$app" ]] && open -a "$app" >/dev/null 2>&1 || true
 }
+quiet_open(){ [[ "${STACK_OPEN_TERMINAL:-}" == none ]] }   # STACK_OPEN_TERMINAL=none — surface NOTHING:
+                                                          # a tmux select-window yanks the human's
+                                                          # focus just as surely as `open -a` does, so
+                                                          # a scripted/batch open must skip both.
+
 surface_review_window(){   # bring the warm nvim's tmux window to the front, reliably.
   # Identify it by the socket nvim's PID, not by name: tmux `automatic-rename` (on by
   # default) renames a window to its running command, so 'review-nvim' silently becomes
@@ -166,6 +171,7 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
   # window you were on. PID match is rename-proof; then pin the name + turn the rename
   # off so it stays reliable, and select by index (unambiguous).
   local npid win
+  quiet_open && return 0
   npid=$(nvim --server "$SOCK" --remote-expr 'getpid()' 2>/dev/null) || true
   if [[ -n "${npid:-}" ]]; then
     # `|| true`: the `break` closes the pipe early, so `tmux list-panes` dies on SIGPIPE (141) — pipefail+set -e would abort the open
@@ -282,7 +288,9 @@ if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
     win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
   fi
-  [[ -n "${win:-}" ]] && tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
+  if ! quiet_open && [[ -n "${win:-}" ]]; then
+    tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
+  fi
   focus_terminal
   [[ -n "$stale_warn" ]] && echo "stack-open: $stale_warn" >&2 || true
   echo "opened $rel on $branch → review-hx ($dir)"
