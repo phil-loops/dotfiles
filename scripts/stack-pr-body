@@ -82,42 +82,11 @@ for i, b in enumerate(d.get("order", []), 1):
     print(f"{i}.{gh_pr(b)} {desc}" + ("  ← **this PR**" if b == me else ""))
 ' "$branch" 2>/dev/null || true)
 
-files="$(git diff --name-only "${parent}...${branch}" | paste -sd', ' - || true)"
-diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,16000]}"
-
-# The MODEL writes exactly ONE section — "The change". Everything relational (what this builds on,
-# what it unblocks, the merge order, the map) is already in git config: it is COMPUTED below, never
-# narrated by a model. A fact we know exactly must not be re-guessed by an LLM.
-read -r -d '' prompt <<EOF || true
-Describe what ONE pull request's diff does. GitHub-flavored markdown ONLY — no preamble, no
-surrounding code fence, no sign-off, no headings other than the group sub-headings described below.
-Do NOT describe where the branch sits in its stack, what it builds on, or what merges after it —
-that is generated separately. Write ONLY the change itself.
-
-HOUSE STYLE — the shape this repo's reviewers already read:
-- Group the work under short **bold text lines** by concern (e.g. "**Delete guard**", "**Tests**").
-  They are bold lines, NOT markdown headings — never emit "#", "##" or "###".
-- A few bullets each.
-- END EACH GROUP with "- Related files: \`path\`, \`path\`" naming the files that group touched.
-- Give tests their own group.
-- Add an "Out of scope" group only when something a reviewer would expect is deliberately left out.
-
-VOICE — plain register. Transform jargon into meaning:
-- Drop raw identifiers (function names, variable names, column/field names) and terms-of-art
-  (idempotent, monotonic, short-circuit, memoize, invalidate). Say what they DO:
-    e.g. NOT "markLocked is idempotent so repeat calls short-circuit"
-         BUT "marking an already-locked goal does nothing, so it is safe to repeat"
-    e.g. NOT "reads the isLocked field"        BUT "reads the locked flag"
-    e.g. NOT "the findByGoalAndSource query"   BUT "the query that loads the attachment"
-
-CHANGED FILES: ${files}
-
-DIFF (truncated to 16k):
-${diff}
-EOF
-
-resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
-[[ -n "$resp" ]] || resp=$'_(could not draft — is `claude` on PATH?)_'
+# THE CHANGE — the only part a model must write, because it is the only part that requires reading
+# a diff. It is stored ON THE BRANCH (stack-summary), keyed by a rebase-stable patch-id: written
+# once, reused free on every regeneration, and re-drafted only when the code itself changes.
+resp=$("${0:A:h}/stack-summary" "$branch" 2>/dev/null || true)
+[[ -n "$resp" ]] || resp=$'_(no summary — run `stack-summary '"$branch"'`)_'
 
 # ─── everything below is COMPUTED from git config + gh: no model, no guessing ────────────────────
 pos=$(print -r -- "$order_list" | awk '/this PR/{print NR}')

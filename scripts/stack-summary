@@ -1,0 +1,81 @@
+#!/bin/zsh
+# stack-summary — a branch's job, summarized from its own diff and STORED ON THE BRANCH.
+#
+# The forest already owns every relation (parent, requires, merge rank) and every purpose (the
+# branch description). The one thing it could not answer for itself was "what does this diff
+# actually do" — so every PR-body draft paid a model call and reworded it slightly each time.
+# That summary is a property of the branch, not of the moment: write it down.
+#
+# Stored in git config, keyed by the branch's PATCH-ID (`git patch-id --stable`), which is
+# rebase-stable: a restack, a reword, or a new base leaves the summary valid, while an actual code
+# change invalidates it and it regenerates. Same contract as the blessing ledger.
+#
+#   stack-summary <branch>            → the summary (regenerating only if the code changed)
+#   stack-summary <branch> --refresh  → regenerate now, whatever the stored one says
+#   stack-summary <branch> --status   → fresh | stale | absent, without spending a token
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+branch="${1:-}"
+[[ -n "$branch" ]] || { echo "usage: stack-summary <branch> [--refresh|--status]" >&2; exit 2; }
+mode="${2:-}"
+
+parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
+
+# rebase-stable identity of this branch's contribution — the SAME code yields the same id on a
+# different base, so restacking never invalidates a summary; editing the code does.
+patch_id=$(git diff "${parent}...${branch}" | git patch-id --stable | awk '{print $1}')
+[[ -n "$patch_id" ]] || patch_id="empty"
+
+stored=$(git config "stack-branch.${branch}.summary" 2>/dev/null || true)
+stored_id=$(git config "stack-branch.${branch}.summary-patchid" 2>/dev/null || true)
+
+if [[ "$mode" == "--status" ]]; then
+  if [[ -z "$stored" ]]; then print -r -- "absent"
+  elif [[ "$stored_id" == "$patch_id" ]]; then print -r -- "fresh"
+  else print -r -- "stale"
+  fi
+  exit 0
+fi
+
+if [[ -n "$stored" && "$stored_id" == "$patch_id" && "$mode" != "--refresh" ]]; then
+  print -r -- "$stored"
+  exit 0
+fi
+
+files="$(git diff --name-only "${parent}...${branch}" | paste -sd', ' - || true)"
+diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,16000]}"
+
+read -r -d '' prompt <<EOF || true
+Describe what ONE pull request's diff does. GitHub-flavored markdown ONLY — no preamble, no
+surrounding code fence, no sign-off. Do NOT describe where the branch sits in its stack, what it
+builds on, or what merges after it — that is generated separately. Write ONLY the change itself.
+
+HOUSE STYLE — the shape this repo's reviewers already read:
+- Group the work under short **bold text lines** by concern (e.g. "**Delete guard**", "**Tests**").
+  They are bold lines, NOT markdown headings — never emit "#", "##" or "###".
+- A few bullets each.
+- END EACH GROUP with "- Related files: \`path\`, \`path\`" naming the files that group touched.
+- Give tests their own group.
+- Add an "Out of scope" group only when something a reviewer would expect is deliberately left out.
+
+VOICE — plain register. Transform jargon into meaning:
+- Drop raw identifiers (function names, variable names, column/field names) and terms-of-art
+  (idempotent, monotonic, short-circuit, memoize, invalidate). Say what they DO:
+    e.g. NOT "markLocked is idempotent so repeat calls short-circuit"
+         BUT "marking an already-locked goal does nothing, so it is safe to repeat"
+    e.g. NOT "reads the isLocked field"        BUT "reads the locked flag"
+    e.g. NOT "the findByGoalAndSource query"   BUT "the query that loads the attachment"
+
+CHANGED FILES: ${files}
+
+DIFF (truncated to 16k):
+${diff}
+EOF
+
+resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
+[[ -n "$resp" ]] || { echo "stack-summary: could not draft — is \`claude\` on PATH?" >&2; exit 1; }
+
+git config "stack-branch.${branch}.summary" "$resp"
+git config "stack-branch.${branch}.summary-patchid" "$patch_id"
+print -r -- "$resp"
