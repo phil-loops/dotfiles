@@ -28,7 +28,7 @@ if [[ "$fork_url" == *[Ll]oops-so* ]]; then
   exit 1
 fi
 slug="${${fork_url#*github.com[:/]}%.git}"
-tag="integ/${project}"
+tag="integration/${project}"
 
 if (( url_only )); then
   # only speak the URL once the tag really exists — a body must never carry a dead link
@@ -59,3 +59,18 @@ print -r -- "built ${ref}"
 # to this push alone.
 ALLOW_MERGE_PUSH=1 git push -q --force "$fork" "${ref}:refs/tags/${tag}"
 print -r -- "published https://github.com/${slug}/tree/${tag}"
+
+# 4 · mint it as a real local branch too, so it can be checked out by name in any worktree.
+# Deliberately NOT the tag's name: a local branch and a fetched tag sharing one name makes every
+# `git checkout integ/x` ambiguous. It is a VIEW, rebuilt from the leaves — never commit on it.
+# Refuse to move it while it is checked out somewhere: that would yank the tree out from under
+# whoever is standing on it.
+local_branch="integ/${project}"
+checked_out=$(git worktree list --porcelain | awk -v b="refs/heads/${local_branch}" '
+  /^worktree /{wt=$2} /^branch /{if ($2==b) print wt}')
+if [[ -n "$checked_out" ]]; then
+  print -r -- "local branch ${local_branch} is checked out at ${checked_out} — left alone (re-checkout there to pick this up)"
+else
+  git branch -f "$local_branch" "$ref"
+  print -r -- "local branch ${local_branch} → git checkout ${local_branch}"
+fi
