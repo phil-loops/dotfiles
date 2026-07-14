@@ -398,13 +398,15 @@ def _node_health(branch, pr=None):
         merged = pr.get("state") == "MERGED"
     else:
         merged = _merged_prless(branch, trunk)
-    # contractable = droppable RIGHT NOW (rebase-classify exit 20: every remaining commit is
-    # patch-identical to trunk). A merged PR with a follow-on commit reads merged=True but is
-    # NOT contractable — /contract refuses it. The badge keys its verb off this, not merged.
-    # A merged node whose local branch is GONE (dangling stack-branch.* keys keep it rendering)
-    # has no commits to lose — contract is pure config cleanup, so it's always droppable.
+    # contractable = droppable RIGHT NOW: every remaining commit is patch-identical to trunk
+    # (rebase-classify exit 20), or the branch is wholly contained in trunk (_landed — the
+    # already-restacked case exit 20 misses). A merged PR with a real follow-on commit is
+    # neither, so it reads merged=True and NOT contractable — /contract refuses it, and the
+    # badge keys its verb off this, not merged. A merged node whose local branch is GONE
+    # (dangling stack-branch.* keys keep it rendering) has no commits to lose — contract is
+    # pure config cleanup, so it's always droppable.
     exists = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode == 0
-    contractable = (not exists or bool(_merged_prless(branch, trunk))) if merged else False
+    contractable = (not exists or bool(_merged_prless(branch, trunk)) or _landed(branch, trunk)) if merged else False
     return {"branch": branch, "drifted": bool(drifted), "merged": bool(merged),
             "contractable": contractable, "parent": parent,
             "pr": pr, **_upstream_state(branch, main)}
@@ -569,6 +571,16 @@ def _already_merged(branch):
     return rc == 20
 
 
+def _landed(branch, trunk="origin/main"):
+    """Every commit on BRANCH is already in TRUNK — dropping it can't lose work. rebase-classify
+    misses this: a branch restacked onto the main that carries its own squash-merge holds zero
+    unique commits, and its `up-to-date` verdict (exit 0) wins over `already-merged` (exit 20),
+    so the exit-20 probes above call it unmerged and nothing will ever drop it. Weaker than
+    exit 20 as evidence of a MERGE (a never-committed branch also passes), so it only ever
+    widens a droppability gate that merged-ness has already opened — never merged-ness itself."""
+    return ctx.run(["git", "merge-base", "--is-ancestor", branch, trunk]).returncode == 0
+
+
 def _requirers_of(branch):
     out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.requires$"]).stdout
     deps = []
@@ -669,7 +681,9 @@ def post_contract(req, raw):
         return
     # A branch that no longer exists locally is pure config rot (dangling stack-branch.* keys
     # keep it rendering as a phantom node) — nothing to lose, so skip the merged gate entirely.
-    if exists and not _already_merged(branch):
+    # What the gate actually protects is "no work that isn't in origin/main"; _landed proves that
+    # outright (the branch IS contained in main), so it clears the same bar exit 20 does.
+    if exists and not _already_merged(branch) and not _landed(branch):
         req._send(409, json.dumps(
             {"ok": False, "err": "not already-merged — refusing to drop a branch with unmerged work"}))
         return
