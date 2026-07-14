@@ -40,28 +40,48 @@ desc_of() {
   print -r -- "${s#*: }"
 }
 
+# THE WHOLE PLAN, not just this branch's coordinates. A position ("1 of 4") tells a reader where
+# this sits but nothing about what the other three DO — so spell out every branch's job, in merge
+# order, and mark this one. The forest knows all of it; a commit that names only itself is thinner
+# than the facts we hold.
 order=$("$here/stack-merge-rank" "$branch" 2>/dev/null || echo '{}')
-position=$(ME="$branch" python3 -c '
-import json, os, sys
-try: order = json.load(sys.stdin).get("order", [])
-except ValueError: order = []
+
+plan=$(ME="$branch" python3 -c '
+import json, os, subprocess, sys
+
+def git(*a):
+    return subprocess.run(["git", *a], capture_output=True, text=True).stdout.strip()
+
+def job(b):
+    p = git("config", f"stack-branch.{b}.parent") or "main"
+    s = git("log", "-1", "--format=%s", f"{p}..{b}")
+    s = s.split(": ", 1)[1] if ": " in s else s
+    return s or git("config", f"branch.{b}.description") or b
+
+try:
+    order = json.load(sys.stdin).get("order", [])
+except ValueError:
+    order = []
 me = os.environ["ME"]
-print(f"{order.index(me)+1} of {len(order)}" if me in order else "")' <<< "$order")
+if not order:
+    sys.exit(0)
 
-sits="Part of ${project}"
-[[ -n "$position" ]] && sits+=", ${position}"
-if [[ "$parent" != "main" ]]; then
-  sits+=". Builds on “$(desc_of "$parent")”"
-else
-  sits+=". An independent base off main"
-fi
-reqs=()
-while read -r r; do [[ -n "$r" ]] && reqs+=("“$(desc_of "$r")”"); done \
-  < <(git config --get-all "stack-branch.${branch}.requires" 2>/dev/null || true)
-(( ${#reqs} )) && sits+=", and pulls in ${(j:, and :)reqs} (fan-in — merges first)"
-sits+="."
+rank = {b: i + 1 for i, b in enumerate(order)}
+for b in order:
+    parent = git("config", f"stack-branch.{b}.parent") or "main"
+    needs = []
+    if parent in rank:
+        needs.append(str(rank[parent]))
+    needs += [str(rank[r]) for r in git("config", "--get-all", f"stack-branch.{b}.requires").splitlines() if r in rank]
+    tail = "  (needs %s)" % ", ".join(needs) if needs else ""
+    print("  %d. %s%s%s" % (rank[b], job(b), tail, "   <- this branch" if b == me else ""))
+' <<< "$order")
 
-section="${sits}"
+position=$(print -r -- "$plan" | grep -c .)
+mine=$(print -r -- "$plan" | awk "/this branch/{print NR}")
+
+section="Part of ${project} — ${mine:-?} of ${position:-?}, which lands as:
+${plan}"
 
 if (( section_only )); then
   print -r -- "$section"
