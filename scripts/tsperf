@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+"""tsperf — a repeatable typecheck-performance harness for the loops repo.
+
+    tsperf run    [-n 3]              time the full check on the working tree
+    tsperf pareto [--top 25]          per-file check-time Pareto (what to attack)
+    tsperf ab <refA> <refB> [-n 3]    A/B two refs, alternating arms, same worktree
+
+Three lessons are baked in, because each one cost us a wrong conclusion:
+
+  * `incremental: true` in tsconfig.node.json makes a bench run reuse .tsbuildinfo
+    and check NOTHING (trace comes out empty). Every run here forces it off.
+  * `checkSourceFile` trace events are B/E pairs, not X spans. Pareto stacks them.
+  * Comparing two worktrees is noise (we once "measured" a -35% that wasn't real).
+    `ab` alternates arms in ONE worktree and reports the median of paired runs.
+
+Instantiation counts do NOT predict check time — read the `check` clock, not the
+counters. See memory: ts-perf-db-delegate-cast.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import statistics
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+TSGO_SPEC = "@typescript/native-preview@^7.0.0-dev.20260707.2"
+TSGO_HOME = Path.home() / ".cache" / "tsperf" / "tsgo"
+BENCH_TSCONFIG = "tsconfig.tsperf.json"
+
+
+def sh(cmd, **kw):
+    return subprocess.run(cmd, shell=isinstance(cmd, str), text=True,
+                          capture_output=True, **kw)
+
+
+def repo_root():
+    r = sh(["git", "rev-parse", "--show-toplevel"])
+    if r.returncode:
+        sys.exit("tsperf: not in a git repo")
+    return Path(r.stdout.strip())
+
+
+def require_deps(root):
+    """A worktree without deps reports thousands of phantom import errors."""
+    if not (root / "node_modules").exists():
+        sys.exit(f"tsperf: {root}/node_modules is missing — every import would\n"
+                 f"        fail and the numbers would be meaningless. Fix with:\n"
+                 f"        ln -sfn ~/coding/loops/node_modules {root}/node_modules\n"
+                 f"        ln -sfn ~/coding/loops/.gen {root}/.gen")
+
+
+def engine_bin(root, engine):
+    if engine == "tsc":
+        return str(root / "node_modules" / ".bin" / "tsc")
+    return tsgo_bin(root)
+
+
+def tsgo_bin(root):
+    """Prefer the worktree's own tsgo; else a pinned copy we provision once."""
+    local = root / "node_modules" / ".bin" / "tsgo"
+    if local.exists():
+        return str(local)
+    binary = TSGO_HOME / "node_modules" / ".bin" / "tsgo"
+    if not binary.exists():
+        print(f"tsperf: provisioning {TSGO_SPEC} into {TSGO_HOME} (one time)…",
+              file=sys.stderr)
+        TSGO_HOME.mkdir(parents=True, exist_ok=True)
+        (TSGO_HOME / "package.json").write_text('{"private":true}\n')
+        r = sh(["npm", "install", "--silent", "--no-audit", "--no-fund", TSGO_SPEC],
+               cwd=TSGO_HOME)
+        if r.returncode or not binary.exists():
+            sys.exit(f"tsperf: could not install tsgo\n{r.stderr}")
+    return str(binary)
+
+
+def write_bench_tsconfig(root, trace_dir=None):
+    """A bench config that actually checks: incremental off, no emit."""
+    opts = {"incremental": False, "noEmit": True, "tsBuildInfoFile": None}
+    if trace_dir:
+        opts["generateTrace"] = trace_dir
+    cfg = {"extends": "./tsconfig.node.json",
+           "compilerOptions": {k: v for k, v in opts.items() if v is not None}}
+    path = root / BENCH_TSCONFIG
+    path.write_text(json.dumps(cfg, indent=2) + "\n")
+    return path
+
+
+def parse_diagnostics(out):
+    """Pull the numbers worth trusting out of --extendedDiagnostics."""
+    def num(label):
+        m = re.search(rf"^{label}:\s+([\d.]+)s?$", out, re.M)
+        return float(m.group(1)) if m else None
+    return {
+        "check": num("Check time"),
+        "total": num("Total time"),
+        "types": num("Types"),
+        "instantiations": num("Instantiations"),
+        "errors": len(re.findall(r"error TS\d+", out)),
+    }
+
+
+def check_once(root, engine, extra=()):
+    cfg = write_bench_tsconfig(root)
+    try:
+        r = sh([engine_bin(root, engine), "-p", str(cfg),
+                "--extendedDiagnostics", *extra], cwd=root)
+        out = r.stdout + r.stderr
+        if "TS5108" in out:
+            sys.exit("tsperf: tsgo rejects this tree's moduleResolution=node10.\n"
+                     "        Only the ts7 forest (nodenext configs) runs under tsgo;\n"
+                     "        elsewhere pass --engine tsc.")
+        m = parse_diagnostics(out)
+        if m["check"] is None:
+            sys.exit(f"tsperf: no check happened — the compiler bailed:\n{out[-800:]}")
+        return m
+    finally:
+        cfg.unlink(missing_ok=True)
+
+
+def fmt(m):
+    return (f"check {m['check']:.2f}s  total {m['total']:.2f}s  "
+            f"inst {m['instantiations']/1e6:.2f}M  errors {m['errors']}")
+
+
+def cmd_run(args):
+    root = repo_root()
+    require_deps(root)
+    runs = []
+    for i in range(args.n):
+        m = check_once(root, args.engine)
+        runs.append(m)
+        print(f"  run {i+1}: {fmt(m)}")
+    med = statistics.median(r["check"] for r in runs)
+    print(f"\nmedian check: {med:.2f}s   ({runs[0]['errors']} errors)")
+
+
+def cmd_pareto(args):
+    root = repo_root()
+    require_deps(root)
+    trace_dir = Path(tempfile.mkdtemp(prefix="tsperf-trace-"))
+    cfg = write_bench_tsconfig(root, trace_dir=str(trace_dir))
+    try:
+        sh([engine_bin(root, args.engine), "-p", str(cfg)], cwd=root)
+        trace = next(trace_dir.glob("trace*.json"), None)
+        if not trace:
+            sys.exit(f"tsperf: no trace emitted into {trace_dir}")
+        events = json.loads(trace.read_text())
+    finally:
+        cfg.unlink(missing_ok=True)
+
+    # checkSourceFile arrives as B/E pairs, NOT X spans — pair them with a stack.
+    stack, per_file = [], {}
+    for e in events:
+        if e.get("name") != "checkSourceFile":
+            continue
+        if e.get("ph") == "B":
+            stack.append(e)
+        elif e.get("ph") == "E" and stack:
+            b = stack.pop()
+            path = (b.get("args") or {}).get("path", "?")
+            per_file[path] = per_file.get(path, 0) + (e["ts"] - b["ts"]) / 1000.0
+
+    if not per_file:
+        sys.exit("tsperf: trace had zero checkSourceFile events "
+                 "(incremental reuse? stale .tsbuildinfo?)")
+
+    ranked = sorted(per_file.items(), key=lambda kv: -kv[1])
+    total = sum(per_file.values())
+    print(f"check time {total/1000:.1f}s across {len(ranked)} files\n")
+    cum = 0.0
+    for i, (path, ms) in enumerate(ranked[:args.top], 1):
+        cum += ms
+        rel = os.path.relpath(path, root)
+        print(f"{i:>3}. {ms:>8.0f}ms  {ms/total*100:>5.1f}%  "
+              f"(cum {cum/total*100:>4.1f}%)  {rel}")
+    for n in (5, 20, 100):
+        if n <= len(ranked):
+            head = sum(ms for _, ms in ranked[:n])
+            print(f"\n  top {n:>3}: {head/total*100:.1f}% of check")
+    shutil.rmtree(trace_dir, ignore_errors=True)
+
+
+def cmd_ab(args):
+    root = repo_root()
+    require_deps(root)
+    if sh(["git", "status", "--porcelain", "-uno"], cwd=root).stdout.strip():
+        sys.exit("tsperf ab: tracked files are modified — it checks out refs, "
+                 "which would clobber them")
+    orig = sh(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=root).stdout.strip()
+    if orig == "HEAD":
+        orig = sh(["git", "rev-parse", "HEAD"], cwd=root).stdout.strip()
+
+    arms = {args.refA: [], args.refB: []}
+    try:
+        for ref in (args.refA, args.refB):  # cold FS cache would tax whoever ran first
+            sh(["git", "checkout", "--detach", "-q", ref], cwd=root)
+            check_once(root, args.engine)
+            print(f"  warmup  {ref}")
+        for i in range(args.n):
+            for ref in (args.refA, args.refB):  # alternate: same pass, same machine load
+                if sh(["git", "checkout", "--detach", "-q", ref], cwd=root).returncode:
+                    sys.exit(f"tsperf ab: cannot check out {ref}")
+                m = check_once(root, args.engine)
+                arms[ref].append(m)
+                print(f"  pair {i+1}  {ref:<28} {fmt(m)}")
+    finally:
+        sh(["git", "checkout", "-q", orig], cwd=root)
+
+    print()
+    for label, key in (("min", min), ("median", statistics.median)):
+        a = key([m["check"] for m in arms[args.refA]])
+        b = key([m["check"] for m in arms[args.refB]])
+        print(f"  {label:>6}:  {args.refA} {a:.2f}s -> {args.refB} {b:.2f}s"
+              f"   {(b - a):+.2f}s ({(b - a) / a * 100:+.1f}%)")
+    # Other sessions' load only ever ADDS time, so the fastest run of each arm is
+    # the least-contaminated estimate of its true cost. Median chases the noise.
+    wins = sum(1 for x, y in zip(arms[args.refA], arms[args.refB])
+               if y["check"] < x["check"])
+    print(f"\n  {wins}/{args.n} pairs favor {args.refB} "
+          f"— believe the delta only if that's unanimous")
+    ia = arms[args.refA][0]["instantiations"]
+    ib = arms[args.refB][0]["instantiations"]
+    print(f"  instantiations {ia/1e6:.2f}M -> {ib/1e6:.2f}M "
+          f"({(ib - ia) / ia * 100:+.1f}%) — deterministic, but it does NOT "
+          f"predict time")
+
+
+def main():
+    p = argparse.ArgumentParser(prog="tsperf", description=__doc__,
+                                formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def engine_flag(sp):
+        sp.add_argument("--engine", choices=("tsgo", "tsc"), default="tsgo",
+                        help="tsgo needs nodenext configs (the ts7 forest); "
+                             "tsc runs anywhere but is slower and noisier")
+
+    r = sub.add_parser("run", help="time the full check on the working tree")
+    r.add_argument("-n", type=int, default=3)
+    engine_flag(r)
+    r.set_defaults(fn=cmd_run)
+
+    pa = sub.add_parser("pareto", help="per-file check-time Pareto")
+    pa.add_argument("--top", type=int, default=25)
+    # tsgo's --generateTrace never finished a repo-scale run (20min+ CPU, killed);
+    # tsc traces in ~30s and the file RANKING is what we act on.
+    pa.add_argument("--engine", choices=("tsgo", "tsc"), default="tsc")
+    pa.set_defaults(fn=cmd_pareto)
+
+    ab = sub.add_parser("ab", help="A/B two refs, alternating arms")
+    ab.add_argument("refA")
+    ab.add_argument("refB")
+    ab.add_argument("-n", type=int, default=3)
+    engine_flag(ab)
+    ab.set_defaults(fn=cmd_ab)
+
+    args = p.parse_args()
+    args.fn(args)
+
+
+if __name__ == "__main__":
+    main()
