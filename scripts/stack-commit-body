@@ -56,7 +56,16 @@ if git branch -r --contains "$tip" 2>/dev/null | grep -q .; then
   exit 1
 fi
 subject=$(git log -1 --format=%s "$branch")
-new=$(print -r -- "${subject}"$'\n\n'"${body}" | git commit-tree "${tip}^{tree}" $(git rev-parse "${tip}^@" | sed 's/^/-p /') )
+msg="${subject}"$'\n\n'"${body}"
+
+# Rewriting a tip reseats every child, so don't do it for a message that already matches —
+# prepare-commit-msg seeds the plan at commit time, so usually it does.
+if [[ "$(git log -1 --format=%B "$branch" | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')" == "$msg" ]]; then
+  print -r -- "${branch}: message already carries its plan — leaving ${tip:0:10} alone"
+  exit 0
+fi
+
+new=$(print -r -- "$msg" | git commit-tree "${tip}^{tree}" $(git rev-parse "${tip}^@" | sed 's/^/-p /') )
 git update-ref "refs/heads/${branch}" "$new" "$tip"
 print -r -- "re-messaged ${branch}: ${tip:0:10} → ${new:0:10}"
 
