@@ -1,6 +1,15 @@
 # Helix config — lives in ~/.dotfiles/helix, symlinked from ~/.config/helix
 # (same pattern as nvim).
 
+# Inside tmux, helix auto-picks tmux's paste buffer, which ⌘V can't see.
+[editor]
+clipboard-provider = "pasteboard"
+
+# Off by default: without it, a gd issued while tsgo is still loading the loops
+# project queues silently and the editor looks hung.
+[editor.lsp]
+display-progress-messages = true
+
 # Implicitly trust the loops worktrees and the hover+o scratch worktrees
 # (/tmp/stack-study via stack-open; macOS canonicalizes /tmp → /private/tmp).
 # Scratch worktrees get a fresh path per open, so without this every hover+o
