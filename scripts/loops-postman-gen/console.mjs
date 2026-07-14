@@ -750,7 +750,7 @@ function shapeOfState(sh, s) { return sh.find(x => x.label === s.label) || sh[0]
 
 function selectEndpoint(e, node, push = true) {
   current = e;
-  if (push && location.pathname !== e.route) history.pushState({}, '', e.route);
+  if (push && location.pathname !== e.route) history.pushState({}, '', e.route + location.search);
   document.title = e.method + ' ' + e.path + ' — Loops API bench';
   document.body.style.setProperty('--verb', getComputedStyle(document.body).getPropertyValue('--' + e.method));
   document.querySelectorAll('.ep').forEach(n => n.classList.remove('active'));
@@ -810,8 +810,7 @@ function urlLine(e) {
     const m = part.match(/^\\{([^}]+)\\}$/);
     if (!m) { wrap.appendChild(document.createTextNode(part)); continue; }
     const name = m[1];
-    const list = isNodeField(name) && graph ? ' list="graphnodes"' : '';
-    const input = el('<input class="slot" spellcheck="false" autocomplete="off"' + list + ' placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
+    const input = el('<input class="slot" spellcheck="false" autocomplete="off" placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
     input.value = st.path[name] || '';
     const fit = () => {
       input.style.width = Math.min(Math.max(name.length, input.value.length) + 2, 64) + 'ch';
@@ -822,13 +821,9 @@ function urlLine(e) {
     if (name === 'workflowId') input.onchange = () => ensureGraph();
     wrap.appendChild(input);
   }
-  if (graph) {
-    const dl = el('<datalist id="graphnodes"></datalist>');
-    for (const id of nodeOrder()) dl.appendChild(el('<option value="' + esc(id) + '">' + esc(nodeLabel(id)) + '</option>'));
-    wrap.appendChild(dl);
-  }
   return wrap;
 }
+
 
 function bandOf(label, n) {
   const count = n == null ? '' : ' <span class="n">' + n + '</span>';
@@ -1568,12 +1563,28 @@ function routed() {
   return ENDPOINTS.find(e => e.route === here);
 }
 
+// The filter is part of where you are, not a keystroke: it rides in the url so a reload — or a
+// link you paste to someone — reopens the same shortlist.
+const filterQuery = () => new URLSearchParams(location.search).get('q') || '';
+
 restoreSession();
-renderList();
+const filterBox = document.getElementById('filter');
+filterBox.value = filterQuery();
+renderList(filterBox.value);
 renderStore();
 renderGraph();
-document.getElementById('filter').oninput = (ev) => renderList(ev.target.value);
-window.onpopstate = () => { const e = routed(); if (e) selectEndpoint(e, null, false); };
+filterBox.oninput = (ev) => {
+  const q = ev.target.value;
+  renderList(q);
+  const url = location.pathname + (q ? '?q=' + encodeURIComponent(q) : '');
+  history.replaceState({}, '', url);
+};
+window.onpopstate = () => {
+  filterBox.value = filterQuery();
+  renderList(filterBox.value);
+  const e = routed();
+  if (e) selectEndpoint(e, null, false);
+};
 const landed = routed();
 if (landed) selectEndpoint(landed, null, false);
 </script>
