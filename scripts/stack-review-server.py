@@ -499,6 +499,38 @@ def watcher():
             pass
 
 
+PACK_QUIET = 1.5   # let a burst of saves settle before packing
+
+
+def pack_watcher():
+    # Pack the extension when its source goes quiet. Without this the whole self-update path is
+    # theatre: an edit sits on disk, updates.xml keeps advertising the old version, and the SW can
+    # ask as eagerly as it likes — there is nothing newer to fetch. (dist/ lives in a subdir, so a
+    # pack's own output can't retrigger us; manifest.json can — the version bump — hence the
+    # re-baseline below, or we'd pack in a loop forever.)
+    d = os.path.join(SCRIPTS, "gh-to-nvim")
+    exts = (".js", ".json", ".css", ".html")
+
+    def newest():
+        try:
+            return max((os.path.getmtime(os.path.join(d, f))
+                        for f in os.listdir(d) if f.endswith(exts)), default=0.0)
+        except OSError:
+            return 0.0
+
+    seen = newest()
+    while True:
+        time.sleep(1.0)
+        m = newest()
+        if m == seen:
+            continue
+        time.sleep(PACK_QUIET)
+        if newest() != m:
+            continue   # still being edited — catch it on the next quiet
+        subprocess.run([os.path.join(SCRIPTS, "gh-to-nvim-pack")], capture_output=True)
+        seen = newest()
+
+
 def warm():
     # prune dead worktree registrations (each rotted entry costs stack-forest a subprocess on
     # every /node sweep), then pre-sweep the gh PR caches so a session's first /forest-health
@@ -516,6 +548,7 @@ def warm():
 _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()   # seed so the first /events stream sees real values
 threading.Thread(target=warm, daemon=True).start()
 threading.Thread(target=reviews.warm_requests_forever, daemon=True).start()   # review-requested PRs → worktree ready before the first jump
+threading.Thread(target=pack_watcher, daemon=True).start()   # ext source → packed, so the installed copy has something newer to fetch
 threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
