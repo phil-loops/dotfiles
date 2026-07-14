@@ -136,6 +136,10 @@ def _refresh_review_branch(num):
     ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
 
 
+def _match_diffhash(paths, want):
+    return next((p for p in paths if p and hashlib.sha256(p.encode()).hexdigest() == want), None)
+
+
 def _path_for_diffhash(branch, want):
     # GitHub's selected-line anchor is #diff-<sha256(path)> — one-way, but the branch is local by
     # now, so hash its changed files (vs merge-base with main; for a stacked PR that's a superset
@@ -143,10 +147,14 @@ def _path_for_diffhash(branch, want):
     r = ctx.run(["git", "diff", "--name-only", f"origin/main...{branch}"])
     if r.returncode != 0:
         r = ctx.run(["git", "diff", "--name-only", f"main...{branch}"])
-    for p in r.stdout.splitlines():
-        if p and hashlib.sha256(p.encode()).hexdigest() == want:
-            return p
-    return None
+    hit = _match_diffhash(r.stdout.splitlines(), want)
+    if hit:
+        return hit
+    # Once the PR squash-merges, the branch stops differing from main and that list goes EMPTY —
+    # every selected line then silently degraded to the whole-PR gm view (slower, and the wrong
+    # thing). The anchor came from GitHub's diff, so the file is real: hash the tracked tree
+    # instead (~0.02s, no network). A sha256 match on the full path is exact, never a near-miss.
+    return _match_diffhash(ctx.run(["git", "ls-files"]).stdout.splitlines(), want)
 
 
 def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a PR's <path> at <line> in nvim
