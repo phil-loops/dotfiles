@@ -1,123 +1,77 @@
 #!/bin/zsh
-# stack-pr-body — a GitHub PR description that frames ONE branch in its forest. Paste it into the
-# PR above the Traffic Cop block: this repo has a PR template, so GitHub prefills from the TEMPLATE
-# and nothing here ever arrives by commit-message prefill.
+# stack-pr-body — a GitHub PR description that frames ONE branch in its forest. Paste it into the PR
+# above the Traffic Cop block: this repo has a PR template, so GitHub prefills from the TEMPLATE and
+# nothing here ever arrives by commit-message prefill.
 #
-# The split that matters: the MODEL writes only "The change" (it must read the diff). Everything
-# RELATIONAL — position in the merge order, what this builds on, what it pulls in, what it unblocks,
-# the merge order with each branch's PR number, the Mermaid map — is COMPUTED from git config + gh.
-# A relation we know exactly is never re-narrated by an LLM.
+# NOTHING here is drafted on the fly. The relational sections come from stack_facts.py (which owns
+# every fact — position, plan, edges, PR numbers, the map) and the change description comes from
+# stack-summary (stored on the branch, keyed by a rebase-stable patch-id). So regenerating a body
+# costs nothing, reads the same every time, and cannot disagree with the commit body or the map.
 #
 #   stack-pr-body <branch>          → GitHub-flavored markdown PR body on stdout
-#   stack-pr-body <branch> --link   → also link the fork's assembled integration (opt-in: that
-#                                     link is the one fact the forest cannot vouch for itself)
+#   stack-pr-body <branch> --link   → also link the fork's assembled integration (opt-in: that link
+#                                     is the one fact the forest cannot vouch for itself)
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
+here="${0:A:h}"
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch>" >&2; exit 2; }
+[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--link]" >&2; exit 2; }
 
-parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
-[[ -n "$parent" ]] || parent=main
-desc=$(git config "branch.${branch}.description" 2>/dev/null || true)
-project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
+facts=$(python3 "$here/stack_facts.py" facts "$branch")
+change=$("$here/stack-summary" "$branch" 2>/dev/null || true)
+[[ -n "$change" ]] || change="_(no summary — run \`stack-summary ${branch}\`)_"
 
-have_gh=0; command -v gh >/dev/null 2>&1 && have_gh=1
-desc_of() { git config "branch.$1.description" 2>/dev/null || true; }
-pr_of() {  # " (PR #N, state)" for a branch, or empty
-  (( have_gh )) || return 0
-  gh pr list --head "$1" --state all --json number,state --limit 1 2>/dev/null \
-    | python3 -c 'import sys,json
-d=json.load(sys.stdin)
-print(" (PR #%s, %s)"%(d[0]["number"],d[0]["state"].lower())) if d else print("",end="")' 2>/dev/null || true
-}
-# one labelled line per related branch: its plain purpose + PR status (NO branch name — the
-# whole point is to reference work by what it does, so the model never echoes a slug).
-line_for() {
-  local d; d=$(desc_of "$1")
-  [[ -n "$d" ]] || d="(no description set)"
-  print -r -- "- ${d}$(pr_of "$1")"
-}
+FACTS="$facts" CHANGE="$change" python3 - <<'PY'
+import json, os
 
-# BUILDS ON — the parent (skip when it forks straight off main: that's an independent base).
-buildon=""
-[[ -n "$parent" && "$parent" != "main" ]] && buildon=$(line_for "$parent")
+f = json.loads(os.environ["FACTS"])
+out = []
 
-# PULLS IN — this branch's own requires (fan-in deps it carries; must merge first).
-pulls=""
-while read -r r; do [[ -z "$r" ]] && continue; pulls+="$(line_for "$r")"$'\n'; done \
-  < <(git config --get-all "stack-branch.${branch}.requires" 2>/dev/null || true)
-
-# UNBLOCKS — everything that builds on this: children (parent==this) ∪ consumers (require this).
-typeset -a downstream
-while read -r c; do [[ -n "$c" ]] && downstream+=("$c"); done \
-  < <( (git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true) \
-       | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}')
-while read -r c; do [[ -n "$c" ]] && downstream+=("$c"); done \
-  < <( (git config --get-regexp '^stack-branch\..*\.requires$' 2>/dev/null || true) \
-       | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.requires$/,"",$1); print $1}')
-downstream=(${(u)downstream})
-unblocks=""
-for c in $downstream; do unblocks+="$(line_for "$c")"$'\n'; done
-
-# CANONICAL MERGE ORDER — the single shared authority (stack-merge-rank), so the body matches the
-# forest story view exactly. Carries each branch's real PR number when one is open, so the
-# relation between this PR and the ones around it is a GitHub cross-link, not prose.
-order_list=$("${0:A:h}/stack-merge-rank" "$branch" 2>/dev/null | python3 -c '
-import sys, json, subprocess
-try: d = json.load(sys.stdin)
-except ValueError: sys.exit(0)
-me = sys.argv[1]
-def gh_pr(b):
-    r = subprocess.run(["gh","pr","list","--head",b,"--state","all","--json","number","--limit","1"],
-                       capture_output=True, text=True)
-    try:
-        j = json.loads(r.stdout)
-        return " #%s" % j[0]["number"] if j else ""
-    except Exception:
+def step_ref(s):
+    if not s.get("pr"):
         return ""
-for i, b in enumerate(d.get("order", []), 1):
-    desc = subprocess.run(["git","config",f"branch.{b}.description"],capture_output=True,text=True).stdout.strip() or "(no description)"
-    desc = desc.split(" -- ")[0].split(". ")[0]
-    print(f"{i}.{gh_pr(b)} {desc}" + ("  ← **this PR**" if b == me else ""))
-' "$branch" 2>/dev/null || true)
+    return " (#%s%s)" % (s["pr"], ", merged" if s.get("state") == "merged" else "")
 
-# THE CHANGE — the only part a model must write, because it is the only part that requires reading
-# a diff. It is stored ON THE BRANCH (stack-summary), keyed by a rebase-stable patch-id: written
-# once, reused free on every regeneration, and re-drafted only when the code itself changes.
-resp=$("${0:A:h}/stack-summary" "$branch" 2>/dev/null || true)
-[[ -n "$resp" ]] || resp=$'_(no summary — run `stack-summary '"$branch"'`)_'
+if f["project"] and f["position"]:
+    out.append("Title: %s/%s — %s\n\n---\n" % (f["project"], f["position"], f["job"]))
 
-# ─── everything below is COMPUTED from git config + gh: no model, no guessing ────────────────────
-pos=$(print -r -- "$order_list" | awk '/this PR/{print NR}')
-total=$(print -r -- "$order_list" | grep -c .)
-subject=$(git log -1 --format=%s "${parent}..${branch}")
+out.append(f["purpose"] or f["job"])
 
-[[ -n "$project" && -n "$pos" ]] && printf 'Title: %s/%s — %s\n\n---\n\n' "$project" "$pos" "${subject#*: }"
-printf '%s\n' "${desc:-$subject}"
+if f["project"]:
+    out.append("\n### Where it fits\n")
+    out.append("Part of **%s** — %s of %s.\n" % (f["project"], f["position"], f["total"]))
+    if f["buildsOn"]:
+        b = f["buildsOn"]
+        out.append("Builds on (merges first):\n- %s%s\n" % (b["job"], step_ref(b)))
+    else:
+        out.append("An independent base — forks off `main`, merges on its own schedule.\n")
+    if f["requires"]:
+        out.append("Pulls in (fan-in — merges first):")
+        out += ["- %s%s" % (r["job"], step_ref(r)) for r in f["requires"]] + [""]
+    if f["unblocks"]:
+        out.append("Unblocks (waits on this):")
+        out += ["- %s%s" % (u["job"], step_ref(u)) for u in f["unblocks"]] + [""]
 
-if [[ -n "$project" ]]; then
-  printf '\n### Where it fits\n\n'
-  printf 'Part of **%s** — %s of %s.\n\n' "$project" "${pos:-?}" "${total:-?}"
-  if [[ -n "$buildon" ]]; then
-    printf 'Builds on (merges first):\n%s\n\n' "$buildon"
-  else
-    printf 'An independent base — forks off `main`, merges on its own schedule.\n\n'
-  fi
-  [[ -n "$pulls"    ]] && printf 'Pulls in (fan-in — merges first):\n%s\n' "$pulls"
-  [[ -n "$unblocks" ]] && printf 'Unblocks (waits on this):\n%s\n' "$unblocks"
+out.append("\n### The change\n")
+out.append(os.environ["CHANGE"])
+
+if f["project"]:
+    out.append("\n### Merge order\n")
+    for s in f["plan"]:
+        mark = "  ← **this PR**" if s.get("me") else ""
+        ref = ""
+        if s.get("pr"):
+            ref = " #%s%s" % (s["pr"], " (merged)" if s.get("state") == "merged" else "")
+        out.append("%d.%s %s%s" % (s["n"], ref, s["job"], mark))
+
+print("\n".join(out))
+PY
+
+if [[ "${2:-}" == "--link" ]]; then
+  project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
+  url=$("$here/stack-integ-publish" --url "$project" 2>/dev/null || true)
+  [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
 fi
 
-printf '\n### The change\n\n%s\n' "$resp"
-
-if [[ -n "$project" ]]; then
-  printf '\n### Merge order\n\n%s\n' "$order_list"
-  # The fork's integration link is OPT-IN (--link): everything else in this body is derivable from
-  # git config + the open PRs, so it stays true on its own. The link depends on a fork push and on
-  # whether a reviewer can even see the fork — the one fact the forest cannot vouch for itself.
-  if [[ "${2:-}" == "--link" ]]; then
-    url=$("${0:A:h}/stack-integ-publish" --url "$project" 2>/dev/null || true)
-    [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
-  fi
-  printf '\n%s\n' "$("${0:A:h}/stack-forest-mermaid" "$branch" --prs --fence)"
-fi
+printf '\n%s\n' "$(python3 "$here/stack_facts.py" mermaid "$branch" --fence)"
