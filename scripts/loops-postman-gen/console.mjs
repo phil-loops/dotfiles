@@ -55,6 +55,7 @@ const withPresignedPut = (endpoints) => {
   endpoints.splice(endpoints.indexOf(create) + 1, 0, {
     method: "PUT",
     path: "{presignedUrl}",
+    route: "/PUT/presigned",
     tag: create.tag,
     summary: "Upload the file to the pre-signed URL.",
     description:
@@ -89,8 +90,11 @@ export const serve = async (opts) => {
   const html = page({ endpoints, base: args.base });
 
   const server = createServer(async (req, res) => {
-    if (req.method === "GET" && req.url === "/") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    // Every endpoint has its own URL, so any GET that isn't an asset opens the bench there.
+    // no-store: the page is generated per process, and a tab left open across a restart would
+    // otherwise keep firing an older bench's javascript.
+    if (req.method === "GET" && req.url !== "/favicon.ico") {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       return res.end(html);
     }
     if (req.method === "POST" && req.url === "/proxy") {
@@ -352,6 +356,7 @@ const extractEndpoints = (spec) => {
       out.push({
         method: METHOD,
         path,
+        route: `/${METHOD}${path}`,
         tag: op.tags?.[0] ?? "Other",
         summary: op.summary ?? "",
         description: op.description ?? "",
@@ -739,13 +744,15 @@ function toStr(v) {
 }
 function shapeOfState(sh, s) { return sh.find(x => x.label === s.label) || sh[0]; }
 
-function selectEndpoint(e, node) {
+function selectEndpoint(e, node, push = true) {
   current = e;
+  if (push && location.pathname !== e.route) history.pushState({}, '', e.route);
+  document.title = e.method + ' ' + e.path + ' — Loops API bench';
   document.body.style.setProperty('--verb', getComputedStyle(document.body).getPropertyValue('--' + e.method));
   document.querySelectorAll('.ep').forEach(n => n.classList.remove('active'));
   if (node) node.classList.add('active');
   else document.querySelectorAll('.ep').forEach(n => {
-    if (n.querySelector('.path').textContent === e.path && n.querySelector('.m').textContent === e.method) n.classList.add('active');
+    if (n.querySelector('.path').textContent === shortPath(e.path) && n.querySelector('.m').textContent === e.method) n.classList.add('active');
   });
   st = {
     path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.alias || p.name)])),
@@ -1269,6 +1276,16 @@ async function sendRequest() {
     }
   }
 
+  // The length in this body is signed into the url that comes back, so a body that disagrees with
+  // the chosen file mints a url the file can never be sent to — catch it here, not at the PUT.
+  if (current.declares && staged) {
+    let declaring;
+    try { declaring = JSON.parse(body); } catch { declaring = {}; }
+    if (Number(declaring.contentLength) !== staged.size) {
+      return fail('LENGTH MISMATCH', 'This declares ' + declaring.contentLength + ' bytes but ' + staged.name + ' is ' + staged.size + '. The url this mints would only accept ' + declaring.contentLength + ' bytes — set contentLength to ' + staged.size + ' or choose the file again.');
+    }
+  }
+
   const resp = document.getElementById('resp');
   resp.innerHTML = '<p class="sending">sending…</p>';
   let r;
@@ -1286,7 +1303,10 @@ async function sendRequest() {
   resp.appendChild(el('<div class="bar" style="margin-top:14px"><span class="status ' + (ok ? 'ok' : 'bad') + '">' + (r.status || 'ERR') + ' ' + esc(r.statusText || '') + '</span><span class="empty">click a highlighted id to capture it</span></div>'));
   resp.appendChild(renderResp(r.body ?? r.error));
   capture(r.body);
-  if (current.declares && ok) { try { declared = JSON.parse(body); } catch { declared = null; } }
+  if (current.declares && ok) {
+    try { declared = JSON.parse(body); } catch { declared = null; }
+    saveSession();
+  }
 }
 
 // The bytes go through the bench's own server: the browser is a foreign origin to storage, and
@@ -1428,6 +1448,7 @@ function walk(v, key, childParam) {
 }
 
 function renderStore() {
+  saveSession();
   const vars = document.getElementById('vars');
   const keys = Object.keys(store);
   if (!keys.length) {
@@ -1472,10 +1493,36 @@ function selectVar(k) {
   }
 }
 
+/* ---------- routing ---------- */
+
+// Each endpoint is its own URL, so back/forward, reload and a pasted link all land on one call.
+// The captured ids ride along in sessionStorage — a reload that forgot them would strand you
+// mid-chain. The staged File cannot be serialized, so an upload in flight asks for it again.
+function restoreSession() {
+  try {
+    Object.assign(store, JSON.parse(sessionStorage.getItem('bench.store') || '{}'));
+    declared = JSON.parse(sessionStorage.getItem('bench.declared') || 'null');
+  } catch {}
+}
+function saveSession() {
+  try {
+    sessionStorage.setItem('bench.store', JSON.stringify(store));
+    sessionStorage.setItem('bench.declared', JSON.stringify(declared));
+  } catch {}
+}
+function routed() {
+  const here = decodeURIComponent(location.pathname);
+  return ENDPOINTS.find(e => e.route === here);
+}
+
+restoreSession();
 renderList();
 renderStore();
 renderGraph();
 document.getElementById('filter').oninput = (ev) => renderList(ev.target.value);
+window.onpopstate = () => { const e = routed(); if (e) selectEndpoint(e, null, false); };
+const landed = routed();
+if (landed) selectEndpoint(landed, null, false);
 </script>
 </body>
 </html>`;
