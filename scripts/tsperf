@@ -22,6 +22,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -31,11 +32,45 @@ from pathlib import Path
 TSGO_SPEC = "@typescript/native-preview@^7.0.0-dev.20260707.2"
 TSGO_HOME = Path.home() / ".cache" / "tsperf" / "tsgo"
 BENCH_TSCONFIG = "tsconfig.tsperf.json"
+# A repo-scale check is ~30s under tsc, ~9s under tsgo. Anything past this is wedged, and a
+# wedged compile is not slow data — it is no data, so waiting longer buys nothing.
+COMPILE_TIMEOUT = 900
 
 
-def sh(cmd, **kw):
-    return subprocess.run(cmd, shell=isinstance(cmd, str), text=True,
-                          capture_output=True, **kw)
+def sh(cmd, timeout=None, **kw):
+    """Run a child we can always reap: its own process group, killed on ANY exit path.
+
+    Compiles are the reason. A plain subprocess.run leaves tsgo running if tsperf dies —
+    it gets reparented to launchd and burns a core until the machine is rebooted (one such
+    orphan ran 9h at 190% CPU). start_new_session gives the child its own group so we can
+    take the whole tree down; the finally-kill covers timeout, KeyboardInterrupt, and the
+    SIGTERM/SIGHUP that a closing terminal sends (see install_reaper).
+    """
+    p = subprocess.Popen(cmd, shell=isinstance(cmd, str), text=True,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         start_new_session=True, **kw)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except BaseException:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)   # start_new_session ⇒ pid is the pgid
+        except ProcessLookupError:
+            pass
+        p.wait()
+        raise
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+def install_reaper():
+    """Turn every catchable kill into a normal unwind, so sh()'s finally-kill runs.
+
+    SIGINT is in here for a reason that looks redundant and isn't: the child has its own
+    session, so Ctrl-C reaches tsperf ALONE and the compile must be killed by us. Relying on
+    the default KeyboardInterrupt is not enough — a backgrounded tsperf inherits SIGINT as
+    SIG_IGN, and the compile then outlives it (measured).
+    """
+    for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+        signal.signal(sig, lambda s, _f: sys.exit(f"tsperf: killed by signal {s}"))
 
 
 def repo_root():
@@ -107,8 +142,13 @@ def parse_diagnostics(out):
 def check_once(root, engine, extra=()):
     cfg = write_bench_tsconfig(root)
     try:
-        r = sh([engine_bin(root, engine), "-p", str(cfg),
-                "--extendedDiagnostics", *extra], cwd=root)
+        try:
+            r = sh([engine_bin(root, engine), "-p", str(cfg),
+                    "--extendedDiagnostics", *extra],
+                   cwd=root, timeout=COMPILE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            sys.exit(f"tsperf: {engine} still running after {COMPILE_TIMEOUT}s — killed. "
+                     f"A wedged compile times nothing.")
         out = r.stdout + r.stderr
         if "TS5108" in out:
             sys.exit("tsperf: tsgo rejects this tree's moduleResolution=node10.\n"
@@ -253,6 +293,7 @@ def cmd_ab(args):
 
 
 def main():
+    install_reaper()
     p = argparse.ArgumentParser(prog="tsperf", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = p.add_subparsers(dest="cmd", required=True)
