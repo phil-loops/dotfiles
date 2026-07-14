@@ -177,6 +177,44 @@ function StageButton(props: { project: string }) {
   );
 }
 
+type ShipResult = {
+  ok?: boolean; err?: string; alreadyReady?: boolean; moved?: string[]; conflict?: string;
+  unseatable?: string[]; contracted?: { branch: string }[]; order?: { branch: string; unpushed: boolean }[];
+};
+
+// One ship verb, one outcome slot. The header button and the map's merged-ghost pill both POST
+// /ship, so they share this signal — a pill that fired and dropped the answer read as a dead
+// button while the server was refusing (an off-parent node, a conflicting rebase) in full detail.
+const [shipMsg, setShipMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
+
+async function runShip(project: string, qc: ReturnType<typeof useQueryClient>): Promise<ShipResult> {
+  setShipMsg(null);
+  const r: ShipResult = await fetch(withRepo("/ship"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ project }),
+  })
+    .then((x) => x.json() as Promise<ShipResult>)
+    .catch((e) => ({ ok: false, err: String(e) }));
+  if (!r.ok) {
+    setShipMsg({ text: `✗ ${r.err || "ship failed"}`, bad: true });
+    return r;
+  }
+  const pushList = (r.order ?? []).filter((o) => o.unpushed).map((o) => leaf(o.branch));
+  const did = [
+    r.contracted?.length ? `${r.contracted.length} merged dropped` : "",
+    r.moved?.length ? `${r.moved.length} rebased` : "",
+  ].filter(Boolean).join(" · ");
+  setShipMsg({
+    text: (r.alreadyReady ? "✓ already ready" : `✓ ready — ${did}`)
+      + (pushList.length ? ` · push: ${pushList.join(" → ")}` : " · nothing to push"),
+  });
+  qc.invalidateQueries({ queryKey: ["model"] });
+  qc.invalidateQueries({ queryKey: ["forest-health"] });
+  qc.invalidateQueries({ queryKey: ["projects"] });
+  return r;
+}
+
 // The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
 // restacks every survivor onto fresh origin/main (trees included), and reports the push
 // order. Prep/push stay per-node so the outgoing commit message remains editable.
@@ -184,7 +222,6 @@ function ShipButton(props: { project: string }) {
   const qc = useQueryClient();
   const [armed, setArmed] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
-  const [msg, setMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
   let disarm: ReturnType<typeof setTimeout>;
   // shared cache with Home's chip — the daemon already classified this forest, so the confirm
   // step previews exactly what it'll do (drop merged ghosts, rebase the rest) rather than firing blind.
@@ -220,35 +257,8 @@ function ShipButton(props: { project: string }) {
     clearTimeout(disarm);
     setArmed(false);
     setBusy(true);
-    setMsg(null);
-    const r = await fetch(withRepo("/ship"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: props.project }),
-    })
-      .then((x) => x.json() as Promise<{
-        ok?: boolean; err?: string; alreadyReady?: boolean; moved?: string[];
-        contracted?: { branch: string }[]; order?: { branch: string; unpushed: boolean }[];
-      }>)
-      .catch((e) => ({ ok: false, err: String(e) }));
+    await runShip(props.project, qc);
     setBusy(false);
-    if (r.ok) {
-      const re = r as { alreadyReady?: boolean; moved?: string[]; contracted?: { branch: string }[]; order?: { branch: string; unpushed: boolean }[] };
-      const pushList = (re.order ?? []).filter((o) => o.unpushed).map((o) => leaf(o.branch));
-      const did = [
-        re.contracted?.length ? `${re.contracted.length} merged dropped` : "",
-        re.moved?.length ? `${re.moved.length} rebased` : "",
-      ].filter(Boolean).join(" · ");
-      setMsg({
-        text: (re.alreadyReady ? "✓ already ready" : `✓ ready — ${did}`)
-          + (pushList.length ? ` · push: ${pushList.join(" → ")}` : " · nothing to push"),
-      });
-      qc.invalidateQueries({ queryKey: ["model"] });
-      qc.invalidateQueries({ queryKey: ["forest-health"] });
-      qc.invalidateQueries({ queryKey: ["projects"] });
-    } else {
-      setMsg({ text: `✗ ${r.err || "ship failed"}`, bad: true });
-    }
   };
   return (
     <>
@@ -266,8 +276,8 @@ function ShipButton(props: { project: string }) {
           ⚠ {preview()!.conflict} may conflict
         </span>
       </Show>
-      <Show when={msg()}>
-        <span class="fo-stage-msg" classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
+      <Show when={shipMsg()}>
+        <span class="fo-stage-msg" classList={{ bad: !!shipMsg()!.bad }}>{shipMsg()!.text}</span>
       </Show>
     </>
   );
@@ -407,16 +417,7 @@ export function ForestOverview() {
                 ovQc.invalidateQueries({ queryKey: ["forest-health"] });
                 ovQc.invalidateQueries({ queryKey: ["projects"] });
               } : undefined}
-              onReady={canMutate ? async () => {
-                await fetch(withRepo("/ship"), {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ project: project() }),
-                }).then((r) => r.json());
-                ovQc.invalidateQueries({ queryKey: ["model"] });
-                ovQc.invalidateQueries({ queryKey: ["forest-health"] });
-                ovQc.invalidateQueries({ queryKey: ["projects"] });
-              } : undefined}
+              onReady={canMutate ? () => runShip(project(), ovQc) : undefined}
             />
           }
         >
