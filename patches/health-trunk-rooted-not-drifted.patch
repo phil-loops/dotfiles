@@ -1,0 +1,19 @@
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index 415fcb2..d740571 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -391,9 +391,12 @@ def _node_health(branch, pr=None):
+         return {"branch": "", "drifted": False, "merged": False, "parent": "", "pr": None}
+     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main
+-    drifted = parent != main and ctx.run(
+-        ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
+     trunk = _trunk(main)
++    # Both spellings of the trunk are root parents. A root branch is never "off-parent" — it's
++    # just behind, which is what a restack is for. Testing the literal "main" alone badged every
++    # origin/main-rooted branch as drifted the moment main advanced past it.
++    drifted = parent not in (main, trunk) and ctx.run(
++        ["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
+     if pr is not None:
+         merged = pr.get("state") == "MERGED"
+     else:
