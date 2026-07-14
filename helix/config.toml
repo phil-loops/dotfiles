@@ -25,16 +25,18 @@ trusted = [
 # back to the blessing viewer — the hover+o → edit → commit review loop. Custom message:
 # :w then :sh hx-wc %{buffer_name} your message
 [keys.normal.space]
-v = [":write", ":sh hx-wc %{buffer_name}"]
+v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
 
 # space-o = "open" menu: m → on GitHub/main, b → on GitHub/current branch,
 # t → the tRPC procedure under the cursor (gd can't reach it: the generated
 # .gen declarations inline the router tree, so it only lands on the appRouter).
+# Absolute paths: `:sh` inherits the launching process's PATH, and a helix started
+# by stack-open (tmux new-window → non-interactive zsh) never sourced .zshrc.
 [keys.normal.space.o]
-m = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
-b = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+m = ":sh $HOME/.dotfiles/scripts/gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+b = ":sh $HOME/.dotfiles/scripts/gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
 t = ":open %sh{$HOME/.dotfiles/scripts/trpc-goto %{buffer_name} %{cursor_line}}"
 
 [keys.select.space.o]
-m = ":sh gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
-b = ":sh gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+m = ":sh $HOME/.dotfiles/scripts/gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+b = ":sh $HOME/.dotfiles/scripts/gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"

@@ -22,10 +22,13 @@ done
 file="${args[0]:?usage: gh-open [--branch] [--print] <file> [start-line] [end-line]}"
 start="${args[1]:-}"; end="${args[2]:-}"
 
-dir=$(cd "$(dirname "$file")" && pwd)
+dir=$(cd "$(dirname "$file")" && pwd -P)
 root=$(git -C "$dir" rev-parse --show-toplevel)
 rel="${dir#"$root"}/$(basename "$file")"; rel="${rel#/}"
-[ -n "$ref" ] || ref=$(git -C "$dir" symbolic-ref --short HEAD)
+# stack-open's scratch worktrees are detached at the branch tip, so ask which branch points here.
+[ -n "$ref" ] || ref=$(git -C "$dir" symbolic-ref --short HEAD 2>/dev/null \
+  || git -C "$dir" for-each-ref --points-at HEAD --format='%(refname:short)' refs/heads | head -1)
+[ -n "$ref" ] || { echo "gh-open: no branch at HEAD in $dir" >&2; exit 1; }
 
 remote=$(git -C "$dir" remote get-url origin)
 remote="${remote%.git}"
