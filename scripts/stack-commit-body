@@ -60,8 +60,8 @@ def job(b):
 
 
 def pr(b):
-    """Once a branch has a PR, name it by that: '#9560 (merged)'. GitHub turns the bare #ref into a
-    live cross-link, so a commit still waiting to land points at the ones that already did."""
+    # Once a branch has a PR, name it by that. GitHub turns the bare #ref into a live cross-link,
+    # so a commit still waiting to land points at the ones that already did.
     r = subprocess.run(
         ["gh", "pr", "list", "--head", b, "--state", "all", "--limit", "1",
          "--json", "number,state"],
