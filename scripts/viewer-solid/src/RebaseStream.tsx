@@ -20,12 +20,21 @@ async function post(url: string, body: unknown) {
   await fetch(withRepo(url), { method: "POST", headers: HEADERS, body: JSON.stringify(body) }).catch(() => {});
 }
 
-export default function RebaseStream(props: { branch: string; onClose: () => void }) {
+export default function RebaseStream(props: {
+  branch: string;
+  onClose: () => void;
+  // fired once when the job reaches a terminal state, so the parent motion can stop showing the
+  // rebase step as running and — on a clean finish — continue merging without a manual re-click.
+  // "stopped" is the user killing it (never auto-continue that); the others are the job's own end.
+  onSettled?: (outcome: "done" | "gone" | "error" | "stopped") => void;
+}) {
   const [text, setText] = createSignal("");
   const [status, setStatus] = createSignal<string | null>("starting");
   const [phase, setPhase] = createSignal<"streaming" | "done" | "gone" | "error">("streaming");
   const [err, setErr] = createSignal<string | null>(null);
   const [session, setSession] = createSignal<string | null>(null);
+  // the user hit ■ stop — suppresses the auto-continue on the `done` the SIGKILL then emits.
+  let stopped = false;
   const ctrl = new AbortController();
   let scroller: HTMLDivElement | undefined;
   // sticky-bottom: follow new output only while parked at the bottom, so scrolling up to read
@@ -92,13 +101,16 @@ export default function RebaseStream(props: { branch: string; onClose: () => voi
           if (payload.session_id) setSession(payload.session_id);
           setPhase("done");
           finished = true;
+          if (!stopped) props.onSettled?.("done");
         } else if (event === "gone") {
           setPhase("gone");
           finished = true;
+          props.onSettled?.("gone");
         } else if (event === "error") {
           setErr(payload.err || "stream error");
           setPhase("error");
           finished = true;
+          props.onSettled?.("error");
         }
       }
       if (finished) {
@@ -117,8 +129,10 @@ export default function RebaseStream(props: { branch: string; onClose: () => voi
     if (s) void post("/chat-popout", { session: s, branch: props.branch });
   };
   const stop = () => {
+    stopped = true;
     void post("/rebase-stop", { branch: props.branch });
     setPhase("done");
+    props.onSettled?.("stopped");
   };
 
   return (
