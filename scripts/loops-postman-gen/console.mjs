@@ -51,6 +51,7 @@ const withPresignedPut = (endpoints) => {
     return endpoints;
   }
   create.needsFile = true;
+  create.declares = true;
   endpoints.splice(endpoints.indexOf(create) + 1, 0, {
     method: "PUT",
     path: "{presignedUrl}",
@@ -521,6 +522,7 @@ h2:first-child { margin-top:0; }
 .band .rule { height:1px; }
 .hint { color:var(--faint); font-size:11px; margin:-2px 0 8px; }
 .hint b { color:var(--muted); font-weight:500; }
+.bad-hint, .bad-hint b { color:var(--DELETE); }
 
 .p { display:grid; grid-template-columns:minmax(120px,180px) 1fr auto; gap:10px; align-items:start;
   padding:8px 10px; border-radius:7px; border:1px solid transparent; }
@@ -669,6 +671,7 @@ let current = null;      // selected endpoint
 let st = null;           // request state for the selected endpoint
 let selectedVar = null;
 let staged = null;       // the File chosen for an upload: declared on create, sent on PUT
+let declared = null;     // what the last create call signed: { contentLength, contentType }
 let graph = null;        // last workflow seen: { rootNodeId, nodes: { id -> { typeName, nextNodeIds } } }
 
 const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
@@ -838,7 +841,12 @@ function renderFile(rack) {
     ? el('<span class="fname">' + esc(staged.name) + ' &middot; ' + esc(staged.type || 'unknown type') + ' &middot; ' + staged.size + ' bytes</span>')
     : el('<span class="empty">no file chosen</span>'));
   rack.appendChild(row);
-  if (!staged && current.presigned) rack.appendChild(el('<p class="hint">Choose the same file you declared on <b>create upload</b> — storage rejects bytes whose length does not match the one that was signed.</p>'));
+  if (current.presigned) {
+    const mismatch = staged && declared && staged.size !== declared.contentLength;
+    if (mismatch) rack.appendChild(el('<p class="hint bad-hint">This url signs <b>' + declared.contentLength + '</b> bytes and this file is <b>' + staged.size + '</b> — storage will reject it. Choose this file on <b>create upload</b> and send that again.</p>'));
+    else if (declared) rack.appendChild(el('<p class="hint">This url signs <b>' + declared.contentLength + '</b> bytes; only that exact file can be sent to it.</p>'));
+    else rack.appendChild(el('<p class="hint">Choose the same file you declared on <b>create upload</b> — its length is signed into this url.</p>'));
+  }
   if (staged && current.body) rack.appendChild(el('<p class="hint">The <b>contentType</b> and <b>contentLength</b> below describe this file. The <b>PUT</b> step sends its bytes.</p>'));
 }
 
@@ -1278,6 +1286,7 @@ async function sendRequest() {
   resp.appendChild(el('<div class="bar" style="margin-top:14px"><span class="status ' + (ok ? 'ok' : 'bad') + '">' + (r.status || 'ERR') + ' ' + esc(r.statusText || '') + '</span><span class="empty">click a highlighted id to capture it</span></div>'));
   resp.appendChild(renderResp(r.body ?? r.error));
   capture(r.body);
+  if (current.declares && ok) { try { declared = JSON.parse(body); } catch { declared = null; } }
 }
 
 // The bytes go through the bench's own server: the browser is a foreign origin to storage, and
@@ -1286,6 +1295,11 @@ async function sendPresigned() {
   const url = subst(st.path.presignedUrl || '');
   if (!url) return fail('NO URL', 'Send create upload first — its presignedUrl is captured for this step.');
   if (!staged) return fail('NO FILE', 'Choose the file whose contentLength you declared on create upload.');
+  // contentLength is inside the signature (X-Amz-SignedHeaders: content-length;host), so bytes of
+  // any other size cannot be sent at this url at all — storage answers SignatureDoesNotMatch.
+  if (declared && staged.size !== declared.contentLength) {
+    return fail('LENGTH MISMATCH', 'This url signs ' + declared.contentLength + ' bytes, but ' + staged.name + ' is ' + staged.size + '. Choose this file on create upload and send that again — the length is part of the signature.');
+  }
 
   const resp = document.getElementById('resp');
   resp.innerHTML = '<p class="sending">uploading…</p>';
