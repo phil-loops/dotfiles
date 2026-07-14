@@ -117,6 +117,12 @@ def check_once(root, engine, extra=()):
         m = parse_diagnostics(out)
         if m["check"] is None:
             sys.exit(f"tsperf: no check happened — the compiler bailed:\n{out[-800:]}")
+        # Errors cut the check short, so a tree with them is timing a different,
+        # smaller job. Usually a missing .gen (tRPC types) — which looks like a win.
+        if m["errors"]:
+            sys.exit(f"tsperf: {m['errors']} type errors — timings would be "
+                     f"meaningless. Missing .gen?\n"
+                     f"        ln -sfn ~/coding/loops/.gen {root}/.gen")
         return m
     finally:
         cfg.unlink(missing_ok=True)
