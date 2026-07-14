@@ -90,8 +90,11 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without 
   # background incremental rebuild → stamp the sha, release the lock. Call the binary
   # DIRECTLY via node (never npx — backgrounded npx with no TTY hangs on its install
   # prompt and piles up runaway procs).
+  # The subshell must drop the inherited stdout/stderr too, not just silence tsc: a caller that
+  # pipes us (the server's Popen+communicate) waits for EOF on those fds, so holding them open
+  # makes this "background" rebuild block the open for as long as the compile takes.
   ( cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project tsconfig.trpc-types.json --pretty false >/dev/null 2>&1 \
-      && echo "$head" > "$marker"; rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) &!
+      && echo "$head" > "$marker"; rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) >/dev/null 2>&1 &!
 }
 ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
   local b="$1" ex dir
@@ -195,7 +198,7 @@ else
   branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
   rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
   pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
-  ( prune_old 3 ) &!                       # lazy self-clean, non-blocking
+  ( prune_old 3 ) >/dev/null 2>&1 &!       # lazy self-clean; drops our pipes so it can't block a piped caller
   dir=$(ensure_worktree "$branch")
 fi
 file="$dir/$rel"
@@ -248,12 +251,13 @@ if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
   if [[ -n "${win:-}" ]]; then
     # Escape must land ALONE: ESC immediately followed by ':' reads as Alt-: and the
     # ':' never opens helix's command line — 'open …' then types into the buffer ('o'
-    # = insert line). The sleeps keep each chord a separate terminal event.
+    # = insert line). Separate send-keys calls already land in separate reads (20/20 clean
+    # from insert mode at 0s); the gap is margin, not the mechanism — 0.2s was 40% of the open.
     tmux send-keys -t "${SESSION}:${win}" Escape
-    sleep 0.2
+    sleep 0.02
     tmux send-keys -t "${SESSION}:${win}" ":open ${file}" Enter
     if [[ -n "$hxline" ]]; then
-      sleep 0.2
+      sleep 0.02
       tmux send-keys -t "${SESSION}:${win}" "${hxline}gg"
     fi
   else
