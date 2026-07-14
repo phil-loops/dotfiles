@@ -71,6 +71,23 @@ def _rebase_delete_wins(scratch, onto, cut, b):
     return True
 
 
+def _fork_cut(branch, parent, parent_sha):
+    """Where BRANCH's own commits start — the replay cut for `rebase --onto <parent> <cut>`.
+    For a seated branch that's the parent's old tip. A DRIFTED branch doesn't descend from that
+    tip (the parent was rewritten under it, or it forked elsewhere), and cutting there replays
+    the parent's superseded commits too — a rewrite leaves them not patch-identical, so they
+    collide with the new parent instead of deduping away. --fork-point reads the parent's reflog
+    for the tip the branch really forked from. None = the reflog can't reach it; the caller
+    refuses rather than guess (plain merge-base would back up to main and replay everything)."""
+    if ctx.run(["git", "merge-base", "--is-ancestor", parent_sha, branch]).returncode == 0:
+        return parent_sha
+    return ctx.run(["git", "merge-base", "--fork-point", parent, branch]).stdout.strip() or None
+
+
+def _drifted(branch, parent):
+    return ctx.run(["git", "merge-base", "--is-ancestor", parent, branch]).returncode != 0
+
+
 def ship(req, raw):
     d = json.loads(raw or "{}")
     project = d.get("project", "")
@@ -88,7 +105,6 @@ def ship(req, raw):
 
     ghosts = [b for b in members if sync._already_merged(b)]
     wts = _worktrees()
-    root, root_branch = wts[0]
     squatters = [(p, b) for p, b in wts if b in members]
     dirty_squat = [p for p, b in squatters if b not in ghosts and _dirty(p)]
     if dirty_squat:
@@ -97,8 +113,10 @@ def ship(req, raw):
     survivors = [b for b in members if b not in ghosts]
     behind = max((int(ctx.run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip() or "0")
                   for b in survivors), default=0)
+    sset = set(survivors)
+    drifted = [b for b in survivors if _parent(b) in sset and _drifted(b, _parent(b))]
     plan = {"ok": True, "project": project, "ghosts": ghosts, "members": survivors, "behind": behind,
-            "alreadyReady": not ghosts and behind == 0}
+            "drifted": drifted, "alreadyReady": not ghosts and behind == 0}
     if dry:
         return req._send(200, json.dumps(plan))
 
@@ -110,30 +128,42 @@ def ship(req, raw):
 
     moved = []
     if behind > 0 or contracted:
+        ms = set(survivors)
         snapshots = {b: ctx.run(["git", "rev-parse", b]).stdout.strip() for b in survivors}
+        # Every cut up front, off the pre-walk SHAs: a drifted node whose fork is unrecoverable
+        # is refused BEFORE anything moves, instead of detonating as a conflict mid-walk.
+        cuts = {}
+        for b in survivors:
+            p = _parent(b)
+            cuts[b] = (_fork_cut(b, p, snapshots[p]) if p in ms
+                       else ctx.run(["git", "merge-base", b, "origin/main"]).stdout.strip() or None)
+        unseatable = [b for b in survivors if not cuts[b]]
+        if unseatable:
+            return req._send(200, json.dumps({
+                "ok": False, "unseatable": unseatable,
+                "err": f"{unseatable[0]} sits off its parent and its fork point is unrecoverable "
+                       "(no reflog) — reseat it by hand, then ship again. Nothing was moved.",
+            }))
+        detached = []
         for p, b in _worktrees():
-            if b in survivors and not _dirty(p):
-                ctx.run(["git", "-C", p, "checkout", "--detach"])
+            if b in ms and not _dirty(p) and ctx.run(["git", "-C", p, "checkout", "--detach"]).returncode == 0:
+                detached.append((p, b))
         scratch = "/tmp/viewer-ship-scratch"
         ctx.run(["git", "worktree", "remove", "--force", scratch])
         r = ctx.run(["git", "worktree", "add", "--detach", scratch, "origin/main"])
         if r.returncode != 0:
             return req._send(200, json.dumps({"ok": False, "err": f"couldn't make a scratch worktree: {r.stderr.strip()}"}))
         try:
-            ms = set(survivors)
             for b in survivors:
                 p = _parent(b)
                 onto = p if p in ms else "origin/main"
-                cut = (snapshots[p] if p in ms
-                       else ctx.run(["git", "merge-base", b, "origin/main"]).stdout.strip())
+                cut = cuts[b]
                 if ctx.run(["git", "rev-parse", b]).stdout.strip() == cut:
                     continue  # empty branch (all its commits were the cut) — nothing to replay
                 if not _rebase_delete_wins(scratch, onto, cut, b):
                     ctx.run(["git", "-C", scratch, "rebase", "--abort"])
                     for rb, sha in snapshots.items():
                         ctx.run(["git", "branch", "-f", rb, sha])
-                    if root_branch in ms:
-                        ctx.run(["git", "-C", root, "checkout", root_branch])
                     return req._send(200, json.dumps({
                         "ok": False, "conflict": b,
                         "err": f"rebase of {b} hit a real conflict (a delete/modify would auto-resolve) "
@@ -142,8 +172,10 @@ def ship(req, raw):
                 moved.append(b)
         finally:
             ctx.run(["git", "worktree", "remove", "--force", scratch])
-        if root_branch in set(survivors):
-            ctx.run(["git", "-C", root, "checkout", root_branch])
+            # reseat every worktree we detached — a failed ship that leaves your checkouts on a
+            # detached HEAD is a half-done ship, however intact the refs are.
+            for p, b in detached:
+                ctx.run(["git", "-C", p, "checkout", b])
 
     if not any(b == "main" for _, b in _worktrees()):
         ctx.run(["git", "branch", "-f", "main", "origin/main"])
