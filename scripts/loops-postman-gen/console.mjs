@@ -33,6 +33,41 @@ const ONE_OF_HINTS = {
 };
 const oneOfHint = (method, path) => ONE_OF_HINTS[`${method} ${path}`] ?? null;
 
+// A path param the response names something else: complete's {id} is the create call's
+// emailAssetId. Key = "METHOD path::param", value = the response key it is captured under.
+const PARAM_ALIASES = {
+  "POST /v1/uploads/{id}/complete::id": "emailAssetId",
+};
+const paramAlias = (method, path, name) => PARAM_ALIASES[`${method} ${path}::${name}`] ?? null;
+
+// The middle leg of an upload — PUT the bytes at the pre-signed URL — is a transport step, not
+// an API route, so it appears in no spec. Give it an endpoint of its own next to the two real
+// ones so the flow reads create → put → complete, one Send each.
+const UPLOAD_PATH = "/v1/uploads";
+
+const withPresignedPut = (endpoints) => {
+  const create = endpoints.find((e) => e.method === "POST" && e.path === UPLOAD_PATH);
+  if (!create) {
+    return endpoints;
+  }
+  create.needsFile = true;
+  endpoints.splice(endpoints.indexOf(create) + 1, 0, {
+    method: "PUT",
+    path: "{presignedUrl}",
+    tag: create.tag,
+    summary: "Upload the file to the pre-signed URL.",
+    description:
+      "Not an API route — the bytes go straight to storage. Sent with the same file, and so the same **contentType** and **contentLength**, you declared in the create call; a mismatch is rejected. On success the body is empty and the asset is ready to complete.",
+    presigned: true,
+    needsFile: true,
+    pathParams: [{ name: "presignedUrl", description: "Captured from the create response." }],
+    queryParams: [],
+    queryOneOf: null,
+    body: null,
+  });
+  return endpoints;
+};
+
 export const serve = async (opts) => {
   const args = {
     spec: DEFAULT_SPEC,
@@ -48,7 +83,7 @@ export const serve = async (opts) => {
     : await readFile(resolve(args.spec), "utf8");
   const spec = JSON.parse(rawSpec);
   mergeWorkflowOverlay(spec); // overlay the workflow builder writes the upstream spec omits
-  const endpoints = extractEndpoints(spec);
+  const endpoints = withPresignedPut(extractEndpoints(spec));
 
   const html = page({ endpoints, base: args.base });
 
@@ -61,6 +96,17 @@ export const serve = async (opts) => {
       try {
         const reqBody = JSON.parse(await readBody(req));
         const result = await proxy(reqBody, args.token);
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify(result));
+      } catch (err) {
+        res.writeHead(500, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ error: String(err.message ?? err) }));
+      }
+    }
+    if (req.method === "PUT" && req.url.startsWith("/put")) {
+      try {
+        const target = new URL(req.url, "http://console").searchParams.get("url");
+        const result = await putBytes(target, req.headers["content-type"], await readBytes(req));
         res.writeHead(200, { "content-type": "application/json" });
         return res.end(JSON.stringify(result));
       } catch (err) {
@@ -89,7 +135,34 @@ const readBody = (req) =>
     req.on("end", () => res(data));
   });
 
+const readBytes = (req) =>
+  new Promise((res, rej) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(c));
+    req.on("end", () => res(Buffer.concat(chunks)));
+    req.on("error", rej);
+  });
+
 const mask = (t) => (t.length > 8 ? `${t.slice(0, 4)}…${t.slice(-4)}` : "****");
+
+// Storage answers the pre-signed PUT with an empty body on success and XML on failure, and it
+// takes no Loops token — the signature in the URL is the credential.
+const putBytes = async (url, contentType, bytes) => {
+  if (!url) {
+    throw new Error("no pre-signed url");
+  }
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "content-type": contentType, "content-length": String(bytes.length) },
+    body: bytes,
+  });
+  const text = await res.text();
+  return {
+    status: res.status,
+    statusText: res.statusText,
+    body: text || { uploaded: bytes.length, contentType },
+  };
+};
 
 const proxy = async ({ method, path, query, body, base }, token) => {
   const url = new URL(base.replace(/\/$/, "") + path);
@@ -283,7 +356,11 @@ const extractEndpoints = (spec) => {
         description: op.description ?? "",
         pathParams: [...path.matchAll(/\{([^}]+)\}/g)].map((m) => {
           const p = params.find((x) => x.in === "path" && x.name === m[1]);
-          return { name: m[1], description: p?.description ?? null };
+          return {
+            name: m[1],
+            description: p?.description ?? null,
+            alias: paramAlias(METHOD, path, m[1]),
+          };
         }),
         queryParams: params
           .filter((p) => p.in === "query")
@@ -506,6 +583,10 @@ button:focus-visible { outline:2px solid var(--fg); outline-offset:2px; }
 .pill[aria-pressed="true"] { background:color-mix(in srgb, var(--verb) 16%, transparent);
   color:var(--verb); border-color:var(--verb); }
 
+.file { display:flex; align-items:center; gap:10px; margin:8px 0 2px; }
+.file label { cursor:pointer; }
+.file .fname { font:400 11px/1 var(--mono); color:var(--fg); }
+
 .sub { grid-column:1/-1; margin:10px 0 2px; padding:12px 0 4px 14px;
   border-left:1px solid var(--edge); }
 .tabs { display:flex; gap:2px; margin:0 0 10px; }
@@ -587,6 +668,7 @@ const store = {};        // captured ids: name -> value
 let current = null;      // selected endpoint
 let st = null;           // request state for the selected endpoint
 let selectedVar = null;
+let staged = null;       // the File chosen for an upload: declared on create, sent on PUT
 let graph = null;        // last workflow seen: { rootNodeId, nodes: { id -> { typeName, nextNodeIds } } }
 
 const el = (h) => { const d = document.createElement('div'); d.innerHTML = h; return d.firstElementChild; };
@@ -663,7 +745,7 @@ function selectEndpoint(e, node) {
     if (n.querySelector('.path').textContent === e.path && n.querySelector('.m').textContent === e.method) n.classList.add('active');
   });
   st = {
-    path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.name)])),
+    path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.alias || p.name)])),
     query: { fields: seedFields({ fields: e.queryParams, oneOf: e.queryOneOf }), extra: {}, custom: null },
     body: e.body ? subState({ shapes: e.body.shapes }, e.body.shapes[0].label) : null,
     tab: 'fields',
@@ -687,6 +769,7 @@ function render() {
   if (e.description) form.appendChild(el('<p class="sum">' + md(e.description) + '</p>'));
 
   const rack = el('<div class="rack"></div>');
+  if (e.needsFile) renderFile(rack);
   if (e.queryParams.length) {
     rack.appendChild(bandOf('query', null));
     if (e.queryOneOf) rack.appendChild(oneOfHint(e.queryOneOf));
@@ -716,7 +799,7 @@ function urlLine(e) {
     const input = el('<input class="slot" spellcheck="false" autocomplete="off"' + list + ' placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
     input.value = st.path[name] || '';
     const fit = () => {
-      input.style.width = (Math.max(name.length, input.value.length) + 2) + 'ch';
+      input.style.width = Math.min(Math.max(name.length, input.value.length) + 2, 64) + 'ch';
       input.classList.toggle('filled', !!input.value);
     };
     fit();
@@ -739,6 +822,40 @@ function bandOf(label, n) {
 function oneOfHint(groups) {
   const txt = groups.map(g => g.map(n => '<b>' + esc(n) + '</b>').join(' or ')).join(', ');
   return el('<p class="hint">Provide at least one of ' + txt + '.</p>');
+}
+
+// The file is the source of truth for every leg of an upload: its type and size are what the
+// create call declares, and its bytes are what the PUT sends. Choosing it fills those two fields
+// rather than leaving them to be typed at odds with the bytes that follow.
+function renderFile(rack) {
+  rack.appendChild(bandOf('file', null));
+  const row = el('<div class="file"></div>');
+  const pick = el('<label class="pill">choose file<input type="file" accept="image/*" hidden /></label>');
+  const input = pick.querySelector('input');
+  input.onchange = () => { if (input.files[0]) stageFile(input.files[0]); };
+  row.appendChild(pick);
+  row.appendChild(staged
+    ? el('<span class="fname">' + esc(staged.name) + ' &middot; ' + esc(staged.type || 'unknown type') + ' &middot; ' + staged.size + ' bytes</span>')
+    : el('<span class="empty">no file chosen</span>'));
+  rack.appendChild(row);
+  if (!staged && current.presigned) rack.appendChild(el('<p class="hint">Choose the same file you declared on <b>create upload</b> — storage rejects bytes whose length does not match the one that was signed.</p>'));
+  if (staged && current.body) rack.appendChild(el('<p class="hint">The <b>contentType</b> and <b>contentLength</b> below describe this file. The <b>PUT</b> step sends its bytes.</p>'));
+}
+
+function stageFile(f) {
+  staged = f;
+  setField('contentType', f.type);
+  setField('contentLength', f.size);
+  st.raw = '';
+  render();
+}
+
+function setField(name, value) {
+  const e = st.body && st.body.fields[name];
+  if (!e) return;
+  e.on = true;
+  e.isNull = false;
+  e.value = String(value);
 }
 
 function renderBody(rack, e) {
@@ -1123,6 +1240,7 @@ function subst(s) {
 /* ---------- send ---------- */
 
 async function sendRequest() {
+  if (current.presigned) return sendPresigned();
   let path = current.path;
   for (const [k, v] of Object.entries(st.path)) path = path.replace('{' + k + '}', encodeURIComponent(subst(v || '')));
 
@@ -1162,6 +1280,31 @@ async function sendRequest() {
   capture(r.body);
 }
 
+// The bytes go through the bench's own server: the browser is a foreign origin to storage, and
+// the token the proxy attaches would be wrong here anyway — the URL carries its own signature.
+async function sendPresigned() {
+  const url = subst(st.path.presignedUrl || '');
+  if (!url) return fail('NO URL', 'Send create upload first — its presignedUrl is captured for this step.');
+  if (!staged) return fail('NO FILE', 'Choose the file whose contentLength you declared on create upload.');
+
+  const resp = document.getElementById('resp');
+  resp.innerHTML = '<p class="sending">uploading…</p>';
+  let r;
+  try {
+    r = await fetch('/put?url=' + encodeURIComponent(url), {
+      method: 'PUT',
+      headers: { 'content-type': staged.type },
+      body: staged,
+    }).then(x => x.json());
+  } catch (err) {
+    return fail('PROXY UNREACHABLE', err.message + ' — is the bench still running?');
+  }
+  const ok = r.status >= 200 && r.status < 300;
+  resp.innerHTML = '';
+  resp.appendChild(el('<div class="bar" style="margin-top:14px"><span class="status ' + (ok ? 'ok' : 'bad') + '">' + (r.status || 'ERR') + ' ' + esc(r.statusText || '') + '</span><span class="empty">' + (ok ? 'stored — complete the upload to get its finalUrl' : 'storage rejected the bytes') + '</span></div>'));
+  resp.appendChild(renderResp(r.body ?? r.error));
+}
+
 function fail(label, msg) {
   const resp = document.getElementById('resp');
   resp.innerHTML = '';
@@ -1197,7 +1340,7 @@ function captureValue(name, val) {
 }
 
 function isIdish(key, val) {
-  if (/(^id$|Id$)/.test(key)) return true;
+  if (/(^id$|Id$|Url$)/.test(key)) return true;
   return typeof val === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{14,}$/.test(val) && /[0-9]/.test(val);
 }
 function capSpan(name, val, inner) {
@@ -1264,7 +1407,7 @@ function walk(v, key, childParam) {
     for (const [k, val] of Object.entries(v)) walk(val, k, childParam);
     return;
   }
-  if (/(^id$|Id$)/.test(key) && (typeof v === 'string' || typeof v === 'number')) {
+  if ((/(^id$|Id$)/.test(key) || paramExists(key)) && (typeof v === 'string' || typeof v === 'number')) {
     store[key] = String(v);
     if (key === 'id' && childParam) store[childParam] = String(v);
   }
@@ -1301,11 +1444,11 @@ function lookupStore(param) {
 function selectVar(k) {
   selectedVar = k;
   if (st) {
-    for (const p of current.pathParams) if (idMatch(p.name, k)) st.path[p.name] = store[k];
+    for (const p of current.pathParams) if (p.alias === k || idMatch(p.name, k)) st.path[p.name] = store[k];
     render();
   }
   const rel = document.getElementById('related');
-  const matches = ENDPOINTS.filter(e => e.pathParams.some(p => idMatch(p.name, k)) || e.queryParams.some(q => idMatch(q.name, k)));
+  const matches = ENDPOINTS.filter(e => e.pathParams.some(p => p.alias === k || idMatch(p.name, k)) || e.queryParams.some(q => idMatch(q.name, k)));
   if (!matches.length) { rel.innerHTML = '<p class="empty">No endpoint takes ' + esc(k) + '.</p>'; return; }
   rel.innerHTML = '<p class="empty">Endpoints taking <code class="b">' + esc(k) + '</code></p>';
   for (const e of matches) {
