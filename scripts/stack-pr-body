@@ -1,9 +1,12 @@
 #!/bin/zsh
-# stack-pr-body — draft a GitHub PR description that frames ONE branch in its forest, in the
-# plain register of the branch descriptions. Four parts: WHAT (the one-line purpose) → WHERE IT
-# FITS (the project, what it builds on, what it pulls in via requires, what it unblocks — each
-# named by what it DOES, never by branch name) → THE CHANGE (the diff in plain language) →
-# SEQUENCING (merge-order, only when it depends on siblings). Opt-in token spend; on-demand only.
+# stack-pr-body — a GitHub PR description that frames ONE branch in its forest. Paste it into the
+# PR above the Traffic Cop block: this repo has a PR template, so GitHub prefills from the TEMPLATE
+# and nothing here ever arrives by commit-message prefill.
+#
+# The split that matters: the MODEL writes only "The change" (it must read the diff). Everything
+# RELATIONAL — position in the merge order, what this builds on, what it pulls in, what it unblocks,
+# the merge order with each branch's PR number, the Mermaid map — is COMPUTED from git config + gh.
+# A relation we know exactly is never re-narrated by an LLM.
 #
 #   stack-pr-body <branch>   → GitHub-flavored markdown PR body on stdout
 set -euo pipefail
@@ -55,63 +58,56 @@ downstream=(${(u)downstream})
 unblocks=""
 for c in $downstream; do unblocks+="$(line_for "$c")"$'\n'; done
 
-# CANONICAL MERGE ORDER — from the single shared authority (stack-merge-rank), so the body's
-# Sequencing matches the forest story view exactly instead of the model re-guessing an order.
+# CANONICAL MERGE ORDER — the single shared authority (stack-merge-rank), so the body matches the
+# forest story view exactly. Carries each branch's real PR number when one is open, so the
+# relation between this PR and the ones around it is a GitHub cross-link, not prose.
 order_list=$("${0:A:h}/stack-merge-rank" "$branch" 2>/dev/null | python3 -c '
 import sys, json, subprocess
 try: d = json.load(sys.stdin)
 except ValueError: sys.exit(0)
 me = sys.argv[1]
+def gh_pr(b):
+    r = subprocess.run(["gh","pr","list","--head",b,"--state","all","--json","number","--limit","1"],
+                       capture_output=True, text=True)
+    try:
+        j = json.loads(r.stdout)
+        return " #%s" % j[0]["number"] if j else ""
+    except Exception:
+        return ""
 for i, b in enumerate(d.get("order", []), 1):
     desc = subprocess.run(["git","config",f"branch.{b}.description"],capture_output=True,text=True).stdout.strip() or "(no description)"
-    print(f"{i}. {desc}" + ("   <-- THIS PR" if b == me else ""))
+    desc = desc.split(" -- ")[0].split(". ")[0]
+    print(f"{i}.{gh_pr(b)} {desc}" + ("  ← **this PR**" if b == me else ""))
 ' "$branch" 2>/dev/null || true)
 
 files="$(git diff --name-only "${parent}...${branch}" | paste -sd', ' - || true)"
 diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,16000]}"
 
+# The MODEL writes exactly ONE section — "The change". Everything relational (what this builds on,
+# what it unblocks, the merge order, the map) is already in git config: it is COMPUTED below, never
+# narrated by a model. A fact we know exactly must not be re-guessed by an LLM.
 read -r -d '' prompt <<EOF || true
-You are drafting a GitHub pull request description for ONE branch in a stacked-PR forest.
-Write GitHub-flavored markdown ONLY — no preamble, no surrounding code fence, no sign-off.
+Describe what ONE pull request's diff does. GitHub-flavored markdown ONLY — no preamble, no
+surrounding code fence, no sign-off, no headings other than the group sub-headings described below.
+Do NOT describe where the branch sits in its stack, what it builds on, or what merges after it —
+that is generated separately. Write ONLY the change itself.
 
-SHAPE — exactly these parts, in this order:
-1. One plain sentence: what this PR does (the opening line; use the purpose below near-verbatim).
-2. "### Where it fits" — name the project/feature, what this builds on, what it pulls in via
-   requires, and what it unblocks. Open the body with this (where it sits comes before the change).
-3. "### The change" — what the diff actually does, in plain language. Follow the HOUSE STYLE this
-   repo's reviewers already read: group the work under short bold/plain sub-headings by concern
-   (e.g. "Mailing-list mutation response", "Tests"), each a few bullets, and END EACH GROUP with a
-   "- Related files: `path`, `path`" line naming the files that group touched. Give tests their own
-   group. Add an "Out of scope" group only when something a reviewer would expect is deliberately
-   left out.
-4. "### Sequencing" — ONLY include this heading if this branch builds on a sibling (a parent that
-   is not main) or pulls in requires; state the merge-order plainly, following the CANONICAL MERGE
-   ORDER below verbatim (do NOT invent your own order). OMIT the whole section for an independent
-   base (forks off main, no requires).
+HOUSE STYLE — the shape this repo's reviewers already read:
+- Group the work under short **bold text lines** by concern (e.g. "**Delete guard**", "**Tests**").
+  They are bold lines, NOT markdown headings — never emit "#", "##" or "###".
+- A few bullets each.
+- END EACH GROUP with "- Related files: \`path\`, \`path\`" naming the files that group touched.
+- Give tests their own group.
+- Add an "Out of scope" group only when something a reviewer would expect is deliberately left out.
 
 VOICE — plain register. Transform jargon into meaning:
 - Drop raw identifiers (function names, variable names, column/field names) and terms-of-art
-  (idempotent, monotonic, short-circuit, memoize, invalidate). Say what they DO. This holds in
-  EVERY section, including "The change" where the prose hugs the diff — name things by role:
+  (idempotent, monotonic, short-circuit, memoize, invalidate). Say what they DO:
     e.g. NOT "markLocked is idempotent so repeat calls short-circuit"
          BUT "marking an already-locked goal does nothing, so it is safe to repeat"
     e.g. NOT "reads the isLocked field"        BUT "reads the locked flag"
     e.g. NOT "the findByGoalAndSource query"   BUT "the query that loads the attachment"
-- KEEP forest vocabulary (requires, fan-in, convergence, base, merges after) — that is meaning,
-  not jargon.
-- Reference every related branch by WHAT IT DOES (the purposes given below), NEVER by branch name.
 
-FOREST FACTS (already plain — quote their meaning, do not echo branch names):
-PROJECT: ${project:-(none)}
-THIS PR'S PURPOSE: ${desc:-(none set — derive a one-line summary from the diff)}
-BUILDS ON:
-${buildon:-- main directly — an independent base of the project (forks off main, merges on its own schedule)}
-PULLS IN (fan-in via requires — must merge first):
-${pulls:-(none)}
-UNBLOCKS (builds on this once it lands):
-${unblocks:-(nothing builds on this yet)}
-CANONICAL MERGE ORDER (authoritative — the whole project, by what each does; use for Sequencing):
-${order_list:-(single branch / not in a project)}
 CHANGED FILES: ${files}
 
 DIFF (truncated to 16k):
@@ -121,19 +117,31 @@ EOF
 resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
 [[ -n "$resp" ]] || resp=$'_(could not draft — is `claude` on PATH?)_'
 
-# Suggested TITLE — the house style carries the stack position (cf. api-review-changes/13).
-pos=$(print -r -- "$order_list" | awk -v n="$(print -r -- "$order_list" | grep -c .)" '/THIS PR/{print NR"/"n}')
+# ─── everything below is COMPUTED from git config + gh: no model, no guessing ────────────────────
+pos=$(print -r -- "$order_list" | awk '/this PR/{print NR}')
+total=$(print -r -- "$order_list" | grep -c .)
 subject=$(git log -1 --format=%s "${parent}..${branch}")
-[[ -n "$project" && -n "$pos" ]] && printf 'Title: %s/%s — %s\n\n---\n\n' "$project" "${pos%%/*}" "${subject#*: }"
 
-printf '%s\n' "$resp"
+[[ -n "$project" && -n "$pos" ]] && printf 'Title: %s/%s — %s\n\n---\n\n' "$project" "$pos" "${subject#*: }"
+printf '%s\n' "${desc:-$subject}"
 
-# The map and the link are FREE (git config, no model). GitHub renders Mermaid in a PR body, and
-# this repo's PR template means nothing here arrives by prefill — paste it above the Traffic Cop
-# block. `stack-commit-body` keeps only the one-line position, so these two live here alone.
 if [[ -n "$project" ]]; then
-  printf '\n### Where this sits in the forest\n\n%s\n' "$("${0:A:h}/stack-commit-body" "$branch" --section)"
+  printf '\n### Where it fits\n\n'
+  printf 'Part of **%s** — %s of %s.\n\n' "$project" "${pos:-?}" "${total:-?}"
+  if [[ -n "$buildon" ]]; then
+    printf 'Builds on (merges first):\n%s\n\n' "$buildon"
+  else
+    printf 'An independent base — forks off `main`, merges on its own schedule.\n\n'
+  fi
+  [[ -n "$pulls"    ]] && printf 'Pulls in (fan-in — merges first):\n%s\n' "$pulls"
+  [[ -n "$unblocks" ]] && printf 'Unblocks (waits on this):\n%s\n' "$unblocks"
+fi
+
+printf '\n### The change\n\n%s\n' "$resp"
+
+if [[ -n "$project" ]]; then
+  printf '\n### Merge order\n\n%s\n' "$order_list"
   url=$("${0:A:h}/stack-integ-publish" --url "$project" 2>/dev/null || true)
   [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
-  printf '\n%s\n' "$("${0:A:h}/stack-forest-mermaid" "$branch" --fence)"
+  printf '\n%s\n' "$("${0:A:h}/stack-forest-mermaid" "$branch" --prs --fence)"
 fi

@@ -9,15 +9,19 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-forest-mermaid <branch> [--fence]" >&2; exit 2; }
-fence=0; [[ "${2:-}" == "--fence" ]] && fence=1
+[[ -n "$branch" ]] || { echo "usage: stack-forest-mermaid <branch> [--prs] [--fence]" >&2; exit 2; }
+fence=0; prs=0
+for arg in "$@"; do
+  [[ "$arg" == "--fence" ]] && fence=1
+  [[ "$arg" == "--prs" ]] && prs=1
+done
 
 project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
 [[ -n "$project" ]] || { echo "stack-forest-mermaid: ${branch} is not in a project" >&2; exit 1; }
 
 order=$("${0:A:h}/stack-merge-rank" "$branch" 2>/dev/null || true)
 
-FENCE=$fence ME="$branch" PROJECT="$project" python3 - "$order" <<'PY'
+FENCE=$fence PRS=$prs ME="$branch" PROJECT="$project" python3 - "$order" <<'PY'
 import json, os, subprocess, sys
 
 me, project, fence = os.environ["ME"], os.environ["PROJECT"], os.environ["FENCE"] == "1"
@@ -32,6 +36,20 @@ except ValueError:
     ranked = []
 # merge order is the authority; anything it does not know about still gets drawn, at the end.
 branches = ranked + [b for b in branches if b not in ranked]
+
+def gh_pr(b):
+    """The branch's PR number, when it has one — the node's own address on GitHub."""
+    if os.environ["PRS"] != "1":
+        return ""
+    r = subprocess.run(
+        ["gh", "pr", "list", "--head", b, "--state", "all", "--json", "number", "--limit", "1"],
+        capture_output=True, text=True)
+    try:
+        j = json.loads(r.stdout)
+        return "#%s · " % j[0]["number"] if j else ""
+    except Exception:
+        return ""
+
 
 def label(b, n):
     parent = git("config", f"stack-branch.{b}.parent") or "main"
@@ -49,7 +67,7 @@ def label(b, n):
     if len(d) > 58:
         d = d[:57].rstrip() + "…"
     d = d.replace('"', "'")
-    return f"{n} · {d}" + (" ◀ this one" if b == me else "")
+    return f"{gh_pr(b)}{n} · {d}" + (" ◀ this one" if b == me else "")
 
 ids = {b: f"b{i}" for i, b in enumerate(branches, 1)}
 out = ["flowchart TD", "  main([main])"]
