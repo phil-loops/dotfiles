@@ -167,10 +167,9 @@ def render_plan(f):
         return ""
     lines = [f'Part of {f["project"]}:']
     for s in f["plan"]:
-        ref = ""
-        if s.get("pr"):
-            ref = " #%s%s" % (s["pr"], " (merged)" if s.get("state") == "merged" else "")
-        lines.append("  %d.%s %s%s" % (s["n"], ref, s["job"], "   <- this branch" if s.get("me") else ""))
+        # a PR number is enough: GitHub expands it to the title and its merged/open state.
+        job = "#%s" % s["pr"] if s.get("pr") else s["job"]
+        lines.append("  %d. %s%s" % (s["n"], job, "   <- this branch" if s.get("me") else ""))
     return "\n".join(lines)
 
 
