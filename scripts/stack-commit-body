@@ -46,7 +46,7 @@ desc_of() {
 # than the facts we hold.
 order=$("$here/stack-merge-rank" "$branch" 2>/dev/null || echo '{}')
 
-plan=$(ME="$branch" python3 -c '
+plan=$(ME="$branch" PROJECT="$project" python3 -c '
 import json, os, subprocess, sys
 
 def git(*a):
@@ -75,17 +75,44 @@ def pr(b):
     state = j[0]["state"].lower()
     return " #%s%s" % (j[0]["number"], " (merged)" if state == "merged" else "")
 
+def landed(project):
+    # Steps that already merged. The forest CONTRACTS as bases land — the branch is dropped and its
+    # config with it — so the live config alone would make the plan forget its own history exactly
+    # when it matters most. The merge ledger the viewer keeps outlives them, so read the story there.
+    gd = git("rev-parse", "--git-common-dir")
+    if gd and not os.path.isabs(gd):
+        gd = os.path.join(os.getcwd(), gd)
+    try:
+        with open(os.path.join(gd, "stack-project-merges.json")) as f:
+            hist = json.load(f).get("merges", {}).get(project, [])
+    except Exception:
+        return []
+    if isinstance(hist, dict):
+        hist = [hist]
+    out = []
+    for e in reversed(hist):            # ledger is newest-first; the plan reads oldest-first
+        title = e.get("title", "")
+        out.append((e.get("pr"), title.split(": ", 1)[1] if ": " in title else title))
+    return out
+
+
 try:
     order = json.load(sys.stdin).get("order", [])
 except ValueError:
     order = []
 me = os.environ["ME"]
-if not order:
+project = os.environ["PROJECT"]
+done = landed(project)
+if not order and not done:
     sys.exit(0)
 
-rank = {b: i + 1 for i, b in enumerate(order)}
+n = 0
+for pr_num, title in done:
+    n += 1
+    print("  %d. #%s (merged) %s" % (n, pr_num, title))
 for b in order:
-    print("  %d.%s %s%s" % (rank[b], pr(b), job(b), "   <- this branch" if b == me else ""))
+    n += 1
+    print("  %d.%s %s%s" % (n, pr(b), job(b), "   <- this branch" if b == me else ""))
 ' <<< "$order")
 
 position=$(print -r -- "$plan" | grep -c .)
