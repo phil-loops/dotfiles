@@ -488,6 +488,11 @@ def prep_push(req, raw):
             routed.append(f"left {', '.join(held)} untouched — open PR, reseat would need a force-push")
 
     v = _origin_verdict(branch)
+    if v.get("commit"):
+        # fold the forest section into the body the editor opens with, so the
+        # "where this sits in the merge order" line is visible and editable up front
+        # instead of being appended unseen at save — what you see is what gets committed.
+        v["commit"] = {**v["commit"], "body": _with_forest(v["commit"]["body"], branch)}
     return req._send(200, json.dumps({
         "ok": True, "routed": routed, "outgoing": v["outgoing"],
         "commit": v["commit"], "wardsOk": v["ok"], "reasons": v["reasons"],
@@ -567,7 +572,9 @@ def prep_message(req, raw):
     env = dict(os.environ)
     if len(meta) == 3:
         env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
-    body = _with_forest(body, branch)
+    # save the body verbatim — the forest section was already folded in when the
+    # editor opened (see the prep return), so the author's edits to it are authoritative
+    # here rather than regenerated out from under them.
     msg = subject + (f"\n\n{body}" if body else "")
     # A reword the author didn't ask for still moves the tip, and a moved tip reseats every
     # child. Now that prepare-commit-msg seeds the plan at commit time, the message usually
