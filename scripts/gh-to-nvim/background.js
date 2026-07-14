@@ -272,7 +272,7 @@ async function computeState() {
 // anymore, so there's nothing to re-inject into open tabs — a bare reload is the whole story.
 // SW sleep resets the quiet timer — worst case the reload waits for the next wake, never loops
 // (reload wipes the session baseline, so the new copy reads as fresh).
-const QUIET_MS = 5000;
+const QUIET_MS = 1500;   // just enough to let a burst of saves settle — this is HMR latency, spend it carefully
 let staleMtime = null;
 let staleSince = 0;
 
@@ -294,7 +294,7 @@ chrome.management.getSelf((info) => {
 });
 chrome.runtime.onUpdateAvailable.addListener(() => chrome.runtime.reload());
 
-const UPDATE_ASK_MS = 60000;   // requestUpdateCheck throttles hard callers — pace it
+const UPDATE_ASK_MS = 5000;   // requestUpdateCheck throttles hard callers — pace it, but 60s WAS the HMR floor
 let lastUpdateAsk = 0;
 
 function maybeAutoReload() {
