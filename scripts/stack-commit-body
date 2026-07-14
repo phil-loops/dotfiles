@@ -68,13 +68,7 @@ if not order:
 
 rank = {b: i + 1 for i, b in enumerate(order)}
 for b in order:
-    parent = git("config", f"stack-branch.{b}.parent") or "main"
-    needs = []
-    if parent in rank:
-        needs.append(str(rank[parent]))
-    needs += [str(rank[r]) for r in git("config", "--get-all", f"stack-branch.{b}.requires").splitlines() if r in rank]
-    tail = "  (needs %s)" % ", ".join(needs) if needs else ""
-    print("  %d. %s%s%s" % (rank[b], job(b), tail, "   <- this branch" if b == me else ""))
+    print("  %d. %s%s" % (rank[b], job(b), "   <- this branch" if b == me else ""))
 ' <<< "$order")
 
 position=$(print -r -- "$plan" | grep -c .)
