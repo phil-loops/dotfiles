@@ -116,3 +116,9 @@ EOF
 resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
 [[ -n "$resp" ]] || resp=$'_(could not draft — is `claude` on PATH?)_'
 printf '%s\n' "$resp"
+
+# The map itself is FREE (git config, no model) — the same section the push flow bakes into the
+# commit body, so a pasted PR body and a pushed commit tell the same story.
+if [[ -n "$project" ]]; then
+  printf '\n%s\n' "$("${0:A:h}/stack-commit-body" "$branch" --section | sed '1d')"
+fi

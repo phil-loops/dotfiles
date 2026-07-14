@@ -494,6 +494,23 @@ def prep_push(req, raw):
     }))
 
 
+def _forest_section(branch):
+    """The section the project writes about itself: where this change sits in the merge order,
+    a link to the whole feature assembled on the fork, and the forest as a Mermaid map (GitHub
+    renders it in the PR body, which a one-commit branch prefills from this message). Free —
+    every fact comes from git config. Silent when the branch is in no project."""
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-commit-body"), branch, "--section"])
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def _with_forest(body, branch):
+    section = _forest_section(branch)
+    if not section:
+        return body
+    prose = body.split("-- forest --")[0].strip()
+    return f"{prose}\n\n{section}" if prose else section
+
+
 def draft_message(req, raw):
     """POST /draft-message {branch} — the opt-in claude pass: draft the ONE outgoing
     commit's message in the author's voice (stack-squash --dry drafts, nothing moves).
@@ -516,7 +533,7 @@ def draft_message(req, raw):
     return req._send(200, json.dumps({
         "ok": True,
         "subject": lines[0].strip() if lines else "",
-        "body": "\n".join(lines[1:]).strip(),
+        "body": _with_forest("\n".join(lines[1:]).strip(), branch),
     }))
 
 
@@ -545,6 +562,7 @@ def prep_message(req, raw):
     env = dict(os.environ)
     if len(meta) == 3:
         env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
+    body = _with_forest(body, branch)
     msg = subject + (f"\n\n{body}" if body else "")
     parent = ctx.run(["git", "rev-parse", f"{tip}~1"]).stdout.strip()
     cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", parent, "-m", msg]

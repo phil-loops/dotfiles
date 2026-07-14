@@ -1,0 +1,104 @@
+#!/bin/zsh
+# stack-commit-body — compose the default commit body for ONE branch of a forest: the author's
+# own prose, then the forest section the project generates for itself (where this change sits,
+# a hardlink to the whole feature assembled on the fork, and the forest as a Mermaid map).
+# FREE (no LLM) — every fact comes from git config. GitHub prefills a PR body from a single
+# commit's message, so this is what carries the change's place in the whole through to review.
+#
+#   stack-commit-body <branch>            → full body on stdout (author prose preserved)
+#   stack-commit-body <branch> --section  → just the generated forest section
+#   stack-commit-body <branch> --apply    → rewrite the branch's unpushed tip commit to carry it
+#
+# Idempotent: an existing forest section is replaced, never stacked up. --apply refuses to touch a
+# commit that is already on a remote — shared history is never rewritten.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+here="${0:A:h}"
+branch="${1:-}"
+[[ -n "$branch" ]] || { echo "usage: stack-commit-body <branch> [--section]" >&2; exit 2; }
+section_only=0; [[ "${2:-}" == "--section" ]] && section_only=1
+apply=0; [[ "${2:-}" == "--apply" ]] && apply=1
+
+MARKER="-- forest --"
+
+project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
+[[ -n "$project" ]] || { echo "stack-commit-body: ${branch} is not in a project" >&2; exit 1; }
+
+parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
+
+# WHERE IT SITS — position in the canonical merge order, plus what it builds on / pulls in, each
+# named by what it DOES, never by branch name. A branch's own commit subject (minus the
+# conventional-commit prefix) is that name: already voiced, already short.
+desc_of() {
+  local p; p=$(git config "stack-branch.$1.parent" 2>/dev/null || echo main)
+  local s; s=$(git log -1 --format=%s "${p}..$1" 2>/dev/null || true)
+  [[ -n "$s" ]] || s=$(git config "branch.$1.description" 2>/dev/null || echo "$1")
+  print -r -- "${s#*: }"
+}
+
+order=$("$here/stack-merge-rank" "$branch" 2>/dev/null || echo '{}')
+position=$(ME="$branch" python3 -c '
+import json, os, sys
+try: order = json.load(sys.stdin).get("order", [])
+except ValueError: order = []
+me = os.environ["ME"]
+print(f"{order.index(me)+1} of {len(order)}" if me in order else "")' <<< "$order")
+
+sits="Part of ${project}"
+[[ -n "$position" ]] && sits+=", ${position}"
+if [[ "$parent" != "main" ]]; then
+  sits+=". Builds on “$(desc_of "$parent")”"
+else
+  sits+=". An independent base off main"
+fi
+reqs=()
+while read -r r; do [[ -n "$r" ]] && reqs+=("“$(desc_of "$r")”"); done \
+  < <(git config --get-all "stack-branch.${branch}.requires" 2>/dev/null || true)
+(( ${#reqs} )) && sits+=", and pulls in ${(j:, and :)reqs} (fan-in — merges first)"
+sits+="."
+
+# THE WHOLE, ASSEMBLED — the integration ref published to the fork (see stack-integ-publish).
+fork_url=$("$here/stack-integ-publish" --url "$project" 2>/dev/null || true)
+
+section="${MARKER}
+${sits}"
+[[ -n "$fork_url" ]] && section+="
+Whole feature assembled: ${fork_url}"
+section+="
+
+$("$here/stack-forest-mermaid" "$branch" --fence)"
+
+if (( section_only )); then
+  print -r -- "$section"
+  exit 0
+fi
+
+# The author's prose is whatever precedes the marker in the current commit body — preserved as-is.
+prose=$(git log -1 --format=%b "$branch" | awk -v m="$MARKER" 'index($0, m)==1 {exit} {print}' | sed -e :a -e '/^[[:space:]]*$/{$d;N;ba' -e '}')
+
+body=""
+[[ -n "$prose" ]] && body+="${prose}"$'\n\n'
+body+="$section"
+
+if (( ! apply )); then
+  print -r -- "$body"
+  exit 0
+fi
+
+# --apply: re-message the tip commit in place (tree, author and parents preserved), the same
+# motion the viewer's message editor uses. Shared history is never rewritten.
+tip=$(git rev-parse "$branch")
+if git branch -r --contains "$tip" 2>/dev/null | grep -q .; then
+  echo "stack-commit-body: ${branch}'s tip is already on a remote — refusing to rewrite it" >&2
+  exit 1
+fi
+subject=$(git log -1 --format=%s "$branch")
+new=$(print -r -- "${subject}"$'\n\n'"${body}" | git commit-tree "${tip}^{tree}" $(git rev-parse "${tip}^@" | sed 's/^/-p /') )
+git update-ref "refs/heads/${branch}" "$new" "$tip"
+print -r -- "re-messaged ${branch}: ${tip:0:10} → ${new:0:10}"
+
+# rewriting a tip moves the base its children were forked from — they must be reseated.
+kids=$( (git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true) \
+  | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}')
+[[ -n "$kids" ]] && print -r -- "restack these onto it — they still sit on the old tip:\n${kids}"
