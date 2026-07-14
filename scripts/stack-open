@@ -25,9 +25,15 @@ SESSION="${STACK_OPEN_TMUX:-loops}"
 
 main_root=$(git rev-parse --show-toplevel)
 
+_wt_list=""
+wt_list(){   # the porcelain worktree list, computed once — it's repo-global and costs ~70ms at 147 worktrees
+  [[ -n "$_wt_list" ]] || _wt_list=$(git worktree list --porcelain)
+  print -r -- "$_wt_list"
+}
+
 existing_worktree(){   # echo the path of a real worktree holding <branch>, if any
-  # `|| true`: awk exits at the match, so `git worktree list` dies on SIGPIPE (141) — pipefail+set -e would abort the caller's ex=$(...)
-  git worktree list --porcelain | awk -v ref="refs/heads/$1" '
+  # `|| true`: awk exits at the match, so the producer dies on SIGPIPE (141) — pipefail+set -e would abort the caller's ex=$(...)
+  wt_list | awk -v ref="refs/heads/$1" '
     /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}' || true
 }
 install_followup_hook(){   # idempotently install the detached-HEAD → branch-follow post-commit hook
@@ -67,23 +73,31 @@ prune_old(){ [[ -d "$SCRATCH" ]] || return 0
 }
 seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without it the tRPC
               # client type COLLAPSES to the "collides with a built-in method" sentinel in
-              # the editor (verified). Clone main's .gen (APFS COW, ~instant) as a baseline
-              # so the open never collapses; then, ONLY if the branch actually touches the
-              # router (trpc/**) and we haven't already built for this HEAD, kick a
-              # background incremental rebuild so types reflect the branch. Never blocks the
-              # open. NB: .gen does NOT reduce tsgo memory — this is purely for correctness.
+              # the editor (verified). A branch that leaves the router alone can just SHARE
+              # main's .gen; only one that touches trpc/** needs its own writable copy to
+              # rebuild into. Never blocks the open. NB: .gen does NOT reduce tsgo memory —
+              # this is purely for correctness.
   local dir="$1" head marker src
   # source .gen from the MAIN checkout (first worktree), not wherever stack-open runs —
   # a sibling worktree has no .gen of its own (it's gitignored, only built in main).
-  # `|| true`: awk exits on the first worktree, so `git worktree list` dies on SIGPIPE (141) — pipefail+set -e would abort the open
-  src=$(git -C "$dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}') || true
+  # `|| true`: awk exits on the first worktree, so the producer dies on SIGPIPE (141) — pipefail+set -e would abort the open
+  src=$(wt_list | awk '/^worktree /{print $2; exit}') || true
   [[ -n "$src" && -d "$src/.gen" ]] || return 0                # nothing to seed from
+  # Router untouched → main's .gen already IS this branch's .gen. Link it: copying was ~0.66s of
+  # a ~1.7s cold open (the "COW clone is ~instant" claim was wrong — it clonefiles per file), and
+  # it was paid BEFORE this check, so the overwhelmingly common branch paid for a copy it never used.
+  if git -C "$dir" diff --quiet main...HEAD -- trpc 2>/dev/null; then
+    [[ -e "$dir/.gen" ]] || ln -sfn "$src/.gen" "$dir/.gen"
+    return 0
+  fi
+  # Touches the router → it needs a PRIVATE .gen, because the rebuild below writes into it;
+  # rebuilding through a symlink would corrupt main's.
+  [[ -L "$dir/.gen" ]] && rm -f "$dir/.gen"
   [[ -d "$dir/.gen" ]] || cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
     || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || return 0   # COW clone, fall back to plain copy
   head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || return 0
   marker="$dir/.gen/.stack-open-gen-sha"
   [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && return 0   # already built for this HEAD
-  git -C "$dir" diff --quiet main...HEAD -- trpc 2>/dev/null && return 0   # router untouched → main's .gen matches
   local tsc="$dir/node_modules/typescript/bin/tsc"
   [[ -e "$tsc" ]] || return 0                                   # no compiler → keep the cloned baseline
   mkdir "$dir/.gen/.rebuilding" 2>/dev/null || return 0         # single-flight lock: a rebuild is already in flight
