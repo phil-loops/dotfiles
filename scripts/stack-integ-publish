@@ -1,0 +1,61 @@
+#!/bin/zsh
+# stack-integ-publish — publish a project's integration ref (the whole feature assembled: every
+# leaf octopus-merged onto main) to the FORK, so a reviewer holding one small PR can click through
+# to what main looks like when the project ships.
+#
+#   stack-integ-publish <project>        → sync the fork's main, build the integration, push it
+#   stack-integ-publish --url <project>  → the URL, but only once it is actually published
+#
+# Published as a TAG (integ/<project>), not a branch: it keeps the fork's branch list clean while
+# outliving the forest, so the link a commit body carries into main's history never rots.
+#
+# NEVER touches origin (Loops-so) — the fork is the only remote it will push to, and it refuses
+# outright if the remote it resolves is the shared repo.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+here="${0:A:h}"
+url_only=0
+[[ "${1:-}" == "--url" ]] && { url_only=1; shift; }
+project="${1:-}"
+[[ -n "$project" ]] || { echo "usage: stack-integ-publish [--url] <project>" >&2; exit 2; }
+
+fork=$(git config stack.fork-remote 2>/dev/null || echo phil-loops)
+fork_url=$(git remote get-url "$fork" 2>/dev/null || true)
+[[ -n "$fork_url" ]] || { echo "stack-integ-publish: no '${fork}' remote" >&2; exit 1; }
+if [[ "$fork_url" == *[Ll]oops-so* ]]; then
+  echo "stack-integ-publish: '${fork}' resolves to the shared repo (${fork_url}) — refusing" >&2
+  exit 1
+fi
+slug="${${fork_url#*github.com[:/]}%.git}"
+tag="integ/${project}"
+
+if (( url_only )); then
+  # only speak the URL once the tag really exists — a body must never carry a dead link
+  git ls-remote --tags --exit-code "$fork" "refs/tags/${tag}" >/dev/null 2>&1 \
+    && print -r -- "https://github.com/${slug}/tree/${tag}"
+  exit 0
+fi
+
+# 1 · the fork's main must match origin's, or the integration sits on a stale base.
+git fetch -q origin main
+if ! git push -q "$fork" origin/main:refs/heads/main 2>/dev/null; then
+  echo "stack-integ-publish: could not fast-forward ${fork}/main to origin/main" >&2
+  exit 1
+fi
+print -r -- "synced ${fork}/main → $(git rev-parse --short origin/main)"
+
+# 2 · build the integration ref (every leaf, octopus-merged onto main)
+ref=$("$here/stack-integrate" "$project") || {
+  echo "stack-integ-publish: integration failed — leaves conflict; nothing published" >&2
+  exit 1
+}
+print -r -- "built ${ref}"
+
+# 3 · publish it as a tag. Forced: every rebuild mints a new merge commit, and the tag is a
+# moving view of the forest, never a base anything is built on.
+# The pre-push hook rejects merge commits (a `git pull` drags squash-merged commits back) — an
+# octopus integration is the one case where the merge commit is the point, so scope the override
+# to this push alone.
+ALLOW_MERGE_PUSH=1 git push -q --force "$fork" "${ref}:refs/tags/${tag}"
+print -r -- "published https://github.com/${slug}/tree/${tag}"

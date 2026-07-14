@@ -1,0 +1,69 @@
+#!/bin/zsh
+# stack-forest-mermaid — render a project's forest as a Mermaid diagram, from git config alone.
+# FREE (no LLM): nodes are branch purposes, solid edges are the parent rail, dashed edges are
+# fan-in requires, and the named branch is marked as the one under review. GitHub renders Mermaid
+# in PR bodies, so this is what lets a commit body show where its change sits in the whole.
+#
+#   stack-forest-mermaid <branch> [--fence]   → Mermaid diagram on stdout (--fence wraps it in ```mermaid)
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+branch="${1:-}"
+[[ -n "$branch" ]] || { echo "usage: stack-forest-mermaid <branch> [--fence]" >&2; exit 2; }
+fence=0; [[ "${2:-}" == "--fence" ]] && fence=1
+
+project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
+[[ -n "$project" ]] || { echo "stack-forest-mermaid: ${branch} is not in a project" >&2; exit 1; }
+
+order=$("${0:A:h}/stack-merge-rank" "$branch" 2>/dev/null || true)
+
+FENCE=$fence ME="$branch" PROJECT="$project" python3 - "$order" <<'PY'
+import json, os, subprocess, sys
+
+me, project, fence = os.environ["ME"], os.environ["PROJECT"], os.environ["FENCE"] == "1"
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+
+branches = [b for b in git("config", "--get-all", f"stack-project.{project}.branch").splitlines() if b]
+try:
+    ranked = json.loads(sys.argv[1] or "{}").get("order", [])
+except ValueError:
+    ranked = []
+# merge order is the authority; anything it does not know about still gets drawn, at the end.
+branches = ranked + [b for b in branches if b not in ranked]
+
+def label(b, n):
+    parent = git("config", f"stack-branch.{b}.parent") or "main"
+    # the branch's own newest commit subject, minus the conventional-commit prefix: already the
+    # merge story, and short enough to read as a map. Descriptions are the fallback.
+    d = git("log", "-1", "--format=%s", f"{parent}..{b}")
+    if ": " in d:
+        d = d.split(": ", 1)[1]
+    if not d:
+        d = git("config", f"branch.{b}.description") or b
+        for sep in (" — ", " -- ", ". "):
+            if sep in d:
+                d = d.split(sep)[0]
+                break
+    if len(d) > 58:
+        d = d[:57].rstrip() + "…"
+    d = d.replace('"', "'")
+    return f"{n} · {d}" + (" ◀ this one" if b == me else "")
+
+ids = {b: f"b{i}" for i, b in enumerate(branches, 1)}
+out = ["flowchart TD", "  main([main])"]
+for i, b in enumerate(branches, 1):
+    out.append(f'  {ids[b]}["{label(b, i)}"]')
+for b in branches:
+    parent = git("config", f"stack-branch.{b}.parent") or "main"
+    out.append(f"  {'main' if parent == 'main' else ids.get(parent, 'main')} --> {ids[b]}")
+    for r in git("config", "--get-all", f"stack-branch.{b}.requires").splitlines():
+        if r in ids:
+            out.append(f"  {ids[r]} -. requires .-> {ids[b]}")
+if me in ids:
+    out.append(f"  style {ids[me]} stroke-width:3px")
+
+body = "\n".join(out)
+print(f"```mermaid\n{body}\n```" if fence else body)
+PY
