@@ -515,6 +515,7 @@ def warm():
 
 _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()   # seed so the first /events stream sees real values
 threading.Thread(target=warm, daemon=True).start()
+threading.Thread(target=reviews.warm_requests_forever, daemon=True).start()   # review-requested PRs → worktree ready before the first jump
 threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
