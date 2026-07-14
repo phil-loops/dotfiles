@@ -569,6 +569,15 @@ def prep_message(req, raw):
         env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
     body = _with_forest(body, branch)
     msg = subject + (f"\n\n{body}" if body else "")
+    # A reword the author didn't ask for still moves the tip, and a moved tip reseats every
+    # child. Now that prepare-commit-msg seeds the plan at commit time, the message usually
+    # already matches — so say so and leave the sha alone.
+    if msg.strip() == ctx.run(["git", "log", "-1", "--format=%B", tip]).stdout.strip():
+        return req._send(200, json.dumps({
+            "ok": True, "unchanged": True,
+            "commit": {"sha": tip, "subject": subject, "body": body},
+            "reseated": [],
+        }))
     parent = ctx.run(["git", "rev-parse", f"{tip}~1"]).stdout.strip()
     cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", parent, "-m", msg]
     if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
