@@ -213,26 +213,33 @@ hx_open(){   # open one-or-more files in the warm review-hx tmux window (reuse v
              # socket, so "warm" is a tmux send-keys trick, mirroring the nvim --remote path.
   local dir="$1" line="$2"; shift 2
   (( $# )) || return 1
-  local win
+  local win first="$1"
   # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
   win=$(tmux list-panes -s -t "$SESSION" \
           -F '#{window_index} #{pane_current_command} #{window_name}' 2>/dev/null \
         | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
-  if [[ -n "${win:-}" ]]; then
+  # Warm reuse only for a SINGLE file: Helix's :open path-completion makes typing multiple
+  # space-separated paths via send-keys unreliable — the completion popup eats the input and the
+  # command never submits. Multi-file review relaunches cold; hx parses CLI args directly.
+  if [[ -n "${win:-}" && $# -eq 1 ]]; then
     # ESC must land ALONE: ESC immediately followed by ':' reads as Alt-: and ':open …' never opens
-    # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads; the
-    # tiny sleep is margin, not the mechanism. Absolute paths → resolve regardless of hx's own cwd.
+    # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads.
     tmux send-keys -t "${SESSION}:${win}" Escape
     sleep 0.02
-    tmux send-keys -t "${SESSION}:${win}" ":open ${*}" Enter
+    tmux send-keys -t "${SESSION}:${win}" ":open ${first}" Enter
     if [[ -n "$line" ]]; then
       sleep 0.02
       tmux send-keys -t "${SESSION}:${win}" "${line}gg"
     fi
   else
-    local -a launch; launch=("$@")
-    [[ -n "$line" ]] && launch[1]="${1}:${line}"
-    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(j: :)${(q)launch}}" \
+    [[ -n "${win:-}" ]] && tmux kill-window -t "${SESSION}:${win}" 2>/dev/null   # replace stale review-hx — multi-file can't reuse it reliably
+    # Shell-quote each path individually (scalar (q), one at a time), then join by a LITERAL space.
+    # NOT ${(j: :)${(q)launch}} — nesting (q) inside the join escapes the separator too, collapsing
+    # every file into one bogus argument. The FIRST file carries :<line> so hx opens it active there.
+    local -a q; local f
+    for f in "$@"; do q+=("${(q)f}"); done
+    [[ -n "$line" ]] && q[1]="${(q)first}:${line}"
+    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(j: :)q}" \
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
     win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
   fi
