@@ -1,0 +1,11 @@
+#!/bin/sh
+# post-rewrite / post-merge — refresh this worktree's tRPC .gen boundary after the source
+# moved underneath it. .gen is a gitignored, per-worktree snapshot seeded once from main;
+# a rebase/amend (post-rewrite) or merge/pull (post-merge) changes the router source but
+# nothing else regenerates it — that silent drift is why .gen goes stale so often, most of
+# all after a restack onto fresh main. seed-gen is idempotent (SHA-marked), COW-cheap,
+# single-flight-locked, and backgrounds any real rebuild via tsgo, so it's safe to fire on
+# every rewrite. Symlinked from both post-rewrite and post-merge; stdin (post-rewrite's
+# commit list) is intentionally ignored.
+"$HOME/.dotfiles/scripts/seed-gen" "$PWD" >/dev/null 2>&1 || true
+exit 0

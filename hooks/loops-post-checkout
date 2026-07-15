@@ -7,4 +7,7 @@
 # stack-open already wrap, plus the ones they don't — bare `git worktree add` and `wt`.
 [ "$3" = "1" ] || exit 0
 "$HOME/.dotfiles/scripts/helix-tsgo-stamp" "$PWD" >/dev/null 2>&1 || true
+# Refresh the tRPC .gen boundary for the newly-checked-out source (idempotent, COW-cheap,
+# backgrounds any real rebuild). Covers branch switches + bare `git worktree add`.
+"$HOME/.dotfiles/scripts/seed-gen" "$PWD" >/dev/null 2>&1 || true
 exit 0
