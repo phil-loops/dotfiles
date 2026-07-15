@@ -19,9 +19,15 @@ Wired in `~/.dotfiles/scripts/stack-open` (`--review` path, `ensure_review_workt
 | `Space d` | diagnostics — does the change introduce LSP errors |
 | `Space s` | symbol picker for the current file |
 
-The gutter marks in the left margin (`▍` add / modify / delete) are the review surface — no line
-selected on GitHub means you land on the first changed file's first hunk; `]g` takes you through
-the rest, `Space b` to the next file.
+The gutter marks in the left margin (`▍` add / modify / delete) are the review surface — you land on
+the biggest-churn file's first hunk; `]g` takes you through the rest, `Space b` to the next file.
+(A brand-new file has no base to diff against, so it shows no gutter — you just read it top to bottom.)
+
+## Big PRs
+
+Only the top **10** files by churn open as buffers (so an import touched across 30 files doesn't
+flood you). Reach the rest with `Space f` — they still show gutters, the whole worktree is soft-reset.
+Change the cap with `git config stack.review-max-buffers <n>` (or `STACK_REVIEW_MAX_BUFFERS`).
 
 ## Line-precise open
 

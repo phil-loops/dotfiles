@@ -266,22 +266,30 @@ case "${1:-}" in
     rbranch="${2:?usage: stack-open --review <branch>}"
     EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
     if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
-      # Helix has no Diffview — "review this PR" opens every changed file (vs main) as a buffer in a
-      # soft-reset review worktree, so each buffer's gutter shows the whole PR. Land on the FIRST file
-      # at its first changed hunk; ]g/[g then walk the changes, space-b switches file.
+      # Helix has no Diffview — "review this PR" opens the changed files (vs main) as buffers in a
+      # soft-reset review worktree, so each buffer's gutter shows the whole PR. Files are ordered by
+      # churn (added+deleted) so the substantive ones open first and a cap keeps a big PR — e.g. an
+      # import touched across 30 files — from flooding you with buffers; the rest are one Space f away
+      # (they still show gutters, the whole worktree is soft-reset). Land on the biggest file's first hunk.
       rvdir=$(ensure_review_worktree "$rbranch")
       mbref="origin/main"; git -C "$rvdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
-      changed=("${(@f)$(git -C "$rvdir" diff --name-only "${mbref}...${rbranch}" 2>/dev/null || true)}")   # branch ref, not HEAD (HEAD is soft-reset to base)
+      maxbuf="${STACK_REVIEW_MAX_BUFFERS:-$(git -C "$main_root" config --int stack.review-max-buffers 2>/dev/null || echo 10)}"
+      # numstat → churn per file (binary shows "-", count as 0) → sort desc → paths (branch ref, not HEAD which is soft-reset)
+      changed=("${(@f)$(git -C "$rvdir" diff --numstat "${mbref}...${rbranch}" 2>/dev/null \
+                        | awk '{a=($1=="-"?0:$1); d=($2=="-"?0:$2); print (a+d)"\t"$3}' | sort -rn | cut -f2- || true)}")
       changed=(${changed:#})
       if (( ${#changed} == 0 )); then
         echo "review-opened $rbranch (no files changed vs ${mbref}) → nothing to open"; exit 0
       fi
-      # first changed NEW-file line of the first file — the "+c" of its first @@ -a,b +c,d @@ hunk
+      total=${#changed}
+      (( total > maxbuf )) && changed=(${changed[1,maxbuf]})   # cap the buffer flood; reach the rest via Space f
+      # first changed NEW-file line of the biggest file — the "+c" of its first @@ -a,b +c,d @@ hunk
       firstline=$(git -C "$rvdir" diff -U0 "${mbref}...${rbranch}" -- "${changed[1]}" 2>/dev/null \
                     | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p' | head -1) || true
       abs=(); for f in "${changed[@]}"; do abs+=("$rvdir/$f"); done
       hx_open "$rvdir" "$firstline" "${abs[@]}" || exit 1
-      echo "review-opened $rbranch (${#changed} files · gutter=whole PR) → review-hx · ]g/[g change · space-b file · gd def"; exit 0
+      more=""; (( total > maxbuf )) && more=" of $total, rest via Space f"
+      echo "review-opened $rbranch (${#changed} files${more} · gutter=whole PR) → review-hx · ]g/[g change · space-b file · gd def"; exit 0
     fi
     rdir=$(ensure_worktree "$rbranch")   # nvim path only: the edit worktree for the <leader>gm Diffview
     to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }   # bound every --server call (wedged-nvim guard)
