@@ -142,6 +142,27 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   install_followup_hook "$dir"
   touch "$dir"; echo "$dir"
 }
+ensure_review_worktree(){   # echo a DEDICATED, disposable worktree for gutter review of <branch>.
+  # Helix has no Diffview — its diff gutter compares each buffer against git HEAD. So to see the WHOLE
+  # PR lit in the gutter, detach at the branch tip then `reset --soft merge-base`: HEAD moves to the
+  # base, the working tree keeps the tip content, and every PR change reads as uncommitted (the gutter
+  # then shows it, ]g/[g walk it). Kept SEPARATE from the edit worktree so the reset never touches your
+  # editable checkout, and it carries NO follow-marker — a stray commit here strands on a detached HEAD
+  # (reflog-recoverable) instead of the post-commit hook force-moving the branch ref onto a squashed base.
+  local b="$1" dir mb base
+  base="origin/main"; git rev-parse -q --verify origin/main >/dev/null 2>&1 || base="main"
+  mkdir -p "$SCRATCH"; dir="$SCRATCH/${b//\//_}__review"
+  if [[ -d "$dir" ]]; then   # re-entry: hard-refresh to tip (discards the prior review's soft-reset staging), then re-reset
+    git -C "$dir" checkout --detach -f "$b" -q 2>/dev/null || git -C "$dir" reset --hard "$b" -q 2>/dev/null || true
+  else
+    git worktree add --detach "$dir" "$b" -q
+  fi
+  [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
+  seed_gen "$dir"                                              # .gen for #trpc LSP resolution — HEAD still at tip here
+  mb=$(git -C "$dir" merge-base HEAD "$base" 2>/dev/null) || true
+  [[ -n "$mb" ]] && git -C "$dir" reset --soft "$mb" -q 2>/dev/null || true   # light the gutter for the whole PR
+  touch "$dir"; echo "$dir"
+}
 focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actually visible
   local app="${STACK_OPEN_TERMINAL:-}"
   [[ "$app" == none ]] && return 0   # STACK_OPEN_TERMINAL=none — for scripted/batch opens, which
@@ -228,24 +249,26 @@ case "${1:-}" in
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
   --review)  # open <branch> for whole-PR review: Helix → its changed files as buffers; nvim → the gm Diffview
     rbranch="${2:?usage: stack-open --review <branch>}"
-    rdir=$(ensure_worktree "$rbranch")
     EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
     if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
-      # Helix has no Diffview — "review this PR" opens every file the branch changes (vs main) as
-      # buffers (browse with the buffer picker), landing on the FIRST at its first changed hunk.
-      mbref="origin/main"; git -C "$rdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
-      changed=("${(@f)$(git -C "$rdir" diff --name-only "${mbref}...HEAD" 2>/dev/null || true)}")
+      # Helix has no Diffview — "review this PR" opens every changed file (vs main) as a buffer in a
+      # soft-reset review worktree, so each buffer's gutter shows the whole PR. Land on the FIRST file
+      # at its first changed hunk; ]g/[g then walk the changes, space-b switches file.
+      rvdir=$(ensure_review_worktree "$rbranch")
+      mbref="origin/main"; git -C "$rvdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
+      changed=("${(@f)$(git -C "$rvdir" diff --name-only "${mbref}...${rbranch}" 2>/dev/null || true)}")   # branch ref, not HEAD (HEAD is soft-reset to base)
       changed=(${changed:#})
       if (( ${#changed} == 0 )); then
         echo "review-opened $rbranch (no files changed vs ${mbref}) → nothing to open"; exit 0
       fi
       # first changed NEW-file line of the first file — the "+c" of its first @@ -a,b +c,d @@ hunk
-      firstline=$(git -C "$rdir" diff -U0 "${mbref}...HEAD" -- "${changed[1]}" 2>/dev/null \
+      firstline=$(git -C "$rvdir" diff -U0 "${mbref}...${rbranch}" -- "${changed[1]}" 2>/dev/null \
                     | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p' | head -1) || true
-      abs=(); for f in "${changed[@]}"; do abs+=("$rdir/$f"); done
-      hx_open "$rdir" "$firstline" "${abs[@]}" || exit 1
-      echo "review-opened $rbranch (${#changed} changed files, on ${changed[1]}) → review-hx ($rdir)"; exit 0
+      abs=(); for f in "${changed[@]}"; do abs+=("$rvdir/$f"); done
+      hx_open "$rvdir" "$firstline" "${abs[@]}" || exit 1
+      echo "review-opened $rbranch (${#changed} files · gutter=whole PR) → review-hx · ]g/[g change · space-b file · gd def"; exit 0
     fi
+    rdir=$(ensure_worktree "$rbranch")   # nvim path only: the edit worktree for the <leader>gm Diffview
     to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }   # bound every --server call (wedged-nvim guard)
     if [[ -S "$SOCK" ]] && to 2 nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
       # cd the warm nvim into the worktree so <leader>gm's git calls target THIS branch, then fire
