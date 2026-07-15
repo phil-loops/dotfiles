@@ -56,7 +56,7 @@ Think in **forests, not stacks** — a linear chain is just the degenerate case.
 
 **Fan-in is the default; everything else is the exception you justify.** The unit of work is one self-contained capability that compiles on its own — each forks off `main` as its own base PR and merges on its own schedule. Integrators that need several bases converge them with `requires` (fan-in). The north star is **reviewability**: a reviewer should hold an entire PR in their head in one sitting. Maximizing independently-mergeable bases is how you get there — it's the most scalable, maintainable way to ship. When unsure, split: more small bases beats one fused branch.
 
-**Before adding code to a branch, ask: is this its own capability?** If a change stands on its own — a generic helper/primitive, a different layer, a separate entity or concern — and isn't the branch's core thesis, it belongs on its *own* base (fanned in), not folded into whatever branch happened to need it first. *Example: a generic `openWriteStream` S3 helper used by a restore engine is its own base — the engine `requires` it — not a commit buried inside the engine.* Folding it in "because that's where I needed it" is the anti-pattern; the test is the capability, not the caller.
+**Before adding code to a branch, ask: is this its own capability?** If a change stands on its own — a generic helper/primitive, a different layer, a separate entity or concern — and isn't the branch's core thesis, it belongs on its *own* base (fanned in), not folded into whatever branch happened to need it first. *Example: a generic `openWriteStream` S3 helper used by a restore engine is its own base — the engine chains on it — not a commit buried inside the engine.* Folding it in "because that's where I needed it" is the anti-pattern; the test is the capability, not the caller.
 
 **Chaining (a linear `parent` line) and co-location are the exceptions** — reach for them only on a *real* dependency: a branch that genuinely won't compile or make sense without its parent. If two capabilities don't depend on each other (e.g. a Valkey cache vs. a JobStatus query change), each forks off `main` and merges on its own schedule — do NOT chain one behind the other just to make a line. Linearizing independent work forces a false merge order and blocks each PR on the others. The integrator that needs both records them as fan-in deps.
 
@@ -66,6 +66,8 @@ Think in **forests, not stacks** — a linear chain is just the degenerate case.
 - **`requires`** (multivar, optional) — fan-in deps: branches this one *carries* (cherry-picked) beyond its `parent`. Metadata only — the `parent...child` review diff is unchanged; `requires` drives the forest viewer's inbound edges and restack re-sync. `git config --add stack-branch.<name>.requires <dep>`.
 
 A pure line uses only `parent`; fan-in adds `requires`. **Never any git merge commits** — fan-in is metadata over linear history (carried cherry-picks), so squash-merge still drops redundant commits cleanly on rebase.
+
+**Chain vs fan-in — the one-dep test (2026-07-13).** If a branch needs exactly ONE other branch to land first because it actually uses its content (compile, build, or runtime), that's a dependency: chain it (`parent = <dep>`). `requires` is reserved for a branch converging **two or more** independent bases — `parent` = one of them, `requires` = the rest. Exactly one `requires` on a main-rooted branch is a mis-encoded chain, and its carried cherry-pick makes the branch's review diff re-review the dep (the ts7 webpack/extension-imports case).
 
 ## Branch purpose
 
@@ -77,6 +79,7 @@ Setting and refreshing the purpose is **part of the forest operation itself, not
 - **Write it in plain language — what the branch *does*, not how it's coded.** Say it the way you'd tell a teammate: drop raw identifiers (`markLocked`, `getOrFetch`) and terms-of-art (`idempotent`, `monotonic`, `short-circuit`) for the behavior they name; keep forest vocabulary (`requires`, fan-in, convergence) — that's structure, not jargon. The purpose seeds the forest viewer and the PR-body drafter, so a reader who doesn't know the code should still grok where the branch sits. Bake this register in at forest-generation time, not as a later de-jargon pass.
 - **Any ancestry change invalidates descriptions — refresh them in the same step.** Reparent, `rebase --onto`, restack, rename, or a `requires`/fan-in change can make a description's account of the branch's parent line, deps, or role go stale. A description that names a parent/inheritance the branch no longer has is a *bug introduced by the operation*, the same as leaving `.parent` wrong. Re-read every touched branch's description after an ancestry edit and fix the ones that no longer match (e.g. a reparent that moves a base from inherited→fanned-in must update the integrator's description that claimed it was inherited). Treat "all touched descriptions accurate" as part of the operation's definition-of-done — verify it before reporting the reshape complete.
 - **Keep it current on scope/repurpose too** — when a branch is repurposed or its scope shifts, update the description. A stale purpose is worse than none.
+- **The forest section in each commit body goes stale the same way — regenerate it in the same step.** A branch's commit body carries a machine-written section (`stack-commit-body <branch>`: its place in the merge order, what it builds on and pulls in, a hardlink to the whole feature assembled on the fork, and the forest as a Mermaid map — GitHub prefills a one-commit branch's PR body from it). A rebase replays the message **verbatim**, so any reforest, reparent, or dropped node leaves it describing a forest that no longer exists — it will happily name a branch you deleted. Regenerate bottom-up (`stack-commit-body <branch> --apply`, reseating each branch's children onto the rewritten tip) as part of the ancestry change itself, exactly like descriptions. The push flow re-ensures the section at prep time, so a stale map never reaches origin — but every local commit lies until it does.
 - The viewer reads the description for **free** (no LLM). A "suggest" button can draft one from the diff (opt-in, haiku) which you then save as the description — **generation never runs automatically**, nothing burns tokens on its own.
 
 ## Creating branches
@@ -154,6 +157,10 @@ base — so it beats leaving a zero-diff branch hanging; an empty node is the co
 avoid. **Do this as part of the rebase, then summarize — never just report "the branch is now empty"
 and stop.** Squash-merged commits won't match `origin/main` by SHA — the rebase drops them cleanly
 (both `parent` and carried `requires`).
+
+A rebase is also a **body-refresh checkpoint** — a restack that contracts or reparents anything
+invalidates the generated forest section in every touched commit body (see *Branch purpose*);
+regenerate it bottom-up before reporting the restack done.
 
 A rebase is also a **comment-review checkpoint.** Any branch you rewrite, re-read its `parent...child`
 diff against the comment gate (*Comments* below) and trim anything that no longer earns its keep —
@@ -308,7 +315,7 @@ tsc-turn npx tsc --project tsconfig.node.json --noEmit   # the repo's own CI typ
 
 `tsc-turn` (`~/.dotfiles/scripts/tsc-turn`) is a machine-wide compile queue: at most 2 heavy checks run at once, extra callers wait their turn. With several Claude sessions live, seven concurrent `tsc` runs flatten the machine (2026-07-06) — always route full typechecks and builds through it; it adds nothing when the machine is idle.
 
-This is the exact command CI runs, so it's the source of truth. Don't use `tsgo` — the global one rejects this repo's `moduleResolution=node10` and there's no compatible local copy, so it's pure friction. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
+This is the exact command CI runs, so it's the source of truth. `tsgo` (the global native compiler) now typechecks this repo cleanly — the old `moduleResolution=node10` rejection was fixed by the nodenext migration, so it's a valid *fast* local typecheck (the loops pre-push hook uses it, gated to TS-changed pushes; bypass a run with `TSGO_SKIP=1`). Keep `tsc-turn npx tsc` as the CI-canonical check. `oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
 
 **Caveat — the tRPC client type is a generated artifact.** A worktree with stale/missing generated types floods `tsc` with hundreds of `.tsx` errors that all trace to one collapsed type (`TS2339` "Property X does not exist on type '...collides with a built-in method...'" plus cascading implicit-`any` params). That's noise from un-built types, not your change. Filter to what you touched (`... --noEmit 2>&1 | grep <your-file>`) to read the real signal, or build the types first (`npx tsc --project tsconfig.trpc-types.json`).
 
