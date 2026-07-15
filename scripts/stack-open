@@ -187,13 +187,65 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
   tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
 }
 
+hx_open(){   # open one-or-more files in the warm review-hx tmux window (reuse via send-keys), else
+             # launch hx cold; land the cursor on <line> of the FIRST file. Helix has no --server
+             # socket, so "warm" is a tmux send-keys trick, mirroring the nvim --remote path.
+  local dir="$1" line="$2"; shift 2
+  (( $# )) || return 1
+  local win
+  # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
+  win=$(tmux list-panes -s -t "$SESSION" \
+          -F '#{window_index} #{pane_current_command} #{window_name}' 2>/dev/null \
+        | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
+  if [[ -n "${win:-}" ]]; then
+    # ESC must land ALONE: ESC immediately followed by ':' reads as Alt-: and ':open …' never opens
+    # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads; the
+    # tiny sleep is margin, not the mechanism. Absolute paths → resolve regardless of hx's own cwd.
+    tmux send-keys -t "${SESSION}:${win}" Escape
+    sleep 0.02
+    tmux send-keys -t "${SESSION}:${win}" ":open ${*}" Enter
+    if [[ -n "$line" ]]; then
+      sleep 0.02
+      tmux send-keys -t "${SESSION}:${win}" "${line}gg"
+    fi
+  else
+    local -a launch; launch=("$@")
+    [[ -n "$line" ]] && launch[1]="${1}:${line}"
+    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(j: :)${(q)launch}}" \
+      || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
+    win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
+  fi
+  if ! quiet_open && [[ -n "${win:-}" ]]; then
+    tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
+  fi
+  focus_terminal
+  return 0
+}
+
 case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
-  --review)  # open <branch> in the warm review-nvim as the whole-PR Diffview (<leader>gm)
+  --review)  # open <branch> for whole-PR review: Helix → its changed files as buffers; nvim → the gm Diffview
     rbranch="${2:?usage: stack-open --review <branch>}"
     rdir=$(ensure_worktree "$rbranch")
+    EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
+    if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
+      # Helix has no Diffview — "review this PR" opens every file the branch changes (vs main) as
+      # buffers (browse with the buffer picker), landing on the FIRST at its first changed hunk.
+      mbref="origin/main"; git -C "$rdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
+      changed=("${(@f)$(git -C "$rdir" diff --name-only "${mbref}...HEAD" 2>/dev/null || true)}")
+      changed=(${changed:#})
+      if (( ${#changed} == 0 )); then
+        echo "review-opened $rbranch (no files changed vs ${mbref}) → nothing to open"; exit 0
+      fi
+      # first changed NEW-file line of the first file — the "+c" of its first @@ -a,b +c,d @@ hunk
+      firstline=$(git -C "$rdir" diff -U0 "${mbref}...HEAD" -- "${changed[1]}" 2>/dev/null \
+                    | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p' | head -1) || true
+      abs=(); for f in "${changed[@]}"; do abs+=("$rdir/$f"); done
+      hx_open "$rdir" "$firstline" "${abs[@]}" || exit 1
+      echo "review-opened $rbranch (${#changed} changed files, on ${changed[1]}) → review-hx ($rdir)"; exit 0
+    fi
     to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }   # bound every --server call (wedged-nvim guard)
     if [[ -S "$SOCK" ]] && to 2 nvim --server "$SOCK" --remote-expr '1' >/dev/null 2>&1; then
       # cd the warm nvim into the worktree so <leader>gm's git calls target THIS branch, then fire
@@ -267,31 +319,7 @@ esac
 EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
 if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
   case "$pos" in <->) hxline="$pos";; <->:<->) hxline="${pos%%:*}";; *) hxline="";; esac
-  win=$(tmux list-panes -s -t "$SESSION" \
-          -F '#{window_index} #{pane_current_command} #{window_name}' 2>/dev/null \
-        | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
-  if [[ -n "${win:-}" ]]; then
-    # Escape must land ALONE: ESC immediately followed by ':' reads as Alt-: and the
-    # ':' never opens helix's command line — 'open …' then types into the buffer ('o'
-    # = insert line). Separate send-keys calls already land in separate reads (20/20 clean
-    # from insert mode at 0s); the gap is margin, not the mechanism — 0.2s was 40% of the open.
-    tmux send-keys -t "${SESSION}:${win}" Escape
-    sleep 0.02
-    tmux send-keys -t "${SESSION}:${win}" ":open ${file}" Enter
-    if [[ -n "$hxline" ]]; then
-      sleep 0.02
-      tmux send-keys -t "${SESSION}:${win}" "${hxline}gg"
-    fi
-  else
-    target="$file"; [[ -n "$hxline" ]] && target="$file:$hxline"
-    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
-      || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; exit 1; }
-    win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
-  fi
-  if ! quiet_open && [[ -n "${win:-}" ]]; then
-    tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
-  fi
-  focus_terminal
+  hx_open "$dir" "$hxline" "$file" || exit 1
   [[ -n "$stale_warn" ]] && echo "stack-open: $stale_warn" >&2 || true
   echo "opened $rel on $branch → review-hx ($dir)"
   exit 0
