@@ -1,0 +1,10 @@
+#!/bin/sh
+# post-checkout — keep Helix on tsgo in every worktree, LOCAL-only.
+# git passes: $1 prev-HEAD, $2 new-HEAD, $3 branch-flag (1 = branch/worktree checkout).
+# The repo commits a tsserver-pinned .helix/languages.toml; helix-tsgo-stamp swaps a
+# skip-worktree'd local copy to tsgo. It's idempotent + self-scoping, so this no-ops once a
+# tree is stamped (or if the tree isn't tsserver-pinned). Covers the creation paths cw and
+# stack-open already wrap, plus the ones they don't — bare `git worktree add` and `wt`.
+[ "$3" = "1" ] || exit 0
+"$HOME/.dotfiles/scripts/helix-tsgo-stamp" "$PWD" >/dev/null 2>&1 || true
+exit 0
