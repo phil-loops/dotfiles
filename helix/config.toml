@@ -4,9 +4,6 @@
 # Inside tmux, helix auto-picks tmux's paste buffer, which ⌘V can't see.
 [editor]
 clipboard-provider = "pasteboard"
-# Tab bar of open buffers — shown only when >1 is open, so single-file editing stays clean but a
-# whole-PR review (⌘⇧O opens every changed file as a buffer) makes them all visible at a glance.
-bufferline = "multiple"
 
 # space-f otherwise skips dot-prefixed files (.npmrc, .gitignore, …); git-ignore
 # stays on, so ignored files are still filtered out.

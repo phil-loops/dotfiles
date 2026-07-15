@@ -143,28 +143,6 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   install_followup_hook "$dir"
   touch "$dir"; echo "$dir"
 }
-ensure_review_worktree(){   # echo a DEDICATED, disposable worktree for gutter review of <branch>.
-  # Helix has no Diffview — its diff gutter compares each buffer against git HEAD. So to see the WHOLE
-  # PR lit in the gutter, detach at the branch tip then `reset --soft merge-base`: HEAD moves to the
-  # base, the working tree keeps the tip content, and every PR change reads as uncommitted (the gutter
-  # then shows it, ]g/[g walk it). Kept SEPARATE from the edit worktree so the reset never touches your
-  # editable checkout, and it carries NO follow-marker — a stray commit here strands on a detached HEAD
-  # (reflog-recoverable) instead of the post-commit hook force-moving the branch ref onto a squashed base.
-  local b="$1" dir mb base
-  base="origin/main"; git rev-parse -q --verify origin/main >/dev/null 2>&1 || base="main"
-  mkdir -p "$SCRATCH"; dir="$SCRATCH/${b//\//_}__review"
-  if [[ -d "$dir" ]]; then   # re-entry: hard-refresh to tip (discards the prior review's soft-reset staging), then re-reset
-    git -C "$dir" checkout --detach -f "$b" -q 2>/dev/null || git -C "$dir" reset --hard "$b" -q 2>/dev/null || true
-  else
-    git worktree add --detach "$dir" "$b" -q
-  fi
-  [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
-  seed_gen "$dir"                                              # .gen for #trpc LSP resolution — HEAD still at tip here
-  "${0:A:h}/helix-tsgo-stamp" "$dir" 2>/dev/null || true       # local-only Helix→tsgo override
-  mb=$(git -C "$dir" merge-base HEAD "$base" 2>/dev/null) || true
-  [[ -n "$mb" ]] && git -C "$dir" reset --soft "$mb" -q 2>/dev/null || true   # light the gutter for the whole PR
-  touch "$dir"; echo "$dir"
-}
 focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actually visible
   local app="${STACK_OPEN_TERMINAL:-}"
   [[ "$app" == none ]] && return 0   # STACK_OPEN_TERMINAL=none — for scripted/batch opens, which
@@ -210,44 +188,30 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
   tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
 }
 
-hx_open(){   # open one-or-more files in the warm review-hx tmux window (reuse via send-keys), else
-             # launch hx cold; land the cursor on <line> of the FIRST file. Helix has no --server
-             # socket, so "warm" is a tmux send-keys trick, mirroring the nvim --remote path.
-  # Feed hx realpath'd (:A) paths. Helix renders picker entries (LSP references, symbols) relative
-  # to its realpath cwd, but /tmp is a symlink to /private/tmp on macOS — launched with the /tmp
-  # form, tsserver reports references as /tmp/… which don't prefix-match cwd, so every one shows as
-  # an absolute path. The /private/tmp form matches cwd → project-relative. (The active buffer looked
-  # relative already only because Helix canonicalizes files it opens directly; LSP paths it doesn't.)
-  local dir="${1:A}" line="$2"; shift 2
-  (( $# )) || return 1
-  local -a files; local x; for x in "$@"; do files+=("${x:A}"); done; set -- "${files[@]}"
-  local win first="$1"
+hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-keys), else launch hx
+             # cold; land the cursor on <line>. Helix has no --server socket, so "warm" is a tmux
+             # send-keys trick. Realpath (:A) the paths so /tmp→/private/tmp matches Helix's cwd and
+             # LSP picker entries (references, symbols) render project-relative instead of absolute.
+  local dir="${1:A}" line="$2" file="${3:A}"
+  [[ -n "$file" ]] || return 1
+  local win
   # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
   win=$(tmux list-panes -s -t "$SESSION" \
           -F '#{window_index} #{pane_current_command} #{window_name}' 2>/dev/null \
         | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
-  # Warm reuse only for a SINGLE file: Helix's :open path-completion makes typing multiple
-  # space-separated paths via send-keys unreliable — the completion popup eats the input and the
-  # command never submits. Multi-file review relaunches cold; hx parses CLI args directly.
-  if [[ -n "${win:-}" && $# -eq 1 ]]; then
+  if [[ -n "${win:-}" ]]; then
     # ESC must land ALONE: ESC immediately followed by ':' reads as Alt-: and ':open …' never opens
     # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads.
     tmux send-keys -t "${SESSION}:${win}" Escape
     sleep 0.02
-    tmux send-keys -t "${SESSION}:${win}" ":open ${first}" Enter
+    tmux send-keys -t "${SESSION}:${win}" ":open ${file}" Enter
     if [[ -n "$line" ]]; then
       sleep 0.02
       tmux send-keys -t "${SESSION}:${win}" "${line}gg"
     fi
   else
-    [[ -n "${win:-}" ]] && tmux kill-window -t "${SESSION}:${win}" 2>/dev/null   # replace stale review-hx — multi-file can't reuse it reliably
-    # Shell-quote each path individually (scalar (q), one at a time), then join by a LITERAL space.
-    # NOT ${(j: :)${(q)launch}} — nesting (q) inside the join escapes the separator too, collapsing
-    # every file into one bogus argument. The FIRST file carries :<line> so hx opens it active there.
-    local -a q; local f
-    for f in "$@"; do q+=("${(q)f}"); done
-    [[ -n "$line" ]] && q[1]="${(q)first}:${line}"
-    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(j: :)q}" \
+    local target="$file"; [[ -n "$line" ]] && target="${file}:${line}"
+    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
     win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
   fi
@@ -266,30 +230,17 @@ case "${1:-}" in
     rbranch="${2:?usage: stack-open --review <branch>}"
     EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
     if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
-      # Helix has no Diffview — "review this PR" opens the changed files (vs main) as buffers in a
-      # soft-reset review worktree, so each buffer's gutter shows the whole PR. Files are ordered by
-      # churn (added+deleted) so the substantive ones open first and a cap keeps a big PR — e.g. an
-      # import touched across 30 files — from flooding you with buffers; the rest are one Space f away
-      # (they still show gutters, the whole worktree is soft-reset). Land on the biggest file's first hunk.
-      rvdir=$(ensure_review_worktree "$rbranch")
-      mbref="origin/main"; git -C "$rvdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
-      maxbuf="${STACK_REVIEW_MAX_BUFFERS:-$(git -C "$main_root" config --int stack.review-max-buffers 2>/dev/null || echo 10)}"
-      # numstat → churn per file (binary shows "-", count as 0) → sort desc → paths (branch ref, not HEAD which is soft-reset)
-      changed=("${(@f)$(git -C "$rvdir" diff --numstat "${mbref}...${rbranch}" 2>/dev/null \
-                        | awk '{a=($1=="-"?0:$1); d=($2=="-"?0:$2); print (a+d)"\t"$3}' | sort -rn | cut -f2- || true)}")
-      changed=(${changed:#})
-      if (( ${#changed} == 0 )); then
+      # Helix has no Diffview — open the branch's first changed file (vs main) at its first hunk.
+      rdir=$(ensure_worktree "$rbranch")
+      mbref="origin/main"; git -C "$rdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
+      first=$(git -C "$rdir" diff --name-only "${mbref}...${rbranch}" 2>/dev/null | head -1) || true
+      if [[ -z "$first" ]]; then
         echo "review-opened $rbranch (no files changed vs ${mbref}) → nothing to open"; exit 0
       fi
-      total=${#changed}
-      (( total > maxbuf )) && changed=(${changed[1,maxbuf]})   # cap the buffer flood; reach the rest via Space f
-      # first changed NEW-file line of the biggest file — the "+c" of its first @@ -a,b +c,d @@ hunk
-      firstline=$(git -C "$rvdir" diff -U0 "${mbref}...${rbranch}" -- "${changed[1]}" 2>/dev/null \
+      firstline=$(git -C "$rdir" diff -U0 "${mbref}...${rbranch}" -- "$first" 2>/dev/null \
                     | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p' | head -1) || true
-      abs=(); for f in "${changed[@]}"; do abs+=("$rvdir/$f"); done
-      hx_open "$rvdir" "$firstline" "${abs[@]}" || exit 1
-      more=""; (( total > maxbuf )) && more=" of $total, rest via Space f"
-      echo "review-opened $rbranch (${#changed} files${more} · gutter=whole PR) → review-hx · ]g/[g change · space-b file · gd def"; exit 0
+      hx_open "$rdir" "$firstline" "$rdir/$first" || exit 1
+      echo "opened $first on $rbranch → review-hx"; exit 0
     fi
     rdir=$(ensure_worktree "$rbranch")   # nvim path only: the edit worktree for the <leader>gm Diffview
     to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }   # bound every --server call (wedged-nvim guard)
