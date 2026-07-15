@@ -136,6 +136,7 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   fi
   [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
   seed_gen "$dir"   # .gen for #trpc resolution (clone now, branch-rebuild in background)
+  "${0:A:h}/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
   # record the branch + install the follow-hook so commits here advance the ref
   # instead of stranding on the detached HEAD (see install_followup_hook).
   echo "$b" > "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch"
@@ -159,6 +160,7 @@ ensure_review_worktree(){   # echo a DEDICATED, disposable worktree for gutter r
   fi
   [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
   seed_gen "$dir"                                              # .gen for #trpc LSP resolution — HEAD still at tip here
+  "${0:A:h}/helix-tsgo-stamp" "$dir" 2>/dev/null || true       # local-only Helix→tsgo override
   mb=$(git -C "$dir" merge-base HEAD "$base" 2>/dev/null) || true
   [[ -n "$mb" ]] && git -C "$dir" reset --soft "$mb" -q 2>/dev/null || true   # light the gutter for the whole PR
   touch "$dir"; echo "$dir"
@@ -211,8 +213,14 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
 hx_open(){   # open one-or-more files in the warm review-hx tmux window (reuse via send-keys), else
              # launch hx cold; land the cursor on <line> of the FIRST file. Helix has no --server
              # socket, so "warm" is a tmux send-keys trick, mirroring the nvim --remote path.
-  local dir="$1" line="$2"; shift 2
+  # Feed hx realpath'd (:A) paths. Helix renders picker entries (LSP references, symbols) relative
+  # to its realpath cwd, but /tmp is a symlink to /private/tmp on macOS — launched with the /tmp
+  # form, tsserver reports references as /tmp/… which don't prefix-match cwd, so every one shows as
+  # an absolute path. The /private/tmp form matches cwd → project-relative. (The active buffer looked
+  # relative already only because Helix canonicalizes files it opens directly; LSP paths it doesn't.)
+  local dir="${1:A}" line="$2"; shift 2
   (( $# )) || return 1
+  local -a files; local x; for x in "$@"; do files+=("${x:A}"); done; set -- "${files[@]}"
   local win first="$1"
   # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
   win=$(tmux list-panes -s -t "$SESSION" \
