@@ -14,6 +14,16 @@
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
 import { createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
 import { computeForestLayout, lumen, NODE_H, leafOf, isGhostId, nodeW } from "./forestLayout";
+import { stationOf, type Station } from "./nodeStation";
+
+// Why the branch stands there — the map's badge carries the same reason the spine's chip does.
+const STATION_WHY: Record<Station, string> = {
+  edit: "still shaping — nothing staged for the shared world yet",
+  review: "unblessed files left to read",
+  ready: "one voiced commit, waiting on the push",
+  shared: "every local commit is on origin — the team sees exactly this",
+  merged: "its work already landed on main (a ghost — drop & rewire)",
+};
 import { createQuery } from "@tanstack/solid-query";
 import { canMutate, provider } from "./provider";
 import type { SpineNode, RestackStatus, BranchPR } from "./types";
@@ -57,7 +67,9 @@ const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: str
 export function ForestMap(props: {
   spine: () => SpineNode[];
   active: () => string;
-  health?: () => Record<string, { drifted: boolean; merged: boolean; contractable: boolean }> | undefined;
+  health?: () =>
+    | Record<string, { drifted: boolean; merged: boolean; contractable: boolean; upstream?: string; ahead?: number }>
+    | undefined;
   prs?: () => Record<string, BranchPR> | undefined;
   onPick: (b: string) => void;
   onClose: () => void;
@@ -77,6 +89,18 @@ export function ForestMap(props: {
   onReady?: () => Promise<unknown>;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
+  // The map asks the same question the review surface asks, from the data /forest-health
+  // already returns: an existing upstream with nothing ahead of it IS "nothing outgoing".
+  // It never learns "ready" (that needs a per-node prep-route — a fresh gh fetch each), so
+  // stationOf degrades to edit rather than claiming it: a badge that lies is worse than one
+  // that stays quiet. The dot keeps meaning BLESSING; this is its own mark.
+  const nstation = (n: SpineNode): Station =>
+    stationOf({
+      merged: nhealth(n.id)?.merged,
+      nothingOutgoing: !!nhealth(n.id)?.upstream && !nhealth(n.id)?.ahead,
+      blessed: n.clean,
+      total: n.total,
+    });
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
   const [contracting, setContracting] = createSignal<string | null>(null);
@@ -546,6 +570,14 @@ export function ForestMap(props: {
                   <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
                   <circle class="dot" cx="16" cy="0" r="5" />
                   <text x={isGhostId(n.id) ? 16 : 30} y="4.5">{leafOf(n.id)}</text>
+                  {/* mirrors the PR badge's baseline on the free right side; "edit" is the
+                      resting state and the absence of a mark says it more quietly. */}
+                  <Show when={!isGhostId(n.id) && nstation(n) !== "edit"}>
+                    <text class="fm-station" classList={{ [nstation(n)]: true }} x={w} y={-NODE_H / 2 - 6}>
+                      <title>{STATION_WHY[nstation(n)]}</title>
+                      {nstation(n)}
+                    </text>
+                  </Show>
                   <Show when={!isGhostId(n.id)}>
                     <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
                   </Show>
@@ -726,6 +758,13 @@ const CSS = `
 /* PR badge — sits above the pill's top-left when the branch has an open PR. Click opens
    GitHub. Neutral patina by default; gold when approved, ember on changes-requested, faint
    when draft, dashed underline when the PR doesn't target main (the stacked-PR anti-pattern). */
+/* station: where the branch stands, mirrored opposite the PR badge. Deliberately NOT gold —
+   gold is blessing (the dot's language), and a branch can be shared without being blessed. */
+.fm-node .fm-station { fill: var(--ink-faint); font-family: var(--mono); font-size: 8.5px;
+  text-anchor: end; letter-spacing: .09em; text-transform: uppercase; opacity: .8; }
+.fm-node .fm-station.shared { fill: var(--patina); }
+.fm-node .fm-station.ready { fill: var(--ember); opacity: 1; }
+.fm-node:hover .fm-station, .fm-node.active .fm-station { opacity: 1; }
 .fm-node .fm-pr { fill: var(--patina); font-family: var(--mono); font-size: 9.5px; text-anchor: start;
   letter-spacing: .02em; cursor: pointer; }
 .fm-node .fm-pr:hover { fill: var(--gold-leaf); text-decoration: underline; }

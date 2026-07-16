@@ -11,20 +11,24 @@ export type Station = "edit" | "review" | "ready" | "shared" | "merged";
 // Station = the DOMINANT position on the branch's real path, not a gate: a branch can sit
 // at "review" with shaping left, and the next step still offers prep. Absent evidence the
 // answer degrades toward "edit" rather than claiming a station it can't see.
+// Inputs are the FACTS, not the transport that carried them: the review surface learns
+// "nothing outgoing" from a prep-route query, the map from upstream && !ahead — same fact,
+// and neither has to fake the other's evidence to ask.
 export function stationOf(input: {
   merged?: boolean;
-  shared?: "local" | "ahead" | "synced" | "gone";
-  prepRoute?: string;
+  gone?: boolean; // the branch's upstream vanished — it landed and origin dropped it
+  nothingOutgoing?: boolean; // every local commit is already on origin: the team sees exactly this
+  ready?: boolean; // exactly one voiced commit, waiting on the push
   blessed?: number;
   total?: number;
 }): Station {
-  if (input.merged || input.shared === "gone") {
+  if (input.merged || input.gone) {
     return "merged";
   }
-  if (input.prepRoute === "nothing") {
+  if (input.nothingOutgoing) {
     return "shared";
   }
-  if (input.prepRoute === "ready") {
+  if (input.ready) {
     return "ready";
   }
   if (input.blessed != null && input.total != null && input.blessed < input.total) {

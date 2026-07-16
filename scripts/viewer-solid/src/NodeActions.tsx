@@ -712,8 +712,9 @@ export function NodeActions(props: {
   const station = (): Station =>
     stationOf({
       merged: props.merged,
-      shared: shared(),
-      prepRoute: prepRoute.data?.route,
+      gone: shared() === "gone",
+      nothingOutgoing: prepRoute.data?.route === "nothing",
+      ready: prepRoute.data?.route === "ready",
       blessed: props.blessing?.blessed,
       total: props.blessing?.total,
     });
