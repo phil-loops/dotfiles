@@ -175,6 +175,17 @@ def pr_body(req, u):
               "text/plain; charset=utf-8")
 
 
+def plan_section(req, u):
+    # the forest-plan block for a commit body — where this branch sits in its project. Recomputed
+    # from stack config alone: free, no model call (unlike pr_body's summary). Feeds the message
+    # editor's "recompute plan" button.
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-commit-body"), branch, "--section"])
+    req._send(200 if r.returncode == 0 else 500,
+              r.stdout if r.returncode == 0 else "",
+              "text/plain; charset=utf-8")
+
+
 def purpose_get(req, u):
     q = parse_qs(u.query)
     args = [os.path.join(ctx.SCRIPTS, "stack-purpose")]
