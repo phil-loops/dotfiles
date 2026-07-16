@@ -52,6 +52,18 @@ npm run visual:shot && npm run visual:diff
     old rules of equal specificity overlapped, file order picked the winner (NodeSpine's
     `.slot-push` after `.pending`); encode the *winner*, not the naive reading of each class.
 13. **`.parent:hover .child` → `group` on the parent + `group-hover:` on the child.**
+14. **Utility strings must be literal.** The scanner can't see `stroke-[${VAR}]` — interpolation
+    only ever joins whole literal strings (see ForestMap's class helpers).
+15. **A CSS variable that parameterizes children is not an alias to resolve** (NextQueue's
+    `--nq`): keep it — `[--x:value]` arbitrary properties per state, `text-(--x)` readers.
+    Rule 11 is about shadowing aliases, not parameterization.
+16. **An entrance animation with a forwards fill forces `!` on later states for that property.**
+    Animations outrank normal declarations; the old CSS's `!important`s were load-bearing —
+    they survive translation (ForestMap opacity).
+17. **`var(--undefined-token)` with no fallback computes to *initial*** — translate to nothing
+    and note it in the commit; never substitute a guessed token.
+18. **Uncovered components get before/after `probe-rects` geometry diffs** as the honest
+    substitute gate (geometry proven, colors unverified) — and the report says so.
 
 ## Keep-list — never convert these
 
@@ -75,3 +87,8 @@ shot-all refuses to run if the server on `--base` is not serving your local `dis
 (byte-compare of index.html) — that's the guard against gating someone else's build. If it
 trips, another checkout's fixture-server owns the port: start yours on a free port and pass
 `--base`, don't kill theirs.
+
+**A fixture change is a multi-surface re-baseline.** Changing fixture *data* changes pixels on
+every surface that renders that data — including surfaces layered above it (the drawer's
+backdrop dims the page behind it but doesn't hide it). Enumerate the affected surfaces and
+re-baseline all of them in the same commit (the Hearth-tangle fixture invalidated four).
