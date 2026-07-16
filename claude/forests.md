@@ -64,17 +64,23 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Restack whole forest after a merge | raw git — snapshot SHAs, ff `main`, `rebase --onto` bottom-up (see *Restacking* below) |
 | Create PR (manual — Phil opens) | reference only: `gh pr create --base main --head <branch>` — never run against origin |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
+| Health-scan the forest     | `stack-doctor [<project>]` (read-only; `--orphans` = problems only) |
+| Reclaim config a dead branch left | `stack-doctor --prune` (`--dry-run` previews)         |
 
 ## The forest config is hand-maintained (the viewer reads it)
 
 The review surfaces — `loops stack web` (the browser viewer), `loops stack review` (nvim), and `loops bless` — are **read-only consumers of git config**. They render whatever these keys say; nothing writes them automatically. So Claude maintains them by hand:
 
 - `git config stack-branch.<name>.parent <parent>` — the rebase base. Set at branch creation; update on every rebase-onto-new-parent, on rename, and when rewiring a dropped node's children.
-- `git config stack-branch.<name>.project <project>` — per-branch project tag. Self-healing: it dies with the branch. Set at creation.
-- `git config --add stack-project.<project>.branch <name>` — the project's branch list. **It rots** — renaming/deleting a branch leaves a dangling entry nothing prunes. Fix by hand (`--unset` the old value, `--add` the new); verify with `git config --get-all stack-project.<project>.branch`.
+- `git config stack-branch.<name>.project <project>` — per-branch project tag. Set at creation. **It rots** (see below).
+- `git config --add stack-project.<project>.branch <name>` — the project's branch list. **It rots** — renaming/deleting a branch leaves a dangling entry. Fix by hand (`--unset` the old value, `--add` the new); verify with `git config --get-all stack-project.<project>.branch`.
 - `git config branch.<name>.description "<thesis>"` — the branch purpose.
 
-**Rename checklist** (all four move together): `git branch -m`, then migrate `.parent` + `.project` keys and the `stack-project.*.branch` entry, and re-point any child's `.parent`. The branch *description* follows `git branch -m` automatically; the `stack-*` keys do **not**.
+**Why every `stack-*` key rots: it lives outside the one namespace git manages.** `git branch -D <b>` deletes the whole `branch.<b>.*` section (any key under it, even one you invent); `git branch -m a b` moves it. Our `stack-branch.<b>.*` / `stack-project.<p>.*` get neither, so they outlive the branch they describe — 36 dangling keys had piled up in loops by 2026-07-16, and a shipped forest kept its focus slot. *(This list once claimed `.project` was "self-healing: it dies with the branch." It never did — that false promise is why the rot went unseen. Don't re-add it.)* The real fix is to move this metadata under `branch.<b>.stack*` and let git GC it for free; deferred — it touches every reader.
+
+**Sweep the rot**: `stack-doctor --prune` (`--dry-run` previews) drops config whose ref is gone, registry entries + `requires` naming it, and a project's keys once no member survives. Idempotent; a project mid-setup keeps its keys. `stack-restack` already does the project half when contraction empties a forest, so shipping self-cleans — reach for `--prune` for branches that died some other way (`git branch -D`, scratch `wt-*` worktrees).
+
+**Rename checklist** (all four move together): `git branch -m`, then migrate `.parent` + `.project` keys and the `stack-project.*.branch` entry, and re-point any child's `.parent`. The branch *description* follows `git branch -m` automatically; the `stack-*` keys do **not** — that asymmetry is the namespace gap above, and this checklist exists only to do by hand what git does for free under `branch.<b>.*`.
 
 ## Restacking after a merge — first principles (raw git)
 
