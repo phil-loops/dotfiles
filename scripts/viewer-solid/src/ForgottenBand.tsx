@@ -41,7 +41,7 @@ export function ForgottenBand(props: {
       <section class="forgotten-band mt-7">
         <h2 class="eyebrow font-display text-[12px] tracking-[0.08em] text-ink-dim uppercase">
           forgotten
-          <span class="eyebrow-ask ml-2 normal-case tracking-normal text-ink-faint">
+          <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">
             — bets you never settled, oldest first · right-click to drop, keep, or pick up
           </span>
         </h2>

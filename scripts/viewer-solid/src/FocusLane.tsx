@@ -170,7 +170,7 @@ export function FocusLane(props: {
   return (
     <Show when={pinned().length || rowDrag()}>
       <section class="focus-lane" classList={{ "drop-target": !!dropAt() }}>
-        <h2 class="eyebrow">focus <span class="eyebrow-ask">— what you're pushing now, drag or right-click to reorder</span></h2>
+        <h2 class="eyebrow">focus <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— what you're pushing now, drag or right-click to reorder</span></h2>
         <div class="focus-rows" ref={rowsEl}>
           <Show when={dropAt()}>
             {(a) => <div class="focus-drop-line" style={{ top: `${a().lineY}px` }} />}

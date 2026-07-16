@@ -544,35 +544,6 @@ body {
 .nh-item-ic { width: 14px; flex: none; text-align: center; opacity: 0.85; }
 .nh-item-note { font-size: 11px; color: var(--ink-faint); padding: 4px 10px 2px; }
 
-/* draft-PR overlay — the generated markdown body, editable + copyable before you paste it
-   into GitHub. Centered modal over a dimmed backdrop; closes on backdrop click or "close". */
-.pr-draft-backdrop {
-  position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.55); backdrop-filter: blur(2px); padding: 40px;
-}
-.pr-draft {
-  width: min(820px, 92vw); max-height: 84vh; display: flex; flex-direction: column;
-  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 12px;
-  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8); overflow: clip;
-}
-.pr-draft-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 12px 14px; border-bottom: 1px solid var(--rule);
-}
-.pr-draft-title { font-size: 13px; color: var(--ink-dim); font-family: var(--mono); }
-.pr-draft-btns { display: flex; gap: 8px; }
-.pr-draft-btn {
-  font: inherit; font-size: 12px; color: var(--patina); cursor: pointer;
-  background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 5px 12px;
-}
-.pr-draft-btn:hover:not(:disabled) { background: var(--vellum-edge); border-color: var(--patina); }
-.pr-draft-btn:disabled { opacity: 0.45; cursor: default; }
-.pr-draft-body {
-  flex: 1; min-height: 320px; resize: none; border: 0; outline: none;
-  background: var(--vellum); color: var(--ink-dim);
-  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; padding: 16px;
-}
-.pr-draft-loading { padding: 60px; text-align: center; color: var(--ink-faint); font-style: italic; }
 .loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
 
 /* subpixel-weight smoothing (not the body's antialiased) so strokes stay heavy on
@@ -744,78 +715,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   color: var(--ink-faint); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
   font-weight: 500; margin: 34px 0 12px;
 }
-.pr-group { margin-bottom: 16px; }
-.pr-project { color: var(--ink-dim); font-size: 11px; letter-spacing: 0.04em; margin: 0 2px 6px; }
-.pr-project-link { color: inherit; text-decoration: none; }
-.pr-project-link:hover { color: var(--gold-leaf); text-decoration: underline; }
-.pr-row {
-  display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink);
-  border: 1px solid var(--rule); border-radius: 10px; background: var(--vellum-raise);
-  padding: 11px 15px; margin-bottom: 6px; transition: border-color 0.12s, background 0.12s, transform 0.12s;
-}
-.pr-row:hover { border-color: var(--gold-deep); background: var(--vellum-edge); transform: translateY(-1px); }
-.pr-num { color: var(--ink-dim); font-size: 12px; flex: none; }
-.pr-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pr-draft {
-  flex: none; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
-  border: 1px solid var(--rule); border-radius: 5px; padding: 1px 6px;
-}
-.pr-rev { flex: none; font-size: 13px; width: 14px; text-align: center; }
-.pr-rev.ok { color: var(--add); }
-.pr-rev.chg { color: var(--del); }
-.pr-rev.req { color: var(--ink-faint); }
-
-/* Work tab — intent sections + the "blessing spine" (a state-coloured rail per row).
-   The rail is the one place colour concentrates; everything else stays warm monochrome. */
-.work-sec { margin-bottom: 30px; }
-.eyebrow-ask {
-  font-family: var(--display); font-style: italic; text-transform: none; letter-spacing: 0;
-  font-size: 14px; color: var(--ink-dim); margin-left: 8px;
-}
-.work-rule { height: 1px; background: var(--rule); margin: 0 0 6px; }
-.work-forest { display: flex; align-items: baseline; gap: 10px; margin: 16px 2px 4px; }
-.work-forest-name {
-  font-family: var(--display); font-style: italic; font-size: 15px; color: var(--ink);
-  text-decoration: none;
-}
-.work-forest-name:hover { color: var(--gold-leaf); }
-.work-verdict {
-  font-size: 10px; letter-spacing: 0.05em; color: var(--state, var(--ink-dim));
-  border: 1px solid var(--state-edge, var(--rule)); border-radius: 6px; padding: 1px 7px;
-}
-.work-meta { color: var(--ink-faint); font-size: 11px; flex: none; }
-
-.work-row {
-  position: relative; display: flex; align-items: center; gap: 14px;
-  padding: 11px 14px 11px 20px; border-radius: 9px; text-decoration: none; color: var(--ink);
-  transition: background 0.12s;
-}
-.work-row::before {
-  content: ""; position: absolute; left: 0; top: 7px; bottom: 7px; width: 4px; border-radius: 2px;
-  background: var(--state, var(--ink-faint)); box-shadow: 0 0 9px -1px var(--state-glow, transparent);
-}
-.work-row:hover { background: var(--vellum-raise); }
-.work-link {
-  display: flex; align-items: center; gap: 14px; flex: 1; min-width: 0;
-  text-decoration: none; color: inherit;
-}
-/* actions recede until the row is hovered — they stop competing with the title down the column */
-.work-acts { flex: none; opacity: 0; transition: opacity 0.12s; }
-.work-row:hover .work-acts, .work-acts:focus-within { opacity: 1; }
-.work-next {
-  flex: none; font-family: var(--mono); font-size: 11px; color: var(--gold-deep);
-  text-decoration: none; white-space: nowrap; padding: 1px 6px;
-  border: 1px solid transparent; border-radius: 5px;
-}
-.work-next:hover { border-color: var(--rule); background: var(--vellum-raise); }
-
-.work-state-changes { --state: #e8794a; --state-edge: var(--del); --state-glow: rgba(232,121,74,0.5); }
-.work-state-review  { --state: #f2c258; --state-edge: var(--gold-deep); --state-glow: rgba(242,194,88,0.45); }
-.work-state-pending { --state: #9ec6b6; }
-.work-state-draft   { --state: #9d8d6b; }
-.work-state-landed  { --state: #8fb0a2; opacity: 0.8; }
-.work-row.work-state-landed .pr-title { color: var(--ink-dim); }
-
 /* lifecycle bands: the page's one grouping — what state the work is in, most urgent first */
 .forest-band-head { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--gold-deep); opacity: 0.85; margin: 16px 4px 7px; }
 .forest-band-head:first-child { margin-top: 2px; }
