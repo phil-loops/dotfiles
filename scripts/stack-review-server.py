@@ -368,7 +368,7 @@ class H(BaseHTTPRequestHandler):
             return review.story_set(self, raw)
         if self.path == "/plan-template":   # save the per-project body template (edit once, carries forward)
             return review.plan_template_set(self, raw)
-        if self.path == "/interest":   # promote/demote a branch's manual interest (stack-branch.<b>.interest)
+        if self.path == "/interest":   # promote/demote a branch's manual interest (stack-project.<p>.interest)
             return review.interest_bump(self, raw)
         if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
             return review.shelve(self, raw)

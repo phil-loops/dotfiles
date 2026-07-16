@@ -174,10 +174,12 @@ def state(branch, fresh_prs=False):
         behind = int(raw)
     except ValueError:
         behind = 0   # origin/main absent or bad ref → treat as up-to-date (no badge)
-    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
     # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
     published = branch in _open_pr_heads(fresh=fresh_prs)
-    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    proj = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
+            or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     # A stacked branch behind main can't forward-rebase alone, but its PROJECT can — sync
     # delegates those to the restack machine instead of shrugging (the button leads to the
     # rebase and executes it).
@@ -390,7 +392,8 @@ def _node_health(branch, pr=None):
     if not branch:
         return {"branch": "", "drifted": False, "merged": False, "parent": "", "pr": None}
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main)
     trunk = _trunk(main)
     # Both spellings of the trunk are root parents. A root branch is never "off-parent" — it's
     # just behind, which is what a restack is for. Testing the literal "main" alone badged every
@@ -558,13 +561,16 @@ def _eject(branch):
 
 
 def _children_of(branch):
+    parents = {}
     out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout
-    kids = []
     for line in out.splitlines():
         key, _, val = line.partition(" ")
-        if val.strip() == branch:
-            kids.append(key[len("stack-branch."):-len(".parent")])
-    return kids
+        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    out = ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-parent$"]).stdout
+    for line in out.splitlines():
+        key, _, val = line.partition(" ")
+        parents[key[len("branch."):-len(".stack-parent")]] = val.strip()
+    return [b for b, p in parents.items() if p == branch]
 
 
 def _already_merged(branch):
@@ -585,13 +591,17 @@ def _landed(branch, trunk="origin/main"):
 
 
 def _requirers_of(branch):
+    reqs, new = {}, {}
     out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.requires$"]).stdout
-    deps = []
     for line in out.splitlines():
         key, _, val = line.partition(" ")
-        if val.strip() == branch:
-            deps.append(key[len("stack-branch."):-len(".requires")])
-    return deps
+        reqs.setdefault(key[len("stack-branch."):-len(".requires")], []).append(val.strip())
+    out = ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-requires$"]).stdout
+    for line in out.splitlines():
+        key, _, val = line.partition(" ")
+        new.setdefault(key[len("branch."):-len(".stack-requires")], []).append(val.strip())
+    reqs.update(new)
+    return [b for b, vals in reqs.items() if branch in vals]
 
 
 def _contract(branch):
@@ -600,7 +610,8 @@ def _contract(branch):
     `children` are branches parented on it (line moves up); `deps` fan it in via `requires` and now
     inherit its work from main, so that edge is dropped. Caller MUST have confirmed _already_merged
     first — this never re-checks."""
-    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
     base = ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip()
     esc = "^" + branch.replace(".", r"\.") + "$"
     kids = _children_of(branch)
@@ -616,7 +627,8 @@ def _contract(branch):
     if wt:
         ctx.run(["git", "-C", wt, "checkout", "--detach"])   # release so branch -D can run
     ctx.run(["git", "branch", "-D", branch])
-    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    proj = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
+            or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     for key in ("parent", "project", "base"):
         ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.{key}"])
     # Sweep EVERY project's branch list, not just .project's — a dangling entry under some
@@ -679,6 +691,7 @@ def post_contract(req, raw):
         for line in ctx.run(["git", "config", "--get-regexp",
                              r"^stack-project\..+\.branch$"]).stdout.splitlines())
     if not exists and not listed and not ctx.run(
+            ["git", "config", "--get-regexp", rf"^branch\.{re.escape(branch)}\.stack-"]).stdout.strip() and not ctx.run(
             ["git", "config", "--get-regexp", rf"^stack-branch\.{re.escape(branch)}\."]).stdout.strip():
         req._send(404, json.dumps({"ok": False, "err": f"no branch or stack config named {branch!r}"}))
         return

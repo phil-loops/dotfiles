@@ -86,7 +86,7 @@ def branch_state(branch):
         except Exception:
             return ""
 
-    parent = g("config", f"stack-branch.{branch}.parent") or "main"
+    parent = g("config", f"branch.{branch}.stack-parent") or g("config", f"stack-branch.{branch}.parent") or "main"
     names = [n for n in g("diff", "--name-only", f"{parent}...{branch}").splitlines() if n]
     dirs = {n.rsplit("/", 1)[0] if "/" in n else "." for n in names}
     purpose = g("config", f"branch.{branch}.description")

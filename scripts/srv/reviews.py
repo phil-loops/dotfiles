@@ -280,7 +280,8 @@ def _viewer_route(branch, prefix="", num=None, local=True):
     # standalone /branch/<b>, an imported PR is /review/N. The project tag is the same git config
     # the viewer reads, so membership stays single-source. The repo prefix lands `→ viewer` on the
     # right repo's node; loops (the CWD default) and unknown slugs stay implicit.
-    project = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    project = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
+               or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     if project:
         return f"/forests/{prefix}{project}/{branch}"
     return f"/branch/{branch}" if local else f"/review/{num}"
@@ -435,13 +436,16 @@ def pull(req, raw):
 
 
 def _children_of(branch):
+    parents = {}
     r = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"])
-    out = []
     for line in r.stdout.splitlines():
         key, _, val = line.partition(" ")
-        if val.strip() == branch:
-            out.append(key[len("stack-branch."):-len(".parent")])
-    return out
+        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    r = ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-parent$"])
+    for line in r.stdout.splitlines():
+        key, _, val = line.partition(" ")
+        parents[key[len("branch."):-len(".stack-parent")]] = val.strip()
+    return [b for b, p in parents.items() if p == branch]
 
 
 def _seated(parent, child):
@@ -452,7 +456,8 @@ def _cut_point(parent, child):
     # the recorded parent tip the child was last rebased onto — NOT merge-base(parent, child):
     # after the parent is rewritten that merge-base collapses to main and the rebase would
     # replay the parent's old commits into the child.
-    base = ctx.run(["git", "config", f"stack-branch.{child}.base"]).stdout.strip()
+    base = (ctx.run(["git", "config", f"branch.{child}.stack-base"]).stdout.strip()
+            or ctx.run(["git", "config", f"stack-branch.{child}.base"]).stdout.strip())
     if base and ctx.run(["git", "cat-file", "-e", f"{base}^{{commit}}"]).returncode == 0:
         return base
     r = ctx.run(["git", "merge-base", "--fork-point", parent, child])
@@ -571,7 +576,8 @@ def pr_forest(req, raw):   # POST /pr-forest — Chrome ext: forest membership +
     if not branch:
         req._send(200, json.dumps({"ok": True, "branch": None}))   # not my local branch → no forest to show
         return
-    project = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    project = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
+               or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     children = [{"branch": c, "seated": _seated(branch, c)} for c in _children_of(branch)]
     prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
     route = f"/forests/{prefix}{project}/{branch}" if project else f"/branch/{branch}"

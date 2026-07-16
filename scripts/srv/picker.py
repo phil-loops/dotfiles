@@ -48,7 +48,8 @@ def _record_open(branch):
     # after you open one of its files. No tag → nothing to order by, skip.
     if not branch:
         return
-    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    proj = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
+            or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     path = _opened_file()
     if not proj or not path:
         return
@@ -104,7 +105,8 @@ def _gh_pr(num):
 def _is_trunk(branch):
     # A trunk anchor: an approved-but-unmerged node the forest treats as its base
     # (stack-branch.<b>.trunk=true). Set/cleared via POST /trunk; dies with the branch.
-    return ctx.run(["git", "config", "--bool", f"stack-branch.{branch}.trunk"]).stdout.strip() == "true"
+    return (ctx.run(["git", "config", "--bool", f"branch.{branch}.stack-trunk"]).stdout.strip()
+            or ctx.run(["git", "config", "--bool", f"stack-branch.{branch}.trunk"]).stdout.strip()) == "true"
 
 
 def _base_of(branch):
@@ -118,7 +120,8 @@ def _base_of(branch):
 
 
 def _project_of(branch):
-    p = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    p = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
+         or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     if p:
         return p
     for line in ctx.run(["git", "config", "--get-regexp",
@@ -144,6 +147,12 @@ def _live_roster():
                          r"^stack-branch\..*\.project$"]).stdout.splitlines():
         k, _, v = line.partition(" ")
         m = re.match(r"^stack-branch\.(.+)\.project$", k)
+        if m and v.strip():
+            out[m.group(1)] = v.strip()
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^branch\..*\.stack-project$"]).stdout.splitlines():
+        k, _, v = line.partition(" ")
+        m = re.match(r"^branch\.(.+)\.stack-project$", k)
         if m and v.strip():
             out[m.group(1)] = v.strip()
     return out
@@ -243,6 +252,11 @@ def _shipped_by_project(name, tip, merges, members):
         k, _, proj = line.partition(" ")
         if proj and k.endswith(".project"):
             to_proj[k[len("stack-branch."):-len(".project")]] = proj.strip()
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^branch\..*\.stack-project$"]).stdout.splitlines():
+        k, _, proj = line.partition(" ")
+        if proj and k.endswith(".stack-project"):
+            to_proj[k[len("branch."):-len(".stack-project")]] = proj.strip()
     # journal fallback, LIVE projects only — journal keys outlive their forests by design,
     # and a dead name (a renamed effort like goal-metrics-page-job) would both steal the
     # head from its live successor and poison the prefix family into ambiguity.
@@ -461,6 +475,12 @@ def _green_set():
                          r"^stack-branch\..*\.gates-green-tree$"]).stdout.splitlines():
         key, _, val = line.partition(" ")
         m = re.match(r"^stack-branch\.(.+)\.gates-green-tree$", key)
+        if m and val.strip():
+            recorded[m.group(1)] = val.strip()
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^branch\..*\.stack-gates-green-tree$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        m = re.match(r"^branch\.(.+)\.stack-gates-green-tree$", key)
         if m and val.strip():
             recorded[m.group(1)] = val.strip()
     if not recorded:
@@ -859,7 +879,8 @@ def drop_project(req, raw):   # POST /drop-project — forget a forest grouping 
     for b in (m.strip() for m in members):
         if not b:
             continue
-        if ctx.run(["git", "config", f"stack-branch.{b}.project"]).stdout.strip() == project:
+        if (ctx.run(["git", "config", f"branch.{b}.stack-project"]).stdout.strip()
+                or ctx.run(["git", "config", f"stack-branch.{b}.project"]).stdout.strip()) == project:
             ctx.run(["git", "config", "--unset", f"stack-branch.{b}.project"])
             untagged += 1
     # Drop the whole [stack-project "<name>"] section (the branch list + any sibling keys).

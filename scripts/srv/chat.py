@@ -116,7 +116,8 @@ def _valid_attachments(raw_list):
 
 def _node_diff(branch):
     # capped parent…branch diff so the model can read a real implementation detail per node
-    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
     out = ctx.run(["git", "diff", f"{parent}...{branch}"]).stdout
     return out[:3500]
 
@@ -137,7 +138,8 @@ def _project_integrator(project):
     # the right cwd for read-only Read/Grep. Fall back to the first member, else the main checkout.
     branches = _project_branches(project)
     for b in branches:
-        if ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.strip():
+        if (ctx.run(["git", "config", "--get-all", f"branch.{b}.stack-requires"]).stdout.strip()
+                or ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.strip()):
             return b
     return branches[0] if branches else ""
 
@@ -148,8 +150,10 @@ def _project_seed(project):
     branches = _project_branches(project)
     edges, blocks = [], []
     for b in branches:
-        parent = ctx.run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip() or "main"
-        requires = ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.split()
+        parent = (ctx.run(["git", "config", f"branch.{b}.stack-parent"]).stdout.strip()
+                  or ctx.run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip() or "main")
+        requires = (ctx.run(["git", "config", "--get-all", f"branch.{b}.stack-requires"]).stdout.split()
+                    or ctx.run(["git", "config", "--get-all", f"stack-branch.{b}.requires"]).stdout.split())
         purpose = ctx.run(["git", "config", f"branch.{b}.description"]).stdout.strip()
         req = f"; requires: {', '.join(requires)}" if requires else ""
         edges.append(f"- {b}  (parent: {parent}{req})")
@@ -232,7 +236,8 @@ def _worktree_for(branch):
 # The branch's combined review diff (parent…branch), computed server-side so the page doesn't
 # have to ship the whole thing. Capped — headless claude can Read individual files for the rest.
 def _branch_diff(branch):
-    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
     out = ctx.run(["git", "diff", f"{parent}...{branch}"]).stdout
     cap = 80_000
     if len(out) > cap:
@@ -470,7 +475,8 @@ def start(req, raw):
         meta = {
             "branch": branch, "path": path, "question": question[:120],
             "repo": next((n for n, p in ctx.REPOS.items() if p == repo_dir), ""),
-            "project": project or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip(),
+            "project": (project or ctx.run(["git", "config", "--get", f"branch.{branch}.stack-project"]).stdout.strip()
+                        or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip()),
         }
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json",

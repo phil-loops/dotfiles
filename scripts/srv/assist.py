@@ -122,7 +122,8 @@ def stream(req, raw):
         meta = {
             "branch": branch, "path": "", "question": instruction[:120], "edit": True,
             "repo": next((n for n, p in ctx.REPOS.items() if p == repo_dir), ""),
-            "project": ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip(),
+            "project": (ctx.run(["git", "config", "--get", f"branch.{branch}.stack-project"]).stdout.strip()
+                        or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.project"]).stdout.strip()),
         }
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json",
