@@ -1303,6 +1303,22 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
   done
 fi
 
+# ---------- the forest shipped: let its project keys die with it ----------
+# Contracting the last member leaves stack-project.<p>.{focus,tier,interest,…} pointing
+# at a forest that no longer exists — invisible in the viewer, so it accumulates unseen
+# (admin-tab-sort held focus slot 6 after shipping, 2026-07-16). These live outside git's
+# own branch.<b>.* namespace, which git GCs on delete, so nothing else reclaims them.
+# Only when the registry is EMPTY — a project mid-setup keeps its keys.
+_PROJECT_SHIPPED=0
+if [[ -z "$(git config --get-all "stack-project.${PROJECT}.branch" 2>/dev/null)" ]]; then
+  while IFS= read -r _k; do
+    [[ -n "$_k" ]] || continue
+    git config --unset-all "$_k" 2>/dev/null || true
+    _PROJECT_SHIPPED=$((_PROJECT_SHIPPED+1))
+  done < <(git config --name-only --get-regexp \
+             "^stack-project\.$(printf '%s' "$PROJECT" | sed 's/[][\.*^$/]/\\&/g')\." 2>/dev/null | sort -u)
+fi
+
 # ---------- done ----------
 
 clear_state
@@ -1325,4 +1341,7 @@ if (( ${#TO_DROP[@]} > 0 )); then
 fi
 if (( ${#ORPHANS[@]} > 0 )); then
   echo "  cleaned orphaned members: ${#ORPHANS[@]}"
+fi
+if (( _PROJECT_SHIPPED > 0 )); then
+  echo "  forest shipped — dropped its ${_PROJECT_SHIPPED} leftover project key(s)"
 fi
