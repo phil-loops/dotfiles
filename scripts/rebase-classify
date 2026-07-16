@@ -57,8 +57,11 @@ verdict() { echo "VERDICT=$1"; printf '%s\n' "$2"; exit "$3"; }
 # `kids=$(children_of …)` assignment before the verdict prints (any repo with no
 # stack config). No children is a valid answer, so swallow the empty-match failure.
 children_of() {
-  { git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
-    | awk -v p="$1" '$2==p { sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1 }'; } || true
+  { { git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null \
+      | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+    git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
+      | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
+  } | awk -v p="$1" 'NF && !seen[$1]++ && $2==p { print $1 }'; } || true
 }
 
 # Replay <branch>'s commits onto <target> in a detached scratch worktree.

@@ -4,7 +4,13 @@
 BRANCH=$(git branch --show-current 2>/dev/null)
 [ -z "$BRANCH" ] && exit 0
 
-ALL_PARENTS=$(git config --get-regexp "^stack-branch\..*\.parent$" 2>/dev/null)
+ALL_PARENTS=$(
+  { git config --get-regexp "^branch\..*\.stack-parent$" 2>/dev/null \
+      | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+    git config --get-regexp "^stack-branch\..*\.parent$" 2>/dev/null \
+      | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
+  } | awk 'NF && !seen[$1]++'
+)
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 
 # Exact-match lookups via awk literal field comparison. Branch names contain
@@ -12,10 +18,10 @@ MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 # mis-matched on shared prefixes/suffixes; awk compares the whole field
 # literally. (No associative arrays — must run under macOS bash 3.2.)
 lookup_parent() {
-  awk -v want="stack-branch.$1.parent" '$1==want{print $2; exit}' <<<"$ALL_PARENTS"
+  awk -v want="$1" '$1==want{print $2; exit}' <<<"$ALL_PARENTS"
 }
 children_of() {
-  awk -v parent="$1" '$2==parent{k=$1; sub(/^stack-branch\./,"",k); sub(/\.parent$/,"",k); print k}' <<<"$ALL_PARENTS"
+  awk -v parent="$1" '$2==parent{print $1}' <<<"$ALL_PARENTS"
 }
 
 PARENT=$(lookup_parent "$BRANCH")
