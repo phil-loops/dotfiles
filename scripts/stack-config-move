@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+"""stack-config-move — migrate stack-branch.<b>.<k> config to branch.<b>.stack-<k>.
+
+The keystone sweep of the namespace migration (design-stack-config-namespace.md):
+git manages branch.<b>.* (deleted with the branch, moved on rename), so per-branch
+stack metadata belongs there. Values move verbatim, multivars preserved in order.
+
+  stack-config-move            dry-run: print what would move
+  stack-config-move --apply    move the keys
+  stack-config-move --check    exit 1 (listing them) while any legacy key remains
+
+Idempotent: a new-namespace key is overwritten from the legacy value only when the
+legacy key still exists (a half-moved repo converges; a finished one is a no-op).
+DO NOT --apply until every reader is dual-read — see the design doc's phase gate.
+"""
+import subprocess
+import sys
+
+
+def git(*args, check=False):
+    r = subprocess.run(["git", *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        sys.exit(f"git {' '.join(args)} failed: {r.stderr.strip()}")
+    return r
+
+
+def legacy_keys():
+    """[(branch, suffix, [values])] for every stack-branch.* key, multivar-aware."""
+    out = git("config", "--local", "-z", "--get-regexp", r"^stack-branch\..*").stdout
+    grouped = {}
+    for entry in out.split("\0"):
+        if not entry:
+            continue
+        key, _, value = entry.partition("\n")
+        name = key[len("stack-branch."):]
+        # branch names contain dots; the suffix is the last dot-segment
+        branch, _, suffix = name.rpartition(".")
+        if branch:
+            grouped.setdefault((branch, suffix), []).append(value)
+    return [(b, s, vs) for (b, s), vs in grouped.items()]
+
+
+def main():
+    mode = sys.argv[1] if len(sys.argv) > 1 else "--dry-run"
+    if mode not in ("--dry-run", "--apply", "--check"):
+        sys.exit(__doc__.strip())
+    moves = legacy_keys()
+    # a key whose branch is gone is the rot this migration exists to end — moving it
+    # would park it in the new namespace where nothing GCs it. Leave it legacy for
+    # stack-doctor --prune, and say so.
+    orphans = [(b, s, vs) for b, s, vs in moves
+               if git("show-ref", "--verify", "--quiet", f"refs/heads/{b}").returncode != 0]
+    if orphans:
+        for b, s, _ in orphans:
+            print(f"orphan (branch gone, skipping): stack-branch.{b}.{s} — run stack-doctor --prune")
+        moves = [m for m in moves if m not in orphans]
+    if mode == "--check":
+        for b, s, vs in moves:
+            print(f"legacy: stack-branch.{b}.{s} ({len(vs)} value{'s' if len(vs) > 1 else ''})")
+        sys.exit(1 if moves else 0)
+    if not moves:
+        print("nothing to move — no stack-branch.* keys")
+        return
+    for b, s, vs in moves:
+        new = f"branch.{b}.stack-{s}"
+        print(f"{'move' if mode == '--apply' else 'would move'}: stack-branch.{b}.{s} -> {new}"
+              + (f" ({len(vs)} values)" if len(vs) > 1 else ""))
+        if mode != "--apply":
+            continue
+        git("config", "--unset-all", new)
+        for v in vs:
+            git("config", "--add", new, v, check=True)
+        git("config", "--unset-all", f"stack-branch.{b}.{s}", check=True)
+    if mode == "--apply":
+        # unset-all leaves empty [stack-branch "<b>"] section headers behind — drop them
+        for b in {b for b, _, _ in moves}:
+            git("config", "--remove-section", f"stack-branch.{b}")
+        print(f"moved {len(moves)} keys across {len({b for b, _, _ in moves})} branches")
+
+
+if __name__ == "__main__":
+    main()
