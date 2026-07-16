@@ -5,6 +5,7 @@ import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
 import { nextStep, type NextStep } from "./homeModel";
 import { FocusLane } from "./FocusLane";
+import { ForgottenBand, isForgotten } from "./ForgottenBand";
 import { rowDrag, setRowDrag, dropOnLane } from "./focusDrag";
 import type { Project, Parked, PR } from "./types";
 
@@ -133,7 +134,10 @@ export function ForestsList(props: {
   // committed → the lifecycle bands above; trying/spike/untriaged get their own sections. A pool of
   // everything still in play (not merged, not shelved) — and NOT already pinned to the focus lane:
   // pinning IS a decision, so a focused forest leaves the triage pile (and every band) for the lane.
-  const tierPool = createMemo(() => filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null));
+  // A forgotten row is claimed by its own band and leaves the tier sections — listed in both, the
+  // stale copy reads as live work in the newest-first sort that hid it in the first place.
+  const tierPool = createMemo(() =>
+    filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null && !isForgotten(p)));
   // any interaction counts as triaged: a forest you've rated (interest>0) keeps its triage-zone
   // spot but no longer nags for a tier — the nag count reflects only the still-untouched ones.
   const triaged = (p: Project) => (p.interest ?? 0) > 0;
@@ -241,6 +245,7 @@ export function ForestsList(props: {
           />
         </Show>
         <FocusLane projects={props.projects} prOf={props.prOf} />
+        <ForgottenBand projects={props.projects} forestRow={props.forestRow} />
         <Show
           when={filteredForests().length}
           fallback={
