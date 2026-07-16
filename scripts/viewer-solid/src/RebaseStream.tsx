@@ -16,6 +16,8 @@ import { renderMarkdown } from "./markdown";
 // out into an interactive tmux claude via the existing /chat-popout.
 const HEADERS = { "Content-Type": "application/json" };
 
+const BTN = "rs-btn cursor-pointer rounded-[6px] border border-rule bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-ink-dim hover:border-patina hover:text-ink";
+
 async function post(url: string, body: unknown) {
   await fetch(withRepo(url), { method: "POST", headers: HEADERS, body: JSON.stringify(body) }).catch(() => {});
 }
@@ -136,11 +138,11 @@ export default function RebaseStream(props: {
   };
 
   return (
-    <div class="rebase-stream">
-      <div class="rs-head">
-        <span class="rs-title" classList={{ "rs-live": streaming() }}>
+    <div class="rebase-stream absolute top-[calc(100%+8px)] right-0 z-[25] flex w-[min(560px,78vw)] flex-col gap-2 rounded-[9px] border border-rule bg-vellum-raise px-3 py-2.5 text-left shadow-[0_12px_34px_-14px_rgba(0,0,0,0.75)]">
+      <div class="rs-head flex items-baseline justify-between gap-3">
+        <span class="rs-title text-[12px]" classList={{ "rs-live text-ember": streaming(), "text-patina": !streaming() }}>
           <Show when={streaming()} fallback={phase() === "done" ? "✓" : phase() === "gone" ? "◌" : "✗"}>
-            <span class="rs-spin">⟳</span>
+            <span class="rs-spin inline-block animate-rs-spin motion-reduce:animate-none">⟳</span>
           </Show>{" "}
           {streaming()
             ? `rebasing ${props.branch} onto origin/main${status() ? ` — ${status()}` : "…"}`
@@ -150,20 +152,25 @@ export default function RebaseStream(props: {
                 ? "rebase job gone (expired or server restarted) — re-run prep to merge to check"
                 : `rebase stream error: ${err() ?? "?"}`}
         </span>
-        <span class="rs-btns">
+        <span class="rs-btns flex flex-none gap-1.5">
           <Show when={streaming() && session()}>
-            <button class="rs-btn" title="take over by hand — resume this rebase in an interactive tmux claude" onClick={takeOver}>
+            <button class={BTN} title="take over by hand — resume this rebase in an interactive tmux claude" onClick={takeOver}>
               take over
             </button>
           </Show>
           <Show when={streaming()}>
-            <button class="rs-btn" title="kill the rebase job for real" onClick={stop}>■ stop</button>
+            <button class={BTN} title="kill the rebase job for real" onClick={stop}>■ stop</button>
           </Show>
-          <button class="rs-btn" title="hide this stream (the job keeps running)" onClick={props.onClose}>✕</button>
+          <button class={BTN} title="hide this stream (the job keeps running)" onClick={props.onClose}>✕</button>
         </span>
       </div>
       <Show when={text()}>
-        <div class="rs-body" ref={scroller} onScroll={onScroll} innerHTML={renderMarkdown(text())} />
+        <div
+          class="rs-body max-h-[340px] overflow-y-auto border-t border-rule pt-2 text-[12px] leading-[1.5] text-ink-dim [&_pre]:whitespace-pre-wrap [&_pre]:[word-break:break-word]"
+          ref={scroller}
+          onScroll={onScroll}
+          innerHTML={renderMarkdown(text())}
+        />
       </Show>
     </div>
   );
