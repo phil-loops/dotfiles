@@ -5,6 +5,7 @@ import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
 import { nextStep, type NextStep } from "./homeModel";
 import { FocusLane } from "./FocusLane";
+import { rowDrag, setRowDrag, dropOnLane } from "./focusDrag";
 import type { Project, Parked, PR } from "./types";
 
 // The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
@@ -133,8 +134,12 @@ export function ForestsList(props: {
   // everything still in play (not merged, not shelved) — and NOT already pinned to the focus lane:
   // pinning IS a decision, so a focused forest leaves the triage pile (and every band) for the lane.
   const tierPool = createMemo(() => filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null));
+  // any interaction counts as triaged: a forest you've rated (interest>0) keeps its triage-zone
+  // spot but no longer nags for a tier — the nag count reflects only the still-untouched ones.
+  const triaged = (p: Project) => (p.interest ?? 0) > 0;
   const triageList = createMemo(() =>
     tierPool().filter((p) => p.tier == null).sort((a, b) => forestTs(b) - forestTs(a)));
+  const triageNag = createMemo(() => triageList().filter((p) => !triaged(p)).length);
   const tryingList = createMemo(() =>
     tierPool().filter((p) => p.tier === "trying").sort((a, b) => forestTs(b) - forestTs(a)));
   const spikeList = createMemo(() =>
@@ -145,16 +150,52 @@ export function ForestsList(props: {
     tierPool().some((p) => p.tier === "committed") &&
     (triageList().length > 0 || tryingList().length > 0 || spikeList().length > 0));
   const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
+
+  // ── drag a row up into the focus lane to pin it (only this page has the drop target) ────
+  // The grip publishes the pointer to the focusDrag store; FocusLane hit-tests and commits the
+  // drop. Release anywhere else is a no-op.
+  const dragDown = (e: PointerEvent, p: Project) => {
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    setRowDrag({ repo: p.repo || "loops", name: p.name, x: e.clientX, y: e.clientY });
+  };
+  const dragMove = (e: PointerEvent) => {
+    const d = rowDrag();
+    if (!d) return;
+    setRowDrag({ ...d, x: e.clientX, y: e.clientY });
+    // the lane lives at the top of a long page — nudge the scroll when dragging near the edges
+    if (e.clientY < 90) window.scrollBy(0, -14);
+    else if (e.clientY > window.innerHeight - 60) window.scrollBy(0, 14);
+  };
+  const dragUp = () => {
+    const d = rowDrag();
+    setRowDrag(null);
+    if (d) dropOnLane(d);
+  };
+  const dragWrap = (p: Project, inner: JSX.Element) => (
+    <div class="row-drag-wrap">
+      <span
+        class="row-drag-grip"
+        title="drag to focus lane"
+        onPointerDown={(e) => dragDown(e, p)}
+        onPointerMove={dragMove}
+        onPointerUp={dragUp}
+        onPointerCancel={dragUp}
+      >⠿</span>
+      {inner}
+    </div>
+  );
+
   // repo demoted from group header to a quiet per-row badge (non-loops rows only)
   const row = (p: Project, folded: boolean) =>
-    multiRepo() && (p.repo || "loops") !== "loops" ? (
+    dragWrap(p, multiRepo() && (p.repo || "loops") !== "loops" ? (
       <div class="epic-subrow">
         <span class="epic-repo-badge">{p.repo}</span>
         {props.forestRow(p, folded, stepInfo(p, folded))}
       </div>
     ) : (
       props.forestRow(p, folded, stepInfo(p, folded))
-    );
+    ));
   // dormant + shelved + recently-merged folds closed until clicked — context, not to-dos.
   const [dormantOpen, setDormantOpen] = createSignal(false);
   const [shelvedOpen, setShelvedOpen] = createSignal(false);
@@ -164,11 +205,13 @@ export function ForestsList(props: {
   const triageRow = (p: Project) => (
     <div class="triage-item">
       {row(p, false)}
-      <div class="triage-actions">
-        <button class="triage-set committed" title="I'm shipping this" onClick={() => props.setTier(p.repo || "loops", p.name, "committed")}>● committed</button>
-        <button class="triage-set trying" title="leaning in, undecided" onClick={() => props.setTier(p.repo || "loops", p.name, "trying")}>◐ trying</button>
-        <button class="triage-set spike" title="throwaway experiment" onClick={() => props.setTier(p.repo || "loops", p.name, "spike")}>○ spike</button>
-      </div>
+      <Show when={!triaged(p)}>
+        <div class="triage-actions">
+          <button class="triage-set committed" title="I'm shipping this" onClick={() => props.setTier(p.repo || "loops", p.name, "committed")}>● committed</button>
+          <button class="triage-set trying" title="leaning in, undecided" onClick={() => props.setTier(p.repo || "loops", p.name, "trying")}>◐ trying</button>
+          <button class="triage-set spike" title="throwaway experiment" onClick={() => props.setTier(p.repo || "loops", p.name, "spike")}>○ spike</button>
+        </div>
+      </Show>
     </div>
   );
   return (
@@ -210,7 +253,7 @@ export function ForestsList(props: {
         >
           <Show when={triageList().length}>
             <div class="forest-band-head triage-head" title="new forests with no conviction tier yet — decide: committed (ships, keeps its bands), trying, or a throwaway spike">
-              ◆ triage <span class="triage-count">{triageList().length}</span>
+              ◆ triage <span class="triage-count">{triageNag()}</span>
             </div>
             <For each={triageList()}>{(p) => triageRow(p)}</For>
           </Show>
@@ -242,12 +285,12 @@ export function ForestsList(props: {
                         ⇌ {cluster.epic}
                       </h3>
                       <For each={cluster.items}>
-                        {(p) => (
+                        {(p) => dragWrap(p, (
                           <div class="epic-subrow">
                             <span class="epic-repo-badge">{p.repo || "loops"}</span>
                             {props.forestRow(p, false, stepInfo(p, false))}
                           </div>
-                        )}
+                        ))}
                       </For>
                     </div>
                   )}
@@ -286,6 +329,13 @@ export function ForestsList(props: {
               <For each={merged()}>{(p) => row(p, true)}</For>
             </Show>
           </Show>
+        </Show>
+        <Show when={rowDrag()}>
+          {(d) => (
+            <div class="drag-ghost" style={{ left: `${d().x}px`, top: `${d().y}px` }}>
+              {d().name}
+            </div>
+          )}
         </Show>
       </section>
       </Show>
