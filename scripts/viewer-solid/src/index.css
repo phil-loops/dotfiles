@@ -89,6 +89,10 @@
     0%, 100% { box-shadow: 0 0 0 0 transparent; }
     50% { box-shadow: 0 0 14px -2px #c87a55; }
   }
+  --animate-rs-spin: rs-spin 1.1s linear infinite;
+  @keyframes rs-spin {
+    to { transform: rotate(360deg); }
+  }
 }
 
 :root {
@@ -324,33 +328,6 @@ body {
 .ur-commit-go:disabled { opacity: 0.4; cursor: not-allowed; }
 .ur-commit-go:not(:disabled):hover { background: var(--del); color: var(--vellum-night); }
 .ur-commit-err { font-size: 11px; color: var(--del); margin: -6px 2px 10px; }
-
-/* ── ejected-rebase live stream (RebaseStream) ──────────────────────────
-   floats below the actions row like .nh-menu; replaces the old frozen
-   "rebasing onto origin/main via Claude" line with the job's live output. */
-.rebase-stream {
-  position: absolute; top: calc(100% + 8px); right: 0; z-index: 25;
-  width: min(560px, 78vw); display: flex; flex-direction: column; gap: 8px;
-  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
-  padding: 10px 12px; box-shadow: 0 12px 34px -14px rgba(0, 0, 0, 0.75);
-  text-align: left;
-}
-.rs-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-.rs-title { font-size: 12px; color: var(--patina); }
-.rs-title.rs-live { color: var(--ember); }
-.rs-spin { display: inline-block; animation: rs-spin 1.1s linear infinite; }
-@keyframes rs-spin { to { transform: rotate(360deg); } }
-.rs-btns { display: flex; gap: 6px; flex: none; }
-.rs-btn {
-  font: inherit; font-size: 11px; color: var(--ink-dim); cursor: pointer;
-  background: transparent; border: 1px solid var(--rule); border-radius: 6px; padding: 2px 7px;
-}
-.rs-btn:hover { color: var(--ink); border-color: var(--patina); }
-.rs-body {
-  max-height: 340px; overflow-y: auto; font-size: 12px; line-height: 1.5; color: var(--ink-dim);
-  border-top: 1px solid var(--rule); padding-top: 8px;
-}
-.rs-body pre { white-space: pre-wrap; word-break: break-word; }
 
 /* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
 .icon-btn {
