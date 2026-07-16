@@ -1,7 +1,7 @@
-import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
+import { createSignal, createMemo, createEffect, on, createResource, Show, For, type JSX } from "solid-js";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
-import { withRepo, canMutate } from "./provider";
+import { provider, withRepo, canMutate } from "./provider";
 import { isBlessed } from "./shared";
 import { threadWorking, threadUnseenDone, threadMsgCount } from "./chatStore";
 import { SessionPicker } from "./SessionPicker";
@@ -371,24 +371,55 @@ export function FileEntry(props: {
   );
 }
 
-export function CommitsList(props: { q: { data: Commit[] | undefined } }) {
+// One history row. Click it to expand that commit's diff inline (git show <sha>) —
+// GitHub-Desktop's History tab: the whole commit, not just a subject line. Diffs load
+// lazily on first expand and are read-only (historical commits, nothing to bless).
+function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, session?: string) => void }) {
+  const [open, setOpen] = createSignal(false);
+  const [diff] = createResource(() => (open() ? props.c.sha : undefined), (sha) => provider.commitDiff(sha));
+  const noBless = { mutate: () => {} };
+  return (
+    <li class="commit" classList={{ own: props.c.own !== false, "commit-open": open() }}>
+      <button class="commit-head" onClick={() => setOpen((v) => !v)}>
+        <span class="c-caret">{open() ? "▾" : "▸"}</span>
+        <span class="c-sha">{props.c.sha}</span>
+        <span class="c-subject">{props.c.subject}</span>
+        <span class="c-meta">{props.c.author} · {props.c.date}</span>
+      </button>
+      <Show when={open()}>
+        <div class="commit-diff">
+          <Show when={diff()} fallback={<p class="loading">loading…</p>}>
+            {(d) => (
+              <Show when={d().files.length} fallback={<p class="loading">no file changes (merge or empty commit)</p>}>
+                <For each={d().files}>
+                  {(f) => <FileEntry file={f} bless={noBless} branch={props.branch} readOnly onChat={props.onChat} />}
+                </For>
+              </Show>
+            )}
+          </Show>
+        </div>
+      </Show>
+    </li>
+  );
+}
+
+export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; onChat: (f: FileDiff, session?: string) => void }) {
+  const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
+  const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
   return (
     <Show when={props.q.data} fallback={<p class="loading">loading…</p>}>
       {(data) => (
-        <Show
-          when={data().length}
-          fallback={<p class="loading">no commits on this branch</p>}
-        >
+        <Show when={data().length} fallback={<p class="loading">no commits on this branch</p>}>
           <ol class="commits">
-            <For each={data()}>
-              {(c) => (
-                <li class="commit">
-                  <span class="c-sha">{c.sha}</span>
-                  <span class="c-subject">{c.subject}</span>
-                  <span class="c-meta">{c.author} · {c.date}</span>
-                </li>
-              )}
+            <For each={own()}>
+              {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
             </For>
+            <Show when={ancestors().length}>
+              <li class="commits-divider"><span>earlier history</span></li>
+              <For each={ancestors()}>
+                {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
+              </For>
+            </Show>
           </ol>
         </Show>
       )}

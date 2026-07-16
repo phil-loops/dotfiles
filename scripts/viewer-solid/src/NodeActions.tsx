@@ -22,6 +22,7 @@ import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
 import RebaseStream from "./RebaseStream";
+import { PlanStepsEditor } from "./PlanStepsEditor";
 import NodeSpine, { type Station, type SpineEdge } from "./NodeSpine";
 
 interface CheckoutResult {
@@ -1090,6 +1091,9 @@ export function NodeActions(props: {
             placeholder="subject — the one line the team reads in history"
             onInput={(e) => setMsgSubject(e.currentTarget.value)}
           />
+          {/* each step's line writes its OWN branch's durable story — so a story survives this
+              branch's merge, instead of being frozen as text in this one commit's plan block */}
+          <PlanStepsEditor branch={props.branch} onSaved={() => planFill.mutate()} />
           <textarea
             class="nh-editor-body"
             value={msgBody()}

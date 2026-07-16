@@ -4,13 +4,15 @@
 #   GET  /node?branch=X     a node's file list (stack-forest --node)
 #   GET  /purpose?branch=X  branch purpose/thesis (read; ?generate=1 opts into token spend)
 #   GET  /file?branch&path  a file's contents on a ref (git show)
-#   GET  /commits?branch=X  this branch's own commits (parent..branch)
+#   GET  /commits?branch=X  branch history: own commits (own:true) + ancestors (own:false)
+#   GET  /commit-diff?sha=X one commit's changed files + patches (git show)
 #   POST /bless {branch,file}    mark file(s) reviewed (stack-bless)
 #   POST /purpose {branch,text}  save a thesis as the branch description
 #   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import json
+import re
 import hashlib
 import threading
 from urllib.parse import parse_qs
@@ -222,17 +224,50 @@ def file(req, u):
 
 
 def commits(req, u):
+    # GitHub-Desktop-style history: the branch's OWN commits first (own:true), then the
+    # ancestor history it forked from (own:false) so the list reads like a real timeline —
+    # not just the parent..branch delta. `own` membership is the rev-list of parent..branch.
     branch = parse_qs(u.query).get("branch", [""])[0]
     parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
-    fmt = "%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
-    out = ctx.run(["git", "log", f"{parent}..{branch}", f"--format={fmt}", "--date=short"]).stdout
+    own = set(ctx.run(["git", "rev-list", f"{parent}..{branch}"]).stdout.split())
+    fmt = "%H\x1f%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
+    out = ctx.run(["git", "log", branch, f"--format={fmt}", "--date=short", "-n", "80"]).stdout
     rows = []
     for ln in out.splitlines():
         p = ln.split("\x1f")
-        if len(p) >= 2:
-            rows.append({"sha": p[0], "subject": p[1],
-                         "author": p[2] if len(p) > 2 else "", "date": p[3] if len(p) > 3 else ""})
+        if len(p) >= 3:
+            rows.append({"sha": p[1], "subject": p[2],
+                         "author": p[3] if len(p) > 3 else "", "date": p[4] if len(p) > 4 else "",
+                         "own": p[0] in own})
     req._send(200, json.dumps(rows))
+
+
+_CDIFF_HDR = re.compile(r"^diff --git a/(.+?) b/(.+)$")
+
+
+def commit_diff(req, u):
+    # one commit's changed files + patches (git show <sha>), in the same FileDiff shape the
+    # node view renders — so the history list can expand a commit inline. Read-only: these are
+    # historical commits, nothing to bless. Diffed against the commit's first parent.
+    sha = parse_qs(u.query).get("sha", [""])[0]
+    counts = {}
+    for ln in ctx.run(["git", "show", "--numstat", "--format=", sha]).stdout.splitlines():
+        p = ln.split("\t")
+        if len(p) == 3:
+            counts[p[2]] = (0 if p[0] == "-" else int(p[0]), 0 if p[1] == "-" else int(p[1]))
+    full = ctx.run(["git", "show", "-p", "--format=", sha]).stdout
+    files = []
+    for ch in re.split(r"(?m)^(?=diff --git )", full):
+        if not ch.startswith("diff --git "):
+            continue
+        m = _CDIFF_HDR.match(ch.splitlines()[0])
+        if not m:
+            continue
+        path = m.group(2)
+        add, dele = counts.get(path, (0, 0))
+        files.append({"path": path, "status": "clean", "add": add, "del": dele,
+                      "patch": ch.rstrip("\n") + "\n"})
+    req._send(200, json.dumps({"sha": sha, "files": files}))
 
 
 # --- POST ---
@@ -254,6 +289,100 @@ def purpose_set(req, raw):
     d = json.loads(raw or "{}")
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
     req._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
+
+
+def _plan_defaults():
+    try:
+        return json.loads(ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "plan-defaults"]).stdout)
+    except Exception:
+        return {"template": "", "step": ""}
+
+
+def _proj_cfg_raw(project, key):
+    # raw read — a template's leading indent + internal newlines are load-bearing (git config appends
+    # one trailing newline of its own; drop only that). Mirrors stack_facts._proj_cfg.
+    r = ctx.run(["git", "config", f"stack-project.{project}.{key}"])
+    if r.returncode != 0:
+        return ""
+    return r.stdout[:-1] if r.stdout.endswith("\n") else r.stdout
+
+
+def plan_template_get(req, u):
+    # GET /plan-template?project=X → the per-project body template + step line (edited once, carried
+    # to every child), plus the built-in defaults the editor prefills / falls back to.
+    project = parse_qs(u.query).get("project", [""])[0]
+    if not project:
+        return req._send(400, json.dumps({"error": "no project"}))
+    req._send(200, json.dumps({
+        "project": project,
+        "template": _proj_cfg_raw(project, "plan-template"),
+        "step": _proj_cfg_raw(project, "plan-step"),
+        "defaults": _plan_defaults(),
+    }))
+
+
+def plan_template_set(req, raw):
+    # POST /plan-template {project, template, step} → persist the template. Empty or default-equal
+    # values are UNSET, so config stays clean and render falls back to the built-in default.
+    d = json.loads(raw or "{}")
+    project = (d.get("project") or "").strip()
+    if not project:
+        return req._send(400, json.dumps({"error": "no project"}))
+    defaults = _plan_defaults()
+    for key, field in (("plan-template", "template"), ("plan-step", "step")):
+        val = d.get(field)
+        cfgkey = f"stack-project.{project}.{key}"
+        if not val or val == defaults.get(field):
+            ctx.run(["git", "config", "--unset", cfgkey])
+        else:
+            ctx.run(["git", "config", cfgkey, val])
+    req._send(200, json.dumps({"ok": True}))
+
+
+def plan_preview(req, u):
+    # GET /plan-preview?branch=X → the rendered plan block for that branch, so the template editor
+    # shows the live effect with the volatile facts (#PR, [this branch], position) filled in.
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    if not branch:
+        return req._send(400, json.dumps({"error": "no branch"}))
+    r = ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "plan", branch])
+    req._send(200, json.dumps({"plan": r.stdout.rstrip("\n")}))
+
+
+def plan_steps(req, u):
+    # GET /plan-steps?branch=X → the forest's steps in merge order, structured for per-step editing:
+    # each carries its branch, effective one-line story (job), the raw stored `.story` override (if
+    # any), whether it already landed, and which one is [this branch]. Feeds the plan-step editor —
+    # editing a line writes that step's OWN branch, so the story is durable past this branch's merge.
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    if not branch:
+        return req._send(400, json.dumps({"error": "no branch"}))
+    r = ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "facts", branch])
+    try:
+        f = json.loads(r.stdout)
+    except Exception:
+        return req._send(500, json.dumps({"steps": []}))
+    steps = [{"n": s.get("n"), "branch": s.get("branch"), "job": s.get("job"),
+              "story": s.get("story", ""), "landed": s.get("landed", False), "me": s.get("me", False)}
+             for s in f.get("plan", [])]
+    req._send(200, json.dumps({"branch": branch, "project": f.get("project"), "steps": steps}))
+
+
+def story_set(req, raw):
+    # POST /story {branch, text} → set (or, on empty text, unset → revert to the commit-subject
+    # gloss) a branch's durable merge story. job_of() prefers it, so the plan renders it on EVERY
+    # branch in the forest and it survives this branch's merge.
+    d = json.loads(raw or "{}")
+    branch = (d.get("branch") or "").strip()
+    text = (d.get("text") or "").strip()
+    if not branch:
+        return req._send(400, json.dumps({"ok": False, "err": "no branch"}))
+    key = f"stack-branch.{branch}.story"
+    if text:
+        ctx.run(["git", "config", key, text])
+    else:
+        ctx.run(["git", "config", "--unset", key])
+    req._send(200, json.dumps({"ok": True, "branch": branch, "story": text}))
 
 
 def interest_bump(req, raw):

@@ -13,6 +13,7 @@ import {
   BranchPR,
   BranchPRMap,
   Commit,
+  CommitDiff,
   ForestBranch,
   ForestModel,
   Head,
@@ -47,6 +48,7 @@ export interface DataProvider {
   model(branch: string): Promise<ForestModel>;
   node(branch: string, base?: string): Promise<NodeData>;
   commits(branch: string): Promise<Commit[]>;
+  commitDiff(sha: string): Promise<CommitDiff>;
   purpose(branch: string): Promise<Purpose>;
   head(): Promise<Head>;
   sync(branch: string): Promise<SyncState>;
@@ -110,6 +112,7 @@ export class HttpProvider implements DataProvider {
   node = (branch: string, base?: string) =>
     fetchJSON<unknown>(withRepo("/node") + "?branch=" + q(branch) + (base ? "&base=" + base : "")).then((d) => parse(NodeData, d, "node"));
   commits = (branch: string) => fetchJSON<unknown>(withRepo("/commits") + "?branch=" + q(branch)).then((d) => parse(z.array(Commit), d, "commits"));
+  commitDiff = (sha: string) => fetchJSON<unknown>(withRepo("/commit-diff") + "?sha=" + q(sha)).then((d) => parse(CommitDiff, d, "commit-diff"));
   purpose = (branch: string) => fetchJSON<unknown>(withRepo("/purpose") + "?branch=" + q(branch)).then((d) => parse(Purpose, d, "purpose"));
   head = () => fetchJSON<unknown>("/head").then((d) => parse(Head, d, "head"));
   sync = (branch: string) => fetchJSON<unknown>(withRepo("/sync") + "?branch=" + q(branch)).then((d) => parse(SyncState, d, "sync"));
@@ -147,6 +150,8 @@ export class StaticProvider implements DataProvider {
   node = (branch: string, _base?: string) =>
     this.get(`node/${slug(branch)}.json`, NodeData, "node").catch(() => ({ branch, files: [] }) as NodeData);
   commits = (branch: string) => this.get(`commits/${slug(branch)}.json`, z.array(Commit), "commits");
+  // per-commit diffs aren't baked (a frozen snapshot has no git to `show` against) — expand is a no-op
+  commitDiff = (sha: string) => Promise.resolve<CommitDiff>({ sha, files: [] });
   purpose = (branch: string) => this.get(`purpose/${slug(branch)}.json`, Purpose, "purpose");
   head = () => this.get("head.json", Head, "head");
   sync = (branch: string) => this.get(`sync/${slug(branch)}.json`, SyncState, "sync");

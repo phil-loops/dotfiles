@@ -301,9 +301,13 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/forest-branches": return picker.forest_branches(self)
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
+        elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template
+        elif u.path == "/plan-preview":   return review.plan_preview(self, u)        # rendered plan for a branch
+        elif u.path == "/plan-steps":     return review.plan_steps(self, u)          # structured steps for per-step story editing
         elif u.path == "/forest-purposes": return review.forest_purposes(self, u)
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
+        elif u.path == "/commit-diff":    return review.commit_diff(self, u)
         elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
         elif u.path == "/claude-sessions": return assist.claude_sessions(self)   # live sessions for the ✦ picker
         elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
@@ -360,6 +364,10 @@ class H(BaseHTTPRequestHandler):
             return picker.drop_project(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
             return review.purpose_set(self, raw)
+        if self.path == "/story":   # save a branch's durable per-step merge story (job_of prefers it)
+            return review.story_set(self, raw)
+        if self.path == "/plan-template":   # save the per-project body template (edit once, carries forward)
+            return review.plan_template_set(self, raw)
         if self.path == "/interest":   # promote/demote a branch's manual interest (stack-branch.<b>.interest)
             return review.interest_bump(self, raw)
         if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
