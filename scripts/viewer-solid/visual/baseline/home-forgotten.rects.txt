@@ -74,7 +74,7 @@
 /div[1]/div[1]/main[2]/section[3]/section[3]/div[2]/div[6]/span[4] 976,731 113x22
 /div[1]/div[1]/main[2]/section[3]/section[4] 436,794 664x557
 /div[1]/div[1]/main[2]/section[3]/section[4]/h2[1] 436,794 664x22
-/div[1]/div[1]/main[2]/section[3]/section[4]/h2[1]/span[1] 526,796 455x16
+/div[1]/div[1]/main[2]/section[3]/section[4]/h2[1]/span[1] 518,796 455x16
 /div[1]/div[1]/main[2]/section[3]/section[4]/div[2] 436,827 664x523
 /div[1]/div[1]/main[2]/section[3]/section[4]/div[2]/div[1] 436,827 664x56
 /div[1]/div[1]/main[2]/section[3]/section[4]/div[2]/div[1]/span[1] 468,844 20x17
