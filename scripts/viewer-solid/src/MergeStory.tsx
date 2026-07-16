@@ -222,43 +222,63 @@ export default function MergeStory(props: {
   };
 
   return (
-    <div class="ms">
-      <style>{CSS}</style>
-      <div class="ms-head">
-        <span class="ms-flow">{props.project} → main</span>
-        <span class="ms-cap">in merge order</span>
+    <div class="ms mx-auto my-0 max-w-[760px] pt-[8px] px-[16px] pb-[40px] font-mono">
+      <div class="ms-head flex items-baseline gap-[12px] pt-[6px] px-[2px] pb-[16px]">
+        <span class="ms-flow text-[14px] text-ink">{props.project} → main</span>
+        <span class="ms-cap text-[11px] uppercase tracking-[0.08em] text-ink-faint">in merge order</span>
         <Show when={canMutate}>
-          <button class="ms-tmpl-btn" classList={{ on: tmplOpen() }} onClick={openTemplate} title="edit the per-project commit/PR body template — once, carried to every child">
+          <button
+            class={`ms-tmpl-btn cursor-pointer whitespace-nowrap rounded-[6px] border py-[3px] px-[10px] text-[11px] leading-[1.55] opacity-90 hover:opacity-100 ${
+              tmplOpen()
+                ? "text-patina border-patina bg-[rgba(138,154,107,0.1)]"
+                : "text-ink-dim border-rule bg-transparent hover:border-patina"
+            }`}
+            classList={{ on: tmplOpen() }}
+            onClick={openTemplate}
+            title="edit the per-project commit/PR body template — once, carried to every child"
+          >
             ⚙ template
           </button>
         </Show>
-        <button class="ms-polish" disabled={polishing()} onClick={polish} title="crisp the subjects + pull a non-trivial implementation detail from each diff (LLM)">
+        <button
+          class="ms-polish ml-auto cursor-pointer whitespace-nowrap rounded-[6px] border border-[#e0ad4e] bg-transparent py-[3px] px-[10px] text-[11px] leading-[1.55] text-[#e0ad4e] opacity-90 hover:enabled:opacity-100 hover:enabled:bg-[rgba(224,173,78,0.1)] disabled:opacity-50 disabled:cursor-default"
+          disabled={polishing()}
+          onClick={polish}
+          title="crisp the subjects + pull a non-trivial implementation detail from each diff (LLM)"
+        >
           {polishing() ? "polishing…" : Object.keys(polished()).length ? "✨ re-polish" : "✨ polish"}
         </button>
         <Show when={polishErr()}>
-          <span class="ms-polish-err">couldn’t polish</span>
+          <span class="ms-polish-err text-[11px] text-ember">couldn’t polish</span>
         </Show>
       </div>
       <Show when={tmplOpen()}>
-        <div class="ms-tmpl">
-          <p class="ms-tmpl-hint">
-            edited once, carried to every child — the volatile facts (<code>#PR</code>, <code>[this branch]</code>, position) re-fill on each render.
+        <div class="ms-tmpl mt-0 mx-[2px] mb-[14px] flex flex-col gap-[6px] rounded-[8px] border border-rule bg-[#1b1815] py-[12px] px-[14px]">
+          <p class="ms-tmpl-hint mt-0 mx-0 mb-[4px] text-[11px] leading-[1.5] text-ink-dim">
+            edited once, carried to every child — the volatile facts (<code class="text-[10.5px] text-patina">#PR</code>, <code class="text-[10.5px] text-patina">[this branch]</code>, position) re-fill on each render.
           </p>
-          <label class="ms-tmpl-lbl">outer <span class="ms-tmpl-tok">{"{project}"} · {"{steps}"}</span></label>
-          <textarea class="ms-tmpl-ta" rows={4} spellcheck={false} value={outer()} onInput={(e) => setOuter(e.currentTarget.value)} />
-          <label class="ms-tmpl-lbl">step line <span class="ms-tmpl-tok">{"{n}"} · {"{ref}"} · {"{job}"} · {"{pr}"} · {"{me}"}</span></label>
-          <textarea class="ms-tmpl-ta" rows={1} spellcheck={false} value={stepFmt()} onInput={(e) => setStepFmt(e.currentTarget.value)} />
-          <div class="ms-tmpl-actions">
-            <button class="ms-tmpl-save" disabled={savingTmpl()} onClick={saveTemplate}>{savingTmpl() ? "saving…" : "save"}</button>
-            <button class="ms-tmpl-reset" onClick={resetTemplate}>reset to default</button>
-            <span class="ms-tmpl-note">preview as {leafOf(previewBranch())}</span>
+          <label class="ms-tmpl-lbl flex items-baseline gap-[8px] text-[11px] text-ink-faint">outer <span class="ms-tmpl-tok text-[10.5px] text-patina">{"{project}"} · {"{steps}"}</span></label>
+          <textarea class={TA} rows={4} spellcheck={false} value={outer()} onInput={(e) => setOuter(e.currentTarget.value)} />
+          <label class="ms-tmpl-lbl flex items-baseline gap-[8px] text-[11px] text-ink-faint">step line <span class="ms-tmpl-tok text-[10.5px] text-patina">{"{n}"} · {"{ref}"} · {"{job}"} · {"{pr}"} · {"{me}"}</span></label>
+          <textarea class={TA} rows={1} spellcheck={false} value={stepFmt()} onInput={(e) => setStepFmt(e.currentTarget.value)} />
+          <div class="ms-tmpl-actions mt-[2px] flex items-center gap-[10px]">
+            <button
+              class="ms-tmpl-save cursor-pointer rounded-[6px] bg-patina py-[4px] px-[14px] text-[11px] leading-[1.55] text-[#131110] disabled:opacity-50 disabled:cursor-default"
+              disabled={savingTmpl()}
+              onClick={saveTemplate}
+            >{savingTmpl() ? "saving…" : "save"}</button>
+            <button
+              class="ms-tmpl-reset cursor-pointer rounded-[6px] border border-rule bg-transparent py-[4px] px-[10px] text-[11px] leading-[1.55] text-ink-faint hover:text-ink-dim"
+              onClick={resetTemplate}
+            >reset to default</button>
+            <span class="ms-tmpl-note ml-auto text-[10.5px] text-ink-faint">preview as {leafOf(previewBranch())}</span>
           </div>
           <Show when={preview()}>
-            <pre class="ms-tmpl-preview">{preview()}</pre>
+            <pre class="ms-tmpl-preview mt-[6px] mx-0 mb-0 overflow-x-auto whitespace-pre-wrap break-words rounded-[6px] border border-rule bg-[#131110] py-[10px] px-[12px] text-[12px] leading-[1.5] text-ink-dim">{preview()}</pre>
           </Show>
         </div>
       </Show>
-      <ol class="ms-list">
+      <ol class="ms-list m-0 flex list-none flex-col gap-[4px] p-0">
         <For each={steps()}>
           {(s, i) => {
             // subtitle = the LLM's diff detail, else the description's own "why" (its remainder past
@@ -268,32 +288,46 @@ export default function MergeStory(props: {
             const sub = () => polished()[s.id]?.detail ?? s.why;
             return (
             <li
-              class="ms-row"
+              class={`ms-row flex cursor-pointer items-baseline gap-[12px] py-[9px] px-[12px] hover:bg-[#1b1815] ${
+                s.depth > 0
+                  ? "rounded-r-[8px] border-y border-r border-l-2 border-y-transparent border-r-transparent border-l-rule hover:border-y-rule hover:border-r-rule hover:border-l-patina"
+                  : "rounded-[8px] border border-transparent hover:border-rule"
+              } ${s.convergence ? "opacity-90" : ""}`}
               classList={{ convergence: s.convergence, nested: s.depth > 0 }}
               style={{ "margin-left": `${s.depth * 26}px` }}
               onClick={() => props.onPick(s.id)}
               title={`open ${leafOf(s.id)}`}
             >
-              <span class="ms-num">{s.convergence ? "★" : i() + 1}</span>
-              <div class="ms-body">
-                <code class="ms-commit" classList={{ faint: !s.hasPurpose }}>
-                  <span class="ms-type" classList={{ refactor: s.type === "refactor" }}>{s.type}</span>
-                  <span class="ms-scope">({scope()})</span>: {subj()}
+              <span
+                class={`ms-num w-[22px] flex-none border-r pr-[10px] text-center text-[12px] ${
+                  s.convergence ? "text-[#e0ad4e] border-r-transparent" : "text-ink-faint border-r-rule"
+                }`}
+              >{s.convergence ? "★" : i() + 1}</span>
+              <div class="ms-body flex min-w-0 flex-col gap-[3px]">
+                <code
+                  class={`ms-commit break-words text-[13px] leading-[1.5] ${!s.hasPurpose ? "text-ink-faint italic" : "text-ink"}`}
+                  classList={{ faint: !s.hasPurpose }}
+                >
+                  <span
+                    class={`ms-type ${s.type === "refactor" ? "text-[#e0ad4e]" : "text-patina"}`}
+                    classList={{ refactor: s.type === "refactor" }}
+                  >{s.type}</span>
+                  <span class="ms-scope text-ink-dim">({scope()})</span>: {subj()}
                 </code>
                 <Show when={sub() && sub() !== subj()}>
-                  <p class="ms-detail">{sub()}</p>
+                  <p class="ms-detail mt-[2px] mx-0 mb-0 max-w-[64ch] text-[12px] leading-[1.55] text-ink-dim">{sub()}</p>
                 </Show>
                 <Show when={s.convergence}>
-                  <span class="ms-dep conv">
+                  <span class="ms-dep conv block text-[11px] text-[#e0ad4e] opacity-[0.85]">
                     converges {[...(s.buildsOn ? [s.buildsOn] : []), ...s.requires].sort((a, b) => a - b).join(" · ")} — convergence view, never merges
                   </span>
                 </Show>
                 <Show when={!s.convergence}>
                   <Show when={s.buildsOn}>
-                    <span class="ms-dep">↳ builds on {s.buildsOn}</span>
+                    <span class="ms-dep block text-[11px] text-ink-faint">↳ builds on {s.buildsOn}</span>
                   </Show>
                   <Show when={s.requires.length}>
-                    <span class="ms-dep req">⤿ requires {s.requires.join(" · ")} — merges after</span>
+                    <span class="ms-dep req block text-[11px] text-patina">⤿ requires {s.requires.join(" · ")} — merges after</span>
                   </Show>
                 </Show>
               </div>
@@ -306,79 +340,7 @@ export default function MergeStory(props: {
   );
 }
 
-const CSS = `
-.ms { max-width: 760px; margin: 0 auto; padding: 8px 16px 40px; font-family: "IBM Plex Mono", ui-monospace, monospace; }
-.ms-head { display: flex; align-items: baseline; gap: 12px; padding: 6px 2px 16px; }
-.ms-flow { font-size: 14px; color: var(--ink, #e9e2d4); }
-.ms-cap { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint, #6f675a); }
-.ms-polish {
-  margin-left: auto; font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
-  color: var(--gold, #e0ad4e); background: transparent; border: 1px solid var(--gold, #e0ad4e);
-  border-radius: 6px; padding: 3px 10px; opacity: .9;
-}
-.ms-polish:hover:not(:disabled) { opacity: 1; background: rgba(224,173,78,.1); }
-.ms-polish:disabled { opacity: .5; cursor: default; }
-.ms-polish-err { font-size: 11px; color: var(--ember, #d36a36); }
-.ms-tmpl-btn {
-  font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
-  color: var(--ink-dim, #a89e8c); background: transparent; border: 1px solid var(--rule, #3a332b);
-  border-radius: 6px; padding: 3px 10px; opacity: .9;
-}
-.ms-tmpl-btn:hover { opacity: 1; border-color: var(--patina, #8a9a6b); }
-.ms-tmpl-btn.on { color: var(--patina, #8a9a6b); border-color: var(--patina, #8a9a6b); background: rgba(138,154,107,.1); }
-.ms-tmpl {
-  margin: 0 2px 14px; padding: 12px 14px; border: 1px solid var(--rule, #3a332b);
-  border-radius: 8px; background: var(--raised, #1b1815); display: flex; flex-direction: column; gap: 6px;
-}
-.ms-tmpl-hint { margin: 0 0 4px; font-size: 11px; line-height: 1.5; color: var(--ink-dim, #a89e8c); }
-.ms-tmpl-hint code { color: var(--patina, #8a9a6b); font-size: 10.5px; }
-.ms-tmpl-lbl { font-size: 11px; color: var(--ink-faint, #6f675a); display: flex; gap: 8px; align-items: baseline; }
-.ms-tmpl-tok { color: var(--patina, #8a9a6b); font-size: 10.5px; }
-.ms-tmpl-ta {
-  font: inherit; font-size: 12px; line-height: 1.5; color: var(--ink, #e9e2d4);
-  background: var(--sunken, #131110); border: 1px solid var(--rule, #3a332b); border-radius: 6px;
-  padding: 7px 9px; resize: vertical; width: 100%; box-sizing: border-box; white-space: pre; overflow-x: auto;
-}
-.ms-tmpl-ta:focus { outline: none; border-color: var(--patina, #8a9a6b); }
-.ms-tmpl-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
-.ms-tmpl-save {
-  font: inherit; font-size: 11px; cursor: pointer; color: var(--sunken, #131110);
-  background: var(--patina, #8a9a6b); border: none; border-radius: 6px; padding: 4px 14px;
-}
-.ms-tmpl-save:disabled { opacity: .5; cursor: default; }
-.ms-tmpl-reset {
-  font: inherit; font-size: 11px; cursor: pointer; color: var(--ink-faint, #6f675a);
-  background: transparent; border: 1px solid var(--rule, #3a332b); border-radius: 6px; padding: 4px 10px;
-}
-.ms-tmpl-reset:hover { color: var(--ink-dim, #a89e8c); }
-.ms-tmpl-note { margin-left: auto; font-size: 10.5px; color: var(--ink-faint, #6f675a); }
-.ms-tmpl-preview {
-  margin: 6px 0 0; padding: 10px 12px; font-size: 12px; line-height: 1.5; color: var(--ink-dim, #a89e8c);
-  background: var(--sunken, #131110); border: 1px solid var(--rule, #3a332b); border-radius: 6px;
-  white-space: pre-wrap; word-break: break-word; overflow-x: auto;
-}
-.ms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.ms-row {
-  display: flex; align-items: baseline; gap: 12px; padding: 9px 12px; border-radius: 8px; cursor: pointer;
-  border: 1px solid transparent;
-}
-.ms-row:hover { background: var(--raised, #1b1815); border-color: var(--rule, #3a332b); }
-.ms-row.nested { border-left: 2px solid var(--rule, #3a332b); border-top-left-radius: 0; border-bottom-left-radius: 0; }
-.ms-row.nested:hover { border-left-color: var(--patina, #8a9a6b); }
-.ms-num {
-  flex: none; width: 22px; text-align: center; font-size: 12px; color: var(--ink-faint, #6f675a);
-  border-right: 1px solid var(--rule, #3a332b); padding-right: 10px;
-}
-.ms-row.convergence .ms-num { color: var(--gold, #e0ad4e); border-color: transparent; }
-.ms-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.ms-commit { font-size: 13px; line-height: 1.5; color: var(--ink, #e9e2d4); word-break: break-word; }
-.ms-commit.faint { color: var(--ink-faint, #6f675a); font-style: italic; }
-.ms-detail { margin: 2px 0 0; font-size: 12px; line-height: 1.55; color: var(--ink-dim, #a89e8c); max-width: 64ch; }
-.ms-type { color: var(--patina, #8a9a6b); }
-.ms-type.refactor { color: var(--gold, #e0ad4e); }
-.ms-scope { color: var(--ink-dim, #a89e8c); }
-.ms-dep { display: block; font-size: 11px; color: var(--ink-faint, #6f675a); }
-.ms-dep.req { color: var(--patina, #8a9a6b); }
-.ms-dep.conv { color: var(--gold, #e0ad4e); opacity: .85; }
-.ms-row.convergence { opacity: .9; }
-`;
+// font: inherit on a textarea pulled the .ms mono stack in; box-border beats the UA's content-box
+const TA =
+  "ms-tmpl-ta box-border w-full resize-y overflow-x-auto whitespace-pre rounded-[6px] border border-rule bg-[#131110] py-[7px] px-[9px] font-mono text-[12px] leading-[1.5] text-ink focus:outline-none focus:border-patina";
+
