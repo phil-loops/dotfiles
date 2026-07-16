@@ -99,6 +99,20 @@ def repo_local(cmd, cwd):
     return local if os.path.exists(local) else None
 
 
+def ensure_tsgo_link(cwd):
+    # tsgo is not an npm dep — a fresh `npm install` wipes the hand-made link and the gate silently falls back to tsc.
+    bindir = os.path.join(cwd, "node_modules", ".bin")
+    if not os.path.isdir(bindir) or os.path.exists(os.path.join(bindir, "tsgo")):
+        return
+    cache = os.path.expanduser("~/.cache/tsperf/tsgo/node_modules/.bin/tsgo")
+    if not os.path.exists(cache):
+        return
+    try:
+        os.symlink(cache, os.path.join(bindir, "tsgo"))
+    except OSError:
+        pass
+
+
 # Files where a behind-origin/main branch is a hard push-block, not just a warning —
 # kept in lockstep with the loops-pre-push hook's deploy-critical list (drift here =
 # the gate and the hook disagree on what blocks a push).
@@ -121,6 +135,7 @@ def default_gates(cwd):
     # Typecheck with the repo-PINNED compiler: a global tsgo dev build rejects
     # configs the repo's own tsc accepts (e.g. moduleResolution=node10 removed),
     # which surfaces as a false "blocked, needs the laptop". Prefer repo tsgo, else tsc.
+    ensure_tsgo_link(cwd)
     typechecker = repo_local("tsgo", cwd) or repo_local("tsc", cwd)
     oxfmt = resolve("oxfmt", cwd)
     if typechecker and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
