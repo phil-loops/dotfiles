@@ -69,6 +69,11 @@ _lanes(){ grep -v '^#' "$OWNERS" | awk 'NF{print $1}'; }
 _is_lane(){ grep -q "^$1 " "$OWNERS"; }
 case "${1:-list}" in
   claim) [[ -n "${2:-}" ]] || { print "usage: own claim <lane>" >&2; exit 2; }
+    # A misspelled lane must FAIL, not claim a lane that doesn't exist. 'own claim viewer-solid'
+    # (the directory name, not the lane) wrote own.viewer-solid.* and printed "you hold it" — but
+    # 'own list' iterates OWNERS, so the claim was invisible, the real [viewer] lane read free to
+    # everyone else, and the phantom key outlived its session by three weeks (2026-07-16).
+    _is_lane "$2" || { print "no such lane: $2 (see 'own list')" >&2; exit 2; }
     # A claim never STEALS. Claiming used to stamp unconditionally, so two sessions could each
     # be told "you hold [viewer]" and edit on for hours — the loser never learns it lost (it
     # cost a session a whole afternoon of lane-less edits, 2026-07-16). Hand-off goes through
