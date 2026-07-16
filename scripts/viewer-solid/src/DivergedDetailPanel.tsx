@@ -18,20 +18,10 @@ export type DivergedDetail = {
 // commits (patch-id twins flagged), a containment verdict, and origin's review diff now vs after push.
 export function DivergedDetailPanel(props: { data: DivergedDetail | undefined }) {
   return (
-            <div
-              class="nh-diverged-detail"
-              style={{
-                margin: "6px 0 2px",
-                padding: "10px 12px",
-                border: "1px solid var(--line, #444)",
-                "border-radius": "8px",
-                "font-size": "12.5px",
-                "line-height": "1.55",
-              }}
-            >
+            <div class="nh-diverged-detail mt-[6px] mb-[2px] rounded-[8px] border border-[color:var(--line,#444)] px-3 py-[10px] text-[12.5px] leading-[1.55]">
               <Show when={props.data} fallback={<span>reading both sides…</span>}>
                 <Show when={props.data!.ok} fallback={<span>✗ {props.data!.err}</span>}>
-                  <div style={{ "margin-bottom": "6px" }}>
+                  <div class="mb-[6px]">
                     <Switch>
                       <Match when={props.data!.containment === "rebase"}>
                         <span>
@@ -60,19 +50,19 @@ export function DivergedDetailPanel(props: { data: DivergedDetail | undefined })
                         </span>
                       </Match>
                     </Switch>
-                    <div style={{ opacity: 0.75 }}>
+                    <div class="opacity-75">
                       PR diff on origin today: {props.data!.prNow || "empty"} → after carrying local's content:{" "}
                       {props.data!.prAfter || "empty"}
                     </div>
                   </div>
-                  <div style={{ display: "flex", gap: "24px", "flex-wrap": "wrap" }}>
+                  <div class="flex flex-wrap gap-6">
                     <div>
-                      <div style={{ opacity: 0.65 }}>only local ({(props.data!.ahead ?? []).length}↑)</div>
+                      <div class="opacity-65">only local ({(props.data!.ahead ?? []).length}↑)</div>
                       <For each={props.data!.ahead}>
                         {(c) => (
                           <div>
                             <code>{c.sha}</code> {c.subject}{" "}
-                            <span style={{ opacity: 0.6 }}>
+                            <span class="opacity-60">
                               {c.matched ? "≡ rewritten twin" : c.fromMain ? "↳ main advance (restack)" : "◆ new work"}
                             </span>
                           </div>
@@ -80,26 +70,26 @@ export function DivergedDetailPanel(props: { data: DivergedDetail | undefined })
                       </For>
                     </div>
                     <div>
-                      <div style={{ opacity: 0.65 }}>only pushed head ({(props.data!.behind ?? []).length}↓)</div>
+                      <div class="opacity-65">only pushed head ({(props.data!.behind ?? []).length}↓)</div>
                       <For each={props.data!.behind}>
                         {(c) => (
                           <div>
                             <code>{c.sha}</code> {c.subject}{" "}
-                            <span style={{ opacity: 0.6 }}>{c.matched ? "≡ rewritten twin" : "◆ no local twin"}</span>
+                            <span class="opacity-60">{c.matched ? "≡ rewritten twin" : "◆ no local twin"}</span>
                           </div>
                         )}
                       </For>
                     </div>
                     <Show when={(props.data!.prFiles ?? []).length > 0}>
                       <div>
-                        <div style={{ opacity: 0.65 }}>
+                        <div class="opacity-65">
                           the PR's diff, file by file (now → after an additive update)
                         </div>
                         <For each={props.data!.prFiles}>
                           {(f) => (
                             <div>
                               <code>{f.path}</code>{" "}
-                              <span style={{ opacity: 0.6 }}>
+                              <span class="opacity-60">
                                 <Switch>
                                   <Match when={f.status === "same"}>{f.now} · unchanged</Match>
                                   <Match when={f.status === "changed"}>
