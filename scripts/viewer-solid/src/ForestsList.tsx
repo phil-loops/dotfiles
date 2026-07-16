@@ -81,7 +81,7 @@ export function ForestsList(props: {
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
     for (const p of filteredForests()) {
-      if (!p.epic || recentlyMerged(p) || p.shelved || p.tier !== "committed") continue;
+      if (!p.epic || recentlyMerged(p) || p.shelved || p.tier !== "committed" || p.focus != null) continue;
       (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
     }
     return [...byEpic.entries()]
@@ -100,7 +100,7 @@ export function ForestsList(props: {
   const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
     const clustered = clusteredKeys();
-    const active = filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.tier === "committed" && !clustered.has(pkey(p)));
+    const active = filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.tier === "committed" && p.focus == null && !clustered.has(pkey(p)));
     return BANDS.map((band, i) => ({
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
@@ -130,8 +130,9 @@ export function ForestsList(props: {
 
   // ── conviction tiers (orthogonal to the bands) ──────────────────────────
   // committed → the lifecycle bands above; trying/spike/untriaged get their own sections. A pool of
-  // everything still in play (not merged, not shelved), partitioned by tier.
-  const tierPool = createMemo(() => filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved));
+  // everything still in play (not merged, not shelved) — and NOT already pinned to the focus lane:
+  // pinning IS a decision, so a focused forest leaves the triage pile (and every band) for the lane.
+  const tierPool = createMemo(() => filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null));
   const triageList = createMemo(() =>
     tierPool().filter((p) => p.tier == null).sort((a, b) => forestTs(b) - forestTs(a)));
   const tryingList = createMemo(() =>
