@@ -434,17 +434,25 @@ if node_mode:
         diff_base = trunk_base(parent if not base else MAIN)
     else:
         diff_base = base
-    rows, *_ = file_status(branch, diff_base)
+    # the independent git calls here (file rows, full patch, worktree map, carried-requires
+    # name lists) each pay this repo's per-spawn floor — overlap them; serial they were the
+    # bulk of a ~0.7s /node fetch (227 worktrees make `worktree list` alone ~200ms).
+    pool = ThreadPoolExecutor(max_workers=8)
+    rows_f = pool.submit(file_status, branch, diff_base)
+    full_f = pool.submit(git_out, ["diff", "-p", f"{diff_base}...{branch}"])
+    wts_f = pool.submit(_worktree_branches)
     # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
     # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
     reqs = requires.get(branch, []) if diff_base in (parent, trunk_base(parent)) else []
-    if reqs:
+    req_fs = [pool.submit(git_out, ["diff", "--name-only", f"{MAIN}...{r}"]) for r in reqs]
+    rows, *_ = rows_f.result()
+    if req_fs:
         carried = set()
-        for r in reqs:
-            carried.update(git_out(["diff", "--name-only", f"{MAIN}...{r}"]).split())
+        for f in req_fs:
+            carried.update(f.result().split())
         rows = [row for row in rows if row["path"] not in carried]
     chunks = {}
-    full = git_out(["diff", "-p", f"{diff_base}...{branch}"])
+    full = full_f.result()
     for ch in re.split(r"(?m)^(?=diff --git )", full):
         if ch.startswith("diff --git "):
             m = DIFF_HDR.match(ch.splitlines()[0])
@@ -474,20 +482,25 @@ if node_mode:
     # that ambushes whatever branch the checkout holds, so it rides the node payload as
     # read-only rows (no blessing: blessing keys on committed content). Untracked files
     # ARE included here — a sync's clean-tree guard trips on them even though rebase won't.
-    dirty_rows, wt = [], next((p for p, b in _worktree_branches() if b == branch), None)
+    dirty_rows, wt = [], next((p for p, b in wts_f.result() if b == branch), None)
     if wt:
+        entries = []
         for ln in subprocess.run(["git", "-C", wt, "status", "--porcelain"],
                                  capture_output=True, text=True).stdout.splitlines():
             if len(ln) < 4:
                 continue
             code = ln[:2].strip()
             p = ln[3:].split(" -> ", 1)[-1].strip().strip('"')
+            entries.append((code, p))
+
+        def dirty_patch(entry):
+            code, p = entry
             if code == "??":
-                d = subprocess.run(["git", "-C", wt, "diff", "--no-index", "--", "/dev/null", p],
-                                   capture_output=True, text=True).stdout
+                args = ["git", "-C", wt, "diff", "--no-index", "--", "/dev/null", p]
             else:
-                d = subprocess.run(["git", "-C", wt, "diff", "HEAD", "--", p],
-                                   capture_output=True, text=True).stdout
+                args = ["git", "-C", wt, "diff", "HEAD", "--", p]
+            return subprocess.run(args, capture_output=True, text=True).stdout
+        for (code, p), d in zip(entries, pool.map(dirty_patch, entries)):
             dirty_rows.append({"path": p, "code": code, "patch": d[:20000]})
     print(json.dumps({"branch": branch, "files": files, "dirty": dirty_rows, "worktree": wt or ""}))
     sys.exit(0)
