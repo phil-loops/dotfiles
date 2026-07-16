@@ -12,6 +12,15 @@ import type { Project, PR } from "./types";
 // Pin/unpin lives in the forest-card ctx menu; this owns the ordering (→ POST /focus {order}).
 const pkey = (p: Project) => (p.repo || "loops") + "/" + p.name;
 
+const CTX_MENU = "fixed z-[91] max-h-[calc(100dvh-16px)] min-w-[150px] overflow-y-auto overscroll-contain rounded-[8px] border border-rule bg-[#1b1815] p-[4px] shadow-[0_8px_26px_rgba(0,0,0,0.45)]";
+const CTX_HEAD = "px-[8px] pt-[4px] pb-[6px] text-[10px] uppercase tracking-[0.08em] text-ink-faint";
+const CTX_ITEM = "group flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] px-[8px] text-left text-[12px] leading-[1.55] disabled:cursor-default disabled:bg-transparent";
+const CTX_ON = "on text-gold-leaf hover:bg-vellum-edge disabled:opacity-32";
+const CTX_OFF = "text-ink-dim hover:bg-vellum-edge hover:text-ink disabled:opacity-32";
+const CTX_PIPS = "min-w-[58px] tracking-[-1px]";
+const CTX_LBL = "text-ink-faint group-hover:text-inherit";
+
+
 export function FocusLane(props: {
   projects: () => Project[] | undefined;
   prOf: (name: string) => PR | undefined;
@@ -233,25 +242,25 @@ export function FocusLane(props: {
       <Show when={menu()}>
         {(m) => (
           <>
-            <div class="ctx-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-            <div class="ctx-menu" ref={(el) => clampMenu(el, m().x, m().y)} style={{ left: `${m().x}px`, top: `${m().y}px` }}>
-              <div class="ctx-head">reprioritize</div>
-              <button class="ctx-item" disabled={m().idx === 0} onClick={() => { moveByIndex(m().idx, 0); setMenu(null); }}>
-                <span class="ctx-pips">⤒</span><span class="ctx-lbl">move to top</span>
+            <div class="ctx-scrim fixed inset-0 z-[90]" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
+            <div class={`ctx-menu ${CTX_MENU}`} ref={(el) => clampMenu(el, m().x, m().y)} style={{ left: `${m().x}px`, top: `${m().y}px` }}>
+              <div class={`ctx-head ${CTX_HEAD}`}>reprioritize</div>
+              <button class={`ctx-item ${CTX_ITEM} py-[5px] ${CTX_OFF}`} disabled={m().idx === 0} onClick={() => { moveByIndex(m().idx, 0); setMenu(null); }}>
+                <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>⤒</span><span class={`ctx-lbl ${CTX_LBL}`}>move to top</span>
               </button>
-              <button class="ctx-item" disabled={m().idx === 0} onClick={() => { moveByIndex(m().idx, m().idx - 1); setMenu(null); }}>
-                <span class="ctx-pips">↑</span><span class="ctx-lbl">move up</span>
+              <button class={`ctx-item ${CTX_ITEM} py-[5px] ${CTX_OFF}`} disabled={m().idx === 0} onClick={() => { moveByIndex(m().idx, m().idx - 1); setMenu(null); }}>
+                <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>↑</span><span class={`ctx-lbl ${CTX_LBL}`}>move up</span>
               </button>
-              <button class="ctx-item" disabled={m().idx === pinned().length - 1} onClick={() => { moveByIndex(m().idx, m().idx + 1); setMenu(null); }}>
-                <span class="ctx-pips">↓</span><span class="ctx-lbl">move down</span>
+              <button class={`ctx-item ${CTX_ITEM} py-[5px] ${CTX_OFF}`} disabled={m().idx === pinned().length - 1} onClick={() => { moveByIndex(m().idx, m().idx + 1); setMenu(null); }}>
+                <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>↓</span><span class={`ctx-lbl ${CTX_LBL}`}>move down</span>
               </button>
-              <div class="ctx-head">set position</div>
+              <div class={`ctx-head ${CTX_HEAD}`}>set position</div>
               <For each={pinned().map((_, i) => i)}>
                 {(pos) => (
-                  <button class="ctx-item ctx-focus" classList={{ on: m().idx === pos }}
+                  <button class={`ctx-item ctx-focus ${CTX_ITEM} py-[5px] ${m().idx === pos ? CTX_ON : CTX_OFF}`}
                     onClick={() => { moveByIndex(m().idx, pos); setMenu(null); }}>
-                    <span class="ctx-pips">{pos + 1}</span>
-                    <span class="ctx-lbl">{pinned()[pos] ? pinned()[pos].name : ""}</span>
+                    <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{pos + 1}</span>
+                    <span class={`ctx-lbl ${m().idx === pos ? "text-inherit" : CTX_LBL}`}>{pinned()[pos] ? pinned()[pos].name : ""}</span>
                   </button>
                 )}
               </For>
