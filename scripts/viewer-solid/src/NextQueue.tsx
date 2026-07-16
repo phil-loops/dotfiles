@@ -20,6 +20,17 @@ export function NextQueue(props: {
   landedRecently: (p: PR) => boolean;
 }) {
   const STALE_BEHIND = 60; // a forest this far behind is rot to decide on, not work to open
+  // tone = the blessing-spine palette; --nq drives the left rail, icon and verb per row
+  const TONE: Record<string, string> = {
+    ship: "[--nq:#e0ad4e] [--nq-glow:rgba(224,173,78,0.5)]",
+    block: "[--nq:#e8794a] [--nq-glow:rgba(232,121,74,0.5)]",
+    open: "[--nq:#9ec6b6]",
+    contract: "[--nq:#9d8d6b]",
+    review: "[--nq:#c9b896]",
+    decide: "[--nq:var(--color-ink-faint)]",
+  };
+  const ROW =
+    "relative flex items-baseline gap-[10px] rounded-[9px] py-[8px] pr-[14px] pl-[20px] text-ink no-underline transition-[background] duration-[120ms] hover:bg-vellum-raise before:absolute before:left-0 before:top-[6px] before:bottom-[6px] before:w-[4px] before:rounded-[2px] before:bg-(--nq) before:shadow-[0_0_9px_-1px_var(--nq-glow,transparent)] before:content-['']";
   const nextActions = createMemo<NextAction[]>(() => {
     const out: NextAction[] = [];
     const prList = props.prs() || [];
@@ -61,10 +72,10 @@ export function NextQueue(props: {
   });
   const nextRowBody = (a: NextAction) => (
     <>
-      <span class="nq-icon">{a.icon}</span>
-      <span class="nq-verb">{a.verb}</span>
-      <span class="nq-target">{a.target}</span>
-      <span class="nq-why">{a.why}</span>
+      <span class="nq-icon w-[16px] flex-none text-center text-[13px] text-(--nq)">{a.icon}</span>
+      <span class="nq-verb flex-none text-[13px] font-semibold tracking-[0.02em] text-(--nq)">{a.verb}</span>
+      <span class="nq-target flex-none font-mono text-[12px] text-ink">{a.target}</span>
+      <span class="nq-why min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-faint">{a.why}</span>
     </>
   );
   return (
@@ -75,11 +86,11 @@ export function NextQueue(props: {
           <For each={nextActions()}>
             {(a) =>
               a.to ? (
-                <Link class={`nq-row nq-${a.tone}`} to={a.to} title={a.title}>
+                <Link class={`nq-row nq-${a.tone} ${ROW} ${TONE[a.tone]}`} to={a.to} title={a.title}>
                   {nextRowBody(a)}
                 </Link>
               ) : (
-                <a class={`nq-row nq-${a.tone}`} href={a.href} target="_blank" rel="noopener" title={a.title}>
+                <a class={`nq-row nq-${a.tone} ${ROW} ${TONE[a.tone]}`} href={a.href} target="_blank" rel="noopener" title={a.title}>
                   {nextRowBody(a)}
                 </a>
               )

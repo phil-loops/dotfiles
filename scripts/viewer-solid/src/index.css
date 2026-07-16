@@ -896,30 +896,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .work-state-landed  { --state: #8fb0a2; opacity: 0.8; }
 .work-row.work-state-landed .pr-title { color: var(--ink-dim); }
 
-/* NEXT queue — one ranked action list so you hop in at the top. Each row is a left-rail-coloured
-   action: verb · target · the one-line WHY that earns its rank. Tone = the blessing-spine palette. */
-.next-queue .nq-row {
-  position: relative; display: flex; align-items: baseline; gap: 10px;
-  padding: 8px 14px 8px 20px; border-radius: 9px; text-decoration: none; color: var(--ink);
-  transition: background 0.12s;
-}
-.nq-row::before {
-  content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 4px; border-radius: 2px;
-  background: var(--nq, var(--ink-faint)); box-shadow: 0 0 9px -1px var(--nq-glow, transparent);
-}
-.nq-row:hover { background: var(--vellum-raise); }
-.nq-icon { flex: none; width: 16px; text-align: center; color: var(--nq, var(--ink-dim)); font-size: 13px; }
-.nq-verb { flex: none; font-weight: 600; font-size: 13px; color: var(--nq, var(--ink)); letter-spacing: 0.02em; }
-.nq-target { flex: none; font-family: var(--mono); font-size: 12px; color: var(--ink); }
-.nq-why { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-size: 11px; color: var(--ink-faint); }
-.nq-ship     { --nq: #e0ad4e; --nq-glow: rgba(224,173,78,0.5); }
-.nq-block    { --nq: #e8794a; --nq-glow: rgba(232,121,74,0.5); }
-.nq-open     { --nq: #9ec6b6; }
-.nq-contract { --nq: #9d8d6b; }
-.nq-review   { --nq: #c9b896; }
-.nq-decide   { --nq: var(--ink-faint); }
-
 .forest-name { font-family: var(--display); font-style: italic; font-size: 17px; flex: 1; }
 .forest-meta { color: var(--ink-faint); font-size: 11px; flex: none; }
 /* a forest with an open PR is badged (not hidden) — understated, never gold (gold is earned) */
