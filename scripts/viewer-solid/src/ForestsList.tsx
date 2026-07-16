@@ -11,6 +11,8 @@ import type { Project, Parked, PR } from "./types";
 
 const SUBROW = "epic-subrow mb-[6px] flex items-center gap-[9px]";
 const BADGE = "epic-repo-badge w-[62px] flex-none text-right text-[10px] uppercase tracking-[0.06em] text-ink-faint";
+const BAND_HEAD = "mx-1 mt-4 mb-[7px] first:mt-[2px] text-[11px] uppercase tracking-[0.09em] opacity-[0.85]";
+const MFOLD = "forest-mfold mt-2 block w-full cursor-pointer px-1 pt-[9px] pb-[5px] text-left text-[11px] leading-[1.55] tracking-[0.03em] text-ink-dim hover:text-gold-leaf";
 
 // The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
 // is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
@@ -180,9 +182,9 @@ export function ForestsList(props: {
     if (d) dropOnLane(d);
   };
   const dragWrap = (p: Project, inner: JSX.Element) => (
-    <div class="row-drag-wrap">
+    <div class="row-drag-wrap group/drag relative">
       <span
-        class="row-drag-grip"
+        class="row-drag-grip absolute -left-5 top-1/2 z-[2] -translate-y-1/2 cursor-grab select-none touch-none px-[3px] py-[6px] text-[12px] text-ink-faint opacity-0 transition-opacity duration-[120ms] hover:text-gold-leaf active:cursor-grabbing group-hover/drag:opacity-100"
         title="drag to focus lane"
         onPointerDown={(e) => dragDown(e, p)}
         onPointerMove={dragMove}
@@ -209,14 +211,15 @@ export function ForestsList(props: {
   const [mergedOpen, setMergedOpen] = createSignal(false);
   const [spikeOpen, setSpikeOpen] = createSignal(false);
   // triage row: a forest with no tier yet → one-click set into a tier. The forcing function.
+  const TRIAGE_SET = "cursor-pointer rounded-[3px] border border-rule px-[9px] py-[2px] font-mono text-[11px] text-ink-dim";
   const triageRow = (p: Project) => (
-    <div class="triage-item">
+    <div class="triage-item flex flex-col">
       {row(p, false)}
       <Show when={!triaged(p)}>
-        <div class="triage-actions">
-          <button class="triage-set committed" title="I'm shipping this" onClick={() => props.setTier(p.repo || "loops", p.name, "committed")}>● committed</button>
-          <button class="triage-set trying" title="leaning in, undecided" onClick={() => props.setTier(p.repo || "loops", p.name, "trying")}>◐ trying</button>
-          <button class="triage-set spike" title="throwaway experiment" onClick={() => props.setTier(p.repo || "loops", p.name, "spike")}>○ spike</button>
+        <div class="triage-actions mt-[2px] mb-2 ml-[10px] flex gap-[6px]">
+          <button class={`triage-set committed ${TRIAGE_SET} hover:border-gold-deep hover:text-gold-leaf`} title="I'm shipping this" onClick={() => props.setTier(p.repo || "loops", p.name, "committed")}>● committed</button>
+          <button class={`triage-set trying ${TRIAGE_SET} hover:border-patina hover:text-patina`} title="leaning in, undecided" onClick={() => props.setTier(p.repo || "loops", p.name, "trying")}>◐ trying</button>
+          <button class={`triage-set spike ${TRIAGE_SET} hover:border-ink-faint hover:text-ink-faint`} title="throwaway experiment" onClick={() => props.setTier(p.repo || "loops", p.name, "spike")}>○ spike</button>
         </div>
       </Show>
     </div>
@@ -260,13 +263,13 @@ export function ForestsList(props: {
           }
         >
           <Show when={triageList().length}>
-            <div class="forest-band-head triage-head" title="new forests with no conviction tier yet — decide: committed (ships, keeps its bands), trying, or a throwaway spike">
-              ◆ triage <span class="triage-count">{triageNag()}</span>
+            <div class={`forest-band-head triage-head ${BAND_HEAD} flex items-center gap-[6px] text-ember`} title="new forests with no conviction tier yet — decide: committed (ships, keeps its bands), trying, or a throwaway spike">
+              ◆ triage <span class="triage-count rounded-[8px] bg-ember px-[6px] font-mono text-[11px] text-vellum-night">{triageNag()}</span>
             </div>
             <For each={triageList()}>{(p) => triageRow(p)}</For>
           </Show>
           <Show when={showTierHeads()}>
-            <div class="tier-head" title="the forests you're serious about — full lifecycle bands below">committed</div>
+            <div class="tier-head mt-[18px] mb-1 border-0 border-b border-solid border-gold-deep pb-[3px] font-mono text-[11px] uppercase tracking-[0.14em] text-gold-leaf" title="the forests you're serious about — full lifecycle bands below">committed</div>
           </Show>
           <For each={bands()}>
             {(band) => (
@@ -274,7 +277,7 @@ export function ForestsList(props: {
                 when={band.key !== "dormant"}
                 fallback={
                   <>
-                    <button class="forest-mfold" onClick={() => setDormantOpen(!dormantOpen())}>
+                    <button class={MFOLD} onClick={() => setDormantOpen(!dormantOpen())}>
                       {dormantOpen() ? "▾" : "▸"} {band.items.length + band.clusters.reduce((n, c) => n + c.items.length, 0)} dormant
                     </button>
                     <Show when={dormantOpen()}>
@@ -285,7 +288,7 @@ export function ForestsList(props: {
                   </>
                 }
               >
-                <div class="forest-band-head" title={band.hint}>{band.label}</div>
+                <div class={`forest-band-head ${BAND_HEAD} text-gold-deep`} title={band.hint}>{band.label}</div>
                 <For each={band.clusters}>
                   {(cluster) => (
                     <div class="epic-cluster mx-0 mt-[2px] mb-[16px] rounded-[12px] border border-gold-deep bg-[color-mix(in_srgb,var(--color-gold-leaf)_5%,var(--color-vellum-raise))] px-[11px] pt-[9px] pb-[4px]">
@@ -308,13 +311,13 @@ export function ForestsList(props: {
             )}
           </For>
           <Show when={tryingList().length}>
-            <div class="forest-band-head tier-head-trying" title="leaning in, undecided — promote to committed or drop to spike as it proves out">
+            <div class={`forest-band-head tier-head-trying ${BAND_HEAD} text-patina`} title="leaning in, undecided — promote to committed or drop to spike as it proves out">
               ◐ trying
             </div>
             <For each={tryingList()}>{(p) => row(p, false)}</For>
           </Show>
           <Show when={spikeList().length}>
-            <button class="forest-mfold" onClick={() => setSpikeOpen(!spikeOpen())} title="throwaway experiments — right-click a forest → conviction to promote one">
+            <button class={MFOLD} onClick={() => setSpikeOpen(!spikeOpen())} title="throwaway experiments — right-click a forest → conviction to promote one">
               {spikeOpen() ? "▾" : "▸"} {spikeList().length} spike{spikeList().length === 1 ? "" : "s"}
             </button>
             <Show when={spikeOpen()}>
@@ -322,7 +325,7 @@ export function ForestsList(props: {
             </Show>
           </Show>
           <Show when={shelvedList().length}>
-            <button class="forest-mfold" onClick={() => setShelvedOpen(!shelvedOpen())} title="deliberately paused (right-click a forest → shelve); unshelve the same way">
+            <button class={MFOLD} onClick={() => setShelvedOpen(!shelvedOpen())} title="deliberately paused (right-click a forest → shelve); unshelve the same way">
               {shelvedOpen() ? "▾" : "▸"} {shelvedList().length} shelved
             </button>
             <Show when={shelvedOpen()}>
@@ -330,7 +333,7 @@ export function ForestsList(props: {
             </Show>
           </Show>
           <Show when={merged().length}>
-            <button class="forest-mfold" onClick={() => setMergedOpen(!mergedOpen())}>
+            <button class={MFOLD} onClick={() => setMergedOpen(!mergedOpen())}>
               {mergedOpen() ? "▾" : "▸"} {merged().length} recently merged
             </button>
             <Show when={mergedOpen()}>
@@ -340,7 +343,7 @@ export function ForestsList(props: {
         </Show>
         <Show when={rowDrag()}>
           {(d) => (
-            <div class="drag-ghost" style={{ left: `${d().x}px`, top: `${d().y}px` }}>
+            <div class="drag-ghost pointer-events-none fixed z-40 translate-x-3 -translate-y-1/2 whitespace-nowrap rounded-[4px] border border-solid border-gold-deep bg-vellum-raise px-3 py-1 font-display text-[14px] italic text-ink shadow-[0_6px_18px_rgba(0,0,0,0.4)]" style={{ left: `${d().x}px`, top: `${d().y}px` }}>
               {d().name}
             </div>
           )}
