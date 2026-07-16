@@ -274,7 +274,8 @@ Each branch is **one reviewable unit — a single capability that compiles on it
 
 ## Ordering & shape
 
-- **Bottom-up by dependency**: schema/migration → queries → models → wiring → refactors/cleanup.
+- **The canonical project skeleton is a layer-per-band line**: **cleanup → queries + tests → models + tests → wiring + tests → endpoints + tests** (endpoints only when it's not tRPC; tRPC routers are wiring). Most features fall straight onto this ladder — reach for it first, and let a band be empty (no models layer, say) rather than fusing two layers to fill it. Tests ride in the *same* band as the code they cover, never a band of their own.
+- **A foundational cleanup goes FIRST, at the bottom — not last.** The order is *by dependency*, so a refactor that later bands build on (extract a helper, move a value into `AppEnv`, add a column) is the base off `main` that the queries/models chain onto. "Cleanup last" only applies to a *post-hoc* tidy that nothing downstream depends on. When a band defaults to `X` from a primitive the cleanup introduces, that primitive is a real dependency → chain, and it sits underneath.
 - **Independent capabilities fork off `main` as siblings**, not chained — each independently mergeable. Only chain on a real dependency.
 - **Integrators fan in**: a branch that needs several independent bases sets `requires` on them (and carries their commits), rather than forcing the bases into a false line.
 - **Tests co-locate** with the code they test (`createX` with queries, `fakeX` with models).
