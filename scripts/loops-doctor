@@ -75,6 +75,12 @@ check_http() { # label port url
     PROBLEMS=$((PROBLEMS + 1))
     return 1
   fi
+  # 503 is the service reporting its own loop has stopped.
+  if [ "$code" = "503" ]; then
+    row "$label" "$(red stalled)" "it says its loop stopped (:$port → 503)"
+    PROBLEMS=$((PROBLEMS + 1))
+    return 1
+  fi
   row "$label" "$(green ok)" "$(dim ":$port → $code")"
   return 0
 }
@@ -191,6 +197,8 @@ run_checks() {
   check_next_server "dev server" 3000 "http://localhost:3000/" || true
   check_jobs_consumer || true
   check_http "mail-schedule" 3005 "http://localhost:3005/" || true
+  check_http "croon" 3003 "http://localhost:3003/" || true
+  check_http "permaloop" 3002 "http://localhost:3002/" || true
   check_previews || true
 }
 
