@@ -173,7 +173,8 @@ def gates_progress(req, u):
 # a message reword must not relock push — the tip-sha key stranded green on rewords
 # (2026-07-12). Config, not process memory, so a server bounce doesn't relock push either.
 def _green_tree(branch):
-    return ctx.run(["git", "config", "--get", f"stack-branch.{branch}.gates-green-tree"]).stdout.strip()
+    return (ctx.run(["git", "config", "--get", f"branch.{branch}.stack-gates-green-tree"]).stdout.strip()
+            or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.gates-green-tree"]).stdout.strip())
 
 
 def _record_green(branch, tree):

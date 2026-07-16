@@ -20,14 +20,21 @@ def _members(project):
     """The forest's live branches: config seeds ∪ .project tags, expanded along
     parent edges (a child follows its forest even when its own tag rotted)."""
     seeds = set(ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split())
+    tags = {}
     for line in ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.project$"]).stdout.splitlines():
         key, _, val = line.partition(" ")
-        if val.strip() == project:
-            seeds.add(key[len("stack-branch."):-len(".project")])
+        tags[key[len("stack-branch."):-len(".project")]] = val.strip()
+    for line in ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-project$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        tags[key[len("branch."):-len(".stack-project")]] = val.strip()
+    seeds |= {b for b, p in tags.items() if p == project}
     parents = {}
     for line in ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout.splitlines():
         key, _, val = line.partition(" ")
         parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    for line in ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-parent$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        parents[key[len("branch."):-len(".stack-parent")]] = val.strip()
     grew = True
     while grew:
         grew = False

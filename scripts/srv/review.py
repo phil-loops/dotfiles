@@ -35,6 +35,7 @@ _mcache_lock = threading.Lock()
 _MODEL_CFG = re.compile(
     r"^(stack\.main-branch="
     r"|branch\.[^=]+\.description="
+    r"|branch\.[^=]+\.stack-(parent|requires|project)="
     r"|stack-branch\.[^=]+\.(parent|requires|project)="
     r"|stack-project\.[^=]+\.(branch|archived|interest)=)")
 
@@ -68,10 +69,14 @@ def _known_forest_name(name):
         return True
     if ctx.run(["git", "config", "--get-all", f"stack-project.{name}.branch"]).stdout.strip():
         return True
+    tags = {}
     for line in ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.project$"]).stdout.splitlines():
-        if line.partition(" ")[2].strip() == name:
-            return True
-    return False
+        key, _, val = line.partition(" ")
+        tags[key[len("stack-branch."):-len(".project")]] = val.strip()
+    for line in ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-project$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        tags[key[len("branch."):-len(".stack-project")]] = val.strip()
+    return name in tags.values()
 
 
 def model(req, u):
@@ -154,7 +159,8 @@ def _is_convergence(branch, stdout):
             return False  # has its own contribution — an ordinary node, not a convergence
     except ValueError:
         return False
-    return bool(ctx.run(["git", "config", "--get-all", f"stack-branch.{branch}.requires"]).stdout.strip())
+    return bool(ctx.run(["git", "config", "--get-all", f"branch.{branch}.stack-requires"]).stdout.strip()
+                or ctx.run(["git", "config", "--get-all", f"stack-branch.{branch}.requires"]).stdout.strip())
 
 
 def node(req, u):
@@ -242,7 +248,8 @@ def commits(req, u):
     # ancestor history it forked from (own:false) so the list reads like a real timeline —
     # not just the parent..branch delta. `own` membership is the rev-list of parent..branch.
     branch = parse_qs(u.query).get("branch", [""])[0]
-    parent = ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
     own = set(ctx.run(["git", "rev-list", f"{parent}..{branch}"]).stdout.split())
     fmt = "%H\x1f%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
     out = ctx.run(["git", "log", branch, f"--format={fmt}", "--date=short", "-n", "80"]).stdout

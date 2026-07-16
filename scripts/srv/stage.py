@@ -15,7 +15,8 @@ from . import ctx, sync
 
 
 def _parent(branch):
-    return ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main"
+    return (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+            or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
 
 
 def _chain(project):
