@@ -45,7 +45,7 @@ if [[ -n "$desc" ]]; then
   jq -n --arg t "$desc" '{thesis:$t, enables:"", source:"description"}'; exit 0
 fi
 
-parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 ledger="$git_dir/stack-purpose.json"
@@ -64,8 +64,11 @@ fi
 
 # 4) generate a suggestion (opt-in, the only token path)
 diff="$(git diff "${parent}...${branch}")"; diff="${diff[1,12000]}"
-children=$(git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
-  | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}' | paste -sd', ' -)
+children=$({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null \
+    | sed -E 's/^branch\.(.*)\.stack-parent /\1 /' || :
+  git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null \
+    | sed -E 's/^stack-branch\.(.*)\.parent /\1 /' || :
+  } | awk -v p="$branch" 'NF && !seen[$1]++ && $2==p{print $1}' | paste -sd', ' -)
 
 read -r -d '' prompt <<EOF || true
 You are summarizing one branch in a stacked-PR series for a teammate skimming a dependency graph.

@@ -101,6 +101,7 @@ def trunk_base(parent):
 
 # ---- one config read → parents / children / requires / project seeds ------
 parents, children, seeds, requires, archived = {}, {}, {}, {}, set()
+new_parents, new_requires, new_tags, old_tags = {}, {}, {}, {}
 for line in git_out(["config", "--local", "--list"]).splitlines():
     if "=" not in line:
         continue
@@ -109,10 +110,18 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     if m:
         parents[m.group(1)] = v
         continue
+    m = re.match(r"^branch\.(.+)\.stack-parent$", k)
+    if m:
+        new_parents[m.group(1)] = v
+        continue
     # fan-in deps (multivar): branches a node carries beyond its single parent
     m = re.match(r"^stack-branch\.(.+)\.requires$", k)
     if m:
         requires.setdefault(m.group(1), []).append(v)
+        continue
+    m = re.match(r"^branch\.(.+)\.stack-requires$", k)
+    if m:
+        new_requires.setdefault(m.group(1), []).append(v)
         continue
     # per-branch project tag (stack-branch.<b>.project = <name>) — the rot-free
     # successor to the stack-project.<name>.branch registry: the tag lives on the
@@ -120,7 +129,12 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     # during migration; a branch tagged into project N is a seed of N.
     m = re.match(r"^stack-branch\.(.+)\.project$", k)
     if m:
+        old_tags[m.group(1)] = v
         seeds.setdefault(v, []).append(m.group(1))
+        continue
+    m = re.match(r"^branch\.(.+)\.stack-project$", k)
+    if m:
+        new_tags[m.group(1)] = v
         continue
     m = re.match(r"^stack-project\.(.+)\.branch$", k)
     if m:
@@ -131,6 +145,15 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     m = re.match(r"^stack-project\.(.+)\.archived$", k)
     if m and v.strip().lower() == "true":
         archived.add(m.group(1))
+parents.update(new_parents)
+requires.update(new_requires)
+for b, p in new_tags.items():
+    old = old_tags.get(b)
+    if old and old != p and b in seeds.get(old, []):
+        seeds[old].remove(b)
+        if not seeds[old]:
+            del seeds[old]
+    seeds.setdefault(p, []).append(b)
 for b, p in parents.items():
     children.setdefault(p, []).append(b)
 # a branch may appear in seeds from both the legacy registry and its per-branch
@@ -276,7 +299,8 @@ if not node_mode and target == "--standalone":
     def standalone_row(b):
         if b not in existing:        # ref deleted out from under the config → drop
             return None
-        base = git_out(["config", f"stack-branch.{b}.parent"]).strip() or MAIN
+        base = (git_out(["config", f"branch.{b}.stack-parent"]).strip()
+                or git_out(["config", f"stack-branch.{b}.parent"]).strip() or MAIN)
         n = git_out(["rev-list", "--count", f"{base}..{b}"]).strip()
         ahead = int(n) if n.isdigit() else 0
         add = dele = 0

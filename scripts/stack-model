@@ -16,14 +16,14 @@ here="${0:A:h}"
 
 chain=("$branch"); b="$branch"
 while :; do
-  p=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "")
+  p=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "")
   [[ -z "$p" || "$p" == "$MAIN" ]] && break
   chain=("$p" "${chain[@]}"); b="$p"
 done
 
 links_json='[]'
 for child in "${chain[@]}"; do
-  parent=$(git config "stack-branch.${child}.parent" 2>/dev/null || echo "$MAIN")
+  parent=$(git config "branch.${child}.stack-parent" 2>/dev/null || git config "stack-branch.${child}.parent" 2>/dev/null || echo "$MAIN")
   state=$("$here/stack-blessed-status" "$child" --parent "$parent")
   files_json='[]'
   while IFS= read -r row; do
