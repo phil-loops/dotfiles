@@ -93,7 +93,7 @@ if (( unbless )); then
 fi
 
 # resolve parent for the file list
-[[ -n "$parent" ]] || parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+[[ -n "$parent" ]] || parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 
 # the trunk bless-base is the REMOTE trunk (origin/main) — what the branch merges into — so a

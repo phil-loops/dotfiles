@@ -30,7 +30,7 @@ while (( $# )); do
 done
 [[ -n "$branch" ]] || { echo "usage: stack-blessed-status <branch> [--parent p] [--pretty]" >&2; exit 2; }
 
-[[ -n "$parent" ]] || parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true)
+[[ -n "$parent" ]] || parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 
 git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
