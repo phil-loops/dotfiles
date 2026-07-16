@@ -214,7 +214,10 @@ body {
 @starting-style { .dirt-receipt { opacity: 0; } }
 
 /* ── review surface ─────────────────────────────────────────────────── */
-.surface { padding: 30px 34px 90px; max-width: 1500px; }
+/* min-width 0: a grid child defaults to min-width:auto, so a diff table's min-content
+   silently widens the 1fr track past the viewport — the page scrolled sideways at narrow
+   widths while .diff's own overflow-x never engaged. */
+.surface { padding: 30px 34px 90px; max-width: 1500px; min-width: 0; }
 
 /* the message editor — prep's landing: the one outgoing commit, editable pre-push */
 .nh-editor {
@@ -361,7 +364,9 @@ body {
 
 /* subpixel-weight smoothing (not the body's antialiased) so strokes stay heavy on
    dark — color contrast was already maxed; the text just read thin. */
-.diff { padding: 2px 0 6px; font-size: 12px; -webkit-font-smoothing: auto; background: var(--diff-bg); }
+/* overflow-x: a d2h table's min-content (one long unbreakable token) can exceed the column
+   at narrow viewports; the diff scrolls inside its card — the PAGE never scrolls sideways. */
+.diff { padding: 2px 0 6px; font-size: 12px; -webkit-font-smoothing: auto; background: var(--diff-bg); overflow-x: auto; }
 
 /* ── diff2html: keep its dark-scheme LAYOUT intact, only re-tint colors so gold
    stays reserved (adds = sage, dels = ember). Never touch padding/border/position. ── */
