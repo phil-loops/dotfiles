@@ -78,9 +78,9 @@
 /div[1]/div[1]/div[2]/svg[1]/g[13]/circle[2] 0,0 0x0
 /div[1]/div[1]/div[2]/svg[1]/g[13]/text[3] 446,644 260x24
 /div[1]/div[1]/div[2]/svg[1]/g[13]/text[4] 714,649 83x18
-/div[1]/div[3] 14,880 8x8
-/div[1]/div[3]/span[1] 14,880 8x8
-/div[1]/div[4] 14,853 46x33
-/div[1]/div[4]/button[1] 15,854 44x31
-/div[1]/div[4]/button[1]/span[1] 26,866 7x7
-/div[1]/div[4]/button[1]/span[2] 40,860 7x19
+/div[1]/div[2] 14,880 8x8
+/div[1]/div[2]/span[1] 14,880 8x8
+/div[1]/div[3] 14,853 46x33
+/div[1]/div[3]/button[1] 15,854 44x31
+/div[1]/div[3]/button[1]/span[1] 26,866 7x7
+/div[1]/div[3]/button[1]/span[2] 40,860 7x19
