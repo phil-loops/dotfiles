@@ -144,7 +144,7 @@ export function NodeHeader(props: {
               />
             </Show>
             <Show when={canMutate}>
-              <span class="sp-anchor">
+              <span class="sp-anchor relative inline-flex">
                 <button class="icon-btn" onClick={() => setChatPick((v) => !v)} title="chat about this whole branch — pick a live claude session or a new pane beside you">
                   ✦
                 </button>
