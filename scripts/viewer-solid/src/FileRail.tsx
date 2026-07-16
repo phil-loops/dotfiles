@@ -10,6 +10,14 @@ import type { FileDiff, Commit } from "./types";
 const FILE_ACT =
   "file-act flex-none cursor-pointer rounded-[7px] border px-[10px] py-1 text-[11px] leading-[1.55] tracking-[0.04em] transition-[background,border-color,color] duration-[120ms]";
 const FILE_ACT_QUIET = "border-rule bg-transparent text-ink-faint hover:border-ink-faint hover:text-ink";
+const LOADING = "loading px-1 py-[14px] italic text-ink-faint";
+// the dirt inputs never set a font family — they render in the UA's default, same as pre-Tailwind
+const UR_INPUT = "ur-commit-input flex-1 rounded-[3px] border border-rule bg-vellum-edge px-2 py-1 text-[12px] text-ink outline-none focus:border-del";
+// no background here — the armed reject flips to bg-del, so each caller sets its own (rule 8)
+const UR_VERDICT = "cursor-pointer rounded-[5px] px-[10px] py-[2px] text-[11px] leading-[1.55]";
+const UR_GO =
+  "ur-commit-go flex-none cursor-pointer rounded-[3px] border border-del bg-del-bg px-[10px] py-1 text-[12px] font-semibold text-del enabled:hover:bg-del enabled:hover:text-vellum-night disabled:cursor-not-allowed disabled:opacity-40";
+const UR_ERR = "ur-commit-err mx-[2px] mt-[-6px] mb-[10px] text-[11px] text-del";
 
 function patchLineCounts(patch: string): { add: number; del: number } {
   let add = 0, del = 0;
@@ -78,12 +86,12 @@ export function DirtyRail(props: {
   };
 
   return (
-    <div class="uncommitted-rail">
-      <div class="ur-head">
-        <span class="ur-label">± uncommitted — working tree only</span>
-        <span class="ur-wt">{props.worktree.replace(/.*\//, "")}</span>
+    <div class="uncommitted-rail mt-[26px] border-t-2 border-x-0 border-b-0 border-dashed border-del pt-3">
+      <div class="ur-head mx-[2px] mt-0 mb-[10px] flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-del">
+        <span class="ur-label flex-1">± uncommitted — working tree only</span>
+        <span class="ur-wt flex-none font-normal normal-case tracking-normal text-ink-faint">{props.worktree.replace(/.*\//, "")}</span>
         <button
-          class="ur-stash-btn"
+          class="ur-stash-btn flex-none cursor-pointer rounded-[3px] border border-ink-faint bg-transparent px-2 py-[2px] text-[10px] font-semibold normal-case tracking-[0.05em] text-ink-faint enabled:hover:bg-vellum-raise enabled:hover:text-ink disabled:cursor-default disabled:opacity-50"
           title="stash all uncommitted changes (incl. untracked) — clears the tree for a blocked squash; recover with git stash pop"
           disabled={busy()}
           onClick={stashAll}
@@ -91,7 +99,7 @@ export function DirtyRail(props: {
           ⇤ stash all
         </button>
         <button
-          class="ur-commit-btn"
+          class="ur-commit-btn flex-none cursor-pointer rounded-[3px] border border-del bg-transparent px-2 py-[2px] text-[10px] font-semibold normal-case tracking-[0.05em] text-del hover:bg-del-bg"
           title="commit all uncommitted changes to this branch"
           onClick={() => { setShowForm((v) => !v); setTimeout(() => inputEl?.focus(), 0); }}
         >
@@ -99,22 +107,22 @@ export function DirtyRail(props: {
         </button>
       </div>
       <Show when={showForm()}>
-        <div class="ur-commit-form">
+        <div class="ur-commit-form mx-[2px] mt-0 mb-3 flex gap-[6px]">
           <input
             ref={inputEl}
-            class="ur-commit-input"
+            class={UR_INPUT}
             placeholder="commit message…"
             value={msg()}
             onInput={(e) => setMsg(e.currentTarget.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
             disabled={busy()}
           />
-          <button class="ur-commit-go" onClick={submit} disabled={busy() || !msg().trim()}>
+          <button class={UR_GO} onClick={submit} disabled={busy() || !msg().trim()}>
             {busy() ? "…" : "commit"}
           </button>
         </div>
         <Show when={err()}>
-          <div class="ur-commit-err">{err()}</div>
+          <div class={UR_ERR}>{err()}</div>
         </Show>
       </Show>
       <For each={props.dirty}>
@@ -178,15 +186,15 @@ function DirtFile(props: {
     post("/discard-dirty", { branch: props.branch, path: props.f.path });
   };
   return (
-    <div class="ur-file">
-      <div class="ur-file-acts">
+    <div class="ur-file relative">
+      <div class="ur-file-acts mx-[2px] mt-[10px] mb-1 flex items-center justify-end gap-2">
         <Show
           when={!form()}
           fallback={
             <>
               <input
                 ref={inputEl}
-                class="ur-commit-input"
+                class={UR_INPUT}
                 placeholder={`message for ${props.f.path.replace(/.*\//, "")}…`}
                 value={msg()}
                 onInput={(e) => setMsg(e.currentTarget.value)}
@@ -200,18 +208,18 @@ function DirtFile(props: {
                 disabled={busy()}
               />
               <button
-                class="ur-commit-go"
+                class={UR_GO}
                 disabled={busy() || !msg().trim()}
                 onClick={() => post("/commit-dirty", { branch: props.branch, message: msg().trim(), path: props.f.path })}
               >
                 {busy() ? "…" : "commit"}
               </button>
-              <button class="ur-file-x" onClick={() => setForm(false)}>✕</button>
+              <button class={`ur-file-x ${UR_VERDICT} border-0 bg-transparent text-ink-faint`} onClick={() => setForm(false)}>✕</button>
             </>
           }
         >
           <button
-            class="ur-file-accept"
+            class={`ur-file-accept ${UR_VERDICT} border border-add bg-transparent text-add opacity-85 enabled:hover:opacity-100`}
             disabled={busy()}
             title="accept — commit just this file to the branch (message next)"
             onClick={() => { setForm(true); setTimeout(() => inputEl?.focus(), 0); }}
@@ -219,8 +227,9 @@ function DirtFile(props: {
             ✓ accept
           </button>
           <button
-            class="ur-file-reject"
-            classList={{ armed: armed() }}
+            class={`ur-file-reject ${UR_VERDICT} border border-del opacity-85 enabled:hover:opacity-100 ${
+              armed() ? "armed bg-del font-semibold text-vellum-night" : "bg-transparent text-del"
+            }`}
             disabled={busy()}
             title="reject — a tracked file restores to HEAD, an untracked one is deleted. This destroys the uncommitted work; two clicks."
             onClick={reject}
@@ -229,7 +238,7 @@ function DirtFile(props: {
           </button>
         </Show>
         <Show when={err()}>
-          <span class="ur-commit-err">{err()}</span>
+          <span class={UR_ERR}>{err()}</span>
         </Show>
       </div>
       <FileEntry
@@ -307,7 +316,7 @@ export function FileEntry(props: {
           matching: "lines",
           colorScheme: ColorSchemeType.DARK,
         })
-      : `<p class="empty">no textual diff</p>`;
+      : `<p class="empty px-1 py-[14px] italic text-ink-faint">no textual diff</p>`;
   const seg = (p: string): JSX.Element => {
     const i = p.lastIndexOf("/");
     return i < 0 ? <b>{p}</b> : [<span class="dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
@@ -429,9 +438,9 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
       </button>
       <Show when={open()}>
         <div class="commit-diff">
-          <Show when={diff()} fallback={<p class="loading">loading…</p>}>
+          <Show when={diff()} fallback={<p class={LOADING}>loading…</p>}>
             {(d) => (
-              <Show when={d().files.length} fallback={<p class="loading">no file changes (merge or empty commit)</p>}>
+              <Show when={d().files.length} fallback={<p class={LOADING}>no file changes (merge or empty commit)</p>}>
                 <For each={d().files}>
                   {(f) => <FileEntry file={f} bless={noBless} branch={props.branch} readOnly onChat={props.onChat} />}
                 </For>
@@ -448,9 +457,9 @@ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: 
   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
   return (
-    <Show when={props.q.data} fallback={<p class="loading">loading…</p>}>
+    <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
-        <Show when={data().length} fallback={<p class="loading">no commits on this branch</p>}>
+        <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
           <ol class="commits">
             <For each={own()}>
               {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}

@@ -176,75 +176,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ── shell: forest spine | review surface ───────────────────────────── */
-.shell { display: grid; grid-template-columns: 264px 1fr; min-height: 100vh; }
-/* collapse the file panel to hand the diff the full width — one column, so main (the only
-   in-flow grid child once the spine is hidden) fills it instead of landing in a 0-width track */
-.shell.panel-collapsed { grid-template-columns: 1fr; }
-.shell.panel-collapsed .spine { display: none; }
-.panel-collapse {
-  position: absolute; top: 20px; right: 6px; z-index: 2; padding: 2px 6px;
-  background: none; border: 0; cursor: pointer; font-family: var(--mono);
-  font-size: 16px; line-height: 1; color: var(--ink-faint);
-}
-.panel-collapse:hover { color: var(--ink); }
-.panel-reopen {
-  position: fixed; left: 0; top: 16px; z-index: 5; padding: 7px 9px;
-  background: var(--vellum-edge); border: 1px solid var(--rule); border-left: 0;
-  border-radius: 0 8px 8px 0; cursor: pointer; font-family: var(--mono);
-  font-size: 15px; line-height: 1; color: var(--ink-dim);
-}
-.panel-reopen:hover { color: var(--gold-leaf); border-color: var(--gold-deep); }
-
-.spine {
-  border-right: 1px solid var(--rule);
-  background: linear-gradient(180deg, var(--vellum-raise), var(--vellum-night));
-  padding: 22px 0 40px;
-  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
-}
-.spine-meta {
-  color: var(--ink-faint); font-size: 10px; letter-spacing: 0.18em;
-  text-transform: uppercase; padding: 0 20px; margin: 4px 0 18px;
-}
-.spine-empty { color: var(--ink-faint); padding: 20px; font-style: italic; }
-.spine-node {
-  display: flex; align-items: center; gap: 9px; padding: 7px 16px 7px 12px;
-  cursor: pointer; border-left: 2px solid transparent; position: relative;
-  transition: background 0.12s, border-color 0.12s;
-}
-.spine-node:hover { background: var(--vellum-edge); }
-.spine-node.active { background: var(--vellum-edge); border-left-color: var(--gold-leaf); }
-.dot {
-  width: 8px; height: 8px; border-radius: 50%; flex: none;
-  background: var(--vellum-night); border: 1.5px solid var(--ink-faint);
-}
-.dot.blessed { background: var(--gold-leaf); border-color: var(--gold-leaf); box-shadow: 0 0 7px var(--gold-wash); }
-.dot.stale { background: transparent; border-color: var(--patina); box-shadow: inset 0 0 0 1.5px var(--patina); }
-.dot.unblessed { background: transparent; border-color: var(--ink-faint); }
-.dot.dirt { background: transparent; border: 1px dashed var(--ink-dim); }
-
-/* per-file dirt verdicts — accept commits the one file, reject destroys (armed) */
-.ur-file { position: relative; }
-.ur-file-acts {
-  display: flex; gap: 8px; align-items: center; justify-content: flex-end;
-  margin: 10px 2px 4px;
-}
-.ur-file-accept, .ur-file-reject, .ur-file-x {
-  font: inherit; font-size: 11px; cursor: pointer; padding: 2px 10px; border-radius: 5px;
-  background: transparent;
-}
-.ur-file-accept { color: var(--add); border: 1px solid var(--add); opacity: 0.85; }
-.ur-file-accept:hover:not(:disabled) { opacity: 1; }
-.ur-file-reject { color: var(--del); border: 1px solid var(--del); opacity: 0.85; }
-.ur-file-reject:hover:not(:disabled) { opacity: 1; }
-.ur-file-reject.armed { color: var(--vellum-night); background: var(--del); font-weight: 600; }
-.ur-file-x { color: var(--ink-faint); border: 0; }
-.dirt-receipt {
-  margin: 14px 2px; font-size: 12px; color: var(--add);
-  transition: opacity 240ms ease;
-}
-@starting-style { .dirt-receipt { opacity: 0; } }
-
 /* ── review surface ─────────────────────────────────────────────────── */
 /* min-width 0: a grid child defaults to min-width:auto, so a diff table's min-content
    silently widens the 1fr track past the viewport — the page scrolled sideways at narrow
@@ -322,41 +253,6 @@ body {
 .nh-dirt-files code { font-size: 11px; color: var(--ink); background: var(--vellum-edge); padding: 1px 6px; border-radius: 4px; }
 .nh-dirt-acts { display: flex; gap: 9px; }
 
-/* uncommitted rail — working-tree dirt, visually apart from the committed review set */
-.uncommitted-rail { margin-top: 26px; border-top: 1px dashed var(--del); border-top-width: 2px; padding-top: 12px; }
-.ur-head {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--del); margin: 0 2px 10px; display: flex; align-items: center; gap: 8px;
-}
-.ur-label { flex: 1; }
-.ur-wt { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-faint); flex: none; }
-.ur-commit-btn {
-  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: none;
-  padding: 2px 8px; border: 1px solid var(--del); border-radius: 3px; background: transparent;
-  color: var(--del); cursor: pointer;
-}
-.ur-commit-btn:hover { background: var(--del-bg); }
-.ur-stash-btn {
-  flex: none; font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: none;
-  padding: 2px 8px; border: 1px solid var(--ink-faint); border-radius: 3px; background: transparent;
-  color: var(--ink-faint); cursor: pointer;
-}
-.ur-stash-btn:hover:not(:disabled) { background: var(--vellum-raise); color: var(--ink); }
-.ur-stash-btn:disabled { opacity: 0.5; cursor: default; }
-.ur-commit-form { display: flex; gap: 6px; margin: 0 2px 12px; }
-.ur-commit-input {
-  flex: 1; background: var(--vellum-edge); border: 1px solid var(--rule); border-radius: 3px;
-  color: var(--ink); font-size: 12px; padding: 4px 8px; outline: none;
-}
-.ur-commit-input:focus { border-color: var(--del); }
-.ur-commit-go {
-  flex: none; padding: 4px 10px; border: 1px solid var(--del); border-radius: 3px;
-  background: var(--del-bg); color: var(--del); font-size: 12px; font-weight: 600; cursor: pointer;
-}
-.ur-commit-go:disabled { opacity: 0.4; cursor: not-allowed; }
-.ur-commit-go:not(:disabled):hover { background: var(--del); color: var(--vellum-night); }
-.ur-commit-err { font-size: 11px; color: var(--del); margin: -6px 2px 10px; }
-
 /* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
 .icon-btn {
   font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);
@@ -364,8 +260,6 @@ body {
   padding: 4px 9px; cursor: pointer;
 }
 .icon-btn:hover, .icon-btn.on { color: var(--ink); border-color: var(--rule); background: var(--vellum-edge); }
-
-.loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
 
 /* subpixel-weight smoothing (not the body's antialiased) so strokes stay heavy on
    dark — color contrast was already maxed; the text just read thin. */

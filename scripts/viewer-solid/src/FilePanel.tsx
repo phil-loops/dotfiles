@@ -2,6 +2,11 @@ import { Show, For, type JSX } from "solid-js";
 import { Link } from "./router";
 import type { NodeData, SpineNode, FileDiff } from "./types";
 
+// the review dots: shared spine/file-list state vocabulary (ForestRow's forest-dot is its own)
+const DOT = "dot h-2 w-2 flex-none rounded-full";
+const SPINE_META = "spine-meta mx-0 mt-1 mb-[18px] px-5 text-[10px] uppercase tracking-[0.18em] text-ink-faint";
+const SPINE_EMPTY = "spine-empty p-5 italic text-ink-faint";
+
 const ITEM =
   "file-item flex cursor-pointer items-center gap-[9px] border-l-2 py-[6px] pr-[16px] pl-[12px] transition-[background,border-color] duration-[120ms]";
 const itemState = (active: boolean) =>
@@ -29,9 +34,9 @@ export function FilePanel(props: {
   onRestorePanel: () => void;
 }) {
   return (
-      <aside class="spine">
+      <aside class="spine sticky top-0 h-screen self-start overflow-y-auto border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] [.panel-collapsed_&]:hidden">
         <button
-          class="panel-collapse"
+          class="panel-collapse absolute top-5 right-[6px] z-[2] cursor-pointer px-[6px] py-[2px] font-mono text-[16px] leading-none text-ink-faint hover:text-ink"
           title="collapse the file panel for more diff width (b)"
           onClick={() => props.onPanelClose()}
         >
@@ -42,18 +47,18 @@ export function FilePanel(props: {
         </Link>
         {/* the branch tree migrated to the docked map (the navigator); the spine is now the
             file list for the active branch. */}
-        <Show when={props.spine().length} fallback={<div class="spine-empty">{props.project()}</div>}>
-          <Show when={props.nodeData()} fallback={<div class="spine-meta">loading…</div>}>
+        <Show when={props.spine().length} fallback={<div class={SPINE_EMPTY}>{props.project()}</div>}>
+          <Show when={props.nodeData()} fallback={<div class={SPINE_META}>loading…</div>}>
             {(data) => (
               <>
-                <div class="spine-meta">
+                <div class={SPINE_META}>
                   {props.isGhost()
                     ? `${data().files.length} files · ✦ all changes`
                     : `${data().files.filter(props.blessedOf).length}/${data().files.length} files blessed`}
                 </div>
                 <Show
                   when={data().files.length}
-                  fallback={<div class="spine-empty">nothing to review</div>}
+                  fallback={<div class={SPINE_EMPTY}>nothing to review</div>}
                 >
                   <input
                     class="file-filter"
@@ -80,7 +85,13 @@ export function FilePanel(props: {
                           onClick={() => props.scrollToFile(f.path)}
                           title={f.path}
                         >
-                          <span class={`dot ${props.blessedOf(f) ? "blessed" : "unblessed"}`} />
+                          <span
+                            class={`${DOT} ${
+                              props.blessedOf(f)
+                                ? "blessed border-[1.5px] border-solid border-gold-leaf bg-gold-leaf shadow-[0_0_7px_var(--color-gold-wash)]"
+                                : "unblessed border-[1.5px] border-solid border-ink-faint bg-transparent"
+                            }`}
+                          />
                           <span
                             class={`${NAME} ${props.activeFile() === f.path ? "text-ink" : "text-ink-dim"} ${
                               props.blessedOf(f) ? "[&_b]:font-medium [&_b]:text-gold-leaf" : "[&_b]:font-semibold"
@@ -115,7 +126,7 @@ export function FilePanel(props: {
                             onClick={() => props.scrollToFile(f.path)}
                             title={f.path}
                           >
-                            <span class="dot dirt" />
+                            <span class={`${DOT} dirt border border-dashed border-ink-dim bg-transparent`} />
                             <span
                               class={`${NAME} [&_b]:font-semibold ${props.activeFile() === f.path ? "text-ink" : "text-ink-dim"}`}
                             >
