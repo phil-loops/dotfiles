@@ -1133,3 +1133,44 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .action-btn.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
 .action-btn.running { color: var(--patina); border-color: transparent; opacity: 0.7; }
 .action-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* ── re-entry header: "since you were last here" ─────────────────────── */
+.reentry {
+  margin: 14px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--gold-deep);
+  border-radius: 4px;
+  background: var(--vellum-raise);
+}
+.reentry-head { display: flex; align-items: baseline; justify-content: space-between; }
+.reentry-when { color: var(--ink-faint); font-weight: 400; }
+.reentry-caught {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+  background: none; border: 1px solid var(--rule); border-radius: 3px;
+  padding: 2px 8px; cursor: pointer;
+}
+.reentry-caught:hover { color: var(--gold-leaf); border-color: var(--gold-deep); }
+.reentry-lines { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+.reentry-line {
+  font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+}
+.reentry-n { color: var(--gold-leaf); font-weight: 600; margin-right: 4px; }
+.reentry-names { color: var(--ink-dim); }
+.reentry-dim { color: var(--ink-faint); }
+.reentry-mlink { color: var(--patina); text-decoration: none; }
+.reentry-mlink:hover { color: var(--gold-leaf); }
+.reentry-resume {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule);
+  text-decoration: none;
+}
+.reentry-resume-tag { color: var(--gold-leaf); font-family: var(--mono); font-size: 12px; }
+.reentry-resume-name { color: var(--ink); font-weight: 600; }
+.reentry-resume .reentry-dim { font-family: var(--mono); font-size: 11px; }
+.reentry-resume-next {
+  font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
+  margin-left: auto; padding: 1px 8px; border: 1px solid var(--rule); border-radius: 3px;
+}
+.reentry-resume-next.yours { color: var(--ember); border-color: var(--ember); background: var(--ember-wash); }
+.reentry-resume:hover .reentry-resume-name { color: var(--gold-leaf); }
