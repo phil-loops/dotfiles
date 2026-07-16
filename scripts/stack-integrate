@@ -3,18 +3,10 @@
 # leaves of a stack-project on top of main. Represents the virtual "feature"
 # node: what main looks like when the whole project ships.
 #
-# Usage: loops stack integrate <project>                  # build, print ref name
-#        loops stack integrate <project> --check          # exit 0 if clean, 1 if conflicts
-#        loops stack integrate <project> --status         # --check + report playground worktree state (k: v lines)
-#        loops stack integrate <project> --worktree       # build + check out the playground worktree (refresh only if it has no tracked edits)
-#        loops stack integrate <project> --worktree-reset # build + FORCE the playground onto the latest integration, discarding its tracked edits
-#        loops stack integrate --all                      # build for every project
-#
-# --status/--worktree/--worktree-reset print machine-readable lines:
-#   playground: <path> / exists: 0|1 / dirty: 0|1 / fresh: 0|1
-# dirty = tracked edits only (-uno; untracked scratch files never block a refresh).
-# fresh = the playground's HEAD TREE equals the integration ref's tree (sha compare
-# would always differ — every rebuild mints a new merge commit).
+# Usage: loops stack integrate <project>            # build, print ref name
+#        loops stack integrate <project> --check    # exit 0 if clean, 1 if conflicts
+#        loops stack integrate <project> --worktree # build + check out into a playground worktree, print its path
+#        loops stack integrate --all                # build for every project
 #
 # Ref name: refs/stack/<project>-integration  (under refs/stack/, not refs/heads/
 # — invisible to `git branch`, ephemeral, never pushed). Refreshed on every call.
@@ -32,70 +24,39 @@ set -e
 
 MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 CHECK_ONLY=0
-STATUS=0
 WORKTREE=0
-RESET=0
 ALL=0
 PROJECT=""
 for arg in "$@"; do
   case "$arg" in
     --check) CHECK_ONLY=1 ;;
-    --status) STATUS=1 ;;
     --worktree) WORKTREE=1 ;;
-    --worktree-reset) WORKTREE=1; RESET=1 ;;
     --all) ALL=1 ;;
     --*) echo "unknown flag: $arg" >&2; exit 2 ;;
     *) [[ -z "$PROJECT" ]] && PROJECT="$arg" ;;
   esac
 done
 
-# The playground worktree lives beside the MAIN repo root (never a worktree's own
-# dir): <repo>-integ-<project>.
-playground_path() {
-  local project="$1"
-  local common=$(git rev-parse --path-format=absolute --git-common-dir)
-  local main_root=$(dirname "$common")
-  echo "$(dirname "$main_root")/$(basename "$main_root")-integ-${project}"
-}
-
-report_playground() {
-  local project="$1" ref="$2"
-  local wt_path=$(playground_path "$project")
-  echo "playground: $wt_path"
-  if git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
-    echo "exists: 1"
-    local dirty=0
-    [[ -n $(git -C "$wt_path" status --porcelain -uno 2>/dev/null) ]] && dirty=1
-    echo "dirty: $dirty"
-    local fresh=0
-    if [[ -n "$ref" ]] && [[ $(git -C "$wt_path" rev-parse 'HEAD^{tree}' 2>/dev/null) == $(git rev-parse "${ref}^{tree}" 2>/dev/null) ]]; then
-      fresh=1
-    fi
-    echo "fresh: $fresh"
-  else
-    echo "exists: 0"
-  fi
-}
-
-# Check the integration ref out into the persistent playground worktree (detached
-# HEAD). Refreshing never touches a playground with tracked edits — discarding
-# those requires the explicit --worktree-reset. Untracked files always survive.
+# Check the integration ref out into a persistent playground worktree (detached
+# HEAD, sibling of the main repo: <repo>-integ-<project>) and print its path.
+# Refreshed on every call; a dirty playground is left untouched so experiments
+# survive a rebuild.
 materialize_worktree() {
   local project="$1" ref="$2"
   local sha=$(git rev-parse "$ref")
-  local wt_path=$(playground_path "$project")
+  local common=$(git rev-parse --path-format=absolute --git-common-dir)
+  local main_root=$(dirname "$common")
+  local wt_path="$(dirname "$main_root")/$(basename "$main_root")-integ-${project}"
   if git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
-    if (( RESET )); then
-      git -C "$wt_path" checkout --force --detach "$sha" >/dev/null 2>&1
-    elif [[ -n $(git -C "$wt_path" status --porcelain -uno 2>/dev/null) ]]; then
-      echo "playground has tracked edits — left as-is (--worktree-reset discards them)" >&2
-    elif [[ $(git -C "$wt_path" rev-parse 'HEAD^{tree}') != $(git rev-parse "${ref}^{tree}") ]]; then
+    if [[ -n $(git -C "$wt_path" status --porcelain 2>/dev/null) ]]; then
+      echo "playground has local changes — left as-is (not refreshed to $sha)" >&2
+    elif [[ $(git -C "$wt_path" rev-parse HEAD) != "$sha" ]]; then
       git -C "$wt_path" checkout --detach "$sha" >/dev/null 2>&1
     fi
   else
     git worktree add --detach "$wt_path" "$sha" >/dev/null 2>&1
   fi
-  report_playground "$project" "$ref"
+  echo "$wt_path"
 }
 
 build_integration() {
@@ -148,7 +109,6 @@ build_integration() {
   # Single leaf: integration ref = leaf tip itself. No merge needed.
   if (( ${#leaves[@]} == 1 )); then
     git update-ref "$ref" "refs/heads/${leaves[1]}"
-    if (( STATUS )); then report_playground "$project" "$ref"; return 0; fi
     if (( CHECK_ONLY )); then return 0; fi
     if (( WORKTREE )); then materialize_worktree "$project" "$ref"; return 0; fi
     echo "$ref"
@@ -189,7 +149,6 @@ build_integration() {
     } >&2
 
     git worktree remove --force "$tmp_wt" >/dev/null 2>&1 || true
-    if (( STATUS )); then report_playground "$project" ""; fi
     return 1
   fi
 
@@ -198,7 +157,6 @@ build_integration() {
 
   git worktree remove --force "$tmp_wt" >/dev/null 2>&1 || true
 
-  if (( STATUS )); then report_playground "$project" "$ref"; return 0; fi
   if (( CHECK_ONLY )); then return 0; fi
   if (( WORKTREE )); then materialize_worktree "$project" "$ref"; return 0; fi
   echo "$ref"

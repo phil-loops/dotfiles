@@ -170,9 +170,7 @@ if [ "$RESTART" = 0 ]; then
 fi
 
 [ -d "$DIR" ] || { echo "loops-restart: --dir not a directory: $DIR" >&2; exit 2; }
-# --output=prefixed tags every line [<task>], so loops-dev-demux can fan each
-# service into its own log. Reset mode's `task dev` already prefixes internally.
-TASK=$([ "$MODE" = reset ] && echo "task dev" || echo "task --output=prefixed dev:watch")
+TASK=$([ "$MODE" = reset ] && echo "task dev" || echo "task dev:watch")
 say "restarting in $DIR via: $TASK   (mode=$MODE, log=$LOG, tmux=$SESSION)"
 
 # `task dev:watch` (keep mode) only relaunches node services — unlike `task dev`, it does
@@ -194,11 +192,10 @@ if [ "$NEED_DOCKER_UP" = 1 ]; then
 fi
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-tmux new-session -d -s "$SESSION" "cd '$DIR' && $TASK 2>&1 | '$HOME/.dotfiles/scripts/loops-dev-demux' '$LOG'"
+tmux new-session -d -s "$SESSION" "cd '$DIR' && $TASK 2>&1 | tee '$LOG'"
 sleep 3
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   say "up: tmux attach -t $SESSION   ·   tail -f $LOG   ·   dev-tail skill reads $LOG"
-  say "per-service logs: tl -l  (pick one, e.g. tl dev:jobs)"
 else
   echo "loops-restart: $SESSION exited immediately — check $LOG:" >&2
   tail -n 20 "$LOG" >&2 || true

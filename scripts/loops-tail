@@ -8,8 +8,7 @@
 #   loops-tail -a | --all …    include dead servers' leftover logs (post-mortem tail)
 #
 # Sources (discovered live):
-#   server            the whole dev stack, merged (/tmp/loops-dev.log)
-#   dev:<name>        one dev app split out by loops-dev-demux (/tmp/loops-dev.d/<name>.log)
+#   server            the :3000 dev server (/tmp/loops-dev.log, written by loops-restart's tee)
 #   preview:<name>    a loops-preview side server (/tmp/loops-preview-<name>.log)
 #   docker:<name>     a running container (docker logs -f)
 #
@@ -28,7 +27,6 @@ alive() { tmux has-session -t "$1" 2>/dev/null; }
 session_for() {
   case "$1" in
     server)    echo "loops-dev" ;;
-    dev:*)     echo "loops-dev" ;;
     preview:*) echo "loops-preview-${1#preview:}" ;;
     *)         return 1 ;;
   esac
@@ -37,7 +35,6 @@ session_for() {
 log_for() {
   case "$1" in
     server)    echo "/tmp/loops-dev.log" ;;
-    dev:*)     echo "/tmp/loops-dev.d/${1#dev:}.log" ;;
     preview:*) echo "/tmp/loops-preview-${1#preview:}.log" ;;
     *)         return 1 ;;
   esac
@@ -46,14 +43,6 @@ log_for() {
 sources() {
   if [ -f /tmp/loops-dev.log ] && { [ "$ALL" = 1 ] || alive loops-dev; }; then
     echo "server"
-  fi
-  # per-app splits written by loops-dev-demux; all live/die with the loops-dev session
-  if [ "$ALL" = 1 ] || alive loops-dev; then
-    for f in /tmp/loops-dev.d/*.log; do
-      [ -e "$f" ] || continue
-      n="${f#/tmp/loops-dev.d/}"
-      echo "dev:${n%.log}"
-    done
   fi
   for f in /tmp/loops-preview-*.log; do
     [ -e "$f" ] || continue
@@ -83,9 +72,9 @@ list() {
 
 cmd_for() {
   case "$1" in
-    server|dev:*|preview:*) echo "tail -n $TAIL_N -F $(log_for "$1")" ;;
-    docker:*)               echo "docker logs -f --tail $TAIL_N ${1#docker:}" ;;
-    *)                      return 1 ;;
+    server|preview:*) echo "tail -n $TAIL_N -F $(log_for "$1")" ;;
+    docker:*)         echo "docker logs -f --tail $TAIL_N ${1#docker:}" ;;
+    *)                return 1 ;;
   esac
 }
 

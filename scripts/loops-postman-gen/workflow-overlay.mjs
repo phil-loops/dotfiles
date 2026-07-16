@@ -38,7 +38,7 @@ export const WORKFLOW_OVERLAY = {
     },
   },
   "/v1/workflows/{workflowId}": {
-    post: {
+    patch: {
       tags: ["Workflows"],
       summary: "Update workflow properties",
       parameters: [wfId],
