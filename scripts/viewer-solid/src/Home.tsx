@@ -139,6 +139,16 @@ export function Home() {
   // drop is destructive (forgets the forest grouping) — a two-click arm so a misclick can't do it.
   const [dropArmed, setDropArmed] = createSignal(false);
   const closeCtx = () => { setCtxMenu(null); setDropArmed(false); };
+  // keep the menu fully on-screen: a click near the bottom would otherwise open it past the
+  // viewport with its lower items (shelve, drop) unreachable. Clamp after measuring; the CSS
+  // max-height caps a tall menu and it scrolls internally.
+  const clampMenu = (el: HTMLElement, x: number, y: number) => {
+    requestAnimationFrame(() => {
+      const pad = 8;
+      el.style.left = `${Math.max(pad, Math.min(x, window.innerWidth - el.offsetWidth - pad))}px`;
+      el.style.top = `${Math.max(pad, Math.min(y, window.innerHeight - el.offsetHeight - pad))}px`;
+    });
+  };
   const setInterest = createMutation(() => ({
     mutationFn: (arg: { repo: string; project: string; value: number }) =>
       fetch(`/${arg.repo}/interest`, {
@@ -436,7 +446,7 @@ export function Home() {
               onClick={closeCtx}
               onContextMenu={(e) => { e.preventDefault(); closeCtx(); }}
             />
-            <div class="ctx-menu" style={{ left: `${m().x}px`, top: `${m().y}px` }}>
+            <div class="ctx-menu" ref={(el) => clampMenu(el, m().x, m().y)} style={{ left: `${m().x}px`, top: `${m().y}px` }}>
               <div class="ctx-head">conviction</div>
               <For each={[
                 { key: "committed", lbl: "committed", mark: "●", title: "I'm shipping this — keeps its full lifecycle bands" },

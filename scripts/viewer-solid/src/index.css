@@ -342,6 +342,7 @@ body {
   position: fixed; z-index: 91; min-width: 150px; padding: 4px;
   background: var(--raised, #1b1815); border: 1px solid var(--rule, #3a332b);
   border-radius: 8px; box-shadow: 0 8px 26px rgba(0,0,0,0.45);
+  max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain;
 }
 .ctx-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); padding: 4px 8px 6px; }
 .ctx-item {
