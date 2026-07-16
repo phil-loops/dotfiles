@@ -101,6 +101,11 @@ deliberate geometry change re-baselines rects the same way as pixels:
     a deliberate-fix candidate.
 27. **`@starting-style` entrance fades translate to the `starting:` variant** (outside the
     keep-list); verify the built CSS emits `@starting-style`.
+28. **Removing an always-mounted inline `<style>` renumbers positional rect baselines** for
+    every later sibling. A `<style>` that is its component's LAST child deletes free;
+    otherwise either leave an empty `<style />` strut in the conversion commit and drop it in
+    a dedicated rects-only re-baseline commit, or accept the multi-surface rects re-baseline
+    and say so in the body.
 
 ## Behavior probes — pixels can be green with the feature dead
 
