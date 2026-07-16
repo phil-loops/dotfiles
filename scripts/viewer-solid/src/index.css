@@ -728,22 +728,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 }
 .thumb.active .thumb-count { color: var(--gold-leaf); border-color: var(--gold-deep); }
 
-.forest-search {
-  width: 100%; font: inherit; font-family: var(--mono); font-size: 13px; color: var(--ink);
-  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
-  padding: 9px 13px; margin: 0 0 12px;
-}
-.forest-search:focus { outline: none; border-color: var(--gold-deep); }
-
-.forest-sort { display: inline-flex; gap: 2px; padding: 2px; background: var(--vellum-raise);
-  border: 1px solid var(--rule); border-radius: 9px; }
-.forest-sort-btn {
-  font: inherit; font-family: var(--mono); font-size: 11px; color: var(--ink-faint);
-  background: transparent; border: 0; border-radius: 7px; padding: 4px 9px; cursor: pointer;
-}
-.forest-sort-btn:hover { color: var(--ink); }
-.forest-sort-btn.active { color: var(--gold-leaf); background: var(--vellum); border: 1px solid var(--gold-deep); padding: 3px 8px; }
-
 .tab-empty { color: var(--ink-faint); font-style: italic; padding: 30px 4px; }
 
 @media (max-width: 640px) {
@@ -813,20 +797,12 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .pr-project { color: var(--ink-dim); font-size: 11px; letter-spacing: 0.04em; margin: 0 2px 6px; }
 .pr-project-link { color: inherit; text-decoration: none; }
 .pr-project-link:hover { color: var(--gold-leaf); text-decoration: underline; }
-.pr-row, .forest-row {
+.pr-row {
   display: flex; align-items: center; gap: 11px; text-decoration: none; color: var(--ink);
   border: 1px solid var(--rule); border-radius: 10px; background: var(--vellum-raise);
   padding: 11px 15px; margin-bottom: 6px; transition: border-color 0.12s, background 0.12s, transform 0.12s;
 }
-.pr-row:hover, .forest-row:hover { border-color: var(--gold-deep); background: var(--vellum-edge); transform: translateY(-1px); }
-.forest-repo-head { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); margin: 14px 2px 7px; }
-.forest-repo-head:first-child { margin-top: 2px; }
-/* cross-repo epic cluster: one card gathering same-epic forests from different repos */
-.epic-cluster { border: 1px solid var(--gold-deep); border-radius: 12px; padding: 9px 11px 4px; margin: 2px 0 16px; background: color-mix(in srgb, var(--gold-leaf) 5%, var(--vellum-raise)); }
-.epic-head { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--gold-deep); margin: 2px 2px 8px; }
-.epic-subrow { display: flex; align-items: center; gap: 9px; margin-bottom: 6px; }
-.epic-subrow .forest-row { flex: 1; margin-bottom: 0; }
-.epic-repo-badge { flex: none; width: 62px; text-align: right; font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); }
+.pr-row:hover { border-color: var(--gold-deep); background: var(--vellum-edge); transform: translateY(-1px); }
 .pr-num { color: var(--ink-dim); font-size: 12px; flex: none; }
 .pr-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pr-draft {
@@ -914,7 +890,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 /* constant width (not min-width) so a wider "16 behind" can't steal space from the flexible name
    and shift the columns left; parked/merged badges are allowed to overflow this slot. */
 .fcell.trail { margin-left: auto; width: auto; display: flex; justify-content: flex-end; align-items: center; }
-.forest-row.folded .fcell.trail { width: auto; }
 /* behind / restack / fresh are restack state, not identity — they recede until the row is hovered */
 .forest-trail { opacity: 0; transition: opacity 0.12s; }
 .forest-row:hover .forest-trail { opacity: 1; }
@@ -955,8 +930,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   font: inherit; font-size: 11px; letter-spacing: 0.03em; color: var(--ink-dim); padding: 9px 4px 5px; margin-top: 8px;
 }
 .forest-mfold:hover { color: var(--gold-leaf); }
-.forest-row.folded { opacity: 0.66; }
-.forest-row.folded:hover { opacity: 1; }
 
 /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
 .base-toggle { display: flex; align-items: center; gap: 6px; }
@@ -1002,7 +975,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   .forest-resolve { animation: pulse-resolve 1.7s ease-in-out infinite; }
 }
 .forest-dot.parked { background: transparent; border: 1.5px solid var(--del); box-shadow: inset 0 0 0 1.5px var(--del); }
-.forest-row.parked { border-color: var(--del); }
 .restack-err { margin-left: auto; color: var(--del); font-size: 11px; letter-spacing: 0.02em; padding-right: 10px; }
 /* a parked branch carries its own contextual menu — one bad branch marks itself, not the whole home */
 .forest-parked { position: relative; flex: none; }
