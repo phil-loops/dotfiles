@@ -123,5 +123,8 @@ export function useRestack(deps: {
       d.paused ? { project: d.project ?? "", current: d.current ?? "", reason: d.reason ?? "" } : null
     );
   });
-  return { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, mergedNames };
+  // Live walk progress (done/total/current) for whatever chip started the run — the
+  // status poll already carries it; without this the chip freezes at "restacking…".
+  const progress = () => (running() ? status.data ?? null : null);
+  return { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, mergedNames, progress };
 }
