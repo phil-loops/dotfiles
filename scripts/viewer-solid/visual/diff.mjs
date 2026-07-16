@@ -38,9 +38,32 @@ for (const f of files) {
   const d = new PNG({ width: a.width, height: a.height });
   const n = pixelmatch(a.data, b.data, d.data, a.width, a.height, { threshold: 0.1 });
   const frac = n / (a.width * a.height);
-  if (frac > THRESHOLD) {
-    writeFileSync(join(OUT, f), PNG.sync.write(d));
-    console.error(`✗ ${f}: ${(frac * 100).toFixed(3)}% pixels differ (${n}) → ${join(OUT, f)}`);
+  // geometry gate — exact where the pixel threshold is fuzzy: the threshold absorbs AA noise,
+  // so it also absorbs small REAL geometry shifts. Rect snapshots must match byte-for-byte.
+  let geomBad = 0;
+  const name = f.replace(/\.png$/, "");
+  const ra = join(A, name + ".rects.txt");
+  const rb = join(B, name + ".rects.txt");
+  if (existsSync(ra) && existsSync(rb)) {
+    const la = readFileSync(ra, "utf8").split("\n");
+    const lb = readFileSync(rb, "utf8").split("\n");
+    for (let i = 0; i < Math.max(la.length, lb.length); i++) {
+      if (la[i] !== lb[i]) {
+        if (geomBad === 0) console.error(`✗ ${name}: GEOMETRY drift (pixel diff ${(frac * 100).toFixed(3)}%)`);
+        if (geomBad < 5) console.error(`    - ${la[i] ?? "(absent)"}\n    + ${lb[i] ?? "(absent)"}`);
+        geomBad++;
+      }
+    }
+    if (geomBad > 5) console.error(`    … ${geomBad - 5} more rect changes`);
+  } else if (existsSync(ra)) {
+    console.error(`✗ ${name}: no rect snapshot in ${B} (older shot-all?)`);
+    geomBad++;
+  }
+  if (frac > THRESHOLD || geomBad) {
+    if (frac > THRESHOLD) {
+      writeFileSync(join(OUT, f), PNG.sync.write(d));
+      console.error(`✗ ${f}: ${(frac * 100).toFixed(3)}% pixels differ (${n}) → ${join(OUT, f)}`);
+    }
     bad++;
   } else {
     console.log(`✓ ${f}${n ? ` (${n}px)` : ""}`);

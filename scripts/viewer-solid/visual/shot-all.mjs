@@ -24,6 +24,7 @@ const BIN = process.env.CHROME_BIN
   ?? "/Users/philbrockman/.cache/puppeteer/chrome-headless-shell/mac_arm-150.0.7871.24/chrome-headless-shell-mac-arm64/chrome-headless-shell";
 const FONTS = join(HERE, "fixtures", "fonts");
 const RECORD_FONTS = process.env.RECORD_FONTS === "1";
+const RECTS_ONLY = process.argv.includes("--rects-only"); // refresh geometry baselines without re-encoding PNGs
 
 const FREEZE_CSS = `
 *, *::before, *::after { animation: none !important; transition: none !important; caret-color: transparent !important; }
@@ -98,7 +99,28 @@ for (const s of surfaces) {
     if (s.waitAfter) await page.waitForSelector(s.waitAfter, { timeout: 15000 });
     await new Promise((r) => setTimeout(r, s.settle ?? 1500));
     await page.evaluate(() => document.fonts.ready);
-    await page.screenshot({ path: join(OUT, s.name + ".png") });
+    if (!RECTS_ONLY) await page.screenshot({ path: join(OUT, s.name + ".png") });
+    // geometry snapshot — positional paths (tag + child index), invariant under class renames.
+    // The pixel threshold absorbs antialiasing noise, which means it also absorbs small real
+    // geometry shifts (a 3px border hid under it); this gate is exact where pixels are fuzzy.
+    const rects = await page.evaluate(() => {
+      const out = [];
+      const walk = (el, path) => {
+        let i = 0;
+        for (const c of el.children) {
+          i++;
+          const p = `${path}/${c.tagName.toLowerCase()}[${i}]`;
+          if (!["SCRIPT", "STYLE", "LINK", "META"].includes(c.tagName)) {
+            const r = c.getBoundingClientRect();
+            out.push(`${p} ${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`);
+          }
+          walk(c, p);
+        }
+      };
+      walk(document.body, "");
+      return out.join("\n");
+    });
+    writeFileSync(join(OUT, s.name + ".rects.txt"), rects + "\n");
     console.log(`  ✓ ${s.name}`);
   } catch (e) {
     console.error(`  ✗ ${s.name}: ${e.message}`);
