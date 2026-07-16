@@ -9,7 +9,7 @@
 # pane a normal pager — bare vim nav works out of the box — while still snapping to the
 # newest result. +G is safe here because we page a real file (a pipe would block on EOF).
 set -u
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+export PATH="$HOME/.volta/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 pane=$1; root=$2; rel=$3; shift 3
 watch=("$@")
@@ -18,18 +18,27 @@ trap 'rm -f "$log"' EXIT
 
 pane_alive() { tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx "$pane"; }
 sig() { local f s=""; for f in "$watch[@]"; do s+=" $(stat -f %m "$f" 2>/dev/null)"; done; print -r -- "$s"; }
+# respawn-pane -k kills the previous less and opens a fresh one at the bottom (latest run),
+# in the foreground so it owns the tty and bare j/k scroll.
+show() { tmux respawn-pane -k -t "$pane" "less -R +G ${(q)log}" 2>/dev/null; }
+fail() { : > "$log"; printf '\n  ✗ %s\n' "$1" >> "$log"; show; exit 1; }
 
-cd "$root" || exit 1
+cd "$root" 2>/dev/null || fail "worktree is gone: $root"
+# Repo-local tsx only — a bare `npx tsx` in a worktree without node_modules net-installs its
+# own copy and flails (a scratch checkout of someone else's branch is exactly that worktree).
+tsx="$root/node_modules/.bin/tsx"
+[[ -x "$tsx" ]] || fail "no node_modules in ${root:t} — ln -s the main checkout's (or npm ci), then space-t again"
+
 while pane_alive; do
+  [[ -d "$root" && -f "$root/$rel" ]] || fail "worktree vanished under the watcher: $root"
   : > "$log"
-  FORCE_COLOR=1 npx tsx --tsconfig tsconfig.node.json --test-reporter=spec --test "$rel" >> "$log" 2>&1
+  FORCE_COLOR=1 "$tsx" --tsconfig tsconfig.node.json --test-reporter=spec --test "$rel" >> "$log" 2>&1
   pane_alive || break
-  # respawn-pane -k kills the previous less and opens a fresh one at the bottom (latest run),
-  # in the foreground so it owns the tty and bare j/k scroll.
-  tmux respawn-pane -k -t "$pane" "less -R +G ${(q)log}" 2>/dev/null || break
+  show || break
   base=$(sig)
   while pane_alive; do
     sleep 0.6
+    [[ -d "$root" ]] || fail "worktree vanished under the watcher: $root"
     [[ "$(sig)" != "$base" ]] && break
   done
 done
