@@ -126,14 +126,25 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+  /* two durations, same keyframes: 1.5s (reading coal), 1.9s (refreshing coal) */
+  --animate-fo-breathe: fo-breathe 1.5s ease-in-out infinite;
+  --animate-fo-breathe-slow: fo-breathe 1.9s ease-in-out infinite;
+  @keyframes fo-breathe {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+  }
+  --animate-fo-warm-fade: fo-warm-fade 0.4s ease both;
+  @keyframes fo-warm-fade {
+    from { opacity: 0; transform: translateY(-2px); }
+    to { opacity: 1; transform: none; }
+  }
 }
 
 :root {
   /* earn the gold: a dark, unlit ledger; gold appears ONLY where work is blessed.
-     Legacy-token audit (batch 8): every token below still has consumers — the
-     unconverted legacy rules that remain (body, .nh-editor, fo-…, amb-chip,
-     watch-pin, action-btn, .ge) and the keep-list set pieces (foil sweep, d2h
-     re-tint, nh sync strip / unfold grammar). Tokens whose ONLY consumers are keep-list blocks are tagged; a token
+     Legacy-token audit (batch 8, re-checked batch 9): every token below still has
+     consumers — the unconverted legacy rules that remain (body, .nh-editor) and the
+     keep-list set pieces (foil sweep, d2h re-tint, nh sync strip / unfold grammar). Tokens whose ONLY consumers are keep-list blocks are tagged; a token
      with zero references gets deleted, not kept (--add-bg died here). */
   --vellum-night: #14110a;
   --vellum-raise: #1c180f;
@@ -149,8 +160,6 @@
   --gold-wash: rgba(230, 182, 78, 0.08); /* keep-list: foil-edge + .nh-editor */
   --ember: #d2732a;       /* kiln heat — warming, deliberately not the blessed gold;
                              keep-list only: nh-settle / nh-step[run] */
-  --ember-wash: rgba(210, 115, 42, 0.12); /* one consumer: ForestOverview's inline fo-warm sheet
-                                             (identical fallback rides the var()) */
   --patina: #7fa093;      /* stale — a blessing that tarnished since the branch moved */
   --rule: #2c2517;
   --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold; in index.css
@@ -335,68 +344,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   }
 }
 
-/* forest overview: the map as a forest's landing hero (no node selected). */
-.forest-overview { min-height: 100vh; background: var(--vellum-night); }
-.fo-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; gap: 16px;
-  padding: 16px 24px; background: var(--vellum-night); border-bottom: 1px solid var(--rule); }
-.fo-project { font-family: var(--display); font-style: italic; font-size: 21px; color: var(--ink); }
-.fo-interest { color: var(--gold-leaf); font-size: 11px; letter-spacing: -1px; }
-.fo-meta { font-size: 12px; letter-spacing: 0.04em; color: var(--ink-faint); }
-.fo-empty { padding: 40px 24px; }
-.origin-btn {
-  font: inherit; font-size: 12px; letter-spacing: 0.04em; color: var(--ink-dim);
-  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 8px;
-  padding: 7px 15px; cursor: pointer; transition: border-color 0.12s, color 0.12s;
-}
-.origin-btn:hover:not(:disabled) { border-color: var(--gold-deep); color: var(--gold-leaf); }
-.origin-btn:disabled { opacity: 0.6; cursor: default; }
-
-/* ambient-restack daemon chip: one quiet forest-wide verdict, sits next to the brand.
-   margin-right:auto keeps it left-grouped with the brand while ↻ check origin stays right. */
-.amb-chip {
-  margin-right: auto; margin-left: 14px; font-size: 11px; letter-spacing: 0.03em;
-  padding: 3px 9px; border-radius: 7px; border: 1px solid var(--rule);
-  background: var(--vellum-raise); cursor: default; white-space: nowrap;
-}
-.amb-chip.amb-clean { color: var(--gold-leaf); border-color: var(--gold-deep); }
-.amb-chip.amb-restack { color: var(--patina); }
-.amb-chip.amb-contract { color: var(--patina); border-color: var(--gold-deep); }
-.amb-chip.amb-conflict { color: var(--del); border-color: var(--del); }
-.amb-chip.amb-stale { color: var(--ink-faint); }
-.amb-chip.amb-link { cursor: pointer; text-decoration: none; }
-.amb-chip.amb-link:hover { border-color: currentColor; filter: brightness(1.12); }
-.amb-chip.landed-mine, .amb-chip.landed-other { margin-right: 0; }
-.amb-chip.landed-mine { color: var(--gold-leaf); border-color: var(--gold-deep); }
-.amb-chip.landed-other { color: var(--ink-faint); }
-/* ── map button + forest-map overlay ─────────────────────────────────── */
-.ge { fill: none; stroke-width: 1.5; }
-.ge.rail { stroke: var(--ink-faint); }
-.ge.fanin { stroke: var(--patina); stroke-dasharray: 2 5; opacity: 0.7; }
-
 /* ── hover a diff line to arm it, then press o to open it in the warm nvim (no click-to-open,
    so mouse drags stay free for sweep-to-chat selection) ──────────────── */
 .d2h-code-side-linenumber:hover, .d2h-code-linenumber:hover { color: var(--ink); background: var(--vellum-edge); }
-
-/* ── watching: opt-in pinned loose branches ──────────────────────────── */
-.watch-pin {
-  font: inherit; font-size: 13px; cursor: pointer; border-radius: 9px; padding: 0 18px;
-  color: var(--vellum-night); background: var(--gold-leaf); border: 1px solid var(--gold-leaf);
-}
-.watch-pin:disabled { opacity: .4; cursor: default; }
-.review-import { flex: none; margin: 6px 10px 6px 0; padding: 0 14px; height: 30px; font-size: 12px; }
-.review-on { flex: none; margin: 0 14px 0 0; color: var(--patina); font-size: 11px; letter-spacing: .04em; }
-
-/* shared contextual-action model (actions.tsx) — fallback styling when an Action carries no
-   `class`; some rows pass an existing per-context class (.watch-pin, …). */
-.action-bar { display: inline-flex; align-items: center; gap: 8px; }
-.action-btn {
-  font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;
-  border-radius: 7px; padding: 3px 11px; background: transparent;
-  color: var(--patina); border: 1px solid transparent;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-.action-btn:hover { border-color: var(--patina); }
-.action-btn.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
-.action-btn.running { color: var(--patina); border-color: transparent; opacity: 0.7; }
-.action-btn:disabled { opacity: 0.5; cursor: default; }
 
