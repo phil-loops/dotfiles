@@ -27,9 +27,13 @@ export function ForestRow(props: {
   next?: { step: NextStep; start: boolean };
 }) {
   const stuck = () => props.parked()?.project === props.p.name;
+  const ROW =
+    "forest-row mb-[6px] flex items-center gap-[11px] rounded-[10px] border bg-vellum-raise px-[15px] py-[11px] text-ink no-underline transition-[border-color,background,transform] duration-[120ms] hover:-translate-y-px hover:bg-vellum-edge [.epic-subrow_&]:mb-0 [.epic-subrow_&]:flex-1";
   return (
     <Link
-      class="forest-row"
+      class={`${ROW} ${stuck() ? "border-del" : "border-rule hover:border-gold-deep"} ${
+        props.folded ? "opacity-[0.66] hover:opacity-100" : ""
+      }`}
       classList={{ parked: stuck(), folded: props.folded }}
       to={{
         kind: "forest",

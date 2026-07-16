@@ -9,6 +9,9 @@ import { ForgottenBand, isForgotten } from "./ForgottenBand";
 import { rowDrag, setRowDrag, dropOnLane } from "./focusDrag";
 import type { Project, Parked, PR } from "./types";
 
+const SUBROW = "epic-subrow mb-[6px] flex items-center gap-[9px]";
+const BADGE = "epic-repo-badge w-[62px] flex-none text-right text-[10px] uppercase tracking-[0.06em] text-ink-faint";
+
 // The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
 // is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
 // folds for dormant + recently-merged. One opinionated order (Phil, 2026-07-11): the manual
@@ -193,8 +196,8 @@ export function ForestsList(props: {
   // repo demoted from group header to a quiet per-row badge (non-loops rows only)
   const row = (p: Project, folded: boolean) =>
     dragWrap(p, multiRepo() && (p.repo || "loops") !== "loops" ? (
-      <div class="epic-subrow">
-        <span class="epic-repo-badge">{p.repo}</span>
+      <div class={SUBROW}>
+        <span class={BADGE}>{p.repo}</span>
         {props.forestRow(p, folded, stepInfo(p, folded))}
       </div>
     ) : (
@@ -238,7 +241,7 @@ export function ForestsList(props: {
         </div>
         <Show when={(props.projects() || []).length > 6}>
           <input
-            class="forest-search"
+            class="forest-search mx-0 mt-0 mb-[12px] w-full rounded-[9px] border border-rule bg-vellum-raise px-[13px] py-[9px] font-mono text-[13px] leading-[1.55] text-ink focus:border-gold-deep focus:outline-none"
             placeholder="filter forests…"
             value={forestQuery()}
             onInput={(e) => setForestQuery(e.currentTarget.value)}
@@ -285,14 +288,14 @@ export function ForestsList(props: {
                 <div class="forest-band-head" title={band.hint}>{band.label}</div>
                 <For each={band.clusters}>
                   {(cluster) => (
-                    <div class="epic-cluster">
-                      <h3 class="epic-head" title="one effort spanning repos, linked by epic tag (advisory — each half still merges on its own main)">
+                    <div class="epic-cluster mx-0 mt-[2px] mb-[16px] rounded-[12px] border border-gold-deep bg-[color-mix(in_srgb,var(--color-gold-leaf)_5%,var(--color-vellum-raise))] px-[11px] pt-[9px] pb-[4px]">
+                      <h3 class="epic-head mx-[2px] mt-[2px] mb-[8px] text-[11px] uppercase tracking-[0.08em] text-gold-deep" title="one effort spanning repos, linked by epic tag (advisory — each half still merges on its own main)">
                         ⇌ {cluster.epic}
                       </h3>
                       <For each={cluster.items}>
                         {(p) => dragWrap(p, (
-                          <div class="epic-subrow">
-                            <span class="epic-repo-badge">{p.repo || "loops"}</span>
+                          <div class={SUBROW}>
+                            <span class={BADGE}>{p.repo || "loops"}</span>
                             {props.forestRow(p, false, stepInfo(p, false))}
                           </div>
                         ))}
