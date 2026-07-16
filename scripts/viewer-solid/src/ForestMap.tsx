@@ -12,18 +12,35 @@
 //
 // Fully self-contained (own class names + <style>): drops into App.tsx with one
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
-import { createMemo, createSignal, For, Show } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
 import { computeForestLayout, lumen, NODE_H, leafOf, isGhostId, nodeW } from "./forestLayout";
 import { createQuery } from "@tanstack/solid-query";
 import { canMutate, provider } from "./provider";
 import type { SpineNode, RestackStatus, BranchPR } from "./types";
 
 // the ghost culmination node is keyed "✦ <project>" (a sentinel, never a real branch).
-// the purpose subtitle rides under the pill; truncate to roughly the pill's width so it
-// never sprawls past the node it describes (full text stays in the node's <title>).
-const fitPurpose = (s: string, w: number): string => {
+// the purpose subtitle rides under the pill, wrapped to the pill's width so it never
+// sprawls past the node it describes (full text stays in the node's <title>). The pill is
+// sized off the BRANCH NAME, so one line guillotined most purposes — wrap to two.
+const PURPOSE_LINES = 2;
+const wrapPurpose = (s: string, w: number): string[] => {
   const max = Math.max(16, Math.floor((w - 10) / 5.1));
-  return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + "…";
+  const lines: string[] = [];
+  let rest = s.trim();
+  while (rest && lines.length < PURPOSE_LINES) {
+    if (rest.length <= max) {
+      lines.push(rest);
+      rest = "";
+      break;
+    }
+    const cut = rest.lastIndexOf(" ", max);
+    lines.push(rest.slice(0, cut > 0 ? cut : max));
+    rest = rest.slice(cut > 0 ? cut : max).trim();
+  }
+  if (rest && lines.length) {
+    lines[lines.length - 1] = lines[lines.length - 1].slice(0, max - 1).trimEnd() + "…";
+  }
+  return lines;
 };
 
 // parent edges are file-tree elbow guides: drop from the guardian's dot column, turn
@@ -353,8 +370,39 @@ export function ForestMap(props: {
     return !!s && s.lit.has(from) && s.lit.has(to);
   };
 
+  // The page map is sized to its own content (W×H), so a SMALL forest rendered at natural
+  // size marooned itself in the middle of a big empty column. Scale it UP to use the room —
+  // never DOWN, so a tall forest still renders full-size and scrolls as before. Height comes
+  // from the viewport, not the host: .fm-page is content-height, so measuring it would feed
+  // the zoom back into itself.
+  let host: HTMLDivElement | undefined;
+  const [box, setBox] = createSignal({ w: 0, h: 0 });
+  const measure = () => {
+    if (!host) return;
+    const cs = getComputedStyle(host);
+    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    setBox({
+      w: host.clientWidth - padX,
+      h: window.innerHeight - host.getBoundingClientRect().top - padY,
+    });
+  };
+  onMount(() => {
+    measure();
+    window.addEventListener("resize", measure);
+    onCleanup(() => window.removeEventListener("resize", measure));
+  });
+  const MAX_ZOOM = 1.7;
+  const zoom = createMemo(() => {
+    const { w, h } = box();
+    if (!props.page || !w || !h) return 1;
+    const l = layout();
+    return Math.min(MAX_ZOOM, Math.max(1, Math.min(w / l.W, h / l.H)));
+  });
+
   return (
     <div
+      ref={host}
       class={props.page ? "fm-page" : props.docked ? "fm-dock" : "fm-overlay"}
       onClick={props.docked || props.page ? undefined : () => props.onClose()}
     >
@@ -368,8 +416,8 @@ export function ForestMap(props: {
         class="fm-svg"
         classList={{ focusing: !!spot(), kiln: !!kiln(), docked: !!props.docked, page: !!props.page }}
         viewBox={`0 0 ${layout().W} ${layout().H}`}
-        width={layout().W}
-        height={layout().H}
+        width={layout().W * zoom()}
+        height={layout().H * zoom()}
         preserveAspectRatio="xMidYMid meet"
         onClick={(e) => e.stopPropagation()}
       >
@@ -525,10 +573,14 @@ export function ForestMap(props: {
                     )}
                   </Show>
                   <Show when={!isGhostId(n.id) && n.description && !nhealth(n.id)?.merged}>
-                    <text class="fm-purpose" x={w / 2} y={NODE_H / 2 + 13}>
-                      <title>{n.description}</title>
-                      {fitPurpose(n.description!, w)}
-                    </text>
+                    <For each={wrapPurpose(n.description!, w)}>
+                      {(line, i) => (
+                        <text class="fm-purpose" x={w / 2} y={NODE_H / 2 + 13 + i() * 10}>
+                          <title>{n.description}</title>
+                          {line}
+                        </text>
+                      )}
+                    </For>
                   </Show>
                   <Show when={isGhostId(n.id) && canMutate}>
                     <text
@@ -626,8 +678,10 @@ const CSS = `
 .fm-svg.docked { max-width: 100%; max-height: calc(100vh - 44px); margin: 0 auto; }
 /* page: the forest landing hero — the map fills the main column under its header, no
    backdrop and no close (you leave by picking a node or the back-link). */
-.fm-page { display: flex; align-items: flex-start; justify-content: center;
-  padding: 30px 22px 48px; overflow: auto; }
+/* "safe" centre: a forest taller than the viewport falls back to flex-start, so it stays
+   scrollable to the top instead of overflowing past it unreachably. */
+.fm-page { display: flex; align-items: safe center; justify-content: center;
+  min-height: calc(100vh - 62px); padding: 30px 22px 48px; overflow: auto; }
 .fm-svg.page { max-width: 100%; max-height: none; height: auto; margin: 0 auto; }
 .fm-dock-close { position: absolute; top: 8px; right: 10px; z-index: 1; background: none; border: none;
   color: var(--ink-faint); font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 6px; }
