@@ -84,6 +84,11 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.25; }
   }
+  --animate-pulse-resolve: pulse-resolve 1.7s ease-in-out infinite;
+  @keyframes pulse-resolve {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    50% { box-shadow: 0 0 14px -2px #c87a55; }
+  }
 }
 
 :root {
@@ -811,49 +816,9 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .work-state-landed  { --state: #8fb0a2; opacity: 0.8; }
 .work-row.work-state-landed .pr-title { color: var(--ink-dim); }
 
-.forest-name { font-family: var(--display); font-style: italic; font-size: 17px; flex: 1; }
-.forest-meta { color: var(--ink-faint); font-size: 11px; flex: none; }
-/* a forest with an open PR is badged (not hidden) — understated, never gold (gold is earned) */
-.forest-pr {
-  flex: none; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;
-  color: var(--ink-dim); border: 1px solid var(--rule); border-radius: 999px; padding: 1px 7px;
-}
-.forest-pr.draft { color: var(--ink-faint); }
-.forest-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.forest-dot.fresh { background: var(--gold-leaf); box-shadow: 0 0 7px var(--gold-wash); }
-.forest-dot.behind { background: transparent; border: 1.5px solid var(--patina); box-shadow: inset 0 0 0 1.5px var(--patina); }
-.forest-fresh { flex: none; font-size: 11px; letter-spacing: 0.03em; }
-.forest-fresh.fresh { color: var(--gold-leaf); }
-.forest-fresh.behind { color: var(--patina); }
-.forest-merged { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); opacity: 0.85; }
-.forest-ready { flex: none; font-size: 11px; letter-spacing: 0.03em; color: var(--gold-leaf); font-weight: 600; }
-/* fixed-width metadata cells so pips · nodes · PR line up down the column; the trailing cell
-   hugs the row's right edge, so behind/restack/merged all align to the right regardless of width. */
-.fcell { flex: none; font-size: 11px; color: var(--ink-faint); text-align: right; }
-.fcell.pips { width: 64px; }
-.fcell.nodes { width: 60px; }
-.fcell.pr { width: 80px; }
-/* constant width (not min-width) so a wider "16 behind" can't steal space from the flexible name
-   and shift the columns left; parked/merged badges are allowed to overflow this slot. */
-.fcell.trail { margin-left: auto; width: auto; display: flex; justify-content: flex-end; align-items: center; }
-/* behind / restack / fresh are restack state, not identity — they recede until the row is hovered */
-.forest-trail { opacity: 0; transition: opacity 0.12s; }
-.forest-row:hover .forest-trail { opacity: 1; }
-/* a shipping row's next step — rank already orders the band, so the text stays quiet ink
-   (faint while it waits on others); ember marks ONLY the start-here row (never gold). */
-.forest-step { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); white-space: nowrap; }
-.forest-step.wait { color: var(--ink-faint); }
-.forest-step.start { color: var(--ember); }
-.forest-step.start::before {
-  content: "start"; margin-right: 8px; padding: 1px 6px;
-  border: 1px solid var(--ember); border-radius: 8px; background: var(--ember-wash);
-  font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ember);
-}
 /* lifecycle bands: the page's one grouping — what state the work is in, most urgent first */
 .forest-band-head { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--gold-deep); opacity: 0.85; margin: 16px 4px 7px; }
 .forest-band-head:first-child { margin-top: 2px; }
-/* interest pips: passive per-row metadata (they no longer rank the page) */
-.forest-pips { flex: none; font-size: 10px; letter-spacing: 0.14em; color: var(--ink-faint); margin-right: 8px; }
 /* live-chat presence: the Home "chats" strip + the pulsing per-forest badge (/chat-jobs) */
 .chat-live .chat-row {
   display: flex; align-items: baseline; gap: 10px; padding: 6px 9px; border-radius: 8px;
@@ -890,7 +855,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 
 /* ── restack affordances on the home (patina = behind/restack; ember = needs you) ── */
 .eyebrow-row { display: flex; align-items: center; justify-content: space-between; }
-.restack-all, .forest-restack, .forest-resolve, .forest-drop {
+.restack-all, .forest-restack, .forest-drop {
   font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;
   border-radius: 7px; padding: 3px 11px; background: transparent;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
@@ -915,34 +880,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .restack-all.running, .forest-restack.running { color: var(--patina); border-color: transparent; opacity: 0.8; }
 .forest-restack { color: var(--patina); border: 1px solid transparent; }
 .forest-restack:hover { border-color: var(--patina); }
-.forest-resolve { color: var(--del); border: 1px solid var(--del); background: var(--del-bg); }
-@media (prefers-reduced-motion: no-preference) {
-  @keyframes pulse-resolve { 0%, 100% { box-shadow: 0 0 0 0 transparent; } 50% { box-shadow: 0 0 14px -2px var(--del); } }
-  .forest-resolve { animation: pulse-resolve 1.7s ease-in-out infinite; }
-}
-.forest-dot.parked { background: transparent; border: 1.5px solid var(--del); box-shadow: inset 0 0 0 1.5px var(--del); }
 .restack-err { margin-left: auto; color: var(--del); font-size: 11px; letter-spacing: 0.02em; padding-right: 10px; }
-/* a parked branch carries its own contextual menu — one bad branch marks itself, not the whole home */
-.forest-parked { position: relative; flex: none; }
-.forest-resolve.open { background: var(--del); color: #1a1411; }
-.forest-popover {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 240px;
-  padding: 11px 12px; border-radius: 9px; border: 1px solid var(--del);
-  background: #18120f; box-shadow: 0 10px 30px -8px rgba(0, 0, 0, 0.6);
-  cursor: default; text-align: left;
-}
-.forest-popover-why { margin: 0 0 8px; font-size: 11px; line-height: 1.45; color: var(--patina); }
-.forest-popover-reason { margin: 0 0 8px; font-size: 10.5px; line-height: 1.4; color: var(--del); opacity: 0.85; }
-.forest-popover-actions { display: flex; flex-direction: column; gap: 6px; }
-.forest-popover-actions button {
-  font: inherit; font-size: 11px; letter-spacing: 0.02em; cursor: pointer; text-align: left;
-  border-radius: 6px; padding: 5px 9px; background: transparent;
-  color: var(--patina); border: 1px solid var(--patina);
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-.forest-popover-actions button:hover { background: rgba(127, 160, 147, 0.12); }
-.forest-popover-actions button.danger { color: var(--del); border-color: var(--del); }
-.forest-popover-actions button.danger:hover { background: var(--del-bg); }
 
 /* ── map button + forest-map overlay ─────────────────────────────────── */
 .map-btn {
