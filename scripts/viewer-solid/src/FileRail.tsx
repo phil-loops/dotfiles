@@ -362,15 +362,20 @@ export function FileEntry(props: {
           {copied() ? "copied ✓" : "⎘ copy ref"}
         </button>
         <Show when={threadMsgCount(props.branch, props.file.path) > 0}>
-          <span class="chat-badge" title="this file has a chat thread">
+          <span class="chat-badge flex-none whitespace-nowrap rounded-[5px] border border-rule bg-vellum-edge px-[6px] py-px text-[11px] text-ink-dim" title="this file has a chat thread">
             💬 {threadMsgCount(props.branch, props.file.path)}
           </span>
         </Show>
         <Show when={canMutate}>
           <span class="sp-anchor relative inline-flex">
             <button
-              class={`${FILE_ACT} ${FILE_ACT_QUIET} chat-act ml-auto`}
-              classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
+              class={`${FILE_ACT} chat-act ml-auto ${
+                chatWorking()
+                  ? "working border-ink-dim bg-transparent text-ink-dim animate-chat-pulse motion-reduce:animate-none"
+                  : !chatWorking() && chatUnseen()
+                    ? "done border-add bg-transparent text-add"
+                    : FILE_ACT_QUIET
+              }`}
               title={
                 chatWorking()
                   ? "Claude is still answering on this file — click to watch"

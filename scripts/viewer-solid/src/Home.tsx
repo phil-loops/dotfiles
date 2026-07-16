@@ -404,11 +404,15 @@ export function Home() {
           <div class="work-rule mb-[6px] h-px bg-rule" />
           <For each={stripChats()}>
             {(j) => (
-              <Link class="chat-row" classList={{ done: j.done }} to={chatTarget(j)} title={j.question}>
-                <span class={`chat-mark ${j.done ? (j.ok === false ? "err" : "ok") : "live"}`}>✦</span>
-                <span class="chat-branch">{leaf(j.branch)}</span>
-                <span class="chat-file">{j.path ? leaf(j.path) : "whole branch"}</span>
-                <span class="chat-progress">
+              <Link
+                class={`chat-row flex items-baseline gap-[10px] rounded-lg px-[9px] py-[6px] text-[13px] text-ink no-underline hover:bg-vellum-edge ${j.done ? "done opacity-55" : ""}`}
+                to={chatTarget(j)}
+                title={j.question}
+              >
+                <span class={`chat-mark flex-none ${j.done ? (j.ok === false ? "err text-del" : "ok text-add") : "live text-gold-leaf animate-chat-pulse-slow motion-reduce:animate-none"}`}>✦</span>
+                <span class="chat-branch flex-none font-semibold">{leaf(j.branch)}</span>
+                <span class="chat-file overflow-hidden text-ellipsis whitespace-nowrap text-ink-dim">{j.path ? leaf(j.path) : "whole branch"}</span>
+                <span class="chat-progress ml-auto flex-none text-[12px] text-ink-faint">
                   {j.done ? (j.ok === false ? "✗ failed" : "done ✓") : `${j.status}…`} · {fmtChars(j.chars)} · {chatAgo(j.created)}
                 </span>
               </Link>
