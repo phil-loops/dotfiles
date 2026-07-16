@@ -64,22 +64,28 @@ def session_path(branch):
 
 
 def children_of(branch):
-    out = git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"])
-    kids = []
-    for ln in out.splitlines():
+    parents = {}
+    for ln in git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"]).splitlines():
         try:
             key, val = ln.split(" ", 1)
         except ValueError:
             continue
-        if val.strip() == branch:
-            kids.append(key[len("stack-branch."):-len(".parent")])
-    return kids
+        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    for ln in git(["config", "--get-regexp", r"^branch\..*\.stack-parent$"]).splitlines():
+        try:
+            key, val = ln.split(" ", 1)
+        except ValueError:
+            continue
+        parents[key[len("branch."):-len(".stack-parent")]] = val.strip()
+    return [child for child, parent in parents.items() if parent == branch]
 
 
 def assemble_briefing(branch):
-    parent = git(["config", f"stack-branch.{branch}.parent"]) or MAIN
+    parent = (git(["config", f"branch.{branch}.stack-parent"])
+              or git(["config", f"stack-branch.{branch}.parent"]) or MAIN)
     purpose = git(["config", f"branch.{branch}.description"])
-    requires = git(["config", "--get-all", f"stack-branch.{branch}.requires"])
+    requires = (git(["config", "--get-all", f"branch.{branch}.stack-requires"])
+                or git(["config", "--get-all", f"stack-branch.{branch}.requires"]))
     kids = children_of(branch)
     commits = git(["log", f"{parent}..{branch}", "--format=%h %s"])
     diffstat = git(["diff", "--stat", f"{parent}...{branch}"])

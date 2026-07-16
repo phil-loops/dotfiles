@@ -204,7 +204,7 @@ topo_order() {
     progress=0
     for m in "${members[@]}"; do
       [[ -n "${emitted[$m]:-}" ]] && continue
-      local p=$(git config "stack-branch.${m}.parent" 2>/dev/null || true)
+      local p=$(git config "branch.${m}.stack-parent" 2>/dev/null || git config "stack-branch.${m}.parent" 2>/dev/null || true)
       if [[ -z "${is_member[$p]:-}" ]] || [[ -n "${emitted[$p]:-}" ]]; then
         echo "$m"
         emitted[$m]=1
@@ -287,6 +287,10 @@ _purge_member_refs() {
     for v in "${keep[@]}"; do git config --add "$key" "$v"; done
     echo "  cleaned requires: ${key#stack-branch.} no longer needs ${gone}" >&2
   done < <(git config --get-regexp '^stack-branch\..*\.requires$' | awk -v g="$gone" '$2==g{print $1}' | sort -u)
+  while IFS= read -r key; do
+    [[ -z "$key" ]] && continue
+    echo "  ⚠ ${key} still names ${gone} (new namespace) — left untouched, needs a post-keystone rewrite path" >&2
+  done < <(git config --get-regexp '^branch\..*\.stack-requires$' 2>/dev/null | awk -v g="$gone" '$2==g{print $1}' | sort -u)
 }
 
 # Where a branch's rebase actually runs (its worktree, or the current repo
@@ -561,7 +565,7 @@ build_perfile() {
 write_conflict_artifact() {
   local branch="$1" parent="$2" inner="$3" staged="${4:-false}"
   local base now
-  base=$(git config "stack-branch.${branch}.base" 2>/dev/null || git rev-parse "$parent" 2>/dev/null || true)
+  base=$(git config "branch.${branch}.stack-base" 2>/dev/null || git config "stack-branch.${branch}.base" 2>/dev/null || git rev-parse "$parent" 2>/dev/null || true)
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   jq -n \
     --arg project "$PROJECT" --arg branch "$branch" --arg parent "$parent" \
@@ -740,7 +744,7 @@ if [[ "$MODE" == "plan" ]]; then
   echo "Plan for $PROJECT:"
   echo "  Main: $MAIN_BRANCH ($(git rev-parse --short $MAIN_BRANCH))"
   while IFS= read -r b; do
-    p=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "?")
+    p=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "?")
     sha=$(git rev-parse --short "$b" 2>/dev/null || echo "MISSING")
     wt=$(worktree_of "$b")
     printf "  %-45s parent=%-40s sha=%s  wt=%s\n" "$b" "$p" "$sha" "${wt:-<unchecked-out>}"
@@ -758,7 +762,7 @@ if [[ "$MODE" == "diagnose" ]]; then
     exit 1
   fi
   REBASE_DIR=$(rebase_dir_for "$CURRENT")
-  PARENT_NAME=$(git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
+  PARENT_NAME=$(git config "branch.${CURRENT}.stack-parent" 2>/dev/null || git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
   if ! rebase_in_progress "$REBASE_DIR"; then
     echo "No rebase in progress for ${CURRENT} — nothing to diagnose." >&2
     exit 1
@@ -840,7 +844,7 @@ if [[ "$MODE" == "handoff" ]]; then
     exit 1
   fi
   REBASE_DIR=$(rebase_dir_for "$CURRENT")
-  PARENT_NAME=$(git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
+  PARENT_NAME=$(git config "branch.${CURRENT}.stack-parent" 2>/dev/null || git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
   if ! rebase_in_progress "$REBASE_DIR"; then
     echo "No rebase in progress for ${CURRENT} — it may already be resolved. Resuming cascade." >&2
   fi
@@ -890,7 +894,7 @@ if [[ "$MODE" == "continue" ]]; then
       fi
     fi
     # Re-verify the human-finished rebase before accepting it.
-    cont_parent=$(git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
+    cont_parent=$(git config "branch.${CURRENT}.stack-parent" 2>/dev/null || git config "stack-branch.${CURRENT}.parent" 2>/dev/null || true)
     cont_oldp="${SNAPSHOT[$cont_parent]:-$(git rev-parse "$cont_parent" 2>/dev/null)}"
     cont_dir=$(rebase_dir_for "$CURRENT")
     if ! restack_sanity_check "$cont_dir" "$CURRENT" "$cont_parent" "$cont_oldp" "${SNAPSHOT[$CURRENT]:-}"; then
@@ -951,20 +955,21 @@ elif [[ "$MODE" == "start" ]]; then
     typeset -a _survivors
     _survivors=()
     for b in "${PENDING[@]}"; do
-      bp=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      bp=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
       [[ -z "$bp" ]] && bp="$MAIN_BRANCH"
       "${SELF_DIR}/rebase-classify" "$b" "$bp" >/dev/null 2>&1 && _crc=0 || _crc=$?
       if (( _crc == 20 )); then
         echo "  ● $b already merged into $bp — contracting (drop + rewire), skipping rebase"
-        while IFS=' ' read -r key val; do
-          [[ -z "$key" ]] && continue
-          child="${key#stack-branch.}"; child="${child%.parent}"
+        while IFS=' ' read -r child val; do
+          [[ -z "$child" ]] && continue
           if [[ "$val" == "$b" ]]; then
             echo "    rewire: $child parent → $bp"
             git config "stack-branch.${child}.parent" "$bp"
             git config --unset "stack-branch.${child}.base" 2>/dev/null || true
           fi
-        done < <(git config --get-regexp '^stack-branch\..*\.parent$')
+        done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+                   git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
+                 } | awk 'NF && !seen[$1]++')
         CONTRACTED+=("$b")
       else
         _survivors+=("$b")
@@ -1035,7 +1040,7 @@ while (( ${#PENDING[@]} > 0 )); do
   # as its base, like main: never rebase it (that rewrites approved history + needs a force-push).
   # Its children still rebase onto it below — its tip doesn't move, so SNAPSHOT[it]==current makes
   # their `rebase --onto it it` a clean no-op when already stacked, or catches a stale child up.
-  if [[ "$(git config --bool "stack-branch.${BRANCH}.trunk" 2>/dev/null || true)" == "true" ]]; then
+  if [[ "$(git config --bool "branch.${BRANCH}.stack-trunk" 2>/dev/null || git config --bool "stack-branch.${BRANCH}.trunk" 2>/dev/null || true)" == "true" ]]; then
     echo "  ❄ ${BRANCH} is the forest trunk (approved base) — frozen, not rebased; children rebase onto it"
     SKIPPED_TRUNK+=("$BRANCH")
     continue
@@ -1047,7 +1052,7 @@ while (( ${#PENDING[@]} > 0 )); do
     continue
   fi
 
-  PARENT_NAME=$(git config "stack-branch.${BRANCH}.parent" 2>/dev/null || true)
+  PARENT_NAME=$(git config "branch.${BRANCH}.stack-parent" 2>/dev/null || git config "stack-branch.${BRANCH}.parent" 2>/dev/null || true)
   if [[ -z "$PARENT_NAME" ]]; then
     # No parent recorded = almost always a root that lost (or never got) its pointer.
     # Default to main, RECORD it (self-heal so the next run is clean), and warn — rather
@@ -1169,7 +1174,7 @@ typeset -a TO_DROP
 TO_DROP=("${CONTRACTED[@]}")   # already-merged branches contracted in the pre-pass (children already rewired)
 for b in "${COMPLETED[@]}"; do
   [[ "$b" == "$MAIN_BRANCH" ]] && continue
-  p=$(git config "stack-branch.${b}.parent" 2>/dev/null || true)
+  p=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || true)
   [[ -z "$p" ]] && continue
   # Empty vs parent OR merged into main?
   if [[ -z "$(git log --oneline "${p}..${b}" 2>/dev/null)" ]]; then
@@ -1198,24 +1203,24 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
     echo "Orphaned members (branch ref gone — cleaning stale config):"
     for b in "${ORPHANS[@]}"; do echo "  - $b"; done
     for orphan in "${ORPHANS[@]}"; do
-      op=$(git config "stack-branch.${orphan}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      op=$(git config "branch.${orphan}.stack-parent" 2>/dev/null || git config "stack-branch.${orphan}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
       [[ -z "$op" ]] && op="$MAIN_BRANCH"
       while [[ "$op" != "$MAIN_BRANCH" ]] \
             && ! git rev-parse --verify --quiet "refs/heads/${op}" >/dev/null 2>&1; do
-        op=$(git config "stack-branch.${op}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+        op=$(git config "branch.${op}.stack-parent" 2>/dev/null || git config "stack-branch.${op}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
         [[ -z "$op" ]] && op="$MAIN_BRANCH"
       done
-      while IFS=' ' read -r key val; do
-        [[ -z "$key" ]] && continue
-        child="${key#stack-branch.}"
-        child="${child%.parent}"
+      while IFS=' ' read -r child val; do
+        [[ -z "$child" ]] && continue
         if [[ "$val" == "$orphan" ]]; then
           echo "  rewire: $child parent → $op"
           git config "stack-branch.${child}.parent" "$op"
           # Parent changed → drop the stale base so stack-base recomputes it.
           git config --unset "stack-branch.${child}.base" 2>/dev/null || true
         fi
-      done < <(git config --get-regexp '^stack-branch\..*\.parent$')
+      done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+                 git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
+               } | awk 'NF && !seen[$1]++')
       git config --unset "stack-branch.${orphan}.parent" 2>/dev/null || true
       _purge_member_refs "$orphan"
 
@@ -1237,18 +1242,18 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
 
     # Rewire children of dropped branches to their dropped parent's parent.
     for dropped in "${TO_DROP[@]}"; do
-      dropped_parent=$(git config "stack-branch.${dropped}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
-      while IFS=' ' read -r key val; do
-        [[ -z "$key" ]] && continue
-        child="${key#stack-branch.}"
-        child="${child%.parent}"
+      dropped_parent=$(git config "branch.${dropped}.stack-parent" 2>/dev/null || git config "stack-branch.${dropped}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      while IFS=' ' read -r child val; do
+        [[ -z "$child" ]] && continue
         if [[ "$val" == "$dropped" ]]; then
           echo "  rewire: $child parent → $dropped_parent"
           git config "stack-branch.${child}.parent" "$dropped_parent"
           # Parent changed → drop the stale base so stack-base recomputes it.
           git config --unset "stack-branch.${child}.base" 2>/dev/null || true
         fi
-      done < <(git config --get-regexp '^stack-branch\..*\.parent$')
+      done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+                 git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
+               } | awk 'NF && !seen[$1]++')
     done
 
     # Delete the dropped branches + their stack-branch.<x>.parent entries +
@@ -1295,7 +1300,7 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
   for b in "${ORPHANS[@]}"; do _dropped[$b]=1; done
   for b in "${COMPLETED[@]}"; do
     [[ "$b" == "$MAIN_BRANCH" || -n "${_dropped[$b]:-}" || -n "${_seeded[$b]:-}" ]] && continue
-    pp=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+    pp=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
     if [[ "$pp" == "$MAIN_BRANCH" ]]; then
       git config --add "stack-project.${PROJECT}.branch" "$b"
       echo "  re-seed new root: $b"
