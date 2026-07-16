@@ -275,6 +275,32 @@ diffstat = git(["diff", "--stat", f"{base}...{branch}"]).stdout.strip()
 patch = git(["diff", f"{base}...{branch}"]).stdout
 patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 
+# scope comes from the forest project, not the code area the voice corpus (main) teaches
+project = git(["config", f"stack-branch.{branch}.project"]).stdout.strip()
+
+_SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!?):\s*(?P<rest>.+)$")
+
+
+def force_scope(msg):
+    """Pin the subject's conventional-commit scope to the stack project. Saying it in the
+    prompt isn't enough: the drafter studies main, where scope IS a code area, and drifts."""
+    if not (project and msg):
+        return msg
+    lines = msg.splitlines()
+    m = _SUBJECT_RE.match(lines[0].strip())
+    if not m:
+        return msg
+    lines[0] = f"{m['type']}({project}){m['bang']}: {m['rest'].strip()}"
+    return "\n".join(lines)
+
+
+scope_instr = (
+    f"\nThe conventional-commit scope MUST be exactly `{project}`: this branch belongs to the\n"
+    f"`{project}` stack project, and every branch in a forest carries the project as its scope so\n"
+    f"the forest is legible from `git log` alone. The code-area scopes in the voice examples are\n"
+    f"main's convention, NOT this forest's — do not copy them.\n"
+) if project else ""
+
 if subject_only:
     write_instr = (
         f"Write ONE commit message that is a SUBJECT LINE ONLY — a single line in {author}'s "
@@ -317,12 +343,12 @@ are often just "wip" — rely on the DIFF below for what actually changed:
 </diff>
 
 {write_instr}
-
+{scope_instr}
 Output ONLY the raw commit message — no preface, no explanation, no code fences."""
 
 # a composer-written message is used verbatim — it IS the voice, so no drafting call
 message = provided_msg.strip()
-voiced = bool(message)
+voiced = verbatim = bool(message)
 if not message and not no_voice:
     try:
         cmd = [CLAUDE_BIN, "-p"]
@@ -341,6 +367,9 @@ if not message:
     pick = next((c for c in commits if c.split(" ", 1)[-1].strip().lower() != "wip"), commits[0])
     top = pick.split(" ", 1)
     message = top[1] if len(top) > 1 else f"squash {branch}"
+
+if not verbatim:
+    message = force_scope(message)
 
 if subject_only and message:
     # guarantee no body regardless of what the draft (or fallback) returned
