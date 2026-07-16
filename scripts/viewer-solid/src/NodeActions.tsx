@@ -37,6 +37,13 @@ interface CheckoutResult {
 
 const shortWt = (p: string) => p.split("/").pop() || p;
 
+const FIX = "cursor-pointer rounded-[5px] border border-del bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] text-del opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-50";
+const PUSH_RED = "cursor-pointer rounded-[5px] border border-del px-[9px] py-[3px] text-[12px] font-semibold leading-[1.55] opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-35";
+const ITEM = "flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] border border-transparent bg-transparent px-[10px] py-[7px] text-left text-[12px] leading-[1.55] text-patina enabled:hover:border-patina enabled:hover:bg-vellum-edge disabled:cursor-default disabled:opacity-45";
+const IC = "w-[14px] flex-none text-center opacity-85";
+const DONE = "text-[12px] transition-opacity duration-[240ms] ease-[ease] starting:opacity-0";
+const EDITOR_CLOSE = "cursor-pointer text-[11px] leading-[1.55] text-ink-faint";
+
 function holdReason(r: CheckoutResult): string {
   const parts: string[] = [];
   if (r.session) {
@@ -785,7 +792,7 @@ export function NodeActions(props: {
   };
 
   return (
-    <div class="node-actions" ref={root}>
+    <div class="node-actions relative flex flex-wrap items-center gap-[9px]" ref={root}>
       {/* the waymark spine — one chip (where the branch stands: edit → review → ready →
           shared → merged, each station lit in its own material) and one slot (the single
           next step, hidden at rest). What used to be the shared chip, the push-blocked
@@ -808,8 +815,7 @@ export function NodeActions(props: {
           green; the server re-verifies everything at push time regardless. */}
       <Show when={!isReview() && (preview.data?.outgoing ?? 0) > 0}>
         <button
-          class="nh-fix nh-push-red"
-          classList={{ armed: armed() === "pushOrigin" }}
+          class={`nh-fix nh-push-red ${PUSH_RED} ${armed() === "pushOrigin" ? "armed bg-del text-vellum-night" : "bg-transparent text-del enabled:hover:bg-del-bg"}`}
           disabled={busy() || !preview.data?.ok}
           title={
             preview.data?.ok
@@ -828,7 +834,7 @@ export function NodeActions(props: {
           open so a re-click can't clobber unsaved edits. */}
       <Show when={!isReview() && preview.data?.commit && !editorOpen()}>
         <button
-          class="nh-fix nh-open-pr"
+          class={`nh-fix nh-open-pr ${FIX}`}
           disabled={busy()}
           title="edit this commit's message (subject + body) before pushing — no sync needed"
           onClick={() => {
@@ -847,7 +853,7 @@ export function NodeActions(props: {
           create. With a commit still outgoing it shows what origin has NOW; push adds yours. */}
       <Show when={!isReview() && preview.data?.originExists}>
         <button
-          class="nh-fix nh-open-pr"
+          class={`nh-fix nh-open-pr ${FIX}`}
           disabled={busy() || openPr.isPending}
           title={
             preview.data?.published
@@ -865,13 +871,13 @@ export function NodeActions(props: {
       {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}
       <Show when={isReview() && remote.data?.available}>
         <span
-          class="nh-pushed"
+          class="nh-pushed cursor-help text-[12px] font-semibold text-del"
           title={`they pushed — your branch is at ${remote.data?.local}, theirs at ${remote.data?.remote}`}
         >
           ↯ they pushed
         </span>
         <button
-          class="nh-fix"
+          class={`nh-fix ${FIX}`}
           disabled={busy()}
           title="re-fetch this PR's pushed head into your local review branch. Your blessings stay — files whose content is unchanged remain blessed; changed files fall to stale for re-review."
           onClick={fire(() => pull.mutate())}
@@ -883,12 +889,12 @@ export function NodeActions(props: {
       {/* held-elsewhere banner: checkout / sync 409'd because another worktree holds the
           branch. Offer to free it and resume whichever action hit it. */}
       <Show when={heldAt()}>
-        <span class="nh-held">
+        <span class="nh-held inline-flex items-center gap-[8px] text-[12px] text-ink-faint">
           held in {heldAt()}{heldWhy() ? ` — ${heldWhy()}` : ""}
-          <button class="nh-held-btn" disabled={busy()} onClick={freeAndContinue}>
+          <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={freeAndContinue}>
             free &amp; {heldFor() === "omniSync" ? "sync" : "checkout"}
           </button>
-          <button class="nh-held-btn" onClick={() => setHeldAt(null)}>cancel</button>
+          <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" onClick={() => setHeldAt(null)}>cancel</button>
         </span>
       </Show>
 
@@ -905,29 +911,29 @@ export function NodeActions(props: {
       </button>
 
       <Show when={open()}>
-        <div class="nh-menu" role="menu">
+        <div class="nh-menu absolute top-[calc(100%+7px)] right-0 z-20 flex min-w-[196px] flex-col gap-[2px] rounded-[9px] border border-rule bg-vellum-raise p-[6px] shadow-[0_12px_34px_-14px_rgba(0,0,0,0.75)]" role="menu">
           {/* checkout — move the primary working tree onto this branch without squashing (view it) */}
           <button
-            class="nh-item"
+            class={`nh-item ${ITEM}`}
             role="menuitem"
             disabled={busy()}
             title="move this repo's main checkout onto this branch (no squash — just switch to it)"
             onClick={fire(() => checkout.mutate(false))}
           >
-            <span class="nh-item-ic">⤓</span>
+            <span class={`nh-item-ic ${IC}`}>⤓</span>
             {checkout.isPending ? "checking out…" : "checkout here"}
           </button>
 
           {/* preview — spin a dev server for this branch on a side port and open it, WITHOUT
               moving your main checkout off :3000 (loops-preview). Stop it from the Activity dock. */}
           <button
-            class="nh-item"
+            class={`nh-item ${ITEM}`}
             role="menuitem"
             disabled={busy() || devServer.isPending}
             title="spin up a dev server for this branch on a side port (3010+) and open it — leaves :3000 and your checkout alone"
             onClick={fire(() => devServer.mutate())}
           >
-            <span class="nh-item-ic">▷</span>
+            <span class={`nh-item-ic ${IC}`}>▷</span>
             {devServer.isPending ? "starting preview…" : "preview (dev server)"}
           </button>
 
@@ -938,50 +944,50 @@ export function NodeActions(props: {
           <Show when={!isReview()}>
             <Show when={props.health?.drifted && props.onReseat}>
               <button
-                class="nh-item"
+                class={`nh-item ${ITEM}`}
                 role="menuitem"
                 title={`rebase this branch (and any orphaned siblings, recursively) back onto ${props.health?.parent ?? "its parent"}'s current tip — local only, nothing pushed, nothing else moves`}
                 onClick={() => { setOpen(false); props.onReseat!(); }}
               >
-                <span class="nh-item-ic">⤴</span> reseat onto {props.health?.parent ?? "parent"}
+                <span class={`nh-item-ic ${IC}`}>⤴</span> reseat onto {props.health?.parent ?? "parent"}
               </button>
             </Show>
             <Show when={props.health?.upstreamBad && props.onDetach}>
               <button
-                class="nh-item"
+                class={`nh-item ${ITEM}`}
                 role="menuitem"
                 title="unset this tracking ref so a Pull/Push can't merge the wrong remote in — keeps every commit"
                 onClick={() => { setOpen(false); props.onDetach!(); }}
               >
-                <span class="nh-item-ic">✂</span> detach tracking ref
+                <span class={`nh-item-ic ${IC}`}>✂</span> detach tracking ref
               </button>
             </Show>
             <Show when={props.health?.diverged && props.onInspect}>
               <button
-                class="nh-item"
+                class={`nh-item ${ITEM}`}
                 role="menuitem"
                 title="show exactly what diverged: each side's commits (rebased twins flagged) + the PR's diff now vs after an additive update"
                 onClick={() => { setOpen(false); props.onInspect!(); }}
               >
-                <span class="nh-item-ic">⇄</span> inspect divergence
+                <span class={`nh-item-ic ${IC}`}>⇄</span> inspect divergence
               </button>
             </Show>
           </Show>
 
           {/* interest + all-threads — demoted off the header bar (strike-6 trim) */}
           <Show when={props.onBump}>
-            <button class="nh-item" role="menuitem" onClick={() => props.onBump!(1)}>
-              <span class="nh-item-ic">▲</span> promote forest on Home{(props.interest ?? 0) > 0 ? ` (now ${props.interest})` : ""}
+            <button class={`nh-item ${ITEM}`} role="menuitem" onClick={() => props.onBump!(1)}>
+              <span class={`nh-item-ic ${IC}`}>▲</span> promote forest on Home{(props.interest ?? 0) > 0 ? ` (now ${props.interest})` : ""}
             </button>
             <Show when={(props.interest ?? 0) > 0}>
-              <button class="nh-item" role="menuitem" onClick={() => props.onBump!(-1)}>
-                <span class="nh-item-ic">▼</span> demote
+              <button class={`nh-item ${ITEM}`} role="menuitem" onClick={() => props.onBump!(-1)}>
+                <span class={`nh-item-ic ${IC}`}>▼</span> demote
               </button>
             </Show>
           </Show>
           <Show when={props.onAllChats}>
-            <button class="nh-item" role="menuitem" onClick={() => { setOpen(false); props.onAllChats!(); }}>
-              <span class="nh-item-ic">💬</span> all chat threads
+            <button class={`nh-item ${ITEM}`} role="menuitem" onClick={() => { setOpen(false); props.onAllChats!(); }}>
+              <span class={`nh-item-ic ${IC}`}>💬</span> all chat threads
             </button>
           </Show>
 
@@ -1023,13 +1029,13 @@ export function NodeActions(props: {
                 <For each={sync.data?.dirty ?? []}>{(f) => <code>{f}</code>}</For>
               </div>
               <div class="nh-dirt-acts">
-                <button class="nh-fix" onClick={() => dirtDecide("include")} title="stage + commit everything in the holding worktree; the squash folds it into the outgoing commit">
+                <button class={`nh-fix ${FIX}`} onClick={() => dirtDecide("include")} title="stage + commit everything in the holding worktree; the squash folds it into the outgoing commit">
                   fold into the commit
                 </button>
-                <button class="nh-fix" onClick={() => dirtDecide("stash")} title="stash (incl. untracked), run the motion, pop the stash after — your changes come back">
+                <button class={`nh-fix ${FIX}`} onClick={() => dirtDecide("stash")} title="stash (incl. untracked), run the motion, pop the stash after — your changes come back">
                   stash &amp; continue
                 </button>
-                <button class="nh-fix nh-dirt-abort" onClick={() => dirtDecide("abort")} title="stop — the working tree stays exactly as it is">
+                <button class={`nh-fix nh-dirt-abort ${FIX}`} onClick={() => dirtDecide("abort")} title="stop — the working tree stays exactly as it is">
                   abort
                 </button>
               </div>
@@ -1039,10 +1045,10 @@ export function NodeActions(props: {
       </Show>
 
       <Show when={done()}>
-        <span class="nh-done" classList={{ "nh-done-alert": doneAlert() }} title={done() ?? ""}>{done()}</span>
+        <span class={`nh-done ${DONE} ${doneAlert() ? "nh-done-alert overflow-visible whitespace-normal rounded-[5px] border border-del bg-del-bg px-[7px] py-[2px] font-semibold text-del" : "max-w-[22ch] overflow-hidden text-ellipsis whitespace-nowrap text-patina opacity-90"}`} title={done() ?? ""}>{done()}</span>
       </Show>
       <Show when={pushedWeb()}>
-        <a class="nh-pushed-link" href={pushedWeb()!} target="_blank" rel="noreferrer">
+        <a class={`nh-pushed-link text-add ${DONE}`} href={pushedWeb()!} target="_blank" rel="noreferrer">
           {pushedWeb()!.includes("/pull/") ? "view the open PR ↗" : "author PR on github.com ↗"}
         </a>
       </Show>
@@ -1053,10 +1059,10 @@ export function NodeActions(props: {
       <Show when={editorOpen()}>
         <div class="nh-editor">
           <Show when={routedNotes().length}>
-            <div class="nh-editor-routed">{routedNotes().join(" · ")}</div>
+            <div class="nh-editor-routed text-[11px] italic text-patina">{routedNotes().join(" · ")}</div>
           </Show>
           <input
-            class="nh-editor-subject"
+            class="nh-editor-subject border-x-0 border-t-0 border-b border-rule bg-transparent px-[1px] py-[3px] font-display text-[17px] font-semibold italic text-ink outline-none focus:border-b-gold-leaf"
             value={msgSubject()}
             placeholder="subject — the one line the team reads in history"
             onInput={(e) => setMsgSubject(e.currentTarget.value)}
@@ -1065,22 +1071,22 @@ export function NodeActions(props: {
               branch's merge, instead of being frozen as text in this one commit's plan block */}
           <PlanStepsEditor branch={props.branch} onSaved={() => planFill.mutate()} />
           <textarea
-            class="nh-editor-body"
+            class="nh-editor-body resize-y border-0 bg-transparent p-[1px] font-mono text-[12px] leading-[1.55] text-ink-dim outline-none"
             value={msgBody()}
             placeholder="body — what ships and why"
             rows={5}
             onInput={(e) => setMsgBody(e.currentTarget.value)}
           />
-          <div class="nh-editor-row">
+          <div class="nh-editor-row flex items-center gap-[10px]">
             <button
-              class="nh-fix nh-editor-save"
+              class={`nh-fix nh-editor-save ${FIX}`}
               disabled={saveMsg.isPending || !msgSubject().trim()}
               onClick={() => saveMsg.mutate()}
             >
               {saveMsg.isPending ? "saving…" : "save message"}
             </button>
             <button
-              class="nh-editor-close"
+              class={`nh-editor-close ${EDITOR_CLOSE}`}
               disabled={planFill.isPending}
               title="recompute this branch's forest-plan block from the stack config (free — no model call)"
               onClick={() => planFill.mutate()}
@@ -1088,14 +1094,14 @@ export function NodeActions(props: {
               {planFill.isPending ? "…" : "↻ plan"}
             </button>
             <button
-              class="nh-editor-close"
+              class={`nh-editor-close ${EDITOR_CLOSE}`}
               disabled={draftMsg.isPending}
               title="ask claude to draft the message in your voice from the outgoing diff"
               onClick={() => draftMsg.mutate()}
             >
               {draftMsg.isPending ? "voicing…" : "✦ voice"}
             </button>
-            <button class="nh-editor-close" onClick={() => setEditorOpen(false)}>
+            <button class={`nh-editor-close ${EDITOR_CLOSE}`} onClick={() => setEditorOpen(false)}>
               close
             </button>
           </div>

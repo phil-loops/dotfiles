@@ -116,7 +116,7 @@ export function Hearth() {
                 fallback={
                   <>
                     <span class="lede font-display text-[16px] italic text-[#f0d3b6]">Restacking {s()?.project}</span>
-                    <span class="meta text-[11px] tracking-[0.04em] text-ink-dim">
+                    <span class="meta ml-auto text-[11px] tracking-[0.06em] text-ink-dim">
                       <Show when={s()?.current} fallback={<>starting the walk…</>}>
                         <Show when={s()?.total}>
                           node {s()?.done != null ? s()!.done! + 1 : 1} of {s()?.total} ·{" "}
@@ -130,7 +130,7 @@ export function Hearth() {
                 <span class="lede font-display text-[16px] italic text-[#f0d3b6]">
                   Parked at {leaf(s()?.current || s()?.project || "")}
                 </span>
-                <span class="meta text-[11px] tracking-[0.04em] text-ink-dim">
+                <span class="meta ml-auto text-[11px] tracking-[0.06em] text-ink-dim">
                   {s()?.reason || "needs a hand — hand it to Claude or abort"}
                 </span>
               </Show>

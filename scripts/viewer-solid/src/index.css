@@ -215,32 +215,6 @@ body {
 
 /* ── review surface ─────────────────────────────────────────────────── */
 .surface { padding: 30px 34px 90px; max-width: 1500px; }
-/* two tiers: an identity line, then a quiet controls bar under a hairline. Splitting them
-   stops a long branch name from wrapping into the toolbar and gives the actions room. */
-.node-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
-.node-head h1 {
-  font-family: var(--display); font-style: italic; font-weight: 600;
-  font-size: 32px; margin: 0; color: var(--ink); letter-spacing: -0.01em;
-}
-.nh-id { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
-.nh-bar { display: flex; align-items: center; gap: 16px; padding-top: 11px; border-top: 1px solid var(--rule); }
-.nh-spacer { flex: 1; }
-.diff-hint { display: flex; justify-content: flex-end; margin: -8px 0 16px; }
-.against { color: var(--ink-faint); font-size: 13px; flex: none; }
-.meta { margin-left: auto; color: var(--ink-dim); font-size: 11px; letter-spacing: 0.06em; }
-
-/* ── branch state badge + ⋯ actions menu (NodeActions) ───────────────── */
-.node-actions { position: relative; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-
-/* THE red button — the only control that touches origin; nothing else may wear this red */
-.nh-fix.nh-push-red { color: var(--del); border-color: var(--del); font-weight: 600; }
-.nh-fix.nh-push-red:disabled { opacity: 0.35; }
-.nh-fix.nh-push-red:hover:not(:disabled):not(.armed) { background: var(--del-bg); }
-.nh-fix.nh-push-red.armed { color: var(--vellum-night); background: var(--del); }
-.nh-pushed-link { font-size: 12px; color: var(--add); }
-/* result line + link fade in (inline in the header row — no height to animate) */
-.nh-done, .nh-pushed-link { transition: opacity 240ms ease; }
-@starting-style { .nh-done, .nh-pushed-link { opacity: 0; } }
 
 /* the message editor — prep's landing: the one outgoing commit, editable pre-push */
 .nh-editor {
@@ -249,52 +223,6 @@ body {
   border: 1px solid var(--gold-deep); border-radius: 9px;
   background: var(--gold-wash); padding: 12px 14px; margin-top: 4px;
 }
-.nh-editor-routed { font-size: 11px; color: var(--patina); font-style: italic; }
-.nh-editor-subject {
-  font-family: var(--display); font-style: italic; font-weight: 600; font-size: 17px;
-  color: var(--ink); background: transparent; border: 0; border-bottom: 1px solid var(--rule);
-  padding: 3px 1px; outline: none;
-}
-.nh-editor-subject:focus { border-bottom-color: var(--gold-leaf); }
-.nh-editor-body {
-  font-family: var(--mono); font-size: 12px; line-height: 1.55; color: var(--ink-dim);
-  background: transparent; border: 0; resize: vertical; outline: none; padding: 1px;
-}
-.nh-editor-row { display: flex; gap: 10px; align-items: center; }
-.nh-editor-save { color: var(--gold-leaf); border-color: var(--gold-deep); }
-.nh-editor-close {
-  font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer;
-}
-.nh-viewnote { font-size: 11px; color: var(--ink-faint); letter-spacing: 0.03em; }
-/* ── per-step story editor (in the message editor) ────────────────────────────
-   Each step's line writes its OWN branch's durable story, so the wording survives
-   this branch's merge instead of being frozen in one sibling's plan block. */
-.plan-steps { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; border-bottom: 1px solid var(--rule); }
-.plan-steps-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-faint); padding: 2px 1px 5px; }
-.plan-step { display: flex; align-items: center; gap: 8px; min-height: 26px; }
-.plan-step.landed { opacity: 0.5; }
-.ps-n { font-family: var(--mono); font-size: 11px; color: var(--gold-leaf); min-width: 14px; text-align: right; flex: none; }
-.plan-step.me .ps-n { color: var(--ember); }
-.ps-line {
-  display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0;
-  font: inherit; text-align: left; background: none; border: 0; cursor: pointer;
-  padding: 3px 6px; border-radius: 5px; color: var(--ink-dim);
-}
-.ps-line:hover:not(:disabled) { background: var(--gold-wash); color: var(--ink); }
-.ps-line:disabled { cursor: default; }
-.ps-job { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
-.ps-job.overridden { color: var(--gold-leaf); } /* a hand-authored story, not the raw commit subject */
-.ps-tail { display: flex; align-items: baseline; gap: 8px; flex: none; }
-.ps-me { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ember); }
-.ps-branch { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
-.ps-input {
-  flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; color: var(--ink);
-  background: var(--vellum-raise); border: 1px solid var(--gold-deep); border-radius: 5px;
-  padding: 4px 7px; outline: none;
-}
-.ps-btn { font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer; flex: none; }
-.ps-btn:hover:not(:disabled) { color: var(--ink); }
-.ps-save { color: var(--gold-leaf); }
 /* ── the unfold grammar ───────────────────────────────────────────────────────
    Nothing in the header teleports into layout: expandables GROW from the seam
    under the header rule and arrive warm (an ember wash that settles into the
@@ -358,7 +286,6 @@ body {
 .nh-dirt-files { display: flex; flex-wrap: wrap; gap: 5px 10px; }
 .nh-dirt-files code { font-size: 11px; color: var(--ink); background: var(--vellum-edge); padding: 1px 6px; border-radius: 4px; }
 .nh-dirt-acts { display: flex; gap: 9px; }
-.nh-dirt-abort { color: var(--ink-dim); border-color: var(--rule); }
 
 /* uncommitted rail — working-tree dirt, visually apart from the committed review set */
 .uncommitted-rail { margin-top: 26px; border-top: 1px dashed var(--del); border-top-width: 2px; padding-top: 12px; }
@@ -395,8 +322,6 @@ body {
 .ur-commit-go:not(:disabled):hover { background: var(--del); color: var(--vellum-night); }
 .ur-commit-err { font-size: 11px; color: var(--del); margin: -6px 2px 10px; }
 
-.nh-drift { font-size: 12px; color: var(--del); cursor: help; }
-.nh-ready { font-size: 12px; color: var(--gold-leaf); cursor: help; letter-spacing: 0.02em; }
 .ctx-scrim { position: fixed; inset: 0; z-index: 90; }
 .ctx-menu {
   position: fixed; z-index: 91; min-width: 150px; padding: 4px;
@@ -418,33 +343,6 @@ body {
 .ctx-pips { min-width: 58px; color: var(--gold-leaf); letter-spacing: -1px; }
 .ctx-lbl { color: var(--ink-faint); }
 .ctx-item:hover .ctx-lbl, .ctx-item.on .ctx-lbl { color: inherit; }
-.nh-pushed { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
-.nh-fix {
-  font: inherit; font-size: 12px; color: var(--del); background: transparent;
-  border: 1px solid var(--del); border-radius: 5px; padding: 3px 9px; cursor: pointer; opacity: 0.9;
-}
-.nh-fix:hover:not(:disabled) { opacity: 1; }
-.nh-fix:disabled { opacity: 0.5; cursor: default; }
-/* held-elsewhere banner: another worktree holds the branch; free it and resume. */
-.nh-held { font-size: 12px; color: var(--ink-faint); display: inline-flex; align-items: center; gap: 8px; }
-.nh-held-btn {
-  font: inherit; font-size: 11px; color: var(--del); background: transparent;
-  border: 1px solid var(--del); border-radius: 5px; padding: 2px 7px; cursor: pointer;
-}
-.nh-held-btn:disabled { opacity: 0.5; cursor: default; }
-.nh-done {
-  font-size: 12px; color: var(--patina); opacity: 0.9;
-  max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-/* a rebase conflict isn't a quiet ✓ — it parks a worktree and blocks restacks. Raise it to the
-   ember alert language (matching .nh-blocked / .amb-conflict) and drop the 22ch truncation so the
-   consequence is legible at a glance. */
-.nh-done-alert {
-  color: var(--del); opacity: 1; font-weight: 600;
-  max-width: none; white-space: normal; overflow: visible;
-  border: 1px solid var(--del); border-radius: 5px;
-  padding: 2px 7px; background: var(--del-bg);
-}
 /* ── ejected-rebase live stream (RebaseStream) ──────────────────────────
    floats below the actions row like .nh-menu; replaces the old frozen
    "rebasing onto origin/main via Claude" line with the job's live output. */
@@ -479,22 +377,6 @@ body {
   padding: 4px 9px; cursor: pointer;
 }
 .icon-btn:hover, .icon-btn.on { color: var(--ink); border-color: var(--rule); background: var(--vellum-edge); }
-.nh-menu {
-  position: absolute; top: calc(100% + 7px); right: 0; z-index: 20;
-  min-width: 196px; display: flex; flex-direction: column; gap: 2px;
-  background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 9px;
-  padding: 6px; box-shadow: 0 12px 34px -14px rgba(0, 0, 0, 0.75);
-}
-.nh-item {
-  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
-  font: inherit; font-size: 12px; color: var(--patina);
-  background: transparent; border: 1px solid transparent; border-radius: 6px;
-  padding: 7px 10px; cursor: pointer;
-}
-.nh-item:hover:not(:disabled) { background: var(--vellum-edge); border-color: var(--patina); }
-.nh-item:disabled { opacity: 0.45; cursor: default; }
-.nh-item.armed { color: var(--del); border-color: var(--del); }
-.nh-item-ic { width: 14px; flex: none; text-align: center; opacity: 0.85; }
 
 .loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
 
@@ -580,10 +462,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .fo-interest { color: var(--gold-leaf); font-size: 11px; letter-spacing: -1px; }
 .fo-meta { font-size: 12px; letter-spacing: 0.04em; color: var(--ink-faint); }
 .fo-empty { padding: 40px 24px; }
-/* the project name in the detail forest-strip doubles as a back-link to the overview map. */
-.nh-forest-back { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase;
-  color: var(--ink-faint); text-decoration: none; transition: color 0.12s; }
-.nh-forest-back:hover { color: var(--ink-dim); }
 .origin-btn {
   font: inherit; font-size: 12px; letter-spacing: 0.04em; color: var(--ink-dim);
   background: var(--vellum-raise); border: 1px solid var(--rule); border-radius: 8px;
