@@ -227,16 +227,16 @@ export function ForestsList(props: {
   return (
       <Show when={props.tab() === "forests"}>
       <section>
-        <div class="eyebrow-row">
-          <h2 class="eyebrow">forests</h2>
+        <div class="eyebrow-row flex items-center justify-between">
+          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">forests</h2>
           <Show when={deleteMode()}>
-            <span class="delete-mode-tag">
+            <span class="delete-mode-tag ml-3 inline-flex items-center gap-2 text-[11px] tracking-[0.03em] text-del">
               delete mode
-              <button class="delete-mode-exit" onClick={() => setDeleteMode(false)}>exit</button>
+              <button class="delete-mode-exit cursor-pointer rounded-[6px] border border-del bg-transparent px-2 py-[2px] text-[11px] leading-[1.55] text-del transition-[background] duration-[120ms] hover:bg-del-bg" onClick={() => setDeleteMode(false)}>exit</button>
             </span>
           </Show>
           <Show when={props.restackErr()}>
-            <span class="restack-err">{props.restackErr()}</span>
+            <span class="restack-err ml-auto pr-[10px] text-[11px] tracking-[0.02em] text-del">{props.restackErr()}</span>
           </Show>
           <Show when={canMutate && (props.projects() || []).some((p) => p.behind > 0)}>
             <ActionBar actions={[props.restackAllAction()]} />

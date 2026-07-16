@@ -170,11 +170,6 @@ body {
   padding: 22px 0 40px;
   position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto;
 }
-.brand {
-  font-family: var(--display); font-style: italic; font-weight: 600;
-  font-size: 26px; color: var(--ink); padding: 0 20px 2px;
-}
-.brand-mark { color: var(--gold-leaf); font-style: normal; font-size: 18px; }
 .spine-meta {
   color: var(--ink-faint); font-size: 10px; letter-spacing: 0.18em;
   text-transform: uppercase; padding: 0 20px; margin: 4px 0 18px;
@@ -620,64 +615,10 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   }
 }
 
-/* ── home: the ledger summary ────────────────────────────────────────── */
-/* ── ledger shell: thumb-index rail | page ──────────────────────────── */
-.ledger { display: grid; grid-template-columns: 96px 1fr; min-height: 100vh; }
-.ledger-page { max-width: 720px; margin: 0 auto; padding: 60px 28px 100px; width: 100%; }
-
-.thumb-index {
-  display: flex; flex-direction: column; gap: 4px; padding: 22px 0 40px;
-  border-right: 1px solid var(--rule);
-  background: linear-gradient(180deg, var(--vellum-raise), var(--vellum-night));
-  position: sticky; top: 0; align-self: start; height: 100vh;
-}
-.thumb-brand { color: var(--gold-leaf); font-size: 19px; text-align: center; margin-bottom: 26px; }
-.thumb {
-  position: relative; display: flex; flex-direction: column; align-items: center; gap: 9px;
-  padding: 18px 0; background: transparent; border: none; border-left: 2px solid transparent;
-  cursor: pointer; color: var(--ink-faint); transition: color 0.14s, background 0.14s;
-}
-.thumb:hover { color: var(--ink-dim); background: var(--vellum-edge); }
-.thumb.active { color: var(--gold-leaf); border-left-color: var(--gold-leaf); background: var(--vellum-edge); }
-.thumb-label {
-  writing-mode: vertical-rl; text-orientation: mixed;
-  font-family: var(--display); font-style: italic; font-size: 17px; letter-spacing: 0.04em;
-}
-.thumb-count {
-  font-family: var(--mono); font-size: 10px; color: var(--ink-faint);
-  background: var(--vellum-night); border: 1px solid var(--rule); border-radius: 6px;
-  padding: 1px 5px; min-width: 17px; text-align: center;
-}
-.thumb.active .thumb-count { color: var(--gold-leaf); border-color: var(--gold-deep); }
-
-.tab-empty { color: var(--ink-faint); font-style: italic; padding: 30px 4px; }
-
-@media (max-width: 640px) {
-  .ledger { grid-template-columns: 1fr; }
-  .thumb-index {
-    flex-direction: row; height: auto; position: static; padding: 10px; gap: 4px;
-    border-right: none; border-bottom: 1px solid var(--rule);
-  }
-  .thumb-brand { display: none; }
-  .thumb { flex-direction: row; border-left: none; border-bottom: 2px solid transparent; padding: 10px 14px; }
-  .thumb.active { border-left-color: transparent; border-bottom-color: var(--gold-leaf); }
-  .thumb-label { writing-mode: horizontal-tb; }
-}
-@media (prefers-reduced-motion: reduce) { .thumb { transition: none; } }
-
-.home-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 34px; }
-.brand {
-  font-family: var(--display); font-style: italic; font-weight: 600; font-size: 26px;
-  color: var(--ink); text-decoration: none; display: inline-block;
-}
-.brand.big { font-size: 44px; }
-.brand-mark { color: var(--gold-leaf); font-style: normal; }
-
 /* forest overview: the map as a forest's landing hero (no node selected). */
 .forest-overview { min-height: 100vh; background: var(--vellum-night); }
 .fo-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: baseline; gap: 16px;
   padding: 16px 24px; background: var(--vellum-night); border-bottom: 1px solid var(--rule); }
-.fo-head .brand { font-size: 22px; }
 .fo-project { font-family: var(--display); font-style: italic; font-size: 21px; color: var(--ink); }
 .fo-interest { color: var(--gold-leaf); font-size: 11px; letter-spacing: -1px; }
 .fo-meta { font-size: 12px; letter-spacing: 0.04em; color: var(--ink-faint); }
@@ -711,10 +652,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .amb-chip.landed-mine, .amb-chip.landed-other { margin-right: 0; }
 .amb-chip.landed-mine { color: var(--gold-leaf); border-color: var(--gold-deep); }
 .amb-chip.landed-other { color: var(--ink-faint); }
-.eyebrow {
-  color: var(--ink-faint); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
-  font-weight: 500; margin: 34px 0 12px;
-}
 /* live-chat presence: the Home "chats" strip + the pulsing per-forest badge (/chat-jobs) */
 .chat-live .chat-row {
   display: flex; align-items: baseline; gap: 10px; padding: 6px 9px; border-radius: 8px;
@@ -731,46 +668,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .chat-progress { margin-left: auto; flex: none; font-size: 12px; color: var(--ink-faint); }
 .forest-chat { flex: none; color: var(--gold-leaf); animation: chat-pulse 1.6s ease-in-out infinite; }
 @keyframes chat-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-/* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
-.base-toggle { display: flex; align-items: center; gap: 6px; }
-.base-label { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; margin-right: 4px; }
-.base-pill {
-  font: inherit; font-size: 11px; color: var(--ink-dim); background: transparent;
-  border: 1px solid var(--rule); border-radius: 7px; padding: 3px 11px; cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-.base-pill:hover { color: var(--ink); border-color: var(--ink-faint); }
-.base-pill.on { color: var(--ink); border-color: var(--ink-faint); background: var(--vellum-edge); }
-
-/* ── restack affordances on the home (patina = behind/restack; ember = needs you) ── */
-.eyebrow-row { display: flex; align-items: center; justify-content: space-between; }
-.restack-all, .forest-restack, .forest-drop {
-  font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;
-  border-radius: 7px; padding: 3px 11px; background: transparent;
-  transition: border-color 0.12s, color 0.12s, background 0.12s;
-}
-.forest-drop { color: var(--del); border: 1px solid transparent; }
-.forest-drop:hover { border-color: var(--del); background: var(--del-bg); }
-.forest-drop.armed { border-color: var(--del); background: var(--del); color: #1a1411; }
-.forest-drop.running { color: var(--del); border-color: transparent; opacity: 0.7; }
-.delete-mode-tag {
-  display: inline-flex; align-items: center; gap: 8px; margin-left: 12px;
-  color: var(--del); font-size: 11px; letter-spacing: 0.03em;
-}
-.delete-mode-exit {
-  font: inherit; font-size: 11px; cursor: pointer; border-radius: 6px;
-  padding: 2px 8px; background: transparent; color: var(--del); border: 1px solid var(--del);
-  transition: background 0.12s;
-}
-.delete-mode-exit:hover { background: var(--del-bg); }
-.restack-all { color: var(--patina); border: 1px solid var(--patina); opacity: 0.8; margin-top: 30px; }
-.restack-all:hover { opacity: 1; }
-.restack-all.armed, .forest-restack.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
-.restack-all.running, .forest-restack.running { color: var(--patina); border-color: transparent; opacity: 0.8; }
-.forest-restack { color: var(--patina); border: 1px solid transparent; }
-.forest-restack:hover { border-color: var(--patina); }
-.restack-err { margin-left: auto; color: var(--del); font-size: 11px; letter-spacing: 0.02em; padding-right: 10px; }
-
 /* ── map button + forest-map overlay ─────────────────────────────────── */
 .map-btn {
   font: inherit; font-size: 11px; letter-spacing: 0.04em; color: var(--ink-dim);
@@ -942,7 +839,7 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .ci-who { color: var(--ink-faint); }
 
 /* shared contextual-action model (actions.tsx) — fallback styling when an Action carries no
-   `class`; most rows pass an existing per-context class (.forest-restack, .watch-pin, …). */
+   `class`; some rows pass an existing per-context class (.watch-pin, …). */
 .action-bar { display: inline-flex; align-items: center; gap: 8px; }
 .action-btn {
   font: inherit; font-size: 11px; letter-spacing: 0.03em; cursor: pointer; flex: none;

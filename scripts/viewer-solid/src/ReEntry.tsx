@@ -87,7 +87,7 @@ export function ReEntry(props: {
     <Show when={hasNews()}>
       <section class="reentry">
         <div class="reentry-head">
-          <h2 class="eyebrow">since you were here <span class="reentry-when">— {ago(since())}</span></h2>
+          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">since you were here <span class="reentry-when">— {ago(since())}</span></h2>
           <button class="reentry-caught" onClick={catchUp} title="mark everything below as seen">
             caught up ✓
           </button>

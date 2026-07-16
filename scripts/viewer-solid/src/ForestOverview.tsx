@@ -373,8 +373,8 @@ export function ForestOverview() {
   return (
     <div class="forest-overview">
       <header class="fo-head">
-        <Link class="brand" to={{ kind: "home", tab: "forests" }}>
-          <span class="brand-mark">✦</span> blessed
+        <Link class="brand inline-block px-[20px] pb-[2px] font-display text-[22px] font-semibold italic text-ink no-underline" to={{ kind: "home", tab: "forests" }}>
+          <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> blessed
         </Link>
         <span class="fo-project">{project()}</span>
         <Show when={(model.data?.interest ?? 0) > 0}>

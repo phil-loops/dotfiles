@@ -265,9 +265,13 @@ export function Home() {
   const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
 
   const restacking = (name: string) => () => running() === name || running() === "__all__";
+  const CHIP =
+    "flex-none cursor-pointer rounded-[7px] border bg-transparent px-[11px] py-[3px] text-[11px] leading-[1.55] tracking-[0.03em] transition-[border-color,color,background] duration-[120ms]";
   const dropAction = (p: Project): Action => ({
     id: "drop:" + p.name,
-    class: "forest-drop",
+    class: `forest-drop ${CHIP} border-transparent text-del hover:border-del hover:bg-del-bg`,
+    armedClass: `forest-drop ${CHIP} border-del bg-del text-[#1a1411]`,
+    runningClass: `forest-drop ${CHIP} border-transparent text-del opacity-70 hover:bg-del-bg`,
     arm: true,
     busy: () => dropping() === p.name,
     label: () => (dropping() === p.name ? "⌫ dropping…" : "✕ drop"),
@@ -276,7 +280,9 @@ export function Home() {
   });
   const restackAllAction = (): Action => ({
     id: "restack:__all__",
-    class: "restack-all",
+    class: `restack-all ${CHIP} mt-[30px] border-patina text-patina opacity-80 hover:opacity-100`,
+    armedClass: `restack-all ${CHIP} mt-[30px] border-del bg-del-bg text-del opacity-80 hover:opacity-100`,
+    runningClass: `restack-all ${CHIP} mt-[30px] border-transparent text-patina opacity-80`,
     arm: true,
     busy: () => running() === "__all__",
     label: () => (running() === "__all__" ? "⤳ restacking all…" : `⟳ restack all ${behindNames().length} behind`),
@@ -313,33 +319,40 @@ export function Home() {
     />
   );
 
+  const THUMB =
+    "thumb relative flex cursor-pointer flex-col items-center gap-[9px] border-l-2 bg-transparent px-0 py-[18px] transition-[color,background] duration-[140ms] motion-reduce:transition-none max-[640px]:flex-row max-[640px]:border-l-0 max-[640px]:border-b-2 max-[640px]:px-[14px] max-[640px]:py-[10px]";
+  const THUMB_OFF = "border-transparent text-ink-faint hover:bg-vellum-edge hover:text-ink-dim";
+  const THUMB_ON =
+    "border-l-gold-leaf bg-vellum-edge text-gold-leaf max-[640px]:border-l-transparent max-[640px]:border-b-gold-leaf";
+  const COUNT =
+    "thumb-count min-w-[17px] rounded-[6px] border bg-vellum-night px-[5px] py-px text-center font-mono text-[10px]";
   return (
-    <div class="ledger">
-      <nav class="thumb-index">
-        <div class="thumb-brand"><span class="brand-mark">✦</span></div>
+    <div class="ledger grid min-h-screen grid-cols-[96px_1fr] max-[640px]:grid-cols-[1fr]">
+      <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
+        <div class="thumb-brand mb-[26px] text-center text-[19px] text-gold-leaf max-[640px]:hidden"><span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span></div>
         <For each={[
           { id: "work" as const, label: "Work", count: workCount() },
           { id: "forests" as const, label: "Forests", count: (projects.data || []).length },
         ]}>
           {(t) => (
             <button
-              class="thumb"
+              class={`${THUMB} ${tab() === t.id ? THUMB_ON : THUMB_OFF}`}
               classList={{ active: tab() === t.id }}
               onClick={() => navigate({ kind: "home", tab: t.id })}
             >
-              <span class="thumb-label">{t.label}</span>
+              <span class="thumb-label font-display italic text-[17px] tracking-[0.04em] [writing-mode:vertical-rl] [text-orientation:mixed] max-[640px]:[writing-mode:horizontal-tb]">{t.label}</span>
               <Show when={t.count}>
-                <span class="thumb-count">{t.count}</span>
+                <span class={`${COUNT} ${tab() === t.id ? "border-gold-deep text-gold-leaf" : "border-rule text-ink-faint"}`}>{t.count}</span>
               </Show>
             </button>
           )}
         </For>
       </nav>
 
-      <main class="ledger-page">
-        <header class="home-head">
-          <div class="brand big">
-            <span class="brand-mark">✦</span> blessed
+      <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[60px] pb-[100px]">
+        <header class="home-head mb-[34px] flex items-center justify-between">
+          <div class="brand big inline-block px-[20px] pb-[2px] font-display text-[44px] font-semibold italic text-ink">
+            <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> blessed
           </div>
           <Show when={landedChip(merges.data, projects.data)}>
             {(c) => c().to
@@ -372,7 +385,7 @@ export function Home() {
 
       <Show when={stripChats().length}>
         <section class="work-sec chat-live mb-[30px]">
-          <h2 class="eyebrow">chats <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— headless claudes on your branches</span></h2>
+          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">chats <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— headless claudes on your branches</span></h2>
           <div class="work-rule mb-[6px] h-px bg-rule" />
           <For each={stripChats()}>
             {(j) => (
