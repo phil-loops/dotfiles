@@ -61,13 +61,18 @@ def _record_open(branch):
         pass
 
 
-def _ready_to_merge(mergeable, prs):
+def _ready_to_merge(mergeable, prs, merged=()):
     """Split stack-forest's topologically-mergeable branches by PR state:
       ready      — an open PR already exists (the green into-main edge-bar set)
       candidates — no PR yet, but clear to merge straight into main.
-    Pure split, input order preserved."""
+    Pure split, input order preserved. A branch whose work already landed is in
+    neither: its PR closed on merge, so "no open PR" would otherwise promote it to
+    a candidate and the row would advertise pushing work that's already in main.
+    It needs a contract, which the restack pre-pass does."""
     ready, candidates = [], []
     for b in mergeable:
+        if b in merged:
+            continue
         (ready if b in prs else candidates).append(b)
     return ready, candidates
 
@@ -526,15 +531,21 @@ def _projects_build(name, path, pck):
         base = _base_of(b)
         n = ctx.run(["git", "rev-list", "--count", f"{b}..{base}"]).stdout.strip()
         behind = int(n) if n.isdigit() else 0
-        overlap = False
+        overlap, merged = False, False
         if behind:
             mb = ctx.run(["git", "merge-base", b, base]).stdout.strip()
             if mb:
                 base_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{base}"]).stdout.splitlines())
+                branch_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
                 if base_files:
-                    branch_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
                     overlap = bool(base_files & branch_files)
-        return behind, overlap
+                # Squash-merged: the branch's OWN files already match base, though its
+                # history diverges and the rest of the tree has moved on. Same predicate
+                # rebase-classify contracts on (VERDICT=already-merged). Scoped to the
+                # branch's files — a whole-tree compare answers a different question.
+                if branch_files:
+                    merged = ctx.run(["git", "diff", "--quiet", base, b, "--", *branch_files]).returncode == 0
+        return behind, overlap, merged
     roots = sorted({b for p in projs for b in p.get("mergeable", [])})
     with ThreadPoolExecutor(max_workers=8, initializer=ctx.set_repo, initargs=(path,)) as ex:
         fresh = dict(zip(roots, ex.map(_root_fresh, roots)))
@@ -553,8 +564,12 @@ def _projects_build(name, path, pck):
     green = _green_set()
     for p in projs:
         p["repo"] = name
-        p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
         bs = p.get("mergeable", [])
+        # Roots whose work is in main but whose node is still in the forest — the restack
+        # pre-pass drops+rewires them. This is live state, unlike the `landed` badge below,
+        # which is history and lingers after the node is contracted.
+        p["mergedNodes"] = [b for b in bs if fresh[b][2]]
+        p["ready"], p["candidates"] = _ready_to_merge(bs, prmap, set(p["mergedNodes"]))
         p["behind"] = max((fresh[b][0] for b in bs), default=0)
         p["overlap"] = any(fresh[b][1] for b in bs)
         landed = merges.get(p["name"]) or []

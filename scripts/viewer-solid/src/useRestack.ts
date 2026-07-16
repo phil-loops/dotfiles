@@ -29,14 +29,19 @@ export function useRestack(deps: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json());
-  const behindNames = () => (deps.projectsData() || []).filter((p) => p.behind > 0).map((p) => p.name);
+  // Restack-all's unit is "had work land", not "trails main": a forest is only behind
+  // because main moved, and those rebase on their own when you next touch them. A merged
+  // node is the case that WON'T resolve itself — it lingers, advertising a push for work
+  // already in main, until the pre-pass contracts it.
+  const mergedNames = () =>
+    (deps.projectsData() || []).filter((p) => (p.mergedNodes?.length ?? 0) > 0).map((p) => p.name);
   const start = (key: string) => {
     setRestackErr(null);
     // restack-all clears any pre-existing park first (server frees the worktree, then the
     // resilient walk restacks the rest); a single-project restack never auto-drops a park.
     const body =
       key === "__all__"
-        ? { projects: behindNames(), abortParked: !!parked() }
+        ? { projects: mergedNames(), abortParked: !!parked() }
         : { project: key };
     post(key === "__all__" ? "/restack-all" : "/restack", body).then((r) => {
       if (r.ok) {
@@ -118,5 +123,5 @@ export function useRestack(deps: {
       d.paused ? { project: d.project ?? "", current: d.current ?? "", reason: d.reason ?? "" } : null
     );
   });
-  return { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, behindNames };
+  return { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, mergedNames };
 }

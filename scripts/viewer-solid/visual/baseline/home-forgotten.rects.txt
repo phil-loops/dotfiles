@@ -35,8 +35,6 @@
 /div[1]/div[1]/main[2]/section[3] 436,325 664x1669
 /div[1]/div[1]/main[2]/section[3]/div[1] 436,325 664x62
 /div[1]/div[1]/main[2]/section[3]/div[1]/h2[1] 436,359 58x16
-/div[1]/div[1]/main[2]/section[3]/div[1]/div[2] 915,329 185x55
-/div[1]/div[1]/main[2]/section[3]/div[1]/div[2]/button[1] 915,359 185x25
 /div[1]/div[1]/main[2]/section[3]/input[2] 436,387 664x40
 /div[1]/div[1]/main[2]/section[3]/section[3] 436,473 664x287
 /div[1]/div[1]/main[2]/section[3]/section[3]/h2[1] 436,473 664x22
