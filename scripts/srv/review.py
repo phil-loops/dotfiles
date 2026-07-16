@@ -293,6 +293,40 @@ def shelve(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "shelved": on}))
 
 
+def _focus_git(repo, *args):
+    # Focus rank lives in each project's OWN repo config; the lane can span repos, so target the
+    # entry's repo explicitly rather than the request's cwd (unknown repo → default cwd).
+    path = ctx.REPOS.get(repo) if repo else None
+    base = ["git", "-C", path] if path else ["git"]
+    return ctx.run(base + list(args))
+
+
+def focus_set(req, raw):
+    # Pin/unpin a forest to the focus lane, or reorder the whole lane (stack-project.<p>.focus N,
+    # 1-based). {order:[{repo,project}...]} rewrites ranks 1..N in one shot (the drag-reorder path);
+    # {repo,project,on} toggles one pin — on appends past the current max rank, off unsets it.
+    d = json.loads(raw or "{}")
+    if isinstance(d.get("order"), list):
+        for i, e in enumerate(d["order"]):
+            proj, repo = e.get("project", ""), e.get("repo", "")
+            if proj:
+                _focus_git(repo, "config", f"stack-project.{proj}.focus", str(i + 1))
+        return req._send(200, json.dumps({"ok": True, "count": len(d["order"])}))
+    proj, repo = d.get("project", ""), d.get("repo", "")
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
+    key = f"stack-project.{proj}.focus"
+    if d.get("on", True):
+        lines = _focus_git(repo, "config", "--get-regexp",
+                           r"^stack-project\..*\.focus$").stdout.splitlines()
+        ranks = [int(v) for v in (ln.rpartition(" ")[2] for ln in lines)
+                 if v.strip().lstrip("-").isdigit()]
+        _focus_git(repo, "config", key, str((max(ranks, default=0)) + 1))
+        return req._send(200, json.dumps({"ok": True, "project": proj, "focus": True}))
+    _focus_git(repo, "config", "--unset", key)
+    req._send(200, json.dumps({"ok": True, "project": proj, "focus": False}))
+
+
 def _scratch_worktree_for(branch):
     # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
     # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.

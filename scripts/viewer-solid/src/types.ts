@@ -121,6 +121,7 @@ export const Project = z.object({
   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
   interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home
   shelved: z.boolean().optional(), // deliberately paused (stack-project.<name>.shelved) — out of the active bands until unshelved
+  focus: z.number().nullable().optional(), // 1-based focus-lane rank (stack-project.<name>.focus); null/absent = not pinned
 });
 export type Project = z.infer<typeof Project>;
 

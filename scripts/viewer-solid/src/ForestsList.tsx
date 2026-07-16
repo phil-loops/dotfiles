@@ -4,6 +4,7 @@ import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
 import { nextStep, type NextStep } from "./homeModel";
+import { FocusLane } from "./FocusLane";
 import type { Project, Parked, PR } from "./types";
 
 // The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
@@ -166,6 +167,7 @@ export function ForestsList(props: {
             onInput={(e) => setForestQuery(e.currentTarget.value)}
           />
         </Show>
+        <FocusLane projects={props.projects} prOf={props.prOf} />
         <Show
           when={filteredForests().length}
           fallback={

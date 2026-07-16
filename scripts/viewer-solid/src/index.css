@@ -1174,3 +1174,34 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 }
 .reentry-resume-next.yours { color: var(--ember); border-color: var(--ember); background: var(--ember-wash); }
 .reentry-resume:hover .reentry-resume-name { color: var(--gold-leaf); }
+
+/* ── focus lane: hand-ordered "pushing now" strip ────────────────────── */
+.focus-lane { margin: 4px 0 20px; }
+.focus-rows { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.focus-row {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px;
+  background: var(--vellum-raise); cursor: grab;
+}
+.focus-row.dragging { opacity: 0.4; cursor: grabbing; }
+.focus-row.over { border-color: var(--gold-deep); box-shadow: inset 0 2px 0 var(--gold-deep); }
+.focus-grip { color: var(--ink-faint); font-size: 13px; cursor: grab; user-select: none; }
+.focus-rank {
+  color: var(--gold-leaf); font-family: var(--mono); font-size: 11px;
+  min-width: 14px; text-align: right;
+}
+.focus-name {
+  color: var(--ink); font-family: var(--display); font-size: 15px; font-style: italic;
+  text-decoration: none; flex: 0 1 auto;
+}
+.focus-name:hover { color: var(--gold-leaf); }
+.focus-repo {
+  font-family: var(--mono); font-style: normal; font-size: 10px; color: var(--ink-faint);
+  margin-right: 6px; padding: 1px 4px; border: 1px solid var(--rule); border-radius: 2px;
+}
+.focus-next {
+  margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
+  padding: 1px 8px; border: 1px solid var(--rule); border-radius: 3px; white-space: nowrap;
+}
+.focus-next.yours { color: var(--ember); border-color: var(--ember); background: var(--ember-wash); }
+.ctx-item.ctx-focus .ctx-pips { color: var(--gold-leaf); }
