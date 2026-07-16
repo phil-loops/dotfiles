@@ -15,7 +15,7 @@ const ROUTES = [
   "/head", "/sync", "/syncs", "/events", "/restack-status", "/branches", "/standalone",
   "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
   "/claude", "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
-  "/preview", "/preview-kill", "/preview-reap",
+  "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
 ];
 
 // Dev-only keep-alive: the Python backend self-reaps after 15min without an /events
