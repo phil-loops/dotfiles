@@ -1058,7 +1058,9 @@ export function NodeActions(props: {
           body, editable before the push. Saving rewrites only that unpushed commit
           (server-verified); the tree, author, and gates verdict are untouched. */}
       <Show when={editorOpen()}>
-        <div class="nh-editor">
+        {/* the marker class stays wired into index.css's unfold grammar (transition,
+            overflow: clip, @starting-style) — only the box styling lives here */}
+        <div class="nh-editor mt-1 flex basis-full flex-col gap-[7px] rounded-[9px] border border-solid border-gold-deep bg-gold-wash px-[14px] py-3">
           <Show when={routedNotes().length}>
             <div class="nh-editor-routed text-[11px] italic text-patina">{routedNotes().join(" · ")}</div>
           </Show>
