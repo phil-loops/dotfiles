@@ -68,6 +68,12 @@ _held_by_other(){ local lane="$1" hp mp hs
   hs=$(gc "own.$lane.session" 2>/dev/null)
   [[ -n "$hs" && -n "$SID" && "$hs" != "$SID" ]] && return 0
   return 1 }
+# "(you)" or "(sess 5bf6bd76)" or "(pid 21994)" — whatever identifies the holder to a reader.
+_holder_tag(){ local lane="$1" hp hs mp
+  hp=$(gc "own.$lane.pid" 2>/dev/null); hs=$(gc "own.$lane.session" 2>/dev/null); mp=$(_mypid)
+  [[ -n "$mp" && "$hp" == "$mp" ]] && { print -rn -- " (you)"; return; }
+  [[ -n "$hs" ]] && { print -rn -- " (sess ${hs%%-*})"; return; }
+  [[ -n "$hp" ]] && print -rn -- " (pid $hp)"; }
 _lane_for(){ local p="$1" best="" blen=0 line lane globs g
   while IFS= read -r line; do
     [[ "$line" == \#* || -z "${line// /}" ]] && continue
@@ -127,7 +133,14 @@ case "${1:-list}" in
     local l=$(_lane_for "$2"); [[ -z "$l" ]] && { print "$2 → (unowned)"; exit 0; }
     local sl=$(gc "own.$l.slice" 2>/dev/null) a; a=$(_age "$l" 2>/dev/null) || a=""
     _alive "$l"; local rc=$?
-    if (( rc == 0 )); then
+    # "a LIVE session" includes YOU. who used to report liveness without ever asking whose, so the
+    # holder was told to patch-protocol against themselves 0s after claiming — wrong for exactly
+    # the person most likely to ask (2026-07-16). Only claim YOU on a positive pid match: an
+    # unresolvable self falls through to the warning, which is the safe way to be unsure.
+    local hp=$(gc "own.$l.pid" 2>/dev/null) mp=$(_mypid)
+    if (( rc == 0 )) && [[ -n "$mp" && "$hp" == "$mp" ]]; then
+      print "$2 → [$l]${sl:+ (slice:$sl)} · ● held by YOU${a:+ (${a}s ago)} — edit it directly"
+    elif (( rc == 0 )); then
       print "$2 → [$l]${sl:+ (slice:$sl)} · ● held by a LIVE session${a:+ (${a}s ago)} ⚠ use the patch protocol"
     elif (( rc == 1 )); then
       print "$2 → [$l]${sl:+ (slice:$sl)} · ✗ holder process gone — free to take${a:+ (claim was ${a}s old)}"
@@ -140,7 +153,12 @@ case "${1:-list}" in
     while IFS= read -r line; do [[ "$line" == \#* || -z "${line// /}" ]] && continue
       lane="${line%% *}"; _alive "$lane"; local rc=$?
       if a=$(_age "$lane" 2>/dev/null); then h="held ${a}s ago"; else h="—"; fi
-      liv=""; (( rc == 0 )) && liv=" · ● live"; (( rc == 1 )) && liv=" · ✗ dead (free to take)"
+      # NAME the live holder. "● live" alone says a lane is taken but not by whom, so a session
+      # that wants it has to guess — and guessed wrong: 5bf6bd76 read "● live", assumed the lane
+      # belonged to the session that had mentioned claiming it that morning, and stood down for
+      # someone who had already released it (2026-07-16). "who holds this" must be answerable.
+      liv=""; (( rc == 0 )) && liv=" · ● live$(_holder_tag "$lane")"
+      (( rc == 1 )) && liv=" · ✗ dead (free to take)"
       r=""; sl=$(gc "own.$lane.slice" 2>/dev/null); [[ -n "$sl" ]] && r=" · slice:$sl"
       if rq=$(_req "$lane" 2>/dev/null) && (( rq < FRESH )); then r="$r ⟵ requested ${rq}s ago"; fi
       printf '  %-9s %-15s %s%s%s\n' "$lane" "$h" "${line#* }" "$liv" "$r"; done < "$OWNERS" ;;
