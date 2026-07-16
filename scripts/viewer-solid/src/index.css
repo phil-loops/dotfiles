@@ -175,7 +175,6 @@ body {
   text-transform: uppercase; padding: 0 20px; margin: 4px 0 18px;
 }
 .spine-empty { color: var(--ink-faint); padding: 20px; font-style: italic; }
-.spine-list { list-style: none; margin: 0; padding: 0; }
 .spine-node {
   display: flex; align-items: center; gap: 9px; padding: 7px 16px 7px 12px;
   cursor: pointer; border-left: 2px solid transparent; position: relative;
@@ -213,22 +212,6 @@ body {
   transition: opacity 240ms ease;
 }
 @starting-style { .dirt-receipt { opacity: 0; } }
-.spine-name { color: var(--ink-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.spine-node.active .spine-name { color: var(--ink); }
-.spine-count { color: var(--ink-faint); font-size: 11px; flex: none; }
-.spine-count .slash { opacity: 0.5; margin: 0 1px; }
-
-/* current-branch header above the file list — click to open the forest map */
-.spine-branch {
-  display: flex; align-items: center; gap: 8px; width: calc(100% - 24px);
-  margin: 14px 12px 0; padding: 7px 10px; cursor: pointer; text-align: left;
-  background: var(--vellum-edge); border: 1px solid var(--rule); border-radius: 6px;
-  color: var(--ink); font-family: var(--mono); font-size: 13px;
-  transition: border-color 0.12s, background 0.12s;
-}
-.spine-branch:hover { border-color: var(--gold-deep); }
-.spine-branch-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.spine-branch-switch { color: var(--ink-faint); flex: none; font-size: 14px; }
 
 /* ── review surface ─────────────────────────────────────────────────── */
 .surface { padding: 30px 34px 90px; max-width: 1500px; }
@@ -378,10 +361,6 @@ body {
 .nh-dirt-abort { color: var(--ink-dim); border-color: var(--rule); }
 
 /* uncommitted rail — working-tree dirt, visually apart from the committed review set */
-.dirty-aside-note {
-  margin-top: 10px; padding: 5px 10px; font-size: 11px; font-weight: 600;
-  color: var(--del); border-left: 2px solid var(--del); font-variant-numeric: tabular-nums;
-}
 .uncommitted-rail { margin-top: 26px; border-top: 1px dashed var(--del); border-top-width: 2px; padding-top: 12px; }
 .ur-head {
   font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
@@ -416,14 +395,8 @@ body {
 .ur-commit-go:not(:disabled):hover { background: var(--del); color: var(--vellum-night); }
 .ur-commit-err { font-size: 11px; color: var(--del); margin: -6px 2px 10px; }
 
-.nh-behind { font-size: 12px; color: var(--patina); opacity: 0.9; }
 .nh-drift { font-size: 12px; color: var(--del); cursor: help; }
-.nh-ghost { font-size: 12px; color: var(--patina); cursor: help; }
 .nh-ready { font-size: 12px; color: var(--gold-leaf); cursor: help; letter-spacing: 0.02em; }
-.interest-ctl { display: inline-flex; align-items: center; gap: 4px; }
-.interest-ctl .icon-btn { padding: 0 6px; line-height: 1.4; }
-.interest-val { min-width: 16px; text-align: center; font-size: 11px; color: var(--ink-faint); }
-.interest-val.on { color: var(--gold-leaf); letter-spacing: -1px; }
 .ctx-scrim { position: fixed; inset: 0; z-index: 90; }
 .ctx-menu {
   position: fixed; z-index: 91; min-width: 150px; padding: 4px;
@@ -445,9 +418,6 @@ body {
 .ctx-pips { min-width: 58px; color: var(--gold-leaf); letter-spacing: -1px; }
 .ctx-lbl { color: var(--ink-faint); }
 .ctx-item:hover .ctx-lbl, .ctx-item.on .ctx-lbl { color: inherit; }
-.nh-amb { font-size: 12px; cursor: help; letter-spacing: 0.02em; }
-.nh-amb.amb-conflict { color: var(--del); }
-.nh-amb.amb-restack { color: var(--patina); }
 .nh-pushed { font-size: 12px; color: var(--del); font-weight: 600; cursor: help; }
 .nh-fix {
   font: inherit; font-size: 12px; color: var(--del); background: transparent;
@@ -455,18 +425,6 @@ body {
 }
 .nh-fix:hover:not(:disabled) { opacity: 1; }
 .nh-fix:disabled { opacity: 0.5; cursor: default; }
-/* the lone per-branch restack button: calm patina for a clean replay, ember only when the
-   ambient dry-run predicts a collision. */
-.nh-fix.nh-restack { color: var(--patina); border-color: var(--patina); }
-.nh-fix.nh-restack.amb-conflict { color: var(--del); border-color: var(--del); font-weight: 600; }
-/* prep-to-merge: the primary merge-prep workflow (checkout + squash). Calm ink until armed,
-   then ember to signal the history rewrite is one more click away. */
-.nh-fix.nh-prep { color: var(--ink-dim); border-color: var(--ink-faint); }
-.nh-fix.nh-prep:hover:not(:disabled) { color: var(--ink); border-color: var(--patina); }
-.nh-fix.nh-prep.armed { color: var(--del); border-color: var(--del); background: var(--del-bg); }
-/* drop-ghost contraction: a merged ghost's one true move — faint ember fill so it reads as
-   the recommended action over the (patina) restack button beside it. */
-.nh-fix.nh-contract { background: var(--del-bg); font-weight: 600; }
 /* held-elsewhere banner: another worktree holds the branch; free it and resume. */
 .nh-held { font-size: 12px; color: var(--ink-faint); display: inline-flex; align-items: center; gap: 8px; }
 .nh-held-btn {
@@ -537,7 +495,6 @@ body {
 .nh-item:disabled { opacity: 0.45; cursor: default; }
 .nh-item.armed { color: var(--del); border-color: var(--del); }
 .nh-item-ic { width: 14px; flex: none; text-align: center; opacity: 0.85; }
-.nh-item-note { font-size: 11px; color: var(--ink-faint); padding: 4px 10px 2px; }
 
 .loading, .empty { color: var(--ink-faint); padding: 14px 4px; font-style: italic; }
 
@@ -669,31 +626,9 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .forest-chat { flex: none; color: var(--gold-leaf); animation: chat-pulse 1.6s ease-in-out infinite; }
 @keyframes chat-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
 /* ── map button + forest-map overlay ─────────────────────────────────── */
-.map-btn {
-  font: inherit; font-size: 11px; letter-spacing: 0.04em; color: var(--ink-dim);
-  background: transparent; border: 1px solid var(--rule); border-radius: 7px;
-  padding: 3px 11px; cursor: pointer; margin-left: 12px; transition: border-color .12s, color .12s;
-}
-.map-btn:hover { color: var(--ink); border-color: var(--ink-faint); }
-.map-overlay {
-  position: fixed; inset: 0; z-index: 200; overflow: auto; padding: 40px;
-  background: rgba(8, 6, 3, 0.9); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
-}
-.map-svg { display: block; margin: auto; }
 .ge { fill: none; stroke-width: 1.5; }
 .ge.rail { stroke: var(--ink-faint); }
 .ge.fanin { stroke: var(--patina); stroke-dasharray: 2 5; opacity: 0.7; }
-.gnode { cursor: pointer; }
-.gnode rect { fill: var(--vellum-raise); stroke: var(--rule); stroke-width: 1; transition: stroke .12s; }
-.gnode:hover rect { stroke: var(--ink-faint); }
-.gnode.active rect { stroke: var(--gold-leaf); }
-.gnode text { fill: var(--ink-dim); font-family: var(--mono); font-size: 12px; }
-.gnode.active text { fill: var(--ink); }
-.gnode .gcount { fill: var(--ink-faint); font-size: 10px; }
-.gdot { stroke-width: 1.5; }
-.gnode.blessed .gdot { fill: var(--gold-leaf); stroke: var(--gold-leaf); }
-.gnode.stale .gdot { fill: none; stroke: var(--patina); }
-.gnode.unblessed .gdot { fill: none; stroke: var(--ink-faint); }
 
 /* ── hover a diff line to arm it, then press o to open it in the warm nvim (no click-to-open,
    so mouse drags stay free for sweep-to-chat selection) ──────────────── */
@@ -707,14 +642,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 }
 
 /* ── diffs / commits view toggle + the commits list ──────────────────── */
-.view-toggle { display: flex; gap: 2px; }
-.view-pill {
-  font: inherit; font-size: 11px; color: var(--ink-faint); background: transparent;
-  border: 1px solid transparent; border-radius: 7px; padding: 3px 10px; cursor: pointer;
-  transition: color .12s, background .12s;
-}
-.view-pill:hover { color: var(--ink-dim); }
-.view-pill.on { color: var(--ink); background: var(--vellum-edge); border-color: var(--rule); }
 .commits { list-style: none; margin: 8px 0 0; padding: 0; }
 .commit { border-bottom: 1px solid var(--rule); }
 .commit-head { display: flex; align-items: baseline; gap: 13px; width: 100%; padding: 9px 4px; background: none; border: 0; text-align: left; cursor: pointer; font: inherit; }
