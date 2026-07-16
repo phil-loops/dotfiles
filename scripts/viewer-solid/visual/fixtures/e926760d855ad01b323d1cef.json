@@ -1,0 +1,668 @@
+{
+  "phil/adapt-chris-chart-to-cumulative": {
+    "num": 205,
+    "url": "https://github.com/phil-loops/loops/pull/205",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-06-02T23:30:43Z"
+  },
+  "phil/goal-query-model-only": {
+    "num": 204,
+    "url": "https://github.com/phil-loops/loops/pull/204",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-06-01T03:21:31Z"
+  },
+  "goal-lock/goals-list-locked": {
+    "num": 203,
+    "url": "https://github.com/phil-loops/loops/pull/203",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-05-27T16:25:57Z"
+  },
+  "phil/goals-daily-conversions-by-attachment": {
+    "num": 202,
+    "url": "https://github.com/phil-loops/loops/pull/202",
+    "draft": false,
+    "base": "phil/goals-daily-enrollments-by-attachment",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-26T19:30:07Z"
+  },
+  "phil/goals-daily-enrollments-by-attachment": {
+    "num": 201,
+    "url": "https://github.com/phil-loops/loops/pull/201",
+    "draft": false,
+    "base": "phil/goals-daily-impressions-by-attachment",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-26T19:29:57Z"
+  },
+  "phil/goals-daily-impressions-by-attachment": {
+    "num": 200,
+    "url": "https://github.com/phil-loops/loops/pull/200",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-05-26T19:29:48Z"
+  },
+  "delete-team/user-query": {
+    "num": 199,
+    "url": "https://github.com/phil-loops/loops/pull/199",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-05-25T22:49:59Z"
+  },
+  "goal-metrics/model-get-campaign-metrics": {
+    "num": 198,
+    "url": "https://github.com/phil-loops/loops/pull/198",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-05-19T18:33:06Z"
+  },
+  "goal-metrics/refactor-list-campaign-attachments": {
+    "num": 197,
+    "url": "https://github.com/phil-loops/loops/pull/197",
+    "draft": false,
+    "base": "goal-metrics/ui-metrics-view",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-19T16:57:48Z"
+  },
+  "goal-metrics/ui-metrics-view": {
+    "num": 196,
+    "url": "https://github.com/phil-loops/loops/pull/196",
+    "draft": false,
+    "base": "goal-metrics/trpc-get-campaign-metrics",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-19T16:43:43Z"
+  },
+  "goal-metrics/trpc-get-campaign-metrics": {
+    "num": 195,
+    "url": "https://github.com/phil-loops/loops/pull/195",
+    "draft": false,
+    "base": "goal-metrics/model-get-campaign-enrolled-contacts",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-19T16:43:32Z"
+  },
+  "goal-metrics/model-get-campaign-enrolled-contacts": {
+    "num": 194,
+    "url": "https://github.com/phil-loops/loops/pull/194",
+    "draft": false,
+    "base": "goal-metrics/model-get-campaign-converted-contacts",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-19T16:43:28Z"
+  },
+  "goal-metrics/model-get-campaign-converted-contacts": {
+    "num": 193,
+    "url": "https://github.com/phil-loops/loops/pull/193",
+    "draft": false,
+    "base": "goal-metrics/model-get-campaign-metrics",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-19T16:43:24Z"
+  },
+  "goals/v1-create-clean": {
+    "num": 186,
+    "url": "https://github.com/phil-loops/loops/pull/186",
+    "draft": false,
+    "base": "goals/api-wire-shape",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-18T22:12:33Z"
+  },
+  "goals/api-wire-shape": {
+    "num": 185,
+    "url": "https://github.com/phil-loops/loops/pull/185",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-05-18T22:12:22Z"
+  },
+  "goals/clean-create-model": {
+    "num": 184,
+    "url": "https://github.com/phil-loops/loops/pull/184",
+    "draft": false,
+    "base": "goals/trpc-uses-shared-validators",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-14T00:44:17Z"
+  },
+  "goals/v1-create": {
+    "num": 183,
+    "url": "https://github.com/phil-loops/loops/pull/183",
+    "draft": false,
+    "base": "goals/clean-create-model",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-13T23:43:17Z"
+  },
+  "goals/v1-api-spike": {
+    "num": 182,
+    "url": "https://github.com/phil-loops/loops/pull/182",
+    "draft": false,
+    "base": "goals/api-method-router",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-13T23:29:00Z"
+  },
+  "goals/trpc-uses-shared-validators": {
+    "num": 180,
+    "url": "https://github.com/phil-loops/loops/pull/180",
+    "draft": false,
+    "base": "goals/shared-validators",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-05-13T23:28:54Z"
+  },
+  "goals/shared-validators": {
+    "num": 179,
+    "url": "https://github.com/phil-loops/loops/pull/179",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-05-13T23:28:52Z"
+  },
+  "phil/loo-4871-goal-duplicate-model": {
+    "num": 178,
+    "url": "https://github.com/phil-loops/loops/pull/178",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-26T21:03:21Z"
+  },
+  "phil/loo-4871-goal-duplicate": {
+    "num": 177,
+    "url": "https://github.com/phil-loops/loops/pull/177",
+    "draft": false,
+    "base": "phil/loo-4871-goal-duplicate-model",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-26T20:36:46Z"
+  },
+  "worktree-hightouch-clean-arch": {
+    "num": 176,
+    "url": "https://github.com/phil-loops/loops/pull/176",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-26T19:30:25Z"
+  },
+  "sam/loop-api/spike": {
+    "num": 174,
+    "url": "https://github.com/phil-loops/loops/pull/174",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-26T19:25:43Z"
+  },
+  "worktree-contact-verbs-redesign": {
+    "num": 172,
+    "url": "https://github.com/phil-loops/loops/pull/172",
+    "draft": false,
+    "base": "worktree-hightouch-update-only",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-26T19:02:51Z"
+  },
+  "phil/goal-modifiable-schema": {
+    "num": 167,
+    "url": "https://github.com/phil-loops/loops/pull/167",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-26T18:58:56Z"
+  },
+  "worktree-hightouch-update-only": {
+    "num": 166,
+    "url": "https://github.com/phil-loops/loops/pull/166",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-26T17:30:42Z"
+  },
+  "phil/goals-analytics-mvs-v3": {
+    "num": 165,
+    "url": "https://github.com/phil-loops/loops/pull/165",
+    "draft": false,
+    "base": "phil/goals-drop-legacy-tables-v2",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-20T02:56:14Z"
+  },
+  "phil/goals-drop-cmt-writes": {
+    "num": 164,
+    "url": "https://github.com/phil-loops/loops/pull/164",
+    "draft": false,
+    "base": "drop-stats-table",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-19T21:16:35Z"
+  },
+  "phil/goals-analytics-mvs-v2": {
+    "num": 163,
+    "url": "https://github.com/phil-loops/loops/pull/163",
+    "draft": false,
+    "base": "phil/goals-partition-window-v2",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-19T21:15:32Z"
+  },
+  "phil/goals-partition-window-v2": {
+    "num": 162,
+    "url": "https://github.com/phil-loops/loops/pull/162",
+    "draft": false,
+    "base": "phil/goals-drop-legacy-tables-v2",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-19T21:15:30Z"
+  },
+  "phil/goals-drop-legacy-tables-v2": {
+    "num": 161,
+    "url": "https://github.com/phil-loops/loops/pull/161",
+    "draft": false,
+    "base": "phil/goals-drop-cmt-writes",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-19T21:15:28Z"
+  },
+  "phil/goals-analytics-review": {
+    "num": 160,
+    "url": "https://github.com/phil-loops/loops/pull/160",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-17T14:52:08Z"
+  },
+  "phil/loop-bookmark-enrollment-guard": {
+    "num": 159,
+    "url": "https://github.com/phil-loops/loops/pull/159",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-16T23:12:16Z"
+  },
+  "phil/valkey-enrollment-guard": {
+    "num": 158,
+    "url": "https://github.com/phil-loops/loops/pull/158",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-16T21:46:05Z"
+  },
+  "phil/goals-dual-view-review": {
+    "num": 157,
+    "url": "https://github.com/phil-loops/loops/pull/157",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-16T18:49:01Z"
+  },
+  "phil/goals-dual-view-ui-chart": {
+    "num": 155,
+    "url": "https://github.com/phil-loops/loops/pull/155",
+    "draft": false,
+    "base": "phil/goals-dual-view-ui-overview",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:06:16Z"
+  },
+  "phil/goals-dual-view-ui-overview": {
+    "num": 154,
+    "url": "https://github.com/phil-loops/loops/pull/154",
+    "draft": false,
+    "base": "phil/goals-dual-view-api-timeseries",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:06:13Z"
+  },
+  "phil/goals-dual-view-api-timeseries": {
+    "num": 153,
+    "url": "https://github.com/phil-loops/loops/pull/153",
+    "draft": false,
+    "base": "phil/goals-dual-view-api-overview",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:05:59Z"
+  },
+  "phil/goals-dual-view-api-overview": {
+    "num": 152,
+    "url": "https://github.com/phil-loops/loops/pull/152",
+    "draft": false,
+    "base": "phil/goals-dual-view-wiring",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:05:56Z"
+  },
+  "phil/goals-dual-view-wiring": {
+    "num": 151,
+    "url": "https://github.com/phil-loops/loops/pull/151",
+    "draft": false,
+    "base": "phil/goals-dual-view-models",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:05:43Z"
+  },
+  "phil/goals-dual-view-models": {
+    "num": 150,
+    "url": "https://github.com/phil-loops/loops/pull/150",
+    "draft": false,
+    "base": "phil/goals-dual-view-constants",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:05:40Z"
+  },
+  "phil/goals-dual-view-constants": {
+    "num": 149,
+    "url": "https://github.com/phil-loops/loops/pull/149",
+    "draft": false,
+    "base": "phil/goals-dual-view-queries",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:05:28Z"
+  },
+  "phil/goals-dual-view-queries": {
+    "num": 148,
+    "url": "https://github.com/phil-loops/loops/pull/148",
+    "draft": false,
+    "base": "phil/goals-dual-view-schema-ch-mvs",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T18:05:25Z"
+  },
+  "phil/goals-dual-view-schema-ch-mvs": {
+    "num": 147,
+    "url": "https://github.com/phil-loops/loops/pull/147",
+    "draft": false,
+    "base": "phil/goals-dual-view-schema-ch-events",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T17:53:27Z"
+  },
+  "phil/goals-dual-view-schema-ch-events": {
+    "num": 146,
+    "url": "https://github.com/phil-loops/loops/pull/146",
+    "draft": false,
+    "base": "phil/goals-dual-view-schema",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-04-16T17:53:12Z"
+  },
+  "phil/goals-dual-view-schema": {
+    "num": 145,
+    "url": "https://github.com/phil-loops/loops/pull/145",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-16T17:53:02Z"
+  },
+  "evaluate-filter-bug": {
+    "num": 144,
+    "url": "https://github.com/phil-loops/loops/pull/144",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "",
+    "createdAt": "2026-04-14T23:17:39Z"
+  },
+  "goals/upsert-any-source": {
+    "num": 9592,
+    "url": "https://github.com/loops-so/loops/pull/9592",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-16T14:57:53Z"
+  },
+  "oauth-team-auth": {
+    "num": 9590,
+    "url": "https://github.com/loops-so/loops/pull/9590",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-16T13:51:59Z"
+  },
+  "maksim/editor-plugins-config": {
+    "num": 9589,
+    "url": "https://github.com/loops-so/loops/pull/9589",
+    "draft": true,
+    "base": "maksim/editor-plugins-register",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-07-16T13:37:21Z"
+  },
+  "maksim/editor-plugins-register": {
+    "num": 9588,
+    "url": "https://github.com/loops-so/loops/pull/9588",
+    "draft": true,
+    "base": "maksim/editor-decorator-decouple",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-07-16T13:37:11Z"
+  },
+  "maksim/editor-decorator-decouple": {
+    "num": 9586,
+    "url": "https://github.com/loops-so/loops/pull/9586",
+    "draft": true,
+    "base": "maksim/editor-lib-react-free",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-07-16T09:37:05Z"
+  },
+  "maksim/editor-lib-react-free": {
+    "num": 9585,
+    "url": "https://github.com/loops-so/loops/pull/9585",
+    "draft": true,
+    "base": "maksim/editor-core-scaffolding",
+    "toMain": false,
+    "review": "",
+    "createdAt": "2026-07-16T09:36:55Z"
+  },
+  "maksim/editor-core-scaffolding": {
+    "num": 9584,
+    "url": "https://github.com/loops-so/loops/pull/9584",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-16T09:36:45Z"
+  },
+  "dan/loo-5408-add-guard-webhook-active": {
+    "num": 9583,
+    "url": "https://github.com/loops-so/loops/pull/9583",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-16T07:34:12Z"
+  },
+  "admin-sort-tabs": {
+    "num": 9582,
+    "url": "https://github.com/loops-so/loops/pull/9582",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-16T04:52:50Z"
+  },
+  "admin-user-membership-queries": {
+    "num": 9578,
+    "url": "https://github.com/loops-so/loops/pull/9578",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-15T20:38:52Z"
+  },
+  "chore/supabase-loops-secret-header": {
+    "num": 9573,
+    "url": "https://github.com/loops-so/loops/pull/9573",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-15T18:01:16Z"
+  },
+  "chore/drop-test-router": {
+    "num": 9566,
+    "url": "https://github.com/loops-so/loops/pull/9566",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-14T23:46:52Z"
+  },
+  "chore/remove-serverless-framework": {
+    "num": 9565,
+    "url": "https://github.com/loops-so/loops/pull/9565",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-14T23:41:57Z"
+  },
+  "agent/add-missing-page-metadata": {
+    "num": 9519,
+    "url": "https://github.com/loops-so/loops/pull/9519",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-10T15:12:42Z"
+  },
+  "sam/rollout-support-7-workflow-email-message-updates": {
+    "num": 9516,
+    "url": "https://github.com/loops-so/loops/pull/9516",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-10T00:34:10Z"
+  },
+  "maksim/remove-legacy-component-lib": {
+    "num": 9509,
+    "url": "https://github.com/loops-so/loops/pull/9509",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-09T16:19:51Z"
+  },
+  "chore/loo-5382-team-switcher-alignment": {
+    "num": 9485,
+    "url": "https://github.com/loops-so/loops/pull/9485",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-08T17:35:39Z"
+  },
+  "chore/gtm-free-team-conversion": {
+    "num": 9408,
+    "url": "https://github.com/loops-so/loops/pull/9408",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-05T15:23:40Z"
+  },
+  "sam/chore/LOO-5344-workflow-api-openapi": {
+    "num": 9396,
+    "url": "https://github.com/loops-so/loops/pull/9396",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-02T18:03:19Z"
+  },
+  "dan/openapi-examples": {
+    "num": 9394,
+    "url": "https://github.com/loops-so/loops/pull/9394",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-07-02T13:24:13Z"
+  },
+  "dan/webhooks-openapi": {
+    "num": 9372,
+    "url": "https://github.com/loops-so/loops/pull/9372",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-07-01T08:27:36Z"
+  },
+  "goal-lock/emit-on-impression": {
+    "num": 9368,
+    "url": "https://github.com/loops-so/loops/pull/9368",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-06-30T23:34:57Z"
+  },
+  "matt/loo-5325-fix-additional-gap-between-groups-in-ctw": {
+    "num": 9277,
+    "url": "https://github.com/loops-so/loops/pull/9277",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-06-27T00:35:08Z"
+  },
+  "matt/loo-5298-create-new-feature-announcement-popup-for-workflows-api": {
+    "num": 9269,
+    "url": "https://github.com/loops-so/loops/pull/9269",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-06-26T16:38:00Z"
+  },
+  "turbopack": {
+    "num": 9266,
+    "url": "https://github.com/loops-so/loops/pull/9266",
+    "draft": true,
+    "base": "main",
+    "toMain": true,
+    "review": "APPROVED",
+    "createdAt": "2026-06-26T13:08:06Z"
+  },
+  "chore/apple-mail-dark-mode-block-color": {
+    "num": 8546,
+    "url": "https://github.com/loops-so/loops/pull/8546",
+    "draft": false,
+    "base": "main",
+    "toMain": true,
+    "review": "REVIEW_REQUIRED",
+    "createdAt": "2026-05-11T13:07:35Z"
+  }
+}

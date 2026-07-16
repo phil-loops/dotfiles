@@ -1,0 +1,74 @@
+[
+  {
+    "num": 9592,
+    "title": "refactor(goals-in-workflows): make the goal-attachment upsert polymorphic",
+    "url": "https://github.com/loops-so/loops/pull/9592",
+    "branch": "goals/upsert-any-source",
+    "project": "goals-in-workflows",
+    "draft": true,
+    "review": "REVIEW_REQUIRED",
+    "ci": "passing",
+    "mergeable": "MERGEABLE",
+    "mergeState": "BLOCKED"
+  },
+  {
+    "num": 9582,
+    "title": "chore(admin): order admin tabs alphabetically",
+    "url": "https://github.com/loops-so/loops/pull/9582",
+    "branch": "admin-sort-tabs",
+    "project": "admin-tab-sort",
+    "draft": false,
+    "review": "APPROVED",
+    "ci": "passing",
+    "mergeable": "MERGEABLE",
+    "mergeState": "CLEAN"
+  },
+  {
+    "num": 9578,
+    "title": "feat(admin-user-memberships): team membership + user queries",
+    "url": "https://github.com/loops-so/loops/pull/9578",
+    "branch": "admin-user-membership-queries",
+    "project": "admin-user-memberships",
+    "draft": false,
+    "review": "APPROVED",
+    "ci": "passing",
+    "mergeable": "MERGEABLE",
+    "mergeState": "CLEAN"
+  },
+  {
+    "num": 9566,
+    "title": "chore: drop unused `testRouter` + friends",
+    "url": "https://github.com/loops-so/loops/pull/9566",
+    "branch": "chore/drop-test-router",
+    "project": null,
+    "draft": true,
+    "review": "REVIEW_REQUIRED",
+    "ci": "passing",
+    "mergeable": "MERGEABLE",
+    "mergeState": "BLOCKED"
+  },
+  {
+    "num": 9565,
+    "title": "chore: remove serverless-framework",
+    "url": "https://github.com/loops-so/loops/pull/9565",
+    "branch": "chore/remove-serverless-framework",
+    "project": null,
+    "draft": false,
+    "review": "APPROVED",
+    "ci": "passing",
+    "mergeable": "MERGEABLE",
+    "mergeState": "CLEAN"
+  },
+  {
+    "num": 9368,
+    "title": "feat(goals): wire goal and attachment lock status through cache",
+    "url": "https://github.com/loops-so/loops/pull/9368",
+    "branch": "goal-lock/emit-on-impression",
+    "project": "goal-lock",
+    "draft": true,
+    "review": "REVIEW_REQUIRED",
+    "ci": "passing",
+    "mergeable": "CONFLICTING",
+    "mergeState": "DIRTY"
+  }
+]
