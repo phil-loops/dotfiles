@@ -1,0 +1,26 @@
+[
+  {
+    "note": "eyebrow LABELS are mono \u2014 only the ask span inside them is display (the Fraunces-FORGOTTEN defect)",
+    "selector": ".eyebrow",
+    "property": "font-family",
+    "expect": "\"IBM Plex Mono\""
+  },
+  {
+    "note": "the ask IS display, everywhere",
+    "selector": ".eyebrow-ask",
+    "property": "font-family",
+    "expect": "Fraunces"
+  },
+  {
+    "note": "brand identity is display at every render site",
+    "selector": ".brand",
+    "property": "font-family",
+    "expect": "Fraunces"
+  },
+  {
+    "note": "gold is never spent on an eyebrow label",
+    "selector": ".eyebrow",
+    "property": "color",
+    "expect": "rgb(103, 93, 77)"
+  }
+]
