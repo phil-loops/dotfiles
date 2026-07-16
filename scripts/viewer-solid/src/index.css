@@ -1,3 +1,52 @@
+/* Tailwind WITHOUT Preflight — deliberate. The ledger's pre-Tailwind CSS is built on UA
+   defaults (button metrics, tab-size, table struts); Preflight rewrites those globally and
+   reflowed every diff table. Granular imports are the incremental-adoption path: theme +
+   utilities only, and the one Preflight behavior we actually want — buttons degrading to
+   quiet inherited text instead of white UA pills — is ours in @layer base below. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme" layer(theme);
+@import "tailwindcss/utilities" layer(utilities);
+
+@layer base {
+  button {
+    font: inherit;
+    line-height: normal; /* the UA value every unconverted chip/label was measured at */
+    color: inherit;
+    letter-spacing: inherit;
+    background: none;
+    border: 0 solid;
+  }
+}
+
+/* ── the unlit-ledger vocabulary as Tailwind utilities (bg-vellum-night, text-ink-dim,
+   border-rule, text-gold-leaf, font-display, …). Converted surfaces use these; the legacy
+   :root block below serves the not-yet-converted CSS and retires with its last consumer.
+   The two lists MUST stay value-identical — @theme is the source of truth. ── */
+@theme {
+  --color-*: initial;
+  --color-vellum-night: #14110a;
+  --color-vellum-raise: #1c180f;
+  --color-vellum-edge: #221c11;
+  --color-ink: #e8dcc4;
+  --color-ink-dim: #9a8e78;
+  --color-ink-faint: #675d4d;
+  --color-gold-leaf: #e6b64e;
+  --color-gold-deep: #6e521d;
+  --color-gold-wash: rgba(230, 182, 78, 0.08);
+  --color-ember: #d2732a;
+  --color-ember-wash: rgba(210, 115, 42, 0.12);
+  --color-patina: #7fa093;
+  --color-rule: #2c2517;
+  --color-add: #8fae7a;
+  --color-add-bg: rgba(143, 174, 122, 0.09);
+  --color-del: #c87a55;
+  --color-del-bg: rgba(200, 122, 85, 0.09);
+  --color-diff-ink: #ecd35a;
+  --color-diff-bg: #0a0a0d;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+
 :root {
   /* earn the gold: a dark, unlit ledger; gold appears ONLY where work is blessed. */
   --vellum-night: #14110a;

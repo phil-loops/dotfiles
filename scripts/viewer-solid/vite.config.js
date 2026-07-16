@@ -1,6 +1,7 @@
 import { execSync, spawn } from "node:child_process";
 import { defineConfig } from "vite";
 import solid from "vite-plugin-solid";
+import tailwindcss from "@tailwindcss/vite";
 
 // The Python viewer (`stack-review-server.py`) exposes everything as a JSON/SSE API; Vite
 // proxies those exact routes so the Solid app is a pure frontend. The backend port is now
@@ -52,7 +53,7 @@ function keepBackendAlive() {
 }
 
 export default defineConfig({
-  plugins: [solid(), keepBackendAlive()],
+  plugins: [solid(), tailwindcss(), keepBackendAlive()],
   build: {
     rollupOptions: {
       output: {

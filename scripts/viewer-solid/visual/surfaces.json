@@ -1,0 +1,9 @@
+[
+  { "name": "home-work", "path": "/work", "waitFor": ".work-row", "settle": 2000 },
+  { "name": "home-forests", "path": "/forests", "waitFor": ".forest-row", "settle": 2000 },
+  { "name": "forest-overview", "path": "/forests/admin-user-memberships", "waitFor": ".forest-overview", "settle": 2500 },
+  { "name": "node-detail", "path": "/forests/admin-user-memberships/admin-user-membership-queries", "waitFor": ".entry", "settle": 2500 },
+  { "name": "review-node", "path": "/review/8633", "waitFor": ".entry", "settle": 2500 },
+  { "name": "activity-dock", "path": "/work", "waitFor": ".activity-head", "clicks": [".activity-head"], "settle": 1200 },
+  { "name": "servers-drawer", "path": "/work", "waitFor": ".activity-head", "clicks": [".activity-head", ".activity-row.launcher"], "waitAfter": ".servers-drawer .card", "settle": 2000 }
+]
