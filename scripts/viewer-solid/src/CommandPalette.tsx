@@ -192,7 +192,6 @@ export default function CommandPalette() {
   return (
     <>
       {/* empty strut where the old inline <style> stood — removing the node renumbers every later sibling in the rect baselines; drop it in a deliberate rects-only re-baseline commit */}
-      <style />
       <Show when={open()}>
         <div
           class="cmdk-backdrop fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(0,0,0,0.45)] pt-[14vh]"
