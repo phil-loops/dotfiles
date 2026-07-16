@@ -40,6 +40,12 @@ def requires_of(branch):
             or git_lines("config", "--get-all", f"stack-branch.{branch}.requires"))
 
 
+def plan_omitted(branch):
+    """Opted out of the rendered story — a local proof branch that never ships as a PR."""
+    return (git("config", f"branch.{branch}.stack-plan-omit")
+            or git("config", f"stack-branch.{branch}.plan-omit")) == "true"
+
+
 def job_of(branch):
     """What this branch DOES, in one voiced line. A hand-authored `stack-branch.<b>.story` wins —
     it's the durable per-step merge story, editable from any branch's plan and re-read on every
@@ -122,6 +128,8 @@ def facts(branch):
     landed_branches = {s["branch"] for s in plan}
     for b in order:
         if b in landed_branches:      # already told as a landed step; do not tell it twice
+            continue
+        if plan_omitted(b):
             continue
         p = prs.get(b, {})
         plan.append({
