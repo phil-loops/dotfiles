@@ -287,11 +287,23 @@ export function FileEntry(props: {
   const tarnished = () => props.file.status === "stale" && !blessed();
   const [deltaView, setDeltaView] = createSignal(false);
   const shownPatch = () => (deltaView() && props.file.stale ? props.file.stale : props.file.patch);
+  // side-by-side renders one column per side, so a pure add/delete patch spends half the width
+  // on a blank column — give those the full width instead.
+  const oneSided = (patch: string) => {
+    let add = false;
+    let del = false;
+    for (const line of patch.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) add = true;
+      else if (line.startsWith("-") && !line.startsWith("---")) del = true;
+      if (add && del) return false;
+    }
+    return true;
+  };
   const html = () =>
     shownPatch()
       ? Diff2Html.html(shownPatch()!, {
           drawFileList: false,
-          outputFormat: "side-by-side",
+          outputFormat: oneSided(shownPatch()!) ? "line-by-line" : "side-by-side",
           matching: "lines",
           colorScheme: ColorSchemeType.DARK,
         })
