@@ -66,7 +66,7 @@ if [[ -n "$TARGET" ]]; then
     [[ -z "$b" ]] && continue
     members+=("$b")
     is_member[$b]=1
-    p=$(git config "stack-branch.${b}.parent" 2>/dev/null || true)
+    p=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || true)
     parent_of[$b]="$p"
   done <<<"${project_branches[$TARGET]}"
 

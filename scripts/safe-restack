@@ -32,7 +32,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "not in a git repo" >&2; exit 
 branches=$(git config --get-all "stack-project.$proj.branch" 2>/dev/null || true)
 [ -n "$branches" ] || { echo "no branches for project '$proj'" >&2; exit 1; }
 sha() { git rev-parse --short "$1" 2>/dev/null; }
-parentof() { git config "stack-branch.$1.parent" 2>/dev/null || echo main; }
+parentof() { git config "branch.$1.stack-parent" 2>/dev/null || git config "stack-branch.$1.parent" 2>/dev/null || echo main; }
 wt_of() { git worktree list --porcelain | awk -v want="$1" '/^worktree /{w=$2} /^branch /{b=$2;sub("refs/heads/","",b); if(b==want){f=w}} END{if(f)print f}'; }
 
 # ── PREFLIGHT ───────────────────────────────────────────────────────────────

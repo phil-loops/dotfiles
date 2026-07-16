@@ -22,7 +22,7 @@ want="${2:-}"
 git rev-parse --verify --quiet "$branch" >/dev/null \
   || { echo "steer-open: no such branch: $branch" >&2; exit 1; }
 repo=$(git rev-parse --show-toplevel)
-parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || true); [[ -n "$parent" ]] || parent=main
+parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || true); [[ -n "$parent" ]] || parent=main
 
 # warm worktree for the branch (node_modules symlinked) so the right-pane nvim gets LSP.
 "$SCRIPTS/stack-open" --prepare "$branch" >/dev/null 2>&1 || true

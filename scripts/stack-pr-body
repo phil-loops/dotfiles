@@ -69,7 +69,7 @@ print("\n".join(out))
 PY
 
 if [[ "${2:-}" == "--link" ]]; then
-  project=$(git config "stack-branch.${branch}.project" 2>/dev/null || true)
+  project=$(git config "branch.${branch}.stack-project" 2>/dev/null || git config "stack-branch.${branch}.project" 2>/dev/null || true)
   url=$("$here/stack-integ-publish" --url "$project" 2>/dev/null || true)
   [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
 fi

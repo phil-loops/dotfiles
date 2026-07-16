@@ -35,7 +35,7 @@ def main_worktree(repo):
 
 
 def changed_files(repo, branch):
-    parent = git(["config", f"stack-branch.{branch}.parent"], repo).stdout.strip() or MAIN
+    parent = git(["config", f"branch.{branch}.stack-parent"], repo).stdout.strip() or git(["config", f"stack-branch.{branch}.parent"], repo).stdout.strip() or MAIN
     base = git(["merge-base", parent, "HEAD"], repo).stdout.strip() or parent
     # Clamp a ROOT branch's diff base FORWARD to its real fork with origin/main. Local `main`
     # is often stale (behind origin/main), so merge-base(main, HEAD) sits below origin/main and

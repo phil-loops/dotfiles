@@ -35,7 +35,7 @@ def main():
     if not branch or branch == "HEAD":
         return  # detached (scratch worktree) — not a real workflow commit
     main_branch = git("config", "stack.main-branch") or "main"
-    project = git("config", f"stack-branch.{branch}.project") or None
+    project = git("config", f"branch.{branch}.stack-project") or git("config", f"stack-branch.{branch}.project") or None
     ahead = git("rev-list", "--count", f"{main_branch}..HEAD")
     ev = {"type": kind, "branch": branch, "project": project,
           "ahead": int(ahead) if ahead.isdigit() else None}
