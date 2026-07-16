@@ -166,6 +166,24 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "checkout failed"}`),
   }));
 
+  // ▷ preview — spin a side-port `next dev` for this branch (loops-preview) and open it. Never
+  // moves the main checkout off :3000; the Activity dock lists + kills the running ones.
+  const devServer = createMutation(() => ({
+    mutationFn: () => post<{ ok: boolean; url?: string; err?: string }>("/preview", { branch: props.branch }),
+    onSuccess: (r) => {
+      setOpen(false);
+      if (r.ok && r.url) {
+        window.open(r.url, "_blank");
+        setDone(`✓ preview → ${r.url.replace("http://", "")}`);
+        qc.invalidateQueries({ queryKey: ["processes"] });
+      } else {
+        setDone(`✗ ${r.err || "preview failed"}`);
+        setDoneAlert(true);
+      }
+    },
+    onError: (e) => { setDone(`✗ ${(e as Error).message || "preview failed"}`); setDoneAlert(true); },
+  }));
+
   // prep to merge — the one-motion merge prep, run as a staged pipeline:
   //   1. up-to-date  → rebase onto fresh origin/main (only if behind; conflict ejects to Claude)
   //   2. checkout    → move the main checkout onto this branch so GitHub Desktop follows
@@ -927,6 +945,19 @@ export function NodeActions(props: {
           >
             <span class="nh-item-ic">⤓</span>
             {checkout.isPending ? "checking out…" : "checkout here"}
+          </button>
+
+          {/* preview — spin a dev server for this branch on a side port and open it, WITHOUT
+              moving your main checkout off :3000 (loops-preview). Stop it from the Activity dock. */}
+          <button
+            class="nh-item"
+            role="menuitem"
+            disabled={busy() || devServer.isPending}
+            title="spin up a dev server for this branch on a side port (3010+) and open it — leaves :3000 and your checkout alone"
+            onClick={fire(() => devServer.mutate())}
+          >
+            <span class="nh-item-ic">▷</span>
+            {devServer.isPending ? "starting preview…" : "preview (dev server)"}
           </button>
 
           {/* conditional repairs — appear only with their condition; everything routine

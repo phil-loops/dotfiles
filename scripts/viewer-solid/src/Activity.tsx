@@ -7,7 +7,7 @@ import { createSignal, Show, For } from "solid-js";
 import "./Activity.css";
 
 type Proc = {
-  kind: "chat" | "restack" | "claude";
+  kind: "chat" | "restack" | "claude" | "preview";
   id: string;
   label: string;
   target: string;
@@ -20,9 +20,11 @@ type Proc = {
   repo?: string;
   working?: boolean;
   count?: number;
+  url?: string; // preview: the side-port dev server, open on click
+  dir?: string; // preview: the worktree dir, sent to /preview-kill
 };
 
-const GLYPH: Record<string, string> = { chat: "✦", restack: "⟳", claude: "◆" };
+const GLYPH: Record<string, string> = { chat: "✦", restack: "⟳", claude: "◆", preview: "▷" };
 
 export function Activity() {
   const q = createQuery<Proc[]>(() => ({
@@ -31,6 +33,14 @@ export function Activity() {
     refetchInterval: 3000,
   }));
   const procs = () => q.data ?? [];
+  // stop one preview by its worktree dir (orphan-safe on the server), then refresh the census.
+  const killPreview = async (dir?: string) => {
+    if (!dir) return;
+    await fetch("/preview-kill", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ dir }),
+    }).catch(() => {});
+    q.refetch();
+  };
   // the chip counts agents that are actually WORKING, not merely alive — a claude parked at its
   // prompt for hours shouldn't inflate the number (that was the "random shit").
   const running = () => procs().filter((p) => p.working !== false && !p.done).length;
@@ -68,15 +78,23 @@ export function Activity() {
               {(p) => (
                 <div class="activity-row" classList={{ done: p.done, bad: p.ok === false, idle: p.working === false }}>
                   <span class="glyph" data-kind={p.kind}>{GLYPH[p.kind] ?? "•"}</span>
-                  <span class="label" title={`${p.kind} · ${p.target}`}>{p.label}</span>
+                  <Show
+                    when={p.kind === "preview" && p.url}
+                    fallback={<span class="label" title={`${p.kind} · ${p.target}`}>{p.label}</span>}
+                  >
+                    <a class="label" href={p.url} target="_blank" rel="noopener" title={`open ${p.url}`}>{p.label}</a>
+                  </Show>
                   <Show when={(p.count ?? 1) > 1}>
                     <span class="mult" title="two agents on one branch — probable duplicate spawn">×{p.count}</span>
                   </Show>
                   <span class="status">{p.status}</span>
-                  <Show when={p.kind === "chat"}>
+                  <Show when={p.kind === "chat" || p.kind === "preview"}>
                     <span class="detail">{p.detail}</span>
                   </Show>
                   <span class="age">{p.age}</span>
+                  <Show when={p.kind === "preview"}>
+                    <button class="kill" title="stop this dev server" onClick={() => killPreview(p.dir)}>×</button>
+                  </Show>
                 </div>
               )}
             </For>
