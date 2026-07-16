@@ -1,7 +1,7 @@
 // ServerStatus — a quiet bottom-left dot that reports whether the review server is
 // reachable. Light poll of /sig (a cheap GET) with a short timeout; calm patina dot
 // when healthy, ember "reconnecting…" when the server is down (e.g. the ~2s window
-// during a restart). Self-contained (own <style>), mounts with one line.
+// during a restart). Mounts with one line.
 //
 // Polls ONLY while the tab is visible — same discipline as the /events SSE — so a
 // backgrounded tab doesn't keep the server alive and defeat its idle-reap.
@@ -44,26 +44,22 @@ export function ServerStatus() {
   });
 
   return (
-    <div class="srvstat" classList={{ down: !up() }} title={up() ? "review server connected — click to re-check" : "review server unreachable — click to reconnect now"} onClick={ping}>
-      <style>{CSS}</style>
-      <span class="srvstat-dot" />
+    <div
+      class="srvstat group pointer-events-none fixed bottom-3 left-[14px] z-[70] flex cursor-pointer items-center gap-[7px]"
+      classList={{ down: !up() }}
+      title={up() ? "review server connected — click to re-check" : "review server unreachable — click to reconnect now"}
+      onClick={ping}
+    >
+      <span
+        class="srvstat-dot pointer-events-auto h-2 w-2 rounded-full transition-[background,opacity,box-shadow] duration-200 group-hover:opacity-100"
+        classList={{
+          "bg-patina opacity-50 shadow-[0_0_6px_var(--color-patina)]": up(),
+          "animate-srvstat-pulse bg-del opacity-100 shadow-[0_0_9px_var(--color-del)] motion-reduce:animate-none": !up(),
+        }}
+      />
       <Show when={!up()}>
-        <span class="srvstat-label">reconnecting…</span>
+        <span class="srvstat-label pointer-events-auto font-mono text-[11px] tracking-[0.02em] text-del">reconnecting…</span>
       </Show>
     </div>
   );
 }
-
-const CSS = `
-.srvstat { position: fixed; left: 14px; bottom: 12px; z-index: 70; display: flex;
-  align-items: center; gap: 7px; pointer-events: none; cursor: pointer; }
-.srvstat .srvstat-dot, .srvstat .srvstat-label { pointer-events: auto; }
-.srvstat:hover .srvstat-dot { opacity: 1; }
-.srvstat-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--patina);
-  box-shadow: 0 0 6px var(--patina); opacity: .5; transition: background .2s, opacity .2s, box-shadow .2s; }
-.srvstat.down .srvstat-dot { background: var(--del); box-shadow: 0 0 9px var(--del); opacity: 1;
-  animation: srvstat-pulse 1.1s ease-in-out infinite; }
-.srvstat-label { font-family: var(--mono); font-size: 11px; color: var(--del); letter-spacing: .02em; }
-@keyframes srvstat-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .srvstat.down .srvstat-dot { animation: none; } }
-`;
