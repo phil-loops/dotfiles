@@ -316,7 +316,10 @@ export function ForestOverview() {
     queryKey: ["forest-health", forestRepo(location()) ?? "loops", healthIds().join(",")],
     queryFn: () =>
       fetch(withRepo("/forest-health?" + healthIds().map((b) => "branch=" + encodeURIComponent(b)).join("&"))).then(
-        (r) => r.json() as Promise<Record<string, { drifted: boolean; merged: boolean; contractable: boolean }>>,
+        (r) =>
+          r.json() as Promise<
+            Record<string, { drifted: boolean; merged: boolean; contractable: boolean; upstream?: string; ahead?: number }>
+          >,
       ),
     enabled: canMutate && healthIds().length > 0,
     // health must wake on focus (global default is refetchOnWindowFocus: false) and converge
