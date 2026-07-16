@@ -94,6 +94,13 @@ deliberate geometry change re-baselines rects the same way as pixels:
     encode the computed *winner*, not the utility that was losing.
 25. **Nested hover scopes need named groups** — once an inner element carries `group`, an outer
     wrapper's hover reveal must use `group/<name>` + `group-hover/<name>:`.
+26. **Dead-by-order rules get deleted, not kept.** Where an equal-specificity later rule wins a
+    tie, the loser is a zombie: probe the computed style to confirm it never applies, then delete
+    it in the extraction — left alive, it will beat your utilities the moment the winner converts
+    (the gold `.nh-editor-save` that always rendered del-red). Flag the never-rendered intent as
+    a deliberate-fix candidate.
+27. **`@starting-style` entrance fades translate to the `starting:` variant** (outside the
+    keep-list); verify the built CSS emits `@starting-style`.
 
 ## Behavior probes — pixels can be green with the feature dead
 
