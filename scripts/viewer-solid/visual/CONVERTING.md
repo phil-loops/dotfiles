@@ -68,8 +68,11 @@ deliberate geometry change re-baselines rects the same way as pixels:
     they survive translation (ForestMap opacity).
 17. **`var(--undefined-token)` with no fallback computes to *initial*** — translate to nothing
     and note it in the commit; never substitute a guessed token.
-18. **Uncovered components get before/after `probe-rects` geometry diffs** as the honest
-    substitute gate (geometry proven, colors unverified) — and the report says so.
+18. **Uncovered components get FORCED-RENDER probes** — seed the state that gates them
+    (localStorage anchor, intercepted API response with a synthetic payload) and capture
+    before/after geometry + a screenshot; see `visual/probe-reentry.mjs` and
+    `visual/probe-diverged.mjs` as templates. Plain `probe-rects` parity is the fallback when
+    forcing a render isn't cheap — and the report says which method was used.
 19. **Single-side non-solid borders on non-buttons must zero the other sides.**
     `border-dashed` sets border-style on all four sides, and with Preflight off any side
     without an explicit width resurrects the UA `medium` (3px). Buttons are masked by the
