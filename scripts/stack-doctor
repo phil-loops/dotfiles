@@ -68,6 +68,14 @@ prune() {
     unset_key "$key"; pruned=$((pruned+1))
   done < <(git config --name-only --get-regexp '^stack-branch\..*\.' 2>/dev/null | sort)
 
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    name="${key#branch.}"; branch="${name%.stack-*}"
+    alive "$branch" && continue
+    echo "  ✗ $branch (no ref)"
+    echo "    left alone (new namespace, git-managed)  $key"
+  done < <(git config --name-only --get-regexp '^branch\..*\.stack-' 2>/dev/null | sort)
+
   # registry entries + fan-in deps naming a branch that no longer exists
   while IFS= read -r key; do
     [ -n "$key" ] || continue
@@ -81,6 +89,15 @@ prune() {
     done < <(git config --get-all "$key" 2>/dev/null)
   done < <(git config --name-only --get-regexp '^(stack-project\..*\.branch|stack-branch\..*\.requires)$' 2>/dev/null | sort -u)
 
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    while IFS= read -r v; do
+      [ -n "$v" ] || continue
+      alive "$v" && continue
+      echo "    left alone (new namespace, git-managed)  $key = $v (no ref)"
+    done < <(git config --get-all "$key" 2>/dev/null)
+  done < <(git config --name-only --get-regexp '^branch\..*\.stack-requires$' 2>/dev/null | sort -u)
+
   # ghost projects: keys outliving every member. Build the live-member set ONCE —
   # per-project rescans are O(projects x branches) git calls and crawl on a big forest.
   local live_projects
@@ -89,9 +106,16 @@ prune() {
     [ -n "$key" ] || continue
     name="${key#stack-branch.}"; branch="${name%.*}"
     alive "$branch" || continue
-    v=$(git config "stack-branch.$branch.project" 2>/dev/null || true)
+    v=$(git config "branch.$branch.stack-project" 2>/dev/null || git config "stack-branch.$branch.project" 2>/dev/null || true)
     [ -n "$v" ] && live_projects+="$v"$'\n'
   done < <(git config --name-only --get-regexp '^stack-branch\..*\.project$' 2>/dev/null)
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    name="${key#branch.}"; branch="${name%.stack-project}"
+    alive "$branch" || continue
+    v=$(git config "branch.$branch.stack-project" 2>/dev/null || true)
+    [ -n "$v" ] && live_projects+="$v"$'\n'
+  done < <(git config --name-only --get-regexp '^branch\..*\.stack-project$' 2>/dev/null)
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     proj="${key#stack-project.}"; proj="${proj%.*}"
@@ -133,7 +157,7 @@ for proj in $projects; do
     if ! git rev-parse --verify -q "$b" >/dev/null; then
       lines+="  ✗ MISSING  $b (in config, no ref)"$'\n'; proj_problem=1; continue
     fi
-    parent=$(git config "stack-branch.$b.parent" 2>/dev/null || echo main)
+    parent=$(git config "branch.$b.stack-parent" 2>/dev/null || git config "stack-branch.$b.parent" 2>/dev/null || echo main)
     glyph="✓"; detail=""
     # orphan check: only when parent is a real, existing branch (not main/origin/main)
     if [ "$parent" != "main" ] && [ "$parent" != "origin/main" ] && git rev-parse --verify -q "$parent" >/dev/null; then

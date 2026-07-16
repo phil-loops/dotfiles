@@ -31,11 +31,13 @@ def git_lines(*args):
 
 
 def parent_of(branch):
-    return git("config", f"stack-branch.{branch}.parent") or "main"
+    return (git("config", f"branch.{branch}.stack-parent")
+            or git("config", f"stack-branch.{branch}.parent") or "main")
 
 
 def requires_of(branch):
-    return git_lines("config", "--get-all", f"stack-branch.{branch}.requires")
+    return (git_lines("config", "--get-all", f"branch.{branch}.stack-requires")
+            or git_lines("config", "--get-all", f"stack-branch.{branch}.requires"))
 
 
 def job_of(branch):
@@ -44,7 +46,8 @@ def job_of(branch):
     branch (so a story survives after this branch merges). Absent that, the branch's own newest
     commit subject minus the conventional-commit prefix; then the branch description (fallback for a
     branch with no commits of its own yet)."""
-    story = git("config", f"stack-branch.{branch}.story")
+    story = (git("config", f"branch.{branch}.stack-story")
+             or git("config", f"stack-branch.{branch}.story"))
     if story:
         return story
     subject = git("log", "-1", "--format=%s", f"{parent_of(branch)}..{branch}")
@@ -110,7 +113,8 @@ def _order(branch):
 
 
 def facts(branch):
-    project = git("config", f"stack-branch.{branch}.project")
+    project = (git("config", f"branch.{branch}.stack-project")
+               or git("config", f"stack-branch.{branch}.project"))
     order = _order(branch) if project else []
     prs = _prs() if (project or order) else {}
 
@@ -122,7 +126,8 @@ def facts(branch):
         p = prs.get(b, {})
         plan.append({
             "job": job_of(b),
-            "story": git("config", f"stack-branch.{b}.story"),
+            "story": (git("config", f"branch.{b}.stack-story")
+                      or git("config", f"stack-branch.{b}.story")),
             "pr": p.get("pr"),
             "state": p.get("state"),
             "landed": False,
@@ -138,13 +143,21 @@ def facts(branch):
     parent = parent_of(branch)
 
     # UNBLOCKS — everything that builds on this: children (parent == this) ∪ consumers (require this)
-    downstream = []
+    edges = {}
     for key, val in (l.split(" ", 1) for l in git_lines("config", "--get-regexp",
                                                         r"^stack-branch\..*\.(parent|requires)$")):
-        if val == branch:
-            name = key[len("stack-branch."):].rsplit(".", 1)[0]
-            if name != branch and name not in downstream:
-                downstream.append(name)
+        name, kind = key[len("stack-branch."):].rsplit(".", 1)
+        edges.setdefault((name, kind), []).append(val)
+    new_edges = {}
+    for key, val in (l.split(" ", 1) for l in git_lines("config", "--get-regexp",
+                                                        r"^branch\..*\.stack-(parent|requires)$")):
+        name, kind = key[len("branch."):].rsplit(".", 1)
+        new_edges.setdefault((name, kind[len("stack-"):]), []).append(val)
+    edges.update(new_edges)
+    downstream = []
+    for (name, _kind), vals in edges.items():
+        if branch in vals and name != branch and name not in downstream:
+            downstream.append(name)
 
     here = os.path.dirname(os.path.abspath(__file__))
     summary_status = subprocess.run([os.path.join(here, "stack-summary"), branch, "--status"],
@@ -154,7 +167,8 @@ def facts(branch):
         "branch": branch,
         "project": project,
         "purpose": git("config", f"branch.{branch}.description"),
-        "summary": git("config", f"stack-branch.{branch}.summary"),
+        "summary": (git("config", f"branch.{branch}.stack-summary")
+                    or git("config", f"stack-branch.{branch}.summary")),
         "summaryStatus": summary_status,
         "job": job_of(branch),
         "parent": parent,

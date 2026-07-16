@@ -39,6 +39,11 @@ claims it; the real key is `stack-project.<p>.interest`. Fix the comment, migrat
    is not forging one), THEN writers flip to the new namespace in the same commit window.
    **Must not run until every reader in every lane is dual-read** — a flipped writer plus a
    legacy-only reader silently loses new branches.
+   Keystone checklist beyond the sweep: flip every legacy write/unset (grep `stack-branch`
+   across scripts/ — each remaining hit is one); the contract/rewire paths in stack-restack
+   and restack-daemon currently READ merged but WRITE legacy (fine dark, shadowed after the
+   sweep), and their `requires` rewrite is warn-and-skip on new-namespace keys — both need
+   the new-namespace write path in the same window.
 3. **Fallback removal** — after a quiet period, drop the legacy read arms + delete this
    fallback machinery. `stack-doctor --prune`'s stack-branch arm becomes vestigial (keep the
    stack-project arm).

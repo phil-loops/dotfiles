@@ -143,6 +143,8 @@ done
 for b in "${plan_branches[@]}"; do
   git branch -D "$b" || echo "\033[33m(branch $b already gone)\033[0m"
   git config --remove-section "stack-branch.$b" 2>/dev/null || true
+  git config --name-only --get-regexp "^branch\.$(sed -e 's/[.[\\*^$()+?{|]/\\&/g' <<<"$b")\.stack-" 2>/dev/null \
+    | while IFS= read -r k; do git config --unset-all "$k"; done
 done
 for t in "${TARGETS[@]}"; do
   git config --remove-section "stack-project.$t" 2>/dev/null \

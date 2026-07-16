@@ -187,7 +187,7 @@ apply_if_safe() {
   n="$(jq -r '[.report.branches[]|select(.verdict=="would-restack" or .verdict=="would-contract")]|length' "$state" 2>/dev/null || echo 0)"
   [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 )) || return 0
   projects="$(jq -r '.report.branches[]|select(.verdict=="would-restack" or .verdict=="would-contract")|.branch' "$state" 2>/dev/null \
-    | while read -r b; do git config "stack-branch.$b.project" 2>/dev/null || true; done | sort -u)"
+    | while read -r b; do git config "branch.$b.stack-project" 2>/dev/null || git config "stack-branch.$b.project" 2>/dev/null || true; done | sort -u)"
   if [[ -z "${projects// }" ]]; then
     logline "apply: $n actionable branch(es) but no stack-project mapping — skipped"; return 0
   fi
@@ -266,8 +266,9 @@ contract_ghosts() {
   [[ -n "${ghosts// }" ]] || return 0
   while IFS= read -r g; do
     [[ -n "$g" ]] || continue
-    parent="$(git config "stack-branch.$g.parent" 2>/dev/null || echo "$MAIN")"
+    parent="$(git config "branch.$g.stack-parent" 2>/dev/null || git config "stack-branch.$g.parent" 2>/dev/null || echo "$MAIN")"
     [[ -n "$parent" ]] || parent="$MAIN"
+    proj="$(git config "branch.$g.stack-project" 2>/dev/null || git config "stack-branch.$g.project" 2>/dev/null || true)"
     # delete FIRST — if the ghost is checked out in some worktree it can't be dropped; bail
     # before touching any config so a non-deletable ghost leaves the graph exactly as it was.
     if ! git branch -D "$g" >/dev/null 2>&1; then
@@ -276,14 +277,15 @@ contract_ghosts() {
     fi
     # rewire every child that pointed at the ghost onto the ghost's parent (metadata only —
     # the child's history still carries the merged commits until its own parked restack replays it)
-    while IFS=' ' read -r key val; do
-      [[ -z "$key" ]] && continue
+    while IFS=' ' read -r child val; do
+      [[ -z "$child" ]] && continue
       [[ "$val" == "$g" ]] || continue
-      child="${key#stack-branch.}"; child="${child%.parent}"
       git config "stack-branch.$child.parent" "$parent"
       git config --unset "stack-branch.$child.base" 2>/dev/null || true
       logline "contract: rewire $child parent → $parent"
-    done < <(git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true)
+    done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+               git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
+             } | awk 'NF && !seen[$1]++' || true)
     # drop the ghost from any integrator's fan-in list — its work is main-native now
     while IFS=' ' read -r key val; do
       [[ -z "$key" ]] && continue
@@ -292,7 +294,13 @@ contract_ghosts() {
       git config --unset-all --fixed-value "stack-branch.$child.requires" "$g" 2>/dev/null || true
       logline "contract: drop fan-in requires $g from $child"
     done < <(git config --get-regexp '^stack-branch\..*\.requires$' 2>/dev/null || true)
-    proj="$(git config "stack-branch.$g.project" 2>/dev/null || true)"
+    while IFS=' ' read -r key val; do
+      [[ -z "$key" ]] && continue
+      [[ "$val" == "$g" ]] || continue
+      child="${key#branch.}"; child="${child%.stack-requires}"
+      logline "contract: WARNING branch.$child.stack-requires still names dropped ghost $g — left untouched, needs a post-keystone rewrite path"
+      echo "restack-daemon: WARNING branch.$child.stack-requires still names dropped ghost $g — left untouched, needs a post-keystone rewrite path" >&2
+    done < <(git config --get-regexp '^branch\..*\.stack-requires$' 2>/dev/null || true)
     [[ -n "$proj" ]] && git config --unset-all --fixed-value "stack-project.$proj.branch" "$g" 2>/dev/null || true
     git config --remove-section "stack-branch.$g" 2>/dev/null || true
     contracted_n=$((contracted_n+1))

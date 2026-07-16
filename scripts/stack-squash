@@ -93,12 +93,16 @@ def out(d):
 
 def children_of(b):
     """branches whose stack-branch.<child>.parent points at b (direct children)."""
-    kids = []
+    parents = {}
     for ln in git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout.splitlines():
         key, _, val = ln.partition(" ")
-        if val.strip() == b and key.startswith("stack-branch.") and key.endswith(".parent"):
-            kids.append(key[len("stack-branch."):-len(".parent")])
-    return kids
+        if key.startswith("stack-branch.") and key.endswith(".parent"):
+            parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    for ln in git(["config", "--get-regexp", r"^branch\..*\.stack-parent$"]).stdout.splitlines():
+        key, _, val = ln.partition(" ")
+        if key.startswith("branch.") and key.endswith(".stack-parent"):
+            parents[key[len("branch."):-len(".stack-parent")]] = val.strip()
+    return [child for child, parent in parents.items() if parent == b]
 
 
 def subtree(base):
@@ -192,7 +196,8 @@ if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
 
 orig_tip = git(["rev-parse", branch]).stdout.strip()   # pre-squash tip: reseat cut + rollback point
 
-parent = git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN
+parent = (git(["config", f"branch.{branch}.stack-parent"]).stdout.strip()
+          or git(["config", f"stack-branch.{branch}.parent"]).stdout.strip() or MAIN)
 
 # squash base: the FROZEN commit the branch sits on, via stack-base (resolves the
 # recorded stack-branch.<b>.base, else merge-base(parent, branch)). Never reset
@@ -276,7 +281,8 @@ patch = git(["diff", f"{base}...{branch}"]).stdout
 patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 
 # scope comes from the forest project, not the code area the voice corpus (main) teaches
-project = git(["config", f"stack-branch.{branch}.project"]).stdout.strip()
+project = (git(["config", f"branch.{branch}.stack-project"]).stdout.strip()
+           or git(["config", f"stack-branch.{branch}.project"]).stdout.strip())
 
 _SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!?):\s*(?P<rest>.+)$")
 
