@@ -17,6 +17,11 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 900 });
 await page.goto(BASE + PATH, { waitUntil: "domcontentloaded", timeout: 20000 });
 await new Promise((r) => setTimeout(r, 3500));
+for (const sel of (arg("clicks", "") || "").split(",").filter(Boolean)) {
+  await page.waitForSelector(sel, { timeout: 10000 });
+  await page.click(sel);
+  await new Promise((r) => setTimeout(r, 1200));
+}
 const lines = await page.evaluate(() => {
   const out = [];
   const seen = new Map();

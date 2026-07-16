@@ -9,7 +9,10 @@
     "preview": "vite preview",
     "typecheck": "tsgo --noEmit",
     "bake": "node bake.mjs",
-    "build:static": "VITE_STATIC=1 vite build && node bake.mjs"
+    "build:static": "VITE_STATIC=1 vite build && node bake.mjs",
+    "visual:serve": "node visual/fixture-server.mjs --dist dist --fixtures visual/fixtures --port 7333",
+    "visual:shot": "node visual/shot-all.mjs --base http://127.0.0.1:7333 --out /tmp/viewer-shots",
+    "visual:diff": "node visual/diff.mjs --a visual/baseline --b /tmp/viewer-shots --out /tmp/viewer-diffs"
   },
   "dependencies": {
     "@solidjs/router": "^0.16.1",
