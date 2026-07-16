@@ -7,6 +7,10 @@ import { threadWorking, threadUnseenDone, threadMsgCount } from "./chatStore";
 import { SessionPicker } from "./SessionPicker";
 import type { FileDiff, Commit } from "./types";
 
+const FILE_ACT =
+  "file-act flex-none cursor-pointer rounded-[7px] border px-[10px] py-1 text-[11px] leading-[1.55] tracking-[0.04em] transition-[background,border-color,color] duration-[120ms]";
+const FILE_ACT_QUIET = "border-rule bg-transparent text-ink-faint hover:border-ink-faint hover:text-ink";
+
 function patchLineCounts(patch: string): { add: number; del: number } {
   let add = 0, del = 0;
   for (const line of patch.split("\n")) {
@@ -297,24 +301,40 @@ export function FileEntry(props: {
     return i < 0 ? <b>{p}</b> : [<span class="dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
   };
   return (
-    <article class="entry" data-path={props.file.path} classList={{ blessed: blessed(), foil: foil() }}>
-      <div class="entry-head">
+    <article
+      class={`entry mb-[14px] overflow-clip rounded-[10px] border border-rule border-l-[3px] bg-vellum-raise transition-[border-color,box-shadow] duration-[250ms] ${
+        blessed() ? "border-l-gold-leaf shadow-[-1px_0_16px_-6px_var(--color-gold-wash)]" : "border-l-rule"
+      }`}
+      data-path={props.file.path}
+      classList={{ blessed: blessed(), foil: foil() }}
+    >
+      <div class="entry-head sticky top-0 z-[3] flex items-center gap-[11px] overflow-hidden border-b border-rule bg-vellum-raise px-[14px] py-[11px]">
         <button
-          class="entry-toggle"
+          class="entry-toggle w-4 flex-none cursor-pointer p-0 text-[11px] leading-none text-ink-faint hover:text-ink"
           title={collapsed() ? "expand" : "collapse"}
           onClick={() => setCollapsed((c) => !c)}
         >
           {collapsed() ? "▸" : "▾"}
         </button>
-        <span class="gutter" classList={{ tarnish: tarnished() }}>{blessed() || foil() || tarnished() ? "✦" : ""}</span>
-        <span class="path" onClick={() => setCollapsed((c) => !c)}>{seg(props.file.path)}</span>
-        <span class="lines">
-          <span class="add">+{props.file.add ?? 0}</span>
-          <span class="del">−{props.file.del ?? 0}</span>
+        <span
+          class={`gutter w-3 flex-none text-center ${tarnished() ? "text-patina" : "text-gold-leaf"}`}
+          classList={{ tarnish: tarnished() }}
+        >
+          {blessed() || foil() || tarnished() ? "✦" : ""}
+        </span>
+        <span
+          class="path cursor-pointer overflow-hidden text-ellipsis whitespace-nowrap text-ink [&_.dir]:text-ink-faint [&_b]:font-semibold"
+          onClick={() => setCollapsed((c) => !c)}
+        >
+          {seg(props.file.path)}
+        </span>
+        <span class="lines flex flex-none gap-2 text-[11px]">
+          <span class="add text-add">+{props.file.add ?? 0}</span>
+          <span class="del text-del">−{props.file.del ?? 0}</span>
         </span>
         <Show when={tarnished() && props.file.stale}>
           <button
-            class="file-act tarnish-chip"
+            class={`${FILE_ACT} tarnish-chip ${deltaView() ? "border-patina bg-patina text-vellum-night" : "border-patina bg-transparent text-patina"}`}
             classList={{ on: deltaView() }}
             title="blessed once, changed since — flip between the full diff and just the delta past the blessed state (the unreviewed part)"
             onClick={() => { setDeltaView((v) => !v); setCollapsed(false); }}
@@ -323,7 +343,7 @@ export function FileEntry(props: {
           </button>
         </Show>
         <button
-          class="file-act"
+          class={`${FILE_ACT} ${FILE_ACT_QUIET}`}
           title="copy a paste-ready file + branch reference for a Claude conversation"
           onClick={copyRef}
         >
@@ -337,7 +357,7 @@ export function FileEntry(props: {
         <Show when={canMutate}>
           <span class="sp-anchor">
             <button
-              class="file-act chat-act"
+              class={`${FILE_ACT} ${FILE_ACT_QUIET} chat-act ml-auto`}
               classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
               title={
                 chatWorking()
@@ -358,7 +378,11 @@ export function FileEntry(props: {
             </Show>
           </span>
           <Show when={!props.readOnly}>
-            <button class="bless-btn" disabled={blessed()} onClick={doBless}>
+            <button
+              class="bless-btn ml-auto flex-none cursor-pointer rounded-[7px] border border-gold-deep bg-transparent px-3 py-1 text-[11px] leading-[1.55] tracking-[0.04em] text-gold-leaf transition-[background,border-color,color] duration-[120ms] enabled:hover:border-gold-leaf enabled:hover:bg-gold-wash disabled:cursor-default disabled:border-transparent disabled:text-[10px] disabled:uppercase disabled:tracking-[0.14em] disabled:opacity-85"
+              disabled={blessed()}
+              onClick={doBless}
+            >
               {blessed() ? "blessed" : "bless ✦"}
             </button>
           </Show>
