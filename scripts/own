@@ -118,10 +118,21 @@ case "${1:-list}" in
     # deny would break the sanctioned `git apply --3way` itself). DETECTION is exact: a write
     # leaves a mark on disk whatever made it. So we look at the disk, right after the command.
     # Ignored paths (dist/, __pycache__) never appear — git status skips them — so builds are quiet.
-    local since="${2:-}"; [[ -n "$since" ]] || exit 0
+    # mtime CANNOT attribute authorship: a holder saving their own file during your command
+    # window looks identical to you stomping it. That blamed a read-only `git status` for
+    # another session's legitimate save. So subtract what was already dirty before the
+    # command ran — a file the holder is mid-edit on is THEIRS, and its churn is not news.
+    # What survives is a file that was CLEAN and is now dirty, inside this command's window:
+    # attributable, because nothing else made it appear.
+    local since="${2:-}" snap="${3:-}"; [[ -n "$since" ]] || exit 0
     local rel abs mt lane out="" mine=""
+    local -A pre
+    [[ -n "$snap" && -f "$snap" ]] && while IFS= read -r rel; do
+      [[ -n "$rel" ]] && pre[$rel]=1
+    done < "$snap"
     while IFS= read -r rel; do
       [[ -n "$rel" ]] || continue
+      (( ${+pre[$rel]} )) && continue                  # already dirty at pre → the holder's own WIP, not attributable to us
       abs="$ROOT/$rel"; [[ -f "$abs" ]] || continue
       mt=$(stat -f %m "$abs" 2>/dev/null) || continue
       (( mt >= since )) || continue                    # untouched by this command → not ours to judge
