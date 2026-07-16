@@ -32,9 +32,11 @@ wt_list(){   # the porcelain worktree list, computed once — it's repo-global a
 }
 
 existing_worktree(){   # echo the path of a real worktree holding <branch>, if any
+  # Claude session scratchpads (/tmp/claude-*/…) are deleted when their session ends — opening
+  # into one strands Helix buffers and space-t watchers on a vanished dir; prefer our own scratch.
   # `|| true`: awk exits at the match, so the producer dies on SIGPIPE (141) — pipefail+set -e would abort the caller's ex=$(...)
   wt_list | awk -v ref="refs/heads/$1" '
-    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}' || true
+    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref && p !~ /^\/(private\/)?tmp\/claude-/){print p; exit}}' || true
 }
 install_followup_hook(){   # idempotently install the detached-HEAD → branch-follow post-commit hook
   # Scratch worktrees are DETACHED so they never lock the branch (you can still
@@ -194,20 +196,22 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
              # LSP picker entries (references, symbols) render project-relative instead of absolute.
   local dir="${1:A}" line="$2" file="${3:A}"
   [[ -n "$file" ]] || return 1
-  local win
+  local win pane
+  # Target the PANE running hx, not the window: window-targeted keys land in the window's
+  # ACTIVE pane, which after a space-t is often the test pager — ':open …' typed into less.
   # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
-  win=$(tmux list-panes -s -t "$SESSION" \
-          -F '#{window_index} #{pane_current_command} #{window_name}' 2>/dev/null \
-        | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
-  if [[ -n "${win:-}" ]]; then
+  read -r win pane <<<"$(tmux list-panes -s -t "$SESSION" \
+          -F '#{window_index} #{pane_id} #{pane_current_command} #{window_name}' 2>/dev/null \
+        | awk '$3=="hx" && $4=="review-hx" {print $1, $2; exit}')" || true
+  if [[ -n "${pane:-}" ]]; then
     # ESC must land ALONE: ESC immediately followed by ':' reads as Alt-: and ':open …' never opens
     # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads.
-    tmux send-keys -t "${SESSION}:${win}" Escape
+    tmux send-keys -t "$pane" Escape
     sleep 0.02
-    tmux send-keys -t "${SESSION}:${win}" ":open ${file}" Enter
+    tmux send-keys -t "$pane" ":open ${file}" Enter
     if [[ -n "$line" ]]; then
       sleep 0.02
-      tmux send-keys -t "${SESSION}:${win}" "${line}gg"
+      tmux send-keys -t "$pane" "${line}gg"
     fi
   else
     local target="$file"; [[ -n "$line" ]] && target="${file}:${line}"
