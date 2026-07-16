@@ -12,6 +12,7 @@
 #   loops-preview [dir] [--port N] [--main path] [--open]  # start (dir defaults to $PWD)
 #   loops-preview [dir] --kill                             # stop the preview for that dir
 #   loops-preview --list                                  # rich list: port · url · branch · age · state
+#   loops-preview --json                                  # same, machine-readable (the viewer dock reads this)
 #   loops-preview --kill-all                              # stop every preview
 #   loops-preview --reap [--older-than MINUTES]           # stop orphaned/crashed (and optionally old) previews
 #
@@ -40,6 +41,7 @@ while [ $# -gt 0 ]; do
     --kill-all) ACTION="kill-all" ;;
     --reap) ACTION="reap" ;;
     --list) ACTION="list" ;;
+    --json) ACTION="json" ;;
     --open) OPEN=1 ;;
     --older-than) OLDER_THAN="${2:-}"; shift ;;
     --port) PORT="${2:-}"; shift ;;
@@ -59,6 +61,9 @@ listening()  { [ -n "$1" ] && lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }
 age_secs()   { [ -n "$1" ] && echo $(( $(date +%s) - $1 )) || echo 0; }                   # $1=STARTED epoch
 age_human()  { local s="$1"; [ "$s" -lt 60 ] && echo "${s}s" || { [ "$s" -lt 3600 ] && echo "$((s/60))m" || echo "$((s/3600))h"; }; }
 branch_of()  { git -C "$1" branch --show-current 2>/dev/null || echo "(gone)"; }          # $1=DIR
+json_esc()   { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+# state of one preview, echoed as: orphaned (dir gone) · up (listening) · dead (crashed, session lingers)
+state_of()   { local dir="$1" port="$2"; { [ -z "$dir" ] || [ ! -d "$dir" ]; } && { echo orphaned; return; }; listening "$port" && echo up || echo dead; }
 
 # Stop one session by NAME: kill tmux + drop its meta. Echoes nothing.
 stop_one() {
@@ -73,15 +78,32 @@ if [ "$ACTION" = "list" ]; then
     found=1
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
+    state="$(state_of "$dir" "$port")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch="(dir gone)"; fi
-    if [ -z "$dir" ] || [ ! -d "$dir" ]; then state="orphaned"
-    elif listening "$port"; then state="up"
-    else state="dead"; fi
     printf '  %-22s :%-5s  %-24s %-6s %s\n' \
       "$name" "${port:-?}" "$branch" "$(age_human "$(age_secs "$started")")" "$state"
     [ "$state" = "up" ] && dim "                         http://localhost:$port"
   done
   [ -n "$found" ] || echo "no previews running"
+  exit 0
+fi
+
+if [ "$ACTION" = "json" ]; then
+  printf '['
+  first=1
+  for s in $(sessions); do
+    name="$(name_of "$s")"; m="$(meta_of "$name")"
+    port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
+    state="$(state_of "$dir" "$port")"
+    if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch=""; fi
+    url=""; [ "$state" = "up" ] && url="http://localhost:$port"
+    [ -n "$first" ] || printf ','
+    first=""
+    printf '{"name":"%s","port":"%s","dir":"%s","branch":"%s","started":"%s","age":"%s","state":"%s","url":"%s"}' \
+      "$(json_esc "$name")" "$(json_esc "$port")" "$(json_esc "$dir")" "$(json_esc "$branch")" \
+      "$(json_esc "$started")" "$(json_esc "$(age_human "$(age_secs "$started")")")" "$(json_esc "$state")" "$(json_esc "$url")"
+  done
+  printf ']\n'
   exit 0
 fi
 
@@ -111,20 +133,23 @@ if [ "$ACTION" = "reap" ]; then
   exit 0
 fi
 
+# --kill needs only the session NAME (basename of the path string) — never cd, so an orphaned
+# preview whose worktree is already gone can still be torn down by the dir the dock recorded.
+if [ "$ACTION" = "kill" ]; then
+  NAME="$(basename "${DIR:-$PWD}")"
+  if tmux has-session -t "${PREFIX}${NAME}" 2>/dev/null; then
+    stop_one "$NAME"; cyan "killed ${PREFIX}${NAME}"
+  else
+    rm -f "$(meta_of "$NAME")"; echo "no session ${PREFIX}${NAME}"
+  fi
+  exit 0
+fi
+
 DIR="$(cd "${DIR:-$PWD}" && pwd)"
 NAME="$(basename "$DIR")"
 SESSION="${PREFIX}${NAME}"
 LOG="/tmp/$SESSION.log"
 META="$(meta_of "$NAME")"
-
-if [ "$ACTION" = "kill" ]; then
-  if tmux has-session -t "$SESSION" 2>/dev/null; then
-    stop_one "$NAME"; cyan "killed $SESSION"
-  else
-    rm -f "$META"; echo "no session $SESSION"
-  fi
-  exit 0
-fi
 
 [ -f "$DIR/package.json" ] || { err "$DIR is not a loops checkout (no package.json)"; exit 1; }
 MAIN="$(cd "$MAIN" && pwd)"
