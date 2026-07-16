@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, For, type JSX } from "solid-js";
+import { createSignal, createMemo, onCleanup, Show, For, type JSX } from "solid-js";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
@@ -163,24 +163,36 @@ export function ForestsList(props: {
   // ── drag a row up into the focus lane to pin it (only this page has the drop target) ────
   // The grip publishes the pointer to the focusDrag store; FocusLane hit-tests and commits the
   // drop. Release anywhere else is a no-op.
+  // the lane lives at the top of a long page — auto-scroll while the pointer holds an edge zone.
+  // Timer-driven, not per-move: scroll must keep flowing while the pointer sits still, and each
+  // tick re-publishes the drag so the lane's indicator/hit-test re-measure the scrolled rect.
+  let scrollTimer: number | undefined;
+  const autoScroll = () => {
+    const d = rowDrag();
+    if (!d) return;
+    if (d.y < 90) window.scrollBy(0, -14);
+    else if (d.y > window.innerHeight - 60) window.scrollBy(0, 14);
+    else return;
+    setRowDrag({ ...d });
+  };
   const dragDown = (e: PointerEvent, p: Project) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     setRowDrag({ repo: p.repo || "loops", name: p.name, x: e.clientX, y: e.clientY });
+    scrollTimer = window.setInterval(autoScroll, 50);
   };
   const dragMove = (e: PointerEvent) => {
     const d = rowDrag();
     if (!d) return;
     setRowDrag({ ...d, x: e.clientX, y: e.clientY });
-    // the lane lives at the top of a long page — nudge the scroll when dragging near the edges
-    if (e.clientY < 90) window.scrollBy(0, -14);
-    else if (e.clientY > window.innerHeight - 60) window.scrollBy(0, 14);
   };
   const dragUp = () => {
+    window.clearInterval(scrollTimer);
     const d = rowDrag();
     setRowDrag(null);
     if (d) dropOnLane(d);
   };
+  onCleanup(() => window.clearInterval(scrollTimer));
   const dragWrap = (p: Project, inner: JSX.Element) => (
     <div class="row-drag-wrap group/drag relative">
       <span
