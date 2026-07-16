@@ -17,7 +17,13 @@ typeset -A children_of
 local line branch parent
 while IFS= read -r line; do
   [[ -z "$line" ]] && continue
-  if [[ "$line" =~ '^stack-branch\.(.+)\.parent (.+)$' ]]; then
+  if [[ "$line" =~ '^branch\.(.+)\.stack-parent (.+)$' ]]; then
+    parent_of[${match[1]}]="${match[2]}"
+  fi
+done < <(git config --local --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null)
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  if [[ "$line" =~ '^stack-branch\.(.+)\.parent (.+)$' && -z "${parent_of[${match[1]}]:-}" ]]; then
     parent_of[${match[1]}]="${match[2]}"
   fi
 done < <(git config --local --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null)

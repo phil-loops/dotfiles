@@ -40,9 +40,13 @@ _refresh() {
 
   # branch → project, from the per-branch .project tags (greedy capture: branch may
   # contain dots/slashes; the key is always `stack-branch.<branch>.project`).
-  projmap=$(git config --get-regexp '^stack-branch\..*\.project$' 2>/dev/null | jq -R -s '
+  projmap=$( { git config --get-regexp '^branch\..*\.stack-project$' 2>/dev/null \
+      | sed -E 's/^branch\.(.*)\.stack-project /\1 /'
+    git config --get-regexp '^stack-branch\..*\.project$' 2>/dev/null \
+      | sed -E 's/^stack-branch\.(.*)\.project /\1 /'
+  } | awk 'NF && !seen[$1]++' | jq -R -s '
     [ splits("\n") | select(length > 0)
-      | capture("^stack-branch\\.(?<b>.*)\\.project (?<p>.*)$") | {(.b): .p} ] | add // {}')
+      | capture("^(?<b>\\S+) (?<p>.*)$") | {(.b): .p} ] | add // {}')
 
   merged='[]'; ok=1
   for repo in $repos; do

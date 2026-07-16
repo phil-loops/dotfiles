@@ -33,7 +33,12 @@ MAIN_BRANCH=$(git config stack.main-branch 2>/dev/null || echo "main")
 typeset -A parents
 typeset -A children
 while IFS= read -r line; do
-  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' ]]; then
+  if [[ "$line" =~ '^branch\.(.+)\.stack-parent=(.+)' ]]; then
+    parents[${match[1]}]="${match[2]}"
+  fi
+done < <(git config --local --list 2>/dev/null | grep -E "^branch\..*\.stack-parent=")
+while IFS= read -r line; do
+  if [[ "$line" =~ 'stack-branch\.(.+)\.parent=(.+)' && -z "${parents[${match[1]}]:-}" ]]; then
     parents[${match[1]}]="${match[2]}"
   fi
 done < <(git config --local --list 2>/dev/null | grep -E "^stack-branch\..*\.parent=")
@@ -114,7 +119,7 @@ if ! git rev-parse --verify "refs/heads/${BRANCH}" >/dev/null 2>&1; then
   exit 1
 fi
 
-PARENT=$(git config "stack-branch.${BRANCH}.parent" 2>/dev/null)
+PARENT=$(git config "branch.${BRANCH}.stack-parent" 2>/dev/null || git config "stack-branch.${BRANCH}.parent" 2>/dev/null)
 if [[ -z "$PARENT" ]]; then
   echo "Branch '$BRANCH' has no parent recorded."
   echo "Run: git config stack-branch.$BRANCH.parent <parent-branch>"

@@ -73,6 +73,9 @@ git update-ref "refs/heads/${branch}" "$new" "$tip"
 print -r -- "re-messaged ${branch}: ${tip:0:10} → ${new:0:10}"
 
 # rewriting a tip moves the base its children were forked from — they must be reseated.
-kids=$( (git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true) \
-  | awk -v p="$branch" '$2==p{sub(/^stack-branch\./,"",$1); sub(/\.parent$/,"",$1); print $1}')
+kids=$( { (git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null || true) \
+    | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
+  (git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null || true) \
+    | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'; } \
+  | awk -v p="$branch" 'NF && !seen[$1]++ && $2==p{print $1}')
 [[ -n "$kids" ]] && print -r -- "restack these onto it — they still sit on the old tip:\n${kids}"
