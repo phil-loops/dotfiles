@@ -1,16 +1,17 @@
 #!/bin/zsh
 # hx-test <file> — the Helix side of a contextual test watcher. Helix has no test
-# integration and :sh discards output, so instead of capturing results we drive a
-# dedicated tmux pane BESIDE Helix that runs node:test in --watch mode: it re-runs
-# on every :w and streams the spec reporter's colored pass/fail live.
+# integration and :sh discards output, so instead we drive a tmux pane BESIDE Helix
+# that runs node:test in --watch mode piped through `less -R +F`:
 #   helix/config.toml binds  space-t = [":write", ":sh hx-test %{buffer_name}"]
-# The :write lands the current edit before we kick the watcher (which then re-runs
-# on each subsequent save on its own).
+# The pane is a read-only pager, NOT a shell — so vim nav works out of the box: it
+# follows the latest run automatically (zero keys), and Ctrl-c drops into normal less
+# to scroll back with j/k/g/G// (press F to resume following). Alt-j / Alt-k hop between
+# Helix and the pane. --watch re-runs on every :w on its own, so this only needs pressing
+# to (re)point the watcher at a new file.
 #
 # File resolution: a *.test.ts buffer runs itself; a source buffer runs its sibling
-# <base>.test.ts. The pane is reused across presses (matched by pane title "hx-test"),
-# so pressing space-t from a different file just re-points the same watcher — one test
-# pane, not a new split each time.
+# <base>.test.ts. Pressing space-t from a different file kills the old pane and opens a
+# fresh watcher — one test pane, never a pile of splits.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
@@ -36,17 +37,15 @@ if [[ -z "${TMUX:-}" ]]; then
   exit 0
 fi
 
-# node:test in a tty auto-selects the colored spec reporter; the pane is a tty, so we
-# get color for free. --watch re-runs the suite on every save under $root.
-cmd="cd ${(q)root} && clear && npx tsx --tsconfig tsconfig.node.json --watch --test ${(q)rel}"
+# FORCE_COLOR keeps the spec reporter's colors alive through the pipe (node drops them
+# when stdout isn't a tty); less -R renders them. +F follows the stream so the newest
+# run is always on screen without a keystroke.
+cmd="cd ${(q)root} && FORCE_COLOR=1 npx tsx --tsconfig tsconfig.node.json --watch --test-reporter=spec --test ${(q)rel} 2>&1 | less -R +F"
 
-# Reuse the pane titled hx-test in THIS window; create a 30%-height split below on first use.
-target=$(tmux list-panes -F '#{pane_id} #{pane_title}' | awk '$2=="hx-test"{print $1; exit}')
-if [[ -z "$target" ]]; then
-  target=$(tmux split-window -d -v -l 30% -c "$root" -P -F '#{pane_id}')
-  tmux select-pane -t "$target" -T hx-test
-fi
-
-tmux send-keys -t "$target" C-c            # stop any in-flight watcher before re-pointing
-tmux send-keys -t "$target" "$cmd" Enter
-echo "▶ watching ${rel:t}"
+# Kill any previous test pane (matched by pane title) and open a fresh split below Helix;
+# -d keeps focus in Helix. A clean respawn avoids fighting less's Ctrl-c handling.
+old=$(tmux list-panes -F '#{pane_id} #{pane_title}' | awk '$2=="hx-test"{print $1; exit}')
+[[ -n "$old" ]] && tmux kill-pane -t "$old"
+new=$(tmux split-window -d -v -l 30% -c "$root" -P -F '#{pane_id}' "$cmd")
+tmux select-pane -t "$new" -T hx-test
+echo "▶ watching ${rel} — Alt-j into pane, Ctrl-c to scroll, Alt-k back"
