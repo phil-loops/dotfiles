@@ -387,7 +387,7 @@ export function ForestOverview() {
           <WarmingRibbon loading={health.isFetching} hasData={!!health.data} needsAttention={needsAttention()} />
           <div class="fo-views" role="group" aria-label="overview view">
             <button classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
-            <button classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
+            <button class="fo-view-story" classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
           </div>
           <Show when={canMutate}>
             <span class="sp-anchor">

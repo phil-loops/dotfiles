@@ -36,6 +36,16 @@
     "settle": 2500
   },
   {
+    "name": "forest-story",
+    "path": "/forests/admin-user-memberships",
+    "waitFor": ".fo-views",
+    "clicks": [
+      ".fo-view-story"
+    ],
+    "waitAfter": ".ms-row",
+    "settle": 2000
+  },
+  {
     "name": "activity-dock",
     "path": "/work",
     "waitFor": ".activity-head",
