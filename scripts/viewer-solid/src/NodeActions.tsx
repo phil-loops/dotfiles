@@ -901,7 +901,7 @@ export function NodeActions(props: {
 
       {/* ⋯ menu — plain checkout, conditional repairs, interest, chats. */}
       <button
-        class="icon-btn"
+        class={`icon-btn cursor-pointer rounded-[6px] border px-[9px] py-1 text-[15px] leading-none hover:border-rule hover:bg-vellum-edge hover:text-ink ${open() ? "border-rule bg-vellum-edge text-ink" : "border-transparent bg-transparent text-ink-faint"}`}
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}

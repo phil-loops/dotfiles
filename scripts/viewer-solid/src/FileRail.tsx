@@ -429,15 +429,16 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
   const [diff] = createResource(() => (open() ? props.c.sha : undefined), (sha) => provider.commitDiff(sha));
   const noBless = { mutate: () => {} };
   return (
-    <li class="commit" classList={{ own: props.c.own !== false, "commit-open": open() }}>
-      <button class="commit-head" onClick={() => setOpen((v) => !v)}>
-        <span class="c-caret">{open() ? "▾" : "▸"}</span>
-        <span class="c-sha">{props.c.sha}</span>
-        <span class="c-subject">{props.c.subject}</span>
-        <span class="c-meta">{props.c.author} · {props.c.date}</span>
+    <li class="commit border-x-0 border-t-0 border-b border-solid border-rule" classList={{ own: props.c.own !== false, "commit-open": open() }}>
+      <button class="commit-head flex w-full cursor-pointer items-baseline gap-[13px] px-1 py-[9px] text-left leading-[1.55] hover:bg-[rgba(255,255,255,0.03)]" onClick={() => setOpen((v) => !v)}>
+        <span class="c-caret w-[10px] flex-none text-[10px] text-ink-faint">{open() ? "▾" : "▸"}</span>
+        <span class="c-sha flex-none text-[11px] text-ink-faint tabular-nums">{props.c.sha}</span>
+        {/* inherited ancestors dim — they're not this branch's work */}
+        <span class={`c-subject flex-1 ${props.c.own !== false ? "text-ink" : "text-ink-faint"}`}>{props.c.subject}</span>
+        <span class="c-meta flex-none text-[10.5px] text-ink-faint">{props.c.author} · {props.c.date}</span>
       </button>
       <Show when={open()}>
-        <div class="commit-diff">
+        <div class="commit-diff px-1 pt-1 pb-3">
           <Show when={diff()} fallback={<p class={LOADING}>loading…</p>}>
             {(d) => (
               <Show when={d().files.length} fallback={<p class={LOADING}>no file changes (merge or empty commit)</p>}>
@@ -460,12 +461,12 @@ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: 
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
         <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
-          <ol class="commits">
+          <ol class="commits mx-0 mt-2 mb-0 list-none p-0">
             <For each={own()}>
               {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
             </For>
             <Show when={ancestors().length}>
-              <li class="commits-divider"><span>earlier history</span></li>
+              <li class="commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']"><span>earlier history</span></li>
               <For each={ancestors()}>
                 {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
               </For>

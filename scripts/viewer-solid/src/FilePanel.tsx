@@ -61,7 +61,7 @@ export function FilePanel(props: {
                   fallback={<div class={SPINE_EMPTY}>nothing to review</div>}
                 >
                   <input
-                    class="file-filter"
+                    class="file-filter mb-2 w-full rounded-[6px] border border-solid border-rule bg-[#100e0c] px-2 py-[5px] font-mono text-[12px] leading-[1.55] text-ink outline-none placeholder:text-ink-faint focus:border-[#e0ad4e]"
                     ref={props.onFilterEl}
                     placeholder="filter files… (⌘F)"
                     value={props.fileFilter()}

@@ -121,15 +121,19 @@
   @keyframes cp-blink {
     50% { opacity: 0; }
   }
+  --animate-tip-in: tip-in 0.12s ease-out;
+  @keyframes tip-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 }
 
 :root {
   /* earn the gold: a dark, unlit ledger; gold appears ONLY where work is blessed.
      Legacy-token audit (batch 8): every token below still has consumers — the
-     unconverted legacy rules that remain (body, .surface, .nh-editor, fo-…, amb-chip,
-     commits, purpose/forest tips, watch-pin, icon-btn, action-btn, kbd-*, .flash, .ge)
-     and the keep-list set pieces (foil sweep, d2h re-tint, nh sync strip / unfold
-     grammar). Tokens whose ONLY consumers are keep-list blocks are tagged; a token
+     unconverted legacy rules that remain (body, .nh-editor, fo-…, amb-chip,
+     watch-pin, action-btn, .ge) and the keep-list set pieces (foil sweep, d2h
+     re-tint, nh sync strip / unfold grammar). Tokens whose ONLY consumers are keep-list blocks are tagged; a token
      with zero references gets deleted, not kept (--add-bg died here). */
   --vellum-night: #14110a;
   --vellum-raise: #1c180f;
@@ -183,12 +187,6 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
 }
-
-/* ── review surface ─────────────────────────────────────────────────── */
-/* min-width 0: a grid child defaults to min-width:auto, so a diff table's min-content
-   silently widens the 1fr track past the viewport — the page scrolled sideways at narrow
-   widths while .diff's own overflow-x never engaged. */
-.surface { padding: 30px 34px 90px; max-width: 1500px; min-width: 0; }
 
 /* the message editor — prep's landing: the one outgoing commit, editable pre-push */
 .nh-editor {
@@ -260,14 +258,6 @@ body {
 .nh-dirt-files { display: flex; flex-wrap: wrap; gap: 5px 10px; }
 .nh-dirt-files code { font-size: 11px; color: var(--ink); background: var(--vellum-edge); padding: 1px 6px; border-radius: 4px; }
 .nh-dirt-acts { display: flex; gap: 9px; }
-
-/* ghost icon button — chat (✦) and the ⋯ trigger; quiet until hovered/open */
-.icon-btn {
-  font: inherit; font-size: 15px; line-height: 1; color: var(--ink-faint);
-  background: transparent; border: 1px solid transparent; border-radius: 6px;
-  padding: 4px 9px; cursor: pointer;
-}
-.icon-btn:hover, .icon-btn.on { color: var(--ink); border-color: var(--rule); background: var(--vellum-edge); }
 
 /* subpixel-weight smoothing (not the body's antialiased) so strokes stay heavy on
    dark — color contrast was already maxed; the text just read thin. */
@@ -386,76 +376,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 /* ── hover a diff line to arm it, then press o to open it in the warm nvim (no click-to-open,
    so mouse drags stay free for sweep-to-chat selection) ──────────────── */
 .d2h-code-side-linenumber:hover, .d2h-code-linenumber:hover { color: var(--ink); background: var(--vellum-edge); }
-.kbd-hint { margin-left: auto; color: var(--ink-faint); font-size: 10px; letter-spacing: 0.04em; }
-.kbd-hint b { color: var(--ink-dim); font-weight: 600; }
-.flash {
-  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 250;
-  background: var(--vellum-raise); border: 1px solid var(--rule); color: var(--ink);
-  padding: 9px 16px; border-radius: 9px; font-size: 12px; box-shadow: 0 14px 40px #0009;
-}
-
-/* ── diffs / commits view toggle + the commits list ──────────────────── */
-.commits { list-style: none; margin: 8px 0 0; padding: 0; }
-.commit { border-bottom: 1px solid var(--rule); }
-.commit-head { display: flex; align-items: baseline; gap: 13px; width: 100%; padding: 9px 4px; background: none; border: 0; text-align: left; cursor: pointer; font: inherit; }
-.commit-head:hover { background: var(--hover, rgba(255,255,255,0.03)); }
-.c-caret { color: var(--ink-faint); font-size: 10px; flex: none; width: 10px; }
-.c-sha { color: var(--ink-faint); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
-.c-subject { color: var(--ink); flex: 1; }
-.commit:not(.own) .c-subject { color: var(--ink-faint); } /* inherited ancestor — dimmed, it's not this branch's work */
-.c-meta { color: var(--ink-faint); font-size: 10.5px; flex: none; }
-.commit-diff { padding: 4px 4px 12px; }
-.commits-divider { display: flex; align-items: center; gap: 10px; padding: 14px 4px 6px; color: var(--ink-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
-.commits-divider::before, .commits-divider::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
-
-/* ── purpose caption: the hovered map node's full thesis, pinned to the bottom edge
-   so it never occludes the graph ── */
-.purpose-tip {
-  position: fixed; z-index: 60; left: 50%; bottom: 16px; transform: translateX(-50%);
-  max-width: min(680px, calc(100vw - 48px)); pointer-events: none;
-  background: var(--vellum-raise); color: var(--ink-dim);
-  border: 1px solid var(--rule); border-left: 2px solid var(--gold-deep);
-  border-radius: 9px; padding: 9px 14px;
-  font-family: var(--mono); font-size: 11.5px; line-height: 1.5;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
-  animation: tip-in .12s ease-out;
-}
-.purpose-tip b { color: var(--ink); font-weight: 500; }
-@keyframes tip-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .purpose-tip { animation: none; } }
-/* forest hover card: each branch in the forest + its one-line purpose */
-.forest-tip {
-  position: fixed; z-index: 60; max-width: 440px; max-height: calc(100vh - 16px);
-  overflow: hidden; pointer-events: none;
-  background: var(--vellum-raise); border: 1px solid var(--rule); border-left: 2px solid var(--gold-deep);
-  border-radius: 9px; padding: 7px 0; box-shadow: 0 10px 30px rgba(0, 0, 0, .5);
-  animation: tip-in .12s ease-out;
-}
-.forest-tip-row {
-  display: grid; grid-template-columns: minmax(84px, 36%) 1fr; gap: 12px;
-  padding: 4px 14px; align-items: baseline;
-}
-.forest-tip-branch {
-  font-family: var(--mono); font-size: 12px; color: var(--ink);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.forest-tip-thesis {
-  font-family: var(--mono); font-size: 11px; color: var(--ink-dim); line-height: 1.45;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-}
-.forest-tip-thesis.none { color: var(--ink-faint); opacity: 0.7; }
-.forest-tip-landed {
-  margin-top: 5px; padding: 5px 14px 1px; border-top: 1px solid var(--rule);
-}
-.forest-tip-landed-row {
-  display: flex; gap: 10px; align-items: baseline; padding: 2px 0;
-  font-family: var(--mono); font-size: 11px;
-}
-.landed-pr { color: var(--gold-deep); }
-.landed-branch {
-  color: var(--ink-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.landed-ago { color: var(--ink-faint); }
 
 /* ── watching: opt-in pinned loose branches ──────────────────────────── */
 .watch-pin {

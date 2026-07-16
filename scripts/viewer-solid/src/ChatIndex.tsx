@@ -50,7 +50,7 @@ export default function ChatIndex(props: {
       >
         <header class="ci-head sticky top-0 z-[1] flex items-center justify-between border-b border-rule bg-vellum-raise px-4 py-[14px]">
           <span class="ci-title text-[14px] text-ink">💬 chats</span>
-          <button class="icon-btn" onClick={props.onClose} title="close">
+          <button class="icon-btn cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[9px] py-1 text-[15px] leading-none text-ink-faint hover:border-rule hover:bg-vellum-edge hover:text-ink" onClick={props.onClose} title="close">
             ×
           </button>
         </header>
