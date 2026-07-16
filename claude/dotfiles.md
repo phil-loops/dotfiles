@@ -3,6 +3,7 @@
 Rules first; mechanics below.
 
 - **Never `zsource` / `git add -A` here.** Phil's `zsource` alias (`git add -A && git commit && git push && source ~/.zshrc`) is his to run, not Claude's: he often has concurrent in-progress dotfiles work, and `-A` sweeps his uncommitted WIP into your commit (it once bundled his ledger scripts into an unrelated `.zshrc` commit). Instead: run `git status` as its own step, then stage **explicit paths** (`git add .zshrc`), commit, push.
+- **Pathspec commits cannot UNTRACK — delete from disk first.** `git commit -- X` re-reads X from the working tree, silently discarding a staged `git rm --cached X` and re-committing the bytes with a success exit code (98f9041 "untrack bytecode" did exactly this; all 23 .pyc stayed tracked). The safe form records an absence: `rm -rf X && git commit -m "…" -- X` (4f56495). Only for generated/regenerable files; a file that must survive on disk gets copied out, untrack-committed, copied back.
 - **Never `git push --force` a branch another session may be live on** — that clobbers pushed work; leave a cosmetically-wrong commit message alone rather than rewrite shared history.
 - **Reloads don't propagate.** `source ~/.zshrc` only affects your own subshell — tell Phil to source it in his terminal to pick up the change.
 - **Never put scripts in ~/bin.** Everything lives in `~/.dotfiles/` so it's version controlled and nothing is lost if the computer dies: shell functions in `.zshrc` (or dedicated files sourced from it), standalone scripts in `~/.dotfiles/scripts/`.
