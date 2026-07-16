@@ -9,9 +9,11 @@
 # Docker project, no collision with `task dev` on :3000.
 #
 # Usage:
-#   loops-preview [dir] [--port N] [--main path]   # start (dir defaults to $PWD)
-#   loops-preview [dir] --kill                      # stop the preview for that dir
-#   loops-preview --list                            # list running previews
+#   loops-preview [dir] [--port N] [--main path] [--open]  # start (dir defaults to $PWD)
+#   loops-preview [dir] --kill                             # stop the preview for that dir
+#   loops-preview --list                                  # rich list: port · url · branch · age · state
+#   loops-preview --kill-all                              # stop every preview
+#   loops-preview --reap [--older-than MINUTES]           # stop orphaned/crashed (and optionally old) previews
 #
 # Env: LOOPS_MAIN overrides the main checkout (default ~/coding/loops).
 #
@@ -22,17 +24,24 @@
 set -euo pipefail
 
 cyan() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
-err() { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; }
+dim()  { printf '\033[2m%s\033[0m\n' "$*"; }
+err()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; }
 
 MAIN="${LOOPS_MAIN:-$HOME/coding/loops}"
 PORT=""
 ACTION="start"
 DIR=""
+OLDER_THAN=""
+OPEN=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --kill) ACTION="kill" ;;
+    --kill-all) ACTION="kill-all" ;;
+    --reap) ACTION="reap" ;;
     --list) ACTION="list" ;;
+    --open) OPEN=1 ;;
+    --older-than) OLDER_THAN="${2:-}"; shift ;;
     --port) PORT="${2:-}"; shift ;;
     --main) MAIN="${2:-}"; shift ;;
     -*) err "unknown flag: $1"; exit 2 ;;
@@ -41,18 +50,79 @@ while [ $# -gt 0 ]; do
   shift
 done
 
+PREFIX="loops-preview-"
+meta_of()    { printf '/tmp/%s%s.meta' "$PREFIX" "$1"; }        # $1 = NAME
+sessions()   { tmux ls 2>/dev/null | sed -n "s/^\(${PREFIX}[^:]*\):.*/\1/p"; }
+name_of()    { printf '%s' "${1#$PREFIX}"; }                     # $1 = SESSION → NAME
+meta_get()   { [ -f "$1" ] && grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- || true; }  # $1=metafile $2=KEY
+listening()  { [ -n "$1" ] && lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }          # $1=PORT
+age_secs()   { [ -n "$1" ] && echo $(( $(date +%s) - $1 )) || echo 0; }                   # $1=STARTED epoch
+age_human()  { local s="$1"; [ "$s" -lt 60 ] && echo "${s}s" || { [ "$s" -lt 3600 ] && echo "$((s/60))m" || echo "$((s/3600))h"; }; }
+branch_of()  { git -C "$1" branch --show-current 2>/dev/null || echo "(gone)"; }          # $1=DIR
+
+# Stop one session by NAME: kill tmux + drop its meta. Echoes nothing.
+stop_one() {
+  local name="$1"
+  tmux kill-session -t "${PREFIX}${name}" 2>/dev/null || true
+  rm -f "$(meta_of "$name")"
+}
+
 if [ "$ACTION" = "list" ]; then
-  tmux ls 2>/dev/null | grep '^loops-preview-' || echo "no previews running"
+  found=""
+  for s in $(sessions); do
+    found=1
+    name="$(name_of "$s")"; m="$(meta_of "$name")"
+    port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
+    if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch="(dir gone)"; fi
+    if [ -z "$dir" ] || [ ! -d "$dir" ]; then state="orphaned"
+    elif listening "$port"; then state="up"
+    else state="dead"; fi
+    printf '  %-22s :%-5s  %-24s %-6s %s\n' \
+      "$name" "${port:-?}" "$branch" "$(age_human "$(age_secs "$started")")" "$state"
+    [ "$state" = "up" ] && dim "                         http://localhost:$port"
+  done
+  [ -n "$found" ] || echo "no previews running"
+  exit 0
+fi
+
+if [ "$ACTION" = "kill-all" ]; then
+  n=0
+  for s in $(sessions); do stop_one "$(name_of "$s")"; n=$((n+1)); done
+  cyan "killed $n preview(s)"
+  exit 0
+fi
+
+if [ "$ACTION" = "reap" ]; then
+  n=0
+  for s in $(sessions); do
+    name="$(name_of "$s")"; m="$(meta_of "$name")"
+    port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
+    reason=""
+    if [ -z "$dir" ] || [ ! -d "$dir" ]; then reason="orphaned (dir gone)"
+    elif ! listening "$port"; then reason="dead (not listening on :$port)"
+    elif [ -n "$OLDER_THAN" ] && [ "$(age_secs "$started")" -gt "$((OLDER_THAN * 60))" ]; then
+      reason="older than ${OLDER_THAN}m"
+    fi
+    if [ -n "$reason" ]; then
+      stop_one "$name"; cyan "reaped $name — $reason"; n=$((n+1))
+    fi
+  done
+  [ "$n" -gt 0 ] || echo "nothing to reap"
   exit 0
 fi
 
 DIR="$(cd "${DIR:-$PWD}" && pwd)"
 NAME="$(basename "$DIR")"
-SESSION="loops-preview-$NAME"
+SESSION="${PREFIX}${NAME}"
 LOG="/tmp/$SESSION.log"
+META="$(meta_of "$NAME")"
 
 if [ "$ACTION" = "kill" ]; then
-  tmux kill-session -t "$SESSION" 2>/dev/null && cyan "killed $SESSION" || echo "no session $SESSION"
+  if tmux has-session -t "$SESSION" 2>/dev/null; then
+    stop_one "$NAME"; cyan "killed $SESSION"
+  else
+    rm -f "$META"; echo "no session $SESSION"
+  fi
   exit 0
 fi
 
@@ -81,9 +151,11 @@ fi
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev --webpack -p $PORT > '$LOG' 2>&1"
+printf 'DIR=%s\nPORT=%s\nSTARTED=%s\n' "$DIR" "$PORT" "$(date +%s)" > "$META"
 
 cyan "preview $NAME  →  http://localhost:$PORT"
-cyan "branch:  $(git -C "$DIR" branch --show-current 2>/dev/null || echo '(detached)')"
+cyan "branch:  $(branch_of "$DIR")"
 cyan "watch:   tmux attach -t $SESSION   ·   log: $LOG"
 cyan "stop:    loops-preview '$DIR' --kill"
 echo "(first request compiles on demand — give it ~10-20s)"
+[ -n "$OPEN" ] && open "http://localhost:$PORT" || true
