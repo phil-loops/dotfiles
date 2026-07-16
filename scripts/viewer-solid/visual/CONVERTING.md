@@ -81,6 +81,15 @@ deliberate geometry change re-baselines rects the same way as pixels:
 22. **Passing diffs with more than a few hundred px still get a forced-artifact look**
     (`--threshold 0` + a bbox scan of the diff PNG) — that's what catches a real regression
     hiding under the threshold.
+23. **Dead CSS colliding with a live class name is part of the computed reality.** Deleting a
+    dead block can silently change a living element that shares the name — probe the merged
+    computed style and bake THAT in; an accidental fix is still rect drift. Flag the collision
+    for a separate deliberate-fix commit (the `.pr-draft` 820px-box case).
+24. **An unlayered legacy rule beats any utility on an already-converted component.** A
+    converted file's utility may be a shadowed no-op until the legacy rule dies; on extraction,
+    encode the computed *winner*, not the utility that was losing.
+25. **Nested hover scopes need named groups** — once an inner element carries `group`, an outer
+    wrapper's hover reveal must use `group/<name>` + `group-hover/<name>:`.
 
 ## Keep-list — never convert these
 
