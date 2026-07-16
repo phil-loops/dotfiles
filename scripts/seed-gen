@@ -44,5 +44,16 @@ if [[ -n "$tsgo" ]]; then
 else
   build=("$HOME/.volta/bin/node" "$tsc")
 fi
-( cd "$dir" && "${build[@]}" --project tsconfig.trpc-types.json --pretty false >/dev/null 2>&1 \
-    && echo "$head" > "$marker"; rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) &
+( cd "$dir"
+  # packages/*/dist (gitignored, built locally) feeds @loops/* resolution in BOTH the .gen emit
+  # and the app typecheck. A branch that changed package source leaves dist stale, so the .gen
+  # would regen against yesterday's package types. Rebuild it first — gated on packages actually
+  # changing so app-only branches skip it. Packages are still moduleResolution=node10, which tsgo
+  # rejects (TS5108), so build them with tsc even when the .gen emit below uses tsgo.
+  if [[ -e "$tsc" ]] && ! git diff --quiet main...HEAD -- packages 2>/dev/null; then
+    "$HOME/.volta/bin/node" "$tsc" -b \
+      packages/settings/tsconfig.json packages/valkey/tsconfig.json packages/mail-pg/tsconfig.json \
+      packages/realtime-client/tsconfig.json packages/prisma/tsconfig.json --pretty false >/dev/null 2>&1
+  fi
+  "${build[@]}" --project tsconfig.trpc-types.json --pretty false >/dev/null 2>&1 && echo "$head" > "$marker"
+  rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) &
