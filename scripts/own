@@ -48,6 +48,18 @@ _active(){ local lane="$1" a; _alive "$lane"; local rc=$?
 # PreToolUse hook does) and _setowner UNSETS .session when it's empty — so a hand-claimed lane
 # is identified by its holder PID, not a session id. Compare pids or the check never fires.
 _mypid(){ local out; out=$("$RESOLVER" 2>/dev/null) && [[ -n "$out" ]] && print -r -- "${out%%	*}"; }
+# An Edit is a TOOL call, not a shell command — there's nowhere to inline OWN_FORCE=1 the way
+# you would for TSGO_SKIP. So the override is stateful, time-boxed and loud: `own force <lane>`,
+# honoured only for the pid that asked, expiring on its own so a 2am override can't become the
+# permanent state of the repo. OWN_FORCE=1 still works for plain shell callers.
+_forced(){ local lane="$1" v pid exp mp
+  [[ -n "${OWN_FORCE:-}" ]] && return 0
+  v=$(gc "own.$lane.force" 2>/dev/null) || return 1
+  [[ -n "$v" ]] || return 1
+  pid="${v%% *}"; exp="${v##* }"
+  (( NOW > exp )) && { gc --unset "own.$lane.force" 2>/dev/null; return 1; }
+  mp=$(_mypid); [[ "$pid" == "${mp:-cli}" ]] || return 1
+  return 0 }
 # is lane $1 held by SOMEONE ELSE, right now? (0 = yes, hands off)
 _held_by_other(){ local lane="$1" hp mp hs
   _active "$lane" || return 1
@@ -93,6 +105,15 @@ case "${1:-list}" in
     done
     print "holding [${(j:, :)@}] for slice:$name — one feature across these lanes."
     print "the other session's 'own list' now shows WHY they're held. edit these directly; patch anything else." ;;
+  force) [[ -n "${2:-}" ]] || { print "usage: own force <lane> [minutes]" >&2; exit 2; }
+    _is_lane "$2" || { print "no such lane: $2 (see 'own list')" >&2; exit 2; }
+    local mins="${3:-10}" mp=$(_mypid)
+    gc "own.$2.force" "${mp:-cli} $((NOW + mins * 60))"
+    print "⚠ forcing edits on [$2] for ${mins}m — the guard will let this session through and say so each time."
+    print "  the holder is still working in there; the patch protocol exists for a reason."
+    print "  'own unforce $2' drops it early; it expires on its own regardless." ;;
+  unforce) [[ -n "${2:-}" ]] || { print "usage: own unforce <lane>" >&2; exit 2; }
+    gc --unset "own.$2.force" 2>/dev/null; print "force dropped on [$2]" ;;
   request) [[ -n "${2:-}" ]] || { print "usage: own request <lane>" >&2; exit 2; }
     if _active "$2"; then
       gc "own.$2.req" "$NOW"; local a=$(_age "$2")
@@ -155,11 +176,23 @@ case "${1:-list}" in
     # since the CLI has no OWN_SESSION) is finally visible here instead of warning nobody.
     if _held_by_other "$lane"; then
       local sl=$(gc "own.$lane.slice" 2>/dev/null) a=$(_age "$lane" 2>/dev/null)
-      print -u2 "⚠ own: [$lane]${sl:+ (slice:$sl)} is held by another LIVE session${a:+ (${a}s ago)}."
-      print -u2 "   editing $rel — prefer the patch protocol (worktree → git diff → git apply --3way). See ~/.dotfiles/OWNERS."
-      exit 0
+      if _forced "$lane"; then
+        print -u2 "⚠ own: [$lane] is held by another LIVE session — FORCED past the guard, editing $rel anyway."
+        exit 0
+      fi
+      # BLOCK. A warning here scrolled past a busy session and the edit landed on someone
+      # else's file regardless — "aware, and letting it get stepped on" (Phil, 2026-07-16:
+      # fail loudly and quickly rather than let everything get stepped on). Exit 2 is the
+      # PreToolUse deny: the tool call never runs and this text goes back as the reason.
+      print -u2 "✘ own: [$lane]${sl:+ (slice:$sl)} is held by another LIVE session${a:+ (${a}s ago)}."
+      print -u2 "   BLOCKED — editing $rel would step on their work."
+      print -u2 "   → patch it:  git worktree add --detach /tmp/wt HEAD && edit there"
+      print -u2 "                git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch && git apply --3way <patch>"
+      print -u2 "   → hand off:  own request $lane      (they release, then you claim)"
+      print -u2 "   → override:  own force $lane        (10m, this session only — then retry)"
+      exit 2
     fi
     gc "own.$lane.held" "$NOW"; _setowner "$lane"        # free lane → register THIS session's activity
     exit 0 ;;
-  *) print "usage: own {claim <lane>|slice <name> <lane>...|request <lane>|who <path>|list|release <lane|slice>}" >&2; exit 2 ;;
+  *) print "usage: own {claim <lane>|slice <name> <lane>...|request <lane>|force <lane> [min]|unforce <lane>|who <path>|list|release <lane|slice>}" >&2; exit 2 ;;
 esac
