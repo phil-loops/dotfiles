@@ -213,11 +213,6 @@ body {
   transition: opacity 240ms ease;
 }
 @starting-style { .dirt-receipt { opacity: 0; } }
-.file-list-dirt-head {
-  margin: 12px 2px 4px; padding-top: 9px; border-top: 1px dashed var(--rule);
-  font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--ink-dim); cursor: help;
-}
 .spine-name { color: var(--ink-dim); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spine-node.active .spine-name { color: var(--ink); }
 .spine-count { color: var(--ink-faint); font-size: 11px; flex: none; }
@@ -234,27 +229,6 @@ body {
 .spine-branch:hover { border-color: var(--gold-deep); }
 .spine-branch-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .spine-branch-switch { color: var(--ink-faint); flex: none; font-size: 14px; }
-
-/* GitHub-PR-style file list: the sidebar's primary content */
-.file-list { list-style: none; margin: 0; padding: 0; }
-.file-item {
-  display: flex; align-items: center; gap: 9px; padding: 6px 16px 6px 12px;
-  cursor: pointer; border-left: 2px solid transparent;
-  transition: background 0.12s, border-color 0.12s;
-}
-.file-item:hover { background: var(--vellum-edge); }
-.file-item.active { background: var(--vellum-edge); border-left-color: var(--gold-leaf); }
-.file-item-name {
-  flex: 1; min-width: 0; color: var(--ink-dim); font-size: 12px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.file-item.active .file-item-name { color: var(--ink); }
-.file-item-name .file-dir { color: var(--ink-faint); }
-.file-item-name b { font-weight: 600; }
-.file-item.blessed .file-item-name b { color: var(--gold-leaf); font-weight: 500; }
-.file-item-lines { display: flex; gap: 6px; font-size: 10px; flex: none; }
-.file-item-lines .add { color: var(--add); }
-.file-item-lines .del { color: var(--del); }
 
 /* ── review surface ─────────────────────────────────────────────────── */
 .surface { padding: 30px 34px 90px; max-width: 1500px; }

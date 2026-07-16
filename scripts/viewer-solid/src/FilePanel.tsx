@@ -2,6 +2,13 @@ import { Show, For, type JSX } from "solid-js";
 import { Link } from "./router";
 import type { NodeData, SpineNode, FileDiff } from "./types";
 
+const ITEM =
+  "file-item flex cursor-pointer items-center gap-[9px] border-l-2 py-[6px] pr-[16px] pl-[12px] transition-[background,border-color] duration-[120ms]";
+const itemState = (active: boolean) =>
+  active ? "border-l-gold-leaf bg-vellum-edge" : "border-l-transparent hover:bg-vellum-edge";
+const NAME =
+  "file-item-name min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] [&_.file-dir]:text-ink-faint";
+
 // the branch's file list (GitHub-PR-style sidebar): filter box + review rows + a dirt divider.
 // A wide prop surface because it mirrors the review surface's state — clicking a row drives the
 // diff cards on the right (activeFile/scrollToFile), and ⌘F focuses this filter.
@@ -64,20 +71,26 @@ export function FilePanel(props: {
                       }
                     }}
                   />
-                  <ul class="file-list">
+                  <ul class="file-list m-0 list-none p-0">
                     <For each={data().files.filter(props.matchFilter)}>
                       {(f) => (
                         <li
-                          class="file-item"
+                          class={`${ITEM} ${itemState(props.activeFile() === f.path)}`}
                           classList={{ blessed: props.blessedOf(f), active: props.activeFile() === f.path }}
                           onClick={() => props.scrollToFile(f.path)}
                           title={f.path}
                         >
                           <span class={`dot ${props.blessedOf(f) ? "blessed" : "unblessed"}`} />
-                          <span class="file-item-name">{props.fileSeg(f.path)}</span>
-                          <span class="file-item-lines">
-                            <span class="add">+{f.add ?? 0}</span>
-                            <span class="del">−{f.del ?? 0}</span>
+                          <span
+                            class={`${NAME} ${props.activeFile() === f.path ? "text-ink" : "text-ink-dim"} ${
+                              props.blessedOf(f) ? "[&_b]:font-medium [&_b]:text-gold-leaf" : "[&_b]:font-semibold"
+                            }`}
+                          >
+                            {props.fileSeg(f.path)}
+                          </span>
+                          <span class="file-item-lines flex flex-none gap-[6px] text-[10px]">
+                            <span class="add text-add">+{f.add ?? 0}</span>
+                            <span class="del text-del">−{f.del ?? 0}</span>
                           </span>
                         </li>
                       )}
@@ -88,22 +101,26 @@ export function FilePanel(props: {
                         card, tab already cycles through them (.entry[data-path]). The story lives
                         in the divider's tooltip; the rows do the work. */}
                     <div
-                      class="file-list-dirt-head"
+                      class="file-list-dirt-head mx-[2px] mt-[12px] mb-[4px] cursor-help border-t border-x-0 border-b-0 border-dashed border-rule pt-[9px] text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-dim"
                       title={`uncommitted changes riding ${data().worktree || "the checkout"} — not part of this review, never blessed; ⟲ sync stops to ask about them`}
                     >
                       ± uncommitted · {(data().worktree ?? "").replace(/.*\//, "") || "checkout"}
                     </div>
-                    <ul class="file-list">
+                    <ul class="file-list m-0 list-none p-0">
                       <For each={data().dirty!.filter((f) => props.matchFilter(f))}>
                         {(f) => (
                           <li
-                            class="file-item dirt"
+                            class={`dirt ${ITEM} ${itemState(props.activeFile() === f.path)}`}
                             classList={{ active: props.activeFile() === f.path }}
                             onClick={() => props.scrollToFile(f.path)}
                             title={f.path}
                           >
                             <span class="dot dirt" />
-                            <span class="file-item-name">{props.fileSeg(f.path)}</span>
+                            <span
+                              class={`${NAME} [&_b]:font-semibold ${props.activeFile() === f.path ? "text-ink" : "text-ink-dim"}`}
+                            >
+                              {props.fileSeg(f.path)}
+                            </span>
                           </li>
                         )}
                       </For>
