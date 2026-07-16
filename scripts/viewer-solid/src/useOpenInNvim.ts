@@ -10,10 +10,12 @@ export function useOpenInNvim(deps: { nodeRef: () => string }) {
   const [flash, setFlash] = createSignal("");
   let flashT: ReturnType<typeof setTimeout>;
   const note = (m: string) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
-  const openInNvim = (path: string, line: number | null) =>
-    !canMutate
-      ? undefined // static snapshot: no live nvim to open into
-      : fetch(withRepo("/open"), {
+  const openInNvim = (path: string, line: number | null) => {
+    if (!canMutate) return undefined; // static snapshot: no live nvim to open into
+    // no auto-clear on this one — the "opening…" chip holds until the result note replaces it
+    clearTimeout(flashT);
+    setFlash(`⌁ opening ${leaf(path)}${line != null ? `:${line}` : ""}…`);
+    return fetch(withRepo("/open"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ branch: deps.nodeRef(), path, ...(line != null ? { pos: String(line) } : {}) }),
@@ -21,6 +23,7 @@ export function useOpenInNvim(deps: { nodeRef: () => string }) {
       .then((r) => r.json())
       .then((r) => note(r.ok ? `⌁ ${leaf(path)}:${line ?? ""} → nvim` : "⌁ open failed — see server"))
       .catch(() => note("⌁ open failed — server unreachable"));
+  };
   const lineAt = (e: MouseEvent): { path: string; line: number } | null => {
     const target = e.target as Element | null;
     const ent = target?.closest<HTMLElement>(".entry");
