@@ -37,8 +37,8 @@ export function FilePanel(props: {
         >
           ‹
         </button>
-        <Link class="brand" to={{ kind: "home", tab: "forests" }}>
-          <span class="brand-mark">✦</span> blessed
+        <Link class="brand inline-block px-[20px] pb-[2px] font-display text-[26px] font-semibold italic text-ink no-underline" to={{ kind: "home", tab: "forests" }}>
+          <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> blessed
         </Link>
         {/* the branch tree migrated to the docked map (the navigator); the spine is now the
             file list for the active branch. */}

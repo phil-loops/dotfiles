@@ -81,7 +81,7 @@ export function NextQueue(props: {
   return (
       <Show when={props.tab() === "work" && nextActions().length}>
         <section class="work-sec next-queue mb-[30px]">
-          <h2 class="eyebrow">next <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— what to do, ranked</span></h2>
+          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">next <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— what to do, ranked</span></h2>
           <div class="work-rule mb-[6px] h-px bg-rule" />
           <For each={nextActions()}>
             {(a) =>

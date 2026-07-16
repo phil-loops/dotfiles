@@ -6,7 +6,7 @@
 // <ActionBar>; the arm pattern lives in useArm, and the click-guard lives in one place.
 //
 // Visuals: an Action carries an optional `class` so it reuses the existing per-context styling
-// (.forest-restack, .watch-pin, …) — the model is behaviour, not a restyle.
+// (.watch-pin, …) — the model is behaviour, not a restyle.
 import { createSignal, For, onCleanup, type JSX } from "solid-js";
 
 export interface Action {
@@ -16,6 +16,9 @@ export interface Action {
   armLabel?: () => string;
   title?: string;
   class?: string; // reuse an existing button style; falls back to .action-btn
+  // Tailwind actions swap whole class strings per state — the armed/running markers carry no styles.
+  armedClass?: string;
+  runningClass?: string;
   // mid-flight (request in progress) → disabled + a "running" class for the existing spinners.
   busy?: () => boolean;
   disabled?: () => boolean;
@@ -56,7 +59,11 @@ export function ActionBar(props: { actions: Action[]; class?: string }): JSX.Ele
       <For each={props.actions}>
         {(a) => (
           <button
-            class={a.class ?? "action-btn"}
+            class={
+              (a.busy?.() && a.runningClass) ||
+              (armed() === a.id && a.armedClass) ||
+              (a.class ?? "action-btn")
+            }
             classList={{ armed: armed() === a.id, running: !!a.busy?.() }}
             title={a.title}
             disabled={a.busy?.() || a.disabled?.()}

@@ -36,6 +36,7 @@ export function WorkTab(props: {
     landed: "[--state:#8fb0a2] opacity-80",
   };
   const SEC = "work-sec mb-[30px]";
+  const EYEBROW = "eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint";
   const ASK = "eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim";
   const HRULE = "work-rule mb-[6px] h-px bg-rule";
   const ROW =
@@ -136,7 +137,7 @@ export function WorkTab(props: {
     <>
       <Show when={props.tab() === "work" && needsYouPRs().length}>
         <section class={SEC}>
-          <h2 class="eyebrow">needs you <span class={ASK}>— blocked or waiting on your call</span></h2>
+          <h2 class={EYEBROW}>needs you <span class={ASK}>— blocked or waiting on your call</span></h2>
           <div class={HRULE} />
           <For each={needsYouPRs()}>{(p) => workRow(p)}</For>
         </section>
@@ -144,7 +145,7 @@ export function WorkTab(props: {
 
       <Show when={props.tab() === "work" && (props.reviewReqs() || []).length}>
         <section class={SEC}>
-          <h2 class="eyebrow">review requests <span class={ASK}>— teammates waiting on your review</span></h2>
+          <h2 class={EYEBROW}>review requests <span class={ASK}>— teammates waiting on your review</span></h2>
           <div class={HRULE} />
           <For each={props.reviewReqs()}>
             {(r) => {
@@ -182,7 +183,7 @@ export function WorkTab(props: {
 
       <Show when={props.tab() === "work" && inFlightByProject().length}>
         <section class={SEC}>
-          <h2 class="eyebrow">in flight <span class={ASK}>— your open work, by forest</span></h2>
+          <h2 class={EYEBROW}>in flight <span class={ASK}>— your open work, by forest</span></h2>
           <div class={HRULE} />
           <For each={inFlightByProject()}>
             {([proj, list]) => {
@@ -206,13 +207,13 @@ export function WorkTab(props: {
 
       <Show when={props.tab() === "work" && landedPRs().length}>
         <section class={SEC}>
-          <h2 class="eyebrow">just landed <span class={ASK}>— merged in the last day, then it fades</span></h2>
+          <h2 class={EYEBROW}>just landed <span class={ASK}>— merged in the last day, then it fades</span></h2>
           <div class={HRULE} />
           <For each={landedPRs()}>{(p) => workRow(p)}</For>
         </section>
       </Show>
       <Show when={props.tab() === "work" && !workCount()}>
-        <p class="tab-empty">Nothing waiting on you — no open PRs or review requests.</p>
+        <p class="tab-empty px-1 py-[30px] italic text-ink-faint">Nothing waiting on you — no open PRs or review requests.</p>
       </Show>
     </>
   );

@@ -39,7 +39,9 @@ export function ForgottenBand(props: {
   return (
     <Show when={rows().length}>
       <section class="forgotten-band mt-7">
-        <h2 class="eyebrow font-display text-[12px] tracking-[0.08em] text-ink-dim uppercase">
+        {/* computed reality (CONVERTING rule 24): the 12px/ink-dim utilities here always LOST to the
+            unlayered .eyebrow rule — baked in the winner; restyling is its own commit + re-baseline. */}
+        <h2 class="eyebrow mt-[34px] mb-[12px] font-display text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">
           forgotten
           <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">
             — bets you never settled, oldest first · right-click to drop, keep, or pick up
