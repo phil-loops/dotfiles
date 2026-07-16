@@ -1,5 +1,5 @@
 // diff — pixel-compare two shot directories; write diff PNGs for failures.
-//   node diff.mjs --a ./baseline --b ./current [--threshold 0.001] [--out ./diffs]
+//   node diff.mjs --a ./baseline --b ./current [--threshold 0.001] [--out ./diffs] [--only name1,name2]
 // threshold is the FRACTION of pixels allowed to differ per surface (default 0.1%).
 import { PNG } from "pngjs";
 import pixelmatch from "pixelmatch";
@@ -16,8 +16,13 @@ const OUT = arg("out", "./diffs");
 const THRESHOLD = parseFloat(arg("threshold", "0.001"));
 
 mkdirSync(OUT, { recursive: true });
+const only = (arg("only", "") || "").split(",").filter(Boolean);
 let bad = 0;
-for (const f of readdirSync(A).filter((f) => f.endsWith(".png")).sort()) {
+const files = readdirSync(A)
+  .filter((f) => f.endsWith(".png"))
+  .filter((f) => only.length === 0 || only.includes(f.replace(/\.png$/, "")))
+  .sort();
+for (const f of files) {
   if (!existsSync(join(B, f))) {
     console.error(`✗ ${f}: missing in ${B}`);
     bad++;

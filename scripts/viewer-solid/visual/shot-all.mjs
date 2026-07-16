@@ -2,7 +2,11 @@
 // Animations/transitions/caret are disabled so shots are pixel-deterministic; Google-hosted
 // fonts are pinned via fixtures/fonts (recorded on first run with RECORD_FONTS=1).
 //
-//   node shot-all.mjs --base http://127.0.0.1:7333 --out ./baseline
+//   node shot-all.mjs --base http://127.0.0.1:7333 --out ./baseline [--only name1,name2]
+//
+// Before shooting, the served build is asserted to BE the local dist (byte-compare of
+// index.html) — a stale/foreign fixture-server on the port otherwise green-lights a build
+// that was never shot (the EADDRINUSE false-green, 2026-07-16).
 import puppeteer from "puppeteer-core";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -31,7 +35,23 @@ mkdirSync(OUT, { recursive: true });
 mkdirSync(FONTS, { recursive: true });
 const keyOf = (url) => createHash("sha1").update(url).digest("hex").slice(0, 24);
 
-const surfaces = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8"));
+const DIST = arg("dist", join(HERE, "..", "dist"));
+const localIndex = readFileSync(join(DIST, "index.html"), "utf8");
+const servedIndex = await fetch(BASE + "/").then((r) => r.text()).catch(() => null);
+if (servedIndex !== localIndex) {
+  console.error(`✗ ${BASE} is not serving ${DIST} — dist/index.html differs from the served page.`);
+  console.error("  A fixture-server for another checkout (or a stale one) owns the port; shooting it");
+  console.error("  would gate the WRONG build. Kill it or pass --base with your own server's port.");
+  process.exit(3);
+}
+
+const only = (arg("only", "") || "").split(",").filter(Boolean);
+const surfaces = JSON.parse(readFileSync(join(HERE, "surfaces.json"), "utf8"))
+  .filter((s) => only.length === 0 || only.includes(s.name));
+if (only.length && surfaces.length !== only.length) {
+  console.error(`✗ --only names not in surfaces.json: ${only.filter((n) => !surfaces.some((s) => s.name === n)).join(", ")}`);
+  process.exit(3);
+}
 const browser = await puppeteer.launch({ executablePath: BIN, headless: true });
 let failed = 0;
 
