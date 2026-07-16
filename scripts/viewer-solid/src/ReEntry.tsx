@@ -82,23 +82,24 @@ export function ReEntry(props: {
 
   const MORE = 6;
   const commitNames = createMemo(() => committed().map((p) => p.name));
+  const LINE = "reentry-line font-mono text-[12.5px] text-ink";
 
   return (
     <Show when={hasNews()}>
-      <section class="reentry">
-        <div class="reentry-head">
-          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">since you were here <span class="reentry-when">— {ago(since())}</span></h2>
-          <button class="reentry-caught" onClick={catchUp} title="mark everything below as seen">
+      <section class="reentry mt-[14px] mb-[18px] rounded-[4px] border border-rule border-l-2 border-l-gold-deep bg-vellum-raise px-[14px] py-[12px]">
+        <div class="reentry-head flex items-baseline justify-between">
+          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">since you were here <span class="reentry-when font-normal text-ink-faint">— {ago(since())}</span></h2>
+          <button class="reentry-caught cursor-pointer rounded-[3px] border border-rule bg-transparent px-2 py-[2px] font-mono text-[11px] text-ink-dim hover:border-gold-deep hover:text-gold-leaf" onClick={catchUp} title="mark everything below as seen">
             caught up ✓
           </button>
         </div>
 
-        <div class="reentry-lines">
+        <div class="reentry-lines mt-2 flex flex-col gap-[3px]">
           <Show when={committed().length}>
-            <div class="reentry-line">
-              <span class="reentry-n">{committed().length}</span>
+            <div class={LINE}>
+              <span class="reentry-n mr-1 font-semibold text-gold-leaf">{committed().length}</span>
               {committed().length === 1 ? "forest" : "forests"} moved
-              <span class="reentry-names">
+              <span class="reentry-names text-ink-dim">
                 · {commitNames().slice(0, MORE).join(", ")}
                 <Show when={commitNames().length > MORE}> +{commitNames().length - MORE} more</Show>
               </span>
@@ -107,19 +108,19 @@ export function ReEntry(props: {
 
           <For each={merges().slice(0, 4)}>
             {(m) => (
-              <div class="reentry-line reentry-merged">
-                <Link class="reentry-mlink" to={target(m.p)}>PR #{m.pr} merged</Link>
-                <span class="reentry-names">· {m.p.name}</span>
+              <div class={`reentry-merged ${LINE}`}>
+                <Link class="reentry-mlink text-patina no-underline hover:text-gold-leaf" to={target(m.p)}>PR #{m.pr} merged</Link>
+                <span class="reentry-names text-ink-dim">· {m.p.name}</span>
               </div>
             )}
           </For>
           <Show when={merges().length > 4}>
-            <div class="reentry-line reentry-dim">+{merges().length - 4} more merged</div>
+            <div class="reentry-line reentry-dim font-mono text-[12.5px] text-ink-faint">+{merges().length - 4} more merged</div>
           </Show>
 
           <Show when={props.reviewCount()}>
-            <div class="reentry-line">
-              <span class="reentry-n">{props.reviewCount()}</span>
+            <div class={LINE}>
+              <span class="reentry-n mr-1 font-semibold text-gold-leaf">{props.reviewCount()}</span>
               awaiting your review
             </div>
           </Show>
@@ -127,14 +128,17 @@ export function ReEntry(props: {
 
         <Show when={resume()}>
           {(r) => (
-            <Link class="reentry-resume" to={target(r().p)}>
-              <span class="reentry-resume-tag">▸ resume</span>
-              <span class="reentry-resume-name">{r().p.name}</span>
+            <Link class="reentry-resume group mt-[10px] flex flex-wrap items-baseline gap-[10px] border-t border-rule pt-[10px] no-underline" to={target(r().p)}>
+              <span class="reentry-resume-tag font-mono text-[12px] text-gold-leaf">▸ resume</span>
+              <span class="reentry-resume-name font-semibold text-ink group-hover:text-gold-leaf">{r().p.name}</span>
               <Show when={r().p.lastCommit}>
-                <span class="reentry-dim">touched {ago((r().p.lastCommit as number) * 1000)}</span>
+                <span class="reentry-dim font-mono text-[11px] text-ink-faint">touched {ago((r().p.lastCommit as number) * 1000)}</span>
               </Show>
               <Show when={r().step}>
-                <span class="reentry-resume-next" classList={{ yours: !!r().step?.yourMove }}>
+                <span
+                  class={`reentry-resume-next ml-auto rounded-[3px] border px-2 py-px font-mono text-[11.5px] ${r().step?.yourMove ? "border-ember bg-ember-wash text-ember" : "border-rule text-ink-dim"}`}
+                  classList={{ yours: !!r().step?.yourMove }}
+                >
                   next: {r().step!.text}
                 </span>
               </Show>
