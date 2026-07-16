@@ -8,6 +8,12 @@ import { drawerMinimized as minimized, setDrawerMinimized } from "./chatDrawer";
 import { renderMarkdown } from "./markdown";
 import { parseSegments, runAction, actionById, chatMessageFor, editStreamFor, type ActionSpec } from "./chatActions";
 
+// The drawer predates the ledger palette and keeps its own: `--gold` here is #e0ad4e (not the
+// blessed gold-leaf), and its raised/line/panel/bg surfaces are local hexes. Only ink, patina
+// and ember resolved to ledger tokens in the old CSS (defined vars beat the fallbacks), so only
+// those use ledger utilities below.
+const SMALL_BTN = "cursor-pointer whitespace-nowrap rounded-[5px] border bg-transparent px-2 py-[2px] text-[10.5px] leading-[1.55]";
+
 // One action Claude offered, rendered as a button. Destructive actions (registry `confirm`) arm on
 // the first click and fire on the second; the rest fire immediately. The endpoint's verdict shows
 // inline, so a click never leaves the chat to learn whether it worked.
@@ -57,14 +63,17 @@ function ChatActionButton(props: { spec: ActionSpec; branch: string; path: strin
   };
 
   return (
-    <span class="cp-actions">
+    <span class="cp-actions mt-[6px] mr-[6px] mb-[2px] inline-flex flex-wrap items-center gap-[6px]">
       <button
-        class="cp-action"
-        classList={{
-          confirm: phase() === "armed",
-          ok: phase() === "done",
-          err: phase() === "error",
-        }}
+        class={`cp-action inline-flex cursor-pointer items-center gap-[6px] rounded-[6px] border px-[11px] py-[5px] text-[12px] leading-[1.2] transition-[background,border-color] duration-[120ms] disabled:cursor-default disabled:opacity-55 ${
+          phase() === "armed"
+            ? "confirm border-ember bg-ember text-(--chip-del-text)"
+            : phase() === "done"
+              ? "ok cursor-default border-gold-deep bg-transparent text-add"
+              : phase() === "error"
+                ? "err border-del bg-del-bg text-del"
+                : "border-gold-deep bg-ember-wash text-ink hover:border-gold-leaf hover:bg-gold-wash"
+        }`}
         disabled={phase() === "running" || phase() === "done"}
         title={def?.describe}
         onClick={onClick}
@@ -74,11 +83,11 @@ function ChatActionButton(props: { spec: ActionSpec; branch: string; path: strin
         </Show>
       </button>
       <Show when={phase() === "running"}>
-        <span class="cp-action-spin">running…</span>
+        <span class="cp-action-spin text-[11px] text-ink-dim">running…</span>
       </Show>
       {/* a query action (whats-next) shows its answer here; "done" is the mute default for do-X actions */}
       <Show when={note() && note() !== "done" && (phase() === "done" || phase() === "error")}>
-        <span class="cp-action-note">{note()}</span>
+        <span class="cp-action-note ml-1 text-[11px] text-ink-faint">{note()}</span>
       </Show>
     </span>
   );
@@ -214,16 +223,20 @@ export default function ChatPanel(props: {
 
   const seg = (p: string): JSX.Element => {
     const i = p.lastIndexOf("/");
-    return i < 0 ? <b>{p}</b> : [<span class="cp-dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
+    return i < 0 ? <b>{p}</b> : [<span class="cp-dir text-[#6f675a]">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
   };
 
   return (
     <>
-      <style>{CSS}</style>
-      <div class="cp-scrim" classList={{ "cp-hidden": minimized() }} onClick={props.onClose} />
+      <style>{MD_CSS}</style>
+      <div
+        class={`cp-scrim fixed inset-0 z-[60] bg-[rgba(8,7,6,.45)] animate-cp-fade motion-reduce:animate-none ${minimized() ? "cp-hidden hidden" : ""}`}
+        onClick={props.onClose}
+      />
       <aside
-        class="cp"
-        classList={{ "cp-hidden": minimized(), "cp-drag": dragOver() }}
+        class={`cp fixed top-0 right-0 bottom-0 z-[61] w-[min(540px,92vw)] flex-col border-l border-[#3a332b] bg-[#1b1815] font-mono text-ink shadow-[-16px_0_48px_rgba(0,0,0,.5)] animate-cp-slide motion-reduce:animate-none ${
+          minimized() ? "cp-hidden hidden" : "flex"
+        } ${dragOver() ? "cp-drag outline-2 outline-dashed outline-[#e0ad4e] outline-offset-[-8px]" : ""}`}
         role="dialog"
         aria-label="chat about this file"
         onDragOver={(e) => {
@@ -244,24 +257,28 @@ export default function ChatPanel(props: {
         }}
       >
         <Show when={dragOver()}>
-          <div class="cp-drop">⤓ drop image to attach</div>
+          {/* drag-to-attach: a dashed overlay over the drawer while a file hovers */}
+          <div class="cp-drop pointer-events-none absolute inset-0 z-[5] flex items-center justify-center bg-[rgba(27,24,21,.86)] text-[14px] tracking-[0.03em] text-[#e0ad4e]">⤓ drop image to attach</div>
         </Show>
-        <header class="cp-head">
-          <div class="cp-title">
-            <span class="cp-mark">✦</span>
-            <span class="cp-path">
+        <header class="cp-head border-b border-[#3a332b] px-4 pt-[14px] pb-3">
+          <div class="cp-title flex items-baseline gap-2 text-[13px]">
+            <span class="cp-mark text-[#e0ad4e]">✦</span>
+            <span class="cp-path break-all">
               {props.file
                 ? seg(props.file.path)
                 : <b>{props.project ? "whole forest" : away() ? `whole branch · ${props.branch.split("/").pop()}` : "whole branch"}</b>}
             </span>
           </div>
-          <div class="cp-sub">
-            <div class="cp-models" role="group" aria-label="chat model">
+          <div class="cp-sub mt-[9px] flex items-center justify-between gap-[10px]">
+            <div class="cp-models flex gap-[2px]" role="group" aria-label="chat model">
               <For each={CHAT_MODELS}>
                 {(m) => (
                   <button
-                    class="cp-model"
-                    classList={{ on: chatModel() === m }}
+                    class={`cp-model cursor-pointer rounded-[5px] border bg-transparent px-2 py-[2px] text-[10.5px] leading-[1.55] tracking-[0.02em] ${
+                      chatModel() === m
+                        ? "on border-[#e0ad4e] bg-[rgba(224,173,78,.08)] text-[#e0ad4e]"
+                        : "border-transparent text-[#6f675a] hover:text-[#a89e8c]"
+                    }`}
                     title={`claude ${m} — used when a chat starts. A running thread stays on the model it began with; hit "new chat" to switch.`}
                     onClick={() => setChatModel(m)}
                   >
@@ -270,44 +287,45 @@ export default function ChatPanel(props: {
                 )}
               </For>
             </div>
-            <div class="cp-sub-right">
+            <div class="cp-sub-right flex items-center gap-[6px]">
               <Show when={session()}>
-                <div class="cp-popout-wrap">
+                <div class="cp-popout-wrap relative">
                   <button
-                    class="cp-popout"
-                    classList={{ on: popoutOpen() }}
+                    class={`cp-popout ${SMALL_BTN} border-[#e0ad4e] text-[#e0ad4e] hover:bg-[rgba(224,173,78,.1)] hover:opacity-100 ${
+                      popoutOpen() ? "on bg-[rgba(224,173,78,.1)] opacity-100" : "opacity-85"
+                    }`}
                     title="pop this chat out into an interactive Claude Code session in tmux — resumes the same thread, now able to edit/run"
                     onClick={togglePopout}
                   >
                     ⤢ pop out
                   </button>
                   <Show when={popoutOpen()}>
-                    <div class="cp-popout-menu">
-                      <div class="cp-popout-head">open in…</div>
-                      <button class="cp-popout-item" onClick={() => popOut("new")}>
+                    <div class="cp-popout-menu absolute top-[calc(100%+6px)] right-0 z-[62] flex w-[220px] cursor-default flex-col gap-px rounded-lg border border-[#3a332b] bg-[#1b1815] p-[5px] text-left shadow-[0_12px_32px_rgba(0,0,0,.5)]">
+                      <div class="cp-popout-head px-2 pt-1 pb-[5px] text-[9.5px] uppercase tracking-[0.08em] text-[#6f675a]">open in…</div>
+                      <button class={POPOUT_ITEM} onClick={() => popOut("new")}>
                         ＋ new window
                       </button>
                       <For each={targets}>
                         {(t) => (
-                          <button class="cp-popout-item" onClick={() => popOut(t.target)}>
-                            <span class="cp-popout-target">{t.target}</span>
-                            <span class="cp-popout-name">{t.name}</span>
+                          <button class={POPOUT_ITEM} onClick={() => popOut(t.target)}>
+                            <span class="cp-popout-target flex-none text-patina">{t.target}</span>
+                            <span class="cp-popout-name overflow-hidden text-[10.5px] text-ellipsis whitespace-nowrap text-[#6f675a]">{t.name}</span>
                           </button>
                         )}
                       </For>
                       <Show when={!targets.length}>
-                        <div class="cp-popout-empty">no tmux windows — opens a new one</div>
+                        <div class="cp-popout-empty px-2 pt-1 pb-[6px] text-[10.5px] italic text-[#6f675a]">no tmux windows — opens a new one</div>
                       </Show>
                     </div>
                   </Show>
                 </div>
               </Show>
               <Show when={popoutMsg()}>
-                <span class="cp-popout-msg">{popoutMsg()}</span>
+                <span class="cp-popout-msg whitespace-nowrap text-[10.5px] text-[#e0ad4e]">{popoutMsg()}</span>
               </Show>
               <Show when={msgs().length}>
                 <button
-                  class="cp-new"
+                  class={`cp-new ${SMALL_BTN} border-patina text-patina enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-40 opacity-85`}
                   title="start a fresh chat — clears this thread so the next message opens a new session (the only way to switch an existing thread to a different model)"
                   disabled={streaming()}
                   onClick={() => clearThread(props.branch, path())}
@@ -316,24 +334,31 @@ export default function ChatPanel(props: {
                 </button>
               </Show>
               <button
-                class="cp-branch"
-                classList={{ away: away() }}
+                class={`cp-branch max-w-[150px] cursor-pointer overflow-hidden rounded border text-ellipsis whitespace-nowrap px-[7px] py-px text-[11px] leading-[1.55] ${
+                  away()
+                    ? "away border-[#e0ad4e] bg-[rgba(224,173,78,.08)] text-[#e0ad4e] opacity-100"
+                    : "border-patina bg-transparent text-patina opacity-85 hover:opacity-100"
+                }`}
                 title={`${away() ? "you're viewing another branch — return to " : "this chat's branch · "}${props.branch}`}
                 onClick={props.onGoToBranch}
               >
                 {props.branch.split("/").pop()}{away() ? " ↗" : ""}
               </button>
-              <button class="cp-min" title="minimize — shrink to a corner pill; the chat keeps running and tells you when it's done" onClick={() => setDrawerMinimized(true)}>
-                <span class="cp-min-bar" />
+              <button
+                class="cp-min group/cpmin inline-flex h-6 min-w-7 cursor-pointer items-center justify-center rounded-[5px] border-0 bg-transparent px-[6px] py-0 hover:bg-[rgba(224,173,78,.1)]"
+                title="minimize — shrink to a corner pill; the chat keeps running and tells you when it's done"
+                onClick={() => setDrawerMinimized(true)}
+              >
+                <span class="cp-min-bar block h-[2px] w-3 rounded-[2px] bg-[#6f675a] group-hover/cpmin:bg-ink" />
               </button>
-              <button class="cp-x" title="close (esc)" onClick={props.onClose}>×</button>
+              <button class="cp-x cursor-pointer border-0 bg-transparent px-[2px] py-0 text-[20px] leading-none text-[#6f675a] hover:text-ink" title="close (esc)" onClick={props.onClose}>×</button>
             </div>
           </div>
         </header>
 
-        <div class="cp-body" ref={scroller} onScroll={onScroll}>
+        <div class="cp-body flex flex-1 flex-col gap-4 overflow-y-auto p-4" ref={scroller} onScroll={onScroll}>
           <Show when={!msgs().length}>
-            <p class="cp-empty">
+            <p class="cp-empty m-0 mt-1 text-[12.5px] leading-[1.6] text-[#a89e8c]">
               {props.project
                 ? "Ask anything about this whole forest — what the feature does end to end, where the gaps are, what's left to build."
                 : props.file
@@ -344,9 +369,9 @@ export default function ChatPanel(props: {
           </Show>
           <For each={msgs()}>
             {(m, i) => (
-              <div class="cp-turn" classList={{ you: m.role === "you", claude: m.role === "claude" }}>
-                <span class="cp-who">{m.role}</span>
-                <div class="cp-text">
+              <div class="cp-turn flex flex-col gap-[5px]" classList={{ you: m.role === "you", claude: m.role === "claude" }}>
+                <span class={`cp-who text-[10px] uppercase tracking-[0.08em] ${m.role === "you" ? "text-patina" : "text-[#e0ad4e]"}`}>{m.role}</span>
+                <div class={`cp-text text-[13px] leading-[1.65] whitespace-pre-wrap [word-break:break-word] ${m.role === "you" ? "text-[#cabfa8]" : ""}`}>
                   <Show when={m.role === "claude"} fallback={m.text}>
                     <For each={parseSegments(m.text)}>
                       {(seg) => (
@@ -354,7 +379,7 @@ export default function ChatPanel(props: {
                           when={seg.kind === "action" ? seg : null}
                           fallback={
                             <Show when={seg.kind === "md" ? seg : null}>
-                              {(md) => <div class="cp-md" innerHTML={renderMarkdown(md().text)} />}
+                              {(md) => <div class="cp-md whitespace-normal" innerHTML={renderMarkdown(md().text)} />}
                             </Show>
                           }
                         >
@@ -364,13 +389,13 @@ export default function ChatPanel(props: {
                     </For>
                   </Show>
                   <Show when={streaming() && m.role === "claude" && i() === msgs().length - 1}>
-                    <span class="cp-caret" />
+                    <span class="cp-caret ml-px inline-block h-3.5 w-[7px] bg-[#e0ad4e] align-text-bottom animate-cp-blink motion-reduce:animate-none" />
                   </Show>
                 </div>
                 <Show when={m.attachments?.length}>
-                  <div class="cp-att-row">
+                  <div class="cp-att-row mt-[2px] flex flex-wrap gap-[5px]">
                     <For each={m.attachments}>
-                      {(a) => <span class="cp-att-chip">🖼 {a.name}</span>}
+                      {(a) => <span class="cp-att-chip rounded-[5px] border border-[#3a332b] bg-[#221e1a] px-[7px] py-px text-[10.5px] text-[#a89e8c]">🖼 {a.name}</span>}
                     </For>
                   </div>
                 </Show>
@@ -378,22 +403,22 @@ export default function ChatPanel(props: {
             )}
           </For>
           <Show when={streaming() || status()}>
-            <div class="cp-status">
+            <div class="cp-status flex items-center gap-[10px] text-[11.5px] italic text-[#6f675a]">
               <span>{status() || "responding"}…</span>
               <Show when={streaming()}>
-                <button class="cp-stop" title="stop responding" onClick={stop}>◼ stop</button>
+                <button class="cp-stop cursor-pointer rounded-[5px] border border-ember bg-transparent px-2 py-px text-[11px] leading-[1.55] not-italic text-ember hover:bg-[rgba(211,106,54,.12)]" title="stop responding" onClick={stop}>◼ stop</button>
               </Show>
             </div>
           </Show>
           {/* messages you sent while a turn was streaming — they auto-send in order */}
           <For each={pending()}>
             {(p, i) => (
-              <div class="cp-turn you queued">
-                <span class="cp-who">queued</span>
-                <div class="cp-text">
+              <div class="cp-turn you queued flex flex-col gap-[5px] opacity-55">
+                <span class="cp-who text-[10px] uppercase tracking-[0.08em] text-patina after:content-['_·_waiting'] after:text-[#6f675a]">queued</span>
+                <div class="cp-text text-[13px] leading-[1.65] whitespace-pre-wrap [word-break:break-word] text-[#cabfa8]">
                   <span>{p.q}</span>
                   <button
-                    class="cp-unqueue"
+                    class="cp-unqueue ml-[6px] cursor-pointer border-0 bg-transparent px-[2px] py-0 align-middle text-[14px] leading-none text-[#6f675a] hover:text-ember"
                     title="remove from queue"
                     onClick={() => unqueue(props.branch, path(), i())}
                   >
@@ -404,27 +429,34 @@ export default function ChatPanel(props: {
             )}
           </For>
           <Show when={error()}>
-            <div class="cp-err">{error()}</div>
+            <div class="cp-err text-[12px] text-ember">{error()}</div>
           </Show>
         </div>
 
-        <footer class="cp-foot">
+        <footer class="cp-foot flex flex-col gap-2 border-t border-[#3a332b] px-4 pt-3 pb-[14px]">
           <Show when={atts.length}>
-            <div class="cp-att-strip">
+            {/* composer thumbnails of pending attachments */}
+            <div class="cp-att-strip flex flex-wrap gap-2">
               <For each={atts}>
                 {(a) => (
-                  <div class="cp-thumb" classList={{ uploading: a.uploading }}>
-                    <img src={a.url} alt={a.name} />
-                    <button class="cp-thumb-x" title="remove" onClick={() => dropAtt(a.id)}>×</button>
+                  <div
+                    class={`cp-thumb relative h-14 w-14 overflow-hidden rounded-[7px] border border-[#3a332b] ${
+                      a.uploading
+                        ? "uploading after:absolute after:inset-0 after:flex after:items-center after:justify-center after:text-[16px] after:text-[#e0ad4e] after:content-['↑'] after:animate-cp-blink motion-reduce:after:animate-none"
+                        : ""
+                    }`}
+                  >
+                    <img class={`block h-full w-full object-cover ${a.uploading ? "opacity-45" : ""}`} src={a.url} alt={a.name} />
+                    <button class="cp-thumb-x absolute top-px right-px h-4 w-4 cursor-pointer rounded-bl-[6px] border-0 bg-[rgba(8,7,6,.7)] p-0 text-[13px] leading-[14px] text-ink hover:bg-ember hover:text-[#1a160f]" title="remove" onClick={() => dropAtt(a.id)}>×</button>
                   </div>
                 )}
               </For>
             </div>
           </Show>
-          <div class="cp-foot-row">
+          <div class="cp-foot-row flex items-end gap-2">
             {/* always sends — a message fired mid-stream queues and auto-sends when the turn ends */}
             <textarea
-              class="cp-input"
+              class="cp-input box-border flex-1 resize-none rounded-[7px] border border-[#3a332b] bg-[#100e0c] px-[10px] py-2 font-mono text-[12.5px] leading-[1.5] text-ink outline-none focus:border-[#e0ad4e]"
               ref={inputEl}
               rows={2}
               placeholder={streaming() ? "Claude is responding — ⏎ to queue your next question…" : "ask about this file — drop or paste a screenshot, ⏎ to send"}
@@ -443,7 +475,7 @@ export default function ChatPanel(props: {
               }}
             />
             <button
-              class="cp-send"
+              class="cp-send cursor-pointer whitespace-nowrap rounded-[7px] border-0 bg-[#e0ad4e] px-[14px] py-2 font-semibold leading-[1.55] text-[#1a160f] disabled:cursor-default disabled:opacity-50"
               disabled={!input().trim() && !atts.some((a) => a.path && !a.uploading)}
               onClick={submit}
             >
@@ -453,155 +485,38 @@ export default function ChatPanel(props: {
         </footer>
       </aside>
       <Show when={minimized()}>
-        <div class="cp-pill" classList={{ working: streaming(), done: !streaming() && finished() }}>
-          <button class="cp-pill-main" title="restore chat" onClick={restore}>
-            <span class="cp-pill-mark">✦</span>
-            <span class="cp-pill-name">{props.file ? props.file.path.split("/").pop() : props.project ? `✦ ${props.project}` : `✦ ${props.branch.split("/").pop()}`}</span>
-            <span class="cp-pill-branch">{props.branch.split("/").pop()}</span>
+        {/* minimized → docked corner pill: no scrim, page interactive, the turn keeps streaming behind it */}
+        <div
+          class={`cp-pill fixed right-[18px] bottom-[18px] z-[61] flex items-stretch rounded-[9px] border bg-[#1b1815] font-mono shadow-[0_10px_30px_rgba(0,0,0,.45)] animate-cp-pill-in motion-reduce:animate-none ${
+            streaming() ? "working border-[#e0ad4e]" : finished() ? "done border-patina" : "border-[#3a332b]"
+          }`}
+        >
+          <button class="cp-pill-main flex max-w-[320px] cursor-pointer items-center gap-2 rounded-l-[9px] border-0 bg-transparent py-[9px] pr-[6px] pl-3 text-left text-[12px] leading-[1.55] text-ink hover:bg-[#221e1a]" title="restore chat" onClick={restore}>
+            <span class={`cp-pill-mark flex-none text-[#e0ad4e] ${streaming() ? "animate-cp-blink motion-reduce:animate-none" : ""}`}>✦</span>
+            <span class="cp-pill-name overflow-hidden text-ellipsis whitespace-nowrap">{props.file ? props.file.path.split("/").pop() : props.project ? `✦ ${props.project}` : `✦ ${props.branch.split("/").pop()}`}</span>
+            <span class="cp-pill-branch flex-none border-l border-[#3a332b] pl-2 text-[10px] text-[#6f675a]">{props.branch.split("/").pop()}</span>
             <Show when={streaming() || (finished() && !streaming())}>
-              <span class="cp-pill-state">{streaming() ? status() || "working…" : "done ✓"}</span>
+              <span class={`cp-pill-state flex-none whitespace-nowrap rounded-full px-[7px] py-px text-[10.5px] ${streaming() ? "bg-[rgba(224,173,78,.12)] text-[#e0ad4e]" : "bg-[rgba(138,154,107,.14)] text-patina"}`}>
+                {streaming() ? status() || "working…" : "done ✓"}
+              </span>
             </Show>
           </button>
           <Show when={away()}>
-            <button class="cp-pill-go" title={`return to ${props.branch}`} onClick={props.onGoToBranch}>↗</button>
+            <button class="cp-pill-go flex-none cursor-pointer border-0 border-l border-[#3a332b] bg-transparent px-[9px] py-0 text-[13px] leading-none text-[#e0ad4e] hover:bg-[rgba(224,173,78,.12)]" title={`return to ${props.branch}`} onClick={props.onGoToBranch}>↗</button>
           </Show>
-          <button class="cp-pill-x" title="close chat" onClick={props.onClose}>×</button>
+          <button class="cp-pill-x flex-none cursor-pointer rounded-r-[9px] border-0 border-l border-[#3a332b] bg-transparent px-[11px] py-0 text-[16px] leading-none text-[#6f675a] hover:bg-[#221e1a] hover:text-ink" title="close chat" onClick={props.onClose}>×</button>
         </div>
       </Show>
     </>
   );
 }
 
-// Self-contained, scoped under .cp-* — rides the viewer's gold/ember dark palette and IBM
-// Plex Mono without touching index.css.
-const CSS = `
-.cp-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(8,7,6,.45); animation: cp-fade 120ms ease-out; }
-.cp-hidden { display: none !important; }
-.cp {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 61;
-  width: min(540px, 92vw); display: flex; flex-direction: column;
-  background: var(--raised, #1b1815); border-left: 1px solid var(--line, #3a332b);
-  box-shadow: -16px 0 48px rgba(0,0,0,.5);
-  font-family: "IBM Plex Mono", ui-monospace, monospace; color: var(--ink, #e9e2d4);
-  animation: cp-slide 160ms cubic-bezier(.2,.7,.2,1);
-}
-@keyframes cp-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes cp-slide { from { transform: translateX(18px); opacity: .4; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .cp, .cp-scrim { animation: none; } }
+const POPOUT_ITEM = "cp-popout-item flex w-full cursor-pointer items-baseline gap-2 rounded-[5px] border-0 bg-transparent px-2 py-[6px] text-left text-[11.5px] leading-[1.55] text-ink hover:bg-[#221e1a]";
 
-.cp-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--line, #3a332b); }
-.cp-title { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
-.cp-mark { color: var(--gold, #e0ad4e); }
-.cp-path { word-break: break-all; }
-.cp-path .cp-dir { color: var(--faint, #6f675a); }
-.cp-sub { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; }
-.cp-sub-right { display: flex; align-items: center; gap: 6px; }
-.cp-models { display: flex; gap: 2px; }
-.cp-model {
-  font: inherit; font-size: 10.5px; letter-spacing: .02em; cursor: pointer;
-  color: var(--faint, #6f675a); background: transparent;
-  border: 1px solid transparent; border-radius: 5px; padding: 2px 8px;
-}
-.cp-model:hover { color: var(--dim, #a89e8c); }
-.cp-model.on { color: var(--gold, #e0ad4e); border-color: var(--gold, #e0ad4e); background: rgba(224,173,78,.08); }
-.cp-branch {
-  font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
-  max-width: 150px; overflow: hidden; text-overflow: ellipsis;
-  color: var(--patina, #8a9a6b); background: transparent; border: 1px solid var(--patina, #8a9a6b);
-  border-radius: 4px; padding: 1px 7px; opacity: .85;
-}
-.cp-branch:hover { opacity: 1; }
-.cp-branch.away { color: var(--gold, #e0ad4e); border-color: var(--gold, #e0ad4e); background: rgba(224,173,78,.08); opacity: 1; }
-.cp-x { border: 0; background: transparent; color: var(--faint, #6f675a); font-size: 20px; line-height: 1; cursor: pointer; padding: 0 2px; }
-.cp-x:hover { color: var(--ink, #e9e2d4); }
-.cp-min {
-  display: inline-flex; align-items: center; justify-content: center;
-  min-width: 28px; height: 24px; padding: 0 6px;
-  border: 0; border-radius: 5px; background: transparent; cursor: pointer;
-}
-.cp-min:hover { background: rgba(224,173,78,.1); }
-.cp-min-bar { display: block; width: 12px; height: 2px; border-radius: 2px; background: var(--faint, #6f675a); }
-.cp-min:hover .cp-min-bar { background: var(--ink, #e9e2d4); }
-
-/* minimized → docked corner pill: no scrim, page interactive, the turn keeps streaming behind it */
-.cp-pill {
-  position: fixed; bottom: 18px; right: 18px; z-index: 61; display: flex; align-items: stretch;
-  background: var(--raised, #1b1815); border: 1px solid var(--line, #3a332b);
-  border-radius: 9px; box-shadow: 0 10px 30px rgba(0,0,0,.45);
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-  animation: cp-pill-in 160ms cubic-bezier(.2,.7,.2,1);
-}
-@keyframes cp-pill-in { from { transform: translateY(8px); opacity: .3; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .cp-pill { animation: none; } }
-.cp-pill.working { border-color: var(--gold, #e0ad4e); }
-.cp-pill.done { border-color: var(--patina, #8a9a6b); }
-.cp-pill-main {
-  display: flex; align-items: center; gap: 8px; max-width: 320px;
-  font: inherit; font-size: 12px; cursor: pointer; text-align: left;
-  background: transparent; border: 0; color: var(--ink, #e9e2d4);
-  padding: 9px 6px 9px 12px; border-radius: 9px 0 0 9px;
-}
-.cp-pill-main:hover { background: var(--panel, #221e1a); }
-.cp-pill-mark { color: var(--gold, #e0ad4e); flex: none; }
-.cp-pill.working .cp-pill-mark { animation: cp-blink 1s step-end infinite; }
-.cp-pill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-pill-branch { flex: none; font-size: 10px; color: var(--faint, #6f675a); border-left: 1px solid var(--line, #3a332b); padding-left: 8px; }
-.cp-pill-go {
-  flex: none; border: 0; border-left: 1px solid var(--line, #3a332b); background: transparent;
-  color: var(--gold, #e0ad4e); font-size: 13px; line-height: 1; cursor: pointer; padding: 0 9px;
-}
-.cp-pill-go:hover { background: rgba(224,173,78,.12); }
-.cp-pill-state { flex: none; font-size: 10.5px; padding: 1px 7px; border-radius: 999px; white-space: nowrap; }
-.cp-pill.working .cp-pill-state { color: var(--gold, #e0ad4e); background: rgba(224,173,78,.12); }
-.cp-pill.done .cp-pill-state { color: var(--patina, #8a9a6b); background: rgba(138,154,107,.14); }
-.cp-pill-x {
-  border: 0; border-left: 1px solid var(--line, #3a332b); background: transparent;
-  color: var(--faint, #6f675a); font-size: 16px; line-height: 1; cursor: pointer;
-  padding: 0 11px; border-radius: 0 9px 9px 0;
-}
-.cp-pill-x:hover { color: var(--ink, #e9e2d4); background: var(--panel, #221e1a); }
-.cp-new {
-  font: inherit; font-size: 10.5px; cursor: pointer; white-space: nowrap;
-  color: var(--patina, #8a9a6b); background: transparent;
-  border: 1px solid var(--patina, #8a9a6b); border-radius: 5px; padding: 2px 8px; opacity: .85;
-}
-.cp-new:hover:not(:disabled) { opacity: 1; }
-.cp-new:disabled { opacity: .4; cursor: default; }
-
-.cp-popout-wrap { position: relative; }
-.cp-popout {
-  font: inherit; font-size: 10.5px; cursor: pointer; white-space: nowrap;
-  color: var(--gold, #e0ad4e); background: transparent;
-  border: 1px solid var(--gold, #e0ad4e); border-radius: 5px; padding: 2px 8px; opacity: .85;
-}
-.cp-popout:hover, .cp-popout.on { opacity: 1; background: rgba(224,173,78,.1); }
-.cp-popout-menu {
-  position: absolute; top: calc(100% + 6px); right: 0; z-index: 62; width: 220px;
-  padding: 5px; border-radius: 8px; border: 1px solid var(--line, #3a332b);
-  background: var(--raised, #1b1815); box-shadow: 0 12px 32px rgba(0,0,0,.5);
-  display: flex; flex-direction: column; gap: 1px; cursor: default; text-align: left;
-}
-.cp-popout-head { font-size: 9.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint, #6f675a); padding: 4px 8px 5px; }
-.cp-popout-item {
-  display: flex; align-items: baseline; gap: 8px; width: 100%;
-  font: inherit; font-size: 11.5px; text-align: left; cursor: pointer;
-  color: var(--ink, #e9e2d4); background: transparent; border: 0; border-radius: 5px; padding: 6px 8px;
-}
-.cp-popout-item:hover { background: var(--panel, #221e1a); }
-.cp-popout-target { color: var(--patina, #8a9a6b); flex: none; }
-.cp-popout-name { color: var(--faint, #6f675a); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cp-popout-empty { font-size: 10.5px; color: var(--faint, #6f675a); padding: 4px 8px 6px; font-style: italic; }
-.cp-popout-msg { font-size: 10.5px; color: var(--gold, #e0ad4e); white-space: nowrap; }
-
-.cp-body { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
-.cp-empty { color: var(--dim, #a89e8c); font-size: 12.5px; line-height: 1.6; margin: 4px 0 0; }
-.cp-turn { display: flex; flex-direction: column; gap: 5px; }
-.cp-who { font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint, #6f675a); }
-.cp-turn.you .cp-who { color: var(--patina, #8a9a6b); }
-.cp-turn.claude .cp-who { color: var(--gold, #e0ad4e); }
-.cp-text { font-size: 13px; line-height: 1.65; white-space: pre-wrap; word-break: break-word; }
-.cp-turn.you .cp-text { color: var(--dim, #cabfa8); }
-.cp-md { white-space: normal; }
+// Keep-list: these style marked-rendered markdown (third-party DOM — same standing as the
+// d2h re-tint). Everything else in the old inline sheet is utilities above; this block stays
+// CSS so the drawer's prose styling never depends on markup we don't emit ourselves.
+const MD_CSS = `
 .cp-md > :first-child { margin-top: 0; }
 .cp-md > :last-child { margin-bottom: 0; }
 .cp-md p { margin: 0 0 10px; }
@@ -616,66 +531,4 @@ const CSS = `
 .cp-md .cp-pre code { font-size: 12px; background: none; color: inherit; padding: 0; border-radius: 0; }
 .cp-md table { border-collapse: collapse; margin: 0 0 10px; font-size: 12px; }
 .cp-md th, .cp-md td { border: 1px solid var(--line, #3a332b); padding: 4px 8px; text-align: left; }
-.cp-turn.queued { opacity: .55; }
-.cp-turn.queued .cp-who::after { content: " · waiting"; color: var(--faint, #6f675a); }
-.cp-caret { display: inline-block; width: 7px; height: 14px; margin-left: 1px; vertical-align: text-bottom;
-  background: var(--gold, #e0ad4e); animation: cp-blink 1s step-end infinite; }
-@keyframes cp-blink { 50% { opacity: 0; } }
-.cp-status { font-size: 11.5px; color: var(--faint, #6f675a); font-style: italic; display: flex; align-items: center; gap: 10px; }
-.cp-stop {
-  font: inherit; font-style: normal; font-size: 11px; cursor: pointer;
-  color: var(--ember, #d36a36); background: transparent;
-  border: 1px solid var(--ember, #d36a36); border-radius: 5px; padding: 1px 8px;
-}
-.cp-stop:hover { background: rgba(211,106,54,.12); }
-.cp-unqueue {
-  border: 0; background: transparent; color: var(--faint, #6f675a);
-  font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; margin-left: 6px;
-  vertical-align: middle;
-}
-.cp-unqueue:hover { color: var(--ember, #d36a36); }
-.cp-err { font-size: 12px; color: var(--ember, #d36a36); }
-
-.cp-foot { display: flex; flex-direction: column; gap: 8px; padding: 12px 16px 14px; border-top: 1px solid var(--line, #3a332b); }
-.cp-foot-row { display: flex; gap: 8px; align-items: flex-end; }
-
-/* drag-to-attach: a dashed overlay over the drawer while a file hovers */
-.cp.cp-drag { outline: 2px dashed var(--gold, #e0ad4e); outline-offset: -8px; }
-.cp-drop {
-  position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center;
-  background: rgba(27,24,21,.86); color: var(--gold, #e0ad4e); font-size: 14px; letter-spacing: .03em;
-  pointer-events: none;
-}
-/* composer thumbnails of pending attachments */
-.cp-att-strip { display: flex; flex-wrap: wrap; gap: 8px; }
-.cp-thumb { position: relative; width: 56px; height: 56px; border-radius: 7px; overflow: hidden; border: 1px solid var(--line, #3a332b); }
-.cp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.cp-thumb.uploading img { opacity: .45; }
-.cp-thumb.uploading::after {
-  content: "↑"; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-  color: var(--gold, #e0ad4e); font-size: 16px; animation: cp-blink 1s step-end infinite;
-}
-.cp-thumb-x {
-  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px; line-height: 14px; padding: 0;
-  border: 0; border-radius: 0 0 0 6px; cursor: pointer; font-size: 13px;
-  background: rgba(8,7,6,.7); color: var(--ink, #e9e2d4);
-}
-.cp-thumb-x:hover { background: var(--ember, #d36a36); color: #1a160f; }
-/* sent-message attachment chips */
-.cp-att-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
-.cp-att-chip {
-  font-size: 10.5px; color: var(--dim, #a89e8c); background: var(--panel, #221e1a);
-  border: 1px solid var(--line, #3a332b); border-radius: 5px; padding: 1px 7px;
-}
-.cp-input {
-  flex: 1; resize: none; box-sizing: border-box; font: inherit; font-size: 12.5px; line-height: 1.5;
-  background: var(--bg, #100e0c); color: var(--ink, #e9e2d4);
-  border: 1px solid var(--line, #3a332b); border-radius: 7px; padding: 8px 10px; outline: none;
-}
-.cp-input:focus { border-color: var(--gold, #e0ad4e); }
-.cp-send {
-  background: var(--gold, #e0ad4e); color: #1a160f; border: 0; border-radius: 7px;
-  padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap;
-}
-.cp-send:disabled { opacity: .5; cursor: default; }
 `;

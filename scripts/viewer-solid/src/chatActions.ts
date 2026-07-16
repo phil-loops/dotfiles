@@ -1,5 +1,4 @@
 import registry from "./chat-actions.json";
-import "./chatActions.css";
 
 // The frontend half of the ONE action registry (chat-actions.json — srv/prompts.py reads the same
 // file to teach Claude the menu). The read-only chat can't touch the tree; instead it emits a

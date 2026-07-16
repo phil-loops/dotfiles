@@ -63,7 +63,7 @@ export function ForestRow(props: {
         <span class="forest-pips mr-2 flex-none text-[10px] tracking-[0.14em] text-ink-faint">{interestPips(props.p.interest!)}</span>
       </Show>
       <Show when={props.hasLiveChat(props.p)}>
-        <span class="forest-chat" title="a chat is running on this forest">✦</span>
+        <span class="forest-chat flex-none text-gold-leaf animate-chat-pulse-slow motion-reduce:animate-none" title="a chat is running on this forest">✦</span>
       </Show>
       {/* ONE status cell, by precedence (Phil, strike 5: "a row = name + one signal") —
           drop-mode > parked repair > merged fold > behind count > open PR. Pips sit dim
