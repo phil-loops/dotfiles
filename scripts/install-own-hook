@@ -1,25 +1,50 @@
 #!/bin/zsh
-# install-own-hook — register the own PreToolUse hook in GLOBAL ~/.claude/settings.json.
+# install-own-hook — register the own hooks in GLOBAL ~/.claude/settings.json.
 # Global (not project-scoped) so it catches dotfiles edits from ANY session cwd. The
 # registration lives in an untracked file, so this tracked installer is its source of
-# truth — re-run it on a fresh machine. Idempotent: a no-op if already present.
+# truth — re-run it on a fresh machine. Idempotent, and it HEALS a stale matcher in
+# place: a hook registered before a vector was known (NotebookEdit, Bash) is upgraded
+# rather than duplicated, so re-running is always the way to catch up.
+#
+# Two hooks, because there are two ways to write a file and only one of them is a tool:
+#   own-hook       Edit/Write/MultiEdit/NotebookEdit — PREVENTS the write (exit 2 = deny).
+#   own-bash-hook  Bash — cannot prevent (you can't parse a shell command's write
+#                  targets, and a blanket deny would break `git apply --3way` and every
+#                  build that writes dist/), so it DETECTS: pre stamps the clock, post
+#                  reports anything dirty in another live session's lane. Same tool call.
+# Hooks are hot-reloadable, so a running session picks these up without a restart.
 emulate -L zsh; set -euo pipefail
-HOOK="${0:A:h}/own-hook"
-python3 - "$HOME/.claude/settings.json" "$HOOK" <<'PY'
+python3 - "$HOME/.claude/settings.json" "${0:A:h}" <<'PY'
 import json, sys, os
-path, hook = sys.argv[1], sys.argv[2]
+path, d = sys.argv[1], sys.argv[2]
+want = [
+    ("PreToolUse",  "Edit|Write|MultiEdit|NotebookEdit", f"{d}/own-hook"),
+    ("PreToolUse",  "Bash",                              f"{d}/own-bash-hook pre"),
+    ("PostToolUse", "Bash",                              f"{d}/own-bash-hook post"),
+]
 os.makedirs(os.path.dirname(path), exist_ok=True)
 try:
     cfg = json.load(open(path))
 except Exception:
     cfg = {}
-blocks = cfg.setdefault("hooks", {}).setdefault("PreToolUse", [])
-if any(h.get("command") == hook for blk in blocks for h in blk.get("hooks", [])):
-    print("✓ own-hook already registered in", path)
-else:
-    blocks.append({"matcher": "Edit|Write|MultiEdit",
-                   "hooks": [{"type": "command", "command": hook}]})
+dirty = False
+for event, matcher, cmd in want:
+    blocks = cfg.setdefault("hooks", {}).setdefault(event, [])
+    blk = next((b for b in blocks if any(h.get("command") == cmd for h in b.get("hooks", []))), None)
+    if blk is None:
+        blocks.append({"matcher": matcher, "hooks": [{"type": "command", "command": cmd}]})
+        dirty = True
+        print(f"✓ registered  {event:12} {matcher:36} {cmd}")
+    elif blk.get("matcher") != matcher:
+        print(f"↻ healed      {event:12} {blk.get('matcher')!r} → {matcher!r}")
+        blk["matcher"] = matcher
+        dirty = True
+    else:
+        print(f"· already     {event:12} {matcher:36} {cmd}")
+if dirty:
     json.dump(cfg, open(path, "w"), indent=2)
     open(path, "a").write("\n")
-    print("✓ registered own-hook in", path)
+    print("→ wrote", path)
+else:
+    print("→ no change:", path)
 PY
