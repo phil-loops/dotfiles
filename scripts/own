@@ -126,7 +126,7 @@ case "${1:-list}" in
     # attributable, because nothing else made it appear.
     local since="${2:-}" snap="${3:-}"; [[ -n "$since" ]] || exit 0
     local rel abs mt lane out="" mine=""
-    local -A pre
+    local -A pre hit
     [[ -n "$snap" && -f "$snap" ]] && while IFS= read -r rel; do
       [[ -n "$rel" ]] && pre[$rel]=1
     done < "$snap"
@@ -139,14 +139,31 @@ case "${1:-list}" in
       lane=$(_lane_for "$rel"); [[ -n "$lane" ]] || continue
       _held_by_other "$lane" || { mine+="   $rel → [$lane]"$'\n'; continue; }
       out+="   $rel → [$lane]$(_holder_tag "$lane")"$'\n'
+      hit[$lane]="$rel"
     done < <(cd "$ROOT" && git status --porcelain --no-renames 2>/dev/null | sed 's/^...//')
     [[ -n "$out" ]] || exit 0
+    # Tell the HOLDER, not just the offender. The report used to land only in the trespasser's
+    # tool result, ending with "tell them yourself" — a class of bug fixed by asking the guilty
+    # party to be diligent, which is the thing tooling is supposed to replace. The person whose
+    # work is being overwritten is the one who needs to know, and they cannot see it from their
+    # side (a raw write leaves no tool call in their transcript).
+    local hlane hs note
+    for hlane in ${(k)hit}; do
+      note="$NOW ${SID:-cli} ${hit[$hlane]}"
+      gc "own.$hlane.trespass" "$note"           # durable: survives a failed send, surfaces on their 'own list'
+      hs=$(gc "own.$hlane.session" 2>/dev/null); [[ -n "$hs" ]] || continue
+      # once per (lane,file) per 10min — a session that ignores the first one does not deserve ten
+      [[ "$(gc "own.$hlane.trespass-sent" 2>/dev/null)" == *" ${hit[$hlane]}" ]] && \
+        (( NOW - ${$(gc "own.$hlane.trespass-sent" 2>/dev/null)%% *} < 600 )) && continue
+      gc "own.$hlane.trespass-sent" "$note"
+      "${0:A:h}/claude-say" "$hs" "⚠ own: a raw shell write from session ${SID:-?} just landed on ${hit[$hlane]} — YOUR [$hlane] lane. It bypassed the Edit guard (sed/cat >/tee/git apply leave no tool call), so nothing in your transcript would show it. Check it before you build on top of it: git -C ~/.dotfiles diff ${hit[$hlane]}" >/dev/null 2>&1 || true
+    done
     print -u2 "✘ own: that shell command wrote into ANOTHER LIVE SESSION'S lane — the Edit guard never saw it."
     print -u2 "$out"
     print -u2 "   Raw writes (sed -i / > / tee / git apply / an editor) bypass the PreToolUse guard entirely."
     print -u2 "   → if that was you: revert it — git -C ~/.dotfiles checkout -- <path>"
     print -u2 "   → then use the patch protocol, or 'own request <lane>' and wait for the hand-off."
-    print -u2 "   → tell the holder NOW (claude-say) if you cannot undo it; they may be mid-edit on that file."
+    print -u2 "   ✉ the holder HAS BEEN TOLD automatically — this is not yours to sit on quietly."
     exit 2 ;;
   force) [[ -n "${2:-}" ]] || { print "usage: own force <lane> [minutes]" >&2; exit 2; }
     _is_lane "$2" || { print "no such lane: $2 (see 'own list')" >&2; exit 2; }
@@ -198,6 +215,11 @@ case "${1:-list}" in
       (( rc == 1 )) && liv=" · ✗ dead (free to take)"
       r=""; sl=$(gc "own.$lane.slice" 2>/dev/null); [[ -n "$sl" ]] && r=" · slice:$sl"
       if rq=$(_req "$lane" 2>/dev/null) && (( rq < FRESH )); then r="$r ⟵ requested ${rq}s ago"; fi
+      # A claude-say can fail (no pane, composer busy). The verdict must not die with the send.
+      local tr=$(gc "own.$lane.trespass" 2>/dev/null) trest
+      if [[ -n "$tr" ]] && (( NOW - ${tr%% *} < FRESH )); then
+        trest="${tr#* }"; r="$r ⚠ TRESPASS $((NOW - ${tr%% *}))s ago by ${${trest%% *}%%-*} on ${trest#* }"
+      fi
       printf '  %-9s %-15s %s%s%s\n' "$lane" "$h" "${line#* }" "$liv" "$r"; done < "$OWNERS" ;;
   release) local arg="${2:-}"; [[ -n "$arg" ]] || { print "usage: own release <lane|slice>" >&2; exit 2; }
     if _is_lane "$arg"; then
