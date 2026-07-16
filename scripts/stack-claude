@@ -107,10 +107,13 @@ draft_deliver(){   # paste the seed into the fresh claude pane as an UNSENT draf
 place="${STACK_CLAUDE_PLACE:-window}"
 draft="${STACK_CLAUDE_DRAFT:-}"
 win="claude:${branch##*/}"
+# Website/viewer-launched panes: bypass permissions so the seed file (/tmp/stack-claude-seed-*),
+# out-of-repo reads, edits, and claude-say all work — Phil wants these sessions unrestricted.
+perm_flag="--dangerously-skip-permissions "
 if [[ -n "$draft" ]]; then
-  run="claude ${model_flag}${session_flag}; exec \$SHELL"
+  run="claude ${perm_flag}${model_flag}${session_flag}; exec \$SHELL"
 else
-  run="claude ${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL"
+  run="claude ${perm_flag}${model_flag}${session_flag}\"\$STACK_CLAUDE_PROMPT\"; exec \$SHELL"
 fi
 if [[ -n "${STACK_CLAUDE_DRY:-}" ]]; then
   print -r -- "DRY: dir=$dir place=$place draft=${draft:-0}"
