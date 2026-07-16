@@ -52,10 +52,6 @@ done
 # a regen in here would write through into main's .gen), rebuild in bg only if the router moved.
 seed-gen "$wt"
 
-# point Helix at tsgo (native TS LSP) for this worktree — local-only, never touches the
-# shared .helix/languages.toml. No-ops in repos that don't ship a tsserver-pinned config.
-"${0:A:h}/helix-tsgo-stamp" "$wt" 2>/dev/null || true
-
 if (( launch )); then
   echo "cw: $wt  (branch $name) → 🍺 launching claude (dangerously-skip-permissions)"
   cd "$wt" && exec claude --dangerously-skip-permissions "$@"
