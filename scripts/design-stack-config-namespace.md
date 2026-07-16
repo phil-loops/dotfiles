@@ -44,6 +44,11 @@ claims it; the real key is `stack-project.<p>.interest`. Fix the comment, migrat
    and restack-daemon currently READ merged but WRITE legacy (fine dark, shadowed after the
    sweep), and their `requires` rewrite is warn-and-skip on new-namespace keys — both need
    the new-namespace write path in the same window.
+   Also (found in the forest-lane dual-read's scratch tests, 2026-07-16): a branch whose
+   `.stack-project` tag says `newproj` but whose LEGACY `stack-project.oldproj.branch`
+   registry entry survives still seeds `oldproj` — the branch shows in BOTH forests.
+   Harmless while writes stay legacy; the sweep must delete the stale legacy registry
+   entry in the same pass as the retag, or a retagged branch double-lists post-keystone.
 3. **Fallback removal** — after a quiet period, drop the legacy read arms + delete this
    fallback machinery. `stack-doctor --prune`'s stack-branch arm becomes vestigial (keep the
    stack-project arm).
