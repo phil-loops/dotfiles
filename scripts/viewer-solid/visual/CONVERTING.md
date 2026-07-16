@@ -13,8 +13,14 @@ npm run visual:shot && npm run visual:diff
 ```
 
 `visual:diff` must report every surface under threshold. Sub-threshold text-antialiasing noise
-(tens–hundreds of px at DSF2) is acceptable; geometry shifts are not — if a diff PNG shows a
-*layout* move, fix it, don't rationalize it.
+(tens–hundreds of px at DSF2) is acceptable; geometry shifts are not — and the differ enforces
+that mechanically: shot-all emits a `<surface>.rects.txt` geometry snapshot (positional paths —
+tag + child index — so class renames don't show up) beside every PNG, and diff compares it
+**byte-for-byte** against the committed baseline. The pixel threshold absorbs AA noise, which
+means it also absorbs small real shifts (a 3px UA border hid under it); the geometry gate is
+exact where pixels are fuzzy, so a "passing" pixel diff with rect drift still FAILS. A
+deliberate geometry change re-baselines rects the same way as pixels:
+`node visual/shot-all.mjs --out visual/baseline --rects-only --only <surface>`.
 
 ## Rules
 
