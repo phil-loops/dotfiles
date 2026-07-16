@@ -588,6 +588,27 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't draft the message"}`),
   }));
 
+  // recompute this branch's forest-plan block from stack config and fold it into the body,
+  // replacing any stale plan already there. Free — no model call, just where-it-fits facts.
+  const planFill = createMutation(() => ({
+    mutationFn: () =>
+      fetch(withRepo("/plan-section") + "?branch=" + encodeURIComponent(props.branch)).then((r) =>
+        r.text(),
+      ),
+    onSuccess: (section) => {
+      const s = section.trim();
+      if (!s) {
+        setDone("✗ no plan — this branch isn't in a project");
+        return;
+      }
+      const lines = msgBody().split("\n");
+      const cut = lines.findIndex((l) => l.startsWith("Part of "));
+      const prose = (cut === -1 ? msgBody() : lines.slice(0, cut).join("\n")).replace(/\s+$/, "");
+      setMsgBody(prose ? `${prose}\n\n${s}` : s);
+    },
+    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't recompute the plan"}`),
+  }));
+
   // what prep WOULD do — the read-only routed verdict, so the button teaches before it acts
   const prepRoute = createQuery(() => ({
     queryKey: ["prep-route", props.branch],
@@ -604,7 +625,7 @@ export function NodeActions(props: {
     queryKey: ["push-preview", props.branch],
     queryFn: () =>
       fetch(withRepo("/push-preview") + "?branch=" + encodeURIComponent(props.branch)).then(
-        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string; originExists?: boolean; published?: boolean }>,
+        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string; originExists?: boolean; published?: boolean; commit?: { sha: string; subject: string; body: string } | null }>,
       ),
     enabled: !!props.branch && !props.isReview,
   }));
@@ -809,6 +830,26 @@ export function NodeActions(props: {
           onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate()))}
         >
           {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push to origin"}
+        </button>
+      </Show>
+
+      {/* open the ONE outgoing commit's message on demand — play with it (or ✦ voice it) and
+          push, without running the whole sync motion first. Pre-filled from the push-preview
+          verdict; the editor it opens is the same one prep ends at. Hidden while it's already
+          open so a re-click can't clobber unsaved edits. */}
+      <Show when={!isReview() && preview.data?.commit && !editorOpen()}>
+        <button
+          class="nh-fix nh-open-pr"
+          disabled={busy()}
+          title="edit this commit's message (subject + body) before pushing — no sync needed"
+          onClick={() => {
+            const c = preview.data!.commit!;
+            setMsgSubject(c.subject);
+            setMsgBody(c.body);
+            setEditorOpen(true);
+          }}
+        >
+          ✎ message
         </button>
       </Show>
 
@@ -1032,6 +1073,14 @@ export function NodeActions(props: {
               onClick={() => saveMsg.mutate()}
             >
               {saveMsg.isPending ? "saving…" : "save message"}
+            </button>
+            <button
+              class="nh-editor-close"
+              disabled={planFill.isPending}
+              title="recompute this branch's forest-plan block from the stack config (free — no model call)"
+              onClick={() => planFill.mutate()}
+            >
+              {planFill.isPending ? "…" : "↻ plan"}
             </button>
             <button
               class="nh-editor-close"
