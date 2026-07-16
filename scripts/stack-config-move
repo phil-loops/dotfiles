@@ -71,6 +71,21 @@ def main():
         for v in vs:
             git("config", "--add", new, v, check=True)
         git("config", "--unset-all", f"stack-branch.{b}.{s}", check=True)
+    # a moved .project tag + a surviving legacy registry entry for a DIFFERENT project
+    # double-lists the branch in both forests — drop the conflicting registry entries
+    # in the same pass (the matching entry stays; it's harmless and dedupe-covered).
+    for b, s, vs in moves:
+        if s != "project" or not vs:
+            continue
+        tag = vs[-1]
+        out = git("config", "--local", "-z", "--get-regexp", r"^stack-project\..*\.branch$").stdout
+        for entry in out.split("\0"):
+            key, _, value = entry.partition("\n")
+            proj = key[len("stack-project."):-len(".branch")] if key else ""
+            if value == b and proj and proj != tag:
+                print(f"{'drop' if mode == '--apply' else 'would drop'}: stale registry {key} = {b} (tag says {tag})")
+                if mode == "--apply":
+                    git("config", "--fixed-value", "--unset-all", key, b, check=True)
     if mode == "--apply":
         # unset-all leaves empty [stack-branch "<b>"] section headers behind — drop them
         for b in {b for b, _, _ in moves}:
