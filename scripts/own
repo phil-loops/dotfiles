@@ -111,6 +111,32 @@ case "${1:-list}" in
     done
     print "holding [${(j:, :)@}] for slice:$name — one feature across these lanes."
     print "the other session's 'own list' now shows WHY they're held. edit these directly; patch anything else." ;;
+  trespass) # own trespass <epoch> — did anything just write into ANOTHER live session's lane?
+    # The Edit guard only sees Edit/Write tool calls. A shell command — sed -i, cat >, tee, a
+    # heredoc, git apply, a headless editor — walks straight past it, so PREVENTION on that path
+    # is a heuristic at best (you cannot parse a shell command's write targets, and a blanket
+    # deny would break the sanctioned `git apply --3way` itself). DETECTION is exact: a write
+    # leaves a mark on disk whatever made it. So we look at the disk, right after the command.
+    # Ignored paths (dist/, __pycache__) never appear — git status skips them — so builds are quiet.
+    local since="${2:-}"; [[ -n "$since" ]] || exit 0
+    local rel abs mt lane out="" mine=""
+    while IFS= read -r rel; do
+      [[ -n "$rel" ]] || continue
+      abs="$ROOT/$rel"; [[ -f "$abs" ]] || continue
+      mt=$(stat -f %m "$abs" 2>/dev/null) || continue
+      (( mt >= since )) || continue                    # untouched by this command → not ours to judge
+      lane=$(_lane_for "$rel"); [[ -n "$lane" ]] || continue
+      _held_by_other "$lane" || { mine+="   $rel → [$lane]"$'\n'; continue; }
+      out+="   $rel → [$lane]$(_holder_tag "$lane")"$'\n'
+    done < <(cd "$ROOT" && git status --porcelain --no-renames 2>/dev/null | sed 's/^...//')
+    [[ -n "$out" ]] || exit 0
+    print -u2 "✘ own: that shell command wrote into ANOTHER LIVE SESSION'S lane — the Edit guard never saw it."
+    print -u2 "$out"
+    print -u2 "   Raw writes (sed -i / > / tee / git apply / an editor) bypass the PreToolUse guard entirely."
+    print -u2 "   → if that was you: revert it — git -C ~/.dotfiles checkout -- <path>"
+    print -u2 "   → then use the patch protocol, or 'own request <lane>' and wait for the hand-off."
+    print -u2 "   → tell the holder NOW (claude-say) if you cannot undo it; they may be mid-edit on that file."
+    exit 2 ;;
   force) [[ -n "${2:-}" ]] || { print "usage: own force <lane> [minutes]" >&2; exit 2; }
     _is_lane "$2" || { print "no such lane: $2 (see 'own list')" >&2; exit 2; }
     local mins="${3:-10}" mp=$(_mypid)

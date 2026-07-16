@@ -1,0 +1,38 @@
+#!/bin/zsh
+# own-bash-hook {pre|post} — Claude Code hooks for the Bash tool (matcher: Bash).
+#
+# The Edit guard (own-hook) only ever sees Edit/Write/MultiEdit. Every raw write —
+# `sed -i`, `cat >`, `tee`, a heredoc, `python - <<EOF`, `git apply`, a headless editor —
+# reaches the same files without the guard ever running. Prevention there is hopeless:
+# you cannot reliably parse a shell command's write targets, and a blanket deny would
+# break the sanctioned `git apply --3way` (the patch protocol) and every build that
+# writes dist/. Detection is exact instead — a write leaves a mark on disk whatever
+# made it — so we watch the disk rather than the command:
+#
+#   pre  — stamp the clock, before the command can touch anything.
+#   post — anything dirty in ~/.dotfiles newer than the stamp, sitting in ANOTHER live
+#          session's lane, is a trespass. Reported within the same tool call.
+#
+# Only the very next turn can still cheaply revert it, which is the whole point: know
+# now, not when someone else's afternoon has been quietly built on top of it.
+emulate -L zsh; set -uo pipefail
+mode="${1:-post}"
+input=$(cat)
+eval "$(print -r -- "$input" | python3 -c '
+import sys, json, shlex
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+print("sid=" + shlex.quote(d.get("session_id", "")))
+' 2>/dev/null)"
+STAMP="${TMPDIR:-/tmp}/own-bash-${sid:-anon}.stamp"
+
+if [[ "$mode" == pre ]]; then
+  date +%s > "$STAMP"          # never blocks: a Bash call is not the guard's business
+  exit 0
+fi
+
+# no stamp (hook added mid-session, or a pre that never ran) → look back a short window
+since=$(cat "$STAMP" 2>/dev/null) || since=$(( $(date +%s) - 30 ))
+[[ -n "$since" ]] || since=$(( $(date +%s) - 30 ))
+OWN_SESSION="${sid:-}" "${0:A:h}/own" trespass "$since"
+exit $?   # 2 = trespass; PostToolUse feeds the message back to the session that did it
