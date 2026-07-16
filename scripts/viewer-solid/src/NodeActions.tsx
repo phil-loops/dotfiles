@@ -37,7 +37,8 @@ interface CheckoutResult {
 
 const shortWt = (p: string) => p.split("/").pop() || p;
 
-const FIX = "cursor-pointer rounded-[5px] border border-del bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] text-del opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-50";
+const FIX_SHAPE = "cursor-pointer rounded-[5px] border bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-50";
+const FIX = `${FIX_SHAPE} border-del text-del`;
 const PUSH_RED = "cursor-pointer rounded-[5px] border border-del px-[9px] py-[3px] text-[12px] font-semibold leading-[1.55] opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-35";
 const ITEM = "flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] border border-transparent bg-transparent px-[10px] py-[7px] text-left text-[12px] leading-[1.55] text-patina enabled:hover:border-patina enabled:hover:bg-vellum-edge disabled:cursor-default disabled:opacity-45";
 const IC = "w-[14px] flex-none text-center opacity-85";
@@ -1035,7 +1036,7 @@ export function NodeActions(props: {
                 <button class={`nh-fix ${FIX}`} onClick={() => dirtDecide("stash")} title="stash (incl. untracked), run the motion, pop the stash after — your changes come back">
                   stash &amp; continue
                 </button>
-                <button class={`nh-fix nh-dirt-abort ${FIX}`} onClick={() => dirtDecide("abort")} title="stop — the working tree stays exactly as it is">
+                <button class={`nh-fix nh-dirt-abort ${FIX_SHAPE} border-rule text-ink-dim`} onClick={() => dirtDecide("abort")} title="stop — the working tree stays exactly as it is">
                   abort
                 </button>
               </div>
@@ -1079,7 +1080,7 @@ export function NodeActions(props: {
           />
           <div class="nh-editor-row flex items-center gap-[10px]">
             <button
-              class={`nh-fix nh-editor-save ${FIX}`}
+              class={`nh-fix nh-editor-save ${FIX_SHAPE} border-gold-deep text-gold-leaf`}
               disabled={saveMsg.isPending || !msgSubject().trim()}
               onClick={() => saveMsg.mutate()}
             >
