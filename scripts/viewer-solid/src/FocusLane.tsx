@@ -169,40 +169,58 @@ export function FocusLane(props: {
 
   return (
     <Show when={pinned().length || rowDrag()}>
-      <section class="focus-lane" classList={{ "drop-target": !!dropAt() }}>
+      <section class="focus-lane mt-1 mb-5" classList={{ "drop-target": !!dropAt() }}>
         <h2 class="eyebrow">focus <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— what you're pushing now, drag or right-click to reorder</span></h2>
-        <div class="focus-rows" ref={rowsEl}>
+        <div
+          class="focus-rows relative mt-2 flex flex-col gap-1"
+          classList={{ "rounded-[4px] outline-1 outline-dashed outline-offset-4 outline-gold-deep": !!dropAt() }}
+          ref={rowsEl}
+        >
           <Show when={dropAt()}>
-            {(a) => <div class="focus-drop-line" style={{ top: `${a().lineY}px` }} />}
+            {(a) => <div class="focus-drop-line pointer-events-none absolute inset-x-0 z-[6] h-[2px] rounded-[1px] bg-gold-leaf" style={{ top: `${a().lineY}px` }} />}
           </Show>
           <Show when={rowDrag() && !pinned().length}>
-            <div class="focus-drop-empty">drop here to focus</div>
+            <div class="focus-drop-empty rounded-[4px] border border-dashed border-gold-deep px-[10px] py-2 text-center font-mono text-[11.5px] text-ink-dim">drop here to focus</div>
           </Show>
           <For each={pinned()}>
             {(p, i) => {
               const step = createMemo(() => nextStep(p, props.prOf(p.name)));
+              const ROW =
+                "focus-row flex items-baseline gap-[10px] rounded-[4px] border bg-vellum-raise px-[10px] py-[6px] transition-transform duration-[170ms] ease-[cubic-bezier(.2,.8,.2,1)]";
+              const rowState = () =>
+                dragFrom() !== i()
+                  ? "border-solid border-rule"
+                  : dragOut()
+                    ? "relative z-[5] cursor-grabbing transition-none border-dashed border-del opacity-50 shadow-[0_6px_18px_rgba(0,0,0,0.4)] after:ml-3 after:whitespace-nowrap after:font-mono after:not-italic after:text-[11px] after:text-del after:content-['release_to_unpin']"
+                    : "relative z-[5] cursor-grabbing transition-none border-solid border-gold-deep shadow-[0_6px_18px_rgba(0,0,0,0.4)]";
               return (
                 <div
-                  class="focus-row"
+                  class={`${ROW} ${rowState()}`}
                   classList={{ dragging: dragFrom() === i(), unpinning: dragFrom() === i() && dragOut() }}
                   style={{ transform: `translate(${rowSlide(i())}px, ${rowShift(i())}px)` }}
                   onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, idx: i() }); }}
                 >
                   <span
-                    class="focus-grip"
+                    class="focus-grip cursor-grab select-none touch-none text-[13px] text-ink-faint active:cursor-grabbing"
                     title="drag to reorder"
                     onPointerDown={(e) => gripDown(e, i())}
                     onPointerMove={gripMove}
                     onPointerUp={gripUp}
                     onPointerCancel={gripUp}
                   >⠿</span>
-                  <span class="focus-rank">{i() + 1}</span>
-                  <Link class="focus-name" to={target(p)}>
-                    {p.repo && p.repo !== "loops" ? <span class="focus-repo">{p.repo}</span> : null}
+                  <span class="focus-rank min-w-[14px] text-right font-mono text-[11px] text-gold-leaf">{i() + 1}</span>
+                  <Link class="focus-name flex-initial font-display text-[15px] italic text-ink no-underline hover:text-gold-leaf" to={target(p)}>
+                    {p.repo && p.repo !== "loops" ? <span class="focus-repo mr-[6px] rounded-[2px] border border-solid border-rule px-1 py-px font-mono text-[10px] not-italic text-ink-faint">{p.repo}</span> : null}
                     {p.name}
                   </Link>
                   <Show when={step()}>
-                    <span class="focus-next" classList={{ yours: !!step()!.yourMove }} title={step()!.title}>
+                    <span
+                      class={`focus-next ml-auto whitespace-nowrap rounded-[3px] border border-solid px-2 py-px font-mono text-[11.5px] ${
+                        step()!.yourMove ? "border-ember bg-ember-wash text-ember" : "border-rule text-ink-dim"
+                      }`}
+                      classList={{ yours: !!step()!.yourMove }}
+                      title={step()!.title}
+                    >
                       {step()!.text}
                     </span>
                   </Show>

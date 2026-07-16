@@ -715,9 +715,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
   color: var(--ink-faint); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase;
   font-weight: 500; margin: 34px 0 12px;
 }
-/* lifecycle bands: the page's one grouping — what state the work is in, most urgent first */
-.forest-band-head { font-size: 11px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--gold-deep); opacity: 0.85; margin: 16px 4px 7px; }
-.forest-band-head:first-child { margin-top: 2px; }
 /* live-chat presence: the Home "chats" strip + the pulsing per-forest badge (/chat-jobs) */
 .chat-live .chat-row {
   display: flex; align-items: baseline; gap: 10px; padding: 6px 9px; border-radius: 8px;
@@ -734,13 +731,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .chat-progress { margin-left: auto; flex: none; font-size: 12px; color: var(--ink-faint); }
 .forest-chat { flex: none; color: var(--gold-leaf); animation: chat-pulse 1.6s ease-in-out infinite; }
 @keyframes chat-pulse { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-/* recently-merged fold — done work tucked out of the active list, collapsed until clicked */
-.forest-mfold {
-  display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
-  font: inherit; font-size: 11px; letter-spacing: 0.03em; color: var(--ink-dim); padding: 9px 4px 5px; margin-top: 8px;
-}
-.forest-mfold:hover { color: var(--gold-leaf); }
-
 /* ── diff-base toggle (selected = ink, never gold — gold stays = blessed) ── */
 .base-toggle { display: flex; align-items: center; gap: 6px; }
 .base-label { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; margin-right: 4px; }
@@ -1006,100 +996,6 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .reentry-resume-next.yours { color: var(--ember); border-color: var(--ember); background: var(--ember-wash); }
 .reentry-resume:hover .reentry-resume-name { color: var(--gold-leaf); }
 
-/* ── focus lane: hand-ordered "pushing now" strip ────────────────────── */
-.focus-lane { margin: 4px 0 20px; }
-.focus-rows { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.focus-row {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px;
-  background: var(--vellum-raise);
-  transition: transform 170ms cubic-bezier(.2,.8,.2,1);
-}
-/* the row under the finger tracks 1:1 (no glide) and lifts above its neighbours */
-.focus-row.dragging {
-  transition: none; position: relative; z-index: 5; cursor: grabbing;
-  border-color: var(--gold-deep); box-shadow: 0 6px 18px rgba(0,0,0,0.4);
-}
-.focus-grip { color: var(--ink-faint); font-size: 13px; cursor: grab; user-select: none; touch-action: none; }
-.focus-grip:active { cursor: grabbing; }
-.focus-rank {
-  color: var(--gold-leaf); font-family: var(--mono); font-size: 11px;
-  min-width: 14px; text-align: right;
-}
-.focus-name {
-  color: var(--ink); font-family: var(--display); font-size: 15px; font-style: italic;
-  text-decoration: none; flex: 0 1 auto;
-}
-.focus-name:hover { color: var(--gold-leaf); }
-.focus-repo {
-  font-family: var(--mono); font-style: normal; font-size: 10px; color: var(--ink-faint);
-  margin-right: 6px; padding: 1px 4px; border: 1px solid var(--rule); border-radius: 2px;
-}
-.focus-next {
-  margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim);
-  padding: 1px 8px; border: 1px solid var(--rule); border-radius: 3px; white-space: nowrap;
-}
-.focus-next.yours { color: var(--ember); border-color: var(--ember); background: var(--ember-wash); }
-.ctx-item.ctx-focus .ctx-pips { color: var(--gold-leaf); }
-
-/* ── cross-section drag: pull a forest row into the lane to pin, a lane row out to unpin ── */
-.row-drag-wrap { position: relative; }
-.row-drag-grip {
-  position: absolute; left: -20px; top: 50%; transform: translateY(-50%);
-  color: var(--ink-faint); font-size: 12px; cursor: grab; z-index: 2;
-  user-select: none; touch-action: none; padding: 6px 3px;
-  opacity: 0; transition: opacity 120ms;
-}
-.row-drag-wrap:hover .row-drag-grip { opacity: 1; }
-.row-drag-grip:hover { color: var(--gold-leaf); }
-.row-drag-grip:active { cursor: grabbing; }
-.drag-ghost {
-  position: fixed; z-index: 40; pointer-events: none; transform: translate(12px, -50%);
-  font-family: var(--display); font-style: italic; font-size: 14px; color: var(--ink);
-  padding: 4px 12px; border: 1px solid var(--gold-deep); border-radius: 4px;
-  background: var(--vellum-raise); box-shadow: 0 6px 18px rgba(0,0,0,0.4);
-  white-space: nowrap;
-}
-.focus-rows { position: relative; }
-.focus-lane.drop-target .focus-rows {
-  outline: 1px dashed var(--gold-deep); outline-offset: 4px; border-radius: 4px;
-}
-.focus-drop-line {
-  position: absolute; left: 0; right: 0; height: 2px; border-radius: 1px;
-  background: var(--gold-leaf); z-index: 6; pointer-events: none;
-}
-.focus-drop-empty {
-  padding: 8px 10px; border: 1px dashed var(--gold-deep); border-radius: 4px;
-  font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); text-align: center;
-}
-.focus-row.unpinning { opacity: 0.5; border-style: dashed; border-color: var(--del); }
-.focus-row.unpinning::after {
-  content: "release to unpin"; margin-left: 12px; white-space: nowrap;
-  font-family: var(--mono); font-style: normal; font-size: 11px; color: var(--del);
-}
-
-/* ── conviction tiers ────────────────────────────────────────────────── */
-.tier-head {
-  margin: 18px 0 4px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
-  text-transform: uppercase; color: var(--gold-leaf); border-bottom: 1px solid var(--gold-deep);
-  padding-bottom: 3px;
-}
-.tier-head-trying { color: var(--patina); }
-.triage-head { color: var(--ember); display: flex; align-items: center; gap: 6px; }
-.triage-count {
-  font-family: var(--mono); font-size: 11px; color: var(--vellum-night);
-  background: var(--ember); border-radius: 8px; padding: 0 6px;
-}
-.triage-item { display: flex; flex-direction: column; gap: 0; }
-.triage-actions { display: flex; gap: 6px; margin: 2px 0 8px 10px; }
-.triage-set {
-  font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
-  background: none; border: 1px solid var(--rule); border-radius: 3px;
-  padding: 2px 9px; cursor: pointer;
-}
-.triage-set.committed:hover { color: var(--gold-leaf); border-color: var(--gold-deep); }
-.triage-set.trying:hover { color: var(--patina); border-color: var(--patina); }
-.triage-set.spike:hover { color: var(--ink-faint); border-color: var(--ink-faint); }
 .ctx-item.ctx-tier.on .ctx-pips { color: var(--gold-leaf); }
 
 /* ── ctx-menu drop (destructive, two-click arm) ──────────────────────── */
