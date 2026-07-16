@@ -39,9 +39,14 @@ def requires_of(branch):
 
 
 def job_of(branch):
-    """What this branch DOES, in one voiced line — its own newest commit subject minus the
-    conventional-commit prefix. That subject IS the merge story. The branch description is the
-    fallback for a branch with no commits of its own yet."""
+    """What this branch DOES, in one voiced line. A hand-authored `stack-branch.<b>.story` wins —
+    it's the durable per-step merge story, editable from any branch's plan and re-read on every
+    branch (so a story survives after this branch merges). Absent that, the branch's own newest
+    commit subject minus the conventional-commit prefix; then the branch description (fallback for a
+    branch with no commits of its own yet)."""
+    story = git("config", f"stack-branch.{branch}.story")
+    if story:
+        return story
     subject = git("log", "-1", "--format=%s", f"{parent_of(branch)}..{branch}")
     if ": " in subject:
         subject = subject.split(": ", 1)[1]
@@ -117,6 +122,7 @@ def facts(branch):
         p = prs.get(b, {})
         plan.append({
             "job": job_of(b),
+            "story": git("config", f"stack-branch.{b}.story"),
             "pr": p.get("pr"),
             "state": p.get("state"),
             "landed": False,
@@ -162,19 +168,55 @@ def facts(branch):
     }
 
 
+# The plan is a per-PROJECT template, edited once and carried forward to every future child — so a
+# framing you write survives the regenerate that each new branch triggers. The volatile facts (the
+# #PR a step lands under, which line is "[this branch]", the position) are NEVER stored; they are
+# re-derived on every render. Only the durable wording lives in config:
+#   stack-project.<project>.plan-template  the outer block. Tokens {project}, {steps}.
+#   stack-project.<project>.plan-step      one step's line.  Tokens {n} {ref} {job} {pr} {me}.
+# Both default to the historical hardcoded format, so an untemplated project is byte-for-byte
+# unchanged. NOTE: the outer template's first line must start with "Part of " — that literal is the
+# fence stack-commit-body uses to replace the block idempotently.
+PLAN_TEMPLATE_DEFAULT = "Part of {project}:\n{steps}"
+PLAN_STEP_DEFAULT = "  {n}. {ref}"
+
+
+def _proj_cfg(project, key, default):
+    # NOT git() — that strips, and a template's leading indent + internal newlines are load-bearing.
+    # git config appends one trailing newline of its own; drop only that.
+    r = subprocess.run(["git", "config", f"stack-project.{project}.{key}"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return default
+    val = r.stdout[:-1] if r.stdout.endswith("\n") else r.stdout
+    return val if val else default
+
+
+def _render_step(tmpl, s):
+    # a PR number is enough: GitHub expands it to the title and its merged/open state. {ref} is the
+    # default face of a step — the landed PR, else "[this branch]" for the current one, else its job.
+    if s.get("me"):
+        ref = "[this branch]"
+    elif s.get("pr"):
+        ref = "#%s" % s["pr"]
+    else:
+        ref = s["job"]
+    return (tmpl
+            .replace("{n}", str(s["n"]))
+            .replace("{ref}", ref)
+            .replace("{job}", s["job"])
+            .replace("{pr}", "#%s" % s["pr"] if s.get("pr") else "")
+            .replace("{me}", " ← this branch" if s.get("me") else ""))
+
+
 def render_plan(f):
     if not f["project"] or not f["plan"]:
         return ""
-    lines = [f'Part of {f["project"]}:']
-    for s in f["plan"]:
-        # a PR number is enough: GitHub expands it to the title and its merged/open state.
-        # This branch names itself and nothing more — the commit it sits in already says the rest.
-        if s.get("me"):
-            job = "[this branch]"
-        else:
-            job = "#%s" % s["pr"] if s.get("pr") else s["job"]
-        lines.append("  %d. %s" % (s["n"], job))
-    return "\n".join(lines)
+    project = f["project"]
+    step_tmpl = _proj_cfg(project, "plan-step", PLAN_STEP_DEFAULT)
+    steps = "\n".join(_render_step(step_tmpl, s) for s in f["plan"])
+    outer = _proj_cfg(project, "plan-template", PLAN_TEMPLATE_DEFAULT)
+    return outer.replace("{project}", project).replace("{steps}", steps)
 
 
 def render_mermaid(f, fence=False):
@@ -209,6 +251,9 @@ def render_mermaid(f, fence=False):
 
 
 def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "plan-defaults":  # no branch needed
+        print(json.dumps({"template": PLAN_TEMPLATE_DEFAULT, "step": PLAN_STEP_DEFAULT}))
+        return 0
     if len(sys.argv) < 3:
         print(__doc__, file=sys.stderr)
         return 2

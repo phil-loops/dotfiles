@@ -367,7 +367,7 @@ export function NodeDetail() {
           blessedOf={blessedOf}
           setShowChats={setShowChats}
         />
-        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} />}>
+        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
           <div class="diff-hint">
             <span class="kbd-hint"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>

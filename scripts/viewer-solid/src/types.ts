@@ -166,8 +166,15 @@ export const Commit = z.object({
   subject: z.string(),
   author: z.string(),
   date: z.string(),
+  own: z.boolean().optional(), // true = on this branch (parent..branch); false = inherited ancestor
 });
 export type Commit = z.infer<typeof Commit>;
+
+export const CommitDiff = z.object({
+  sha: z.string(),
+  files: z.array(FileDiff),
+});
+export type CommitDiff = z.infer<typeof CommitDiff>;
 
 export const RestackDriver = z.object({
   pid: z.number(),

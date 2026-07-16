@@ -221,6 +221,35 @@ body {
   font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer;
 }
 .nh-viewnote { font-size: 11px; color: var(--ink-faint); letter-spacing: 0.03em; }
+/* ── per-step story editor (in the message editor) ────────────────────────────
+   Each step's line writes its OWN branch's durable story, so the wording survives
+   this branch's merge instead of being frozen in one sibling's plan block. */
+.plan-steps { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; border-bottom: 1px solid var(--rule); }
+.plan-steps-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-faint); padding: 2px 1px 5px; }
+.plan-step { display: flex; align-items: center; gap: 8px; min-height: 26px; }
+.plan-step.landed { opacity: 0.5; }
+.ps-n { font-family: var(--mono); font-size: 11px; color: var(--gold-leaf); min-width: 14px; text-align: right; flex: none; }
+.plan-step.me .ps-n { color: var(--ember); }
+.ps-line {
+  display: flex; align-items: baseline; gap: 10px; flex: 1; min-width: 0;
+  font: inherit; text-align: left; background: none; border: 0; cursor: pointer;
+  padding: 3px 6px; border-radius: 5px; color: var(--ink-dim);
+}
+.ps-line:hover:not(:disabled) { background: var(--gold-wash); color: var(--ink); }
+.ps-line:disabled { cursor: default; }
+.ps-job { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; }
+.ps-job.overridden { color: var(--gold-leaf); } /* a hand-authored story, not the raw commit subject */
+.ps-tail { display: flex; align-items: baseline; gap: 8px; flex: none; }
+.ps-me { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ember); }
+.ps-branch { font-family: var(--mono); font-size: 10px; color: var(--ink-faint); }
+.ps-input {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; color: var(--ink);
+  background: var(--vellum-raise); border: 1px solid var(--gold-deep); border-radius: 5px;
+  padding: 4px 7px; outline: none;
+}
+.ps-btn { font: inherit; font-size: 11px; color: var(--ink-faint); background: none; border: 0; cursor: pointer; flex: none; }
+.ps-btn:hover:not(:disabled) { color: var(--ink); }
+.ps-save { color: var(--gold-leaf); }
 /* ── the unfold grammar ───────────────────────────────────────────────────────
    Nothing in the header teleports into layout: expandables GROW from the seam
    under the header rule and arrive warm (an ember wash that settles into the
@@ -351,6 +380,7 @@ body {
   background: transparent; color: var(--ink-dim);
 }
 .ctx-item:hover { background: var(--vellum-edge); color: var(--ink); }
+.ctx-item:disabled { opacity: 0.32; cursor: default; background: transparent; }
 .ctx-item.on { color: var(--gold-leaf); }
 /* shelve sits apart from the interest levels — a state flip, not a ranking */
 .ctx-shelve { border-top: 1px solid var(--vellum-edge); margin-top: 4px; padding-top: 7px; }
@@ -1006,10 +1036,17 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .view-pill:hover { color: var(--ink-dim); }
 .view-pill.on { color: var(--ink); background: var(--vellum-edge); border-color: var(--rule); }
 .commits { list-style: none; margin: 8px 0 0; padding: 0; }
-.commit { display: flex; align-items: baseline; gap: 13px; padding: 9px 4px; border-bottom: 1px solid var(--rule); }
+.commit { border-bottom: 1px solid var(--rule); }
+.commit-head { display: flex; align-items: baseline; gap: 13px; width: 100%; padding: 9px 4px; background: none; border: 0; text-align: left; cursor: pointer; font: inherit; }
+.commit-head:hover { background: var(--hover, rgba(255,255,255,0.03)); }
+.c-caret { color: var(--ink-faint); font-size: 10px; flex: none; width: 10px; }
 .c-sha { color: var(--ink-faint); font-size: 11px; flex: none; font-variant-numeric: tabular-nums; }
 .c-subject { color: var(--ink); flex: 1; }
+.commit:not(.own) .c-subject { color: var(--ink-faint); } /* inherited ancestor — dimmed, it's not this branch's work */
 .c-meta { color: var(--ink-faint); font-size: 10.5px; flex: none; }
+.commit-diff { padding: 4px 4px 12px; }
+.commits-divider { display: flex; align-items: center; gap: 10px; padding: 14px 4px 6px; color: var(--ink-faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em; }
+.commits-divider::before, .commits-divider::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
 
 /* ── purpose caption: the hovered map node's full thesis, pinned to the bottom edge
    so it never occludes the graph ── */
@@ -1182,11 +1219,16 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .focus-row {
   display: flex; align-items: baseline; gap: 10px;
   padding: 6px 10px; border: 1px solid var(--rule); border-radius: 4px;
-  background: var(--vellum-raise); cursor: grab;
+  background: var(--vellum-raise);
+  transition: transform 170ms cubic-bezier(.2,.8,.2,1);
 }
-.focus-row.dragging { opacity: 0.4; cursor: grabbing; }
-.focus-row.over { border-color: var(--gold-deep); box-shadow: inset 0 2px 0 var(--gold-deep); }
-.focus-grip { color: var(--ink-faint); font-size: 13px; cursor: grab; user-select: none; }
+/* the row under the finger tracks 1:1 (no glide) and lifts above its neighbours */
+.focus-row.dragging {
+  transition: none; position: relative; z-index: 5; cursor: grabbing;
+  border-color: var(--gold-deep); box-shadow: 0 6px 18px rgba(0,0,0,0.4);
+}
+.focus-grip { color: var(--ink-faint); font-size: 13px; cursor: grab; user-select: none; touch-action: none; }
+.focus-grip:active { cursor: grabbing; }
 .focus-rank {
   color: var(--gold-leaf); font-family: var(--mono); font-size: 11px;
   min-width: 14px; text-align: right;

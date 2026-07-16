@@ -1,5 +1,6 @@
 import { For, Show, createMemo, createSignal } from "solid-js";
 import type { ForestModel } from "./types";
+import { withRepo, canMutate } from "./provider";
 
 // The forest read as a STORY: every branch as the semantic commit it will become, in the order it
 // merges into main (deps before dependents). Order comes from the graph (parent + requires); the
@@ -7,13 +8,17 @@ import type { ForestModel } from "./types";
 // the at-a-glance "what is this feature", the merge plan, and a preview of main's eventual history.
 const leafOf = (b: string): string => b.split("/").pop() || b;
 
-// purpose → conventional-commit subject: the first clause, made imperative-lowercase.
-const subjectOf = (desc?: string): string => {
+// purpose → {subject, why}: the FIRST clause is the conventional-commit subject (imperative,
+// lower-cased); anything past the first delimiter is the "why". A one-clause purpose has no why, so
+// the subtitle stays empty instead of restating the subject — the grammar is `subject — why`.
+const splitPurpose = (desc?: string): { subject: string; why: string } => {
   if (!desc) {
-    return "(no purpose set yet)";
+    return { subject: "(no purpose set yet)", why: "" };
   }
-  const first = desc.split(/ — | – |\. |: |, /)[0].trim().replace(/[.;]+$/, "");
-  return first ? first.charAt(0).toLowerCase() + first.slice(1) : desc;
+  const m = desc.match(/^([\s\S]*?)(?: — | – |\. |: |, )([\s\S]*)$/);
+  const head = (m ? m[1] : desc).trim().replace(/[.;]+$/, "");
+  const subject = head ? head.charAt(0).toLowerCase() + head.slice(1) : desc;
+  return { subject, why: m ? m[2].trim() : "" };
 };
 // cleanup branches are refactors, not features — inferred from the purpose's verbs.
 const typeOf = (desc?: string): "feat" | "refactor" =>
@@ -23,6 +28,7 @@ type Step = {
   id: string;
   type: "feat" | "refactor";
   subject: string; // deterministic first-clause fallback
+  why: string; // the description's remainder past the first clause — "" when it's one clause
   purpose: string; // the full plain description, sent to the LLM polish
   hasPurpose: boolean;
   buildsOn: number | null; // parent position — a CODE dep (this branch is stacked on it)
@@ -108,10 +114,12 @@ export default function MergeStory(props: {
       // MERGE-AFTER fan-in: separate bases that must land first. The story labels them differently.
       const parent = m?.parent && inForest.has(m.parent) && m.parent !== "main" ? m.parent : null;
       const reqs = (m?.requires ?? []).filter((r) => inForest.has(r));
+      const { subject, why } = splitPurpose(m?.description);
       return {
         id,
         type: typeOf(m?.description),
-        subject: subjectOf(m?.description),
+        subject,
+        why,
         purpose: m?.description ?? "",
         hasPurpose: !!m?.description,
         buildsOn: parent ? (pos.get(parent) ?? null) : null,
@@ -154,12 +162,76 @@ export default function MergeStory(props: {
     setPolishing(false);
   };
 
+  // The per-project BODY TEMPLATE — edited once here, carried to every future child. Only the
+  // durable wording lives in config; the volatile facts (#PR, [this branch], position) re-fill on
+  // every render. Server: GET/POST /plan-template, GET /plan-preview (a representative branch so the
+  // #PRs actually show). Preview reflects SAVED state — save is the commit, then it refreshes.
+  const previewBranch = () => steps().at(-1)?.id ?? "";
+  const [tmplOpen, setTmplOpen] = createSignal(false);
+  const [outer, setOuter] = createSignal("");
+  const [stepFmt, setStepFmt] = createSignal("");
+  const [tmplDefaults, setTmplDefaults] = createSignal<{ template: string; step: string }>({ template: "", step: "" });
+  const [preview, setPreview] = createSignal("");
+  const [savingTmpl, setSavingTmpl] = createSignal(false);
+
+  const loadPreview = async () => {
+    const b = previewBranch();
+    if (!b) {
+      return;
+    }
+    try {
+      const r = await fetch(withRepo(`/plan-preview?branch=${encodeURIComponent(b)}`)).then((res) => res.json());
+      setPreview(r?.plan ?? "");
+    } catch {
+      setPreview("");
+    }
+  };
+  const openTemplate = async () => {
+    if (tmplOpen()) {
+      setTmplOpen(false);
+      return;
+    }
+    setTmplOpen(true);
+    try {
+      const r = await fetch(withRepo(`/plan-template?project=${encodeURIComponent(props.project)}`)).then((res) => res.json());
+      const d = r?.defaults ?? { template: "", step: "" };
+      setTmplDefaults(d);
+      setOuter(r?.template || d.template || "");
+      setStepFmt(r?.step || d.step || "");
+    } catch { /* leave fields empty */ }
+    void loadPreview();
+  };
+  const saveTemplate = async () => {
+    if (savingTmpl()) {
+      return;
+    }
+    setSavingTmpl(true);
+    try {
+      await fetch(withRepo("/plan-template"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: props.project, template: outer(), step: stepFmt() }),
+      });
+      await loadPreview();
+    } catch { /* surfaced by an unchanged preview */ }
+    setSavingTmpl(false);
+  };
+  const resetTemplate = () => {
+    setOuter(tmplDefaults().template);
+    setStepFmt(tmplDefaults().step);
+  };
+
   return (
     <div class="ms">
       <style>{CSS}</style>
       <div class="ms-head">
         <span class="ms-flow">{props.project} → main</span>
         <span class="ms-cap">in merge order</span>
+        <Show when={canMutate}>
+          <button class="ms-tmpl-btn" classList={{ on: tmplOpen() }} onClick={openTemplate} title="edit the per-project commit/PR body template — once, carried to every child">
+            ⚙ template
+          </button>
+        </Show>
         <button class="ms-polish" disabled={polishing()} onClick={polish} title="crisp the subjects + pull a non-trivial implementation detail from each diff (LLM)">
           {polishing() ? "polishing…" : Object.keys(polished()).length ? "✨ re-polish" : "✨ polish"}
         </button>
@@ -167,9 +239,34 @@ export default function MergeStory(props: {
           <span class="ms-polish-err">couldn’t polish</span>
         </Show>
       </div>
+      <Show when={tmplOpen()}>
+        <div class="ms-tmpl">
+          <p class="ms-tmpl-hint">
+            edited once, carried to every child — the volatile facts (<code>#PR</code>, <code>[this branch]</code>, position) re-fill on each render.
+          </p>
+          <label class="ms-tmpl-lbl">outer <span class="ms-tmpl-tok">{"{project}"} · {"{steps}"}</span></label>
+          <textarea class="ms-tmpl-ta" rows={4} spellcheck={false} value={outer()} onInput={(e) => setOuter(e.currentTarget.value)} />
+          <label class="ms-tmpl-lbl">step line <span class="ms-tmpl-tok">{"{n}"} · {"{ref}"} · {"{job}"} · {"{pr}"} · {"{me}"}</span></label>
+          <textarea class="ms-tmpl-ta" rows={1} spellcheck={false} value={stepFmt()} onInput={(e) => setStepFmt(e.currentTarget.value)} />
+          <div class="ms-tmpl-actions">
+            <button class="ms-tmpl-save" disabled={savingTmpl()} onClick={saveTemplate}>{savingTmpl() ? "saving…" : "save"}</button>
+            <button class="ms-tmpl-reset" onClick={resetTemplate}>reset to default</button>
+            <span class="ms-tmpl-note">preview as {leafOf(previewBranch())}</span>
+          </div>
+          <Show when={preview()}>
+            <pre class="ms-tmpl-preview">{preview()}</pre>
+          </Show>
+        </div>
+      </Show>
       <ol class="ms-list">
         <For each={steps()}>
-          {(s, i) => (
+          {(s, i) => {
+            // subtitle = the LLM's diff detail, else the description's own "why" (its remainder past
+            // the first clause). A one-clause purpose has no why, so it renders NOTHING rather than
+            // echoing the subject back — the redundancy this hides.
+            const subj = () => polished()[s.id]?.subject ?? s.subject;
+            const sub = () => polished()[s.id]?.detail ?? s.why;
+            return (
             <li
               class="ms-row"
               classList={{ convergence: s.convergence, nested: s.depth > 0 }}
@@ -181,10 +278,10 @@ export default function MergeStory(props: {
               <div class="ms-body">
                 <code class="ms-commit" classList={{ faint: !s.hasPurpose }}>
                   <span class="ms-type" classList={{ refactor: s.type === "refactor" }}>{s.type}</span>
-                  <span class="ms-scope">({scope()})</span>: {polished()[s.id]?.subject ?? s.subject}
+                  <span class="ms-scope">({scope()})</span>: {subj()}
                 </code>
-                <Show when={polished()[s.id]?.detail ?? (s.hasPurpose ? s.purpose : "")}>
-                  {(detail) => <p class="ms-detail">{detail()}</p>}
+                <Show when={sub() && sub() !== subj()}>
+                  <p class="ms-detail">{sub()}</p>
                 </Show>
                 <Show when={s.convergence}>
                   <span class="ms-dep conv">
@@ -201,7 +298,8 @@ export default function MergeStory(props: {
                 </Show>
               </div>
             </li>
-          )}
+            );
+          }}
         </For>
       </ol>
     </div>
@@ -221,6 +319,44 @@ const CSS = `
 .ms-polish:hover:not(:disabled) { opacity: 1; background: rgba(224,173,78,.1); }
 .ms-polish:disabled { opacity: .5; cursor: default; }
 .ms-polish-err { font-size: 11px; color: var(--ember, #d36a36); }
+.ms-tmpl-btn {
+  font: inherit; font-size: 11px; cursor: pointer; white-space: nowrap;
+  color: var(--ink-dim, #a89e8c); background: transparent; border: 1px solid var(--rule, #3a332b);
+  border-radius: 6px; padding: 3px 10px; opacity: .9;
+}
+.ms-tmpl-btn:hover { opacity: 1; border-color: var(--patina, #8a9a6b); }
+.ms-tmpl-btn.on { color: var(--patina, #8a9a6b); border-color: var(--patina, #8a9a6b); background: rgba(138,154,107,.1); }
+.ms-tmpl {
+  margin: 0 2px 14px; padding: 12px 14px; border: 1px solid var(--rule, #3a332b);
+  border-radius: 8px; background: var(--raised, #1b1815); display: flex; flex-direction: column; gap: 6px;
+}
+.ms-tmpl-hint { margin: 0 0 4px; font-size: 11px; line-height: 1.5; color: var(--ink-dim, #a89e8c); }
+.ms-tmpl-hint code { color: var(--patina, #8a9a6b); font-size: 10.5px; }
+.ms-tmpl-lbl { font-size: 11px; color: var(--ink-faint, #6f675a); display: flex; gap: 8px; align-items: baseline; }
+.ms-tmpl-tok { color: var(--patina, #8a9a6b); font-size: 10.5px; }
+.ms-tmpl-ta {
+  font: inherit; font-size: 12px; line-height: 1.5; color: var(--ink, #e9e2d4);
+  background: var(--sunken, #131110); border: 1px solid var(--rule, #3a332b); border-radius: 6px;
+  padding: 7px 9px; resize: vertical; width: 100%; box-sizing: border-box; white-space: pre; overflow-x: auto;
+}
+.ms-tmpl-ta:focus { outline: none; border-color: var(--patina, #8a9a6b); }
+.ms-tmpl-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.ms-tmpl-save {
+  font: inherit; font-size: 11px; cursor: pointer; color: var(--sunken, #131110);
+  background: var(--patina, #8a9a6b); border: none; border-radius: 6px; padding: 4px 14px;
+}
+.ms-tmpl-save:disabled { opacity: .5; cursor: default; }
+.ms-tmpl-reset {
+  font: inherit; font-size: 11px; cursor: pointer; color: var(--ink-faint, #6f675a);
+  background: transparent; border: 1px solid var(--rule, #3a332b); border-radius: 6px; padding: 4px 10px;
+}
+.ms-tmpl-reset:hover { color: var(--ink-dim, #a89e8c); }
+.ms-tmpl-note { margin-left: auto; font-size: 10.5px; color: var(--ink-faint, #6f675a); }
+.ms-tmpl-preview {
+  margin: 6px 0 0; padding: 10px 12px; font-size: 12px; line-height: 1.5; color: var(--ink-dim, #a89e8c);
+  background: var(--sunken, #131110); border: 1px solid var(--rule, #3a332b); border-radius: 6px;
+  white-space: pre-wrap; word-break: break-word; overflow-x: auto;
+}
 .ms-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .ms-row {
   display: flex; align-items: baseline; gap: 12px; padding: 9px 12px; border-radius: 8px; cursor: pointer;
