@@ -16,6 +16,15 @@ import { leaf, mergedAgo } from "./shared";
 import type { Project, PR, ReviewRequest } from "./types";
 
 // ── home: the ledger summary ─────────────────────────────────────────
+
+const CTX_MENU = "fixed z-[91] max-h-[calc(100dvh-16px)] min-w-[150px] overflow-y-auto overscroll-contain rounded-[8px] border border-rule bg-[#1b1815] p-[4px] shadow-[0_8px_26px_rgba(0,0,0,0.45)]";
+const CTX_HEAD = "px-[8px] pt-[4px] pb-[6px] text-[10px] uppercase tracking-[0.08em] text-ink-faint";
+const CTX_ITEM = "group flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] px-[8px] text-left text-[12px] leading-[1.55] disabled:cursor-default disabled:bg-transparent";
+const CTX_ON = "on text-gold-leaf hover:bg-vellum-edge disabled:opacity-32";
+const CTX_OFF = "text-ink-dim hover:bg-vellum-edge hover:text-ink disabled:opacity-32";
+const CTX_PIPS = "min-w-[58px] tracking-[-1px]";
+const CTX_LBL = "text-ink-faint group-hover:text-inherit";
+
 export function Home() {
   const qc = useQueryClient();
   const prs = createQuery(() => ({
@@ -468,12 +477,12 @@ export function Home() {
         {(m) => (
           <>
             <div
-              class="ctx-scrim"
+              class="ctx-scrim fixed inset-0 z-[90]"
               onClick={closeCtx}
               onContextMenu={(e) => { e.preventDefault(); closeCtx(); }}
             />
-            <div class="ctx-menu" ref={(el) => clampMenu(el, m().x, m().y)} style={{ left: `${m().x}px`, top: `${m().y}px` }}>
-              <div class="ctx-head">conviction</div>
+            <div class={`ctx-menu ${CTX_MENU}`} ref={(el) => clampMenu(el, m().x, m().y)} style={{ left: `${m().x}px`, top: `${m().y}px` }}>
+              <div class={`ctx-head ${CTX_HEAD}`}>conviction</div>
               <For each={[
                 { key: "committed", lbl: "committed", mark: "●", title: "I'm shipping this — keeps its full lifecycle bands" },
                 { key: "trying", lbl: "trying", mark: "◐", title: "leaning in, undecided — its own light section" },
@@ -482,62 +491,58 @@ export function Home() {
               ]}>
                 {(t) => (
                   <button
-                    class="ctx-item ctx-tier"
-                    classList={{ on: (m().tier ?? "") === t.key }}
+                    class={`ctx-item ctx-tier ${CTX_ITEM} py-[5px] ${(m().tier ?? "") === t.key ? CTX_ON : CTX_OFF}`}
                     title={t.title}
                     onClick={() => {
                       setTier.mutate({ repo: m().repo, project: m().project, tier: t.key });
                       setCtxMenu(null);
                     }}
                   >
-                    <span class="ctx-pips">{t.mark}</span>
-                    <span class="ctx-lbl">{t.lbl}</span>
+                    <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{t.mark}</span>
+                    <span class={`ctx-lbl ${(m().tier ?? "") === t.key ? "text-inherit" : CTX_LBL}`}>{t.lbl}</span>
                   </button>
                 )}
               </For>
               <button
-                class="ctx-item ctx-focus"
-                classList={{ on: m().focused }}
+                class={`ctx-item ctx-focus ${CTX_ITEM} py-[5px] ${m().focused ? CTX_ON : CTX_OFF}`}
                 title={m().focused ? "remove from the focus lane" : "pin to the focus lane — your hand-ordered 'pushing now' strip at the top"}
                 onClick={() => {
                   setFocus.mutate({ repo: m().repo, project: m().project, on: !m().focused });
                   setCtxMenu(null);
                 }}
               >
-                <span class="ctx-pips">{m().focused ? "★" : "☆"}</span>
-                <span class="ctx-lbl">{m().focused ? "unpin from focus" : "pin to focus"}</span>
+                <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{m().focused ? "★" : "☆"}</span>
+                <span class={`ctx-lbl ${m().focused ? "text-inherit" : CTX_LBL}`}>{m().focused ? "unpin from focus" : "pin to focus"}</span>
               </button>
-              <div class="ctx-head">importance</div>
+              <div class={`ctx-head ${CTX_HEAD}`}>importance</div>
               <For each={[5, 4, 3, 2, 1, 0]}>
                 {(lvl) => (
                   <button
-                    class="ctx-item"
-                    classList={{ on: m().current === lvl }}
+                    class={`ctx-item ${CTX_ITEM} py-[5px] ${m().current === lvl ? CTX_ON : CTX_OFF}`}
                     onClick={() => {
                       setInterest.mutate({ repo: m().repo, project: m().project, value: lvl });
                       setCtxMenu(null);
                     }}
                   >
-                    <span class="ctx-pips">{lvl === 0 ? "—" : "▲".repeat(lvl)}</span>
-                    <span class="ctx-lbl">{lvl === 0 ? "none" : `level ${lvl}`}</span>
+                    <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{lvl === 0 ? "—" : "▲".repeat(lvl)}</span>
+                    <span class={`ctx-lbl ${m().current === lvl ? "text-inherit" : CTX_LBL}`}>{lvl === 0 ? "none" : `level ${lvl}`}</span>
                   </button>
                 )}
               </For>
               <button
-                class="ctx-item ctx-shelve"
+                class={`ctx-item ctx-shelve ${CTX_ITEM} mt-[4px] border-t border-vellum-edge pt-[7px] pb-[5px] ${CTX_OFF}`}
                 title={m().shelved ? "bring this forest back into the active bands" : "deliberately pause this forest — it moves to the shelved fold no matter its PR state"}
                 onClick={() => {
                   setShelved.mutate({ repo: m().repo, project: m().project, on: !m().shelved });
                   setCtxMenu(null);
                 }}
               >
-                <span class="ctx-pips">{m().shelved ? "▶" : "⏸"}</span>
-                <span class="ctx-lbl">{m().shelved ? "unshelve" : "shelve"}</span>
+                <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{m().shelved ? "▶" : "⏸"}</span>
+                <span class={`ctx-lbl ${CTX_LBL}`}>{m().shelved ? "unshelve" : "shelve"}</span>
               </button>
-              <div class="ctx-sep" />
+              <div class="ctx-sep mx-[6px] my-[5px] h-px bg-rule" />
               <button
-                class="ctx-item ctx-drop"
-                classList={{ armed: dropArmed() }}
+                class={`ctx-item ctx-drop ${CTX_ITEM} py-[5px] ${dropArmed() ? "armed bg-del-bg text-del disabled:opacity-55" : "text-ink-dim hover:bg-del-bg hover:text-del disabled:opacity-55"}`}
                 title="forget this forest grouping — the config tag only; its branches are kept"
                 disabled={dropping() === m().project}
                 onClick={() => {
@@ -547,8 +552,8 @@ export function Home() {
                   closeCtx();
                 }}
               >
-                <span class="ctx-pips">✕</span>
-                <span class="ctx-lbl">
+                <span class={`ctx-pips ${CTX_PIPS} text-del`}>✕</span>
+                <span class={`ctx-lbl ${dropArmed() ? "text-del" : CTX_LBL}`}>
                   {dropping() === m().project ? "dropping…" : dropArmed() ? "forget forest? — click to confirm" : "drop project"}
                 </span>
               </button>

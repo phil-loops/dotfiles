@@ -322,27 +322,6 @@ body {
 .ur-commit-go:not(:disabled):hover { background: var(--del); color: var(--vellum-night); }
 .ur-commit-err { font-size: 11px; color: var(--del); margin: -6px 2px 10px; }
 
-.ctx-scrim { position: fixed; inset: 0; z-index: 90; }
-.ctx-menu {
-  position: fixed; z-index: 91; min-width: 150px; padding: 4px;
-  background: var(--raised, #1b1815); border: 1px solid var(--rule, #3a332b);
-  border-radius: 8px; box-shadow: 0 8px 26px rgba(0,0,0,0.45);
-  max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain;
-}
-.ctx-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); padding: 4px 8px 6px; }
-.ctx-item {
-  display: flex; align-items: center; gap: 10px; width: 100%; font: inherit; font-size: 12px;
-  text-align: left; cursor: pointer; padding: 5px 8px; border-radius: 6px; border: 0;
-  background: transparent; color: var(--ink-dim);
-}
-.ctx-item:hover { background: var(--vellum-edge); color: var(--ink); }
-.ctx-item:disabled { opacity: 0.32; cursor: default; background: transparent; }
-.ctx-item.on { color: var(--gold-leaf); }
-/* shelve sits apart from the interest levels — a state flip, not a ranking */
-.ctx-shelve { border-top: 1px solid var(--vellum-edge); margin-top: 4px; padding-top: 7px; }
-.ctx-pips { min-width: 58px; color: var(--gold-leaf); letter-spacing: -1px; }
-.ctx-lbl { color: var(--ink-faint); }
-.ctx-item:hover .ctx-lbl, .ctx-item.on .ctx-lbl { color: inherit; }
 /* ── ejected-rebase live stream (RebaseStream) ──────────────────────────
    floats below the actions row like .nh-menu; replaces the old frozen
    "rebasing onto origin/main via Claude" line with the job's live output. */
@@ -657,13 +636,3 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .action-btn.running { color: var(--patina); border-color: transparent; opacity: 0.7; }
 .action-btn:disabled { opacity: 0.5; cursor: default; }
 
-.ctx-item.ctx-tier.on .ctx-pips { color: var(--gold-leaf); }
-
-/* ── ctx-menu drop (destructive, two-click arm) ──────────────────────── */
-.ctx-sep { height: 1px; background: var(--rule); margin: 5px 6px; }
-.ctx-item.ctx-drop { color: var(--ink-dim); }
-.ctx-item.ctx-drop .ctx-pips { color: var(--del); }
-.ctx-item.ctx-drop:hover { background: var(--del-bg); color: var(--del); }
-.ctx-item.ctx-drop.armed { color: var(--del); background: var(--del-bg); }
-.ctx-item.ctx-drop.armed .ctx-lbl { color: var(--del); }
-.ctx-item.ctx-drop:disabled { opacity: 0.55; cursor: default; }
