@@ -142,10 +142,13 @@
 
 :root {
   /* earn the gold: a dark, unlit ledger; gold appears ONLY where work is blessed.
-     Legacy-token audit (batch 8, re-checked batch 9): every token below still has
-     consumers — the unconverted legacy rules that remain (body, .nh-editor) and the
-     keep-list set pieces (foil sweep, d2h re-tint, nh sync strip / unfold grammar). Tokens whose ONLY consumers are keep-list blocks are tagged; a token
-     with zero references gets deleted, not kept (--add-bg died here). */
+     Legacy-token audit (batch 8, closed out batch 9): every token below still has
+     consumers — the html/body base, the keep-list set pieces (foil sweep, d2h re-tint,
+     nh sync strip / unfold grammar), NodeHeader's inline style objects (--rule,
+     --ink-faint), and ChatPanel's keep-list .cp-md sheet (--ink). Tokens whose ONLY
+     consumers are keep-list blocks are tagged; a token with zero references gets
+     deleted, not kept (--add-bg died in batch 8; --gold-deep/--patina/--del-bg/
+     --display died here when their last legacy rules converted). */
   --vellum-night: #14110a;
   --vellum-raise: #1c180f;
   --vellum-edge: #221c11;
@@ -155,17 +158,14 @@
   --diff-bg: #0a0a0d;     /* cool near-black surface behind the diff (not the warm page) */
   --ink-dim: #9a8e78;
   --ink-faint: #675d4d;
-  --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
-  --gold-deep: #6e521d;
-  --gold-wash: rgba(230, 182, 78, 0.08); /* keep-list: foil-edge + .nh-editor */
+  --gold-leaf: #e6b64e;   /* blessed — the only gold on the page; keep-list: foil-edge */
+  --gold-wash: rgba(230, 182, 78, 0.08); /* keep-list: foil-edge */
   --ember: #d2732a;       /* kiln heat — warming, deliberately not the blessed gold;
                              keep-list only: nh-settle / nh-step[run] */
-  --patina: #7fa093;      /* stale — a blessing that tarnished since the branch moved */
   --rule: #2c2517;
-  --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold; in index.css
-                             keep-list only: nh-step[ok] (plus tsx inline sheets) */
-  --del: #c87a55;         /* diff deletions: ember */
-  --del-bg: rgba(200, 122, 85, 0.09);
+  --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold;
+                             keep-list only: nh-step[ok] */
+  --del: #c87a55;         /* diff deletions: ember; keep-list: nh-step[fail] */
   /* readable diff: the whole changed LINE is washed green/red (the primary add/del
      signal, not a far-left hairline), text leans off-gold, the +/- prefix is bright,
      and edited tokens sit on a solid chip with luminance-matched text (dark on the
@@ -182,7 +182,6 @@
   --chip-del-text: #fbf7ee;
   --stripe-add: #1fb300;
   --stripe-del: #cc2a18;
-  --display: "Fraunces", Georgia, serif;
   --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
 }
 
@@ -197,13 +196,6 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* the message editor — prep's landing: the one outgoing commit, editable pre-push */
-.nh-editor {
-  flex-basis: 100%;
-  display: flex; flex-direction: column; gap: 7px;
-  border: 1px solid var(--gold-deep); border-radius: 9px;
-  background: var(--gold-wash); padding: 12px 14px; margin-top: 4px;
-}
 /* ── the unfold grammar ───────────────────────────────────────────────────────
    Nothing in the header teleports into layout: expandables GROW from the seam
    under the header rule and arrive warm (an ember wash that settles into the
