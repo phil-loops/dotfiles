@@ -122,10 +122,16 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
     # git's index.lock, and a single swallowed failure used to leave the worktree pinned to a
     # stale (e.g. force-pushed) head — so a precise line-open landed on an old snapshot. Loop a
     # few times instead of trusting one attempt.
-    # uncommitted edits here are the user's in-flight work (the viewer surfaces + commits them);
-    # a -f/--hard resync would silently discard them, so leave a dirty worktree untouched.
-    if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "$b" 2>/dev/null)" \
-          && -z "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
+    if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "$b" 2>/dev/null)" ]]; then
+      # The resync always wins: this worktree exists to show the branch as the viewer shows it,
+      # so it must never sit on a stale head. Dirty tracked files would be eaten by the -f below
+      # (and skipping the sync over them is what used to pin the worktree at an old snapshot for
+      # good), so park them in a stash first — recover with `git -C <dir> stash list`. Untracked
+      # files survive checkout -f untouched, so -uno keeps them out of the stash.
+      if [[ -n "$(git -C "$dir" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+        git -C "$dir" stash push -q -m "stack-open: parked $b edits $(date +%Y-%m-%dT%H:%M:%S)" 2>/dev/null \
+          && echo "stack-open: parked uncommitted $b edits in a stash — git -C $dir stash list" >&2
+      fi
       for _ in 1 2 3 4 5; do
         git -C "$dir" checkout --detach -f "$b" -q 2>/dev/null \
           || git -C "$dir" reset --hard "$b" -q 2>/dev/null || true
