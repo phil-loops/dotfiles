@@ -95,6 +95,21 @@ deliberate geometry change re-baselines rects the same way as pixels:
 25. **Nested hover scopes need named groups** — once an inner element carries `group`, an outer
     wrapper's hover reveal must use `group/<name>` + `group-hover/<name>:`.
 
+## Behavior probes — pixels can be green with the feature dead
+
+The pixel/geometry/invariant gates verify a RENDERED STATE; they cannot see interaction.
+A conversion that touches a pointer path (drag, hover reveals driving logic, palette
+navigation) needs a behavior probe: drive the interaction in puppeteer against a
+fixture-server with the network fully owned (hold mutation responses to prove optimistic
+paint; capture payloads; never let a POST reach a real server). `behave-focus-drag.mjs`
+is the reference (`npm run visual:behave`); it asserts the client contract only — server
+reconciliation is out of a CSS conversion's blast radius.
+
+Probe-craft warning from its first run: synthetic pointer events below the viewport fold
+silently no-op and read as "feature broken" — that false signal git-bisected cleanly to an
+innocent commit that merely made the page taller. A behavior probe must assert its actors
+are inside the viewport before concluding anything.
+
 ## Keep-list — never convert these
 
 - The foil-sweep bless choreography (`.entry.foil` block in `index.css`)
