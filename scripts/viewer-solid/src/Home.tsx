@@ -176,7 +176,15 @@ export function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo: arg.repo, project: arg.project, on: arg.on }),
       }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+    // paint the pin/unpin into the cache NOW — the forest jumps into the lane (and out of triage)
+    // instantly, instead of after the whole projects fan-out refetches. Server reconciles on settle.
+    onMutate: (arg) => qc.setQueryData<Project[]>(["projects"], (cur) => {
+      if (!cur) return cur;
+      const maxRank = Math.max(0, ...cur.filter((p) => p.focus != null).map((p) => p.focus ?? 0));
+      return cur.map((p) => p.name === arg.project && (p.repo || "loops") === (arg.repo || "loops")
+        ? { ...p, focus: arg.on ? maxRank + 1 : null } : p);
+    }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
   // set a forest's conviction tier (stack-project.<name>.tier); "" unsets → untriaged.
   const setTier = createMutation(() => ({
@@ -186,7 +194,12 @@ export function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: arg.project, tier: arg.tier }),
       }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+    // optimistic: the triage decision lands in the cache immediately so the forest leaves the triage
+    // pile (or moves tiers) on click, not on the refetch that follows. "" → untriaged (null).
+    onMutate: (arg) => qc.setQueryData<Project[]>(["projects"], (cur) =>
+      cur?.map((p) => p.name === arg.project && (p.repo || "loops") === (arg.repo || "loops")
+        ? { ...p, tier: (arg.tier || null) as Project["tier"] } : p)),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
 
   const { location, navigate } = useViewerLocation();
