@@ -9,6 +9,7 @@ import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { Activity } from "./Activity";
+import { ServersDrawer } from "./ServersDrawer";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
 import { ForestOverview } from "./ForestOverview";
@@ -106,6 +107,7 @@ function Layout(props: { children?: JSX.Element }) {
       <CommandPalette />
       <ServerStatus />
       <Activity />
+      <ServersDrawer />
     </>
   );
 }
