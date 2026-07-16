@@ -6,7 +6,9 @@ export const isGhostId = (id: string): boolean => id.startsWith("✦");
 export const nodeW = (b: string): number => 50 + leafOf(b).length * 7.2 + 34;
 
 // story-tree layout constants: one branch per row, indentation IS the parent edge.
-const ROW_H = 74, INDENT = 46, LEFT = 96, TOP = 64, PAD_R = 150, PAD_B = 56;
+// PAD_R only has to clear the fan-in arc's bow (control point +58 → the curve reaches ~+43
+// past the widest node); the rest was dead viewBox that pushed the map off-centre.
+const ROW_H = 74, INDENT = 46, LEFT = 96, TOP = 64, PAD_R = 90, PAD_B = 56;
 
 export function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
   if (n.stale > 0) return "stale";
@@ -124,8 +126,8 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
       if (!me) return;
       const p = n.parent && n.parent !== "main" && pos[n.parent] ? n.parent : "main";
       const gx = p === "main" ? mainPos.x : pos[p].x + 16; // drop from the dot column
-      // start the drop BELOW the parent's purpose subtitle so the guide never strikes it.
-      const gy = p === "main" ? mainPos.y + 10 : pos[p].y + NODE_H / 2 + (byId[p]?.description ? 21 : 4);
+      // start the drop BELOW the parent's purpose subtitle (two lines now) so it never strikes it.
+      const gy = p === "main" ? mainPos.y + 10 : pos[p].y + NODE_H / 2 + (byId[p]?.description ? 31 : 4);
       edges.push({ x1: gx, y1: gy, x2: me.x - 7, y2: me.y, kind: lumen(n), from: p, to: n.id });
       const ancestors = new Set<string>();
       let x: string | undefined = n.parent, guard = 0;
