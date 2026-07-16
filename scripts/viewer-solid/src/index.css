@@ -50,6 +50,16 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.32; }
   }
+  --animate-hearth-breathe: hearth-breathe 1.6s ease-in-out infinite;
+  @keyframes hearth-breathe {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(200, 122, 85, 0.1); opacity: 0.65; }
+    50% { box-shadow: 0 0 0 5px rgba(200, 122, 85, 0.1); opacity: 1; }
+  }
+  --animate-hearth-alarm-pulse: hearth-alarm-pulse 2s ease-out 2;
+  @keyframes hearth-alarm-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 transparent; }
+    50% { box-shadow: 0 0 34px -10px #e2643a; }
+  }
 }
 
 :root {
