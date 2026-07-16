@@ -106,6 +106,12 @@ deliberate geometry change re-baselines rects the same way as pixels:
     otherwise either leave an empty `<style />` strut in the conversion commit and drop it in
     a dedicated rects-only re-baseline commit, or accept the multi-surface rects re-baseline
     and say so in the body.
+29. **A shared state-bundle const must not carry a property any state branch overrides** —
+    `bg-transparent` in the shared string vs `bg-del` in the armed branch is a generated-order
+    tie, and the loser renders (the empty "confirm: discard" pill). Backgrounds/colors that
+    vary by state live only in the per-state strings.
+30. **Never write `*/` inside a CSS comment's token list** — Tailwind's parser error is
+    cryptic and points nowhere near the comment.
 
 ## Behavior probes — pixels can be green with the feature dead
 
