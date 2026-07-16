@@ -59,4 +59,11 @@ fully check them (animations are frozen in shots).
 
 New/changed interactive flows need a `surfaces.json` entry (route + clicks + waitFor on marker
 classes). Re-record fixtures only when an API shape changes (`--record` against a live server);
-re-baseline (`--out visual/baseline`) only on a commit that *deliberately* changes pixels.
+re-baseline only on a commit that *deliberately* changes pixels, and re-baseline ONLY the
+affected surface: `node visual/shot-all.mjs --out visual/baseline --only <surface>` — a full
+re-baseline bakes antialiasing noise into every other surface's reference.
+
+shot-all refuses to run if the server on `--base` is not serving your local `dist/`
+(byte-compare of index.html) — that's the guard against gating someone else's build. If it
+trips, another checkout's fixture-server owns the port: start yours on a free port and pass
+`--base`, don't kill theirs.

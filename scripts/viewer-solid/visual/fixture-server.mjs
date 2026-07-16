@@ -91,7 +91,13 @@ createServer(async (req, res) => {
   // anything else: SPA fallback
   res.writeHead(200, { "Content-Type": "text/html" });
   res.end(readFileSync(join(DIST, "index.html")));
-}).listen(PORT, () => console.log(`fixture-server :${PORT} dist=${DIST} fixtures=${FIXTURES}${RECORD ? " RECORD←" + UPSTREAM : ""}`));
+}).listen(PORT, () => console.log(`fixture-server :${PORT} dist=${DIST} fixtures=${FIXTURES}${RECORD ? " RECORD←" + UPSTREAM : ""}`))
+  .on("error", (e) => {
+    // lose the port race LOUDLY — a silent death here left a stale server green-lighting
+    // someone else's build (the 2026-07-16 false-green). shot-all also asserts the dist.
+    console.error(`fixture-server: cannot listen on :${PORT} (${e.code}) — another server owns it. Kill it or use --port.`);
+    process.exit(4);
+  });
 
 process.on("SIGINT", () => {
   if (misses.length) console.warn(`\n${misses.length} fixture misses`);
