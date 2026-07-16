@@ -88,7 +88,7 @@ topo_order() {
     progress=0
     for m in "${members[@]}"; do
       [[ -n "${emitted[$m]:-}" ]] && continue
-      local p=$(git config "stack-branch.${m}.parent" 2>/dev/null || true)
+      local p=$(git config "branch.${m}.stack-parent" 2>/dev/null || git config "stack-branch.${m}.parent" 2>/dev/null || true)
       if [[ -z "${is_member[$p]:-}" ]] || [[ -n "${emitted[$p]:-}" ]]; then
         echo "$m"; emitted[$m]=1; progress=1
       fi
@@ -140,7 +140,7 @@ DRIFT=0   # for --check / --plan
 FAIL=0
 
 for b in "${ORDER[@]}"; do
-  parent=$(git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+  parent=$(git config "branch.${b}.stack-parent" 2>/dev/null || git config "stack-branch.${b}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
   [[ -z "$parent" ]] && parent="$MAIN_BRANCH"
   if ! dir=$(prepare_branch_dir "$b"); then
     echo "  ✗ $b — could not check out; skipping" >&2; FAIL=1; continue

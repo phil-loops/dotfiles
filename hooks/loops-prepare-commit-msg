@@ -22,7 +22,7 @@ grep -q '^Part of ' "$msg_file" && exit 0 # already carries a plan
 
 # Only the branch's FIRST commit carries the plan — that commit becomes the PR message. Once the
 # branch owns a commit beyond its parent, later commits stay plain instead of repeating the plan.
-parent=$(git config "stack-branch.$branch.parent" 2>/dev/null || true)
+parent=$(git config "branch.$branch.stack-parent" 2>/dev/null || git config "stack-branch.$branch.parent" 2>/dev/null || true)
 if [ -n "$parent" ] && git rev-parse --verify -q "$parent" >/dev/null; then
   [ "$(git rev-list --count "$parent..HEAD" 2>/dev/null || echo 0)" = 0 ] || exit 0
 fi

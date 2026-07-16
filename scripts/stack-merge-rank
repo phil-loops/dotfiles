@@ -27,7 +27,7 @@ def main():
         return
     key = sys.argv[1]
     # accept a branch (resolve its project) or a project name directly
-    project = cfg(f"stack-branch.{key}.project").strip()
+    project = cfg(f"branch.{key}.stack-project").strip() or cfg(f"stack-branch.{key}.project").strip()
     if not project:
         project = key
     branches = [b for b in cfg("--get-all", f"stack-project.{project}.branch").splitlines() if b]
@@ -38,9 +38,10 @@ def main():
     parent, requires = {}, {}
     known = set(branches)
     for b in branches:
-        p = cfg(f"stack-branch.{b}.parent").strip() or "main"
+        p = cfg(f"branch.{b}.stack-parent").strip() or cfg(f"stack-branch.{b}.parent").strip() or "main"
         parent[b] = p
-        requires[b] = [r for r in cfg("--get-all", f"stack-branch.{b}.requires").splitlines() if r]
+        requires[b] = [r for r in cfg("--get-all", f"branch.{b}.stack-requires").splitlines() if r] \
+            or [r for r in cfg("--get-all", f"stack-branch.{b}.requires").splitlines() if r]
 
     memo = {}
 

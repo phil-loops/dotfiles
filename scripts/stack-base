@@ -24,7 +24,7 @@ fi
 
 # Recorded base wins — but only if it still exists and is an ancestor of the
 # branch (an external rebase can leave it stale; fall through to recompute).
-local recorded=$(git config "stack-branch.${branch}.base" 2>/dev/null || true)
+local recorded=$(git config "branch.${branch}.stack-base" 2>/dev/null || git config "stack-branch.${branch}.base" 2>/dev/null || true)
 if [[ -n "$recorded" ]] \
    && git rev-parse --verify --quiet "$recorded" >/dev/null \
    && git merge-base --is-ancestor "$recorded" "$branch" 2>/dev/null; then
@@ -33,7 +33,7 @@ if [[ -n "$recorded" ]] \
 fi
 
 # Derive from the fork point with the parent (default main).
-local parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
+local parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
 git rev-parse --verify --quiet "$parent" >/dev/null || parent=main
 
 local base=$(git merge-base "$parent" "$branch" 2>/dev/null || true)

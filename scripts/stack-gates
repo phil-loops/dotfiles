@@ -177,7 +177,7 @@ def default_fixes(cwd, branch, borrowed=False):
     an oxfmt pass into a fresh commit. --no-verify keeps a pre-commit formatter from re-firing."""
     self_dir = os.path.dirname(os.path.abspath(__file__))
     fixes = {}
-    parent = gconf(f"stack-branch.{branch}.parent", cwd) if branch else ""
+    parent = (gconf(f"branch.{branch}.stack-parent", cwd) or gconf(f"stack-branch.{branch}.parent", cwd)) if branch else ""
     if parent in ("", "main") and borrowed:
         # Detached scratch: a bare rebase moves only the detached HEAD, and stack-open's
         # post-commit follow-hook force-moves the branch at EVERY replayed commit — so pin
@@ -190,7 +190,7 @@ def default_fixes(cwd, branch, borrowed=False):
     elif parent in ("", "main"):
         fixes["fresh"] = ("git fetch origin main -q && git rebase origin/main "
                           "|| { git rebase --abort 2>/dev/null; exit 1; }")
-    project = gconf(f"stack-branch.{branch}.project", cwd) if branch else ""
+    project = (gconf(f"branch.{branch}.stack-project", cwd) or gconf(f"stack-branch.{branch}.project", cwd)) if branch else ""
     if project and os.path.exists(os.path.join(self_dir, "stack-fmt")):
         fixes["format"] = f"{self_dir}/stack-fmt {project}"
         return fixes

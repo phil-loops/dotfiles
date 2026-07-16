@@ -20,15 +20,15 @@ branch="${1:-}"
 [[ -n "$branch" ]] || { echo "usage: stack-summary <branch> [--refresh|--status]" >&2; exit 2; }
 mode="${2:-}"
 
-parent=$(git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
+parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || echo main)
 
 # rebase-stable identity of this branch's contribution — the SAME code yields the same id on a
 # different base, so restacking never invalidates a summary; editing the code does.
 patch_id=$(git diff "${parent}...${branch}" | git patch-id --stable | awk '{print $1}')
 [[ -n "$patch_id" ]] || patch_id="empty"
 
-stored=$(git config "stack-branch.${branch}.summary" 2>/dev/null || true)
-stored_id=$(git config "stack-branch.${branch}.summary-patchid" 2>/dev/null || true)
+stored=$(git config "branch.${branch}.stack-summary" 2>/dev/null || git config "stack-branch.${branch}.summary" 2>/dev/null || true)
+stored_id=$(git config "branch.${branch}.stack-summary-patchid" 2>/dev/null || git config "stack-branch.${branch}.summary-patchid" 2>/dev/null || true)
 
 if [[ "$mode" == "--status" ]]; then
   if [[ -z "$stored" ]]; then print -r -- "absent"
