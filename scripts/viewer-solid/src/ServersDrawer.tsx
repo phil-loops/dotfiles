@@ -123,15 +123,19 @@ export function ServersDrawer() {
                 const h = () => HEALTH[p.health] ?? { label: p.health, cls: "" };
                 return (
                   <div class="card" classList={{ [h().cls]: true }}>
+                    {/* the branch is the card's identity — the "which server is which" answer */}
                     <div class="card-top">
+                      <span class="branch" title={p.dir}>{p.branch || p.name}</span>
+                      <span class="age">{p.age}</span>
+                    </div>
+                    <div class="card-vitals">
                       <span class="badge" classList={{ [h().cls]: true }}>
+                        <span class="pulse" />
                         {h().label}{p.latency != null ? ` · ${p.latency}ms` : ""}
                       </span>
-                      <Show when={p.url} fallback={<span class="branch">{p.branch || p.name}</span>}>
-                        <a class="branch" href={p.url} target="_blank" rel="noopener">{p.branch || p.name}</a>
+                      <Show when={p.url} fallback={<span class="port">:{p.port}</span>}>
+                        <a class="url" href={p.url} target="_blank" rel="noopener">localhost:{p.port} ↗</a>
                       </Show>
-                      <span class="port">:{p.port}</span>
-                      <span class="age">{p.age}</span>
                     </div>
                     <Show when={p.error}>
                       <div class="err" title={p.error}>{p.error}</div>
@@ -144,14 +148,11 @@ export function ServersDrawer() {
                       <span class="node shared">shared stack</span>
                     </div>
                     <div class="actions">
-                      <Show when={p.url}>
-                        <a class="btn" href={p.url} target="_blank" rel="noopener">open</a>
-                      </Show>
                       <button class="btn" disabled={busy() === p.dir} onClick={() => act(p.dir, "/preview-restart")}>
                         {busy() === p.dir ? "…" : "restart"}
                       </button>
-                      <button class="btn" disabled={busy() === p.dir} onClick={() => act(p.dir, "/preview-kill")}>kill</button>
                       <button class="btn" onClick={() => showLog(p.dir)}>{logFor() === p.dir ? "hide log" : "log"}</button>
+                      <button class="btn danger" disabled={busy() === p.dir} onClick={() => act(p.dir, "/preview-kill")}>kill</button>
                     </div>
                     <Show when={logFor() === p.dir}>
                       <pre class="log">{logText()}</pre>
@@ -165,7 +166,7 @@ export function ServersDrawer() {
 
         <footer class="servers-foot">
           <button class="btn" disabled={busy() === "__all__"} onClick={reap}>reap orphaned</button>
-          <button class="btn" disabled={busy() === "__all__" || previews().length === 0} onClick={killAll}>kill all</button>
+          <button class="btn danger" disabled={busy() === "__all__" || previews().length === 0} onClick={killAll}>kill all</button>
         </footer>
       </aside>
     </Show>

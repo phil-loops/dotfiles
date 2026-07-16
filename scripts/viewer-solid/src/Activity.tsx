@@ -72,13 +72,19 @@ export function Activity() {
         </button>
         <Show when={open()}>
           <div class="activity-list">
-            {/* dev servers → one launcher into the Servers drawer, never inline rows */}
+            {/* dev servers → one launcher into the Servers drawer, never inline rows. One pip per
+                server; "listening" is all the dock knows — real health is probed in the drawer. */}
             <Show when={previews().length > 0}>
-              <button class="activity-row launcher" onClick={() => openServers()} title="open the Servers panel — health, connections, restart/kill/logs">
+              <button class="activity-row launcher" onClick={() => openServers()} title="open the Servers panel — which branch each server runs, real health, restart · kill · log">
                 <span class="glyph" data-kind="preview">▷</span>
                 <span class="label">{previews().length} dev {previews().length === 1 ? "server" : "servers"}</span>
-                <span class="status">{serversUp()} up</span>
-                <span class="age">›</span>
+                <span class="pips">
+                  <For each={previews()}>
+                    {(p) => <span class="pip" classList={{ up: p.status === "up" }} title={`${p.label} — ${p.status}`} />}
+                  </For>
+                </span>
+                <span class="status">{serversUp()} listening</span>
+                <span class="chev">›</span>
               </button>
             </Show>
             <For each={rows()}>
