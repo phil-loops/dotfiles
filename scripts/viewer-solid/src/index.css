@@ -60,6 +60,11 @@
     0%, 100% { box-shadow: 0 0 0 0 transparent; }
     50% { box-shadow: 0 0 34px -10px #e2643a; }
   }
+  --animate-srvstat-pulse: srvstat-pulse 1.1s ease-in-out infinite;
+  @keyframes srvstat-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
 }
 
 :root {
