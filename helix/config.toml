@@ -29,8 +29,13 @@ trusted = [
 # space-v = the nvim :wc port (custom/wc.lua): write + commit JUST this file, then flip
 # back to the blessing viewer — the hover+o → edit → commit review loop. Custom message:
 # :w then :sh hx-wc %{buffer_name} your message
+#
+# space-t = contextual test watcher: write, then drive a tmux pane below Helix running
+# node:test --watch on this file's sibling .test.ts (or the buffer itself). Re-runs live
+# on every save; one reused pane, not a fresh split per press. See scripts/hx-test.
 [keys.normal.space]
 v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
+t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
 
 # space-o = "open" menu: m → on GitHub/main, b → on GitHub/current branch,
 # t → the tRPC procedure under the cursor (gd can't reach it: the generated
