@@ -447,7 +447,7 @@ export function ForestOverview() {
       </Show>
       <Show when={tip()}>
         {(t) => (
-          <div class="purpose-tip">
+          <div class="purpose-tip pointer-events-none fixed bottom-4 left-1/2 z-[60] max-w-[min(680px,calc(100vw-48px))] -translate-x-1/2 animate-tip-in rounded-[9px] border border-solid border-rule border-l-2 border-l-gold-deep bg-vellum-raise px-[14px] py-[9px] font-mono text-[11.5px] leading-[1.5] text-ink-dim shadow-[0_10px_30px_rgba(0,0,0,0.5)] motion-reduce:animate-none [&_b]:font-medium [&_b]:text-ink">
             <b>{leaf(t().branch)}</b> — {t().text}
           </div>
         )}

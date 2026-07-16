@@ -145,7 +145,7 @@ export function NodeHeader(props: {
             </Show>
             <Show when={canMutate}>
               <span class="sp-anchor relative inline-flex">
-                <button class="icon-btn" onClick={() => setChatPick((v) => !v)} title="chat about this whole branch — pick a live claude session or a new pane beside you">
+                <button class="icon-btn cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[9px] py-1 text-[15px] leading-none text-ink-faint hover:border-rule hover:bg-vellum-edge hover:text-ink" onClick={() => setChatPick((v) => !v)} title="chat about this whole branch — pick a live claude session or a new pane beside you">
                   ✦
                 </button>
                 <Show when={chatPick()}>

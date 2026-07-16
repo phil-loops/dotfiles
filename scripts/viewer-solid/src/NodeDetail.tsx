@@ -19,36 +19,11 @@ import type { FileDiff } from "./types";
 
 const LOADING = "loading px-1 py-[14px] italic text-ink-faint";
 
-// node-view file filter + the `?` shortcut cheatsheet — scoped here so it rides the viewer palette
-// without touching the shared index.css.
-const NODE_KBD_CSS = `
-.file-filter {
-  width: 100%; box-sizing: border-box; margin: 0 0 8px; font: inherit; font-size: 12px;
-  background: var(--bg, #100e0c); color: var(--ink, #e9e2d4);
-  border: 1px solid var(--rule, #3a332b); border-radius: 6px; padding: 5px 8px; outline: none;
-}
-.file-filter:focus { border-color: var(--gold, #e0ad4e); }
-.file-filter::placeholder { color: var(--ink-faint, #6f675a); }
-.kbd-help-scrim {
-  position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center;
-  background: rgba(8,7,6,.55);
-}
-.kbd-help {
-  min-width: 320px; max-width: 92vw; padding: 18px 20px; border-radius: 12px;
-  background: var(--raised, #1b1815); border: 1px solid var(--rule, #3a332b);
-  box-shadow: 0 24px 64px rgba(0,0,0,.5); font-family: "IBM Plex Mono", ui-monospace, monospace;
-  color: var(--ink, #e9e2d4);
-}
-.kbd-help-head { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-faint, #6f675a); margin-bottom: 14px; }
-.kbd-help dl { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; align-items: baseline; }
-.kbd-help dl > div { display: contents; }
-.kbd-help dt { display: flex; gap: 4px; justify-self: start; margin: 0; }
-.kbd-help dt .k {
-  font-size: 11px; line-height: 1.5; padding: 1px 7px; border-radius: 5px;
-  background: var(--bg, #100e0c); border: 1px solid var(--rule, #3a332b); color: var(--gold, #e0ad4e);
-}
-.kbd-help dd { margin: 0; font-size: 12.5px; color: var(--ink-dim, #a89e8c); }
-`;
+// the `?` shortcut cheatsheet — one row per binding; the div is display:contents so
+// dt/dd land directly in the dl grid.
+const KBD_DT = "m-0 flex gap-1 justify-self-start";
+const KBD_K = "k rounded-[5px] border border-solid border-rule bg-[#100e0c] px-[7px] py-px text-[11px] leading-[1.5] text-[#e0ad4e]";
+const KBD_DD = "m-0 text-[12.5px] text-ink-dim";
 
 // ── node detail: forest spine + review surface ───────────────────────
 export function NodeDetail() {
@@ -344,8 +319,11 @@ export function NodeDetail() {
         onRestorePanel={restorePanel}
       />
 
+      {/* min-w-0: a grid child defaults to min-width:auto, so a diff table's min-content
+          would silently widen the 1fr track past the viewport — the page scrolled sideways
+          at narrow widths while .diff's own overflow-x never engaged */}
       <main
-        class="surface"
+        class="surface min-w-0 max-w-[1500px] px-[34px] pt-[30px] pb-[90px]"
         onMouseOver={(e) => {
           const h = lineAt(e);
           // clear when off any row so `o` can't fire on a stale line; dedup to avoid churn
@@ -377,7 +355,7 @@ export function NodeDetail() {
         />
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
-            <span class="kbd-hint"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
+            <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>
           <Show when={node.data} fallback={<p class={LOADING}>loading…</p>}>
             {(data) => (
@@ -431,27 +409,26 @@ export function NodeDetail() {
         <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
       </Show>
       <Show when={showHelp()}>
-        <div class="kbd-help-scrim" onClick={() => setShowHelp(false)}>
-          <div class="kbd-help" onClick={(e) => e.stopPropagation()}>
-            <div class="kbd-help-head">keyboard · reviewing a branch</div>
-            <dl>
-              <div><dt><span class="k">tab</span></dt><dd>next file</dd></div>
-              <div><dt><span class="k">c</span></dt><dd>flip diffs ⇄ commits</dd></div>
-              <div><dt><span class="k">1</span><span class="k">2</span><span class="k">3</span><span class="k">4</span></dt><dd>diff vs parent / main / last blessed / outgoing (what a push sends)</dd></div>
-              <div><dt><span class="k">b</span></dt><dd>show / hide the file panel</dd></div>
-              <div><dt><span class="k">⌘F</span></dt><dd>filter files</dd></div>
-              <div><dt><span class="k">⇧B</span></dt><dd>bless file &amp; advance</dd></div>
-              <div><dt><span class="k">⇧U</span></dt><dd>unbless file</dd></div>
-              <div><dt><span class="k">o</span></dt><dd>open hovered line in nvim</dd></div>
-              <div><dt><span class="k">m</span><span class="k">esc</span></dt><dd>up to the forest</dd></div>
-              <div><dt><span class="k">?</span></dt><dd>this help</dd></div>
+        <div class="kbd-help-scrim fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(8,7,6,0.55)]" onClick={() => setShowHelp(false)}>
+          <div class="kbd-help min-w-[320px] max-w-[92vw] rounded-[12px] border border-solid border-rule bg-[#1b1815] px-5 py-[18px] font-mono text-ink shadow-[0_24px_64px_rgba(0,0,0,0.5)]" onClick={(e) => e.stopPropagation()}>
+            <div class="kbd-help-head mb-[14px] text-[11px] uppercase tracking-[0.08em] text-ink-faint">keyboard · reviewing a branch</div>
+            <dl class="m-0 grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2">
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>tab</span></dt><dd class={KBD_DD}>next file</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>c</span></dt><dd class={KBD_DD}>flip diffs ⇄ commits</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>1</span><span class={KBD_K}>2</span><span class={KBD_K}>3</span><span class={KBD_K}>4</span></dt><dd class={KBD_DD}>diff vs parent / main / last blessed / outgoing (what a push sends)</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>b</span></dt><dd class={KBD_DD}>show / hide the file panel</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⌘F</span></dt><dd class={KBD_DD}>filter files</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧B</span></dt><dd class={KBD_DD}>bless file &amp; advance</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧U</span></dt><dd class={KBD_DD}>unbless file</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>o</span></dt><dd class={KBD_DD}>open hovered line in nvim</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>m</span><span class={KBD_K}>esc</span></dt><dd class={KBD_DD}>up to the forest</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>?</span></dt><dd class={KBD_DD}>this help</dd></div>
             </dl>
           </div>
         </div>
       </Show>
-      <style>{NODE_KBD_CSS}</style>
       <Show when={flash()}>
-        <div class="flash">{flash()}</div>
+        <div class="flash fixed bottom-[26px] left-1/2 z-[250] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-[12px] text-ink shadow-[0_14px_40px_#0009]">{flash()}</div>
       </Show>
     </div>
   );

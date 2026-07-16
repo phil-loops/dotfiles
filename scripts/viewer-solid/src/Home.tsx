@@ -451,29 +451,29 @@ export function Home() {
 
 
         <Show when={flash()}>
-          <div class="flash">{flash()}</div>
+          <div class="flash fixed bottom-[26px] left-1/2 z-[250] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-[12px] text-ink shadow-[0_14px_40px_#0009]">{flash()}</div>
         </Show>
         <Show when={ftip()}>
           {(t) => (
-            <div class="forest-tip" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
+            <div class="forest-tip pointer-events-none fixed z-[60] max-h-[calc(100vh-16px)] max-w-[440px] animate-tip-in overflow-hidden rounded-[9px] border border-solid border-rule border-l-2 border-l-gold-deep bg-vellum-raise py-[7px] shadow-[0_10px_30px_rgba(0,0,0,0.5)] motion-reduce:animate-none" style={{ left: `${t().x}px`, top: `${t().y}px` }}>
               <For each={t().rows}>
                 {(r) => (
-                  <div class="forest-tip-row">
-                    <span class="forest-tip-branch">{leaf(r.branch)}</span>
-                    <span class="forest-tip-thesis" classList={{ none: !r.thesis }}>
+                  <div class="forest-tip-row grid grid-cols-[minmax(84px,36%)_1fr] items-baseline gap-3 px-[14px] py-1">
+                    <span class="forest-tip-branch overflow-hidden text-ellipsis whitespace-nowrap font-mono text-[12px] text-ink">{leaf(r.branch)}</span>
+                    <span class={`forest-tip-thesis line-clamp-2 font-mono text-[11px] leading-[1.45] ${r.thesis ? "text-ink-dim" : "text-ink-faint opacity-70"}`} classList={{ none: !r.thesis }}>
                       {r.thesis || "no purpose set"}
                     </span>
                   </div>
                 )}
               </For>
               <Show when={t().landed?.length}>
-                <div class="forest-tip-landed">
+                <div class="forest-tip-landed mt-[5px] border-x-0 border-t border-b-0 border-solid border-rule px-[14px] pt-[5px] pb-px">
                   <For each={t().landed}>
                     {(m) => (
-                      <div class="forest-tip-landed-row" title={m.title}>
-                        <span class="landed-pr">#{m.pr}</span>
-                        <span class="landed-branch">{leaf(m.branch)}</span>
-                        <span class="landed-ago">{mergedAgo(m.at) ?? new Date(m.at).toLocaleDateString()}</span>
+                      <div class="forest-tip-landed-row flex items-baseline gap-[10px] py-[2px] font-mono text-[11px]" title={m.title}>
+                        <span class="landed-pr text-gold-deep">#{m.pr}</span>
+                        <span class="landed-branch flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-ink-dim">{leaf(m.branch)}</span>
+                        <span class="landed-ago text-ink-faint">{mergedAgo(m.at) ?? new Date(m.at).toLocaleDateString()}</span>
                       </div>
                     )}
                   </For>
