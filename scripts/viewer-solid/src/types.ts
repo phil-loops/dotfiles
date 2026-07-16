@@ -117,7 +117,10 @@ export const Project = z.object({
     })
     .nullable()
     .optional(), // merged PRs attributed to this forest in the past month (gh-backed, not the daemon journal)
-  lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches
+  unpushed: z.number().optional(), // member branches whose tip is on no remote — work that never left this machine
+  green: z.number().optional(), // member branches whose gates verdict still stands (tree-keyed)
+  lastCommit: z.number().nullable().optional(), // newest committer-date (unix secs) across member branches — a rebase resets it, so it means "last touched", not "last worked on"
+  lastAuthored: z.number().nullable().optional(), // newest author-date (unix secs) — survives a rebase, so it's the clock that can see work going stale
   prOpened: z.string().nullable().optional(), // newest open-PR createdAt (ISO) across member branches
   interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home
   shelved: z.boolean().optional(), // deliberately paused (stack-project.<name>.shelved) — out of the active bands until unshelved
