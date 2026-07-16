@@ -1,8 +1,11 @@
 #!/bin/zsh
 # own-hook — Claude Code PreToolUse hook (matcher: Edit|Write|MultiEdit).
 # Routes each edited file through `own guard` so a session auto-claims the lane
-# it edits (adoption without remembering) and gets warned on cross-session
-# collisions. WARN-ONLY: this always exits 0, never blocks a tool call.
+# it edits (adoption without remembering) and is STOPPED on cross-session collisions.
+# It used to swallow the verdict (always exit 0) — a warning a busy session scrolled
+# past while the edit landed on someone else's file anyway. Now the exit code is the
+# verdict: 2 = deny, and own's stderr goes back as the reason. `own force <lane>` is
+# the escape (an Edit is a tool call, so there's no env to inline an override into).
 #
 # Claude Code feeds the hook a JSON payload on stdin: {session_id, tool_input:{file_path}}.
 emulate -L zsh; set -uo pipefail
@@ -19,4 +22,4 @@ print("fp="  + shlex.quote(fp))
 ' 2>/dev/null)"
 [[ -n "${fp:-}" ]] || exit 0
 OWN_SESSION="${sid:-}" "${0:A:h}/own" guard "$fp"
-exit 0
+exit $?   # 0 = allow, 2 = deny (PreToolUse blocks the call and feeds stderr back)
