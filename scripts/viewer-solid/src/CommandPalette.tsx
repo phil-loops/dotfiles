@@ -134,12 +134,31 @@ export default function CommandPalette() {
     return cmds;
   });
 
+  // substring outranks subsequence; consecutive runs and word-start hits rank tighter
+  const fuzzyScore = (needle: string, hay: string): number => {
+    const at = hay.indexOf(needle);
+    if (at !== -1) return 1e6 - at * 10 - hay.length;
+    let score = 0;
+    let prev = -2;
+    for (const ch of needle) {
+      const j = hay.indexOf(ch, prev + 1);
+      if (j === -1) return -Infinity;
+      score += j === prev + 1 ? 10 : 1;
+      if (j === 0 || "-/ _.".includes(hay[j - 1])) score += 5;
+      prev = j;
+    }
+    return score - hay.length * 0.01;
+  };
+
   const filtered = createMemo<Cmd[]>(() => {
-    const needle = q().toLowerCase().trim();
+    const needle = q().toLowerCase().replace(/\s+/g, "");
     const list = commands();
     if (!needle) return list;
-    // simple subsequence-friendly contains match on label+sub
-    return list.filter((c) => (c.label + " " + (c.sub || "")).toLowerCase().includes(needle));
+    return list
+      .map((c, i) => ({ c, i, s: fuzzyScore(needle, (c.label + " " + (c.sub || "")).toLowerCase()) }))
+      .filter((x) => x.s > -Infinity)
+      .sort((a, b) => b.s - a.s || a.i - b.i)
+      .map((x) => x.c);
   });
 
   createEffect(() => {
