@@ -44,6 +44,14 @@ npm run visual:shot && npm run visual:diff
    leaves the old file half-alive is worse than no conversion.
 10. **Solid, not React**: `class=`/`classList=`, `<Show>`/`<For>` — don't let Tailwind examples
     drag `className` in.
+11. **Local CSS-variable aliases don't survive — resolve them.** An old component that locally
+    redefined a token (Hearth's `--ember: var(--del)`) gets utilities for what the alias
+    *pointed at* (`del`-family), not the token it shadowed. Raw local hexes stay raw arbitrary
+    values. Keyframes that referenced local vars get the resolved value hardcoded in `@theme`.
+12. **Re-derive old rule-order ties before folding states into classList strings.** Where two
+    old rules of equal specificity overlapped, file order picked the winner (NodeSpine's
+    `.slot-push` after `.pending`); encode the *winner*, not the naive reading of each class.
+13. **`.parent:hover .child` → `group` on the parent + `group-hover:` on the child.**
 
 ## Keep-list — never convert these
 
