@@ -136,6 +136,9 @@ export function Home() {
   const [ctxMenu, setCtxMenu] = createSignal<
     { x: number; y: number; repo: string; project: string; current: number; shelved: boolean; focused: boolean; tier: string | null } | null
   >(null);
+  // drop is destructive (forgets the forest grouping) — a two-click arm so a misclick can't do it.
+  const [dropArmed, setDropArmed] = createSignal(false);
+  const closeCtx = () => { setCtxMenu(null); setDropArmed(false); };
   const setInterest = createMutation(() => ({
     mutationFn: (arg: { repo: string; project: string; value: number }) =>
       fetch(`/${arg.repo}/interest`, {
@@ -265,6 +268,7 @@ export function Home() {
     if (!canMutate) return;
     e.preventDefault();
     hideFtip();
+    setDropArmed(false);
     setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved, focused: p.focus != null, tier: p.tier ?? null });
   };
   const forestRow = (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => (
@@ -429,8 +433,8 @@ export function Home() {
           <>
             <div
               class="ctx-scrim"
-              onClick={() => setCtxMenu(null)}
-              onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
+              onClick={closeCtx}
+              onContextMenu={(e) => { e.preventDefault(); closeCtx(); }}
             />
             <div class="ctx-menu" style={{ left: `${m().x}px`, top: `${m().y}px` }}>
               <div class="ctx-head">conviction</div>
@@ -493,6 +497,24 @@ export function Home() {
               >
                 <span class="ctx-pips">{m().shelved ? "▶" : "⏸"}</span>
                 <span class="ctx-lbl">{m().shelved ? "unshelve" : "shelve"}</span>
+              </button>
+              <div class="ctx-sep" />
+              <button
+                class="ctx-item ctx-drop"
+                classList={{ armed: dropArmed() }}
+                title="forget this forest grouping — the config tag only; its branches are kept"
+                disabled={dropping() === m().project}
+                onClick={() => {
+                  if (dropping() === m().project) { return; }
+                  if (!dropArmed()) { setDropArmed(true); return; }
+                  dropProject(m().project);
+                  closeCtx();
+                }}
+              >
+                <span class="ctx-pips">✕</span>
+                <span class="ctx-lbl">
+                  {dropping() === m().project ? "dropping…" : dropArmed() ? "forget forest? — click to confirm" : "drop project"}
+                </span>
               </button>
             </div>
           </>

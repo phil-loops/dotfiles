@@ -1229,3 +1229,12 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .triage-set.trying:hover { color: var(--patina); border-color: var(--patina); }
 .triage-set.spike:hover { color: var(--ink-faint); border-color: var(--ink-faint); }
 .ctx-item.ctx-tier.on .ctx-pips { color: var(--gold-leaf); }
+
+/* ── ctx-menu drop (destructive, two-click arm) ──────────────────────── */
+.ctx-sep { height: 1px; background: var(--rule); margin: 5px 6px; }
+.ctx-item.ctx-drop { color: var(--ink-dim); }
+.ctx-item.ctx-drop .ctx-pips { color: var(--del); }
+.ctx-item.ctx-drop:hover { background: var(--del-bg); color: var(--del); }
+.ctx-item.ctx-drop.armed { color: var(--del); background: var(--del-bg); }
+.ctx-item.ctx-drop.armed .ctx-lbl { color: var(--del); }
+.ctx-item.ctx-drop:disabled { opacity: 0.55; cursor: default; }
