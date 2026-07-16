@@ -94,7 +94,7 @@ export function Home() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     }).then((r) => r.json());
-  const { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, behindNames } =
+  const { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, mergedNames } =
     useRestack({
       projectsData: () => projects.data,
       refetchProjects: () => projects.refetch(),
@@ -294,8 +294,11 @@ export function Home() {
     runningClass: `restack-all ${CHIP} mt-[30px] border-transparent text-patina opacity-80`,
     arm: true,
     busy: () => running() === "__all__",
-    label: () => (running() === "__all__" ? "⤳ restacking all…" : `⟳ restack all ${behindNames().length} behind`),
-    armLabel: () => (parked() ? `drop parked ${leaf(parked()!.project)} & restack all?` : "restack all behind?"),
+    label: () =>
+      running() === "__all__"
+        ? "⤳ restacking…"
+        : `⟳ restack ${mergedNames().length} with merged work`,
+    armLabel: () => (parked() ? `drop parked ${leaf(parked()!.project)} & restack?` : "restack merged?"),
     run: () => start("__all__"),
   });
 

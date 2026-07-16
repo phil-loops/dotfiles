@@ -23,7 +23,12 @@ export function nextStep(p: Project, pr: PR | undefined): NextStep | null {
     return { rank: 6, yourMove: false, text: `⧗ review #${pr.num}`, title: `waiting on review — nothing for you yet\n${pr.title}` };
   }
   if (pr) return { rank: 4, yourMove: false, text: `draft #${pr.num}`, title: `draft PR — mark it ready when it is\n${pr.title}` };
-  const base = p.candidates?.[0] ?? p.mergeable?.[0];
+  const landed = p.mergedNodes ?? [];
+  if (landed.length)
+    return { rank: 2, yourMove: true, text: `⟳ restack — ${leaf(landed[0])} landed`,
+      title: `${landed.map((b) => `${b} is already in main`).join("\n")}\n\n`
+        + "restack contracts the merged node(s) and rebases the rest onto fresh main" };
+  const base = p.candidates?.[0] ?? p.mergeable?.filter((b) => !landed.includes(b))[0];
   if (base) return { rank: 2, yourMove: true, text: `▸ push ${leaf(base)}`, title: `next base ready to push: ${base}` };
   return null;
 }

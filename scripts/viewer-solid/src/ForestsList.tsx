@@ -250,7 +250,7 @@ export function ForestsList(props: {
           <Show when={props.restackErr()}>
             <span class="restack-err ml-auto pr-[10px] text-[11px] tracking-[0.02em] text-del">{props.restackErr()}</span>
           </Show>
-          <Show when={canMutate && (props.projects() || []).some((p) => p.behind > 0)}>
+          <Show when={canMutate && (props.projects() || []).some((p) => (p.mergedNodes?.length ?? 0) > 0)}>
             <ActionBar actions={[props.restackAllAction()]} />
           </Show>
         </div>

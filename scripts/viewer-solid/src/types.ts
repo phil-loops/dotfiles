@@ -100,6 +100,7 @@ export const Project = z.object({
   behind: z.number(),
   mergeable: z.array(z.string()).optional(), // topo-mergeable roots; [0] is the entry node a non-loops card opens
   candidates: z.array(z.string()).optional(),
+  mergedNodes: z.array(z.string()).optional(), // landed but not yet contracted — restack drops them
   merged: z
     .object({ pr: z.number(), title: z.string(), at: z.string(), branch: z.string() })
     .nullable()
