@@ -65,6 +65,25 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.35; }
   }
+  --animate-fm-fade: fm-fade 0.8s ease forwards;
+  --animate-fm-fade-node: fm-fade 0.45s ease forwards;
+  @keyframes fm-fade {
+    to { opacity: 1; }
+  }
+  --animate-fm-fade-half: fm-fade-half 0.8s ease forwards;
+  @keyframes fm-fade-half {
+    to { opacity: 0.5; }
+  }
+  --animate-fm-kiln-breathe: fm-kiln-breathe 1.5s ease-in-out infinite;
+  @keyframes fm-kiln-breathe {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+  }
+  --animate-fm-pulse: fm-pulse 1.6s ease-in-out infinite;
+  @keyframes fm-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.25; }
+  }
 }
 
 :root {

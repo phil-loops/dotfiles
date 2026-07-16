@@ -63,6 +63,23 @@ const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: str
     ? `M${e.x1},${e.y1} C${e.x1 + 58},${e.y1} ${e.x2 + 58},${e.y2} ${e.x2},${e.y2}`
     : `M${e.x1},${e.y1} L${e.x1},${e.y2} L${e.x2},${e.y2}`;
 
+const OVERLAY =
+  "fm-overlay fixed inset-0 z-50 flex items-center justify-center overflow-auto bg-[rgba(8,6,3,0.93)] backdrop-blur-[3px]";
+const DOCK =
+  "fm-dock sticky top-0 col-[3] flex h-screen items-start justify-center overflow-auto border-l border-rule pt-[30px] px-[8px] pb-[14px]";
+const PAGE =
+  "fm-page flex [align-items:safe_center] justify-center min-h-[calc(100vh-62px)] overflow-auto pt-[30px] px-[22px] pb-[48px]";
+
+const EDGE_STROKE: Record<string, string> = {
+  blessed: "stroke-gold-deep",
+  stale: "stroke-del",
+  unblessed: "stroke-ink-faint",
+};
+
+const PILL_TEXT = "font-mono text-[11.5px] font-medium tracking-[0.02em] [text-anchor:middle]";
+// the here pill never re-pinned mono the way play did, so the ghost's display face bleeds in
+const HERE_TEXT = "font-display text-[13.5px] font-medium tracking-[0.02em] [text-anchor:middle]";
+
 
 export function ForestMap(props: {
   spine: () => SpineNode[];
@@ -394,6 +411,146 @@ export function ForestMap(props: {
     return !!s && s.lit.has(from) && s.lit.has(to);
   };
 
+  // ── the old <style> cascade, folded into per-property whole strings (state is all in
+  // signals, so classList recomputes what descendant selectors used to). The `!` marks
+  // survive translation: an entrance animation with a forwards fill on opacity outranks
+  // normal declarations, so every post-entrance opacity override must stay important.
+  const treeEdgeClass = (kind: string, lit: boolean, frozen: boolean): string => {
+    if (frozen) {
+      return spot()
+        ? "stroke-ink-faint! opacity-[0.35]! stroke-[1.6] [stroke-dasharray:2_7]! animate-fm-fade!"
+        : "stroke-ink-faint! opacity-[0.2]! stroke-[1.4] [stroke-dasharray:2_7]! animate-fm-fade!";
+    }
+    if (spot()) {
+      return lit
+        ? "opacity-100! stroke-gold-leaf! stroke-[2.3] animate-fm-fade transition-[opacity,stroke] duration-[140ms]"
+        : `opacity-[0.05]! ${EDGE_STROKE[kind]} stroke-[1.4] animate-fm-fade transition-opacity duration-[140ms]`;
+    }
+    return `${EDGE_STROKE[kind]} stroke-[1.4] animate-fm-fade motion-reduce:animate-none motion-reduce:opacity-100`;
+  };
+  const faninEdgeClass = (lit: boolean): string => {
+    if (spot()) {
+      return lit
+        ? "opacity-100! stroke-gold-leaf! stroke-[2.3] [stroke-dasharray:7_4] animate-fm-fade-half transition-[opacity,stroke] duration-[140ms]"
+        : "opacity-[0.05]! stroke-patina stroke-[1.6] [stroke-dasharray:7_4] animate-fm-fade-half transition-opacity duration-[140ms]";
+    }
+    return "stroke-patina stroke-[1.6] [stroke-dasharray:7_4] animate-fm-fade-half motion-reduce:animate-none motion-reduce:opacity-50";
+  };
+  const nodeGClass = (id: string, lit: boolean): string => {
+    const base = "cursor-pointer opacity-0 animate-fm-fade-node motion-reduce:animate-none motion-reduce:opacity-100";
+    if (kiln() && kilnState(id) === "") return `${base} opacity-[0.26]!`;
+    if (spot()) return `${base} ${lit ? "opacity-100!" : "opacity-[0.16]!"} transition-opacity duration-[140ms]`;
+    if (kilnState(id) === "pending") return `${base} opacity-[0.34]!`;
+    return base;
+  };
+  // active (and the kiln's current front) flipped every un-pinned text fill to ink via
+  // `.fm-node.active text` — one element more specific than the two-class child rules
+  const inkFlip = (id: string): boolean => id === props.active() || kilnState(id) === "current";
+  const rectClass = (n: SpineNode): string => {
+    const id = n.id;
+    const hovd = hov() === id;
+    const ghost = isGhostId(id);
+    const h = nhealth(id);
+    const ks = kilnState(id);
+    const kilnMark = ks === "set" || ks === "current" || ks === "parked";
+    const dam = dams().damSet.has(id);
+    const conflict = dams().conflictSet.has(id);
+    const active = id === props.active();
+    const head = heads().has(id);
+    const stroke =
+      hovd ? "stroke-ink"
+      : kilnMark || conflict || dam ? "stroke-del"
+      : ghost ? "stroke-ink-faint"
+      : lumen(n) === "blessed" ? "stroke-gold-deep"
+      : h?.merged ? "stroke-patina"
+      : h?.drifted ? "stroke-del"
+      : active ? "stroke-gold-leaf"
+      : head ? "stroke-ink-dim"
+      : "stroke-rule";
+    const width =
+      hovd ? "stroke-[2]"
+      : ks === "parked" || ks === "current" ? "stroke-[2.3]"
+      : ks === "set" ? "stroke-[1.6]"
+      : dam ? "stroke-[2]"
+      : ghost ? "stroke-[1.3]"
+      : h?.merged ? "stroke-[2.2]"
+      : h?.drifted ? "stroke-[2.4]"
+      : active ? "stroke-[2]"
+      : head ? "stroke-[1.6]"
+      : "stroke-[1.2]";
+    const dash =
+      ks === "parked" ? "[stroke-dasharray:5_3]"
+      : conflict ? "[stroke-dasharray:4_3]"
+      : ghost ? "[stroke-dasharray:5_4]"
+      : h?.merged ? "[stroke-dasharray:2_3]"
+      : h?.drifted ? "[stroke-dasharray:5_3]"
+      : "";
+    const fill =
+      ghost ? "fill-none"
+      : ks === "current" || hovd ? "fill-vellum-edge"
+      : "fill-vellum-raise";
+    const filter =
+      hovd ? "drop-shadow-[0_0_10px_var(--color-gold-wash)]"
+      : ks === "parked" ? "drop-shadow-[0_0_9px_var(--color-del)]"
+      : ks === "current" ? "drop-shadow-[0_0_11px_var(--color-del)]"
+      : dam ? "drop-shadow-[0_0_8px_var(--color-del)]"
+      : h?.merged ? "drop-shadow-[0_0_6px_var(--color-patina)]"
+      : h?.drifted ? "drop-shadow-[0_0_7px_var(--color-del)]"
+      : active ? "drop-shadow-[0_0_9px_var(--color-gold-wash)]"
+      : head ? "drop-shadow-[0_0_5px_var(--color-gold-wash)]"
+      : "";
+    return `${fill} ${stroke} ${width} ${dash} ${filter} transition-[stroke,fill] duration-[150ms]`;
+  };
+  const dotClass = (n: SpineNode): string => {
+    if (isGhostId(n.id)) return "hidden";
+    const ks = kilnState(n.id);
+    if (ks === "parked") return "fill-del stroke-del animate-fm-pulse motion-reduce:animate-none";
+    if (ks === "current") return "fill-del stroke-del animate-fm-kiln-breathe motion-reduce:animate-none";
+    if (ks === "set") return "fill-del stroke-del opacity-75";
+    if (dams().damSet.has(n.id)) return "fill-del stroke-del animate-fm-pulse";
+    const l = lumen(n);
+    if (l === "blessed") return "fill-gold-leaf stroke-gold-leaf drop-shadow-[0_0_5px_var(--color-gold-wash)]";
+    if (l === "stale") return "fill-del stroke-del";
+    return "fill-none stroke-ink-faint";
+  };
+  const nameClass = (n: SpineNode): string =>
+    isGhostId(n.id)
+      ? "fill-ink-dim font-display text-[13.5px]"
+      : `font-mono text-[11.5px] ${inkFlip(n.id) ? "fill-ink" : "fill-ink-dim"}`;
+  const stationClass = (s: Station, id: string): string => {
+    const fill =
+      s === "shared" ? "fill-patina"
+      : s === "ready" ? "fill-ember"
+      : inkFlip(id) ? "fill-ink"
+      : "fill-ink-faint";
+    const op = s === "ready" || hov() === id || id === props.active() ? "opacity-100" : "opacity-80";
+    return `font-mono text-[8.5px] uppercase tracking-[0.09em] [text-anchor:end] ${fill} ${op}`;
+  };
+  const prClass = (pr: BranchPR, id: string): string => {
+    const fill =
+      pr.review === "CHANGES_REQUESTED" ? "fill-del"
+      : pr.review === "APPROVED" ? "fill-gold-leaf"
+      : pr.draft ? "fill-ink-faint"
+      : `${inkFlip(id) ? "fill-ink" : "fill-patina"} hover:fill-gold-leaf`;
+    const deco = pr.toMain === false ? "underline decoration-dashed" : "hover:underline";
+    return `cursor-pointer font-mono text-[9.5px] tracking-[0.02em] [text-anchor:start] ${fill} ${deco}`;
+  };
+  const purposeClass = (id: string): string => {
+    const lift = hov() === id || id === props.active();
+    return `font-mono text-[9px] [text-anchor:middle] ${
+      lift ? "fill-ink-dim opacity-100" : kilnState(id) === "current" ? "fill-ink opacity-[0.72]" : "fill-ink-faint opacity-[0.72]"
+    }`;
+  };
+  const integClass = (id: string): string => {
+    const s = integ()[ghostProject(id)];
+    const fill =
+      s?.clean === true ? "fill-[#7c9a6b]"
+      : s && s.clean === false && !s.loading ? "fill-ember"
+      : hov() === id ? "fill-ink-dim"
+      : "fill-ink-faint";
+    return `font-mono text-[10px] [text-anchor:end] ${fill}`;
+  };
+
   // The page map is sized to its own content (W×H), so a SMALL forest rendered at natural
   // size marooned itself in the middle of a big empty column. Scale it UP to use the room —
   // never DOWN, so a tall forest still renders full-size and scrolls as before. Height comes
@@ -427,17 +584,26 @@ export function ForestMap(props: {
   return (
     <div
       ref={host}
-      class={props.page ? "fm-page" : props.docked ? "fm-dock" : "fm-overlay"}
+      class={props.page ? PAGE : props.docked ? DOCK : OVERLAY}
       onClick={props.docked || props.page ? undefined : () => props.onClose()}
     >
-      <style>{CSS}</style>
       <Show when={props.docked}>
-        <button class="fm-dock-close" title="close map" onClick={() => props.onClose()}>
+        <button
+          class="fm-dock-close absolute top-[8px] right-[10px] z-[1] cursor-pointer px-[6px] py-[2px] text-[17px] leading-none text-ink-faint hover:text-ink"
+          title="close map"
+          onClick={() => props.onClose()}
+        >
           ×
         </button>
       </Show>
       <svg
-        class="fm-svg"
+        class={`fm-svg block ${
+          props.docked
+            ? "mx-auto my-0 h-auto max-w-full max-h-[calc(100vh-44px)]"
+            : props.page
+              ? "mx-auto my-0 h-auto max-w-full max-h-none"
+              : "m-auto h-auto max-w-[94vw] max-h-[90vh]"
+        }`}
         classList={{ focusing: !!spot(), kiln: !!kiln(), docked: !!props.docked, page: !!props.page }}
         viewBox={`0 0 ${layout().W} ${layout().H}`}
         width={layout().W * zoom()}
@@ -453,7 +619,7 @@ export function ForestMap(props: {
         <For each={layout().edges.filter((e) => e.kind !== "fanin")}>
           {(e, i) => (
             <path
-              class={`fm-edge ${e.kind}`}
+              class={`fm-edge ${e.kind} fill-none opacity-0 ${treeEdgeClass(e.kind, litEdge(e.from, e.to), dams().frozen.has(e.to))}`}
               classList={{ lit: litEdge(e.from, e.to), frozen: dams().frozen.has(e.to) }}
               style={{ "animation-delay": `${i() * 40}ms` }}
               marker-end="url(#fm-arrow)"
@@ -465,21 +631,26 @@ export function ForestMap(props: {
             without words; the hover spotlight brightens the arc. */}
         <For each={layout().edges.filter((e) => e.kind === "fanin")}>
           {(e) => (
-            <path class="fm-edge fanin" classList={{ lit: litEdge(e.from, e.to) }} marker-end="url(#fm-arrow)" d={edgePath(e)}>
+            <path
+              class={`fm-edge fanin fill-none opacity-0 ${faninEdgeClass(litEdge(e.from, e.to))}`}
+              classList={{ lit: litEdge(e.from, e.to) }}
+              marker-end="url(#fm-arrow)"
+              d={edgePath(e)}
+            >
               <title>fan-in: merges after {leafOf(e.from)}</title>
             </path>
           )}
         </For>
         <g
-          class="fm-node fm-main"
+          class={`fm-node fm-main ${nodeGClass("main", !!spot() && spot()!.lit.has("main"))}`}
           classList={{ lit: !!spot() && spot()!.lit.has("main"), hov: hov() === "main" }}
           style={{ "animation-delay": "80ms" }}
           transform={`translate(${layout().mainPos.x},${layout().mainPos.y})`}
           onMouseEnter={() => setHov("main")}
           onMouseLeave={() => setHov(null)}
         >
-          <circle r="6" />
-          <text x="16" y="4">main</text>
+          <circle r="6" class="fill-gold-leaf drop-shadow-[0_0_7px_var(--color-gold-leaf)]" />
+          <text x="16" y="4" class="fill-gold-leaf font-display text-[15px]">main</text>
         </g>
         <For each={layout().list}>
           {(n, i) => {
@@ -488,7 +659,7 @@ export function ForestMap(props: {
             return (
               <Show when={p()}>
                 <g
-                  class={`fm-node ${lumen(n)}`}
+                  class={`fm-node ${lumen(n)} ${nodeGClass(n.id, !!spot() && spot()!.lit.has(n.id))}`}
                   classList={{
                     ghost: isGhostId(n.id),
                     head: heads().has(n.id),
@@ -526,14 +697,18 @@ export function ForestMap(props: {
                     <Show
                       when={nhealth(n.id)?.merged}
                       fallback={
-                        <text class="fm-warn drift" x={w / 2} y={NODE_H / 2 + 12}>
+                        <text
+                          class={`fm-warn drift font-mono text-[9.5px] tracking-[0.03em] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-del"}`}
+                          x={w / 2}
+                          y={NODE_H / 2 + 12}
+                        >
                           <title>off its parent (not a git ancestor) — its diff is effectively vs main; restack to separate</title>
                           ⤺ off-parent
                         </text>
                       }
                     >
                       <g
-                        class="fm-ghost-pill"
+                        class="fm-ghost-pill group/pill cursor-pointer"
                         classList={{ drop: ghostMode(n.id) === "drop", forward: ghostMode(n.id) === "forward" }}
                         transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}
                         onClick={(e) => {
@@ -562,29 +737,61 @@ export function ForestMap(props: {
                               ? "the PR merged but a newer commit rides on top — not droppable alone. Readies the whole forest: merged work contracts into fresh main first, then everything (the follow-on included) restacks in order. A conflict restores every branch."
                               : "merged into main (ghost)"}
                         </title>
-                        <rect x={-pillW(ghostLabel(n.id)) / 2} y={-11} rx={9} width={pillW(ghostLabel(n.id))} height={22} />
-                        <text x={0} y={4}>{ghostLabel(n.id)}</text>
+                        <rect
+                          class={`fill-vellum-night stroke-[1.2] ${
+                            ghostMode(n.id) === "drop"
+                              ? "stroke-ember group-hover/pill:fill-ember"
+                              : ghostMode(n.id) === "forward"
+                                ? "stroke-gold-leaf group-hover/pill:fill-gold-leaf"
+                                : "stroke-rule"
+                          }`}
+                          x={-pillW(ghostLabel(n.id)) / 2}
+                          y={-11}
+                          rx={9}
+                          width={pillW(ghostLabel(n.id))}
+                          height={22}
+                        />
+                        <text
+                          class={`${PILL_TEXT} ${
+                            ghostMode(n.id) === "drop"
+                              ? "fill-ember group-hover/pill:fill-vellum-night"
+                              : ghostMode(n.id) === "forward"
+                                ? "fill-gold-leaf group-hover/pill:fill-vellum-night"
+                                : "fill-ink-dim"
+                          }`}
+                          x={0}
+                          y={4}
+                        >{ghostLabel(n.id)}</text>
                       </g>
                     </Show>
                   </Show>
-                  <rect x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
-                  <circle class="dot" cx="16" cy="0" r="5" />
-                  <text x={isGhostId(n.id) ? 16 : 30} y="4.5">{leafOf(n.id)}</text>
+                  <rect class={rectClass(n)} x="0" y={-NODE_H / 2} rx="8" width={w} height={NODE_H} />
+                  <circle class={`dot stroke-[1.5] ${dotClass(n)}`} cx="16" cy="0" r="5" />
+                  <text class={nameClass(n)} x={isGhostId(n.id) ? 16 : 30} y="4.5">{leafOf(n.id)}</text>
                   {/* mirrors the PR badge's baseline on the free right side; "edit" is the
                       resting state and the absence of a mark says it more quietly. */}
                   <Show when={!isGhostId(n.id) && nstation(n) !== "edit"}>
-                    <text class="fm-station" classList={{ [nstation(n)]: true }} x={w} y={-NODE_H / 2 - 6}>
+                    <text
+                      class={`fm-station ${stationClass(nstation(n), n.id)}`}
+                      classList={{ [nstation(n)]: true }}
+                      x={w}
+                      y={-NODE_H / 2 - 6}
+                    >
                       <title>{STATION_WHY[nstation(n)]}</title>
                       {nstation(n)}
                     </text>
                   </Show>
                   <Show when={!isGhostId(n.id)}>
-                    <text class="cnt" x={w - 12} y="4.5">{n.clean}/{n.total}</text>
+                    <text
+                      class={`cnt font-mono text-[10px] [text-anchor:end] ${inkFlip(n.id) ? "fill-ink" : "fill-ink-faint"}`}
+                      x={w - 12}
+                      y="4.5"
+                    >{n.clean}/{n.total}</text>
                   </Show>
                   <Show when={!isGhostId(n.id) && prOf(n.id)}>
                     {(pr) => (
                       <text
-                        class="fm-pr"
+                        class={`fm-pr ${prClass(pr(), n.id)}`}
                         classList={{
                           draft: !!pr().draft,
                           approved: pr().review === "APPROVED",
@@ -607,7 +814,7 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id) && n.description && !nhealth(n.id)?.merged}>
                     <For each={wrapPurpose(n.description!, w)}>
                       {(line, i) => (
-                        <text class="fm-purpose" x={w / 2} y={NODE_H / 2 + 13 + i() * 10}>
+                        <text class={`fm-purpose ${purposeClass(n.id)}`} x={w / 2} y={NODE_H / 2 + 13 + i() * 10}>
                           <title>{n.description}</title>
                           {line}
                         </text>
@@ -616,7 +823,7 @@ export function ForestMap(props: {
                   </Show>
                   <Show when={isGhostId(n.id) && canMutate}>
                     <text
-                      class="cnt fm-integ"
+                      class={`cnt fm-integ ${integClass(n.id)}`}
                       x={w - 12}
                       y="4.5"
                       classList={{
@@ -648,27 +855,66 @@ export function ForestMap(props: {
                       const row = () => pw() + 8 + hw();
                       return (
                         <g transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}>
-                          <g
-                            class="fm-ghost-pill play"
-                            classList={{
-                              ready: !!integ()[proj()]?.playground?.fresh && !integ()[proj()]?.playground?.dirty,
-                              dirty: !!integ()[proj()]?.playground?.dirty && !integ()[proj()]?.armReset,
-                              armed: !!integ()[proj()]?.armReset,
-                            }}
-                            transform={`translate(${-row() / 2 + pw() / 2}, 0)`}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              clickPlayPill(n.id);
-                            }}
-                          >
-                            <title>{playTitle(proj())}</title>
-                            <rect x={-pw() / 2} y={-11} rx={9} width={pw()} height={22} />
-                            <text x={0} y={4}>{label()}</text>
-                          </g>
+                          {(() => {
+                            const st = () =>
+                              integ()[proj()]?.armReset
+                                ? "armed"
+                                : integ()[proj()]?.playground?.dirty
+                                  ? "dirty"
+                                  : integ()[proj()]?.playground?.fresh
+                                    ? "ready"
+                                    : "verb";
+                            return (
+                              <g
+                                class="fm-ghost-pill play group/pill cursor-pointer"
+                                classList={{
+                                  ready: st() === "ready",
+                                  dirty: st() === "dirty",
+                                  armed: st() === "armed",
+                                }}
+                                transform={`translate(${-row() / 2 + pw() / 2}, 0)`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  clickPlayPill(n.id);
+                                }}
+                              >
+                                <title>{playTitle(proj())}</title>
+                                <rect
+                                  class={`stroke-[1.2] ${
+                                    st() === "armed"
+                                      ? "fill-ember stroke-ember"
+                                      : st() === "dirty"
+                                        ? "fill-vellum-night stroke-ember group-hover/pill:fill-none"
+                                        : st() === "ready"
+                                          ? "fill-vellum-night stroke-rule group-hover/pill:fill-none group-hover/pill:stroke-[#7c9a6b]"
+                                          : "fill-vellum-night stroke-[#7c9a6b] group-hover/pill:fill-[#7c9a6b]"
+                                  }`}
+                                  x={-pw() / 2}
+                                  y={-11}
+                                  rx={9}
+                                  width={pw()}
+                                  height={22}
+                                />
+                                <text
+                                  class={`${PILL_TEXT} ${
+                                    st() === "armed"
+                                      ? "fill-vellum-night"
+                                      : st() === "dirty"
+                                        ? "fill-ember"
+                                        : st() === "ready"
+                                          ? "fill-ink-dim group-hover/pill:fill-[#7c9a6b]"
+                                          : "fill-[#7c9a6b] group-hover/pill:fill-vellum-night"
+                                  }`}
+                                  x={0}
+                                  y={4}
+                                >{label()}</text>
+                              </g>
+                            );
+                          })()}
                           <Show when={hereLabel(proj())}>
                             {(hlabel) => (
                               <g
-                                class="fm-ghost-pill here"
+                                class="fm-ghost-pill here group/pill cursor-pointer"
                                 classList={{
                                   done: !!integ()[proj()]?.hereDone,
                                   err: !!integ()[proj()]?.hereErr,
@@ -680,8 +926,31 @@ export function ForestMap(props: {
                                 }}
                               >
                                 <title>{hereTitle(proj())}</title>
-                                <rect x={-hw() / 2} y={-11} rx={9} width={hw()} height={22} />
-                                <text x={0} y={4}>{hlabel()}</text>
+                                <rect
+                                  class={`stroke-[1.2] ${
+                                    integ()[proj()]?.hereErr
+                                      ? "fill-vellum-night stroke-ember group-hover/pill:fill-none"
+                                      : integ()[proj()]?.hereDone
+                                        ? "fill-vellum-night stroke-rule group-hover/pill:fill-none group-hover/pill:stroke-gold-leaf"
+                                        : "fill-vellum-night stroke-gold-leaf group-hover/pill:fill-gold-leaf"
+                                  }`}
+                                  x={-hw() / 2}
+                                  y={-11}
+                                  rx={9}
+                                  width={hw()}
+                                  height={22}
+                                />
+                                <text
+                                  class={`${HERE_TEXT} ${
+                                    integ()[proj()]?.hereErr
+                                      ? "fill-ember"
+                                      : integ()[proj()]?.hereDone
+                                        ? "fill-ink-dim group-hover/pill:fill-gold-leaf"
+                                        : "fill-gold-leaf group-hover/pill:fill-vellum-night"
+                                  }`}
+                                  x={0}
+                                  y={4}
+                                >{hlabel()}</text>
                               </g>
                             )}
                           </Show>
@@ -699,184 +968,3 @@ export function ForestMap(props: {
   );
 }
 
-const CSS = `
-.fm-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center;
-  justify-content: center; overflow: auto; background: rgba(8, 6, 3, .93); backdrop-filter: blur(3px); }
-.fm-svg { display: block; margin: auto; max-width: 94vw; max-height: 90vh; height: auto; }
-/* docked: a persistent right-rail navigator (grid column), not a modal — no backdrop,
-   stays open on node-click. The svg scales to the panel width instead of the viewport. */
-.fm-dock { grid-column: 3; position: sticky; top: 0; height: 100vh; overflow: auto; border-left: 1px solid var(--rule);
-  background: var(--vellum); padding: 30px 8px 14px; display: flex; align-items: flex-start; justify-content: center; }
-.fm-svg.docked { max-width: 100%; max-height: calc(100vh - 44px); margin: 0 auto; }
-/* page: the forest landing hero — the map fills the main column under its header, no
-   backdrop and no close (you leave by picking a node or the back-link). */
-/* "safe" centre: a forest taller than the viewport falls back to flex-start, so it stays
-   scrollable to the top instead of overflowing past it unreachably. */
-.fm-page { display: flex; align-items: safe center; justify-content: center;
-  min-height: calc(100vh - 62px); padding: 30px 22px 48px; overflow: auto; }
-.fm-svg.page { max-width: 100%; max-height: none; height: auto; margin: 0 auto; }
-.fm-dock-close { position: absolute; top: 8px; right: 10px; z-index: 1; background: none; border: none;
-  color: var(--ink-faint); font-size: 17px; line-height: 1; cursor: pointer; padding: 2px 6px; }
-.fm-dock-close:hover { color: var(--ink); }
-/* every edge flows gently by default — the forest is "live water": work is
-   integration-ready and the world downstream is coherent. A dam (below) stops it. */
-.fm-edge { fill: none; stroke: var(--ink-faint); stroke-width: 1.4; opacity: 0;
-  animation: fm-fade .8s ease forwards; }
-.fm-edge.blessed { stroke: var(--gold-deep); }
-.fm-edge.stale { stroke: var(--del); }
-/* the requires arc rests faint (dashed = carried, not based-on) and reads full under the spotlight. */
-.fm-edge.fanin { stroke: var(--patina); stroke-width: 1.6; stroke-dasharray: 7 4; animation: fm-fade-half .8s ease forwards; }
-.fm-node { cursor: pointer; opacity: 0; animation: fm-fade .45s ease forwards; }
-.fm-node rect { fill: var(--vellum-raise); stroke: var(--rule); stroke-width: 1.2; transition: stroke .15s, fill .15s; }
-.fm-node:hover rect { stroke: var(--ink-faint); fill: var(--vellum-edge); }
-/* HEAD: the tip of a substack — a branch nothing builds on. Brighter ring + soft glow so
-   each substack's leaf reads at a glance; intentionally low in the cascade so active, dam,
-   kiln, and bless states all override it (a tip that is ALSO any of those shows that instead). */
-.fm-node.head rect { stroke: var(--ink-dim); stroke-width: 1.6; filter: drop-shadow(0 0 5px var(--gold-wash)); }
-.fm-node.head:hover rect { stroke: var(--ink); }
-.fm-node.active rect { stroke: var(--gold-leaf); stroke-width: 2; filter: drop-shadow(0 0 9px var(--gold-wash)); }
-.fm-node.drifted rect { stroke: var(--del); stroke-width: 2.4; stroke-dasharray: 5 3; filter: drop-shadow(0 0 7px var(--del)); }
-.fm-node.merged rect { stroke: var(--patina); stroke-width: 2.2; stroke-dasharray: 2 3; filter: drop-shadow(0 0 6px var(--patina)); }
-.fm-warn { font-family: var(--mono); font-size: 9.5px; text-anchor: middle; letter-spacing: .03em; }
-.fm-warn.drift { fill: var(--del); }
-/* merged-ghost next-step pill: a backed rect so the verb is legible OVER the edges, in ember
-   (drop & rewire — the clean ghost) or gold-leaf (ready forest — merged PR + follow-on). */
-.fm-ghost-pill { cursor: pointer; }
-.fm-ghost-pill rect { fill: var(--vellum-night, #14110a); stroke: var(--rule, #3a332b); stroke-width: 1.2; }
-.fm-ghost-pill text { font-family: var(--mono); font-size: 11.5px; text-anchor: middle; letter-spacing: .02em; font-weight: 500; fill: var(--ink-dim, #a89e8c); }
-.fm-ghost-pill.drop rect { stroke: var(--ember, #d2732a); }
-.fm-ghost-pill.drop text { fill: var(--ember, #d2732a); }
-.fm-ghost-pill.drop:hover rect { fill: var(--ember, #d2732a); stroke: var(--ember, #d2732a); }
-.fm-ghost-pill.drop:hover text { fill: var(--vellum-night, #14110a); }
-.fm-ghost-pill.forward rect { stroke: var(--gold-leaf, #e6b64e); }
-.fm-ghost-pill.forward text { fill: var(--gold-leaf, #e6b64e); }
-.fm-ghost-pill.forward:hover rect { fill: var(--gold-leaf, #e6b64e); stroke: var(--gold-leaf, #e6b64e); }
-.fm-ghost-pill.forward:hover text { fill: var(--vellum-night, #14110a); }
-.fm-node text { font-family: var(--mono); font-size: 11.5px; fill: var(--ink-dim); }
-.fm-node.active text { fill: var(--ink); }
-.fm-node .cnt { fill: var(--ink-faint); font-size: 10px; text-anchor: end; }
-/* PR badge — sits above the pill's top-left when the branch has an open PR. Click opens
-   GitHub. Neutral patina by default; gold when approved, ember on changes-requested, faint
-   when draft, dashed underline when the PR doesn't target main (the stacked-PR anti-pattern). */
-/* station: where the branch stands, mirrored opposite the PR badge. Deliberately NOT gold —
-   gold is blessing (the dot's language), and a branch can be shared without being blessed. */
-.fm-node .fm-station { fill: var(--ink-faint); font-family: var(--mono); font-size: 8.5px;
-  text-anchor: end; letter-spacing: .09em; text-transform: uppercase; opacity: .8; }
-.fm-node .fm-station.shared { fill: var(--patina); }
-.fm-node .fm-station.ready { fill: var(--ember); opacity: 1; }
-.fm-node:hover .fm-station, .fm-node.active .fm-station { opacity: 1; }
-.fm-node .fm-pr { fill: var(--patina); font-family: var(--mono); font-size: 9.5px; text-anchor: start;
-  letter-spacing: .02em; cursor: pointer; }
-.fm-node .fm-pr:hover { fill: var(--gold-leaf); text-decoration: underline; }
-.fm-node .fm-pr.draft { fill: var(--ink-faint); }
-.fm-node .fm-pr.approved { fill: var(--gold-leaf); }
-.fm-node .fm-pr.changes { fill: var(--del); }
-.fm-node .fm-pr.offbase { text-decoration: underline dashed; }
-/* purpose subtitle — the branch's one-line thesis under the pill, dim so the name leads;
-   lifts to ink-dim on hover/active so the focused node's intent is fully legible. */
-.fm-node .fm-purpose { fill: var(--ink-faint); font-family: var(--mono); font-size: 9px; text-anchor: middle; opacity: .72; }
-.fm-node:hover .fm-purpose, .fm-node.active .fm-purpose { fill: var(--ink-dim); opacity: 1; }
-/* integrate-preview badge on the ghost node — mono + small (beats the ghost's italic display
-   via the extra class), faint until you hover, ember when the project won't land clean. */
-.fm-node.ghost .fm-integ { fill: var(--ink-faint); font-style: normal; font-family: var(--mono); font-size: 10px; text-anchor: end; }
-.fm-node.ghost:hover .fm-integ { fill: var(--ink-dim); }
-.fm-node.ghost .fm-integ.clean { fill: var(--moss, #7c9a6b); }
-.fm-node.ghost .fm-integ.conflict { fill: var(--ember, #d36a36); }
-.fm-node .dot { stroke-width: 1.5; fill: none; }
-.fm-node.blessed .dot { fill: var(--gold-leaf); stroke: var(--gold-leaf); filter: drop-shadow(0 0 5px var(--gold-wash)); }
-.fm-node.blessed rect { stroke: var(--gold-deep); }
-.fm-node.stale .dot { fill: var(--del); stroke: var(--del); }
-.fm-node.unblessed .dot { stroke: var(--ink-faint); }
-.fm-main circle { fill: var(--gold-leaf); filter: drop-shadow(0 0 7px var(--gold-leaf)); }
-.fm-main text { fill: var(--gold-leaf); font-family: var(--display); font-style: normal; font-size: 15px; }
-
-/* the endstate ghost (✦ <project>): a destination, not a branch — dashed + faint, no
-   blessing dot or count, so it reads as the place the work is headed rather than work itself. */
-.fm-node.ghost rect { fill: none; stroke: var(--ink-faint); stroke-width: 1.3; stroke-dasharray: 5 4; }
-.fm-node.ghost text { fill: var(--ink-dim); font-family: var(--display); font-style: normal; font-size: 13.5px; }
-.fm-node.ghost .dot { display: none; }
-.fm-node.ghost:hover rect { stroke: var(--patina); fill: none; }
-/* playground pill — the ✦ endstate's verb, earned by a clean integrate check (moss, the
-   same material as "✓ lands clean"). Scoped under .fm-node.ghost so the ghost's own
-   dashed/display treatment (above, same specificity but later otherwise) can't bleed in.
-   States: verb (moss) → ready (settles quiet) → dirty (ember fact: edits kept) →
-   armed (filled ember question: one more click discards). */
-.fm-node.ghost .fm-ghost-pill.play rect { fill: var(--vellum-night, #14110a); stroke: var(--moss, #7c9a6b); stroke-dasharray: none; }
-.fm-node.ghost .fm-ghost-pill.play text { font-family: var(--mono); font-size: 11.5px; fill: var(--moss, #7c9a6b); }
-.fm-node.ghost .fm-ghost-pill.play:hover rect { fill: var(--moss, #7c9a6b); }
-.fm-node.ghost .fm-ghost-pill.play:hover text { fill: var(--vellum-night, #14110a); }
-.fm-node.ghost .fm-ghost-pill.play.ready rect { stroke: var(--rule, #3a332b); }
-.fm-node.ghost .fm-ghost-pill.play.ready text { fill: var(--ink-dim, #a89e8c); }
-.fm-node.ghost .fm-ghost-pill.play.ready:hover rect { fill: none; stroke: var(--moss, #7c9a6b); }
-.fm-node.ghost .fm-ghost-pill.play.ready:hover text { fill: var(--moss, #7c9a6b); }
-.fm-node.ghost .fm-ghost-pill.play.dirty rect { stroke: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.play.dirty text { fill: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.play.dirty:hover rect { fill: none; stroke: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.play.dirty:hover text { fill: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.play.armed rect { fill: var(--ember, #d2732a); stroke: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.play.armed text { fill: var(--vellum-night, #14110a); }
-.fm-node.ghost .fm-ghost-pill.here rect { fill: var(--vellum-night, #14110a); stroke: var(--gold-leaf, #e6b64e); stroke-dasharray: none; }
-.fm-node.ghost .fm-ghost-pill.here text { fill: var(--gold-leaf, #e6b64e); }
-.fm-node.ghost .fm-ghost-pill.here:hover rect { fill: var(--gold-leaf, #e6b64e); }
-.fm-node.ghost .fm-ghost-pill.here:hover text { fill: var(--vellum-night, #14110a); }
-.fm-node.ghost .fm-ghost-pill.here.done rect { stroke: var(--rule, #3a332b); }
-.fm-node.ghost .fm-ghost-pill.here.done text { fill: var(--ink-dim, #a89e8c); }
-.fm-node.ghost .fm-ghost-pill.here.done:hover rect { fill: none; stroke: var(--gold-leaf, #e6b64e); }
-.fm-node.ghost .fm-ghost-pill.here.done:hover text { fill: var(--gold-leaf, #e6b64e); }
-.fm-node.ghost .fm-ghost-pill.here.err rect { stroke: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.here.err text { fill: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.here.err:hover rect { fill: none; stroke: var(--ember, #d2732a); }
-.fm-node.ghost .fm-ghost-pill.here.err:hover text { fill: var(--ember, #d2732a); }
-
-/* DAMS: a dirty branch whose uncommitted paths collide with a downstream node's
-   own diff. The dam (red, pulsing) stops the water — every edge below it freezes
-   to a dim, static trickle, and the descendants it will actually conflict with
-   carry a dashed-red outline. The dam holds until the dirt commits + the forest restacks. */
-.fm-edge.frozen { stroke: var(--ink-faint) !important; opacity: .2 !important;
-  stroke-dasharray: 2 7 !important; animation: fm-fade .8s ease forwards !important; }   /* no drift = no flow */
-.fm-node.dam rect { stroke: var(--del); stroke-width: 2; filter: drop-shadow(0 0 8px var(--del)); }
-.fm-node.dam .dot { fill: var(--del); stroke: var(--del); animation: fm-pulse 1.6s ease-in-out infinite; }
-.fm-node.conflict rect { stroke: var(--del); stroke-dasharray: 4 3; }
-
-/* spotlight: hovering a node dims the field and lights its dependency neighborhood.
-   Lit nodes keep their resting colors — no per-direction recolor (gold/ember already
-   mean blessed/kiln elsewhere); the lit edges' arrowheads carry the direction.
-   !important beats the entrance animation's forwards-fill on opacity. */
-.fm-svg.focusing .fm-node { opacity: .16 !important; transition: opacity .14s; }
-.fm-svg.focusing .fm-edge { opacity: .05 !important; transition: opacity .14s; }
-.fm-svg.focusing .fm-node.lit, .fm-svg.focusing .fm-main.lit { opacity: 1 !important; }
-.fm-svg.focusing .fm-node.hov rect { stroke: var(--ink); stroke-width: 2; filter: drop-shadow(0 0 10px var(--gold-wash)); }
-.fm-svg.focusing .fm-edge.lit { opacity: 1 !important; stroke: var(--gold-leaf) !important; stroke-width: 2.3;
-  transition: opacity .14s, stroke .14s; }
-/* a frozen edge stays frozen even when the spotlight would otherwise light it */
-.fm-svg.focusing .fm-edge.frozen { opacity: .35 !important; stroke: var(--ink-faint) !important;
-  stroke-width: 1.6; stroke-dasharray: 2 7 !important; animation: fm-fade .8s ease forwards !important; }
-
-/* KILN: a restack walking the forest bottom-up — a heat-front climbing the branches.
-   Ember throughout, never gold (gold is earned by blessing): set = rebased this run
-   (cooled), current = rebasing now (breathing glow), pending = not yet reached (dim),
-   parked = stalled on a conflict (dashed + pulse). While the kiln burns, branches the
-   walk hasn't touched recede so the front reads clearly. !important beats the entrance
-   animation's forwards-fill on opacity (same trick the spotlight uses). */
-.fm-svg.kiln .fm-node:not(.kiln-set):not(.kiln-current):not(.kiln-pending):not(.kiln-parked) { opacity: .26 !important; }
-.fm-node.kiln-pending { opacity: .34 !important; }
-.fm-node.kiln-set rect { stroke: var(--del); stroke-width: 1.6; }
-.fm-node.kiln-set .dot { fill: var(--del); stroke: var(--del); opacity: .75; }
-.fm-node.kiln-current rect { stroke: var(--del); stroke-width: 2.3; fill: var(--vellum-edge);
-  filter: drop-shadow(0 0 11px var(--del)); }
-.fm-node.kiln-current .dot { fill: var(--del); stroke: var(--del); animation: fm-kiln-breathe 1.5s ease-in-out infinite; }
-.fm-node.kiln-current text { fill: var(--ink); }
-.fm-node.kiln-parked rect { stroke: var(--del); stroke-width: 2.3; stroke-dasharray: 5 3;
-  filter: drop-shadow(0 0 9px var(--del)); }
-.fm-node.kiln-parked .dot { fill: var(--del); stroke: var(--del); animation: fm-pulse 1.6s ease-in-out infinite; }
-
-@keyframes fm-fade { to { opacity: 1; } }
-@keyframes fm-fade-half { to { opacity: .5; } }
-@keyframes fm-kiln-breathe { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
-@keyframes fm-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
-@media (prefers-reduced-motion: reduce) {
-  .fm-edge, .fm-node { animation: none; opacity: 1; }
-  .fm-edge.fanin { opacity: .5; }
-  .fm-node.kiln-current .dot, .fm-node.kiln-parked .dot { animation: none; }
-}
-`;
