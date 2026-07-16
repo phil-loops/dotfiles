@@ -1,28 +1,30 @@
 #!/bin/zsh
 # hx-test <file> — the Helix side of a contextual test watcher. Helix has no test
-# integration and :sh discards output, so instead we drive a tmux pane BESIDE Helix
-# that runs node:test in --watch mode piped through `less -R +F`:
-#   helix/config.toml binds  space-t = [":write", ":sh hx-test %{buffer_name}"]
-# The pane is a read-only pager, NOT a shell — so vim nav works out of the box: it
-# follows the latest run automatically (zero keys), and Ctrl-c drops into normal less
-# to scroll back with j/k/g/G// (press F to resume following). Alt-j / Alt-k hop between
-# Helix and the pane. --watch re-runs on every :w on its own, so this only needs pressing
-# to (re)point the watcher at a new file.
+# integration and :sh discards output, so instead we open a tmux pane BESIDE Helix that
+# shows the current file's tests. helix/config.toml binds
+#   space-t = [":write", ":sh hx-test %{buffer_name}"]
+# The pane is a plain read-only `less` pager (driven by the hx-test-pane daemon), NOT a
+# shell — so vim nav works out of the box: j/k/g/G// scroll immediately, nothing to type,
+# no follow prompt. It re-runs and snaps to the newest result on every :w. Alt-j / Alt-k
+# hop between Helix and the pane; q closes it (space-t reopens).
 #
 # File resolution: a *.test.ts buffer runs itself; a source buffer runs its sibling
-# <base>.test.ts. Pressing space-t from a different file kills the old pane and opens a
-# fresh watcher — one test pane, never a pile of splits.
+# <base>.test.ts (and either way both files are watched, so editing source or test reruns).
+# Pressing space-t from a different file kills the old pane and its daemon and opens a
+# fresh one — one test pane, never a pile of splits.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+scripts="${0:A:h}"
 
 file="${1:?usage: hx-test <file>}"
 file="${file:A}"   # %{buffer_name} is cwd-relative; absolutize before deriving paths
 
 case "$file" in
-  *.test.ts|*.test.tsx) testfile="$file" ;;
-  *.ts)  testfile="${file:r}.test.ts" ;;
-  *.tsx) testfile="${file:r}.test.tsx" ;;
-  *)     echo "hx-test: not a TypeScript file: ${file:t}"; exit 0 ;;
+  *.test.ts)  testfile="$file";              srcfile="${file:r:r}.ts" ;;
+  *.test.tsx) testfile="$file";              srcfile="${file:r:r}.tsx" ;;
+  *.ts)       testfile="${file:r}.test.ts";  srcfile="$file" ;;
+  *.tsx)      testfile="${file:r}.test.tsx"; srcfile="$file" ;;
+  *)          echo "hx-test: not a TypeScript file: ${file:t}"; exit 0 ;;
 esac
 if [[ ! -f "$testfile" ]]; then
   echo "hx-test: no test file (${testfile:t}) next to ${file:t}"
@@ -32,20 +34,23 @@ fi
 root=$(git -C "${file:h}" rev-parse --show-toplevel)
 rel="${testfile#$root/}"
 
+watch=("$testfile")
+[[ -f "$srcfile" && "$srcfile" != "$testfile" ]] && watch+=("$srcfile")
+
 if [[ -z "${TMUX:-}" ]]; then
   echo "hx-test: not in tmux — run: task test -- $rel"
   exit 0
 fi
 
-# FORCE_COLOR keeps the spec reporter's colors alive through the pipe (node drops them
-# when stdout isn't a tty); less -R renders them. +F follows the stream so the newest
-# run is always on screen without a keystroke.
-cmd="cd ${(q)root} && FORCE_COLOR=1 npx tsx --tsconfig tsconfig.node.json --watch --test-reporter=spec --test ${(q)rel} 2>&1 | less -R +F"
-
-# Kill any previous test pane (matched by pane title) and open a fresh split below Helix;
-# -d keeps focus in Helix. A clean respawn avoids fighting less's Ctrl-c handling.
+# Kill any previous test pane (matched by pane title); its daemon notices the pane is gone
+# and exits. Open a fresh split below Helix running a placeholder the daemon will replace;
+# -d keeps focus in Helix.
 old=$(tmux list-panes -F '#{pane_id} #{pane_title}' | awk '$2=="hx-test"{print $1; exit}')
 [[ -n "$old" ]] && tmux kill-pane -t "$old"
-new=$(tmux split-window -d -v -l 30% -c "$root" -P -F '#{pane_id}' "$cmd")
+new=$(tmux split-window -d -v -l 30% -c "$root" -P -F '#{pane_id}' \
+  'printf "\n  ▶ starting test watcher…\n"; exec cat')
 tmux select-pane -t "$new" -T hx-test
-echo "▶ watching ${rel} — Alt-j into pane, Ctrl-c to scroll, Alt-k back"
+
+# Detach the daemon (&! = background + disown) so it outlives this :sh invocation and drives
+# the pane until it closes.
+nohup "$scripts/hx-test-pane" "$new" "$root" "$rel" "$watch[@]" >/dev/null 2>&1 &!
