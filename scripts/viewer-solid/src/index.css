@@ -124,7 +124,13 @@
 }
 
 :root {
-  /* earn the gold: a dark, unlit ledger; gold appears ONLY where work is blessed. */
+  /* earn the gold: a dark, unlit ledger; gold appears ONLY where work is blessed.
+     Legacy-token audit (batch 8): every token below still has consumers — the
+     unconverted legacy rules that remain (body, .surface, .nh-editor, fo-…, amb-chip,
+     commits, purpose/forest tips, watch-pin, icon-btn, action-btn, kbd-*, .flash, .ge)
+     and the keep-list set pieces (foil sweep, d2h re-tint, nh sync strip / unfold
+     grammar). Tokens whose ONLY consumers are keep-list blocks are tagged; a token
+     with zero references gets deleted, not kept (--add-bg died here). */
   --vellum-night: #14110a;
   --vellum-raise: #1c180f;
   --vellum-edge: #221c11;
@@ -136,13 +142,15 @@
   --ink-faint: #675d4d;
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page */
   --gold-deep: #6e521d;
-  --gold-wash: rgba(230, 182, 78, 0.08);
-  --ember: #d2732a;       /* kiln heat — warming, deliberately not the blessed gold */
-  --ember-wash: rgba(210, 115, 42, 0.12);
+  --gold-wash: rgba(230, 182, 78, 0.08); /* keep-list: foil-edge + .nh-editor */
+  --ember: #d2732a;       /* kiln heat — warming, deliberately not the blessed gold;
+                             keep-list only: nh-settle / nh-step[run] */
+  --ember-wash: rgba(210, 115, 42, 0.12); /* one consumer: ForestOverview's inline fo-warm sheet
+                                             (identical fallback rides the var()) */
   --patina: #7fa093;      /* stale — a blessing that tarnished since the branch moved */
   --rule: #2c2517;
-  --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold */
-  --add-bg: rgba(143, 174, 122, 0.09);
+  --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold; in index.css
+                             keep-list only: nh-step[ok] (plus tsx inline sheets) */
   --del: #c87a55;         /* diff deletions: ember */
   --del-bg: rgba(200, 122, 85, 0.09);
   /* readable diff: the whole changed LINE is washed green/red (the primary add/del
