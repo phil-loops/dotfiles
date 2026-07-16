@@ -12,7 +12,8 @@ import { parseSegments, runAction, actionById, chatMessageFor, editStreamFor, ty
 // blessed gold-leaf), and its raised/line/panel/bg surfaces are local hexes. Only ink, patina
 // and ember resolved to ledger tokens in the old CSS (defined vars beat the fallbacks), so only
 // those use ledger utilities below.
-const SMALL_BTN = "cursor-pointer whitespace-nowrap rounded-[5px] border bg-transparent px-2 py-[2px] text-[10.5px] leading-[1.55]";
+// no background here — cp-popout's open state flips to a gold wash, so callers set their own (rule 8)
+const SMALL_BTN = "cursor-pointer whitespace-nowrap rounded-[5px] border px-2 py-[2px] text-[10.5px] leading-[1.55]";
 
 // One action Claude offered, rendered as a button. Destructive actions (registry `confirm`) arm on
 // the first click and fire on the second; the rest fire immediately. The endpoint's verdict shows
@@ -274,10 +275,10 @@ export default function ChatPanel(props: {
               <For each={CHAT_MODELS}>
                 {(m) => (
                   <button
-                    class={`cp-model cursor-pointer rounded-[5px] border bg-transparent px-2 py-[2px] text-[10.5px] leading-[1.55] tracking-[0.02em] ${
+                    class={`cp-model cursor-pointer rounded-[5px] border px-2 py-[2px] text-[10.5px] leading-[1.55] tracking-[0.02em] ${
                       chatModel() === m
                         ? "on border-[#e0ad4e] bg-[rgba(224,173,78,.08)] text-[#e0ad4e]"
-                        : "border-transparent text-[#6f675a] hover:text-[#a89e8c]"
+                        : "border-transparent bg-transparent text-[#6f675a] hover:text-[#a89e8c]"
                     }`}
                     title={`claude ${m} — used when a chat starts. A running thread stays on the model it began with; hit "new chat" to switch.`}
                     onClick={() => setChatModel(m)}
@@ -292,7 +293,7 @@ export default function ChatPanel(props: {
                 <div class="cp-popout-wrap relative">
                   <button
                     class={`cp-popout ${SMALL_BTN} border-[#e0ad4e] text-[#e0ad4e] hover:bg-[rgba(224,173,78,.1)] hover:opacity-100 ${
-                      popoutOpen() ? "on bg-[rgba(224,173,78,.1)] opacity-100" : "opacity-85"
+                      popoutOpen() ? "on bg-[rgba(224,173,78,.1)] opacity-100" : "bg-transparent opacity-85"
                     }`}
                     title="pop this chat out into an interactive Claude Code session in tmux — resumes the same thread, now able to edit/run"
                     onClick={togglePopout}
@@ -325,7 +326,7 @@ export default function ChatPanel(props: {
               </Show>
               <Show when={msgs().length}>
                 <button
-                  class={`cp-new ${SMALL_BTN} border-patina text-patina enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-40 opacity-85`}
+                  class={`cp-new ${SMALL_BTN} border-patina bg-transparent text-patina enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-40 opacity-85`}
                   title="start a fresh chat — clears this thread so the next message opens a new session (the only way to switch an existing thread to a different model)"
                   disabled={streaming()}
                   onClick={() => clearThread(props.branch, path())}
