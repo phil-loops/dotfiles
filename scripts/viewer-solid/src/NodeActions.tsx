@@ -23,7 +23,8 @@ import { provider, canMutate, withRepo } from "./provider";
 import { useArm } from "./actions";
 import RebaseStream from "./RebaseStream";
 import { PlanStepsEditor } from "./PlanStepsEditor";
-import NodeSpine, { type Station, type SpineEdge } from "./NodeSpine";
+import NodeSpine, { type SpineEdge } from "./NodeSpine";
+import { nextStepOf, stationOf, type Station } from "./nodeStation";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -708,22 +709,14 @@ export function NodeActions(props: {
   // Station = where the branch stands on its real path — the DOMINANT position, not a
   // gate: a branch can sit at "review" with shaping left; the slot still offers prep.
   const blessedAll = () => !!props.blessing && props.blessing.total > 0 && props.blessing.blessed === props.blessing.total;
-  const station = (): Station => {
-    if (props.merged || shared() === "gone") {
-      return "merged";
-    }
-    const r = prepRoute.data?.route;
-    if (r === "nothing") {
-      return "shared";
-    }
-    if (r === "ready") {
-      return "ready";
-    }
-    if (props.blessing && props.blessing.blessed < props.blessing.total) {
-      return "review";
-    }
-    return "edit";
-  };
+  const station = (): Station =>
+    stationOf({
+      merged: props.merged,
+      shared: shared(),
+      prepRoute: prepRoute.data?.route,
+      blessed: props.blessing?.blessed,
+      total: props.blessing?.total,
+    });
   // Reasons live in the tooltip — why the branch sits at this station. What used to be
   // four separate header chips (shared / blocked / behind / diverged) is this one string.
   const reasons = () => {
@@ -762,50 +755,26 @@ export function NodeActions(props: {
   // Edge = the single LOCAL next step (Phil: "whatever we do here locally is fine").
   // The shared world never moves from this slot — that's the red button's sole job.
   const edge = (): SpineEdge | null => {
-    // contractable = droppable NOW (rebase-classify exit 20); contractKids() means /sync already
-    // verified it. A merged PR with a follow-on commit is merged but NOT contractable — /contract
-    // refuses it, so offer the forward rebase (push the follow-on) instead of a dead drop.
-    if (contractKids() || (props.merged && props.health?.contractable)) {
-      return {
-        label: contractKids() ? `drop ghost & rewire ${contractKids()!.length} →` : "drop ghost & rewire →",
-        kind: "contract",
-        pending: contract.isPending,
-        title: "this branch's work already merged (a ghost) — drop it, rewire its children onto main, drop any requires edge on it",
-        onClick: fire(() => contract.mutate()),
-      };
+    const step = nextStepOf({
+      merged: props.merged,
+      contractable: props.health?.contractable,
+      contractKids: contractKids(),
+      drifted: props.health?.drifted,
+      behind: behind(),
+      syncable: sync.data?.syncable,
+      prepRoute: prepRoute.data?.route,
+      prepWhy: prepRoute.data?.why,
+    });
+    if (!step) {
+      return null;
     }
-    if (props.merged) {
-      return {
-        label: "↑ rebase forward →",
-        kind: "prep",
-        pending: omniSync.isPending,
-        title: "the PR merged but a newer commit rides on top — not droppable. ⟲ sync rebases it forward onto fresh origin/main: the merged commit drops (already upstream), the follow-on stays, then routes to one commit to push.",
-        onClick: fire(startSync),
-      };
-    }
-    const r = prepRoute.data?.route;
-    const idle = (!r || r === "nothing") && !props.health?.drifted && behind() === 0;
-    if (idle) {
-      return null; // truly at rest — the slot does not render
-    }
-    const steps: string[] = [];
-    if (props.health?.drifted) {
-      steps.push("reseat onto its parent");
-    }
-    if (behind() > 0 && sync.data?.syncable) {
-      steps.push(`rebase forward (${behind()} behind)`);
-    }
-    steps.push("checkout here");
-    if (r && r !== "nothing" && r !== "ready") {
-      steps.push(prepRoute.data?.why ?? "route to one outgoing commit");
-    }
-    steps.push("open the message editor");
+    const contracting = step.kind === "contract";
     return {
-      label: "⟲ sync",
-      kind: "prep",
-      pending: omniSync.isPending,
-      title: `sync — everything local, in one motion:\n· ${steps.join("\n· ")}\n(Claude steps in when a divergence has no mechanical route)`,
-      onClick: fire(startSync),
+      label: step.label,
+      kind: step.kind,
+      title: step.title,
+      pending: contracting ? contract.isPending : omniSync.isPending,
+      onClick: fire(contracting ? () => contract.mutate() : startSync),
     };
   };
   const fire = (fn: () => void) => () => {
