@@ -1,5 +1,6 @@
 import { For, Show } from "solid-js";
 import "./NodeSpine.css";
+import type { Station } from "./nodeStation";
 
 // The node header under the one-chip-one-slot rule (Phil, 2026-07-05): ONE waymark chip —
 // the branch's position on its real path, edit → review → ready → shared → merged — and
@@ -8,8 +9,8 @@ import "./NodeSpine.css";
 // (a place on this path), a REASON (why the branch sits there — the tooltip), or an EDGE
 // (the one move forward — the slot). This component is purely presentational: the caller
 // derives station/edge from the queries it already runs and passes the mutations in.
-
-export type Station = "edit" | "review" | "ready" | "shared" | "merged";
+// Station itself is domain, not view — it lives in nodeStation.ts alongside the rules that
+// decide it, because the forest map and review surface need the same answer.
 
 export interface SpineEdge {
   label: string; // the step, named as the step: "prep: squash 3→1", "edit the why", "push"
