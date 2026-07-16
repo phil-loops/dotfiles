@@ -27,19 +27,33 @@ _MCACHE_MAX = 8
 _mcache_lock = threading.Lock()
 
 
+# the config keys the /model payload is actually built from (stack-forest's structure
+# reads + _enrich's description/interest grafts). The sig hashes ONLY these lines —
+# whole-file config mtime busted every forest's cache on any unrelated write (gates
+# verdicts, shelve/focus/usage counters churn it constantly with live sessions), so
+# /model rebuilt ~1s on nearly every fetch.
+_MODEL_CFG = re.compile(
+    r"^(stack\.main-branch="
+    r"|branch\.[^=]+\.description="
+    r"|stack-branch\.[^=]+\.(parent|requires|project)="
+    r"|stack-project\.[^=]+\.(branch|archived|interest)=)")
+
+
 def _forest_sig(branches):
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     pats = [f"refs/heads/{b}" for b in branches]
     pats += [f"refs/heads/{main}", f"refs/remotes/origin/{main}"]
     refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)", *pats]).stdout
     gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+    cfg = "\n".join(ln for ln in ctx.run(["git", "config", "--local", "--list"]).stdout.splitlines()
+                    if _MODEL_CFG.match(ln))
 
     def mt(p):
         try:
             return os.path.getmtime(p)
         except OSError:
             return 0
-    stamp = (refs + str(mt(os.path.join(gd, "config")))
+    stamp = (refs + cfg
              + str(mt(os.path.join(gd, "stack-blessed.json")))
              + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
     return hashlib.sha1(stamp.encode()).hexdigest()

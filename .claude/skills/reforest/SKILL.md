@@ -33,7 +33,7 @@ git until they approve.
 - Inventory by **capability, not by file**: what distinct, independently-reviewable things does this
   do? A generic helper/primitive, a schema change, a query layer, a model, wiring, a cleanup — each
   is a candidate branch. The test is the capability, not the caller: a helper used by an engine is
-  its OWN base (the engine `requires` it), not a commit buried inside the engine.
+  its OWN base (the engine chains on it), not a commit buried inside the engine.
 
 ## 2 · Propose the forest
 
@@ -41,8 +41,10 @@ git until they approve.
   `remove X`). Size tracks concern-count, not a line budget.
 - **Bottom-up by dependency**: schema/migration → queries → models → wiring → refactors/cleanup.
 - **Independent capabilities fork off `main` as siblings** — each its own base, independently
-  mergeable. Only **chain** (set a non-main `parent`) on a *real* compile dependency. Integrators
-  **fan in** via `requires`. Fan-in is the default; justify every chain. When unsure, split more.
+  mergeable. **Chain** (set a non-main `parent`) on a *real* dependency: the branch needs that one
+  base's content to compile, build, or run. Integrators converging **two or more** independent
+  bases **fan in** via `requires` (parent = one, `requires` = the rest); exactly one `requires` on
+  a main-rooted branch is a mis-encoded chain. Splitting is the default; when unsure, split more.
 - **Query and model branches must carry tests** — a query branch ships with its query tests (real
   DB, `createX` factories) and a model branch with its model tests (DI + `t.mock.fn()`), co-located.
   A query/model branch without tests is mis-scoped the same way a non-compiling base is — plan the
@@ -63,7 +65,7 @@ Present the forest as the **merge-story** — the same artifact the viewer rende
 ```
 <project> → main, in merge order:
 1  feat(<scope>): <plain subject>
-2  feat(<scope>): <plain subject>            ⤿ requires 1 — merges after   (separate base off main)
+2  feat(<scope>): <plain subject>            (independent base off main)
    3  feat(<scope>): <plain subject>         ↳ builds on 1                  (true child, indented)
    4  refactor(<scope>): <plain subject>     ↳ builds on 2
 ★  feat(<scope>): converge …                 converges 1·3·4 — never merges
@@ -74,7 +76,9 @@ Present the forest as the **merge-story** — the same artifact the viewer rende
   consume it, don't re-derive.
 - **`type`** = `feat` for a new capability, `refactor`/`chore` for cleanup, by the branch's nature.
 - Distinguish **`↳ builds on N`** (a true `parent` — stacked code) from **`⤿ requires N — merges
-  after`** (a fan-in base off main that must land first for runtime reasons). Indent true children.
+  after`** (an integrator carrying ≥2 bases beyond its parent lists the extras this way). A branch
+  with exactly ONE prerequisite builds on it — one dep is a parent, never a lone `requires`.
+  Indent true children.
 - For each branch: the **plain subject** (identifier-free) + one **non-trivial implementation note**
   from its slice of the diff (a mechanism, invariant, gotcha, or perf/correctness choice).
 - This is the **contract**. Revise it with the user until the split, order, labels, and purposes are
