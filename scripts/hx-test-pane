@@ -1,0 +1,35 @@
+#!/bin/zsh
+# hx-test-pane <pane-id> <root> <rel> <watch-file>... — the daemon behind space-t's
+# test pane. Runs OUTSIDE the pane (it drives the pane via respawn-pane, so it must not
+# BE the pane's process). Loop: run the test once → respawn the pane as a plain read-only
+# `less` at the bottom of the result → block until a watched file changes → repeat.
+#
+# Why not `tsx --watch | less -R +F`: follow-mode shows a "Waiting for data" prompt and
+# swallows j/k until Ctrl-c. Re-opening a fresh non-follow `less` per run instead keeps the
+# pane a normal pager — bare vim nav works out of the box — while still snapping to the
+# newest result. +G is safe here because we page a real file (a pipe would block on EOF).
+set -u
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+pane=$1; root=$2; rel=$3; shift 3
+watch=("$@")
+log=$(mktemp -t hx-test)
+trap 'rm -f "$log"' EXIT
+
+pane_alive() { tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -qx "$pane"; }
+sig() { local f s=""; for f in "$watch[@]"; do s+=" $(stat -f %m "$f" 2>/dev/null)"; done; print -r -- "$s"; }
+
+cd "$root" || exit 1
+while pane_alive; do
+  : > "$log"
+  FORCE_COLOR=1 npx tsx --tsconfig tsconfig.node.json --test-reporter=spec --test "$rel" >> "$log" 2>&1
+  pane_alive || break
+  # respawn-pane -k kills the previous less and opens a fresh one at the bottom (latest run),
+  # in the foreground so it owns the tty and bare j/k scroll.
+  tmux respawn-pane -k -t "$pane" "less -R +G ${(q)log}" 2>/dev/null || break
+  base=$(sig)
+  while pane_alive; do
+    sleep 0.6
+    [[ "$(sig)" != "$base" ]] && break
+  done
+done
