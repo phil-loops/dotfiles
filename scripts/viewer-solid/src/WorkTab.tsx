@@ -81,11 +81,7 @@ export function WorkTab(props: {
     const [mark, cls] = review(p.review);
     return (
       <>
-{/* computed reality, not intent (CONVERTING rule 21): the dead PR-draft modal's bare `.pr-draft`
-    rule collided with this tag and won the cascade — the tag has always rendered as this 820px
-    flex box. Baked in verbatim so the parity gates hold; unwinding it is a deliberate visual
-    change for its own commit + re-baseline. */}
-{p.draft && <span class="pr-draft flex w-[min(820px,92vw)] max-h-[84vh] flex-none flex-col overflow-clip rounded-[5px] border border-solid border-rule bg-vellum-raise px-[6px] py-px text-[10px] uppercase tracking-[0.06em] text-ink-faint shadow-[0_24px_60px_-20px_rgba(0,0,0,0.8)]">draft</span>}
+{p.draft && <span class="pr-draft flex-none rounded-[5px] border border-solid border-rule px-[6px] py-px text-[10px] uppercase tracking-[0.06em] text-ink-faint">draft</span>}
         <span class={`${PR_REV} ${cls}`}>{mark}</span>
       </>
     );
