@@ -411,7 +411,7 @@ export function ForestOverview() {
       </header>
       <Show
         when={spine().length}
-        fallback={<p class="loading fo-empty">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
+        fallback={<p class="loading fo-empty italic text-ink-faint">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
       >
         <Show
           when={ovView() === "story"}

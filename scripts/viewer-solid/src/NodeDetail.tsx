@@ -17,6 +17,8 @@ import { chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
 import type { FileDiff } from "./types";
 
+const LOADING = "loading px-1 py-[14px] italic text-ink-faint";
+
 // node-view file filter + the `?` shortcut cheatsheet — scoped here so it rides the viewer palette
 // without touching the shared index.css.
 const NODE_KBD_CSS = `
@@ -313,9 +315,15 @@ export function NodeDetail() {
     location,
   });
   return (
-    <div class="shell" classList={{ "panel-collapsed": !panelOpen() }}>
+    // collapsed → one column, so main (the only in-flow grid child once the spine hides)
+    // fills it instead of landing in a 0-width track
+    <div class={`shell grid min-h-screen ${panelOpen() ? "grid-cols-[264px_1fr]" : "panel-collapsed grid-cols-[1fr]"}`}>
       <Show when={!panelOpen()}>
-        <button class="panel-reopen" title="show the file panel (b)" onClick={() => setPanelOpen(true)}>
+        <button
+          class="panel-reopen fixed top-4 left-0 z-[5] cursor-pointer rounded-r-lg border border-l-0 border-rule bg-vellum-edge px-[9px] py-[7px] font-mono text-[15px] leading-none text-ink-dim hover:border-gold-deep hover:text-gold-leaf"
+          title="show the file panel (b)"
+          onClick={() => setPanelOpen(true)}
+        >
           ›
         </button>
       </Show>
@@ -371,19 +379,19 @@ export function NodeDetail() {
           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
             <span class="kbd-hint"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>
-          <Show when={node.data} fallback={<p class="loading">loading…</p>}>
+          <Show when={node.data} fallback={<p class={LOADING}>loading…</p>}>
             {(data) => (
               <Show
                 when={data().files.length}
                 fallback={
-                  <p class="loading">
+                  <p class={LOADING}>
                     {base() === "@origin"
                       ? "nothing outgoing — origin already has all of this (or the branch was never pushed; vs parent shows everything)"
                       : "nothing to review here ✦"}
                   </p>
                 }
               >
-                <Show when={data().files.filter(matchFilter).length} fallback={<p class="loading">no files match “{fileFilter()}”</p>}>
+                <Show when={data().files.filter(matchFilter).length} fallback={<p class={LOADING}>no files match “{fileFilter()}”</p>}>
                   {/* off-parent bases are view-only — bless keys on the parent...child patch-id, not the shown diff */}
                   <For each={data().files.filter(matchFilter)}>
                     {/* the ghost has no real branch — send the project so the seed resolves the integrator ref */}
@@ -415,7 +423,7 @@ export function NodeDetail() {
             />
           </Show>
           <Show when={dirtReceipt()}>
-            <p class="dirt-receipt">{dirtReceipt()}{(node.data?.dirty?.length ?? 0) === 0 ? " · working tree clean" : ""}</p>
+            <p class="dirt-receipt mx-[2px] my-[14px] text-[12px] text-add transition-opacity duration-[240ms] ease-[ease] starting:opacity-0">{dirtReceipt()}{(node.data?.dirty?.length ?? 0) === 0 ? " · working tree clean" : ""}</p>
           </Show>
         </Show>
       </main>

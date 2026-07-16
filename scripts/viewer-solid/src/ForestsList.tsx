@@ -267,7 +267,7 @@ export function ForestsList(props: {
         <Show
           when={filteredForests().length}
           fallback={
-            <p class="loading">
+            <p class="loading px-1 py-[14px] italic text-ink-faint">
               {forestQuery()
                 ? `no forest matches “${forestQuery()}”`
                 : "no forests configured"}
