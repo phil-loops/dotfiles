@@ -355,7 +355,7 @@ export function FileEntry(props: {
           </span>
         </Show>
         <Show when={canMutate}>
-          <span class="sp-anchor">
+          <span class="sp-anchor relative inline-flex">
             <button
               class={`${FILE_ACT} ${FILE_ACT_QUIET} chat-act ml-auto`}
               classList={{ working: chatWorking(), done: !chatWorking() && chatUnseen() }}
