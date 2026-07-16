@@ -7,6 +7,7 @@
 #   stack-doctor                 scan every project
 #   stack-doctor <project>       scan one project
 #   stack-doctor --orphans       only show projects with a problem (orphan/stale/ghost)
+#   stack-doctor --prune         GC config whose branch is gone (--dry-run to preview)
 #
 # Per branch:
 #   ✓ fresh    on current origin/main
@@ -20,16 +21,100 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
-only_problems=0; want=""
+only_problems=0; want=""; do_prune=0; dry_run=0
 for a in "$@"; do
   case "$a" in
     --orphans|--problems) only_problems=1 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    --prune) do_prune=1 ;;
+    --dry-run|-n) dry_run=1 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) want="$a" ;;
   esac
 done
 
 git rev-parse --git-dir >/dev/null 2>&1 || { echo "stack-doctor: not in a git repo" >&2; exit 1; }
+
+# ── prune ───────────────────────────────────────────────────────────────────
+# The cure for what the scan already diagnoses (✗ MISSING / ghost projects).
+# `stack-branch.<b>.*` and `stack-project.<p>.*` live outside git's own
+# `branch.<b>.*` namespace, which git GCs on delete and moves on rename — so
+# ours survives the branch it describes and accumulates forever.
+#
+# Two rules, both keyed on "the ref is gone", never on staleness:
+#   1. branch has no ref  → drop its stack-branch.*, its registry entries, and
+#      any other branch's `requires` naming it.
+#   2. project has no surviving member → drop its stack-project.* (focus/tier/…).
+# A project with keys but no members yet (mid-setup) is NOT pruned — it's only
+# a ghost once it had members and outlived them, so require zero live members
+# AND zero registry entries.
+alive() { git rev-parse --verify -q "$1^{commit}" >/dev/null 2>&1; }
+unset_key() {  # $1 = full key
+  if [ "$dry_run" = "1" ]; then echo "    would unset  $1"
+  else git config --unset-all "$1" 2>/dev/null || true; echo "    unset  $1"; fi
+}
+
+prune() {
+  local pruned=0 key name branch proj v
+  # --name-only is load-bearing: `summary` values are multi-line prose, so raw
+  # --get-regexp output interleaves value lines that parse as bogus keys.
+  # Suffixes never contain a dot, branch names do (cal.com-integration) — so
+  # strip the LAST component, never split on the first.
+  echo "── pruning config whose branch is gone ──"
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    name="${key#stack-branch.}"; branch="${name%.*}"
+    alive "$branch" && continue
+    echo "  ✗ $branch (no ref)"
+    unset_key "$key"; pruned=$((pruned+1))
+  done < <(git config --name-only --get-regexp '^stack-branch\..*\.' 2>/dev/null | sort)
+
+  # registry entries + fan-in deps naming a branch that no longer exists
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    while IFS= read -r v; do
+      [ -n "$v" ] || continue
+      alive "$v" && continue
+      if [ "$dry_run" = "1" ]; then echo "    would drop   $key = $v (no ref)"
+      else git config --unset-all "$key" "^$(printf '%s' "$v" | sed 's/[][\.*^$/]/\\&/g')$" 2>/dev/null || true
+           echo "    dropped  $key = $v (no ref)"; fi
+      pruned=$((pruned+1))
+    done < <(git config --get-all "$key" 2>/dev/null)
+  done < <(git config --name-only --get-regexp '^(stack-project\..*\.branch|stack-branch\..*\.requires)$' 2>/dev/null | sort -u)
+
+  # ghost projects: keys outliving every member. Build the live-member set ONCE —
+  # per-project rescans are O(projects x branches) git calls and crawl on a big forest.
+  local live_projects
+  live_projects=$'\n'
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    name="${key#stack-branch.}"; branch="${name%.*}"
+    alive "$branch" || continue
+    v=$(git config "stack-branch.$branch.project" 2>/dev/null || true)
+    [ -n "$v" ] && live_projects+="$v"$'\n'
+  done < <(git config --name-only --get-regexp '^stack-branch\..*\.project$' 2>/dev/null)
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    proj="${key#stack-project.}"; proj="${proj%.*}"
+    while IFS= read -r v; do
+      [ -n "$v" ] && alive "$v" && live_projects+="$proj"$'\n'
+    done < <(git config --get-all "$key" 2>/dev/null)
+  done < <(git config --name-only --get-regexp '^stack-project\..*\.branch$' 2>/dev/null)
+
+  while IFS= read -r proj; do
+    [ -n "$proj" ] || continue
+    case "$live_projects" in *$'\n'"$proj"$'\n'*) continue ;; esac
+    echo "  ⊘ project $proj (no surviving member)"
+    while IFS= read -r key; do unset_key "$key"; pruned=$((pruned+1)); done \
+      < <(git config --name-only --get-regexp "^stack-project\.$(printf '%s' "$proj" | sed 's/[][\.*^$/]/\\&/g')\." 2>/dev/null | sort -u)
+  done < <(git config --name-only --get-regexp '^stack-project\.' 2>/dev/null \
+           | sed -E 's/^stack-project\.(.*)\.[^.]+$/\1/' | sort -u)
+
+  if [ "$pruned" = "0" ]; then echo "  nothing to prune — config is clean"
+  elif [ "$dry_run" = "1" ]; then echo "── $pruned dangling key(s) would be pruned (--prune without --dry-run to apply) ──"
+  else echo "── $pruned dangling key(s) pruned ──"; fi
+}
+
+if [ "$do_prune" = "1" ]; then prune; exit 0; fi
 git fetch origin main --quiet 2>/dev/null || true
 OM=$(git rev-parse origin/main 2>/dev/null || git rev-parse main)
 
