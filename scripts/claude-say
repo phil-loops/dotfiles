@@ -222,7 +222,8 @@ def main():
         snippet = msg.strip()[:24]
         line = next((l for l in reversed(sh(["tmux", "capture-pane", "-t", pane, "-p"]).splitlines())
                      if snippet and snippet in l), "")
-        residue = line.split(snippet)[0].strip(" │|┃▌>❯›∙·⏵") if line else ""
+        # a lone nbsp/zero-width IS an empty composer — counting it as residue strands the note
+        residue = line.split(snippet)[0].strip(" \t\xa0\u2007\u202f\u200b│|┃▌>❯›∙·⏵") if line else ""
         if residue:
             print("composer already held %r — NOT submitting; left as a draft to review in that pane."
                   % residue[-20:], file=sys.stderr)
