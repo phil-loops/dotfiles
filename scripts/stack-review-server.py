@@ -14,7 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase, processes
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase, processes, preview
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
@@ -370,6 +370,12 @@ class H(BaseHTTPRequestHandler):
             return checkout.move(self, raw)
         if self.path == "/worktree":  # reveal the branch's worktree in Finder (scratch one if none)
             return checkout.worktree(self, raw)
+        if self.path == "/preview":   # spin a side-port `next dev` for this branch (no touch to :3000)
+            return preview.start(self, raw)
+        if self.path == "/preview-kill":   # stop one side-port preview (by its worktree dir)
+            return preview.kill(self, raw)
+        if self.path == "/preview-reap":   # stop orphaned/crashed previews
+            return preview.reap(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
         if self.path == "/contract":   # drop an already-merged branch + rewire its children onto main

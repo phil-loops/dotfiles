@@ -145,6 +145,32 @@
 .activity-row.bad .glyph {
   color: var(--del);
 }
+.activity-row .glyph[data-kind="preview"] {
+  color: var(--patina);
+}
+/* a preview's label is a link to its side-port server — reads like the other labels, opens on click. */
+.activity-row a.label {
+  text-decoration: none;
+  cursor: pointer;
+}
+.activity-row a.label:hover {
+  text-decoration: underline;
+}
+/* × — stop this dev server. Quiet until hover (ambient dock, not a control panel). */
+.activity-row .kill {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.activity-row .kill:hover {
+  color: var(--del);
+}
 
 @keyframes activity-breathe {
   0%, 100% { opacity: 1; }
