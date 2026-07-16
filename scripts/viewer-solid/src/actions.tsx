@@ -52,17 +52,25 @@ export function useArm(ms = 3000): {
 
 // Renders a row of actions. Each button swallows the click (so an enclosing <Link> row doesn't
 // navigate) and routes arm-required actions through a single useArm.
+// Fallback styling when an Action carries no `class`. The old .action-btn.running opacity
+// (0.7) never rendered — running always co-occurs with :disabled, whose 0.5 won the tie —
+// so only disabled:opacity-50 survives translation.
+const AB = "action-btn flex-none cursor-pointer rounded-[7px] border px-[11px] py-[3px] text-[11px] leading-[1.55] tracking-[0.03em] transition-[border-color,color,background] duration-[120ms] disabled:cursor-default disabled:opacity-50";
+const AB_QUIET = `${AB} border-transparent bg-transparent text-patina hover:border-patina`;
+const AB_ARMED = `${AB} border-del bg-del-bg text-del`;
+const AB_RUNNING = `${AB} border-transparent bg-transparent text-patina`;
+
 export function ActionBar(props: { actions: Action[]; class?: string }): JSX.Element {
   const { armed, trigger } = useArm();
   return (
-    <div class={props.class ?? "action-bar"}>
+    <div class={props.class ?? "action-bar inline-flex items-center gap-2"}>
       <For each={props.actions}>
         {(a) => (
           <button
             class={
-              (a.busy?.() && a.runningClass) ||
-              (armed() === a.id && a.armedClass) ||
-              (a.class ?? "action-btn")
+              (a.busy?.() && (a.runningClass ?? AB_RUNNING)) ||
+              (armed() === a.id && (a.armedClass ?? AB_ARMED)) ||
+              (a.class ?? AB_QUIET)
             }
             classList={{ armed: armed() === a.id, running: !!a.busy?.() }}
             title={a.title}

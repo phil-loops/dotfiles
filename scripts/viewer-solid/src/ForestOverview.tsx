@@ -13,54 +13,29 @@ import type { Purpose } from "./types";
 
 // ── forest overview: the map as the landing hero (no node selected) ──────
 // Picking a node navigates to /forests/<project>/<branch> — the per-node review surface.
-const FO_VIEWS_CSS = `
-.fo-views { display: inline-flex; gap: 2px; margin-left: auto; }
-.fo-views button {
-  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px;
-  color: var(--ink-faint, #6f675a); background: transparent; border: 1px solid transparent;
-}
-.fo-views button:hover { color: var(--ink-dim, #a89e8c); }
-.fo-views button.on { color: var(--gold, #e0ad4e); border-color: var(--rule, #3a332b); background: var(--raised, #1b1815); }
-.fo-chat {
-  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px; margin-left: 6px;
-  color: var(--ember, #d2732a); background: transparent; border: 1px solid var(--gold-deep, #6e521d);
-}
-.fo-chat:hover { color: var(--gold-leaf, #e6b64e); border-color: var(--gold-leaf, #e6b64e); }
-.fo-stage {
-  font: inherit; font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 6px; margin-left: 6px;
-  color: var(--patina, #7fa093); background: transparent; border: 1px solid var(--rule, #3a332b);
-}
-.fo-stage:hover:not(:disabled) { color: var(--ink, #e8dcc4); border-color: var(--patina, #7fa093); }
-.fo-stage:disabled { opacity: 0.5; cursor: default; }
-.fo-stage.armed { color: var(--vellum-night, #14110a); background: var(--patina, #7fa093); border-color: var(--patina, #7fa093); }
-.fo-stage-msg { font-size: 11px; margin-left: 6px; color: var(--ink-dim, #a89e8c); white-space: nowrap; }
-.fo-stage-msg.bad { color: var(--del, #c87a55); }
-
-/* Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs GitHub).
-   Ember, never the blessed gold; a delay guard keeps it off sub-second warm-cache loads. */
-.fo-warm { display: inline-flex; align-items: center; gap: 8px;
-  font-size: 11px; letter-spacing: 0.05em; white-space: nowrap; }
-.fo-warm.reading { color: var(--ember, #d2732a); }
-.fo-warm.read { color: var(--ink-dim, #a89e8c); animation: fo-warm-fade 0.4s ease both; }
-.fo-warm.refreshing { color: var(--ink-faint, #6f675a); }
-.fo-warm b { font-weight: 500; color: var(--gold-leaf, #e6b64e); }         /* the count that earns a look */
-.fo-warm .fo-coal {
-  width: 7px; height: 7px; border-radius: 50%; flex: none;
-  background: var(--ember, #d2732a); box-shadow: 0 0 8px var(--ember-wash, rgba(210,115,42,.12));
-}
-.fo-warm.reading .fo-coal { animation: fo-breathe 1.5s ease-in-out infinite; }
-.fo-warm.read .fo-coal { background: var(--gold-leaf, #e6b64e); box-shadow: 0 0 8px var(--gold-wash, rgba(230,182,78,.08)); }
-.fo-warm.refreshing .fo-coal { width: 5px; height: 5px; background: var(--ink-faint, #6f675a); box-shadow: none;
-  animation: fo-breathe 1.9s ease-in-out infinite; }
-
-@keyframes fo-breathe { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
-@keyframes fo-warm-fade { from { opacity: 0; transform: translateY(-2px); } to { opacity: 1; transform: none; } }
-@media (prefers-reduced-motion: reduce) {
-  .fo-warm .fo-coal { animation: none !important; }
-  .fo-warm.reading .fo-coal { opacity: 1; }
-}
-@media (max-width: 600px) { .fo-warm { white-space: normal; } }
-`;
+// The old inline sheet's --gold/--raised fallbacks were live (#e0ad4e / #1b1815 — those
+// tokens were never defined); they stay raw below.
+const FO_BTN = "cursor-pointer rounded-[6px] px-[10px] py-[3px] text-[11px] leading-[1.55]";
+const FO_VIEW_OFF = "border-transparent bg-transparent text-ink-faint hover:text-ink-dim";
+const FO_VIEW_ON = "border-rule bg-[#1b1815] text-[#e0ad4e]";
+const FO_STAGE = `fo-stage ${FO_BTN} ml-[6px] border enabled:hover:border-patina enabled:hover:text-ink disabled:cursor-default disabled:opacity-50`;
+const FO_STAGE_QUIET = "border-rule bg-transparent text-patina";
+const FO_STAGE_ARMED = "border-patina bg-patina text-vellum-night";
+const FO_STAGE_MSG = "fo-stage-msg ml-[6px] text-[11px] whitespace-nowrap";
+// Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs
+// GitHub). Ember, never the blessed gold; a delay guard keeps it off sub-second loads.
+const FO_WARM = "fo-warm inline-flex items-center gap-2 text-[11px] tracking-[0.05em] whitespace-nowrap max-[600px]:whitespace-normal";
+const FO_WARM_STATE: Record<string, string> = {
+  reading: "text-ember",
+  read: "animate-fo-warm-fade text-ink-dim",
+  refreshing: "text-ink-faint",
+};
+const FO_COAL = "fo-coal flex-none rounded-full motion-reduce:animate-none";
+const FO_COAL_STATE: Record<string, string> = {
+  reading: "h-[7px] w-[7px] animate-fo-breathe bg-ember shadow-[0_0_8px_var(--color-ember-wash)]",
+  read: "h-[7px] w-[7px] bg-gold-leaf shadow-[0_0_8px_var(--color-gold-wash)]",
+  refreshing: "h-[5px] w-[5px] animate-fo-breathe-slow bg-ink-faint shadow-none",
+};
 
 // The forest header's warming indicator. Three honest states, straight from the health query —
 // which maps 1:1 to the server's SWR cache: pending-with-no-data = cold read (~5s vs GitHub),
@@ -104,12 +79,12 @@ function WarmingRibbon(props: {
   return (
     <Show when={state()}>
       {(s) => (
-        <span class={`fo-warm ${s()}`} aria-live="polite">
-          <span class="fo-coal" />
+        <span class={`${FO_WARM} ${s()} ${FO_WARM_STATE[s()]}`} aria-live="polite">
+          <span class={`${FO_COAL} ${FO_COAL_STATE[s()]}`} />
           <Show when={s() === "reading"}>warming · reading branch health from GitHub</Show>
           <Show when={s() === "read"}>
             <Show when={attn() > 0} fallback={<>read · all clear</>}>
-              read · <b>{attn()}</b> {attn() === 1 ? "needs" : "need"} attention
+              read · <b class="font-medium text-gold-leaf">{attn()}</b> {attn() === 1 ? "needs" : "need"} attention
             </Show>
           </Show>
           <Show when={s() === "refreshing"}>· refreshing</Show>
@@ -162,7 +137,7 @@ function StageButton(props: { project: string }) {
   return (
     <>
       <button
-        class="fo-stage"
+        class={`${FO_STAGE} ${armed() ? FO_STAGE_ARMED : FO_STAGE_QUIET}`}
         classList={{ armed: armed() }}
         disabled={busy()}
         title="stage for testing — restack this chain onto fresh origin/main, then move your main checkout onto the tip so the dev server serves it. Refuses on a dirty checkout, an open PR in the chain, or anything but a single main-rooted line."
@@ -171,7 +146,7 @@ function StageButton(props: { project: string }) {
         {busy() ? "staging…" : armed() ? "confirm: move my checkout" : "⇪ stage"}
       </button>
       <Show when={msg()}>
-        <span class="fo-stage-msg" classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
+        <span class={`${FO_STAGE_MSG} ${msg()!.bad ? "text-del" : "text-ink-dim"}`} classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
       </Show>
     </>
   );
@@ -278,7 +253,7 @@ function ShipButton(props: { project: string }) {
   return (
     <>
       <button
-        class="fo-stage"
+        class={`${FO_STAGE} ${armed() ? FO_STAGE_ARMED : FO_STAGE_QUIET}`}
         classList={{ armed: armed() }}
         disabled={busy()}
         title="ready to ship — drop any member that already merged (rewiring its children), restack the whole forest onto fresh origin/main, then list what to push in order. Refuses if a member has an open PR or a dirty worktree; a conflict restores everything."
@@ -287,12 +262,12 @@ function ShipButton(props: { project: string }) {
         {busy() ? "readying…" : armed() ? confirmLabel() : "▸ ready"}
       </button>
       <Show when={armed() && (preview()?.conflict ?? 0) > 0}>
-        <span class="fo-stage-msg bad" title="a conflicting rebase restores every branch to where it was — nothing is left half-done">
+        <span class={`${FO_STAGE_MSG} bad text-del`} title="a conflicting rebase restores every branch to where it was — nothing is left half-done">
           ⚠ {preview()!.conflict} may conflict
         </span>
       </Show>
       <Show when={shipMsg()}>
-        <span class="fo-stage-msg" classList={{ bad: !!shipMsg()!.bad }}>{shipMsg()!.text}</span>
+        <span class={`${FO_STAGE_MSG} ${shipMsg()!.bad ? "text-del" : "text-ink-dim"}`} classList={{ bad: !!shipMsg()!.bad }}>{shipMsg()!.text}</span>
       </Show>
     </>
   );
@@ -371,28 +346,28 @@ export function ForestOverview() {
   const [chatPick, setChatPick] = createSignal(false);
 
   return (
-    <div class="forest-overview">
-      <header class="fo-head">
+    <div class="forest-overview min-h-screen bg-vellum-night">
+      <header class="fo-head sticky top-0 z-[2] flex items-baseline gap-4 border-x-0 border-t-0 border-b border-solid border-rule bg-vellum-night px-6 py-4">
         <Link class="brand inline-block px-[20px] pb-[2px] font-display text-[22px] font-semibold italic text-ink no-underline" to={{ kind: "home", tab: "forests" }}>
           <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> blessed
         </Link>
-        <span class="fo-project">{project()}</span>
+        <span class="fo-project font-display text-[21px] italic text-ink">{project()}</span>
         <Show when={(model.data?.interest ?? 0) > 0}>
-          <span class="fo-interest" title={`interest ${model.data!.interest} — promoted on the Forests home`}>
+          <span class="fo-interest text-[11px] tracking-[-1px] text-gold-leaf" title={`interest ${model.data!.interest} — promoted on the Forests home`}>
             {interestPips(model.data!.interest!)}
           </span>
         </Show>
         <Show when={spine().length}>
-          <span class="fo-meta">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
+          <span class="fo-meta text-[12px] tracking-[0.04em] text-ink-faint">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
           <WarmingRibbon loading={health.isFetching} hasData={!!health.data} needsAttention={needsAttention()} />
-          <div class="fo-views" role="group" aria-label="overview view">
-            <button classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
-            <button class="fo-view-story" classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
+          <div class="fo-views ml-auto inline-flex gap-[2px]" role="group" aria-label="overview view">
+            <button class={`${FO_BTN} border ${ovView() === "map" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
+            <button class={`fo-view-story ${FO_BTN} border ${ovView() === "story" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
           </div>
           <Show when={canMutate}>
             <span class="sp-anchor relative inline-flex">
               <button
-                class="fo-chat"
+                class={`fo-chat ${FO_BTN} ml-[6px] border border-gold-deep bg-transparent text-ember hover:border-gold-leaf hover:text-gold-leaf`}
                 title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
                 onClick={() => setChatPick((v) => !v)}
               >✦ chat</button>
@@ -407,11 +382,10 @@ export function ForestOverview() {
             <StageButton project={project()} />
           </Show>
         </Show>
-        <style>{FO_VIEWS_CSS}</style>
       </header>
       <Show
         when={spine().length}
-        fallback={<p class="loading fo-empty italic text-ink-faint">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
+        fallback={<p class="loading fo-empty px-6 py-10 italic text-ink-faint">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
       >
         <Show
           when={ovView() === "story"}
