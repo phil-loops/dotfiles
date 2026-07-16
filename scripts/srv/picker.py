@@ -390,6 +390,19 @@ def _shelved_set():
     return out
 
 
+def _focus_ranks():
+    # {project: rank} — Phil's hand-ordered focus lane (stack-project.<p>.focus N, 1-based
+    # position). The lane is "what I'm pushing now", ordered by rank; absent = not pinned.
+    out = {}
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.focus$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        m = re.match(r"^stack-project\.(.+)\.focus$", key)
+        if m and val.strip().lstrip("-").isdigit() and int(val) > 0:
+            out[m.group(1)] = int(val)
+    return out
+
+
 def _projects_snapshot_file():
     gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
     return os.path.join(gd, "stack-projects-cache.json") if gd else ""
@@ -471,6 +484,7 @@ def _projects_build(name, path, pck):
     commits = _branch_commit_unix()
     interest = _interest_levels()
     shelved = _shelved_set()
+    focus = _focus_ranks()
     for p in projs:
         p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
@@ -485,6 +499,7 @@ def _projects_build(name, path, pck):
         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
         p["interest"] = interest.get(p["name"], 0)
         p["shelved"] = p["name"] in shelved
+        p["focus"] = focus.get(p["name"])
         p["epic"] = ctx.run(["git", "config", f"stack-project.{p['name']}.epic"]).stdout.strip() or None
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches

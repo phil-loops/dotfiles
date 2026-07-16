@@ -114,7 +114,7 @@ export function Home() {
   // right-click a forest card → set its importance (stack-project.<name>.interest) — what
   // floats the forest up the Home list.
   const [ctxMenu, setCtxMenu] = createSignal<
-    { x: number; y: number; repo: string; project: string; current: number; shelved: boolean } | null
+    { x: number; y: number; repo: string; project: string; current: number; shelved: boolean; focused: boolean } | null
   >(null);
   const setInterest = createMutation(() => ({
     mutationFn: (arg: { repo: string; project: string; value: number }) =>
@@ -131,6 +131,17 @@ export function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project: arg.project, on: arg.on }),
+      }).then((r) => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  }));
+  // pin/unpin a forest to the focus lane (stack-project.<name>.focus) — cross-repo, so /focus is
+  // not repo-prefixed; the body carries the repo the rank is written into.
+  const setFocus = createMutation(() => ({
+    mutationFn: (arg: { repo: string; project: string; on: boolean }) =>
+      fetch(`/focus`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo: arg.repo, project: arg.project, on: arg.on }),
       }).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
@@ -224,7 +235,7 @@ export function Home() {
     if (!canMutate) return;
     e.preventDefault();
     hideFtip();
-    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved });
+    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved, focused: p.focus != null });
   };
   const forestRow = (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => (
     <ForestRow
@@ -391,6 +402,18 @@ export function Home() {
               onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
             />
             <div class="ctx-menu" style={{ left: `${m().x}px`, top: `${m().y}px` }}>
+              <button
+                class="ctx-item ctx-focus"
+                classList={{ on: m().focused }}
+                title={m().focused ? "remove from the focus lane" : "pin to the focus lane — your hand-ordered 'pushing now' strip at the top"}
+                onClick={() => {
+                  setFocus.mutate({ repo: m().repo, project: m().project, on: !m().focused });
+                  setCtxMenu(null);
+                }}
+              >
+                <span class="ctx-pips">{m().focused ? "★" : "☆"}</span>
+                <span class="ctx-lbl">{m().focused ? "unpin from focus" : "pin to focus"}</span>
+              </button>
               <div class="ctx-head">importance</div>
               <For each={[5, 4, 3, 2, 1, 0]}>
                 {(lvl) => (

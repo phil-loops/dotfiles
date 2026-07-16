@@ -308,6 +308,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/claude-sessions": return assist.claude_sessions(self)   # live sessions for the ✦ picker
         elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
         elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
+        elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
+        elif u.path == "/preview-log":    return preview.log(self)   # tail one preview's next-dev log
         else:
             self._send(404, "{}")
 
@@ -362,6 +364,8 @@ class H(BaseHTTPRequestHandler):
             return review.interest_bump(self, raw)
         if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
             return review.shelve(self, raw)
+        if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
+            return review.focus_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
@@ -374,6 +378,8 @@ class H(BaseHTTPRequestHandler):
             return preview.start(self, raw)
         if self.path == "/preview-kill":   # stop one side-port preview (by its worktree dir)
             return preview.kill(self, raw)
+        if self.path == "/preview-restart":   # kill + fresh next dev on the same port
+            return preview.restart(self, raw)
         if self.path == "/preview-reap":   # stop orphaned/crashed previews
             return preview.reap(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
