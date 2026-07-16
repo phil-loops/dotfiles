@@ -111,60 +111,6 @@ case "${1:-list}" in
     done
     print "holding [${(j:, :)@}] for slice:$name — one feature across these lanes."
     print "the other session's 'own list' now shows WHY they're held. edit these directly; patch anything else." ;;
-  trespass) # own trespass <epoch> — did anything just write into ANOTHER live session's lane?
-    # The Edit guard only sees Edit/Write tool calls. A shell command — sed -i, cat >, tee, a
-    # heredoc, git apply, a headless editor — walks straight past it, so PREVENTION on that path
-    # is a heuristic at best (you cannot parse a shell command's write targets, and a blanket
-    # deny would break the sanctioned `git apply --3way` itself). DETECTION is exact: a write
-    # leaves a mark on disk whatever made it. So we look at the disk, right after the command.
-    # Ignored paths (dist/, __pycache__) never appear — git status skips them — so builds are quiet.
-    # mtime CANNOT attribute authorship: a holder saving their own file during your command
-    # window looks identical to you stomping it. That blamed a read-only `git status` for
-    # another session's legitimate save. So subtract what was already dirty before the
-    # command ran — a file the holder is mid-edit on is THEIRS, and its churn is not news.
-    # What survives is a file that was CLEAN and is now dirty, inside this command's window:
-    # attributable, because nothing else made it appear.
-    local since="${2:-}" snap="${3:-}"; [[ -n "$since" ]] || exit 0
-    local rel abs mt lane out="" mine=""
-    local -A pre hit
-    [[ -n "$snap" && -f "$snap" ]] && while IFS= read -r rel; do
-      [[ -n "$rel" ]] && pre[$rel]=1
-    done < "$snap"
-    while IFS= read -r rel; do
-      [[ -n "$rel" ]] || continue
-      (( ${+pre[$rel]} )) && continue                  # already dirty at pre → the holder's own WIP, not attributable to us
-      abs="$ROOT/$rel"; [[ -f "$abs" ]] || continue
-      mt=$(stat -f %m "$abs" 2>/dev/null) || continue
-      (( mt >= since )) || continue                    # untouched by this command → not ours to judge
-      lane=$(_lane_for "$rel"); [[ -n "$lane" ]] || continue
-      _held_by_other "$lane" || { mine+="   $rel → [$lane]"$'\n'; continue; }
-      out+="   $rel → [$lane]$(_holder_tag "$lane")"$'\n'
-      hit[$lane]="$rel"
-    done < <(cd "$ROOT" && git status --porcelain --no-renames 2>/dev/null | sed 's/^...//')
-    [[ -n "$out" ]] || exit 0
-    # Tell the HOLDER, not just the offender. The report used to land only in the trespasser's
-    # tool result, ending with "tell them yourself" — a class of bug fixed by asking the guilty
-    # party to be diligent, which is the thing tooling is supposed to replace. The person whose
-    # work is being overwritten is the one who needs to know, and they cannot see it from their
-    # side (a raw write leaves no tool call in their transcript).
-    local hlane hs note
-    for hlane in ${(k)hit}; do
-      note="$NOW ${SID:-cli} ${hit[$hlane]}"
-      gc "own.$hlane.trespass" "$note"           # durable: survives a failed send, surfaces on their 'own list'
-      hs=$(gc "own.$hlane.session" 2>/dev/null); [[ -n "$hs" ]] || continue
-      # once per (lane,file) per 10min — a session that ignores the first one does not deserve ten
-      [[ "$(gc "own.$hlane.trespass-sent" 2>/dev/null)" == *" ${hit[$hlane]}" ]] && \
-        (( NOW - ${$(gc "own.$hlane.trespass-sent" 2>/dev/null)%% *} < 600 )) && continue
-      gc "own.$hlane.trespass-sent" "$note"
-      "${0:A:h}/claude-say" "$hs" "⚠ own: a raw shell write from session ${SID:-?} just landed on ${hit[$hlane]} — YOUR [$hlane] lane. It bypassed the Edit guard (sed/cat >/tee/git apply leave no tool call), so nothing in your transcript would show it. Check it before you build on top of it: git -C ~/.dotfiles diff ${hit[$hlane]}" >/dev/null 2>&1 || true
-    done
-    print -u2 "✘ own: that shell command wrote into ANOTHER LIVE SESSION'S lane — the Edit guard never saw it."
-    print -u2 "$out"
-    print -u2 "   Raw writes (sed -i / > / tee / git apply / an editor) bypass the PreToolUse guard entirely."
-    print -u2 "   → if that was you: revert it — git -C ~/.dotfiles checkout -- <path>"
-    print -u2 "   → then use the patch protocol, or 'own request <lane>' and wait for the hand-off."
-    print -u2 "   ✉ the holder HAS BEEN TOLD automatically — this is not yours to sit on quietly."
-    exit 2 ;;
   force) [[ -n "${2:-}" ]] || { print "usage: own force <lane> [minutes]" >&2; exit 2; }
     _is_lane "$2" || { print "no such lane: $2 (see 'own list')" >&2; exit 2; }
     local mins="${3:-10}" mp=$(_mypid)
@@ -215,11 +161,6 @@ case "${1:-list}" in
       (( rc == 1 )) && liv=" · ✗ dead (free to take)"
       r=""; sl=$(gc "own.$lane.slice" 2>/dev/null); [[ -n "$sl" ]] && r=" · slice:$sl"
       if rq=$(_req "$lane" 2>/dev/null) && (( rq < FRESH )); then r="$r ⟵ requested ${rq}s ago"; fi
-      # A claude-say can fail (no pane, composer busy). The verdict must not die with the send.
-      local tr=$(gc "own.$lane.trespass" 2>/dev/null) trest
-      if [[ -n "$tr" ]] && (( NOW - ${tr%% *} < FRESH )); then
-        trest="${tr#* }"; r="$r ⚠ TRESPASS $((NOW - ${tr%% *}))s ago by ${${trest%% *}%%-*} on ${trest#* }"
-      fi
       printf '  %-9s %-15s %s%s%s\n' "$lane" "$h" "${line#* }" "$liv" "$r"; done < "$OWNERS" ;;
   release) local arg="${2:-}"; [[ -n "$arg" ]] || { print "usage: own release <lane|slice>" >&2; exit 2; }
     if _is_lane "$arg"; then

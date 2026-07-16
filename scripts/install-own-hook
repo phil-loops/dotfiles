@@ -6,12 +6,17 @@
 # place: a hook registered before a vector was known (NotebookEdit, Bash) is upgraded
 # rather than duplicated, so re-running is always the way to catch up.
 #
-# Two hooks, because there are two ways to write a file and only one of them is a tool:
-#   own-hook       Edit/Write/MultiEdit/NotebookEdit — PREVENTS the write (exit 2 = deny).
-#   own-bash-hook  Bash — cannot prevent (you can't parse a shell command's write
-#                  targets, and a blanket deny would break `git apply --3way` and every
-#                  build that writes dist/), so it DETECTS: pre stamps the clock, post
-#                  reports anything dirty in another live session's lane. Same tool call.
+# One hook: own-hook, on Edit/Write/MultiEdit/NotebookEdit. It PREVENTS the write
+# (exit 2 = deny) because it is handed the tool call and the exact path — it knows WHO
+# is writing WHAT before it happens.
+#
+# The Bash side (own-bash-hook) is RETIRED, not forgotten — see `retire` below, which
+# actively unregisters it so a machine that installed it stops. It watched the disk after
+# each shell command and accused whoever's window the change fell in. But mtime answers
+# WHEN, never WHO: a lane holder saving their own file mid-window is indistinguishable
+# from someone stomping it. It shipped 2 false accusations and 0 true ones in one hour —
+# the second one named an innocent bystander and mailed the accusation to a third party.
+# Detection on the raw-write path needs per-write PID (root-level tracing), not a clock.
 # Hooks are hot-reloadable, so a running session picks these up without a restart.
 emulate -L zsh; set -euo pipefail
 python3 - "$HOME/.claude/settings.json" "${0:A:h}" <<'PY'
@@ -19,15 +24,24 @@ import json, sys, os
 path, d = sys.argv[1], sys.argv[2]
 want = [
     ("PreToolUse",  "Edit|Write|MultiEdit|NotebookEdit", f"{d}/own-hook"),
-    ("PreToolUse",  "Bash",                              f"{d}/own-bash-hook pre"),
-    ("PostToolUse", "Bash",                              f"{d}/own-bash-hook post"),
 ]
+# Uninstalling has to be as automatic as installing. A retired hook left in an untracked
+# settings.json keeps firing on every machine that already has it — and hooks hot-reload,
+# so removing it here stops live sessions mid-flight. This is the only way to recall one.
+retire = [f"{d}/own-bash-hook pre", f"{d}/own-bash-hook post"]
 os.makedirs(os.path.dirname(path), exist_ok=True)
 try:
     cfg = json.load(open(path))
 except Exception:
     cfg = {}
 dirty = False
+for event, blocks in list(cfg.get("hooks", {}).items()):
+    for blk in list(blocks):
+        blk["hooks"] = [h for h in blk.get("hooks", []) if h.get("command") not in retire]
+        if not blk["hooks"]:
+            blocks.remove(blk)
+            dirty = True
+            print(f"✗ retired     {event:12} {blk.get('matcher')}")
 for event, matcher, cmd in want:
     blocks = cfg.setdefault("hooks", {}).setdefault(event, [])
     blk = next((b for b in blocks if any(h.get("command") == cmd for h in b.get("hooks", []))), None)
