@@ -1,4 +1,4 @@
-import { createSignal, createMemo, Show, For } from "solid-js";
+import { createSignal, createMemo, createEffect, Show, For } from "solid-js";
 import { useQueryClient, createQuery, createMutation } from "@tanstack/solid-query";
 import { Link, useViewerLocation, type HomeTab, type ViewerLocation } from "./router";
 import { provider, canMutate } from "./provider";
@@ -22,10 +22,30 @@ export function Home() {
     queryKey: ["myprs"],
     queryFn: () => provider.myPrs(),
   }));
+  // opportunistic load: the forests fan-out is cheap warm (~110ms) but a reaped server pays a cold
+  // python boot + git fan-out, and the home would render EMPTY until it lands. Paint the last-known
+  // forests from localStorage instantly, then revalidate — the page is never blank on a cold open.
+  const PROJECTS_CACHE = "viewerProjectsCache";
+  const cachedProjects = (): Project[] | undefined => {
+    try {
+      const s = localStorage.getItem(PROJECTS_CACHE);
+      return s ? (JSON.parse(s) as Project[]) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   const projects = createQuery(() => ({
     queryKey: ["projects"],
     queryFn: () => provider.projects(),
+    initialData: cachedProjects,
+    initialDataUpdatedAt: 0, // treat the cached paint as stale so it always revalidates on open
   }));
+  createEffect(() => {
+    const d = projects.data;
+    if (d && d.length) {
+      try { localStorage.setItem(PROJECTS_CACHE, JSON.stringify(d)); } catch { /* quota/private mode — skip */ }
+    }
+  });
   // live chat presence — server truth (srv/chat.py's job registry), not this browser's
   // localStorage, so chats started in another tab (or surviving a closed one) still show.
   type ChatJob = {
