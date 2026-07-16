@@ -21,6 +21,7 @@ export function ForestsList(props: {
   forestRow: (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => JSX.Element;
   parked: () => Parked | null;
   prOf: (name: string) => PR | undefined;
+  setTier: (repo: string, project: string, tier: string) => void;
 }) {
   const [forestQuery, setForestQuery] = createSignal("");
   // Forests recency — "most recently alive": the latest of local commit, PR opened, and
@@ -80,7 +81,7 @@ export function ForestsList(props: {
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
     for (const p of filteredForests()) {
-      if (!p.epic || recentlyMerged(p) || p.shelved) continue;
+      if (!p.epic || recentlyMerged(p) || p.shelved || p.tier !== "committed") continue;
       (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
     }
     return [...byEpic.entries()]
@@ -99,7 +100,7 @@ export function ForestsList(props: {
   const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
     const clustered = clusteredKeys();
-    const active = filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && !clustered.has(pkey(p)));
+    const active = filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.tier === "committed" && !clustered.has(pkey(p)));
     return BANDS.map((band, i) => ({
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
@@ -126,6 +127,22 @@ export function ForestsList(props: {
   // deliberately paused — Phil's explicit mark (right-click → shelve); a shelf, not a band
   const shelvedList = createMemo(() =>
     filteredForests().filter((p) => p.shelved && !recentlyMerged(p)).sort((a, b) => forestTs(b) - forestTs(a)));
+
+  // ── conviction tiers (orthogonal to the bands) ──────────────────────────
+  // committed → the lifecycle bands above; trying/spike/untriaged get their own sections. A pool of
+  // everything still in play (not merged, not shelved), partitioned by tier.
+  const tierPool = createMemo(() => filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved));
+  const triageList = createMemo(() =>
+    tierPool().filter((p) => p.tier == null).sort((a, b) => forestTs(b) - forestTs(a)));
+  const tryingList = createMemo(() =>
+    tierPool().filter((p) => p.tier === "trying").sort((a, b) => forestTs(b) - forestTs(a)));
+  const spikeList = createMemo(() =>
+    tierPool().filter((p) => p.tier === "spike").sort((a, b) => forestTs(b) - forestTs(a)));
+  // the "committed" super-header only earns its place once tiers are actually in use — otherwise
+  // the bands stand on their own exactly as before.
+  const showTierHeads = createMemo(() =>
+    tierPool().some((p) => p.tier === "committed") &&
+    (triageList().length > 0 || tryingList().length > 0 || spikeList().length > 0));
   const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
   // repo demoted from group header to a quiet per-row badge (non-loops rows only)
   const row = (p: Project, folded: boolean) =>
@@ -141,6 +158,18 @@ export function ForestsList(props: {
   const [dormantOpen, setDormantOpen] = createSignal(false);
   const [shelvedOpen, setShelvedOpen] = createSignal(false);
   const [mergedOpen, setMergedOpen] = createSignal(false);
+  const [spikeOpen, setSpikeOpen] = createSignal(false);
+  // triage row: a forest with no tier yet → one-click set into a tier. The forcing function.
+  const triageRow = (p: Project) => (
+    <div class="triage-item">
+      {row(p, false)}
+      <div class="triage-actions">
+        <button class="triage-set committed" title="I'm shipping this" onClick={() => props.setTier(p.repo || "loops", p.name, "committed")}>● committed</button>
+        <button class="triage-set trying" title="leaning in, undecided" onClick={() => props.setTier(p.repo || "loops", p.name, "trying")}>◐ trying</button>
+        <button class="triage-set spike" title="throwaway experiment" onClick={() => props.setTier(p.repo || "loops", p.name, "spike")}>○ spike</button>
+      </div>
+    </div>
+  );
   return (
       <Show when={props.tab() === "forests"}>
       <section>
@@ -178,6 +207,15 @@ export function ForestsList(props: {
             </p>
           }
         >
+          <Show when={triageList().length}>
+            <div class="forest-band-head triage-head" title="new forests with no conviction tier yet — decide: committed (ships, keeps its bands), trying, or a throwaway spike">
+              ◆ triage <span class="triage-count">{triageList().length}</span>
+            </div>
+            <For each={triageList()}>{(p) => triageRow(p)}</For>
+          </Show>
+          <Show when={showTierHeads()}>
+            <div class="tier-head" title="the forests you're serious about — full lifecycle bands below">committed</div>
+          </Show>
           <For each={bands()}>
             {(band) => (
               <Show
@@ -217,6 +255,20 @@ export function ForestsList(props: {
               </Show>
             )}
           </For>
+          <Show when={tryingList().length}>
+            <div class="forest-band-head tier-head-trying" title="leaning in, undecided — promote to committed or drop to spike as it proves out">
+              ◐ trying
+            </div>
+            <For each={tryingList()}>{(p) => row(p, false)}</For>
+          </Show>
+          <Show when={spikeList().length}>
+            <button class="forest-mfold" onClick={() => setSpikeOpen(!spikeOpen())} title="throwaway experiments — right-click a forest → conviction to promote one">
+              {spikeOpen() ? "▾" : "▸"} {spikeList().length} spike{spikeList().length === 1 ? "" : "s"}
+            </button>
+            <Show when={spikeOpen()}>
+              <For each={spikeList()}>{(p) => row(p, false)}</For>
+            </Show>
+          </Show>
           <Show when={shelvedList().length}>
             <button class="forest-mfold" onClick={() => setShelvedOpen(!shelvedOpen())} title="deliberately paused (right-click a forest → shelve); unshelve the same way">
               {shelvedOpen() ? "▾" : "▸"} {shelvedList().length} shelved

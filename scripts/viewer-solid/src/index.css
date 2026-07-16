@@ -1205,3 +1205,27 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 }
 .focus-next.yours { color: var(--ember); border-color: var(--ember); background: var(--ember-wash); }
 .ctx-item.ctx-focus .ctx-pips { color: var(--gold-leaf); }
+
+/* ── conviction tiers ────────────────────────────────────────────────── */
+.tier-head {
+  margin: 18px 0 4px; font-family: var(--mono); font-size: 11px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--gold-leaf); border-bottom: 1px solid var(--gold-deep);
+  padding-bottom: 3px;
+}
+.tier-head-trying { color: var(--patina); }
+.triage-head { color: var(--ember); display: flex; align-items: center; gap: 6px; }
+.triage-count {
+  font-family: var(--mono); font-size: 11px; color: var(--vellum-night);
+  background: var(--ember); border-radius: 8px; padding: 0 6px;
+}
+.triage-item { display: flex; flex-direction: column; gap: 0; }
+.triage-actions { display: flex; gap: 6px; margin: 2px 0 8px 10px; }
+.triage-set {
+  font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+  background: none; border: 1px solid var(--rule); border-radius: 3px;
+  padding: 2px 9px; cursor: pointer;
+}
+.triage-set.committed:hover { color: var(--gold-leaf); border-color: var(--gold-deep); }
+.triage-set.trying:hover { color: var(--patina); border-color: var(--patina); }
+.triage-set.spike:hover { color: var(--ink-faint); border-color: var(--ink-faint); }
+.ctx-item.ctx-tier.on .ctx-pips { color: var(--gold-leaf); }

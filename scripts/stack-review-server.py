@@ -366,6 +366,8 @@ class H(BaseHTTPRequestHandler):
             return review.shelve(self, raw)
         if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
             return review.focus_set(self, raw)
+        if self.path == "/tier":       # set a forest's conviction tier (stack-project.<p>.tier)
+            return review.tier_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background

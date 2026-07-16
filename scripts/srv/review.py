@@ -327,6 +327,23 @@ def focus_set(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "focus": False}))
 
 
+def tier_set(req, raw):
+    # Set a forest's conviction tier (stack-project.<p>.tier ∈ committed|trying|spike); an empty/
+    # absent tier unsets → untriaged (the triage zone). Repo-scoped like interest.
+    d = json.loads(raw or "{}")
+    proj = d.get("project", "")
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
+    key = f"stack-project.{proj}.tier"
+    tier = d.get("tier", "")
+    if tier in ("committed", "trying", "spike"):
+        ctx.run(["git", "config", key, tier])
+    else:
+        ctx.run(["git", "config", "--unset", key])
+        tier = None
+    req._send(200, json.dumps({"ok": True, "project": proj, "tier": tier}))
+
+
 def _scratch_worktree_for(branch):
     # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
     # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.
