@@ -368,7 +368,7 @@ export function NodeDetail() {
           setShowChats={setShowChats}
         />
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
-          <div class="diff-hint">
+          <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
             <span class="kbd-hint"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>
           <Show when={node.data} fallback={<p class="loading">loading…</p>}>

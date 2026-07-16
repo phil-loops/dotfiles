@@ -41,7 +41,7 @@ export function NodeHeader(props: {
 }) {
   const [chatPick, setChatPick] = createSignal(false);
   return (
-        <header class="node-head">
+        <header class="node-head mb-[20px] flex flex-col gap-[12px]">
           {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
               branch control bar so forest-scope actions stop bleeding into branch controls. */}
           <div
@@ -70,41 +70,41 @@ export function NodeHeader(props: {
               }
             >
               <Link
-                class="nh-forest-back"
+                class="nh-forest-back text-[11px] uppercase tracking-[0.07em] text-ink-faint no-underline transition-[color] duration-[120ms] hover:text-ink-dim"
                 to={{ kind: "forest", name: props.project(), repo: forestRepo(props.location()) }}
                 title="back to the forest map — your current node stays highlighted there"
               >
                 ⊞ {props.project()}
               </Link>
             </Show>
-            <div class="nh-spacer" />
+            <div class="nh-spacer flex-1" />
           </div>
           {/* branch strip — identity: the branch name + what it's diffed against + health badges. */}
-          <div class="nh-id">
-            <h1>{props.isGhost() ? `✦ ${props.project()}` : leaf(props.active()) || "—"}</h1>
+          <div class="nh-id flex flex-wrap items-baseline gap-[12px]">
+            <h1 class="m-0 font-display text-[32px] font-semibold italic tracking-[-0.01em] text-ink">{props.isGhost() ? `✦ ${props.project()}` : leaf(props.active()) || "—"}</h1>
             <Show
               when={props.isGhost()}
               fallback={
                 <Show when={props.parentOf()}>
-                  <span class="against">◂ {leaf(props.parentOf())}</span>
+                  <span class="against flex-none text-[13px] text-ink-faint">◂ {leaf(props.parentOf())}</span>
                 </Show>
               }
             >
-              <span class="against">◂ main · all changes on this project</span>
+              <span class="against flex-none text-[13px] text-ink-faint">◂ main · all changes on this project</span>
             </Show>
             <Show when={!props.isGhost() && props.interestOf() > 0}>
-              <span class="nh-ready" title={`interest ${props.interestOf()} — this forest is promoted on the Forests home`}>
+              <span class="nh-ready cursor-help text-[12px] tracking-[0.02em] text-gold-leaf" title={`interest ${props.interestOf()} — this forest is promoted on the Forests home`}>
                 {interestPips(props.interestOf())}
               </span>
             </Show>
             {/* health badges folded into the spine (reasons tooltip + ⋯ overrides) — what
                 remains here is only the transient outcome of a repair fired from ⋯. */}
             <Show when={props.reseatChildren.isPending || props.detachUpstream.isPending}>
-              <span class="nh-drift">{props.reseatChildren.isPending ? "⤴ reseating…" : "✂ detaching…"}</span>
+              <span class="nh-drift cursor-help text-[12px] text-del">{props.reseatChildren.isPending ? "⤴ reseating…" : "✂ detaching…"}</span>
             </Show>
             <Show when={props.reseatChildren.data && !props.reseatChildren.data.ok}>
               <span
-                class="nh-drift"
+                class="nh-drift cursor-help text-[12px] text-del"
                 title={props.reseatChildren.data!.conflicts.map((c) => `${c.branch}: ${c.err}`).join("\n")}
               >
                 ⚠ reseat: {props.reseatChildren.data!.conflicts.length} conflicted — resolve by hand or restack
@@ -119,14 +119,14 @@ export function NodeHeader(props: {
           {/* tier-2 (Phil, strikes 6+7): no view controls at all — c flips diffs⇄commits,
               1/2/3 set the diff base, both taught in ? help. The base shows as passive text
               only when it's not the default, so a non-parent diff can't masquerade. */}
-          <div class="nh-bar">
+          <div class="nh-bar flex items-center gap-[16px] border-t border-rule pt-[11px]">
             <Show when={props.view() === "commits"}>
-              <span class="nh-viewnote">commits · c for diffs</span>
+              <span class="nh-viewnote text-[11px] tracking-[0.03em] text-ink-faint">commits · c for diffs</span>
             </Show>
             <Show when={props.view() === "diffs" && props.base() !== "" && !props.isGhost()}>
-              <span class="nh-viewnote">vs {(props.BASES.find(([v]) => v === props.base()) ?? props.BASES[0])[1]} · 1 for parent</span>
+              <span class="nh-viewnote text-[11px] tracking-[0.03em] text-ink-faint">vs {(props.BASES.find(([v]) => v === props.base()) ?? props.BASES[0])[1]} · 1 for parent</span>
             </Show>
-            <div class="nh-spacer" />
+            <div class="nh-spacer flex-1" />
             <Show when={!props.isGhost()}>
               <NodeActions
                 branch={props.active()}
