@@ -191,76 +191,45 @@ export default function CommandPalette() {
 
   return (
     <>
-      <style>{CMDK_CSS}</style>
+      {/* empty strut where the old inline <style> stood — removing the node renumbers every later sibling in the rect baselines; drop it in a deliberate rects-only re-baseline commit */}
+      <style />
       <Show when={open()}>
-        <div class="cmdk-backdrop" onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
-          <div class="cmdk-panel">
+        <div
+          class="cmdk-backdrop fixed inset-0 z-[80] flex items-start justify-center bg-[rgba(0,0,0,0.45)] pt-[14vh]"
+          onClick={(e) => { if (e.target === e.currentTarget) setOpen(false); }}
+        >
+          <div class='cmdk-panel w-[min(560px,90vw)] overflow-hidden rounded-xl border border-[#3a332b] bg-[#1b1815] font-["IBM_Plex_Mono",ui-monospace,monospace] shadow-[0_18px_50px_rgba(0,0,0,0.55)]'>
             <input
               ref={inputRef}
-              class="cmdk-input"
+              class="cmdk-input w-full border-0 border-b border-[#3a332b] bg-transparent px-4 py-[13px] text-[14px] leading-[1.55] text-ink outline-none [font-family:inherit]"
               placeholder="jump to a branch, or a command…"
               value={q()}
               onInput={(e) => { setQ(e.currentTarget.value); setSel(0); }}
               onKeyDown={onInputKey}
             />
-            <ul class="cmdk-list">
-              <Show when={filtered().length} fallback={<li class="cmdk-empty">no matches</li>}>
+            <ul class="cmdk-list m-0 max-h-[46vh] list-none overflow-y-auto p-1.5">
+              <Show when={filtered().length} fallback={<li class="cmdk-empty p-3 text-[12.5px] text-[#a89e8c]">no matches</li>}>
                 <For each={filtered()}>
                   {(c, i) => (
                     <li
-                      class="cmdk-item"
-                      classList={{ on: i() === sel() }}
+                      class="cmdk-item flex cursor-pointer items-baseline gap-2.5 rounded-[7px] px-2.5 py-[7px] text-[12.5px] text-ink"
+                      classList={{ "on bg-[#221e1a]": i() === sel() }}
                       onMouseEnter={() => setSel(i())}
                       onMouseDown={(e) => { e.preventDefault(); run(c); }}
                     >
-                      <span class="cmdk-label">{c.label}</span>
+                      <span class="cmdk-label flex-none">{c.label}</span>
                       <Show when={c.sub}>
-                        <span class="cmdk-sub">{c.sub}</span>
+                        <span class="cmdk-sub ml-auto text-[11px] text-[#6f675a]">{c.sub}</span>
                       </Show>
                     </li>
                   )}
                 </For>
               </Show>
             </ul>
-            <div class="cmdk-hint">↑↓ move · ↵ run · esc close</div>
+            <div class="cmdk-hint border-t border-[#3a332b] px-3.5 py-2 text-[11px] text-[#6f675a]">↑↓ move · ↵ run · esc close</div>
           </div>
         </div>
       </Show>
     </>
   );
 }
-
-const CMDK_CSS = `
-.cmdk-backdrop {
-  position: fixed; inset: 0; z-index: 80;
-  background: rgba(0,0,0,0.45);
-  display: flex; align-items: flex-start; justify-content: center;
-  padding-top: 14vh;
-}
-.cmdk-panel {
-  width: min(560px, 90vw);
-  background: var(--raised, #1b1815);
-  border: 1px solid var(--line, #3a332b);
-  border-radius: 12px;
-  box-shadow: 0 18px 50px rgba(0,0,0,0.55);
-  overflow: hidden;
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
-}
-.cmdk-input {
-  width: 100%; box-sizing: border-box;
-  background: transparent; color: var(--ink, #e9e2d4);
-  border: 0; border-bottom: 1px solid var(--line, #3a332b);
-  padding: 13px 16px; font: inherit; font-size: 14px; outline: none;
-}
-.cmdk-list { list-style: none; margin: 0; padding: 6px; max-height: 46vh; overflow-y: auto; }
-.cmdk-item {
-  display: flex; align-items: baseline; gap: 10px;
-  padding: 7px 10px; border-radius: 7px; cursor: pointer;
-  color: var(--ink, #e9e2d4); font-size: 12.5px;
-}
-.cmdk-item.on { background: var(--panel, #221e1a); }
-.cmdk-label { flex: 0 0 auto; }
-.cmdk-sub { color: var(--faint, #6f675a); font-size: 11px; margin-left: auto; }
-.cmdk-empty { padding: 12px; color: var(--dim, #a89e8c); font-size: 12.5px; }
-.cmdk-hint { padding: 8px 14px; border-top: 1px solid var(--line, #3a332b); color: var(--faint, #6f675a); font-size: 11px; }
-`;
