@@ -9,4 +9,4 @@ forest      scripts/stack-forest scripts/stack-bless scripts/stack-blessed-statu
 stack       scripts/stack-restack scripts/stack-fmt scripts/stack-precommit-fmt scripts/stack-install-precommit-hook scripts/stack-gates scripts/stack-integrate scripts/stack-list scripts/stack-rm scripts/git-stacks scripts/stack-prompt.sh scripts/stack-squash scripts/stack-archive
 review      scripts/stack-review scripts/stack-review-html scripts/branch-review
 shell       .zshrc
-docs        CLAUDE.md OWNERS
+docs        CLAUDE.md OWNERS claude/
