@@ -136,13 +136,21 @@ check_jobs_consumer() {
 
   health="$(http_code http://localhost:4000/ 3)"
 
+  # An empty queue proves nothing on its own — a dead worker also drains nothing.
   if [ "$d1" -eq 0 ]; then
     if [ "$health" = "200" ]; then
       row "jobs worker" "$(green ok)" "$(dim "queue empty · health :4000 → 200")"
-    else
-      row "jobs worker" "$(amber idle?)" "queue empty but :4000 → $health"
+      return 0
     fi
-    return 0
+    if [ "$health" = "503" ]; then
+      row "jobs worker" "$(red stalled)" "worker says it stopped polling (:4000 → 503)"
+    elif listening 4000; then
+      row "jobs worker" "$(red WEDGED)" "listening on :4000 but no response (may still be booting)"
+    else
+      row "jobs worker" "$(dim down)" "nothing listening on :4000"
+    fi
+    PROBLEMS=$((PROBLEMS + 1))
+    return 1
   fi
 
   sleep 4
@@ -230,8 +238,8 @@ if [ -z "$FIX" ]; then
 fi
 
 printf '\n%s\n' "$(dim 'fixing…')"
-grep -q "jobs worker.*\(WEDGED\|not consuming\)" "$OUT" && bounce_jobs_worker
-grep -q "mail-schedule.*WEDGED" "$OUT" && bounce_mail_schedule
+grep -q "jobs worker.*\(WEDGED\|not consuming\|stalled\|down\)" "$OUT" && bounce_jobs_worker
+grep -q "mail-schedule.*\(WEDGED\|down\)" "$OUT" && bounce_mail_schedule
 grep -q "preview.*WEDGED" "$OUT" && printf '  %s wedged preview: loops-preview <dir> --kill && loops-preview <dir>\n' "$(amber ▸)"
 grep -q "dev server.*WEDGED" "$OUT" && printf '  %s :3000 belongs to another checkout — restart it there (task dev), not from here\n' "$(amber ▸)"
 
