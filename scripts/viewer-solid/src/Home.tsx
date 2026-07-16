@@ -371,9 +371,9 @@ export function Home() {
         />
 
       <Show when={stripChats().length}>
-        <section class="work-sec chat-live">
-          <h2 class="eyebrow">chats <span class="eyebrow-ask">— headless claudes on your branches</span></h2>
-          <div class="work-rule" />
+        <section class="work-sec chat-live mb-[30px]">
+          <h2 class="eyebrow">chats <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— headless claudes on your branches</span></h2>
+          <div class="work-rule mb-[6px] h-px bg-rule" />
           <For each={stripChats()}>
             {(j) => (
               <Link class="chat-row" classList={{ done: j.done }} to={chatTarget(j)} title={j.question}>
