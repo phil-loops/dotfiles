@@ -10,4 +10,10 @@ mcp-servers/*/node_modules/
 !.claude/skills/loops-restart/
 !.claude/skills/loops-preview/
 scripts/gh-to-nvim/dist/
+
+# Compiled bytecode — machine- and version-specific (cpython-314), regenerated on every run.
+# Tracked, these rewrite themselves constantly: 14 of this repo's 38 dirty files were .pyc churn,
+# which buries real WIP in `git status` — the one signal that keeps concurrent sessions apart.
+__pycache__/
+*.pyc
 scripts/gh-to-nvim-key.pem
