@@ -403,6 +403,20 @@ def _focus_ranks():
     return out
 
 
+def _tier_map():
+    # {project: tier} — Phil's conviction axis (stack-project.<p>.tier ∈ committed|trying|spike).
+    # Absent = untriaged (the triage zone). Orthogonal to the lifecycle bands: committed keeps its
+    # full bands, trying/spike get their own lighter sections.
+    out = {}
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-project\..*\.tier$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        m = re.match(r"^stack-project\.(.+)\.tier$", key)
+        if m and val.strip() in ("committed", "trying", "spike"):
+            out[m.group(1)] = val.strip()
+    return out
+
+
 def _projects_snapshot_file():
     gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
     return os.path.join(gd, "stack-projects-cache.json") if gd else ""
@@ -485,6 +499,7 @@ def _projects_build(name, path, pck):
     interest = _interest_levels()
     shelved = _shelved_set()
     focus = _focus_ranks()
+    tier = _tier_map()
     for p in projs:
         p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
@@ -500,6 +515,7 @@ def _projects_build(name, path, pck):
         p["interest"] = interest.get(p["name"], 0)
         p["shelved"] = p["name"] in shelved
         p["focus"] = focus.get(p["name"])
+        p["tier"] = tier.get(p["name"])
         p["epic"] = ctx.run(["git", "config", f"stack-project.{p['name']}.epic"]).stdout.strip() or None
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches

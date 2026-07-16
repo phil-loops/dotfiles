@@ -114,7 +114,7 @@ export function Home() {
   // right-click a forest card → set its importance (stack-project.<name>.interest) — what
   // floats the forest up the Home list.
   const [ctxMenu, setCtxMenu] = createSignal<
-    { x: number; y: number; repo: string; project: string; current: number; shelved: boolean; focused: boolean } | null
+    { x: number; y: number; repo: string; project: string; current: number; shelved: boolean; focused: boolean; tier: string | null } | null
   >(null);
   const setInterest = createMutation(() => ({
     mutationFn: (arg: { repo: string; project: string; value: number }) =>
@@ -142,6 +142,16 @@ export function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repo: arg.repo, project: arg.project, on: arg.on }),
+      }).then((r) => r.json()),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
+  }));
+  // set a forest's conviction tier (stack-project.<name>.tier); "" unsets → untriaged.
+  const setTier = createMutation(() => ({
+    mutationFn: (arg: { repo: string; project: string; tier: string }) =>
+      fetch(`/${arg.repo}/tier`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project: arg.project, tier: arg.tier }),
       }).then((r) => r.json()),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
@@ -235,7 +245,7 @@ export function Home() {
     if (!canMutate) return;
     e.preventDefault();
     hideFtip();
-    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved, focused: p.focus != null });
+    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved, focused: p.focus != null, tier: p.tier ?? null });
   };
   const forestRow = (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => (
     <ForestRow
@@ -357,6 +367,7 @@ export function Home() {
         forestRow={forestRow}
         parked={parked}
         prOf={prOf}
+        setTier={(repo, project, tier) => setTier.mutate({ repo, project, tier })}
       />
 
 
@@ -402,6 +413,28 @@ export function Home() {
               onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
             />
             <div class="ctx-menu" style={{ left: `${m().x}px`, top: `${m().y}px` }}>
+              <div class="ctx-head">conviction</div>
+              <For each={[
+                { key: "committed", lbl: "committed", mark: "●", title: "I'm shipping this — keeps its full lifecycle bands" },
+                { key: "trying", lbl: "trying", mark: "◐", title: "leaning in, undecided — its own light section" },
+                { key: "spike", lbl: "spike", mark: "○", title: "throwaway experiment — folds away quietly" },
+                { key: "", lbl: "untriaged", mark: "—", title: "no tier — sits in the triage zone to be decided" },
+              ]}>
+                {(t) => (
+                  <button
+                    class="ctx-item ctx-tier"
+                    classList={{ on: (m().tier ?? "") === t.key }}
+                    title={t.title}
+                    onClick={() => {
+                      setTier.mutate({ repo: m().repo, project: m().project, tier: t.key });
+                      setCtxMenu(null);
+                    }}
+                  >
+                    <span class="ctx-pips">{t.mark}</span>
+                    <span class="ctx-lbl">{t.lbl}</span>
+                  </button>
+                )}
+              </For>
               <button
                 class="ctx-item ctx-focus"
                 classList={{ on: m().focused }}
