@@ -8,8 +8,9 @@ deleted). Mimic them exactly. The goal of a conversion commit is **pixel parity*
 ```sh
 npx tsgo --noEmit
 npm run build
-npm run visual:serve   # in another shell, or already running
+npm run visual:serve        # in another shell, or already running
 npm run visual:shot && npm run visual:diff
+npm run visual:invariants   # identity facts, not drift — see below
 ```
 
 `visual:diff` must report every surface under threshold. Sub-threshold text-antialiasing noise
@@ -116,6 +117,14 @@ shot-all refuses to run if the server on `--base` is not serving your local `dis
 (byte-compare of index.html) — that's the guard against gating someone else's build. If it
 trips, another checkout's fixture-server owns the port: start yours on a free port and pass
 `--base`, don't kill theirs.
+
+**Invariants catch what drift gates can't.** Pixel and geometry gates compare against
+baselines shot from *some build* — a defect present when the baseline was made is encoded as
+truth and no drift gate will ever flag it (the Fraunces-eyebrow case shipped wrong on arrival;
+at 10px letterspaced caps the wrong font is invisible in a reviewed screenshot). `invariants.json`
+asserts build-independent identity facts — computed font families and colors per semantic role,
+checked on every surface post-clicks. When a conversion establishes a new house truth ("all X
+are Y"), add it as an invariant, not a comment.
 
 **A fixture change is a multi-surface re-baseline.** Changing fixture *data* changes pixels on
 every surface that renders that data — including surfaces layered above it (the drawer's
