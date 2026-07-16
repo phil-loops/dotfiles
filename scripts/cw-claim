@@ -20,6 +20,15 @@ cold() {
 }
 
 main_top=$(git -C "$cur" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}') || true
+if [[ -z "${main_top:-}" ]]; then
+  # Ctrl-a C fired from a pane that isn't inside a repo (e.g. a `staging` shell). Anchor on the
+  # default repo so it still launches — and can adopt that repo's warm pool — instead of
+  # cold-splitting into the non-repo dir where `cw` dies with "cw: not in a git repo".
+  default_repo=$(git config --global cw.default-repo 2>/dev/null || true)
+  default_repo="${default_repo:-$HOME/coding/loops}"; default_repo="${default_repo/#\~/$HOME}"
+  cur="$default_repo"
+  main_top=$(git -C "$cur" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}') || true
+fi
 [[ -n "${main_top:-}" ]] || cold
 repo=$(basename "$main_top")
 sess="cw-pool-$repo"
