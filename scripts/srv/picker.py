@@ -21,7 +21,7 @@ from urllib.parse import parse_qs
 from . import ctx
 
 _pcache = {}  # repo-name -> ((model_sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
-_PROJ_SNAP_V = 3  # projects card shape version — bump when a build adds a field, else the
+_PROJ_SNAP_V = 4  # projects card shape version — bump when a build adds a field, else the
                   # disk snapshot (keyed only on repo state) keeps serving the old shape
 _PR_RE = re.compile(r"\(#(\d+)\)")
 
@@ -306,6 +306,20 @@ def _branch_commit_unix():
     return out
 
 
+def _branch_author_unix():
+    # {branch: author-date-unix} — how long since the work was WRITTEN. Committer-date can't answer
+    # that here: a rebase rewrites it, so our own restacking backdates every branch to today (one
+    # mass restack made a 21-day-old forest read as touched 1d ago). Author-date survives a rebase,
+    # so this is the only clock that can see work going stale.
+    r = ctx.run(["git", "for-each-ref", "--format=%(refname:short)%09%(authordate:unix)", "refs/heads"])
+    out = {}
+    for line in r.stdout.splitlines():
+        branch, _, ts = line.partition("\t")
+        if ts.isdigit():
+            out[branch] = int(ts)
+    return out
+
+
 def _interest_levels():
     # {project: interest} — Phil's hand-set promote/demote level (stack-project.<p>.interest N).
     # One read for all; drives the Forests promotion order. 0/absent = none.
@@ -417,6 +431,40 @@ def _tier_map():
     return out
 
 
+def _unpushed_map():
+    # {branch: True} for a local branch whose tip matches no remote-tracking ref of the same name.
+    # Remote-tracking refs are local, so this is one for-each-ref rather than a fetch per branch —
+    # it reads a never-pushed branch as unpushed even behind a stale fetch, which is the safe way
+    # to be wrong: the band's job is to notice work that never left this machine.
+    heads, remotes = {}, {}
+    for line in ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)",
+                         "refs/heads", "refs/remotes"]).stdout.splitlines():
+        ref, _, sha = line.partition(" ")
+        if ref.startswith("refs/heads/"):
+            heads[ref[len("refs/heads/"):]] = sha
+        elif ref.startswith("refs/remotes/"):
+            _, _, branch = ref[len("refs/remotes/"):].partition("/")
+            remotes.setdefault(branch, set()).add(sha)
+    return {b: sha not in remotes.get(b, ()) for b, sha in heads.items()}
+
+
+def _green_set():
+    # {branch} whose gates verdict still stands. stack-branch.<b>.gates-green-tree records the TREE
+    # the gates passed on, so a reworded commit keeps its verdict and a real edit drops it.
+    recorded = {}
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^stack-branch\..*\.gates-green-tree$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        m = re.match(r"^stack-branch\.(.+)\.gates-green-tree$", key)
+        if m and val.strip():
+            recorded[m.group(1)] = val.strip()
+    if not recorded:
+        return set()
+    trees = dict(l.partition(" ")[::2] for l in ctx.run(
+        ["git", "for-each-ref", "--format=%(refname:short) %(tree)", "refs/heads"]).stdout.splitlines())
+    return {b for b, tree in recorded.items() if trees.get(b) == tree}
+
+
 def _projects_snapshot_file():
     gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
     return os.path.join(gd, "stack-projects-cache.json") if gd else ""
@@ -496,10 +544,13 @@ def _projects_build(name, path, pck):
     members = _project_members()
     shipped = _shipped_by_project(name, pck[1], merges, members)
     commits = _branch_commit_unix()
+    authored = _branch_author_unix()
     interest = _interest_levels()
     shelved = _shelved_set()
     focus = _focus_ranks()
     tier = _tier_map()
+    unpushed = _unpushed_map()
+    green = _green_set()
     for p in projs:
         p["repo"] = name
         p["ready"], p["candidates"] = _ready_to_merge(p.get("mergeable", []), prmap)
@@ -517,7 +568,10 @@ def _projects_build(name, path, pck):
         p["focus"] = focus.get(p["name"])
         p["tier"] = tier.get(p["name"])
         p["epic"] = ctx.run(["git", "config", f"stack-project.{p['name']}.epic"]).stdout.strip() or None
+        p["unpushed"] = sum(1 for b in branches if unpushed.get(b, False))
+        p["green"] = sum(1 for b in branches if b in green)
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
+        p["lastAuthored"] = max((authored[b] for b in branches if b in authored), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
                              if b in prmap and prmap[b].get("createdAt")), default=None)
     _pcache[name] = (pck, projs)   # one cached build per repo (keyed by its own model_sig)
