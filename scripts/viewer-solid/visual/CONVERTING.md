@@ -64,6 +64,17 @@ npm run visual:shot && npm run visual:diff
     and note it in the commit; never substitute a guessed token.
 18. **Uncovered components get before/after `probe-rects` geometry diffs** as the honest
     substitute gate (geometry proven, colors unverified) — and the report says so.
+19. **Single-side non-solid borders on non-buttons must zero the other sides.**
+    `border-dashed` sets border-style on all four sides, and with Preflight off any side
+    without an explicit width resurrects the UA `medium` (3px). Buttons are masked by the
+    `@layer base` reset; divs are not — `border-t border-dashed` needs `border-x-0 border-b-0`.
+20. **Parent-contextual rules can ride the child as an arbitrary variant**
+    (`[.epic-subrow_&]:mb-0`) instead of surviving as an index.css shim — keeps extractions total.
+21. **`:first-of-type` in legacy CSS gets a dead-or-alive check before translating** — it's
+    tag-scoped; translate the computed reality, not the selector's apparent intent.
+22. **Passing diffs with more than a few hundred px still get a forced-artifact look**
+    (`--threshold 0` + a bbox scan of the diff PNG) — that's what catches a real regression
+    hiding under the threshold.
 
 ## Keep-list — never convert these
 
