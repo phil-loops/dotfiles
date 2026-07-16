@@ -1,0 +1,244 @@
+#!/usr/bin/env bash
+# loops-doctor — find local loops services that are WEDGED: alive but not working.
+#
+# Why this exists: a wedged service never crashes, so `tsx --watch` never restarts it
+# and nothing alarms. Worse, the app's healthcheck (lib/health-server.ts) answers a
+# hardcoded {"status":"ok"} with no knowledge of the consume loop — so a jobs worker
+# that has stopped consuming entirely still reports healthy. Observed 2026-07-16: the
+# dev queue reached 19,140 messages behind a worker that ps showed as running.
+#
+# The signals that actually distinguish wedged from healthy:
+#   - port LISTENing but HTTP not answering within a timeout  → wedged
+#   - queue has a backlog that does not drain over a sample    → consumer wedged/absent
+#   - nothing LISTENing                                        → down (not wedged)
+#
+# Usage:
+#   loops-doctor            # report a table
+#   loops-doctor --fix      # bounce what is safely bounceable, then re-report
+#   loops-doctor --quiet    # only print problems (for a prompt hook / cron)
+#
+# Exit: 0 all healthy · 1 something wedged/down · 2 usage error
+set -uo pipefail
+
+ELASTICMQ="http://localhost:9324/000000000000"
+JOBS_QUEUE="dev"
+NEXT_COMPILE_TIMEOUT="${LOOPS_DOCTOR_COMPILE_TIMEOUT:-100}"
+FIX=""
+QUIET=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fix) FIX=1 ;;
+    --quiet|-q) QUIET=1 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) printf 'unknown flag: %s\n' "$1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+green() { printf '\033[32m%s\033[0m' "$*"; }
+red()   { printf '\033[31m%s\033[0m' "$*"; }
+amber() { printf '\033[33m%s\033[0m' "$*"; }
+dim()   { printf '\033[2m%s\033[0m' "$*"; }
+
+PROBLEMS=0
+
+row() { # name state detail
+  printf '  %-18s %-22s %s\n' "$1" "$2" "$3"
+}
+
+listening() { lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }
+
+# echoes the HTTP code; curl itself prints 000 on hang/refusal, so never append to it
+http_code() {
+  local code
+  code="$(curl -s -o /dev/null -m "${2:-4}" -w '%{http_code}' "$1" 2>/dev/null)"
+  printf '%s' "${code:-000}"
+}
+
+queue_depth() {
+  local body
+  body="$(curl -s -m 4 "$ELASTICMQ/$1?Action=GetQueueAttributes&AttributeName.1=ApproximateNumberOfMessages" 2>/dev/null)"
+  printf '%s' "$body" | grep -o '<Value>[0-9][0-9]*</Value>' | head -1 | tr -dc '0-9'
+}
+
+# A plain HTTP service: down if nothing listens, wedged if it listens but won't answer.
+check_http() { # label port url
+  local label="$1" port="$2" url="$3" code
+  if ! listening "$port"; then
+    row "$label" "$(dim down)" "nothing listening on :$port"
+    return 1
+  fi
+  code="$(http_code "$url")"
+  if [ "$code" = "000" ]; then
+    row "$label" "$(red WEDGED)" "listening on :$port but no response in 4s"
+    PROBLEMS=$((PROBLEMS + 1))
+    return 1
+  fi
+  row "$label" "$(green ok)" "$(dim ":$port → $code")"
+  return 0
+}
+
+# A `next dev` server compiles routes on demand: a COLD one legitimately takes ~85s to
+# answer, so a short probe alone reports a healthy server as wedged. Probe fast for the
+# common case, then confirm a suspected hang against a timeout longer than a real compile.
+check_next_server() { # label port url
+  local label="$1" port="$2" url="$3" code t0 elapsed
+  if ! listening "$port"; then
+    row "$label" "$(dim down)" "nothing listening on :$port"
+    return 1
+  fi
+  code="$(http_code "$url" 5)"
+  if [ "$code" != "000" ]; then
+    row "$label" "$(green ok)" "$(dim ":$port → $code")"
+    return 0
+  fi
+  t0="$(date +%s)"
+  code="$(http_code "$url" "$NEXT_COMPILE_TIMEOUT")"
+  elapsed=$(( $(date +%s) - t0 ))
+  if [ "$code" != "000" ]; then
+    row "$label" "$(green ok)" "$(dim ":$port → $code · was compiling (${elapsed}s)")"
+    return 0
+  fi
+  row "$label" "$(red WEDGED)" "listening on :$port, no response in ${NEXT_COMPILE_TIMEOUT}s (longer than a cold compile)"
+  PROBLEMS=$((PROBLEMS + 1))
+  return 1
+}
+
+wait_for_http() { # url timeout — poll until it answers
+  local url="$1" timeout="$2" waited=0
+  while [ "$waited" -lt "$timeout" ]; do
+    [ "$(http_code "$url" 3)" != "000" ] && return 0
+    sleep 3
+    waited=$((waited + 3))
+  done
+  return 1
+}
+
+check_docker() {
+  if ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q loops-psql-1; then
+    row "docker" "$(red down)" "loops-psql-1 not running — start the main stack first"
+    PROBLEMS=$((PROBLEMS + 1))
+    return 1
+  fi
+  row "docker" "$(green ok)" "$(dim "$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c '^loops-') containers")"
+}
+
+# The real test for a queue consumer: does the backlog actually move?
+check_jobs_consumer() {
+  local d1 d2 health
+  d1="$(queue_depth "$JOBS_QUEUE")"
+  d1="${d1:-}"
+  if [ -z "$d1" ]; then
+    row "jobs queue" "$(dim unknown)" "elasticmq not reachable on :9324"
+    return 1
+  fi
+
+  health="$(http_code http://localhost:4000/ 3)"
+
+  if [ "$d1" -eq 0 ]; then
+    if [ "$health" = "200" ]; then
+      row "jobs worker" "$(green ok)" "$(dim "queue empty · health :4000 → 200")"
+    else
+      row "jobs worker" "$(amber idle?)" "queue empty but :4000 → $health"
+    fi
+    return 0
+  fi
+
+  sleep 4
+  d2="$(queue_depth "$JOBS_QUEUE")"
+  d2="${d2:-$d1}"
+
+  if [ "$d2" -lt "$d1" ]; then
+    row "jobs worker" "$(green ok)" "$(dim "draining: $d1 → $d2")"
+    return 0
+  fi
+
+  PROBLEMS=$((PROBLEMS + 1))
+  if [ "$health" = "200" ]; then
+    row "jobs worker" "$(red WEDGED)" "backlog $d2 not draining, yet :4000 says ok (healthcheck lies)"
+  else
+    row "jobs worker" "$(red "not consuming")" "backlog $d2 not draining · :4000 → $health"
+  fi
+  return 1
+}
+
+check_previews() {
+  local json url branch state
+  json="$(loops-preview --json 2>/dev/null)" || return 0
+  [ "$json" = "[]" ] || [ -z "$json" ] && { row "previews" "$(dim none)" ""; return 0; }
+  printf '%s' "$json" \
+    | tr '}' '\n' \
+    | grep -o '"name":"[^"]*"\|"port":"[^"]*"\|"state":"[^"]*"' >/dev/null 2>&1 || true
+
+  for port in $(printf '%s' "$json" | grep -o '"port":"[0-9]*"' | grep -o '[0-9]*'); do
+    check_next_server "preview :$port" "$port" "http://localhost:$port/" || true
+  done
+}
+
+# Redirected to a file by the caller, never $(...) — a subshell would discard PROBLEMS.
+run_checks() {
+  PROBLEMS=0
+  check_docker || true
+  check_next_server "dev server" 3000 "http://localhost:3000/" || true
+  check_jobs_consumer || true
+  check_http "mail-schedule" 3005 "http://localhost:3005/" || true
+  check_previews || true
+}
+
+# Only bounce what we own: the standalone tmux sessions loops-doctor/loops-preview start.
+# A `task dev`-managed process belongs to that terminal — say so instead of fighting it.
+bounce_jobs_worker() {
+  local main="${LOOPS_MAIN:-$HOME/coding/loops}"
+  if tmux has-session -t loops-jobs-worker 2>/dev/null; then
+    tmux kill-session -t loops-jobs-worker 2>/dev/null || true
+  fi
+  tmux new-session -d -s loops-jobs-worker \
+    "cd '$main' && npx tsx --tsconfig tsconfig.node.json --import dotenv/config lib/job-queue/index.js http://localhost:9324/elasticmq/dev 10 > /tmp/loops-jobs-worker.log 2>&1"
+  printf '  %s restarted jobs worker (tmux loops-jobs-worker · /tmp/loops-jobs-worker.log)\n' "$(green ▸)"
+}
+
+bounce_mail_schedule() {
+  local main="${LOOPS_MAIN:-$HOME/coding/loops}"
+  if tmux has-session -t loops-mail-schedule 2>/dev/null; then
+    tmux kill-session -t loops-mail-schedule 2>/dev/null || true
+  fi
+  tmux new-session -d -s loops-mail-schedule \
+    "cd '$main' && npx tsx --tsconfig tsconfig.node.json --import dotenv/config apps/mail-schedule/src/index.ts > /tmp/loops-mail-schedule.log 2>&1"
+  printf '  %s restarted mail-schedule (tmux loops-mail-schedule · /tmp/loops-mail-schedule.log)\n' "$(green ▸)"
+}
+
+OUT="$(mktemp -t loops-doctor)"
+trap 'rm -f "$OUT"' EXIT
+run_checks > "$OUT"
+
+if [ -n "$QUIET" ] && [ "$PROBLEMS" -eq 0 ]; then
+  exit 0
+fi
+
+printf '\n%s\n' "$(dim 'loops-doctor — local services')"
+cat "$OUT"
+
+if [ "$PROBLEMS" -eq 0 ]; then
+  printf '%s\n\n' "$(green 'all healthy')"
+  exit 0
+fi
+
+if [ -z "$FIX" ]; then
+  printf '%s\n\n' "$(amber "$PROBLEMS problem(s) — re-run with --fix to bounce them")"
+  exit 1
+fi
+
+printf '\n%s\n' "$(dim 'fixing…')"
+grep -q "jobs worker.*\(WEDGED\|not consuming\)" "$OUT" && bounce_jobs_worker
+grep -q "mail-schedule.*WEDGED" "$OUT" && bounce_mail_schedule
+grep -q "preview.*WEDGED" "$OUT" && printf '  %s wedged preview: loops-preview <dir> --kill && loops-preview <dir>\n' "$(amber ▸)"
+grep -q "dev server.*WEDGED" "$OUT" && printf '  %s :3000 belongs to another checkout — restart it there (task dev), not from here\n' "$(amber ▸)"
+
+printf '\n%s\n' "$(dim 're-checking (waiting for workers to boot)…')"
+wait_for_http http://localhost:4000/ 60 || true
+run_checks > "$OUT"
+cat "$OUT"
+[ "$PROBLEMS" -eq 0 ] && { printf '%s\n\n' "$(green 'all healthy')"; exit 0; }
+printf '%s\n\n' "$(amber "$PROBLEMS problem(s) remain")"
+exit 1
