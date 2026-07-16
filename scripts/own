@@ -44,6 +44,18 @@ _active(){ local lane="$1" a; _alive "$lane"; local rc=$?
   (( rc == 0 )) && return 0
   (( rc == 2 )) && { a=$(_age "$lane") && (( a < FRESH )) && return 0; }
   return 1 }
+# WHO AM I, in the same currency a claim records. The CLI never sets OWN_SESSION (only the
+# PreToolUse hook does) and _setowner UNSETS .session when it's empty — so a hand-claimed lane
+# is identified by its holder PID, not a session id. Compare pids or the check never fires.
+_mypid(){ local out; out=$("$RESOLVER" 2>/dev/null) && [[ -n "$out" ]] && print -r -- "${out%%	*}"; }
+# is lane $1 held by SOMEONE ELSE, right now? (0 = yes, hands off)
+_held_by_other(){ local lane="$1" hp mp hs
+  _active "$lane" || return 1
+  hp=$(gc "own.$lane.pid" 2>/dev/null); mp=$(_mypid)
+  [[ -n "$hp" && -n "$mp" && "$hp" != "$mp" ]] && return 0
+  hs=$(gc "own.$lane.session" 2>/dev/null)
+  [[ -n "$hs" && -n "$SID" && "$hs" != "$SID" ]] && return 0
+  return 1 }
 _lane_for(){ local p="$1" best="" blen=0 line lane globs g
   while IFS= read -r line; do
     [[ "$line" == \#* || -z "${line// /}" ]] && continue
@@ -57,6 +69,15 @@ _lanes(){ grep -v '^#' "$OWNERS" | awk 'NF{print $1}'; }
 _is_lane(){ grep -q "^$1 " "$OWNERS"; }
 case "${1:-list}" in
   claim) [[ -n "${2:-}" ]] || { print "usage: own claim <lane>" >&2; exit 2; }
+    # A claim never STEALS. Claiming used to stamp unconditionally, so two sessions could each
+    # be told "you hold [viewer]" and edit on for hours — the loser never learns it lost (it
+    # cost a session a whole afternoon of lane-less edits, 2026-07-16). Hand-off goes through
+    # 'own request' → the holder releases. Manual CLI (no OWN_SESSION) keeps the old behaviour.
+    if _held_by_other "$2"; then
+      print "[$2] is actively held by another live session — NOT claiming (that would silently steal it)." >&2
+      print "  'own request $2' registers a request; they release, then you claim. 'own list' shows who." >&2
+      exit 1
+    fi
     gc "own.$2.held" "$NOW"; gc --unset "own.$2.req" 2>/dev/null; gc --unset "own.$2.slice" 2>/dev/null; _setowner "$2"
     print "you hold [$2] — edit these directly; patch anything else:"; _paths "$2" ;;
   slice) [[ $# -ge 3 ]] || { print "usage: own slice <name> <lane> [<lane>...]" >&2; exit 2; }
@@ -99,6 +120,13 @@ case "${1:-list}" in
       printf '  %-9s %-15s %s%s%s\n' "$lane" "$h" "${line#* }" "$liv" "$r"; done < "$OWNERS" ;;
   release) local arg="${2:-}"; [[ -n "$arg" ]] || { print "usage: own release <lane|slice>" >&2; exit 2; }
     if _is_lane "$arg"; then
+      # Releasing someone else's live lane wipes their claim without telling them — the other
+      # half of the same footgun as a stealing claim. Yours, or dead, or nothing.
+      if _held_by_other "$arg"; then
+        print "[$arg] is held by another live session, not you — refusing to release their lane." >&2
+        print "  they release it themselves; 'own request $arg' asks them to." >&2
+        exit 1
+      fi
       _clearowner "$arg"; print "released [$arg]"
     else   # not a lane → treat as a slice name; release every lane tagged with it
       local any=0 ln
@@ -113,13 +141,20 @@ case "${1:-list}" in
     case "$p" in "$ROOT"/*) ;; *) exit 0 ;; esac          # only dotfiles paths are laned
     local rel="${p#$ROOT/}" lane=$(_lane_for "${p#$ROOT/}")
     [[ -n "$lane" ]] || exit 0
-    local holder=$(gc "own.$lane.session" 2>/dev/null)
-    if _active "$lane" && [[ -n "$holder" && "$holder" != "$SID" ]]; then
+    # Held by someone else → warn and LEAVE THEIR CLAIM ALONE. This used to warn and then
+    # auto-claim anyway, so "who holds it" decayed to "who edited last": every session that
+    # touched a viewer file silently took the lane from the one actually working it, and the
+    # next session was told THEY were the holder. A claim you can lose by someone else's
+    # keystroke isn't a claim. (Also why a single stack-gates edit squatted [stack] 9.5h.)
+    # _held_by_other compares PID too, so a hand-claimed lane (which records no .session,
+    # since the CLI has no OWN_SESSION) is finally visible here instead of warning nobody.
+    if _held_by_other "$lane"; then
       local sl=$(gc "own.$lane.slice" 2>/dev/null) a=$(_age "$lane" 2>/dev/null)
       print -u2 "⚠ own: [$lane]${sl:+ (slice:$sl)} is held by another LIVE session${a:+ (${a}s ago)}."
       print -u2 "   editing $rel — prefer the patch protocol (worktree → git diff → git apply --3way). See ~/.dotfiles/OWNERS."
+      exit 0
     fi
-    gc "own.$lane.held" "$NOW"; _setowner "$lane"        # auto-claim: register THIS session's activity
+    gc "own.$lane.held" "$NOW"; _setowner "$lane"        # free lane → register THIS session's activity
     exit 0 ;;
   *) print "usage: own {claim <lane>|slice <name> <lane>...|request <lane>|who <path>|list|release <lane|slice>}" >&2; exit 2 ;;
 esac
