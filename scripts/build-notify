@@ -68,6 +68,13 @@ runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 30 
   -q '.[] | select(.status=="completed") | [.databaseId,.headSha,.conclusion,.number,.headBranch,.startedAt,.updatedAt,.event,.url] | @tsv' 2>/dev/null || true)
 [ -n "$runs" ] || { grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"; exit 0; }
 
+# Cross-sweep supersession: a merge train gives every merge its own main build, but each
+# newer build CONTAINS the older ones — an older success is stale the moment a newer main
+# build is in flight. (The success_notified guard below only covers two successes landing
+# in the SAME sweep.) Failures still notify individually — red main is always actionable.
+inflight_max=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 10 \
+  --json number,status -q '[.[] | select(.status!="completed") | .number] | max // 0' 2>/dev/null || echo 0)
+
 now_s=$(date +%s)
 success_notified=0
 while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event url; do
@@ -97,6 +104,11 @@ while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event ur
     if [ "$success_notified" = "1" ]; then   # runs arrive newest-first; a newer success already notified
       echo "build-notify: · $tag superseded this sweep — seeded silently"
       journal_silent silent-superseded "$tag" "built, superseded by a newer build this sweep" "$url"
+      echo "$rid" >> "$seen"; continue
+    fi
+    if [ "${inflight_max:-0}" -gt "$runnum" ] 2>/dev/null; then
+      echo "build-notify: · $tag superseded — main build #$inflight_max in flight"
+      journal_silent silent-superseded "$tag" "built; superseded by in-flight main build #$inflight_max" "$url"
       echo "$rid" >> "$seen"; continue
     fi
     success_notified=1

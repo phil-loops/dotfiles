@@ -484,6 +484,16 @@ if [[ "${1:-}" == "--sweep" ]]; then
       if [[ -f "$rstate" ]]; then
         while IFS=$'\t' read -r k st _; do [[ -n "$k" ]] && rprev[$k]=$st; done <"$rstate"
       fi
+      # Per-lane supersession: deploys to the SAME env supersede each other — once a newer
+      # [staging] run exists (any state), an older [staging] success is stale news; the
+      # newer run's completion is the one that matters. Envs never supersede across, so a
+      # staging deploy and a production deploy each still announce. Failures always notify.
+      typeset -A envnewest
+      while IFS=$'\t' read -r wrepo rid st title; do
+        [[ -n "$rid" && "$title" =~ '^\[([a-z-]+)\]' ]] || continue
+        ek="$wrepo:${match[1]}"
+        (( rid > ${envnewest[$ek]:-0} )) && envnewest[$ek]=$rid
+      done <<< "$rrows"
       rnew=""
       while IFS=$'\t' read -r wrepo rid st title; do
         [[ -n "$rid" ]] || continue
@@ -494,7 +504,13 @@ if [[ "${1:-}" == "--sweep" ]]; then
         [[ "$st" == "$was" ]] && continue
         answered "$key" && continue   # run was explicitly watched — its one notification fired
         case "$st" in
-          (success) salert "deployed" "Deployed $(deploy_title "$title")" "$url" ;;
+          (success)
+            if [[ "$title" =~ '^\[([a-z-]+)\]' ]] && (( ${envnewest[$wrepo:${match[1]}]:-0} > rid )); then
+              "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-superseded "deployed" \
+                "Deployed $(deploy_title "$title") — superseded by a newer ${match[1]} deploy" "$url" 2>/dev/null || true
+            else
+              salert "deployed" "Deployed $(deploy_title "$title")" "$url"
+            fi ;;
           (failure|timed_out|startup_failure|cancelled)
             salert "deploy failed" "Deploy ${st//_/ } — $(deploy_title "$title")" "$url" ;;
         esac   # in-flight states record silently — Slack already announces the start
