@@ -119,6 +119,12 @@ collect into separate dicts, then overlay new onto old per (branch, kind) — fo
 
 - Branch names contain dots — every name-extraction must strip the FIXED prefix/suffix
   (`${k#branch.}` + `${k%.stack-parent}`), never split on `.`.
+- **Case, precisely** (scratch-verified 2026-07-16, contra an earlier over-broad warning):
+  `--get-regexp` matches per-component — section + variable names case-INsensitively,
+  the subsection (the branch name) case-SENSITIVELY with case preserved. An uppercase
+  branch embedded verbatim in a pattern matches fine; what silently matches nothing is
+  case-NORMALIZING the branch name (`.lower()`, `tr A-Z a-z`) before building the pattern,
+  or hand-lowercasing a pattern "for safety". Never case-touch `$b`. (srv/* audited clean.)
 - srv/review.py's `_MODEL_CFG` sig regex must gain the new-namespace alternates or the
   viewer stops repainting on stack config changes after the keystone.
 - `stack-doctor` enumerates `^stack-branch\..*\.` generically — needs the new-namespace arm
