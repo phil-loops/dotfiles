@@ -19,7 +19,7 @@ rot class, and shrinks the rename checklist to children's parents + registry ent
 | `stack-branch.<b>.requires` (multivar)  | `branch.<b>.stack-requires`          |
 | `stack-branch.<b>.project`              | `branch.<b>.stack-project`           |
 | `stack-branch.<b>.base`                 | `branch.<b>.stack-base`              |
-| `stack-branch.<b>.story`                | **EXEMPT — stays legacy** (see below)|
+| `stack-branch.<b>.story`                | `branch.<b>.stack-story`             |
 | `stack-branch.<b>.summary`              | `branch.<b>.stack-summary`           |
 | `stack-branch.<b>.summary-patchid`      | `branch.<b>.stack-summary-patchid`   |
 | `stack-branch.<b>.trunk` (bool)         | `branch.<b>.stack-trunk`             |
@@ -28,27 +28,6 @@ rot class, and shrinks the rename checklist to children's parents + registry ent
 
 (`stack-branch.<b>.interest` does not exist — a stale comment in stack-review-server.py
 claims it; the real key is `stack-project.<p>.interest`. Fix the comment, migrate nothing.)
-
-### `.story` is lifetime-exempt (2026-07-16)
-
-`.story`'s contract is to OUTLIVE its branch: the plan renders a merged step's story after
-contraction deletes the branch (stack_facts.py:job_of, srv/review.py:story_set both state
-it). `git branch -D` deletes the entire `branch.<b>.*` section — so the auto-GC that makes
-this migration correct for every other key silently destroys a story exactly when the merge
-history matters most. Verified in a scratch repo: custom `branch.<b>.stack-*` keys are
-removed with the branch; `stack-branch.<b>.*` survives.
-
-So `stack-branch.<b>.story` stays the canonical home, permanently:
-
-- `stack-config-move` skips suffix `story` (both sweep and `--check` gate) and no longer
-  `--remove-section`s a `stack-branch.<b>` section that still holds keys.
-- `stack-doctor --prune` keeps `.story` for a gone branch — "ref is gone" is its normal
-  live state, not rot. (This was a live data-loss bug even before the migration.)
-- **Keystone carve-out**: the grep-every-`stack-branch`-write flip must NOT flip the
-  `.story` writer (srv/review.py:story_set) — it writes legacy forever.
-- **Phase 3 carve-out**: readers' `.story` arms are the mirror of every other key — the
-  legacy arm is canonical; delete the dead new-namespace-first arms (stack_facts.py reads
-  `branch.<b>.stack-story` first — nothing will ever write it).
 
 ## Phases (additive lattice; the writer flip is the ONE keystone)
 
@@ -119,6 +98,11 @@ collect into separate dicts, then overlay new onto old per (branch, kind) — fo
 
 - Branch names contain dots — every name-extraction must strip the FIXED prefix/suffix
   (`${k#branch.}` + `${k%.stack-parent}`), never split on `.`.
+- `.story` needs NO lifetime exemption (settled 2026-07-17 after a retracted alarm): a
+  landed step renders from the merge ledger (`stack-project-merges.json`) and facts()
+  skips landed branches before job_of, so a gone branch's story is never read — job_of's
+  "survives after this branch merges" means the branch you're editing FROM, not the step's
+  own. Migrate `.story` and let git GC it like every other key.
 - **Case, precisely** (full matrix scratch-verified 2026-07-16, superseding two earlier
   partial accounts): git lowercases the PATTERN's first and last dot-delimited components
   before matching — that's how section + variable names match case-INsensitively — and the
