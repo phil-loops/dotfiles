@@ -134,21 +134,28 @@ def _health(pv):
 def _substrate():
     # the ONE shared dev stack (docker compose project "loops") that every preview + :3000 use —
     # NOT per-preview and NOT isolated, so a preview's writes hit the same Postgres/ClickHouse.
+    # `ps -a`, not `ps`: a crashed container must count against the total, not vanish from it
+    # (running-only listing once reported "10/10 up" while a container sat exited). Exited(0) is
+    # a finished one-shot init job — shown as "done", excluded from the denominator.
     services = []
     try:
         p = subprocess.run(
-            ["docker", "ps", "--filter", "label=com.docker.compose.project=loops",
+            ["docker", "ps", "-a", "--filter", "label=com.docker.compose.project=loops",
              "--format", "{{.Names}}\t{{.Status}}"],
             capture_output=True, text=True, timeout=6)
         for line in p.stdout.strip().splitlines():
             parts = line.split("\t")
             if len(parts) >= 2:
-                services.append({"name": parts[0], "status": parts[1], "up": parts[1].startswith("Up")})
+                status = parts[1]
+                up = status.startswith("Up")
+                state = "up" if up else "done" if status.startswith("Exited (0)") else "failed"
+                services.append({"name": parts[0], "status": status, "up": up, "state": state})
     except Exception:
         pass
     return {
         "project": "loops", "shared": True,
-        "up": sum(1 for s in services if s["up"]), "total": len(services),
+        "up": sum(1 for s in services if s["up"]),
+        "total": sum(1 for s in services if s["state"] != "done"),
         "services": services,
     }
 
