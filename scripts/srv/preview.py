@@ -1,7 +1,9 @@
 # srv/preview.py — spin a side-port `next dev` for a branch, and manage the running ones. Wraps
 # the loops-preview script (auto-picks a free 3010-3060 port, borrows MAIN's node_modules/.env and
 # the running Docker) so a branch renders in the browser WITHOUT moving the main checkout off :3000.
-#   POST /preview          {branch}  → {ok, url, port, dir}   start (materialises a worktree if none)
+#   GET  /preview-wait     ?branch=  → HTML                   warming page: starts + watches the boot,
+#                                                             hands the tab off once the server answers
+#   POST /preview          {branch}  → {ok, url, port, dir, reused?}  start, or attach to a running one
 #   POST /preview-kill     {dir}     → {ok}                   stop one (dir-string only; orphan-safe)
 #   POST /preview-restart  {dir}     → {ok, url, port}        kill + fresh next dev on the SAME port
 #   POST /preview-reap                → {ok, out}             stop orphaned/crashed previews
@@ -160,6 +162,19 @@ def _substrate():
     }
 
 
+def wait(req):
+    # the warming interstitial: served by THIS (always-alive) server so the tab a preview click
+    # opens is never a refused connection — the page starts the preview, narrates the boot, and
+    # location.replace()s to it once healthy. Re-read per request: hot-editable, nothing cached.
+    try:
+        with open(os.path.join(os.path.dirname(__file__), "preview-wait.html"), "rb") as f:
+            body = f.read()
+    except OSError:
+        req._send(404, "preview-wait.html missing", "text/plain")
+        return
+    req._send(200, body, "text/html; charset=utf-8")
+
+
 def start(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
@@ -173,6 +188,14 @@ def start(req, raw):
     if r.returncode != 0 or not dirp:
         req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a worktree").strip()}))
         return
+    # attach, don't restart: loops-preview cold-reboots an existing session (kills tmux, wipes
+    # .next), so re-clicking preview on a warm branch must NOT destroy the running server.
+    for pv in _list_json():
+        if pv.get("dir") == dirp and pv.get("state") == "up" and str(pv.get("port", "")).isdigit():
+            port = int(pv["port"])
+            req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
+                                       "dir": dirp, "reused": True}))
+            return
     # loops-preview detaches the server into tmux and returns immediately with the URL on stdout.
     p = subprocess.run([_script(), dirp, "--main", checkout._active_main_wt()], capture_output=True, text=True)
     m = re.search(r"localhost:(\d+)", p.stdout)

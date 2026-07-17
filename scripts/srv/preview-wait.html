@@ -1,0 +1,160 @@
+<!doctype html>
+<!-- The preview warming page — served by the review server (always alive) so the tab a
+     "▷ preview" click opens can NEVER be a refused connection. It starts the side-port
+     next dev itself (POST /preview, idempotent — attaches to a running one), narrates the
+     boot from /previews health + the next-dev log tail, and location.replace()s to the
+     preview the moment it answers. A compile error parks here with the error line and a
+     restart button instead of redirecting to a broken page. Polling /previews doubles as
+     the first hit that makes Next compile the route, so the handoff lands pre-compiled. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>warming preview…</title>
+<style>
+  :root {
+    --night: #14110a; --raise: #1c180f; --ink: #e8dcc4; --dim: #9a8e78; --faint: #675d4d;
+    --gold: #e6b64e; --ember: #d2732a; --add: #8fae7a; --del: #c87a55; --rule: #2c2517;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--night); color: var(--ink); font-family: var(--mono);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
+  }
+  main { width: min(680px, 100%); }
+  .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--ember); }
+  .dot.breathe { animation: breathe 1.5s ease-in-out infinite; }
+  .dot.err { background: var(--del); animation: none; }
+  .dot.ok { background: var(--add); animation: none; }
+  @keyframes breathe { 0%,100% { opacity: 0.35 } 50% { opacity: 1 } }
+  @media (prefers-reduced-motion: reduce) { .dot.breathe { animation: none } }
+  h1 { font-size: 15px; font-weight: 500; font-family: var(--mono); }
+  h1 b { color: var(--gold); font-weight: 600; }
+  .state { color: var(--ember); font-size: 13px; }
+  .state.err { color: var(--del); }
+  .meta { margin-top: 7px; color: var(--faint); font-size: 11.5px; line-height: 1.6; }
+  .meta a { color: var(--dim); }
+  .errline {
+    display: none; margin-top: 14px; padding: 10px 12px; border-left: 3px solid var(--del);
+    background: rgba(200, 122, 85, 0.09); color: var(--del); font-size: 12.5px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .actions { display: none; margin-top: 12px; gap: 8px; }
+  .actions button {
+    cursor: pointer; font-family: var(--mono); font-size: 12px; color: var(--ink);
+    background: transparent; border: 1px solid var(--rule); border-radius: 5px; padding: 4px 11px;
+  }
+  .actions button:hover { border-color: var(--dim); }
+  pre {
+    margin-top: 18px; padding: 12px 14px; height: 260px; overflow-y: auto;
+    background: var(--raise); border: 1px solid var(--rule); border-radius: 6px;
+    color: var(--dim); font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  }
+  .caveat { margin-top: 10px; color: var(--faint); font-size: 10.5px; font-style: italic; }
+</style>
+</head>
+<body>
+<main>
+  <div class="head">
+    <span class="dot breathe" id="dot"></span>
+    <h1>preview <b id="branch"></b></h1>
+    <span class="state" id="state">starting…</span>
+    <span class="meta" id="clock"></span>
+  </div>
+  <div class="meta" id="meta"></div>
+  <div class="errline" id="errline"></div>
+  <div class="actions" id="actions">
+    <button id="restart">restart server</button>
+    <button id="anyway">open anyway</button>
+  </div>
+  <pre id="log">…</pre>
+  <div class="caveat">shares the one dev Docker stack with :3000 — same Postgres/ClickHouse, writes collide</div>
+</main>
+<script>
+  // repo-pinned API base: the page is served at [/<repo>]/preview-wait, so everything before
+  // the last segment is the prefix the server reads the repo from.
+  const base = location.pathname.replace(/\/preview-wait$/, "");
+  const branch = new URLSearchParams(location.search).get("branch") || "";
+  const t0 = Date.now();
+  let dir = "", url = "", parked = false;
+
+  const $ = (id) => document.getElementById(id);
+  $("branch").textContent = branch;
+  document.title = "warming " + branch + "…";
+  setInterval(() => { $("clock").textContent = Math.round((Date.now() - t0) / 1000) + "s"; }, 1000);
+
+  const setState = (label, kind) => {
+    $("state").textContent = label;
+    $("state").className = "state" + (kind === "err" ? " err" : "");
+    $("dot").className = "dot " + (kind === "err" ? "err" : kind === "ok" ? "ok" : "breathe");
+  };
+  const park = (line) => {
+    parked = true;
+    $("errline").style.display = "block";
+    $("errline").textContent = line || "the dev server hit an error — see the log below";
+    $("actions").style.display = "flex";
+  };
+  const unpark = () => {
+    parked = false;
+    $("errline").style.display = "none";
+    $("actions").style.display = "none";
+    setState("restarting…");
+  };
+
+  const post = (path, body) =>
+    fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => r.json());
+
+  async function tailLog() {
+    if (!dir) { return; }
+    try {
+      const r = await fetch(base + "/preview-log?dir=" + encodeURIComponent(dir)).then((x) => x.json());
+      if (r.log) {
+        const el = $("log");
+        const pinned = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+        el.textContent = r.log.split("\n").slice(-120).join("\n");
+        if (pinned) { el.scrollTop = el.scrollHeight; }
+      }
+    } catch {}
+  }
+
+  async function watch() {
+    try {
+      const r = await fetch(base + "/previews").then((x) => x.json());
+      const pv = (r.previews || []).find((p) => p.dir === dir);
+      if (!pv) { return; }
+      if (pv.health === "healthy") {
+        setState("ready — opening", "ok");
+        location.replace(url);
+        return;
+      }
+      if (parked) { return; } // error is showing; let restart drive the next transition
+      if (pv.health === "error") { setState("compile error", "err"); park(pv.error); }
+      else if (pv.health === "dead" || pv.health === "orphaned") { setState("server died", "err"); park("the dev server is no longer listening on :" + pv.port); }
+      else { setState(pv.health === "compiling" ? "compiling…" : "booting… (clean build, ~20–60s)"); }
+    } catch {}
+  }
+
+  $("restart").onclick = async () => {
+    unpark();
+    const r = await post("/preview-restart", { dir });
+    if (!r.ok) { setState("restart failed", "err"); park(r.err); }
+  };
+  $("anyway").onclick = () => { if (url) { location.replace(url); } };
+
+  (async () => {
+    if (!branch) { setState("no branch given", "err"); return; }
+    setState("materialising worktree…");
+    const r = await post("/preview", { branch }).catch((e) => ({ ok: false, err: String(e) }));
+    if (!r.ok) { setState("could not start", "err"); park(r.err); $("restart").style.display = "none"; return; }
+    dir = r.dir; url = r.url;
+    $("meta").textContent = (r.reused ? "attached to the running server" : "started") + " on :" + r.port + "  ·  " + dir.split("/").pop();
+    setState(r.reused ? "checking health…" : "booting… (clean build, ~20–60s)");
+    watch(); tailLog();
+    setInterval(watch, 2000);
+    setInterval(tailLog, 2500);
+  })();
+</script>
+</body>
+</html>
