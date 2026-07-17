@@ -40,7 +40,7 @@ out.append(f["purpose"] or f["job"])
 
 if f["project"]:
     out.append("\n### Where it fits\n")
-    out.append("Part of **%s** — %s of %s.\n" % (f["project"], f["position"], f["total"]))
+    out.append("Part of a stack — %s of %s.\n" % (f["position"], f["total"]))
     if f["buildsOn"]:
         b = f["buildsOn"]
         out.append("Builds on (merges first):\n- %s%s\n" % (b["job"], step_ref(b)))

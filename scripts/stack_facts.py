@@ -202,7 +202,7 @@ def facts(branch):
 # Both default to the historical hardcoded format, so an untemplated project is byte-for-byte
 # unchanged. NOTE: the outer template's first line must start with "Part of " — that literal is the
 # fence stack-commit-body uses to replace the block idempotently.
-PLAN_TEMPLATE_DEFAULT = "Part of {project}:\n{steps}"
+PLAN_TEMPLATE_DEFAULT = "Part of a stack, in merge order:\n{steps}"
 PLAN_STEP_DEFAULT = "  {n}. {ref}"
 
 
