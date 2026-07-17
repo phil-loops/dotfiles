@@ -31,7 +31,7 @@ type Preview = {
   pid?: string;
   behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
 };
-type Service = { name: string; status: string; up: boolean };
+type Service = { name: string; status: string; up: boolean; state?: string }; // up · done (finished init job) · failed
 type Substrate = { project: string; shared: boolean; up: number; total: number; services: Service[] };
 type PreviewsResp = { ok: boolean; previews: Preview[]; substrate: Substrate };
 
@@ -130,9 +130,13 @@ export function ServersDrawer() {
                   {(svc) => (
                     <span
                       class="rounded-md border bg-vellum-night px-[7px] py-px text-[10px]"
-                      classList={{ "border-rule text-ink-dim": svc.up, "border-del text-del": !svc.up }}
+                      classList={{
+                        "border-rule text-ink-dim": svc.up,
+                        "border-rule text-ink-faint opacity-70": svc.state === "done",
+                        "border-del text-del": !svc.up && svc.state !== "done",
+                      }}
                       title={svc.status}
-                    >{shortSvc(svc.name)}</span>
+                    >{shortSvc(svc.name)}{svc.state === "done" ? " · done" : svc.state === "failed" ? " · exited" : ""}</span>
                   )}
                 </For>
               </div>
