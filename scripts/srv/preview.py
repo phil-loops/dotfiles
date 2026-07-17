@@ -103,7 +103,12 @@ def _health(pv):
         return pv
     port = int(pv["port"]) if str(pv.get("port", "")).isdigit() else 0
     code, lat = _probe(port)
-    logstate, summary = _log_state(pv.get("name", ""))
+    # an unmanaged stray has no preview log — and its dir's basename can collide with a
+    # registered preview's log (same worktree, two servers), so never read one for it
+    if pv.get("managed", True):
+        logstate, summary = _log_state(pv.get("name", ""))
+    else:
+        logstate, summary = "", ""
     # A live probe is the strongest signal: <500 ⇒ healthy (it's serving now), ≥500 ⇒ error (the
     # page itself throws — a compile/runtime failure). Only when the probe gets no answer do we fall
     # back to the log: `next dev` prints "✓ Ready" the instant it boots but compiles a route on first
@@ -195,10 +200,15 @@ def restart(req, raw):
 def kill(req, raw):
     d = json.loads(raw or "{}")
     dirp = d.get("dir", "")
-    if not dirp:
+    port = str(d.get("port", "") or "")
+    if not dirp and not port:
         req._send(400, json.dumps({"ok": False, "err": "no dir"}))
         return
-    subprocess.run([_script(), dirp, "--kill"], capture_output=True, text=True)
+    # port pins the exact server — one dir can host a registered preview AND an unmanaged stray
+    argv = [_script(), dirp or "/", "--kill"]
+    if port:
+        argv += ["--port", port]
+    subprocess.run(argv, capture_output=True, text=True)
     req._send(200, json.dumps({"ok": True}))
 
 
@@ -214,7 +224,8 @@ def previews(req):
     main_wt = checkout._active_main_wt()
     for pv in pvs:
         pv["borrows"] = main_wt
-        pv["log"] = _log_path(pv.get("name", ""))
+        if pv.get("managed", True):
+            pv["log"] = _log_path(pv.get("name", ""))
     if pvs:
         with ThreadPoolExecutor(max_workers=min(8, len(pvs))) as ex:
             pvs = list(ex.map(_health, pvs))

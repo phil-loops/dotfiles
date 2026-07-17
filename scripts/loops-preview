@@ -13,6 +13,8 @@
 #   loops-preview [dir] --kill                             # stop the preview for that dir
 #   loops-preview --list                                  # rich list: port · url · branch · age · state
 #   loops-preview --json                                  # same, machine-readable (the viewer dock reads this)
+#                                                         # both also surface UNMANAGED next-dev listeners
+#                                                         # on :3000-3060 that no preview session owns
 #   loops-preview --kill-all                              # stop every preview
 #   loops-preview --reap [--older-than MINUTES]           # stop orphaned/crashed (and optionally old) previews
 #
@@ -60,10 +62,61 @@ meta_get()   { [ -f "$1" ] && grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- ||
 listening()  { [ -n "$1" ] && lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }          # $1=PORT
 age_secs()   { [ -n "$1" ] && echo $(( $(date +%s) - $1 )) || echo 0; }                   # $1=STARTED epoch
 age_human()  { local s="$1"; [ "$s" -lt 60 ] && echo "${s}s" || { [ "$s" -lt 3600 ] && echo "$((s/60))m" || echo "$((s/3600))h"; }; }
-branch_of()  { git -C "$1" branch --show-current 2>/dev/null || echo "(gone)"; }          # $1=DIR
+# $1=DIR — a detached HEAD reports as detached@<sha>, not blank (blank made the dock fall back
+# to the worktree name and hide that a server was pinned to an old commit)
+branch_of()  {
+  local b
+  b="$(git -C "$1" branch --show-current 2>/dev/null)" || { echo "(gone)"; return; }
+  if [ -n "$b" ]; then echo "$b"; else echo "detached@$(git -C "$1" rev-parse --short HEAD 2>/dev/null)"; fi
+}
+behind_of()  { git -C "$1" rev-list --count HEAD..origin/main 2>/dev/null || true; }      # $1=DIR
 json_esc()   { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # state of one preview, echoed as: orphaned (dir gone) · up (listening) · dead (crashed, session lingers)
 state_of()   { local dir="$1" port="$2"; { [ -z "$dir" ] || [ ! -d "$dir" ]; } && { echo orphaned; return; }; listening "$port" && echo up || echo dead; }
+
+# Unmanaged next-dev listeners on :3000-3060 — servers no preview session owns (a leftover
+# headless `next dev`, a `task dev` in a worktree). Echoes "PORT PID" per stray; $1 = ports
+# already claimed by registered sessions.
+stray_listeners() {
+  local known=" $1 " port pid
+  lsof -nP -iTCP:3000-3060 -sTCP:LISTEN 2>/dev/null \
+    | awk 'NR>1 {n=split($9,a,":"); print a[n], $2}' | sort -u -k1,1n \
+    | while read -r port pid; do
+        case "$known" in *" $port "*) continue ;; esac
+        ps -p "$pid" -o command= 2>/dev/null | grep -q next || continue
+        echo "$port $pid"
+      done
+}
+cwd_of()     { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -1; }     # $1=PID
+pid_age() {  # $1=PID → seconds alive, from ps etime ([[dd-]hh:]mm:ss)
+  local e d=0 h=0 m=0 s=0 rest
+  e="$(ps -p "$1" -o etime= 2>/dev/null | tr -d ' ')"
+  [ -n "$e" ] || { echo 0; return; }
+  case "$e" in *-*) d="${e%%-*}"; e="${e#*-}" ;; esac
+  case "$e" in
+    *:*:*) h="${e%%:*}"; rest="${e#*:}"; m="${rest%%:*}"; s="${rest#*:}" ;;
+    *)     m="${e%%:*}"; s="${e#*:}" ;;
+  esac
+  echo $(( 10#$d*86400 + 10#$h*3600 + 10#$m*60 + 10#$s ))
+}
+
+# Kill the listener on a port (whole process group, so the npx→npm→next tree dies together).
+# Refuses anything that isn't a next dev server — this must never reach for a Docker service
+# or an unrelated node process that happens to sit in the range.
+kill_port() {
+  local port="$1" pid pgid cmd
+  pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1)"
+  [ -n "$pid" ] || { err "nothing listening on :$port"; exit 1; }
+  cmd="$(ps -p "$pid" -o command= 2>/dev/null)"
+  case "$cmd" in *next*) ;; *) err "refusing to kill :$port — not a next dev server ($cmd)"; exit 1 ;; esac
+  pgid="$(ps -p "$pid" -o pgid= 2>/dev/null | tr -d ' ')"
+  if [ -n "$pgid" ] && [ "$pgid" -gt 1 ] 2>/dev/null; then
+    kill -TERM -- "-$pgid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
+  else
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+  cyan "killed :$port (pid $pid)"
+}
 
 # Stop one session by NAME: kill tmux + drop its meta. Echoes nothing.
 stop_one() {
@@ -74,16 +127,29 @@ stop_one() {
 
 if [ "$ACTION" = "list" ]; then
   found=""
+  reg_ports=""
   for s in $(sessions); do
     found=1
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
+    reg_ports="$reg_ports $port"
     state="$(state_of "$dir" "$port")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch="(dir gone)"; fi
     printf '  %-22s :%-5s  %-24s %-6s %s\n' \
       "$name" "${port:-?}" "$branch" "$(age_human "$(age_secs "$started")")" "$state"
     [ "$state" = "up" ] && dim "                         http://localhost:$port"
   done
+  while read -r port pid; do
+    [ -n "$port" ] || continue
+    found=1
+    dir="$(cwd_of "$pid")"
+    branch=""; [ -n "$dir" ] && [ -d "$dir" ] && branch="$(branch_of "$dir")"
+    printf '  %-22s :%-5s  %-24s %-6s %s\n' \
+      "$(basename "${dir:-pid-$pid}")" "$port" "${branch:-?}" "$(age_human "$(pid_age "$pid")")" "unmanaged (pid $pid)"
+    dim "                         http://localhost:$port"
+  done <<EOF
+$(stray_listeners "$reg_ports")
+EOF
   [ -n "$found" ] || echo "no previews running"
   exit 0
 fi
@@ -91,18 +157,34 @@ fi
 if [ "$ACTION" = "json" ]; then
   printf '['
   first=1
+  reg_ports=""
   for s in $(sessions); do
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
+    reg_ports="$reg_ports $port"
     state="$(state_of "$dir" "$port")"
-    if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch=""; fi
+    if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; behind="$(behind_of "$dir")"; else branch=""; behind=""; fi
     url=""; [ "$state" = "up" ] && url="http://localhost:$port"
     [ -n "$first" ] || printf ','
     first=""
-    printf '{"name":"%s","port":"%s","dir":"%s","branch":"%s","started":"%s","age":"%s","state":"%s","url":"%s"}' \
+    printf '{"name":"%s","port":"%s","dir":"%s","branch":"%s","started":"%s","age":"%s","state":"%s","url":"%s","managed":true,"behind":"%s"}' \
       "$(json_esc "$name")" "$(json_esc "$port")" "$(json_esc "$dir")" "$(json_esc "$branch")" \
-      "$(json_esc "$started")" "$(json_esc "$(age_human "$(age_secs "$started")")")" "$(json_esc "$state")" "$(json_esc "$url")"
+      "$(json_esc "$started")" "$(json_esc "$(age_human "$(age_secs "$started")")")" "$(json_esc "$state")" "$(json_esc "$url")" \
+      "$(json_esc "$behind")"
   done
+  while read -r port pid; do
+    [ -n "$port" ] || continue
+    dir="$(cwd_of "$pid")"
+    branch=""; behind=""
+    if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; behind="$(behind_of "$dir")"; fi
+    [ -n "$first" ] || printf ','
+    first=""
+    printf '{"name":"%s","port":"%s","dir":"%s","branch":"%s","pid":"%s","age":"%s","state":"up","url":"http://localhost:%s","managed":false,"behind":"%s"}' \
+      "$(json_esc "$(basename "${dir:-pid-$pid}")")" "$(json_esc "$port")" "$(json_esc "$dir")" "$(json_esc "$branch")" \
+      "$(json_esc "$pid")" "$(json_esc "$(age_human "$(pid_age "$pid")")")" "$(json_esc "$port")" "$(json_esc "$behind")"
+  done <<EOF
+$(stray_listeners "$reg_ports")
+EOF
   printf ']\n'
   exit 0
 fi
@@ -135,7 +217,19 @@ fi
 
 # --kill needs only the session NAME (basename of the path string) — never cd, so an orphaned
 # preview whose worktree is already gone can still be torn down by the dir the dock recorded.
+# With --port it kills by PORT instead: one dir can host both a registered preview and an
+# unmanaged stray, so only the port names a server precisely.
 if [ "$ACTION" = "kill" ]; then
+  if [ -n "$PORT" ]; then
+    for s in $(sessions); do
+      name="$(name_of "$s")"
+      if [ "$(meta_get "$(meta_of "$name")" PORT)" = "$PORT" ]; then
+        stop_one "$name"; cyan "killed ${PREFIX}${name}"; exit 0
+      fi
+    done
+    kill_port "$PORT"
+    exit 0
+  fi
   NAME="$(basename "${DIR:-$PWD}")"
   if tmux has-session -t "${PREFIX}${NAME}" 2>/dev/null; then
     stop_one "$NAME"; cyan "killed ${PREFIX}${NAME}"

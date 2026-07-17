@@ -27,6 +27,9 @@ type Preview = {
   error?: string;
   borrows?: string;
   log?: string;
+  managed?: boolean; // false = a next-dev listener no preview session owns (task dev, leftover headless server)
+  pid?: string;
+  behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
 };
 type Service = { name: string; status: string; up: boolean };
 type Substrate = { project: string; shared: boolean; up: number; total: number; services: Service[] };
@@ -72,16 +75,18 @@ export function ServersDrawer() {
   const [logFor, setLogFor] = createSignal<string | null>(null);
   const [logText, setLogText] = createSignal("");
 
-  const act = async (dir: string, path: string) => {
-    setBusy(dir);
-    await post(path, { dir });
+  // kill carries the port — a dir can host both a registered preview and an unmanaged stray,
+  // so only the port names a server precisely
+  const act = async (p: Preview, path: string) => {
+    setBusy(p.dir + p.port);
+    await post(path, { dir: p.dir, port: p.port });
     await q.refetch();
     setBusy(null);
   };
   const reap = async () => { setBusy("__all__"); await post("/preview-reap", {}); await q.refetch(); setBusy(null); };
   const killAll = async () => {
     setBusy("__all__");
-    for (const p of previews()) { await post("/preview-kill", { dir: p.dir }); }
+    for (const p of previews()) { await post("/preview-kill", { dir: p.dir, port: p.port }); }
     await q.refetch();
     setBusy(null);
   };
@@ -149,6 +154,9 @@ export function ServersDrawer() {
                     {/* the branch is the card's identity — the "which server is which" answer */}
                     <div class="flex items-baseline gap-2.5">
                       <span class="truncate text-[13.5px] font-semibold text-ink" title={p.dir}>{p.branch || p.name}</span>
+                      <Show when={p.managed === false}>
+                        <span class="flex-none rounded border border-ember px-1.5 py-px text-[9px] uppercase tracking-[0.08em] text-ember" title="a next-dev listener no preview session owns — started outside the dock (task dev, leftover headless server)">unmanaged</span>
+                      </Show>
                       <span class="ml-auto flex-none text-[11px] text-ink-faint">{p.age}</span>
                     </div>
                     <div class="mt-[5px] flex items-baseline gap-3">
@@ -159,6 +167,9 @@ export function ServersDrawer() {
                       <Show when={p.url} fallback={<span class="text-[11px] text-ink-faint">:{p.port}</span>}>
                         <a class="text-[11px] text-patina no-underline hover:text-ink hover:underline" href={p.url} target="_blank" rel="noopener">localhost:{p.port} ↗</a>
                       </Show>
+                      <Show when={p.behind && p.behind !== "0"}>
+                        <span class="text-[10.5px] text-ember" title="the checkout this server serves trails origin/main — healthy means answering, not fresh">{p.behind} behind main</span>
+                      </Show>
                     </div>
                     <Show when={p.error}>
                       <div class="mt-[7px] truncate text-[10.5px] text-del" title={p.error}>{p.error}</div>
@@ -166,17 +177,23 @@ export function ServersDrawer() {
                     <div class="mt-2 flex flex-wrap items-center gap-[5px] text-[10px] text-ink-faint" title="each preview runs its own worktree but borrows main's node_modules + .env, and shares the one Docker stack">
                       <span class={CONN_NODE}>⌂ {shortDir(p.dir)}</span>
                       <span>→</span>
-                      <span class={CONN_NODE}>borrows main</span>
+                      <Show when={p.managed !== false} fallback={<span class={CONN_NODE}>pid {p.pid}</span>}>
+                        <span class={CONN_NODE}>borrows main</span>
+                      </Show>
                       <span>→</span>
                       <span class={`${CONN_NODE} text-patina`}>shared stack</span>
                     </div>
                     <div class="mt-2.5 flex items-center gap-[7px]">
-                      <button class={BTN} disabled={busy() === p.dir} onClick={() => act(p.dir, "/preview-restart")}>
-                        {busy() === p.dir ? "…" : "restart"}
-                      </button>
-                      <button class={BTN} onClick={() => showLog(p.dir)}>{logFor() === p.dir ? "hide log" : "log"}</button>
+                      {/* restart/log only make sense for servers the dock owns — an unmanaged
+                          stray has no session to respawn and no log file to tail */}
+                      <Show when={p.managed !== false}>
+                        <button class={BTN} disabled={busy() === p.dir + p.port} onClick={() => act(p, "/preview-restart")}>
+                          {busy() === p.dir + p.port ? "…" : "restart"}
+                        </button>
+                        <button class={BTN} onClick={() => showLog(p.dir)}>{logFor() === p.dir ? "hide log" : "log"}</button>
+                      </Show>
                       {/* kill stands apart — the one destructive act on the card, in the ledger's del voice */}
-                      <button class={BTN_DANGER} disabled={busy() === p.dir} onClick={() => act(p.dir, "/preview-kill")}>kill</button>
+                      <button class={BTN_DANGER} disabled={busy() === p.dir + p.port} onClick={() => act(p, "/preview-kill")}>kill</button>
                     </div>
                     <Show when={logFor() === p.dir}>
                       <pre class="mt-[9px] max-h-[220px] overflow-auto rounded-[7px] border border-rule bg-diff-bg px-2.5 py-[9px] text-[10px] leading-[1.5] whitespace-pre-wrap text-ink-dim">{logText()}</pre>
