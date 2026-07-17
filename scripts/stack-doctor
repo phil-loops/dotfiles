@@ -65,11 +65,6 @@ prune() {
     name="${key#stack-branch.}"; branch="${name%.*}"
     alive "$branch" && continue
     echo "  ✗ $branch (no ref)"
-    # .story is durable data, not rot: the plan renders a merged step's story AFTER its
-    # branch is contracted away, so "ref is gone" is its normal live state — never reap it.
-    case "$key" in *.story)
-      echo "    kept (a story outlives its branch)  $key"; continue ;;
-    esac
     unset_key "$key"; pruned=$((pruned+1))
   done < <(git config --name-only --get-regexp '^stack-branch\..*\.' 2>/dev/null | sort)
 
