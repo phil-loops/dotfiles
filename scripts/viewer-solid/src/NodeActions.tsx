@@ -176,23 +176,25 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "checkout failed"}`),
   }));
 
-  // ▷ preview — spin a side-port `next dev` for this branch (loops-preview) and open it. Never
-  // moves the main checkout off :3000; the Activity dock lists + kills the running ones.
-  const devServer = createMutation(() => ({
-    mutationFn: () => post<{ ok: boolean; url?: string; err?: string }>("/preview", { branch: props.branch }),
-    onSuccess: (r) => {
-      setOpen(false);
-      if (r.ok && r.url) {
-        window.open(r.url, "_blank");
-        setDone(`✓ preview → ${r.url.replace("http://", "")}`);
-        qc.invalidateQueries({ queryKey: ["processes"] });
-      } else {
-        setDone(`✗ ${r.err || "preview failed"}`);
-        setDoneAlert(true);
-      }
-    },
-    onError: (e) => { setDone(`✗ ${(e as Error).message || "preview failed"}`); setDoneAlert(true); },
+  // ▷ preview — open the warming page (/preview-wait, served by THIS always-alive server) in a
+  // new tab. The page starts the side-port `next dev` (or attaches to a running one), narrates
+  // the boot, and hands the tab to the preview only once it answers — never a dead page.
+  // window.open stays synchronous in the click so popup blockers see the user gesture.
+  const openPreview = () => {
+    setOpen(false);
+    window.open(withRepo("/preview-wait") + "?branch=" + encodeURIComponent(props.branch), "_blank");
+  };
+  // running preview for this branch, fetched only while the menu is open — flips the menu row
+  // from "start one" to "open the one on :<port>". /previews health-probes serverside.
+  const livePreviews = createQuery(() => ({
+    queryKey: ["previews"],
+    queryFn: () =>
+      fetch("/previews").then((r) => r.json() as Promise<{ previews?: { branch?: string; port: string; state: string; health: string }[] }>),
+    enabled: open(),
+    staleTime: 10_000,
   }));
+  const livePreview = () =>
+    livePreviews.data?.previews?.find((p) => p.branch === props.branch && p.state === "up");
 
   // prep to merge — the one-motion merge prep, run as a staged pipeline:
   //   1. up-to-date  → rebase onto fresh origin/main (only if behind; conflict ejects to Claude)
@@ -925,17 +927,22 @@ export function NodeActions(props: {
             {checkout.isPending ? "checking out…" : "checkout here"}
           </button>
 
-          {/* preview — spin a dev server for this branch on a side port and open it, WITHOUT
-              moving your main checkout off :3000 (loops-preview). Stop it from the Activity dock. */}
+          {/* preview — open the warming tab: it spins a dev server for this branch on a side
+              port (or attaches to the running one) WITHOUT moving your main checkout off :3000,
+              and shows the boot until the server can answer. Stop it from the Activity dock. */}
           <button
             class={`nh-item ${ITEM}`}
             role="menuitem"
-            disabled={busy() || devServer.isPending}
-            title="spin up a dev server for this branch on a side port (3010+) and open it — leaves :3000 and your checkout alone"
-            onClick={fire(() => devServer.mutate())}
+            disabled={busy()}
+            title="spin up a dev server for this branch on a side port (3010+) and open it once it answers — leaves :3000 and your checkout alone"
+            onClick={fire(openPreview)}
           >
             <span class={`nh-item-ic ${IC}`}>▷</span>
-            {devServer.isPending ? "starting preview…" : "preview (dev server)"}
+            {(() => {
+              const pv = livePreview();
+              if (!pv) return "preview (dev server)";
+              return `open preview :${pv.port}` + (pv.health && pv.health !== "healthy" ? ` · ${pv.health}` : "");
+            })()}
           </button>
 
           {/* conditional repairs — appear only with their condition; everything routine

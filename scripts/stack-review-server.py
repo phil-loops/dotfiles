@@ -314,6 +314,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
         elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
         elif u.path == "/preview-log":    return preview.log(self)   # tail one preview's next-dev log
+        elif u.path == "/preview-wait":   return preview.wait(self)   # warming page: boots + hands off to the preview
         else:
             self._send(404, "{}")
 
