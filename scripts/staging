@@ -10,7 +10,7 @@
 set -euo pipefail
 
 REPO="loops-so/loops"
-DEPLOY_WORKFLOW="deploy.yml"
+DEPLOY_WORKFLOW="deploy-v2.yml"
 BUILD_WORKFLOW="build-and-test"
 SOUNDS_DIR="$HOME/.dotfiles/sounds"
 
@@ -131,6 +131,7 @@ print_build_status() {
 # Convert ISO timestamp to epoch (UTC-aware)
 to_epoch() {
   local ts=$1
+  case "$ts" in ''|*[!0-9]*) ;; *) echo "$ts"; return ;; esac   # already an epoch
   if date -d "$ts" +%s &>/dev/null; then
     date -d "$ts" +%s
   else
@@ -155,34 +156,31 @@ print_deploy_status() {
   local started=$(echo "$deploy" | jq -r '.startedAt')
   local run_id=$(echo "$deploy" | jq -r '.databaseId')
 
-  # Skip completed deploys older than 45 minutes
-  if [[ "$status" == "completed" ]]; then
-    local started_epoch=$(to_epoch "$started")
-    local now=$(date +%s)
-    local age=$((now - started_epoch))
-    if ((age > 2700)); then
-      echo -e "\n${BOLD}Staging${NC}"
-      echo -e "  ${DIM}No active deploys (last deploy was $(relative_time "$started"))${NC}"
-      return
-    fi
-  fi
-
   # Extract tag from title like "[staging] deploying some-tag-123-1"
   local deployed_tag=$(echo "$title" | sed 's/\[staging\] deploying //')
+  local actor=$(gh api "repos/${REPO}/actions/runs/${run_id}" -q '.actor.login' 2>/dev/null || echo "?")
 
   echo -e "\n${BOLD}Staging${NC}"
-  echo -e "  Tag:      ${CYAN}${deployed_tag}${NC}"
+  echo -e "  Tag:      ${CYAN}${deployed_tag}${NC} ${DIM}(${actor})${NC}"
 
-  if [[ "$status" == "completed" ]]; then
-    if [[ "$conclusion" == "success" ]]; then
-      echo -e "  Status:   ${GREEN}✓ deployed${NC} $(relative_time "$started")"
-    else
-      echo -e "  Status:   ${RED}✗ ${conclusion}${NC} $(relative_time "$started")"
-    fi
-  elif [[ "$status" == "in_progress" ]]; then
-    echo -e "  Status:   ${YELLOW}⟳ deploying${NC} (started $(relative_time "$started"))"
+  # deploy-v2 "success" = ENQUEUED only (~10s shim); the deployer worker does the helm
+  # rollout afterwards. Live truth is the buildId flip that build-notify records ambiently.
+  local now=$(date +%s)
+  local enq_epoch=$(to_epoch "$started")
+  local flip_epoch=0
+  [[ -s "$HOME/.cache/build-notify/staging-last" ]] && \
+    flip_epoch=$(cut -f3 "$HOME/.cache/build-notify/staging-last" 2>/dev/null || echo 0)
+
+  if [[ "$status" != "completed" ]]; then
+    echo -e "  Status:   ${YELLOW}⟳ enqueueing${NC} (started $(relative_time "$started"))"
+  elif [[ "$conclusion" != "success" ]]; then
+    echo -e "  Status:   ${RED}✗ ${conclusion}${NC} $(relative_time "$started")"
+  elif (( flip_epoch > enq_epoch )); then
+    echo -e "  Status:   ${GREEN}✓ live${NC} — flipped $(relative_time "$flip_epoch") (enqueued $(relative_time "$started"))"
+  elif (( now - enq_epoch > 2700 )); then
+    echo -e "  Status:   ${GREEN}✓ deployed${NC} $(relative_time "$started") ${DIM}(flip unobserved — age is enqueue time)${NC}"
   else
-    echo -e "  Status:   ${DIM}${status}${NC}"
+    echo -e "  Status:   ${YELLOW}⟳ rolling out${NC} — enqueued $(relative_time "$started"), staging not serving it yet"
   fi
 
   echo -e "  Run:      ${DIM}https://github.com/${REPO}/actions/runs/${run_id}${NC}"
@@ -337,7 +335,7 @@ case "${1:-}" in
     echo -e "  Run:      ${DIM}https://github.com/${REPO}/actions/runs/${run_id}${NC}"
     ;;
   status|"")
-    print_build_status
+    print_build_status || true   # no builds on this branch ≠ no answer — staging state still prints
     print_deploy_status
     ;;
   *)
