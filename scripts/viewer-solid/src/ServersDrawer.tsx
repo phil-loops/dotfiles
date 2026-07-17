@@ -8,7 +8,7 @@
 // Styling: Tailwind utilities against the ledger @theme (the migration's reference surface).
 // Health carries all the color: sage = serving, ember = warming, del = broken, faint = gone.
 import { createQuery } from "@tanstack/solid-query";
-import { createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Show } from "solid-js";
 
 const [open, setOpen] = createSignal(false);
 export const openServers = () => setOpen(true);
@@ -73,7 +73,14 @@ export function ServersDrawer() {
   const sub = () => q.data?.substrate;
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
-  const [logText, setLogText] = createSignal("");
+  // live tail — next dev keeps appending, so poll while a log pane is open
+  const logQ = createQuery<{ log?: string }>(() => ({
+    queryKey: ["preview-log", logFor()],
+    queryFn: () => fetch("/preview-log?dir=" + encodeURIComponent(logFor() ?? "")).then((r) => r.json() as Promise<{ log?: string }>),
+    enabled: logFor() != null,
+    refetchInterval: logFor() != null ? 1500 : false,
+  }));
+  const logText = () => (logQ.data ? logQ.data.log?.trim() || "(log empty)" : "loading…");
 
   // kill carries the port — a dir can host both a registered preview and an unmanaged stray,
   // so only the port names a server precisely
@@ -90,15 +97,7 @@ export function ServersDrawer() {
     await q.refetch();
     setBusy(null);
   };
-  const showLog = async (dir: string) => {
-    if (logFor() === dir) { setLogFor(null); return; }
-    setLogFor(dir);
-    setLogText("loading…");
-    const r = await fetch("/preview-log?dir=" + encodeURIComponent(dir))
-      .then((res) => res.json() as Promise<{ log?: string }>)
-      .catch(() => ({ log: "" }));
-    setLogText(r.log?.trim() || "(log empty)");
-  };
+  const showLog = (dir: string) => setLogFor(logFor() === dir ? null : dir);
 
   return (
     <Show when={open()}>
@@ -153,6 +152,14 @@ export function ServersDrawer() {
             <For each={previews()}>
               {(p) => {
                 const h = () => HEALTH[p.health] ?? { ...FALLBACK, label: p.health };
+                // the tail follows new output only while the reader is at the bottom —
+                // scrolling up to study a line pins the view until they scroll back down
+                let logPre: HTMLPreElement | undefined;
+                let logPinned = true;
+                createEffect(() => {
+                  logText();
+                  if (logFor() === p.dir && logPre && logPinned) { logPre.scrollTop = logPre.scrollHeight; }
+                });
                 return (
                   <div class={`card rounded-[10px] border border-rule border-l-[3px] bg-vellum-raise px-[13px] py-[11px] transition-[border-color] duration-[250ms] ${h().stripe} ${h().card ?? ""}`}>
                     {/* the branch is the card's identity — the "which server is which" answer */}
@@ -200,7 +207,11 @@ export function ServersDrawer() {
                       <button class={BTN_DANGER} disabled={busy() === p.dir + p.port} onClick={() => act(p, "/preview-kill")}>kill</button>
                     </div>
                     <Show when={logFor() === p.dir}>
-                      <pre class="mt-[9px] max-h-[220px] overflow-auto rounded-[7px] border border-rule bg-diff-bg px-2.5 py-[9px] text-[10px] leading-[1.5] whitespace-pre-wrap text-ink-dim">{logText()}</pre>
+                      <pre
+                        ref={logPre}
+                        onScroll={() => { if (logPre) { logPinned = logPre.scrollHeight - logPre.scrollTop - logPre.clientHeight < 40; } }}
+                        class="mt-[9px] max-h-[220px] overflow-auto rounded-[7px] border border-rule bg-diff-bg px-2.5 py-[9px] text-[10px] leading-[1.5] whitespace-pre-wrap text-ink-dim"
+                      >{logText()}</pre>
                     </Show>
                   </div>
                 );
