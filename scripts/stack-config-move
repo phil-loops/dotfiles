@@ -45,6 +45,14 @@ def main():
     if mode not in ("--dry-run", "--apply", "--check"):
         sys.exit(__doc__.strip())
     moves = legacy_keys()
+    # .story is lifetime-exempt: its contract is to OUTLIVE the branch (the plan renders a
+    # merged step's story after contraction), and git GCs branch.<b>.* on `git branch -D` —
+    # the auto-GC that makes this migration correct for every other key destroys this one.
+    stories = [m for m in moves if m[1] == "story"]
+    if stories:
+        for b, _, _ in stories:
+            print(f"exempt (.story outlives its branch): stack-branch.{b}.story stays legacy")
+        moves = [m for m in moves if m[1] != "story"]
     # a key whose branch is gone is the rot this migration exists to end — moving it
     # would park it in the new namespace where nothing GCs it. Leave it legacy for
     # stack-doctor --prune, and say so.
@@ -87,9 +95,14 @@ def main():
                 if mode == "--apply":
                     git("config", "--fixed-value", "--unset-all", key, b, check=True)
     if mode == "--apply":
-        # unset-all leaves empty [stack-branch "<b>"] section headers behind — drop them
+        # unset-all leaves empty [stack-branch "<b>"] section headers behind — drop them,
+        # but only when truly empty: remove-section would take an exempt .story with it.
+        # Never embed the branch in the regexp — get-regexp matches case-insensitively,
+        # so an uppercase branch name in the pattern silently matches nothing.
+        left = {b for b, _, _ in legacy_keys()}
         for b in {b for b, _, _ in moves}:
-            git("config", "--remove-section", f"stack-branch.{b}")
+            if b not in left:
+                git("config", "--remove-section", f"stack-branch.{b}")
         print(f"moved {len(moves)} keys across {len({b for b, _, _ in moves})} branches")
 
 
