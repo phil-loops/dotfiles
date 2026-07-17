@@ -41,7 +41,8 @@ def requires_of(branch):
 
 
 def plan_omitted(branch):
-    """Opted out of the rendered story — a local proof branch that never ships as a PR."""
+    """Opted out of every rendered story (plan, PR body, mermaid) — an integration or
+    test/proof branch that never ships as a PR. Set with `stack-plan-omit`."""
     return (git("config", f"branch.{branch}.stack-plan-omit")
             or git("config", f"stack-branch.{branch}.plan-omit")) == "true"
 
@@ -167,7 +168,8 @@ def facts(branch):
     edges.update(new_edges)
     downstream = []
     for (name, _kind), vals in edges.items():
-        if branch in vals and name != branch and name not in downstream:
+        if (branch in vals and name != branch and name not in downstream
+                and not plan_omitted(name)):
             downstream.append(name)
 
     here = os.path.dirname(os.path.abspath(__file__))

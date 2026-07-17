@@ -1,0 +1,36 @@
+#!/bin/zsh
+# stack-plan-omit — keep a branch out of every rendered story: commit-body plan blocks,
+# PR bodies (steps + unblocks), and the mermaid map. For integration and test/proof
+# branches that never ship as a PR. Metadata only — the branch stays a full forest
+# member (viewer, restack, gates all still see it).
+#
+#   stack-plan-omit <branch>...          omit the branches
+#   stack-plan-omit --clear <branch>...  re-include them
+#   stack-plan-omit --list               show every omitted branch
+set -euo pipefail
+
+mode="omit"
+case "${1:-}" in
+  --list)
+    { git config --get-regexp '^branch\..*\.stack-plan-omit$' 2>/dev/null || true
+      git config --get-regexp '^stack-branch\..*\.plan-omit$' 2>/dev/null || true; } \
+      | sed -E 's/^(stack-)?branch\.(.*)\.(stack-)?plan-omit true$/\2/' | sort -u
+    exit 0 ;;
+  --clear) mode="clear"; shift ;;
+  --*) echo "usage: stack-plan-omit [--clear] <branch>... | --list" >&2; exit 2 ;;
+esac
+
+[[ $# -ge 1 ]] || { echo "usage: stack-plan-omit [--clear] <branch>... | --list" >&2; exit 2; }
+
+for b in "$@"; do
+  git show-ref --verify --quiet "refs/heads/$b" \
+    || { echo "stack-plan-omit: no branch named '$b'" >&2; exit 1; }
+  if [[ "$mode" == "clear" ]]; then
+    git config --unset "branch.$b.stack-plan-omit" 2>/dev/null || true
+    git config --unset "stack-branch.$b.plan-omit" 2>/dev/null || true
+    echo "$b: back in the story"
+  else
+    git config "stack-branch.$b.plan-omit" true
+    echo "$b: omitted from rendered stories"
+  fi
+done
