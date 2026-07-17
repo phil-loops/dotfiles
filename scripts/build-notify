@@ -177,6 +177,19 @@ pend="$statedir/staging-pending"
 # the 404 shell also embeds buildId, so no auth needed (no head/exit → SIGPIPE-safe)
 bid_now=$(curl -sS --max-time 8 "$STAGING_URL" 2>/dev/null | sed -n 's/.*"buildId":"\([^"]*\)".*/\1/p' | awk 'NR==1' || true)
 
+# Staleness ground truth: the buildId only changes when staging actually SERVES a new
+# build, so its flip time is "how fresh is staging" — no kubectl (needs an aws-vault
+# unlock) and no Slack-thread reading. staging-last gains version/actor from the pending
+# enqueue below when one is armed; an untracked deploy still moves the clock.
+bidfile="$statedir/staging-bid"; lastfile="$statedir/staging-last"
+if [ -n "$bid_now" ]; then
+  prev_bid=$(cut -f1 "$bidfile" 2>/dev/null || true)
+  if [ "$bid_now" != "$prev_bid" ]; then
+    printf '%s\t%s\n' "$bid_now" "$now_s" > "$bidfile"
+    [ -n "$prev_bid" ] && printf '?\t?\t%s\n' "$now_s" > "$lastfile"
+  fi
+fi
+
 deps=$(gh run list -R "$REPO" --workflow=deploy-v2.yml -L 10 \
   --json databaseId,displayTitle,status,conclusion,updatedAt,url \
   -q '.[] | select(.status=="completed" and (.displayTitle | startswith("[staging]"))) | [(.databaseId|tostring),.conclusion,.displayTitle,.updatedAt,.url] | @tsv' 2>/dev/null || true)
@@ -210,6 +223,7 @@ if [ -s "$pend" ] && [ -n "$bid_now" ]; then
     mins=$(( (now_s - parm_s) / 60 ))
     notify "⛴ staging flipped" "$pver ($pactor) is live ~${mins}m after enqueue — go test" "$STAGING_URL"
     echo "build-notify: ⛴ staging flipped to $pver (${mins}m)"
+    printf '%s\t%s\t%s\n' "$pver" "$pactor" "$now_s" > "$lastfile"
     : > "$pend"
   elif [ $(( now_s - parm_s )) -gt $(( STALL_MIN * 60 )) ]; then
     notify "⏳ staging deploy stalled" "$pver enqueued >${STALL_MIN}m ago and staging's buildId hasn't changed — check the Slack thread" "$purl"

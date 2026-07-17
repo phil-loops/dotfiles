@@ -118,6 +118,31 @@ if [ "$d" -gt 0 ]; then
     echo ":paperplane.fill: Deploying $(deploy_title "$title") · $(elapsed "$st") | href=$url"
   done <<< "$deploys"
 fi
+# staging staleness — ground truth is build-notify's buildId probe (staging-last: version,
+# actor, flip-epoch; staging-pending: an enqueue whose buildId flip hasn't been seen yet).
+# Rolling-out is the "would have checked Slack" state; live-age answers "how stale is staging".
+bn="$HOME/.cache/build-notify"
+staging_url="${BUILD_NOTIFY_STAGING_URL:-https://app.l3s.email/}"
+staging_line=""
+if [ -s "$bn/staging-pending" ]; then
+  IFS=$'\t' read -r _ parm_s _ pver pactor purl < "$bn/staging-pending"
+  am=$(( ($(date +%s) - ${parm_s:-0}) / 60 ))
+  staging_line=":ferry.fill: Staging: ${pver} (${pactor}) rolling out · ${am}m | href=${purl:-$staging_url}"
+elif [ -s "$bn/staging-last" ]; then
+  IFS=$'\t' read -r sver sactor sflip < "$bn/staging-last"
+  sm=$(( ($(date +%s) - ${sflip:-0}) / 60 ))
+  age="${sm}m"; [ "$sm" -ge 60 ] && age="$(( sm / 60 ))h $(( sm % 60 ))m"
+  if [ "$sver" = "?" ]; then
+    staging_line=":ferry: Staging flipped ${age} ago (untracked deploy) | href=$staging_url"
+  else
+    staging_line=":ferry: Staging: ${sver} (${sactor}) · live ${age} | href=$staging_url"
+  fi
+fi
+if [ -n "$staging_line" ]; then
+  echo "---"
+  echo "STAGING | color=gray size=11"
+  echo "$staging_line"
+fi
 if [ "$k" -gt 0 ]; then
   echo "---"
   echo "FINISHED | color=gray size=11"
