@@ -122,8 +122,15 @@ notify() {  # $1 status   $2 detail   $3 url (optional — opened when you click
   if command -v terminal-notifier >/dev/null 2>&1; then
     # </dev/null is load-bearing: terminal-notifier slurps piped stdin as the message, so
     # inside a `while read` loop it would eat every remaining row (and display them raw).
-    terminal-notifier -title "prwatch · $1" -message "${2:-$1}" -sound Glass \
+    # Unique -group + delayed -remove: with terminal-notifier set to Alert style (System
+    # Settings → Notifications → terminal-notifier → Alerts) the notification HOLDS on
+    # screen for PRWATCH_NOTE_SECONDS, then dismisses itself. Banner style is unaffected
+    # (macOS hides banners at ~5s regardless; the remove just tidies Notification Center).
+    local g="prwatch-note-$$-$RANDOM"
+    terminal-notifier -title "prwatch · $1" -message "${2:-$1}" -sound Glass -group "$g" \
       ${3:+-open "$3"} </dev/null >/dev/null 2>&1 || true
+    ( sleep "${PRWATCH_NOTE_SECONDS:-45}"
+      terminal-notifier -remove "$g" </dev/null >/dev/null 2>&1 ) >/dev/null 2>&1 &!
   else
     local t="prwatch · $1" m="${2:-$1}"
     t=${t//\\/\\\\}; t=${t//\"/\\\"}; m=${m//\\/\\\\}; m=${m//\"/\\\"}

@@ -69,11 +69,16 @@ for f in "$trackdir"/*.tsv; do
 done
 w=0; [ -n "$watches" ] && w=$(printf '%s' "$watches" | grep -c .)
 
-# unacknowledged sticky completions (deploy landed / explicit watch finished)
+# unacknowledged sticky completions (deploy landed / explicit watch finished).
+# Rows expire after BUILD_STATUS_DONE_TTL_HOURS (default 48) — this is a catch-up
+# ledger for a glance away, not an archive; days-old deploys are just noise.
+ttl_s=$(( ${BUILD_STATUS_DONE_TTL_HOURS:-48} * 3600 )); now=$(date +%s)
 dones=""
 for f in "$donedir"/*.tsv; do
   [ -e "$f" ] || continue
-  IFS=$'\t' read -r dst dmsg durl _ < "$f"
+  IFS=$'\t' read -r dst dmsg durl dts < "$f"
+  case "$dts" in *[!0-9]*|"") dts=$(stat -f %m "$f" 2>/dev/null || echo "$now") ;; esac
+  [ $(( now - dts )) -gt "$ttl_s" ] && { rm -f "$f"; continue; }
   dones="${dones}$(basename "$f" .tsv)"$'\t'"$dst"$'\t'"$dmsg"$'\t'"$durl"$'\n'
 done
 k=0; [ -n "$dones" ] && k=$(printf '%s' "$dones" | grep -c .)
