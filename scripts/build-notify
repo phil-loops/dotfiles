@@ -221,12 +221,24 @@ if [ -s "$pend" ] && [ -n "$bid_now" ]; then
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$prid" "$parm_s" "$bid_now" "$pver" "$pactor" "$purl" > "$pend"
   elif [ "$bid_now" != "$pbid" ]; then
     mins=$(( (now_s - parm_s) / 60 ))
-    notify "⛴ staging flipped" "$pver ($pactor) is live ~${mins}m after enqueue — go test" "$STAGING_URL"
-    echo "build-notify: ⛴ staging flipped to $pver (${mins}m)"
+    # Only MY deploys tap the shoulder — someone else's flip is ambient state, not my cue
+    # to go test. It still updates the clock (staging-last / menubar / `staging` CLI).
+    me=$(gh api user -q .login 2>/dev/null || true)
+    if [ -n "$me" ] && [ "$pactor" = "$me" ]; then
+      notify "⛴ staging flipped" "$pver ($pactor) is live ~${mins}m after enqueue — go test" "$STAGING_URL"
+    else
+      journal_silent silent-other-actor "staging $pver" "flipped ~${mins}m after enqueue by $pactor — recorded, not mine" "$purl"
+    fi
+    echo "build-notify: ⛴ staging flipped to $pver (${mins}m, $pactor)"
     printf '%s\t%s\t%s\n' "$pver" "$pactor" "$now_s" > "$lastfile"
     : > "$pend"
   elif [ $(( now_s - parm_s )) -gt $(( STALL_MIN * 60 )) ]; then
-    notify "⏳ staging deploy stalled" "$pver enqueued >${STALL_MIN}m ago and staging's buildId hasn't changed — check the Slack thread" "$purl"
+    me=$(gh api user -q .login 2>/dev/null || true)
+    if [ -n "$me" ] && [ "$pactor" = "$me" ]; then
+      notify "⏳ staging deploy stalled" "$pver enqueued >${STALL_MIN}m ago and staging's buildId hasn't changed — check the Slack thread" "$purl"
+    else
+      journal_silent silent-other-actor "staging $pver" "stalled >${STALL_MIN}m (by $pactor) — recorded, not mine" "$purl"
+    fi
     : > "$pend"
   fi
 fi
