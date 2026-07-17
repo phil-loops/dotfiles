@@ -49,17 +49,20 @@ def plan_omitted(branch):
 def job_of(branch):
     """What this branch DOES, in one voiced line. A hand-authored `stack-branch.<b>.story` wins —
     it's the durable per-step merge story, editable from any branch's plan and re-read on every
-    branch (so a story survives after this branch merges). Absent that, the branch's own newest
-    commit subject minus the conventional-commit prefix; then the branch description (fallback for a
-    branch with no commits of its own yet)."""
+    branch (so a story survives after this branch merges). Then the branch description: it is the
+    branch's stated purpose and is maintained deliberately, so it outranks the commit subject,
+    which is only an auto-derived gloss of the newest commit. Subject last, then the name."""
     story = (git("config", f"branch.{branch}.stack-story")
              or git("config", f"stack-branch.{branch}.story"))
     if story:
         return story
+    description = git("config", f"branch.{branch}.description")
+    if description:
+        return description
     subject = git("log", "-1", "--format=%s", f"{parent_of(branch)}..{branch}")
     if ": " in subject:
         subject = subject.split(": ", 1)[1]
-    return subject or git("config", f"branch.{branch}.description") or branch
+    return subject or branch
 
 
 def _prs():
