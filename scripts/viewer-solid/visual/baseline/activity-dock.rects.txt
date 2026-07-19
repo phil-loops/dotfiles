@@ -12,8 +12,10 @@
 /div[1]/div[1]/nav[1]/div[4] 18,316 59x1
 /div[1]/div[1]/nav[1]/button[5] 0,327 95x160
 /div[1]/div[1]/nav[1]/button[5]/span[1] 42,337 14x140
+/div[1]/div[1]/nav[1]/button[5]/span[2] 78,329 13x14
 /div[1]/div[1]/nav[1]/button[6] 0,491 95x69
 /div[1]/div[1]/nav[1]/button[6]/span[1] 42,501 14x49
+/div[1]/div[1]/nav[1]/button[6]/span[2] 78,493 13x14
 /div[1]/div[1]/div[2] 96,0 1344x2119
 /div[1]/div[1]/div[2]/div[1] 96,0 1344x2119
 /div[1]/div[1]/div[2]/div[1]/main[1] 408,0 720x2119

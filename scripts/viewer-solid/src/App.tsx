@@ -14,6 +14,7 @@ import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
 import { ForestOverview } from "./ForestOverview";
 import { NavRail } from "./NavRail";
+import { trackRecent } from "./recents";
 
 
 // ── router ───────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ function Layout(props: { children?: JSX.Element }) {
       project: forestKey(l) || undefined,
       node: "node" in l ? l.node : undefined,
     });
+    trackRecent(l); // here, not in the rail — it's hidden on node review but history still counts
   });
   // /events is a persistent SSE stream and the browser only allows ~6 connections per origin
   // (HTTP/1.1) — so a graveyard of idle tabs each squatting a stream exhausts the pool and new
@@ -101,10 +103,18 @@ function Layout(props: { children?: JSX.Element }) {
     closeStream();
   });
 
+  // the rail yields on the per-node review surface — every horizontal pixel goes to the diffs;
+  // home and the forest overview keep it.
+  const showRail = () => {
+    const l = loc();
+    return l.kind === "home" || isForestOverview(l);
+  };
   return (
     <>
-      <div class="app-shell grid min-h-screen grid-cols-[96px_1fr] max-[640px]:grid-cols-[1fr]">
-        <NavRail />
+      <div class={`app-shell grid min-h-screen ${showRail() ? "grid-cols-[96px_1fr] max-[640px]:grid-cols-[1fr]" : "grid-cols-[1fr]"}`}>
+        <Show when={showRail()}>
+          <NavRail />
+        </Show>
         <div class="app-page min-w-0">{props.children}</div>
       </div>
       <ChatDrawerHost />
