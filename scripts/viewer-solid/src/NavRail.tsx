@@ -1,4 +1,4 @@
-import { For, Show, createMemo } from "solid-js";
+import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { useViewerLocation, type HomeTab, type ViewerLocation } from "./router";
 import { provider } from "./provider";
@@ -61,6 +61,24 @@ export function NavRail() {
     }
     return null;
   });
+  // the tile lingers after you go home — dimmed, one click back to where you just were.
+  const LAST_KEY = "viewerLastContext";
+  const readLast = (): { label: string; to: ViewerLocation } | null => {
+    try {
+      const s = localStorage.getItem(LAST_KEY);
+      return s ? JSON.parse(s) : null;
+    } catch {
+      return null;
+    }
+  };
+  const [last, setLast] = createSignal(readLast());
+  createEffect(() => {
+    const c = context();
+    if (c) {
+      setLast(c);
+      try { localStorage.setItem(LAST_KEY, JSON.stringify(c)); } catch { /* quota/private mode — skip */ }
+    }
+  });
   return (
     <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
       <button
@@ -87,12 +105,12 @@ export function NavRail() {
           </button>
         )}
       </For>
-      <Show when={context()}>
+      <Show when={context() ?? last()}>
         {(c) => (
           <button
-            class={`thumb-context ${THUMB} ${THUMB_ON}`}
-            classList={{ active: true }}
-            title={`${c().label} — up to the overview`}
+            class={`thumb-context ${THUMB} ${context() ? THUMB_ON : THUMB_OFF}`}
+            classList={{ active: !!context() }}
+            title={context() ? `${c().label} — up to the overview` : `back to ${c().label}`}
             onClick={() => navigate(c().to)}
           >
             <span class={`${THUMB_LBL} max-w-[calc(100vh*0.3)] overflow-hidden text-ellipsis whitespace-nowrap text-[14px] max-[640px]:max-w-[160px]`}>{c().label}</span>
