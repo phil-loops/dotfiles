@@ -1,0 +1,12 @@
+#!/bin/sh
+# Print the git worktree root containing $1 (a Helix buffer path). Used by the gd/gr
+# keybindings to :cd there before goto, so location pickers relativize against the
+# ACTIVE buffer's worktree — not whatever worktree the single warm review-hx Helix was
+# first launched in. (Helix has one global cwd; strip_prefix(cwd) renders a buffer
+# absolute unless cwd is its ancestor.) Falls back to "." (a :cd no-op) for non-file /
+# non-repo buffers so the :cd never errors.
+p="$1"
+[ -n "$p" ] || { echo "."; exit 0; }
+d=$(dirname "$p")
+[ -d "$d" ] || { echo "."; exit 0; }
+git -C "$d" rev-parse --show-toplevel 2>/dev/null || echo "."

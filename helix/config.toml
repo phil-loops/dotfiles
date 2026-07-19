@@ -50,3 +50,13 @@ t = ":open %sh{$HOME/.dotfiles/scripts/trpc-goto %{buffer_name} %{cursor_line}}"
 [keys.select.space.o]
 m = ":sh $HOME/.dotfiles/scripts/gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
 b = ":sh $HOME/.dotfiles/scripts/gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+
+# gd/gr/gy/gi: :cd into the active buffer's worktree root before goto, so the location
+# picker relativizes candidates against THIS buffer's worktree. Helix has one global cwd
+# (strip_prefix, no ../), so a warm review-hx reused across scratch worktrees otherwise
+# renders every candidate absolute for any buffer outside the cwd it first launched in.
+[keys.normal.g]
+d = [":cd %sh{$HOME/.dotfiles/scripts/hx-workspace-root %{buffer_name}}", "goto_definition"]
+r = [":cd %sh{$HOME/.dotfiles/scripts/hx-workspace-root %{buffer_name}}", "goto_reference"]
+y = [":cd %sh{$HOME/.dotfiles/scripts/hx-workspace-root %{buffer_name}}", "goto_type_definition"]
+i = [":cd %sh{$HOME/.dotfiles/scripts/hx-workspace-root %{buffer_name}}", "goto_implementation"]
