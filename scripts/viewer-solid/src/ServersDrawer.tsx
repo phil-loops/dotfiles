@@ -70,8 +70,9 @@ export function ServersDrawer() {
     refetchInterval: open() ? 3000 : false,
   }));
   const previews = () => q.data?.previews ?? [];
-  // main owns :3000 (task dev's home, or a "run main" launch); everything else is a branch preview
-  const mainSrv = () => previews().find((p) => p.port === "3000");
+  // the main server is the one serving the main checkout itself (dir === the borrowed main wt),
+  // wherever it landed — NOT whatever squats :3000. A branch on :3000 is not main.
+  const mainSrv = () => previews().find((p) => p.dir && p.dir === p.borrows);
   const sub = () => q.data?.substrate;
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
@@ -92,7 +93,8 @@ export function ServersDrawer() {
     await q.refetch();
     setBusy(null);
   };
-  const launchMain = async () => { setBusy("__main__"); await post("/preview-main", {}); await q.refetch(); setBusy(null); };
+  const [mainPort, setMainPort] = createSignal("3000");
+  const launchMain = async () => { setBusy("__main__"); await post("/preview-main", { port: mainPort().trim() }); await q.refetch(); setBusy(null); };
   const reap = async () => { setBusy("__all__"); await post("/preview-reap", {}); await q.refetch(); setBusy(null); };
   const killAll = async () => {
     setBusy("__all__");
@@ -112,14 +114,23 @@ export function ServersDrawer() {
           <button class="ml-auto cursor-pointer px-0.5 text-[18px] leading-none text-ink-faint hover:text-ink" title="close" onClick={() => setOpen(false)}>×</button>
         </header>
 
-        {/* main — the one server not tied to a branch node. When it's down, a quiet launcher; when
-            up (task dev or a launch), it lists below with the branch previews, so no card here. */}
+        {/* main — the one server not tied to a branch node. When it's down, a quiet launcher with a
+            port preference; when up (task dev or a launch), it lists below with the previews. */}
         <Show when={!mainSrv()}>
-          <section class="flex items-center gap-2.5 border-b border-rule px-4.5 py-[11px]">
+          <section class="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-rule px-4.5 py-[11px]">
             <button class={BTN} disabled={busy() === "__main__"} onClick={launchMain}>
-              {busy() === "__main__" ? "starting main…" : "▷ run main (:3000)"}
+              {busy() === "__main__" ? "starting main…" : "▷ run main"}
             </button>
-            <span class="text-[10.5px] text-ink-faint">serves the main checkout · web only</span>
+            <label class="flex items-center gap-1 text-[10.5px] text-ink-faint">
+              port
+              <input
+                class="w-[46px] rounded border border-rule bg-vellum-night px-1.5 py-px text-center text-[11px] text-ink-dim focus:border-ink-faint focus:text-ink focus:outline-none"
+                value={mainPort()}
+                onInput={(e) => setMainPort(e.currentTarget.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && busy() !== "__main__") { launchMain(); } }}
+              />
+            </label>
+            <span class="text-[10.5px] text-ink-faint">main checkout · web only · falls back to a free port if taken</span>
           </section>
         </Show>
 
