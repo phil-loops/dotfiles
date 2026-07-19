@@ -1,12 +1,20 @@
 #!/bin/sh
-# Print the git worktree root containing $1 (a Helix buffer path). Used by the gd/gr
+# Print the worktree root containing $1 (a Helix buffer path). Used by the gd/gr
 # keybindings to :cd there before goto, so location pickers relativize against the
 # ACTIVE buffer's worktree — not whatever worktree the single warm review-hx Helix was
 # first launched in. (Helix has one global cwd; strip_prefix(cwd) renders a buffer
-# absolute unless cwd is its ancestor.) Falls back to "." (a :cd no-op) for non-file /
-# non-repo buffers so the :cd never errors.
+# absolute unless cwd is its ancestor.)
+#
+# Walk up for `.git` in pure shell rather than forking `git rev-parse` — this runs
+# before EVERY goto, and the git fork is ~60ms vs a handful of stat syscalls. `.git`
+# marks a worktree root in both forms: a dir in the main checkout, a gitdir-pointer
+# FILE in a linked worktree. Falls back to "." (a :cd no-op) when nothing matches, so
+# the :cd never errors on a scratch/non-file buffer.
 p="$1"
 [ -n "$p" ] || { echo "."; exit 0; }
 d=$(dirname "$p")
-[ -d "$d" ] || { echo "."; exit 0; }
-git -C "$d" rev-parse --show-toplevel 2>/dev/null || echo "."
+while [ "$d" != "/" ] && [ -n "$d" ]; do
+  [ -e "$d/.git" ] && { echo "$d"; exit 0; }
+  d=$(dirname "$d")
+done
+echo "."
