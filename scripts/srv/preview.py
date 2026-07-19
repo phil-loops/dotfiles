@@ -21,6 +21,7 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -40,12 +41,32 @@ def _script():
     return os.path.join(ctx.SCRIPTS, "loops-preview")
 
 
-def _list_json():
-    try:
-        p = subprocess.run([_script(), "--json"], capture_output=True, text=True, timeout=6)
-        return json.loads(p.stdout or "[]")
-    except Exception:
-        return []
+# One shared snapshot of `loops-preview --json` (a multi-second shell of tmux/lsof/meta scans):
+# /previews and /processes land within the same drawer-open beat and each paid the full run.
+# Short TTL keeps ambient reads cheap; mutation paths pass fresh=True (an attach decision on a
+# stale list would double-launch) and mutations invalidate so the next read sees the change.
+_list_cache = {"at": 0.0, "data": None}
+_LIST_TTL = 4.0
+_list_lock = threading.Lock()
+
+
+def _list_json(fresh=False):
+    if not fresh and _list_cache["data"] is not None and time.monotonic() - _list_cache["at"] < _LIST_TTL:
+        return _list_cache["data"]
+    with _list_lock:
+        if not fresh and _list_cache["data"] is not None and time.monotonic() - _list_cache["at"] < _LIST_TTL:
+            return _list_cache["data"]
+        try:
+            p = subprocess.run([_script(), "--json"], capture_output=True, text=True, timeout=6)
+            data = json.loads(p.stdout or "[]")
+        except Exception:
+            data = []
+        _list_cache["data"], _list_cache["at"] = data, time.monotonic()
+        return data
+
+
+def _list_invalidate():
+    _list_cache["at"] = 0.0
 
 
 def _meta_get(name, key):
@@ -203,7 +224,7 @@ def start(req, raw):
         return
     # attach, don't restart: loops-preview cold-reboots an existing session (kills tmux, wipes
     # .next), so re-clicking preview on a warm branch must NOT destroy the running server.
-    for pv in _list_json():
+    for pv in _list_json(fresh=True):
         if pv.get("dir") == dirp and pv.get("state") == "up" and str(pv.get("port", "")).isdigit():
             port = int(pv["port"])
             req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
@@ -211,6 +232,7 @@ def start(req, raw):
             return
     # loops-preview detaches the server into tmux and returns immediately with the URL on stdout.
     p = subprocess.run([_script(), dirp, "--main", checkout._active_main_wt()], capture_output=True, text=True)
+    _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
         req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "preview failed").strip()[:400]}))
@@ -233,7 +255,7 @@ def start_main(req, raw):
     if r.returncode != 0 or not dirp:
         req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a main worktree").strip()}))
         return
-    for pv in _list_json():
+    for pv in _list_json(fresh=True):
         if pv.get("dir") == dirp and pv.get("state") != "orphaned" and str(pv.get("port", "")).isdigit():
             port = int(pv["port"])
             req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
@@ -244,6 +266,7 @@ def start_main(req, raw):
     if not _listening(pref):
         argv += ["--port", str(pref)]  # preferred is free — take it; else loops-preview auto-picks a free side port
     p = subprocess.run(argv, capture_output=True, text=True)
+    _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
         req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "launch failed").strip()[:400]}))
@@ -265,6 +288,7 @@ def restart(req, raw):
         argv += ["--port", port]
     argv += ["--main", checkout._active_main_wt()]
     p = subprocess.run(argv, capture_output=True, text=True)
+    _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
         req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "restart failed").strip()[:400]}))
@@ -285,27 +309,34 @@ def kill(req, raw):
     if port:
         argv += ["--port", port]
     subprocess.run(argv, capture_output=True, text=True)
+    _list_invalidate()
     req._send(200, json.dumps({"ok": True}))
 
 
 def reap(req, raw):
     p = subprocess.run([_script(), "--reap"], capture_output=True, text=True)
+    _list_invalidate()
     req._send(200, json.dumps({"ok": True, "out": (p.stdout or "").strip()}))
 
 
 def previews(req):
-    pvs = _list_json()
-    # _active_main_wt reads the request's pinned repo via a thread-local the probe pool WON'T
-    # inherit (ctx.py gotcha), so resolve it once here and stamp every row with it.
-    main_wt = checkout._active_main_wt()
-    for pv in pvs:
-        pv["borrows"] = main_wt
-        if pv.get("managed", True):
-            pv["log"] = _log_path(pv.get("name", ""))
-    if pvs:
-        with ThreadPoolExecutor(max_workers=min(8, len(pvs))) as ex:
-            pvs = list(ex.map(_health, pvs))
-    req._send(200, json.dumps({"ok": True, "previews": pvs, "substrate": _substrate()}))
+    # the docker-ps substrate scan is independent of the preview list + probes — overlap them
+    # so the drawer's cold open pays max(list+probes, docker), not the sum.
+    with ThreadPoolExecutor(max_workers=1) as sub_ex:
+        f_sub = sub_ex.submit(_substrate)
+        pvs = [dict(pv) for pv in _list_json()]   # rows get annotated — never mutate the shared snapshot
+        # _active_main_wt reads the request's pinned repo via a thread-local the probe pool WON'T
+        # inherit (ctx.py gotcha), so resolve it once here and stamp every row with it.
+        main_wt = checkout._active_main_wt()
+        for pv in pvs:
+            pv["borrows"] = main_wt
+            if pv.get("managed", True):
+                pv["log"] = _log_path(pv.get("name", ""))
+        if pvs:
+            with ThreadPoolExecutor(max_workers=min(8, len(pvs))) as ex:
+                pvs = list(ex.map(_health, pvs))
+        substrate = f_sub.result()
+    req._send(200, json.dumps({"ok": True, "previews": pvs, "substrate": substrate}))
 
 
 def log(req):
