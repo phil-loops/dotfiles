@@ -70,6 +70,8 @@ export function ServersDrawer() {
     refetchInterval: open() ? 3000 : false,
   }));
   const previews = () => q.data?.previews ?? [];
+  // main owns :3000 (task dev's home, or a "run main" launch); everything else is a branch preview
+  const mainSrv = () => previews().find((p) => p.port === "3000");
   const sub = () => q.data?.substrate;
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
@@ -90,6 +92,7 @@ export function ServersDrawer() {
     await q.refetch();
     setBusy(null);
   };
+  const launchMain = async () => { setBusy("__main__"); await post("/preview-main", {}); await q.refetch(); setBusy(null); };
   const reap = async () => { setBusy("__all__"); await post("/preview-reap", {}); await q.refetch(); setBusy(null); };
   const killAll = async () => {
     setBusy("__all__");
@@ -108,6 +111,17 @@ export function ServersDrawer() {
           <span class="text-[10px] uppercase tracking-[0.18em] text-ink-faint">{previews().length} running</span>
           <button class="ml-auto cursor-pointer px-0.5 text-[18px] leading-none text-ink-faint hover:text-ink" title="close" onClick={() => setOpen(false)}>×</button>
         </header>
+
+        {/* main — the one server not tied to a branch node. When it's down, a quiet launcher; when
+            up (task dev or a launch), it lists below with the branch previews, so no card here. */}
+        <Show when={!mainSrv()}>
+          <section class="flex items-center gap-2.5 border-b border-rule px-4.5 py-[11px]">
+            <button class={BTN} disabled={busy() === "__main__"} onClick={launchMain}>
+              {busy() === "__main__" ? "starting main…" : "▷ run main (:3000)"}
+            </button>
+            <span class="text-[10.5px] text-ink-faint">serves the main checkout · web only</span>
+          </section>
+        </Show>
 
         {/* shared substrate — the one Docker stack everything rides; a quiet section, not a card */}
         <Show when={sub()}>

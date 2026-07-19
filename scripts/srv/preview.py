@@ -4,6 +4,7 @@
 #   GET  /preview-wait     ?branch=  → HTML                   warming page: starts + watches the boot,
 #                                                             hands the tab off once the server answers
 #   POST /preview          {branch}  → {ok, url, port, dir, reused?}  start, or attach to a running one
+#   POST /preview-main                → {ok, url, port, dir, reused?}  run (or attach to) main on :3000
 #   POST /preview-kill     {dir}     → {ok}                   stop one (dir-string only; orphan-safe)
 #   POST /preview-restart  {dir}     → {ok, url, port}        kill + fresh next dev on the SAME port
 #   POST /preview-reap                → {ok, out}             stop orphaned/crashed previews
@@ -93,6 +94,17 @@ def _probe(port):
         return e.code, int((time.monotonic() - t0) * 1000)
     except Exception:
         return None, None
+
+
+def _listening(port):
+    # is anything holding the LISTEN socket on this port? Used before launching main: a mid-compile
+    # task dev listens but doesn't answer HTTP yet, so a TCP check (not _probe) is what guards it.
+    try:
+        p = subprocess.run(["lsof", "-nP", "-iTCP:%d" % port, "-sTCP:LISTEN"],
+                           capture_output=True, text=True, timeout=4)
+        return p.returncode == 0 and bool(p.stdout.strip())
+    except Exception:
+        return False
 
 
 def _health(pv):
@@ -204,6 +216,28 @@ def start(req, raw):
         return
     port = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": dirp}))
+
+
+def start_main(req, raw):
+    # "run main": a web-only next dev for the MAIN checkout on :3000 — the one server not tied to a
+    # branch node. :3000 is where task dev already serves main, so if anything is listening there we
+    # ATTACH, never relaunch: loops-preview wipes .next before it binds, which would corrupt a live
+    # task dev. Only spawn when 3000 is free.
+    main_wt = checkout._active_main_wt()
+    if not main_wt or not os.path.isdir(main_wt):
+        req._send(500, json.dumps({"ok": False, "err": "could not resolve main worktree"}))
+        return
+    if _listening(3000):
+        req._send(200, json.dumps({"ok": True, "port": 3000, "url": "http://localhost:3000",
+                                   "dir": main_wt, "reused": True}))
+        return
+    p = subprocess.run([_script(), main_wt, "--port", "3000", "--main", main_wt], capture_output=True, text=True)
+    m = re.search(r"localhost:(\d+)", p.stdout)
+    if not m:
+        req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "launch failed").strip()[:400]}))
+        return
+    port = int(m.group(1))
+    req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": main_wt}))
 
 
 def restart(req, raw):
