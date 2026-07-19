@@ -13,6 +13,7 @@ import re
 import json
 import time
 import signal
+import hashlib
 import threading
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -20,8 +21,8 @@ from urllib.parse import parse_qs
 
 from . import ctx
 
-_pcache = {}  # repo-name -> ((model_sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
-_PROJ_SNAP_V = 4  # projects card shape version — bump when a build adds a field, else the
+_pcache = {}  # repo-name -> ((content-sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
+_PROJ_SNAP_V = 5  # projects card shape version — bump when a build adds a field, else the
                   # disk snapshot (keyed only on repo state) keeps serving the old shape
 _PR_RE = re.compile(r"\(#(\d+)\)")
 
@@ -339,19 +340,6 @@ def _branch_author_unix():
     return out
 
 
-def _interest_levels():
-    # {project: interest} — Phil's hand-set promote/demote level (stack-project.<p>.interest N).
-    # One read for all; drives the Forests promotion order. 0/absent = none.
-    out = {}
-    for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-project\..*\.interest$"]).stdout.splitlines():
-        key, _, val = line.partition(" ")
-        m = re.match(r"^stack-project\.(.+)\.interest$", key)
-        if m and val.strip().lstrip("-").isdigit() and int(val) > 0:
-            out[m.group(1)] = int(val)
-    return out
-
-
 # POST /next — read-only: the branch(es) in THIS branch's forest that can merge into main
 # now, in canonical order. Reuses the exact machinery the Forest cards build from
 # (stack-forest --projects + stack-prs → _ready_to_merge), so ordering never diverges.
@@ -411,45 +399,6 @@ def myprs(req):
     req._send(200, r.stdout or "[]")
 
 
-def _shelved_set():
-    # {project} — forests Phil marked deliberately paused (stack-project.<p>.shelved true).
-    # A shelved forest leaves the active bands regardless of PR/merge state, until unshelved.
-    out = set()
-    for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-project\..*\.shelved$"]).stdout.splitlines():
-        key, _, val = line.partition(" ")
-        if key.endswith(".shelved") and val.strip() == "true":
-            out.add(key[len("stack-project."):-len(".shelved")])
-    return out
-
-
-def _focus_ranks():
-    # {project: rank} — Phil's hand-ordered focus lane (stack-project.<p>.focus N, 1-based
-    # position). The lane is "what I'm pushing now", ordered by rank; absent = not pinned.
-    out = {}
-    for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-project\..*\.focus$"]).stdout.splitlines():
-        key, _, val = line.partition(" ")
-        m = re.match(r"^stack-project\.(.+)\.focus$", key)
-        if m and val.strip().lstrip("-").isdigit() and int(val) > 0:
-            out[m.group(1)] = int(val)
-    return out
-
-
-def _tier_map():
-    # {project: tier} — Phil's conviction axis (stack-project.<p>.tier ∈ committed|trying|spike).
-    # Absent = untriaged (the triage zone). Orthogonal to the lifecycle bands: committed keeps its
-    # full bands, trying/spike get their own lighter sections.
-    out = {}
-    for line in ctx.run(["git", "config", "--get-regexp",
-                         r"^stack-project\..*\.tier$"]).stdout.splitlines():
-        key, _, val = line.partition(" ")
-        m = re.match(r"^stack-project\.(.+)\.tier$", key)
-        if m and val.strip() in ("committed", "trying", "spike"):
-            out[m.group(1)] = val.strip()
-    return out
-
-
 def _unpushed_map():
     # {branch: True} for a local branch whose tip matches no remote-tracking ref of the same name.
     # Remote-tracking refs are local, so this is one for-each-ref rather than a fetch per branch —
@@ -490,9 +439,96 @@ def _green_set():
     return {b for b, tree in recorded.items() if trees.get(b) == tree}
 
 
+_gd_cache = {}   # repo path -> git-common-dir; never changes for a live repo, so spawn once
+
+
+def _git_common_dir():
+    repo = ctx.repo_cwd()
+    gd = _gd_cache.get(repo)
+    if gd is None:
+        gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+        _gd_cache[repo] = gd
+    return gd
+
+
 def _projects_snapshot_file():
-    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+    gd = _git_common_dir()
     return os.path.join(gd, "stack-projects-cache.json") if gd else ""
+
+
+_OVERLAY_SUFFIXES = (".interest", ".shelved", ".focus", ".tier", ".epic")
+
+
+def _is_overlay_line(line):
+    # config lines the OVERLAY serves (triage axes + gates verdicts) — they change the
+    # response without invalidating the heavy build, so the cache key must not see them.
+    key = line.partition(" ")[0]
+    if key.startswith("stack-project.") and key.endswith(_OVERLAY_SUFFIXES):
+        return True
+    return key.endswith(".gates-green-tree")
+
+
+def _projects_state(path):
+    # One parallel sweep gathers what both the cache KEY and the live overlay need. The key
+    # is CONTENT the cards are built from — ref tips (remotes too: unpushed/behind/PR pushes
+    # must bust) + the stack config lines + bless ledger — never the config file's mtime:
+    # concurrent sessions constantly touch unrelated keys, and every touch was a ~8s re-fan.
+    with ThreadPoolExecutor(max_workers=4, initializer=ctx.set_repo, initargs=(path,)) as ex:
+        f_refs = ex.submit(ctx.run, ["git", "for-each-ref", "--format=%(refname) %(objectname)",
+                                     "refs/heads", "refs/remotes"])
+        f_cfg = ex.submit(ctx.run, ["git", "config", "--get-regexp",
+                                    r"^(stack-branch|stack-project|branch)\."])
+        f_main = ex.submit(ctx.run, ["git", "rev-parse", "origin/main"])
+        f_green = ex.submit(_green_set)
+    refs, cfg = f_refs.result().stdout, f_cfg.result().stdout
+    gd = _git_common_dir()
+
+    def mt(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0
+    heavy = "".join(l + "\n" for l in cfg.splitlines() if not _is_overlay_line(l))
+    stamp = (refs + heavy
+             + str(mt(os.path.join(gd, "stack-blessed.json")))
+             + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
+    pck = (hashlib.sha1(stamp.encode()).hexdigest(), f_main.result().stdout.strip())
+    return pck, cfg, f_green.result()
+
+
+def _overlay_live(projs, cfg, green):
+    # The axes Phil clicks all day (interest/shelve/focus/tier/epic) plus gates verdicts get
+    # painted fresh onto the cached build every serve — flipping one repaints, never rebuilds.
+    meta, members = {}, {}
+    for line in cfg.splitlines():
+        key, _, val = line.partition(" ")
+        if not key.startswith("stack-project."):
+            continue
+        body = key[len("stack-project."):]
+        if key.endswith(".branch") and val:
+            members.setdefault(body[:-len(".branch")], []).append(val)
+            continue
+        for suf in _OVERLAY_SUFFIXES:
+            if key.endswith(suf):
+                meta.setdefault(body[:-len(suf)], {})[suf[1:]] = val.strip()
+                break
+
+    def pos_int(v):
+        return int(v) if v and v.lstrip("-").isdigit() and int(v) > 0 else None
+    out = []
+    for p in projs:
+        p = dict(p)   # never mutate the cached build — concurrent serves share it
+        m = meta.get(p["name"], {})
+        p["interest"] = pos_int(m.get("interest")) or 0
+        p["shelved"] = m.get("shelved") == "true"
+        p["focus"] = pos_int(m.get("focus"))
+        tier = m.get("tier")
+        p["tier"] = tier if tier in ("committed", "trying", "spike") else None
+        p["epic"] = m.get("epic") or None
+        branches = members.get(p["name"]) or p.get("mergeable", [])
+        p["green"] = sum(1 for b in branches if b in green)
+        out.append(p)
+    return out
 
 
 # single-flight: N concurrent cold /projects each ran their OWN multi-second git fan-out
@@ -506,15 +542,15 @@ def _projects_for(name, path):
     # thread, but the fan-out pools below run on WORKER threads that don't inherit the
     # thread-local — so each pool seeds it via initializer=ctx.set_repo, else the workers
     # would query CWD (loops) for a monotoad build. Returns the tagged list (repo=name).
-    pck = (ctx.model_sig(), ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip())
+    pck, cfg, green = _projects_state(path)
     cached = _pcache.get(name)
     if cached and cached[0] == pck:
-        return cached[1]
+        return _overlay_live(cached[1], cfg, green)
     with _pbuild_lock:
         cached = _pcache.get(name)   # a queued waiter finds the winner's build here
         if cached and cached[0] == pck:
-            return cached[1]
-        return _projects_build(name, path, pck)
+            return _overlay_live(cached[1], cfg, green)
+        return _overlay_live(_projects_build(name, path, pck), cfg, green)
 
 
 def _projects_build(name, path, pck):
@@ -576,12 +612,7 @@ def _projects_build(name, path, pck):
     shipped = _shipped_by_project(name, pck[1], merges, members)
     commits = _branch_commit_unix()
     authored = _branch_author_unix()
-    interest = _interest_levels()
-    shelved = _shelved_set()
-    focus = _focus_ranks()
-    tier = _tier_map()
     unpushed = _unpushed_map()
-    green = _green_set()
     for p in projs:
         p["repo"] = name
         bs = p.get("mergeable", [])
@@ -598,13 +629,7 @@ def _projects_build(name, path, pck):
         p["shipped"] = shipped.get(p["name"])
         branches = members.get(p["name"]) or bs
         p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
-        p["interest"] = interest.get(p["name"], 0)
-        p["shelved"] = p["name"] in shelved
-        p["focus"] = focus.get(p["name"])
-        p["tier"] = tier.get(p["name"])
-        p["epic"] = ctx.run(["git", "config", f"stack-project.{p['name']}.epic"]).stdout.strip() or None
         p["unpushed"] = sum(1 for b in branches if unpushed.get(b, False))
-        p["green"] = sum(1 for b in branches if b in green)
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["lastAuthored"] = max((authored[b] for b in branches if b in authored), default=None)
         p["prOpened"] = max((prmap[b]["createdAt"] for b in branches
