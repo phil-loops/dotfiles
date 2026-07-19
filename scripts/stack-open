@@ -214,6 +214,12 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
     # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads.
     tmux send-keys -t "$pane" Escape
     sleep 0.02
+    # :cd into this file's worktree first — the warm Helix's cwd is pinned to whichever scratch
+    # worktree it was first launched in, and gd/reference pickers render entries relative to cwd,
+    # so a file from any OTHER branch (every scratch worktree is a fresh path) shows absolute
+    # without this. LSP workspace root is resolved per-file, so :cd never disturbs it.
+    tmux send-keys -t "$pane" ":cd ${dir}" Enter
+    sleep 0.02
     tmux send-keys -t "$pane" ":open ${file}" Enter
     if [[ -n "$line" ]]; then
       sleep 0.02
