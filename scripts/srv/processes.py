@@ -4,14 +4,12 @@
 # normalizes them so the Activity dock renders one list regardless of kind. Fired agents used to
 # need tmux/pgrep archaeology to discover; now every launcher registers itself, so we just read it.
 import json
-import os
-import subprocess
 import time
 
-from . import ctx
 from . import chat
 from . import restack
 from . import agents
+from . import preview
 
 
 def _age(created_sec):
@@ -73,20 +71,16 @@ def list_all(req):
     # bounce, so we read them from the script rather than any in-memory registry. Each row carries
     # its url + dir so the dock can open it and kill it (/preview-kill). "up" is working; a "dead"
     # (crashed) or "orphaned" (worktree gone) row lingers as idle so it's visible to reap.
-    try:
-        pj = subprocess.run([os.path.join(ctx.SCRIPTS, "loops-preview"), "--json"],
-                            capture_output=True, text=True, timeout=5)
-        for pv in json.loads(pj.stdout or "[]"):
-            up = pv.get("state") == "up"
-            procs.append({
-                "kind": "preview", "id": pv.get("name", ""),
-                "label": pv.get("branch") or pv.get("name", ""),
-                "target": pv.get("dir", ""), "dir": pv.get("dir", ""), "url": pv.get("url", ""),
-                "status": pv.get("state", ""), "detail": ":" + str(pv.get("port", "")),
-                "done": False, "working": up, "age": pv.get("age", ""), "count": 1,
-            })
-    except Exception:
-        pass
+    # Shares preview's TTL snapshot — the dock and the drawer land in the same beat, one shell.
+    for pv in preview._list_json():
+        up = pv.get("state") == "up"
+        procs.append({
+            "kind": "preview", "id": pv.get("name", ""),
+            "label": pv.get("branch") or pv.get("name", ""),
+            "target": pv.get("dir", ""), "dir": pv.get("dir", ""), "url": pv.get("url", ""),
+            "status": pv.get("state", ""), "detail": ":" + str(pv.get("port", "")),
+            "done": False, "working": up, "age": pv.get("age", ""), "count": 1,
+        })
 
     procs.sort(key=lambda p: (p.get("done", False),))
     req._send(200, json.dumps(procs))
