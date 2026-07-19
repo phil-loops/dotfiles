@@ -98,6 +98,14 @@ export function NavRail() {
     const curKey = cur ? buildPath(cur.to) : null;
     return recents().filter((x) => buildPath(x.to) !== curKey).slice(0, 3);
   });
+  const dismiss = (to: ViewerLocation) => {
+    const key = buildPath(to);
+    setRecents((r) => {
+      const next = r.filter((x) => buildPath(x.to) !== key);
+      try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch { /* quota/private mode — skip */ }
+      return next;
+    });
+  };
   return (
     <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start overflow-y-auto border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
       <button
@@ -142,11 +150,16 @@ export function NavRail() {
       <For each={others()}>
         {(c) => (
           <button
-            class={`thumb-recent ${THUMB_SM} ${THUMB_OFF}`}
+            class={`thumb-recent group ${THUMB_SM} ${THUMB_OFF}`}
             title={`back to ${c.label}`}
             onClick={() => navigate(c.to)}
           >
             <span class={RECENT_LBL}>{c.label}</span>
+            <span
+              class="thumb-dismiss absolute top-[2px] right-[4px] rounded-[4px] px-[3px] font-mono text-[11px] leading-[1.3] text-ink-faint opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 hover:bg-vellum-night hover:text-ink max-[640px]:static max-[640px]:opacity-100"
+              title={`forget ${c.label}`}
+              onClick={(e) => { e.stopPropagation(); dismiss(c.to); }}
+            >✕</span>
           </button>
         )}
       </For>
