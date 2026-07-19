@@ -110,13 +110,13 @@ export function ServersDrawer() {
       <aside class="servers-drawer fixed inset-y-0 right-0 z-[210] flex w-[min(460px,92vw)] flex-col border-l border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night)_340px)] font-mono text-[13px] text-ink shadow-[-24px_0_60px_-18px_rgba(0,0,0,0.8)]">
         <header class="flex items-baseline gap-3 border-b border-rule px-4.5 pt-4 pb-[13px]">
           <span class="font-display text-[19px] font-semibold italic text-ink">Dev servers</span>
-          <span class="text-[10px] uppercase tracking-[0.18em] text-ink-faint">{previews().length} running</span>
+          <span class="text-[10px] uppercase tracking-[0.18em] text-ink-faint">{q.data ? `${previews().length} running` : "…"}</span>
           <button class="ml-auto cursor-pointer px-0.5 text-[18px] leading-none text-ink-faint hover:text-ink" title="close" onClick={() => setOpen(false)}>×</button>
         </header>
 
         {/* main — the one server not tied to a branch node. When it's down, a quiet launcher with a
             port preference; when up (task dev or a launch), it lists below with the previews. */}
-        <Show when={!mainSrv()}>
+        <Show when={q.data && !mainSrv()}>
           <section class="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-rule px-4.5 py-[11px]">
             <button class={BTN} disabled={busy() === "__main__"} onClick={launchMain}>
               {busy() === "__main__" ? "starting main…" : "▷ run main"}
@@ -170,7 +170,11 @@ export function ServersDrawer() {
 
         <Show
           when={previews().length > 0}
-          fallback={<p class="px-4.5 py-[30px] text-center italic text-ink-faint">No dev servers running. Start one from a node's ⋯ menu → ▷ preview.</p>}
+          fallback={
+            <p class="px-4.5 py-[30px] text-center italic text-ink-faint">
+              {q.data ? "No dev servers running. Start one from a node's ⋯ menu → ▷ preview." : "probing dev servers…"}
+            </p>
+          }
         >
           {/* each server is a ledger entry — branch identity first, the left stripe carries health */}
           <div class="flex flex-auto flex-col gap-2.5 overflow-y-auto px-4 py-3.5">
