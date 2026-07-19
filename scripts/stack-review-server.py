@@ -387,6 +387,8 @@ class H(BaseHTTPRequestHandler):
             return checkout.worktree(self, raw)
         if self.path == "/preview":   # spin a side-port `next dev` for this branch (no touch to :3000)
             return preview.start(self, raw)
+        if self.path == "/preview-main":   # run (or attach to) main on :3000
+            return preview.start_main(self, raw)
         if self.path == "/preview-kill":   # stop one side-port preview (by its worktree dir)
             return preview.kill(self, raw)
         if self.path == "/preview-restart":   # kill + fresh next dev on the same port
