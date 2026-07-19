@@ -7,7 +7,7 @@
 //
 // Styling: Tailwind utilities against the ledger @theme (the migration's reference surface).
 // Health carries all the color: sage = serving, ember = warming, del = broken, faint = gone.
-import { createQuery } from "@tanstack/solid-query";
+import { createQuery, useQueryClient } from "@tanstack/solid-query";
 import { createEffect, createSignal, For, Show } from "solid-js";
 
 const [open, setOpen] = createSignal(false);
@@ -42,6 +42,7 @@ const HEALTH: Record<string, { label: string; stripe: string; badge: string; pul
   starting: { label: "starting", stripe: "border-l-ember", badge: "text-ember", pulse: "animate-breathe motion-reduce:animate-none" },
   error: { label: "error", stripe: "border-l-del", badge: "font-semibold text-del" },
   wedged: { label: "not responding", stripe: "border-l-del", badge: "font-semibold text-del" },
+  probing: { label: "probing…", stripe: "border-l-ink-faint", badge: "text-ink-faint", pulse: "animate-breathe motion-reduce:animate-none" },
   dead: { label: "dead", stripe: "border-l-ink-faint", badge: "text-ink-faint", card: "opacity-65" },
   orphaned: { label: "orphaned", stripe: "border-l-ink-faint", badge: "text-ink-faint", card: "opacity-65" },
 };
@@ -63,17 +64,37 @@ const shortSvc = (n: string) => n.replace(/^loops-/, "").replace(/-1$/, "");
 const shortDir = (d: string) => d.split("/").filter(Boolean).pop() ?? d;
 
 export function ServersDrawer() {
+  const qc = useQueryClient();
+  // the Activity dock polls /processes ambiently and already knows every preview by the time
+  // the drawer opens — seed from its cache so the list paints instantly with health "probing",
+  // and the /previews probe fills in real health ~a second later. Same server-side snapshot
+  // feeds both endpoints, so the seeded membership can't disagree with the probed one.
+  const seedFromDock = (): PreviewsResp | undefined => {
+    type DockProc = { kind: string; id: string; label: string; dir?: string; url?: string; status: string; detail: string; age: string };
+    const procs = qc.getQueryData<DockProc[]>(["processes"]);
+    if (!procs) return undefined;
+    return {
+      ok: true,
+      previews: procs.filter((p) => p.kind === "preview").map((p) => ({
+        name: p.id, branch: p.label, dir: p.dir ?? "", url: p.url,
+        port: p.detail.startsWith(":") ? p.detail.slice(1) : "",
+        state: p.status, age: p.age, health: "probing",
+      })),
+      substrate: { project: "loops", shared: true, up: 0, total: 0, services: [] },
+    };
+  };
   const q = createQuery<PreviewsResp>(() => ({
     queryKey: ["previews"],
     queryFn: () => fetch("/previews").then((r) => r.json() as Promise<PreviewsResp>),
     enabled: open(),
     refetchInterval: open() ? 3000 : false,
+    placeholderData: seedFromDock,
   }));
   const previews = () => q.data?.previews ?? [];
   // the main server is the one serving the literal main branch (its scratch worktree reports
   // "main" via stack-open intent), wherever it landed — NOT whatever squats :3000.
   const mainSrv = () => previews().find((p) => p.branch === "main");
-  const sub = () => q.data?.substrate;
+  const sub = () => (q.isPlaceholderData ? undefined : q.data?.substrate);   // the seed's stub would read "0/0 up"
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
   // live tail — next dev keeps appending, so poll while a log pane is open
@@ -110,7 +131,7 @@ export function ServersDrawer() {
       <aside class="servers-drawer fixed inset-y-0 right-0 z-[210] flex w-[min(460px,92vw)] flex-col border-l border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night)_340px)] font-mono text-[13px] text-ink shadow-[-24px_0_60px_-18px_rgba(0,0,0,0.8)]">
         <header class="flex items-baseline gap-3 border-b border-rule px-4.5 pt-4 pb-[13px]">
           <span class="font-display text-[19px] font-semibold italic text-ink">Dev servers</span>
-          <span class="text-[10px] uppercase tracking-[0.18em] text-ink-faint">{q.data ? `${previews().length} running` : "…"}</span>
+          <span class="text-[10px] uppercase tracking-[0.18em] text-ink-faint">{q.data ? `${previews().length} running${q.isPlaceholderData ? " · probing" : ""}` : "…"}</span>
           <button class="ml-auto cursor-pointer px-0.5 text-[18px] leading-none text-ink-faint hover:text-ink" title="close" onClick={() => setOpen(false)}>×</button>
         </header>
 
