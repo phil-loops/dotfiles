@@ -2,8 +2,8 @@
 
 ## Remotes
 
-- `phil-loops` (`phil-loops/loops`) — Phil's fork. This is our workspace for branches, PRs, and experimentation. Push here freely when needed. **Only open PRs on this remote.**
-- `origin` (`Loops-so/loops`) — Shared team repo. **Never push here. Never open PRs here.** Treat as read-only.
+- `origin` (`Loops-so/loops`) — the shared team repo, and where branches **and** PRs actually live: branches are pushed straight to origin and PRs are opened origin-internal (head branch → `main`, same repo — not fork PRs). **Claude never pushes here and never opens PRs.** Phil pushes branches himself (GH Desktop, → viewer per the push-to-origin work) and opens every PR manually. Claude's job ends at a prepped local branch + a drafted PR body handed off.
+- `phil-loops` (`phil-loops/loops`) — an old fork, **not used**. Don't push experimental branches here — they'd be orphaned, since the real PRs are origin-internal.
 
 ## Script runner
 
