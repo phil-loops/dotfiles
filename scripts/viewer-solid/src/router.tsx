@@ -7,7 +7,7 @@
 // name to know what it's looking at. Real History-API paths (not hash) — clean URLs; the
 // server serves index.html for any app route (SPA fallback) so deep-links + refresh resolve.
 //
-//   /work  /forests  /watching          → home, a named tab
+//   /work  /forests                     → home, a named tab
 //   /forests/<project>[/<branch...>]     → a forest: project + active node (a branch), both in path
 //   /branch/<branch...>                  → a pinned standalone (single node)
 //   /review/<pr>                         → an imported review PR (single node)
@@ -17,8 +17,8 @@
 // `/forests` with no project is the home tab; `/forests/<project>` is a forest (collection/item).
 import { createContext, useContext, createSignal, onCleanup, type JSX } from "solid-js";
 
-export type HomeTab = "work" | "forests" | "watching";
-export const HOME_TABS: HomeTab[] = ["work", "forests", "watching"];
+export type HomeTab = "work" | "forests";
+export const HOME_TABS: HomeTab[] = ["work", "forests"];
 
 export type ViewerLocation =
   | { kind: "home"; tab: HomeTab }

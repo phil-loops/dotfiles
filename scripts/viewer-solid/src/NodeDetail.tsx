@@ -295,7 +295,7 @@ export function NodeDetail() {
     <div class={`shell grid min-h-screen ${panelOpen() ? "grid-cols-[264px_1fr]" : "panel-collapsed grid-cols-[1fr]"}`}>
       <Show when={!panelOpen()}>
         <button
-          class="panel-reopen fixed top-4 left-0 z-[5] cursor-pointer rounded-r-lg border border-l-0 border-rule bg-vellum-edge px-[9px] py-[7px] font-mono text-[15px] leading-none text-ink-dim hover:border-gold-deep hover:text-gold-leaf"
+          class="panel-reopen fixed top-4 left-[96px] max-[640px]:left-0 z-[5] cursor-pointer rounded-r-lg border border-l-0 border-rule bg-vellum-edge px-[9px] py-[7px] font-mono text-[15px] leading-none text-ink-dim hover:border-gold-deep hover:text-gold-leaf"
           title="show the file panel (b)"
           onClick={() => setPanelOpen(true)}
         >

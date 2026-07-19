@@ -13,6 +13,7 @@ import { ServersDrawer } from "./ServersDrawer";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
 import { ForestOverview } from "./ForestOverview";
+import { NavRail } from "./NavRail";
 
 
 // ── router ───────────────────────────────────────────────────────────
@@ -102,7 +103,10 @@ function Layout(props: { children?: JSX.Element }) {
 
   return (
     <>
-      {props.children}
+      <div class="app-shell grid min-h-screen grid-cols-[96px_1fr] max-[640px]:grid-cols-[1fr]">
+        <NavRail />
+        <div class="app-page min-w-0">{props.children}</div>
+      </div>
       <ChatDrawerHost />
       <CommandPalette />
       <ServerStatus />
