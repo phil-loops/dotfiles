@@ -63,11 +63,16 @@ listening()  { [ -n "$1" ] && lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }
 age_secs()   { [ -n "$1" ] && echo $(( $(date +%s) - $1 )) || echo 0; }                   # $1=STARTED epoch
 age_human()  { local s="$1"; [ "$s" -lt 60 ] && echo "${s}s" || { [ "$s" -lt 3600 ] && echo "$((s/60))m" || echo "$((s/3600))h"; }; }
 # $1=DIR — a detached HEAD reports as detached@<sha>, not blank (blank made the dock fall back
-# to the worktree name and hide that a server was pinned to an old commit)
+# to the worktree name and hide that a server was pinned to an old commit). A stack-open scratch
+# worktree is detached-but-intentional: it records the branch it stands in for, so prefer that
+# name over the sha (ensure_worktree keeps it resynced to that branch's tip).
 branch_of()  {
-  local b
+  local b gd
   b="$(git -C "$1" branch --show-current 2>/dev/null)" || { echo "(gone)"; return; }
-  if [ -n "$b" ]; then echo "$b"; else echo "detached@$(git -C "$1" rev-parse --short HEAD 2>/dev/null)"; fi
+  if [ -n "$b" ]; then echo "$b"; return; fi
+  gd="$(git -C "$1" rev-parse --git-dir 2>/dev/null)"
+  if [ -n "$gd" ] && [ -s "$gd/stack-open-branch" ]; then sed -n '1p' "$gd/stack-open-branch"; return; fi
+  echo "detached@$(git -C "$1" rev-parse --short HEAD 2>/dev/null)"
 }
 behind_of()  { git -C "$1" rev-list --count HEAD..origin/main 2>/dev/null || true; }      # $1=DIR
 json_esc()   { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }

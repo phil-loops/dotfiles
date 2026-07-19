@@ -4,8 +4,8 @@
 #   GET  /preview-wait     ?branch=  → HTML                   warming page: starts + watches the boot,
 #                                                             hands the tab off once the server answers
 #   POST /preview          {branch}  → {ok, url, port, dir, reused?}  start, or attach to a running one
-#   POST /preview-main     {port?}    → {ok, url, port, dir, reused?}  run (or attach to) main; prefer
-#                                                             :3000 (or port), fall back to a free one
+#   POST /preview-main     {port?}    → {ok, url, port, dir, reused?}  run (or attach to) the literal
+#                                                             main branch; prefer :3000 (or port), else free
 #   POST /preview-kill     {dir}     → {ok}                   stop one (dir-string only; orphan-safe)
 #   POST /preview-restart  {dir}     → {ok, url, port}        kill + fresh next dev on the SAME port
 #   POST /preview-reap                → {ok, out}             stop orphaned/crashed previews
@@ -220,25 +220,27 @@ def start(req, raw):
 
 
 def start_main(req, raw):
-    # "run main": a web-only next dev for the MAIN checkout, preferring :3000. main is a single
-    # server (same checkout, same DB), so if it's already up on ANY port we ATTACH rather than
-    # launch a twin — identified by the server whose dir is the main worktree, not by the port.
-    # The preferred port (caller's, default 3000) is taken when it's free; when something else
-    # squats it (a branch on :3000), we fall back to a free side port instead of clobbering it —
-    # loops-preview wipes .next before it binds, so it must never be pointed at an occupied port.
+    # "run main": a web-only next dev for the LITERAL main branch, preferring :3000. main's worktree
+    # is resolved the same way branch previews resolve theirs — its own checkout if the primary tree
+    # is on main, else a materialised scratch worktree — so this serves main's code even when the
+    # primary checkout is parked on a feature branch. main is a single server, so if one already
+    # serves that worktree (any port) we ATTACH rather than launch a twin. The preferred port
+    # (caller's, default 3000) is taken when free; when something else squats it we fall back to a
+    # free side port — loops-preview wipes .next before it binds, so never point it at a busy port.
     d = json.loads(raw or "{}")
-    main_wt = checkout._active_main_wt()
-    if not main_wt or not os.path.isdir(main_wt):
-        req._send(500, json.dumps({"ok": False, "err": "could not resolve main worktree"}))
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--path", "main"])
+    dirp = (r.stdout or "").strip()
+    if r.returncode != 0 or not dirp:
+        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a main worktree").strip()}))
         return
     for pv in _list_json():
-        if pv.get("dir") == main_wt and pv.get("state") != "orphaned" and str(pv.get("port", "")).isdigit():
+        if pv.get("dir") == dirp and pv.get("state") != "orphaned" and str(pv.get("port", "")).isdigit():
             port = int(pv["port"])
             req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
-                                       "dir": main_wt, "reused": True}))
+                                       "dir": dirp, "reused": True}))
             return
     pref = int(d["port"]) if str(d.get("port", "")).isdigit() else 3000
-    argv = [_script(), main_wt, "--main", main_wt]
+    argv = [_script(), dirp, "--main", checkout._active_main_wt()]
     if not _listening(pref):
         argv += ["--port", str(pref)]  # preferred is free — take it; else loops-preview auto-picks a free side port
     p = subprocess.run(argv, capture_output=True, text=True)
@@ -247,7 +249,7 @@ def start_main(req, raw):
         req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "launch failed").strip()[:400]}))
         return
     port = int(m.group(1))
-    req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": main_wt}))
+    req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": dirp}))
 
 
 def restart(req, raw):
