@@ -6,6 +6,11 @@
 #   staging watch     Watch current build, then prompt to deploy
 #   staging deploy    Deploy latest successful build to staging
 #   staging status    Show what's currently deployed on staging
+#
+# Deploys gate on staging etiquette: if someone ELSE deployed staging within the last
+# STAGING_GUARD_MIN minutes (default 30) — or their deploy is still enqueueing — you get
+# a "check Slack" prompt before anything dispatches. Override interactively (y) or with
+# --force / -f. Your own recent deploys never gate.
 
 set -euo pipefail
 
@@ -45,15 +50,18 @@ get_latest_build() {
     --branch "$(get_branch)" \
     --workflow "$BUILD_WORKFLOW" \
     --limit 1 \
-    --json databaseId,status,conclusion,number,attempt,startedAt,updatedAt \
+    --json databaseId,status,conclusion,number,attempt,createdAt,startedAt,updatedAt \
     --jq '.[0]'
 }
 
-# Derive tag from a build run
+# Derive the deploy-v2 chart version from a build run: YYYY.MM.DD-<run>-<attempt>
+# (the date comes from the build's createdAt — same derivation build-notify uses)
 get_tag_from_build() {
   local number=$1
   local attempt=$2
-  echo "$(get_tag_prefix)-${number}-${attempt}"
+  local created=${3:-}
+  local d="${created:0:10}"
+  echo "${d//-/.}-${number}-${attempt}"
 }
 
 # Get the latest staging deploy run
@@ -105,7 +113,7 @@ print_build_status() {
   local attempt=$(echo "$build" | jq -r '.attempt')
   local started=$(echo "$build" | jq -r '.startedAt')
   local run_id=$(echo "$build" | jq -r '.databaseId')
-  local tag=$(get_tag_from_build "$number" "$attempt")
+  local tag=$(get_tag_from_build "$number" "$attempt" "$(echo "$build" | jq -r '.createdAt')")
 
   echo -e "${BOLD}Build${NC}"
   echo -e "  Tag:      ${CYAN}${tag}${NC}"
@@ -200,7 +208,7 @@ do_watch() {
   local run_id=$(echo "$build" | jq -r '.databaseId')
   local number=$(echo "$build" | jq -r '.number')
   local attempt=$(echo "$build" | jq -r '.attempt')
-  local tag=$(get_tag_from_build "$number" "$attempt")
+  local tag=$(get_tag_from_build "$number" "$attempt" "$(echo "$build" | jq -r '.createdAt')")
 
   if [[ "$status" == "in_progress" || "$status" == "queued" ]]; then
     echo -e "${YELLOW}⟳ Watching build for ${CYAN}${tag}${NC}...\n"
@@ -226,9 +234,36 @@ do_watch() {
   fi
 }
 
+# Pre-deploy etiquette gate: a recent deploy by someone ELSE means they're probably still
+# testing on staging — stomping it is what the manual Slack check used to prevent. My own
+# recent deploy never gates. Override: answer y, pass --force, or STAGING_GUARD_MIN=0.
+staging_guard() {
+  local deploy status started run_id title
+  deploy=$(get_latest_staging_deploy)
+  [[ -z "$deploy" || "$deploy" == "null" ]] && return 0
+  status=$(echo "$deploy" | jq -r '.status')
+  started=$(echo "$deploy" | jq -r '.startedAt')
+  run_id=$(echo "$deploy" | jq -r '.databaseId')
+  title=$(echo "$deploy" | jq -r '.displayTitle')
+  local guard_min="${STAGING_GUARD_MIN:-30}"
+  local age=$(( $(date +%s) - $(to_epoch "$started") ))
+  [[ "$status" == "completed" ]] && (( age >= guard_min * 60 )) && return 0
+  local me actor
+  me=$(gh api user -q .login 2>/dev/null || true)
+  actor=$(gh api "repos/${REPO}/actions/runs/${run_id}" -q '.actor.login' 2>/dev/null || echo "?")
+  [[ -n "$me" && "$actor" == "$me" ]] && return 0
+  local tag=$(echo "$title" | sed 's/\[staging\] deploying //')
+  echo -e "${YELLOW}⚠ staging was deployed $(relative_time "$started") by ${BOLD}${actor}${NC}${YELLOW} (${tag})${NC}"
+  echo -e "${YELLOW}  they may still be testing on it — check Slack before stomping it${NC}"
+  read -p "Deploy anyway? [y/N] " -n 1 -r
+  echo
+  [[ $REPLY =~ ^[Yy]$ ]] || { echo -e "${DIM}Aborted — staging left alone.${NC}"; exit 1; }
+}
+
 # Deploy a tag to staging
 do_deploy() {
   local tag=${1:-}
+  (( FORCE )) || staging_guard
 
   if [[ -z "$tag" ]]; then
     # Get tag from latest successful build
@@ -248,19 +283,17 @@ do_deploy() {
 
     local number=$(echo "$build" | jq -r '.number')
     local attempt=$(echo "$build" | jq -r '.attempt')
-    tag=$(get_tag_from_build "$number" "$attempt")
+    tag=$(get_tag_from_build "$number" "$attempt" "$(echo "$build" | jq -r '.createdAt')")
   fi
 
   play_sound "ready-to-work.mp3"
   echo -e "${YELLOW}Deploying ${CYAN}${tag}${YELLOW} to staging...${NC}\n"
 
-  local ref
-  ref=$(git symbolic-ref HEAD)
   gh workflow run "$DEPLOY_WORKFLOW" \
     --repo "$REPO" \
-    -r "$ref" \
+    -r main \
     -F env=staging \
-    -F tag="$tag"
+    -F version="$tag"
 
   echo -e "${GREEN}Deploy triggered!${NC} Waiting for workflow to start..."
   sleep 5
@@ -302,6 +335,16 @@ do_deploy() {
 }
 
 # Main
+FORCE=0
+args=()
+for a in "$@"; do
+  case "$a" in
+    -f|--force) FORCE=1 ;;
+    *) args+=("$a") ;;
+  esac
+done
+set -- "${args[@]:-}"
+
 case "${1:-}" in
   watch)
     do_watch
