@@ -8,7 +8,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 **Pushing & PRs**
 
-- **Never push to `origin` or open PRs on `origin` — Phil handles pushing and opening PRs himself.** In the loops repo, `phil-loops` (Phil's fork) is the workspace: push there freely when needed, and open PRs only there; `origin` (`Loops-so/loops`) is read-only. Never let tooling open PRs either — that's manual.
+- **Never push branches or open PRs — Phil handles both himself** (pushes to `origin` = `Loops-so/loops` via GH Desktop / the viewer; opens every PR manually). Claude's job ends at a prepped local branch + a drafted PR body. Branches and PRs live on `origin` directly (origin-internal, not fork PRs); the `phil-loops` fork is **unused**, so never push there either. Never let tooling open PRs — that's manual.
 - Committing locally is fine — make clean, self-contained commits.
 
 **History**
