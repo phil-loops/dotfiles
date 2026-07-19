@@ -14,6 +14,7 @@
 /div[1]/div[1]/nav[1]/button[5]/span[1] 41,345 16x175
 /div[1]/div[1]/nav[1]/button[6] 0,542 95x69
 /div[1]/div[1]/nav[1]/button[6]/span[1] 42,552 14x49
+/div[1]/div[1]/nav[1]/button[6]/span[2] 78,544 13x14
 /div[1]/div[1]/div[2] 96,0 1344x900
 /div[1]/div[1]/div[2]/div[1] 96,0 1344x900
 /div[1]/div[1]/div[2]/div[1]/header[1] 96,0 1344x66
