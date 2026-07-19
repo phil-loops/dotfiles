@@ -1,6 +1,6 @@
 import { For, Show, createMemo, createSignal, createEffect } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
-import { useViewerLocation, type HomeTab, type ViewerLocation } from "./router";
+import { useViewerLocation, buildPath, type HomeTab, type ViewerLocation } from "./router";
 import { provider } from "./provider";
 import { leaf } from "./shared";
 import { cachedProjects } from "./projectsCache";
@@ -12,15 +12,22 @@ import { cachedProjects } from "./projectsCache";
 // inside a forest lights Forests, an imported review lights Work; the place you're standing
 // shows as a gold context tile beneath, which climbs back to its forest overview.
 
-const THUMB =
-  "thumb relative flex cursor-pointer flex-col items-center gap-[9px] border-l-2 bg-transparent px-0 py-[18px] transition-[color,background] duration-[140ms] motion-reduce:transition-none max-[640px]:flex-row max-[640px]:border-l-0 max-[640px]:border-b-2 max-[640px]:px-[14px] max-[640px]:py-[10px]";
+const THUMB_BASE =
+  "thumb relative flex cursor-pointer flex-col items-center gap-[9px] border-l-2 bg-transparent px-0 transition-[color,background] duration-[140ms] motion-reduce:transition-none max-[640px]:flex-row max-[640px]:border-l-0 max-[640px]:border-b-2 max-[640px]:px-[14px] max-[640px]:py-[10px]";
+const THUMB = `${THUMB_BASE} py-[18px]`;
+const THUMB_SM = `${THUMB_BASE} py-[10px] flex-none`;
 const THUMB_OFF = "border-transparent text-ink-faint hover:bg-vellum-edge hover:text-ink-dim";
 const THUMB_ON =
   "border-l-gold-leaf bg-vellum-edge text-gold-leaf max-[640px]:border-l-transparent max-[640px]:border-b-gold-leaf";
-const THUMB_LBL =
-  "thumb-label font-display italic text-[17px] tracking-[0.04em] [writing-mode:vertical-rl] [text-orientation:mixed] max-[640px]:[writing-mode:horizontal-tb]";
+// vertical text runs its inline axis DOWN the rail, so truncation is a max-HEIGHT there;
+// on mobile the rail is horizontal and it flips back to a max-width.
+const THUMB_LBL_BASE =
+  "thumb-label font-display italic tracking-[0.04em] [writing-mode:vertical-rl] [text-orientation:mixed] overflow-hidden text-ellipsis whitespace-nowrap max-[640px]:[writing-mode:horizontal-tb] max-[640px]:max-h-none";
+const THUMB_LBL = `${THUMB_LBL_BASE} text-[17px]`;
 const COUNT =
   "thumb-count min-w-[17px] rounded-[6px] border bg-vellum-night px-[5px] py-px text-center font-mono text-[10px]";
+const CTX_LBL = `${THUMB_LBL_BASE} text-[14px] max-h-[200px] max-[640px]:max-w-[160px]`;
+const RECENT_LBL = `${THUMB_LBL_BASE} text-[12px] max-h-[140px] max-[640px]:max-w-[120px]`;
 
 // the tile a location belongs under: reviews are Work-tab things, everything branch-shaped
 // lives under Forests.
@@ -61,26 +68,38 @@ export function NavRail() {
     }
     return null;
   });
-  // the tile lingers after you go home — dimmed, one click back to where you just were.
-  const LAST_KEY = "viewerLastContext";
-  const readLast = (): { label: string; to: ViewerLocation } | null => {
+  // recently-accessed places linger under the current one — dimmed, one click back. MRU,
+  // deduped by destination, capped. Persisted so the stack survives a reload.
+  type Ctx = { label: string; to: ViewerLocation };
+  const RECENTS_KEY = "viewerRecentContexts";
+  const readRecents = (): Ctx[] => {
     try {
-      const s = localStorage.getItem(LAST_KEY);
-      return s ? JSON.parse(s) : null;
+      const s = localStorage.getItem(RECENTS_KEY);
+      if (s) return JSON.parse(s);
+      const old = localStorage.getItem("viewerLastContext"); // predecessor: single lingering tile
+      return old ? [JSON.parse(old)] : [];
     } catch {
-      return null;
+      return [];
     }
   };
-  const [last, setLast] = createSignal(readLast());
+  const [recents, setRecents] = createSignal<Ctx[]>(readRecents());
   createEffect(() => {
     const c = context();
-    if (c) {
-      setLast(c);
-      try { localStorage.setItem(LAST_KEY, JSON.stringify(c)); } catch { /* quota/private mode — skip */ }
-    }
+    if (!c) return;
+    const key = buildPath(c.to);
+    setRecents((r) => {
+      const next = [c, ...r.filter((x) => buildPath(x.to) !== key)].slice(0, 6);
+      try { localStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch { /* quota/private mode — skip */ }
+      return next;
+    });
+  });
+  const others = createMemo(() => {
+    const cur = context();
+    const curKey = cur ? buildPath(cur.to) : null;
+    return recents().filter((x) => buildPath(x.to) !== curKey).slice(0, 3);
   });
   return (
-    <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
+    <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start overflow-y-auto border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
       <button
         class="thumb-brand mb-[26px] cursor-pointer border-0 bg-transparent text-center text-[19px] text-gold-leaf max-[640px]:hidden"
         title="canopy — home"
@@ -105,18 +124,32 @@ export function NavRail() {
           </button>
         )}
       </For>
-      <Show when={context() ?? last()}>
+      <Show when={context() || others().length}>
+        <div class="rail-sep mx-[18px] my-[6px] h-px flex-none bg-rule max-[640px]:hidden" />
+      </Show>
+      <Show when={context()}>
         {(c) => (
           <button
-            class={`thumb-context ${THUMB} ${context() ? THUMB_ON : THUMB_OFF}`}
-            classList={{ active: !!context() }}
-            title={context() ? `${c().label} — up to the overview` : `back to ${c().label}`}
+            class={`thumb-context ${THUMB} ${THUMB_ON}`}
+            classList={{ active: true }}
+            title={`${c().label} — up to the overview`}
             onClick={() => navigate(c().to)}
           >
-            <span class={`${THUMB_LBL} max-w-[calc(100vh*0.3)] overflow-hidden text-ellipsis whitespace-nowrap text-[14px] max-[640px]:max-w-[160px]`}>{c().label}</span>
+            <span class={CTX_LBL}>{c().label}</span>
           </button>
         )}
       </Show>
+      <For each={others()}>
+        {(c) => (
+          <button
+            class={`thumb-recent ${THUMB_SM} ${THUMB_OFF}`}
+            title={`back to ${c.label}`}
+            onClick={() => navigate(c.to)}
+          >
+            <span class={RECENT_LBL}>{c.label}</span>
+          </button>
+        )}
+      </For>
     </nav>
   );
 }
