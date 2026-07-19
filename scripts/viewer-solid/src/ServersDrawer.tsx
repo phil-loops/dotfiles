@@ -70,9 +70,9 @@ export function ServersDrawer() {
     refetchInterval: open() ? 3000 : false,
   }));
   const previews = () => q.data?.previews ?? [];
-  // the main server is the one serving the main checkout itself (dir === the borrowed main wt),
-  // wherever it landed — NOT whatever squats :3000. A branch on :3000 is not main.
-  const mainSrv = () => previews().find((p) => p.dir && p.dir === p.borrows);
+  // the main server is the one serving the literal main branch (its scratch worktree reports
+  // "main" via stack-open intent), wherever it landed — NOT whatever squats :3000.
+  const mainSrv = () => previews().find((p) => p.branch === "main");
   const sub = () => q.data?.substrate;
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
