@@ -1,6 +1,6 @@
 import { createSignal, createEffect, onCleanup, createMemo, Show } from "solid-js";
 import { useQueryClient, createQuery } from "@tanstack/solid-query";
-import { Link, useViewerLocation, forestKey, forestRepo, withNode } from "./router";
+import { useViewerLocation, forestKey, forestRepo, withNode } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, interestPips, flattenForest } from "./shared";
 import { cameFrom } from "./cameFrom";
@@ -348,9 +348,6 @@ export function ForestOverview() {
   return (
     <div class="forest-overview min-h-screen bg-vellum-night">
       <header class="fo-head sticky top-0 z-[2] flex items-baseline gap-4 border-x-0 border-t-0 border-b border-solid border-rule bg-vellum-night px-6 py-4">
-        <Link class="brand inline-block px-[20px] pb-[2px] font-display text-[22px] font-semibold italic text-ink no-underline" to={{ kind: "home", tab: "forests" }}>
-          <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> blessed
-        </Link>
         <span class="fo-project font-display text-[21px] italic text-ink">{project()}</span>
         <Show when={(model.data?.interest ?? 0) > 0}>
           <span class="fo-interest text-[11px] tracking-[-1px] text-gold-leaf" title={`interest ${model.data!.interest} — promoted on the Forests home`}>

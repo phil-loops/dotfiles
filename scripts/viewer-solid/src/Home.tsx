@@ -10,6 +10,7 @@ import { NextQueue } from "./NextQueue";
 import { ForestRow } from "./ForestRow";
 import { useRestack } from "./useRestack";
 import { ambientChip, landedChip, type NextStep } from "./homeModel";
+import { cachedProjects, rememberProjects } from "./projectsCache";
 import { WorkTab } from "./WorkTab";
 import { ForestsList } from "./ForestsList";
 import { leaf, mergedAgo } from "./shared";
@@ -31,30 +32,13 @@ export function Home() {
     queryKey: ["myprs"],
     queryFn: () => provider.myPrs(),
   }));
-  // opportunistic load: the forests fan-out is cheap warm (~110ms) but a reaped server pays a cold
-  // python boot + git fan-out, and the home would render EMPTY until it lands. Paint the last-known
-  // forests from localStorage instantly, then revalidate — the page is never blank on a cold open.
-  const PROJECTS_CACHE = "viewerProjectsCache";
-  const cachedProjects = (): Project[] | undefined => {
-    try {
-      const s = localStorage.getItem(PROJECTS_CACHE);
-      return s ? (JSON.parse(s) as Project[]) : undefined;
-    } catch {
-      return undefined;
-    }
-  };
   const projects = createQuery(() => ({
     queryKey: ["projects"],
     queryFn: () => provider.projects(),
     initialData: cachedProjects,
     initialDataUpdatedAt: 0, // treat the cached paint as stale so it always revalidates on open
   }));
-  createEffect(() => {
-    const d = projects.data;
-    if (d && d.length) {
-      try { localStorage.setItem(PROJECTS_CACHE, JSON.stringify(d)); } catch { /* quota/private mode — skip */ }
-    }
-  });
+  createEffect(() => rememberProjects(projects.data));
   // live chat presence — server truth (srv/chat.py's job registry), not this browser's
   // localStorage, so chats started in another tab (or surviving a closed one) still show.
   type ChatJob = {
@@ -211,7 +195,7 @@ export function Home() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
 
-  const { location, navigate } = useViewerLocation();
+  const { location } = useViewerLocation();
   const tab = (): HomeTab => {
     const l = location();
     return l.kind === "home" ? l.tab : "work";
@@ -270,8 +254,6 @@ export function Home() {
   // the open PR for a forest, if any — drives the [PR #N] badge so a PR'd forest stays in the
   // Forests list (the complete index) instead of vanishing the moment it gets a PR.
   const prOf = (name: string): PR | undefined => (prs.data || []).find((p) => p.project === name);
-
-  const workCount = () => (prs.data || []).length + (reviewReqs.data || []).length;
 
   const restacking = (name: string) => () => running() === name || running() === "__all__";
   // ambient-restack daemon chip: one quiet forest-wide verdict, sits next to the brand.
@@ -350,40 +332,12 @@ export function Home() {
     />
   );
 
-  const THUMB =
-    "thumb relative flex cursor-pointer flex-col items-center gap-[9px] border-l-2 bg-transparent px-0 py-[18px] transition-[color,background] duration-[140ms] motion-reduce:transition-none max-[640px]:flex-row max-[640px]:border-l-0 max-[640px]:border-b-2 max-[640px]:px-[14px] max-[640px]:py-[10px]";
-  const THUMB_OFF = "border-transparent text-ink-faint hover:bg-vellum-edge hover:text-ink-dim";
-  const THUMB_ON =
-    "border-l-gold-leaf bg-vellum-edge text-gold-leaf max-[640px]:border-l-transparent max-[640px]:border-b-gold-leaf";
-  const COUNT =
-    "thumb-count min-w-[17px] rounded-[6px] border bg-vellum-night px-[5px] py-px text-center font-mono text-[10px]";
   return (
-    <div class="ledger grid min-h-screen grid-cols-[96px_1fr] max-[640px]:grid-cols-[1fr]">
-      <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
-        <div class="thumb-brand mb-[26px] text-center text-[19px] text-gold-leaf max-[640px]:hidden"><span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span></div>
-        <For each={[
-          { id: "work" as const, label: "Work", count: workCount() },
-          { id: "forests" as const, label: "Forests", count: (projects.data || []).length },
-        ]}>
-          {(t) => (
-            <button
-              class={`${THUMB} ${tab() === t.id ? THUMB_ON : THUMB_OFF}`}
-              classList={{ active: tab() === t.id }}
-              onClick={() => navigate({ kind: "home", tab: t.id })}
-            >
-              <span class="thumb-label font-display italic text-[17px] tracking-[0.04em] [writing-mode:vertical-rl] [text-orientation:mixed] max-[640px]:[writing-mode:horizontal-tb]">{t.label}</span>
-              <Show when={t.count}>
-                <span class={`${COUNT} ${tab() === t.id ? "border-gold-deep text-gold-leaf" : "border-rule text-ink-faint"}`}>{t.count}</span>
-              </Show>
-            </button>
-          )}
-        </For>
-      </nav>
-
+    <div class="ledger min-h-screen">
       <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[60px] pb-[100px]">
         <header class="home-head mb-[34px] flex items-center justify-between">
           <div class="brand big inline-block px-[20px] pb-[2px] font-display text-[44px] font-semibold italic text-ink">
-            <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> blessed
+            <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> canopy
           </div>
           <Show when={landedChip(merges.data, projects.data)}>
             {(c) => c().to
