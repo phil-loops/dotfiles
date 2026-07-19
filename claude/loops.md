@@ -3,7 +3,7 @@
 ## Remotes
 
 - `origin` (`Loops-so/loops`) — the shared team repo, and where branches **and** PRs actually live: branches are pushed straight to origin and PRs are opened origin-internal (head branch → `main`, same repo — not fork PRs). **Claude never pushes here and never opens PRs.** Phil pushes branches himself (GH Desktop, → viewer per the push-to-origin work) and opens every PR manually. Claude's job ends at a prepped local branch + a drafted PR body handed off.
-- `phil-loops` (`phil-loops/loops`) — an old fork, **not used**. Don't push experimental branches here — they'd be orphaned, since the real PRs are origin-internal.
+- `phil-loops` (`phil-loops/loops`) — Phil's fork. **Not part of the PR workflow** (those branches are origin-internal, above), but not dead: it holds bench/experimental branches (e.g. `bench/goal-metrics`) and is the repo's `stack-push.remote` default. So a *PR* branch never goes here (it'd be orphaned); a throwaway/bench branch may. When in doubt, it's Phil's push either way.
 
 ## Script runner
 
