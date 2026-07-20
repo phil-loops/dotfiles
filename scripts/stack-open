@@ -196,6 +196,36 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
   tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
 }
 
+hx_verify_normal(){   # Escape until the pane's statusline proves NOR with no ':' prompt open
+  local pane="$1" i snap
+  for i in {1..20}; do
+    tmux send-keys -t "$pane" Escape
+    sleep 0.05
+    snap=$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2)
+    if [[ "$snap" == *NOR* && "${snap##*$'\n'}" != :* ]]; then return 0; fi
+  done
+  return 1
+}
+
+hx_cmd(){   # run one ':' command, typing it only once the prompt is visibly open
+  local pane="$1" cmd="$2" i ok=
+  tmux send-keys -t "$pane" :
+  for i in {1..20}; do
+    if [[ "$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -1)" == :* ]]; then ok=1; break; fi
+    sleep 0.05
+  done
+  [[ -n "$ok" ]] || return 1
+  tmux send-keys -t "$pane" -l "$cmd"
+  tmux send-keys -t "$pane" Enter
+}
+
+hx_goto_line(){   # land on <line> (no-op without one), re-verifying NOR after the :open settles
+  local pane="$1" line="$2"
+  [[ -n "$line" ]] || return 0
+  hx_verify_normal "$pane" || return 1
+  tmux send-keys -t "$pane" -l "${line}gg"
+}
+
 hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-keys), else launch hx
              # cold; land the cursor on <line>. Helix has no --server socket, so "warm" is a tmux
              # send-keys trick. Realpath (:A) the paths so /tmp→/private/tmp matches Helix's cwd and
@@ -210,22 +240,25 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
           -F '#{window_index} #{pane_id} #{pane_current_command} #{window_name}' 2>/dev/null \
         | awk '$3=="hx" && $4=="review-hx" {print $1, $2; exit}')" || true
   if [[ -n "${pane:-}" ]]; then
-    # ESC must land ALONE: ESC immediately followed by ':' reads as Alt-: and ':open …' never opens
-    # the command line — 'o' inserts instead. Separate send-keys calls land in separate reads.
-    tmux send-keys -t "$pane" Escape
-    sleep 0.02
+    # Verify state, never sleep-and-hope: under load ESC+':' coalesce into Alt-: and the 'c' of
+    # ':cd' runs as a change command — the rest of the keys typed themselves into the buffer as
+    # text (2026-07-20, PR-9614 deep link). Poll the statusline for NOR / the ':' prompt before
+    # each batch; if the pane won't verify, send nothing more and open a cold window instead.
     # :cd into this file's worktree first — the warm Helix's cwd is pinned to whichever scratch
     # worktree it was first launched in, and gd/reference pickers render entries relative to cwd,
     # so a file from any OTHER branch (every scratch worktree is a fresh path) shows absolute
     # without this. LSP workspace root is resolved per-file, so :cd never disturbs it.
-    tmux send-keys -t "$pane" ":cd ${dir}" Enter
-    sleep 0.02
-    tmux send-keys -t "$pane" ":open ${file}" Enter
-    if [[ -n "$line" ]]; then
-      sleep 0.02
-      tmux send-keys -t "$pane" "${line}gg"
+    if hx_verify_normal "$pane" \
+       && hx_cmd "$pane" "cd ${dir}" \
+       && hx_cmd "$pane" "open ${file}" \
+       && hx_goto_line "$pane" "$line"; then
+      :
+    else
+      echo "stack-open: review-hx pane wouldn't reach a known state; opening cold" >&2
+      pane=""
     fi
-  else
+  fi
+  if [[ -z "${pane:-}" ]]; then
     local target="$file"; [[ -n "$line" ]] && target="${file}:${line}"
     tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
