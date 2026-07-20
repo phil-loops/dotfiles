@@ -17,31 +17,38 @@ import subprocess
 import sys
 
 
-def cfg(*args):
-    return subprocess.run(["git", "config", *args], capture_output=True, text=True).stdout
+# one spawn for the whole namespace — per-key `git config` spawns cost ~40ms each, and the old
+# 4-reads-per-branch loop made this script the slow step of every plan/model render
+def read_config():
+    raw = subprocess.run(["git", "config", "-z", "--get-regexp",
+                          r"^(branch|stack-branch|stack-project)\."],
+                         capture_output=True, text=True).stdout
+    conf = {}
+    for entry in raw.split("\0"):
+        if entry:
+            key, _, val = entry.partition("\n")
+            conf.setdefault(key, []).append(val.strip())
+    return conf
 
 
-def main():
-    if len(sys.argv) < 2:
-        print(json.dumps({"project": "", "rank": {}, "order": []}))
-        return
-    key = sys.argv[1]
+# importable too: stack_facts loads this file as a module and calls compute() with its own
+# already-read config, skipping a second python startup
+def compute(key, conf):
+    one = lambda k: (conf.get(k) or [""])[-1].strip()
+    many = lambda k: [v.strip() for v in conf.get(k, []) if v.strip()]
     # accept a branch (resolve its project) or a project name directly
-    project = cfg(f"branch.{key}.stack-project").strip() or cfg(f"stack-branch.{key}.project").strip()
+    project = one(f"branch.{key}.stack-project") or one(f"stack-branch.{key}.project")
     if not project:
         project = key
-    branches = [b for b in cfg("--get-all", f"stack-project.{project}.branch").splitlines() if b]
+    branches = many(f"stack-project.{project}.branch")
     if not branches:
-        print(json.dumps({"project": project, "rank": {}, "order": []}))
-        return
+        return {"project": project, "rank": {}, "order": []}
 
     parent, requires = {}, {}
     known = set(branches)
     for b in branches:
-        p = cfg(f"branch.{b}.stack-parent").strip() or cfg(f"stack-branch.{b}.parent").strip() or "main"
-        parent[b] = p
-        requires[b] = [r for r in cfg("--get-all", f"branch.{b}.stack-requires").splitlines() if r] \
-            or [r for r in cfg("--get-all", f"stack-branch.{b}.requires").splitlines() if r]
+        parent[b] = one(f"branch.{b}.stack-parent") or one(f"stack-branch.{b}.parent") or "main"
+        requires[b] = many(f"branch.{b}.stack-requires") or many(f"stack-branch.{b}.requires")
 
     memo = {}
 
@@ -64,7 +71,15 @@ def main():
     ranks = {b: rank(b, set()) for b in branches}
     # stable sort preserves the declared branch-list order within a rank
     order = sorted(branches, key=lambda b: ranks[b])
-    print(json.dumps({"project": project, "rank": ranks, "order": order}))
+    return {"project": project, "rank": ranks, "order": order}
 
 
-main()
+def main():
+    if len(sys.argv) < 2:
+        print(json.dumps({"project": "", "rank": {}, "order": []}))
+        return
+    print(json.dumps(compute(sys.argv[1], read_config())))
+
+
+if __name__ == "__main__":
+    main()
