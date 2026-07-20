@@ -730,8 +730,12 @@ def branch_url(req, u):   # GET /branch-url?branch= — the branch's open-PR url
         remote = ctx.run(["git", "config", "--get", f"branch.{branch}.remote"]).stdout.strip() or "origin"
         base = _repo_web_url(remote)
         if base:
-            main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-            url = f"{base}/compare/{main}...{branch}"
+            if remote == "origin":
+                from srv import push
+                cmp_base = push._pr_base(branch)
+            else:
+                cmp_base = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+            url = f"{base}/compare/{cmp_base}...{branch}"
     req._send(200, json.dumps({"url": url}))
 
 

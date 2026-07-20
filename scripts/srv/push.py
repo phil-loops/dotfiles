@@ -192,13 +192,34 @@ def _tree(rev):
     return ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
 
 
+def _pr_base(branch):
+    """The compare form's base: the nearest stack ancestor with an OPEN PR on origin, else
+    main. A stacked child targets its parent's PR so the review diff stays that branch's own
+    work; GitHub retargets the child to main itself when the parent PR merges."""
+    heads = sync._open_pr_heads()
+    seen = {branch}
+    b = branch
+    while True:
+        parent = (ctx.run(["git", "config", f"branch.{b}.stack-parent"]).stdout.strip()
+                  or ctx.run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip())
+        if not parent or parent in ("main", "master") or parent in seen:
+            return "main"
+        if (parent in heads
+                and ctx.run(["git", "rev-parse", "--verify", "-q",
+                             f"refs/remotes/origin/{parent}"]).returncode == 0):
+            return parent
+        seen.add(parent)
+        b = parent
+
+
 def _origin_web(branch):
     """github.com compare link for the branch, opened straight to the 'Open a pull
-    request' form (?expand=1). Authoring still happens on the website — this only
-    opens the form; it never prefills a title/body or calls gh pr create."""
+    request' form (?expand=1) with the base prefilled by _pr_base. Authoring still
+    happens on the website — this only opens the form; it never prefills a
+    title/body or calls gh pr create."""
     url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
-    return f"https://github.com/{m.group(1)}/compare/main...{branch}?expand=1" if m else ""
+    return f"https://github.com/{m.group(1)}/compare/{_pr_base(branch)}...{branch}?expand=1" if m else ""
 
 
 def _open_pr_url(branch):
