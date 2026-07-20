@@ -48,11 +48,20 @@ fi
 # package build here. Skips too if tsgo is absent; bypass a run with TSGO_SKIP=1.
 if [ -n "$files" ] && [ "$TSGO_SKIP" != "1" ] && command -v tsgo >/dev/null 2>&1; then
   if [ -f .gen/trpc-types/trpc/root.d.ts ]; then
-    echo "tsgo: typechecking..."
-    if ! tsgo --project tsconfig.node.json --noEmit; then
-      echo "🚨 tsgo: type errors above — fix before pushing (TSGO_SKIP=1 to bypass)"
-      exit 1
+    # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
+    # branches from before the split still carry the old single config.
+    if [ -f typescript/tsconfig.runtime.json ]; then
+      ts_projects="typescript/tsconfig.runtime.json typescript/tsconfig.test.json"
+    else
+      ts_projects="tsconfig.node.json"
     fi
+    for proj in $ts_projects; do
+      echo "tsgo: typechecking $proj..."
+      if ! tsgo --project "$proj" --noEmit; then
+        echo "🚨 tsgo: type errors above — fix before pushing (TSGO_SKIP=1 to bypass)"
+        exit 1
+      fi
+    done
   else
     echo "tsgo: .gen not built in this worktree — skipping local typecheck"
   fi

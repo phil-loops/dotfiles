@@ -138,7 +138,12 @@ def default_gates(cwd):
     ensure_tsgo_link(cwd)
     typechecker = repo_local("tsgo", cwd) or repo_local("tsc", cwd)
     oxfmt = resolve("oxfmt", cwd)
-    if typechecker and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
+    # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
+    # branches from before the split still carry the old single config.
+    if typechecker and os.path.exists(os.path.join(cwd, "typescript/tsconfig.runtime.json")):
+        gates.append(("typecheck", f"{typechecker} --project typescript/tsconfig.runtime.json --noEmit"
+                                   f" && {typechecker} --project typescript/tsconfig.test.json --noEmit"))
+    elif typechecker and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
         gates.append(("typecheck", f"{typechecker} --project tsconfig.node.json --noEmit"))
     if oxfmt:
         gates.append((
