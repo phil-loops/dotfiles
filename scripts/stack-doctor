@@ -18,6 +18,9 @@
 #   ⊘ empty    parent...branch diff is empty (contract: drop + rewire children)
 #   ~ ghost?   patch-contained in origin/main (likely squash-merged — verify, then contract)
 #   ✗ MISSING  branch in config but no ref
+#   ∴ decide   proof branch (role=proof, never ships) outlived every shippable member —
+#              keep it as a standing proof, lift the artifact out, or drop it. Never
+#              sweep it silently.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
@@ -27,7 +30,7 @@ for a in "$@"; do
     --orphans|--problems) only_problems=1 ;;
     --prune) do_prune=1 ;;
     --dry-run|-n) dry_run=1 ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
     *) want="$a" ;;
   esac
 done
@@ -140,7 +143,7 @@ prune() {
 
 if [ "$do_prune" = "1" ]; then prune; exit 0; fi
 git fetch origin main --quiet 2>/dev/null || true
-OM=$(git rev-parse origin/main 2>/dev/null || git rev-parse main)
+OM=$(git rev-parse --verify -q origin/main 2>/dev/null || git rev-parse --verify -q main)
 
 sha() { git rev-parse --short "$1" 2>/dev/null; }
 # real parent commit of a branch = its first-parent commit
@@ -152,11 +155,13 @@ projects=$(git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | s
 
 for proj in $projects; do
   [ -n "$want" ] && [ "$proj" != "$want" ] && continue
-  lines=""; proj_problem=0
+  lines=""; proj_problem=0; proof_members=""; shippable_alive=0
   for b in $(git config --get-all "stack-project.$proj.branch"); do
     if ! git rev-parse --verify -q "$b" >/dev/null; then
       lines+="  ✗ MISSING  $b (in config, no ref)"$'\n'; proj_problem=1; continue
     fi
+    role=$(git config "branch.$b.stack-role" 2>/dev/null || git config "stack-branch.$b.role" 2>/dev/null || true)
+    if [ "$role" = "proof" ]; then proof_members+="$b"$'\n'; else shippable_alive=1; fi
     parent=$(git config "branch.$b.stack-parent" 2>/dev/null || git config "stack-branch.$b.parent" 2>/dev/null || echo main)
     glyph="✓"; detail=""
     # orphan check: only when parent is a real, existing branch (not main/origin/main)
@@ -184,8 +189,15 @@ for proj in $projects; do
         fi
       fi
     fi
-    lines+="  $glyph $b${detail:+  — $detail}"$'\n'
+    lines+="  $glyph $b${role:+ [$role]}${detail:+  — $detail}"$'\n'
   done
+  if [ -n "$proof_members" ] && [ "$shippable_alive" = "0" ]; then
+    while IFS= read -r pb; do
+      [ -n "$pb" ] || continue
+      lines+="  ∴ $pb — proof branch outlived its forest: keep as standing proof, lift the artifact, or drop"$'\n'
+    done <<< "$proof_members"
+    proj_problem=1
+  fi
   if [ "$only_problems" = "1" ] && [ "$proj_problem" = "0" ]; then continue; fi
   printf '### %s\n%s\n' "$proj" "$lines"
   [ "$proj_problem" = "1" ] && problems=$((problems+1))

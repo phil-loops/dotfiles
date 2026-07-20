@@ -17,7 +17,11 @@ It also blocks **merge commits on a feature branch** — one means a `git pull`
 commits back in and bloats the PR with phantom "new" commits. Rebase onto
 origin/main instead.
 
-Escape hatches (per guard, one push): `ALLOW_WIP_PUSH=1` / `ALLOW_MERGE_PUSH=1`.
+It also refuses **proof branches** (`role=proof`, set with `stack-proof`) — a
+never-merge forest member that exists to prove the forest works, not to ship.
+
+Escape hatches (per guard, one push): `ALLOW_WIP_PUSH=1` / `ALLOW_MERGE_PUSH=1`
+/ `ALLOW_PROOF_PUSH=1`.
 For pushes from GUI clients that can't set env vars (GH Desktop), a one-shot
 per-branch flag does the same for the merge guard and is consumed on use:
 `git config stack-branch.<branch>.allow-merge-push true`.
@@ -84,6 +88,16 @@ def merge_commits(rev_args):
     return found
 
 
+def branch_role(name):
+    for key in (f"branch.{name}.stack-role", f"stack-branch.{name}.role"):
+        val = subprocess.run(
+            ["git", "config", "--get", key], capture_output=True, text=True,
+        ).stdout.strip()
+        if val:
+            return val
+    return ""
+
+
 def branch_merge_pass(remote_ref):
     """One-shot per-branch merge-push pass, consumed on use (for GUI pushes)."""
     branch = remote_ref.removeprefix("refs/heads/")
@@ -104,14 +118,33 @@ def main():
         cols = line.split()
         if len(cols) < 4:
             continue
-        _local_ref, local_sha, remote_ref, remote_sha = cols[:4]
+        local_ref, local_sha, remote_ref, remote_sha = cols[:4]
         if local_sha == ZERO:   # deleting a ref — nothing to scan
             continue
-        refs.append((local_sha, remote_ref, remote_sha))
+        refs.append((local_ref, local_sha, remote_ref, remote_sha))
+
+    if os.environ.get("ALLOW_PROOF_PUSH", "").strip().lower() in FALSEY:
+        proofs = []
+        for local_ref, _local_sha, remote_ref, _remote_sha in refs:
+            for ref in {local_ref, remote_ref}:
+                name = ref.removeprefix("refs/heads/")
+                if branch_role(name) == "proof" and name not in proofs:
+                    proofs.append(name)
+        if proofs:
+            print("\n✋ push blocked — proof branch(es) never ship:\n", file=sys.stderr)
+            for name in proofs:
+                print(f"   {name}", file=sys.stderr)
+            print(
+                "\nA proof branch (role=proof) rides alongside its forest to prove it works —\n"
+                "it is not a PR. Clear the role first (`stack-proof --clear <branch>`) if it\n"
+                "really should ship, or override this one push: ALLOW_PROOF_PUSH=1 git push …\n",
+                file=sys.stderr,
+            )
+            return 1
 
     if os.environ.get("ALLOW_MERGE_PUSH", "").strip().lower() in FALSEY:
         merges = []
-        for local_sha, remote_ref, remote_sha in refs:
+        for _local_ref, local_sha, remote_ref, remote_sha in refs:
             if remote_ref.endswith("/main"):
                 continue
             if branch_merge_pass(remote_ref):
@@ -135,7 +168,7 @@ def main():
 
     if os.environ.get("ALLOW_WIP_PUSH", "").strip().lower() in FALSEY:
         offenders = []
-        for local_sha, _remote_ref, remote_sha in refs:
+        for _local_ref, local_sha, _remote_ref, remote_sha in refs:
             offenders += wip_commits(range_for(local_sha, remote_sha))
         if offenders:
             seen = set()

@@ -1,0 +1,37 @@
+#!/bin/zsh
+# stack-proof — mark a branch as a proof branch: a never-merge forest member that rides
+# alongside to prove the forest works (e2e/smoke artifacts). The role, not the caller,
+# carries the semantics: rendered stories omit it (stack_facts reads role), the pre-push
+# hook refuses to push it, and stack-doctor reports "outlived its forest" instead of
+# treating it as sweepable. Shape-wise it's just an integrator (parent + requires).
+#
+#   stack-proof <branch>...          mark role=proof
+#   stack-proof --clear <branch>...  clear the role
+#   stack-proof --list               show every proof branch
+set -euo pipefail
+
+mode="proof"
+case "${1:-}" in
+  --list)
+    { git config --get-regexp '^branch\..*\.stack-role$' 2>/dev/null || true
+      git config --get-regexp '^stack-branch\..*\.role$' 2>/dev/null || true; } \
+      | sed -nE 's/^(stack-)?branch\.(.*)\.(stack-)?role proof$/\2/p' | sort -u
+    exit 0 ;;
+  --clear) mode="clear"; shift ;;
+  --*) echo "usage: stack-proof [--clear] <branch>... | --list" >&2; exit 2 ;;
+esac
+
+[[ $# -ge 1 ]] || { echo "usage: stack-proof [--clear] <branch>... | --list" >&2; exit 2; }
+
+for b in "$@"; do
+  git show-ref --verify --quiet "refs/heads/$b" \
+    || { echo "stack-proof: no branch named '$b'" >&2; exit 1; }
+  if [[ "$mode" == "clear" ]]; then
+    git config --unset "branch.$b.stack-role" 2>/dev/null || true
+    git config --unset "stack-branch.$b.role" 2>/dev/null || true
+    echo "$b: role cleared — a shippable branch again"
+  else
+    git config "stack-branch.$b.role" proof
+    echo "$b: role=proof — never ships; omitted from stories; push will refuse it"
+  fi
+done

@@ -40,9 +40,19 @@ def requires_of(branch):
             or git_lines("config", "--get-all", f"stack-branch.{branch}.requires"))
 
 
+def role_of(branch):
+    """A branch's forest role. `proof` = a never-merge branch riding alongside its forest
+    to prove it works (e2e/smoke artifacts). Set with `stack-proof`."""
+    return (git("config", f"branch.{branch}.stack-role")
+            or git("config", f"stack-branch.{branch}.role"))
+
+
 def plan_omitted(branch):
     """Opted out of every rendered story (plan, PR body, mermaid) — an integration or
-    test/proof branch that never ships as a PR. Set with `stack-plan-omit`."""
+    test/proof branch that never ships as a PR. Set with `stack-plan-omit`; role=proof
+    implies it."""
+    if role_of(branch) == "proof":
+        return True
     return (git("config", f"branch.{branch}.stack-plan-omit")
             or git("config", f"stack-branch.{branch}.plan-omit")) == "true"
 
@@ -179,6 +189,7 @@ def facts(branch):
     return {
         "branch": branch,
         "project": project,
+        "role": role_of(branch),
         "purpose": git("config", f"branch.{branch}.description"),
         "summary": (git("config", f"branch.{branch}.stack-summary")
                     or git("config", f"stack-branch.{branch}.summary")),
