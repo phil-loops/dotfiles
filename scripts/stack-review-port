@@ -5,7 +5,7 @@
 # never drift onto different ports.
 #
 # Per-repo ports are what let you forest several repos AT ONCE — loops on its port,
-# dotfiles on its own, each `loops stack web` opening a live tab that coexists with the
+# dotfiles on its own, each `stack web` opening a live tab that coexists with the
 # others (the old single :62333 served one repo at a time and reclaimed the port).
 #
 #   $STACK_REVIEW_PORT (if set) wins   — explicit override / pinning

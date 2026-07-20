@@ -40,7 +40,7 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   const [head, ...rest] = pathname.split("/").filter(Boolean);
 
   if (!head) {
-    // legacy launch entry: `loops stack web <name>` opens /?branch=<name> — honour it as a forest
+    // legacy launch entry: `stack web <name>` opens /?branch=<name> — honour it as a forest
     // (RouterProvider canonicalises the URL to /forests/<name> on load).
     const branch = new URLSearchParams(search).get("branch");
     return branch ? { kind: "forest", name: branch } : { kind: "home", tab: "work" };
