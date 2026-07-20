@@ -62,10 +62,10 @@ dur_of() {  # $1 startedAt  $2 updatedAt (ISO) -> "Nm" or ""
 prs=$(gh pr list -R "$REPO" --author @me --state merged -L 30 --json number,mergeCommit \
   -q '.[] | select(.mergeCommit.oid != null) | "\(.mergeCommit.oid)\t\(.number)"' 2>/dev/null || true)
 
-# completed build-and-test main runs
+# completed build-and-test main runs (displayTitle last — it holds spaces; @tsv escapes tabs)
 runs=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main -L 30 \
-  --json databaseId,headSha,conclusion,number,headBranch,startedAt,updatedAt,event,url,status \
-  -q '.[] | select(.status=="completed") | [.databaseId,.headSha,.conclusion,.number,.headBranch,.startedAt,.updatedAt,.event,.url] | @tsv' 2>/dev/null || true)
+  --json databaseId,headSha,conclusion,number,headBranch,startedAt,updatedAt,event,url,status,attempt,displayTitle \
+  -q '.[] | select(.status=="completed") | [.databaseId,.headSha,.conclusion,.number,.headBranch,.startedAt,.updatedAt,.event,.url,.attempt,.displayTitle] | @tsv' 2>/dev/null || true)
 [ -n "$runs" ] || { grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"; exit 0; }
 
 # Cross-sweep supersession: a merge train gives every merge its own main build, but each
@@ -77,11 +77,11 @@ inflight_max=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch mai
 
 now_s=$(date +%s)
 success_notified=0
-while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event url; do
+while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event url attempt title; do
   [ -n "$rid" ] || continue
   grep -qx "$rid" "$seen" && continue
   if [ "$firstrun" = "1" ]; then echo "$rid" >> "$seen"; continue; fi   # seed silently
-  tag="${headbr}-${runnum}-1"
+  tag="${headbr}-${runnum}-${attempt:-1}"
   end_s=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$updatedAt" +%s 2>/dev/null || echo 0)
   if [ "$end_s" -gt 0 ] && [ $(( now_s - end_s )) -gt $(( MAX_AGE_H * 3600 )) ]; then
     echo "build-notify: · $tag finished >${MAX_AGE_H}h ago — seeded silently"
@@ -112,8 +112,14 @@ while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event ur
       echo "$rid" >> "$seen"; continue
     fi
     success_notified=1
+    # every merge lands on main as event=push, so "direct push" was claimed for every
+    # TEAMMATE's merge (mine match $prs) — read the real source from the squash-merge
+    # subject's trailing (#NNNN) and say so; a subject without one is a true direct push
+    mergedpr=$(printf '%s' "$title" | sed -nE 's/.*\(#([0-9]+)\)$/\1/p')
     if [ -n "$prnum" ]; then
       msg="PR #$prnum → $tag${dur:+ in $dur}. Seed staging: seed-staging-goal --tag $tag"
+    elif [ -n "$mergedpr" ]; then
+      msg="main build $tag (#$mergedpr merged)${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
     elif [ "$event" != "pull_request" ]; then
       msg="main build $tag (direct push)${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
     else
