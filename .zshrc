@@ -180,6 +180,11 @@ loops() {
             fi
             ;;
         *)
+            # this fn shadows the loops-so CLI binary — unknown commands belong to it
+            if [[ -n "$cmd" && -x "$HOME/.local/bin/loops" ]]; then
+                "$HOME/.local/bin/loops" "$cmd" "$@"
+                return $?
+            fi
             echo "Usage: loops <command>"
             echo ""
             echo "Commands:"
@@ -191,6 +196,7 @@ loops() {
             echo "  purpose [branch] [text]  View/set a branch's purpose (git branch description)"
             echo "  clean-migrations  Remove empty migration folders"
             echo "  staging           Check build/deploy status, watch, or deploy"
+            echo "  <anything else>   passed through to the Loops CLI (~/.local/bin/loops)"
             ;;
     esac
 }
