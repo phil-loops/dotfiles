@@ -614,18 +614,86 @@ def _requirers_of(branch):
     return [b for b, vals in reqs.items() if branch in vals]
 
 
+def _rebase_onto(branch, onto, cut):
+    """Replay BRANCH's own commits (cut..BRANCH) onto ONTO — in the branch's own clean
+    worktree, or borrowed into the scratch worktree when it isn't checked out anywhere.
+    Returns (status, detail): 'clean' — ref moved; 'conflict' — aborted + restored, detail
+    names the conflicted files; 'skip' — no safe worktree, detail says why."""
+    main = os.path.realpath(ctx.MAIN_WT)
+    wt = _worktree_of(branch)
+    own = False
+    if wt and os.path.realpath(wt) != main and _clean(wt):
+        target = wt
+    elif not wt:
+        target = _scratch_wt()
+        if ctx.run(["git", "-C", target, "checkout", branch]).returncode != 0:
+            return "skip", "couldn't borrow it into the scratch worktree"
+        own = True
+    elif os.path.realpath(wt) == main:
+        return "skip", "it's checked out in the main worktree"
+    else:
+        return "skip", f"its worktree is dirty ({wt})"
+    reb = ctx.run(["git", "-C", target, "rebase", "--onto", onto, cut, branch])
+    if reb.returncode != 0:
+        conflicted = ctx.run(["git", "-C", target, "diff", "--name-only", "--diff-filter=U"]).stdout.strip()
+        ctx.run(["git", "-C", target, "rebase", "--abort"])
+        if own:
+            ctx.run(["git", "-C", target, "checkout", "--detach"])
+        return "conflict", conflicted.replace("\n", ", ")
+    if own:
+        ctx.run(["git", "-C", target, "checkout", "--detach"])
+    return "clean", ""
+
+
+def _rebase_tree(branch, onto, cut):
+    """Rebase BRANCH (cut..BRANCH onto ONTO), then reseat its whole descendant subtree onto the
+    rewritten tips — a rebase strands children on the pre-rebase history otherwise. Returns ""
+    or an error naming the branch that failed; branches already moved stay moved (the restack
+    machinery recovers a stranded subtree via its drifted-fork cut)."""
+    old = ctx.run(["git", "rev-parse", branch]).stdout.strip()
+    status, detail = _rebase_onto(branch, onto, cut)
+    if status != "clean":
+        why = f"hit a conflict ({detail})" if status == "conflict" else f"has no safe worktree — {detail}"
+        return f"rebasing {branch} {why}"
+    for c in _children_of(branch):
+        c_cut = ctx.run(["git", "merge-base", old, c]).stdout.strip()
+        if not c_cut:
+            continue
+        if ctx.run(["git", "merge-base", "--is-ancestor", c_cut, branch]).returncode == 0:
+            continue   # already seated on the rewritten tip
+        err = _rebase_tree(c, branch, c_cut)
+        if err:
+            return err
+        ctx.run(["git", "config", f"stack-branch.{c}.base",
+                 ctx.run(["git", "rev-parse", branch]).stdout.strip()])
+    return ""
+
+
 def _contract(branch):
     """Drop an already-merged branch and rewire its dependents onto its parent (== main for a
-    syncable root). Deterministic mirror of the manual contraction. Returns (children, deps, parent):
-    `children` are branches parented on it (line moves up); `deps` fan it in via `requires` and now
-    inherit its work from main, so that edge is dropped. Caller MUST have confirmed _already_merged
-    first — this never re-checks."""
+    syncable root). Each child REBASES off the dropped tip before its config moves — rewiring
+    config alone leaves the child's history forked off the dead tip, still carrying the merged
+    commit as a ghost the review diff re-shows (bit us 2026-07-20). Per-child transactional: a
+    child either fully moves (history + config) or is left untouched, and any failure stops the
+    contraction with the node still standing, so the drop is safe to re-press once fixed.
+    Returns (err, children, deps, parent); err is "" on success. `children` are branches
+    parented on it (line moves up); `deps` fan it in via `requires` and now inherit its work
+    from main, so that edge is dropped. Caller MUST have confirmed _already_merged first —
+    this never re-checks."""
     parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
               or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    base = ctx.run(["git", "rev-parse", "origin/main"]).stdout.strip()
+    onto = "origin/main" if parent == "main" else parent
+    base = ctx.run(["git", "rev-parse", onto]).stdout.strip()
     esc = "^" + branch.replace(".", r"\.") + "$"
     kids = _children_of(branch)
+    tip = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).stdout.strip()
     for k in kids:
+        cut = ctx.run(["git", "merge-base", tip, k]).stdout.strip() if tip else ""
+        # cut already inside the new base = no ghost history to shed → config-only move
+        if cut and ctx.run(["git", "merge-base", "--is-ancestor", cut, onto]).returncode != 0:
+            err = _rebase_tree(k, onto, cut)
+            if err:
+                return f"{err}; {branch} left standing", kids, [], parent
         ctx.run(["git", "config", f"stack-branch.{k}.parent", parent])
         ctx.run(["git", "config", f"stack-branch.{k}.base", base])
     # Fan-in dependents: the required base landed in main, so the edge is now redundant — drop it,
@@ -655,7 +723,7 @@ def _contract(branch):
         # (interest/epic included) so no empty forest card lingers.
         if not ctx.run(["git", "config", "--get-all", f"stack-project.{p}.branch"]).stdout.strip():
             ctx.run(["git", "config", "--remove-section", f"stack-project.{p}"])
-    return kids, deps, parent
+    return "", kids, deps, parent
 
 
 def post_sync(req, raw):
@@ -713,10 +781,13 @@ def post_contract(req, raw):
         req._send(409, json.dumps(
             {"ok": False, "err": "not already-merged — refusing to drop a branch with unmerged work"}))
         return
-    kids, deps, parent = _contract(branch)
+    err, kids, deps, parent = _contract(branch)
+    if err:
+        req._send(409, json.dumps({"ok": False, "err": err}))
+        return
     parts = []
     if kids:
-        parts.append(f"rewired {len(kids)} child{'' if len(kids) == 1 else 'ren'} onto {parent}")
+        parts.append(f"moved {len(kids)} child{'' if len(kids) == 1 else 'ren'} onto {parent}")
     if deps:
         parts.append(f"dropped the requires edge on {len(deps)} integrator{'' if len(deps) == 1 else 's'}")
     summary = f"dropped {branch}" + (f"; {', '.join(parts)}" if parts else " (no dependents)")

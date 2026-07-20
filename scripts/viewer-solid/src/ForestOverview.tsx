@@ -398,7 +398,7 @@ export function ForestOverview() {
               onHoverNode={showTip}
               onLeaveNode={hideTip}
               onContract={canMutate ? async (branch) => {
-                await fetch(withRepo("/contract"), {
+                const res = await fetch(withRepo("/contract"), {
                   method: "POST",
                   headers: { "Content-Type": "application/json" },
                   body: JSON.stringify({ branch }),
@@ -406,6 +406,7 @@ export function ForestOverview() {
                 ovQc.invalidateQueries({ queryKey: ["model"] });
                 ovQc.invalidateQueries({ queryKey: ["forest-health"] });
                 ovQc.invalidateQueries({ queryKey: ["projects"] });
+                return res;
               } : undefined}
               // a forest with nothing to ship gets no verb — the merged-with-follow-on node stays a
               // passive ghost instead of a "ready forest →" that fires and reports "already ready".

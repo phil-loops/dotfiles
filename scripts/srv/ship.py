@@ -136,7 +136,9 @@ def ship(req, raw):
 
     contracted = []
     for g in ghosts:
-        kids, deps, parent = sync._contract(g)
+        err, kids, deps, parent = sync._contract(g)
+        if err:
+            return req._send(200, json.dumps({"ok": False, "err": err, "contracted": contracted}))
         contracted.append({"branch": g, "children": kids, "deps": deps, "parent": parent})
     survivors = _topo([b for b in _members(project) if b in survivors])
 
