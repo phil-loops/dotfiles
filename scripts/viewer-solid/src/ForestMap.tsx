@@ -125,6 +125,7 @@ export function ForestMap(props: {
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
   const [contracting, setContracting] = createSignal<string | null>(null);
+  const [contractErr, setContractErr] = createSignal<{ id: string; err: string } | null>(null);
   const [readying, setReadying] = createSignal(false);
   // the merged-ghost next step, keyed off CONTRACTABLE (rebase-classify exit 20), not merged:
   //   drop    — fully contractable + we can mutate → ⊘ drop & rewire (POST /contract)
@@ -140,6 +141,7 @@ export function ForestMap(props: {
   };
   const ghostLabel = (id: string): string => {
     if (contracting() === id) return readying() ? "▸ readying forest…" : "⊘ dropping & rewiring…";
+    if (contractErr()?.id === id) return "⊘ drop failed ↻";
     const m = ghostMode(id);
     return m === "drop" ? "⊘ drop & rewire →" : m === "forward" ? "▸ ready forest →" : "✦ merged ghost";
   };
@@ -722,7 +724,13 @@ export function ForestMap(props: {
                           const m = ghostMode(n.id);
                           if (m === "drop") {
                             setContracting(n.id);
-                            Promise.resolve(props.onContract!(n.id)).finally(() => setContracting(null));
+                            setContractErr(null);
+                            Promise.resolve(props.onContract!(n.id))
+                              .then((r) => {
+                                const j = r as { ok?: boolean; err?: string } | undefined;
+                                if (j && j.ok === false) setContractErr({ id: n.id, err: j.err || "contract failed" });
+                              })
+                              .finally(() => setContracting(null));
                           } else if (m === "forward") {
                             // not droppable alone — run the whole ready motion: contract merged
                             // work into fresh main FIRST, then restack survivors root-down.
@@ -736,8 +744,10 @@ export function ForestMap(props: {
                         }}
                       >
                         <title>
-                          {ghostMode(n.id) === "drop"
-                            ? "already merged AND fully contractable — drops this branch, rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
+                          {contractErr()?.id === n.id
+                            ? `${contractErr()!.err} — click to retry`
+                            : ghostMode(n.id) === "drop"
+                            ? "already merged AND fully contractable — drops this branch, rebases + rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
                             : ghostMode(n.id) === "forward"
                               ? "the PR merged but a newer commit rides on top — not droppable alone. Readies the whole forest: merged work contracts into fresh main first, then everything (the follow-on included) restacks in order. A conflict restores every branch."
                               : "merged into main (ghost)"}
