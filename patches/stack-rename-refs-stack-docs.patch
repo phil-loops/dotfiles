@@ -1,0 +1,302 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 8947de0..5358f2c 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -53,7 +53,7 @@ that mattered was the data gap sitting underneath both.)
+ 
+ # Browser / "open in web"
+ 
+-**The Claude browser extension is NOT installed/connected.** The `mcp__claude-in-chrome__*` tools *load* via ToolSearch but fail at runtime with "browser extension is not connected" — don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a headless-Chromium script — `npx puppeteer`, or a small node script that launches Chromium, navigates, screenshots, and asserts on the DOM). When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `loops stack web`, which is the forest viewer server the user reviews on himself.)
++**The Claude browser extension is NOT installed/connected.** The `mcp__claude-in-chrome__*` tools *load* via ToolSearch but fail at runtime with "browser extension is not connected" — don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a headless-Chromium script — `npx puppeteer`, or a small node script that launches Chromium, navigates, screenshots, and asserts on the DOM). When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `stack web`, which is the forest viewer server the user reviews on himself.)
+ 
+ # Topic files
+ 
+diff --git a/claude/forests.md b/claude/forests.md
+index 50b8e96..f8e0f53 100644
+--- a/claude/forests.md
++++ b/claude/forests.md
+@@ -58,7 +58,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
+ | Add a fan-in dep           | `git config --add stack-branch.<name>.requires <dep>`       |
+ | Set/update a branch's purpose | `git config branch.<name>.description "<thesis>"` (a.k.a. `git branch --edit-description`) |
+ | Tag a branch's forest membership | `git config stack-branch.<name>.project <project>` + `git config --add stack-project.<project>.branch <name>` (the viewer reads these) |
+-| Review the forest (live)   | `loops stack web [<project>]` — Phil's browser viewer, on the repo's own port (`stack-review-port` prints it; read-only; reads git config per request). Claude doesn't drive it; it just keeps the config correct. |
++| Review the forest (live)   | `stack web [<project>]` — Phil's browser viewer, on the repo's own port (`stack-review-port` prints it; read-only; reads git config per request). Claude doesn't drive it; it just keeps the config correct. |
+ | Update branch after parent change | `git rebase <parent>`                                |
+ | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
+ | Restack whole forest after a merge | raw git — snapshot SHAs, ff `main`, `rebase --onto` bottom-up (see *Restacking* below) |
+@@ -69,7 +69,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
+ 
+ ## The forest config is hand-maintained (the viewer reads it)
+ 
+-The review surfaces — `loops stack web` (the browser viewer), `loops stack review` (nvim), and `loops bless` — are **read-only consumers of git config**. They render whatever these keys say; nothing writes them automatically. So Claude maintains them by hand:
++The review surfaces — `stack web` (the browser viewer), `stack review` (nvim), and `stack bless` — are **read-only consumers of git config**. They render whatever these keys say; nothing writes them automatically. So Claude maintains them by hand:
+ 
+ - `git config stack-branch.<name>.parent <parent>` — the rebase base. Set at branch creation; update on every rebase-onto-new-parent, on rename, and when rewiring a dropped node's children.
+ - `git config stack-branch.<name>.project <project>` — per-branch project tag. Set at creation. **It rots** (see below).
+@@ -136,14 +136,14 @@ Each branch is **one reviewable unit — a single capability that compiles on it
+ 
+ Three tools, different jobs — don't conflate them. `review` (nvim) and `web` (browser) are **not the same command**:
+ 
+-- **`loops stack web [<project>]`** — the **primary, live review surface** (the blessing-ledger server, on the repo's own port — `stack-review-port` prints it; loops is :62497 today. Per-repo so several repos can be forested at once; :62333 is only the legacy not-in-a-repo fallback — a dead end from a worktree). Renders the whole forest in the browser: tree rail, graph map, per-node `parent...child` diffs, since-blessed deltas, and click-to-bless. Reads git config live per request. This is where Phil reviews — default to it.
+-- **`loops stack review [<branch>]`** — *(legacy, local)* stack-stepping in **nvim diffview**, one `parent...child` link at a time. Doesn't know worktrees exist. Use only for offline/local stepping; the `--html` (/tmp browser tabs) flag is deprecated — use `loops stack web` instead.
++- **`stack web [<project>]`** — the **primary, live review surface** (the blessing-ledger server, on the repo's own port — `stack-review-port` prints it; loops is :62497 today. Per-repo so several repos can be forested at once; :62333 is only the legacy not-in-a-repo fallback — a dead end from a worktree). Renders the whole forest in the browser: tree rail, graph map, per-node `parent...child` diffs, since-blessed deltas, and click-to-bless. Reads git config live per request. This is where Phil reviews — default to it.
++- **`stack review [<branch>]`** — *(legacy, local)* stack-stepping in **nvim diffview**, one `parent...child` link at a time. Doesn't know worktrees exist. Use only for offline/local stepping; the `--html` (/tmp browser tabs) flag is deprecated — use `stack web` instead.
+ - **`wt [base-branch] [--html|-H]`** — solves the **worktree-discovery** problem. fzf-picks across sibling worktrees and shows the picked branch's *full* cumulative diff vs `base` (default `main`), including uncommitted working-tree changes (`--imply-local`). Not stack-aware — a 6-branch stack shows as one giant diff.
+ 
+ Decision rule:
+-- Reviewing/blessing a whole forest or stack → `loops stack web` (default)
++- Reviewing/blessing a whole forest or stack → `stack web` (default)
+ - Single-branch feature, or scanning across many worktrees → `wt`
+-- Offline, no browser, want nvim stepping → `loops stack review`
++- Offline, no browser, want nvim stepping → `stack review`
+ 
+ ### Claude inside the viewer (it's no longer purely read-only)
+ 
+diff --git a/scripts/stack-archive b/scripts/stack-archive
+index 05cbad7..a27252e 100755
+--- a/scripts/stack-archive
++++ b/scripts/stack-archive
+@@ -5,9 +5,9 @@
+ # branch-seed multivar (`.branch`) is left untouched, so the project comes back
+ # exactly as it was.
+ #
+-# Usage: loops stack archive [project]      # hide from chooser (archived=true)
+-#        loops stack unarchive [project]    # show again (unset archived)
+-#        loops stack archived               # list archived projects
++# Usage: stack archive [project]      # hide from chooser (archived=true)
++#        stack unarchive [project]    # show again (unset archived)
++#        stack archived               # list archived projects
+ # No project + a TTY → fzf-pick (archive: from visible; unarchive: from archived).
+ 
+ set -e
+@@ -40,7 +40,7 @@ fi
+ pick() {
+   local prompt="$1"; shift
+   (( $# == 0 )) && die "nothing to ${prompt}."
+-  [[ -t 1 ]] || die "no project given (non-interactive). Usage: loops stack ${prompt} <project>"
++  [[ -t 1 ]] || die "no project given (non-interactive). Usage: stack ${prompt} <project>"
+   printf '%s\n' "$@" | fzf --prompt="${prompt}> " --height=40% --reverse \
+     --preview="git config --get-all stack-project.{}.branch" --preview-window=right:55% \
+     || exit 130
+@@ -53,7 +53,7 @@ case "$op" in
+     name="${1:-$(pick archive "${visible_projects[@]}")}"
+     known "$name"
+     git config stack-project.${name}.archived true
+-    echo "✦ archived '$name' — hidden from the chooser  (loops stack unarchive $name to restore)"
++    echo "✦ archived '$name' — hidden from the chooser  (stack unarchive $name to restore)"
+     ;;
+   unarchive)
+     name="${1:-$(pick unarchive "${archived_projects[@]}")}"
+@@ -69,10 +69,10 @@ case "$op" in
+     fi
+     ;;
+   *)
+-    echo "loops stack archive commands:" >&2
+-    echo "  loops stack archive [project]     hide a project from the chooser" >&2
+-    echo "  loops stack unarchive [project]   show it again" >&2
+-    echo "  loops stack archived              list archived projects" >&2
++    echo "stack archive commands:" >&2
++    echo "  stack archive [project]     hide a project from the chooser" >&2
++    echo "  stack unarchive [project]   show it again" >&2
++    echo "  stack archived              list archived projects" >&2
+     exit 1
+     ;;
+ esac
+diff --git a/scripts/stack-fmt b/scripts/stack-fmt
+index e7ed145..2f2ecc8 100755
+--- a/scripts/stack-fmt
++++ b/scripts/stack-fmt
+@@ -1,9 +1,9 @@
+ #!/bin/zsh
+ # stack-fmt — make every branch in a stack-project oxfmt-clean, cascading.
+ #
+-# Usage: loops stack fmt <project>          # format the forest, commit + re-cascade
+-#        loops stack fmt <project> --check  # report drift only, write nothing (CI/gate)
+-#        loops stack fmt <project> --plan   # show topo order + per-branch drift, no writes
++# Usage: stack fmt <project>          # format the forest, commit + re-cascade
++#        stack fmt <project> --check  # report drift only, write nothing (CI/gate)
++#        stack fmt <project> --plan   # show topo order + per-branch drift, no writes
+ #
+ # Why this exists: oxfmt drift on a base branch can't be fixed in isolation — once you
+ # reformat a base, every descendant must rebase onto the new tip. Doing that by hand is
+@@ -32,7 +32,7 @@ for arg in "$@"; do
+   esac
+ done
+ if [[ -z "$PROJECT" ]]; then
+-  echo "usage: loops stack fmt <project> [--check|--plan]" >&2
++  echo "usage: stack fmt <project> [--check|--plan]" >&2
+   exit 2
+ fi
+ 
+diff --git a/scripts/stack-integrate b/scripts/stack-integrate
+index 47d5cf0..b1f6377 100755
+--- a/scripts/stack-integrate
++++ b/scripts/stack-integrate
+@@ -3,10 +3,10 @@
+ # leaves of a stack-project on top of main. Represents the virtual "feature"
+ # node: what main looks like when the whole project ships.
+ #
+-# Usage: loops stack integrate <project>            # build, print ref name
+-#        loops stack integrate <project> --check    # exit 0 if clean, 1 if conflicts
+-#        loops stack integrate <project> --worktree # build + check out into a playground worktree, print its path
+-#        loops stack integrate --all                # build for every project
++# Usage: stack integrate <project>            # build, print ref name
++#        stack integrate <project> --check    # exit 0 if clean, 1 if conflicts
++#        stack integrate <project> --worktree # build + check out into a playground worktree, print its path
++#        stack integrate --all                # build for every project
+ #
+ # Ref name: refs/stack/<project>-integration  (under refs/stack/, not refs/heads/
+ # — invisible to `git branch`, ephemeral, never pushed). Refreshed on every call.
+@@ -191,8 +191,8 @@ if (( ALL )); then
+ fi
+ 
+ if [[ -z "$PROJECT" ]]; then
+-  echo "Usage: loops stack integrate <project> [--check]" >&2
+-  echo "       loops stack integrate --all" >&2
++  echo "Usage: stack integrate <project> [--check]" >&2
++  echo "       stack integrate --all" >&2
+   exit 2
+ fi
+ 
+diff --git a/scripts/stack-list b/scripts/stack-list
+index db52609..a94d871 100755
+--- a/scripts/stack-list
++++ b/scripts/stack-list
+@@ -1,11 +1,11 @@
+ #!/bin/zsh
+ # Stack List - print all registered stack-projects in this repo, optionally fzf-pick.
+-# Usage: loops stack list                 # pretty-print all projects
+-#        loops stack list <project>       # print dependency tree for one project
+-#        loops stack list --pick          # fzf-pick, open in stack review
+-#        loops stack list --pick --echo   # fzf-pick, print chosen name (no open)
+-#        loops stack list --names         # one name per line (for completion/scripts)
+-# Any extra args (e.g. --html) after --pick are forwarded to `loops stack review`.
++# Usage: stack list                 # pretty-print all projects
++#        stack list <project>       # print dependency tree for one project
++#        stack list --pick          # fzf-pick, open in stack review
++#        stack list --pick --echo   # fzf-pick, print chosen name (no open)
++#        stack list --names         # one name per line (for completion/scripts)
++# Any extra args (e.g. --html) after --pick are forwarded to `stack review`.
+ 
+ set -e
+ 
+diff --git a/scripts/stack-restack b/scripts/stack-restack
+index ffa2dd4..003757f 100755
+--- a/scripts/stack-restack
++++ b/scripts/stack-restack
+@@ -1,11 +1,11 @@
+ #!/bin/zsh
+ # Stack Restack - rebase every branch in a stack-project onto fresh origin/main.
+ #
+-# Usage: loops stack restack <project>            # start fresh
+-#        loops stack restack <project> --continue # resume after a manual resolve
+-#        loops stack restack <project> --abort    # discard saved state
+-#        loops stack restack <project> --plan     # dry-run: topo order + parent map
+-#        loops stack restack <project> --no-claude# disable auto-resolve (manual only)
++# Usage: stack restack <project>            # start fresh
++#        stack restack <project> --continue # resume after a manual resolve
++#        stack restack <project> --abort    # discard saved state
++#        stack restack <project> --plan     # dry-run: topo order + parent map
++#        stack restack <project> --no-claude# disable auto-resolve (manual only)
+ #
+ # What it does:
+ #   1. Fetch origin; fast-forward local main
+@@ -31,7 +31,7 @@
+ #   delete/modify, or overlapping edits is escalated: the script saves state to
+ #   <git-common-dir>/stack-restack-state and exits 1 with a ready-to-run
+ #   interactive `claude` command (and the manual git steps). Resolve, then
+-#   `loops stack restack <project> --continue` resumes the topo walk.
++#   `stack restack <project> --continue` resumes the topo walk.
+ #   `--no-claude` skips the auto step and always pauses for a human.
+ #   Tunables: CLAUDE_BIN (default `claude`), STACK_RESTACK_BUDGET_USD (default 2),
+ #   STACK_RESTACK_RESOLVE_TIMEOUT (per-resolver wall-clock cap, default 600s).
+@@ -66,15 +66,15 @@ SELF_DIR="${0:A:h}"   # script dir, captured at top level ($0 inside a zsh funct
+ 
+ usage() {
+   cat >&2 <<EOF
+-Usage: loops stack restack <project>
+-       loops stack restack <project> --continue
+-       loops stack restack <project> --handoff    # AI-resolve the parked conflict (human-authorized), then resume
+-       loops stack restack <project> --diagnose   # AI-resolve + STAGE the parked conflict for review (no continue) → stack-restack-conflict.json
+-       loops stack restack <project> --discard    # discard a staged diagnose fix, restoring the parked conflict
+-       loops stack restack <project> --abort
+-       loops stack restack <project> --plan
+-       loops stack restack <project> --no-claude
+-       loops stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
++Usage: stack restack <project>
++       stack restack <project> --continue
++       stack restack <project> --handoff    # AI-resolve the parked conflict (human-authorized), then resume
++       stack restack <project> --diagnose   # AI-resolve + STAGE the parked conflict for review (no continue) → stack-restack-conflict.json
++       stack restack <project> --discard    # discard a staged diagnose fix, restoring the parked conflict
++       stack restack <project> --abort
++       stack restack <project> --plan
++       stack restack <project> --no-claude
++       stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
+ EOF
+   exit 2
+ }
+@@ -152,7 +152,7 @@ acquire_lock() {
+     holder="$(cat "$LOCK_FILE" 2>/dev/null)"
+     holder_pid="${holder%% *}"
+     if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
+-      echo "a restack is already running (pid $holder_pid: ${holder#* }) — wait for it, or 'loops stack restack $PROJECT --abort' if it's wedged." >&2
++      echo "a restack is already running (pid $holder_pid: ${holder#* }) — wait for it, or 'stack restack $PROJECT --abort' if it's wedged." >&2
+       exit 1
+     fi
+     echo "  (clearing stale restack lock from dead pid ${holder_pid:-?})" >&2
+@@ -664,9 +664,9 @@ Restack halted: ${branch}'s rebased tip changed files it never owned (see ✗ ab
+     git -C ${dir} rebase --onto ${parent} ${old_parent_sha} ${branch}
+   (or drop the spurious hunks from the current tip). Its diff vs ${parent} should be
+   limited to ${branch}'s own files. Then resume (re-checks the footprint first):
+-    loops stack restack ${PROJECT} --continue
++    stack restack ${PROJECT} --continue
+   Or bail out:
+-    git -C ${dir} rebase --abort 2>/dev/null; loops stack restack ${PROJECT} --abort
++    git -C ${dir} rebase --abort 2>/dev/null; stack restack ${PROJECT} --abort
+ EOF
+   exit 1
+ }
+@@ -861,7 +861,7 @@ Handoff: Claude couldn't safely resolve ${CURRENT} — genuinely ambiguous, stil
+   Rebase paused in: ${REBASE_DIR}
+   Resolve by hand, then resume:
+     git -C ${REBASE_DIR} add <resolved-files> && git -C ${REBASE_DIR} rebase --continue
+-    loops stack restack ${PROJECT} --continue
++    stack restack ${PROJECT} --continue
+ EOF
+     exit 1
+   done
+@@ -1129,11 +1129,11 @@ Conflict during restack of ${BRANCH} — needs a human.
+     git -C ${REBASE_DIR} add <resolved-files>
+     git -C ${REBASE_DIR} rebase --continue
+   Then resume the cascade:
+-    loops stack restack ${PROJECT} --continue
++    stack restack ${PROJECT} --continue
+ 
+   To bail out instead:
+     git -C ${REBASE_DIR} rebase --abort
+-    loops stack restack ${PROJECT} --abort
++    stack restack ${PROJECT} --abort
+ EOF
+     exit 1
+   done
+diff --git a/scripts/stack-rm b/scripts/stack-rm
+index 703e050..984d10d 100755
+--- a/scripts/stack-rm
++++ b/scripts/stack-rm
+@@ -4,11 +4,11 @@
+ # never auto-deleted.
+ #
+ # Usage:
+-#   loops stack rm                 # fzf multi-select projects to kill (TAB to mark)
+-#   loops stack rm <project>...    # kill named project(s)
+-#   loops stack rm --dry-run       # show the plan, change nothing  (alias: -n)
+-#   loops stack rm --yes           # skip the confirmation prompt    (alias: -y)
+-#   loops stack rm --force         # force-remove dirty worktrees
++#   stack rm                 # fzf multi-select projects to kill (TAB to mark)
++#   stack rm <project>...    # kill named project(s)
++#   stack rm --dry-run       # show the plan, change nothing  (alias: -n)
++#   stack rm --yes           # skip the confirmation prompt    (alias: -y)
++#   stack rm --force         # force-remove dirty worktrees
+ #
+ # Safety: never deletes `main` or the currently checked-out branch; refuses dirty
+ # worktrees unless --force; prints (does not delete) any stack-project.<n>.memory file.

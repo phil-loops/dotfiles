@@ -1,0 +1,13 @@
+diff --git a/scripts/stack-purpose b/scripts/stack-purpose
+index cc87f0c..e88f3ca 100755
+--- a/scripts/stack-purpose
++++ b/scripts/stack-purpose
+@@ -4,7 +4,7 @@
+ # The authoritative source is git's NATIVE branch description
+ # (git config branch.<name>.description) — so git owns it, it travels with the
+ # repo's config, and it's free to read. You set it intentionally when you create
+-# or edit a branch (`loops purpose <branch> "..."` or `git branch --edit-description`).
++# or edit a branch (`stack purpose <branch> "..."` or `git branch --edit-description`).
+ #
+ # Generation is OPT-IN and never automatic: it only runs with --generate, and it
+ # produces a *suggestion* (haiku) you can choose to save as the description.
