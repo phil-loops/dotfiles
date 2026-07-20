@@ -58,98 +58,76 @@ oplpr() {
     open "https://github.com/phil-loops/loops/compare/${base_branch}...phil-loops:loops:${current_branch}"
 }
 
-loops() {
+stack() {
     local cmd=$1
-    shift
+    shift 2>/dev/null
 
     case "$cmd" in
-        stack)
-            local subcmd=$1
-            shift 2>/dev/null
-            case "$subcmd" in
-                review)
-                    # No arg: if the current branch is part of a stack (has a
-                    # recorded parent), let stack-review auto-resolve it — it
-                    # upgrades any member branch to its project view. Only when
-                    # we're not on a stack at all (e.g. main) do we fzf-pick.
-                    if (( $# == 0 )); then
-                        local cur=$(git branch --show-current 2>/dev/null)
-                        if [[ -z "$(git config stack-branch.${cur}.parent 2>/dev/null)" ]]; then
-                            local picked=$(~/.dotfiles/scripts/stack-list --pick) || return $?
-                            [[ -z "$picked" ]] && return 130
-                            ~/.dotfiles/scripts/stack-review "$picked"
-                            return $?
-                        fi
-                    fi
-                    ~/.dotfiles/scripts/stack-review "$@"
-                    ;;
-                web)
-                    # live blessing-aware browser review of a project (illuminated
-                    # ledger): tree-rail, graph map, since-blessed deltas, live bless.
-                    # No arg: interactive → fzf-pick a project; non-interactive
-                    # (e.g. Claude / no TTY) → just list the local projects.
-                    local web_target="$1"
-                    if [[ -z "$web_target" ]]; then
-                        if [[ -t 1 ]]; then
-                            web_target=$(~/.dotfiles/scripts/stack-list --pick --echo) || return $?
-                            [[ -z "$web_target" ]] && return 130
-                        else
-                            ~/.dotfiles/scripts/stack-list
-                            return 0
-                        fi
-                    fi
-                    ~/.dotfiles/scripts/stack-review-serve "$web_target"
-                    ;;
-                list|ls)
-                    ~/.dotfiles/scripts/stack-list "$@"
-                    ;;
-                integrate)
-                    ~/.dotfiles/scripts/stack-integrate "$@"
-                    ;;
-                restack)
-                    ~/.dotfiles/scripts/stack-restack "$@"
-                    ;;
-                fmt)
-                    ~/.dotfiles/scripts/stack-fmt "$@"
-                    ;;
-                rm|kill)
-                    ~/.dotfiles/scripts/stack-rm "$@"
-                    ;;
-                archive)
-                    ~/.dotfiles/scripts/stack-archive archive "$@"
-                    ;;
-                unarchive)
-                    ~/.dotfiles/scripts/stack-archive unarchive "$@"
-                    ;;
-                archived)
-                    ~/.dotfiles/scripts/stack-archive list
-                    ;;
-                *)
-                    echo "loops stack commands:"
-                    echo "  loops stack review [project|branch]   review stack in nvim diffview"
-                    echo "  loops stack web [project|branch]       live blessing review in the browser"
-                    echo "  loops stack list                       list registered stack-projects"
-                    echo "  loops stack list --pick                fzf-pick a stack and open in review"
-                    echo "  loops stack integrate <project>        build virtual integration ref"
-                    echo "  loops stack restack <project>          rebase whole project onto fresh origin/main"
-                    echo "  loops stack restack <project> --plan   dry-run: show planned topo order"
-                    echo "  loops stack fmt <project>              oxfmt every branch's delta + re-cascade (--check|--plan)"
-                    echo "  loops stack rm [project...]            fzf multi-select & kill project(s): branches+worktrees+config"
-                    echo "  loops stack rm --dry-run               show the kill plan, change nothing"
-                    echo "  loops stack archive [project]          hide a finished project from the chooser"
-                    echo "  loops stack unarchive [project]        show an archived project again"
-                    echo "  loops stack archived                   list archived projects"
-                    ;;
-            esac
+        review)
+            # No arg: if the current branch is part of a stack (has a
+            # recorded parent), let stack-review auto-resolve it — it
+            # upgrades any member branch to its project view. Only when
+            # we're not on a stack at all (e.g. main) do we fzf-pick.
+            if (( $# == 0 )); then
+                local cur=$(git branch --show-current 2>/dev/null)
+                if [[ -z "$(git config stack-branch.${cur}.parent 2>/dev/null)" ]]; then
+                    local picked=$(~/.dotfiles/scripts/stack-list --pick) || return $?
+                    [[ -z "$picked" ]] && return 130
+                    ~/.dotfiles/scripts/stack-review "$picked"
+                    return $?
+                fi
+            fi
+            ~/.dotfiles/scripts/stack-review "$@"
+            ;;
+        web)
+            # live blessing-aware browser review of a project (illuminated
+            # ledger): tree-rail, graph map, since-blessed deltas, live bless.
+            # No arg: interactive → fzf-pick a project; non-interactive
+            # (e.g. Claude / no TTY) → just list the local projects.
+            local web_target="$1"
+            if [[ -z "$web_target" ]]; then
+                if [[ -t 1 ]]; then
+                    web_target=$(~/.dotfiles/scripts/stack-list --pick --echo) || return $?
+                    [[ -z "$web_target" ]] && return 130
+                else
+                    ~/.dotfiles/scripts/stack-list
+                    return 0
+                fi
+            fi
+            ~/.dotfiles/scripts/stack-review-serve "$web_target"
+            ;;
+        list|ls)
+            ~/.dotfiles/scripts/stack-list "$@"
+            ;;
+        integrate)
+            ~/.dotfiles/scripts/stack-integrate "$@"
+            ;;
+        restack)
+            ~/.dotfiles/scripts/stack-restack "$@"
+            ;;
+        fmt)
+            ~/.dotfiles/scripts/stack-fmt "$@"
+            ;;
+        rm|kill)
+            ~/.dotfiles/scripts/stack-rm "$@"
+            ;;
+        archive)
+            ~/.dotfiles/scripts/stack-archive archive "$@"
+            ;;
+        unarchive)
+            ~/.dotfiles/scripts/stack-archive unarchive "$@"
+            ;;
+        archived)
+            ~/.dotfiles/scripts/stack-archive list
             ;;
         review-branch)
             ~/.dotfiles/scripts/branch-review "$@"
             ;;
         pr-review)
-            _loops_pr_review "$@"
+            _stack_pr_review "$@"
             ;;
         clean-migrations)
-            _loops_clean_migrations "$@"
+            _stack_clean_migrations "$@"
             ;;
         staging)
             ~/.dotfiles/scripts/staging "$@"
@@ -169,8 +147,8 @@ loops() {
             ;;
         purpose)
             # View or set a branch's purpose — git's native branch description.
-            #   loops purpose [branch]              → show
-            #   loops purpose [branch] <text...>    → set
+            #   stack purpose [branch]              → show
+            #   stack purpose [branch] <text...>    → set
             local b="$1"
             if [[ -z "$b" || "$b" == --* ]]; then b=$(git branch --show-current 2>/dev/null); else shift; fi
             if (( $# )); then
@@ -180,39 +158,48 @@ loops() {
             fi
             ;;
         *)
-            # this fn shadows the loops-so CLI binary — unknown commands belong to it
-            if [[ -n "$cmd" && -x "$HOME/.local/bin/loops" ]]; then
-                "$HOME/.local/bin/loops" "$cmd" "$@"
-                return $?
-            fi
-            echo "Usage: loops <command>"
+            echo "Usage: stack <command>        (loops is the Loops CLI again — no longer shadowed)"
             echo ""
-            echo "Commands:"
-            echo "  stack review      Review stack in nvim (diffview)"
-            echo "  review-branch     Review branch against main with blessing"
-            echo "  pr-review         Review PRs assigned to you (with blessing)"
-            echo "  bless [branch]    Bless (mark reviewed) a branch's files"
-            echo "  blessed [branch]  Show clean/stale/unblessed status for a branch"
-            echo "  purpose [branch] [text]  View/set a branch's purpose (git branch description)"
-            echo "  clean-migrations  Remove empty migration folders"
-            echo "  staging           Check build/deploy status, watch, or deploy"
-            echo "  <anything else>   passed through to the Loops CLI (~/.local/bin/loops)"
+            echo "  stack review [project|branch]    review stack in nvim diffview"
+            echo "  stack web [project|branch]       live blessing review in the browser"
+            echo "  stack list [--pick]              list registered stack-projects"
+            echo "  stack integrate <project>        build virtual integration ref"
+            echo "  stack restack <project> [--plan] rebase whole project onto fresh origin/main"
+            echo "  stack fmt <project>              oxfmt every branch's delta + re-cascade (--check|--plan)"
+            echo "  stack rm [project...]            fzf multi-select & kill project(s): branches+worktrees+config"
+            echo "  stack archive|unarchive|archived hide/show finished projects"
+            echo "  stack review-branch              review branch against main with blessing"
+            echo "  stack pr-review                  review PRs assigned to you (with blessing)"
+            echo "  stack bless [branch]             bless (mark reviewed) a branch's files"
+            echo "  stack blessed [branch]           clean/stale/unblessed status for a branch"
+            echo "  stack purpose [branch] [text]    view/set a branch's purpose (git branch description)"
+            echo "  stack staging                    build/deploy status, watch, or deploy"
+            echo "  stack clean-migrations           remove empty migration folders"
             ;;
     esac
 }
 
-_loops() {
-    local -a branches
+_stack() {
     if (( CURRENT == 2 )); then
         _values 'subcommand' \
-            'stack[branch stack tools]' \
+            'review[review stack in nvim diffview]' \
+            'web[live blessing review in the browser]' \
+            'list[list registered stack-projects]' \
+            'integrate[build virtual integration ref]' \
+            'restack[rebase project onto fresh origin/main]' \
+            'fmt[oxfmt every branch delta + re-cascade]' \
+            'rm[kill project(s): branches+worktrees+config]' \
+            'archive[hide a finished project]' \
+            'unarchive[show an archived project]' \
+            'archived[list archived projects]' \
             'review-branch[review current branch vs main]' \
             'pr-review[review PRs assigned to you]' \
-            'clean-migrations[remove empty migration folders]' \
-            'staging[staging build/deploy status]'
-    elif (( CURRENT == 3 )) && [[ "${words[2]}" == "stack" ]]; then
-        _values 'stack subcommand' 'review[review stack in nvim diffview]'
-    elif (( CURRENT == 4 )) && [[ "${words[2]}" == "stack" ]] && [[ "${words[3]}" == "review" ]]; then
+            'bless[mark a branch reviewed]' \
+            'blessed[clean/stale/unblessed status]' \
+            'purpose[view/set branch purpose]' \
+            'staging[staging build/deploy status]' \
+            'clean-migrations[remove empty migration folders]'
+    elif (( CURRENT == 3 )) && [[ "${words[2]}" == "review" ]]; then
         # Build branch → projects map from `stack-project.<proj>.branch <branch>` config.
         local -A branch_projects
         local line proj branch
@@ -249,9 +236,9 @@ _loops() {
         _describe -t project-branches 'project branch' project_branch_entries
     fi
 }
-compdef _loops loops
+compdef _stack stack
 
-_loops_clean_migrations() {
+_stack_clean_migrations() {
     local migrations_dir="prisma/migrations"
 
     if [[ ! -d "$migrations_dir" ]]; then
@@ -277,7 +264,7 @@ _loops_clean_migrations() {
     fi
 }
 
-_loops_pr_review() {
+_stack_pr_review() {
     local cache_dir=$(mktemp -d)
     trap "rm -rf $cache_dir" EXIT
 
@@ -317,7 +304,7 @@ stack-print() {
 # Inspect a sibling git worktree's diff without touching the current checkout.
 # Default: open in nvim (DiffviewOpen). --html: render as side-by-side HTML and open in the browser.
 # Usage: wt [base-branch] [--html|-H]   (base defaults to main)
-# For stack-aware review, use `loops stack review` (which also accepts --html).
+# For stack-aware review, use `stack review` (which also accepts --html).
 wt() {
     local base="main"
     local html=0
