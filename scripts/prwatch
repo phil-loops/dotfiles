@@ -462,18 +462,21 @@ if [[ "${1:-}" == "--sweep" ]]; then
   # `task release:production` deploy would otherwise finish unannounced. Track the
   # configured workflows' recent runs (mine only) and notify once on completion.
   sweepwfs=(${=$(git config prwatch.sweep-workflows 2>/dev/null || true)})
-  if (( ${#sweepwfs} )); then
+  # identity failure skips the lane entirely: dropping --user would swap the tracked
+  # window to everyone's runs, and every window swap re-announces old successes as
+  # fresh transitions (the 2026-07-20 3am stale-"Deployed" storm)
+  me=""
+  (( ${#sweepwfs} )) && { me=$(gh api user --jq .login 2>/dev/null) || me=""; }
+  if [[ -n "$me" ]]; then
     rstate="$HOME/.cache/prwatch/sweep-runs-state.tsv"
-    me=$(gh api user --jq .login 2>/dev/null) || me=""
-    uflag=(); [[ -n "$me" ]] && uflag=(--user "$me")
     rrows=""
     for spec in $sweepwfs; do
       wrepo="${spec%%:*}"; wfile="${spec#*:}"
-      chunk=$(gh run list --repo "$wrepo" --workflow "$wfile" $uflag --limit 10 \
-        --json databaseId,status,conclusion,displayTitle 2>/dev/null \
+      chunk=$(gh run list --repo "$wrepo" --workflow "$wfile" --user "$me" --limit 10 \
+        --json databaseId,status,conclusion,displayTitle,updatedAt 2>/dev/null \
         | jq -r --arg r "$wrepo" '.[] | [$r, (.databaseId|tostring),
             (if .status=="completed" then .conclusion else .status end),
-            .displayTitle] | @tsv') || chunk=""
+            .updatedAt, .displayTitle] | @tsv') || chunk=""
       [[ -n "$chunk" ]] && rrows+="$chunk"$'\n'
     done
 
@@ -489,13 +492,13 @@ if [[ "${1:-}" == "--sweep" ]]; then
       # newer run's completion is the one that matters. Envs never supersede across, so a
       # staging deploy and a production deploy each still announce. Failures always notify.
       typeset -A envnewest
-      while IFS=$'\t' read -r wrepo rid st title; do
+      while IFS=$'\t' read -r wrepo rid st upd title; do
         [[ -n "$rid" && "$title" =~ '^\[([a-z-]+)\]' ]] || continue
         ek="$wrepo:${match[1]}"
         (( rid > ${envnewest[$ek]:-0} )) && envnewest[$ek]=$rid
       done <<< "$rrows"
       rnew=""
-      while IFS=$'\t' read -r wrepo rid st title; do
+      while IFS=$'\t' read -r wrepo rid st upd title; do
         [[ -n "$rid" ]] || continue
         key="$wrepo/$rid"; url="https://github.com/$wrepo/actions/runs/$rid"
         rnew+="$key"$'\t'"$st"$'\n'
@@ -503,6 +506,14 @@ if [[ "${1:-}" == "--sweep" ]]; then
         was="${rprev[$key]:-}"
         [[ "$st" == "$was" ]] && continue
         answered "$key" && continue   # run was explicitly watched — its one notification fired
+        # a completion older than the horizon is history, not news — a state gap
+        # (offline stretch, window drift) must never sticky-announce days-old deploys
+        end_s=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$upd" +%s 2>/dev/null) || end_s=0
+        if (( end_s > 0 && now_s - end_s > ${PRWATCH_RUN_MAX_AGE_H:-6} * 3600 )); then
+          "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-age "deployed" \
+            "$(deploy_title "$title") — finished >${PRWATCH_RUN_MAX_AGE_H:-6}h ago" "$url" 2>/dev/null || true
+          continue
+        fi
         case "$st" in
           (success)
             if [[ "$title" =~ '^\[([a-z-]+)\]' ]] && (( ${envnewest[$wrepo:${match[1]}]:-0} > rid )); then
