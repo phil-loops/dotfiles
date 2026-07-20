@@ -18,6 +18,7 @@ Follow a strict layering pattern:
 ## Type style
 
 - **Inline object-parameter type literals in function signatures.** Don't declare a separate named type alias just to name the input shape. Example: `function update(input: { id: string; name?: string })` — not `type UpdateInput = { ... }; function update(input: UpdateInput)`. Standalone aliases pollute the file's mental context: readers have to scroll up to resolve the alias to understand the contract. Inlining keeps the contract at the call site, even with 5+ fields. Test code that uses `Deps<typeof fn>` / `Parameters<typeof fn>` extracts from the function itself, so inline types don't break it. Don't refactor pre-existing standalone types unless asked.
+- **A deps parameter needs only the `typeof`, never the value.** Type each dep as `typeof realFn` and import it with `import type`; make `deps` required and let the caller (wiring) pass the real implementations. Never default a deps object to the real functions when that default is the only thing forcing a runtime import — a value import that exists purely to seed a default couples heavy modules for nothing (sesUtils pulling in transactionalEmails just to name a default) and invites cycles; `import type` erases the edge at compile time. Exception: a same-module thin default-deps wrapper (the script-runner pattern) is fine — there the wrapper IS the wiring and the defaults live where the values already are.
 
 ## Comments
 
