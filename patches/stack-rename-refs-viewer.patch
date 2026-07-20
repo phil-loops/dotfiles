@@ -1,0 +1,26 @@
+diff --git a/scripts/stack-review-port b/scripts/stack-review-port
+index 22855e3..4b55b67 100755
+--- a/scripts/stack-review-port
++++ b/scripts/stack-review-port
+@@ -5,7 +5,7 @@
+ # never drift onto different ports.
+ #
+ # Per-repo ports are what let you forest several repos AT ONCE — loops on its port,
+-# dotfiles on its own, each `loops stack web` opening a live tab that coexists with the
++# dotfiles on its own, each `stack web` opening a live tab that coexists with the
+ # others (the old single :62333 served one repo at a time and reclaimed the port).
+ #
+ #   $STACK_REVIEW_PORT (if set) wins   — explicit override / pinning
+diff --git a/scripts/viewer-solid/src/router.tsx b/scripts/viewer-solid/src/router.tsx
+index 37aad0a..481add5 100644
+--- a/scripts/viewer-solid/src/router.tsx
++++ b/scripts/viewer-solid/src/router.tsx
+@@ -40,7 +40,7 @@ export function parseLocation(pathname: string, search: string): ViewerLocation
+   const [head, ...rest] = pathname.split("/").filter(Boolean);
+ 
+   if (!head) {
+-    // legacy launch entry: `loops stack web <name>` opens /?branch=<name> — honour it as a forest
++    // legacy launch entry: `stack web <name>` opens /?branch=<name> — honour it as a forest
+     // (RouterProvider canonicalises the URL to /forests/<name> on load).
+     const branch = new URLSearchParams(search).get("branch");
+     return branch ? { kind: "forest", name: branch } : { kind: "home", tab: "work" };

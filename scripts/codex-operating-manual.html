@@ -224,7 +224,7 @@ means stop and ask Phil.</p>
 <div class="tablewrap">
 <table>
   <tr><th>Tool</th><th>What it is</th><th>Codex needs to know</th></tr>
-  <tr><td><code>loops stack web</code></td><td>Forest viewer on :62333 — Phil's primary review surface. Reads git config live.</td><td>Keep the config keys correct; the viewer just renders them. Bouncing the server is safe (crash-only state).</td></tr>
+  <tr><td><code>stack web</code></td><td>Forest viewer on :62333 — Phil's primary review surface. Reads git config live.</td><td>Keep the config keys correct; the viewer just renders them. Bouncing the server is safe (crash-only state).</td></tr>
   <tr><td><code>tsc-turn</code></td><td>Machine-wide compile queue (2 slots), in <code>~/.dotfiles/scripts/</code>.</td><td>Route every full typecheck/build through it.</td></tr>
   <tr><td><code>own</code> / <code>OWNERS</code></td><td>Per-lane file ownership for concurrent sessions in ~/.dotfiles.</td><td>Claim a lane before dotfiles work; patch-protocol for other lanes' files.</td></tr>
   <tr><td><code>claude-say</code></td><td>The only session-to-session channel — types into the target tmux pane and sends.</td><td>Use it to announce cross-lane work; don't draft, send.</td></tr>
