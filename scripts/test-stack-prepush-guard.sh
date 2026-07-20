@@ -105,6 +105,32 @@ code="$(cd "$r" && echo "refs/heads/feature $mergetip refs/heads/feature $ZERO" 
 code="$(cd "$r" && run_guard "refs/heads/main $mergetip refs/heads/main $ZERO")"
 [[ "$code" == 0 ]] && ok "merge to main → skip/allow (0)" || bad "merge-to-main returned $code"
 
+# --- proof branch (role=proof, old namespace) → block -----------------------
+r="$(mkrepo)"
+echo a > "$r/a"; git -C "$r" add .; git -C "$r" commit -qm "feat: a"
+git -C "$r" config stack-branch.e2e.role proof
+code="$(cd "$r" && run_guard "refs/heads/e2e $(sha "$r") refs/heads/e2e $ZERO")"
+[[ "$code" == 1 ]] && ok "proof branch (stack-branch.*.role) → block (1)" || bad "proof branch returned $code"
+
+# --- proof branch (new namespace key) → block --------------------------------
+r="$(mkrepo)"
+echo a > "$r/a"; git -C "$r" add .; git -C "$r" commit -qm "feat: a"
+git -C "$r" config branch.e2e.stack-role proof
+code="$(cd "$r" && run_guard "refs/heads/e2e $(sha "$r") refs/heads/e2e $ZERO")"
+[[ "$code" == 1 ]] && ok "proof branch (branch.*.stack-role) → block (1)" || bad "new-namespace proof returned $code"
+
+# --- proof branch pushed under another name → still block (local ref) --------
+code="$(cd "$r" && run_guard "refs/heads/e2e $(sha "$r") refs/heads/renamed $ZERO")"
+[[ "$code" == 1 ]] && ok "proof branch pushed as another name → block (1)" || bad "renamed proof returned $code"
+
+# --- ALLOW_PROOF_PUSH escape hatch → allow ------------------------------------
+code="$(cd "$r" && echo "refs/heads/e2e $(sha "$r") refs/heads/e2e $ZERO" | ALLOW_PROOF_PUSH=1 "$guard" >/dev/null 2>&1; echo $?)"
+[[ "$code" == 0 ]] && ok "ALLOW_PROOF_PUSH=1 overrides → allow (0)" || bad "proof escape hatch returned $code"
+
+# --- non-proof branch in a repo that HAS a proof branch → allow ---------------
+code="$(cd "$r" && run_guard "refs/heads/main $(sha "$r") refs/heads/main $ZERO")"
+[[ "$code" == 0 ]] && ok "sibling non-proof branch → allow (0)" || bad "sibling returned $code"
+
 echo ""
 echo "  $pass passed, $fail failed"
 [[ "$fail" == 0 ]]
