@@ -31,6 +31,16 @@ task ci:run              # full CI pipeline locally
 
 Run `task --list` to see all available tasks. Use the team's tools — don't reinvent with raw commands.
 
+## Migrations
+
+**A new migration must pass squawk before it ships, unless there's a stated reason it shouldn't.** Run it locally the moment the migration file exists — CI (`lint-migrations`) runs the same check and comments on the PR, so this front-loads it:
+
+```bash
+npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
+```
+
+The repo's `.squawk.toml` applies automatically (it already excludes `require-timeout-settings` and `prefer-timestamp-tz`). Repo conventions squawk enforces: `CREATE TABLE IF NOT EXISTS` (robust statements). When a warning is wrong for the case (e.g. `prefer-bigint-over-int` on a small bounded counter), suppress it with an inline `-- squawk-ignore <rule>` comment directly above the statement — bare rule name only, no trailing text — and put the reason in the commit message.
+
 ## Typecheck
 
 Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to tsgo** — since the nodenext migration it typechecks this repo cleanly and ~3.6× faster than tsc (≈10s vs ≈37s):
