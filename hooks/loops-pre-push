@@ -14,8 +14,9 @@ behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
 if [ "$behind" -gt 0 ] 2>/dev/null; then
   echo "⚠️  Branch is $behind commits behind origin/main. Consider: git rebase origin/main"
 
-  # Check for deploy-critical changes missed from main
-  critical=$(git diff HEAD..origin/main --name-only -- \
+  # Check for deploy-critical changes missed from main (three-dot: only
+  # main-side changes, so the branch's own new migrations don't show up)
+  critical=$(git diff HEAD...origin/main --name-only -- \
     'k8s/charts/loops/values.staging.yaml' \
     'k8s/charts/loops/values.production.yaml' \
     'packages/prisma/migrations/*' \
