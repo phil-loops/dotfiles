@@ -182,11 +182,16 @@ bid_now=$(curl -sS --max-time 8 "$STAGING_URL" 2>/dev/null | sed -n 's/.*"buildI
 # unlock) and no Slack-thread reading. staging-last gains version/actor from the pending
 # enqueue below when one is armed; an untracked deploy still moves the clock.
 bidfile="$statedir/staging-bid"; lastfile="$statedir/staging-last"
+# flipped=1 defers the "untracked deploy" verdict to the end of the sweep: an armed
+# pending watch below claims the flip first (else a flip landing between sweeps —
+# or during an arm whose baseline curl failed — gets logged as untracked and the
+# pending re-baselines to the post-flip bid, watching forever for a second flip)
+flipped=0
 if [ -n "$bid_now" ]; then
   prev_bid=$(cut -f1 "$bidfile" 2>/dev/null || true)
   if [ "$bid_now" != "$prev_bid" ]; then
     printf '%s\t%s\n' "$bid_now" "$now_s" > "$bidfile"
-    [ -n "$prev_bid" ] && printf '?\t?\t%s\n' "$now_s" > "$lastfile"
+    [ -n "$prev_bid" ] && flipped=1
   fi
 fi
 
@@ -217,7 +222,8 @@ done <<< "$deps"
 
 if [ -s "$pend" ] && [ -n "$bid_now" ]; then
   IFS=$'\t' read -r prid parm_s pbid pver pactor purl < "$pend"
-  if [ "$pbid" = "unknown" ]; then   # baseline fetch failed at arm time; take it now
+  if [ "$pbid" = "unknown" ] && [ "$flipped" = "0" ]; then
+    # baseline fetch failed at arm time and nothing has flipped since; take it now
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$prid" "$parm_s" "$bid_now" "$pver" "$pactor" "$purl" > "$pend"
   elif [ "$bid_now" != "$pbid" ]; then
     mins=$(( (now_s - parm_s) / 60 ))
@@ -232,6 +238,7 @@ if [ -s "$pend" ] && [ -n "$bid_now" ]; then
     echo "build-notify: ⛴ staging flipped to $pver (${mins}m, $pactor)"
     printf '%s\t%s\t%s\n' "$pver" "$pactor" "$now_s" > "$lastfile"
     : > "$pend"
+    flipped=0
   elif [ $(( now_s - parm_s )) -gt $(( STALL_MIN * 60 )) ]; then
     me=$(gh api user -q .login 2>/dev/null || true)
     if [ -n "$me" ] && [ "$pactor" = "$me" ]; then
@@ -241,6 +248,9 @@ if [ -s "$pend" ] && [ -n "$bid_now" ]; then
     fi
     : > "$pend"
   fi
+fi
+if [ "$flipped" = "1" ]; then   # a flip nobody was watching for
+  printf '?\t?\t%s\n' "$now_s" > "$lastfile"
 fi
 
 grep -qx '#v2' "$seen" 2>/dev/null || echo '#v2' >> "$seen"
