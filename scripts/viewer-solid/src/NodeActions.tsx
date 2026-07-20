@@ -25,6 +25,7 @@ import RebaseStream from "./RebaseStream";
 import { PlanStepsEditor } from "./PlanStepsEditor";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
 import { nextStepOf, stationOf, type Station } from "./nodeStation";
+import { patchHtml, patchLineCounts } from "./FileRail";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -216,6 +217,7 @@ export function NodeActions(props: {
   type SyncStep = { id: string; label: string; state: "idle" | "run" | "ok" | "skip" | "fail"; note?: string; startedAt?: number };
   const [syncSteps, setSyncSteps] = createSignal<SyncStep[] | null>(null);
   const [dirtGate, setDirtGate] = createSignal(false);      // paused on the dirt decision
+  const [dirtOpen, setDirtOpen] = createSignal<Record<string, boolean>>({}); // gate paths expanded to their diff
   const [stashedRun, setStashedRun] = createSignal(false);  // a sync-stash to pop when the motion ends
   // 1s heartbeat for the running-step elapsed counters — only strip rows that render a
   // counter subscribe, so an idle header pays nothing for it.
@@ -1033,9 +1035,42 @@ export function NodeActions(props: {
           </For>
           <Show when={dirtGate()}>
             <div class="nh-dirt">
+              {/* each path expands to its uncommitted diff — the exact content fold/stash acts on */}
               <div class="nh-dirt-files">
-                <For each={sync.data?.dirty ?? []}>{(f) => <code>{f}</code>}</For>
+                <For each={sync.data?.dirty ?? []}>
+                  {(f) => {
+                    const row = () => sync.data?.dirtyRows?.find((r) => r.path === f);
+                    return (
+                      <button
+                        class="nh-dirt-path flex cursor-pointer items-center gap-[5px] border-0 bg-transparent p-0 text-left disabled:cursor-default"
+                        title={row() ? "show the uncommitted diff" : undefined}
+                        disabled={!row()}
+                        onClick={() => setDirtOpen((m) => ({ ...m, [f]: !m[f] }))}
+                      >
+                        <Show when={row()}>
+                          <span class="text-[9px] text-ink-faint">{dirtOpen()[f] ? "▾" : "▸"}</span>
+                        </Show>
+                        <code>{f}</code>
+                        <Show when={row()}>
+                          {(r) => (
+                            <span class="flex gap-[6px] text-[10px]">
+                              <span class="text-add">+{patchLineCounts(r().patch).add}</span>
+                              <span class="text-del">−{patchLineCounts(r().patch).del}</span>
+                            </span>
+                          )}
+                        </Show>
+                      </button>
+                    );
+                  }}
+                </For>
               </div>
+              <For each={(sync.data?.dirtyRows ?? []).filter((r) => dirtOpen()[r.path])}>
+                {(r) => (
+                  <article class="entry nh-dirt-diff overflow-clip rounded-[10px] border border-rule border-l-[3px] border-l-del bg-vellum-raise">
+                    <div class="diff" innerHTML={patchHtml(r.patch)} />
+                  </article>
+                )}
+              </For>
               <div class="nh-dirt-acts">
                 <button class={`nh-fix ${FIX}`} onClick={() => dirtDecide("include")} title="stage + commit everything in the holding worktree; the squash folds it into the outgoing commit">
                   fold into the commit

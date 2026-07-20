@@ -152,7 +152,7 @@ def _shared(branch):
     return ("gone" if track == "[gone]" else "local"), 0
 
 
-def state(branch, fresh_prs=False):
+def state(branch, fresh_prs=False, with_patches=False):
     """Fork-staleness of a branch vs origin/main — the signal behind the viewer's
     "N behind" badge.
       behind    — commits on origin/main not yet in this branch (two-dot count,
@@ -197,7 +197,7 @@ def state(branch, fresh_prs=False):
     # working-tree dirt of the worktree HOLDING this branch (incl. untracked — clean-tree
     # guards trip on those too). Dirt is per-worktree state; it ambushes whatever branch
     # the checkout holds, which is why it rides the branch payload.
-    dirty, dirty_wt = [], ""
+    dirty, dirty_rows, dirty_wt = [], [], ""
     wt_path, cur = None, None
     for ln in ctx.run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
         if ln.startswith("worktree "):
@@ -206,18 +206,28 @@ def state(branch, fresh_prs=False):
             wt_path = cur
     if wt_path:
         st = ctx.run(["git", "-C", wt_path, "status", "--porcelain"]).stdout.splitlines()
-        dirty = [l[3:].split(" -> ", 1)[-1].strip().strip('"') for l in st if len(l) > 3][:20]
+        entries = [(l[:2].strip(), l[3:].split(" -> ", 1)[-1].strip().strip('"'))
+                   for l in st if len(l) > 3][:20]
+        dirty = [p for _, p in entries]
         dirty_wt = wt_path if dirty else ""
+        # patches only for the single-branch read (the dirt gate's "what would fold/stash
+        # act on") — the batch badge sweep must not pay a diff spawn per dirty file.
+        if with_patches:
+            for code, p in entries:
+                args = (["git", "-C", wt_path, "diff", "--no-index", "--", "/dev/null", p]
+                        if code == "??" else ["git", "-C", wt_path, "diff", "HEAD", "--", p])
+                dirty_rows.append({"path": p, "code": code,
+                                   "patch": ctx.run(args).stdout[:20000]})
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
             "syncable": behind > 0 and parent == "main" and not published,
             "restack": restack, "project": proj,
             "shared": shared, "aheadOfOrigin": ahead,
-            "dirty": dirty, "dirtyWorktree": dirty_wt,
+            "dirty": dirty, "dirtyRows": dirty_rows, "dirtyWorktree": dirty_wt,
             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
 
 
 def get_one(req, u):
-    req._send(200, json.dumps(state(parse_qs(u.query).get("branch", [""])[0])))
+    req._send(200, json.dumps(state(parse_qs(u.query).get("branch", [""])[0], with_patches=True)))
 
 
 def get_many(req, u):

@@ -266,6 +266,7 @@ export const SyncState = z.object({
   shared: z.enum(["local", "ahead", "synced", "gone"]).optional(), // local-vs-origin: can the team see this branch?
   aheadOfOrigin: z.number().optional(), // commits origin's copy lacks (shared === "ahead")
   dirty: z.array(z.string()).optional(), // uncommitted paths (incl. untracked) in the worktree HOLDING this branch
+  dirtyRows: z.array(z.object({ path: z.string(), code: z.string(), patch: z.string() })).optional(), // + per-file patches (single-branch read only) — the dirt gate's expandable diffs
   dirtyWorktree: z.string().optional(),
 });
 export type SyncState = z.infer<typeof SyncState>;
