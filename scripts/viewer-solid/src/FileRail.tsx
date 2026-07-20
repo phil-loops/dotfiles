@@ -19,7 +19,32 @@ const UR_GO =
   "ur-commit-go flex-none cursor-pointer rounded-[3px] border border-del bg-del-bg px-[10px] py-1 text-[12px] font-semibold text-del enabled:hover:bg-del enabled:hover:text-vellum-night disabled:cursor-not-allowed disabled:opacity-40";
 const UR_ERR = "ur-commit-err mx-[2px] mt-[-6px] mb-[10px] text-[11px] text-del";
 
-function patchLineCounts(patch: string): { add: number; del: number } {
+// side-by-side renders one column per side, so a pure add/delete patch spends half the width
+// on a blank column — give those the full width instead.
+const oneSided = (patch: string) => {
+  let add = false;
+  let del = false;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) add = true;
+    else if (line.startsWith("-") && !line.startsWith("---")) del = true;
+    if (add && del) return false;
+  }
+  return true;
+};
+
+// the one way any surface renders a patch — the node cards and the dirt gate must look identical.
+export function patchHtml(patch: string | undefined): string {
+  return patch
+    ? Diff2Html.html(patch, {
+        drawFileList: false,
+        outputFormat: oneSided(patch) ? "line-by-line" : "side-by-side",
+        matching: "lines",
+        colorScheme: ColorSchemeType.DARK,
+      })
+    : `<p class="empty px-1 py-[14px] italic text-ink-faint">no textual diff</p>`;
+}
+
+export function patchLineCounts(patch: string): { add: number; del: number } {
   let add = 0, del = 0;
   for (const line of patch.split("\n")) {
     if (line.startsWith("+") && !line.startsWith("+++")) add++;
@@ -296,27 +321,7 @@ export function FileEntry(props: {
   const tarnished = () => props.file.status === "stale" && !blessed();
   const [deltaView, setDeltaView] = createSignal(false);
   const shownPatch = () => (deltaView() && props.file.stale ? props.file.stale : props.file.patch);
-  // side-by-side renders one column per side, so a pure add/delete patch spends half the width
-  // on a blank column — give those the full width instead.
-  const oneSided = (patch: string) => {
-    let add = false;
-    let del = false;
-    for (const line of patch.split("\n")) {
-      if (line.startsWith("+") && !line.startsWith("+++")) add = true;
-      else if (line.startsWith("-") && !line.startsWith("---")) del = true;
-      if (add && del) return false;
-    }
-    return true;
-  };
-  const html = () =>
-    shownPatch()
-      ? Diff2Html.html(shownPatch()!, {
-          drawFileList: false,
-          outputFormat: oneSided(shownPatch()!) ? "line-by-line" : "side-by-side",
-          matching: "lines",
-          colorScheme: ColorSchemeType.DARK,
-        })
-      : `<p class="empty px-1 py-[14px] italic text-ink-faint">no textual diff</p>`;
+  const html = () => patchHtml(shownPatch());
   const seg = (p: string): JSX.Element => {
     const i = p.lastIndexOf("/");
     return i < 0 ? <b>{p}</b> : [<span class="dir">{p.slice(0, i + 1)}</span>, <b>{p.slice(i + 1)}</b>];
