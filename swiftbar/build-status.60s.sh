@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# SwiftBar plugin — build-status: shows in-progress build-and-test MAIN image builds,
-# my own dispatched deploy-v2 runs (`task release:staging|production VERSION=…`),
+# SwiftBar plugin — build-status: shows in-progress build-and-test image builds (main +
+# my own branch builds), my dispatched deploy-v2 runs (`task release:staging|production VERSION=…`),
 # active prwatch watches (~/.cache/prwatch/tracking), and unacknowledged sticky
 # completions (~/.cache/prwatch/done — prwatch notify_sticky). Badge is ONE template
 # SF symbol (+ count), most-urgent state: checkmark unacked done > paperplane deploy >
@@ -42,13 +42,25 @@ elapsed() {  # ISO startedAt -> "Nm"
   now=$(date +%s); echo "$(( (now - s) / 60 ))m"
 }
 
+me="${BUILD_STATUS_USER:-$(gh api user -q .login 2>/dev/null || true)}"
+
 rows=$(gh run list -R "$REPO" --workflow=build-and-test.yml --branch main --status in_progress -L 5 \
   --json number,headBranch,startedAt,url \
   -q '.[] | [.number,.headBranch,.startedAt,.url] | @tsv' 2>/dev/null || true)
 n=0; [ -n "$rows" ] && n=$(printf '%s\n' "$rows" | grep -c .)
 
+# my in-flight branch builds — the image build I'm actually waiting on is usually a PR
+# branch, not main (main is covered above regardless of who triggered it)
+mine=""
+if [ -n "$me" ]; then
+  mine=$(gh run list -R "$REPO" --workflow=build-and-test.yml --user "$me" --status in_progress -L 5 \
+    --json number,headBranch,startedAt,url \
+    -q '.[] | select(.headBranch != "main") | [.number,.headBranch,.startedAt,.url] | @tsv' 2>/dev/null || true)
+fi
+m=0; [ -n "$mine" ] && m=$(printf '%s\n' "$mine" | grep -c .)
+b=$(( n + m ))
+
 # my dispatched deploys (queued or running) — the "waiting on my staging deploy" case
-me="${BUILD_STATUS_USER:-$(gh api user -q .login 2>/dev/null || true)}"
 deploys=""
 if [ -n "$me" ]; then
   deploys=$(gh run list -R "$REPO" --workflow=deploy-v2.yml --user "$me" -L 10 \
@@ -95,15 +107,15 @@ if   [ "$k" -gt 1 ]; then badge=":checkmark.circle.fill: $k"
 elif [ "$k" -gt 0 ]; then badge=":checkmark.circle.fill:"
 elif [ "$d" -gt 1 ]; then badge=":paperplane.fill: $d"
 elif [ "$d" -gt 0 ]; then badge=":paperplane.fill:"
-elif [ "$n" -gt 1 ]; then badge=":hammer.fill: $n"
-elif [ "$n" -gt 0 ]; then badge=":hammer.fill:"
+elif [ "$b" -gt 1 ]; then badge=":hammer.fill: $b"
+elif [ "$b" -gt 0 ]; then badge=":hammer.fill:"
 elif [ "$w" -gt 0 ]; then badge=":eye: $w"
 else badge=":hammer:"
 fi
 echo "$badge"
 echo "---"
 echo "IN FLIGHT | color=gray size=11"
-if [ "$n" -eq 0 ] && [ "$d" -eq 0 ]; then
+if [ "$b" -eq 0 ] && [ "$d" -eq 0 ]; then
   echo "Nothing building or deploying | color=gray"
 fi
 if [ "$n" -gt 0 ]; then
@@ -111,6 +123,12 @@ if [ "$n" -gt 0 ]; then
     [ -n "$num" ] || continue
     echo ":hammer.fill: Building ${br}-${num}-1 · $(elapsed "$st") | href=$url"
   done <<< "$rows"
+fi
+if [ "$m" -gt 0 ]; then
+  while IFS=$'\t' read -r num br st url; do
+    [ -n "$num" ] || continue
+    echo ":hammer.fill: Building ${br}-${num}-1 · $(elapsed "$st") | href=$url"
+  done <<< "$mine"
 fi
 if [ "$d" -gt 0 ]; then
   while IFS=$'\t' read -r title st url; do
