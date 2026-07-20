@@ -199,6 +199,11 @@ def _plan(branch, project, prs):
             "requires": requires_of(b),
             "me": b == branch,
         })
+    # a PR already open for review merges before anything still unpushed — new work always
+    # tells itself after the open PRs, whatever the declared branch-list order says
+    done = sum(1 for s in plan if s["landed"])
+    live = plan[done:]
+    plan = plan[:done] + [s for s in live if s.get("pr")] + [s for s in live if not s.get("pr")]
     for i, step in enumerate(plan, 1):
         step["n"] = i
     return plan
