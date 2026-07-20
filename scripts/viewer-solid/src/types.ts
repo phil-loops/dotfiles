@@ -79,8 +79,9 @@ export const PR = z.object({
 export type PR = z.infer<typeof PR>;
 
 // The /prs map (stack-prs): every open PR keyed by its HEAD branch, so the forest map can
-// badge a node the moment its branch has a PR. `toMain` is true iff the PR targets main (the
-// forest aim — every PR merges into main); a non-main base is the stacked-PR anti-pattern.
+// badge a node the moment its branch has a PR. `toMain` is true iff the PR targets main.
+// A base that is the node's stack parent is the stacked-PR convention (GitHub retargets to
+// main when the parent merges); any OTHER non-main base is the anomaly worth flagging.
 export const BranchPR = z.object({
   num: z.number(),
   url: z.string(),

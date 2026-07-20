@@ -21,6 +21,10 @@
 #   ∴ decide   proof branch (role=proof, never ships) outlived every shippable member —
 #              keep it as a standing proof, lift the artifact out, or drop it. Never
 #              sweep it silently.
+#   ⛓ chain    exactly one `requires` on a main-rooted branch — a mis-encoded chain
+#              (the one-dep test): set parent=<dep> and drop the requires.
+#   ∅ purpose  no branch description — an unfinished operation; every forest member
+#              carries a one-line purpose (git branch --edit-description).
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
@@ -30,7 +34,7 @@ for a in "$@"; do
     --orphans|--problems) only_problems=1 ;;
     --prune) do_prune=1 ;;
     --dry-run|-n) dry_run=1 ;;
-    -h|--help) sed -n '2,23p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
     *) want="$a" ;;
   esac
 done
@@ -190,6 +194,14 @@ for proj in $projects; do
       fi
     fi
     lines+="  $glyph $b${role:+ [$role]}${detail:+  — $detail}"$'\n'
+    reqs=$(git config --get-all "branch.$b.stack-requires" 2>/dev/null || git config --get-all "stack-branch.$b.requires" 2>/dev/null || true)
+    nreq=$(printf '%s' "$reqs" | grep -c . || true)
+    if { [ "$parent" = "main" ] || [ "$parent" = "origin/main" ]; } && [ "$nreq" = "1" ]; then
+      lines+="  ⛓ $b — one requires ($reqs) on a main-rooted branch: mis-encoded chain — set parent=$reqs, drop the requires"$'\n'; proj_problem=1
+    fi
+    if [ "$role" != "proof" ] && [ -z "$(git config "branch.$b.description" 2>/dev/null || true)" ]; then
+      lines+="  ∅ $b — no purpose: git config branch.$b.description \"<thesis>\""$'\n'; proj_problem=1
+    fi
   done
   if [ -n "$proof_members" ] && [ "$shippable_alive" = "0" ]; then
     while IFS= read -r pb; do

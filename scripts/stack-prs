@@ -7,9 +7,10 @@
 # `review` is GitHub's reviewDecision: "APPROVED" | "CHANGES_REQUESTED" |
 # "REVIEW_REQUIRED" | "" (none required / not yet reviewed).
 #
-# `toMain` is true iff the PR's base is main. The forest aim is that every PR
-# merges into main, so the viewer highlights toMain edges and flags the rest
-# (a PR against a non-main base is the stacked-PR anti-pattern).
+# `toMain` is true iff the PR's base is main. Every PR ultimately merges into main,
+# but a stacked child targets its parent's open PR until that parent lands (GitHub
+# retargets on merge) — so the viewer flags only a base that is neither main nor
+# the node's stack parent.
 #
 # Stale-while-revalidate (GitHub-Desktop model): the request path NEVER blocks on
 # GitHub. A present cache is served immediately — even when stale — and a stale

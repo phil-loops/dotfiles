@@ -106,6 +106,10 @@ export function ForestMap(props: {
   onReady?: () => Promise<unknown>;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
+  // the one-dep test: exactly one `requires` on a main-rooted branch is a mis-encoded
+  // chain (requires is reserved for converging 2+ bases) — same rule as stack-doctor ⛓
+  const misChain = (n: SpineNode) =>
+    !isGhostId(n.id) && (!n.parent || n.parent === "main") && (n.requires?.length ?? 0) === 1;
   // The map asks the same question the review surface asks, from the data /forest-health
   // already returns: an existing upstream with nothing ahead of it IS "nothing outgoing".
   // It never learns "ready" (that needs a per-node prep-route — a fresh gh fetch each), so
@@ -526,13 +530,14 @@ export function ForestMap(props: {
     const op = s === "ready" || hov() === id || id === props.active() ? "opacity-100" : "opacity-80";
     return `font-mono text-[8.5px] uppercase tracking-[0.09em] [text-anchor:end] ${fill} ${op}`;
   };
-  const prClass = (pr: BranchPR, id: string): string => {
+  const prClass = (pr: BranchPR, id: string, parent?: string): string => {
     const fill =
       pr.review === "CHANGES_REQUESTED" ? "fill-del"
       : pr.review === "APPROVED" ? "fill-gold-leaf"
       : pr.draft ? "fill-ink-faint"
       : `${inkFlip(id) ? "fill-ink" : "fill-patina"} hover:fill-gold-leaf`;
-    const deco = pr.toMain === false ? "underline decoration-dashed" : "hover:underline";
+    // base = the node's stack parent is the stacked-PR convention, not an anomaly
+    const deco = pr.toMain === false && pr.base !== parent ? "underline decoration-dashed" : "hover:underline";
     return `cursor-pointer font-mono text-[9.5px] tracking-[0.02em] [text-anchor:start] ${fill} ${deco}`;
   };
   const purposeClass = (id: string): string => {
@@ -791,19 +796,23 @@ export function ForestMap(props: {
                   <Show when={!isGhostId(n.id) && prOf(n.id)}>
                     {(pr) => (
                       <text
-                        class={`fm-pr ${prClass(pr(), n.id)}`}
+                        class={`fm-pr ${prClass(pr(), n.id, n.parent)}`}
                         classList={{
                           draft: !!pr().draft,
                           approved: pr().review === "APPROVED",
                           changes: pr().review === "CHANGES_REQUESTED",
-                          offbase: pr().toMain === false,
+                          // a stacked child TARGETING its parent's open PR is the convention
+                          // (GitHub retargets to main when the parent merges) — warn only on
+                          // a base that is neither main nor this node's stack parent
+                          offbase: pr().toMain === false && pr().base !== n.parent,
                         }}
                         x={14}
                         y={-NODE_H / 2 - 6}
                         onClick={(e) => { e.stopPropagation(); window.open(pr().url, "_blank", "noopener"); }}
                       >
                         <title>
-                          {pr().toMain === false ? `⚠ PR targets ${pr().base} — not main. ` : ""}
+                          {pr().toMain === false && pr().base !== n.parent ? `⚠ PR targets ${pr().base} — neither main nor this branch's parent. ` : ""}
+                          {pr().toMain === false && pr().base === n.parent ? `stacked on the parent PR (${pr().base}) · ` : ""}
                           {pr().review === "APPROVED" ? "approved · " : pr().review === "CHANGES_REQUESTED" ? "changes requested · " : ""}
                           open #{pr().num} on GitHub
                         </title>
@@ -812,8 +821,19 @@ export function ForestMap(props: {
                     )}
                   </Show>
                   {/* drifted hides the purpose like merged does — the ⤺ off-parent warn draws in
-                      the same sub-node slot (NODE_H/2+12 vs +13) and the two overprint */}
-                  <Show when={!isGhostId(n.id) && n.description && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted}>
+                      the same sub-node slot (NODE_H/2+12 vs +13) and the two overprint; the ⛓
+                      and ∅ marks share that slot too, so each state yields to the one above it */}
+                  <Show when={misChain(n) && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted && !dams().damSet.has(n.id)}>
+                    <text
+                      class={`fm-warn font-mono text-[9.5px] tracking-[0.03em] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-del"}`}
+                      x={w / 2}
+                      y={NODE_H / 2 + 12}
+                    >
+                      <title>one `requires` on a main-rooted branch is a mis-encoded chain — set parent={n.requires![0]} and drop the requires</title>
+                      ⛓ mis-encoded chain
+                    </text>
+                  </Show>
+                  <Show when={!isGhostId(n.id) && !misChain(n) && n.description && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted}>
                     <For each={wrapPurpose(n.description!, w)}>
                       {(line, i) => (
                         <text class={`fm-purpose ${purposeClass(n.id)}`} x={w / 2} y={NODE_H / 2 + 13 + i() * 10}>
@@ -822,6 +842,16 @@ export function ForestMap(props: {
                         </text>
                       )}
                     </For>
+                  </Show>
+                  <Show when={!isGhostId(n.id) && !misChain(n) && !n.description && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted}>
+                    <text
+                      class={`fm-purpose font-mono text-[9px] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-ink-faint"}`}
+                      x={w / 2}
+                      y={NODE_H / 2 + 13}
+                    >
+                      <title>no branch description — an unfinished operation; git branch --edit-description names the thesis</title>
+                      ∅ no purpose
+                    </text>
                   </Show>
                   <Show when={isGhostId(n.id) && canMutate}>
                     <text
