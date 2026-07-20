@@ -18,6 +18,9 @@ commits back in and bloats the PR with phantom "new" commits. Rebase onto
 origin/main instead.
 
 Escape hatches (per guard, one push): `ALLOW_WIP_PUSH=1` / `ALLOW_MERGE_PUSH=1`.
+For pushes from GUI clients that can't set env vars (GH Desktop), a one-shot
+per-branch flag does the same for the merge guard and is consumed on use:
+`git config stack-branch.<branch>.allow-merge-push true`.
 
 Exit 0 = clean (allow push). Exit 1 = blocked.
 """
@@ -81,6 +84,20 @@ def merge_commits(rev_args):
     return found
 
 
+def branch_merge_pass(remote_ref):
+    """One-shot per-branch merge-push pass, consumed on use (for GUI pushes)."""
+    branch = remote_ref.removeprefix("refs/heads/")
+    key = f"stack-branch.{branch}.allow-merge-push"
+    val = subprocess.run(
+        ["git", "config", "--get", key], capture_output=True, text=True,
+    ).stdout.strip().lower()
+    if val in FALSEY:
+        return False
+    subprocess.run(["git", "config", "--unset", key], capture_output=True)
+    print(f"⚑ merge-push pass for {branch} — used and cleared ({key})", file=sys.stderr)
+    return True
+
+
 def main():
     refs = []
     for line in sys.stdin:
@@ -96,6 +113,8 @@ def main():
         merges = []
         for local_sha, remote_ref, remote_sha in refs:
             if remote_ref.endswith("/main"):
+                continue
+            if branch_merge_pass(remote_ref):
                 continue
             merges += merge_commits(range_for(local_sha, remote_sha))
         if merges:
