@@ -373,7 +373,7 @@ export function NodeDetail() {
                   {/* off-parent bases are view-only — bless keys on the parent...child patch-id, not the shown diff */}
                   <For each={data().files.filter(matchFilter)}>
                     {/* the ghost has no real branch — send the project so the seed resolves the integrator ref */}
-                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={isGhost() || base() !== ""} onChat={(file, session) => chatToTmux(isGhost() ? { project: project(), path: file.path, patch: file.patch, session } : { branch: active(), path: file.path, patch: file.patch, session })} />}
+                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={base() !== ""} onChat={(file, session) => chatToTmux(isGhost() ? { project: project(), path: file.path, patch: file.patch, session } : { branch: active(), path: file.path, patch: file.patch, session })} />}
                   </For>
                 </Show>
               </Show>
