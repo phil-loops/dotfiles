@@ -42,7 +42,7 @@ git checkout -b <new-branch-name>      # child branch forks from current HEAD
 
 The parent relationship is **implicit in the fork point** — git does not track it natively. Two places need to know the parent explicitly:
 
-1. **PRs**: always `gh pr create --base main` — every branch merges into main, never onto its parent. Independent bases (forked off main) keep each PR's diff to its own work; a genuinely-dependent branch merges in order after its base lands. (Never let tooling open PRs — that's manual.)
+1. **PRs**: an independent base targets `main`; a stacked child targets the nearest ancestor with an **open PR** (so the review diff stays the branch's own work — GitHub retargets the child to main itself when the parent merges), falling back to `main` when no ancestor PR is open. The viewer's compare links prefill this base (2026-07-19). New work always merges after the already-open PRs. (Never let tooling open PRs — that's manual.)
 2. **Rebase after parent changes**: `git rebase <parent>` (or `git rebase --onto <new-parent> <old-parent>` when moving a branch).
 
 Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so reviewers can see the order. And **set the branch's purpose right after creating it** — `git config branch.<new-branch-name>.description "<one-line thesis>"` — so the intent is captured while it's fresh.
@@ -62,7 +62,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
 | Restack whole forest after a merge | raw git — snapshot SHAs, ff `main`, `rebase --onto` bottom-up (see *Restacking* below) |
-| Create PR (manual — Phil opens) | reference only: `gh pr create --base main --head <branch>` — never run against origin |
+| Create PR (manual — Phil opens) | reference only: `gh pr create --base <nearest-open-ancestor-PR-branch, else main> --head <branch>` — never run against origin |
 | Squash commits             | `git reset --soft <parent> && git commit`                   |
 | Health-scan the forest     | `stack-doctor [<project>]` (read-only; `--orphans` = problems only) |
 | Reclaim config a dead branch left | `stack-doctor --prune` (`--dry-run` previews)         |
