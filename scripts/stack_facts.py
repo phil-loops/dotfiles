@@ -13,9 +13,12 @@ A real file, not a `python3 -c '...'` string: that pattern broke twice on an apo
 shell quote.
 
   stack_facts.py facts   <branch>   → JSON
+  stack_facts.py steps   <branch>   → JSON, plan only — no gh call; the viewer's steps editor
   stack_facts.py plan    <branch>   → the plan block for a commit body
   stack_facts.py mermaid <branch> [--fence]
 """
+import importlib.machinery
+import importlib.util
 import json
 import os
 import subprocess
@@ -30,21 +33,49 @@ def git_lines(*args):
     return [x for x in git(*args).splitlines() if x]
 
 
+_CONFIG = None
+
+
+def _config():
+    """All branch/stack config in ONE git spawn. Per-key spawns cost ~40ms each on this repo,
+    so a 7-step plan paid seconds in config reads alone; the whole namespace reads in ~50ms."""
+    global _CONFIG
+    if _CONFIG is None:
+        raw = subprocess.run(
+            ["git", "config", "-z", "--get-regexp", r"^(branch|stack-branch|stack-project)\."],
+            capture_output=True, text=True).stdout
+        _CONFIG = {}
+        for entry in raw.split("\0"):
+            if entry:
+                key, _, val = entry.partition("\n")
+                _CONFIG.setdefault(key, []).append(val)
+    return _CONFIG
+
+
+def cfg(key):
+    vals = _config().get(key)
+    return vals[-1].strip() if vals else ""
+
+
+def cfg_all(key):
+    return [v.strip() for v in _config().get(key, []) if v.strip()]
+
+
 def parent_of(branch):
-    return (git("config", f"branch.{branch}.stack-parent")
-            or git("config", f"stack-branch.{branch}.parent") or "main")
+    return (cfg(f"branch.{branch}.stack-parent")
+            or cfg(f"stack-branch.{branch}.parent") or "main")
 
 
 def requires_of(branch):
-    return (git_lines("config", "--get-all", f"branch.{branch}.stack-requires")
-            or git_lines("config", "--get-all", f"stack-branch.{branch}.requires"))
+    return (cfg_all(f"branch.{branch}.stack-requires")
+            or cfg_all(f"stack-branch.{branch}.requires"))
 
 
 def role_of(branch):
     """A branch's forest role. `proof` = a never-merge branch riding alongside its forest
     to prove it works (e2e/smoke artifacts). Set with `stack-proof`."""
-    return (git("config", f"branch.{branch}.stack-role")
-            or git("config", f"stack-branch.{branch}.role"))
+    return (cfg(f"branch.{branch}.stack-role")
+            or cfg(f"stack-branch.{branch}.role"))
 
 
 def plan_omitted(branch):
@@ -53,8 +84,8 @@ def plan_omitted(branch):
     implies it."""
     if role_of(branch) == "proof":
         return True
-    return (git("config", f"branch.{branch}.stack-plan-omit")
-            or git("config", f"stack-branch.{branch}.plan-omit")) == "true"
+    return (cfg(f"branch.{branch}.stack-plan-omit")
+            or cfg(f"stack-branch.{branch}.plan-omit")) == "true"
 
 
 def job_of(branch):
@@ -63,11 +94,11 @@ def job_of(branch):
     branch (so a story survives after this branch merges). Then the branch description: it is the
     branch's stated purpose and is maintained deliberately, so it outranks the commit subject,
     which is only an auto-derived gloss of the newest commit. Subject last, then the name."""
-    story = (git("config", f"branch.{branch}.stack-story")
-             or git("config", f"stack-branch.{branch}.story"))
+    story = (cfg(f"branch.{branch}.stack-story")
+             or cfg(f"stack-branch.{branch}.story"))
     if story:
         return story
-    description = git("config", f"branch.{branch}.description")
+    description = cfg(f"branch.{branch}.description")
     if description:
         return description
     subject = git("log", "-1", "--format=%s", f"{parent_of(branch)}..{branch}")
@@ -123,24 +154,34 @@ def _landed(project):
 
 
 def _order(branch):
+    # in-process, sharing our config read — spawning it as a second python cost ~0.5s
     here = os.path.dirname(os.path.abspath(__file__))
-    r = subprocess.run([os.path.join(here, "stack-merge-rank"), branch],
-                       capture_output=True, text=True)
+    path = os.path.join(here, "stack-merge-rank")
+    loader = importlib.machinery.SourceFileLoader("stack_merge_rank", path)
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+        return mod.compute(branch, _config()).get("order", [])
+    except Exception:
+        pass
+    # not importable python (a test stubs it with a shell script) — spawn it like before
+    r = subprocess.run([path, branch], capture_output=True, text=True)
     try:
         return json.loads(r.stdout).get("order", [])
     except Exception:
         return []
 
 
-def facts(branch):
-    project = (git("config", f"branch.{branch}.stack-project")
-               or git("config", f"stack-branch.{branch}.project"))
-    order = _order(branch) if project else []
-    prs = _prs() if (project or order) else {}
+def project_of(branch):
+    return (cfg(f"branch.{branch}.stack-project")
+            or cfg(f"stack-branch.{branch}.project"))
 
+
+def _plan(branch, project, prs):
     plan = _landed(project) if project else []
     landed_branches = {s["branch"] for s in plan}
-    for b in order:
+    for b in (_order(branch) if project else []):
         if b in landed_branches:      # already told as a landed step; do not tell it twice
             continue
         if plan_omitted(b):
@@ -148,8 +189,8 @@ def facts(branch):
         p = prs.get(b, {})
         plan.append({
             "job": job_of(b),
-            "story": (git("config", f"branch.{b}.stack-story")
-                      or git("config", f"stack-branch.{b}.story")),
+            "story": (cfg(f"branch.{b}.stack-story")
+                      or cfg(f"stack-branch.{b}.story")),
             "pr": p.get("pr"),
             "state": p.get("state"),
             "landed": False,
@@ -160,6 +201,20 @@ def facts(branch):
         })
     for i, step in enumerate(plan, 1):
         step["n"] = i
+    return plan
+
+
+def steps(branch):
+    """The plan alone, minus the PR decoration and graph edges `facts` also derives — no gh
+    network call, so the viewer's steps editor loads in one beat instead of several seconds."""
+    project = project_of(branch)
+    return {"branch": branch, "project": project, "plan": _plan(branch, project, {})}
+
+
+def facts(branch):
+    project = project_of(branch)
+    prs = _prs() if project else {}
+    plan = _plan(branch, project, prs)
 
     mine = next((s["n"] for s in plan if s.get("me")), None)
     parent = parent_of(branch)
@@ -190,9 +245,9 @@ def facts(branch):
         "branch": branch,
         "project": project,
         "role": role_of(branch),
-        "purpose": git("config", f"branch.{branch}.description"),
-        "summary": (git("config", f"branch.{branch}.stack-summary")
-                    or git("config", f"stack-branch.{branch}.summary")),
+        "purpose": cfg(f"branch.{branch}.description"),
+        "summary": (cfg(f"branch.{branch}.stack-summary")
+                    or cfg(f"stack-branch.{branch}.summary")),
         "summaryStatus": summary_status,
         "job": job_of(branch),
         "parent": parent,
@@ -296,6 +351,9 @@ def main():
         print(__doc__, file=sys.stderr)
         return 2
     mode, branch = sys.argv[1], sys.argv[2]
+    if mode == "steps":
+        print(json.dumps(steps(branch)))
+        return 0
     f = facts(branch)
     if mode == "facts":
         print(json.dumps(f, indent=2))

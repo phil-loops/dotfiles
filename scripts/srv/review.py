@@ -378,7 +378,7 @@ def plan_steps(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
     if not branch:
         return req._send(400, json.dumps({"error": "no branch"}))
-    r = ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "facts", branch])
+    r = ctx.run(["python3", os.path.join(ctx.SCRIPTS, "stack_facts.py"), "steps", branch])
     try:
         f = json.loads(r.stdout)
     except Exception:
