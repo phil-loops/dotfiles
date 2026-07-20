@@ -68,7 +68,15 @@ HOOK
   chmod +x "$hook"
 }
 prune_old(){ [[ -d "$SCRATCH" ]] || return 0
+  # never prune under a live editor: yanking a worktree a warm hx/nvim still sits in
+  # panics tsgo (typescript-go overlayfs.go:350, batched close+change) and kills its LSP
+  local editor_cwds
+  editor_cwds=$(lsof -a -c hx -c nvim -d cwd -Fn 2>/dev/null | sed -n 's/^n//p') || true
   find "$SCRATCH" -maxdepth 1 -mindepth 1 -type d -mtime +"${1:-3}" 2>/dev/null | while read -r d; do
+    local real; real=$(cd "$d" 2>/dev/null && pwd -P) || real="$d"
+    case $'\n'"$editor_cwds"$'\n' in
+      *$'\n'"$real"$'\n'*|*$'\n'"$real"/*) continue;;
+    esac
     git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
   done
   git worktree prune 2>/dev/null || true
