@@ -214,34 +214,73 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
   tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true
 }
 
+hx_pane_line(){ tmux capture-pane -p -t "$1" 2>/dev/null | tail -"${2:-1}" }
+
+HX_LOCK=""
+hx_lock(){   # one driver per pane. Two hover+o presses landing at once is what turns a
+             # stolen ':' prompt into keys typed straight into the file: the racer's Escape
+             # closes the prompt mid-batch, ':cd <dir>' then runs 'c' as a change command and
+             # the path types itself into the buffer (reproduced 2026-07-21).
+  local lock="${TMPDIR:-/tmp}/stack-open-hx-${1//[^a-zA-Z0-9]/}.lock" i holder
+  for i in {1..100}; do
+    if mkdir "$lock" 2>/dev/null; then print -r -- $$ > "$lock/pid"; HX_LOCK="$lock"; return 0; fi
+    holder=$(cat "$lock/pid" 2>/dev/null) || true
+    if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$lock"; continue; fi
+    sleep 0.1
+  done
+  return 1
+}
+hx_unlock(){ [[ -n "$HX_LOCK" ]] && rm -rf "$HX_LOCK"; HX_LOCK=""; }
+
+hx_modified(){ [[ "$(hx_pane_line "$1" 2)" == *"[+]"* ]] }   # Helix's unsaved-buffer marker
+
 hx_verify_normal(){   # Escape until the pane's statusline proves NOR with no ':' prompt open
-  local pane="$1" i snap
-  for i in {1..20}; do
+  local pane="$1" round i snap
+  for round in 1 2 3; do
     tmux send-keys -t "$pane" Escape
-    sleep 0.05
-    snap=$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2)
-    if [[ "$snap" == *NOR* && "${snap##*$'\n'}" != :* ]]; then return 0; fi
+    for i in {1..12}; do
+      sleep 0.05
+      snap=$(hx_pane_line "$pane" 2)
+      if [[ "$snap" == *NOR* && "${snap##*$'\n'}" != :* ]]; then return 0; fi
+    done
   done
   return 1
 }
 
-hx_cmd(){   # run one ':' command, typing it only once the prompt is visibly open
-  local pane="$1" cmd="$2" i ok=
+hx_cmd(){   # run one ':' command: open the prompt, watch the body echo back OUT of it, then Enter.
+            # The echo is the only proof the keys reached Helix's command line rather than the
+            # buffer — a prompt that closed under us otherwise edits the file silently.
+  local pane="$1" cmd="$2" expect=":$2" i last width before opened=
+  before=$(hx_pane_line "$pane")
   tmux send-keys -t "$pane" :
-  for i in {1..20}; do
-    if [[ "$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -1)" == :* ]]; then ok=1; break; fi
+  for i in {1..30}; do
     sleep 0.05
+    last=$(hx_pane_line "$pane")
+    # the line must CHANGE into a prompt — Helix pre-fills it with a history suggestion, so
+    # "starts with ':'" alone would also match a leftover frame from the previous open
+    if [[ "$last" == :* && "$last" != "$before" ]]; then opened=1; break; fi
   done
-  [[ -n "$ok" ]] || return 1
+  [[ -n "$opened" ]] || return 1
+  width=$(tmux display -p -t "$pane" '#{pane_width}' 2>/dev/null) || width=0
   tmux send-keys -t "$pane" -l "$cmd"
-  tmux send-keys -t "$pane" Enter
+  for i in {1..60}; do   # Helix's path completion needs >1s to echo a long path back
+    sleep 0.05
+    last=$(hx_pane_line "$pane")
+    if [[ "$last" == "$expect" ]]; then tmux send-keys -t "$pane" Enter; return 0; fi
+    # too long to fit — Helix scrolls the prompt, so only its tail is on screen
+    if (( ${#expect} >= width )) && [[ -n "$last" && "$expect" == *"$last" ]]; then
+      tmux send-keys -t "$pane" Enter; return 0
+    fi
+  done
+  return 1
 }
 
-hx_goto_line(){   # land on <line> (no-op without one), re-verifying NOR after the :open settles
+hx_goto_line(){   # land on <line> (no-op without one) through the verified ':' prompt — a bare
+                  # '<n>gg' is at the mercy of Escape+digit coalescing, and lands on 21 for 121
   local pane="$1" line="$2"
   [[ -n "$line" ]] || return 0
   hx_verify_normal "$pane" || return 1
-  tmux send-keys -t "$pane" -l "${line}gg"
+  hx_cmd "$pane" "goto ${line}"
 }
 
 hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-keys), else launch hx
@@ -257,6 +296,9 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
   read -r win pane <<<"$(tmux list-panes -s -t "$SESSION" \
           -F '#{window_index} #{pane_id} #{pane_current_command} #{window_name}' 2>/dev/null \
         | awk '$3=="hx" && $4=="review-hx" {print $1, $2; exit}')" || true
+  # Open by RELATIVE path once we've cd'd: Helix re-completes the whole prompt on every
+  # keystroke, so a 100-char absolute path costs it over a second of stat()s per open.
+  local rel_target="$file"; [[ "$file" == "$dir"/* ]] && rel_target="${file#$dir/}"
   if [[ -n "${pane:-}" ]]; then
     # Verify state, never sleep-and-hope: under load ESC+':' coalesce into Alt-: and the 'c' of
     # ':cd' runs as a change command — the rest of the keys typed themselves into the buffer as
@@ -266,17 +308,38 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
     # worktree it was first launched in, and gd/reference pickers render entries relative to cwd,
     # so a file from any OTHER branch (every scratch worktree is a fresh path) shows absolute
     # without this. LSP workspace root is resolved per-file, so :cd never disturbs it.
-    if hx_verify_normal "$pane" \
-       && hx_cmd "$pane" "cd ${dir}" \
-       && hx_cmd "$pane" "open ${file}" \
-       && hx_goto_line "$pane" "$line"; then
-      :
+    local dirty_before=""
+    if hx_lock "$pane"; then
+      hx_modified "$pane" && dirty_before=1
+      if hx_verify_normal "$pane" \
+         && hx_cmd "$pane" "cd ${dir}" \
+         && hx_cmd "$pane" "open ${rel_target}"; then
+        # The file IS open now — a cursor that didn't land is worth a warning, not a rival window.
+        hx_goto_line "$pane" "$line" || echo "stack-open: opened $rel_target but couldn't land on line $line" >&2
+      else
+        # A batch that died mid-way may have typed its body into the buffer. Undo only when the
+        # pane was clean before we touched it — that's the proof the edit is ours, not the human's.
+        if hx_verify_normal "$pane" && [[ -z "$dirty_before" ]] && hx_modified "$pane"; then
+          tmux send-keys -t "$pane" -l u
+          echo "stack-open: a lost prompt typed into the buffer — undone" >&2
+        fi
+        echo "stack-open: review-hx pane wouldn't reach a known state; opening cold" >&2
+        pane=""
+      fi
+      hx_unlock
     else
-      echo "stack-open: review-hx pane wouldn't reach a known state; opening cold" >&2
+      echo "stack-open: another open is still driving review-hx; opening cold" >&2
       pane=""
     fi
   fi
   if [[ -z "${pane:-}" ]]; then
+    # Retire whatever we couldn't drive before spawning its replacement, so the next hover+o
+    # aims at the fresh window instead of the same stuck pane — that pileup is how one bad
+    # open became four review-hx windows.
+    local stale
+    for stale in ${(f)"$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1}')"}; do
+      [[ -n "$stale" ]] && tmux rename-window -t "${SESSION}:${stale}" review-hx-stale 2>/dev/null || true
+    done
     local target="$file"; [[ -n "$line" ]] && target="${file}:${line}"
     tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
