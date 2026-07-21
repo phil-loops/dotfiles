@@ -127,6 +127,11 @@ export function ForestMap(props: {
   const [contracting, setContracting] = createSignal<string | null>(null);
   const [contractErr, setContractErr] = createSignal<{ id: string; err: string } | null>(null);
   const [readying, setReadying] = createSignal(false);
+  // A contracted node leaves the map the moment the server says it's gone, rather than waiting
+  // on the /model + /forest-health refetch — those are seconds slow on a big forest, and a ghost
+  // still standing under its idle "⊘ drop & rewire →" pill reads as "the auto-drop never ran".
+  // It did: the second press then 404s on a branch that no longer exists (2026-07-21).
+  const [dropped, setDropped] = createSignal<ReadonlySet<string>>(new Set());
   // the merged-ghost next step, keyed off CONTRACTABLE (rebase-classify exit 20), not merged:
   //   drop    — fully contractable + we can mutate → ⊘ drop & rewire (POST /contract)
   //   forward — merged PR but a newer commit rides on top → not droppable alone; the verb is
@@ -153,7 +158,11 @@ export function ForestMap(props: {
       .then((r) => {
         const j = r as { ok?: boolean; err?: string } | undefined;
         if (j && j.ok === false) setContractErr({ id, err: j.err || "contract failed" });
+        else setDropped((s) => new Set(s).add(id));
       })
+      // a throw (server bounced mid-request, non-JSON body) used to leave the pill back on its
+      // idle label with nothing said — the one failure that looks exactly like never having run
+      .catch((e: unknown) => setContractErr({ id, err: (e as Error)?.message || "contract failed" }))
       .finally(() => setContracting(null));
   };
 
@@ -293,8 +302,23 @@ export function ForestMap(props: {
     return "checks the whole feature out into a scratch worktree you can run and edit — refreshed on each open, your edits there are never clobbered; copies the cd command";
   };
 
+  // Mirror server-side contraction: the node goes, its children inherit its parent, and any
+  // `requires` naming it loses that edge — the same rewire /contract just performed.
+  const withoutDropped = (list: SpineNode[]): SpineNode[] => {
+    const gone = dropped();
+    if (!gone.size) return list;
+    const parentOf = new Map(list.map((n) => [n.id, n.parent]));
+    const heir = (p: string | undefined, guard = 0): string | undefined =>
+      p && gone.has(p) && guard < 64 ? heir(parentOf.get(p), guard + 1) : p;
+    return list.filter((n) => !gone.has(n.id)).map((n) => ({
+      ...n,
+      parent: heir(n.parent),
+      ...(n.requires ? { requires: n.requires.filter((r) => !gone.has(r)) } : {}),
+    }));
+  };
+
   const model = createMemo(() => {
-    const list = props.spine();
+    const list = withoutDropped(props.spine());
     const byId: Record<string, SpineNode> = {};
     list.forEach((n) => (byId[n.id] = n));
     return { list, byId };
