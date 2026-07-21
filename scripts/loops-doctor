@@ -204,23 +204,35 @@ run_checks() {
 
 # Only bounce what we own: the standalone tmux sessions loops-doctor/loops-preview start.
 # A `task dev`-managed process belongs to that terminal — say so instead of fighting it.
+# tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (loops PR #9599);
+# pre-split checkouts still carry the old single config.
+runtime_tsconfig() {
+  if [ -f "$1/typescript/tsconfig.runtime.json" ]; then
+    echo typescript/tsconfig.runtime.json
+  else
+    echo tsconfig.node.json
+  fi
+}
+
 bounce_jobs_worker() {
   local main="${LOOPS_MAIN:-$HOME/coding/loops}"
+  local cfg; cfg=$(runtime_tsconfig "$main")
   if tmux has-session -t loops-jobs-worker 2>/dev/null; then
     tmux kill-session -t loops-jobs-worker 2>/dev/null || true
   fi
   tmux new-session -d -s loops-jobs-worker \
-    "cd '$main' && npx tsx --tsconfig tsconfig.node.json --import dotenv/config lib/job-queue/index.js http://localhost:9324/elasticmq/dev 10 > /tmp/loops-jobs-worker.log 2>&1"
+    "cd '$main' && npx tsx --tsconfig '$cfg' --import dotenv/config lib/job-queue/index.js http://localhost:9324/elasticmq/dev 10 > /tmp/loops-jobs-worker.log 2>&1"
   printf '  %s restarted jobs worker (tmux loops-jobs-worker · /tmp/loops-jobs-worker.log)\n' "$(green ▸)"
 }
 
 bounce_mail_schedule() {
   local main="${LOOPS_MAIN:-$HOME/coding/loops}"
+  local cfg; cfg=$(runtime_tsconfig "$main")
   if tmux has-session -t loops-mail-schedule 2>/dev/null; then
     tmux kill-session -t loops-mail-schedule 2>/dev/null || true
   fi
   tmux new-session -d -s loops-mail-schedule \
-    "cd '$main' && npx tsx --tsconfig tsconfig.node.json --import dotenv/config apps/mail-schedule/src/index.ts > /tmp/loops-mail-schedule.log 2>&1"
+    "cd '$main' && npx tsx --tsconfig '$cfg' --import dotenv/config apps/mail-schedule/src/index.ts > /tmp/loops-mail-schedule.log 2>&1"
   printf '  %s restarted mail-schedule (tmux loops-mail-schedule · /tmp/loops-mail-schedule.log)\n' "$(green ▸)"
 }
 
