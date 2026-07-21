@@ -68,12 +68,33 @@ _held_by_other(){ local lane="$1" hp mp hs
   hs=$(gc "own.$lane.session" 2>/dev/null)
   [[ -n "$hs" && -n "$SID" && "$hs" != "$SID" ]] && return 0
   return 1 }
-# "(you)" or "(sess 5bf6bd76)" or "(pid 21994)" — whatever identifies the holder to a reader.
-_holder_tag(){ local lane="$1" hp hs mp
+# pid → live session, read from the presence registry claude-say addresses. Loaded once per run.
+typeset -gA _PRESENCE; typeset -g _PRESENCE_LOADED=""
+_presence_load(){ [[ -n "$_PRESENCE_LOADED" ]] && return; _PRESENCE_LOADED=1
+  local p s r
+  while IFS=$'\t' read -r p s r; do [[ -n "$p" ]] && _PRESENCE[$p]="$s	$r"; done < <(
+    python3 - <<'PY' 2>/dev/null
+import glob, json, os
+for f in glob.glob(os.path.expanduser("~/.claude/session-presence/*.json")):
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    print("%s\t%s\t%s" % (d.get("pid", ""), (d.get("session_id") or "")[:8], d.get("repo_name") or ""))
+PY
+  ) }
+# "(you)" or "(sess c3e93b25 · loops-wt-145615)" — whatever identifies the holder to a reader.
+# Resolve it from the PID, never from the .session recorded at claim time: one claude PROCESS
+# outlives its session id (a /clear mints a new one), so the recorded id goes stale and names a
+# session claude-say can't find — which reads as a dead claim on a lane that's very much held
+# (2026-07-21, viewer lane). A holder with no presence entry says so, rather than implying one.
+_holder_tag(){ local lane="$1" hp hs mp ent
   hp=$(gc "own.$lane.pid" 2>/dev/null); hs=$(gc "own.$lane.session" 2>/dev/null); mp=$(_mypid)
   [[ -n "$mp" && "$hp" == "$mp" ]] && { print -rn -- " (you)"; return; }
-  [[ -n "$hs" ]] && { print -rn -- " (sess ${hs%%-*})"; return; }
-  [[ -n "$hp" ]] && print -rn -- " (pid $hp)"; }
+  _presence_load; ent="${_PRESENCE[${hp:-x}]:-}"
+  [[ -n "$ent" ]] && { print -rn -- " (sess ${ent%%	*}${${ent##*	}:+ · ${ent##*	}})"; return; }
+  [[ -n "$hp" ]] && { print -rn -- " (pid $hp · no presence entry — unaddressable)"; return; }
+  [[ -n "$hs" ]] && print -rn -- " (sess ${hs%%-*} · no presence entry — unaddressable)"; }
 _lane_for(){ local p="$1" best="" blen=0 line lane globs g
   while IFS= read -r line; do
     [[ "$line" == \#* || -z "${line// /}" ]] && continue
@@ -141,7 +162,7 @@ case "${1:-list}" in
     if (( rc == 0 )) && [[ -n "$mp" && "$hp" == "$mp" ]]; then
       print "$2 → [$l]${sl:+ (slice:$sl)} · ● held by YOU${a:+ (${a}s ago)} — edit it directly"
     elif (( rc == 0 )); then
-      print "$2 → [$l]${sl:+ (slice:$sl)} · ● held by a LIVE session${a:+ (${a}s ago)} ⚠ use the patch protocol"
+      print "$2 → [$l]${sl:+ (slice:$sl)} · ● held by a LIVE session$(_holder_tag "$l")${a:+ (${a}s ago)} ⚠ use the patch protocol"
     elif (( rc == 1 )); then
       print "$2 → [$l]${sl:+ (slice:$sl)} · ✗ holder process gone — free to take${a:+ (claim was ${a}s old)}"
     elif [[ -n "$a" ]] && (( a < FRESH )); then
