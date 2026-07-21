@@ -91,6 +91,7 @@ def model(req, u):
     if not _known_forest_name(branch):
         req._send(404, json.dumps({"error": f"no branch or forest named {branch!r}"}))
         return
+    guard = ctx.model_sig()   # what the build is about to read, fingerprinted BEFORE it reads it
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), branch])
     if r.returncode != 0:
         req._send(500, json.dumps({"error": r.stderr}))
@@ -100,9 +101,12 @@ def model(req, u):
             branches = list((json.loads(out) or {}).get("nodes") or {})
         except ValueError:
             branches = []
-        # a ref moving DURING the build must not be masked by a post-build sig — reuse the
-        # pre-build sig when membership is unchanged so the next request rebuilds instead.
-        sig = pre_sig if (ent and ent["branches"] == branches) else _forest_sig(branches)
+        # A mutation landing mid-build (a /contract dropping a node) leaves `out` describing the
+        # repo as it was BEFORE it — and a post-build sig then certifies that stale forest for
+        # good, since every later check re-measures the same settled state and matches. That
+        # froze a contracted branch on the map until the server was bounced (2026-07-21). An
+        # empty sig can never equal a fresh one, so the next request rebuilds instead.
+        sig = _forest_sig(branches) if ctx.model_sig() == guard else ""
         with _mcache_lock:
             _mcache.pop(ck, None)
             _mcache[ck] = {"sig": sig, "branches": branches, "out": out}
