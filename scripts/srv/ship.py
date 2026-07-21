@@ -136,7 +136,7 @@ def ship(req, raw):
 
     contracted = []
     for g in ghosts:
-        err, kids, deps, parent = sync._contract(g)
+        err, kids, deps, parent, _refreshed = sync._contract(g)
         if err:
             return req._send(200, json.dumps({"ok": False, "err": err, "contracted": contracted}))
         contracted.append({"branch": g, "children": kids, "deps": deps, "parent": parent})
