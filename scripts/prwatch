@@ -20,17 +20,24 @@
 #                        CI, a PR's FIRST approval, deploy landings, and sweep-workflows
 #                        run completions (those are runs *I* dispatched — high signal);
 #                        QUIET (no sound, self-dismissing — replaced by the next quiet
-#                        banner and cleared at the next pass) = merged, passing,
-#                        recovered. Everything lands in notify-log.
+#                        banner and cleared at the next pass) = passing, recovered,
+#                        deploy enqueued. A merge itself is journal-only — it is
+#                        paperwork; the image built from it is the first real news.
+#                        Everything lands in notify-log.
 #                        Also watches dispatched workflow runs (deploys) — set
 #                          git config prwatch.sweep-workflows "owner/repo:deploy-v2.yml …"
-#                        and each of your runs notifies once when it succeeds or fails.
-#                        And tracks per-PR DEPLOY LANDING: after a PR merges it pings
-#                        again when it reaches staging, then production — a main-build
-#                        deploy whose commit contains the PR's merge (ancestry, not
-#                        time, so rollbacks and PR-branch staging tests don't false-fire).
+#                        deploy-v2 only ENQUEUES (its last step is `loopsctl deploy`,
+#                        ~10s), so its success is reported as "enqueued"; the sticky
+#                        "deployed" waits until the env actually SERVES that version.
+#                        And tracks per-PR ARTIFACT LANDING: after a PR merges it pings
+#                        when its image is built, then when staging/production serve a
+#                        commit containing the merge (ancestry via /api/build, not time,
+#                        so rollbacks and PR-branch staging tests don't false-fire).
+#                        Staging is opt-in — label the PR (prwatch.staging-label,
+#                        default "watch-staging"); production always reports.
 #                        Watched repo: git config prwatch.landing-repos "owner/repo …"
-#                        (default Loops-so/loops).
+#                        (default Loops-so/loops). Env probes are overridable:
+#                          git config prwatch.env-url.production https://…/api/build
 #                        After a long offline gap (> PRWATCH_SWEEP_GAP_H, default 6h —
 #                        reboot, weekend) the pass's notifications collapse into ONE
 #                        "while you were away" digest instead of a per-event storm.
@@ -387,6 +394,23 @@ if [[ "${1:-}" == "--sweep" ]]; then
       print -r -- "$1"
     fi
   }
+
+  # deploy-v2's last step is `loopsctl deploy`, which only ENQUEUES onto SQS and exits
+  # (~10s) — its success never means a rollout finished. The app is the honest source:
+  # /api/build serves DD_VERSION, the image tag actually running.
+  typeset -A envurl
+  envurl[production]="https://app.loops.so/api/build"
+  envurl[staging]="https://app.l3s.email/api/build"
+  serving_version() {  # $1 env → the appVersion that env is serving right now
+    local u
+    u="$(git config prwatch.env-url.$1 2>/dev/null)" || u="${envurl[$1]:-}"
+    [[ -n "$u" ]] || return 1
+    curl -fsS -m 10 "$u" 2>/dev/null | jq -r '.version // empty' 2>/dev/null
+  }
+  version_runnum() {  # "main-20863-1" / "2026.07.21-20863-1" → 20863 (branch names hold hyphens)
+    local rn="${1%-*}"; rn="${rn##*-}"
+    [[ "$rn" == <-> ]] && print -r -- "$rn"
+  }
   # clear last pass's quiet banner — quiet notifications live one sweep interval, tops
   command -v terminal-notifier >/dev/null 2>&1 && \
     { terminal-notifier -remove "$QUIET_GROUP" </dev/null >/dev/null 2>&1 || true; }
@@ -444,8 +468,10 @@ if [[ "${1:-}" == "--sweep" ]]; then
       repo="${key%\#*}"; num="${key##*\#}"
       prstate="$(gh pr view "$num" --repo "$repo" --json state --jq .state 2>/dev/null)" || prstate=""
       if [[ "$prstate" == MERGED ]]; then
-        answered "$key" || squiet "🎉 merged" "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num"
-        merged_now+=("$key")   # hand off to deploy-landing tracking below
+        # a merge is paperwork — the image built from it is the first real news
+        "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-merged "🎉 merged" \
+          "$key — ${prevtitle[$key]:-merged}" "https://github.com/$repo/pull/$num" 2>/dev/null || true
+        merged_now+=("$key")   # hand off to build/deploy landing tracking below
         any_merged=1
       elif [[ "$prstate" != CLOSED ]]; then
         # still open (or unverifiable) yet missing from the scan — a partial gh fetch
@@ -517,10 +543,12 @@ if [[ "${1:-}" == "--sweep" ]]; then
         case "$st" in
           (success)
             if [[ "$title" =~ '^\[([a-z-]+)\]' ]] && (( ${envnewest[$wrepo:${match[1]}]:-0} > rid )); then
-              "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-superseded "deployed" \
-                "Deployed $(deploy_title "$title") — superseded by a newer ${match[1]} deploy" "$url" 2>/dev/null || true
-            else
-              salert "deployed" "Deployed $(deploy_title "$title")" "$url"
+              "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-superseded "deploy enqueued" \
+                "Enqueued $(deploy_title "$title") — superseded by a newer ${match[1]} deploy" "$url" 2>/dev/null || true
+            elif [[ "$title" =~ '^\[([a-z-]+)\][[:space:]]+deploying[[:space:]]+(.+)$' ]]; then
+              squiet "deploy enqueued" "Enqueued $(deploy_title "$title")" "$url"
+              print -r -- "${match[1]}"$'\t'"${match[2]}"$'\t'"$url"$'\t'"$now_s" \
+                >> "$HOME/.cache/prwatch/pending-deploy.tsv"
             fi ;;
           (failure|timed_out|startup_failure|cancelled)
             salert "deploy failed" "Deploy ${st//_/ } — $(deploy_title "$title")" "$url" ;;
@@ -530,13 +558,38 @@ if [[ "${1:-}" == "--sweep" ]]; then
     fi
   fi
 
-  # --- per-PR deploy landing: merged → in staging → in production --------------
-  # A merged PR has "landed" in an env once a SUCCESSFUL deploy of that env ships a
-  # build whose commit CONTAINS the PR's merge commit. Rollback-safe: the deploy
-  # version (date-<runNumber>-attempt) maps to the build-and-test run that built it,
-  # whose headSha is the deployed commit — ancestry, not timestamps, decides.
+  # --- dispatched deploys: enqueued → confirmed serving ------------------------
+  # The sticky ✅ belongs to the rollout LANDING, not to the dispatch that requested
+  # it — poll the env until it serves the version we enqueued.
+  pstate="$HOME/.cache/prwatch/pending-deploy.tsv"
+  if [[ -s "$pstate" ]]; then
+    typeset -A nowserving
+    pnew=""
+    while IFS=$'\t' read -r penv pver purl pat; do
+      [[ -n "$penv" && -n "$pver" ]] || continue
+      [[ -n "${nowserving[$penv]:-}" ]] || nowserving[$penv]="$(serving_version "$penv" || true)"
+      if [[ -n "${nowserving[$penv]}" && "${nowserving[$penv]}" == "$pver" ]]; then
+        salert "deployed" "$pver live in $penv" "$purl"
+        continue
+      fi
+      if (( now_s - ${pat:-0} > ${PRWATCH_DEPLOY_MAX_WAIT_M:-45} * 60 )); then
+        "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-stale-deploy "deploy unconfirmed" \
+          "$pver never showed up in $penv (serving ${nowserving[$penv]:-?})" "$purl" 2>/dev/null || true
+        continue
+      fi
+      pnew+="$penv"$'\t'"$pver"$'\t'"$purl"$'\t'"$pat"$'\n'
+    done < "$pstate"
+    printf '%s' "$pnew" >"$pstate"
+  fi
+
+  # --- per-PR artifact landing: merged → image built → live in an env ----------
+  # A merged PR's work exists once a SUCCESSFUL main build-and-test CONTAINS its merge
+  # commit, and is live once the env serves an image containing it. The serving
+  # appVersion maps back to the build-and-test run that produced it, whose headSha is
+  # the running commit — ancestry, not timestamps, decides (so rollbacks can't lie).
   landrepos=(${=$(git config prwatch.landing-repos 2>/dev/null || echo "Loops-so/loops")})
   lstate="$HOME/.cache/prwatch/sweep-landing.tsv"
+  stagelabel="$(git config prwatch.staging-label 2>/dev/null)" || stagelabel="watch-staging"
   # ingest PRs that merged THIS pass, recording their merge commit
   for key in ${merged_now[@]:-}; do
     [[ -n "$key" ]] || continue
@@ -546,48 +599,52 @@ if [[ "${1:-}" == "--sweep" ]]; then
     msha=$(gh pr view "$lnum" --repo "$lrepo" --json mergeCommit --jq '.mergeCommit.oid' 2>/dev/null) || msha=""
     [[ -n "$msha" ]] || continue
     ltitle=$(gh pr view "$lnum" --repo "$lrepo" --json title --jq .title 2>/dev/null) || ltitle=""
-    print -r -- "$key"$'\t'"$msha"$'\t'"$ltitle"$'\t'0$'\t'0 >> "$lstate"
+    wstag=0   # staging is opt-in — only a PR you labelled reports its staging rollout
+    gh pr view "$lnum" --repo "$lrepo" --json labels --jq '.labels[].name' 2>/dev/null \
+      | grep -qxF "$stagelabel" && wstag=1
+    print -r -- "$key"$'\t'"$msha"$'\t'"$ltitle"$'\t'0$'\t'0$'\t'0$'\t'"$wstag" >> "$lstate"
   done
   if [[ -s "$lstate" ]]; then
-    typeset -a stag prod
+    typeset -A builtsha envsha
     for lr in $landrepos; do
-      while IFS=$'\t' read -r denv dver; do
+      builtsha[$lr]=$(gh run list --repo "$lr" --workflow build-and-test.yml --branch main \
+                        --status success --limit 1 --json headSha --jq '.[0].headSha // empty' 2>/dev/null) || builtsha[$lr]=""
+      for denv in production staging; do
+        dver="$(serving_version "$denv" || true)"
         [[ -n "$dver" ]] || continue
-        rn="${dver#*-}"; rn="${rn%-*}"           # date-<runNumber>-attempt → runNumber
-        [[ "$rn" == <-> ]] || continue
-        # only MAIN builds count as a landing — a deploy of a PR-branch build is
-        # pre-merge staging-testing, not the merged code going out.
-        dsha=$(gh run list --repo "$lr" --workflow build-and-test.yml --limit 150 --json number,headSha,headBranch 2>/dev/null \
-                 | jq -r --argjson n "$rn" '.[] | select(.number==$n and .headBranch=="main") | .headSha' 2>/dev/null | head -1) || dsha=""
-        [[ -n "$dsha" ]] || continue
-        case "$denv" in (staging) stag+="$lr|$dsha";; (production) prod+="$lr|$dsha";; esac
-      done < <(gh run list --repo "$lr" --workflow deploy-v2.yml --status success --limit 25 --json displayTitle 2>/dev/null \
-                 | jq -r '.[] | (.displayTitle | capture("\\[(?<e>[a-z]+)\\] deploying (?<v>[^ ]+)")) | "\(.e)\t\(.v)"' 2>/dev/null || true)
-    done
-    stag=(${(u)stag}); prod=(${(u)prod})         # dedupe candidate deploy commits
-    _pr_in_deploy() {  # $1 repo  $2 mergeSha  $3.. list of "repo|sha" — 0 if merge is an ancestor of any
-      local mr="$1" ms="$2"; shift 2
-      local pair r s stt
-      for pair in "$@"; do
-        r="${pair%%|*}"; s="${pair#*|}"
-        [[ "$r" == "$mr" ]] || continue
-        stt=$(gh api "repos/$mr/compare/$ms...$s" --jq .status 2>/dev/null) || stt=""
-        [[ "$stt" == ahead || "$stt" == identical ]] && return 0
+        rn="$(version_runnum "$dver")"
+        [[ -n "$rn" ]] || continue
+        ekey="${lr}:${denv}"   # zsh reads a bare $var:s… as the :s modifier — key via a var
+        envsha[$ekey]=$(gh run list --repo "$lr" --workflow build-and-test.yml --limit 150 \
+                          --json number,headSha --jq "map(select(.number==$rn))[0].headSha // empty" 2>/dev/null) || envsha[$ekey]=""
       done
-      return 1
+    done
+    _contains() {  # $1 repo  $2 mergeSha  $3 candidateSha — 0 if the merge is in that commit
+      [[ -n "$3" ]] || return 1
+      local stt
+      stt=$(gh api "repos/$1/compare/$2...$3" --jq .status 2>/dev/null) || return 1
+      [[ "$stt" == ahead || "$stt" == identical ]]
     }
     lnew=""
-    while IFS=$'\t' read -r key msha title staged prodded; do
+    while IFS=$'\t' read -r key msha title built staged prodded wstag; do
       [[ -n "$key" ]] || continue
+      if [[ -z "$prodded" ]]; then   # row from before build-tracking: key msha title staged prodded
+        prodded="$staged"; staged="$built"; built=1; wstag=0
+      fi
       lrepo="${key%\#*}"; lnum="${key##*\#}"; lurl="https://github.com/$lrepo/pull/$lnum"
-      if [[ "$staged" != 1 ]] && _pr_in_deploy "$lrepo" "$msha" ${stag[@]:-}; then
-        snotify "🚀 landed in staging" "$key — $title" "$lurl"; staged=1
+      skey="${lrepo}:staging"; pkey="${lrepo}:production"
+      if [[ "$built" != 1 ]] && _contains "$lrepo" "$msha" "${builtsha[$lrepo]:-}"; then
+        snotify "📦 image built" "$key — $title" "$lurl"; built=1
       fi
-      if [[ "$prodded" != 1 ]] && _pr_in_deploy "$lrepo" "$msha" ${prod[@]:-}; then
-        snotify "🚀 landed in production" "$key — $title" "$lurl"; prodded=1
+      if [[ "$staged" != 1 ]] && _contains "$lrepo" "$msha" "${envsha[$skey]:-}"; then
+        (( wstag )) && snotify "🚀 live in staging" "$key — $title" "$lurl"
+        staged=1
       fi
-      [[ "$staged" == 1 && "$prodded" == 1 ]] && continue   # fully landed → drop from tracking
-      lnew+="$key"$'\t'"$msha"$'\t'"$title"$'\t'"$staged"$'\t'"$prodded"$'\n'
+      if [[ "$prodded" != 1 ]] && _contains "$lrepo" "$msha" "${envsha[$pkey]:-}"; then
+        snotify "🚀 live in production" "$key — $title" "$lurl"; prodded=1
+      fi
+      [[ "$built" == 1 && "$staged" == 1 && "$prodded" == 1 ]] && continue   # fully landed → drop
+      lnew+="$key"$'\t'"$msha"$'\t'"$title"$'\t'"$built"$'\t'"$staged"$'\t'"$prodded"$'\t'"$wstag"$'\n'
     done < "$lstate"
     printf '%s' "$lnew" >"$lstate"
   fi
