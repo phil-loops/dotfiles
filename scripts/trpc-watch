@@ -14,7 +14,10 @@ set -euo pipefail
 root=$(git rev-parse --show-toplevel 2>/dev/null) || {
   echo "trpc-watch: not in a git repo" >&2; exit 1
 }
-[[ -f "$root/tsconfig.trpc-types.json" ]] || {
+# moved under typescript/ by loops PR #9599; a pre-split checkout still has it at the root.
+proj="$root/typescript/tsconfig.trpc-types.json"
+[[ -f "$proj" ]] || proj="$root/tsconfig.trpc-types.json"
+[[ -f "$proj" ]] || {
   echo "trpc-watch: no tsconfig.trpc-types.json in $root" >&2; exit 1
 }
 
@@ -42,7 +45,7 @@ tsc="$root/node_modules/.bin/tsgo"
 [[ -x "$tsc" ]] || tsc="$root/node_modules/.bin/tsc"
 [[ -x "$tsc" ]] || { echo "trpc-watch: no compiler in $root/node_modules/.bin" >&2; exit 1; }
 
-nohup "$tsc" -p "$root/tsconfig.trpc-types.json" --watch --preserveWatchOutput --pretty false \
+nohup "$tsc" -p "$proj" --watch --preserveWatchOutput --pretty false \
   >"$log" 2>&1 &
 echo "watching $root with $(basename "$tsc")  (pid $!, log: $log)"
 echo "  .gen now rebuilds whenever you touch a router — your editor stops lying"
