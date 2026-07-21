@@ -28,11 +28,15 @@ cd "$root" 2>/dev/null || fail "worktree is gone: $root"
 # own copy and flails (a scratch checkout of someone else's branch is exactly that worktree).
 tsx="$root/node_modules/.bin/tsx"
 [[ -x "$tsx" ]] || fail "no node_modules in ${root:t} — ln -s the main checkout's (or npm ci), then space-t again"
+# tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (loops PR #9599);
+# pre-split branches still carry the old single config.
+cfg=typescript/tsconfig.test.json
+[[ -f "$root/$cfg" ]] || cfg=tsconfig.node.json
 
 while pane_alive; do
   [[ -d "$root" && -f "$root/$rel" ]] || fail "worktree vanished under the watcher: $root"
   : > "$log"
-  FORCE_COLOR=1 "$tsx" --tsconfig tsconfig.node.json --test-reporter=spec --test "$rel" >> "$log" 2>&1
+  FORCE_COLOR=1 "$tsx" --tsconfig "$cfg" --test-reporter=spec --test "$rel" >> "$log" 2>&1
   pane_alive || break
   show || break
   base=$(sig)
