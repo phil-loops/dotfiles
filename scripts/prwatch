@@ -30,11 +30,11 @@
 #                        ~10s), so its success is reported as "enqueued"; the sticky
 #                        "deployed" waits until the env actually SERVES that version.
 #                        And tracks per-PR ARTIFACT LANDING: after a PR merges it pings
-#                        when its image is built, then when staging/production serve a
-#                        commit containing the merge (ancestry via /api/build, not time,
-#                        so rollbacks and PR-branch staging tests don't false-fire).
-#                        Staging is opt-in — label the PR (prwatch.staging-label,
-#                        default "watch-staging"); production always reports.
+#                        when its image is built, then when PRODUCTION serves a commit
+#                        containing the merge (ancestry via /api/build, not time, so
+#                        rollbacks and PR-branch staging tests don't false-fire).
+#                        Staging gets no per-PR tap — a staging deploy you dispatched
+#                        already stickies via the --user-filtered lane above.
 #                        Watched repo: git config prwatch.landing-repos "owner/repo …"
 #                        (default Loops-so/loops). Env probes are overridable:
 #                          git config prwatch.env-url.production https://…/api/build
@@ -587,9 +587,10 @@ if [[ "${1:-}" == "--sweep" ]]; then
   # commit, and is live once the env serves an image containing it. The serving
   # appVersion maps back to the build-and-test run that produced it, whose headSha is
   # the running commit — ancestry, not timestamps, decides (so rollbacks can't lie).
+  # Staging gets no per-PR tap: a staging rollout you dispatched already stickies via
+  # the --user-filtered deploy lane above, and dispatching IS the signal that you care.
   landrepos=(${=$(git config prwatch.landing-repos 2>/dev/null || echo "Loops-so/loops")})
-  lstate="$HOME/.cache/prwatch/sweep-landing.tsv"
-  stagelabel="$(git config prwatch.staging-label 2>/dev/null)" || stagelabel="watch-staging"
+  lstate="$HOME/.cache/prwatch/sweep-landing2.tsv"
   # ingest PRs that merged THIS pass, recording their merge commit
   for key in ${merged_now[@]:-}; do
     [[ -n "$key" ]] || continue
@@ -599,25 +600,21 @@ if [[ "${1:-}" == "--sweep" ]]; then
     msha=$(gh pr view "$lnum" --repo "$lrepo" --json mergeCommit --jq '.mergeCommit.oid' 2>/dev/null) || msha=""
     [[ -n "$msha" ]] || continue
     ltitle=$(gh pr view "$lnum" --repo "$lrepo" --json title --jq .title 2>/dev/null) || ltitle=""
-    wstag=0   # staging is opt-in — only a PR you labelled reports its staging rollout
-    gh pr view "$lnum" --repo "$lrepo" --json labels --jq '.labels[].name' 2>/dev/null \
-      | grep -qxF "$stagelabel" && wstag=1
-    print -r -- "$key"$'\t'"$msha"$'\t'"$ltitle"$'\t'0$'\t'0$'\t'0$'\t'"$wstag" >> "$lstate"
+    print -r -- "$key"$'\t'"$msha"$'\t'"$ltitle"$'\t'0$'\t'0 >> "$lstate"
   done
   if [[ -s "$lstate" ]]; then
     typeset -A builtsha envsha
     for lr in $landrepos; do
       builtsha[$lr]=$(gh run list --repo "$lr" --workflow build-and-test.yml --branch main \
                         --status success --limit 1 --json headSha --jq '.[0].headSha // empty' 2>/dev/null) || builtsha[$lr]=""
-      for denv in production staging; do
-        dver="$(serving_version "$denv" || true)"
-        [[ -n "$dver" ]] || continue
+      dver="$(serving_version production || true)"
+      if [[ -n "$dver" ]]; then
         rn="$(version_runnum "$dver")"
-        [[ -n "$rn" ]] || continue
-        ekey="${lr}:${denv}"   # zsh reads a bare $var:s… as the :s modifier — key via a var
-        envsha[$ekey]=$(gh run list --repo "$lr" --workflow build-and-test.yml --limit 150 \
-                          --json number,headSha --jq "map(select(.number==$rn))[0].headSha // empty" 2>/dev/null) || envsha[$ekey]=""
-      done
+        if [[ -n "$rn" ]]; then
+          envsha[$lr]=$(gh run list --repo "$lr" --workflow build-and-test.yml --limit 150 \
+                          --json number,headSha --jq "map(select(.number==$rn))[0].headSha // empty" 2>/dev/null) || envsha[$lr]=""
+        fi
+      fi
     done
     _contains() {  # $1 repo  $2 mergeSha  $3 candidateSha — 0 if the merge is in that commit
       [[ -n "$3" ]] || return 1
@@ -626,25 +623,17 @@ if [[ "${1:-}" == "--sweep" ]]; then
       [[ "$stt" == ahead || "$stt" == identical ]]
     }
     lnew=""
-    while IFS=$'\t' read -r key msha title built staged prodded wstag; do
+    while IFS=$'\t' read -r key msha title built prodded; do
       [[ -n "$key" ]] || continue
-      if [[ -z "$prodded" ]]; then   # row from before build-tracking: key msha title staged prodded
-        prodded="$staged"; staged="$built"; built=1; wstag=0
-      fi
       lrepo="${key%\#*}"; lnum="${key##*\#}"; lurl="https://github.com/$lrepo/pull/$lnum"
-      skey="${lrepo}:staging"; pkey="${lrepo}:production"
       if [[ "$built" != 1 ]] && _contains "$lrepo" "$msha" "${builtsha[$lrepo]:-}"; then
         snotify "📦 image built" "$key — $title" "$lurl"; built=1
       fi
-      if [[ "$staged" != 1 ]] && _contains "$lrepo" "$msha" "${envsha[$skey]:-}"; then
-        (( wstag )) && snotify "🚀 live in staging" "$key — $title" "$lurl"
-        staged=1
-      fi
-      if [[ "$prodded" != 1 ]] && _contains "$lrepo" "$msha" "${envsha[$pkey]:-}"; then
+      if [[ "$prodded" != 1 ]] && _contains "$lrepo" "$msha" "${envsha[$lrepo]:-}"; then
         snotify "🚀 live in production" "$key — $title" "$lurl"; prodded=1
       fi
-      [[ "$built" == 1 && "$staged" == 1 && "$prodded" == 1 ]] && continue   # fully landed → drop
-      lnew+="$key"$'\t'"$msha"$'\t'"$title"$'\t'"$built"$'\t'"$staged"$'\t'"$prodded"$'\t'"$wstag"$'\n'
+      [[ "$built" == 1 && "$prodded" == 1 ]] && continue   # fully landed → drop
+      lnew+="$key"$'\t'"$msha"$'\t'"$title"$'\t'"$built"$'\t'"$prodded"$'\n'
     done < "$lstate"
     printf '%s' "$lnew" >"$lstate"
   fi
