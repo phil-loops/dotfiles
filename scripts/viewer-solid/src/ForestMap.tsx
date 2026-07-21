@@ -12,7 +12,7 @@
 //
 // Fully self-contained (own class names + <style>): drops into App.tsx with one
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
-import { createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
 import { computeForestLayout, lumen, NODE_H, leafOf, isGhostId, nodeW } from "./forestLayout";
 import { stationOf, type Station } from "./nodeStation";
 
@@ -146,6 +146,16 @@ export function ForestMap(props: {
     return m === "drop" ? "⊘ drop & rewire →" : m === "forward" ? "▸ ready forest →" : "✦ merged ghost";
   };
   const pillW = (s: string): number => [...s].length * 6.9 + 18;
+  const fireContract = (id: string) => {
+    setContracting(id);
+    setContractErr(null);
+    Promise.resolve(props.onContract!(id))
+      .then((r) => {
+        const j = r as { ok?: boolean; err?: string } | undefined;
+        if (j && j.ok === false) setContractErr({ id, err: j.err || "contract failed" });
+      })
+      .finally(() => setContracting(null));
+  };
 
   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
   // the project's leaves on main in an ephemeral ref (read-only, never pushed) — does the whole
@@ -412,6 +422,18 @@ export function ForestMap(props: {
   };
 
   const layout = createMemo(() => computeForestLayout(model()));
+  // auto-contract (Phil, 2026-07-20): a merged, fully-contractable node has exactly one correct
+  // resolution, so fire the drop on sight instead of waiting for the pill click — narrower than
+  // ambient auto-rebase, which stays rejected. One node at a time; a failure parks on the pill
+  // (⊘ drop failed ↻, click to retry) and is never auto-retried.
+  const autoTried = new Set<string>();
+  createEffect(() => {
+    if (!props.onContract || contracting()) return;
+    const ghost = layout().list.find((n) => !autoTried.has(n.id) && ghostMode(n.id) === "drop");
+    if (!ghost) return;
+    autoTried.add(ghost.id);
+    fireContract(ghost.id);
+  });
   const litEdge = (from: string, to: string) => {
     const s = spot();
     return !!s && s.lit.has(from) && s.lit.has(to);
@@ -723,14 +745,7 @@ export function ForestMap(props: {
                           if (contracting() === n.id) return;
                           const m = ghostMode(n.id);
                           if (m === "drop") {
-                            setContracting(n.id);
-                            setContractErr(null);
-                            Promise.resolve(props.onContract!(n.id))
-                              .then((r) => {
-                                const j = r as { ok?: boolean; err?: string } | undefined;
-                                if (j && j.ok === false) setContractErr({ id: n.id, err: j.err || "contract failed" });
-                              })
-                              .finally(() => setContracting(null));
+                            fireContract(n.id);
                           } else if (m === "forward") {
                             // not droppable alone — run the whole ready motion: contract merged
                             // work into fresh main FIRST, then restack survivors root-down.

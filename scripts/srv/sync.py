@@ -669,6 +669,30 @@ def _rebase_tree(branch, onto, cut):
     return ""
 
 
+def _refresh_bodies(branch):
+    """Regenerate BRANCH's commit-body forest section (stack-commit-body --apply) and walk its
+    descendants, reseating each child whose base the re-message rewrote. A reseat replays onto
+    an identical tree, so it can't conflict. Best-effort by design: a refused rewrite (pushed
+    tip, not in a project) or an unseatable child is left for the push-prep / restack backstops.
+    Returns the branches whose bodies were rewritten."""
+    notes = []
+    old = ctx.run(["git", "rev-parse", branch]).stdout.strip()
+    ctx.run([os.path.join(ctx.SCRIPTS, "stack-commit-body"), branch, "--apply"])
+    new = ctx.run(["git", "rev-parse", branch]).stdout.strip()
+    if new != old:
+        notes.append(branch)
+    for c in _children_of(branch):
+        if new != old:
+            c_cut = ctx.run(["git", "merge-base", old, c]).stdout.strip()
+            if c_cut and ctx.run(["git", "merge-base", "--is-ancestor", c_cut, branch]).returncode != 0:
+                status, _ = _rebase_onto(c, branch, c_cut)
+                if status != "clean":
+                    continue
+                ctx.run(["git", "config", f"stack-branch.{c}.base", new])
+        notes += _refresh_bodies(c)
+    return notes
+
+
 def _contract(branch):
     """Drop an already-merged branch and rewire its dependents onto its parent (== main for a
     syncable root). Each child REBASES off the dropped tip before its config moves — rewiring
@@ -693,7 +717,7 @@ def _contract(branch):
         if cut and ctx.run(["git", "merge-base", "--is-ancestor", cut, onto]).returncode != 0:
             err = _rebase_tree(k, onto, cut)
             if err:
-                return f"{err}; {branch} left standing", kids, [], parent
+                return f"{err}; {branch} left standing", kids, [], parent, []
         ctx.run(["git", "config", f"stack-branch.{k}.parent", parent])
         ctx.run(["git", "config", f"stack-branch.{k}.base", base])
     # Fan-in dependents: the required base landed in main, so the edge is now redundant — drop it,
@@ -707,8 +731,9 @@ def _contract(branch):
     ctx.run(["git", "branch", "-D", branch])
     proj = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
             or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
-    for key in ("parent", "project", "base"):
-        ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.{key}"])
+    # the whole section, not named keys — a straggler like gates-green-tree otherwise outlives
+    # the branch (stack-branch.* sits outside the branch.<n>.* namespace git GCs on branch -D)
+    ctx.run(["git", "config", "--remove-section", f"stack-branch.{branch}"])
     # Sweep EVERY project's branch list, not just .project's — a dangling entry under some
     # other project is exactly the phantom-forest rot contraction exists to clean.
     projs = {proj} if proj else set()
@@ -723,7 +748,11 @@ def _contract(branch):
         # (interest/epic included) so no empty forest card lingers.
         if not ctx.run(["git", "config", "--get-all", f"stack-project.{p}.branch"]).stdout.strip():
             ctx.run(["git", "config", "--remove-section", f"stack-project.{p}"])
-    return "", kids, deps, parent
+    # bodies LAST: the plan reads git config, so it must see the post-contraction forest
+    refreshed = []
+    for k in kids:
+        refreshed += _refresh_bodies(k)
+    return "", kids, deps, parent, refreshed
 
 
 def post_sync(req, raw):
@@ -781,13 +810,15 @@ def post_contract(req, raw):
         req._send(409, json.dumps(
             {"ok": False, "err": "not already-merged — refusing to drop a branch with unmerged work"}))
         return
-    err, kids, deps, parent = _contract(branch)
+    err, kids, deps, parent, refreshed = _contract(branch)
     if err:
         req._send(409, json.dumps({"ok": False, "err": err}))
         return
     parts = []
     if kids:
         parts.append(f"moved {len(kids)} child{'' if len(kids) == 1 else 'ren'} onto {parent}")
+    if refreshed:
+        parts.append(f"refreshed {len(refreshed)} commit bod{'y' if len(refreshed) == 1 else 'ies'}")
     if deps:
         parts.append(f"dropped the requires edge on {len(deps)} integrator{'' if len(deps) == 1 else 's'}")
     summary = f"dropped {branch}" + (f"; {', '.join(parts)}" if parts else " (no dependents)")
