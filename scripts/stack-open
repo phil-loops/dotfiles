@@ -134,6 +134,16 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   local b="$1" ex dir
   ex=$(existing_worktree "$b"); if [[ -n "$ex" ]]; then echo "$ex"; return; fi
   mkdir -p "$SCRATCH"; dir="$SCRATCH/${b//\//_}"
+  # Zombie: the dir survived but its .git gitfile didn't (prune racing a background --prepare).
+  # Every `git -C "$dir"` below then fails into /dev/null and the marker write resolves to
+  # `/stack-open-branch` — "read-only file system", a 500, and the viewer's useless open-failed
+  # toast. Park it (never delete: it may hold unpushed scratch edits) and rebuild from scratch.
+  if [[ -d "$dir" ]] && ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    local parked="${dir}.zombie-$(date +%Y%m%d%H%M%S)"
+    mv "$dir" "$parked" 2>/dev/null \
+      && echo "stack-open: $dir was no longer a worktree — parked at $parked, recreating" >&2
+    git worktree prune 2>/dev/null || true
+  fi
   if [[ -d "$dir" ]]; then
     # already at the branch's tip → skip the (~0.3s) re-checkout; only sync when it moved.
     # Retry until HEAD actually matches the tip: a concurrent prepare (background warm) holds
@@ -289,7 +299,7 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
              # LSP picker entries (references, symbols) render project-relative instead of absolute.
   local dir="${1:A}" line="$2" file="${3:A}"
   [[ -n "$file" ]] || return 1
-  local win pane
+  local win pane retire=""
   # Target the PANE running hx, not the window: window-targeted keys land in the window's
   # ACTIVE pane, which after a space-t is often the test pager — ':open …' typed into less.
   # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
@@ -324,10 +334,12 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
           echo "stack-open: a lost prompt typed into the buffer — undone" >&2
         fi
         echo "stack-open: review-hx pane wouldn't reach a known state; opening cold" >&2
-        pane=""
+        pane=""; retire=1
       fi
       hx_unlock
     else
+      # Busy, not broken: someone else's batch has the pane. Retiring it here would orphan a
+      # perfectly good warm Helix and send every later open to a rival window.
       echo "stack-open: another open is still driving review-hx; opening cold" >&2
       pane=""
     fi
@@ -337,9 +349,11 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
     # aims at the fresh window instead of the same stuck pane — that pileup is how one bad
     # open became four review-hx windows.
     local stale
-    for stale in ${(f)"$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1}')"}; do
-      [[ -n "$stale" ]] && tmux rename-window -t "${SESSION}:${stale}" review-hx-stale 2>/dev/null || true
-    done
+    if [[ -n "$retire" ]]; then
+      for stale in ${(f)"$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1}')"}; do
+        [[ -n "$stale" ]] && tmux rename-window -t "${SESSION}:${stale}" review-hx-stale 2>/dev/null || true
+      done
+    fi
     local target="$file"; [[ -n "$line" ]] && target="${file}:${line}"
     tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
