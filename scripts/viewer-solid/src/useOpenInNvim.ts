@@ -9,7 +9,13 @@ export function useOpenInNvim(deps: { nodeRef: () => string }) {
   const [hover, setHover] = createSignal<{ path: string; line: number } | null>(null);
   const [flash, setFlash] = createSignal("");
   let flashT: ReturnType<typeof setTimeout>;
-  const note = (m: string) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), 1900); };
+  const note = (m: string, ms = 1900) => { setFlash(m); clearTimeout(flashT); flashT = setTimeout(() => setFlash(""), ms); };
+  // stack-open reports one-line diagnoses on stderr ("'x.ts' not in <branch>", a parked zombie
+  // worktree, a line past EOF) and the server forwards them — showing them beats "see server",
+  // which sent you to a log the open path never writes to.
+  const why = (r: { err?: string; out?: string }) =>
+    ((r.err || r.out || "").trim().split("\n").filter(Boolean).pop() || "open failed")
+      .replace(/^stack-open: /, "").slice(0, 140);
   const openInNvim = (path: string, line: number | null) => {
     if (!canMutate) return undefined; // static snapshot: no live nvim to open into
     // no auto-clear on this one — the "opening…" chip holds until the result note replaces it
@@ -21,7 +27,7 @@ export function useOpenInNvim(deps: { nodeRef: () => string }) {
       body: JSON.stringify({ branch: deps.nodeRef(), path, ...(line != null ? { pos: String(line) } : {}) }),
     })
       .then((r) => r.json())
-      .then((r) => note(r.ok ? `⌁ ${leaf(path)}:${line ?? ""} → nvim` : "⌁ open failed — see server"))
+      .then((r) => (r.ok ? note(`⌁ ${leaf(path)}:${line ?? ""} → nvim`) : note(`⌁ ${why(r)}`, 6000)))
       .catch(() => note("⌁ open failed — server unreachable"));
   };
   const lineAt = (e: MouseEvent): { path: string; line: number } | null => {
