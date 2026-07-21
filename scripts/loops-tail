@@ -8,7 +8,9 @@
 #   loops-tail -a | --all …    include dead servers' leftover logs (post-mortem tail)
 #
 # Sources (discovered live):
-#   server            the :3000 dev server (/tmp/loops-dev.log, written by loops-restart's tee)
+#   server            the whole dev stack, merged (/tmp/loops-dev.log)
+#   dev:<name>        one dev app split out by loops-dev-demux (/tmp/loops-dev.d/<name>.log)
+#   svc:<name>        a sidecar loops-doctor runs in its own tmux session, e.g. svc:jobs-worker
 #   preview:<name>    a loops-preview side server (/tmp/loops-preview-<name>.log)
 #   docker:<name>     a running container (docker logs -f)
 #
@@ -27,6 +29,8 @@ alive() { tmux has-session -t "$1" 2>/dev/null; }
 session_for() {
   case "$1" in
     server)    echo "loops-dev" ;;
+    dev:*)     echo "loops-dev" ;;
+    svc:*)     echo "loops-${1#svc:}" ;;
     preview:*) echo "loops-preview-${1#preview:}" ;;
     *)         return 1 ;;
   esac
@@ -35,6 +39,8 @@ session_for() {
 log_for() {
   case "$1" in
     server)    echo "/tmp/loops-dev.log" ;;
+    dev:*)     echo "/tmp/loops-dev.d/${1#dev:}.log" ;;
+    svc:*)     echo "/tmp/loops-${1#svc:}.log" ;;
     preview:*) echo "/tmp/loops-preview-${1#preview:}.log" ;;
     *)         return 1 ;;
   esac
@@ -44,6 +50,25 @@ sources() {
   if [ -f /tmp/loops-dev.log ] && { [ "$ALL" = 1 ] || alive loops-dev; }; then
     echo "server"
   fi
+  # per-app splits written by loops-dev-demux; all live/die with the loops-dev session
+  if [ "$ALL" = 1 ] || alive loops-dev; then
+    for f in /tmp/loops-dev.d/*.log; do
+      [ -e "$f" ] || continue
+      n="${f#/tmp/loops-dev.d/}"
+      echo "dev:${n%.log}"
+    done
+  fi
+  # sidecars loops-doctor runs outside the dev stack (jobs worker, mail-schedule):
+  # each is its own `loops-<name>` tmux session redirecting to /tmp/loops-<name>.log.
+  for f in /tmp/loops-*.log; do
+    [ -e "$f" ] || continue
+    b="${f#/tmp/}"
+    n="${b%.log}"
+    case "$n" in loops-dev|loops-preview-*) continue ;; esac
+    if [ "$ALL" = 1 ] || alive "$n"; then
+      echo "svc:${n#loops-}"
+    fi
+  done
   for f in /tmp/loops-preview-*.log; do
     [ -e "$f" ] || continue
     b="${f#/tmp/}"
@@ -72,9 +97,9 @@ list() {
 
 cmd_for() {
   case "$1" in
-    server|preview:*) echo "tail -n $TAIL_N -F $(log_for "$1")" ;;
-    docker:*)         echo "docker logs -f --tail $TAIL_N ${1#docker:}" ;;
-    *)                return 1 ;;
+    server|dev:*|svc:*|preview:*) echo "tail -n $TAIL_N -F $(log_for "$1")" ;;
+    docker:*)                     echo "docker logs -f --tail $TAIL_N ${1#docker:}" ;;
+    *)                            return 1 ;;
   esac
 }
 
@@ -140,7 +165,7 @@ for s in ${picked[@]+"${picked[@]}"}; do
   # bare `task dev`: it's live but nothing tees its output into the log file.
   if sess="$(session_for "$s" 2>/dev/null)" && ! alive "$sess"; then
     if [ ! -f "$(log_for "$s")" ]; then
-      warn "'$s' has no log file — start it via loops-restart / loops-preview"; continue
+      warn "'$s' has no log file — start it via loops-restart / loops-doctor / loops-preview"; continue
     fi
     if [ "$s" = "server" ] && lsof -ti :3000 >/dev/null 2>&1; then
       warn "something IS on :3000, but it wasn't started via loops-restart — this log is from an older run"
