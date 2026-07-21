@@ -9,7 +9,7 @@ import type { Project, PR } from "./types";
 // The forest bands rank by shipping momentum; this ranks by Phil's explicit priority. A short
 // pinned list (stack-project.<p>.focus N), reordered two ways: pointer-drag the grip (rows glide
 // out of the way), or right-click a row for the reprioritize menu (to top / up / set position).
-// Pin/unpin lives in the forest-card ctx menu; this owns the ordering (→ POST /focus {order}).
+// Pinning is a drag up from the bands; unpinning is drag-sideways or the menu's "drop from focus".
 const pkey = (p: Project) => (p.repo || "loops") + "/" + p.name;
 
 const CTX_MENU = "fixed z-[91] max-h-[calc(100dvh-16px)] min-w-[150px] overflow-y-auto overscroll-contain rounded-[8px] border border-rule bg-[#1b1815] p-[4px] shadow-[0_8px_26px_rgba(0,0,0,0.45)]";
@@ -253,6 +253,10 @@ export function FocusLane(props: {
               </button>
               <button class={`ctx-item ${CTX_ITEM} py-[5px] ${CTX_OFF}`} disabled={m().idx === pinned().length - 1} onClick={() => { moveByIndex(m().idx, m().idx + 1); setMenu(null); }}>
                 <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>↓</span><span class={`ctx-lbl ${CTX_LBL}`}>move down</span>
+              </button>
+              <button class={`ctx-item ctx-unpin ${CTX_ITEM} mt-[4px] border-t border-rule py-[5px] pt-[7px] text-ink-dim hover:bg-vellum-edge hover:text-del`}
+                onClick={() => { unpin(pinned()[m().idx]); setMenu(null); }}>
+                <span class={`ctx-pips ${CTX_PIPS} text-del`}>✕</span><span class={`ctx-lbl ${CTX_LBL}`}>drop from focus</span>
               </button>
               <div class={`ctx-head ${CTX_HEAD}`}>set position</div>
               <For each={pinned().map((_, i) => i)}>
