@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# loops-dev-demux — fan the dev stack's prefixed stdout into per-app logs.
+#
+# Drop-in for `tee <combined>` in loops-restart's launch pipe. go-task's
+# `--output=prefixed` tags every line `[<task>] …`; we split those into one
+# file per task so loops-tail can pick a single service. Everything still lands
+# in <combined> (the `server` source) and is echoed to stdout (the tmux pane),
+# so nothing that worked before changes.
+#
+#   … | loops-dev-demux /tmp/loops-dev.log
+#     → /tmp/loops-dev.log             every line (combined, unchanged)
+#     → /tmp/loops-dev.d/<label>.log   the label's own lines, prefix stripped
+#
+# Per-app files live in a <combined>.d/ dir of their own, NOT /tmp/loops-dev-*.log
+# — that flat namespace already holds per-worktree combined logs, which the glob
+# would wrongly pick up as services.
+#
+# go-task's command echoes go to stderr as `task: [name] …` (leading `task:`)
+# and are merged in by the caller's 2>&1 — they don't start with `[`, so they
+# stay in the combined log only, never a per-app file. A leading `dev:` on the
+# label is dropped so `[dev:jobs]` → jobs.log (source `dev:jobs`), not `dev-jobs`.
+set -uo pipefail
+
+combined="${1:?usage: loops-dev-demux <combined-log>}"
+svcdir="${combined%.log}.d"      # /tmp/loops-dev.log → /tmp/loops-dev.d/<label>.log
+
+: > "$combined"                  # fresh combined log, matching tee's truncate
+mkdir -p "$svcdir"
+rm -f "$svcdir"/*.log 2>/dev/null || true   # drop last run's per-app logs
+
+exec awk -v combined="$combined" -v svcdir="$svcdir" '
+  {
+    print                        # → stdout (tmux pane), live
+    print > combined
+    if (match($0, /^\[[^]]+\] /)) {
+      lbl  = substr($0, 2, RLENGTH - 3)      # text between the [ ] (drop "[", "] ")
+      rest = substr($0, RLENGTH + 1)         # the line minus its "[label] " prefix
+      sub(/^dev:/, "", lbl)                  # [dev:jobs] → jobs, so file is jobs.log
+      gsub(/[^A-Za-z0-9._-]/, "-", lbl)      # slugify (":" "/" spaces → "-")
+      print rest > (svcdir "/" lbl ".log")
+    }
+    fflush()                     # flush every open output so tails stay live
+  }
+'
