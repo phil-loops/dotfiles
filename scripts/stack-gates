@@ -100,7 +100,7 @@ def repo_local(cmd, cwd):
 
 
 def ensure_tsgo_link(cwd):
-    # tsgo is not an npm dep — a fresh `npm install` wipes the hand-made link and the gate silently falls back to tsc.
+    # tsgo is not an npm dep — a fresh `npm install` wipes the hand-made link and the typecheck gate goes red.
     bindir = os.path.join(cwd, "node_modules", ".bin")
     if not os.path.isdir(bindir) or os.path.exists(os.path.join(bindir, "tsgo")):
         return
@@ -132,19 +132,25 @@ def default_gates(cwd):
               f'miss="$(git diff HEAD..origin/main --name-only -- {DEPLOY_CRITICAL})"; '
               '[ -z "$miss" ] && exit 0; '
               'echo "behind origin/main, missing deploy-critical:"; echo "$miss"; exit 1')]
-    # Typecheck with the repo-PINNED compiler: a global tsgo dev build rejects
-    # configs the repo's own tsc accepts (e.g. moduleResolution=node10 removed),
-    # which surfaces as a false "blocked, needs the laptop". Prefer repo tsgo, else tsc.
+    # Typecheck with the repo-PINNED tsgo: a global dev build rejects configs the repo's
+    # own toolchain accepts (e.g. moduleResolution=node10 removed), which surfaces as a
+    # false "blocked, needs the laptop". No tsc fallback — CI is the slow-and-exact check.
     ensure_tsgo_link(cwd)
-    typechecker = repo_local("tsgo", cwd) or repo_local("tsc", cwd)
+    tsgo = repo_local("tsgo", cwd)
     oxfmt = resolve("oxfmt", cwd)
     # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
     # branches from before the split still carry the old single config.
-    if typechecker and os.path.exists(os.path.join(cwd, "typescript/tsconfig.runtime.json")):
-        gates.append(("typecheck", f"{typechecker} --project typescript/tsconfig.runtime.json --noEmit"
-                                   f" && {typechecker} --project typescript/tsconfig.test.json --noEmit"))
-    elif typechecker and os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
-        gates.append(("typecheck", f"{typechecker} --project tsconfig.node.json --noEmit"))
+    if os.path.exists(os.path.join(cwd, "typescript/tsconfig.runtime.json")):
+        ts_projects = ["typescript/tsconfig.runtime.json", "typescript/tsconfig.test.json"]
+    elif os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
+        ts_projects = ["tsconfig.node.json"]
+    else:
+        ts_projects = []
+    if ts_projects and not tsgo:
+        gates.append(("typecheck", 'echo "no repo-local tsgo (node_modules/.bin/tsgo) — run npm install"; exit 1'))
+    elif ts_projects:
+        gates.append(("typecheck",
+                      " && ".join(f"{tsgo} --project {p} --noEmit" for p in ts_projects)))
     if oxfmt:
         gates.append((
             "format",
@@ -152,7 +158,7 @@ def default_gates(cwd):
             f"| xargs -r {oxfmt} --check",
         ))
     delta_tests = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-delta-tests")
-    if typechecker and os.path.exists(delta_tests):
+    if ts_projects and os.path.exists(delta_tests):
         gates.append(("tests", delta_tests))
     return gates
 
