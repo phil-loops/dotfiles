@@ -34,6 +34,10 @@ trusted = [
 # node:test --watch on this file's sibling .test.ts (or the buffer itself). Re-runs live
 # on every save; one reused pane, not a fresh split per press. See scripts/hx-test.
 [keys.normal.space]
+# space-n = new file beside this one: prefills `:open "<this dir>/"` with the cursor
+# inside the quotes, so you just type the name. Quotes are load-bearing — an expansion
+# ENDS an argument, so an unquoted %sh{...}/name.ts opens two files, one of them `/name.ts`.
+n = "@:open \"%sh{dirname %{buffer_name}}/\"<C-b>"
 v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
 
