@@ -1,0 +1,61 @@
+#!/bin/zsh
+# hx-rm <file> — delete the file behind a Helix buffer. Helix 25.07 has no file-delete command
+# of its own (":delete", ":remove" and ":file" all complete to nothing), so this is it.
+#
+#   space-x = ":sh hx-rm %{buffer_name}"   then :bc! to drop the now-dangling buffer
+#
+# Deletion is made RECOVERABLE rather than made hard to trigger — a destructive key you have to
+# think about is a key you fumble under time pressure, while an undoable one is safe every time:
+#   tracked file    → `git rm`, so the content stays in history (the undo line is printed)
+#   anything else   → moved to ~/.Trash, so Finder's Put Back works
+# Nothing is ever unlinked outright, which is why one keystroke is an acceptable price.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+file="${1:?usage: hx-rm <file>}"
+file="${file:A}"          # %{buffer_name} is cwd-relative
+dir="${file:h}"
+
+die(){ echo "hx-rm: $*" >&2; exit 1 }
+
+# Helix DISMISSES the :sh output popup when the binding chains a second command, so the undo line
+# a one-key delete most needs is exactly the line you never get to read ("Command run" is all the
+# statusline shows). Every deletion is therefore also appended here — `hx-rm --last` reads it back.
+LOG="${TMPDIR:-/tmp}/hx-rm-last"
+note(){ print -r -- "$(date '+%H:%M:%S')  $*" >> "$LOG"; echo "$*" }
+
+if [[ "${1:-}" == --last ]]; then
+  [[ -s "$LOG" ]] && tail -5 "$LOG" || echo "hx-rm: nothing deleted yet this session"
+  exit 0
+fi
+
+[[ -e "$file" ]] || die "${file:t} does not exist on disk (an unsaved scratch buffer? just :bc!)"
+[[ -f "$file" ]] || die "${file} is not a regular file — refusing"
+
+if git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 \
+   && git -C "$dir" ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+  root=$(git -C "$dir" rev-parse --show-toplevel)
+  rel="${file#$root/}"
+  # Does HEAD still have it? A staged-but-never-committed file has nothing to restore FROM, and
+  # saying so is the difference between "undo it" and "that content is gone".
+  in_head=1; git -C "$root" cat-file -e "HEAD:${rel}" 2>/dev/null || in_head=0
+  # -f because a file with local edits is still safe to remove: those edits are the only thing
+  # lost, and the buffer you are deleting is where they came from.
+  git -C "$root" rm -f -q -- "$rel" || die "git rm failed for $rel"
+  if (( in_head )); then
+    # The deletion is STAGED, not committed, so the undo needs no sha — HEAD still has the file.
+    note "✂ git rm ${rel}  —  undo: git checkout HEAD -- ${rel}"
+  else
+    note "✂ git rm ${rel}  —  was never committed; that content is gone"
+  fi
+  exit 0
+fi
+
+# Not tracked: git cannot get it back, so hand it to the Trash, which can. Collision-safe —
+# ~/.Trash is one flat namespace shared with every other delete on the machine.
+trash="$HOME/.Trash"
+[[ -d "$trash" ]] || die "no ~/.Trash to move ${file:t} into — refusing to unlink it outright"
+dest="$trash/${file:t}"
+[[ -e "$dest" ]] && dest="$trash/${file:r:t}-$(date +%Y%m%d%H%M%S).${file:e}"
+mv -- "$file" "$dest" || die "could not move ${file:t} to the Trash"
+note "🗑 ${file:t} → Trash (untracked; Finder Put Back restores it)"
