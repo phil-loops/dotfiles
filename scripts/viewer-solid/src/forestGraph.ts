@@ -18,16 +18,24 @@ export const indexById = (list: SpineNode[]): Spine => {
 
 // Mirror a server-side contraction: the node goes, its children inherit its nearest surviving
 // ancestor, and any `requires` naming it loses that edge — the same rewire /contract performs.
+// depth re-derives from the new parent line: dropping a base promotes its children to roots,
+// and a root that still carries the old depth stops answering to `depth === 0`.
 export function contractNodes(list: SpineNode[], gone: ReadonlySet<string>): SpineNode[] {
   if (!gone.size) return list;
   const parentOf = new Map(list.map((n) => [n.id, n.parent]));
   const heir = (p: string | undefined, guard = 0): string | undefined =>
     p && gone.has(p) && guard < 64 ? heir(parentOf.get(p), guard + 1) : p;
-  return list.filter((n) => !gone.has(n.id)).map((n) => ({
+  const kept = list.filter((n) => !gone.has(n.id)).map((n) => ({
     ...n,
     parent: heir(n.parent),
     ...(n.requires ? { requires: n.requires.filter((r) => !gone.has(r)) } : {}),
   }));
+  const keptById = new Map(kept.map((n) => [n.id, n]));
+  const depthOf = (n: (typeof kept)[number], guard = 0): number => {
+    const p = n.parent ? keptById.get(n.parent) : undefined;
+    return p && guard < 64 ? depthOf(p, guard + 1) + 1 : 0;
+  };
+  return kept.map((n) => ({ ...n, depth: depthOf(n) }));
 }
 
 // heads: the TIP of each substack — a branch nothing else builds on (nobody's parent,
