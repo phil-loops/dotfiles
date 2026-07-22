@@ -75,13 +75,16 @@
   // repo-pinned API base: the page is served at [/<repo>]/preview-wait, so everything before
   // the last segment is the prefix the server reads the repo from.
   const base = location.pathname.replace(/\/preview-wait$/, "");
-  const branch = new URLSearchParams(location.search).get("branch") || "";
+  const params = new URLSearchParams(location.search);
+  const branch = params.get("branch") || "";
+  const project = params.get("project") || ""; // ✦integration instead of a branch: served from the playground worktree
+  const what = project ? "✦ " + project : branch;
   const t0 = Date.now();
   let dir = "", url = "", parked = false;
 
   const $ = (id) => document.getElementById(id);
-  $("branch").textContent = branch;
-  document.title = "warming " + branch + "…";
+  $("branch").textContent = what;
+  document.title = "warming " + what + "…";
   setInterval(() => { $("clock").textContent = Math.round((Date.now() - t0) / 1000) + "s"; }, 1000);
 
   const setState = (label, kind) => {
@@ -144,12 +147,15 @@
   $("anyway").onclick = () => { if (url) { location.replace(url); } };
 
   (async () => {
-    if (!branch) { setState("no branch given", "err"); return; }
-    setState("materialising worktree…");
-    const r = await post("/preview", { branch }).catch((e) => ({ ok: false, err: String(e) }));
+    if (!branch && !project) { setState("no branch given", "err"); return; }
+    setState(project ? "merging the leaves…" : "materialising worktree…");
+    const r = await (project ? post("/preview-integration", { project }) : post("/preview", { branch })).catch((e) => ({ ok: false, err: String(e) }));
     if (!r.ok) { setState("could not start", "err"); park(r.err); $("restart").style.display = "none"; return; }
     dir = r.dir; url = r.url;
-    $("meta").textContent = (r.reused ? "attached to the running server" : "started") + " on :" + r.port + "  ·  " + dir.split("/").pop();
+    // a playground with tracked edits is never refreshed onto the latest integration — say so,
+    // or you review a build that silently isn't the forest's tip.
+    const stale = r.dirty ? "  ·  ⚠ playground has local edits — serving those, not the latest integration" : "";
+    $("meta").textContent = (r.reused ? "attached to the running server" : "started") + " on :" + r.port + "  ·  " + dir.split("/").pop() + stale;
     setState(r.reused ? "checking health…" : "booting… (clean build, ~20–60s)");
     watch(); tailLog();
     setInterval(watch, 2000);
