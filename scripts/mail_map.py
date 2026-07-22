@@ -18,10 +18,12 @@ lines it points at and the linter goes red the moment they change.
 import hashlib
 import os
 import re
+import subprocess
 
 HOME = os.path.expanduser("~")
 PAGES_DIR = os.environ.get("MAIL_MAP_PAGES", os.path.join(HOME, ".dotfiles", "mail-map"))
 REPO = os.environ.get("MAIL_MAP_REPO", os.path.join(HOME, "coding", "loops"))
+REF = os.environ.get("MAIL_MAP_REF", "origin/main")
 
 WORD_BUDGET = 260
 CITE_RE = re.compile(r"\[([^\]]+)\]\(src:([^)\s]+)\)")
@@ -87,12 +89,28 @@ def citations(body):
 _SYMBOL_RE = "(?:export\\s+)?(?:default\\s+)?(?:async\\s+)?(?:function|const|let|class|type|interface)\\s+{name}\\b"
 
 
+_cache = {}
+
+
 def _read(path):
-    full = os.path.join(REPO, path)
-    if not os.path.exists(full):
-        raise Problem(f"no such file in the checkout: {path}")
-    with open(full, encoding="utf-8", errors="replace") as fh:
-        return fh.read().splitlines()
+    """The file at REF — read from git, not from disk.
+
+    Any worktree of the repo will do, because the object database is shared. Reading
+    the working tree instead would make a citation mean something different depending
+    on which branch someone happened to have checked out when they opened the page.
+    """
+    if path in _cache:
+        return _cache[path]
+    proc = subprocess.run(
+        ["git", "-C", REPO, "show", f"{REF}:{path}"],
+        capture_output=True,
+        text=True,
+        errors="replace",
+    )
+    if proc.returncode != 0:
+        raise Problem(f"not in {REF}: {path}")
+    _cache[path] = proc.stdout.splitlines()
+    return _cache[path]
 
 
 def _block_end(lines, start):
@@ -175,6 +193,7 @@ def source_slice(anchor, context=3):
         "from": top,
         "text": "\n".join(lines[top - 1 : bottom]),
         "kind": hit["kind"],
+        "ref": REF,
     }
 
 
