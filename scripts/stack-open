@@ -88,13 +88,23 @@ live_cwds(){   # every live process's cwd, computed once (~0.3s). Reclaiming und
   print -r -- "$_live_cwds"
 }
 in_use(){   # is <dir>, or anything under it, some live process's cwd?
-  local real; real=$(cd "$1" 2>/dev/null && pwd -P) || real="$1"
-  case $'\n'"$(live_cwds)"$'\n' in
+  # An empty probe means lsof failed (it lives in /usr/sbin, off some PATHs), not that nothing
+  # is running — the guard has to fail CLOSED, or a machine without lsof silently reclaims
+  # everything, including the worktree a warm Helix is sitting in.
+  local real cwds; cwds=$(live_cwds)
+  [[ -n "$cwds" ]] || return 0
+  real=$(cd "$1" 2>/dev/null && pwd -P) || real="$1"
+  case $'\n'"$cwds"$'\n' in
     *$'\n'"$real"$'\n'*|*$'\n'"$real"/*) return 0;;
   esac
   return 1
 }
 idle_dirs(){ find "$SCRATCH" -maxdepth 1 -mindepth 1 -type d -mtime +"$1" 2>/dev/null }
+ours(){   # $SCRATCH is one shared directory but stack-open runs from whatever repo you're in —
+          # only reclaim from worktrees of THIS repo, whose node_modules we know the source of
+  [[ "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" == "$_common_dir" ]]
+}
+_common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || _common_dir=""
 human_kb(){ (( $1 >= 1048576 )) && printf '%.1fG' $(( $1 / 1048576.0 )) || printf '%dM' $(( $1 / 1024 )) }
 
 # What a scratch worktree may hold that stack-open can always make again. node_modules belongs
@@ -103,27 +113,33 @@ human_kb(){ (( $1 >= 1048576 )) && printf '%.1fG' $(( $1 / 1048576.0 )) || print
 strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees nobody has opened
                # lately, but KEEP the checkout: a stripped worktree still opens instantly.
   [[ -d "$SCRATCH" ]] || return 0
-  local days="$1" dry="${2:-}" d kb total=0 nm
+  local days="$1" dry="${2:-}" d kb total=0 nm mine=0
   nm="$(main_checkout)/node_modules"
   for d in ${(f)"$(idle_dirs "$days")"}; do
     [[ -n "$d" ]] || continue
+    ours "$d" || continue
+    mine=$(( mine + 1 ))
     in_use "$d" && continue
     # only when the symlink we'd put back would actually resolve — never trade 1.5G of working
     # deps for a dangling link
     if [[ -d "$d/node_modules" && ! -L "$d/node_modules" && -d "$nm" ]]; then
       kb=$(du -sk "$d/node_modules" 2>/dev/null | cut -f1) || kb=0
-      (( total += kb ))
+      total=$(( total + kb ))
       [[ -n "$dry" ]] || { rm -rf "$d/node_modules"; ln -sfn "$nm" "$d/node_modules"; }
       echo "  ${d:t}  $(human_kb ${kb:-0})  node_modules → symlink" >&2
     fi
     if [[ -d "$d/.next" ]]; then
       kb=$(du -sk "$d/.next" 2>/dev/null | cut -f1) || kb=0
-      (( total += kb ))
+      total=$(( total + kb ))
       [[ -n "$dry" ]] || rm -rf "$d/.next"
       echo "  ${d:t}  $(human_kb ${kb:-0})  .next build cache" >&2
     fi
   done
-  (( total > 0 )) && echo "stack-open: $(human_kb $total) ${dry:+would be }reclaimed from scratch worktrees idle > ${days}d" >&2
+  if (( total > 0 )); then
+    echo "stack-open: $(human_kb $total) ${dry:+would be }reclaimed from scratch worktrees idle > ${days}d" >&2
+  elif (( mine == 0 )); then
+    echo "stack-open: no scratch worktrees of ${_common_dir:h:t} are idle > ${days}d — nothing to reclaim" >&2
+  fi
   return 0
 }
 
