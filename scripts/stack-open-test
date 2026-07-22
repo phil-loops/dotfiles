@@ -1,0 +1,168 @@
+#!/bin/zsh
+# stack-open-test — the things stack-open has silently regressed on, as assertions.
+#
+# Every bug this file guards against failed QUIETLY: a marker written to /, a lock nobody
+# could ever release, a sweep that died mid-loop, a guard that read "probe broke" as
+# "nothing is running". None of them would surface in an open that looks fine.
+#
+# Runs entirely in throwaway scratch dirs, a temp branch, and its own tmux session — it
+# never touches /tmp/stack-study or the review-hx window you are working in.
+#
+#   stack-open-test          run everything (skips the editor tests without tmux + hx)
+#   stack-open-test --no-hx  skip the editor tests
+emulate -L zsh
+set -uo pipefail
+
+SO="${0:A:h}/stack-open"
+[[ -x "$SO" ]] || { print -u2 "no stack-open next to $0"; exit 1 }
+REPO=$(git rev-parse --show-toplevel 2>/dev/null) || { print -u2 "run me from inside a git repo"; exit 1 }
+MAIN=$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+print -r -- "exercising ${REPO:t} (main checkout: $MAIN)"; print
+
+# realpath it: macOS hands out /var/... while git reports /private/var/..., and cleanup
+# matches worktree paths by prefix
+T="$(cd "$(mktemp -d)" && pwd -P)/so-test"; mkdir -p "$T"
+BRANCH="__so_test_$$"
+SESSION="so-test-$$"
+
+cleanup(){
+  tmux kill-session -t "$SESSION" 2>/dev/null
+  local w; for w in ${(f)"$(git worktree list --porcelain | awk -v t="$T" '/^worktree /{if (index($2,t)==1) print $2}')"}; do
+    [[ -n "$w" ]] && git worktree remove --force "$w" 2>/dev/null
+  done
+  git branch -D "$BRANCH" 2>/dev/null >/dev/null
+  rm -rf "$T"
+  git worktree prune 2>/dev/null   # after the dirs are gone, so stale registrations go too
+}
+trap cleanup EXIT INT TERM
+
+pass=0; failed=0
+ok(){ print -r -- "  ✓ $1"; pass=$(( pass + 1 )) }
+no(){ print -r -- "  ✗ $1"; failed=$(( failed + 1 )) }
+yes(){ [[ -n "$2" ]] && ok "$1" || no "$1" }        # <desc> <non-empty means true>
+fat(){ mkdir -p "$1"; /bin/dd if=/dev/zero of="$1/blob" bs=1048576 count="${2:-8}" 2>/dev/null }
+
+git branch -f "$BRANCH" HEAD 2>/dev/null
+
+print -r -- "worktree lifecycle"
+
+# A scratch dir whose .git gitfile vanished used to make every git call fail into /dev/null,
+# and the branch marker landed on /stack-open-branch — "read-only file system", exit 1.
+zdir="$T/zombie"; mkdir -p "$zdir/${BRANCH}"; print -r -- keep > "$zdir/${BRANCH}/README"
+out=$(STACK_OPEN_DIR="$zdir" "$SO" --path "$BRANCH" 2>/dev/null); code=$?
+[[ $code == 0 ]] && ok "a zombie scratch dir is rebuilt, not fatal" || no "zombie scratch dir still fails (exit $code)"
+yes "the zombie's contents are parked, not deleted" "$(print -rl -- "$zdir"/${BRANCH}.zombie-*(N))"
+yes "the rebuilt worktree is a real one" "$(git -C "$out" rev-parse --git-dir 2>/dev/null)"
+
+print
+print -r -- "expiry ladder"
+
+s="$T/gc"; mkdir -p "$s"
+git worktree add --detach -q "$s/idle" HEAD 2>/dev/null   # past rung 1 only: strip it, keep it
+git worktree add --detach -q "$s/ancient" HEAD 2>/dev/null # past both rungs: remove it outright
+git worktree add --detach -q "$s/busy" HEAD 2>/dev/null
+rm -rf "$s/idle/node_modules" "$s/busy/node_modules"
+fat "$s/idle/node_modules/pkg" 8; fat "$s/idle/.next" 4; fat "$s/busy/node_modules/pkg" 8
+# a worktree of a DIFFERENT repo, parked in the same shared scratch dir
+git init -q "$T/otherrepo" 2>/dev/null
+git -C "$T/otherrepo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m seed 2>/dev/null
+git -C "$T/otherrepo" worktree add --detach -q "$s/alien" HEAD 2>/dev/null
+( cd "$s/busy" && sleep 25 ) &                         # a live process sits in busy/
+sleep 0.3
+touch -t "$(date -v-60H +%Y%m%d%H%M)" "$s/idle"        # 2.5d: clear of BOTH rung edges
+                                                       # (find counts whole days, so 2d exactly is a coin flip)
+touch -t 202001010000 "$s/ancient" "$s/busy" "$s/alien"  # idle for years: both rungs
+
+STACK_OPEN_DIR="$s" "$SO" --gc 1 --dry-run >/dev/null 2>&1
+yes "--dry-run reclaims nothing" "$([[ -d $s/idle/.next ]] && print y)"
+
+STACK_OPEN_DIR="$s" "$SO" --gc 1 >/dev/null 2>&1
+if [[ -d "$MAIN/node_modules" ]]; then
+  [[ -L "$s/idle/node_modules" ]] && ok "a real node_modules goes back to a symlink" \
+                                  || no "node_modules was not relinked"
+else
+  print -r -- "  – node_modules relink: skipped (${MAIN:t} has no node_modules to link to)"
+fi
+[[ -d "$s/idle/.next" ]] && no "the .next build cache survived" || ok "the .next build cache is reclaimed"
+[[ -e "$s/idle/.git" ]] && ok "the checkout itself is kept" || no "the checkout was destroyed"
+[[ -d "$s/busy/node_modules" && ! -L "$s/busy/node_modules" ]] && ok "a dir a live process sits in is untouched" \
+                                                              || no "reclaimed under a live process"
+[[ -d "$s/alien" ]] && ok "another repo's worktree is untouched" || no "reclaimed another repo's worktree"
+
+# Second rung: the same sweep removes what is past it, and still spares the busy one. A dir
+# stripped by rung 1 must keep its old timestamp, or our own sweep would hide it from removal.
+[[ -d "$s/ancient" ]] && no "a years-idle worktree survived removal" || ok "a years-idle worktree is removed"
+[[ -d "$s/busy" ]] && ok "removal spares a dir with a live process" || no "removed a dir under a live process"
+
+# lsof lives in /usr/sbin; off the PATH the script exports, the cwd probe returns nothing.
+# That has to read as "the probe broke", never as "nothing is running".
+s2="$T/failclosed"; mkdir -p "$s2"
+git worktree add --detach -q "$s2/idle" HEAD 2>/dev/null
+fat "$s2/idle/.next" 4; touch -t 202001010000 "$s2/idle"
+env PATH=/usr/bin:/bin STACK_OPEN_DIR="$s2" "$SO" --gc 1 >/dev/null 2>&1
+[[ -d "$s2/idle/.next" ]] && ok "no cwd probe means reclaim nothing (fails closed)" \
+                          || no "reclaimed with a broken cwd probe (fails OPEN)"
+
+if [[ "${1:-}" == --no-hx ]] || ! command -v tmux >/dev/null || ! command -v hx >/dev/null; then
+  print
+  print -r -- "editor drive: skipped"
+else
+  print
+  print -r -- "editor drive"
+  wt=$(STACK_OPEN_DIR="$T/hx" "$SO" --path "$BRANCH" 2>/dev/null)
+  tmux new-session -d -s "$SESSION" -x 200 -y 50 -n idle 'sleep 120' 2>/dev/null
+  # a file with room for the cursor to land: asking for line 33 of a 4-line .dockerignore
+  # would fail the assertion for a reason that has nothing to do with stack-open
+  probe=$(git -C "$wt" ls-files | while read -r f; do
+    [[ -f "$wt/$f" ]] && (( $(wc -l < "$wt/$f" 2>/dev/null || print 0) > 40 )) && { print -r -- "$f"; break }
+  done)
+  tmux new-window -t "$SESSION" -n review-hx "cd ${(q)wt} && hx ${(q)probe}" 2>/dev/null
+  # poll for a ready editor instead of sleeping a guess: under load hx takes longer to draw,
+  # and driving a half-started one is the very flake these assertions exist to catch
+  for i in {1..40}; do
+    pane=$(tmux list-panes -s -t "$SESSION" -F '#{pane_id} #{pane_current_command}' 2>/dev/null | awk '$2=="hx"{print $1; exit}')
+    [[ -n "$pane" && "$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2)" == *NOR* ]] && break
+    sleep 0.5
+  done
+
+  if [[ -z "$pane" ]]; then
+    no "could not stand up a review-hx pane"
+  else
+    env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx \
+        STACK_OPEN_DIR="$T/hx" "$SO" "$BRANCH" "$probe" 33 >/dev/null 2>&1
+    for i in {1..24}; do
+      line=$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2 | head -1)
+      [[ "$line" == *33:* ]] && break
+      sleep 0.25
+    done
+    [[ "$line" == *33:* ]] && ok "a warm open lands the cursor on the asked-for line" \
+                           || no "warm open did not land on line 33 (statusline: ${line:0:60})"
+
+    # What the budget is FOR — surviving the viewer's 8s SIGKILL mid-drive — needs a drive that
+    # genuinely takes seconds (a cold loops worktree, a wedged Helix). A sandbox open finishes in
+    # ~1.5s, so "gave up fast / buffer clean / no rival window" are all satisfied by an ordinary
+    # successful open too: that phrasing passes against 1a05be4^, which has no budget at all.
+    # Faking a slow editor does not work either — tmux names the pane after the process it execs,
+    # so a shell-script stand-in reports as `bash` and is never found, and macOS will not run
+    # copies of its own signed binaries.
+    # So assert the one thing only a budgeted build can do: REFUSE the drive and say why.
+    md5_before=$(md5 -q "$wt/$probe" 2>/dev/null)
+    live_before=$(tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | awk '$1=="review-hx"' | wc -l | tr -d ' ')
+    err=$(env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx \
+              STACK_OPEN_DIR="$T/hx" STACK_OPEN_HX_BUDGET=0.2 "$SO" "$BRANCH" "$probe" 5 2>&1 >/dev/null)
+    code=$?
+    sleep 0.5
+    { (( code != 0 )) && [[ "$err" == *"press o again"* ]] } \
+      && ok "an exhausted budget refuses the drive and says so" \
+      || no "an exhausted budget drove anyway (exit $code): ${err:0:70}"
+    live_after=$(tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | awk '$1=="review-hx"' | wc -l | tr -d ' ')
+    (( live_after == live_before )) && ok "a refused open piles on no rival window" \
+                                    || no "spawned a rival review-hx window (${live_before} → ${live_after})"
+    [[ "$(md5 -q "$wt/$probe" 2>/dev/null)" == "$md5_before" ]] && ok "the file on disk is untouched" \
+                                                               || no "the drive wrote into the file"
+  fi
+fi
+
+print
+print -r -- "${pass} passed, ${failed} failed"
+(( failed == 0 ))
