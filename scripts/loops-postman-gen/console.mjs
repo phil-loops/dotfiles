@@ -209,13 +209,20 @@ const flatten = (schema, spec) => {
     return s;
   }
   const out = { type: "object", properties: {}, required: [] };
-  for (const part of [...s.allOf, s]) {
+  for (const part of s.allOf) {
     const p = flatten(part, spec);
     Object.assign(out.properties, p.properties ?? {});
     out.required.push(...(p.required ?? []));
     if (p.additionalProperties) {
       out.additionalProperties = p.additionalProperties;
     }
+  }
+  // The schema's own members land last so they win over the allOf parts. Read them
+  // directly: re-entering flatten(s) would recurse forever, since s still has allOf.
+  Object.assign(out.properties, s.properties ?? {});
+  out.required.push(...(s.required ?? []));
+  if (s.additionalProperties) {
+    out.additionalProperties = s.additionalProperties;
   }
   return out;
 };
@@ -239,7 +246,7 @@ const fieldOf = (name, raw, spec, required, method, path) => {
     nullable: !!s.nullable || (Array.isArray(s.type) && s.type.includes("null")),
     description: s.description ?? null,
     values,
-    sample: values ? values[0] : sample(s, spec, name),
+    sample: s.example ?? (values ? values[0] : sample(s, spec, name)),
   };
   if (shapes) {
     f.shapesLabel = shapes.label;
@@ -352,7 +359,9 @@ const extractEndpoints = (spec) => {
         continue;
       }
       const METHOD = method.toUpperCase();
-      const params = op.parameters ?? [];
+      // Parameters shared by every method sit on the path item, not the operation —
+      // the real Loops spec declares workflowId that way, so read both levels.
+      const params = [...(methods.parameters ?? []), ...(op.parameters ?? [])];
       out.push({
         method: METHOD,
         path,
@@ -366,6 +375,7 @@ const extractEndpoints = (spec) => {
             name: m[1],
             description: p?.description ?? null,
             alias: paramAlias(METHOD, path, m[1]),
+            sample: p?.schema?.example ?? null,
           };
         }),
         queryParams: params
@@ -763,7 +773,7 @@ function selectEndpoint(e, node, push = true) {
     if (n.querySelector('.path').textContent === shortPath(e.path) && n.querySelector('.m').textContent === e.method) n.classList.add('active');
   });
   st = {
-    path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.alias || p.name)])),
+    path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.alias || p.name) || p.sample || ''])),
     query: { fields: seedFields({ fields: e.queryParams, oneOf: e.queryOneOf }), extra: {}, custom: null },
     body: e.body ? subState({ shapes: e.body.shapes }, e.body.shapes[0].label) : null,
     tab: 'fields',
