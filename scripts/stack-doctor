@@ -169,24 +169,48 @@ here="$(cd "$(dirname "$0")" && pwd)"
 viewer_port=""
 [ "$check_viewer" = "1" ] && viewer_port=$("$here/stack-review-port" 2>/dev/null || true)
 
-nodeset() {  # forest JSON on stdin → one branch per line, sorted; ✦ <project> is a phantom, not a ref
-  python3 -c 'import json,sys
-d = json.load(sys.stdin)
-print("\n".join(sorted(b for b in (d.get("nodes") or {}) if not b.startswith("✦"))))' 2>/dev/null
+modeldiff() {  # served JSON $1 vs git JSON $2 → how they disagree, empty when they agree
+  python3 -c '
+import json, sys
+def nodes(p):
+    d = json.load(open(p))
+    return d, {b: n for b, n in (d.get("nodes") or {}).items() if not b.startswith("✦")}
+sd, sn = nodes(sys.argv[1])
+td, tn = nodes(sys.argv[2])
+# stack-forest emits roots/children/requires in an unstable order — two runs over identical
+# state disagree, so only their CONTENT can mean anything here
+norm = lambda v: sorted(v) if isinstance(v, list) and all(isinstance(x, str) for x in v) else v
+out = []
+gone, missing = sorted(set(sn) - set(tn)), sorted(set(tn) - set(sn))
+if gone:    out.append("shows dead branches: " + " ".join(gone))
+if missing: out.append("omits live branches: " + " ".join(missing))
+# only the keys stack-forest itself emits: /model grafts description + mergeRank on top
+bad = [(b, sorted(k for k in tn[b] if norm(sn[b].get(k)) != norm(tn[b][k]))) for b in sorted(set(sn) & set(tn))]
+bad = [(b, ks) for b, ks in bad if ks]
+if bad:     out.append("wrong data on: " + " ".join("%s(%s)" % (b, ",".join(ks[:3])) for b, ks in bad))
+if norm(sd.get("roots") or []) != norm(td.get("roots") or []): out.append("different roots")
+print(" — ".join(out))' "$1" "$2" 2>/dev/null
+}
+
+drift_once() {  # $1 = project, $2 = scratch dir → modeldiff of a fresh read of both sides
+  curl -sf --max-time 2 "http://127.0.0.1:$viewer_port/model?branch=$1" -o "$2/served.json" || return 1
+  "$here/stack-forest" "$1" > "$2/truth.json" 2>/dev/null || return 1
+  modeldiff "$2/served.json" "$2/truth.json"
 }
 
 viewer_drift() {  # $1 = project → a report line iff served ≠ git; silent if the server is down
   [ -n "$viewer_port" ] || return 0
-  local served truth gone missing pid
-  served=$(curl -sf --max-time 2 "http://127.0.0.1:$viewer_port/model?branch=$1" | nodeset) || return 0
-  [ -n "$served" ] || return 0
-  truth=$("$here/stack-forest" "$1" 2>/dev/null | nodeset) || return 0
-  if [ "$served" = "$truth" ]; then return 0; fi
-  gone=$(comm -23 <(printf '%s\n' "$served") <(printf '%s\n' "$truth") | paste -sd' ' -)
-  missing=$(comm -13 <(printf '%s\n' "$served") <(printf '%s\n' "$truth") | paste -sd' ' -)
+  local tmp drift pid
+  tmp=$(mktemp -d); trap 'rm -rf "$tmp"' RETURN
+  drift=$(drift_once "$1" "$tmp") || return 0
+  [ -n "$drift" ] || return 0
+  # a commit landing between the two reads looks exactly like a stale cache — but only once,
+  # since the second read rebuilds. Cry wolf here and the whole check gets tuned out.
+  drift=$(drift_once "$1" "$tmp") || return 0
+  [ -n "$drift" ] || return 0
   pid=$(lsof -ti "tcp:$viewer_port" -sTCP:LISTEN 2>/dev/null | head -1)
-  printf '  ⧉ viewer serves a stale model%s%s — bounce it: kill %s; stack-review-serve --ensure\n' \
-    "${gone:+ — shows dead branches: $gone}" "${missing:+ — omits live branches: $missing}" "${pid:-<pid>}"
+  printf '  ⧉ viewer serves a stale model — %s — bounce it: kill %s; stack-review-serve --ensure\n' \
+    "$drift" "${pid:-<pid>}"
 }
 
 problems=0
