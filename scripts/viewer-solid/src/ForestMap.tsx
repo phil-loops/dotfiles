@@ -15,6 +15,7 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
 import { computeForestLayout, lumen, NODE_H, leafOf, isGhostId, nodeW } from "./forestLayout";
 import * as Graph from "./forestGraph.ts";
+import { contractionDone } from "./contractResult.ts";
 import { stationOf, type Station } from "./nodeStation";
 
 // Why the branch stands there — the map's badge carries the same reason the spine's chip does.
@@ -99,7 +100,7 @@ export function ForestMap(props: {
   onLeaveNode?: () => void;
   // the merged-ghost badge's contextual next step: drop this branch + rewire its children
   // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
-  onContract?: (branch: string) => Promise<unknown>;
+  onContract?: (branch: string) => Promise<{ status: number; ok?: boolean; err?: string }>;
   // the merged-with-follow-on ghost's next step: ready the WHOLE forest (POST /ship —
   // contract merged work first, then restack survivors onto fresh main, in that order).
   // A node-local rebase here would move the node off its parent mid-graph; the forest
@@ -156,10 +157,12 @@ export function ForestMap(props: {
     setContracting(id);
     setContractErr(null);
     Promise.resolve(props.onContract!(id))
+      // The branch already being gone IS the outcome contraction was asking for — reporting it as
+      // "⊘ drop failed" taught Phil to distrust the auto-drop (2026-07-21). Every other refusal
+      // (409 unmerged work, 500) still parks on the pill.
       .then((r) => {
-        const j = r as { ok?: boolean; err?: string } | undefined;
-        if (j && j.ok === false) setContractErr({ id, err: j.err || "contract failed" });
-        else setDropped((s) => new Set(s).add(id));
+        if (contractionDone(r)) setDropped((s) => new Set(s).add(id));
+        else setContractErr({ id, err: r.err || "contract failed" });
       })
       // a throw (server bounced mid-request, non-JSON body) used to leave the pill back on its
       // idle label with nothing said — the one failure that looks exactly like never having run
