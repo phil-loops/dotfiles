@@ -64,7 +64,16 @@ _forced(){ local lane="$1" v pid exp mp
 _held_by_other(){ local lane="$1" hp mp hs
   _active "$lane" || return 1
   hp=$(gc "own.$lane.pid" 2>/dev/null); mp=$(_mypid)
-  [[ -n "$hp" && -n "$mp" && "$hp" != "$mp" ]] && return 0
+  # Both pids known → the PID SETTLES IT, both ways. One claude process is one session, but
+  # its session id is not stable: a /clear mints a new one for that same process, leaving the
+  # recorded .session naming an id nobody answers to. Falling through to the session compare
+  # after a pid MATCH is what blocked a lane against its own holder — the hook denied edits
+  # `own who` reported as yours, for a whole session (2026-07-22, viewer). Same reasoning
+  # _holder_tag already carries below; it was fixed there and missed here.
+  if [[ -n "$hp" && -n "$mp" ]]; then
+    [[ "$hp" == "$mp" ]] && return 1
+    return 0
+  fi
   hs=$(gc "own.$lane.session" 2>/dev/null)
   [[ -n "$hs" && -n "$SID" && "$hs" != "$SID" ]] && return 0
   return 1 }
