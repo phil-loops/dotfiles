@@ -7,34 +7,63 @@
 # .gen is gitignored and only ever built in the main checkout, so a fresh sibling worktree
 # has none.
 #
-# Clone main's .gen (APFS copy-on-write, ~instant) as a baseline so the worktree never
-# collapses — a COW clone, NOT a symlink: a regen in the worktree must not write through
-# into main's .gen. Then, ONLY if the branch touches something the declaration build reads
-# and we haven't already built for this HEAD, kick a background incremental rebuild so the
-# types reflect the branch. Never blocks. NB: .gen does NOT reduce tsc memory — purely correctness.
+# ONE implementation for every caller — the git hooks (post-checkout/-merge/-rewrite) and
+# stack-open. Two copies of this logic drifted apart and each drift was a silent bug: this
+# one's rebuild aimed at a tsconfig loops had moved (dead since 2026-07-19), and stack-open's
+# copy watched only trpc/ while this one watched the real input set.
+#
+# The main checkout is the ONLY tree that can build a correct .gen: everywhere else
+# node_modules is a symlink to it, so prisma-inferred exports resolve outside the project root
+# and trip TS2883, which means the aggregates the client type resolves through (trpc/root.d.ts,
+# routers/*.d.ts) are never re-emitted — such a rebuild rewrites the leaves only and leaves the
+# tree self-inconsistent, which reads as a confident wrong answer. So:
+#
+#   main checkout        rebuild whenever HEAD moved off what .gen was built for
+#   scratch review tree  symlink main's .gen — a read surface, nothing there writes it
+#   any other worktree   copy main's .gen — `task dev` there must not write through
+#
+# Never blocks. NB: .gen does NOT reduce tsc memory — purely correctness.
 set -u
 
 dir="${1:?usage: seed-gen <worktree-dir>}"
+realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
 
 # source .gen from the MAIN checkout (first worktree), not wherever this runs — a sibling
 # worktree has no .gen of its own (gitignored, only built in main).
-src=$(git -C "$dir" worktree list --porcelain | awk '/^worktree /{print $2; exit}')
+src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
 [[ -n "$src" && -d "$src/.gen" ]] || exit 0                  # nothing to seed from
-[[ -d "$dir/.gen" ]] || cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
-  || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || exit 0     # COW clone, fall back to plain copy
+
+if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
+  if [[ ! -e "$dir/.gen" ]]; then
+    scratch=$(realpath_of "${STACK_OPEN_DIR:-/tmp/stack-study}")
+    if [[ -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ]]; then
+      ln -sfn "$src/.gen" "$dir/.gen"
+      exit 0
+    fi
+    cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
+      || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || exit 0  # COW clone, fall back to plain copy
+  fi
+  # A copied marker describes the tree it was copied FROM: left in place it claims this
+  # worktree's .gen was built for a commit it has never seen.
+  [[ -L "$dir/.gen" ]] || rm -f "$dir/.gen/.seed-gen-sha"
+  exit 0
+fi
 
 head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || exit 0
 marker="$dir/.gen/.seed-gen-sha"
 [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0   # already built for this HEAD
-# root.d.ts inlines every procedure's output type, so it carries ~500 references into lib/,
-# models/ and queries/ — watching trpc/ alone leaves .gen silently stale (and stale .gen
-# typechecks GREEN against yesterday's field names, which is the bad kind of wrong).
-git -C "$dir" diff --quiet main...HEAD -- trpc lib models queries packages tsconfig.trpc-types.json 2>/dev/null && exit 0
+# Gate on HEAD alone, never on `git diff main...HEAD -- <inputs>`: that gate is empty when the
+# checkout comes back TO main, so .gen kept whatever shape the last feature branch left it —
+# which is how the seed every other worktree copies got poisoned.
+
+proj=typescript/tsconfig.trpc-types.json                     # moved under typescript/ by loops #9599
+[[ -f "$dir/$proj" ]] || proj=tsconfig.trpc-types.json       # a pre-split branch still has it at the root
+[[ -f "$dir/$proj" ]] || exit 0
 
 tsgo="$dir/node_modules/.bin/tsgo"                           # ~3x faster; falls back to tsc
 [[ -x "$tsgo" ]] || tsgo=""
 tsc="$dir/node_modules/typescript/bin/tsc"
-[[ -n "$tsgo" || -e "$tsc" ]] || exit 0                      # no compiler → keep the cloned baseline
+[[ -n "$tsgo" || -e "$tsc" ]] || exit 0                      # no compiler → keep what's there
 mkdir "$dir/.gen/.rebuilding" 2>/dev/null || exit 0          # single-flight lock: a rebuild is already in flight
 
 # background incremental rebuild → stamp the sha, release the lock. Call the binary DIRECTLY
@@ -44,16 +73,20 @@ if [[ -n "$tsgo" ]]; then
 else
   build=("$HOME/.volta/bin/node" "$tsc")
 fi
+# The subshell drops the inherited stdout/stderr too, not just the compiler's: a caller that
+# pipes us waits for EOF on those fds, so holding them open makes this "background" rebuild
+# block that caller for as long as the compile takes.
 ( cd "$dir"
   # packages/*/dist (gitignored, built locally) feeds @loops/* resolution in BOTH the .gen emit
-  # and the app typecheck. A branch that changed package source leaves dist stale, so the .gen
-  # would regen against yesterday's package types. Rebuild it first — gated on packages actually
-  # changing so app-only branches skip it. Build with tsc (not tsgo) to match the canonical
-  # `task build:packages`, so the shared dist/*.tsbuildinfo never thrashes between two compilers.
-  if [[ -e "$tsc" ]] && ! git diff --quiet main...HEAD -- packages 2>/dev/null; then
+  # and the app typecheck, and `tsc -b` is a no-op when nothing changed. Build with tsc (not
+  # tsgo) to match the canonical `task build:packages`, so the shared dist/*.tsbuildinfo never
+  # thrashes between two compilers.
+  if [[ -e "$tsc" ]]; then
     "$HOME/.volta/bin/node" "$tsc" -b \
       packages/settings/tsconfig.json packages/valkey/tsconfig.json packages/mail-pg/tsconfig.json \
       packages/realtime-client/tsconfig.json packages/prisma/tsconfig.json --pretty false >/dev/null 2>&1
   fi
-  "${build[@]}" --project tsconfig.trpc-types.json --pretty false >/dev/null 2>&1 && echo "$head" > "$marker"
-  rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) &
+  # A HEAD that moved during the build would make this stamp claim a shape .gen doesn't have.
+  "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
+    && [[ "$(git rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
+  rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) >/dev/null 2>&1 &
