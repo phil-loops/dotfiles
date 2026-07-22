@@ -26,6 +26,7 @@ import { PlanStepsEditor } from "./PlanStepsEditor";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
 import { nextStepOf, stationOf, type Station } from "./nodeStation";
 import { patchHtml, patchLineCounts } from "./FileRail";
+import { contractionDone } from "./contractResult.ts";
 
 interface CheckoutResult {
   ok?: boolean;
@@ -79,7 +80,7 @@ interface DeltaTestResult {
   summary?: string; // tail of the runner output (for the tooltip)
 }
 
-async function post<T>(url: string, body: unknown): Promise<T> {
+async function postStatus<T>(url: string, body: unknown): Promise<{ status: number; body: T }> {
   // prefix the active repo (/monotoad/checkout) so the server pins the right repo — without it
   // every node action (checkout/squash/rebase/contract/…) runs against the launched repo (loops).
   const r = await fetch(withRepo(url), {
@@ -93,10 +94,14 @@ async function post<T>(url: string, body: unknown): Promise<T> {
   // throws here instead of failing silently — the mutations' onError surfaces it.
   const text = await r.text();
   try {
-    return JSON.parse(text) as T;
+    return { status: r.status, body: JSON.parse(text) as T };
   } catch {
     throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : " (empty response)"}`);
   }
+}
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  return (await postStatus<T>(url, body)).body;
 }
 
 export function NodeActions(props: {
@@ -525,14 +530,16 @@ export function NodeActions(props: {
   // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
   const contract = createMutation(() => ({
     mutationFn: () =>
-      post<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch: props.branch }),
-    onSuccess: (r) => {
-      if (!r.ok) {
-        setDone(`✗ ${r.err || "contract failed"}`);
+      postStatus<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch: props.branch }),
+    // The branch already being gone (a stale node still on screen after the map's auto-drop) IS
+    // contraction's outcome, so it reads as done, never as ✗.
+    onSuccess: ({ status, body }) => {
+      if (!contractionDone({ status, ...body })) {
+        setDone(`✗ ${body.err || "contract failed"}`);
         return;
       }
       setContractKids(null);
-      setDone(`✓ ${r.summary || "contracted"}`);
+      setDone(status === 404 ? "✓ already dropped" : `✓ ${body.summary || "contracted"}`);
       qc.invalidateQueries({ queryKey: ["model"] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
       qc.invalidateQueries({ queryKey: ["forest-health"] });
