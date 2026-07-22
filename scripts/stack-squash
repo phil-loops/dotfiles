@@ -4,9 +4,11 @@
 
   stack-squash <branch>            squash parent..branch + auto-commit (voiced msg)
   stack-squash --dry <branch>      draft the message + report, but DON'T rewrite
-  stack-squash --unpushed <b>      squash only UNPUSHED commits (base = upstream if
-                                   the branch is published, else its parent) — so a
+  stack-squash --unpushed <b>      squash only UNPUSHED commits (base = origin's head
+                                   for the branch if published, else its parent) — so a
                                    plain push works, never a force-push
+  stack-squash --allow-published <b>  squash BELOW origin's head anyway; without this a
+                                   squash that would rewrite pushed history is refused
   stack-squash --format <branch>   after committing, run oxfmt + oxlint --fix on the
                                    changed files and fold the fixes into the same commit
   stack-squash --subject-only <b>  draft a SUBJECT LINE ONLY — no body, no bullets
@@ -227,18 +229,15 @@ force = False   # will pushing the squashed branch need a force? (true once publ
 def published_head():
     """The sha origin already has for this branch, "" if it was never pushed.
 
-    @{upstream} only answers when tracking config exists, and a GitHub Desktop push
-    doesn't always leave it — trusting it alone let a squash collapse past an already-
-    pushed commit and silently diverge an open PR (#9700). refs/remotes/origin/<b> is the
-    same signal reseat_gate trusts, and it survives a missing upstream."""
-    up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
-    cand = up.stdout.strip()
-    if up.returncode == 0 and cand and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0:
-        return git(["rev-parse", cand]).stdout.strip()
-    fallback = f"refs/remotes/origin/{branch}"
-    if git(["rev-parse", "--verify", "--quiet", fallback]).returncode == 0:
-        return git(["rev-parse", fallback]).stdout.strip()
-    return ""
+    origin, deliberately — not @{upstream}. Tracking config is often absent (a GitHub
+    Desktop push doesn't always leave one, which is how a squash collapsed past a pushed
+    commit and diverged an open PR, #9700), and when it IS set it can name the phil-loops
+    fork, which would let a squash rewrite what origin holds under an open PR. origin is
+    where PRs live, so origin is what must not be rewritten — same ref reseat_gate reads."""
+    ref = f"refs/remotes/origin/{branch}"
+    if git(["rev-parse", "--verify", "--quiet", ref]).returncode != 0:
+        return ""
+    return git(["rev-parse", ref]).stdout.strip()
 
 
 pub = published_head()
