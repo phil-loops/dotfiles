@@ -15,7 +15,9 @@
 #   docker:<name>     a running container (docker logs -f)
 #
 # Defaults live in ~/.dotfiles/loops-tail.conf — one source per line, # comments fine.
-# Each line of output is prefixed with a colored [source] tag; Ctrl-C stops everything.
+# Each line of output is prefixed with a colored, width-aligned tag; Ctrl-C stops everything.
+# A preview tags as its PORT ([:3011]) — the number in the browser tab you're comparing
+# against — and tailing more than one source prints a legend of tag → source · branch · url.
 set -uo pipefail
 
 CONF="$HOME/.dotfiles/loops-tail.conf"
@@ -44,6 +46,54 @@ log_for() {
     preview:*) echo "/tmp/loops-preview-${1#preview:}.log" ;;
     *)         return 1 ;;
   esac
+}
+
+meta_get()   { [ -f "$1" ] && sed -n "s/^$2=//p" "$1" | head -1 || true; }   # $1=metafile $2=KEY
+meta_for()   { printf '/tmp/loops-preview-%s.meta' "$1"; }                   # $1=preview NAME
+
+# A preview's PORT is its identity — it's the number in the browser tab you're comparing
+# against. The worktree name isn't: several previews can live in look-alike wt-* dirs.
+# Only previews get a port; `server` is a MERGED stack log, so stamping :3000 on a worker
+# line would be a lie.
+port_for() {
+  case "$1" in
+    preview:*) meta_get "$(meta_for "${1#preview:}")" PORT ;;
+    *)         return 1 ;;
+  esac
+}
+
+# $1 = source → the branch a preview serves (legend only). A stack-open scratch worktree is
+# detached-but-intentional: it records the branch it stands in for, so prefer that name.
+branch_for() {
+  local dir b gd
+  case "$1" in preview:*) dir="$(meta_get "$(meta_for "${1#preview:}")" DIR)" ;; *) return 1 ;; esac
+  { [ -n "$dir" ] && [ -d "$dir" ]; } || return 1
+  b="$(git -C "$dir" branch --show-current 2>/dev/null)"
+  if [ -n "$b" ]; then echo "$b"; return 0; fi
+  gd="$(git -C "$dir" rev-parse --git-dir 2>/dev/null)"
+  if [ -n "$gd" ] && [ -s "$gd/stack-open-branch" ]; then sed -n '1p' "$gd/stack-open-branch"; return 0; fi
+  echo "detached@$(git -C "$dir" rev-parse --short HEAD 2>/dev/null)"
+}
+
+tag_for() {
+  local p; p="$(port_for "$1" 2>/dev/null)" || p=""
+  if [ -n "$p" ]; then printf ':%s' "$p"; else printf '%s' "$1"; fi
+}
+
+# what a tag stands for, saying each thing once: the source id only when the tag hides it,
+# the branch only when it isn't already the preview's name, then the url. A source whose tag
+# already names it earns its keep by showing where it reads from instead.
+legend_detail() {
+  local s="$1" d="" b p
+  [ "$(tag_for "$s")" = "$s" ] || d="$s"
+  b="$(branch_for "$s" 2>/dev/null)" || b=""
+  [ -n "$b" ] && [ "$b" != "${s#preview:}" ] && d="${d:+$d · }$b"
+  p="$(port_for "$s" 2>/dev/null)" || p=""
+  [ -n "$p" ] && d="${d:+$d · }http://localhost:$p"
+  if [ -z "$d" ]; then
+    case "$s" in docker:*) d="container ${s#docker:}" ;; *) d="$(log_for "$s")" ;; esac
+  fi
+  printf '%s' "$d"
 }
 
 sources() {
@@ -89,9 +139,10 @@ defaults() {
 }
 
 list() {
-  local defs; defs=" $(defaults | tr '\n' ' ') "
+  local defs p; defs=" $(defaults | tr '\n' ' ') "
   sources | while IFS= read -r s; do
-    case "$defs" in *" $s "*) echo "● $s" ;; *) echo "  $s" ;; esac
+    p="$(port_for "$s" 2>/dev/null)" || p=""
+    case "$defs" in *" $s "*) printf '● %s%s\n' "$s" "${p:+  :$p}" ;; *) printf '  %s%s\n' "$s" "${p:+  :$p}" ;; esac
   done
 }
 
@@ -141,25 +192,13 @@ else
   while IFS= read -r s; do picked+=("$s"); done < <(defaults)
 fi
 
-# ── tail them all, tagged and colored ───────────────────────────────
-# set -m: each background pipeline becomes its own PROCESS GROUP. Without it, bash
-# collapses `( cmd | awk ) &` so $! is only the awk side and async jobs ignore SIGINT —
-# Ctrl-C returned the prompt but left tail/docker-logs running. kill -- -pgid gets all.
-set -m
-COLORS=(36 33 35 32 34 91 92 93 94 95)
-pids=()
-cleanup() {
-  for p in ${pids[@]+"${pids[@]}"}; do   # ${arr[@]+…}: empty array + set -u crashes bash 3.2
-    kill -- -"$p" 2>/dev/null || kill "$p" 2>/dev/null
-  done
-}
-trap cleanup EXIT INT TERM
-
 warn() { printf '\033[33m[loops-tail]\033[0m %s\n' "$1" >&2; }
 
-i=0
+# ── resolve which sources really tail, and how wide their tags are ──
+valid=()
+TAGW=0
 for s in ${picked[@]+"${picked[@]}"}; do
-  cmd="$(cmd_for "$s")" || { warn "unknown source '$s' (try --list)"; continue; }
+  cmd_for "$s" >/dev/null 2>&1 || { warn "unknown source '$s' (try --list)"; continue; }
   # a tmux-backed source can be stale (server died, log remains) or missing outright —
   # say so instead of tailing silence. `lsof :3000` catches a dev server started as a
   # bare `task dev`: it's live but nothing tees its output into the log file.
@@ -173,13 +212,46 @@ for s in ${picked[@]+"${picked[@]}"}; do
       warn "'$s' isn't running — showing its log's last output (stale)"
     fi
   fi
-  c="${COLORS[$((i % ${#COLORS[@]}))]}"
+  valid+=("$s")
+  t="$(tag_for "$s")"; [ "${#t}" -gt "$TAGW" ] && TAGW="${#t}"
+done
+[ "${#valid[@]:-0}" -gt 0 ] || { echo "loops-tail: nothing to tail" >&2; exit 1; }
+
+COLORS=(36 33 35 32 34 91 92 93 94 95)
+color_at() { echo "${COLORS[$(($1 % ${#COLORS[@]}))]}"; }
+
+# ── legend — a bare :3011 is only readable if you can look up what it serves ──
+if [ "${#valid[@]}" -gt 1 ]; then
+  i=0
+  for s in "${valid[@]}"; do
+    printf '\033[%sm[%-*s]\033[0m \033[2m%s\033[0m\n' \
+      "$(color_at $i)" "$TAGW" "$(tag_for "$s")" "$(legend_detail "$s")" >&2
+    i=$((i + 1))
+  done
+fi
+
+# ── tail them all, tagged and colored ───────────────────────────────
+# set -m: each background pipeline becomes its own PROCESS GROUP. Without it, bash
+# collapses `( cmd | awk ) &` so $! is only the awk side and async jobs ignore SIGINT —
+# Ctrl-C returned the prompt but left tail/docker-logs running. kill -- -pgid gets all.
+set -m
+pids=()
+cleanup() {
+  for p in ${pids[@]+"${pids[@]}"}; do   # ${arr[@]+…}: empty array + set -u crashes bash 3.2
+    kill -- -"$p" 2>/dev/null || kill "$p" 2>/dev/null
+  done
+}
+trap cleanup EXIT INT TERM
+
+i=0
+for s in "${valid[@]}"; do
+  cmd="$(cmd_for "$s")"
+  tag="$(printf '\033[%sm[%-*s]\033[0m' "$(color_at $i)" "$TAGW" "$(tag_for "$s")")"
   i=$((i + 1))
   (
-    $cmd 2>&1 | awk -v tag="$(printf '\033[%sm[%s]\033[0m' "$c" "$s")" '{ print tag, $0; fflush() }'
+    $cmd 2>&1 | awk -v tag="$tag" '{ print tag, $0; fflush() }'
   ) &
   pids+=($!)
 done
 
-[ "${#pids[@]:-0}" -gt 0 ] || { echo "loops-tail: nothing to tail" >&2; exit 1; }
 wait
