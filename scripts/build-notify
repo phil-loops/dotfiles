@@ -3,15 +3,15 @@
 # shoulder when a main build finishes, so I never track it by hand. launchd StartInterval
 # sweep (one pass per invocation — see com.philbrockman.build-notify.plist).
 #
-# Notifies on completed main builds (merged-PR, direct push, or re-run), deduped by
-# run-id. When a build maps to one of my merged PRs (its headSha == my PR's mergeCommit),
-# the notification is enriched with the PR # and the ready-to-paste seed command. First run
-# (and the v2 scope-widening) seeds finished builds silently — no backlog spam.
+# A main build notifies only when it's MY merge (its headSha == one of my merged PRs'
+# mergeCommit) — carrying the PR # and the ready-to-paste seed command. A teammate's merge
+# is ambient state, not my cue to seed staging, so it's journaled and seeded silently.
+# Deduped by run-id; first run (and the v2 scope-widening) seeds silently — no backlog spam.
 #
 # Storm guards (the machine-was-off-for-two-days case): unseen builds that finished more
 # than BUILD_NOTIFY_MAX_AGE_H ago seed silently, and only the NEWEST fresh success
 # notifies per sweep — older successes in the same pass are superseded (logged, seeded).
-# Failures still notify individually.
+# Failures still notify individually, mine or not — red main blocks my pushes too.
 #
 # v3 adds the staging sweep: my OPEN PRs whose body carries the Traffic Cop
 # "Tested in staging" checklist get a notification when their PR-branch image build
@@ -101,6 +101,11 @@ while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event ur
     echo "$rid" >> "$seen"; continue
   fi
   if [ "$concl" = "success" ]; then
+    if [ -z "$prnum" ]; then   # a teammate's merge — ambient state, not my cue to go seed staging
+      echo "build-notify: · $tag not my merge — seeded silently"
+      journal_silent silent-other-actor "$tag" "main build from someone else's merge — recorded, not mine" "$url"
+      echo "$rid" >> "$seen"; continue
+    fi
     if [ "$success_notified" = "1" ]; then   # runs arrive newest-first; a newer success already notified
       echo "build-notify: · $tag superseded this sweep — seeded silently"
       journal_silent silent-superseded "$tag" "built, superseded by a newer build this sweep" "$url"
@@ -112,20 +117,7 @@ while IFS=$'\t' read -r rid sha concl runnum headbr startedAt updatedAt event ur
       echo "$rid" >> "$seen"; continue
     fi
     success_notified=1
-    # every merge lands on main as event=push, so "direct push" was claimed for every
-    # TEAMMATE's merge (mine match $prs) — read the real source from the squash-merge
-    # subject's trailing (#NNNN) and say so; a subject without one is a true direct push
-    mergedpr=$(printf '%s' "$title" | sed -nE 's/.*\(#([0-9]+)\)$/\1/p')
-    if [ -n "$prnum" ]; then
-      msg="PR #$prnum → $tag${dur:+ in $dur}. Seed staging: seed-staging-goal --tag $tag"
-    elif [ -n "$mergedpr" ]; then
-      msg="main build $tag (#$mergedpr merged)${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
-    elif [ "$event" != "pull_request" ]; then
-      msg="main build $tag (direct push)${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
-    else
-      msg="$tag built${dur:+ in $dur}. Seed: seed-staging-goal --tag $tag"
-    fi
-    notify "✓ image built" "$msg" "$url"
+    notify "✓ image built" "PR #$prnum → $tag${dur:+ in $dur}. Seed staging: seed-staging-goal --tag $tag" "$url"
     echo "build-notify: ✓ $tag${dur:+ ($dur)} — seed-staging-goal --tag $tag"
   else
     notify "✗ build ${concl:-failed}" "$tag ${concl:-failed}${dur:+ after $dur}. Re-run at the run page ↗" "$url"
