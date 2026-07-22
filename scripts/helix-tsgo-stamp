@@ -1,0 +1,36 @@
+#!/bin/zsh
+# helix-tsgo-stamp [dir] — point Helix at tsgo for this worktree, LOCAL-only.
+#
+# The loops repo commits a shared .helix/languages.toml that pins
+# typescript-language-server (tsserver). Teammates need that until TS7 lands, so we
+# don't touch the tracked file — instead we transform a copy in THIS worktree and
+# `git update-index --skip-worktree` it, so the override never reaches origin. Each
+# worktree is stamped independently, so tsgo roots per-branch (correct types), at the
+# cost of one ~1.2GB tsgo per concurrently-open editor (no cross-instance LRU).
+#
+# Idempotent and self-scoping: no-ops unless the worktree ships a tsserver-pinned
+# .helix config, and skips if already stamped.
+emulate -L zsh; set -uo pipefail
+
+dir="${1:-$PWD}"
+top=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || exit 0
+cfg="$top/.helix/languages.toml"
+
+[[ -f "$cfg" ]] || exit 0
+grep -q 'typescript-language-server' "$cfg" || exit 0   # not the config we override
+grep -q 'language-server.tsgo' "$cfg" && exit 0         # already stamped
+
+cat >> "$cfg" <<'TSGO'
+
+[language-server.tsgo]
+command = "tsgo"
+args = ["--lsp", "--stdio"]
+TSGO
+
+# swap the TS language server, and restore the user's deliberate no-surprise-format
+sed -i '' \
+  -e 's/"typescript-language-server"/"tsgo"/g' \
+  -e 's/auto-format = true/auto-format = false/g' \
+  "$cfg"
+
+git -C "$top" update-index --skip-worktree .helix/languages.toml

@@ -1,0 +1,86 @@
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 589848c..7d78bbe 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -7,6 +7,7 @@
+   POST /heartbeat        keepalive; the server self-reaps after IDLE seconds idle
+ 
+ Args: <servedir> <scriptsdir> <repodir>. Prints the chosen 127.0.0.1 port, then serves.
++$STACK_REVIEW_LOG=1 logs one line per request (method path status ms) to stderr; silent otherwise.
+ The page is same-origin with the server, so /model and /bless are plain relative fetches.
+ """
+ import sys, os, json, re, subprocess, threading, time, hashlib, shlex
+@@ -44,6 +45,14 @@ last = [time.time()]
+ _render_lock = threading.Lock()
+ _pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
+ _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
++LOG = os.environ.get("STACK_REVIEW_LOG", "") not in ("", "0")   # $STACK_REVIEW_LOG=1 → one line per request
++_log_lock = threading.Lock()
++
++
++def _log(line):
++    with _log_lock:   # threaded server: one locked write, or concurrent requests interleave mid-line
++        sys.stderr.write(f"{time.strftime('%H:%M:%S')} {line}\n")
++        sys.stderr.flush()
+ 
+ 
+ def run(args):
+@@ -156,6 +165,23 @@ class H(BaseHTTPRequestHandler):
+     def log_message(self, *a):
+         pass
+ 
++    def log_request(self, code="-", size="-"):
++        self._status = code
++
++    def handle_one_request(self):
++        # the raw request line, not self.path: do_POST rewrites self.path to the repo-stripped one.
++        if not LOG:
++            return BaseHTTPRequestHandler.handle_one_request(self)
++        self._status, self.raw_requestline = "-", b""   # cleared, or a dead keep-alive read re-logs the last request
++        t0 = time.perf_counter()
++        try:
++            BaseHTTPRequestHandler.handle_one_request(self)
++        finally:
++            req = (getattr(self, "raw_requestline", b"") or b"").decode("latin-1").split()
++            if req:
++                ms = (time.perf_counter() - t0) * 1000
++                _log(f"{req[0]} {req[1] if len(req) > 1 else '?'} {self._status} {ms:.0f}ms")
++
+     def _send(self, code, body, ctype="application/json"):
+         b = body.encode() if isinstance(body, str) else body
+         self.send_response(code)
+@@ -487,6 +513,20 @@ class H(BaseHTTPRequestHandler):
+         self._send(404, "{}")
+ 
+ 
++class Server(ThreadingHTTPServer):
++    allow_reuse_address = True
++
++    def handle_error(self, request, client_address):
++        # a tab navigating away or an SSE stream closing is normal here, and socketserver's default
++        # dumps a ~20-line traceback per abort — that noise WAS the whole log (119KB, 2026-07-21).
++        exc = sys.exc_info()[1]
++        if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
++            if LOG:
++                _log(f"client gone ({type(exc).__name__})")
++            return
++        super().handle_error(request, client_address)
++
++
+ def reaper():
+     while True:
+         time.sleep(5)
+@@ -499,11 +539,10 @@ def reaper():
+ # self-reload. If the stable port is taken (a stale/foreign holder), fall back to
+ # an ephemeral one rather than failing to start.
+ PORT = int(sys.argv[4]) if len(sys.argv) > 4 else int(os.environ.get("STACK_REVIEW_PORT", "62333"))
+-ThreadingHTTPServer.allow_reuse_address = True
+ try:
+-    httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
++    httpd = Server(("127.0.0.1", PORT), H)
+ except OSError:
+-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), H)
++    httpd = Server(("127.0.0.1", 0), H)
+ PORT = httpd.server_address[1]
+ if len(sys.argv) <= 4:
+     print(PORT, flush=True)  # announce the port only on the first launch

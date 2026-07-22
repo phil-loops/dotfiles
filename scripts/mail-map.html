@@ -1,44 +1,23 @@
-<title>Mail pipeline — code map</title>
 <style>
   :root {
     color-scheme: light;
-    --page: #f7f8fa;
-    --surface: #fdfdfe;
-    --sunk: #eef1f5;
-    --ink: #0b0d10;
-    --ink-2: #4d545e;
-    --muted: #848b95;
-    --rule: #dfe3ea;
-    --border: rgba(11, 13, 16, 0.11);
-    --accent: #2a78d6;
-    --pg: #2a78d6;
-    --valkey: #4a3aa7;
-    --sqs: #eb6834;
-    --s3: #008300;
-    --ses: #e34948;
-    --flag: #b3261e;
-    --flag-bg: rgba(179, 38, 30, 0.07);
+    --page: #f7f8fa; --surface: #fdfdfe; --sunk: #eef1f5;
+    --ink: #0b0d10; --ink-2: #4d545e; --muted: #848b95;
+    --rule: #dfe3ea; --border: rgba(11, 13, 16, 0.11);
+    --accent: #2a78d6; --pg: #2a78d6; --valkey: #4a3aa7;
+    --sqs: #eb6834; --s3: #008300; --ses: #e34948;
+    --flag: #b3261e; --flag-bg: rgba(179, 38, 30, 0.07);
     --shadow: 0 1px 2px rgba(11, 13, 16, 0.05);
   }
   @media (prefers-color-scheme: dark) {
     :root:where(:not([data-theme="light"])) {
       color-scheme: dark;
-      --page: #0c0e11;
-      --surface: #16191d;
-      --sunk: #1d2126;
-      --ink: #f4f6f8;
-      --ink-2: #b8bfc9;
-      --muted: #838a94;
-      --rule: #262b31;
-      --border: rgba(255, 255, 255, 0.11);
-      --accent: #3987e5;
-      --pg: #3987e5;
-      --valkey: #9085e9;
-      --sqs: #d95926;
-      --s3: #17a217;
-      --ses: #e66767;
-      --flag: #f2857c;
-      --flag-bg: rgba(242, 133, 124, 0.10);
+      --page: #0c0e11; --surface: #16191d; --sunk: #1d2126;
+      --ink: #f4f6f8; --ink-2: #b8bfc9; --muted: #838a94;
+      --rule: #262b31; --border: rgba(255, 255, 255, 0.11);
+      --accent: #3987e5; --pg: #3987e5; --valkey: #9085e9;
+      --sqs: #d95926; --s3: #17a217; --ses: #e66767;
+      --flag: #f2857c; --flag-bg: rgba(242, 133, 124, 0.10);
       --shadow: none;
     }
   }
@@ -52,663 +31,449 @@
     --flag: #f2857c; --flag-bg: rgba(242, 133, 124, 0.10);
     --shadow: none;
   }
-  :root[data-theme="light"] {
-    color-scheme: light;
-    --page: #f7f8fa; --surface: #fdfdfe; --sunk: #eef1f5;
-    --ink: #0b0d10; --ink-2: #4d545e; --muted: #848b95;
-    --rule: #dfe3ea; --border: rgba(11, 13, 16, 0.11);
-    --accent: #2a78d6; --pg: #2a78d6; --valkey: #4a3aa7;
-    --sqs: #eb6834; --s3: #008300; --ses: #e34948;
-    --flag: #b3261e; --flag-bg: rgba(179, 38, 30, 0.07);
-    --shadow: 0 1px 2px rgba(11, 13, 16, 0.05);
-  }
 
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--page); color: var(--ink);
-    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    font: 15px/1.62 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  .wrap { max-width: 1000px; margin: 0 auto; padding: 30px 20px 90px; }
-  .mono, code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .mono, code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 
-  h1 { font-size: 22px; margin: 0 0 6px; letter-spacing: -0.015em; }
-  .lede { margin: 0; color: var(--ink-2); max-width: 70ch; }
-  .lede b { color: var(--ink); }
+  /* ---------------------------------------------------------------- layout */
+  .app { display: grid; grid-template-columns: 244px minmax(0, 1fr); min-height: 100vh; }
+  @media (max-width: 860px) { .app { grid-template-columns: 1fr; } .rail { position: static; height: auto; } }
 
-  .howto {
-    margin: 18px 0 0; background: var(--sunk); border: 1px solid var(--border);
-    border-radius: 8px; padding: 12px 15px; font-size: 13.5px; color: var(--ink-2);
+  .rail {
+    position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    border-right: 1px solid var(--rule); background: var(--surface); padding: 20px 0 32px;
   }
-  .howto b { color: var(--ink); }
-  .howto kbd {
-    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
-    background: var(--surface); border: 1px solid var(--border);
-    border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; color: var(--ink);
+  .rail .brand { padding: 0 18px 16px; }
+  .rail .brand b { display: block; font-size: 13.5px; letter-spacing: -0.01em; }
+  .rail .brand span { font-size: 11.5px; color: var(--muted); }
+  .rail h4 {
+    margin: 18px 0 5px; padding: 0 18px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
   }
-  .howto .sha { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .rail a {
+    display: block; padding: 5px 18px; color: var(--ink-2); text-decoration: none;
+    font-size: 13.2px; border-left: 2px solid transparent;
+  }
+  .rail a:hover { background: var(--sunk); color: var(--ink); }
+  .rail a.on { border-left-color: var(--accent); color: var(--ink); font-weight: 550; background: var(--sunk); }
 
-  .correction {
-    margin: 12px 0 0; border: 1px solid var(--flag); border-left-width: 3px;
-    background: var(--flag-bg); border-radius: 8px; padding: 12px 15px;
-    font-size: 13.5px; color: var(--ink-2);
-  }
-  .correction .h {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-    font-weight: 700; color: var(--flag); display: block; margin-bottom: 4px;
-  }
-  .correction b { color: var(--ink); }
+  main { padding: 40px 40px 120px; max-width: 760px; }
+  @media (max-width: 860px) { main { padding: 28px 20px 90px; } }
 
-  h2.sec {
-    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.09em;
-    color: var(--muted); margin: 34px 0 12px; padding-bottom: 6px;
-    border-bottom: 1px solid var(--rule); font-weight: 650;
+  article h1 { font-size: 25px; letter-spacing: -0.021em; margin: 0 0 6px; }
+  article .lede { color: var(--ink-2); font-size: 15.5px; margin: 0 0 26px; }
+  article h2 { font-size: 16px; letter-spacing: -0.01em; margin: 30px 0 8px; }
+  article p { margin: 0 0 14px; }
+  article ol, article ul { margin: 0 0 14px; padding-left: 22px; }
+  article li { margin: 4px 0; }
+  article code { background: var(--sunk); padding: 1.5px 5px; border-radius: 4px; font-size: 0.885em; }
+  article pre {
+    background: var(--sunk); border: 1px solid var(--rule); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; font-size: 12.6px; margin: 0 0 16px;
   }
+  article pre code { background: none; padding: 0; }
 
-  /* ---- storage inventory ---- */
-  .inv { display: grid; gap: 8px; }
-  .store {
-    background: var(--surface); border: 1px solid var(--border);
-    border-left: 3px solid var(--tint); border-radius: 7px;
-    box-shadow: var(--shadow); overflow: hidden;
-  }
-  .store .top {
-    display: grid; grid-template-columns: 210px 1fr; gap: 4px 18px;
-    align-items: baseline; padding: 10px 14px 11px;
-  }
-  @media (max-width: 720px) { .store .top { grid-template-columns: 1fr; } }
-  .store .k { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
-  .store .tag {
-    display: block; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: 0.07em; font-weight: 700; color: var(--tint); margin-bottom: 2px;
-  }
-  .store .d { font-size: 13.3px; color: var(--ink-2); }
-  .store .d em { color: var(--ink); font-style: normal; font-weight: 600; }
+  .wl { color: var(--accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+  .wl:hover { border-bottom-color: var(--accent); }
 
-  .shape {
-    font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--muted);
-    background: var(--sunk); border-radius: 5px; padding: 7px 10px;
-    margin-top: 8px; overflow-x: auto; white-space: pre;
+  /* ---------------------------------------------------------------- citations */
+  .cite {
+    display: inline; border: 0; background: none; padding: 0; margin: 0; cursor: pointer;
+    font: inherit; color: var(--accent); text-align: left;
+    border-bottom: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent);
   }
+  .cite:hover { border-bottom-style: solid; }
+  .cite::after { content: " ⌄"; font-size: 0.8em; opacity: 0.55; }
+  .cite.open::after { content: " ⌃"; }
 
-  /* ---- expandable detail ---- */
-  details.more { border-top: 1px solid var(--rule); }
-  details.more > summary {
-    cursor: pointer; list-style: none; padding: 8px 14px;
-    font-size: 12.3px; font-weight: 600; color: var(--accent);
-    display: flex; align-items: center; gap: 7px; user-select: none;
+  .src {
+    margin: 10px 0 18px; border: 1px solid var(--border); border-radius: 9px;
+    background: var(--surface); overflow: hidden; box-shadow: var(--shadow);
   }
-  details.more > summary::-webkit-details-marker { display: none; }
-  details.more > summary:hover { background: var(--sunk); }
-  details.more > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  details.more > summary .caret { transition: transform 0.15s ease; display: inline-block; font-size: 10px; color: var(--muted); }
-  details.more[open] > summary .caret { transform: rotate(90deg); }
-  @media (prefers-reduced-motion: reduce) { details.more > summary .caret { transition: none; } }
-  .more-body { padding: 2px 14px 14px; font-size: 13.3px; color: var(--ink-2); }
-  .more-body > p { margin: 0 0 9px; max-width: 72ch; }
-  .more-body > p:last-child { margin-bottom: 0; }
-  .more-body b { color: var(--ink); font-weight: 600; }
+  .src .head {
+    display: flex; align-items: center; gap: 9px; padding: 7px 11px;
+    background: var(--sunk); border-bottom: 1px solid var(--rule); font-size: 11.6px;
+  }
+  .src .head .p { font-family: ui-monospace, Menlo, monospace; color: var(--ink-2); }
+  .src .head .k {
+    margin-left: auto; color: var(--muted); font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .src pre { margin: 0; border: 0; border-radius: 0; background: none; padding: 10px 0; font-size: 12.3px; }
+  .src .ln { display: block; padding: 0 12px 0 0; white-space: pre; }
+  .src .ln .no {
+    display: inline-block; width: 44px; padding-right: 12px; text-align: right;
+    color: var(--muted); opacity: 0.6; user-select: none;
+  }
+  .src .ln.hit { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+  .src .ln.hit .no { opacity: 1; color: var(--accent); }
+  .src .err { padding: 10px 12px; color: var(--flag); background: var(--flag-bg); font-size: 12.8px; }
 
-  .cols {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
-    gap: 10px; margin: 4px 0 11px;
+  /* ---------------------------------------------------------------- ask */
+  #pop {
+    position: absolute; z-index: 40; display: none; gap: 6px;
+    background: var(--ink); color: var(--page); border-radius: 7px;
+    padding: 5px 10px; font-size: 12.3px; cursor: pointer; box-shadow: 0 3px 14px rgba(0,0,0,0.3);
+    border: 0; font-family: inherit;
   }
-  .colgrp { background: var(--sunk); border-radius: 6px; padding: 9px 11px; }
-  .colgrp h4 {
-    margin: 0 0 5px; font-size: 10.5px; text-transform: uppercase;
-    letter-spacing: 0.07em; color: var(--muted); font-weight: 700;
-  }
-  .colgrp ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 3px; }
-  .colgrp li { font-family: ui-monospace, Menlo, monospace; font-size: 11.8px; color: var(--ink); overflow-wrap: anywhere; }
-  .colgrp li span { color: var(--muted); font-family: system-ui, sans-serif; font-size: 11.5px; }
+  #pop.on { display: block; }
 
-  .keyfact {
-    border-left: 2px solid var(--tint, var(--accent)); padding: 3px 0 3px 11px;
-    margin: 0 0 10px; font-size: 13.2px;
+  #drawer {
+    position: fixed; right: 0; top: 0; bottom: 0; width: min(460px, 100vw);
+    background: var(--surface); border-left: 1px solid var(--rule);
+    transform: translateX(100%); transition: transform 0.16s ease;
+    display: flex; flex-direction: column; z-index: 50; box-shadow: -8px 0 30px rgba(0,0,0,0.09);
   }
-  .keyfact b { color: var(--ink); }
+  #drawer.on { transform: none; }
+  #drawer .top {
+    display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+    border-bottom: 1px solid var(--rule); font-size: 12.5px; color: var(--muted);
+  }
+  #drawer .top b { color: var(--ink); font-size: 13px; }
+  #drawer .top button { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 17px; }
+  #thread { flex: 1; overflow-y: auto; padding: 14px; }
+  #drawer .compose { border-top: 1px solid var(--rule); padding: 10px 12px; display: flex; gap: 8px; }
+  #drawer textarea {
+    flex: 1; resize: none; border: 1px solid var(--border); border-radius: 7px;
+    background: var(--page); color: var(--ink); padding: 8px 10px; font: inherit; font-size: 13.2px;
+    min-height: 60px;
+  }
+  #drawer .compose button {
+    align-self: flex-end; border: 0; border-radius: 7px; background: var(--accent);
+    color: #fff; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  #drawer .compose button:disabled { opacity: 0.45; cursor: default; }
 
-  /* ---- hops ---- */
-  .hop { display: grid; grid-template-columns: 34px 1fr; gap: 14px; margin-bottom: 10px; }
-  .hop .rail { display: flex; flex-direction: column; align-items: center; }
-  .hop .num {
-    width: 26px; height: 26px; flex: none; border-radius: 50%;
-    background: var(--surface); border: 1px solid var(--border); color: var(--ink);
-    font: 650 12.5px/24px ui-monospace, Menlo, monospace; text-align: center;
+  .qa { margin-bottom: 18px; }
+  .qa .sel {
+    border-left: 2px solid var(--accent); padding: 3px 0 3px 9px; margin-bottom: 8px;
+    color: var(--muted); font-size: 12.2px; font-style: italic;
   }
-  .hop .line { flex: 1; width: 1px; background: var(--rule); margin-top: 6px; min-height: 10px; }
-  .hop:last-child .line { display: none; }
+  .qa .q { font-weight: 560; margin-bottom: 6px; font-size: 13.6px; }
+  .qa .st { color: var(--muted); font-size: 11.8px; margin-bottom: 5px; }
+  .qa .tool {
+    display: inline-block; background: var(--sunk); border-radius: 4px; padding: 1px 6px;
+    margin: 0 4px 4px 0; font-family: ui-monospace, Menlo, monospace; font-size: 10.8px; color: var(--ink-2);
+  }
+  .qa .a { font-size: 13.7px; line-height: 1.6; white-space: pre-wrap; }
+  .qa .a code { background: var(--sunk); padding: 1px 4px; border-radius: 3px; font-size: 0.9em; }
+  .qa .err { color: var(--flag); }
 
-  .card {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
-    box-shadow: var(--shadow); margin-bottom: 4px; overflow: hidden;
-  }
-  .card .inner { padding: 13px 16px 14px; }
-  .card h3 { font-size: 15px; margin: 0 0 3px; letter-spacing: -0.01em; }
-  .card h3 .who { font: 500 12px/1 ui-monospace, Menlo, monospace; color: var(--muted); margin-left: 8px; }
-  .card .inner > p { margin: 0 0 10px; font-size: 13.8px; color: var(--ink-2); max-width: 72ch; }
-  .card .inner > p b { color: var(--ink); font-weight: 600; }
-
-  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; font-size: 12px; margin: 0 0 11px; }
-  .flow .pill {
-    display: inline-flex; align-items: center; gap: 5px; background: var(--sunk);
-    border-radius: 20px; padding: 3px 10px 3px 8px; font-family: ui-monospace, Menlo, monospace;
-    font-size: 11.5px; color: var(--ink-2); white-space: nowrap;
-  }
-  .flow .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--tint); flex: none; }
-  .flow .arrow { color: var(--muted); font-size: 13px; }
-
-  .links { display: grid; gap: 5px; }
-  .links a {
-    display: grid; grid-template-columns: minmax(0, auto) 1fr; gap: 4px 12px;
-    align-items: baseline; text-decoration: none; color: inherit;
-    background: var(--sunk); border: 1px solid transparent; border-radius: 6px; padding: 7px 11px;
-  }
-  @media (max-width: 640px) { .links a { grid-template-columns: 1fr; } }
-  .links a:hover { border-color: var(--accent); background: var(--surface); }
-  .links a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .links .ref { font-family: ui-monospace, Menlo, monospace; font-size: 12.3px; color: var(--accent); font-weight: 600; overflow-wrap: anywhere; }
-  .links .what { font-size: 12.8px; color: var(--ink-2); }
-  .links .what em { font-style: normal; color: var(--ink); font-weight: 600; }
-
-  .aside {
-    margin: 10px 0 0; border-left: 2px solid var(--rule); padding: 2px 0 2px 12px;
-    font-size: 12.8px; color: var(--muted); max-width: 70ch;
-  }
-  .aside b { color: var(--ink-2); }
-
-  footer { margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--rule); font-size: 12.8px; color: var(--muted); max-width: 76ch; }
-  footer b { color: var(--ink-2); }
-
-  /* ---- ask ---- */
-  .ask { border-top: 1px solid var(--rule); padding: 10px 14px 12px; background: var(--sunk); }
-  .ask .row { display: flex; gap: 8px; align-items: flex-start; }
-  .ask textarea {
-    flex: 1; min-height: 34px; max-height: 200px; resize: vertical;
-    font: 13px/1.45 system-ui, -apple-system, sans-serif;
-    color: var(--ink); background: var(--surface);
-    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
-  }
-  .ask textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
-  .ask button {
-    flex: none; font: 600 12.5px/1 system-ui, sans-serif; color: #fff;
-    background: var(--accent); border: 1px solid var(--accent);
-    border-radius: 6px; padding: 9px 13px; cursor: pointer;
-  }
-  .ask button:disabled { opacity: 0.5; cursor: default; }
-  .ask button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
-  .ask .scope {
-    font: 11.5px ui-monospace, Menlo, monospace; color: var(--muted);
-    margin-bottom: 6px; display: block;
-  }
-  .ask .scope b { color: var(--ink-2); font-weight: 600; }
-  .thread { display: grid; gap: 10px; margin-top: 11px; }
-  .qa { border-left: 2px solid var(--accent); padding-left: 11px; }
-  .qa .q { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 5px; }
-  .qa .a { font-size: 13.3px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .qa .a code { background: var(--surface); border-radius: 4px; padding: 1px 4px; font-size: 12.4px; }
-  .qa .st {
-    font: 11.5px ui-monospace, Menlo, monospace; color: var(--muted);
-    display: flex; flex-wrap: wrap; gap: 5px 10px; margin-bottom: 5px;
-  }
-  .qa .st .tool {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 4px; padding: 1px 6px; color: var(--ink-2);
-  }
-  .qa .st .tool b { color: var(--accent); font-weight: 600; }
-  .qa .err { color: var(--flag); font-size: 12.8px; }
   .offline {
-    border-top: 1px solid var(--rule); padding: 9px 14px;
-    font-size: 12.3px; color: var(--muted);
+    margin-top: 26px; border: 1px dashed var(--border); border-radius: 8px;
+    padding: 11px 13px; color: var(--muted); font-size: 12.6px;
   }
-  .offline code { color: var(--ink-2); }
+  .offline code { background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+
+  footer.lint { margin-top: 46px; border-top: 1px solid var(--rule); padding-top: 14px; font-size: 12px; color: var(--muted); }
+  footer.lint .bad { color: var(--flag); display: block; }
+  .hint { margin-bottom: 22px; padding: 9px 12px; background: var(--sunk); border-radius: 8px; font-size: 12.5px; color: var(--ink-2); }
 </style>
 
-<div class="wrap">
-  <h1>Where an email actually lives, hop by hop</h1>
-  <p class="lede">Six moves from <code class="mono">sendMail()</code> to SES. Every claim links to the exact lines that do it — and every card opens for the detail underneath.</p>
-
-  <div class="howto">
-    <b>Clicking a link</b> opens GitHub with those lines highlighted, pinned to <span class="sha">73a371b</span> (origin/main) so the numbers can't drift. From there <kbd>⌘⇧O</kbd> drops you into Helix at the same spot. <b>Every card has a “▸” row</b> — open it for the schema, the mechanism, and the consequences.
-  </div>
-
-  <div class="correction">
-    <span class="h">Correction — the earlier version of this page was wrong</span>
-    I said <code class="mono">EnqueuedEmail</code> holds “the whole email.” <b>It doesn't.</b> It holds a <b>render request</b>: ids pointing at the template, list and attachments, plus frozen JSON copies of the merge data. There is no subject and no body in it. That distinction has a real consequence — see the card below.
-  </div>
-
-  <h2 class="sec">Where data sits</h2>
-  <div class="inv" id="inv"></div>
-
-  <h2 class="sec">The six hops</h2>
-  <div id="hops"></div>
-
-  <footer>
-    <b>Reading the links:</b> a range like <code class="mono">L46-L90</code> highlights that block; a bare <code class="mono">L112</code> lands on one line. <b>PR #9648 merged 2026-07-21</b> and main has moved past the version we read earlier — the per-team cap is now overridable via a <code class="mono">team-rate-limit:&lt;teamId&gt;</code> key and a rate-limited peek returns a retry-after hint. These links point at main, so they show current truth.
-  </footer>
+<div class="app">
+  <nav class="rail">
+    <div class="brand"><b>Mail pipeline</b><span id="count"></span></div>
+    <div id="nav"></div>
+  </nav>
+  <main>
+    <article id="page"></article>
+    <div id="ask-slot"></div>
+    <footer class="lint" id="lint"></footer>
+  </main>
 </div>
+
+<button id="pop">ask about this</button>
+
+<aside id="drawer">
+  <div class="top"><b>Ask</b><span id="scope"></span><button id="close">✕</button></div>
+  <div id="thread"></div>
+  <div class="compose">
+    <textarea id="q" placeholder="Ask about the selection, or anything on this page…"></textarea>
+    <button id="send">Ask</button>
+  </div>
+</aside>
 
 <script>
 (() => {
-  const SHA = "73a371bc152130de1211762d7f824d42d116f0f6";
-  const gh = (path, range) => `https://github.com/loops-so/loops/blob/${SHA}/${path}#${range}`;
-  const MIG = "packages/mail-pg/migrations/20260615000000_create_mail_queue_tables.sql";
-
-  const linkRow = ([path, range, what]) =>
-    `<a href="${gh(path, range)}" target="_blank" rel="noopener">
-       <span class="ref">${path.split("/").pop()}:${range.replace(/L/g, "").replace("-", "–")}</span>
-       <span class="what">${what}</span>
-     </a>`;
-
-  const colgrp = (title, items) =>
-    `<div class="colgrp"><h4>${title}</h4><ul>${items.map((i) => `<li>${i}</li>`).join("")}</ul></div>`;
-
-  /* ---------------- storage ---------------- */
-  const stores = [
-    {
-      tint: "pg", tag: "Postgres · mail db", key: "enqueued_email",
-      d: "A <em>render request</em>, not an email. Ids pointing at the template, contact, list and attachments — plus frozen JSON copies of everything that could change before it sends. <em>No subject, no body.</em>",
-      summary: "what's actually in the row (and why it's split this way)",
-      more: `
-        <div class="cols">
-          ${colgrp("References — read later, live", [
-            "email_message_id <span>the template</span>",
-            "contact_id <span>the recipient</span>",
-            "mailing_list_id",
-            "attachment_key <span>→ S3</span>",
-          ])}
-          ${colgrp("Frozen at enqueue — JSONB", [
-            "contact_attributes",
-            "data_variables",
-            "event_property_values",
-            "datasource_extras",
-          ])}
-          ${colgrp("Flags &amp; bookkeeping", [
-            "include_unsubscribe_link",
-            "include_preview_tag",
-            "priority <span>smallint 0–255</span>",
-            "enqueued_at <span>partition key</span>",
-          ])}
-        </div>
-        <p class="keyfact" style="--tint: var(--pg)"><b>The consequence of that split:</b> merge data is <b>frozen</b> — if a contact changes their name after enqueue, the already-queued email still sends the old one. But the <b>template is not frozen</b>: render fetches the live <code class="mono">emailMessage</code> row by id with no version pin, so editing a campaign after enqueue but before render <b>changes what actually goes out</b>.</p>
-        <p>So the rule is: anything cheap and volatile gets copied; anything big and shared gets referenced. That's also why the row stays small enough to write millions of them at campaign speed.</p>
-        <div class="links">
-          ${[[MIG, "L2-L23", "<em>the CREATE TABLE</em> — every column, in order"],
-             ["packages/mail-pg/src/enqueued-email.ts", "L27-L42", "the insert schema, same fields as types"],
-             ["queries/email-message.ts", "L413-L425", "<em>findByIdsForSend</em> — plain findMany by id, no version pin"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "pg", tag: "Postgres · mail db", key: "enqueued_email_status",
-      d: "The state trail. <em>Six</em> states, not three: pending → rendering → rendered → sending → sent, or error. Append-only — one row per transition.",
-      summary: "why the status is stored twice",
-      more: `
-        <p>The current state lives in <b>two places on purpose</b>. <code class="mono">enqueued_email_status</code> is the append-only log — every transition, with its timestamp and message. But <code class="mono">enqueued_email</code> <em>also</em> carries denormalized <code class="mono">current_status</code>, <code class="mono">current_status_at</code> and <code class="mono">current_status_message</code> columns.</p>
-        <p>That duplication is what makes the operational queries possible: “which emails are stuck in <code class="mono">rendering</code>” is an index scan on the row, not an aggregate over the log. The partial indexes even exclude finished mail (<code class="mono">WHERE current_status NOT IN ('sent','error')</code>), so the hot index only covers in-flight work.</p>
-        <div class="links">
-          ${[[MIG, "L37-L46", "<em>the log table</em> — append-only, one row per transition"],
-             [MIG, "L18-L22", "the denormalized <em>current_status</em> columns on the email row"],
-             [MIG, "L30-L35", "the partial indexes that only cover in-flight mail"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "pg", tag: "Postgres · mail db", key: "email_send",
-      d: "The pointer to the rendered bytes — <em>bucket, key, and a byte range</em> inside the object. This is the table I left out of the last version entirely.",
-      summary: "what byte_offset really tells you",
-      more: `
-        <p>The columns are <code class="mono">bucket</code>, <code class="mono">key</code>, <code class="mono">byte_offset</code>, <code class="mono">byte_length</code>, <code class="mono">schema_version</code>. An offset and a length mean one S3 object holds <b>many rendered emails packed end to end</b>, and each email is a slice of it — which is exactly what the <code class="mono">serializePackedMailArtifact</code> / <code class="mono">parsePackedMailArtifact</code> pair in <code class="mono">lib/email-send</code> is for.</p>
-        <p>Why: a render batch is up to 500 emails. 500 separate PUTs is 500 round trips and 500 objects to lifecycle; one packed object is one PUT, and the send worker does a ranged GET for just its slice. <code class="mono">schema_version</code> is what lets the packing format change without stranding artifacts already written.</p>
-        <div class="links">
-          ${[[MIG, "L53-L63", "<em>the CREATE TABLE</em> — bucket, key, offset, length, version"],
-             ["jobs/mail-render.ts", "L434-L450", "where the packed artifact is written"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "pg", tag: "Postgres · all three tables", key: "PARTITION BY RANGE",
-      d: "All three tables are <em>time-partitioned</em> — by <code class=\"mono\">enqueued_at</code>, <code class=\"mono\">at</code>, and <code class=\"mono\">rendered_at</code> respectively.",
-      summary: "why that shows up in every CREATE TABLE",
-      more: `
-        <p>Mail tables are append-heavy and worthless after a while. Partitioning by time means retention is <code class="mono">DROP TABLE</code> on an old partition — instant, no vacuum storm — instead of a <code class="mono">DELETE</code> that would churn the indexes on the hot partition.</p>
-        <p>The practical catch: every partitioned table needs partitions to <b>exist before</b> rows land in that range, which is why the package ships a seeder rather than creating them lazily.</p>
-        <div class="links">
-          ${[[MIG, "L23", "<em>PARTITION BY RANGE (enqueued_at)</em>"],
-             ["packages/mail-pg/src/seed-partitions.ts", "L1", "the partition seeder"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "valkey", tag: "Valkey · sorted set", key: "{mail-schedule}:mail-queue:<teamId>",
-      d: "One queue <em>per team</em>, holding email <em>ids only</em>. The score packs priority and arrival time into one number.",
-      shape: `member "email_abc"   score  32·10¹³ + 1721480000000
-                          ▲ priority   ▲ enqueued-at ms`,
-      summary: "the score arithmetic, worked",
-      more: `
-        <p>A zset is just <b>(member, score)</b> pairs kept sorted by score — think two columns with an index on the number. Here the score is <code class="mono">priority × 10¹³ + createdAtMs</code>. Because <code class="mono">10¹³</code> is larger than any plausible millisecond timestamp, priority occupies the high digits and time the low ones, so one sort yields “all priority-32 oldest-first, then all priority-64 oldest-first.”</p>
-        <p>That's why the peek can select a class with a plain range read: everything below <code class="mono">64 × 10¹³</code> <em>is</em> the high-priority set. Priority is capped at 255 so the packed number stays inside a float64's exact-integer range.</p>
-        <div class="links">
-          ${[["lib/valkey-mail-queue.ts", "L139-L149", "<em>getQueueScore</em> — the packing, plus its safety checks"],
-             ["lib/valkey-mail-queue.ts", "L18", "PRIORITY_BUCKET_SIZE = 10¹³"],
-             ["lib/valkey-mail-queue.ts", "L59", "the range read that means “high priority only”"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "valkey", tag: "Valkey · sorted set", key: "…:active-mail-teams · …:processing-mail-teams",
-      d: "The scheduler's own work queue, where the unit of work is <em>a team</em>. Active = has mail waiting (score: since when). Processing = claimed (score: <em>lease expiry</em>).",
-      shape: `active      "team_abc"  →  1721480000000   waiting since 8:00:00
-processing  "team_abc"  →  1721480060000   lease dies 8:01:00`,
-      summary: "claim, lease, and what happens when a scheduler dies",
-      more: `
-        <p>Claiming a team <b>atomically moves</b> it from active to processing, writing <code class="mono">now + teamLeaseMs</code> as the new score. A move can only succeed once, so two replicas can never work the same team — that's the whole double-send defense, at team granularity.</p>
-        <p>If the instance holding a claim dies, the team would be stranded in processing forever. So every tick starts by sweeping processing for scores in the past and moving those teams back to active — but only if their queue is still non-empty. Worst case after a crash is one team pausing for one lease period.</p>
-        <p>If that shape feels familiar: it is <b>SQS's receive + visibility-timeout</b>, hand-rolled, with “a team with pending mail” as the message.</p>
-        <div class="links">
-          ${[["lib/valkey-mail-queue.ts", "L172-L188", "<em>claimActiveTeams</em> — the move, with leaseUntil as score"],
-             ["packages/valkey/src/index.ts", "L21-L33", "the atomic move script — <em>lowest scores first</em> = fairness"],
-             ["lib/valkey-mail-queue.ts", "L35-L44", "<em>the crash sweep</em> — expired leases return to active"],
-             ["lib/valkey-mail-queue.ts", "L28-L33", "mark-active skips a team that's already being processed"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "valkey", tag: "Valkey · counter + sorted set", key: "…:low-tokens · …:scheduled-rate:<teamId>",
-      d: "The two throttles. <em>low-tokens</em> is a single global integer. <em>scheduled-rate</em> is a rolling one-second log — member = email id, score = when it was scheduled.",
-      summary: "why a log instead of a counter",
-      more: `
-        <p>A counter with a one-second expiry gives you <b>fixed</b> windows, and fixed windows leak: 1,000 sends at 0.99s plus 1,000 at 1.01s is 2,000 in 20ms, both “legal.” Scoring each id by its timestamp makes the window <b>slide</b> — trim everything older than a second and whatever remains is, exactly, the last second. Any 1,000 ms interval you pick holds at most the cap.</p>
-        <p><code class="mono">low-tokens</code> is the other axis: one integer, global, funded by transactional health. Both are read and written inside the same Lua script as the peek, because a check-then-act split across replicas would let two workers spend the same allowance.</p>
-        <div class="links">
-          ${[["lib/valkey-mail-queue.ts", "L52-L57", "trim the window, compute what's available"],
-             ["lib/mail-send-tokens.ts", "L6-L12", "the token constants — key, scale, SLA threshold"],
-             ["lib/mail-send-tokens.ts", "L14-L20", "the ×0.9 decay as Lua, so it can't race"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "sqs", tag: "SQS", key: "mailRender · mailSend",
-      d: "Two job queues, both carrying <em>ids and pointers, never bodies</em>. <code class=\"mono\">messageGroupId = teamId</code> keeps one team's batches in order.",
-      summary: "why render and send are separate queues",
-      more: `
-        <p>Rendering is slow and CPU-bound (template + merge data + safety checks); sending is a fast network call to SES. Splitting them means a slow render can't occupy a send slot, and each half <b>retries independently</b> — a transient SES error re-sends the already-rendered artifact instead of re-rendering it.</p>
-        <p>It's also where the fan-out changes shape: one <code class="mono">mailRender</code> message covers a whole batch of ids, and render fans it out into per-email <code class="mono">mailSend</code> jobs.</p>
-        <div class="links">
-          ${[["apps/mail-schedule/src/scheduler.ts", "L203-L214", "<em>submitRenderBatch</em> — one message per batch"],
-             ["jobs/mail-render.ts", "L516-L521", "render fans out into per-email send jobs"]].map(linkRow).join("")}
-        </div>`,
-    },
-    {
-      tint: "s3", tag: "S3", key: "packed mail artifact",
-      d: "The <em>rendered</em> SES payload. Too big for a queue message, so the queue carries a pointer and <code class=\"mono\">email_send</code> records the byte range.",
-      summary: "see the email_send card above",
-      more: `<p>The interesting part isn't S3 itself — it's that many emails share one object and each is addressed by offset and length. That's covered in the <b><code class="mono">email_send</code></b> card above.</p>`,
-    },
-  ];
-
-  /* ---------------- ask: live Q&A against the real repo ---------------- */
-  // Only works when this page is served by `mail-map-serve`, which proxies to the viewer's
-  // read-only `claude -p` (Read/Grep/Glob in the loops worktree). Opened as a hosted
-  // artifact there is no such backend, so the box is replaced by a note.
   const LOCAL = ["localhost", "127.0.0.1"].includes(location.hostname);
+  const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+  const $ = (id) => document.getElementById(id);
 
-  // The file each chunk's questions are seeded with. Claude can Read/Grep anything else it needs.
-  const STORE_PATHS = [
-    "packages/mail-pg/migrations/20260615000000_create_mail_queue_tables.sql",
-    "packages/mail-pg/migrations/20260615000000_create_mail_queue_tables.sql",
-    "packages/mail-pg/migrations/20260615000000_create_mail_queue_tables.sql",
-    "packages/mail-pg/migrations/20260615000000_create_mail_queue_tables.sql",
-    "lib/valkey-mail-queue.ts",
-    "lib/valkey-mail-queue.ts",
-    "lib/mail-send-tokens.ts",
-    "apps/mail-schedule/src/scheduler.ts",
-    "jobs/mail-render.ts",
-  ];
-  const HOP_PATHS = {
-    1: "lib/send-mail.ts",
-    2: "lib/enqueue-email.ts",
-    3: "apps/mail-schedule/src/scheduler.ts",
-    4: "lib/valkey-mail-queue.ts",
-    5: "jobs/mail-render.ts",
-    6: "jobs/mail-send.ts",
-  };
+  let PAGES = [];
+  let current = null;
+  let selection = null;
+  let session = null;
 
-  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-  // just enough markdown for an answer: `code` and **bold**
-  const fmt = (s) => esc(s)
-    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+  /* ------------------------------------------------------------ markdown */
+  // Deliberately small: the wiki only uses what is rendered here. Anything that needs
+  // more markup than this is a sign the page should be split, not that this should grow.
+  const inline = (s) =>
+    esc(s)
+      .replace(/\[([^\]]+)\]\(src:([^)\s]+)\)/g,
+        (_, text, anchor) => `<button class="cite" data-anchor="${esc(anchor)}">${text}</button>`)
+      .replace(/\[\[([a-z0-9\-]+)\]\]/g, (_, slug) => {
+        const p = PAGES.find((x) => x.slug === slug);
+        return `<a class="wl" href="#${slug}">${p ? esc(p.title) : slug}</a>`;
+      })
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+      .replace(/(^|[\s(])\*([^*]+)\*/g, "$1<em>$2</em>");
 
-  function askBlock(path) {
-    if (!LOCAL) {
-      return `<div class="offline">Ask-a-question needs the local backend — run <code>mail-map-serve</code> and open <code>localhost:62555</code>.</div>`;
-    }
-    return `<div class="ask" data-path="${path}">
-      <span class="scope">answers read <b>${path}</b> and anything else they need, in your checkout</span>
-      <div class="row">
-        <textarea rows="1" placeholder="Ask about this — e.g. “what happens if two schedulers claim the same team?”"></textarea>
-        <button type="button">Ask</button>
-      </div>
-      <div class="thread"></div>
-    </div>`;
-  }
+  function render(md) {
+    const out = [];
+    const lines = md.split("\n");
+    let list = null;
+    const closeList = () => { if (list) { out.push(`</${list}>`); list = null; } };
 
-  function wireAsk(root) {
-    const box = root.querySelector(".ask");
-    if (!box) return;
-    const ta = box.querySelector("textarea");
-    const btn = box.querySelector("button");
-    const thread = box.querySelector(".thread");
-    const path = box.dataset.path;
-    let session = "";
-
-    async function send() {
-      const question = ta.value.trim();
-      if (!question) return;
-      ta.value = "";
-      btn.disabled = true;
-
-      const qa = document.createElement("div");
-      qa.className = "qa";
-      qa.innerHTML = `<div class="q">${esc(question)}</div><div class="st">starting…</div><div class="a"></div>`;
-      thread.appendChild(qa);
-      const st = qa.querySelector(".st");
-      const ans = qa.querySelector(".a");
-      qa.scrollIntoView({ block: "nearest", behavior: "smooth" });
-
-      const tools = [];
-      let text = "";
-      const body = {
-        turn: `map-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        branch: "main",
-        path,
-        question,
-      };
-      if (session) body.resume = session;
-
-      try {
-        const res = await fetch("/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        });
-        const reader = res.body.getReader();
-        const dec = new TextDecoder();
-        let buf = "";
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buf += dec.decode(value, { stream: true });
-          const frames = buf.split("\n\n");
-          buf = frames.pop();
-          for (const frame of frames) {
-            const ev = /^event: (.+)$/m.exec(frame);
-            const da = /^data: (.+)$/m.exec(frame);
-            if (!ev || !da) continue;
-            let obj;
-            try { obj = JSON.parse(da[1]); } catch { continue; }
-            const kind = ev[1].trim();
-            if (kind === "session") {
-              session = obj.session_id || session;
-            } else if (kind === "status") {
-              if (!text) st.textContent = obj.s + "…";
-            } else if (kind === "tool") {
-              tools.push(obj);
-              st.innerHTML = tools.map((t) =>
-                `<span class="tool"><b>${esc(t.name || "")}</b> ${esc(String(t.arg || "").slice(0, 60))}</span>`).join("");
-            } else if (kind === "token") {
-              text += obj.t || "";
-              ans.innerHTML = fmt(text);
-            } else if (kind === "error") {
-              ans.innerHTML = `<span class="err">${esc(obj.err || "the backend returned an error")}</span>`;
-            } else if (kind === "gone") {
-              ans.innerHTML = `<span class="err">that turn expired — ask again</span>`;
-            }
-          }
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^\s{4,}\S/.test(line)) {
+        closeList();
+        const block = [];
+        while (i < lines.length && (/^\s{4,}/.test(lines[i]) || !lines[i].trim())) {
+          block.push(lines[i].replace(/^ {4}/, ""));
+          i++;
         }
-        if (!text && !ans.textContent) {
-          ans.innerHTML = `<span class="err">no answer came back — is the viewer running on :62497?</span>`;
-        }
-      } catch (err) {
-        ans.innerHTML = `<span class="err">${esc(String(err))}</span>`;
-      } finally {
-        btn.disabled = false;
-        if (!tools.length) st.remove();
-        ta.focus();
+        i--;
+        out.push(`<pre><code>${esc(block.join("\n").replace(/\s+$/, ""))}</code></pre>`);
+        continue;
       }
+      if (!line.trim()) { closeList(); continue; }
+      const h = /^(#{2,3})\s+(.*)$/.exec(line);
+      if (h) { closeList(); out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+      const ol = /^(\d+)\.\s+(.*)$/.exec(line);
+      const ul = /^[-*]\s+(.*)$/.exec(line);
+      if (ol || ul) {
+        const want = ol ? "ol" : "ul";
+        if (list !== want) { closeList(); out.push(`<${want}>`); list = want; }
+        out.push(`<li>${inline((ol || ul)[ol ? 2 : 1])}</li>`);
+        continue;
+      }
+      closeList();
+      out.push(`<p>${inline(line)}</p>`);
     }
-
-    btn.addEventListener("click", send);
-    ta.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); send(); }
-    });
+    closeList();
+    return out.join("");
   }
 
-  const invHost = document.getElementById("inv");
-  stores.forEach((s, i) => {
-    const el = document.createElement("div");
-    el.className = "store";
-    el.style.setProperty("--tint", `var(--${s.tint})`);
-    el.innerHTML = `
-      <div class="top">
-        <div><span class="tag">${s.tag}</span><div class="k">${s.key.replace(/</g, "&lt;")}</div></div>
-        <div><div class="d">${s.d}</div>${s.shape ? `<div class="shape">${s.shape}</div>` : ""}</div>
-      </div>
-      <details class="more">
-        <summary><span class="caret">▶</span>${s.summary}</summary>
-        <div class="more-body">${s.more}</div>
-      </details>
-      ${askBlock(STORE_PATHS[i])}`;
-    invHost.appendChild(el);
-    wireAsk(el);
+  /* ------------------------------------------------------------ nav + routing */
+  function buildNav() {
+    const host = $("nav");
+    host.innerHTML = "";
+    let section = null;
+    for (const p of PAGES) {
+      if (p.section !== section) {
+        section = p.section;
+        const h = document.createElement("h4");
+        h.textContent = section;
+        host.appendChild(h);
+      }
+      const a = document.createElement("a");
+      a.href = `#${p.slug}`;
+      a.dataset.slug = p.slug;
+      a.textContent = p.title;
+      host.appendChild(a);
+    }
+    $("count").textContent = `${PAGES.length} pages · reads your checkout`;
+  }
+
+  function show(slug) {
+    const page = PAGES.find((p) => p.slug === slug) || PAGES[0];
+    current = page;
+    document.querySelectorAll(".rail a").forEach((a) => a.classList.toggle("on", a.dataset.slug === page.slug));
+    $("page").innerHTML =
+      `<h1>${esc(page.title)}</h1>` +
+      (page.lede ? `<p class="lede">${inline(page.lede)}</p>` : "") +
+      (page.slug === PAGES[0].slug ? `<div class="hint">Dotted links open the real source from your checkout, in place. <b>Select any text</b> to ask about it.</div>` : "") +
+      render(page.body);
+    $("ask-slot").innerHTML = LOCAL
+      ? ""
+      : `<div class="offline">Source lookup and questions need the local backend — run <code>mail-map-serve</code> and open <code>localhost:62555</code>.</div>`;
+    window.scrollTo(0, 0);
+    session = null;
+    $("thread").innerHTML = "";
+  }
+
+  window.addEventListener("hashchange", () => show(location.hash.slice(1)));
+
+  /* ------------------------------------------------------------ citations */
+  document.addEventListener("click", async (e) => {
+    const btn = e.target.closest(".cite");
+    if (!btn) return;
+    // A citation sits mid-sentence, so the source attaches after the whole paragraph —
+    // nesting a block inside the <p> would split the sentence around it.
+    const block = btn.closest("p, li, h2, h3") || btn;
+    const next = block.nextElementSibling;
+    if (next && next.classList.contains("src") && next.dataset.anchor === btn.dataset.anchor) {
+      next.remove();
+      btn.classList.remove("open");
+      return;
+    }
+    btn.classList.add("open");
+    const box = document.createElement("div");
+    box.className = "src";
+    box.dataset.anchor = btn.dataset.anchor;
+    box.innerHTML = `<div class="head"><span class="p">loading…</span></div>`;
+    block.after(box);
+
+    const res = await fetch(`/src?anchor=${encodeURIComponent(btn.dataset.anchor)}`).then((r) => r.json());
+    if (res.err) {
+      box.innerHTML = `<div class="err">${esc(res.err)}</div>`;
+      return;
+    }
+    const rows = res.text.split("\n").map((line, i) => {
+      const no = res.from + i;
+      const hit = no >= res.start && no <= res.end;
+      return `<span class="ln${hit ? " hit" : ""}"><span class="no">${no}</span>${esc(line)}</span>`;
+    });
+    box.innerHTML =
+      `<div class="head"><span class="p">${esc(res.path)}:${res.start}–${res.end}</span>` +
+      `<span class="k">${res.kind === "symbol" ? "definition" : res.kind === "match" ? "call site" : "pinned range"}</span></div>` +
+      `<pre>${rows.join("")}</pre>`;
   });
 
-  /* ---------------- hops ---------------- */
-  const hops = [
-    {
-      n: 1, title: "Birth — the render request is written down", who: "any web/API process",
-      body: "Five callers funnel into <code class='mono'>sendMail</code>: the transactional API, a workflow's send-email node, campaign fan-out, opt-in, previews. <b>getPriority</b> stamps the number that decides everything later — transactional 32, preview 48, workflow 64, campaign 128. Then one Postgres transaction writes the request row plus its first status.",
-      flow: [["nothing", null], ["enqueued_email + status", "pg"]],
-      links: [
-        ["lib/send-mail.ts", "L22-L36", "<em>getPriority</em> — the whole priority map, 15 lines"],
-        ["lib/enqueue-email.ts", "L68-L80", "the transaction: <em>row + 'pending' status</em>, atomically"],
-      ],
-      summary: "why priority 64 is the fault line",
-      more: `<p>“High priority” is defined as strictly <code class="mono">&lt; 64</code>. Workflow mail is <em>exactly</em> 64 — so it lands on the low-priority side by one point, sharing a class with campaigns. Within that class its lower number still sorts it ahead of campaign mail, but it is subject to the token gate, and transactional (32) is not.</p>
-        <div class="links">${[["lib/mail-send-tokens.ts", "L22-L24", "<em>isHighPriority</em> — the one-line definition"]].map(linkRow).join("")}</div>`,
-    },
-    {
-      n: 2, title: "Park — the id goes into the team's queue", who: "same process, right after the commit",
-      body: "The same function pushes just the <b>id</b> into that team's Valkey queue and stamps the team into the active index. Nothing is running yet — the mail is parked, and this buffer is what makes everything downstream controllable.",
-      flow: [["enqueued_email", "pg"], ["+ id in team queue", "valkey"]],
-      links: [
-        ["lib/enqueue-email.ts", "L83-L92", "push to Valkey — <em>only id, teamId, priority, createdAt</em>"],
-        ["lib/enqueue-email.ts", "L112", "<em>markTeamActive</em> — put the team in the index"],
-      ],
-      summary: "why park at all instead of enqueuing a job directly",
-      more: `<p>If enqueue pushed straight to SQS, a 5M-recipient campaign would flood the job queue and transactional mail would sit behind it — SQS can't reorder, and there'd be no single place to intervene, since pushes come from many processes at once.</p>
-        <p>Parking in Valkey creates the one place that <b>can</b> decide order and pace. Everything in hops 3 and 4 exists because of this choice.</p>`,
-    },
-    {
-      n: 3, title: "Claim — the scheduler picks up a team", who: "apps/mail-schedule (its own service)",
-      body: "Not a job handler — a <b>while loop</b> in its own deployed app. Each tick: sweep expired leases, then claim up to <code class='mono'>teamClaimLimit</code> teams by atomically moving them active → processing.",
-      flow: [["team in active", "valkey"], ["team in processing", "valkey"]],
-      links: [
-        ["apps/mail-schedule/src/scheduler.ts", "L175-L190", "<em>the loop</em> — while(shouldRun) tick, sleep only when idle"],
-        ["apps/mail-schedule/src/scheduler.ts", "L123-L172", "<em>one tick</em> — requeue expired, claim, schedule each"],
-      ],
-      summary: "the claim/lease mechanics",
-      more: `<p>Covered in full on the <b>active / processing</b> card above — claim = atomic move, lease = expiry score, crash sweep = range read over the past.</p>
-        <div class="links">${[["lib/valkey-mail-queue.ts", "L172-L188", "<em>claimActiveTeams</em>"],
-          ["packages/valkey/src/index.ts", "L21-L33", "the atomic move, lowest score first"]].map(linkRow).join("")}</div>`,
-    },
-    {
-      n: 4, title: "Peek — the one atomic doorway", who: "scheduler, one Lua script per team",
-      body: "The single choke point. In <b>one indivisible script</b>: trim the rolling window and see what's left of the cap → take high-priority ids until the batch is full → give leftovers to low-priority <b>only if tokens allow</b> → record what was taken.",
-      flow: [["ids parked", "valkey"], ["ids in hand", "valkey"]],
-      links: [
-        ["lib/valkey-mail-queue.ts", "L46-L90", "<em>the whole peek script</em> — read this one top to bottom"],
-        ["lib/valkey-mail-queue.ts", "L59", "high-priority first — <em>can take the entire batch</em>"],
-        ["lib/valkey-mail-queue.ts", "L65-L80", "the token gate: leftovers only, floor(tokens/1000) of them"],
-      ],
-      summary: "why this has to be Lua",
-      more: `<p>Both throttles are <b>shared counters with concurrent deciders</b>. Written in JS, <code class="mono">GET tokens</code> … decide … <code class="mono">DECRBY</code> is three round trips with gaps: two team-workers (or two replicas) both read “1,000 left” and both spend it. A Lua script runs atomically on the server, so read-decide-mutate is one step. The ×0.9 decay is a separate script for the same reason.</p>
-        <p>The general rule: <b>when a decision depends on shared state, the decision has to execute where the state lives.</b></p>`,
-    },
-    {
-      n: 5, title: "Render — first time anyone reads content", who: "jobs/mail-render (a worker)",
-      body: "Ids go to SQS and are only then removed from the queue, so a crash can't lose mail. The render worker loads the message, contact and list from the <b>main</b> database, builds the SES payload, writes it to <b>S3</b>, and enqueues per-email send jobs pointing at byte ranges.",
-      flow: [["ids", "valkey"], ["mailRender msg", "sqs"], ["packed artifact", "s3"]],
-      links: [
-        ["apps/mail-schedule/src/scheduler.ts", "L49-L120", "<em>scheduleTeamRenderBatch</em> — peek, submit, remove, re-mark active"],
-        ["jobs/mail-render.ts", "L434-L450", "<em>writeToStorage</em> — the packed artifact lands in S3"],
-        ["jobs/mail-render.ts", "L516-L521", "fan out into per-email <em>mailSend</em> jobs"],
-      ],
-      summary: "the ordering that makes crashes safe",
-      more: `<p>The sequence is <b>submit first, remove second</b>. If the process dies between them, the ids are still in the team queue and get picked up again — a duplicate render is recoverable, a lost email is not. Choosing which way to fail is the whole design decision here.</p>
-        <p>This is also where the <b>fresh</b> reads happen: the template and contact are fetched live from the main DB, while the merge data comes frozen off the request row. That asymmetry is the <code class="mono">enqueued_email</code> card's consequence, in action.</p>`,
-    },
-    {
-      n: 6, title: "Send — SES, then the verdict flows back", who: "jobs/mail-send (a worker)",
-      body: "Ranged-GETs its slice of the artifact, calls SES, appends <b>sent</b> or <b>error</b>. Then measures <code class='mono'>queueDelayMs</code> = sent-at minus enqueued-at — <b>the number the 10-second SLA judges</b> — and reports it. Inside SLA deposits +10 tokens; a miss multiplies the balance by 0.9.",
-      flow: [["artifact slice", "s3"], ["SES", "ses"], ["status + verdict", "pg"]],
-      links: [
-        ["jobs/mail-send.ts", "L276", "<em>where queueDelayMs is computed</em> — sentAt − enqueuedAt"],
-        ["jobs/mail-send.ts", "L184-L205", "write the status, then report the delay"],
-        ["lib/mail-send-tokens.ts", "L97-L121", "<em>the SLA branch</em> — the if/else the economy hangs on"],
-      ],
-      summary: "what the delay is actually measuring",
-      more: `<p><code class="mono">queueDelayMs</code> spans <b>the entire pipeline</b> — enqueue to SES-accepted — not just the send step. So it absorbs time parked in Valkey, waiting for a claim, sitting in SQS, and rendering. That's deliberate: it's a customer-visible latency measure, not a component metric.</p>
-        <p>Which is why the feedback loop bites the way it does. When <em>anything</em> upstream is slow, transactional mail misses the 10s SLA, and the ×0.9 decay throttles low-priority mail to give the whole pipeline room. Workflow throughput is the shock absorber for transactional latency.</p>
-        <div class="links">${[["lib/mail-send-tokens.ts", "L14-L20", "the decay script"],
-          ["lib/app-env/mail-send.ts", "L4-L6", "<em>MAIL_SEND_HIGH_PRIORITY_SLA_MS</em> — the 10,000 default"]].map(linkRow).join("")}</div>`,
-      aside: "After SES accepts, the story continues only through inbound SES webhooks — deliveries and bounces arrive later as separate events.",
-    },
-  ];
+  /* ------------------------------------------------------------ select to ask */
+  const pop = $("pop");
 
-  const tint = { pg: "var(--pg)", valkey: "var(--valkey)", sqs: "var(--sqs)", s3: "var(--s3)", ses: "var(--ses)" };
-  const hopHost = document.getElementById("hops");
+  document.addEventListener("mouseup", (e) => {
+    const from = e.target instanceof Element ? e.target : null;
+    if (from && (from.closest("#drawer") || from.closest("#pop"))) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel ? sel.toString().trim() : "";
+      if (!text || text.length < 3) { pop.classList.remove("on"); return; }
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      const src = from ? from.closest(".src") : null;
+      selection = {
+        text,
+        anchor: src ? src.dataset.anchor : null,
+        path: src ? src.querySelector(".head .p")?.textContent : null,
+      };
+      pop.style.left = `${window.scrollX + rect.left}px`;
+      pop.style.top = `${window.scrollY + rect.bottom + 7}px`;
+      pop.classList.add("on");
+    }, 0);
+  });
 
-  for (const h of hops) {
-    const flow = h.flow.map(([label, kind], i) =>
-      (i ? '<span class="arrow">→</span>' : "") +
-      `<span class="pill" style="--tint:${kind ? tint[kind] : "var(--muted)"}"><i></i>${label}</span>`).join("");
+  pop.addEventListener("click", () => {
+    pop.classList.remove("on");
+    openDrawer();
+  });
 
-    const el = document.createElement("div");
-    el.className = "hop";
-    el.innerHTML = `
-      <div class="rail"><div class="num">${h.n}</div><div class="line"></div></div>
-      <div>
-        <div class="card">
-          <div class="inner">
-            <h3>${h.title}<span class="who">${h.who}</span></h3>
-            <div class="flow">${flow}</div>
-            <p>${h.body}</p>
-            <div class="links">${h.links.map(linkRow).join("")}</div>
-            ${h.aside ? `<p class="aside">${h.aside}</p>` : ""}
-          </div>
-          <details class="more">
-            <summary><span class="caret">▶</span>${h.summary}</summary>
-            <div class="more-body">${h.more}</div>
-          </details>
-          ${askBlock(HOP_PATHS[h.n])}
-        </div>
-      </div>`;
-    hopHost.appendChild(el);
-    wireAsk(el);
+  function openDrawer() {
+    $("drawer").classList.add("on");
+    $("scope").textContent = selection
+      ? `· ${selection.path || current.title}`
+      : `· ${current.title}`;
+    $("q").focus();
   }
+
+  $("close").addEventListener("click", () => $("drawer").classList.remove("on"));
+
+  /* ------------------------------------------------------------ chat */
+  async function ask() {
+    const ta = $("q");
+    const question = ta.value.trim();
+    if (!question) return;
+    ta.value = "";
+    $("send").disabled = true;
+
+    const qa = document.createElement("div");
+    qa.className = "qa";
+    qa.innerHTML =
+      (selection ? `<div class="sel">${esc(selection.text.slice(0, 220))}</div>` : "") +
+      `<div class="q">${esc(question)}</div><div class="st">starting…</div><div class="a"></div>`;
+    $("thread").appendChild(qa);
+    qa.scrollIntoView({ block: "start" });
+
+    const st = qa.querySelector(".st");
+    const ans = qa.querySelector(".a");
+    const tools = [];
+    const framing = selection
+      ? `On this line or passage:\n\n${selection.text}\n\n${question}`
+      : question;
+
+    try {
+      const res = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          turn: framing,
+          question: framing,
+          branch: "main",
+          path: (selection && selection.anchor ? selection.anchor.split("#")[0] : null) || current.ask,
+          resume: session,
+        }),
+      });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      let text = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop();
+        for (const frame of frames) {
+          const ev = /^event: (.+)$/m.exec(frame);
+          const da = /^data: (.+)$/m.exec(frame);
+          if (!ev || !da) continue;
+          let obj = {};
+          try { obj = JSON.parse(da[1]); } catch { continue; }
+          const kind = ev[1].trim();
+          if (kind === "status") st.textContent = obj.status || "";
+          else if (kind === "session") session = obj.session_id || session;
+          else if (kind === "tool") {
+            tools.push(obj);
+            st.innerHTML = tools.map((t) =>
+              `<span class="tool">${esc(t.name || "")} ${esc(String(t.arg || "").slice(0, 48))}</span>`).join("");
+          } else if (kind === "token") {
+            text += obj.text || "";
+            ans.innerHTML = esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
+          } else if (kind === "done") st.textContent = "";
+          else if (kind === "error") ans.innerHTML = `<span class="err">${esc(obj.err || "backend error")}</span>`;
+        }
+      }
+      if (!text && !ans.innerHTML) {
+        ans.innerHTML = `<span class="err">no answer came back — is the viewer running on :62497?</span>`;
+      }
+    } catch (err) {
+      ans.innerHTML = `<span class="err">${esc(err)}</span>`;
+    } finally {
+      st.textContent = st.textContent === "starting…" ? "" : st.textContent;
+      $("send").disabled = false;
+      selection = null;
+    }
+  }
+
+  $("send").addEventListener("click", ask);
+  $("q").addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") ask();
+  });
+
+  /* ------------------------------------------------------------ boot */
+  (async () => {
+    const data = await fetch("/pages").then((r) => r.json()).catch(() => ({ err: "server not reachable" }));
+    if (data.err) {
+      $("page").innerHTML = `<p class="err">${esc(data.err)}</p>`;
+      return;
+    }
+    PAGES = data.pages;
+    buildNav();
+    show(location.hash.slice(1));
+
+    const lint = await fetch("/lint").then((r) => r.json()).catch(() => null);
+    if (lint && lint.problems) {
+      $("lint").innerHTML = lint.problems.length
+        ? lint.problems.map((p) => `<span class="bad">${esc(p.kind)} — ${esc(p.msg)}</span>`).join("")
+        : `checks pass · every citation resolves against your checkout`;
+    }
+  })();
 })();
 </script>

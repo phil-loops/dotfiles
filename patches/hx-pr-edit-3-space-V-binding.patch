@@ -1,0 +1,17 @@
+diff --git a/helix/config.toml b/helix/config.toml
+index eac7641..b144e4c 100644
+--- a/helix/config.toml
++++ b/helix/config.toml
+@@ -46,6 +46,12 @@ n = "@:open \"%sh{dirname %{buffer_name}}/\"<C-b>"
+ # (verified 2026-07-22). Piping the selection is a synchronous transaction, so :write sees it.
+ m = ["select_all", ":pipe $HOME/.dotfiles/scripts/hx-fmt %{buffer_name}", ":write", "collapse_selection"]
+ v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
++# space-V = ship it: commit whatever is dirty, start the push gates in the background, and land
++# on this branch's node in the viewer, where the push button is. The pair is deliberate —
++# space-v is a CHECKPOINT and stays in the editor (it used to raise Chrome, which with no viewer
++# tab open just dumped you on whatever Chrome was showing); space-V is the one handoff.
++# It never pushes: the viewer's warded ⇧ button remains the only door to origin.
++V = [":write", ":sh $HOME/.dotfiles/scripts/hx-ship %{buffer_name}"]
+ t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
+ 
+ # space-o = "open" menu: m → on GitHub/main, b → on GitHub/current branch,

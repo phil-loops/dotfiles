@@ -1,0 +1,107 @@
+diff --git a/scripts/srv/preview.py b/scripts/srv/preview.py
+index b7f7c92..45dcbfd 100644
+--- a/scripts/srv/preview.py
++++ b/scripts/srv/preview.py
+@@ -4,7 +4,8 @@
+ #   GET  /preview-wait     ?branch=  → HTML                   warming page: starts + watches the boot,
+ #                                                             hands the tab off once the server answers
+ #   POST /preview          {branch}  → {ok, url, port, dir, reused?}  start, or attach to a running one
+-#   POST /preview-main                → {ok, url, port, dir, reused?}  run (or attach to) main on :3000
++#   POST /preview-main     {port?}    → {ok, url, port, dir, reused?}  run (or attach to) main; prefer
++#                                                             :3000 (or port), fall back to a free one
+ #   POST /preview-kill     {dir}     → {ok}                   stop one (dir-string only; orphan-safe)
+ #   POST /preview-restart  {dir}     → {ok, url, port}        kill + fresh next dev on the SAME port
+ #   POST /preview-reap                → {ok, out}             stop orphaned/crashed previews
+@@ -219,19 +220,28 @@ def start(req, raw):
+ 
+ 
+ def start_main(req, raw):
+-    # "run main": a web-only next dev for the MAIN checkout on :3000 — the one server not tied to a
+-    # branch node. :3000 is where task dev already serves main, so if anything is listening there we
+-    # ATTACH, never relaunch: loops-preview wipes .next before it binds, which would corrupt a live
+-    # task dev. Only spawn when 3000 is free.
++    # "run main": a web-only next dev for the MAIN checkout, preferring :3000. main is a single
++    # server (same checkout, same DB), so if it's already up on ANY port we ATTACH rather than
++    # launch a twin — identified by the server whose dir is the main worktree, not by the port.
++    # The preferred port (caller's, default 3000) is taken when it's free; when something else
++    # squats it (a branch on :3000), we fall back to a free side port instead of clobbering it —
++    # loops-preview wipes .next before it binds, so it must never be pointed at an occupied port.
++    d = json.loads(raw or "{}")
+     main_wt = checkout._active_main_wt()
+     if not main_wt or not os.path.isdir(main_wt):
+         req._send(500, json.dumps({"ok": False, "err": "could not resolve main worktree"}))
+         return
+-    if _listening(3000):
+-        req._send(200, json.dumps({"ok": True, "port": 3000, "url": "http://localhost:3000",
+-                                   "dir": main_wt, "reused": True}))
+-        return
+-    p = subprocess.run([_script(), main_wt, "--port", "3000", "--main", main_wt], capture_output=True, text=True)
++    for pv in _list_json():
++        if pv.get("dir") == main_wt and pv.get("state") != "orphaned" and str(pv.get("port", "")).isdigit():
++            port = int(pv["port"])
++            req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
++                                       "dir": main_wt, "reused": True}))
++            return
++    pref = int(d["port"]) if str(d.get("port", "")).isdigit() else 3000
++    argv = [_script(), main_wt, "--main", main_wt]
++    if not _listening(pref):
++        argv += ["--port", str(pref)]  # preferred is free — take it; else loops-preview auto-picks a free side port
++    p = subprocess.run(argv, capture_output=True, text=True)
+     m = re.search(r"localhost:(\d+)", p.stdout)
+     if not m:
+         req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "launch failed").strip()[:400]}))
+diff --git a/scripts/viewer-solid/src/ServersDrawer.tsx b/scripts/viewer-solid/src/ServersDrawer.tsx
+index 24fcc64..fc6ec90 100644
+--- a/scripts/viewer-solid/src/ServersDrawer.tsx
++++ b/scripts/viewer-solid/src/ServersDrawer.tsx
+@@ -70,8 +70,9 @@ export function ServersDrawer() {
+     refetchInterval: open() ? 3000 : false,
+   }));
+   const previews = () => q.data?.previews ?? [];
+-  // main owns :3000 (task dev's home, or a "run main" launch); everything else is a branch preview
+-  const mainSrv = () => previews().find((p) => p.port === "3000");
++  // the main server is the one serving the main checkout itself (dir === the borrowed main wt),
++  // wherever it landed — NOT whatever squats :3000. A branch on :3000 is not main.
++  const mainSrv = () => previews().find((p) => p.dir && p.dir === p.borrows);
+   const sub = () => q.data?.substrate;
+   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
+   const [logFor, setLogFor] = createSignal<string | null>(null);
+@@ -92,7 +93,8 @@ export function ServersDrawer() {
+     await q.refetch();
+     setBusy(null);
+   };
+-  const launchMain = async () => { setBusy("__main__"); await post("/preview-main", {}); await q.refetch(); setBusy(null); };
++  const [mainPort, setMainPort] = createSignal("3000");
++  const launchMain = async () => { setBusy("__main__"); await post("/preview-main", { port: mainPort().trim() }); await q.refetch(); setBusy(null); };
+   const reap = async () => { setBusy("__all__"); await post("/preview-reap", {}); await q.refetch(); setBusy(null); };
+   const killAll = async () => {
+     setBusy("__all__");
+@@ -112,14 +114,23 @@ export function ServersDrawer() {
+           <button class="ml-auto cursor-pointer px-0.5 text-[18px] leading-none text-ink-faint hover:text-ink" title="close" onClick={() => setOpen(false)}>×</button>
+         </header>
+ 
+-        {/* main — the one server not tied to a branch node. When it's down, a quiet launcher; when
+-            up (task dev or a launch), it lists below with the branch previews, so no card here. */}
++        {/* main — the one server not tied to a branch node. When it's down, a quiet launcher with a
++            port preference; when up (task dev or a launch), it lists below with the previews. */}
+         <Show when={!mainSrv()}>
+-          <section class="flex items-center gap-2.5 border-b border-rule px-4.5 py-[11px]">
++          <section class="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-rule px-4.5 py-[11px]">
+             <button class={BTN} disabled={busy() === "__main__"} onClick={launchMain}>
+-              {busy() === "__main__" ? "starting main…" : "▷ run main (:3000)"}
++              {busy() === "__main__" ? "starting main…" : "▷ run main"}
+             </button>
+-            <span class="text-[10.5px] text-ink-faint">serves the main checkout · web only</span>
++            <label class="flex items-center gap-1 text-[10.5px] text-ink-faint">
++              port
++              <input
++                class="w-[46px] rounded border border-rule bg-vellum-night px-1.5 py-px text-center text-[11px] text-ink-dim focus:border-ink-faint focus:text-ink focus:outline-none"
++                value={mainPort()}
++                onInput={(e) => setMainPort(e.currentTarget.value)}
++                onKeyDown={(e) => { if (e.key === "Enter" && busy() !== "__main__") { launchMain(); } }}
++              />
++            </label>
++            <span class="text-[10.5px] text-ink-faint">main checkout · web only · falls back to a free port if taken</span>
+           </section>
+         </Show>
+ 

@@ -1,0 +1,72 @@
+diff --git a/scripts/srv/ctx.py b/scripts/srv/ctx.py
+index 589d5ab..b5b10ab 100644
+--- a/scripts/srv/ctx.py
++++ b/scripts/srv/ctx.py
+@@ -6,7 +6,7 @@ import os
+ import hashlib
+ import threading
+ 
+-run = None      # run(argv) -> CompletedProcess, cwd=repo_cwd()
++run = None      # run(argv, timeout=None) -> CompletedProcess, cwd=repo_cwd(); expiry = rc 124
+ ROOT = ""       # servedir (where restack.log / index.html live)
+ SCRIPTS = ""    # ~/.dotfiles/scripts
+ CWD = ""        # the repo the server was launched in (the default when no ?repo= is selected)
+diff --git a/scripts/srv/reviews.py b/scripts/srv/reviews.py
+index ddc98e6..c1a26c8 100644
+--- a/scripts/srv/reviews.py
++++ b/scripts/srv/reviews.py
+@@ -155,7 +155,7 @@ def _local_branch_for_pr(num):
+     if hit and now - hit[0] < _BRANCH_TTL:
+         return hit[1]
+     r = ctx.run(["gh", "pr", "view", num, "--json", "headRefName,isCrossRepository",
+-                 "--jq", "[.headRefName, .isCrossRepository] | @tsv"])
++                 "--jq", "[.headRefName, .isCrossRepository] | @tsv"], timeout=15)
+     parts = r.stdout.strip().split("\t") if r.returncode == 0 else []
+     branch = None
+     if len(parts) == 2 and parts[1] != "true" and parts[0] and \
+@@ -189,7 +189,7 @@ def _refresh_review_branch(num):
+     with _refresh_locks.setdefault(key, threading.Lock()):
+         if time.time() - _refreshed.get(key, 0) < _REFRESH_TTL:
+             return
+-        ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
++        ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"], timeout=20)
+         _refreshed[key] = time.time()
+ 
+ 
+@@ -231,7 +231,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
+         if ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{review}"]).returncode == 0:
+             branch = review   # already imported — reuse, don't re-fetch on every click
+         else:
+-            r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
++            r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num], timeout=30)
+             if r.returncode != 0:
+                 req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
+                 return
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 7d78bbe..9ec10d3 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -55,10 +55,21 @@ def _log(line):
+         sys.stderr.flush()
+ 
+ 
+-def run(args):
++def run(args, timeout=None):
+     # cwd is the per-request active repo (srvctx.repo_cwd) — the ?repo= selection for this
+     # thread, or CWD when none. So every handler that goes through run is repo-aware for free.
+-    return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True)
++    #
++    # timeout is opt-in per call and MUST NOT become a default — plenty of what comes through here
++    # (a restack, a gates run, a vite build) is legitimately slow. But a network git/gh call on a
++    # request thread that stalls pends that thread for the life of the server: nothing above reaps
++    # it, so the thread and its child both leak, and the caller learns nothing. Expiry reads as an
++    # ordinary failed CompletedProcess (124, the shell's timeout code), so callers keep their
++    # `returncode != 0` shape without knowing this exists.
++    try:
++        return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True, timeout=timeout)
++    except subprocess.TimeoutExpired:
++        _log(f"run: timed out after {timeout}s — {' '.join(args)}")
++        return subprocess.CompletedProcess(args, 124, "", f"timed out after {timeout}s")
+ 
+ 
+ def _main_worktree():

@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-# mail-map-serve — serve the mail-pipeline map with a working "ask" box.
+# mail-map-serve — serve the mail map wiki with working source lookup and Q&A.
 #
 #   mail-map-serve [port]        default 62555; prints the URL, Ctrl-C to stop
 #
-# The map itself is a static page. The ask box needs a Claude that can READ the loops
-# repo, which the blessing viewer already runs (POST :62497/chat → read-only `claude -p`
-# in the branch's worktree, streamed as SSE). The browser can't call that directly: the
-# viewer allows a localhost Origin but sends no Access-Control-Allow-Origin, so the
-# response is unreadable cross-port. So this proxies /chat server-side — same origin from
-# the page's view, and zero changes to the viewer.
+# The server is deliberately dumb: it hands out pages as JSON (content lives in
+# ~/.dotfiles/mail-map/*.md) and resolves citations against the checkout. All rendering
+# is in mail-map.html. That split is what keeps the wiki restructurable — moving a page
+# is `git mv`, not surgery on markup.
+#
+# /chat is proxied rather than called from the browser: the blessing viewer accepts a
+# localhost Origin but sends no Access-Control-Allow-Origin, so a page on another port
+# can POST and still not read the reply. Proxying makes it same-origin, with zero
+# viewer changes.
 
-import http.server
 import json
 import os
 import socketserver
 import sys
 import urllib.error
 import urllib.request
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import parse_qs, urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mail_map  # noqa: E402
 
 VIEWER = os.environ.get("STACK_VIEWER", "http://127.0.0.1:62497")
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -25,34 +32,65 @@ PAGE = os.path.join(HERE, "mail-map.html")
 SHELL = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mail pipeline</title>
 </head><body>
 %s
 </body></html>"""
 
 
-class Handler(http.server.BaseHTTPRequestHandler):
+class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def do_GET(self):
-        route = self.path.split("?")[0]
-        if route == "/favicon.ico":
-            self.send_response(204)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        if route not in ("/", "/index.html"):
-            return self.send_error(404)
-        try:
-            with open(PAGE, "rb") as fh:
-                body = (SHELL % fh.read().decode("utf-8")).encode("utf-8")
-        except FileNotFoundError:
-            return self.send_error(500, f"missing {PAGE}")
+    def _send(self, body, ctype="application/json"):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body).encode()
+        elif isinstance(body, str):
+            body = body.encode()
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def do_GET(self):
+        url = urlparse(self.path)
+        query = parse_qs(url.query)
+
+        if url.path == "/favicon.ico":
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
+        if url.path in ("/", "/index.html"):
+            try:
+                with open(PAGE, encoding="utf-8") as fh:
+                    return self._send(SHELL % fh.read(), "text/html; charset=utf-8")
+            except FileNotFoundError:
+                return self.send_error(500, f"missing {PAGE}")
+
+        if url.path == "/pages":
+            try:
+                return self._send({"pages": mail_map.load_pages()})
+            except mail_map.Problem as exc:
+                return self._send({"err": str(exc)})
+
+        if url.path == "/src":
+            anchor = (query.get("anchor") or [""])[0]
+            try:
+                return self._send(mail_map.source_slice(anchor))
+            except mail_map.Problem as exc:
+                return self._send({"err": str(exc)})
+
+        if url.path == "/lint":
+            try:
+                found = mail_map.check()
+            except mail_map.Problem as exc:
+                return self._send({"err": str(exc)})
+            return self._send({"problems": [{"kind": k, "msg": m} for k, m in found]})
+
+        return self.send_error(404)
 
     def do_POST(self):
         if self.path != "/chat":
@@ -66,13 +104,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upstream = urllib.request.urlopen(req, timeout=900)
         except urllib.error.URLError as exc:
             msg = json.dumps({"err": f"viewer at {VIEWER} unreachable: {exc}"})
-            body = f"event: error\ndata: {msg}\n\n".encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
+            return self._send(f"event: error\ndata: {msg}\n\n", "text/event-stream")
 
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -102,14 +134,22 @@ class Server(socketserver.ThreadingTCPServer):
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 62555
+    try:
+        pages = mail_map.load_pages()
+    except mail_map.Problem as exc:
+        print(f"pages are broken: {exc}")
+        return 1
     with Server(("127.0.0.1", port), Handler) as httpd:
-        print(f"mail map → http://localhost:{port}   (chat proxied to {VIEWER})")
+        print(f"mail map → http://localhost:{port}   ({len(pages)} pages)")
+        print(f"  source  ← {mail_map.REPO}")
+        print(f"  chat    → {VIEWER}")
         print("Ctrl-C to stop")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
             print()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
