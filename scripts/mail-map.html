@@ -205,6 +205,7 @@
   const $ = (id) => document.getElementById(id);
 
   let PAGES = [];
+  let REF = "origin/main";
   let current = null;
   let selection = null;
   let session = null;
@@ -279,7 +280,7 @@
       a.textContent = p.title;
       host.appendChild(a);
     }
-    $("count").textContent = `${PAGES.length} pages · reads your checkout`;
+    $("count").textContent = `${PAGES.length} pages · source from ${REF}`;
   }
 
   function show(slug) {
@@ -333,7 +334,7 @@
     });
     box.innerHTML =
       `<div class="head"><span class="p">${esc(res.path)}:${res.start}–${res.end}</span>` +
-      `<span class="k">${res.kind === "symbol" ? "definition" : res.kind === "match" ? "call site" : "pinned range"}</span></div>` +
+      `<span class="k">${res.kind === "symbol" ? "definition" : res.kind === "match" ? "call site" : "pinned range"} · ${esc(res.ref || "")}</span></div>` +
       `<pre>${rows.join("")}</pre>`;
   });
 
@@ -427,16 +428,19 @@
           let obj = {};
           try { obj = JSON.parse(da[1]); } catch { continue; }
           const kind = ev[1].trim();
-          if (kind === "status") st.textContent = obj.status || "";
+          if (kind === "status") st.textContent = obj.s || "";
           else if (kind === "session") session = obj.session_id || session;
           else if (kind === "tool") {
             tools.push(obj);
             st.innerHTML = tools.map((t) =>
               `<span class="tool">${esc(t.name || "")} ${esc(String(t.arg || "").slice(0, 48))}</span>`).join("");
           } else if (kind === "token") {
-            text += obj.text || "";
+            text += obj.t || "";
             ans.innerHTML = esc(text).replace(/`([^`]+)`/g, "<code>$1</code>");
-          } else if (kind === "done") st.textContent = "";
+          } else if (kind === "done") {
+            st.textContent = "";
+            session = obj.session_id || session;
+          }
           else if (kind === "error") ans.innerHTML = `<span class="err">${esc(obj.err || "backend error")}</span>`;
         }
       }
@@ -465,6 +469,7 @@
       return;
     }
     PAGES = data.pages;
+    REF = data.ref || REF;
     buildNav();
     show(location.hash.slice(1));
 
