@@ -33,6 +33,15 @@ test("contractNodes: a whole dropped chain reparents to the nearest survivor", (
   assert.equal(out.find((n) => n.id === "tip")!.parent, undefined);
 });
 
+// The map asks `depth === 0` for "is this a root" (the main-hover spotlight). Dropping a merged
+// base — the auto-contract case — promotes its children, so their depth has to come down with it.
+test("contractNodes: children promoted to roots re-read as depth 0", () => {
+  const seeded = forest().map((n) => ({ ...n, depth: n.parent ? 1 : 0 }));
+  const out = contractNodes(seeded, new Set(["base"]));
+  assert.equal(out.find((n) => n.id === "mid")!.depth, 0);
+  assert.equal(out.find((n) => n.id === "tip")!.depth, 1);
+});
+
 test("contractNodes: a parent cycle terminates instead of hanging the map", () => {
   const cyclic = [node("a", "b"), node("b", "a"), node("c", "a")];
   assert.doesNotThrow(() => contractNodes(cyclic, new Set(["a"])));
