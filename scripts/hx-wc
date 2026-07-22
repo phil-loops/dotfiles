@@ -12,8 +12,15 @@
 # Chrome, which is wrong for an edit loop (you commit several files before you want to look
 # at anything) and was a blind `open -a` besides: with no viewer tab open it dumped you on
 # whatever Chrome happened to be showing. The deliberate hand-off lives in `hx-ship`.
+#
+# NOTHING reaches stdout on success: helix's :sh renders any stdout as a popup floating over
+# the buffer, which is far too loud for a key pressed this often. The confirmation goes to the
+# tmux status line instead; helix's own "Command run" covers the bare-terminal case. Failures
+# still go to stderr, where a non-zero exit surfaces as a helix error rather than a popup.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+note(){ [[ -n "${TMUX:-}" ]] && tmux display-message "$1" 2>/dev/null || true }
 
 file="${1:?usage: hx-wc <file> [msg...]}"
 shift || true
@@ -24,7 +31,7 @@ dir="${file:h}"
 # pre-check instead of letting commit fail: detached-HEAD commit failure output is a noisy
 # two-liner ("Not currently on any branch." + "nothing to commit") in the hx popup
 if [[ -z "$(git -C "$dir" status --porcelain -- "$file")" ]]; then
-  echo "hx-wc: nothing to commit"
+  note "hx-wc: nothing to commit"
   exit 0
 fi
 git -C "$dir" add -- "$file"
@@ -34,4 +41,4 @@ if ! out=$(git -C "$dir" commit -m "$msg" -- "$file" 2>&1); then
 fi
 sha=$(git -C "$dir" rev-parse --short HEAD)
 
-echo "✦ committed ${sha}  ${msg}"
+note "✦ committed ${sha}  ${msg}"
