@@ -23,6 +23,9 @@ file="${file:A}"          # %{buffer_name} is cwd-relative; git -C below re-anch
 dir="${file:h}"
 
 die(){ echo "hx-ship: $*" >&2; exit 1 }
+# stdout would become a popup floating over the buffer (helix renders :sh output that way), so
+# the summary goes to the tmux status line — same channel as hx-wc. --dry-run still prints.
+note(){ [[ -n "${TMUX:-}" ]] && tmux display-message "$1" 2>/dev/null || true }
 
 git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || die "$dir is not in a git worktree"
 root=$(git -C "$dir" rev-parse --show-toplevel)
@@ -152,4 +155,4 @@ if [[ -z "$landed" ]]; then
   if open "$url" >/dev/null 2>&1; then landed="↗ $route"; else landed="$url (no browser)"; fi
 fi
 
-echo "${committed}${gates}  ${landed}"
+note "${committed}${gates}  ${landed}"

@@ -26,9 +26,13 @@ trusted = [
   "/private/tmp/stack-study/*",
 ]
 
-# space-v = the nvim :wc port (custom/wc.lua): write + commit JUST this file, so the blessing
-# viewer (which renders committed diffs) sees the edit — it stays in the editor, see space-V
-# below. Custom message: :w then :sh hx-wc %{buffer_name} your message
+# space-v / space-V are the same motion at two volumes: both format, save, and commit so the
+# blessing viewer (which renders committed diffs) sees the edit. space-v stops there and stays
+# in the editor; space-V also starts the push gates and raises Chrome on this branch's node,
+# where the push button is. Neither pushes: the viewer's warded ⇧ button is the only door to
+# origin. Formatting rides on :write via auto-format (see languages.toml) — there is no
+# separate format key, because a format that isn't saved and committed helps nobody here.
+# Custom commit message: :w then :sh hx-wc %{buffer_name} your message
 #
 # space-t = contextual test watcher: write, then drive a tmux pane below Helix running
 # node:test --watch on this file's sibling .test.ts (or the buffer itself). Re-runs live
@@ -38,19 +42,7 @@ trusted = [
 # inside the quotes, so you just type the name. Quotes are load-bearing — an expansion
 # ENDS an argument, so an unquoted %sh{...}/name.ts opens two files, one of them `/name.ts`.
 n = "@:open \"%sh{dirname %{buffer_name}}/\"<C-b>"
-# space-m = format, THEN save — the deliberate "yes, reformat it" press. auto-format stays
-# off in languages.toml so :w and space-v never surprise-reformat, which leaves formatting
-# with no one-key affordance at all; this is it.
-# NOT [":format", ":write"]: :format is an async job whose edit lands after the :write queued
-# behind it, so that pair saves the UNformatted text and leaves the formatting unsaved
-# (verified 2026-07-22). Piping the selection is a synchronous transaction, so :write sees it.
-m = ["select_all", ":pipe $HOME/.dotfiles/scripts/hx-fmt %{buffer_name}", ":write", "collapse_selection"]
 v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
-# space-V = ship it: commit whatever is dirty, start the push gates in the background, and land
-# on this branch's node in the viewer, where the push button is. The pair is deliberate —
-# space-v is a CHECKPOINT and stays in the editor (it used to raise Chrome, which with no viewer
-# tab open just dumped you on whatever Chrome was showing); space-V is the one handoff.
-# It never pushes: the viewer's warded ⇧ button remains the only door to origin.
 V = [":write", ":sh $HOME/.dotfiles/scripts/hx-ship %{buffer_name}"]
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
 

@@ -2,16 +2,20 @@
 command = "tsgo"
 args = ["--lsp", "--stdio"]
 
-# formatter = oxfmt (the repo's own, via task lint) — :fmt formats the buffer in place
-# WITHOUT saving. auto-format stays off so :w / space-v never surprise-reformat.
+# formatter = oxfmt (the repo's own, via task lint). auto-format is what makes space-v
+# format: helix chains the save INSIDE the format callback, so :write is the only ordering
+# that gets formatted bytes to disk — [":format", ":write"] races and saves the unformatted
+# text (verified 2026-07-22). It fails safe: oxfmt exits non-zero on a syntax error, helix
+# drops the transaction and saves the buffer verbatim rather than writing the error over it.
+# Escape hatch for a save that must not reformat: `:write --no-format`.
 [[language]]
 name = "typescript"
 language-servers = ["tsgo", "oxlint"]
-auto-format = false
+auto-format = true
 formatter = { command = "oxfmt-stdin", args = ["ts"] }
 
 [[language]]
 name = "tsx"
 language-servers = ["tsgo", "oxlint"]
-auto-format = false
+auto-format = true
 formatter = { command = "oxfmt-stdin", args = ["tsx"] }
