@@ -159,6 +159,7 @@ def _local_branch_for_pr(num):
 
 
 _refreshed = {}   # pr-num -> unix time of the last head fetch
+_refresh_locks = {}
 _REFRESH_TTL = 120
 
 
@@ -172,11 +173,16 @@ def _refresh_review_branch(num):
     # on every precise ⌘⇧O. The page-load prewarm pays it instead; the TTL is what lets the
     # keypress skip it. Prewarm time is also the more faithful moment to fetch: the line number
     # the chord sends was read off the page as it rendered, not off whatever the head is now.
-    now = time.time()
-    if now - _refreshed.get(num, 0) < _REFRESH_TTL:
-        return
-    ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
-    _refreshed[num] = now
+    #
+    # Lock per PR, don't just test the TTL: pressing the chord a second after the page renders
+    # lands here while the prewarm's own fetch is still in flight and hasn't stamped the TTL yet,
+    # so both would fetch the same ref at once — the keypress paying the very cost it's meant to
+    # skip. Waiting for the in-flight fetch is strictly cheaper, and leaves the TTL warm.
+    with _refresh_locks.setdefault(num, threading.Lock()):
+        if time.time() - _refreshed.get(num, 0) < _REFRESH_TTL:
+            return
+        ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
+        _refreshed[num] = time.time()
 
 
 def _match_diffhash(paths, want):
