@@ -169,14 +169,42 @@ here="$(cd "$(dirname "$0")" && pwd)"
 viewer_port=""
 [ "$check_viewer" = "1" ] && viewer_port=$("$here/stack-review-port" 2>/dev/null || true)
 
-modeldiff() {  # served JSON $1 vs git JSON $2 → how they disagree, empty when they agree
+modeldiff() {  # served JSON $1 vs git JSON $2 for project $3 → how they disagree, empty when agreed
   python3 -c '
-import json, sys
-def nodes(p):
+import json, subprocess, sys
+served_p, truth_p, proj, scripts = sys.argv[1:5]
+
+def enrich(d):
+    # /model serves stack-forest PLUS these; mirrors srv/review.py _enrich, which owns the rules.
+    # Best-effort exactly as it is there: a field we cannot derive is left off and not compared.
+    rk = subprocess.run([scripts + "/stack-merge-rank", proj], capture_output=True, text=True)
+    ranks, order = {}, []
+    if rk.returncode == 0:
+        try:
+            mr = json.loads(rk.stdout) or {}
+            ranks, order = mr.get("rank", {}), mr.get("order", [])
+        except ValueError:
+            pass
+    for bid, meta in (d.get("nodes") or {}).items():
+        if not isinstance(meta, dict):
+            continue
+        desc = subprocess.run(["git", "config", "branch.%s.description" % bid],
+                              capture_output=True, text=True).stdout.strip()
+        if desc:
+            meta["description"] = desc
+        if bid in ranks:
+            meta["mergeRank"] = ranks[bid]
+    if order:
+        d["mergeOrder"] = order
+    return d
+
+def nodes(p, graft=False):
     d = json.load(open(p))
+    if graft:
+        d = enrich(d)
     return d, {b: n for b, n in (d.get("nodes") or {}).items() if not b.startswith("✦")}
-sd, sn = nodes(sys.argv[1])
-td, tn = nodes(sys.argv[2])
+sd, sn = nodes(served_p)
+td, tn = nodes(truth_p, graft=True)
 # stack-forest emits roots/children/requires in an unstable order — two runs over identical
 # state disagree, so only their CONTENT can mean anything here
 norm = lambda v: sorted(v) if isinstance(v, list) and all(isinstance(x, str) for x in v) else v
@@ -189,13 +217,14 @@ bad = [(b, sorted(k for k in tn[b] if norm(sn[b].get(k)) != norm(tn[b][k]))) for
 bad = [(b, ks) for b, ks in bad if ks]
 if bad:     out.append("wrong data on: " + " ".join("%s(%s)" % (b, ",".join(ks[:3])) for b, ks in bad))
 if norm(sd.get("roots") or []) != norm(td.get("roots") or []): out.append("different roots")
-print(" — ".join(out))' "$1" "$2" 2>/dev/null
+if "mergeOrder" in td and sd.get("mergeOrder") != td["mergeOrder"]: out.append("different merge order")
+print(" — ".join(out))' "$1" "$2" "$3" "$here" 2>/dev/null
 }
 
 drift_once() {  # $1 = project, $2 = scratch dir → modeldiff of a fresh read of both sides
   curl -sf --max-time 2 "http://127.0.0.1:$viewer_port/model?branch=$1" -o "$2/served.json" || return 1
   "$here/stack-forest" "$1" > "$2/truth.json" 2>/dev/null || return 1
-  modeldiff "$2/served.json" "$2/truth.json"
+  modeldiff "$2/served.json" "$2/truth.json" "$1"
 }
 
 viewer_drift() {  # $1 = project → a report line iff served ≠ git; silent if the server is down
