@@ -589,6 +589,9 @@ if [[ "${1:-}" == "--sweep" ]]; then
   # the running commit — ancestry, not timestamps, decides (so rollbacks can't lie).
   # Staging gets no per-PR tap: a staging rollout you dispatched already stickies via
   # the --user-filtered deploy lane above, and dispatching IS the signal that you care.
+  # Production applies that same rule to the 🚀 tap: a release someone ELSE dispatched
+  # carrying your long-merged PR is their news, not yours, so it only journals. Identity
+  # failure fails closed (journal, no tap) — an unknown dispatcher is not you.
   landrepos=(${=$(git config prwatch.landing-repos 2>/dev/null || echo "Loops-so/loops")})
   lstate="$HOME/.cache/prwatch/sweep-landing2.tsv"
   # ingest PRs that merged THIS pass, recording their merge commit
@@ -603,7 +606,8 @@ if [[ "${1:-}" == "--sweep" ]]; then
     print -r -- "$key"$'\t'"$msha"$'\t'"$ltitle"$'\t'0$'\t'0 >> "$lstate"
   done
   if [[ -s "$lstate" ]]; then
-    typeset -A builtsha envsha
+    typeset -A builtsha envsha mydeploy
+    lme=$(gh api user --jq .login 2>/dev/null) || lme=""
     for lr in $landrepos; do
       builtsha[$lr]=$(gh run list --repo "$lr" --workflow build-and-test.yml --branch main \
                         --status success --limit 1 --json headSha --jq '.[0].headSha // empty' 2>/dev/null) || builtsha[$lr]=""
@@ -613,6 +617,18 @@ if [[ "${1:-}" == "--sweep" ]]; then
         if [[ -n "$rn" ]]; then
           envsha[$lr]=$(gh run list --repo "$lr" --workflow build-and-test.yml --limit 150 \
                           --json number,headSha --jq "map(select(.number==$rn))[0].headSha // empty" 2>/dev/null) || envsha[$lr]=""
+          # did I dispatch the release that's serving? Compare RUN NUMBERS, not strings:
+          # prod reports the appVersion (main-21012-1) while the deploy title carries the
+          # release version (2026.07.22-21012-1) — same build, different spelling.
+          if [[ -n "$lme" ]]; then
+            mytitles=$(gh run list --repo "$lr" --workflow deploy-v2.yml --user "$lme" --limit 30 \
+                         --json displayTitle \
+                         --jq '.[] | select(.displayTitle | startswith("[production]")) | .displayTitle' 2>/dev/null) || mytitles=""
+            for mt in ${(f)mytitles}; do
+              [[ -n "$mt" ]] || continue
+              if [[ "$(version_runnum "${mt##* }")" == "$rn" ]]; then mydeploy[$lr]=1; fi
+            done
+          fi
         fi
       fi
     done
@@ -630,7 +646,13 @@ if [[ "${1:-}" == "--sweep" ]]; then
         snotify "📦 image built" "$key — $title" "$lurl"; built=1
       fi
       if [[ "$prodded" != 1 ]] && _contains "$lrepo" "$msha" "${envsha[$lrepo]:-}"; then
-        snotify "🚀 live in production" "$key — $title" "$lurl"; prodded=1
+        if [[ -n "${mydeploy[$lrepo]:-}" ]]; then
+          snotify "🚀 live in production" "$key — $title" "$lurl"
+        else
+          "$HOME/.dotfiles/scripts/notify-journal" prwatch silent-other-actor "🚀 live in production" \
+            "$key — shipped by a release I didn't dispatch" "$lurl" 2>/dev/null || true
+        fi
+        prodded=1
       fi
       [[ "$built" == 1 && "$prodded" == 1 ]] && continue   # fully landed → drop
       lnew+="$key"$'\t'"$msha"$'\t'"$title"$'\t'"$built"$'\t'"$prodded"$'\n'
