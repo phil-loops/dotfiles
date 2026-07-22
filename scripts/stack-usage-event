@@ -24,26 +24,37 @@ def session():
     # (2026-07-22), each time to a session that hadn't read the code. Stamp it instead, via the
     # same ancestor walk `own` uses for lane claims. No claude ancestor = Phil at a terminal,
     # recorded as null: that is an answer, not a gap.
+    # Two ways in, because the ancestor walk alone returns nothing here: the post-commit hook
+    # launches this as `( … & )`, so the parent is gone before we run and the process is already
+    # reparented to launchd. The environment survives that, and presence records carry tmux_pane
+    # — so the pane is the identity that outlives the detach. Prefer the pid when we have one
+    # (a pane can be re-hosted, e.g. cw-claim joining a warm-pool pane into a new window).
     out = subprocess.run([os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude-session-pid")],
                          capture_output=True, text=True, timeout=5).stdout
     pid = out.split("\t")[0].strip() if out else ""
-    if not pid:
-        return None
+    pane = os.environ.get("TMUX_PANE", "")
+    by_pane = None
     for f in glob.glob(os.path.expanduser("~/.claude/session-presence/*.json")):
         try:
             with open(f) as fh:
                 d = json.load(fh)
         except Exception:
             continue
-        if str(d.get("pid")) == pid:
-            return (d.get("session_id") or "")[:8] or None
-    return None
+        sid = (d.get("session_id") or "")[:8] or None
+        if pid and str(d.get("pid")) == pid:
+            return sid
+        if pane and d.get("tmux_pane") == pane:
+            by_pane = sid
+    return by_pane
 
 
 def who(want):
     path = log_file()
-    if not want or not path or not os.path.exists(path):
-        print("no usage log here" if not want else f"usage: {os.path.basename(__file__)} who <sha>")
+    if not want:
+        print(f"usage: {os.path.basename(__file__)} who <sha>")
+        return
+    if not path or not os.path.exists(path):
+        print("no usage log in this repo yet")
         return
     for line in reversed(open(path).read().splitlines()):
         try:
