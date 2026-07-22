@@ -93,3 +93,20 @@ export function nextStepOf(input: {
     title: `sync — everything local, in one motion:\n· ${steps.join("\n· ")}\n(Claude steps in when a divergence has no mechanical route)`,
   };
 }
+
+// The ambient daemon's dry-run verdict, as the one line the local-motion button's tooltip
+// carries — folded into that button rather than living as its own badge, so the prediction
+// reaches you before the click instead of competing for space beside it. Every verdict other
+// than a predicted collision is silence: the normal case must not grow a warning.
+export function conflictWarning(ambient?: {
+  verdict?: string;
+  conflict_pr?: number | null;
+  conflict_title?: string | null;
+} | null): string {
+  if (ambient?.verdict !== "will-conflict") {
+    return "";
+  }
+  const pr = ambient.conflict_pr ? ` with #${ambient.conflict_pr}` : "";
+  const title = ambient.conflict_title ? ` — ${ambient.conflict_title}` : "";
+  return `⚠ the ambient dry-run predicts this rebase conflicts${pr}${title}`;
+}

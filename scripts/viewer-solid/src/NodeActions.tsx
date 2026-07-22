@@ -24,7 +24,7 @@ import { useArm } from "./actions";
 import RebaseStream from "./RebaseStream";
 import { PlanStepsEditor } from "./PlanStepsEditor";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
-import { nextStepOf, stationOf, type Station } from "./nodeStation";
+import { conflictWarning, nextStepOf, stationOf, type Station } from "./nodeStation";
 import { patchHtml, patchLineCounts } from "./FileRail";
 import { contractionDone } from "./contractResult.ts";
 
@@ -522,9 +522,6 @@ export function NodeActions(props: {
   const blocked = () => critical().length > 0;
   const shared = () => sync.data?.shared;
   const aheadOfOrigin = () => sync.data?.aheadOfOrigin ?? 0;
-  // ambient daemon's dry-run verdict for this branch — folded into the one restack button so a
-  // predicted collision warns before you click, instead of living as its own duplicate badge.
-  const willConflict = () => props.ambient?.verdict === "will-conflict";
 
   // Confirm of the already-merged offer above: drop the empty branch and rewire its children
   // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
@@ -789,10 +786,12 @@ export function NodeActions(props: {
       return null;
     }
     const contracting = step.kind === "contract";
+    // a predicted collision rides the button that would hit it, not a badge of its own
+    const warning = contracting ? "" : conflictWarning(props.ambient);
     return {
       label: step.label,
       kind: step.kind,
-      title: step.title,
+      title: warning ? `${step.title}\n\n${warning}` : step.title,
       pending: contracting ? contract.isPending : omniSync.isPending,
       onClick: fire(contracting ? () => contract.mutate() : startSync),
     };
