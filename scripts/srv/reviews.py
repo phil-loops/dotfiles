@@ -136,15 +136,22 @@ def warm_requests_forever():
         time.sleep(_WARM_EVERY)
 
 
-_branch_cache = {}   # pr-num -> (at, own_local_branch_or_None)
+_branch_cache = {}   # (repo, pr-num) -> (at, own_local_branch_or_None)
 _BRANCH_TTL = 120
+
+
+def _pr_key(num):
+    # Every registered repo numbers its PRs from 1, so a bare number is not a cache key: with
+    # loops and monotoad both live, monotoad#42 would read loops#42's answer and jump into the
+    # wrong checkout without a word. The request has already pinned its repo by here.
+    return (ctx.repo_cwd(), num)
 
 
 def _local_branch_for_pr(num):
     # Your own PR? Open the real local branch (already checked out, editable) instead of a
     # detached review/pr-N fetch — skips the gh + 2 fetches + scratch-worktree import.
     now = time.time()
-    hit = _branch_cache.get(num)
+    hit = _branch_cache.get(_pr_key(num))
     if hit and now - hit[0] < _BRANCH_TTL:
         return hit[1]
     r = ctx.run(["gh", "pr", "view", num, "--json", "headRefName,isCrossRepository",
@@ -154,7 +161,7 @@ def _local_branch_for_pr(num):
     if len(parts) == 2 and parts[1] != "true" and parts[0] and \
             ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{parts[0]}"]).returncode == 0:
         branch = parts[0]
-    _branch_cache[num] = (now, branch)
+    _branch_cache[_pr_key(num)] = (now, branch)
     return branch
 
 
@@ -178,11 +185,12 @@ def _refresh_review_branch(num):
     # lands here while the prewarm's own fetch is still in flight and hasn't stamped the TTL yet,
     # so both would fetch the same ref at once — the keypress paying the very cost it's meant to
     # skip. Waiting for the in-flight fetch is strictly cheaper, and leaves the TTL warm.
-    with _refresh_locks.setdefault(num, threading.Lock()):
-        if time.time() - _refreshed.get(num, 0) < _REFRESH_TTL:
+    key = _pr_key(num)
+    with _refresh_locks.setdefault(key, threading.Lock()):
+        if time.time() - _refreshed.get(key, 0) < _REFRESH_TTL:
             return
         ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
-        _refreshed[num] = time.time()
+        _refreshed[key] = time.time()
 
 
 def _match_diffhash(paths, want):
@@ -229,7 +237,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
                 return
             _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
             branch = r.stdout.strip()
-            _refreshed[num] = time.time()   # the import just fetched this head — don't re-fetch it below
+            _refreshed[_pr_key(num)] = time.time()   # the import just fetched this head — don't re-fetch it below
     prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
     route = _viewer_route(branch, prefix, num, local)
     refreshed = False
