@@ -42,8 +42,11 @@ trusted = [
 # inside the quotes, so you just type the name. Quotes are load-bearing — an expansion
 # ENDS an argument, so an unquoted %sh{...}/name.ts opens two files, one of them `/name.ts`.
 n = "@:open \"%sh{dirname %{buffer_name}}/\"<C-b>"
+# checkpoint: format, save, and commit just this file, staying in the editor
 v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
+# ship it: the same, for every dirty file, then push gates + the viewer in Chrome
 V = [":write", ":sh $HOME/.dotfiles/scripts/hx-ship %{buffer_name}"]
+# watch this file's tests in a tmux pane below, re-running on every save
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
 
 # space-x = the destructive menu, deliberately two keys. Helix has no file-delete command of its
@@ -62,10 +65,14 @@ d = [":sh $HOME/.dotfiles/scripts/hx-rm %{buffer_name}", ":buffer-close!"]
 # Absolute paths: `:sh` inherits the launching process's PATH, so a helix launched by
 # something that never ran a zsh at all (LaunchServices, a GUI handoff) still resolves these.
 [keys.normal.space.o]
+# these lines on GitHub, against main
 m = ":sh $HOME/.dotfiles/scripts/gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
+# these lines on GitHub, against the branch you're on
 b = ":sh $HOME/.dotfiles/scripts/gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
+# the tRPC procedure under the cursor, which gd can't reach
 t = ":open %sh{$HOME/.dotfiles/scripts/trpc-goto %{buffer_name} %{cursor_line}}"
 
+# the same two, for the lines a selection spans
 [keys.select.space.o]
 m = ":sh $HOME/.dotfiles/scripts/gh-open %{buffer_name} %{selection_line_start} %{selection_line_end}"
 b = ":sh $HOME/.dotfiles/scripts/gh-open --branch %{buffer_name} %{selection_line_start} %{selection_line_end}"
