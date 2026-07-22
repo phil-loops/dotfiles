@@ -162,65 +162,14 @@ prune_old(){ [[ -d "$SCRATCH" ]] || return 0
   done
   git worktree prune 2>/dev/null || true
 }
-seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without it the tRPC
-              # client type COLLAPSES to the "collides with a built-in method" sentinel in
-              # the editor (verified). A branch that leaves the router alone can just SHARE
-              # main's .gen; only one that touches trpc/** needs its own writable copy to
-              # rebuild into. Never blocks the open. NB: .gen does NOT reduce tsgo memory —
-              # this is purely for correctness.
-  local dir="$1" head marker src
-  # source .gen from the MAIN checkout (first worktree), not wherever stack-open runs —
-  # a sibling worktree has no .gen of its own (it's gitignored, only built in main).
-  # `|| true`: awk exits on the first worktree, so the producer dies on SIGPIPE (141) — pipefail+set -e would abort the open
-  src=$(wt_list | awk '/^worktree /{print $2; exit}') || true
-  [[ -n "$src" && -d "$src/.gen" ]] || return 0                # nothing to seed from
-  # Router untouched → main's .gen already IS this branch's .gen. Link it: copying was ~0.66s of
-  # a ~1.7s cold open (the "COW clone is ~instant" claim was wrong — it clonefiles per file), and
-  # it was paid BEFORE this check, so the overwhelmingly common branch paid for a copy it never used.
-  if git -C "$dir" diff --quiet main...HEAD -- trpc 2>/dev/null; then
-    [[ -e "$dir/.gen" ]] || ln -sfn "$src/.gen" "$dir/.gen"
-    return 0
-  fi
-  # Touches the router → it needs a PRIVATE .gen, because the rebuild below writes into it;
-  # rebuilding through a symlink would corrupt main's.
-  [[ -L "$dir/.gen" ]] && rm -f "$dir/.gen"
-  [[ -d "$dir/.gen" ]] || cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
-    || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || return 0   # COW clone, fall back to plain copy
-  head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || return 0
-  marker="$dir/.gen/.stack-open-gen-sha"
-  [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && return 0   # already built for this HEAD
-  # tsconfig.trpc-types.json moved under typescript/ (loops PR #9599); a pre-split branch
-  # still carries it at the root, and stack-open opens old branches too.
-  local proj=typescript/tsconfig.trpc-types.json
-  [[ -f "$dir/$proj" ]] || proj=tsconfig.trpc-types.json
-  [[ -f "$dir/$proj" ]] || return 0                             # no trpc-types project → keep the cloned baseline
-  # tsgo emits these declarations ~3x faster (17s → 5s); tsc only when the link is missing.
-  local compiler="$dir/node_modules/.bin/tsgo" runner=
-  if [[ ! -x "$compiler" ]]; then
-    compiler="$dir/node_modules/typescript/bin/tsc"
-    runner="$HOME/.volta/bin/node"
-  fi
-  [[ -e "$compiler" ]] || return 0                              # no compiler → keep the cloned baseline
-  # Single-flight lock. It only means "in flight" while its owner is alive: the viewer SIGKILLs
-  # stack-open's whole process group at 8s, and a lock orphaned by that kill used to freeze this
-  # worktree's .gen for good — every later open silently kept the stale #trpc types.
-  local lock="$dir/.gen/.rebuilding" owner stale=""
-  if ! mkdir "$lock" 2>/dev/null; then
-    owner=$(cat "$lock/pid" 2>/dev/null) || true
-    [[ -n "$owner" ]] && ! kill -0 "$owner" 2>/dev/null && stale=1
-    [[ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]] && stale=1   # killed before it recorded a pid
-    [[ -n "$stale" ]] || return 0
-    rm -rf "$lock"; mkdir "$lock" 2>/dev/null || return 0
-  fi
-  # background incremental rebuild → stamp the sha, release the lock. Call the binary
-  # DIRECTLY (never npx — backgrounded npx with no TTY hangs on its install prompt and
-  # piles up runaway procs); tsc is a JS entrypoint so it needs node, tsgo is native.
-  # The subshell must drop the inherited stdout/stderr too, not just silence the compiler: a
-  # caller that pipes us (the server's Popen+communicate) waits for EOF on those fds, so holding
-  # them open makes this "background" rebuild block the open for as long as the compile takes.
-  ( cd "$dir" && ${runner:+"$runner"} "$compiler" --project "$proj" --pretty false >/dev/null 2>&1 \
-      && echo "$head" > "$marker"; rm -rf "$lock" ) >/dev/null 2>&1 &!
-  print -r -- $! > "$lock/pid" 2>/dev/null || true   # the rebuild outlives us; the lock follows IT, not this script
+seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without it the tRPC client
+              # type COLLAPSES to the "collides with a built-in method" sentinel in the editor.
+              # seed-gen is the single implementation (the git hooks call it too). The copy that
+              # lived here had drifted into watching trpc/ alone — root.d.ts inlines every
+              # procedure's output type, so a branch touching only models/ silently kept main's —
+              # and into rebuilding inside a scratch tree, where symlinked node_modules trip
+              # TS2883 on prisma-inferred exports and the aggregates never re-emit at all.
+  "${0:A:h}/seed-gen" "$1" >/dev/null 2>&1 || true
 }
 ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
   local b="$1" ex dir
@@ -263,7 +212,7 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
     git worktree add --detach "$dir" "$b" -q
   fi
   [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
-  seed_gen "$dir"   # .gen for #trpc resolution (clone now, branch-rebuild in background)
+  seed_gen "$dir"   # .gen for #trpc resolution — a scratch tree shares the main checkout's
   "${0:A:h}/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
   # record the branch + install the follow-hook so commits here advance the ref
   # instead of stranding on the detached HEAD (see install_followup_hook).
