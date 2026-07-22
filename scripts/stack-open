@@ -109,20 +109,28 @@ ours(){   # $SCRATCH is one shared directory but stack-open runs from whatever r
 _common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || _common_dir=""
 human_kb(){ (( $1 >= 1048576 )) && printf '%.1fG' $(( $1 / 1048576.0 )) || printf '%dM' $(( $1 / 1024 )) }
 
-# What a scratch worktree may hold that stack-open can always make again. node_modules belongs
-# here because ensure_worktree only ever wants a symlink to the main checkout's — a real 1.5G
-# directory means something ran an install in the scratch dir and left it behind.
+# Two different things get reclaimed here, on two different clocks.
+#
+# A real node_modules or a frozen .gen copy is not a cache — it is WRONG STATE. Every open
+# replaces both with symlinks to the main checkout, so a real directory means something ran an
+# install (or a pre-2026-07-22 seeder ran) and left it behind. Repairing that has no downside
+# and no reason to wait: gate it on "nothing is running in there", nothing else. Measured
+# 2026-07-22: two such node_modules held 3G, with no live process in either, while an idle
+# window kept them for another day.
+#
+# .next IS a cache — deleting it costs the next preview a rebuild — so it keeps the idle window.
 STRIP_ITEMS=(); STRIP_TOTAL_KB=0; STRIP_IDLE=0   # what the last sweep found — see gc_report/gc_json
 strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees nobody has opened
                # lately, but KEEP the checkout: a stripped worktree still opens instantly.
   [[ -d "$SCRATCH" ]] || return 0
-  local days="$1" dry="${2:-}" d kb total=0 nm mine=0 clock
+  local days="$1" dry="${2:-}" d kb total=0 nm mine=0 clock idle=""
   nm="$(main_checkout)/node_modules"
   clock=$(mktemp)
-  for d in ${(f)"$(idle_dirs "$days")"}; do
-    [[ -n "$d" ]] || continue
+  idle=$'\n'"$(idle_dirs "$days")"$'\n'
+  for d in "$SCRATCH"/*(N/); do
+    d="${d%/}"
     ours "$d" || continue
-    mine=$(( mine + 1 ))
+    [[ "$idle" == *$'\n'"$d"$'\n'* ]] && mine=$(( mine + 1 ))
     in_use "$d" && continue
     # The idle clock must measure when YOU last opened this worktree, not when we last swept it:
     # stripping writes to the directory, and an mtime bumped by our own maintenance would hide
@@ -136,7 +144,14 @@ strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees n
       [[ -n "$dry" ]] || { rm -rf "$d/node_modules"; ln -sfn "$nm" "$d/node_modules"; }
       STRIP_ITEMS+=("${d:t}"$'\t'"node_modules"$'\t'"${kb:-0}")
     fi
-    if [[ -d "$d/.next" ]]; then
+    # a frozen 17M .gen copy is the same wrong state; seed-gen owns that trade, so ask it
+    if [[ -d "$d/.gen" && ! -L "$d/.gen" && ! -d "$d/.gen/.rebuilding" ]]; then
+      kb=$(du -sk "$d/.gen" 2>/dev/null | cut -f1) || kb=0
+      total=$(( total + kb ))
+      [[ -n "$dry" ]] || "$SCRIPTS/seed-gen" "$d" >/dev/null 2>&1
+      STRIP_ITEMS+=("${d:t}"$'\t'".gen copy"$'\t'"${kb:-0}")
+    fi
+    if [[ -d "$d/.next" ]] && [[ "$idle" == *$'\n'"$d"$'\n'* ]]; then
       kb=$(du -sk "$d/.next" 2>/dev/null | cut -f1) || kb=0
       total=$(( total + kb ))
       [[ -n "$dry" ]] || rm -rf "$d/.next"
