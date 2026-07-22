@@ -290,7 +290,7 @@
     $("page").innerHTML =
       `<h1>${esc(page.title)}</h1>` +
       (page.lede ? `<p class="lede">${inline(page.lede)}</p>` : "") +
-      (page.slug === PAGES[0].slug ? `<div class="hint">Dotted links open the real source from your checkout, in place. <b>Select any text</b> to ask about it.</div>` : "") +
+      (page.slug === PAGES[0].slug ? `<div class="hint">Dotted links open the real source at <code>${esc(REF)}</code>, in place. <b>Select any text</b> to ask about it.</div>` : "") +
       render(page.body);
     $("ask-slot").innerHTML = LOCAL
       ? ""
@@ -477,7 +477,7 @@
     if (lint && lint.problems) {
       $("lint").innerHTML = lint.problems.length
         ? lint.problems.map((p) => `<span class="bad">${esc(p.kind)} — ${esc(p.msg)}</span>`).join("")
-        : `checks pass · every citation resolves against your checkout`;
+        : `checks pass · every citation resolves against ${esc(REF)}`;
     }
   })();
 })();
