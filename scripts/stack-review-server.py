@@ -44,6 +44,9 @@ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts 
 last = [time.time()]
 _render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
+_pulse_subs = [0]                  # open /events streams — pulse() only runs while this is > 0
+_pulse_subs_lock = threading.Lock()
+_pulse_wake = threading.Event()
 _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
 LOG = os.environ.get("STACK_REVIEW_LOG", "") not in ("", "0")   # $STACK_REVIEW_LOG=1 → one line per request
 _log_lock = threading.Lock()
@@ -154,13 +157,25 @@ def asset_sig():
     return hashlib.sha1(",".join(str(mt(p)) for p in parts).encode()).hexdigest()
 
 
+def _pulse_refresh():
+    _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()
+
+
 def pulse():
     # one shared thread recomputes both fingerprints ~1/s; every open /events stream
     # reads these in-process, so N tabs cost one git check total, not N polling tabs.
+    #
+    # N=0 was the case nobody wrote: with no stream open there is nothing to push to, yet this
+    # kept spawning git around the clock — 0.44s of CPU per minute, measured, for no reader. That
+    # cost is the whole reason the server reaps itself after 15min idle, which is in turn why
+    # every consumer had to grow a way to resurrect it. Sleep until someone actually subscribes.
     while True:
+        if _pulse_subs[0] == 0:
+            _pulse_wake.wait()
+            _pulse_wake.clear()
+            continue
         try:
-            _pulse["sig"] = srvctx.model_sig()
-            _pulse["asset"] = asset_sig()
+            _pulse_refresh()
         except Exception:
             pass
         time.sleep(1.0)
@@ -302,6 +317,15 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "keep-alive")
             self.end_headers()
+            with _pulse_subs_lock:
+                _pulse_subs[0] += 1
+                first = _pulse_subs[0] == 1
+            if first:
+                try:
+                    _pulse_refresh()   # seeding seen_* from fingerprints left over from the last
+                except Exception:      # subscriber would read as a change and reload this tab on sight
+                    pass
+                _pulse_wake.set()
             seen_sig, seen_asset = _pulse["sig"], _pulse["asset"]
             beat = 0
             try:
@@ -324,6 +348,9 @@ class H(BaseHTTPRequestHandler):
                         self.wfile.flush()
             except OSError:
                 pass   # client closed the tab → the write fails, this thread ends
+            finally:
+                with _pulse_subs_lock:
+                    _pulse_subs[0] -= 1
             return
         elif u.path == "/prs":            return picker.prs(self)
         elif u.path == "/myprs":          return picker.myprs(self)
@@ -625,7 +652,6 @@ def warm():
         pass
 
 
-_pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()   # seed so the first /events stream sees real values
 threading.Thread(target=warm, daemon=True).start()
 threading.Thread(target=reviews.warm_requests_forever, daemon=True).start()   # review-requested PRs → worktree ready before the first jump
 threading.Thread(target=pack_watcher, daemon=True).start()   # ext source → packed, so the installed copy has something newer to fetch
