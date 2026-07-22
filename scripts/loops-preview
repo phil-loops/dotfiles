@@ -277,7 +277,7 @@ fi
 rm -rf "$DIR/.next"
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev --webpack -p $PORT > '$LOG' 2>&1"
+tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev -p $PORT > '$LOG' 2>&1"
 printf 'DIR=%s\nPORT=%s\nSTARTED=%s\n' "$DIR" "$PORT" "$(date +%s)" > "$META"
 
 cyan "preview $NAME  →  http://localhost:$PORT"
