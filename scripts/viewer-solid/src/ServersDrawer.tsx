@@ -54,6 +54,25 @@ const BTN = `${BTN_SHAPE} border-rule text-ink-faint enabled:hover:border-ink-fa
 const BTN_DANGER = `${BTN_SHAPE} ml-auto border-del text-del opacity-85 enabled:hover:bg-del-bg enabled:hover:opacity-100`;
 const CONN_NODE = "rounded border border-rule bg-vellum-night px-1.5 py-px";
 
+// every loading surface holds the shape it is about to become, so nothing arrives late and
+// shoves the list down. Sizes are hand-matched to the real elements they stand in for.
+const Skel = (props: { w: string; h?: string; cls?: string }) => (
+  <span
+    class={`inline-block flex-none animate-breathe rounded-[3px] bg-rule motion-reduce:animate-none ${props.cls ?? ""}`}
+    style={{ width: props.w, height: props.h ?? "9px" }}
+  />
+);
+const SKEL_CHIPS = ["46px", "172px", "44px", "96px", "124px", "98px", "132px", "138px", "50px", "54px", "72px"];
+const SkelCard = () => (
+  <div class="rounded-[10px] border border-rule border-l-[3px] border-l-ink-faint bg-vellum-raise px-[13px] py-[11px]">
+    <div class="flex items-center gap-2.5"><Skel w="170px" h="17px" /><Skel w="34px" h="11px" cls="ml-auto" /></div>
+    <div class="mt-[7px] flex items-center gap-3"><Skel w="78px" h="13px" /><Skel w="104px" h="13px" /></div>
+    <div class="mt-2 flex flex-wrap gap-[5px]"><Skel w="212px" h="19px" /><Skel w="96px" h="19px" /><Skel w="88px" h="19px" /></div>
+    <div class="mt-2.5 flex gap-[7px]"><Skel w="62px" h="25px" cls="rounded-[7px]" /><Skel w="44px" h="25px" cls="rounded-[7px]" /><Skel w="44px" h="25px" cls="ml-auto rounded-[7px]" /></div>
+  </div>
+);
+const Spinner = () => <span class="inline-block animate-rs-spin not-italic motion-reduce:animate-none">⟳</span>;
+
 async function post(url: string, body: unknown) {
   await fetch(url, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -131,14 +150,18 @@ export function ServersDrawer() {
       <aside class="servers-drawer fixed inset-y-0 right-0 z-[210] flex w-[min(460px,92vw)] flex-col border-l border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night)_340px)] font-mono text-[13px] text-ink shadow-[-24px_0_60px_-18px_rgba(0,0,0,0.8)]">
         <header class="flex items-baseline gap-3 border-b border-rule px-4.5 pt-4 pb-[13px]">
           <span class="font-display text-[19px] font-semibold italic text-ink">Dev servers</span>
-          <span class="text-[10px] uppercase tracking-[0.18em] text-ink-faint">{q.data ? `${previews().length} running${q.isPlaceholderData ? " · probing" : ""}` : "…"}</span>
+          <span class="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-faint">
+            <Show when={q.data} fallback="probing">{previews().length} running</Show>
+            <Show when={!q.data || q.isPlaceholderData}><Spinner /></Show>
+          </span>
           <button class="ml-auto cursor-pointer px-0.5 text-[18px] leading-none text-ink-faint hover:text-ink" title="close" onClick={() => setOpen(false)}>×</button>
         </header>
 
         {/* main — the one server not tied to a branch node. When it's down, a quiet launcher with a
             port preference; when up (task dev or a launch), it lists below with the previews. */}
-        <Show when={q.data && !mainSrv()}>
+        <Show when={!q.data || !mainSrv()}>
           <section class="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-rule px-4.5 py-[11px]">
+            <Show when={q.data} fallback={<><Skel w="92px" h="25px" cls="rounded-[7px]" /><Skel w="72px" h="19px" cls="rounded-[7px]" /><Skel w="100%" h="16px" /></>}>
             <button class={BTN} disabled={busy() === "__main__"} onClick={launchMain}>
               {busy() === "__main__" ? "starting main…" : "▷ run main"}
             </button>
@@ -152,14 +175,21 @@ export function ServersDrawer() {
               />
             </label>
             <span class="text-[10.5px] text-ink-faint">main checkout · web only · falls back to a free port if taken</span>
+            </Show>
           </section>
         </Show>
 
         {/* shared substrate — the one Docker stack everything rides; a quiet section, not a card */}
-        <Show when={sub()}>
-          {(s) => (
-            <section class="border-b border-rule px-4.5 pt-3 pb-[13px]">
-              <div class="flex items-center gap-2">
+        <section class="border-b border-rule px-4.5 pt-3 pb-[13px]">
+          <div class="flex items-center gap-2">
+            <Show
+              when={sub()}
+              fallback={<>
+                <span class="h-[7px] w-[7px] flex-none animate-breathe rounded-full bg-ink-faint motion-reduce:animate-none" />
+                <span class="flex items-center gap-1.5 text-[12px] text-ink-dim">shared dev stack · <Skel w="48px" /></span>
+              </>}
+            >
+              {(s) => (<>
                 <span
                   class="h-[7px] w-[7px] flex-none rounded-full"
                   classList={{
@@ -168,9 +198,13 @@ export function ServersDrawer() {
                   }}
                 />
                 <span class="text-[12px] text-ink-dim">shared dev stack · {s().up}/{s().total} up</span>
-              </div>
-              <p class="mt-[7px] mb-[9px] text-[11px] leading-[1.5] text-ember opacity-85">One stack for everything — every preview and :3000 read/write the same DB. Not isolated; concurrent seeds/migrations collide.</p>
-              <div class="flex flex-wrap gap-1">
+              </>)}
+            </Show>
+          </div>
+          <p class="mt-[7px] mb-[9px] text-[11px] leading-[1.5] text-ember opacity-85">One stack for everything — every preview and :3000 read/write the same DB. Not isolated; concurrent seeds/migrations collide.</p>
+          <div class="flex flex-wrap gap-1">
+            <Show when={sub()} fallback={<For each={SKEL_CHIPS}>{(w) => <Skel w={w} h="21px" cls="rounded-md" />}</For>}>
+              {(s) => (
                 <For each={s().services}>
                   {(svc) => (
                     <span
@@ -184,17 +218,20 @@ export function ServersDrawer() {
                     >{shortSvc(svc.name)}{svc.state === "done" ? " · done" : svc.state === "failed" ? " · exited" : ""}</span>
                   )}
                 </For>
-              </div>
-            </section>
-          )}
-        </Show>
+              )}
+            </Show>
+          </div>
+        </section>
 
         <Show
           when={previews().length > 0}
           fallback={
-            <p class="px-4.5 py-[30px] text-center italic text-ink-faint">
-              {q.data ? "No dev servers running. Start one from a node's ⋯ menu → ▷ preview." : "probing dev servers…"}
-            </p>
+            <Show
+              when={q.data}
+              fallback={<div class="flex flex-auto flex-col gap-2.5 px-4 py-3.5"><SkelCard /><SkelCard /></div>}
+            >
+              <p class="px-4.5 py-[30px] text-center italic text-ink-faint">No dev servers running. Start one from a node's ⋯ menu → ▷ preview.</p>
+            </Show>
           }
         >
           {/* each server is a ledger entry — branch identity first, the left stripe carries health */}
