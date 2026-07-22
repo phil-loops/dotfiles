@@ -70,7 +70,7 @@
 /div[1]/div[1]/div[1]/div[1]/main[2]/div[2]/span[1]/b[4] 1335,183 6x11
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[3] 298,212 1108x309
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[1] 301,213 1104x50
-/div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[1]/button[1] 315,232 16x11
+/div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[1]/span[1] 315,232 16x11
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[1]/span[2] 342,238 12x0
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[1]/span[3] 365,228 55x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[1]/span[3]/b[1] 365,230 55x15
@@ -182,7 +182,7 @@
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[3]/div[2]/div[1]/div[1]/div[2]/div[1]/table[1]/tbody[1]/tr[11]/td[2]/div[1]/span[2] 430,492 677x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[4] 298,535 1108x421
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[1] 301,536 1104x50
-/div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[1]/button[1] 315,555 16x11
+/div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[1]/span[1] 315,555 16x11
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[1]/span[2] 342,561 12x0
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[1]/span[3] 365,551 102x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[1]/span[3]/span[1] 365,553 39x15
@@ -332,7 +332,7 @@
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[4]/div[2]/div[1]/div[1]/div[2]/div[1]/table[1]/tbody[1]/tr[16]/td[2]/div[1]/span[2] 429,928 678x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[5] 298,971 1108x2154
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[1] 301,972 1104x50
-/div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[1]/button[1] 315,991 16x11
+/div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[1]/span[1] 315,991 16x11
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[1]/span[2] 342,996 12x0
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[1]/span[3] 365,986 274x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[1]/span[3]/span[1] 365,988 39x15
@@ -1109,7 +1109,7 @@
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[5]/div[2]/div[1]/div[1]/div[2]/div[1]/table[1]/tbody[1]/tr[93]/td[2]/div[1]/span[2] 428,3096 678x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[6] 298,3139 1108x624
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[1] 301,3140 1104x50
-/div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[1]/button[1] 315,3159 16x11
+/div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[1]/span[1] 315,3159 16x11
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[1]/span[2] 342,3164 12x0
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[1]/span[3] 365,3154 204x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[1]/span[3]/span[1] 365,3156 31x15
@@ -1335,7 +1335,7 @@
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[6]/div[2]/div[1]/div[1]/div[2]/div[1]/table[1]/tbody[1]/tr[25]/td[2]/div[1]/span[2] 429,3734 678x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[7] 298,3777 1108x2404
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[7]/div[1] 301,3778 1104x50
-/div[1]/div[1]/div[1]/div[1]/main[2]/article[7]/div[1]/button[1] 315,3797 16x11
+/div[1]/div[1]/div[1]/div[1]/main[2]/article[7]/div[1]/span[1] 315,3797 16x11
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[7]/div[1]/span[2] 342,3803 12x0
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[7]/div[1]/span[3] 365,3792 211x20
 /div[1]/div[1]/div[1]/div[1]/main[2]/article[7]/div[1]/span[3]/span[1] 365,3794 133x15
