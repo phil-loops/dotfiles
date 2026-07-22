@@ -34,12 +34,18 @@ src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{pr
 [[ -n "$src" && -d "$src/.gen" ]] || exit 0                  # nothing to seed from
 
 if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
-  if [[ ! -e "$dir/.gen" ]]; then
-    scratch=$(realpath_of "${STACK_OPEN_DIR:-/tmp/stack-study}")
-    if [[ -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ]]; then
-      ln -sfn "$src/.gen" "$dir/.gen"
-      exit 0
+  scratch=$(realpath_of "${STACK_OPEN_DIR:-/tmp/stack-study}")
+  if [[ -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ]]; then
+    # Nothing in a scratch tree rebuilds .gen any more, so a private copy is 17M of types frozen
+    # at whenever it was seeded — including the 47 the pre-2026-07-22 seeders left behind. Trade
+    # each one for the live link on its next open, unless a pre-fix rebuild is still holding it.
+    if [[ ! -L "$dir/.gen" && -d "$dir/.gen" && ! -d "$dir/.gen/.rebuilding" ]]; then
+      rm -rf "$dir/.gen"
     fi
+    [[ -e "$dir/.gen" ]] || ln -sfn "$src/.gen" "$dir/.gen"
+    exit 0
+  fi
+  if [[ ! -e "$dir/.gen" ]]; then
     cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null \
       || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || exit 0  # COW clone, fall back to plain copy
   fi
