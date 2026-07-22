@@ -1,0 +1,21 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index c555828..3d785ea 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -556,11 +556,11 @@ def _with_forest(body, branch):
+     section = _forest_section(branch)
+     if not section:
+         return body
+-    # regenerate: drop any previously generated line (and the old "-- forest --" fence)
+-    prose = "\n".join(
+-        line for line in body.split("-- forest --")[0].splitlines()
+-        if not line.startswith("Part of ")
+-    ).strip()
++    # regenerate: the generated block runs from its opening line to the end of the body, so cut
++    # there — dropping only that one line left its steps behind as prose and the editor doubled them.
++    lines = body.split("-- forest --")[0].splitlines()
++    cut = next((i for i, l in enumerate(lines) if l.startswith("Part of ")), len(lines))
++    prose = "\n".join(lines[:cut]).strip()
+     return f"{prose}\n\n{section}" if prose else section
+ 
+ 

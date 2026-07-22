@@ -1,0 +1,32 @@
+diff --git a/scripts/srv/checkout.py b/scripts/srv/checkout.py
+index 57078e5..9eef63d 100644
+--- a/scripts/srv/checkout.py
++++ b/scripts/srv/checkout.py
+@@ -102,14 +102,24 @@ def move(req, raw):
+     freed = ""
+     if wt and os.path.realpath(wt) != os.path.realpath(main_wt):
+         # git can't move the main tree onto a branch another worktree already holds.
++        # A LIVE session mid-work owns its checkout — force frees a dirty/held tree, but it must
++        # NEVER silently evict a live coding session (the incident that reaped a live worktree).
++        # This check sits ABOVE the force branch: only a deliberate evictLive overrides it.
++        session = _live_session_in(wt)
++        if session and not d.get("evictLive"):
++            req._send(409, json.dumps({
++                "ok": False, "err": "a live session is working in worktree at " + wt,
++                "worktree": wt, "dirty": max(_dirty_count(wt), 0),
++                "session": session, "liveBlocked": True,
++            }))
++            return
+         if not d.get("force"):
+             dirty = _dirty_count(wt)
+-            session = _live_session_in(wt)
+-            if dirty != 0 or session:
++            if dirty != 0:
+                 # tell the client where it lives AND why it's held, so the force-confirm is informed
+                 req._send(409, json.dumps({
+                     "ok": False, "err": "already open in worktree at " + wt,
+-                    "worktree": wt, "dirty": max(dirty, 0), "session": session,
++                    "worktree": wt, "dirty": max(dirty, 0), "session": None,
+                 }))
+                 return
+             # provably safe — clean tree, no live session — so freeing it IS the checkout,

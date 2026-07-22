@@ -1,0 +1,28 @@
+diff --git a/scripts/stack-delta-tests b/scripts/stack-delta-tests
+index f3897f5..bda7c14 100755
+--- a/scripts/stack-delta-tests
++++ b/scripts/stack-delta-tests
+@@ -10,7 +10,7 @@ changed `*.test.ts(x)` runs directly. Nothing changed has a sibling test ⇒ exi
+                                      base = merge-base(parent, HEAD), parent from
+                                      stack-branch.<b>.parent (else main)
+ 
+-Runs `tsx --tsconfig tsconfig.node.json --test <files>` from the repo toplevel,
++Runs `tsx --tsconfig <repo test tsconfig> --test <files>` from the repo toplevel,
+ resolving tsx repo-local first. A worktree with no node_modules borrows the main
+ worktree's via a symlink (the established worktree-verify pattern). Exit code is the
+ test run's own (0 pass / non-zero fail); prints the runner's output through.
+@@ -114,8 +114,13 @@ def main():
+     for t in tests:
+         print(f"  {t}")
+     sys.stdout.flush()
++    # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
++    # branches from before the split still carry the old single config.
++    tsconfig = "typescript/tsconfig.test.json"
++    if not os.path.exists(os.path.join(repo, tsconfig)):
++        tsconfig = "tsconfig.node.json"
+     r = subprocess.run(
+-        [tsx, "--tsconfig", "tsconfig.node.json", "--test", *tests],
++        [tsx, "--tsconfig", tsconfig, "--test", *tests],
+         cwd=repo,
+     )
+     return r.returncode

@@ -1,0 +1,96 @@
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index 533ddf1..ccb023d 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -308,7 +308,7 @@ export function NodeActions(props: {
+           return { phase: "blocked" as const };
+         }
+         if (sy.ok && !sy.rebased) {
+-          stepSet("rebase", "run", "conflict — ejected to a headless rebase, streaming below; run sync again once it lands");
++          stepSet("rebase", "run", "conflict — resolving in a headless rebase, streaming below; the motion continues on its own once it lands");
+           return { phase: "streaming" as const };
+         }
+         stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
+@@ -1049,7 +1049,26 @@ export function NodeActions(props: {
+       </Show>
+ 
+       <Show when={rebaseStreaming()}>
+-        <RebaseStream branch={props.branch} onClose={() => setRebaseStreaming(false)} />
++        <RebaseStream
++          branch={props.branch}
++          onClose={() => setRebaseStreaming(false)}
++          onSettled={(outcome) => {
++            if (outcome === "done") {
++              // the headless rebase landed cleanly — the branch now contains origin/main, so
++              // pick the motion back up where it ejected (checkout → one commit → gates → editor)
++              // instead of stranding a ticking spinner that waits on a manual re-click.
++              stepSet("rebase", "ok", "landed — merging it in");
++              setRebaseStreaming(false);
++              sync.refetch().then(() => omniSync.mutate(false));
++            } else if (outcome === "stopped") {
++              stepSet("rebase", "fail", "stopped — re-run sync to retry the rebase");
++            } else if (outcome === "gone") {
++              stepSet("rebase", "fail", "rebase job gone (expired or server restarted) — re-run sync to see where it landed");
++            } else {
++              stepSet("rebase", "fail", "rebase stream errored — re-run sync to retry");
++            }
++          }}
++        />
+       </Show>
+     </div>
+   );
+diff --git a/scripts/viewer-solid/src/RebaseStream.tsx b/scripts/viewer-solid/src/RebaseStream.tsx
+index 0349f5e..bf409ff 100644
+--- a/scripts/viewer-solid/src/RebaseStream.tsx
++++ b/scripts/viewer-solid/src/RebaseStream.tsx
+@@ -20,12 +20,21 @@ async function post(url: string, body: unknown) {
+   await fetch(withRepo(url), { method: "POST", headers: HEADERS, body: JSON.stringify(body) }).catch(() => {});
+ }
+ 
+-export default function RebaseStream(props: { branch: string; onClose: () => void }) {
++export default function RebaseStream(props: {
++  branch: string;
++  onClose: () => void;
++  // fired once when the job reaches a terminal state, so the parent motion can stop showing the
++  // rebase step as running and — on a clean finish — continue merging without a manual re-click.
++  // "stopped" is the user killing it (never auto-continue that); the others are the job's own end.
++  onSettled?: (outcome: "done" | "gone" | "error" | "stopped") => void;
++}) {
+   const [text, setText] = createSignal("");
+   const [status, setStatus] = createSignal<string | null>("starting");
+   const [phase, setPhase] = createSignal<"streaming" | "done" | "gone" | "error">("streaming");
+   const [err, setErr] = createSignal<string | null>(null);
+   const [session, setSession] = createSignal<string | null>(null);
++  // the user hit ■ stop — suppresses the auto-continue on the `done` the SIGKILL then emits.
++  let stopped = false;
+   const ctrl = new AbortController();
+   let scroller: HTMLDivElement | undefined;
+   // sticky-bottom: follow new output only while parked at the bottom, so scrolling up to read
+@@ -92,13 +101,16 @@ export default function RebaseStream(props: { branch: string; onClose: () => voi
+           if (payload.session_id) setSession(payload.session_id);
+           setPhase("done");
+           finished = true;
++          if (!stopped) props.onSettled?.("done");
+         } else if (event === "gone") {
+           setPhase("gone");
+           finished = true;
++          props.onSettled?.("gone");
+         } else if (event === "error") {
+           setErr(payload.err || "stream error");
+           setPhase("error");
+           finished = true;
++          props.onSettled?.("error");
+         }
+       }
+       if (finished) {
+@@ -117,8 +129,10 @@ export default function RebaseStream(props: { branch: string; onClose: () => voi
+     if (s) void post("/chat-popout", { session: s, branch: props.branch });
+   };
+   const stop = () => {
++    stopped = true;
+     void post("/rebase-stop", { branch: props.branch });
+     setPhase("done");
++    props.onSettled?.("stopped");
+   };
+ 
+   return (

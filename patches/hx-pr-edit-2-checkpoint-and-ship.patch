@@ -1,0 +1,218 @@
+diff --git a/scripts/hx-ship b/scripts/hx-ship
+new file mode 100755
+index 0000000..7f43e45
+--- /dev/null
++++ b/scripts/hx-ship
+@@ -0,0 +1,155 @@
++#!/bin/zsh
++# hx-ship <file-in-the-worktree> [msg...] — the deliberate hand-off at the end of a Helix edit
++# session: commit what's dirty, start the push gates in the background, and land on this
++# branch's node in the blessing viewer, where the push button is.
++#
++#   space-V = [":write", ":sh hx-ship %{buffer_name}"]     (space-v stays a silent checkpoint)
++#
++# It does NOT push. The viewer's red ⇧ button is the only door to origin, and it is warded
++# (fast-forward only, one outgoing commit, gates green) precisely because a PR someone else is
++# reviewing deserves a typecheck between your keyboard and their branch. This gets you to that
++# door with the gates already running, which is the whole latency win.
++#
++#   --dry-run   print the plan (branch, files, route) and touch nothing
++set -euo pipefail
++export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
++
++dry=0
++if [[ "${1:-}" == --dry-run ]]; then dry=1; shift; fi
++file="${1:?usage: hx-ship [--dry-run] <file> [msg...]}"
++shift || true
++msg="${*:-wip}"
++file="${file:A}"          # %{buffer_name} is cwd-relative; git -C below re-anchors paths
++dir="${file:h}"
++
++die(){ echo "hx-ship: $*" >&2; exit 1 }
++
++git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 || die "$dir is not in a git worktree"
++root=$(git -C "$dir" rev-parse --show-toplevel)
++
++# ── which branch am I shipping? ───────────────────────────────────────────────
++# A stack-open scratch worktree is DETACHED with a follow-marker naming the branch its
++# post-commit hook advances; a real worktree just has the branch checked out. Anything else —
++# a detached HEAD with no marker — must refuse: a commit there strands on a nameless head.
++branch=$(git -C "$dir" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
++if [[ -z "$branch" ]]; then
++  marker="$(git -C "$dir" rev-parse --git-dir)/stack-open-branch"
++  [[ -r "$marker" ]] || die "detached HEAD with no stack-open follow marker — a commit here would strand on a nameless head (recover with: git -C $dir reflog)"
++  branch=$(<"$marker")
++  branch="${branch//[[:space:]]/}"
++  [[ -n "$branch" ]] || die "empty follow marker at $marker"
++  git -C "$dir" show-ref --verify --quiet "refs/heads/${branch}" \
++    || die "follow marker names '$branch', which no longer exists as a branch"
++  # The follow hook MOVES the branch to whatever this worktree commits. If HEAD has drifted off
++  # the tip (someone restacked, or the worktree was resynced under you), committing would drag
++  # the branch backwards onto this stale base — silently, and after a push that is unrecoverable
++  # for everyone else. Refuse and say where the divergence is.
++  head_sha=$(git -C "$dir" rev-parse HEAD)
++  tip_sha=$(git -C "$dir" rev-parse "$branch")
++  [[ "$head_sha" == "$tip_sha" ]] \
++    || die "worktree HEAD ($(git -C "$dir" rev-parse --short HEAD)) is not $branch's tip ($(git -C "$dir" rev-parse --short "$branch")) — committing would move the branch backwards. Re-open the branch to resync."
++fi
++
++# ── commit what's dirty ──────────────────────────────────────────────────────
++# TRACKED files only, never `git add -A`: a shared checkout collects other people's untracked
++# WIP, and sweeping it into a commit that then goes to a PR is the exact accident this avoids.
++# Every path is echoed, so an unexpected passenger is visible rather than inferred.
++# `-C "$root"`, not "$dir": --name-only reports paths from the WORKTREE ROOT, so resolving them
++# against the edited file's own directory makes every pathspec miss.
++paths=("${(f)$(git -C "$root" diff --name-only HEAD 2>/dev/null)}")
++paths=("${(@)paths:#}")
++if (( ${#paths} )); then
++  if (( dry )); then
++    print -l "would commit (${#paths}):" "  ${^paths}"
++  else
++    git -C "$root" add -- "${paths[@]}" || die "could not stage ${#paths} path(s)"
++    if ! out=$(git -C "$root" commit -m "$msg" -- "${paths[@]}" 2>&1); then
++      die "commit failed: ${out}"
++    fi
++    committed="✦ $(git -C "$root" rev-parse --short HEAD) ${msg} (${#paths} file$( (( ${#paths} > 1 )) && echo s ))"
++  fi
++else
++  committed="nothing new to commit"
++fi
++
++# ── the viewer: gates in the background, then the node ───────────────────────
++port=$("$HOME/.dotfiles/scripts/stack-review-port" "$dir" 2>/dev/null || true)
++[[ "$port" == <-> ]] || die "couldn't derive the viewer port for $root"
++
++# Same git config the viewer itself reads, so membership can't drift: a forest member lives at
++# /forests/<project>/<branch>, an untagged branch is a standalone node. Dual-read spans the
++# in-flight stack-branch.* → branch.*.stack-* namespace migration.
++project=$(git -C "$dir" config "branch.${branch}.stack-project" 2>/dev/null \
++          || git -C "$dir" config "stack-branch.${branch}.project" 2>/dev/null || true)
++if [[ -n "$project" ]]; then route="/forests/${project}/${branch}"; else route="/branch/${branch}"; fi
++url="http://127.0.0.1:${port}${route}"
++
++if (( dry )); then
++  echo "branch $branch → $url"
++  exit 0
++fi
++
++# Gates: detached (returns at once, the viewer strip tails the journal), cached (a re-ship on an
++# unchanged tree answers green instead of re-paying the typecheck), and NEVER --fix — a fix that
++# reformats or rebases would move the tip out from under the commit just made. Bounded and
++# non-fatal both ways: the server shells git with no timeout of its own, and a slow gate must
++# never hold the editor's :sh popup open.
++bounded(){ perl -e 'alarm shift; exec @ARGV' "$@" }   # macOS has no timeout(1)
++
++gates=""
++up(){ curl -fsS --max-time 2 -o /dev/null "http://127.0.0.1:${port}/sig" 2>/dev/null }
++if ! up; then
++  # --ensure derives its port from the CWD, so it must run inside the repo — from Helix's cwd it
++  # would happily ensure some OTHER repo's viewer. Bounded: a first launch can build, and the
++  # editor's :sh popup must not hang behind it.
++  ( cd "$dir" && bounded 25 "$HOME/.dotfiles/scripts/stack-review-serve" --ensure ) >/dev/null 2>&1 || true
++fi
++if up; then
++  if curl -fsS --max-time 8 -X POST "http://127.0.0.1:${port}/gates" \
++       -H 'Content-Type: application/json' \
++       -d "{\"branch\":\"${branch}\",\"detach\":true,\"fix\":false,\"useCache\":true}" \
++       >/dev/null 2>&1; then
++    gates="  ⚙ gates running"
++  else
++    gates="  ⚠ gates not started"
++  fi
++else
++  gates="  ⚠ viewer not reachable"
++fi
++
++# Land on THE NODE, never on "whatever Chrome was showing". Focus a tab already on this route;
++# failing that `open` the URL, which both creates the tab and raises the browser — deterministic
++# whether or not a viewer tab exists, which a bare `open -a "Google Chrome"` never was.
++landed=""
++if pgrep -xq "Google Chrome" 2>/dev/null; then
++  hit=$(osascript \
++    -e 'on run argv' \
++    -e 'set needle to item 1 of argv' \
++    -e 'tell application "Google Chrome"' \
++    -e 'repeat with w in windows' \
++    -e 'set i to 0' \
++    -e 'repeat with t in (tabs of w)' \
++    -e 'set i to i + 1' \
++    -e 'if (URL of t contains needle) then' \
++    -e 'set active tab index of w to i' \
++    -e 'set index of w to 1' \
++    -e 'return "1"' \
++    -e 'end if' \
++    -e 'end repeat' \
++    -e 'end repeat' \
++    -e 'return ""' \
++    -e 'end tell' \
++    -e 'end run' \
++    ":${port}${route}" 2>/dev/null) || true
++  # Apple events are denied to a detached tmux (-1743), so a miss here means "couldn't ask",
++  # not "no such tab" — `open` is the guaranteed path either way.
++  if [[ "${hit:-}" == *1* ]]; then
++    open -a "Google Chrome" 2>/dev/null || true
++    landed="↩ viewer"
++  fi
++fi
++if [[ -z "$landed" ]]; then
++  if open "$url" >/dev/null 2>&1; then landed="↗ $route"; else landed="$url (no browser)"; fi
++fi
++
++echo "${committed}${gates}  ${landed}"
+diff --git a/scripts/hx-wc b/scripts/hx-wc
+index 05067c7..e57fec9 100755
+--- a/scripts/hx-wc
++++ b/scripts/hx-wc
+@@ -8,10 +8,10 @@
+ # The scratch review worktree is a detached HEAD, but stack-open installs a post-commit
+ # follow-hook there, so this plain commit advances the branch ref like :wc does.
+ #
+-# Refocus mirrors wc.lua's two gotchas: only flip to Chrome when we're in the review-hx
+-# tmux window stack-open drives (never your daily Helix), and raise Chrome with `open -a`
+-# (LaunchServices) — under a detached tmux macOS denies Apple events (-1743), so the
+-# osascript tab-select is best-effort on top of the guaranteed `open -a` raise.
++# This is a CHECKPOINT and nothing else — it stays in the editor. It used to also raise
++# Chrome, which is wrong for an edit loop (you commit several files before you want to look
++# at anything) and was a blind `open -a` besides: with no viewer tab open it dumped you on
++# whatever Chrome happened to be showing. The deliberate hand-off lives in `hx-ship`.
+ set -euo pipefail
+ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+ 
+@@ -34,36 +34,4 @@ if ! out=$(git -C "$dir" commit -m "$msg" -- "$file" 2>&1); then
+ fi
+ sha=$(git -C "$dir" rev-parse --short HEAD)
+ 
+-back=""
+-if [[ -n "${TMUX:-}" && "$(tmux display-message -p '#{window_name}' 2>/dev/null)" == "review-hx" ]] \
+-   && pgrep -xq "Google Chrome" 2>/dev/null; then
+-  # tab-select needles in priority order: :5174 = Solid dev viewer, else this repo's
+-  # per-repo stable port (stack-review-port derives it from the git common dir, so the
+-  # scratch worktree resolves to the same port as the main checkout).
+-  port=$("$HOME/.dotfiles/scripts/stack-review-port" "$dir" 2>/dev/null || true)
+-  for needle in ":5174" ${port:+":$port"}; do
+-    hit=$(osascript \
+-      -e 'on run argv' \
+-      -e 'set needle to item 1 of argv' \
+-      -e 'tell application "Google Chrome"' \
+-      -e 'repeat with w in windows' \
+-      -e 'set i to 0' \
+-      -e 'repeat with t in (tabs of w)' \
+-      -e 'set i to i + 1' \
+-      -e 'if (URL of t contains needle) then' \
+-      -e 'set active tab index of w to i' \
+-      -e 'set index of w to 1' \
+-      -e 'return "1"' \
+-      -e 'end if' \
+-      -e 'end repeat' \
+-      -e 'end repeat' \
+-      -e 'return ""' \
+-      -e 'end tell' \
+-      -e 'end run' \
+-      "$needle" 2>/dev/null) || true
+-    [[ "${hit:-}" == *1* ]] && break
+-  done
+-  open -a "Google Chrome" 2>/dev/null && back="  ↩ viewer"
+-fi
+-
+-echo "✦ committed ${sha}  ${msg}${back}"
++echo "✦ committed ${sha}  ${msg}"

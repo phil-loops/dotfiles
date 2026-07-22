@@ -1,0 +1,75 @@
+diff --git a/scripts/stack-open b/scripts/stack-open
+index 5782bdb..62fc2c4 100755
+--- a/scripts/stack-open
++++ b/scripts/stack-open
+@@ -29,6 +29,8 @@ SOCK="${STACK_OPEN_SOCK:-/tmp/stack-review-nvim.sock}"
+ SESSION="${STACK_OPEN_TMUX:-loops}"
+ 
+ main_root=$(git rev-parse --show-toplevel)
++SCRIPTS="${0:A:h}"   # resolve our own dir HERE: inside a function zsh's $0 is the function name,
++                     # so ${0:A:h} there is the CWD and the sibling script silently never runs
+ 
+ _wt_list=""
+ wt_list(){   # the porcelain worktree list, computed once — it's repo-global and costs ~70ms at 147 worktrees
+@@ -197,7 +199,7 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without
+               # procedure's output type, so a branch touching only models/ silently kept main's —
+               # and into rebuilding inside a scratch tree, where symlinked node_modules trip
+               # TS2883 on prisma-inferred exports and the aggregates never re-emit at all.
+-  "${0:A:h}/seed-gen" "$1" >/dev/null 2>&1 || true
++  "$SCRIPTS/seed-gen" "$1" >/dev/null 2>&1 || true
+ }
+ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
+   local b="$1" ex dir
+@@ -241,7 +243,7 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
+   fi
+   [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
+   seed_gen "$dir"   # .gen for #trpc resolution — a scratch tree shares the main checkout's
+-  "${0:A:h}/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
++  "$SCRIPTS/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
+   # record the branch + install the follow-hook so commits here advance the ref
+   # instead of stranding on the detached HEAD (see install_followup_hook).
+   echo "$b" > "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch"
+diff --git a/scripts/stack-open-test b/scripts/stack-open-test
+index e6c86ed..83cf0f1 100755
+--- a/scripts/stack-open-test
++++ b/scripts/stack-open-test
+@@ -103,6 +103,39 @@ env PATH=/usr/bin:/bin STACK_OPEN_DIR="$s2" "$SO" --gc 1 >/dev/null 2>&1
+ [[ -d "$s2/idle/.next" ]] && ok "no cwd probe means reclaim nothing (fails closed)" \
+                           || no "reclaimed with a broken cwd probe (fails OPEN)"
+ 
++print
++print -r -- ".gen seeding"
++
++# The two seeders drifted for three days with no failing surface: the hook-side rebuild aimed at
++# a tsconfig loops had moved, and every scratch tree quietly kept a frozen copy of main's types.
++if [[ -d "$MAIN/.gen" ]]; then
++  g="$T/gen"; mkdir -p "$g"
++  gdir=$(STACK_OPEN_DIR="$g" "$SO" --path "$BRANCH" 2>/dev/null)
++  [[ -L "$gdir/.gen" ]] && ok "a scratch tree shares the main checkout's .gen" \
++                        || no "a scratch tree got a .gen of its own"
++
++  # An older seeder's copy has to be traded for the link, or it stays frozen forever: nothing in
++  # a scratch tree rebuilds (symlinked node_modules can't emit the aggregates the client resolves through).
++  rm -f "$gdir/.gen"
++  cp -cR "$MAIN/.gen" "$gdir/.gen" 2>/dev/null || cp -R "$MAIN/.gen" "$gdir/.gen" 2>/dev/null
++  STACK_OPEN_DIR="$g" "$SO" --path "$BRANCH" >/dev/null 2>&1
++  [[ -L "$gdir/.gen" ]] && ok "a frozen .gen copy is traded for the link" \
++                        || no "kept a frozen .gen copy"
++
++  # A copy carries the marker of the tree it came from — left there it claims this worktree's
++  # .gen was built for a commit it has never seen, which is what made 53 trees look up to date.
++  ndir="$T/nonscratch"
++  git worktree add --detach -q "$ndir" HEAD 2>/dev/null
++  rm -rf "$ndir/.gen"
++  "${SO:h}/seed-gen" "$ndir" 2>/dev/null
++  { [[ -d "$ndir/.gen" && ! -L "$ndir/.gen" ]] } && ok "a real worktree gets a copy, not the link" \
++                                                 || no "a real worktree was linked to main's .gen"
++  [[ -f "$ndir/.gen/.seed-gen-sha" ]] && no "the copy inherited the source tree's marker" \
++                                      || ok "the copy drops the source tree's marker"
++else
++  print -r -- "  – .gen seeding: skipped (${MAIN:t} has no .gen to seed from)"
++fi
++
+ if [[ "${1:-}" == --no-hx ]] || ! command -v tmux >/dev/null || ! command -v hx >/dev/null; then
+   print
+   print -r -- "editor drive: skipped"

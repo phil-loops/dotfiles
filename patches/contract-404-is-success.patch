@@ -1,0 +1,104 @@
+diff --git a/scripts/viewer-solid/src/ForestMap.tsx b/scripts/viewer-solid/src/ForestMap.tsx
+index f689090..c4e20b8 100644
+--- a/scripts/viewer-solid/src/ForestMap.tsx
++++ b/scripts/viewer-solid/src/ForestMap.tsx
+@@ -98,7 +98,7 @@ export function ForestMap(props: {
+   onLeaveNode?: () => void;
+   // the merged-ghost badge's contextual next step: drop this branch + rewire its children
+   // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
+-  onContract?: (branch: string) => Promise<unknown>;
++  onContract?: (branch: string) => Promise<{ status: number; ok?: boolean; err?: string }>;
+   // the merged-with-follow-on ghost's next step: ready the WHOLE forest (POST /ship —
+   // contract merged work first, then restack survivors onto fresh main, in that order).
+   // A node-local rebase here would move the node off its parent mid-graph; the forest
+@@ -155,9 +155,11 @@ export function ForestMap(props: {
+     setContracting(id);
+     setContractErr(null);
+     Promise.resolve(props.onContract!(id))
++      // 404 = the branch AND its stack config are already gone, which is the outcome contraction
++      // was asking for — reporting it as "⊘ drop failed" taught Phil to distrust the auto-drop
++      // (2026-07-21). Every other refusal (409 unmerged work, 500) still parks on the pill.
+       .then((r) => {
+-        const j = r as { ok?: boolean; err?: string } | undefined;
+-        if (j && j.ok === false) setContractErr({ id, err: j.err || "contract failed" });
++        if (r.ok === false && r.status !== 404) setContractErr({ id, err: r.err || "contract failed" });
+         else setDropped((s) => new Set(s).add(id));
+       })
+       // a throw (server bounced mid-request, non-JSON body) used to leave the pill back on its
+diff --git a/scripts/viewer-solid/src/ForestOverview.tsx b/scripts/viewer-solid/src/ForestOverview.tsx
+index 991b29a..0c2dab9 100644
+--- a/scripts/viewer-solid/src/ForestOverview.tsx
++++ b/scripts/viewer-solid/src/ForestOverview.tsx
+@@ -398,15 +398,16 @@ export function ForestOverview() {
+               onHoverNode={showTip}
+               onLeaveNode={hideTip}
+               onContract={canMutate ? async (branch) => {
+-                const res = await fetch(withRepo("/contract"), {
++                const r = await fetch(withRepo("/contract"), {
+                   method: "POST",
+                   headers: { "Content-Type": "application/json" },
+                   body: JSON.stringify({ branch }),
+-                }).then((r) => r.json());
++                });
++                const body = (await r.json()) as { ok?: boolean; err?: string };
+                 ovQc.invalidateQueries({ queryKey: ["model"] });
+                 ovQc.invalidateQueries({ queryKey: ["forest-health"] });
+                 ovQc.invalidateQueries({ queryKey: ["projects"] });
+-                return res;
++                return { status: r.status, ...body };
+               } : undefined}
+               // a forest with nothing to ship gets no verb — the merged-with-follow-on node stays a
+               // passive ghost instead of a "ready forest →" that fires and reports "already ready".
+diff --git a/scripts/viewer-solid/src/NodeActions.tsx b/scripts/viewer-solid/src/NodeActions.tsx
+index cb2beb7..8977398 100644
+--- a/scripts/viewer-solid/src/NodeActions.tsx
++++ b/scripts/viewer-solid/src/NodeActions.tsx
+@@ -79,7 +79,7 @@ interface DeltaTestResult {
+   summary?: string; // tail of the runner output (for the tooltip)
+ }
+ 
+-async function post<T>(url: string, body: unknown): Promise<T> {
++async function postStatus<T>(url: string, body: unknown): Promise<{ status: number; body: T }> {
+   // prefix the active repo (/monotoad/checkout) so the server pins the right repo — without it
+   // every node action (checkout/squash/rebase/contract/…) runs against the launched repo (loops).
+   const r = await fetch(withRepo(url), {
+@@ -93,12 +93,16 @@ async function post<T>(url: string, body: unknown): Promise<T> {
+   // throws here instead of failing silently — the mutations' onError surfaces it.
+   const text = await r.text();
+   try {
+-    return JSON.parse(text) as T;
++    return { status: r.status, body: JSON.parse(text) as T };
+   } catch {
+     throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : " (empty response)"}`);
+   }
+ }
+ 
++async function post<T>(url: string, body: unknown): Promise<T> {
++  return (await postStatus<T>(url, body)).body;
++}
++
+ export function NodeActions(props: {
+   branch: string;
+   isReview: boolean;
+@@ -525,14 +529,16 @@ export function NodeActions(props: {
+   // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
+   const contract = createMutation(() => ({
+     mutationFn: () =>
+-      post<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch: props.branch }),
+-    onSuccess: (r) => {
+-      if (!r.ok) {
+-        setDone(`✗ ${r.err || "contract failed"}`);
++      postStatus<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch: props.branch }),
++    // 404 = the branch AND its stack config are already gone (a stale node still on screen after
++    // the map's auto-drop) — that IS contraction's outcome, so it reads as done, never as ✗.
++    onSuccess: ({ status, body }) => {
++      if (!body.ok && status !== 404) {
++        setDone(`✗ ${body.err || "contract failed"}`);
+         return;
+       }
+       setContractKids(null);
+-      setDone(`✓ ${r.summary || "contracted"}`);
++      setDone(status === 404 ? "✓ already dropped" : `✓ ${body.summary || "contracted"}`);
+       qc.invalidateQueries({ queryKey: ["model"] });
+       qc.invalidateQueries({ queryKey: ["node", props.branch] });
+       qc.invalidateQueries({ queryKey: ["forest-health"] });

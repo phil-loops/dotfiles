@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""mail-map-lint — deterministic checks on the mail map wiki.
+
+    mail-map-lint            report; exit 1 if anything is wrong
+    mail-map-lint --repin    recompute the @hash on every pinned line range
+    mail-map-lint --additive <ref>   flag commits that only grew the wiki
+
+Every check here is mechanical. The point is that "did this stay honest and stay
+structured" is an exit code rather than a judgement call — citations that no longer
+resolve, pages over budget, orphans, and the same prose written twice on two pages.
+
+--repin accepts the current source as correct, so run it only after actually reading
+what changed. It is the `-u` of this tool: fast, and dangerous if used reflexively.
+"""
+
+import os
+import re
+import subprocess
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import mail_map  # noqa: E402
+
+RED, GREEN, YELLOW, DIM, OFF = "\033[31m", "\033[32m", "\033[33m", "\033[2m", "\033[0m"
+
+SEVERITY = {
+    "broken-citation": RED,
+    "broken-ask": RED,
+    "dead-link": RED,
+    "over-budget": YELLOW,
+    "duplicate-citation": YELLOW,
+    "duplicate-prose": YELLOW,
+    "uncited": YELLOW,
+    "orphan": YELLOW,
+}
+
+
+def repin():
+    """Rewrite every #L..-L..@hash citation with the hash of the lines as they are now."""
+    changed = 0
+    for name in sorted(os.listdir(mail_map.PAGES_DIR)):
+        if not name.endswith(".md"):
+            continue
+        path = os.path.join(mail_map.PAGES_DIR, name)
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+
+        def fix(match):
+            nonlocal changed
+            anchor = match.group(2)
+            ranged = re.match(r"(.+#L\d+(?:-L\d+)?)@([0-9a-f]{4,})", anchor)
+            if not ranged:
+                return match.group(0)
+            base = ranged.group(1)
+            try:
+                fresh = mail_map.resolve(base + "@" + "0" * 8)
+            except mail_map.Problem as exc:
+                message = str(exc)
+                found = re.search(r"now @([0-9a-f]{8})", message)
+                if not found:
+                    print(f"{RED}cannot repin{OFF} {anchor}: {exc}")
+                    return match.group(0)
+                if found.group(1) != ranged.group(2):
+                    changed += 1
+                return f"[{match.group(1)}](src:{base}@{found.group(1)})"
+            return match.group(0)
+
+        fixed = mail_map.CITE_RE.sub(fix, text)
+        if fixed != text:
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(fixed)
+    print(f"repinned {changed} range citation(s)")
+    return 0
+
+
+def additive(ref):
+    """A 'refactor' that only adds lines is not a refactor. Make that measurable."""
+    diff = subprocess.run(
+        ["git", "diff", "--numstat", ref, "--", "mail-map/"],
+        cwd=os.path.join(mail_map.HOME, ".dotfiles"),
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    added = removed = 0
+    for line in diff.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 3 and parts[0].isdigit():
+            added += int(parts[0])
+            removed += int(parts[1])
+    if not added and not removed:
+        print(f"{DIM}no wiki changes since {ref}{OFF}")
+        return 0
+    ratio = removed / added if added else 1.0
+    verdict = f"+{added} −{removed}"
+    if removed == 0 and added > 20:
+        print(f"{YELLOW}purely additive{OFF} since {ref}: {verdict} — nothing was cut or moved")
+        return 1
+    print(f"{GREEN}{verdict}{OFF} since {ref} ({ratio:.0%} churn) — content moved, not just piled on")
+    return 0
+
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] == "--repin":
+        return repin()
+    if args and args[0] == "--additive":
+        return additive(args[1] if len(args) > 1 else "HEAD")
+
+    try:
+        pages = mail_map.load_pages()
+    except mail_map.Problem as exc:
+        print(f"{RED}{exc}{OFF}")
+        return 1
+
+    problems = mail_map.check(pages)
+    linked = {t for p in pages for t in mail_map.WIKILINK_RE.findall(p["body"])}
+    for page in pages:
+        if page["section"] != "Orientation" and page["slug"] not in linked:
+            problems.append(("orphan", f"{page['slug']}: no page links here"))
+
+    for kind, message in sorted(problems):
+        print(f"{SEVERITY.get(kind, '')}{kind:>20}{OFF}  {message}")
+
+    total = sum(p["words"] for p in pages)
+    widest = max(pages, key=lambda p: p["words"])
+    print(
+        f"\n{len(pages)} pages · {total} words · "
+        f"longest {widest['slug']} at {widest['words']}/{mail_map.WORD_BUDGET}"
+    )
+    if not problems:
+        print(f"{GREEN}clean{OFF}")
+    return 1 if any(SEVERITY.get(k) == RED for k, _ in problems) else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

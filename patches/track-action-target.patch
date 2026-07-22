@@ -1,0 +1,37 @@
+diff --git a/scripts/viewer-solid/src/track.ts b/scripts/viewer-solid/src/track.ts
+index b04e805..0c5fbde 100644
+--- a/scripts/viewer-solid/src/track.ts
++++ b/scripts/viewer-solid/src/track.ts
+@@ -27,6 +27,21 @@ export function track(type: string, data: Record<string, unknown> = {}): void {
+ const SKIP_TRACK = new Set(["/track", "/heartbeat", "/prepare"]);
+ let installed = false;
+ 
++// WHAT the action was aimed at, lifted from the request body every mutating POST already sends.
++// Without it the log records that a /contract 404'd but not on which branch, so reading back a
++// past session means inferring the target from surrounding timestamps — an hour of detour on the
++// frozen-model hunt (2026-07-21). Truncated: a target is a name, never a payload.
++const targetOf = (body: BodyInit | null | undefined): string => {
++  if (typeof body !== "string") return "";
++  try {
++    const b = JSON.parse(body) as Record<string, unknown>;
++    const t = b.branch ?? b.project ?? b.name;
++    return typeof t === "string" ? t.slice(0, 120) : "";
++  } catch {
++    return "";
++  }
++};
++
+ // Instrument the ONE layer every request passes through, so EVERY action POST is tracked —
+ // with its outcome (status) and latency (ms) — no matter which component fires it, present or
+ // future. This is what makes "are all actions tracked?" answerable with yes, by construction.
+@@ -47,7 +62,9 @@ export function installFetchTracking(): void {
+     const t0 = performance.now();
+     const p = realFetch(input, init);
+     if (isPost && path && !SKIP_TRACK.has(path)) {
+-      const done = (status: number) => track("action", { url: path, status, ms: Math.round(performance.now() - t0) });
++      const on = targetOf(init?.body);
++      const done = (status: number) =>
++        track("action", { url: path, ...(on ? { on } : {}), status, ms: Math.round(performance.now() - t0) });
+       p.then((r) => done(r.status), () => done(0));
+     }
+     return p;
