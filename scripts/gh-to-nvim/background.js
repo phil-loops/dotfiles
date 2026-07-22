@@ -165,8 +165,12 @@ function prewarm(url) {
   }).catch(() => {});   // viewer down → the chord's recovery ladder still handles it
 }
 
+// GitHub is a Turbo app: clicking a PR out of the list, or the Files tab of the PR you're on, is
+// a pushState navigation that fires onUpdated with a URL and NO status — so gating on
+// status:"complete" warmed only the PRs you reached by a full page load, missing the way you
+// usually get there. The PR-keyed dedupe above is what makes the wider trigger free.
 chrome.tabs.onUpdated.addListener((_id, info, tab) => {
-  if (info.status === "complete") {
+  if (info.status === "complete" || info.url) {
     prewarm(tab?.url);
   }
 });
