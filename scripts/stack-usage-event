@@ -10,11 +10,52 @@
 #
 #   stack-usage-event commit   # one event per commit: branch, project, subject shape, ahead-count
 #   stack-usage-event push     # one event at push: branch, project, ahead-count, subjects sent
-import sys, os, json, time, subprocess
+#   stack-usage-event who <sha>  # which session made <sha> — read-only, for handoff notes
+import sys, os, json, time, glob, subprocess
 
 
 def git(*args):
     return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+
+
+def session():
+    # Every commit in a shared repo is authored "Phil Brockman", so which SESSION made one has
+    # only ever been inferred — and inference got two commits misattributed in a single day
+    # (2026-07-22), each time to a session that hadn't read the code. Stamp it instead, via the
+    # same ancestor walk `own` uses for lane claims. No claude ancestor = Phil at a terminal,
+    # recorded as null: that is an answer, not a gap.
+    out = subprocess.run([os.path.join(os.path.dirname(os.path.abspath(__file__)), "claude-session-pid")],
+                         capture_output=True, text=True, timeout=5).stdout
+    pid = out.split("\t")[0].strip() if out else ""
+    if not pid:
+        return None
+    for f in glob.glob(os.path.expanduser("~/.claude/session-presence/*.json")):
+        try:
+            with open(f) as fh:
+                d = json.load(fh)
+        except Exception:
+            continue
+        if str(d.get("pid")) == pid:
+            return (d.get("session_id") or "")[:8] or None
+    return None
+
+
+def who(want):
+    path = log_file()
+    if not want or not path or not os.path.exists(path):
+        print("no usage log here" if not want else f"usage: {os.path.basename(__file__)} who <sha>")
+        return
+    for line in reversed(open(path).read().splitlines()):
+        try:
+            ev = json.loads(line)
+        except Exception:
+            continue
+        if ev.get("type") == "commit" and str(ev.get("sha", "")).startswith(want):
+            by = ev.get("session") or "— no claude ancestor (a hand commit)"
+            print(f"{ev['sha']}  by {by}  on {ev.get('branch')}  "
+                  f"{time.strftime('%Y-%m-%d %H:%M', time.localtime(ev.get('ts', 0)))}")
+            return
+    print(f"{want}: not in this repo's usage log (predates session stamping, or another repo)")
 
 
 def log_file():
@@ -28,9 +69,11 @@ def log_file():
 
 
 def main():
+    kind = sys.argv[1] if len(sys.argv) > 1 else ""
+    if kind == "who":   # a read — answerable even with logging switched off
+        return who(sys.argv[2] if len(sys.argv) > 2 else "")
     if os.environ.get("STACK_USAGE") == "0":
         return
-    kind = sys.argv[1] if len(sys.argv) > 1 else ""
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     if not branch or branch == "HEAD":
         return  # detached (scratch worktree) — not a real workflow commit
@@ -38,9 +81,10 @@ def main():
     project = git("config", f"branch.{branch}.stack-project") or git("config", f"stack-branch.{branch}.project") or None
     ahead = git("rev-list", "--count", f"{main_branch}..HEAD")
     ev = {"type": kind, "branch": branch, "project": project,
-          "ahead": int(ahead) if ahead.isdigit() else None}
+          "ahead": int(ahead) if ahead.isdigit() else None, "session": session()}
 
     if kind == "commit":
+        ev["sha"] = git("rev-parse", "--short=10", "HEAD")
         subject = git("log", "-1", "--format=%s")
         body = git("log", "-1", "--format=%b")
         ev["subjectLen"] = len(subject)
