@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsgo --noEmit",
+    "test": "node --test src/*.test.ts",
     "bake": "node bake.mjs",
     "build:static": "VITE_STATIC=1 vite build && node bake.mjs",
     "visual:serve": "node visual/fixture-server.mjs --dist dist --fixtures visual/fixtures --port 7333",
@@ -28,6 +29,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/node": "^26.1.1",
     "@typescript/native-preview": "^7.0.0-dev.20260617.2",
     "pixelmatch": "^7.2.0",
     "pngjs": "^7.0.0",
