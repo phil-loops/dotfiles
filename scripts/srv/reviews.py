@@ -158,12 +158,25 @@ def _local_branch_for_pr(num):
     return branch
 
 
+_refreshed = {}   # pr-num -> unix time of the last head fetch
+_REFRESH_TTL = 120
+
+
 def _refresh_review_branch(num):
     # Re-sync review/pr-N to the live PR head before a precise line-open, so the line lands where
     # GitHub shows it — a stale fetch drifts line numbers (a pushed refactor moves the line). The
-    # bless ledger is content-keyed (patch-id/blob), so re-fetch is safe; cheap when already
-    # current; --force because a PR head can be force-pushed.
+    # bless ledger is content-keyed (patch-id/blob), so re-fetch is safe; --force because a PR
+    # head can be force-pushed.
+    #
+    # It is NOT cheap when already current — a no-op fetch measures ~1.2s of network, and it ran
+    # on every precise ⌘⇧O. The page-load prewarm pays it instead; the TTL is what lets the
+    # keypress skip it. Prewarm time is also the more faithful moment to fetch: the line number
+    # the chord sends was read off the page as it rendered, not off whatever the head is now.
+    now = time.time()
+    if now - _refreshed.get(num, 0) < _REFRESH_TTL:
+        return
     ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
+    _refreshed[num] = now
 
 
 def _match_diffhash(paths, want):
@@ -210,6 +223,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
                 return
             _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
             branch = r.stdout.strip()
+            _refreshed[num] = time.time()   # the import just fetched this head — don't re-fetch it below
     prefix = f"{repo_name}/" if (repo_path != ctx.CWD and repo_name) else ""
     route = _viewer_route(branch, prefix, num, local)
     refreshed = False
@@ -230,6 +244,8 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
         return
     path = (d.get("path") or "").strip()
     if not path:
+        if not local:
+            _refresh_review_branch(num)   # warm the REF too — before the worktree, so it builds at the live head
         picker.prepare_branch(branch)   # warm the worktree in the background for a fast first open
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
         return
