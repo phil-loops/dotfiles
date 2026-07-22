@@ -120,7 +120,17 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without 
     runner="$HOME/.volta/bin/node"
   fi
   [[ -e "$compiler" ]] || return 0                              # no compiler → keep the cloned baseline
-  mkdir "$dir/.gen/.rebuilding" 2>/dev/null || return 0         # single-flight lock: a rebuild is already in flight
+  # Single-flight lock. It only means "in flight" while its owner is alive: the viewer SIGKILLs
+  # stack-open's whole process group at 8s, and a lock orphaned by that kill used to freeze this
+  # worktree's .gen for good — every later open silently kept the stale #trpc types.
+  local lock="$dir/.gen/.rebuilding" owner stale=""
+  if ! mkdir "$lock" 2>/dev/null; then
+    owner=$(cat "$lock/pid" 2>/dev/null) || true
+    [[ -n "$owner" ]] && ! kill -0 "$owner" 2>/dev/null && stale=1
+    [[ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]] && stale=1   # killed before it recorded a pid
+    [[ -n "$stale" ]] || return 0
+    rm -rf "$lock"; mkdir "$lock" 2>/dev/null || return 0
+  fi
   # background incremental rebuild → stamp the sha, release the lock. Call the binary
   # DIRECTLY (never npx — backgrounded npx with no TTY hangs on its install prompt and
   # piles up runaway procs); tsc is a JS entrypoint so it needs node, tsgo is native.
@@ -128,7 +138,8 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without 
   # caller that pipes us (the server's Popen+communicate) waits for EOF on those fds, so holding
   # them open makes this "background" rebuild block the open for as long as the compile takes.
   ( cd "$dir" && ${runner:+"$runner"} "$compiler" --project "$proj" --pretty false >/dev/null 2>&1 \
-      && echo "$head" > "$marker"; rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) >/dev/null 2>&1 &!
+      && echo "$head" > "$marker"; rm -rf "$lock" ) >/dev/null 2>&1 &!
+  print -r -- $! > "$lock/pid" 2>/dev/null || true   # the rebuild outlives us; the lock follows IT, not this script
 }
 ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
   local b="$1" ex dir
@@ -226,13 +237,23 @@ surface_review_window(){   # bring the warm nvim's tmux window to the front, rel
 
 hx_pane_line(){ tmux capture-pane -p -t "$1" 2>/dev/null | tail -"${2:-1}" }
 
+typeset -F SECONDS
+HX_DEADLINE=0
+hx_out_of_time(){ (( HX_DEADLINE > 0 && SECONDS >= HX_DEADLINE )) }
+             # Every poll below answers to ONE budget, because the caller kills us: the viewer
+             # SIGKILLs stack-open's process group 8s into /open. The per-step caps alone add up
+             # to ~17s, so a slow-but-working drive used to be killed mid-keystroke — with the
+             # prompt half-typed and the undo guard never reached, which is the "it scribbled
+             # into my file" report. Give up in time to recover and report instead.
+
 HX_LOCK=""
 hx_lock(){   # one driver per pane. Two hover+o presses landing at once is what turns a
              # stolen ':' prompt into keys typed straight into the file: the racer's Escape
              # closes the prompt mid-batch, ':cd <dir>' then runs 'c' as a change command and
              # the path types itself into the buffer (reproduced 2026-07-21).
   local lock="${TMPDIR:-/tmp}/stack-open-hx-${1//[^a-zA-Z0-9]/}.lock" i holder
-  for i in {1..100}; do
+  for i in {1..30}; do   # ~3s: waiting out the holder must still leave time to open cold
+    hx_out_of_time && return 2   # 2 = out of budget, not contended — the caller says so out loud
     if mkdir "$lock" 2>/dev/null; then print -r -- $$ > "$lock/pid"; HX_LOCK="$lock"; return 0; fi
     holder=$(cat "$lock/pid" 2>/dev/null) || true
     if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then rm -rf "$lock"; continue; fi
@@ -249,6 +270,7 @@ hx_verify_normal(){   # Escape until the pane's statusline proves NOR with no ':
   for round in 1 2 3; do
     tmux send-keys -t "$pane" Escape
     for i in {1..12}; do
+      hx_out_of_time && return 1
       sleep 0.05
       snap=$(hx_pane_line "$pane" 2)
       if [[ "$snap" == *NOR* && "${snap##*$'\n'}" != :* ]]; then return 0; fi
@@ -264,6 +286,7 @@ hx_cmd(){   # run one ':' command: open the prompt, watch the body echo back OUT
   before=$(hx_pane_line "$pane")
   tmux send-keys -t "$pane" :
   for i in {1..30}; do
+    hx_out_of_time && return 1
     sleep 0.05
     last=$(hx_pane_line "$pane")
     # the line must CHANGE into a prompt — Helix pre-fills it with a history suggestion, so
@@ -274,6 +297,7 @@ hx_cmd(){   # run one ':' command: open the prompt, watch the body echo back OUT
   width=$(tmux display -p -t "$pane" '#{pane_width}' 2>/dev/null) || width=0
   tmux send-keys -t "$pane" -l "$cmd"
   for i in {1..60}; do   # Helix's path completion needs >1s to echo a long path back
+    hx_out_of_time && return 1
     sleep 0.05
     last=$(hx_pane_line "$pane")
     if [[ "$last" == "$expect" ]]; then tmux send-keys -t "$pane" Enter; return 0; fi
@@ -319,6 +343,8 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
     # so a file from any OTHER branch (every scratch worktree is a fresh path) shows absolute
     # without this. LSP workspace root is resolved per-file, so :cd never disturbs it.
     local dirty_before=""
+    HX_DEADLINE=${STACK_OPEN_HX_BUDGET:-5}   # seconds of THIS script's life, not of the drive:
+                                             # the worktree work before us spends the same 8s
     if hx_lock "$pane"; then
       hx_modified "$pane" && dirty_before=1
       if hx_verify_normal "$pane" \
@@ -329,6 +355,7 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
       else
         # A batch that died mid-way may have typed its body into the buffer. Undo only when the
         # pane was clean before we touched it — that's the proof the edit is ours, not the human's.
+        HX_DEADLINE=7   # cleaning up after ourselves outranks the open we just lost — still under the kill
         if hx_verify_normal "$pane" && [[ -z "$dirty_before" ]] && hx_modified "$pane"; then
           tmux send-keys -t "$pane" -l u
           echo "stack-open: a lost prompt typed into the buffer — undone" >&2
@@ -338,6 +365,13 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
       fi
       hx_unlock
     else
+      local why=$?
+      # Out of budget (2) means the worktree work ate the 8s the viewer allows — the pane is fine
+      # and now warm, so say "press o again" instead of piling a rival window on top of it.
+      if (( why == 2 )); then
+        echo "stack-open: no time left to drive review-hx (cold worktree) — press o again, it's warm now" >&2
+        return 1
+      fi
       # Busy, not broken: someone else's batch has the pane. Retiring it here would orphan a
       # perfectly good warm Helix and send every later open to a rival window.
       echo "stack-open: another open is still driving review-hx; opening cold" >&2
