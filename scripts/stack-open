@@ -398,13 +398,19 @@ hx_goto_line(){   # land on <line> (no-op without one) through the verified ':' 
   hx_cmd "$pane" "goto ${line}"
 }
 
-hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-keys), else launch hx
-             # cold; land the cursor on <line>. Helix has no --server socket, so "warm" is a tmux
-             # send-keys trick. Realpath (:A) the paths so /tmp→/private/tmp matches Helix's cwd and
-             # LSP picker entries (references, symbols) render project-relative instead of absolute.
-  local dir="${1:A}" line="$2" file="${3:A}"
-  [[ -n "$file" ]] || return 1
+hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-keys), else launch hx
+             # cold; land the cursor on <line> of the FIRST file. Helix has no --server socket, so
+             # "warm" is a tmux send-keys trick. Realpath (:A) the paths so /tmp→/private/tmp matches
+             # Helix's cwd and LSP picker entries (references, symbols) render project-relative.
+             # Several files only ever launch COLD: Helix's path completion eats a multi-path ':open'
+             # typed through send-keys (the command never submits), while `hx` parses argv directly.
+  local dir="${1:A}" line="$2"; shift 2
+  local files=() f
+  for f in "$@"; do [[ -n "$f" ]] && files+=("${f:A}"); done
+  (( ${#files} )) || return 1
+  local file="${files[1]}"
   local win pane retire=""
+  HX_OPENED=${#files}   # what the caller may claim it opened — the guards below can shrink it
   # Target the PANE running hx, not the window: window-targeted keys land in the window's
   # ACTIVE pane, which after a space-t is often the test pager — ':open …' typed into less.
   # `|| true`: awk exits at the match → tmux SIGPIPE (141); pipefail+set -e would abort the open
@@ -414,6 +420,24 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
   # Open by RELATIVE path once we've cd'd: Helix re-completes the whole prompt on every
   # keystroke, so a 100-char absolute path costs it over a second of stat()s per open.
   local rel_target="$file"; [[ "$file" == "$dir"/* ]] && rel_target="${file#$dir/}"
+  # A multi-file open relaunches cold, which retires the warm window — so it must never happen
+  # over UNSAVED work. Fail CLOSED: only a statusline that positively reads clean (a mode word,
+  # no [+]) earns the retire; an unreadable pane counts as dirty and downgrades the open to the
+  # single top file, warm. Losing a buffer costs more than landing on one file instead of ten.
+  if (( ${#files} > 1 )) && [[ -n "${pane:-}" ]]; then
+    local snap; snap=$(hx_pane_line "$pane" 2)
+    if [[ "$snap" == *NOR* || "$snap" == *INS* || "$snap" == *SEL* ]] && [[ "$snap" != *"[+]"* ]]; then
+      # CLOSE the window rather than renaming it aside: the rename exists so a STUCK pane stops
+      # being targeted, but this one just proved it is healthy and holds nothing unsaved. Renaming
+      # it would leave a review-hx-stale behind on every whole-PR open, which is how the session
+      # fills with dead editors.
+      tmux kill-window -t "$pane" 2>/dev/null || true
+      pane=""; win=""
+    else
+      echo "stack-open: review-hx has unsaved edits (or won't report) — opening just ${file:t}, not relaunching over it" >&2
+      files=("$file"); HX_OPENED=1
+    fi
+  fi
   if [[ -n "${pane:-}" ]]; then
     # Verify state, never sleep-and-hope: under load ESC+':' coalesce into Alt-: and the 'c' of
     # ':cd' runs as a change command — the rest of the keys typed themselves into the buffer as
@@ -474,8 +498,16 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
         [[ -n "$stale" ]] && tmux rename-window -t "${SESSION}:${stale}" review-hx-stale 2>/dev/null || true
       done
     fi
-    local target="$file"; [[ -n "$line" ]] && target="${file}:${line}"
-    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(q)target}" \
+    # Quote each path as its OWN scalar, then join with a literal space: `${(j: :)${(q)array}}`
+    # escapes the join space itself, so `sh` word-splits it into ONE argument and hx opens a
+    # single file named after every path mashed together (2026-07-14).
+    local args=() x first=1
+    for x in "${files[@]}"; do
+      if (( first )) && [[ -n "$line" ]]; then x="${x}:${line}"; fi
+      first=0
+      args+=("${(q)x}")
+    done
+    tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(j: :)args}" \
       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
     win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
   fi
@@ -501,17 +533,37 @@ case "${1:-}" in
     rbranch="${2:?usage: stack-open --review <branch>}"
     EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
     if [[ "$EDITOR_CHOICE" == hx || "$EDITOR_CHOICE" == helix ]]; then
-      # Helix has no Diffview — open the branch's first changed file (vs main) at its first hunk.
+      # Helix has no Diffview. Open the branch's changed files as BUFFERS instead, biggest churn
+      # first — `space-b` is then a fuzzy picker scoped to exactly this PR, and `space-g` picks up
+      # whatever you go on to edit. Land on the biggest file at its first hunk.
       rdir=$(ensure_worktree "$rbranch")
       mbref="origin/main"; git -C "$rdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
-      first=$(git -C "$rdir" diff --name-only "${mbref}...${rbranch}" 2>/dev/null | head -1) || true
-      if [[ -z "$first" ]]; then
+      # --no-renames: numstat renders a rename as `pkg/{old => new}/f.ts`, which is not a path.
+      # --diff-filter=d: a deleted file opens as a phantom empty buffer named after the corpse.
+      # Binary files report churn as `-`; they sort last rather than crashing the arithmetic.
+      rfiles=(${(f)"$(git -C "$rdir" diff --numstat --no-renames --diff-filter=d \
+                        "${mbref}...${rbranch}" 2>/dev/null \
+                      | awk -F'\t' '{c = ($1=="-" || $2=="-") ? 0 : $1+$2; print c "\t" $3}' \
+                      | sort -rn -k1,1 | cut -f2-)"}) || true
+      rkeep=()
+      for rf in "${rfiles[@]}"; do [[ -f "$rdir/$rf" ]] && rkeep+=("$rf"); done   # never hand hx a ghost
+      if (( ${#rkeep} == 0 )); then
         echo "review-opened $rbranch (no files changed vs ${mbref}) → nothing to open"; exit 0
       fi
-      firstline=$(git -C "$rdir" diff -U0 "${mbref}...${rbranch}" -- "$first" 2>/dev/null \
+      # Cap the flood: one changed import across 40 files should not become 40 buffers. A garbage
+      # config value falls back to the default rather than exploding the slice.
+      rmax="${STACK_REVIEW_MAX_BUFFERS:-$(git -C "$rdir" config stack.review-max-buffers 2>/dev/null || true)}"
+      [[ "$rmax" == <-> && "$rmax" -gt 0 ]] || rmax=10
+      (( ${#rkeep} > rmax )) && rkeep=("${(@)rkeep[1,$rmax]}")
+      first="${rkeep[1]}"
+      firstline=$(git -C "$rdir" diff -U0 --no-renames "${mbref}...${rbranch}" -- "$first" 2>/dev/null \
                     | sed -n 's/^@@ -[0-9,]* +\([0-9]*\).*/\1/p' | head -1) || true
-      hx_open "$rdir" "$firstline" "$rdir/$first" || exit 1
-      echo "opened $first on $rbranch → review-hx"; exit 0
+      rabs=(); for rf in "${rkeep[@]}"; do rabs+=("$rdir/$rf"); done
+      HX_OPENED=0
+      hx_open "$rdir" "$firstline" "${rabs[@]}" || exit 1
+      # HX_OPENED, not ${#rabs}: the unsaved-buffer guard can shrink the open to one file, and
+      # reporting the count we ASKED for would describe a window that isn't there.
+      echo "opened ${HX_OPENED} of ${#rabs} changed file(s) of $rbranch → review-hx (space-b to switch; on $first)"; exit 0
     fi
     rdir=$(ensure_worktree "$rbranch")   # nvim path only: the edit worktree for the <leader>gm Diffview
     to(){ perl -e 'alarm shift; exec @ARGV' "$@"; }   # bound every --server call (wedged-nvim guard)
