@@ -8,14 +8,22 @@ const HOST = "com.loops.gh_to_nvim";   // native host that launches the viewer (
 // POST /open-url owns ALL parsing — PR vs blob vs commit, and resolving GitHub's
 // #diff-<sha256(path)>R<n> selected-line hash against the branch's changed files.
 
+// Nothing on the server side is bounded: ctx.run() shells git/gh with no timeout, so one stalled
+// fetch or a contended index.lock pends the request thread — and a pending request is the one
+// failure the recovery ladder below can't see (it reads status 0 and 504, never a hang). Un-timed,
+// that surfaces as a "…" badge forever, which is indistinguishable from the chord not firing at
+// all. Longer than the server's own worst case (a 20s-bounded Diffview) so it only ever means stuck.
+const POST_TIMEOUT_MS = 30000;
+
 function post(payload) {
   return fetch(`${VIEWER_URL}/open-url`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(POST_TIMEOUT_MS),
   })
     .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }))
-    .catch((err) => ({ status: 0, error: String(err) }));
+    .catch((err) => ({ status: 0, error: String(err), timedOut: err?.name === "TimeoutError" }));
 }
 
 function launchViewer() {
@@ -85,6 +93,11 @@ const reason = (res) => res?.body?.err || res?.error || `status ${res?.status}`;
 async function openWithRecovery(payload) {
   await badge("…", "#58A6FF", 30000);
   let res = await post(payload);
+  if (res.timedOut) {
+    // A live-but-stuck viewer must not take the launch path — stack-review-serve would find the
+    // port held, report success, and the retry would hang exactly as long all over again.
+    return { status: 0, error: `viewer took the request but never answered (${POST_TIMEOUT_MS / 1000}s) — it's stuck on a git or gh call` };
+  }
   if (res.status === 0) {
     await badge("⏻", "#58A6FF", 30000);
     const launched = await launchViewer();
@@ -162,6 +175,7 @@ function prewarm(url) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url: m[0], open: "prewarm" }),
+    signal: AbortSignal.timeout(POST_TIMEOUT_MS),
   }).catch(() => {});   // viewer down → the chord's recovery ladder still handles it
 }
 
