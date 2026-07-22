@@ -146,11 +146,19 @@ def default_gates(cwd):
         ts_projects = ["tsconfig.node.json"]
     else:
         ts_projects = []
+    # A typecheck reads generated tRPC types that only the MAIN checkout can build, and it builds
+    # them for whatever branch it happens to be sitting on — so the seed every scratch tree
+    # symlinks routinely describes someone else's routers, and the red that follows is not a real
+    # error. Say so ON the failure rather than gating separately: a provenance gate would block
+    # every push on this machine until the seed is rebuilt, which is not ours to impose.
+    seed_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed-gen")
+    why_red = f' || {{ {seed_gen} --check . ; exit 1; }}' if os.path.exists(seed_gen) else ""
     if ts_projects and not tsgo:
         gates.append(("typecheck", 'echo "no repo-local tsgo (node_modules/.bin/tsgo) — run npm install"; exit 1'))
     elif ts_projects:
         gates.append(("typecheck",
-                      " && ".join(f"{tsgo} --project {p} --noEmit" for p in ts_projects)))
+                      "{ " + " && ".join(f"{tsgo} --project {p} --noEmit" for p in ts_projects)
+                      + f" ; }}{why_red}"))
     if oxfmt:
         gates.append((
             "format",

@@ -25,8 +25,45 @@
 # Never blocks. NB: .gen does NOT reduce tsc memory — purely correctness.
 set -u
 
-dir="${1:?usage: seed-gen <worktree-dir>}"
 realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
+
+# --check <worktree>: is the .gen this tree reads trustworthy FOR THE BRANCH IT IS ON?
+#
+# Only the main checkout can build a correct .gen, and it builds for whatever it happens to be
+# sitting on — so the seed every other tree symlinks describes some arbitrary branch's routers.
+# A typecheck against it is not a verdict: tRPC errors are as likely to come from the seed as
+# from the code. Verified 2026-07-22: ~/coding/loops was on a csv-import branch and its .gen was
+# stamped with a commit contained in NO branch at all.
+#
+# Exit 0 = trustworthy. Exit 1 = say so out loud instead of reporting a confident red.
+if [[ "${1:-}" == --check ]]; then
+  dir="${2:?usage: seed-gen --check <worktree-dir>}"
+  src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
+  [[ -n "$src" && -d "$src/.gen" ]] && { [[ -n "$src" ]]; } || { echo "no .gen anywhere to seed from"; exit 1; }
+  sha=$(cat "$src/.gen/.seed-gen-sha" 2>/dev/null)
+  head=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
+  branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+  [[ "$branch" == HEAD ]] && branch=$(cat "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch" 2>/dev/null || echo "$head")
+  fix="cd ${src} && git checkout main && $(cd "$(dirname "$0")" && pwd -P)/seed-gen ${src}"
+  if [[ -z "$sha" ]]; then
+    echo "generated tRPC types have no provenance marker — cannot tell what they describe"
+    echo "  regenerate: $fix"; exit 1
+  fi
+  if ! git -C "$dir" merge-base --is-ancestor "$sha" "$head" 2>/dev/null; then
+    where=$(git -C "$dir" branch --contains "$sha" 2>/dev/null | head -3 | tr -d ' *' | tr '\n' ' ')
+    echo "generated tRPC types were built from ${sha:0:10} (${where:-on no branch}), which is not in ${branch}"
+    echo "  any tRPC type error above may be the types, not your code"
+    echo "  regenerate: $fix"; exit 1
+  fi
+  if ! git -C "$dir" diff --quiet "$sha" "$head" -- trpc 2>/dev/null; then
+    echo "this branch changes trpc/ beyond what the generated types were built for (${sha:0:10})"
+    echo "  a scratch worktree cannot rebuild them (TS2883 on prisma-inferred exports), so tRPC"
+    echo "  shape errors above are expected here and are checked for real by CI"; exit 1
+  fi
+  exit 0
+fi
+
+dir="${1:?usage: seed-gen <worktree-dir>}"
 
 # source .gen from the MAIN checkout (first worktree), not wherever this runs — a sibling
 # worktree has no .gen of its own (gitignored, only built in main).
