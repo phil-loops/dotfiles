@@ -22,7 +22,7 @@ set -uo pipefail
 
 ELASTICMQ="http://localhost:9324/000000000000"
 JOBS_QUEUE="dev"
-NEXT_COMPILE_TIMEOUT="${LOOPS_DOCTOR_COMPILE_TIMEOUT:-100}"
+NEXT_COMPILE_TIMEOUT="${LOOPS_DOCTOR_COMPILE_TIMEOUT:-30}"
 FIX=""
 QUIET=""
 
@@ -85,9 +85,11 @@ check_http() { # label port url
   return 0
 }
 
-# A `next dev` server compiles routes on demand: a COLD one legitimately takes ~85s to
-# answer, so a short probe alone reports a healthy server as wedged. Probe fast for the
-# common case, then confirm a suspected hang against a timeout longer than a real compile.
+# A `next dev` server compiles routes on demand, so a short probe alone reports a
+# still-compiling server as wedged. Probe fast for the common case, then confirm a suspected
+# hang against a timeout longer than a real cold compile. Turbopack (#9663) dropped that floor
+# hard — boot is sub-second and a cold route answers in ~6s, vs webpack's old ~85s — so the
+# cutoff is 30s now; bump LOOPS_DOCTOR_COMPILE_TIMEOUT if a heavy route ever trips it.
 check_next_server() { # label port url
   local label="$1" port="$2" url="$3" code t0 elapsed
   if ! listening "$port"; then
