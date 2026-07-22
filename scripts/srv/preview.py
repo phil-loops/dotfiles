@@ -266,9 +266,12 @@ def _integrate_playground(project):
         elif key in ("dirty", "fresh"):
             flags[key] = val == "1"
     if not dirp or not os.path.isdir(dirp):
-        # exit 1 = the leaves conflict (stderr names them), 2 = no such project
-        return "", {}, (r.stderr or r.stdout or "could not build the integration").strip()[:600]
-    return dirp, flags, ""
+        # exit 1 = the leaves conflict (stderr names them), 2 = no such project — and the caller
+        # answers those differently: a name that doesn't exist is 404 like every other unknown
+        # thing on this surface, a real refusal is 500.
+        err = (r.stderr or r.stdout or "could not build the integration").strip()[:600]
+        return "", {}, err, 404 if r.returncode == 2 else 500
+    return dirp, flags, "", 200
 
 
 def _dirty_paths(dirp):
@@ -282,17 +285,17 @@ def start_integration(req, raw):
     if not project:
         req._send(400, json.dumps({"ok": False, "err": "no project"}))
         return
-    dirp, flags, err = _integrate_playground(project)
+    dirp, flags, err, code = _integrate_playground(project)
     if err:
-        req._send(500, json.dumps({"ok": False, "err": err}))
+        req._send(code, json.dumps({"ok": False, "err": err}))
         return
     if flags.get("dirty") and set(_dirty_paths(dirp)) <= set(_DEV_CHURN):
         ctx.run(["git", "-C", dirp, "checkout", "--", *_DEV_CHURN])
         flags["dirty"] = False
         if not flags.get("fresh"):
-            dirp, flags, err = _integrate_playground(project)  # the refresh the churn was blocking
+            dirp, flags, err, code = _integrate_playground(project)  # the refresh the churn was blocking
             if err:
-                req._send(500, json.dumps({"ok": False, "err": err}))
+                req._send(code, json.dumps({"ok": False, "err": err}))
                 return
     _serve_dir(req, dirp, {"project": project, **flags})
 
