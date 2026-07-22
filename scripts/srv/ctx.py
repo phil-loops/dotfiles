@@ -6,7 +6,7 @@ import os
 import hashlib
 import threading
 
-run = None      # run(argv) -> CompletedProcess, cwd=repo_cwd()
+run = None      # run(argv, timeout=None) -> CompletedProcess, cwd=repo_cwd(); expiry = rc 124
 ROOT = ""       # servedir (where restack.log / index.html live)
 SCRIPTS = ""    # ~/.dotfiles/scripts
 CWD = ""        # the repo the server was launched in (the default when no ?repo= is selected)
