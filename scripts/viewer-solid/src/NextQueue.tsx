@@ -33,6 +33,7 @@ export function NextQueue(props: {
     "relative flex items-baseline gap-[10px] rounded-[9px] py-[8px] pr-[14px] pl-[20px] text-ink no-underline transition-[background] duration-[120ms] hover:bg-vellum-raise before:absolute before:left-0 before:top-[6px] before:bottom-[6px] before:w-[4px] before:rounded-[2px] before:bg-(--nq) before:shadow-[0_0_9px_-1px_var(--nq-glow,transparent)] before:content-['']";
   const nextActions = createMemo<NextAction[]>(() => {
     const out: NextAction[] = [];
+    const stale: Project[] = [];
     const prList = props.prs() || [];
     const projs = props.projects() || [];
     const blockedMerge = (s?: string) => s === "BLOCKED" || s === "DIRTY";
@@ -52,16 +53,26 @@ export function NextQueue(props: {
     const hasPR = new Set(prList.filter((p) => p.project).map((p) => p.project));
     for (const pr of projs) {
       const loc: ViewerLocation = { kind: "forest", name: pr.name, repo: pr.repo };
-      if (pr.merged) {
+      // mergedNodes, not merged: the latter is merge HISTORY and never clears, so it kept
+      // asking you to contract nodes deleted weeks ago.
+      if (pr.mergedNodes?.length) {
         out.push({ id: "contract:" + pr.name, tier: 3, tone: "contract", icon: "✂",
-          verb: "contract", target: pr.name, why: "merged · node lingering", to: loc });
+          verb: "contract", target: pr.name, why: `${leaf(pr.mergedNodes[0])} merged · node lingering`, to: loc });
       } else if (!pr.prOpened && !hasPR.has(pr.name) && pr.mergeable?.length && pr.behind < STALE_BEHIND) {
         out.push({ id: "open:" + pr.name, tier: 2, tone: "open", icon: "↗", verb: "open PR",
           target: pr.name, why: pr.behind > 0 ? `${pr.behind} behind · no PR yet` : "clean · no PR yet", to: loc });
-      } else if (!pr.merged && pr.behind >= STALE_BEHIND) {
-        out.push({ id: "decide:" + pr.name, tier: 5, tone: "decide", icon: "✦",
-          verb: "decide", target: pr.name, why: `${pr.behind} behind · revive or drop`, to: loc });
+      } else if (pr.behind >= STALE_BEHIND) {
+        stale.push(pr);
       }
+    }
+    // A graveyard is a backlog, not a queue: 26 identical "revive or drop" rows buried the six
+    // rows that were actually today's work. One row, and Forests is where you triage them.
+    if (stale.length) {
+      out.push({ id: "decide:stale", tier: 5, tone: "decide", icon: "✦", verb: "triage",
+        target: `${stale.length} stale forest${stale.length > 1 ? "s" : ""}`,
+        why: `${STALE_BEHIND}+ behind · revive or drop`,
+        title: stale.map((p) => `${p.name} — ${p.behind} behind`).join("\n"),
+        to: { kind: "home", tab: "forests" } });
     }
     for (const r of props.reviewReqs() || []) {
       out.push({ id: "review:" + r.number, tier: 4, tone: "review", icon: "\u{1F441}",
