@@ -248,12 +248,6 @@ def start(req, raw):
     _serve_dir(req, dirp)
 
 
-# Tracked files `next dev` rewrites as it boots. stack-integrate refuses to refresh a playground
-# with tracked edits, so left in place these would freeze the playground at the first integration
-# it ever served and every later preview would silently show stale code.
-_DEV_CHURN = ("next-env.d.ts",)
-
-
 def _integrate_playground(project):
     # → (dir, {dirty, fresh}, err). stack-integrate --worktree rebuilds refs/stack/<project>-integration
     # and parks it in the project's persistent playground worktree — a directory loops-preview can serve.
@@ -274,11 +268,6 @@ def _integrate_playground(project):
     return dirp, flags, "", 200
 
 
-def _dirty_paths(dirp):
-    r = ctx.run(["git", "-C", dirp, "status", "--porcelain", "-uno"])
-    return [line[3:].strip() for line in r.stdout.splitlines() if line.strip()]
-
-
 def start_integration(req, raw):
     d = json.loads(raw or "{}")
     project = d.get("project", "")
@@ -289,14 +278,6 @@ def start_integration(req, raw):
     if err:
         req._send(code, json.dumps({"ok": False, "err": err}))
         return
-    if flags.get("dirty") and set(_dirty_paths(dirp)) <= set(_DEV_CHURN):
-        ctx.run(["git", "-C", dirp, "checkout", "--", *_DEV_CHURN])
-        flags["dirty"] = False
-        if not flags.get("fresh"):
-            dirp, flags, err, code = _integrate_playground(project)  # the refresh the churn was blocking
-            if err:
-                req._send(code, json.dumps({"ok": False, "err": err}))
-                return
     _serve_dir(req, dirp, {"project": project, **flags})
 
 
