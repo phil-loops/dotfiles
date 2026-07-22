@@ -3,7 +3,7 @@
 # blessing-ledger web viewer on :62333 and open it in Chrome. The menu-bar item
 # is green when the viewer is live, grey when it's down.
 #
-# <bitbar.title>loops stack web</bitbar.title>
+# <bitbar.title>stack web</bitbar.title>
 # <bitbar.desc>Launch/reuse the stack web viewer (:62333) and open it in Chrome.</bitbar.desc>
 # <bitbar.author>phil</bitbar.author>
 # <swiftbar.refreshOnOpen>true</swiftbar.refreshOnOpen>

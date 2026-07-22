@@ -4,11 +4,11 @@
 # never auto-deleted.
 #
 # Usage:
-#   loops stack rm                 # fzf multi-select projects to kill (TAB to mark)
-#   loops stack rm <project>...    # kill named project(s)
-#   loops stack rm --dry-run       # show the plan, change nothing  (alias: -n)
-#   loops stack rm --yes           # skip the confirmation prompt    (alias: -y)
-#   loops stack rm --force         # force-remove dirty worktrees
+#   stack rm                 # fzf multi-select projects to kill (TAB to mark)
+#   stack rm <project>...    # kill named project(s)
+#   stack rm --dry-run       # show the plan, change nothing  (alias: -n)
+#   stack rm --yes           # skip the confirmation prompt    (alias: -y)
+#   stack rm --force         # force-remove dirty worktrees
 #
 # Safety: never deletes `main` or the currently checked-out branch; refuses dirty
 # worktrees unless --force; prints (does not delete) any stack-project.<n>.memory file.

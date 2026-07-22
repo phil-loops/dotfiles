@@ -5,9 +5,9 @@
 # branch-seed multivar (`.branch`) is left untouched, so the project comes back
 # exactly as it was.
 #
-# Usage: loops stack archive [project]      # hide from chooser (archived=true)
-#        loops stack unarchive [project]    # show again (unset archived)
-#        loops stack archived               # list archived projects
+# Usage: stack archive [project]      # hide from chooser (archived=true)
+#        stack unarchive [project]    # show again (unset archived)
+#        stack archived               # list archived projects
 # No project + a TTY → fzf-pick (archive: from visible; unarchive: from archived).
 
 set -e
@@ -40,7 +40,7 @@ fi
 pick() {
   local prompt="$1"; shift
   (( $# == 0 )) && die "nothing to ${prompt}."
-  [[ -t 1 ]] || die "no project given (non-interactive). Usage: loops stack ${prompt} <project>"
+  [[ -t 1 ]] || die "no project given (non-interactive). Usage: stack ${prompt} <project>"
   printf '%s\n' "$@" | fzf --prompt="${prompt}> " --height=40% --reverse \
     --preview="git config --get-all stack-project.{}.branch" --preview-window=right:55% \
     || exit 130
@@ -53,7 +53,7 @@ case "$op" in
     name="${1:-$(pick archive "${visible_projects[@]}")}"
     known "$name"
     git config stack-project.${name}.archived true
-    echo "✦ archived '$name' — hidden from the chooser  (loops stack unarchive $name to restore)"
+    echo "✦ archived '$name' — hidden from the chooser  (stack unarchive $name to restore)"
     ;;
   unarchive)
     name="${1:-$(pick unarchive "${archived_projects[@]}")}"
@@ -69,10 +69,10 @@ case "$op" in
     fi
     ;;
   *)
-    echo "loops stack archive commands:" >&2
-    echo "  loops stack archive [project]     hide a project from the chooser" >&2
-    echo "  loops stack unarchive [project]   show it again" >&2
-    echo "  loops stack archived              list archived projects" >&2
+    echo "stack archive commands:" >&2
+    echo "  stack archive [project]     hide a project from the chooser" >&2
+    echo "  stack unarchive [project]   show it again" >&2
+    echo "  stack archived              list archived projects" >&2
     exit 1
     ;;
 esac

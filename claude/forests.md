@@ -58,7 +58,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 | Add a fan-in dep           | `git config --add stack-branch.<name>.requires <dep>`       |
 | Set/update a branch's purpose | `git config branch.<name>.description "<thesis>"` (a.k.a. `git branch --edit-description`) |
 | Tag a branch's forest membership | `git config stack-branch.<name>.project <project>` + `git config --add stack-project.<project>.branch <name>` (the viewer reads these) |
-| Review the forest (live)   | `loops stack web [<project>]` — Phil's browser viewer, on the repo's own port (`stack-review-port` prints it; read-only; reads git config per request). Claude doesn't drive it; it just keeps the config correct. |
+| Review the forest (live)   | `stack web [<project>]` — Phil's browser viewer, on the repo's own port (`stack-review-port` prints it; read-only; reads git config per request). Claude doesn't drive it; it just keeps the config correct. |
 | Update branch after parent change | `git rebase <parent>`                                |
 | Move branch to new parent  | `git rebase --onto <new-parent> <old-parent> <branch>`      |
 | Restack whole forest after a merge | raw git — snapshot SHAs, ff `main`, `rebase --onto` bottom-up (see *Restacking* below) |
@@ -69,7 +69,7 @@ Record the parent in the PR body when opening (e.g. "Stacked on: #1234") so revi
 
 ## The forest config is hand-maintained (the viewer reads it)
 
-The review surfaces — `loops stack web` (the browser viewer), `loops stack review` (nvim), and `loops bless` — are **read-only consumers of git config**. They render whatever these keys say; nothing writes them automatically. So Claude maintains them by hand:
+The review surfaces — `stack web` (the browser viewer), `stack review` (nvim), and `stack bless` — are **read-only consumers of git config**. They render whatever these keys say; nothing writes them automatically. So Claude maintains them by hand:
 
 - `git config stack-branch.<name>.parent <parent>` — the rebase base. Set at branch creation; update on every rebase-onto-new-parent, on rename, and when rewiring a dropped node's children.
 - `git config stack-branch.<name>.project <project>` — per-branch project tag. Set at creation. **It rots** (see below).
@@ -134,14 +134,14 @@ Each branch is **one reviewable unit — a single capability that compiles on it
 
 Three tools, different jobs — don't conflate them. `review` (nvim) and `web` (browser) are **not the same command**:
 
-- **`loops stack web [<project>]`** — the **primary, live review surface** (the blessing-ledger server, on the repo's own port — `stack-review-port` prints it; loops is :62497 today. Per-repo so several repos can be forested at once; :62333 is only the legacy not-in-a-repo fallback — a dead end from a worktree). Renders the whole forest in the browser: tree rail, graph map, per-node `parent...child` diffs, since-blessed deltas, and click-to-bless. Reads git config live per request. This is where Phil reviews — default to it.
-- **`loops stack review [<branch>]`** — *(legacy, local)* stack-stepping in **nvim diffview**, one `parent...child` link at a time. Doesn't know worktrees exist. Use only for offline/local stepping; the `--html` (/tmp browser tabs) flag is deprecated — use `loops stack web` instead.
+- **`stack web [<project>]`** — the **primary, live review surface** (the blessing-ledger server, on the repo's own port — `stack-review-port` prints it; loops is :62497 today. Per-repo so several repos can be forested at once; :62333 is only the legacy not-in-a-repo fallback — a dead end from a worktree). Renders the whole forest in the browser: tree rail, graph map, per-node `parent...child` diffs, since-blessed deltas, and click-to-bless. Reads git config live per request. This is where Phil reviews — default to it.
+- **`stack review [<branch>]`** — *(legacy, local)* stack-stepping in **nvim diffview**, one `parent...child` link at a time. Doesn't know worktrees exist. Use only for offline/local stepping; the `--html` (/tmp browser tabs) flag is deprecated — use `stack web` instead.
 - **`wt [base-branch] [--html|-H]`** — solves the **worktree-discovery** problem. fzf-picks across sibling worktrees and shows the picked branch's *full* cumulative diff vs `base` (default `main`), including uncommitted working-tree changes (`--imply-local`). Not stack-aware — a 6-branch stack shows as one giant diff.
 
 Decision rule:
-- Reviewing/blessing a whole forest or stack → `loops stack web` (default)
+- Reviewing/blessing a whole forest or stack → `stack web` (default)
 - Single-branch feature, or scanning across many worktrees → `wt`
-- Offline, no browser, want nvim stepping → `loops stack review`
+- Offline, no browser, want nvim stepping → `stack review`
 
 ### Claude inside the viewer (it's no longer purely read-only)
 

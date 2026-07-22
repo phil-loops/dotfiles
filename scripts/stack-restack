@@ -1,11 +1,11 @@
 #!/bin/zsh
 # Stack Restack - rebase every branch in a stack-project onto fresh origin/main.
 #
-# Usage: loops stack restack <project>            # start fresh
-#        loops stack restack <project> --continue # resume after a manual resolve
-#        loops stack restack <project> --abort    # discard saved state
-#        loops stack restack <project> --plan     # dry-run: topo order + parent map
-#        loops stack restack <project> --no-claude# disable auto-resolve (manual only)
+# Usage: stack restack <project>            # start fresh
+#        stack restack <project> --continue # resume after a manual resolve
+#        stack restack <project> --abort    # discard saved state
+#        stack restack <project> --plan     # dry-run: topo order + parent map
+#        stack restack <project> --no-claude# disable auto-resolve (manual only)
 #
 # What it does:
 #   1. Fetch origin; fast-forward local main
@@ -31,7 +31,7 @@
 #   delete/modify, or overlapping edits is escalated: the script saves state to
 #   <git-common-dir>/stack-restack-state and exits 1 with a ready-to-run
 #   interactive `claude` command (and the manual git steps). Resolve, then
-#   `loops stack restack <project> --continue` resumes the topo walk.
+#   `stack restack <project> --continue` resumes the topo walk.
 #   `--no-claude` skips the auto step and always pauses for a human.
 #   Tunables: CLAUDE_BIN (default `claude`), STACK_RESTACK_BUDGET_USD (default 2),
 #   STACK_RESTACK_RESOLVE_TIMEOUT (per-resolver wall-clock cap, default 600s).
@@ -66,15 +66,15 @@ SELF_DIR="${0:A:h}"   # script dir, captured at top level ($0 inside a zsh funct
 
 usage() {
   cat >&2 <<EOF
-Usage: loops stack restack <project>
-       loops stack restack <project> --continue
-       loops stack restack <project> --handoff    # AI-resolve the parked conflict (human-authorized), then resume
-       loops stack restack <project> --diagnose   # AI-resolve + STAGE the parked conflict for review (no continue) → stack-restack-conflict.json
-       loops stack restack <project> --discard    # discard a staged diagnose fix, restoring the parked conflict
-       loops stack restack <project> --abort
-       loops stack restack <project> --plan
-       loops stack restack <project> --no-claude
-       loops stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
+Usage: stack restack <project>
+       stack restack <project> --continue
+       stack restack <project> --handoff    # AI-resolve the parked conflict (human-authorized), then resume
+       stack restack <project> --diagnose   # AI-resolve + STAGE the parked conflict for review (no continue) → stack-restack-conflict.json
+       stack restack <project> --discard    # discard a staged diagnose fix, restoring the parked conflict
+       stack restack <project> --abort
+       stack restack <project> --plan
+       stack restack <project> --no-claude
+       stack restack <project> --no-classify  # skip the already-merged contraction pre-pass
 EOF
   exit 2
 }
@@ -152,7 +152,7 @@ acquire_lock() {
     holder="$(cat "$LOCK_FILE" 2>/dev/null)"
     holder_pid="${holder%% *}"
     if [[ -n "$holder_pid" ]] && kill -0 "$holder_pid" 2>/dev/null; then
-      echo "a restack is already running (pid $holder_pid: ${holder#* }) — wait for it, or 'loops stack restack $PROJECT --abort' if it's wedged." >&2
+      echo "a restack is already running (pid $holder_pid: ${holder#* }) — wait for it, or 'stack restack $PROJECT --abort' if it's wedged." >&2
       exit 1
     fi
     echo "  (clearing stale restack lock from dead pid ${holder_pid:-?})" >&2
@@ -664,9 +664,9 @@ Restack halted: ${branch}'s rebased tip changed files it never owned (see ✗ ab
     git -C ${dir} rebase --onto ${parent} ${old_parent_sha} ${branch}
   (or drop the spurious hunks from the current tip). Its diff vs ${parent} should be
   limited to ${branch}'s own files. Then resume (re-checks the footprint first):
-    loops stack restack ${PROJECT} --continue
+    stack restack ${PROJECT} --continue
   Or bail out:
-    git -C ${dir} rebase --abort 2>/dev/null; loops stack restack ${PROJECT} --abort
+    git -C ${dir} rebase --abort 2>/dev/null; stack restack ${PROJECT} --abort
 EOF
   exit 1
 }
@@ -861,7 +861,7 @@ Handoff: Claude couldn't safely resolve ${CURRENT} — genuinely ambiguous, stil
   Rebase paused in: ${REBASE_DIR}
   Resolve by hand, then resume:
     git -C ${REBASE_DIR} add <resolved-files> && git -C ${REBASE_DIR} rebase --continue
-    loops stack restack ${PROJECT} --continue
+    stack restack ${PROJECT} --continue
 EOF
     exit 1
   done
@@ -1129,11 +1129,11 @@ Conflict during restack of ${BRANCH} — needs a human.
     git -C ${REBASE_DIR} add <resolved-files>
     git -C ${REBASE_DIR} rebase --continue
   Then resume the cascade:
-    loops stack restack ${PROJECT} --continue
+    stack restack ${PROJECT} --continue
 
   To bail out instead:
     git -C ${REBASE_DIR} rebase --abort
-    loops stack restack ${PROJECT} --abort
+    stack restack ${PROJECT} --abort
 EOF
     exit 1
   done
