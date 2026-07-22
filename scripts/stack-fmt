@@ -1,9 +1,9 @@
 #!/bin/zsh
 # stack-fmt — make every branch in a stack-project oxfmt-clean, cascading.
 #
-# Usage: loops stack fmt <project>          # format the forest, commit + re-cascade
-#        loops stack fmt <project> --check  # report drift only, write nothing (CI/gate)
-#        loops stack fmt <project> --plan   # show topo order + per-branch drift, no writes
+# Usage: stack fmt <project>          # format the forest, commit + re-cascade
+#        stack fmt <project> --check  # report drift only, write nothing (CI/gate)
+#        stack fmt <project> --plan   # show topo order + per-branch drift, no writes
 #
 # Why this exists: oxfmt drift on a base branch can't be fixed in isolation — once you
 # reformat a base, every descendant must rebase onto the new tip. Doing that by hand is
@@ -32,7 +32,7 @@ for arg in "$@"; do
   esac
 done
 if [[ -z "$PROJECT" ]]; then
-  echo "usage: loops stack fmt <project> [--check|--plan]" >&2
+  echo "usage: stack fmt <project> [--check|--plan]" >&2
   exit 2
 fi
 

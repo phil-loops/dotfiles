@@ -1,11 +1,11 @@
 #!/bin/zsh
 # Stack List - print all registered stack-projects in this repo, optionally fzf-pick.
-# Usage: loops stack list                 # pretty-print all projects
-#        loops stack list <project>       # print dependency tree for one project
-#        loops stack list --pick          # fzf-pick, open in stack review
-#        loops stack list --pick --echo   # fzf-pick, print chosen name (no open)
-#        loops stack list --names         # one name per line (for completion/scripts)
-# Any extra args (e.g. --html) after --pick are forwarded to `loops stack review`.
+# Usage: stack list                 # pretty-print all projects
+#        stack list <project>       # print dependency tree for one project
+#        stack list --pick          # fzf-pick, open in stack review
+#        stack list --pick --echo   # fzf-pick, print chosen name (no open)
+#        stack list --names         # one name per line (for completion/scripts)
+# Any extra args (e.g. --html) after --pick are forwarded to `stack review`.
 
 set -e
 
