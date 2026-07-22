@@ -13,6 +13,11 @@
 #                                       — for jumping from a GitHub blob view to your editor
 #   stack-open --prepare <branch>  create/refresh the worktree only (prefetch)
 #   stack-open --prune [<days>]    remove scratch worktrees idle > days (default 3)
+#   stack-open --gc [<days>] [--dry-run]   the expiry ladder, with a size report: idle > days
+#                                       (default 1) loses its regenerable weight (a real
+#                                       node_modules goes back to a symlink, .next goes), idle
+#                                       > 3d loses the whole worktree. Runs on every open too,
+#                                       quietly; a dir any live process sits in is never touched.
 #
 # A branch already checked out in a real worktree is opened there (editable);
 # otherwise a scratch worktree under $STACK_OPEN_DIR is used.
@@ -29,6 +34,14 @@ _wt_list=""
 wt_list(){   # the porcelain worktree list, computed once — it's repo-global and costs ~70ms at 147 worktrees
   [[ -n "$_wt_list" ]] || _wt_list=$(git worktree list --porcelain)
   print -r -- "$_wt_list"
+}
+
+main_checkout(){   # the repo's FIRST worktree — the only one that really has node_modules/.gen.
+                   # Not $main_root: we may be invoked from any sibling worktree, and hanging a
+                   # scratch dir's node_modules off one of those breaks when it's removed.
+  # `|| true`: awk exits on the first worktree, so the producer dies on SIGPIPE (141)
+  local first; first=$(wt_list | awk '/^worktree /{print $2; exit}') || true
+  print -r -- "${first:-$main_root}"
 }
 
 existing_worktree(){   # echo the path of a real worktree holding <branch>, if any
@@ -67,16 +80,58 @@ b=$(cat "$marker")
 HOOK
   chmod +x "$hook"
 }
+_live_cwds=""
+live_cwds(){   # every live process's cwd, computed once (~0.3s). Reclaiming under a running
+               # process is the thing to never do: yanking a worktree a warm hx/nvim sits in
+               # panics tsgo (typescript-go overlayfs.go:350), and a dev server loses its build.
+  [[ -n "$_live_cwds" ]] || _live_cwds=$(lsof -a -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | sort -u) || true
+  print -r -- "$_live_cwds"
+}
+in_use(){   # is <dir>, or anything under it, some live process's cwd?
+  local real; real=$(cd "$1" 2>/dev/null && pwd -P) || real="$1"
+  case $'\n'"$(live_cwds)"$'\n' in
+    *$'\n'"$real"$'\n'*|*$'\n'"$real"/*) return 0;;
+  esac
+  return 1
+}
+idle_dirs(){ find "$SCRATCH" -maxdepth 1 -mindepth 1 -type d -mtime +"$1" 2>/dev/null }
+human_kb(){ (( $1 >= 1048576 )) && printf '%.1fG' $(( $1 / 1048576.0 )) || printf '%dM' $(( $1 / 1024 )) }
+
+# What a scratch worktree may hold that stack-open can always make again. node_modules belongs
+# here because ensure_worktree only ever wants a symlink to the main checkout's — a real 1.5G
+# directory means something ran an install in the scratch dir and left it behind.
+strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees nobody has opened
+               # lately, but KEEP the checkout: a stripped worktree still opens instantly.
+  [[ -d "$SCRATCH" ]] || return 0
+  local days="$1" dry="${2:-}" d kb total=0 nm
+  nm="$(main_checkout)/node_modules"
+  for d in ${(f)"$(idle_dirs "$days")"}; do
+    [[ -n "$d" ]] || continue
+    in_use "$d" && continue
+    # only when the symlink we'd put back would actually resolve — never trade 1.5G of working
+    # deps for a dangling link
+    if [[ -d "$d/node_modules" && ! -L "$d/node_modules" && -d "$nm" ]]; then
+      kb=$(du -sk "$d/node_modules" 2>/dev/null | cut -f1) || kb=0
+      (( total += kb ))
+      [[ -n "$dry" ]] || { rm -rf "$d/node_modules"; ln -sfn "$nm" "$d/node_modules"; }
+      echo "  ${d:t}  $(human_kb ${kb:-0})  node_modules → symlink" >&2
+    fi
+    if [[ -d "$d/.next" ]]; then
+      kb=$(du -sk "$d/.next" 2>/dev/null | cut -f1) || kb=0
+      (( total += kb ))
+      [[ -n "$dry" ]] || rm -rf "$d/.next"
+      echo "  ${d:t}  $(human_kb ${kb:-0})  .next build cache" >&2
+    fi
+  done
+  (( total > 0 )) && echo "stack-open: $(human_kb $total) ${dry:+would be }reclaimed from scratch worktrees idle > ${days}d" >&2
+  return 0
+}
+
 prune_old(){ [[ -d "$SCRATCH" ]] || return 0
-  # never prune under a live editor: yanking a worktree a warm hx/nvim still sits in
-  # panics tsgo (typescript-go overlayfs.go:350, batched close+change) and kills its LSP
-  local editor_cwds
-  editor_cwds=$(lsof -a -c hx -c nvim -d cwd -Fn 2>/dev/null | sed -n 's/^n//p') || true
-  find "$SCRATCH" -maxdepth 1 -mindepth 1 -type d -mtime +"${1:-3}" 2>/dev/null | while read -r d; do
-    local real; real=$(cd "$d" 2>/dev/null && pwd -P) || real="$d"
-    case $'\n'"$editor_cwds"$'\n' in
-      *$'\n'"$real"$'\n'*|*$'\n'"$real"/*) continue;;
-    esac
+  local d
+  for d in ${(f)"$(idle_dirs "${1:-3}")"}; do
+    [[ -n "$d" ]] || continue
+    in_use "$d" && continue
     git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
   done
   git worktree prune 2>/dev/null || true
@@ -181,7 +236,7 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   else
     git worktree add --detach "$dir" "$b" -q
   fi
-  [[ -e "$dir/node_modules" ]] || ln -sfn "$main_root/node_modules" "$dir/node_modules"
+  [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
   seed_gen "$dir"   # .gen for #trpc resolution (clone now, branch-rebuild in background)
   "${0:A:h}/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
   # record the branch + install the follow-hook so commits here advance the ref
@@ -402,6 +457,13 @@ hx_open(){   # open <file> in the warm review-hx tmux window (reuse via send-key
 
 case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
+  --gc)      # the whole expiry ladder, out loud: shed weight at <days>, remove the long-idle
+    gcdays="${2:-1}"; [[ "$gcdays" == --dry-run ]] && gcdays=1
+    gcdry=""; [[ "${2:-}" == --dry-run || "${3:-}" == --dry-run ]] && gcdry=1
+    strip_fat "$gcdays" "$gcdry"
+    [[ -n "$gcdry" ]] || prune_old 3
+    echo "scratch now $(du -sh "$SCRATCH" 2>/dev/null | cut -f1) in $(ls -d "$SCRATCH"/*/ 2>/dev/null | wc -l | tr -d ' ') worktrees"
+    exit 0;;
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
   --review)  # open <branch> for whole-PR review: Helix → its changed files as buffers; nvim → the gm Diffview
@@ -447,7 +509,9 @@ else
   branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
   rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
   pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
-  ( prune_old 3 ) >/dev/null 2>&1 &!       # lazy self-clean; drops our pipes so it can't block a piped caller
+  # lazy self-clean, two rungs: shed regenerable weight after a day idle, remove the worktree
+  # after three. Drops our pipes so it can't block a piped caller.
+  ( strip_fat 1; prune_old 3 ) >/dev/null 2>&1 &!
   dir=$(ensure_worktree "$branch")
 fi
 file="$dir/$rel"
