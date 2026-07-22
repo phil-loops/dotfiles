@@ -14,6 +14,7 @@
 // import + the existing <ForestMap …/> mount — zero shared CSS or lines.
 import { createEffect, createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
 import { computeForestLayout, lumen, NODE_H, leafOf, isGhostId, nodeW } from "./forestLayout";
+import * as Graph from "./forestGraph.ts";
 import { stationOf, type Station } from "./nodeStation";
 
 // Why the branch stands there — the map's badge carries the same reason the spine's chip does.
@@ -302,74 +303,11 @@ export function ForestMap(props: {
     return "checks the whole feature out into a scratch worktree you can run and edit — refreshed on each open, your edits there are never clobbered; copies the cd command";
   };
 
-  // Mirror server-side contraction: the node goes, its children inherit its parent, and any
-  // `requires` naming it loses that edge — the same rewire /contract just performed.
-  const withoutDropped = (list: SpineNode[]): SpineNode[] => {
-    const gone = dropped();
-    if (!gone.size) return list;
-    const parentOf = new Map(list.map((n) => [n.id, n.parent]));
-    const heir = (p: string | undefined, guard = 0): string | undefined =>
-      p && gone.has(p) && guard < 64 ? heir(parentOf.get(p), guard + 1) : p;
-    return list.filter((n) => !gone.has(n.id)).map((n) => ({
-      ...n,
-      parent: heir(n.parent),
-      ...(n.requires ? { requires: n.requires.filter((r) => !gone.has(r)) } : {}),
-    }));
-  };
+  const model = createMemo(() => Graph.indexById(Graph.contractNodes(props.spine(), dropped())));
 
-  const model = createMemo(() => {
-    const list = withoutDropped(props.spine());
-    const byId: Record<string, SpineNode> = {};
-    list.forEach((n) => (byId[n.id] = n));
-    return { list, byId };
-  });
-
-  // heads: the TIP of each substack — a branch nothing else builds on (nobody's parent,
-  // nobody's `requires`). These are the leaves you'd actually check out; everything else
-  // is interior plumbing. The ghost endstate is excluded (it's a destination, not a tip).
-  const heads = createMemo(() => {
-    const { list } = model();
-    const hasChild = new Set<string>();
-    list.forEach((n) => {
-      if (n.parent && n.parent !== "main") hasChild.add(n.parent);
-      (n.requires || []).forEach((r) => hasChild.add(r));
-    });
-    const h = new Set<string>();
-    list.forEach((n) => { if (!isGhostId(n.id) && !hasChild.has(n.id)) h.add(n.id); });
-    return h;
-  });
-
-  // upstream: the parent chain + the transitive `requires` (fan-in) closure —
-  // everything that must merge before this branch can. downstream: the transitive
-  // dependents (branches whose parent IS this, or that `require` it).
-  const upstreamOf = (id: string): Set<string> => {
-    const { byId } = model();
-    const seen = new Set<string>();
-    const visit = (x: string) => {
-      const n = byId[x];
-      if (!n) return;
-      const ups: string[] = [];
-      if (n.parent && byId[n.parent]) ups.push(n.parent);
-      (n.requires || []).forEach((r) => { if (byId[r]) ups.push(r); });
-      ups.forEach((u) => { if (!seen.has(u)) { seen.add(u); visit(u); } });
-    };
-    visit(id);
-    return seen;
-  };
-  const downstreamOf = (id: string): Set<string> => {
-    const { list } = model();
-    const seen = new Set<string>();
-    const q = [id];
-    while (q.length) {
-      const x = q.shift()!;
-      list.forEach((n) => {
-        if (seen.has(n.id)) return;
-        if (n.parent === x || (n.requires || []).includes(x)) { seen.add(n.id); q.push(n.id); }
-      });
-    }
-    seen.delete(id);
-    return seen;
-  };
+  const heads = createMemo(() => Graph.headsOf(model().list));
+  const upstreamOf = (id: string): Set<string> => Graph.upstreamOf(model().byId, id);
+  const downstreamOf = (id: string): Set<string> => Graph.downstreamOf(model().list, id);
 
   // the spotlight set for the hovered node (main → its outbound roots).
   const spot = createMemo(() => {
@@ -382,35 +320,7 @@ export function ForestMap(props: {
     return { h, lit: new Set<string>([h, "main", ...upstreamOf(h), ...downstreamOf(h)]) };
   });
 
-  // CHEAP dirty-conflict "dams". A node with uncommitted (tracked) working-tree
-  // changes whose paths collide with a DOWNSTREAM node's OWN diff is a dam: once
-  // that dirt commits, those descendants conflict on rebase. A dam freezes the
-  // flow to its WHOLE downstream subtree — everything below is built on a world
-  // about to shift. File-overlap only (no merge attempt): honest "potential",
-  // instant, recomputed each render. `frozen` = nodes whose inbound edge is dead.
-  const dams = createMemo(() => {
-    const { list, byId } = model();
-    const damSet = new Set<string>();
-    const conflictSet = new Set<string>();
-    const frozen = new Set<string>();
-    const dirtyOf = (id: string) => byId[id]?.dirty ?? [];
-    const ownPaths = (id: string) => (byId[id]?.files ?? []).map((f) => f.path);
-    list.forEach((n) => {
-      const d = dirtyOf(n.id);
-      if (!d.length) return;
-      const dset = new Set(d);
-      const down = downstreamOf(n.id);
-      let active = false;
-      down.forEach((c) => {
-        if (ownPaths(c).some((p) => dset.has(p))) { conflictSet.add(c); active = true; }
-      });
-      if (active) {
-        damSet.add(n.id);
-        down.forEach((c) => frozen.add(c));
-      }
-    });
-    return { damSet, conflictSet, frozen, dirtyOf };
-  });
+  const dams = createMemo(() => Graph.computeDams(model().list, model().byId));
 
   // KILN: a live restack walking THIS forest, read off /restack-status. The cascade
   // rebases bottom-up, so a heat-front climbs the branches: completed = set (rebased,
