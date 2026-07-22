@@ -46,13 +46,6 @@ n = "@:open \"%sh{dirname %{buffer_name}}/\"<C-b>"
 # (verified 2026-07-22). Piping the selection is a synchronous transaction, so :write sees it.
 m = ["select_all", ":pipe $HOME/.dotfiles/scripts/hx-fmt %{buffer_name}", ":write", "collapse_selection"]
 v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
-# space-x = delete this file (Helix has none of its own — :delete/:remove/:file complete to
-# nothing). Safe to bind to ONE key because the deletion itself is undoable, not because the key
-# is awkward: a tracked file goes through `git rm` (still in HEAD), anything else moves to
-# ~/.Trash. Nothing is unlinked outright. The buffer-close is chained so no buffer is left
-# pointing at a dead path, where a stray :w would recreate the file — but chaining makes Helix
-# DISMISS the :sh popup, so the undo line only survives in the log: `hx-rm --last` reads it back.
-x = [":sh $HOME/.dotfiles/scripts/hx-rm %{buffer_name}", ":buffer-close!"]
 # space-V = ship it: commit whatever is dirty, start the push gates in the background, and land
 # on this branch's node in the viewer, where the push button is. The pair is deliberate —
 # space-v is a CHECKPOINT and stays in the editor (it used to raise Chrome, which with no viewer
@@ -60,6 +53,16 @@ x = [":sh $HOME/.dotfiles/scripts/hx-rm %{buffer_name}", ":buffer-close!"]
 # It never pushes: the viewer's warded ⇧ button remains the only door to origin.
 V = [":write", ":sh $HOME/.dotfiles/scripts/hx-ship %{buffer_name}"]
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
+
+# space-x = the destructive menu, deliberately two keys. Helix has no file-delete command of its
+# own (:delete/:remove/:file complete to nothing), and hx-rm makes the deletion recoverable —
+# tracked files via `git rm` (still in HEAD), everything else to ~/.Trash — but recoverable is not
+# the same as cheap to trigger: an accident still costs finding the undo line and re-running it,
+# for no benefit, since deleting a file is a once-a-week act. So no single slip can reach it.
+# The chained buffer-close leaves no buffer pointing at a dead path (a stray :w would recreate the
+# file), and it also makes Helix dismiss the :sh popup — `hx-rm --last` reads the undo line back.
+[keys.normal.space.x]
+d = [":sh $HOME/.dotfiles/scripts/hx-rm %{buffer_name}", ":buffer-close!"]
 
 # space-o = "open" menu: m → on GitHub/main, b → on GitHub/current branch,
 # t → the tRPC procedure under the cursor (gd can't reach it: the generated
