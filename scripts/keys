@@ -1,0 +1,207 @@
+#!/usr/bin/env python3
+# keys [--md] [helix|tmux] — the cheatsheet of every key we've bound ourselves.
+#
+# It is GENERATED from the configs on every run, never stored, for the same reason the forest
+# viewer reads git config live: a hand-kept second copy of the bindings is a copy that drifts,
+# and a cheatsheet you can't trust is worse than none. Whatever the configs say today is what
+# prints today. Nothing here needs updating when a binding changes.
+#
+# "Non-default" needs no cleverness to detect: a key only appears in these files BECAUSE we
+# bound it, so the explicit bindings are exactly the set worth remembering. Stock keys are the
+# editor's own docs' job (:tutor, man tmux).
+#
+# The description of each binding is the comment sitting directly above it — the configs
+# already carry those, so this is a reader for prose that exists rather than a place to write
+# it again. A binding with no comment prints its command instead, which is its own quiet
+# nudge to go explain it.
+import re
+import sys
+from pathlib import Path
+
+HOME = Path.home()
+HELIX = HOME / ".dotfiles/helix/config.toml"
+TMUX = HOME / ".dotfiles/tmux.conf"
+
+SHORTEN = [
+    ("$HOME/.dotfiles/scripts/", ""),
+    ("/Users/philbrockman/.dotfiles/scripts/", ""),
+    ("~/.dotfiles/scripts/", ""),
+]
+
+
+def tidy(cmd: str, limit: int = 62) -> str:
+    for old, new in SHORTEN:
+        cmd = cmd.replace(old, new)
+    cmd = re.sub(r"\s+", " ", cmd).strip()
+    return cmd if len(cmd) <= limit else cmd[: limit - 1] + "…"
+
+
+def summarise_command(value: str) -> str:
+    """An un-commented binding shows its command — minus the scaffolding every one shares.
+
+    `[":cd %sh{hx-workspace-root …}", "goto_definition"]` is a goto; leading the description
+    with the :cd tells the reader nothing that distinguishes this key from its neighbours.
+    """
+    parts = re.findall(r'"((?:[^"\\]|\\.)*)"', value)
+    if not parts:
+        return tidy(value.strip().strip("[]"))
+    meat = [p for p in parts if not re.match(r":(write|cd)\b", p)] or parts
+    return tidy(", ".join(meat))
+
+
+def first_sentence(comment_lines: list[str], limit: int = 76) -> str:
+    """The comment blocks run to paragraphs; a cheatsheet wants the first claim only."""
+    text = " ".join(comment_lines).strip()
+    if not text:
+        return ""
+    # "space-v = the thing it does" — the key name is already in the left column
+    text = re.sub(r"^space-\S+\s*=\s*", "", text)
+    cut = re.search(r"(?<=[a-z0-9)\"'])[.;—](?:\s|$)", text)
+    if cut:
+        text = text[: cut.start()]
+    text = text.strip(" .—-")
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def parse_helix() -> tuple[list[tuple[str, str, str, str]], dict[str, str]]:
+    """→ ([(group, key-chord, description, _)], {group: note}).
+
+    A comment above a [keys.*] table describes the whole table, so it becomes the group's
+    note rather than being repeated onto each key underneath it.
+    """
+    if not HELIX.exists():
+        return [], {}
+    table: list[str] | None = None
+    comment: list[str] = []
+    out: list[tuple[str, str, str, str]] = []
+    notes: dict[str, str] = {}
+    for raw in HELIX.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            comment.append(line.lstrip("#").strip())
+            continue
+        if not line:
+            comment = []
+            continue
+        if line.startswith("["):
+            name = line.strip("[]").split(".")
+            table = name[1:] if name and name[0] == "keys" else None
+            if table:
+                group = "helix — " + " · ".join(table)
+                if comment:
+                    notes.setdefault(group, first_sentence(comment, limit=110))
+            comment = []
+            continue
+        if table is None or "=" not in line:
+            comment = []
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip().strip('"')
+        group = "helix — " + " · ".join(table)
+        chord = " ".join(table[1:] + [key])
+        desc = first_sentence(comment) or summarise_command(value)
+        out.append((group, chord, desc, ""))
+        comment = []
+    return out, notes
+
+
+def parse_tmux() -> list[tuple[str, str, str]]:
+    """→ [(table, key, description)] for every bind line."""
+    if not TMUX.exists():
+        return []
+    comment: list[str] = []
+    out = []
+    for raw in TMUX.read_text().splitlines():
+        line = raw.strip()
+        if line.startswith("#"):
+            comment.append(line.lstrip("#").strip())
+            continue
+        if not line:
+            comment = []
+            continue
+        if not re.match(r"bind(-key)?\b", line):
+            comment = []
+            continue
+        rest = line.split(None, 1)[1] if " " in line else ""
+        where = "prefix"
+        # `-` is itself a bound key (the vsplit), so only real bind flags may be stripped
+        while re.match(r"-[nrT](\s|$)", rest):
+            flag, _, rest = rest.partition(" ")
+            rest = rest.strip()
+            if flag == "-n":
+                where = "root"
+            elif flag == "-T":
+                tbl, _, rest = rest.partition(" ")
+                where = tbl.strip()
+                rest = rest.strip()
+        key, _, cmd = rest.partition(" ")
+        if not key:
+            comment = []
+            continue
+        out.append((where, key.strip(), first_sentence(comment) or tidy(cmd)))
+        comment = []
+    return out
+
+
+def helix_groups(rows, notes):
+    for group in dict.fromkeys(g for g, _, _, _ in rows):
+        yield group, notes.get(group, ""), [(k, d) for g, k, d, _ in rows if g == group]
+
+
+def tmux_groups(rows):
+    labels = {
+        "prefix": "tmux — after C-a",
+        "root": "tmux — no prefix",
+        "copy-mode-vi": "tmux — copy mode",
+    }
+    order = list(labels) + [w for w, _, _ in rows if w not in labels]
+    for where in dict.fromkeys(order):
+        rows_in = [(k, d) for w, k, d in rows if w == where]
+        if rows_in:
+            yield labels.get(where, f"tmux — {where}"), "", rows_in
+
+
+def render_text(groups) -> str:
+    bold, dim, reset = ("\033[1m", "\033[2m", "\033[0m") if sys.stdout.isatty() else ("", "", "")
+    chunks = []
+    for title, note, rows in groups:
+        width = max(len(k) for k, _ in rows)
+        head = f"{bold}{title}{reset}"
+        if note:
+            head += f"\n  {dim}{note}{reset}"
+        body = "\n".join(f"  {bold}{k.ljust(width)}{reset}  {dim}{d}{reset}" for k, d in rows)
+        chunks.append(f"{head}\n{body}")
+    return "\n\n".join(chunks)
+
+
+def render_md(groups) -> str:
+    chunks = []
+    for title, note, rows in groups:
+        body = "\n".join(f"| `{k.replace('|', '\\|')}` | {d.replace('|', '\\|')} |" for k, d in rows)
+        head = f"### {title}\n"
+        if note:
+            head += f"\n{note}\n"
+        chunks.append(f"{head}\n| key | does |\n| --- | --- |\n{body}")
+    return "\n\n".join(chunks)
+
+
+def main() -> int:
+    args = sys.argv[1:]
+    as_md = "--md" in args
+    wanted = [a for a in args if not a.startswith("-")]
+
+    groups = []
+    if not wanted or "helix" in wanted:
+        groups += list(helix_groups(*parse_helix()))
+    if not wanted or "tmux" in wanted:
+        groups += list(tmux_groups(parse_tmux()))
+
+    if not groups:
+        print(f"keys: nothing to show (looked in {HELIX} and {TMUX})", file=sys.stderr)
+        return 1
+    print(render_md(groups) if as_md else render_text(groups))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
