@@ -605,7 +605,9 @@ def squash(req, raw):
     d = json.loads(raw or "{}")
     # squash button → collapse parent..branch into UNSTAGED working-tree changes, no commit
     # (Phil writes the commit in GitHub Desktop). See stack-squash --unstage.
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--unstage", d.get("branch", "")])
+    # --unpushed for the same reason /prep passes it: without it this collapsed to the frozen
+    # fork-point even on a published branch, swallowing pushed commits and diverging the PR.
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--unstage", "--unpushed", d.get("branch", "")])
     # stack-squash always prints a JSON report (on success AND handled failure)
     req._send(200 if r.returncode == 0 else 500,
               r.stdout or json.dumps({"ok": False, "err": r.stderr or "squash crashed"}))
