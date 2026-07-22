@@ -428,7 +428,7 @@ export function NodeDetail() {
         </div>
       </Show>
       <Show when={flash()}>
-        <div class="flash fixed bottom-[26px] left-1/2 z-[250] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-[12px] text-ink shadow-[0_14px_40px_#0009]">{flash()}</div>
+        <div class="flash fixed bottom-[26px] left-1/2 z-[250] max-w-[min(90vw,640px)] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-center text-[12px] text-ink [overflow-wrap:anywhere] shadow-[0_14px_40px_#0009]">{flash()}</div>
       </Show>
     </div>
   );
