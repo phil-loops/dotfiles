@@ -235,9 +235,17 @@ def published_head():
     fork, which would let a squash rewrite what origin holds under an open PR. origin is
     where PRs live, so origin is what must not be rewritten — same ref reseat_gate reads."""
     ref = f"refs/remotes/origin/{branch}"
-    if git(["rev-parse", "--verify", "--quiet", ref]).returncode != 0:
-        return ""
-    return git(["rev-parse", ref]).stdout.strip()
+    if git(["rev-parse", "--verify", "--quiet", ref]).returncode == 0:
+        return git(["rev-parse", ref]).stdout.strip()
+    # No origin branch under this name — but a rename after publishing leaves tracking on the
+    # OLD name, and a push follows tracking. Squashing would then rewrite that remote branch
+    # while this reports "never pushed", so refuse instead of guessing which name is the truth.
+    up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"]).stdout.strip()
+    if up.startswith("origin/") and up != f"origin/{branch}":
+        out({"ok": False, "branch": branch, "n": 0,
+             "err": f"{branch} tracks {up} — local and origin branch names must match. "
+                    f"Rename one to line them up, then squash."})
+    return ""
 
 
 pub = published_head()
