@@ -58,6 +58,17 @@ playground_path() {
   echo "$(dirname "$main_root")/$(basename "$main_root")-integ-${project}"
 }
 
+# Tracked files a dev server rewrites as it boots (`next dev` repoints next-env.d.ts at its build
+# dir). Counting those as edits freezes the playground on the first integration it ever served —
+# a refresh refuses to run over tracked edits, so every later run silently gets stale code.
+GENERATED=(next-env.d.ts)
+GENERATED_EXCLUDE=("${GENERATED[@]/#/:(exclude)}")
+
+# $1 = worktree path — the tracked edits that are actually a human's
+playground_dirt() {
+  git -C "$1" status --porcelain -uno -- . "${GENERATED_EXCLUDE[@]}" 2>/dev/null
+}
+
 report_playground() {
   local project="$1" ref="$2"
   local wt_path=$(playground_path "$project")
@@ -65,7 +76,7 @@ report_playground() {
   if git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
     echo "exists: 1"
     local dirty=0
-    [[ -n $(git -C "$wt_path" status --porcelain -uno 2>/dev/null) ]] && dirty=1
+    [[ -n $(playground_dirt "$wt_path") ]] && dirty=1
     echo "dirty: $dirty"
     local fresh=0
     if [[ -n "$ref" ]] && [[ $(git -C "$wt_path" rev-parse 'HEAD^{tree}' 2>/dev/null) == $(git rev-parse "${ref}^{tree}" 2>/dev/null) ]]; then
@@ -87,10 +98,13 @@ materialize_worktree() {
   if git -C "$wt_path" rev-parse --git-dir >/dev/null 2>&1; then
     if (( RESET )); then
       git -C "$wt_path" checkout --force --detach "$sha" >/dev/null 2>&1
-    elif [[ -n $(git -C "$wt_path" status --porcelain -uno 2>/dev/null) ]]; then
+    elif [[ -n $(playground_dirt "$wt_path") ]]; then
       echo "playground has tracked edits — left as-is (--worktree-reset discards them)" >&2
     elif [[ $(git -C "$wt_path" rev-parse 'HEAD^{tree}') != $(git rev-parse "${ref}^{tree}") ]]; then
-      git -C "$wt_path" checkout --detach "$sha" >/dev/null 2>&1
+      git -C "$wt_path" checkout -- "${GENERATED[@]}" >/dev/null 2>&1 || true
+      if ! git -C "$wt_path" checkout --detach "$sha" >/dev/null 2>&1; then
+        echo "playground refresh failed — still on $(git -C "$wt_path" rev-parse --short HEAD)" >&2
+      fi
     fi
   else
     git worktree add --detach "$wt_path" "$sha" >/dev/null 2>&1
