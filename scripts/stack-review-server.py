@@ -55,10 +55,21 @@ def _log(line):
         sys.stderr.flush()
 
 
-def run(args):
+def run(args, timeout=None):
     # cwd is the per-request active repo (srvctx.repo_cwd) — the ?repo= selection for this
     # thread, or CWD when none. So every handler that goes through run is repo-aware for free.
-    return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True)
+    #
+    # timeout is opt-in per call and MUST NOT become a default — plenty of what comes through here
+    # (a restack, a gates run, a vite build) is legitimately slow. But a network git/gh call on a
+    # request thread that stalls pends that thread for the life of the server: nothing above reaps
+    # it, so the thread and its child both leak, and the caller learns nothing. Expiry reads as an
+    # ordinary failed CompletedProcess (124, the shell's timeout code), so callers keep their
+    # `returncode != 0` shape without knowing this exists.
+    try:
+        return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _log(f"run: timed out after {timeout}s — {' '.join(args)}")
+        return subprocess.CompletedProcess(args, 124, "", f"timed out after {timeout}s")
 
 
 def _main_worktree():

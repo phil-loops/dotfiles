@@ -155,7 +155,7 @@ def _local_branch_for_pr(num):
     if hit and now - hit[0] < _BRANCH_TTL:
         return hit[1]
     r = ctx.run(["gh", "pr", "view", num, "--json", "headRefName,isCrossRepository",
-                 "--jq", "[.headRefName, .isCrossRepository] | @tsv"])
+                 "--jq", "[.headRefName, .isCrossRepository] | @tsv"], timeout=15)
     parts = r.stdout.strip().split("\t") if r.returncode == 0 else []
     branch = None
     if len(parts) == 2 and parts[1] != "true" and parts[0] and \
@@ -189,7 +189,7 @@ def _refresh_review_branch(num):
     with _refresh_locks.setdefault(key, threading.Lock()):
         if time.time() - _refreshed.get(key, 0) < _REFRESH_TTL:
             return
-        ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"])
+        ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"], timeout=20)
         _refreshed[key] = time.time()
 
 
@@ -231,7 +231,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
         if ctx.run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{review}"]).returncode == 0:
             branch = review   # already imported — reuse, don't re-fetch on every click
         else:
-            r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
+            r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num], timeout=30)
             if r.returncode != 0:
                 req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
                 return
