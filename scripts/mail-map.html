@@ -135,7 +135,9 @@
     border-bottom: 1px solid var(--rule); font-size: 12.5px; color: var(--muted);
   }
   #drawer .top b { color: var(--ink); font-size: 13px; }
-  #drawer .top button { margin-left: auto; background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 17px; }
+  #drawer .top button { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 17px; }
+  #drawer .top #clear { margin-left: auto; font-size: 11.5px; font-family: inherit; }
+  #drawer .top #clear:hover { color: var(--ink); }
   #thread { flex: 1; overflow-y: auto; padding: 14px; }
   #drawer .compose { border-top: 1px solid var(--rule); padding: 10px 12px; display: flex; gap: 8px; }
   #drawer textarea {
@@ -150,6 +152,10 @@
   #drawer .compose button:disabled { opacity: 0.45; cursor: default; }
 
   .qa { margin-bottom: 18px; }
+  .qa .from {
+    font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 5px;
+  }
   .qa .sel {
     border-left: 2px solid var(--accent); padding: 3px 0 3px 9px; margin-bottom: 8px;
     color: var(--muted); font-size: 12.2px; font-style: italic;
@@ -190,7 +196,7 @@
 <button id="pop">ask about this</button>
 
 <aside id="drawer">
-  <div class="top"><b>Ask</b><span id="scope"></span><button id="close">✕</button></div>
+  <div class="top"><b>Ask</b><span id="scope"></span><button id="clear" title="clear the thread">clear</button><button id="close">✕</button></div>
   <div id="thread"></div>
   <div class="compose">
     <textarea id="q" placeholder="Ask about the selection, or anything on this page…"></textarea>
@@ -296,8 +302,6 @@
       ? ""
       : `<div class="offline">Source lookup and questions need the local backend — run <code>mail-map-serve</code> and open <code>localhost:62555</code>.</div>`;
     window.scrollTo(0, 0);
-    session = null;
-    $("thread").innerHTML = "";
   }
 
   window.addEventListener("hashchange", () => show(location.hash.slice(1)));
@@ -377,6 +381,33 @@
   $("close").addEventListener("click", () => $("drawer").classList.remove("on"));
 
   /* ------------------------------------------------------------ chat */
+  // The thread outlives navigation and reloads. A question asked on one page is
+  // usually the reason you go looking at another, so wiping it on nav loses the
+  // conversation exactly when it starts being worth something.
+  const STORE = "mail-map-thread";
+
+  function save() {
+    try {
+      sessionStorage.setItem(STORE, JSON.stringify({ html: $("thread").innerHTML, session }));
+    } catch {}
+  }
+
+  function restore() {
+    try {
+      const held = JSON.parse(sessionStorage.getItem(STORE) || "null");
+      if (!held || !held.html) return;
+      $("thread").innerHTML = held.html;
+      session = held.session || null;
+      $("thread").scrollTop = $("thread").scrollHeight;
+    } catch {}
+  }
+
+  $("clear").addEventListener("click", () => {
+    $("thread").innerHTML = "";
+    session = null;
+    save();
+  });
+
   async function ask() {
     const ta = $("q");
     const question = ta.value.trim();
@@ -387,6 +418,7 @@
     const qa = document.createElement("div");
     qa.className = "qa";
     qa.innerHTML =
+      `<div class="from">${esc(current.title)}</div>` +
       (selection ? `<div class="sel">${esc(selection.text.slice(0, 220))}</div>` : "") +
       `<div class="q">${esc(question)}</div><div class="st">starting…</div><div class="a"></div>`;
     $("thread").appendChild(qa);
@@ -448,11 +480,13 @@
         ans.innerHTML = `<span class="err">no answer came back — is the viewer running on :62497?</span>`;
       }
     } catch (err) {
-      ans.innerHTML = `<span class="err">${esc(err)}</span>`;
+      // Leaving the page aborts the stream. Whatever already arrived is still the answer.
+      if (!text) ans.innerHTML = `<span class="err">${esc(err)}</span>`;
     } finally {
       st.textContent = st.textContent === "starting…" ? "" : st.textContent;
       $("send").disabled = false;
       selection = null;
+      save();
     }
   }
 
@@ -472,6 +506,7 @@
     REF = data.ref || REF;
     buildNav();
     show(location.hash.slice(1));
+    restore();
 
     const lint = await fetch("/lint").then((r) => r.json()).catch(() => null);
     if (lint && lint.problems) {
