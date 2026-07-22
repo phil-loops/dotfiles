@@ -36,7 +36,7 @@ cleanup(){
 }
 trap cleanup EXIT INT TERM
 
-pass=0; failed=0
+pass=0; failed=0; skipped=0
 ok(){ print -r -- "  ✓ $1"; pass=$(( pass + 1 )) }
 no(){ print -r -- "  ✗ $1"; failed=$(( failed + 1 )) }
 yes(){ [[ -n "$2" ]] && ok "$1" || no "$1" }        # <desc> <non-empty means true>
@@ -82,6 +82,7 @@ if [[ -d "$MAIN/node_modules" ]]; then
                                   || no "node_modules was not relinked"
 else
   print -r -- "  – node_modules relink: skipped (${MAIN:t} has no node_modules to link to)"
+  skipped=$(( skipped + 1 ))
 fi
 [[ -d "$s/idle/.next" ]] && no "the .next build cache survived" || ok "the .next build cache is reclaimed"
 [[ -e "$s/idle/.git" ]] && ok "the checkout itself is kept" || no "the checkout was destroyed"
@@ -134,11 +135,13 @@ if [[ -d "$MAIN/.gen" ]]; then
                                       || ok "the copy drops the source tree's marker"
 else
   print -r -- "  – .gen seeding: skipped (${MAIN:t} has no .gen to seed from)"
+  skipped=$(( skipped + 4 ))
 fi
 
 if [[ "${1:-}" == --no-hx ]] || ! command -v tmux >/dev/null || ! command -v hx >/dev/null; then
   print
   print -r -- "editor drive: skipped"
+  skipped=$(( skipped + 3 ))
 else
   print
   print -r -- "editor drive"
@@ -197,5 +200,10 @@ else
 fi
 
 print
-print -r -- "${pass} passed, ${failed} failed"
+if (( skipped > 0 )); then
+  print -r -- "${pass} passed, ${failed} failed, ${skipped} SKIPPED — run this from a loops worktree"
+  print -r -- "  (skipped assertions cannot tell a fixed build from a broken one)"
+else
+  print -r -- "${pass} passed, ${failed} failed"
+fi
 (( failed == 0 ))
