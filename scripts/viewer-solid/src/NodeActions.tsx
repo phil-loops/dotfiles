@@ -275,7 +275,7 @@ export function NodeActions(props: {
         g.ok ? "ok" : "fail",
         g.ok
           ? `${g.cached ? "already green for this commit" : parts || "green"} — push unlocked`
-          : `${parts} (advisory — the motion continues; push stays locked)${fails ? ":\n" + fails : ""}`,
+          : `${parts} — push BLOCKED until these pass; fix and re-sync${fails ? ":\n" + fails : ""}`,
       );
       preview.refetch();
     };
