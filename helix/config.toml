@@ -26,9 +26,9 @@ trusted = [
   "/private/tmp/stack-study/*",
 ]
 
-# space-v = the nvim :wc port (custom/wc.lua): write + commit JUST this file, then flip
-# back to the blessing viewer — the hover+o → edit → commit review loop. Custom message:
-# :w then :sh hx-wc %{buffer_name} your message
+# space-v = the nvim :wc port (custom/wc.lua): write + commit JUST this file, so the blessing
+# viewer (which renders committed diffs) sees the edit — it stays in the editor, see space-V
+# below. Custom message: :w then :sh hx-wc %{buffer_name} your message
 #
 # space-t = contextual test watcher: write, then drive a tmux pane below Helix running
 # node:test --watch on this file's sibling .test.ts (or the buffer itself). Re-runs live
