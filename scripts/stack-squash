@@ -330,7 +330,17 @@ def force_scope(msg):
     lines = msg.splitlines()
     m = _SUBJECT_RE.match(lines[0].strip())
     if not m:
-        return msg
+        # No conventional prefix AT ALL — the drafter dropped it wholesale, and returning
+        # unchanged here is what let a scoped `fix(x): ...` land as a bare subject (#9700).
+        # Recover the type from the commits being collapsed rather than inventing one; if
+        # none of them carry a type either, leave it be — a wrong type reads worse than none.
+        t = next((cm["type"] for cm in
+                  (_SUBJECT_RE.match(c.split(" ", 1)[1].strip()) for c in commits if " " in c)
+                  if cm), "")
+        if not t:
+            return msg
+        lines[0] = f"{t}({project}): {lines[0].strip()}"
+        return "\n".join(lines)
     lines[0] = f"{m['type']}({project}){m['bang']}: {m['rest'].strip()}"
     return "\n".join(lines)
 
