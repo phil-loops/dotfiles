@@ -8,7 +8,7 @@
 // Styling: Tailwind utilities against the ledger @theme (the migration's reference surface).
 // Health carries all the color: sage = serving, ember = warming, del = broken, faint = gone.
 import { createQuery, useQueryClient } from "@tanstack/solid-query";
-import { createEffect, createSignal, For, Show } from "solid-js";
+import { createEffect, createSignal, For, Index, Show } from "solid-js";
 
 const [open, setOpen] = createSignal(false);
 export const openServers = () => setOpen(true);
@@ -116,6 +116,10 @@ export function ServersDrawer() {
   const sub = () => (q.isPlaceholderData ? undefined : q.data?.substrate);   // the seed's stub would read "0/0 up"
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
+  // the tail follows new output only while the reader is at the bottom — scrolling up to study a
+  // line pins the view until they scroll back down. Drawer-level, not per-card: a card that
+  // re-renders mid-read must not silently re-arm following.
+  let logPinned = true;
   // live tail — next dev keeps appending, so poll while a log pane is open
   const logQ = createQuery<{ log?: string }>(() => ({
     queryKey: ["preview-log", logFor()],
@@ -142,12 +146,15 @@ export function ServersDrawer() {
     await q.refetch();
     setBusy(null);
   };
-  const showLog = (dir: string) => setLogFor(logFor() === dir ? null : dir);
+  const showLog = (dir: string) => { logPinned = true; setLogFor(logFor() === dir ? null : dir); };
 
   return (
     <Show when={open()}>
       <div class="fixed inset-0 z-[209] bg-[rgba(0,0,0,0.45)] backdrop-blur-[2px]" onClick={() => setOpen(false)} />
-      <aside class="servers-drawer fixed inset-y-0 right-0 z-[210] flex w-[min(460px,92vw)] flex-col border-l border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night)_340px)] font-mono text-[13px] text-ink shadow-[-24px_0_60px_-18px_rgba(0,0,0,0.8)]">
+      <aside
+        class="servers-drawer fixed inset-y-0 right-0 z-[210] flex flex-col border-l border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night)_340px)] font-mono text-[13px] text-ink shadow-[-24px_0_60px_-18px_rgba(0,0,0,0.8)] transition-[width] duration-200 motion-reduce:transition-none"
+        classList={{ "w-[min(460px,92vw)]": logFor() == null, "w-[min(1000px,96vw)]": logFor() != null }}
+      >
         <header class="flex items-baseline gap-3 border-b border-rule px-4.5 pt-4 pb-[13px]">
           <span class="font-display text-[19px] font-semibold italic text-ink">Dev servers</span>
           <span class="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-[0.18em] text-ink-faint">
@@ -236,46 +243,45 @@ export function ServersDrawer() {
         >
           {/* each server is a ledger entry — branch identity first, the left stripe carries health */}
           <div class="flex flex-auto flex-col gap-2.5 overflow-y-auto px-4 py-3.5">
-            <For each={previews()}>
+            {/* Index, not For: every 3s poll returns fresh objects (latency alone changes), and
+                For would rebuild each card — throwing away the open log's scroll position */}
+            <Index each={previews()}>
               {(p) => {
-                const h = () => HEALTH[p.health] ?? { ...FALLBACK, label: p.health };
-                // the tail follows new output only while the reader is at the bottom —
-                // scrolling up to study a line pins the view until they scroll back down
+                const h = () => HEALTH[p().health] ?? { ...FALLBACK, label: p().health };
                 let logPre: HTMLPreElement | undefined;
-                let logPinned = true;
                 createEffect(() => {
                   logText();
-                  if (logFor() === p.dir && logPre && logPinned) { logPre.scrollTop = logPre.scrollHeight; }
+                  if (logFor() === p().dir && logPre && logPinned) { logPre.scrollTop = logPre.scrollHeight; }
                 });
                 return (
                   <div class={`card rounded-[10px] border border-rule border-l-[3px] bg-vellum-raise px-[13px] py-[11px] transition-[border-color] duration-[250ms] ${h().stripe} ${h().card ?? ""}`}>
                     {/* the branch is the card's identity — the "which server is which" answer */}
                     <div class="flex items-baseline gap-2.5">
-                      <span class="truncate text-[13.5px] font-semibold text-ink" title={p.dir}>{p.branch || p.name}</span>
-                      <Show when={p.managed === false}>
+                      <span class="truncate text-[13.5px] font-semibold text-ink" title={p().dir}>{p().branch || p().name}</span>
+                      <Show when={p().managed === false}>
                         <span class="flex-none rounded border border-ember px-1.5 py-px text-[9px] uppercase tracking-[0.08em] text-ember" title="a next-dev listener no preview session owns — started outside the dock (task dev, leftover headless server)">unmanaged</span>
                       </Show>
-                      <span class="ml-auto flex-none text-[11px] text-ink-faint">{p.age}</span>
+                      <span class="ml-auto flex-none text-[11px] text-ink-faint">{p().age}</span>
                     </div>
                     <div class="mt-[5px] flex items-baseline gap-3">
                       <span class={`inline-flex items-baseline gap-1.5 text-[10px] uppercase tracking-[0.06em] ${h().badge}`}>
                         <span class={`h-1.5 w-1.5 flex-none self-center rounded-full bg-current ${h().pulse ?? ""}`} />
-                        {h().label}{p.latency != null ? ` · ${p.latency}ms` : ""}
+                        {h().label}{p().latency != null ? ` · ${p().latency}ms` : ""}
                       </span>
-                      <Show when={p.url} fallback={<span class="text-[11px] text-ink-faint">:{p.port}</span>}>
-                        <a class="text-[11px] text-patina no-underline hover:text-ink hover:underline" href={p.url} target="_blank" rel="noopener">localhost:{p.port} ↗</a>
+                      <Show when={p().url} fallback={<span class="text-[11px] text-ink-faint">:{p().port}</span>}>
+                        <a class="text-[11px] text-patina no-underline hover:text-ink hover:underline" href={p().url} target="_blank" rel="noopener">localhost:{p().port} ↗</a>
                       </Show>
-                      <Show when={p.behind && p.behind !== "0"}>
-                        <span class="text-[10.5px] text-ember" title="the checkout this server serves trails origin/main — healthy means answering, not fresh">{p.behind} behind main</span>
+                      <Show when={p().behind && p().behind !== "0"}>
+                        <span class="text-[10.5px] text-ember" title="the checkout this server serves trails origin/main — healthy means answering, not fresh">{p().behind} behind main</span>
                       </Show>
                     </div>
-                    <Show when={p.error}>
-                      <div class="mt-[7px] truncate text-[10.5px] text-del" title={p.error}>{p.error}</div>
+                    <Show when={p().error}>
+                      <div class="mt-[7px] truncate text-[10.5px] text-del" title={p().error}>{p().error}</div>
                     </Show>
                     <div class="mt-2 flex flex-wrap items-center gap-[5px] text-[10px] text-ink-faint" title="each preview runs its own worktree but borrows main's node_modules + .env, and shares the one Docker stack">
-                      <span class={CONN_NODE}>⌂ {shortDir(p.dir)}</span>
+                      <span class={CONN_NODE}>⌂ {shortDir(p().dir)}</span>
                       <span>→</span>
-                      <Show when={p.managed !== false} fallback={<span class={CONN_NODE}>pid {p.pid}</span>}>
+                      <Show when={p().managed !== false} fallback={<span class={CONN_NODE}>pid {p().pid}</span>}>
                         <span class={CONN_NODE}>borrows main</span>
                       </Show>
                       <span>→</span>
@@ -284,26 +290,26 @@ export function ServersDrawer() {
                     <div class="mt-2.5 flex items-center gap-[7px]">
                       {/* restart/log only make sense for servers the dock owns — an unmanaged
                           stray has no session to respawn and no log file to tail */}
-                      <Show when={p.managed !== false}>
-                        <button class={BTN} disabled={busy() === p.dir + p.port} onClick={() => act(p, "/preview-restart")}>
-                          {busy() === p.dir + p.port ? "…" : "restart"}
+                      <Show when={p().managed !== false}>
+                        <button class={BTN} disabled={busy() === p().dir + p().port} onClick={() => act(p(), "/preview-restart")}>
+                          {busy() === p().dir + p().port ? "…" : "restart"}
                         </button>
-                        <button class={BTN} onClick={() => showLog(p.dir)}>{logFor() === p.dir ? "hide log" : "log"}</button>
+                        <button class={BTN} onClick={() => showLog(p().dir)}>{logFor() === p().dir ? "hide log" : "log"}</button>
                       </Show>
                       {/* kill stands apart — the one destructive act on the card, in the ledger's del voice */}
-                      <button class={BTN_DANGER} disabled={busy() === p.dir + p.port} onClick={() => act(p, "/preview-kill")}>kill</button>
+                      <button class={BTN_DANGER} disabled={busy() === p().dir + p().port} onClick={() => act(p(), "/preview-kill")}>kill</button>
                     </div>
-                    <Show when={logFor() === p.dir}>
+                    <Show when={logFor() === p().dir}>
                       <pre
                         ref={logPre}
                         onScroll={() => { if (logPre) { logPinned = logPre.scrollHeight - logPre.scrollTop - logPre.clientHeight < 40; } }}
-                        class="mt-[9px] max-h-[220px] overflow-auto rounded-[7px] border border-rule bg-diff-bg px-2.5 py-[9px] text-[10px] leading-[1.5] whitespace-pre-wrap text-ink-dim"
+                        class="mt-[9px] h-[min(62vh,600px)] overflow-auto rounded-[7px] border border-rule bg-diff-bg px-3 py-2.5 text-[11.5px] leading-[1.6] whitespace-pre-wrap text-ink-dim"
                       >{logText()}</pre>
                     </Show>
                   </div>
                 );
               }}
-            </For>
+            </Index>
           </div>
         </Show>
 
