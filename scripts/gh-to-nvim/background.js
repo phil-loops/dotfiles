@@ -165,18 +165,41 @@ chrome.commands.onCommand.addListener((cmd) => {
 const PR_RE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
 let lastPrewarmed = "";
 
-function prewarm(url) {
+let lastLaunchAt = 0;
+const LAUNCH_COOLDOWN_MS = 60000;   // bound a host that can't start; one boot per idle-reap cycle
+
+function prewarmPost(pr) {
+  return fetch(`${VIEWER_URL}/open-url`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url: pr, open: "prewarm" }),
+    signal: AbortSignal.timeout(POST_TIMEOUT_MS),
+  }).then(() => true).catch(() => false);   // reached the server at all? a 4xx still counts
+}
+
+async function prewarm(url) {
   const m = (url || "").match(PR_RE);
   if (!m || m[0] === lastPrewarmed) {
     return;   // not a PR, or the same one — clicking a line rewrites the hash, not the PR
   }
   lastPrewarmed = m[0];
-  fetch(`${VIEWER_URL}/open-url`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ url: m[0], open: "prewarm" }),
-    signal: AbortSignal.timeout(POST_TIMEOUT_MS),
-  }).catch(() => {});   // viewer down → the chord's recovery ladder still handles it
+  if (await prewarmPost(m[0])) {
+    return;
+  }
+  // The viewer self-reaps after 15min idle, so the first PR of a session finds it gone and the
+  // prewarm quietly does nothing — leaving the entire cold cost (boot, import, worktree: ~8s)
+  // on the first ⌘⇧O. That is the press that "only launches the forest": it is working, it just
+  // hasn't finished by the time a second press lands warm and takes the credit. Boot it here
+  // instead, while the diff is still being read. No extra launches — once up it stays up, so
+  // this is the same one-per-session boot, moved off the keypress.
+  if (Date.now() - lastLaunchAt < LAUNCH_COOLDOWN_MS) {
+    return;
+  }
+  lastLaunchAt = Date.now();
+  if (!(await launchViewer()).ok || !(await waitForViewer(15000))) {
+    return;   // the chord's recovery ladder is still the backstop
+  }
+  await prewarmPost(m[0]);
 }
 
 // GitHub is a Turbo app: clicking a PR out of the list, or the Files tab of the PR you're on, is
