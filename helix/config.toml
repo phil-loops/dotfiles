@@ -38,6 +38,13 @@ trusted = [
 # inside the quotes, so you just type the name. Quotes are load-bearing — an expansion
 # ENDS an argument, so an unquoted %sh{...}/name.ts opens two files, one of them `/name.ts`.
 n = "@:open \"%sh{dirname %{buffer_name}}/\"<C-b>"
+# space-m = format, THEN save — the deliberate "yes, reformat it" press. auto-format stays
+# off in languages.toml so :w and space-v never surprise-reformat, which leaves formatting
+# with no one-key affordance at all; this is it.
+# NOT [":format", ":write"]: :format is an async job whose edit lands after the :write queued
+# behind it, so that pair saves the UNformatted text and leaves the formatting unsaved
+# (verified 2026-07-22). Piping the selection is a synchronous transaction, so :write sees it.
+m = ["select_all", ":pipe $HOME/.dotfiles/scripts/hx-fmt %{buffer_name}", ":write", "collapse_selection"]
 v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
 
