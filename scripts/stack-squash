@@ -165,6 +165,7 @@ def reseat_cascade(base, old_base_tip, base_wt):
 # ---- args ----------------------------------------------------------------
 argv = sys.argv[1:]
 dry = unpushed = fmt = subject_only = unstage = no_voice = reseat = False
+allow_published = False   # --allow-published: squash BELOW the remote head anyway (needs a force-push)
 provided_msg = ""   # --message=<msg>: use this verbatim (the composer wrote it), skip drafting
 rest = []
 for a in argv:
@@ -182,13 +183,15 @@ for a in argv:
         no_voice = True
     elif a == "--reseat":
         reseat = True
+    elif a == "--allow-published":
+        allow_published = True
     elif a.startswith("--message="):
         provided_msg = a[len("--message="):]
     else:
         rest.append(a)
 branch = (rest[0] if rest else "").strip()
 if not branch:
-    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] [--unstage] [--no-voice] <branch>"})
+    out({"ok": False, "err": "usage: stack-squash [--dry] [--unpushed] [--format] [--subject-only] [--unstage] [--no-voice] [--allow-published] <branch>"})
 
 # branch must exist
 if git(["rev-parse", "--verify", "--quiet", branch]).returncode != 0:
@@ -219,22 +222,47 @@ if parent == MAIN:
     if omb and omb != base and git(["merge-base", "--is-ancestor", base, omb]).returncode == 0:
         base = omb
 force = False   # will pushing the squashed branch need a force? (true once published history is rewritten)
-if unpushed:
+
+
+def published_head():
+    """The sha origin already has for this branch, "" if it was never pushed.
+
+    @{upstream} only answers when tracking config exists, and a GitHub Desktop push
+    doesn't always leave it — trusting it alone let a squash collapse past an already-
+    pushed commit and silently diverge an open PR (#9700). refs/remotes/origin/<b> is the
+    same signal reseat_gate trusts, and it survives a missing upstream."""
     up = git(["rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     cand = up.stdout.strip()
-    published = (up.returncode == 0 and cand
-                 and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0)
-    if published:
-        # Only base on the upstream when it's actually an ANCESTOR of the branch — i.e.
-        # the branch is "remote + new commits" and a plain push lands them. If the branch
-        # was REBASED, its old remote is a stale ancestor on a different base; basing on it
-        # would sweep every intervening commit (origin/main's advance + pre-rebase history)
-        # into the squash. In that case keep the frozen fork-point base so only the branch's
-        # OWN commits collapse — and the push needs a force (the remote has diverged).
-        if git(["merge-base", "--is-ancestor", cand, branch]).returncode == 0:
-            base = cand
-        else:
-            force = True
+    if up.returncode == 0 and cand and git(["rev-parse", "--verify", "--quiet", cand]).returncode == 0:
+        return git(["rev-parse", cand]).stdout.strip()
+    fallback = f"refs/remotes/origin/{branch}"
+    if git(["rev-parse", "--verify", "--quiet", fallback]).returncode == 0:
+        return git(["rev-parse", fallback]).stdout.strip()
+    return ""
+
+
+pub = published_head()
+# Base on the published head only when it's actually an ANCESTOR of the branch — i.e. the
+# branch is "remote + new commits" and a plain push lands them. If the branch was REBASED, its
+# old remote is a stale ancestor on a different base; basing on it would sweep every intervening
+# commit (origin/main's advance + pre-rebase history) into the squash. In that case keep the
+# frozen fork-point base so only the branch's OWN commits collapse — and the push needs a force.
+pub_is_ancestor = bool(pub) and git(["merge-base", "--is-ancestor", pub, branch]).returncode == 0
+if unpushed:
+    if pub_is_ancestor:
+        base = pub
+    elif pub:
+        force = True
+elif (pub_is_ancestor and pub != base
+      and git(["merge-base", "--is-ancestor", base, pub]).returncode == 0):
+    # base sits BELOW what origin already has, so this squash would rewrite published
+    # history and the next push could only land as a force. Refuse rather than stomp.
+    if not allow_published:
+        out({"ok": False, "branch": branch, "parent": parent, "base": base, "n": 0,
+             "err": f"{branch} is published at {pub[:10]} — squashing to {base[:10]} would rewrite "
+                    f"pushed history (force-push). Use --unpushed to collapse only the new commits, "
+                    f"or --allow-published to override."})
+    force = True
 
 # the commits we'd collapse
 log = git(["log", f"{base}..{branch}", "--format=%h %s"]).stdout.strip()
