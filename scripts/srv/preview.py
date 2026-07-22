@@ -2,8 +2,10 @@
 # the loops-preview script (auto-picks a free 3010-3060 port, borrows MAIN's node_modules/.env and
 # the running Docker) so a branch renders in the browser WITHOUT moving the main checkout off :3000.
 #   GET  /preview-wait     ?branch=  → HTML                   warming page: starts + watches the boot,
-#                                                             hands the tab off once the server answers
+#                        | ?project=                           hands the tab off once the server answers
 #   POST /preview          {branch}  → {ok, url, port, dir, reused?}  start, or attach to a running one
+#   POST /preview-integration {project} → {ok, url, port, dir, reused?, dirty, fresh}  same, for a
+#                                                             project's ✦integration playground worktree
 #   POST /preview-main     {port?}    → {ok, url, port, dir, reused?}  run (or attach to) the literal
 #                                                             main branch; prefer :3000 (or port), else free
 #   POST /preview-kill     {dir}     → {ok}                   stop one (dir-string only; orphan-safe)
@@ -209,6 +211,27 @@ def wait(req):
     req._send(200, body, "text/html; charset=utf-8")
 
 
+def _serve_dir(req, dirp, extra=None):
+    # attach, don't restart: loops-preview cold-reboots an existing session (kills tmux, wipes
+    # .next), so re-clicking preview on a warm checkout must NOT destroy the running server.
+    for pv in _list_json(fresh=True):
+        if pv.get("dir") == dirp and pv.get("state") == "up" and str(pv.get("port", "")).isdigit():
+            port = int(pv["port"])
+            req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
+                                       "dir": dirp, "reused": True, **(extra or {})}))
+            return
+    # loops-preview detaches the server into tmux and returns immediately with the URL on stdout.
+    p = subprocess.run([_script(), dirp, "--main", checkout._active_main_wt()], capture_output=True, text=True)
+    _list_invalidate()
+    m = re.search(r"localhost:(\d+)", p.stdout)
+    if not m:
+        req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "preview failed").strip()[:400]}))
+        return
+    port = int(m.group(1))
+    req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
+                               "dir": dirp, **(extra or {})}))
+
+
 def start(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
@@ -222,23 +245,56 @@ def start(req, raw):
     if r.returncode != 0 or not dirp:
         req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a worktree").strip()}))
         return
-    # attach, don't restart: loops-preview cold-reboots an existing session (kills tmux, wipes
-    # .next), so re-clicking preview on a warm branch must NOT destroy the running server.
-    for pv in _list_json(fresh=True):
-        if pv.get("dir") == dirp and pv.get("state") == "up" and str(pv.get("port", "")).isdigit():
-            port = int(pv["port"])
-            req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
-                                       "dir": dirp, "reused": True}))
-            return
-    # loops-preview detaches the server into tmux and returns immediately with the URL on stdout.
-    p = subprocess.run([_script(), dirp, "--main", checkout._active_main_wt()], capture_output=True, text=True)
-    _list_invalidate()
-    m = re.search(r"localhost:(\d+)", p.stdout)
-    if not m:
-        req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "preview failed").strip()[:400]}))
+    _serve_dir(req, dirp)
+
+
+# Tracked files `next dev` rewrites as it boots. stack-integrate refuses to refresh a playground
+# with tracked edits, so left in place these would freeze the playground at the first integration
+# it ever served and every later preview would silently show stale code.
+_DEV_CHURN = ("next-env.d.ts",)
+
+
+def _integrate_playground(project):
+    # → (dir, {dirty, fresh}, err). stack-integrate --worktree rebuilds refs/stack/<project>-integration
+    # and parks it in the project's persistent playground worktree — a directory loops-preview can serve.
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-integrate"), project, "--worktree"])
+    dirp, flags = "", {}
+    for line in r.stdout.splitlines():
+        key, _, val = line.strip().partition(": ")
+        if key == "playground":
+            dirp = val
+        elif key in ("dirty", "fresh"):
+            flags[key] = val == "1"
+    if not dirp or not os.path.isdir(dirp):
+        # exit 1 = the leaves conflict (stderr names them), 2 = no such project
+        return "", {}, (r.stderr or r.stdout or "could not build the integration").strip()[:600]
+    return dirp, flags, ""
+
+
+def _dirty_paths(dirp):
+    r = ctx.run(["git", "-C", dirp, "status", "--porcelain", "-uno"])
+    return [line[3:].strip() for line in r.stdout.splitlines() if line.strip()]
+
+
+def start_integration(req, raw):
+    d = json.loads(raw or "{}")
+    project = d.get("project", "")
+    if not project:
+        req._send(400, json.dumps({"ok": False, "err": "no project"}))
         return
-    port = int(m.group(1))
-    req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": dirp}))
+    dirp, flags, err = _integrate_playground(project)
+    if err:
+        req._send(500, json.dumps({"ok": False, "err": err}))
+        return
+    if flags.get("dirty") and set(_dirty_paths(dirp)) <= set(_DEV_CHURN):
+        ctx.run(["git", "-C", dirp, "checkout", "--", *_DEV_CHURN])
+        flags["dirty"] = False
+        if not flags.get("fresh"):
+            dirp, flags, err = _integrate_playground(project)  # the refresh the churn was blocking
+            if err:
+                req._send(500, json.dumps({"ok": False, "err": err}))
+                return
+    _serve_dir(req, dirp, {"project": project, **flags})
 
 
 def start_main(req, raw):

@@ -1,7 +1,8 @@
 import { Show, createSignal } from "solid-js";
+import { createQuery } from "@tanstack/solid-query";
 import { Link, forestRepo, type ViewerLocation } from "./router";
 import { leaf, interestPips } from "./shared";
-import { canMutate } from "./provider";
+import { canMutate, withRepo } from "./provider";
 import { chatToTmux } from "./chatDrawer";
 import { SessionPicker } from "./SessionPicker";
 import { DivergedDetailPanel, type DivergedDetail } from "./DivergedDetailPanel";
@@ -13,6 +14,37 @@ type HealthEntry = {
   upstream?: string; upstreamBad?: boolean; upstreamReason?: string;
   diverged?: boolean; ahead?: number; behind?: number;
 };
+
+const GHOST_BTN =
+  "cursor-pointer rounded-[5px] border border-rule bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] text-patina opacity-90 hover:border-patina hover:bg-vellum-edge hover:opacity-100";
+
+// The ✦integration ghost is a ref, not a branch, so every branch action (checkout/push/prep) is
+// meaningless on it — but the assembled feature is exactly the thing worth *running*. ▷ opens the
+// warming tab against the project, which parks the integration in its playground worktree and
+// serves that on a side port.
+function GhostActions(props: { project: () => string }) {
+  const previews = createQuery(() => ({
+    queryKey: ["previews"],
+    queryFn: () =>
+      fetch("/previews").then((r) => r.json() as Promise<{ previews?: { dir?: string; port: string; state: string; health: string }[] }>),
+    staleTime: 10_000,
+  }));
+  const live = () =>
+    previews.data?.previews?.find((p) => (p.dir ?? "").endsWith(`-integ-${props.project()}`) && p.state === "up");
+  return (
+    <button
+      class={`nh-ghost-preview ${GHOST_BTN}`}
+      title="build this project's integration into its playground worktree and serve it on a side port (3010+) — leaves :3000 and your checkout alone"
+      onClick={() => window.open(withRepo("/preview-wait") + "?project=" + encodeURIComponent(props.project()), "_blank")}
+    >
+      {(() => {
+        const pv = live();
+        if (!pv) return "▷ preview integration";
+        return `▷ open preview :${pv.port}` + (pv.health && pv.health !== "healthy" ? ` · ${pv.health}` : "");
+      })()}
+    </button>
+  );
+}
 
 // The node review header: forest strip (back to the map) + branch identity/health + the tier-2
 // action bar (NodeActions + whole-branch chat). A wide prop surface because it mirrors the review
@@ -127,7 +159,7 @@ export function NodeHeader(props: {
               <span class="nh-viewnote text-[11px] tracking-[0.03em] text-ink-faint">vs {(props.BASES.find(([v]) => v === props.base()) ?? props.BASES[0])[1]} · 1 for parent</span>
             </Show>
             <div class="nh-spacer flex-1" />
-            <Show when={!props.isGhost()}>
+            <Show when={!props.isGhost()} fallback={<Show when={canMutate}><GhostActions project={props.project} /></Show>}>
               <NodeActions
                 branch={props.active()}
                 isReview={props.location().kind === "review"}
