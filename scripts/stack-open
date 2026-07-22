@@ -13,7 +13,7 @@
 #                                       — for jumping from a GitHub blob view to your editor
 #   stack-open --prepare <branch>  create/refresh the worktree only (prefetch)
 #   stack-open --prune [<days>]    remove scratch worktrees idle > days (default 3)
-#   stack-open --gc [<days>] [--dry-run]   the expiry ladder, with a size report: idle > days
+#   stack-open --gc [<days>] [--dry-run] [--json]  the expiry ladder, with a size report: idle > days
 #                                       (default 1) loses its regenerable weight (a real
 #                                       node_modules goes back to a symlink, .next goes), idle
 #                                       > 3d loses the whole worktree. Runs on every open too,
@@ -110,6 +110,7 @@ human_kb(){ (( $1 >= 1048576 )) && printf '%.1fG' $(( $1 / 1048576.0 )) || print
 # What a scratch worktree may hold that stack-open can always make again. node_modules belongs
 # here because ensure_worktree only ever wants a symlink to the main checkout's — a real 1.5G
 # directory means something ran an install in the scratch dir and left it behind.
+STRIP_ITEMS=(); STRIP_TOTAL_KB=0; STRIP_IDLE=0   # what the last sweep found — see gc_report/gc_json
 strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees nobody has opened
                # lately, but KEEP the checkout: a stripped worktree still opens instantly.
   [[ -d "$SCRATCH" ]] || return 0
@@ -131,23 +132,50 @@ strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees n
       kb=$(du -sk "$d/node_modules" 2>/dev/null | cut -f1) || kb=0
       total=$(( total + kb ))
       [[ -n "$dry" ]] || { rm -rf "$d/node_modules"; ln -sfn "$nm" "$d/node_modules"; }
-      echo "  ${d:t}  $(human_kb ${kb:-0})  node_modules → symlink" >&2
+      STRIP_ITEMS+=("${d:t}"$'\t'"node_modules"$'\t'"${kb:-0}")
     fi
     if [[ -d "$d/.next" ]]; then
       kb=$(du -sk "$d/.next" 2>/dev/null | cut -f1) || kb=0
       total=$(( total + kb ))
       [[ -n "$dry" ]] || rm -rf "$d/.next"
-      echo "  ${d:t}  $(human_kb ${kb:-0})  .next build cache" >&2
+      STRIP_ITEMS+=("${d:t}"$'\t'".next"$'\t'"${kb:-0}")
     fi
     touch -r "$clock" "$d"
   done
   rm -f "$clock"
-  if (( total > 0 )); then
-    echo "stack-open: $(human_kb $total) ${dry:+would be }reclaimed from scratch worktrees idle > ${days}d" >&2
-  elif (( mine == 0 )); then
-    echo "stack-open: no scratch worktrees of ${_common_dir:h:t} are idle > ${days}d — nothing to reclaim" >&2
-  fi
+  STRIP_TOTAL_KB=$total; STRIP_IDLE=$mine
   return 0
+}
+
+# Rendering lives out here so a caller can have the numbers instead of the prose: strip_fat
+# only measures and acts, and every outcome is stated — "nothing idle" and "idle but nothing
+# left to shed" are different answers, and silence used to be the only way it said either.
+gc_report(){   # <days> <dry> — human on stderr
+  local days="$1" dry="${2:-}" it
+  for it in "${STRIP_ITEMS[@]}"; do
+    echo "  ${it%%$'\t'*}  $(human_kb ${it##*$'\t'})  ${${it#*$'\t'}%%$'\t'*}" >&2
+  done
+  if (( STRIP_TOTAL_KB > 0 )); then
+    echo "stack-open: $(human_kb $STRIP_TOTAL_KB) ${dry:+would be }reclaimed from ${_common_dir:h:t} worktrees idle > ${days}d" >&2
+  elif (( STRIP_IDLE == 0 )); then
+    echo "stack-open: no ${_common_dir:h:t} worktrees idle > ${days}d — nothing to reclaim" >&2
+  else
+    echo "stack-open: ${STRIP_IDLE} ${_common_dir:h:t} worktrees idle > ${days}d, nothing left to shed" >&2
+  fi
+}
+gc_json(){   # <days> <dry> — machine on stdout, the whole answer in one object
+  local days="$1" dry="${2:-}" it first=1 jdry=false
+  [[ -n "$dry" ]] && jdry=true
+  printf '{"repo":"%s","idle_days":%s,"dry_run":%s,"idle_worktrees":%s,"reclaimable_kb":%s,"items":[' \
+    "${_common_dir:h:t}" "$days" "$jdry" "$STRIP_IDLE" "$STRIP_TOTAL_KB"
+  for it in "${STRIP_ITEMS[@]}"; do
+    (( first )) || printf ','; first=0
+    printf '{"worktree":"%s","what":"%s","kb":%s}' \
+      "${it%%$'\t'*}" "${${it#*$'\t'}%%$'\t'*}" "${it##*$'\t'}"
+  done
+  printf '],"scratch_kb":%s,"worktrees":%s}\n' \
+    "$(du -sk "$SCRATCH" 2>/dev/null | cut -f1 || print 0)" \
+    "$(ls -d "$SCRATCH"/*/ 2>/dev/null | wc -l | tr -d ' ')"
 }
 
 prune_old(){ [[ -d "$SCRATCH" ]] || return 0
@@ -471,10 +499,20 @@ case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
   --gc)      # the whole expiry ladder, out loud: shed weight at <days>, remove the long-idle
     gcdays="${2:-1}"; [[ "$gcdays" == --dry-run ]] && gcdays=1
-    gcdry=""; [[ "${2:-}" == --dry-run || "${3:-}" == --dry-run ]] && gcdry=1
+    gcdry=""; gcjson=""
+    for a in "$@"; do
+      [[ "$a" == --dry-run ]] && gcdry=1
+      [[ "$a" == --json ]] && gcjson=1
+    done
+    [[ "$gcdays" == --* ]] && gcdays=1
     strip_fat "$gcdays" "$gcdry"
     [[ -n "$gcdry" ]] || prune_old 3
-    echo "scratch now $(du -sh "$SCRATCH" 2>/dev/null | cut -f1) in $(ls -d "$SCRATCH"/*/ 2>/dev/null | wc -l | tr -d ' ') worktrees"
+    if [[ -n "$gcjson" ]]; then
+      gc_json "$gcdays" "$gcdry"
+    else
+      gc_report "$gcdays" "$gcdry"
+      echo "scratch now $(du -sh "$SCRATCH" 2>/dev/null | cut -f1) in $(ls -d "$SCRATCH"/*/ 2>/dev/null | wc -l | tr -d ' ') worktrees"
+    fi
     exit 0;;
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
