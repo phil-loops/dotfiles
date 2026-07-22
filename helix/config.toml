@@ -48,6 +48,8 @@ v = [":write", ":sh $HOME/.dotfiles/scripts/hx-wc %{buffer_name}"]
 V = [":write", ":sh $HOME/.dotfiles/scripts/hx-ship %{buffer_name}"]
 # watch this file's tests in a tmux pane below, re-running on every save
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
+# the cheatsheet of every key we've bound ourselves — the one place :sh's popup is the point
+K = ":sh $HOME/.dotfiles/scripts/keys"
 
 # space-x = the destructive menu, deliberately two keys. Helix has no file-delete command of its
 # own (:delete/:remove/:file complete to nothing), and hx-rm makes the deletion recoverable —
