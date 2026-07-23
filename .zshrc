@@ -414,3 +414,7 @@ hold() {
         echo "🍺 Usage: hold my beer"
     fi
 }
+
+# macOS silently unloads launchd agents (2026-07-12, 2026-07-23) — self-heal on
+# terminal open, at most hourly, off the startup path
+( ~/.dotfiles/scripts/agents-ensure --throttled >/dev/null 2>&1 & ) 2>/dev/null

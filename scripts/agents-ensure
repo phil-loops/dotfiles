@@ -1,0 +1,30 @@
+#!/bin/zsh
+# agents-ensure — re-bootstrap com.philbrockman.* launchd agents that macOS silently
+# unloaded (all four dropped 2026-07-12 and again 2026-07-23, real-file plists included;
+# cause is BTM's, recovery is ours). Notifies per resurrection — a quiet self-heal would
+# hide that the flakiness is worsening.
+#
+#   agents-ensure               check every installed agent, resurrect the unloaded
+#   agents-ensure --throttled   exit unless >1h since the last pass (the zshrc hook)
+set -uo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+STAMP=~/.cache/agents-ensure.last
+if [[ "${1:-}" == "--throttled" ]]; then
+  (( $(date +%s) - $(cat "$STAMP" 2>/dev/null || echo 0) < 3600 )) && exit 0
+fi
+mkdir -p ~/.cache
+date +%s > "$STAMP"
+
+for plist in ~/Library/LaunchAgents/com.philbrockman.*.plist(N); do
+  label="${plist:t:r}"
+  launchctl print "gui/$UID/$label" >/dev/null 2>&1 && continue
+  if launchctl bootstrap "gui/$UID" "$plist" 2>/dev/null; then
+    msg="$label was unloaded — resurrected"
+  else
+    msg="$label is unloaded and bootstrap FAILED — check $plist"
+  fi
+  print -r -- "agents-ensure: $msg"
+  command -v terminal-notifier >/dev/null 2>&1 &&
+    terminal-notifier -title agents-ensure -message "$msg" -sound Basso </dev/null >/dev/null 2>&1
+done
