@@ -340,3 +340,41 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
    so mouse drags stay free for sweep-to-chat selection) ──────────────── */
 .d2h-code-side-linenumber:hover, .d2h-code-linenumber:hover { color: var(--ink); background: var(--vellum-edge); }
 
+
+/* ── the wiki: prose measured for reading, citations that look pressable ──────────────── */
+/* The app is mono everywhere because it is SCANNED — diffs, branch names, counts. The wiki is
+   the one surface that is READ, so its body takes the display serif already in the palette;
+   code and citations stay mono, which is what makes them read as code. */
+.wiki-prose {
+  /* Georgia, not the display face: the installed Fraunces is an italic cut, and running
+     copy has to sit upright. Fraunces keeps the headings, where the slant IS the house look. */
+  font-family: Georgia, "Iowan Old Style", serif;
+  font-style: normal;
+  font-size: 15.5px; line-height: 1.72; color: var(--ink);
+}
+.wiki-prose em { font-style: italic; }
+.wiki-prose > * + * { margin-top: 0.9em; }
+.wiki-prose p { margin: 0; }
+.wiki-prose strong { color: var(--gold-leaf); font-weight: 600; }
+.wiki-prose ul, .wiki-prose ol { margin: 0; padding-left: 1.3em; }
+.wiki-prose li + li { margin-top: 0.35em; }
+.wiki-prose code {
+  font-family: var(--font-mono); font-size: 0.87em;
+  background: var(--vellum-edge); padding: 0.1em 0.35em; border-radius: 3px;
+}
+.wiki-prose pre, .cp-pre {
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.55;
+  background: var(--diff-bg); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 12px 14px; overflow-x: auto;   /* wide code scrolls in its own box, never the page */
+}
+.wiki-prose pre code, .cp-pre code { background: none; padding: 0; font-size: inherit; }
+
+/* A citation is the load-bearing element of a map page — it reads as text until you want it. */
+.wiki-cite {
+  font: inherit; color: var(--gold-leaf); cursor: pointer;
+  border-bottom: 1px dotted var(--gold-deep); padding: 0;
+}
+.wiki-cite:hover { border-bottom-style: solid; }
+.wiki-cite:focus-visible, .wiki-link:focus-visible { outline: 1px solid var(--gold-leaf); outline-offset: 2px; }
+.wiki-link { color: var(--patina); text-decoration: none; border-bottom: 1px solid transparent; }
+.wiki-link:hover { border-bottom-color: var(--patina); }

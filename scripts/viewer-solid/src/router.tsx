@@ -11,6 +11,7 @@
 //   /forests/<project>[/<branch...>]     → a forest: project + active node (a branch), both in path
 //   /branch/<branch...>                  → a pinned standalone (single node)
 //   /review/<pr>                         → an imported review PR (single node)
+//   /wiki[/<slug>]                       → the repo wiki: durable prose, no node
 //
 // A forest project tag is a single segment; the active node (a branch) is the path tail, slashes
 // and all. Putting both in the path means the URL fully identifies the view — no ?node= query.
@@ -24,7 +25,8 @@ export type ViewerLocation =
   | { kind: "home"; tab: HomeTab }
   | { kind: "forest"; name: string; node?: string; repo?: string }
   | { kind: "standalone"; branch: string; node?: string }
-  | { kind: "review"; pr: number; node?: string };
+  | { kind: "review"; pr: number; node?: string }
+  | { kind: "wiki"; slug?: string };
 
 const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(s);
 
@@ -65,6 +67,9 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   if (isHomeTab(head)) {
     return { kind: "home", tab: head };
   }
+  if (head === "wiki") {
+    return { kind: "wiki", slug: rest.length ? rest.join("/") : undefined };
+  }
   if (head === "branch" && rest.length) {
     return { kind: "standalone", branch: rest.join("/") };
   }
@@ -89,6 +94,8 @@ export function buildPath(loc: ViewerLocation): string {
       return "/branch/" + loc.branch;
     case "review":
       return "/review/" + loc.pr;
+    case "wiki":
+      return "/wiki" + (loc.slug ? "/" + loc.slug : "");
   }
 }
 
@@ -105,12 +112,29 @@ export function forestKey(loc: ViewerLocation): string {
       return loc.branch;
     case "review":
       return "review/pr-" + loc.pr;
+    case "wiki":
+      return "";
+  }
+}
+
+// The active node, for the kinds that have one. A switch rather than a `kind !== "home"` test,
+// so adding a destination is a compile error here instead of a wrong read at two call sites.
+export function nodeOf(loc: ViewerLocation): string | undefined {
+  switch (loc.kind) {
+    case "home":
+    case "wiki":
+      return undefined;
+    case "forest":
+    case "standalone":
+    case "review":
+      return loc.node;
   }
 }
 
 // Re-target the active node within the current location (the j/k spine walk, click-to-open).
 export function withNode(loc: ViewerLocation, node: string): ViewerLocation {
-  return loc.kind === "home" ? loc : { ...loc, node };
+  // home and wiki have no node to re-target; adding one would build an unroutable path.
+  return loc.kind === "home" || loc.kind === "wiki" ? loc : { ...loc, node };
 }
 
 // The repo a location belongs to — only a forest can live in a non-loops repo; everything
