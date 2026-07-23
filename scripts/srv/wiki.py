@@ -142,6 +142,15 @@ def pages(req, u):
         found, problems = _load()
     except OSError as exc:
         return req._send(200, json.dumps({"err": str(exc)}))
+    # An empty wiki has two very different causes and they must not look alike: a repo with
+    # no content yet, versus a lookup pointing somewhere that doesn't exist. The second is a
+    # bug (it shipped once — the repo was keyed on the launch directory), and it presented as
+    # a serenely empty page. Name the searched paths so the UI can say which it is.
+    searched = [os.path.join(WIKI_ROOT, _repo_name())]
+    legacy = LEGACY.get(_repo_name())
+    if legacy:
+        searched.append(legacy)
+
     project = parse_qs(u.query).get("project", [""])[0]
     if project:
         found = [p for p in found if p["project"] == project]
@@ -150,6 +159,8 @@ def pages(req, u):
         "ref": mail_map.REF,
         "repo": _repo_name(),
         "problems": problems,
+        "searched": searched,
+        "roots": _page_dirs(),   # the subset of `searched` that actually exists
     }))
 
 
