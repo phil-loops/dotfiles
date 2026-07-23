@@ -535,7 +535,7 @@ def prep_push(req, raw):
         # fold the forest section into the body the editor opens with, so the
         # "where this sits in the merge order" line is visible and editable up front
         # instead of being appended unseen at save — what you see is what gets committed.
-        v["commit"] = {**v["commit"], "body": _with_forest(v["commit"]["body"], branch)}
+        v["commit"] = {**v["commit"], "body": _with_forest(v["commit"]["body"], branch, published=published)}
     return req._send(200, json.dumps({
         "ok": True, "routed": routed, "outgoing": v["outgoing"],
         "commit": v["commit"], "wardsOk": v["ok"], "reasons": v["reasons"],
@@ -552,15 +552,19 @@ def _forest_section(branch):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def _with_forest(body, branch):
-    section = _forest_section(branch)
-    if not section:
+def _with_forest(body, branch, published=False):
+    # once the PR is open its body owns the merge-order story — strip the section from a
+    # rework commit instead of re-baking branch info that goes stale the moment a base lands
+    section = "" if published else _forest_section(branch)
+    if not section and not published:
         return body
     # regenerate: the generated block runs from its opening line to the end of the body, so cut
     # there — dropping only that one line left its steps behind as prose and the editor doubled them.
     lines = body.split("-- forest --")[0].splitlines()
     cut = next((i for i, l in enumerate(lines) if l.startswith("Part of ")), len(lines))
     prose = "\n".join(lines[:cut]).strip()
+    if not section:
+        return prose
     return f"{prose}\n\n{section}" if prose else section
 
 
@@ -586,7 +590,8 @@ def draft_message(req, raw):
     return req._send(200, json.dumps({
         "ok": True,
         "subject": lines[0].strip() if lines else "",
-        "body": _with_forest("\n".join(lines[1:]).strip(), branch),
+        "body": _with_forest("\n".join(lines[1:]).strip(), branch,
+                             published=branch in sync._open_pr_heads()),
     }))
 
 
