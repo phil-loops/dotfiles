@@ -1,37 +1,80 @@
 #!/bin/zsh
-# stack-pr-body — a GitHub PR description that frames ONE branch in its forest. Paste it into the PR
-# above the Traffic Cop block: this repo has a PR template, so GitHub prefills from the TEMPLATE and
-# nothing here ever arrives by commit-message prefill.
+# stack-pr-body — furniture for a GitHub PR body: the branch's one-line purpose plus its
+# merge-order block, shaped to sit UNDER hand-written prose (and above the Traffic Cop template)
+# rather than replace it. The default output is deliberately an appendix, not a document — the
+# PR author's own words go on top; this block guarantees the branch's rationale and forest
+# position ship with them.
 #
-# NOTHING here is drafted on the fly. The relational sections come from stack_facts.py (which owns
-# every fact — position, plan, edges, PR numbers, the map) and the change description comes from
-# stack-summary (stored on the branch, keyed by a rebase-stable patch-id). So regenerating a body
-# costs nothing, reads the same every time, and cannot disagree with the commit body or the map.
+# Everything comes from stack_facts.py (which owns every fact — position, plan, edges, PR
+# numbers) so the default costs nothing, reads the same every time, and cannot disagree with the
+# commit body or the map. Only --full touches stack-summary, which may spend a model call when
+# the stored summary is stale.
 #
-#   stack-pr-body <branch>          → GitHub-flavored markdown PR body on stdout
-#   stack-pr-body <branch> --link   → also link the fork's assembled integration (opt-in: that link
-#                                     is the one fact the forest cannot vouch for itself)
+#   stack-pr-body <branch>           → purpose + merge-order furniture on stdout
+#   stack-pr-body <branch> --full    → the full document (title, where-it-fits, stored change
+#                                      summary, merge order, mermaid map)
+#   stack-pr-body <branch> --link    → also link the fork's assembled integration (opt-in: that
+#                                      link is the one fact the forest cannot vouch for itself)
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 here="${0:A:h}"
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--link]" >&2; exit 2; }
+[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--full] [--link]" >&2; exit 2; }
+shift
+
+full=0 link=0
+for arg in "$@"; do
+  case "$arg" in
+    --full) full=1 ;;
+    --link) link=1 ;;
+    *) echo "unknown flag: $arg" >&2; exit 2 ;;
+  esac
+done
 
 facts=$(python3 "$here/stack_facts.py" facts "$branch")
-change=$("$here/stack-summary" "$branch" 2>/dev/null || true)
-[[ -n "$change" ]] || change="_(no summary — run \`stack-summary ${branch}\`)_"
 
-FACTS="$facts" CHANGE="$change" python3 - <<'PY'
+if (( full )); then
+  change=$("$here/stack-summary" "$branch" 2>/dev/null || true)
+  [[ -n "$change" ]] || change="_(no summary — run \`stack-summary ${branch}\`)_"
+else
+  change=""
+fi
+
+FACTS="$facts" CHANGE="$change" FULL="$full" python3 - <<'PY'
 import json, os
 
 f = json.loads(os.environ["FACTS"])
+full = os.environ["FULL"] == "1"
 out = []
 
 def step_ref(s):
     if not s.get("pr"):
         return ""
     return " (#%s%s)" % (s["pr"], ", merged" if s.get("state") == "merged" else "")
+
+if not full:
+    out.append(f["purpose"] or f["job"])
+    if f["project"] and len(f["plan"]) > 1:
+        out.append("\nPart of a stack, in merge order:")
+        for s in f["plan"]:
+            if s.get("me"):
+                out.append("  %d. [this branch]" % s["n"])
+                continue
+            ref = "#%s " % s["pr"] if s.get("pr") else ""
+            merged = " (merged)" if s.get("state") == "merged" else ""
+            out.append("  %d. %s%s%s" % (s["n"], ref, s["job"], merged))
+        if f["requires"]:
+            step_by_branch = {s.get("branch"): s["n"] for s in f["plan"]}
+            def req_ref(r):
+                if r.get("pr"):
+                    return "#%s" % r["pr"]
+                n = step_by_branch.get(r.get("branch"))
+                return "step %d" % n if n else r["job"]
+            out.append("\nPulls in (fan-in — merges first): " + ", ".join(
+                req_ref(r) for r in f["requires"]))
+    print("\n".join(out))
+    raise SystemExit
 
 if f["project"] and f["position"]:
     out.append("Title: %s/%s — %s\n\n---\n" % (f["project"], f["position"], f["job"]))
@@ -68,10 +111,12 @@ if f["project"]:
 print("\n".join(out))
 PY
 
-if [[ "${2:-}" == "--link" ]]; then
+if (( link )); then
   project=$(git config "branch.${branch}.stack-project" 2>/dev/null || git config "stack-branch.${branch}.project" 2>/dev/null || true)
   url=$("$here/stack-integ-publish" --url "$project" 2>/dev/null || true)
   [[ -n "$url" ]] && printf '\nWhole feature assembled: %s\n' "$url"
 fi
 
-printf '\n%s\n' "$(python3 "$here/stack_facts.py" mermaid "$branch" --fence)"
+if (( full )); then
+  printf '\n%s\n' "$(python3 "$here/stack_facts.py" mermaid "$branch" --fence)"
+fi

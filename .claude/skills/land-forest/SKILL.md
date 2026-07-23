@@ -60,9 +60,12 @@ Per CLAUDE.md *Restacking — first principles*, in a worktree:
 
 ### 3 · Draft the PR bodies
 
-`stack-pr-body <branch>` per PR-able branch, in merge order — forest-framed, plain register (what +
-where-it-fits + the change + sequencing, the Sequencing section following the canonical order). Hand
-the user paste-ready bodies; skip the convergence-only ★ node (no PR).
+`stack-pr-body <branch>` per PR-able branch, in merge order. The default output is furniture, not a
+document: the branch's one-line purpose plus the merge-order block, shaped to sit UNDER the user's
+own prose (and above the Traffic Cop template) — the user's voice goes on top, the furniture
+guarantees the rationale and forest position ship with it. `--full` still emits the old complete
+document (where-it-fits + stored change summary + mermaid) when a body needs to stand alone. Hand
+the user paste-ready blocks; skip the convergence-only ★ node (no PR).
 
 ### 4 · Hand off — the user pushes + opens PRs
 
