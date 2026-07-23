@@ -17,4 +17,6 @@ There is a third consequence with no PR behind it. `lib/storage.ts` has no list-
 
 Which means deletes that already ran recorded neither prefix nor count. **Those audiences are not restorable through this path** — the same only-works-going-forward property the contact-level snapshot work has.
 
-Of the six branches, five hold. Only the engine needs rewriting, and the paged format makes it simpler: the page becomes the batch. A seventh branch belongs underneath — see [[restore-format]].
+Both were confirmed by restacking the forest onto today's main: the whole thing compiles except one line, the engine's now-nonexistent index job. Fixed there.
+
+The page does **not** become the batch, though. Postgres binds at most 65535 parameters and the revive sends ten per row, so a 20k page overflows it — the page is the unit of resumption, and the write still goes in sub-batches. A seventh branch belongs underneath — see [[restore-format]].
