@@ -37,7 +37,7 @@ type Service = { name: string; status: string; up: boolean; state?: string }; //
 // `compose up` still running; err = that run's last line after it failed.
 type Substrate = {
   project: string; dir?: string; home?: boolean; shared: boolean;
-  starting?: boolean; err?: string | null; up: number; total: number; services: Service[];
+  starting?: boolean; err?: string | null; db?: string | null; up: number; total: number; services: Service[];
 };
 type PreviewsResp = { ok: boolean; previews: Preview[]; substrate: Substrate };
 
@@ -228,6 +228,12 @@ export function ServersDrawer() {
           <Show when={sub()?.home === false && sub()?.dir}>
             <p class="mt-[7px] text-[10.5px] leading-[1.5] text-ember opacity-85">
               running from {shortDir(sub()!.dir!)} — its own Postgres/ClickHouse volumes, not main's
+            </p>
+          </Show>
+          {/* a preview probes HEALTHY against a database with no tables — say so before its first query does */}
+          <Show when={sub()?.db === "empty"}>
+            <p class="mt-[7px] text-[11px] leading-[1.5] text-del">
+              this Postgres has no app schema — every query will fail until <code class="text-ink-dim">task dev:migrate</code> runs
             </p>
           </Show>
           <p class="mt-[7px] mb-[9px] text-[11px] leading-[1.5] text-ember opacity-85">One stack for everything — every preview and :3000 read/write the same DB. Not isolated; concurrent seeds/migrations collide.</p>

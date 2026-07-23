@@ -174,6 +174,8 @@ _STACK_LOG = "/tmp/loops-stack-up.log"
 _stack_up = None   # the detached `docker compose up -d` a start click launched
 _git_dirs = {}
 _svc_cache = {}
+_db_cache = {"at": 0.0, "container": None, "val": None}
+_DB_TTL = 30.0
 
 
 def _git_common(dirp):
@@ -204,6 +206,28 @@ def _default_services(dirp):
             names = None
         _svc_cache.update(key=key, names=names)
     return _svc_cache.get("names")
+
+
+def _db_state(services):
+    # "up" says the port answers; it does NOT say the database is the one you think. A stack from
+    # another checkout serves empty volumes, and a preview on it still probes HEALTHY while every
+    # query dies on a missing table — so ask Postgres whether the app's schema is even there.
+    psql = next((s for s in services if s.get("svc") == "psql" and s["up"]), None)
+    if psql is None:
+        return None
+    now = time.monotonic()
+    if _db_cache["container"] == psql["name"] and now - _db_cache["at"] < _DB_TTL:
+        return _db_cache["val"]
+    try:
+        p = subprocess.run(
+            ["docker", "exec", psql["name"], "psql", "-U", "postgres", "-d", "postgres",
+             "-tAc", 'select to_regclass(\'public."User"\') is not null'],
+            capture_output=True, text=True, timeout=8)
+        val = "migrated" if p.stdout.strip() == "t" else "empty"
+    except Exception:
+        val = None
+    _db_cache.update(container=psql["name"], at=now, val=val)
+    return val
 
 
 def _stack_err():
@@ -258,6 +282,7 @@ def _substrate(main_wt):
         "home": live["dir"] == main_wt,
         "starting": _stack_up is not None and _stack_up.poll() is None,
         "err": _stack_err(),
+        "db": _db_state(services),
         "up": sum(1 for s in services if s["up"]),
         "total": sum(1 for s in services if s["state"] != "done"),
         "services": services,
