@@ -25,7 +25,11 @@ type WikiPage = {
   words: number;
 };
 
-type PagesReply = { pages: WikiPage[]; ref: string; repo: string; problems: string[]; err?: string };
+type PagesReply = {
+  pages: WikiPage[]; ref: string; repo: string; problems: string[]; err?: string;
+  searched?: string[]; // where pages were looked for
+  roots?: string[]; // which of those exist — none, with pages empty, is a misconfiguration
+};
 type SrcReply = { path: string; start: number; end: number; from: number; text: string; kind: string; ref: string; err?: string };
 
 const CITE = /\[([^\]]+)\]\(src:([^)\s]+)\)/g;
@@ -122,6 +126,26 @@ export function Wiki() {
         </Show>
         <Show when={pages()?.err}>
           <div class="text-del text-sm font-mono">{pages()!.err}</div>
+        </Show>
+        {/* An empty wiki must never render as a calm blank page — say whether this repo
+            simply has no pages yet, or whether the lookup is pointing at nothing. */}
+        <Show when={pages() && !pages()!.err && pages()!.pages.length === 0}>
+          <div class="border border-del rounded-sm p-4">
+            <div class="font-display text-[17px] text-ink mb-2">
+              No pages for <span class="font-mono text-gold-leaf">{pages()!.repo}</span>
+            </div>
+            <Show
+              when={(pages()!.roots ?? []).length === 0}
+              fallback={<p class="text-[14px] text-ink-dim m-0">Add a markdown file to {pages()!.roots?.[0]}</p>}
+            >
+              <p class="text-[14px] text-ink-dim m-0">
+                None of these directories exist — the wiki is looking in the wrong place:
+              </p>
+              <ul class="mt-2 mb-0 font-mono text-[12px] text-del">
+                <For each={pages()!.searched ?? []}>{(d) => <li>{d}</li>}</For>
+              </ul>
+            </Show>
+          </div>
         </Show>
         <Show when={current()}>
           {(page) => (
