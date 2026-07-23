@@ -12,6 +12,7 @@ import { Activity } from "./Activity";
 import { ServersDrawer } from "./ServersDrawer";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
+import { Wiki } from "./Wiki";
 import { ForestOverview } from "./ForestOverview";
 import { NavRail } from "./NavRail";
 import { trackRecent } from "./recents";
@@ -39,6 +40,9 @@ function Routes() {
     <Switch>
       <Match when={location().kind === "home"}>
         <Home />
+      </Match>
+      <Match when={location().kind === "wiki"}>
+        <Wiki />
       </Match>
       <Match when={isForestOverview(location())}>
         <ForestOverview />
@@ -107,7 +111,7 @@ function Layout(props: { children?: JSX.Element }) {
   // home and the forest overview keep it.
   const showRail = () => {
     const l = loc();
-    return l.kind === "home" || isForestOverview(l);
+    return l.kind === "home" || l.kind === "wiki" || isForestOverview(l);
   };
   return (
     <>

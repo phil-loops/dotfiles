@@ -31,8 +31,11 @@ const RECENT_LBL = `${THUMB_LBL_BASE} text-[12px] max-h-[140px] max-[640px]:max-
 
 // the tile a location belongs under: reviews are Work-tab things, everything branch-shaped
 // lives under Forests.
-const tileOf = (l: ViewerLocation): HomeTab =>
-  l.kind === "home" ? l.tab : l.kind === "review" ? "work" : "forests";
+const tileOf = (l: ViewerLocation): HomeTab | null =>
+  l.kind === "wiki" ? null
+    : l.kind === "home" ? l.tab
+    : l.kind === "review" ? "work"
+    : "forests";
 
 export function NavRail() {
   const { location, navigate } = useViewerLocation();
@@ -87,6 +90,14 @@ export function NavRail() {
           </button>
         )}
       </For>
+      <button
+        class={`${THUMB} ${location().kind === "wiki" ? THUMB_ON : THUMB_OFF}`}
+        classList={{ active: location().kind === "wiki" }}
+        title="wiki — how this repo works, and what we plan to build"
+        onClick={() => navigate({ kind: "wiki" })}
+      >
+        <span class={THUMB_LBL}>Wiki</span>
+      </button>
       <Show when={context() || others().length}>
         <div class="rail-sep mx-[18px] my-[6px] h-px flex-none bg-rule max-[640px]:hidden" />
       </Show>

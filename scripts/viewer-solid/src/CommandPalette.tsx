@@ -3,7 +3,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { track } from "./track";
-import { useViewerLocation, forestKey, withNode, forestRepo } from "./router";
+import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
 import { setOverviewView } from "./overviewView";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
@@ -28,7 +28,7 @@ export default function CommandPalette() {
   // forestKey = the server's branch/project name for the current location; node = active branch.
   const ctx = createMemo(() => {
     const l = location();
-    return { project: forestKey(l), node: l.kind === "home" ? "" : l.node || "" };
+    return { project: forestKey(l), node: nodeOf(l) || "" };
   });
   let inputRef: HTMLInputElement | undefined;
 

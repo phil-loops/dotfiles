@@ -21,6 +21,7 @@ ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
 from srv import ship    # own line: same reason
 from srv import prep    # own line: same reason
+from srv import wiki    # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -239,8 +240,8 @@ class H(BaseHTTPRequestHandler):
             srvctx.clear_repo()
 
     def _dispatch_get(self, u):
-        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching")
-                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/"))):
+        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki")
+                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/"))):
             # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
             # every client route: path-based routing (History API) means a deep-link/refresh to
             # /forest/x hits the server, which must return index.html (SPA fallback) so the client
@@ -363,6 +364,10 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
         elif u.path == "/branches":       return picker.branches(self)
         elif u.path == "/forest-branches": return picker.forest_branches(self)
+        # Hyphenated, not /wiki/… — /wiki/<slug> is a client route served index.html above.
+        elif u.path == "/wiki-pages":     return wiki.pages(self, u)   # every page for this repo, nav-ordered
+        elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
+        elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template

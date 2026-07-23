@@ -1,6 +1,6 @@
 import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
 import { useQueryClient, createQuery, keepPreviousData } from "@tanstack/solid-query";
-import { useViewerLocation, forestKey, withNode, forestRepo } from "./router";
+import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, isBlessed, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
@@ -31,10 +31,7 @@ export function NodeDetail() {
   const { location, navigate } = useViewerLocation();
   const project = () => forestKey(location());
   const repoKey = () => forestRepo(location()) ?? "loops"; // segregates query caches per repo
-  const nodeParam = (): string | undefined => {
-    const l = location();
-    return l.kind === "home" ? undefined : l.node;
-  };
+  const nodeParam = (): string | undefined => nodeOf(location());
 
   const model = createQuery(() => ({
     queryKey: ["model", repoKey(), project()],
