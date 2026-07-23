@@ -35,6 +35,7 @@ interface CheckoutResult {
   freed?: string; // set on ok: a clean, session-less worktree the server auto-freed en route
   dirty?: number; // set on 409: uncommitted paths in the holding worktree
   session?: { pane?: string; idleSeconds?: number } | null; // set on 409: live Claude session in it
+  liveBlocked?: boolean; // set on 409: the hold is a live session — force won't free it, only evictLive
 }
 
 const shortWt = (p: string) => p.split("/").pop() || p;
@@ -132,6 +133,9 @@ export function NodeActions(props: {
   // why the server refused to auto-free it — a clean, session-less hold never gets here
   // (the server frees those itself); this names the dirt or the live session instead.
   const [heldWhy, setHeldWhy] = createSignal<string>("");
+  // the hold is a live session: the server ignores force for those (only evictLive overrides),
+  // so the free button must escalate — and say so.
+  const [heldLive, setHeldLive] = createSignal(false);
   // squashing rewrites history → two-click arm (shared useArm) before it fires.
   const { armed, trigger } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
@@ -164,16 +168,18 @@ export function NodeActions(props: {
 
   const checkout = createMutation(() => ({
     mutationFn: (force: boolean) =>
-      post<CheckoutResult>("/checkout", { branch: props.branch, force }),
+      post<CheckoutResult>("/checkout", { branch: props.branch, force, evictLive: force && heldLive() }),
     onSuccess: (r) => {
       if (r.ok) {
         setHeldAt(null);
+        setHeldLive(false);
         setOpen(false);
         setDone(`✓ checked out in ${r.worktree || "your main checkout"}${r.freed ? ` (freed ${shortWt(r.freed)} — clean, no live session)` : ""}`);
         qc.invalidateQueries({ queryKey: ["head"] });
       } else if (r.worktree) {
         setHeldFor("checkout");
         setHeldWhy(holdReason(r));
+        setHeldLive(!!r.liveBlocked);
         setHeldAt(r.worktree); // held elsewhere → offer to free it
       } else {
         setDone(`✗ ${r.err || "checkout failed"}`);
@@ -351,10 +357,11 @@ export function NodeActions(props: {
         stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
       }
       stepSet("checkout", "run");
-      const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force });
+      const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force, evictLive: force && heldLive() });
       if (!co.ok) {
         if (co.worktree) {
           setHeldWhy(holdReason(co));
+          setHeldLive(!!co.liveBlocked);
           stepSet("checkout", "fail", `held by ${co.worktree}${holdReason(co) ? ` (${holdReason(co)})` : ""} — free it below to continue`);
           return { phase: "held" as const, held: co.worktree };
         }
@@ -903,7 +910,7 @@ export function NodeActions(props: {
         <span class="nh-held inline-flex items-center gap-[8px] text-[12px] text-ink-faint">
           held in {heldAt()}{heldWhy() ? ` — ${heldWhy()}` : ""}
           <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={freeAndContinue}>
-            free &amp; {heldFor() === "omniSync" ? "sync" : "checkout"}
+            {heldLive() ? "evict live session" : "free"} &amp; {heldFor() === "omniSync" ? "sync" : "checkout"}
           </button>
           <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" onClick={() => setHeldAt(null)}>cancel</button>
         </span>
