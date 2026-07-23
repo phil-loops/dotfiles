@@ -316,7 +316,7 @@ def _serve_dir(req, dirp, extra=None):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "preview failed").strip()[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "preview failed").strip())[:400]}))
         return
     port = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
@@ -329,12 +329,12 @@ def start(req, raw):
     if not branch:
         req._send(400, json.dumps({"ok": False, "err": "no branch"}))
         return
-    # resolve (materialise) the branch's worktree — same synchronous path checkout.worktree opens
-    # in Finder, so a watched/PR branch checked out nowhere still gets a tree to run.
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--path", branch])
+    # resolve (materialise) the branch's worktree. --serve-path, not --path: a branch checked out
+    # in the primary tree must serve from a scratch worktree — loops-preview refuses MAIN.
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--serve-path", branch])
     dirp = (r.stdout or "").strip()
     if r.returncode != 0 or not dirp:
-        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a worktree").strip()}))
+        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (r.stderr or "could not resolve a worktree").strip())}))
         return
     _serve_dir(req, dirp)
 
@@ -381,10 +381,10 @@ def start_main(req, raw):
     # (caller's, default 3000) is taken when free; when something else squats it we fall back to a
     # free side port — loops-preview wipes .next before it binds, so never point it at a busy port.
     d = json.loads(raw or "{}")
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--path", "main"])
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--serve-path", "main"])
     dirp = (r.stdout or "").strip()
     if r.returncode != 0 or not dirp:
-        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a main worktree").strip()}))
+        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (r.stderr or "could not resolve a main worktree").strip())}))
         return
     for pv in _list_json(fresh=True):
         if pv.get("dir") == dirp and pv.get("state") != "orphaned" and str(pv.get("port", "")).isdigit():
@@ -400,7 +400,7 @@ def start_main(req, raw):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "launch failed").strip()[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "launch failed").strip())[:400]}))
         return
     port = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": dirp}))
@@ -422,7 +422,7 @@ def restart(req, raw):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": (p.stderr or p.stdout or "restart failed").strip()[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "restart failed").strip())[:400]}))
         return
     newport = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": newport, "url": "http://localhost:%d" % newport, "dir": dirp}))

@@ -50,8 +50,10 @@ existing_worktree(){   # echo the path of a real worktree holding <branch>, if a
   # Claude session scratchpads (/tmp/claude-*/…) are deleted when their session ends — opening
   # into one strands Helix buffers and space-t watchers on a vanished dir; prefer our own scratch.
   # `|| true`: awk exits at the match, so the producer dies on SIGPIPE (141) — pipefail+set -e would abort the caller's ex=$(...)
-  wt_list | awk -v ref="refs/heads/$1" '
-    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref && p !~ /^\/(private\/)?tmp\/claude-/){print p; exit}}' || true
+  # STACK_OPEN_SKIP_PRIMARY: pretend the primary checkout doesn't hold the branch — for callers
+  # (loops-preview via --serve-path) that must never run a second server out of the main tree.
+  wt_list | awk -v ref="refs/heads/$1" -v skip="${STACK_OPEN_SKIP_PRIMARY:+$(main_checkout)}" '
+    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref && p != skip && p !~ /^\/(private\/)?tmp\/claude-/){print p; exit}}' || true
 }
 install_followup_hook(){   # idempotently install the detached-HEAD → branch-follow post-commit hook
   # Scratch worktrees are DETACHED so they never lock the branch (you can still
@@ -533,6 +535,8 @@ case "${1:-}" in
     exit 0;;
   --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
+  --serve-path) STACK_OPEN_SKIP_PRIMARY=1 ensure_worktree "${2:?branch}"; exit 0;;   # --path, but never
+             # the primary checkout — a dir loops-preview may serve (it refuses MAIN)
   --review)  # open <branch> for whole-PR review: Helix → its changed files as buffers; nvim → the gm Diffview
     rbranch="${2:?usage: stack-open --review <branch>}"
     EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
