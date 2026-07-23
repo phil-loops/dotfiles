@@ -2,6 +2,7 @@
 #   GET  /sync?branch=X    one branch's staleness vs origin/main
 #   GET  /syncs?branch=…   batch staleness for many branches in one round-trip
 #   POST /sync {branch}    rebase an unpublished root onto fresh origin/main
+import hashlib
 import json
 import os
 import re
@@ -314,6 +315,16 @@ def _trunk(main):
     return main
 
 
+_FRESH = {"okAt": 0.0, "failing": False}   # last successful trunk fetch + whether the latest attempt failed
+
+
+def _fetch_trunk(main):
+    ok = ctx.run(["git", "fetch", "origin", main]).returncode == 0
+    if ok:
+        _FRESH["okAt"] = time.time()
+    _FRESH["failing"] = not ok
+
+
 def _freshen_trunk(main):
     # Keep origin/<main> loosely fresh so a PR that merged upstream surfaces as a ghost on
     # a plain page load, without a manual "↻ check origin". Throttled + backgrounded: at
@@ -325,9 +336,50 @@ def _freshen_trunk(main):
         if now - _TRUNK_FETCH_AT < 45:
             return
         _TRUNK_FETCH_AT = now
-    threading.Thread(
-        target=lambda: ctx.run(["git", "fetch", "origin", main]), daemon=True
-    ).start()
+    threading.Thread(target=_fetch_trunk, args=(main,), daemon=True).start()
+
+
+_PULSE_FRESHEN_AT = [0.0]
+
+
+def pulse_freshen():
+    # Remote-world refresh while someone is watching: the server pulse (which only runs with
+    # an open /events stream) calls this every tick; at most one freshen per 90s. An open tab
+    # converges on a merge without any client polling — prwatch's poke is an accelerant, not
+    # a dependency (2026-07-23: sweep dead → merged branch rendered live indefinitely).
+    now = time.time()
+    if now - _PULSE_FRESHEN_AT[0] < 90:
+        return
+    _PULSE_FRESHEN_AT[0] = now
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    global _TRUNK_FETCH_AT
+    with _TRUNK_FETCH_LOCK:
+        _TRUNK_FETCH_AT = now
+    threading.Thread(target=_fetch_trunk, args=(main,), daemon=True).start()
+    _pr_state_map()
+
+
+def world_sig():
+    # Fingerprint of the remote world: origin/<main> tip + the cached PR states + fetch
+    # health. The pulse folds this in beside model_sig, so a trunk move or a PR state flip
+    # pushes an SSE update to open tabs — model_sig itself must NOT include these (it keys
+    # the /model cache, and remote drift shouldn't rebuild the model).
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
+    tip = ctx.run(["git", "rev-parse", "-q", "--verify", f"origin/{main}"]).stdout.strip()
+    with _PR_STATE_LOCK:
+        data = _pr_state_ent(ctx.repo_cwd())["data"] or {}
+        states = sorted(
+            (b, p.get("state") or "", p.get("review") or "", bool(p.get("draft")))
+            for b, p in data.items()
+        )
+    return hashlib.sha1(
+        json.dumps([tip, states, _FRESH["failing"]], default=str).encode()
+    ).hexdigest()
+
+
+def fresh_state():
+    # (failing, seconds since the last successful trunk fetch; -1 = never fetched)
+    return _FRESH["failing"], (time.time() - _FRESH["okAt"] if _FRESH["okAt"] else -1)
 
 
 def _upstream_state(branch, main):
@@ -452,7 +504,7 @@ def pr_poke(req, raw):
     global _TRUNK_FETCH_AT
     with _TRUNK_FETCH_LOCK:
         _TRUNK_FETCH_AT = time.time()
-    ctx.run(["git", "fetch", "origin", main])
+    _fetch_trunk(main)
     _refresh_pr_state()
     req._send(200, json.dumps({"ok": True}))
 

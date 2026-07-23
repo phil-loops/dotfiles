@@ -148,11 +148,10 @@ export function NodeDetail() {
       ),
     enabled: canMutate && healthIds().length > 0,
     placeholderData: keepPreviousData,
-    // health is "did the world change while I was away" — the one query that must wake on
-    // focus (the global default is refetchOnWindowFocus: false) and converge unattended,
-    // else a merge only surfaces on a full reload.
+    // health is "did the world change while I was away" — it wakes on focus (the global
+    // default is refetchOnWindowFocus: false); unattended convergence is the server's job
+    // (pulse freshens the remote world, SSE pushes an update).
     refetchOnWindowFocus: true,
-    refetchInterval: 180_000,
   }));
   const nodeHealth = (b: string) => health.data?.[b];
   // the ambient daemon's per-branch dry-run verdict (shared cache with Home's chip) — surfaces
