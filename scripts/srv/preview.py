@@ -11,6 +11,7 @@
 #   POST /preview-kill     {dir}     → {ok}                   stop one (dir-string only; orphan-safe)
 #   POST /preview-restart  {dir}     → {ok, url, port}        kill + fresh next dev on the SAME port
 #   POST /preview-reap                → {ok, out}             stop orphaned/crashed previews
+#   POST /stack-up         {dir?}    → {ok, starting, dir}    docker compose up -d the shared stack
 #   GET  /previews                    → {previews[], substrate}  health-probed list + shared dev stack
 #   GET  /preview-log      ?dir=      → {ok, log}             tail the preview's next-dev log
 #
@@ -169,29 +170,94 @@ def _health(pv):
     return pv
 
 
-def _substrate():
-    # the ONE shared dev stack (docker compose project "loops") that every preview + :3000 use —
-    # NOT per-preview and NOT isolated, so a preview's writes hit the same Postgres/ClickHouse.
+_STACK_LOG = "/tmp/loops-stack-up.log"
+_stack_up = None   # the detached `docker compose up -d` a start click launched
+_git_dirs = {}
+_svc_cache = {}
+
+
+def _git_common(dirp):
+    if dirp not in _git_dirs:
+        try:
+            p = subprocess.run(["git", "-C", dirp, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                               capture_output=True, text=True, timeout=4)
+            _git_dirs[dirp] = p.stdout.strip() if p.returncode == 0 else ""
+        except Exception:
+            _git_dirs[dirp] = ""
+    return _git_dirs[dirp]
+
+
+def _default_services(dirp):
+    # services `compose up` actually starts — profile-gated ones (testing-psql) are excluded, so a
+    # container left over from a `--profile testing` run months ago stops counting as a dead service.
+    f = os.path.join(dirp, "docker-compose.yml")
+    try:
+        key = (dirp, os.path.getmtime(f))
+    except OSError:
+        return None
+    if _svc_cache.get("key") != key:
+        try:
+            p = subprocess.run(["docker", "compose", "config", "--services"],
+                               cwd=dirp, capture_output=True, text=True, timeout=8)
+            names = set(p.stdout.split()) if p.returncode == 0 else None
+        except Exception:
+            names = None
+        _svc_cache.update(key=key, names=names)
+    return _svc_cache.get("names")
+
+
+def _stack_err():
+    if _stack_up is None or _stack_up.poll() in (None, 0):
+        return None
+    try:
+        with open(_STACK_LOG) as f:
+            lines = [ln.strip() for ln in f.readlines()[-40:] if ln.strip()]
+    except OSError:
+        lines = []
+    return _ANSI.sub("", lines[-1])[:200] if lines else "docker compose up failed"
+
+
+def _substrate(main_wt):
+    # the ONE shared dev stack (Postgres/ClickHouse/Valkey/…) every preview + :3000 use — NOT
+    # per-preview and NOT isolated, so a preview's writes hit the same DB. Compose names a project
+    # after its checkout dir, so a stack started from a worktree runs as "loops-wt-134853"; the
+    # services bind fixed host ports, so whichever project holds them IS the shared stack (filtering
+    # to "loops" alone reported 0/11 while a worktree's full stack was up). Volumes are project-
+    # scoped, so a worktree's stack carries its own data — hence `home`.
     # `ps -a`, not `ps`: a crashed container must count against the total, not vanish from it
     # (running-only listing once reported "10/10 up" while a container sat exited). Exited(0) is
     # a finished one-shot init job — shown as "done", excluded from the denominator.
-    services = []
+    stacks = {}
     try:
         p = subprocess.run(
-            ["docker", "ps", "-a", "--filter", "label=com.docker.compose.project=loops",
-             "--format", "{{.Names}}\t{{.Status}}"],
+            ["docker", "ps", "-a", "--format",
+             '{{.Names}}\t{{.Status}}\t{{.Label "com.docker.compose.project"}}'
+             '\t{{.Label "com.docker.compose.project.working_dir"}}'
+             '\t{{.Label "com.docker.compose.service"}}'],
             capture_output=True, text=True, timeout=6)
         for line in p.stdout.strip().splitlines():
             parts = line.split("\t")
-            if len(parts) >= 2:
-                status = parts[1]
-                up = status.startswith("Up")
-                state = "up" if up else "done" if status.startswith("Exited (0)") else "failed"
-                services.append({"name": parts[0], "status": status, "up": up, "state": state})
+            if len(parts) < 5 or not parts[3] or _git_common(parts[3]) != _git_common(main_wt):
+                continue
+            name, status, project, wd, svc = parts[0], parts[1], parts[2], parts[3], parts[4]
+            up = status.startswith("Up")
+            state = "up" if up else "done" if status.startswith("Exited (0)") else "failed"
+            stacks.setdefault(project, {"project": project, "dir": wd, "services": []})
+            stacks[project]["services"].append({"name": name, "svc": svc, "status": status, "up": up, "state": state})
     except Exception:
         pass
+    home = os.path.basename(main_wt.rstrip("/"))
+    live = max(stacks.values(), default=None,
+               key=lambda s: sum(1 for x in s["services"] if x["up"]))
+    if live is None or not any(x["up"] for x in live["services"]):
+        live = stacks.get(home) or live or {"project": home, "dir": main_wt, "services": []}
+    wanted = _default_services(live["dir"])
+    services = [s for s in live["services"] if not wanted or s["svc"] in wanted]
     return {
-        "project": "loops", "shared": True,
+        "project": live["project"], "dir": live["dir"], "shared": True,
+        "home": live["dir"] == main_wt,
+        "starting": _stack_up is not None and _stack_up.poll() is None,
+        "err": _stack_err(),
         "up": sum(1 for s in services if s["up"]),
         "total": sum(1 for s in services if s["state"] != "done"),
         "services": services,
@@ -359,15 +425,41 @@ def reap(req, raw):
     req._send(200, json.dumps({"ok": True, "out": (p.stdout or "").strip()}))
 
 
+def stack_up(req, raw):
+    # bring the shared Docker stack up. Detached: `compose up -d` can pull images for minutes, and
+    # the drawer's service chips already narrate the containers arriving.
+    global _stack_up
+    d = json.loads(raw or "{}")
+    main_wt = checkout._active_main_wt()
+    dirp = d.get("dir") or main_wt
+    if _git_common(dirp) != _git_common(main_wt):
+        req._send(400, json.dumps({"ok": False, "err": "not a checkout of this repo"}))
+        return
+    if _stack_up is not None and _stack_up.poll() is None:
+        req._send(200, json.dumps({"ok": True, "starting": True, "dir": dirp}))
+        return
+    try:
+        log = open(_STACK_LOG, "wb")
+    except OSError as e:
+        req._send(500, json.dumps({"ok": False, "err": str(e)}))
+        return
+    # --no-recreate: the dev Postgres keeps its data in the CONTAINER's anonymous volume (the psql
+    # service declares none), so letting compose rebuild a drifted container wipes the dev DB
+    _stack_up = subprocess.Popen(["docker", "compose", "up", "-d", "--no-recreate", "--remove-orphans"],
+                                 cwd=dirp, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    req._send(200, json.dumps({"ok": True, "starting": True, "dir": dirp}))
+
+
 def previews(req):
     # the docker-ps substrate scan is independent of the preview list + probes — overlap them
     # so the drawer's cold open pays max(list+probes, docker), not the sum.
+    # _active_main_wt reads the request's pinned repo via a thread-local the pools WON'T inherit
+    # (ctx.py gotcha), so resolve it once here — every row is stamped with it, and the substrate
+    # scan takes it as an argument.
+    main_wt = checkout._active_main_wt()
     with ThreadPoolExecutor(max_workers=1) as sub_ex:
-        f_sub = sub_ex.submit(_substrate)
+        f_sub = sub_ex.submit(_substrate, main_wt)
         pvs = [dict(pv) for pv in _list_json()]   # rows get annotated — never mutate the shared snapshot
-        # _active_main_wt reads the request's pinned repo via a thread-local the probe pool WON'T
-        # inherit (ctx.py gotcha), so resolve it once here and stamp every row with it.
-        main_wt = checkout._active_main_wt()
         for pv in pvs:
             pv["borrows"] = main_wt
             if pv.get("managed", True):

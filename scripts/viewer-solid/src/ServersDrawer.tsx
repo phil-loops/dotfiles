@@ -32,7 +32,13 @@ type Preview = {
   behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
 };
 type Service = { name: string; status: string; up: boolean; state?: string }; // up · done (finished init job) · failed
-type Substrate = { project: string; shared: boolean; up: number; total: number; services: Service[] };
+// project/dir name the compose project that actually holds the ports — often a worktree's, not
+// main's (home=false), and a worktree stack carries its own volumes. starting = a start click's
+// `compose up` still running; err = that run's last line after it failed.
+type Substrate = {
+  project: string; dir?: string; home?: boolean; shared: boolean;
+  starting?: boolean; err?: string | null; up: number; total: number; services: Service[];
+};
 type PreviewsResp = { ok: boolean; previews: Preview[]; substrate: Substrate };
 
 // health → label + the state's stripe/badge tint. starting/compiling are transient warmth.
@@ -79,7 +85,8 @@ async function post(url: string, body: unknown) {
   }).catch(() => {});
 }
 
-const shortSvc = (n: string) => n.replace(/^loops-/, "").replace(/-1$/, "");
+const shortSvc = (n: string, project: string) =>
+  (project && n.startsWith(project + "-") ? n.slice(project.length + 1) : n.replace(/^loops-/, "")).replace(/-1$/, "");
 const shortDir = (d: string) => d.split("/").filter(Boolean).pop() ?? d;
 
 export function ServersDrawer() {
@@ -147,6 +154,8 @@ export function ServersDrawer() {
     setBusy(null);
   };
   const showLog = (dir: string) => { logPinned = true; setLogFor(logFor() === dir ? null : dir); };
+  const startStack = async () => { setBusy("__stack__"); await post("/stack-up", { dir: sub()?.dir }); await q.refetch(); setBusy(null); };
+  const stackStarting = () => busy() === "__stack__" || !!sub()?.starting;
 
   return (
     <Show when={open()}>
@@ -201,14 +210,30 @@ export function ServersDrawer() {
                   class="h-[7px] w-[7px] flex-none rounded-full"
                   classList={{
                     "bg-add shadow-[0_0_6px_rgba(143,174,122,0.5)]": s().total > 0 && s().up >= s().total,
-                    "bg-del shadow-[0_0_6px_rgba(200,122,85,0.5)]": s().total === 0 || s().up < s().total,
+                    "animate-breathe bg-ember motion-reduce:animate-none": stackStarting() && s().up < s().total,
+                    "bg-del shadow-[0_0_6px_rgba(200,122,85,0.5)]": !stackStarting() && (s().total === 0 || s().up < s().total),
                   }}
                 />
-                <span class="text-[12px] text-ink-dim">shared dev stack · {s().up}/{s().total} up</span>
+                <span class="min-w-0 text-[12px] text-ink-dim">shared dev stack · {s().up}/{s().total} up</span>
+                <Show when={s().total === 0 || s().up < s().total}>
+                  <button class={`${BTN} ml-auto flex-none whitespace-nowrap`} disabled={stackStarting()} onClick={startStack}>
+                    {stackStarting() ? <>starting… <Spinner /></> : "▷ start stack"}
+                  </button>
+                </Show>
               </>)}
             </Show>
           </div>
+          {/* the live stack is whichever compose project holds the ports — often a worktree's, and
+              compose scopes volumes per project, so that stack's data is not main's */}
+          <Show when={sub()?.home === false && sub()?.dir}>
+            <p class="mt-[7px] text-[10.5px] leading-[1.5] text-ember opacity-85">
+              running from {shortDir(sub()!.dir!)} — its own Postgres/ClickHouse volumes, not main's
+            </p>
+          </Show>
           <p class="mt-[7px] mb-[9px] text-[11px] leading-[1.5] text-ember opacity-85">One stack for everything — every preview and :3000 read/write the same DB. Not isolated; concurrent seeds/migrations collide.</p>
+          <Show when={sub()?.err}>
+            {(e) => <p class="mt-[-3px] mb-[9px] text-[11px] leading-[1.5] text-del">docker compose up: {e()}</p>}
+          </Show>
           <div class="flex flex-wrap gap-1">
             <Show when={sub()} fallback={<For each={SKEL_CHIPS}>{(w) => <Skel w={w} h="21px" cls="rounded-md" />}</For>}>
               {(s) => (
@@ -222,7 +247,7 @@ export function ServersDrawer() {
                         "border-del text-del": !svc.up && svc.state !== "done",
                       }}
                       title={svc.status}
-                    >{shortSvc(svc.name)}{svc.state === "done" ? " · done" : svc.state === "failed" ? " · exited" : ""}</span>
+                    >{shortSvc(svc.name, s().project)}{svc.state === "done" ? " · done" : svc.state === "failed" ? " · exited" : ""}</span>
                   )}
                 </For>
               )}
