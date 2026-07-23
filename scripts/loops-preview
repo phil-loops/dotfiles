@@ -252,6 +252,9 @@ META="$(meta_of "$NAME")"
 
 [ -f "$DIR/package.json" ] || { err "$DIR is not a loops checkout (no package.json)"; exit 1; }
 MAIN="$(cd "$MAIN" && pwd)"
+# previewing MAIN itself would rm -rf its real node_modules and then "clone" from the
+# just-deleted source, leaving a self-symlink (2026-07-23) — the refresh logic assumes DIR≠MAIN
+[ "$DIR" = "$MAIN" ] && { err "refusing to preview the MAIN checkout ($MAIN) — run the real dev stack there, or preview a worktree"; exit 1; }
 
 # Worktrees have no node_modules and don't carry untracked env files — take them from MAIN.
 # Turbopack refuses to follow a node_modules that symlinks out of the project root ("points out of
@@ -259,17 +262,23 @@ MAIN="$(cd "$MAIN" && pwd)"
 # which shares its blocks (~30s once, ~no disk). Only if cloning fails do we symlink and pin the
 # preview to the old bundler.
 BUNDLER=""
-if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
-  cyan "MAIN reinstalled since this clone — refreshing node_modules"
-  rm -rf "$DIR/node_modules"
-fi
-if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
-  rm -f "$DIR/node_modules"
-  cyan "cloning node_modules from $MAIN (once per checkout, ~30s)"
-  if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
+# MAIN must never enter the borrow block: the refresh clause would rm -rf the very tree it then
+# clones from, leaving node_modules a symlink to itself (bit us 2026-07-23).
+if [ "$DIR" = "$MAIN" ]; then
+  [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] || { err "MAIN's node_modules is missing or a symlink — run npm install in $MAIN"; exit 1; }
+else
+  if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
+    cyan "MAIN reinstalled since this clone — refreshing node_modules"
     rm -rf "$DIR/node_modules"
-    ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
-    err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
+  fi
+  if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
+    rm -f "$DIR/node_modules"
+    cyan "cloning node_modules from $MAIN (once per checkout, ~30s)"
+    if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
+      rm -rf "$DIR/node_modules"
+      ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
+      err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
+    fi
   fi
 fi
 if [ -L "$DIR/node_modules" ]; then BUNDLER="--webpack"; fi
