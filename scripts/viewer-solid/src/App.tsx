@@ -1,4 +1,4 @@
-import { createEffect, Show, Switch, Match, onCleanup, type JSX } from "solid-js";
+import { createEffect, createSignal, Show, Switch, Match, onCleanup, type JSX } from "solid-js";
 import { useQueryClient } from "@tanstack/solid-query";
 import { RouterProvider, useViewerLocation, forestKey, type ViewerLocation } from "./router";
 import { canMutate } from "./provider";
@@ -81,11 +81,24 @@ function Layout(props: { children?: JSX.Element }) {
     qc.invalidateQueries({ queryKey: ["node"] });
     qc.invalidateQueries({ queryKey: ["model"] });
     qc.invalidateQueries({ queryKey: ["projects"] });
+    qc.invalidateQueries({ queryKey: ["forest-health"] });
+    qc.invalidateQueries({ queryKey: ["branch-prs"] });
+  };
+  // origin checks failing server-side → the page may be rendering a stale world; say so
+  // (nothing shows while healthy — the chip is the failure mode's only footprint).
+  const [staleOrigin, setStaleOrigin] = createSignal(false);
+  const onStale = (e: MessageEvent) => {
+    try {
+      setStaleOrigin(!!JSON.parse(e.data).failing);
+    } catch {
+      setStaleOrigin(false);
+    }
   };
   const openStream = () => {
     if (!canMutate || es) return; // static snapshot: no live event stream
     es = new EventSource("/events");
     es.addEventListener("update", refresh);
+    es.addEventListener("stale", onStale);
   };
   const closeStream = () => {
     es?.close();
@@ -124,6 +137,14 @@ function Layout(props: { children?: JSX.Element }) {
       <ChatDrawerHost />
       <CommandPalette />
       <ServerStatus />
+      <Show when={staleOrigin()}>
+        <span
+          class="pointer-events-none fixed bottom-8 left-[14px] z-[70] font-mono text-[11px] tracking-[0.02em] text-gold"
+          title="the server's `git fetch origin` is failing — merged PRs may still render as live"
+        >
+          origin checks failing — world may be stale
+        </span>
+      </Show>
       <Activity />
       <ServersDrawer />
     </>

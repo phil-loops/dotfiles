@@ -1,0 +1,236 @@
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index fb2b96d..dd2138c 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -2,6 +2,7 @@
+ #   GET  /sync?branch=X    one branch's staleness vs origin/main
+ #   GET  /syncs?branch=…   batch staleness for many branches in one round-trip
+ #   POST /sync {branch}    rebase an unpublished root onto fresh origin/main
++import hashlib
+ import json
+ import os
+ import re
+@@ -314,6 +315,16 @@ def _trunk(main):
+     return main
+ 
+ 
++_FRESH = {"okAt": 0.0, "failing": False}   # last successful trunk fetch + whether the latest attempt failed
++
++
++def _fetch_trunk(main):
++    ok = ctx.run(["git", "fetch", "origin", main]).returncode == 0
++    if ok:
++        _FRESH["okAt"] = time.time()
++    _FRESH["failing"] = not ok
++
++
+ def _freshen_trunk(main):
+     # Keep origin/<main> loosely fresh so a PR that merged upstream surfaces as a ghost on
+     # a plain page load, without a manual "↻ check origin". Throttled + backgrounded: at
+@@ -325,9 +336,50 @@ def _freshen_trunk(main):
+         if now - _TRUNK_FETCH_AT < 45:
+             return
+         _TRUNK_FETCH_AT = now
+-    threading.Thread(
+-        target=lambda: ctx.run(["git", "fetch", "origin", main]), daemon=True
+-    ).start()
++    threading.Thread(target=_fetch_trunk, args=(main,), daemon=True).start()
++
++
++_PULSE_FRESHEN_AT = [0.0]
++
++
++def pulse_freshen():
++    # Remote-world refresh while someone is watching: the server pulse (which only runs with
++    # an open /events stream) calls this every tick; at most one freshen per 90s. An open tab
++    # converges on a merge without any client polling — prwatch's poke is an accelerant, not
++    # a dependency (2026-07-23: sweep dead → merged branch rendered live indefinitely).
++    now = time.time()
++    if now - _PULSE_FRESHEN_AT[0] < 90:
++        return
++    _PULSE_FRESHEN_AT[0] = now
++    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
++    global _TRUNK_FETCH_AT
++    with _TRUNK_FETCH_LOCK:
++        _TRUNK_FETCH_AT = now
++    threading.Thread(target=_fetch_trunk, args=(main,), daemon=True).start()
++    _pr_state_map()
++
++
++def world_sig():
++    # Fingerprint of the remote world: origin/<main> tip + the cached PR states + fetch
++    # health. The pulse folds this in beside model_sig, so a trunk move or a PR state flip
++    # pushes an SSE update to open tabs — model_sig itself must NOT include these (it keys
++    # the /model cache, and remote drift shouldn't rebuild the model).
++    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
++    tip = ctx.run(["git", "rev-parse", "-q", "--verify", f"origin/{main}"]).stdout.strip()
++    with _PR_STATE_LOCK:
++        data = _pr_state_ent(ctx.repo_cwd())["data"] or {}
++        states = sorted(
++            (b, p.get("state") or "", p.get("review") or "", bool(p.get("draft")))
++            for b, p in data.items()
++        )
++    return hashlib.sha1(
++        json.dumps([tip, states, _FRESH["failing"]], default=str).encode()
++    ).hexdigest()
++
++
++def fresh_state():
++    # (failing, seconds since the last successful trunk fetch; -1 = never fetched)
++    return _FRESH["failing"], (time.time() - _FRESH["okAt"] if _FRESH["okAt"] else -1)
+ 
+ 
+ def _upstream_state(branch, main):
+@@ -452,7 +504,7 @@ def pr_poke(req, raw):
+     global _TRUNK_FETCH_AT
+     with _TRUNK_FETCH_LOCK:
+         _TRUNK_FETCH_AT = time.time()
+-    ctx.run(["git", "fetch", "origin", main])
++    _fetch_trunk(main)
+     _refresh_pr_state()
+     req._send(200, json.dumps({"ok": True}))
+ 
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 07abbf7..090a877 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -44,7 +44,7 @@ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts
+              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
+ last = [time.time()]
+ _render_lock = threading.Lock()
+-_pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
++_pulse = {"sig": "", "asset": "", "world": ""}  # model+asset+remote-world fingerprints, refreshed ~1/s by pulse()
+ _pulse_subs = [0]                  # open /events streams — pulse() only runs while this is > 0
+ _pulse_subs_lock = threading.Lock()
+ _pulse_wake = threading.Event()
+@@ -159,7 +159,7 @@ def asset_sig():
+ 
+ 
+ def _pulse_refresh():
+-    _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()
++    _pulse["sig"], _pulse["asset"], _pulse["world"] = srvctx.model_sig(), asset_sig(), sync.world_sig()
+ 
+ 
+ def pulse():
+@@ -176,6 +176,7 @@ def pulse():
+             _pulse_wake.clear()
+             continue
+         try:
++            sync.pulse_freshen()   # remote world converges while a tab is open, no client polling
+             _pulse_refresh()
+         except Exception:
+             pass
+@@ -327,7 +328,8 @@ class H(BaseHTTPRequestHandler):
+                 except Exception:      # subscriber would read as a change and reload this tab on sight
+                     pass
+                 _pulse_wake.set()
+-            seen_sig, seen_asset = _pulse["sig"], _pulse["asset"]
++            seen_sig, seen_asset, seen_world = _pulse["sig"], _pulse["asset"], _pulse["world"]
++            seen_failing = False
+             beat = 0
+             try:
+                 self.wfile.write(b": connected\n\n")
+@@ -343,6 +345,16 @@ class H(BaseHTTPRequestHandler):
+                         seen_sig = _pulse["sig"]
+                         self.wfile.write(b"event: update\ndata: 1\n\n")
+                         self.wfile.flush()
++                    if _pulse["world"] != seen_world:    # remote moved (merge, PR flip) → refetch in place
++                        seen_world = _pulse["world"]
++                        self.wfile.write(b"event: update\ndata: 1\n\n")
++                        self.wfile.flush()
++                    failing, age = sync.fresh_state()
++                    if failing != seen_failing:          # origin checks broke/recovered → honesty chip
++                        seen_failing = failing
++                        payload = json.dumps({"failing": failing, "age": int(age)})
++                        self.wfile.write(f"event: stale\ndata: {payload}\n\n".encode())
++                        self.wfile.flush()
+                     beat = (beat + 1) % 5
+                     if beat == 0:   # periodic comment: keep-alive + detect a closed tab (write then fails)
+                         self.wfile.write(b": ping\n\n")
+diff --git a/scripts/viewer-solid/src/App.tsx b/scripts/viewer-solid/src/App.tsx
+index 7e9439f..8cca9b3 100644
+--- a/scripts/viewer-solid/src/App.tsx
++++ b/scripts/viewer-solid/src/App.tsx
+@@ -1,4 +1,4 @@
+-import { createEffect, Show, Switch, Match, onCleanup, type JSX } from "solid-js";
++import { createEffect, createSignal, Show, Switch, Match, onCleanup, type JSX } from "solid-js";
+ import { useQueryClient } from "@tanstack/solid-query";
+ import { RouterProvider, useViewerLocation, forestKey, type ViewerLocation } from "./router";
+ import { canMutate } from "./provider";
+@@ -81,11 +81,24 @@ function Layout(props: { children?: JSX.Element }) {
+     qc.invalidateQueries({ queryKey: ["node"] });
+     qc.invalidateQueries({ queryKey: ["model"] });
+     qc.invalidateQueries({ queryKey: ["projects"] });
++    qc.invalidateQueries({ queryKey: ["forest-health"] });
++    qc.invalidateQueries({ queryKey: ["branch-prs"] });
++  };
++  // origin checks failing server-side → the page may be rendering a stale world; say so
++  // (nothing shows while healthy — the chip is the failure mode's only footprint).
++  const [staleOrigin, setStaleOrigin] = createSignal(false);
++  const onStale = (e: MessageEvent) => {
++    try {
++      setStaleOrigin(!!JSON.parse(e.data).failing);
++    } catch {
++      setStaleOrigin(false);
++    }
+   };
+   const openStream = () => {
+     if (!canMutate || es) return; // static snapshot: no live event stream
+     es = new EventSource("/events");
+     es.addEventListener("update", refresh);
++    es.addEventListener("stale", onStale);
+   };
+   const closeStream = () => {
+     es?.close();
+@@ -124,6 +137,14 @@ function Layout(props: { children?: JSX.Element }) {
+       <ChatDrawerHost />
+       <CommandPalette />
+       <ServerStatus />
++      <Show when={staleOrigin()}>
++        <span
++          class="pointer-events-none fixed bottom-8 left-[14px] z-[70] font-mono text-[11px] tracking-[0.02em] text-gold"
++          title="the server's `git fetch origin` is failing — merged PRs may still render as live"
++        >
++          origin checks failing — world may be stale
++        </span>
++      </Show>
+       <Activity />
+       <ServersDrawer />
+     </>
+diff --git a/scripts/viewer-solid/src/ForestOverview.tsx b/scripts/viewer-solid/src/ForestOverview.tsx
+index 0c2dab9..07b47bd 100644
+--- a/scripts/viewer-solid/src/ForestOverview.tsx
++++ b/scripts/viewer-solid/src/ForestOverview.tsx
+@@ -297,10 +297,10 @@ export function ForestOverview() {
+           >,
+       ),
+     enabled: canMutate && healthIds().length > 0,
+-    // health must wake on focus (global default is refetchOnWindowFocus: false) and converge
+-    // unattended, else a merge only surfaces on a full reload.
++    // health wakes on focus (global default is refetchOnWindowFocus: false); unattended
++    // convergence is the server's job — its pulse freshens the remote world and pushes an
++    // SSE update, so N tabs cost one poller instead of N intervals.
+     refetchOnWindowFocus: true,
+-    refetchInterval: 180_000,
+   }));
+   // open PRs keyed by head branch — drives the per-node PR badge in the map. The rich /prs
+   // map (base/toMain/review) is filtered to MY PRs via /myprs, so a node only badges a PR I own.
+diff --git a/scripts/viewer-solid/src/NodeDetail.tsx b/scripts/viewer-solid/src/NodeDetail.tsx
+index da3aeb8..f403a74 100644
+--- a/scripts/viewer-solid/src/NodeDetail.tsx
++++ b/scripts/viewer-solid/src/NodeDetail.tsx
+@@ -148,11 +148,10 @@ export function NodeDetail() {
+       ),
+     enabled: canMutate && healthIds().length > 0,
+     placeholderData: keepPreviousData,
+-    // health is "did the world change while I was away" — the one query that must wake on
+-    // focus (the global default is refetchOnWindowFocus: false) and converge unattended,
+-    // else a merge only surfaces on a full reload.
++    // health is "did the world change while I was away" — it wakes on focus (the global
++    // default is refetchOnWindowFocus: false); unattended convergence is the server's job
++    // (pulse freshens the remote world, SSE pushes an update).
+     refetchOnWindowFocus: true,
+-    refetchInterval: 180_000,
+   }));
+   const nodeHealth = (b: string) => health.data?.[b];
+   // the ambient daemon's per-branch dry-run verdict (shared cache with Home's chip) — surfaces

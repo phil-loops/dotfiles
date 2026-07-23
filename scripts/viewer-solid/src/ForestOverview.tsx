@@ -297,10 +297,10 @@ export function ForestOverview() {
           >,
       ),
     enabled: canMutate && healthIds().length > 0,
-    // health must wake on focus (global default is refetchOnWindowFocus: false) and converge
-    // unattended, else a merge only surfaces on a full reload.
+    // health wakes on focus (global default is refetchOnWindowFocus: false); unattended
+    // convergence is the server's job — its pulse freshens the remote world and pushes an
+    // SSE update, so N tabs cost one poller instead of N intervals.
     refetchOnWindowFocus: true,
-    refetchInterval: 180_000,
   }));
   // open PRs keyed by head branch — drives the per-node PR badge in the map. The rich /prs
   // map (base/toMain/review) is filtered to MY PRs via /myprs, so a node only badges a PR I own.

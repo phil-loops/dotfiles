@@ -44,7 +44,7 @@ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts 
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
 _render_lock = threading.Lock()
-_pulse = {"sig": "", "asset": ""}  # current model+asset fingerprints, refreshed ~1/s by pulse()
+_pulse = {"sig": "", "asset": "", "world": ""}  # model+asset+remote-world fingerprints, refreshed ~1/s by pulse()
 _pulse_subs = [0]                  # open /events streams — pulse() only runs while this is > 0
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
@@ -159,7 +159,7 @@ def asset_sig():
 
 
 def _pulse_refresh():
-    _pulse["sig"], _pulse["asset"] = srvctx.model_sig(), asset_sig()
+    _pulse["sig"], _pulse["asset"], _pulse["world"] = srvctx.model_sig(), asset_sig(), sync.world_sig()
 
 
 def pulse():
@@ -176,6 +176,7 @@ def pulse():
             _pulse_wake.clear()
             continue
         try:
+            sync.pulse_freshen()   # remote world converges while a tab is open, no client polling
             _pulse_refresh()
         except Exception:
             pass
@@ -327,7 +328,8 @@ class H(BaseHTTPRequestHandler):
                 except Exception:      # subscriber would read as a change and reload this tab on sight
                     pass
                 _pulse_wake.set()
-            seen_sig, seen_asset = _pulse["sig"], _pulse["asset"]
+            seen_sig, seen_asset, seen_world = _pulse["sig"], _pulse["asset"], _pulse["world"]
+            seen_failing = False
             beat = 0
             try:
                 self.wfile.write(b": connected\n\n")
@@ -342,6 +344,16 @@ class H(BaseHTTPRequestHandler):
                     if _pulse["sig"] != seen_sig:        # forest changed → refetch in place
                         seen_sig = _pulse["sig"]
                         self.wfile.write(b"event: update\ndata: 1\n\n")
+                        self.wfile.flush()
+                    if _pulse["world"] != seen_world:    # remote moved (merge, PR flip) → refetch in place
+                        seen_world = _pulse["world"]
+                        self.wfile.write(b"event: update\ndata: 1\n\n")
+                        self.wfile.flush()
+                    failing, age = sync.fresh_state()
+                    if failing != seen_failing:          # origin checks broke/recovered → honesty chip
+                        seen_failing = failing
+                        payload = json.dumps({"failing": failing, "age": int(age)})
+                        self.wfile.write(f"event: stale\ndata: {payload}\n\n".encode())
                         self.wfile.flush()
                     beat = (beat + 1) % 5
                     if beat == 0:   # periodic comment: keep-alive + detect a closed tab (write then fails)
