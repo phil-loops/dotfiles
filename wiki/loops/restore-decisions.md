@@ -8,7 +8,9 @@ lede: Six. Two change what gets built; four can be settled while building.
 
 **Blocking — a superseded dump.** Guard (b) in [[restore-guards]] makes restoring an old dump correct but nearly silent: it restores almost nothing and reports zero. Is a silent zero right, or should the list refuse to offer a dump a later delete supersedes? It changes both the model and the UI, so it wants an answer before either is written.
 
-**Blocking — one pass, or a budget.** The earlier line re-enqueued itself every twenty seconds; the rewrite dropped that on the theory that a free retry makes a single pass safe. Per page it is one SELECT and one UPDATE, so page count decides — and there is no measurement yet. This one needs a number off a real large team, not a judgement.
+**SETTLED — budget, not one pass.** Measured (`bench/audience-restore`): a page costs rows × *contact properties*, and property count is unbounded. At 200 properties a 20k page takes 24.7s, so a million contacts is ~20 minutes — past the point where the one-hour lock expires underneath the running job. The budget's original rationale was wrong (the poller heartbeats SQS visibility every 20s, so nothing was ever going to redeliver a long job), but the conclusion stands for a different reason. `jobs/delete-team.ts` already drains this way.
+
+The cursor is one integer: the paged dump means resuming is `fromPage`, not the row counter the old line kept.
 
 **A third counter.** A row can be neither restored nor skipped when someone already restored it. Lean: add `alreadyLive`; it costs nothing and makes a re-run legible.
 
