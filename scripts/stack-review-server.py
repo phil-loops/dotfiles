@@ -461,6 +461,8 @@ class H(BaseHTTPRequestHandler):
             return preview.restart(self, raw)
         if self.path == "/preview-reap":   # stop orphaned/crashed previews
             return preview.reap(self, raw)
+        if self.path == "/stack-up":   # bring the shared Docker stack (Postgres/ClickHouse/…) up
+            return preview.stack_up(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
         if self.path == "/contract":   # drop an already-merged branch + rewire its children onto main
