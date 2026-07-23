@@ -28,7 +28,13 @@ state_dir="$HOME/.cache/cw-pool"; mkdir -p "$state_dir"
 state="$state_dir/$repo"
 
 lock="$state_dir/$repo.lock"
-mkdir "$lock" 2>/dev/null || exit 0
+# a warm takes seconds; a lock older than 10 min is a leak from a SIGKILL/reboot mid-run
+# (~/.cache survives reboots) — steal it or warming is silently dead forever
+if ! mkdir "$lock" 2>/dev/null; then
+  [[ -n "$(find "$lock" -maxdepth 0 -mmin +10 2>/dev/null)" ]] || exit 0
+  rmdir "$lock" 2>/dev/null || true
+  mkdir "$lock" 2>/dev/null || exit 0
+fi
 trap 'rmdir "$lock" 2>/dev/null' EXIT
 
 tmux has-session -t "=$sess" 2>/dev/null && exit 0
