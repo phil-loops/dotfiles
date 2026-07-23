@@ -43,7 +43,23 @@ MALFORMED_RE = re.compile(r"\]\(src:([^)]*\s[^)]*)\)")
 
 
 def _repo_name():
-    return os.path.basename(ctx.repo_cwd() or ctx.CWD or "").replace(".git", "") or "repo"
+    """The repo's name, identical from any of its worktrees.
+
+    NOT the directory basename: the viewer is per-repo but gets launched from whichever
+    worktree is handy, so a bounce from loops-wt-160721 would look for wiki/loops-wt-160721
+    and silently serve nothing. The common git dir is shared by every worktree, so its
+    parent names the repo no matter where the server started.
+    """
+    cwd = ctx.repo_cwd() or ctx.CWD or ""
+    try:
+        common = ctx.run(["git", "rev-parse", "--git-common-dir"]).stdout.strip()
+    except Exception:
+        common = ""
+    if common:
+        if not os.path.isabs(common):
+            common = os.path.join(cwd, common)
+        return os.path.basename(os.path.dirname(os.path.abspath(common))) or "repo"
+    return os.path.basename(cwd) or "repo"
 
 
 def _page_dirs():
