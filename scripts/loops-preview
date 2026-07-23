@@ -277,7 +277,9 @@ fi
 rm -rf "$DIR/.next"
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev -p $PORT > '$LOG' 2>&1"
+# --webpack: Turbopack rejects a node_modules symlink pointing outside the project dir (fatal
+# "points out of the filesystem root"), and every preview borrows MAIN's node_modules that way
+tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev --webpack -p $PORT > '$LOG' 2>&1"
 printf 'DIR=%s\nPORT=%s\nSTARTED=%s\n' "$DIR" "$PORT" "$(date +%s)" > "$META"
 
 cyan "preview $NAME  →  http://localhost:$PORT"
