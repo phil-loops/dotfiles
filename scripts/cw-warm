@@ -15,6 +15,12 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PA
 
 repo_dir="${1:-$PWD}"
 main_top=$(git -C "$repo_dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}') || true
+if [[ -z "${main_top:-}" ]]; then
+  # same fallback as cw-claim, so the tmux-startup warm needs no repo argument
+  default_repo=$(git config --global cw.default-repo 2>/dev/null || true)
+  default_repo="${default_repo:-$HOME/coding/loops}"; default_repo="${default_repo/#\~/$HOME}"
+  main_top=$(git -C "$default_repo" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}') || true
+fi
 [[ -n "${main_top:-}" ]] || { echo "cw-warm: not in a git repo" >&2; exit 1; }
 repo=$(basename "$main_top")
 sess="cw-pool-$repo"
