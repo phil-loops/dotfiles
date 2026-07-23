@@ -282,6 +282,20 @@ tmux kill-session -t "$SESSION" 2>/dev/null || true
 tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev --webpack -p $PORT > '$LOG' 2>&1"
 printf 'DIR=%s\nPORT=%s\nSTARTED=%s\n' "$DIR" "$PORT" "$(date +%s)" > "$META"
 
+# webpack rewrites the tracked next-env.d.ts to its own types path at boot (and only at boot), so
+# every preview would leave its checkout dirty — restore it as soon as the server has written it,
+# and only when we didn't inherit real edits to the file.
+if git -C "$DIR" diff --quiet -- next-env.d.ts 2>/dev/null; then
+  (
+    for _ in $(seq 1 90); do
+      sleep 1
+      git -C "$DIR" diff --quiet -- next-env.d.ts 2>/dev/null && continue
+      git -C "$DIR" checkout -- next-env.d.ts 2>/dev/null
+      break
+    done
+  ) >/dev/null 2>&1 &
+fi
+
 cyan "preview $NAME  →  http://localhost:$PORT"
 cyan "branch:  $(branch_of "$DIR")"
 cyan "watch:   tmux attach -t $SESSION   ·   log: $LOG"
