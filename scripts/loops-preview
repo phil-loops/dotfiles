@@ -20,8 +20,8 @@
 #
 # Env: LOOPS_MAIN overrides the main checkout (default ~/coding/loops).
 #
-# Caveat: shares MAIN's built workspace packages (via the symlinked node_modules),
-# so a preview that changes packages/* won't reflect those until MAIN rebuilds them.
+# Caveat: copies MAIN's built workspace packages (packages/*/dist), so a preview that
+# changes packages/* won't reflect those until MAIN rebuilds them.
 # App code (app/, pages/, components/, trpc/, lib/) is compiled from the preview
 # checkout itself, so UI/route changes show up fine.
 set -euo pipefail
@@ -253,11 +253,38 @@ META="$(meta_of "$NAME")"
 [ -f "$DIR/package.json" ] || { err "$DIR is not a loops checkout (no package.json)"; exit 1; }
 MAIN="$(cd "$MAIN" && pwd)"
 
-# Worktrees have no node_modules and don't carry untracked env files — borrow MAIN's.
-if [ ! -e "$DIR/node_modules" ]; then
-  ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
-  cyan "linked node_modules from $MAIN"
+# Worktrees have no node_modules and don't carry untracked env files — take them from MAIN.
+# Turbopack refuses to follow a node_modules that symlinks out of the project root ("points out of
+# the filesystem root", fatal at boot), so the checkout gets a REAL tree: an APFS clone of MAIN's,
+# which shares its blocks (~30s once, ~no disk). Only if cloning fails do we symlink and pin the
+# preview to the old bundler.
+BUNDLER=""
+if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
+  cyan "MAIN reinstalled since this clone — refreshing node_modules"
+  rm -rf "$DIR/node_modules"
 fi
+if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
+  rm -f "$DIR/node_modules"
+  cyan "cloning node_modules from $MAIN (once per checkout, ~30s)"
+  if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
+    rm -rf "$DIR/node_modules"
+    ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
+    err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
+  fi
+fi
+if [ -L "$DIR/node_modules" ]; then BUNDLER="--webpack"; fi
+
+# the workspace links resolve to the checkout's OWN packages/*, which carry source but no build —
+# take MAIN's dist for each (gitignored, so the checkout stays clean)
+for src in "$MAIN"/packages/*/dist; do
+  [ -d "$src" ] || continue
+  dest="$DIR/packages/$(basename "$(dirname "$src")")/dist"
+  [ -d "$(dirname "$dest")" ] || continue
+  if [ ! -d "$dest" ] || [ "$src" -nt "$dest" ]; then
+    rm -rf "$dest"
+    cp -Rc "$src" "$dest" 2>/dev/null || cp -R "$src" "$dest"
+  fi
+done
 for e in .env .env.local .env.development; do
   if [ -f "$MAIN/$e" ] && [ ! -e "$DIR/$e" ]; then
     ln -sfn "$MAIN/$e" "$DIR/$e"
@@ -277,14 +304,12 @@ fi
 rm -rf "$DIR/.next"
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-# --webpack: Turbopack rejects a node_modules symlink pointing outside the project dir (fatal
-# "points out of the filesystem root"), and every preview borrows MAIN's node_modules that way
-tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev --webpack -p $PORT > '$LOG' 2>&1"
+tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
 printf 'DIR=%s\nPORT=%s\nSTARTED=%s\n' "$DIR" "$PORT" "$(date +%s)" > "$META"
 
-# webpack rewrites the tracked next-env.d.ts to its own types path at boot (and only at boot), so
-# every preview would leave its checkout dirty — restore it as soon as the server has written it,
-# and only when we didn't inherit real edits to the file.
+# next dev rewrites the tracked next-env.d.ts at boot (and only at boot) to a types path the
+# committed file doesn't carry, so every preview would leave its checkout dirty — restore it as
+# soon as the server has written it, and only when we didn't inherit real edits to the file.
 if git -C "$DIR" diff --quiet -- next-env.d.ts 2>/dev/null; then
   (
     for _ in $(seq 1 90); do
