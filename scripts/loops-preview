@@ -278,6 +278,9 @@ else
       rm -rf "$DIR/node_modules"
       ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
       err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
+    else
+      # a quarantine-inheriting ancestor (e.g. Chrome-launched viewer) taints the clone; Gatekeeper then refuses dlopen of .node bindings
+      xattr -dr com.apple.quarantine "$DIR/node_modules" 2>/dev/null || true
     fi
   fi
 fi
