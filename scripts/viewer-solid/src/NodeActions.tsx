@@ -36,6 +36,9 @@ interface CheckoutResult {
   dirty?: number; // set on 409: uncommitted paths in the holding worktree
   session?: { pane?: string; idleSeconds?: number } | null; // set on 409: live Claude session in it
   liveBlocked?: boolean; // set on 409: the hold is a live session — force won't free it, only evictLive
+  dirt?: string[]; // set on a dirty-MAIN-tree refusal: the paths blocking the checkout
+  dirtWt?: string; // the worktree that dirt lives in (the main checkout)
+  dirtNote?: string; // set on ok after a dirt retry: what got stashed/dropped and how to recover it
 }
 
 const shortWt = (p: string) => p.split("/").pop() || p;
@@ -126,10 +129,11 @@ export function NodeActions(props: {
 }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
-  // 409 stash: the worktree holding the branch, awaiting a force-confirm — plus which action
-  // hit it, so freeing the worktree resumes the right one (plain checkout vs the omni sync).
+  // 409 stash: the worktree holding the branch, awaiting a force-confirm.
   const [heldAt, setHeldAt] = createSignal<string | null>(null);
-  const [heldFor, setHeldFor] = createSignal<"checkout" | "omniSync">("checkout");
+  // dirty-MAIN-tree refusal: the paths blocking a checkout, awaiting a stash/drop decision.
+  const [coDirt, setCoDirt] = createSignal<{ files: string[]; wt: string } | null>(null);
+  const [dropArmed, setDropArmed] = createSignal(false);
   // why the server refused to auto-free it — a clean, session-less hold never gets here
   // (the server frees those itself); this names the dirt or the live session instead.
   const [heldWhy, setHeldWhy] = createSignal<string>("");
@@ -167,20 +171,23 @@ export function NodeActions(props: {
   });
 
   const checkout = createMutation(() => ({
-    mutationFn: (force: boolean) =>
-      post<CheckoutResult>("/checkout", { branch: props.branch, force, evictLive: force && heldLive() }),
+    mutationFn: (opts: { force?: boolean; dirt?: "stash" | "discard" }) =>
+      post<CheckoutResult>("/checkout", { branch: props.branch, ...opts, evictLive: opts.force && heldLive() }),
     onSuccess: (r) => {
       if (r.ok) {
         setHeldAt(null);
         setHeldLive(false);
+        setCoDirt(null);
         setOpen(false);
-        setDone(`✓ checked out in ${r.worktree || "your main checkout"}${r.freed ? ` (freed ${shortWt(r.freed)} — clean, no live session)` : ""}`);
+        setDone(`✓ checked out in ${r.worktree || "your main checkout"}${r.freed ? ` (freed ${shortWt(r.freed)} — clean, no live session)` : ""}${r.dirtNote ? ` · ${r.dirtNote}` : ""}`);
         qc.invalidateQueries({ queryKey: ["head"] });
       } else if (r.worktree) {
-        setHeldFor("checkout");
         setHeldWhy(holdReason(r));
         setHeldLive(!!r.liveBlocked);
         setHeldAt(r.worktree); // held elsewhere → offer to free it
+      } else if (r.dirt?.length) {
+        setDropArmed(false);
+        setCoDirt({ files: r.dirt, wt: r.dirtWt || "the main checkout" }); // → stash/drop decision
       } else {
         setDone(`✗ ${r.err || "checkout failed"}`);
       }
@@ -208,18 +215,14 @@ export function NodeActions(props: {
   const livePreview = () =>
     livePreviews.data?.previews?.find((p) => p.branch === props.branch && p.state === "up");
 
-  // prep to merge — the one-motion merge prep, run as a staged pipeline:
-  //   1. up-to-date  → rebase onto fresh origin/main (only if behind; conflict ejects to Claude)
-  //   2. checkout    → move the main checkout onto this branch so GitHub Desktop follows
-  //   3. squash      → collapse the whole branch into one voiced commit + oxfmt (base-clamped)
-  //   4. delta-tests → run the tests related to the diff (warn, never block)
-  // You review + push from GitHub Desktop, where the pre-push hook runs the gates. Each stage
-  // narrates via done(); a stale main, a held worktree, or a conflict stops early with the reason.
   // ── ⟲ sync — the omni local motion (Phil, 2026-07-05): "whatever we do here locally is
   // fine." One button that makes this branch RIGHT and YOURS: reseat if drifted → rebase
-  // forward if behind (streams on eject) → checkout here → route to one outgoing commit
-  // (additive for a diverged PR, squash for a messy tail) → advisory tests + the push
-  // gates (detached — their green is what unlocks the red button) → the message editor.
+  // forward if behind (streams on eject) → route to one outgoing commit (additive for a
+  // diverged PR, squash for a messy tail) → advisory tests + the push gates (detached —
+  // their green is what unlocks the red button) → the message editor. Every step runs
+  // against the worktree already holding the branch — the motion never moves the main
+  // checkout (that step was GH-Desktop-era; the red button pushes from the branch's own
+  // tree, so a dirty main checkout can't block a sync — Phil, 2026-07-28).
   // When a step isn't mechanically routable, Claude goes in the middle (reconcile
   // eject). NOTHING here touches origin — the shared world moves only via the red button.
   //
@@ -252,7 +255,6 @@ export function NodeActions(props: {
       });
     }
     steps.push(
-      { id: "checkout", label: "checkout", state: "idle" },
       { id: "route", label: "one commit", state: "idle" },
       { id: "tests", label: "tests", state: "idle" },
       { id: "gates", label: "push gates", state: "idle" },
@@ -324,7 +326,7 @@ export function NodeActions(props: {
       });
   };
   const omniSync = createMutation(() => ({
-    mutationFn: async (force: boolean) => {
+    mutationFn: async () => {
       if (!syncSteps()) {
         beginSteps();
       }
@@ -356,19 +358,6 @@ export function NodeActions(props: {
         }
         stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
       }
-      stepSet("checkout", "run");
-      const co = await post<CheckoutResult>("/checkout", { branch: props.branch, force, evictLive: force && heldLive() });
-      if (!co.ok) {
-        if (co.worktree) {
-          setHeldWhy(holdReason(co));
-          setHeldLive(!!co.liveBlocked);
-          stepSet("checkout", "fail", `held by ${co.worktree}${holdReason(co) ? ` (${holdReason(co)})` : ""} — free it below to continue`);
-          return { phase: "held" as const, held: co.worktree };
-        }
-        stepSet("checkout", "fail", co.err || "checkout failed");
-        return { phase: "error" as const };
-      }
-      stepSet("checkout", "ok", co.freed ? `freed ${shortWt(co.freed)} — clean, no live session` : undefined);
       stepSet("route", "run");
       const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
         "/prep-push", { branch: props.branch });
@@ -411,11 +400,6 @@ export function NodeActions(props: {
     },
     onSuccess: (r) => {
       setOpen(false);
-      if (r.phase === "held") {
-        setHeldFor("omniSync");
-        setHeldAt(r.held);
-        return;
-      }
       if (r.phase === "blocked" || r.phase === "error") {
         // the failing step carries its full reason in the strip — nothing more to say here
         sync.refetch();
@@ -486,7 +470,7 @@ export function NodeActions(props: {
       setDirtGate(true);
       return;
     }
-    omniSync.mutate(false);
+    omniSync.mutate();
   };
   const dirtDecide = async (action: "include" | "stash" | "abort") => {
     setDirtGate(false);
@@ -504,17 +488,13 @@ export function NodeActions(props: {
       setStashedRun(true);
     }
     sync.refetch();
-    omniSync.mutate(false);
+    omniSync.mutate();
   };
 
-  // free the worktree that 409'd, then resume whichever action hit it.
+  // free the worktree that 409'd the plain checkout, then retry it.
   const freeAndContinue = () => {
     setOpen(false);
-    if (heldFor() === "omniSync") {
-      omniSync.mutate(true);
-    } else {
-      checkout.mutate(true);
-    }
+    checkout.mutate({ force: true });
   };
 
   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
@@ -904,16 +884,36 @@ export function NodeActions(props: {
         </button>
       </Show>
 
-      {/* held-elsewhere banner: checkout / sync 409'd because another worktree holds the
-          branch. Offer to free it and resume whichever action hit it. */}
+      {/* held-elsewhere banner: checkout 409'd because another worktree holds the
+          branch. Offer to free it and retry. */}
       <Show when={heldAt()}>
         <span class="nh-held inline-flex items-center gap-[8px] text-[12px] text-ink-faint">
           held in {heldAt()}{heldWhy() ? ` — ${heldWhy()}` : ""}
           <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={freeAndContinue}>
-            {heldLive() ? "evict live session" : "free"} &amp; {heldFor() === "omniSync" ? "sync" : "checkout"}
+            {heldLive() ? "evict live session" : "free"} &amp; checkout
           </button>
           <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" onClick={() => setHeldAt(null)}>cancel</button>
         </span>
+      </Show>
+
+      {/* dirty-main-tree refusal: the checkout would overwrite uncommitted changes sitting in
+          the main checkout. Two explicit outs, nothing automatic — stash parks JUST the
+          blocking files (pop brings them back); drop discards them via a dropped stash whose
+          sha the receipt prints (recoverable until gc). */}
+      <Show when={coDirt()}>
+        {(cd) => (
+          <span class="nh-codirt inline-flex flex-wrap items-center gap-[8px] text-[12px] text-ink-faint">
+            blocked by uncommitted changes in {shortWt(cd().wt)}:
+            <For each={cd().files}>{(f) => <code class="text-[11px]">{f}</code>}</For>
+            <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={() => checkout.mutate({ dirt: "stash" })} title="stash the blocking files (incl. untracked), then check out — git stash pop brings them back">
+              stash &amp; checkout
+            </button>
+            <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={() => (dropArmed() ? checkout.mutate({ dirt: "discard" }) : setDropArmed(true))} title="discard the blocking changes, then check out — recoverable only via the stash sha the receipt prints, until git gc">
+              {dropArmed() ? "really drop them?" : "drop & checkout"}
+            </button>
+            <button class="nh-held-btn cursor-pointer rounded-[5px] border border-rule bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-ink-dim disabled:cursor-default disabled:opacity-50" onClick={() => { setCoDirt(null); setDropArmed(false); }}>cancel</button>
+          </span>
+        )}
       </Show>
 
       {/* ⋯ menu — plain checkout, conditional repairs, interest, chats. */}
@@ -936,7 +936,7 @@ export function NodeActions(props: {
             role="menuitem"
             disabled={busy()}
             title="move this repo's main checkout onto this branch (no squash — just switch to it)"
-            onClick={fire(() => checkout.mutate(false))}
+            onClick={fire(() => checkout.mutate({}))}
           >
             <span class={`nh-item-ic ${IC}`}>⤓</span>
             {checkout.isPending ? "checking out…" : "checkout here"}
@@ -1173,11 +1173,11 @@ export function NodeActions(props: {
           onSettled={(outcome) => {
             if (outcome === "done") {
               // the headless rebase landed cleanly — the branch now contains origin/main, so
-              // pick the motion back up where it ejected (checkout → one commit → gates → editor)
+              // pick the motion back up where it ejected (one commit → gates → editor)
               // instead of stranding a ticking spinner that waits on a manual re-click.
               stepSet("rebase", "ok", "landed — merging it in");
               setRebaseStreaming(false);
-              sync.refetch().then(() => omniSync.mutate(false));
+              sync.refetch().then(() => omniSync.mutate());
             } else if (outcome === "stopped") {
               stepSet("rebase", "fail", "stopped — re-run sync to retry the rebase");
             } else if (outcome === "gone") {

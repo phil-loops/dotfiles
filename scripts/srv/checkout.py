@@ -6,6 +6,7 @@
 import glob
 import os
 import json
+import re
 import subprocess
 import time
 
@@ -73,6 +74,20 @@ def _live_session_in(wt):
             "idleSeconds": max(0, int(time.time()) - int(d.get("last_active") or 0)),
         }
     return None
+
+
+def _overwrite_paths(msg):
+    """The blocking paths out of git's 'would be overwritten by checkout' refusal
+    (both the local-changes and untracked variants list them tab-indented)."""
+    files, take = [], False
+    for ln in (msg or "").splitlines():
+        if ln.endswith("would be overwritten by checkout:"):
+            take = True
+        elif take and ln.startswith(("\t", "    ")):
+            files.append(ln.strip())
+        else:
+            take = False
+    return files
 
 
 def head(req):
@@ -143,6 +158,33 @@ def move(req, raw):
     if r.returncode == 0:
         req._send(200, json.dumps({"ok": True, "worktree": main_wt, "out": r.stdout, "freed": freed}))
         return
+    msg = (r.stderr or r.stdout or "checkout failed").strip()
+    files = _overwrite_paths(msg)
+    if files and d.get("dirt") in ("stash", "discard"):
+        # stash ONLY the blocking paths — other dirt provably doesn't block this checkout, and
+        # a whole-tree stash would sweep a concurrent session's unrelated WIP into it. Discard
+        # rides the same stash then drops it: the printed sha stays recoverable until gc.
+        st = ctx.run(["git", "-C", main_wt, "stash", "push", "-u",
+                      "-m", f"viewer: parked {len(files)} file(s) to check out {branch}", "--", *files])
+        if st.returncode != 0:
+            req._send(500, json.dumps({"ok": False, "err": "stash failed: " + (st.stderr or st.stdout).strip()}))
+            return
+        note = f"stashed {len(files)} blocking file(s) — git stash pop brings them back"
+        if d.get("dirt") == "discard":
+            dr = ctx.run(["git", "-C", main_wt, "stash", "drop"])
+            m = re.search(r"\(([0-9a-f]{7,40})\)", dr.stdout or "")
+            note = f"dropped {len(files)} blocking file(s)" + (f" — recover: git stash apply {m.group(1)}" if m else "")
+        r = ctx.run(["git", "-C", main_wt, "checkout", branch])
+        if r.returncode == 0:
+            req._send(200, json.dumps({"ok": True, "worktree": main_wt, "out": r.stdout, "freed": freed, "dirtNote": note}))
+            return
+        msg = (r.stderr or r.stdout or "checkout failed").strip()
+        files = _overwrite_paths(msg)
+    if files:
+        # dirty MAIN tree — the client renders the blocking paths with stash/discard retries.
+        # Deliberately not the `worktree` key: that reads as "held in another tree, free it".
+        req._send(200, json.dumps({"ok": False, "err": msg, "dirt": files, "dirtWt": main_wt}))
+        return
     # no `worktree` on failure: the client reads that key as "held in another tree, offer to
     # free it", so echoing main_wt here masks a dirty-tree refusal as a held state (silent loop).
-    req._send(500, json.dumps({"ok": False, "err": (r.stderr or r.stdout or "checkout failed").strip()}))
+    req._send(500, json.dumps({"ok": False, "err": msg}))

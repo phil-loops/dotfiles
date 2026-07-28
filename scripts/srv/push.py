@@ -19,11 +19,21 @@ from . import ctx, stage, sync
 
 def delta_tests(req, raw):
     # Run the tests RELATED to the branch's delta (stack-delta-tests: each changed X.ts's
-    # co-located X.test.ts, plus changed *.test.ts). The prep-to-merge pipeline calls this
-    # AFTER checkout, so it runs in the main checkout (HEAD = branch, real node_modules).
+    # co-located X.test.ts, plus changed *.test.ts). stack-delta-tests reads the delta from
+    # HEAD, so it runs in the worktree HOLDING the branch — the sync strip no longer moves
+    # the main checkout — or in its stack-open scratch tree (detached at the tip).
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-delta-tests"), "--branch", branch])
+    wt = _branch_worktree(branch)
+    if not wt:
+        r0 = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--path", branch])
+        wt = (r0.stdout or "").strip() if r0.returncode == 0 else ""
+    if not wt:
+        return req._send(200, json.dumps({
+            "ok": True, "ran": False, "noTests": False,
+            "summary": f"no worktree holds {branch} and none could be materialized — advisory tests skipped"}))
+    r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-delta-tests"), "--branch", branch],
+                       cwd=wt, capture_output=True, text=True)
     out = (r.stdout or "") + (r.stderr or "")
 
     def _n(label):
