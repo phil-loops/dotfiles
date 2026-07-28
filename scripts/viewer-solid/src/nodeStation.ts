@@ -82,7 +82,6 @@ export function nextStepOf(input: {
   if ((input.behind ?? 0) > 0 && input.syncable) {
     steps.push(`rebase forward (${input.behind} behind)`);
   }
-  steps.push("checkout here");
   if (r && r !== "nothing" && r !== "ready") {
     steps.push(input.prepWhy ?? "route to one outgoing commit");
   }
