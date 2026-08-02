@@ -14,10 +14,17 @@ Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With 
 config, falls back to auto-detected defaults (tsgo if tsconfig.node.json exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
-  stack-gates [--branch <b>] [--fix] [--progress <file>]
+  stack-gates [<branch> | --branch <b>] [--fix] [--progress <file>]
                                        run in the worktree of <b>; if none exists, materialize
                                        its stack-open scratch checkout (detached at the tip) —
-                                       never gates an unrelated tree
+                                       never gates an unrelated tree. Unrecognized arguments
+                                       are an error (a silently-dropped branch arg once gated
+                                       the caller's cwd and recorded verdicts for it).
+
+Before any gate runs, the tree's generated artifacts are repaired in place (reported as an
+"env" entry only when something was done): a node_modules symlink pointing anywhere but the
+main checkout is repointed, and seed-gen --sync brings .gen (and main's packages dist) up to
+date for the gated HEAD — so a red typecheck means the CODE is wrong, not the tree.
 
 --progress: append JSONL events to <file> as gates run — {"event":"plan","gates":[...]},
 then start/done per gate, then {"event":"result",...} mirroring stdout. Lets a caller
@@ -146,11 +153,10 @@ def default_gates(cwd):
         ts_projects = ["tsconfig.node.json"]
     else:
         ts_projects = []
-    # A typecheck reads generated tRPC types that only the MAIN checkout can build, and it builds
-    # them for whatever branch it happens to be sitting on — so the seed every scratch tree
-    # symlinks routinely describes someone else's routers, and the red that follows is not a real
-    # error. Say so ON the failure rather than gating separately: a provenance gate would block
-    # every push on this machine until the seed is rebuilt, which is not ours to impose.
+    # env_repair syncs the generated tRPC types before gates run, but when that couldn't happen
+    # (no tsgo, rebuild failed) a red here may still be the types, not the code. Say so ON the
+    # failure rather than gating separately: a provenance gate would block every push on this
+    # machine until the seed is rebuilt, which is not ours to impose.
     seed_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed-gen")
     why_red = f' || {{ {seed_gen} --check . ; exit 1; }}' if os.path.exists(seed_gen) else ""
     if ts_projects and not tsgo:
@@ -160,9 +166,12 @@ def default_gates(cwd):
                       "{ " + " && ".join(f"{tsgo} --project {p} --noEmit" for p in ts_projects)
                       + f" ; }}{why_red}"))
     if oxfmt:
+        # merge-base against origin/main, never the local main ref: a stale local main inflates
+        # the file set with other branches' files (169 files red for a 3-file branch, 2026-07-30).
         gates.append((
             "format",
-            "git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx' "
+            'base=$(git merge-base origin/main HEAD 2>/dev/null || echo main); '
+            "git diff --name-only \"$base\" HEAD --diff-filter=ACMR -- '*.ts' '*.tsx' "
             f"| xargs -r {oxfmt} --check",
         ))
     delta_tests = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-delta-tests")
@@ -216,7 +225,8 @@ def default_fixes(cwd, branch, borrowed=False):
     oxfmt = resolve("oxfmt", cwd)
     if oxfmt:
         fixes["format"] = (
-            "files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
+            'base=$(git merge-base origin/main HEAD 2>/dev/null || echo main); '
+            "files=$(git diff --name-only \"$base\" HEAD --diff-filter=ACMR -- '*.ts' '*.tsx'); "
             '[ -z "$files" ] && exit 0; '
             f'echo "$files" | xargs {oxfmt} --write; '
             'echo "$files" | xargs git add; '
@@ -231,18 +241,84 @@ def last_lines(text, n=12):
     return "\n".join(tail)
 
 
+def env_repair(cwd):
+    """Deterministic repairs to the tree's generated artifacts (all gitignored) so a gate
+    red means the code is wrong, not the environment. Returns (notes, ok): notes only for
+    actions actually taken — a healthy tree stays silent."""
+    notes = []
+    ok = True
+    out = run(["git", "worktree", "list", "--porcelain"], cwd).stdout
+    main = next((ln[len("worktree "):] for ln in out.splitlines() if ln.startswith("worktree ")), "")
+    if not main:
+        return notes, ok
+    # a node_modules symlink aimed anywhere but the main checkout reads some other tree's
+    # frozen packages/*/dist (the wt-075238 donor rot, 2026-07-30); a real directory is left alone
+    nm = os.path.join(cwd, "node_modules")
+    target = os.path.join(main, "node_modules")
+    if (os.path.islink(nm) and os.path.isdir(target)
+            and os.path.realpath(nm) != os.path.realpath(target)):
+        old = os.readlink(nm)
+        try:
+            os.unlink(nm)
+            os.symlink(target, nm)
+            notes.append(f"node_modules pointed at {old} — repointed at the main checkout")
+        except OSError as e:
+            notes.append(f"node_modules points at {old} and could not be repointed: {e}")
+            ok = False
+    seed_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed-gen")
+    if os.path.exists(seed_gen):
+        # donor first (main's .gen + packages dist feed every other tree), then the gated tree
+        for tree in dict.fromkeys([main, cwd]):
+            label = "" if tree == cwd else "main checkout: "
+            try:
+                r = subprocess.run([seed_gen, "--sync", tree],
+                                   capture_output=True, text=True, timeout=600)
+                msg = (r.stdout or "").strip()
+                if msg:
+                    notes.append(label + msg)
+                if r.returncode != 0:
+                    ok = False
+            except subprocess.TimeoutExpired:
+                notes.append(f"{label}types rebuild timed out after 600s")
+                ok = False
+    return notes, ok
+
+
 def main():
     branch = ""
-    argv = sys.argv[1:]
-    if "--branch" in argv:
-        i = argv.index("--branch")
-        branch = argv[i + 1] if i + 1 < len(argv) else ""
     progress_path = ""
-    if "--progress" in argv:
-        i = argv.index("--progress")
-        progress_path = argv[i + 1] if i + 1 < len(argv) else ""
-
-    do_fix = "--fix" in argv
+    do_fix = False
+    positional = []
+    unknown = []
+    argv = sys.argv[1:]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--branch" and i + 1 < len(argv):
+            branch = argv[i + 1]
+            i += 2
+        elif a == "--progress" and i + 1 < len(argv):
+            progress_path = argv[i + 1]
+            i += 2
+        elif a == "--fix":
+            do_fix = True
+            i += 1
+        elif a.startswith("-"):
+            unknown.append(a)
+            i += 1
+        else:
+            positional.append(a)
+            i += 1
+    if not branch and len(positional) == 1:
+        branch = positional.pop()
+    if unknown or positional:
+        bad = " ".join(unknown + positional)
+        verdict = {"ok": False, "gates": [
+            {"name": "usage", "ok": False, "ms": 0,
+             "summary": f"unrecognized argument(s): {bad}\n"
+                        "usage: stack-gates [<branch> | --branch <b>] [--fix] [--progress <file>]"}]}
+        print(json.dumps(verdict))
+        return 0
 
     prog = open(progress_path, "w", buffering=1) if progress_path else None
 
@@ -266,6 +342,9 @@ def main():
                 print(json.dumps(verdict))
                 return 0
         cwd = wt
+    t0 = time.time()
+    env_notes, env_ok = env_repair(cwd)
+    env_ms = int((time.time() - t0) * 1000)
     gates = configured_gates(cwd) or default_gates(cwd)
     fixes = (configured_fixes(cwd) or default_fixes(cwd, branch, borrowed)) if do_fix else {}
 
@@ -275,9 +354,15 @@ def main():
         print(json.dumps(verdict))
         return 0
 
-    emit({"event": "plan", "gates": [name for name, _ in gates]})
+    plan = (["env"] if env_notes else []) + [name for name, _ in gates]
+    emit({"event": "plan", "gates": plan})
     results = []
     all_ok = True
+    if env_notes:
+        results.append({"name": "env", "ok": env_ok, "ms": env_ms,
+                        "summary": "\n".join(env_notes)})
+        emit({"event": "done", "gate": "env", "ok": env_ok, "ms": env_ms})
+        all_ok = all_ok and env_ok
     for name, cmd in gates:
         t0 = time.time()
         emit({"event": "start", "gate": name, "ts": t0})
