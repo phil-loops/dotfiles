@@ -1,83 +1,142 @@
 #!/usr/bin/env bash
-# seed-gen <worktree-dir>
+# seed-gen [--sync] <worktree-dir>
 #
 # Give a worktree a .gen so `tsc`/the editor can resolve #trpc imports. Without it the tRPC
 # client type COLLAPSES to the "collides with a built-in method" sentinel and every
 # trpc.*.useQuery in the app reports as a bogus error (hundreds of .tsx errors, verified).
-# .gen is gitignored and only ever built in the main checkout, so a fresh sibling worktree
-# has none.
+# .gen is gitignored, so a fresh sibling worktree has none.
 #
-# ONE implementation for every caller — the git hooks (post-checkout/-merge/-rewrite) and
-# stack-open. Two copies of this logic drifted apart and each drift was a silent bug: this
-# one's rebuild aimed at a tsconfig loops had moved (dead since 2026-07-19), and stack-open's
-# copy watched only trpc/ while this one watched the real input set.
+# ONE implementation for every caller — the git hooks (post-checkout/-merge/-rewrite),
+# stack-open, and stack-gates. Two copies of this logic drifted apart and each drift was a
+# silent bug: this one's rebuild aimed at a tsconfig loops had moved (dead since 2026-07-19),
+# and stack-open's copy watched only trpc/ while this one watched the real input set.
 #
-# The main checkout is the ONLY tree that can build a correct .gen: everywhere else
-# node_modules is a symlink to it, so prisma-inferred exports resolve outside the project root
-# and trip TS2883, which means the aggregates the client type resolves through (trpc/root.d.ts,
-# routers/*.d.ts) are never re-emitted — such a rebuild rewrites the leaves only and leaves the
-# tree self-inconsistent, which reads as a confident wrong answer. So:
+# Which trees can build a correct .gen: the main checkout always (real node_modules, either
+# compiler). Everywhere else node_modules is a symlink, and *tsc* trips TS2883 there
+# (prisma-inferred exports resolve outside the project root), silently skipping the aggregates
+# the client type resolves through — but *tsgo* emits the full tree correctly (verified
+# 2026-07-30: aggregates rewritten, concrete types, gate typechecks green). So in-tree
+# rebuilds outside the main checkout are tsgo-only.
 #
-#   main checkout        rebuild whenever HEAD moved off what .gen was built for
-#   scratch review tree  symlink main's .gen — a read surface, nothing there writes it
-#   any other worktree   copy main's .gen — `task dev` there must not write through
+#   default (hooks; async, never blocks):
+#     main checkout        rebuild whenever HEAD moved off what .gen was built for
+#     scratch review tree  symlink main's .gen — a read surface, nothing there writes it
+#     any other worktree   copy main's .gen — `task dev` there must not write through
 #
-# Never blocks. NB: .gen does NOT reduce tsc memory — purely correctness.
+#   --sync (stack-gates; foreground): make THIS tree's .gen describe THIS tree's HEAD —
+#     reseed from main if absent, trade a symlink for a private copy rather than write
+#     through it, tsgo-emit in-tree, stamp .gen/.seed-gen-sha with the HEAD it now
+#     describes. Prints one line per action taken; silent no-op when already accurate.
+#
+# NB: .gen does NOT reduce tsc memory — purely correctness.
 set -u
 
 realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
 
+# .rebuilding is the single-flight lock. A crashed build strands it, and a stranded lock
+# silently freezes that tree's .gen forever (bit us 2026-07-30) — steal locks older than 10m.
+take_lock(){ # $1 = the .gen dir
+  local lock="$1/.rebuilding"
+  mkdir "$lock" 2>/dev/null && return 0
+  local age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || echo 0) ))
+  (( age > 600 )) && rm -rf "$lock" && mkdir "$lock" 2>/dev/null && return 0
+  return 1
+}
+
+drop_lock(){ rmdir "$1/.rebuilding" 2>/dev/null; }
+
+trpc_types_project(){ # $1 = tree; echoes the tsconfig path or nothing
+  local proj=typescript/tsconfig.trpc-types.json            # moved under typescript/ by loops #9599
+  [[ -f "$1/$proj" ]] || proj=tsconfig.trpc-types.json      # a pre-split branch still has it at the root
+  [[ -f "$1/$proj" ]] && echo "$proj"
+}
+
 # --check <worktree>: is the .gen this tree reads trustworthy FOR THE BRANCH IT IS ON?
-#
-# Only the main checkout can build a correct .gen, and it builds for whatever it happens to be
-# sitting on — so the seed every other tree symlinks describes some arbitrary branch's routers.
-# A typecheck against it is not a verdict: tRPC errors are as likely to come from the seed as
-# from the code. Verified 2026-07-22: ~/coding/loops was on a csv-import branch and its .gen was
-# stamped with a commit contained in NO branch at all.
-#
+# The marker is read from THIS tree's .gen (through a symlink that is main's marker; a
+# self-built copy carries its own) — a copy with no marker has no provenance at all.
 # Exit 0 = trustworthy. Exit 1 = say so out loud instead of reporting a confident red.
 if [[ "${1:-}" == --check ]]; then
   dir="${2:?usage: seed-gen --check <worktree-dir>}"
-  src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
-  [[ -n "$src" && -d "$src/.gen" ]] && { [[ -n "$src" ]]; } || { echo "no .gen anywhere to seed from"; exit 1; }
-  sha=$(cat "$src/.gen/.seed-gen-sha" 2>/dev/null)
+  [[ -d "$dir/.gen" || -L "$dir/.gen" ]] || { echo "no generated tRPC types in this tree"; exit 1; }
+  sha=$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)
   head=$(git -C "$dir" rev-parse HEAD 2>/dev/null)
   branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
   [[ "$branch" == HEAD ]] && branch=$(cat "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch" 2>/dev/null || echo "$head")
-  fix="cd ${src} && git checkout main && $(cd "$(dirname "$0")" && pwd -P)/seed-gen ${src}"
+  fix="$(cd "$(dirname "$0")" && pwd -P)/seed-gen --sync ${dir}"
   if [[ -z "$sha" ]]; then
     echo "generated tRPC types have no provenance marker — cannot tell what they describe"
-    echo "  regenerate: $fix"; exit 1
+    echo "  rebuild for this tree: $fix"; exit 1
   fi
   if ! git -C "$dir" merge-base --is-ancestor "$sha" "$head" 2>/dev/null; then
     where=$(git -C "$dir" branch --contains "$sha" 2>/dev/null | head -3 | tr -d ' *' | tr '\n' ' ')
     echo "generated tRPC types were built from ${sha:0:10} (${where:-on no branch}), which is not in ${branch}"
     echo "  any tRPC type error above may be the types, not your code"
-    echo "  regenerate: $fix"; exit 1
+    echo "  rebuild for this tree: $fix"; exit 1
   fi
   if ! git -C "$dir" diff --quiet "$sha" "$head" -- trpc 2>/dev/null; then
     echo "this branch changes trpc/ beyond what the generated types were built for (${sha:0:10})"
-    echo "  a scratch worktree cannot rebuild them (TS2883 on prisma-inferred exports), so tRPC"
-    echo "  shape errors above are expected here and are checked for real by CI"; exit 1
+    echo "  tRPC shape errors above may be the types, not your code"
+    echo "  rebuild for this tree: $fix"; exit 1
   fi
   exit 0
 fi
 
-dir="${1:?usage: seed-gen <worktree-dir>}"
+sync=0
+[[ "${1:-}" == --sync ]] && { sync=1; shift; }
+dir="${1:?usage: seed-gen [--sync] <worktree-dir>}"
 
 # source .gen from the MAIN checkout (first worktree), not wherever this runs — a sibling
-# worktree has no .gen of its own (gitignored, only built in main).
+# worktree has no .gen of its own (gitignored, only routinely built in main).
 src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
 [[ -n "$src" && -d "$src/.gen" ]] || exit 0                  # nothing to seed from
 
 if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
+
+  if (( sync )); then
+    head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || exit 0
+    marker="$dir/.gen/.seed-gen-sha"
+    [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0
+    if [[ -L "$dir/.gen" ]]; then
+      # main's .gen through a link — keep it only if it already describes this HEAD
+      sha=$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)
+      if [[ -n "$sha" ]] && git -C "$dir" merge-base --is-ancestor "$sha" "$head" 2>/dev/null \
+         && git -C "$dir" diff --quiet "$sha" "$head" -- trpc 2>/dev/null; then
+        exit 0
+      fi
+      rm -f "$dir/.gen"
+      echo "traded main's .gen link for a private copy (seed does not describe this branch)"
+    fi
+    if [[ ! -e "$dir/.gen" ]]; then
+      cp -cR "$src/.gen" "$dir/.gen" 2>/dev/null || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || mkdir -p "$dir/.gen"
+      rm -f "$marker"                     # the copy was built for main's HEAD, not this one
+      rm -rf "$dir/.gen/.rebuilding"      # a lock riding along in the copy is not ours
+    fi
+    proj=$(trpc_types_project "$dir") || exit 0
+    tsgo="$dir/node_modules/.bin/tsgo"
+    [[ -x "$tsgo" ]] || { echo "no repo-local tsgo — cannot rebuild types here (tsc trips TS2883 outside main)"; exit 0; }
+    take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
+    if out=$(cd "$dir" && "$tsgo" --project "$proj" --pretty false 2>&1); then
+      [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
+      drop_lock "$dir/.gen"
+      echo "rebuilt tRPC types for ${head:0:10} in this tree"
+    else
+      drop_lock "$dir/.gen"
+      echo "tRPC types rebuild FAILED:"; echo "$out" | tail -5
+      exit 1
+    fi
+    exit 0
+  fi
+
   scratch=$(realpath_of "${STACK_OPEN_DIR:-/tmp/stack-study}")
   if [[ -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ]]; then
-    # Nothing in a scratch tree rebuilds .gen any more, so a private copy is 17M of types frozen
-    # at whenever it was seeded — including the 47 the pre-2026-07-22 seeders left behind. Trade
-    # each one for the live link on its next open, unless a pre-fix rebuild is still holding it.
+    # Nothing in a scratch tree rebuilds .gen on the async path, so a private copy is 17M of
+    # types frozen at whenever it was seeded — including the 47 the pre-2026-07-22 seeders left
+    # behind. Trade each one for the live link on its next open, unless a rebuild is holding it.
+    # A marker matching HEAD is a --sync-built copy that is MORE accurate than main's seed: keep it.
     if [[ ! -L "$dir/.gen" && -d "$dir/.gen" && ! -d "$dir/.gen/.rebuilding" ]]; then
-      rm -rf "$dir/.gen"
+      if [[ "$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)" != "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" ]]; then
+        rm -rf "$dir/.gen"
+      fi
     fi
     [[ -e "$dir/.gen" ]] || ln -sfn "$src/.gen" "$dir/.gen"
     exit 0
@@ -87,8 +146,11 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
       || cp -R "$src/.gen" "$dir/.gen" 2>/dev/null || exit 0  # COW clone, fall back to plain copy
   fi
   # A copied marker describes the tree it was copied FROM: left in place it claims this
-  # worktree's .gen was built for a commit it has never seen.
-  [[ -L "$dir/.gen" ]] || rm -f "$dir/.gen/.seed-gen-sha"
+  # worktree's .gen was built for a commit it has never seen. (A marker matching this tree's
+  # HEAD is a --sync-built .gen — that one is real, keep it.)
+  if [[ ! -L "$dir/.gen" && "$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)" != "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" ]]; then
+    rm -f "$dir/.gen/.seed-gen-sha"
+  fi
   exit 0
 fi
 
@@ -99,27 +161,25 @@ marker="$dir/.gen/.seed-gen-sha"
 # checkout comes back TO main, so .gen kept whatever shape the last feature branch left it —
 # which is how the seed every other worktree copies got poisoned.
 
-proj=typescript/tsconfig.trpc-types.json                     # moved under typescript/ by loops #9599
-[[ -f "$dir/$proj" ]] || proj=tsconfig.trpc-types.json       # a pre-split branch still has it at the root
-[[ -f "$dir/$proj" ]] || exit 0
+proj=$(trpc_types_project "$dir") || exit 0
 
 tsgo="$dir/node_modules/.bin/tsgo"                           # ~3x faster; falls back to tsc
 [[ -x "$tsgo" ]] || tsgo=""
 tsc="$dir/node_modules/typescript/bin/tsc"
 [[ -n "$tsgo" || -e "$tsc" ]] || exit 0                      # no compiler → keep what's there
-mkdir "$dir/.gen/.rebuilding" 2>/dev/null || exit 0          # single-flight lock: a rebuild is already in flight
+if ! take_lock "$dir/.gen"; then
+  (( sync )) && { echo "a types rebuild is already in flight in the main checkout"; exit 1; }
+  exit 0
+fi
 
-# background incremental rebuild → stamp the sha, release the lock. Call the binary DIRECTLY
-# (never npx — backgrounded npx with no TTY hangs on its install prompt and piles up runaway procs).
 if [[ -n "$tsgo" ]]; then
   build=("$tsgo")
 else
   build=("$HOME/.volta/bin/node" "$tsc")
 fi
-# The subshell drops the inherited stdout/stderr too, not just the compiler's: a caller that
-# pipes us waits for EOF on those fds, so holding them open makes this "background" rebuild
-# block that caller for as long as the compile takes.
-( cd "$dir"
+
+build_main(){
+  cd "$dir"
   # packages/*/dist (gitignored, built locally) feeds @loops/* resolution in BOTH the .gen emit
   # and the app typecheck, and `tsc -b` is a no-op when nothing changed. Build with tsc (not
   # tsgo) to match the canonical `task build:packages`, so the shared dist/*.tsbuildinfo never
@@ -132,4 +192,20 @@ fi
   # A HEAD that moved during the build would make this stamp claim a shape .gen doesn't have.
   "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
     && [[ "$(git rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
-  rmdir "$dir/.gen/.rebuilding" 2>/dev/null ) >/dev/null 2>&1 &
+  drop_lock "$dir/.gen"
+}
+
+if (( sync )); then
+  build_main
+  if [[ "$(cat "$marker" 2>/dev/null)" == "$head" ]]; then
+    echo "rebuilt main checkout types (+packages dist) for ${head:0:10}"
+  else
+    echo "main checkout types rebuild FAILED (or HEAD moved during the build)"; exit 1
+  fi
+else
+  # The subshell drops the inherited stdout/stderr too, not just the compiler's: a caller that
+  # pipes us waits for EOF on those fds, so holding them open makes this "background" rebuild
+  # block that caller for as long as the compile takes. Call the binary DIRECTLY (never npx —
+  # backgrounded npx with no TTY hangs on its install prompt and piles up runaway procs).
+  ( build_main ) >/dev/null 2>&1 &
+fi
