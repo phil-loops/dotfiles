@@ -251,20 +251,8 @@ def env_repair(cwd):
     main = next((ln[len("worktree "):] for ln in out.splitlines() if ln.startswith("worktree ")), "")
     if not main:
         return notes, ok
-    # a node_modules symlink aimed anywhere but the main checkout reads some other tree's
-    # frozen packages/*/dist (the wt-075238 donor rot, 2026-07-30); a real directory is left alone
-    nm = os.path.join(cwd, "node_modules")
-    target = os.path.join(main, "node_modules")
-    if (os.path.islink(nm) and os.path.isdir(target)
-            and os.path.realpath(nm) != os.path.realpath(target)):
-        old = os.readlink(nm)
-        try:
-            os.unlink(nm)
-            os.symlink(target, nm)
-            notes.append(f"node_modules pointed at {old} — repointed at the main checkout")
-        except OSError as e:
-            notes.append(f"node_modules points at {old} and could not be repointed: {e}")
-            ok = False
+    # seed-gen --sync owns every repair (node_modules donor, tree-local packages dist, .gen) —
+    # one implementation shared with the pre-push hook, per the drift lesson in its header
     seed_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed-gen")
     if os.path.exists(seed_gen):
         # donor first (main's .gen + packages dist feed every other tree), then the gated tree

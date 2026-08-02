@@ -34,8 +34,11 @@ if [ "$behind" -gt 0 ] 2>/dev/null; then
   fi
 fi
 
-# Format-check files that differ from main; block the push if any are mis-formatted
-files=$(git diff --name-only main HEAD --diff-filter=ACMR -- '*.ts' '*.tsx')
+# Format-check files that differ from main; block the push if any are mis-formatted.
+# merge-base against origin/main, never the local main ref: a stale local main inflates
+# the file set with other branches' files (169 red for a 3-file branch, 2026-07-30).
+base=$(git merge-base origin/main HEAD 2>/dev/null || echo main)
+files=$(git diff --name-only "$base" HEAD --diff-filter=ACMR -- '*.ts' '*.tsx')
 if [ -n "$files" ]; then
   echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
   if ! echo "$files" | xargs npx oxfmt --check; then
@@ -44,10 +47,17 @@ if [ -n "$files" ]; then
 fi
 
 # Native-tsgo full typecheck of TS pushes — front-loads CI's type failures locally (~5-25s).
-# Runs against the already-built .gen/packages (the dev server keeps them fresh); skips when the
-# tRPC boundary was never built in this worktree, so a cold checkout never triggers a slow
-# package build here. Skips too if tsgo is absent; bypass a run with TSGO_SKIP=1.
+# seed-gen --sync first repairs what the typecheck reads (node_modules donor, .gen for THIS
+# HEAD, tree-local packages dist when the branch changes packages source) — foreground,
+# silent no-op when already accurate — so a red below means the code, not the tree.
+# Skips if tsgo is absent; bypass a run with TSGO_SKIP=1.
 if [ -n "$files" ] && [ "$TSGO_SKIP" != "1" ] && command -v tsgo >/dev/null 2>&1; then
+  seed_gen="$HOME/.dotfiles/scripts/seed-gen"
+  if [ -x "$seed_gen" ]; then
+    main_wt=$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
+    [ -n "$main_wt" ] && "$seed_gen" --sync "$main_wt"
+    "$seed_gen" --sync "$PWD"
+  fi
   if [ -f .gen/trpc-types/trpc/root.d.ts ]; then
     # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
     # branches from before the split still carry the old single config.
