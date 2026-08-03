@@ -84,6 +84,40 @@ explode_node_modules(){ # $1 = tree, $2 = main checkout; idempotent, tops up new
   return 0
 }
 
+seed_prisma_client(){ # $1 = tree, $2 = main checkout; a schema.prisma that differs from the donor's
+  # cannot read the donor's generated client — trade the .prisma/@prisma links for real copies and
+  # generate from THIS tree's schema. Stamped by schema blob hash: no-op while current, regenerates
+  # on any schema change including a revert back to the donor's.
+  local tree="$1" src="$2" schema="$1/packages/prisma/schema.prisma"
+  [[ -f "$schema" ]] || return 0
+  local want stamp="$1/node_modules/.prisma/.seed-gen-schema"
+  want=$(git -C "$tree" hash-object "$schema" 2>/dev/null) || return 0
+  [[ "$(cat "$stamp" 2>/dev/null)" == "$want" ]] && return 0
+  local src_head; src_head=$(git -C "$src" rev-parse HEAD 2>/dev/null)
+  if [[ -L "$tree/node_modules/.prisma" && -n "$src_head" ]] \
+     && git -C "$tree" diff --quiet "$src_head" HEAD -- packages/prisma/schema.prisma 2>/dev/null; then
+    return 0                       # donor's client through the link still describes this schema
+  fi
+  local pkg
+  for pkg in .prisma @prisma; do
+    [[ -L "$tree/node_modules/$pkg" ]] || continue
+    rm "$tree/node_modules/$pkg"
+    cp -cR "$src/node_modules/$pkg" "$tree/node_modules/$pkg" 2>/dev/null \
+      || cp -R "$src/node_modules/$pkg" "$tree/node_modules/$pkg"
+  done
+  local out
+  # generate never connects; prisma.config.ts still demands DATABASE_URL, and PRISMA_SCHEMA
+  # feeds the schema's binaryTargets env() — native is all a typecheck needs
+  if out=$(cd "$tree" && DATABASE_URL='postgresql://localhost:5432/seed-gen' PRISMA_SCHEMA='["native"]' \
+             ./node_modules/.bin/prisma generate --schema packages/prisma/schema.prisma 2>&1); then
+    echo "$want" > "$stamp"
+    echo "generated tree-local prisma client (schema differs from the donor's)"
+  else
+    echo "tree-local prisma generate FAILED:"; echo "$out" | tail -5
+    return 1
+  fi
+}
+
 build_packages(){ # $1 = tree; every packages/*/tsconfig.json, with the canonical tsc (no-op-fast when current)
   local tsc="$1/node_modules/typescript/bin/tsc"
   [[ -e "$tsc" ]] || return 0
@@ -163,6 +197,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
         exit 1
       fi
     fi
+    seed_prisma_client "$dir" "$src" || exit 1
     marker="$dir/.gen/.seed-gen-sha"
     [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0
     if [[ -L "$dir/.gen" ]]; then
