@@ -50,9 +50,11 @@ def _deploy_critical_globs():
 
 def _deploy_critical(branch):
     """Deploy-critical files origin/main changed that this branch is missing — mirrors the
-    pre-push hook's `git diff <ref>..origin/main -- <globs>` exactly (read-only)."""
+    pre-push hook's `git diff <ref>...origin/main -- <globs>` exactly (read-only).
+    Three-dot (merge-base→origin/main): two-dot is a tree diff that flags the branch's
+    OWN new migrations as main-side changes and locks push on every migration branch."""
     globs = _deploy_critical_globs()
-    out = ctx.run(["git", "diff", f"{branch}..origin/main", "--name-only", "--", *globs]).stdout
+    out = ctx.run(["git", "diff", f"{branch}...origin/main", "--name-only", "--", *globs]).stdout
     return [f for f in out.splitlines() if f.strip()]
 
 
