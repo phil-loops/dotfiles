@@ -132,6 +132,9 @@ fi
 sync=0
 [[ "${1:-}" == --sync ]] && { sync=1; shift; }
 dir="${1:?usage: seed-gen [--sync] <worktree-dir>}"
+# realpath: a /tmp spelling makes tsgo treat the tree's own node_modules as external
+# (/private/tmp realpaths) and dts emit fails with TS2883
+dir=$(realpath_of "$dir") || exit 0
 
 # source .gen from the MAIN checkout (first worktree), not wherever this runs — a sibling
 # worktree has no .gen of its own (gitignored, only routinely built in main).
