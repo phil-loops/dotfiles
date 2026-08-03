@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""IMAP IDLE watcher for GitHub Actions completion emails.
+
+Watches a dedicated throwaway mailbox (fed by a Gmail filter-forward of
+notifications@github.com run emails) and fires a macOS notification the
+moment a message lands. Config: ~/.config/ghci-mail-watch/config
+(IMAP_USER=..., optional IMAP_HOST/MAILBOX/IMAP_PASS_FILE); the app
+password lives in ~/.config/ghci-mail-watch/app-password (chmod 600).
+
+Usage: ghci-mail-watch [--test]   (--test fires a sample notification)
+"""
+
+import email
+import email.header
+import imaplib
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import time
+
+CONFIG_PATH = os.path.expanduser("~/.config/ghci-mail-watch/config")
+IDLE_REISSUE_SECONDS = 25 * 60
+RUN_URL = re.compile(rb"https://github\.com/[^\s\"'<>]+/actions/runs/\d+")
+
+
+def load_config():
+    if not os.path.exists(CONFIG_PATH):
+        print(f"no config at {CONFIG_PATH}; exiting", flush=True)
+        sys.exit(0)
+    cfg = {}
+    with open(CONFIG_PATH) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            cfg[key.strip()] = value.strip()
+    cfg.setdefault("IMAP_HOST", "imap.gmail.com")
+    cfg.setdefault("MAILBOX", "INBOX")
+    pass_file = os.path.expanduser(
+        cfg.get("IMAP_PASS_FILE", "~/.config/ghci-mail-watch/app-password")
+    )
+    with open(pass_file) as f:
+        cfg["IMAP_PASS"] = f.read().strip()
+    return cfg
+
+
+def decode_subject(raw):
+    parts = email.header.decode_header(raw)
+    return "".join(
+        p.decode(enc or "utf-8", "replace") if isinstance(p, bytes) else p
+        for p, enc in parts
+    )
+
+
+def find_run_url(msg):
+    for part in msg.walk():
+        if part.get_content_type() in ("text/plain", "text/html"):
+            payload = part.get_payload(decode=True) or b""
+            match = RUN_URL.search(payload)
+            if match:
+                return match.group(0).decode()
+    return ""
+
+
+def notify(subject, url):
+    lower = subject.lower()
+    if "succeeded" in lower or "success" in lower:
+        title, sound = "CI ✅", "Glass"
+    elif "failed" in lower or "failure" in lower:
+        title, sound = "CI ❌", "Basso"
+    elif "cancelled" in lower or "canceled" in lower:
+        title, sound = "CI ⛔", "Pop"
+    else:
+        title, sound = "CI", "Pop"
+    if shutil.which("terminal-notifier"):
+        cmd = [
+            "terminal-notifier",
+            "-title", title,
+            "-message", subject,
+            "-sound", sound,
+            "-group", f"ghci-mail-watch-{abs(hash(subject))}",
+        ]
+        if url:
+            cmd += ["-open", url]
+        subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    else:
+        safe = subject.replace("\\", "\\\\").replace('"', '\\"')
+        subprocess.run(
+            ["osascript", "-e", f'display notification "{safe}" with title "{title}"'],
+            stdin=subprocess.DEVNULL,
+        )
+
+
+def process_unseen(conn):
+    ok, data = conn.search(None, "UNSEEN")
+    if ok != "OK" or not data or not data[0]:
+        return
+    for num in data[0].split():
+        ok, fetched = conn.fetch(num, "(RFC822)")
+        if ok != "OK" or not fetched or not isinstance(fetched[0], tuple):
+            continue
+        msg = email.message_from_bytes(fetched[0][1])
+        subject = decode_subject(msg.get("Subject", "(no subject)"))
+        print(f"notify: {subject}", flush=True)
+        notify(subject, find_run_url(msg))
+
+
+def idle_wait(conn):
+    tag = conn._new_tag().decode()
+    conn.send(f"{tag} IDLE\r\n".encode())
+    line = conn.readline()
+    if not line.startswith(b"+"):
+        raise ConnectionError(f"IDLE refused: {line!r}")
+    conn.sock.settimeout(IDLE_REISSUE_SECONDS)
+    try:
+        while True:
+            line = conn.readline()
+            if not line:
+                raise ConnectionError("connection closed during IDLE")
+            if b"EXISTS" in line:
+                break
+    except socket.timeout:
+        pass
+    finally:
+        conn.sock.settimeout(60)
+        conn.send(b"DONE\r\n")
+    while True:
+        line = conn.readline()
+        if not line:
+            raise ConnectionError("connection closed after IDLE DONE")
+        if line.startswith(tag.encode()):
+            break
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--test":
+        notify("[Loops-so/loops] Run succeeded: build-and-test (test)", "")
+        return
+    cfg = load_config()
+    backoff = 5
+    while True:
+        conn = None
+        try:
+            conn = imaplib.IMAP4_SSL(cfg["IMAP_HOST"])
+            conn.login(cfg["IMAP_USER"], cfg["IMAP_PASS"])
+            conn.select(cfg["MAILBOX"])
+            print(f"watching {cfg['IMAP_USER']}/{cfg['MAILBOX']}", flush=True)
+            backoff = 5
+            while True:
+                process_unseen(conn)
+                idle_wait(conn)
+        except Exception as e:
+            print(f"reconnect after error: {e}", flush=True)
+            if conn is not None:
+                try:
+                    conn.logout()
+                except Exception:
+                    pass
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 300)
+
+
+if __name__ == "__main__":
+    main()
