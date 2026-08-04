@@ -260,6 +260,13 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   fi
   [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
   seed_gen "$dir"   # .gen for #trpc resolution — a scratch tree shares the main checkout's
+  # The seed is main's types; when this branch's trpc surface differs they are WRONG in the
+  # editor (phantom errors on new router inputs, 2026-08-03). Heal in the background — the
+  # no-op path (marker matches HEAD) exits in ms, a real rebuild lands seconds after open.
+  # STACK_OPEN_NO_GEN_SYNC opts out (stack-open-test's bare-seeding cases assert the link).
+  [[ -n "${STACK_OPEN_NO_GEN_SYNC:-}" ]] \
+    || ( "$SCRIPTS/seed-gen" --sync "$dir" \
+           >"$(git -C "$dir" rev-parse --git-dir 2>/dev/null)/seed-gen-sync.log" 2>&1 & )
   "$SCRIPTS/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
   # record the branch + install the follow-hook so commits here advance the ref
   # instead of stranding on the detached HEAD (see install_followup_hook).
