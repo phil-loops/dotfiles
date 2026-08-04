@@ -38,7 +38,10 @@ git until they approve.
 ## 2 · Propose the forest
 
 - One **single-verb** branch per capability (`add X`, `record X`, `emit X`, `use X in Y`,
-  `remove X`). Size tracks concern-count, not a line budget.
+  `remove X`). Size tracks concern-count, not a line budget — **and moved code counts concerns the
+  same as new code**: an extraction has one concern per relocated function with its own callers or
+  reason to exist, and moves slice SMALLER than new code (reviewing a move = verifying faithful
+  relocation). The "cohesive primitive + tests" allowance never covers relocations.
 - **Bottom-up by dependency**: schema/migration → queries → models → wiring → refactors/cleanup.
 - **Independent capabilities fork off `main` as siblings** — each its own base, independently
   mergeable. **Chain** (set a non-main `parent`) on a *real* dependency: the branch needs that one
@@ -56,7 +59,8 @@ git until they approve.
 - Each branch gets a one-line **purpose** in the plain register (CLAUDE.md *Branch purpose*): what
   it DOES, no raw identifiers (`markLocked`, `getOrFetch`) or terms-of-art (`idempotent`,
   `monotonic`, `short-circuit`); keep forest vocab (`requires`, fan-in, convergence). This one line
-  seeds both the story and the PR body — write it well, not as a later de-jargon pass.
+  seeds both the story and the PR body — write it well, not as a later de-jargon pass. Every "and"
+  joining two behaviors in a purpose line is a split point — fix the split, not the sentence.
 
 ## 4 · Emit the merge-story plan
 
@@ -98,7 +102,7 @@ Desktop concurrently). Walk the branches in dependency order; per branch:
 - Move the work onto it: cherry-pick the relevant commits, or `git restore -p` / `git checkout -p`
   the capability's hunks from the source, then commit (clean, single-purpose commit; no
   Co-Authored-By; never amend). Each **base must compile on its own** — typecheck it
-  (`npx tsc --project tsconfig.node.json --noEmit`) before moving on. A base that won't compile
+  (`tsgo --project typescript/tsconfig.runtime.json --noEmit`) before moving on. A base that won't compile
   alone is mis-split — re-cut it. For query/model branches, run their tests too — untested
   queries/models don't leave this step.
 - Set its config in the **same motion** (the forest config is hand-maintained; the viewer reads it):
