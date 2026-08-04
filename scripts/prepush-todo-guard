@@ -7,7 +7,9 @@
 #
 # Called from .git/hooks/pre-push with the hook's own args ("$@"):
 #   $1 = remote name   $2 = remote URL
-# Does NOT read stdin (stack-prepush-guard already consumed it).
+# Does NOT read stdin (the hook captures it); $PUSH_SHA carries the pushed commit —
+# fall back to HEAD only when absent, since the push may run from a worktree that
+# has a different branch checked out.
 #
 # Bypass: TODO_GUARD=0 git push ...   (or git push --no-verify)
 set -uo pipefail
@@ -22,10 +24,11 @@ case "$remote_url" in
   *) exit 0 ;;
 esac
 
-base=$(git merge-base HEAD origin/main 2>/dev/null) || exit 0
+pushed="${PUSH_SHA:-HEAD}"
+base=$(git merge-base "$pushed" origin/main 2>/dev/null) || exit 0
 [ -n "$base" ] || exit 0
 
-added=$(git diff -U0 --diff-filter=ACMR "$base...HEAD" 2>/dev/null | awk '
+added=$(git diff -U0 --diff-filter=ACMR "$base...$pushed" 2>/dev/null | awk '
   /^\+\+\+ b\// { file = substr($0, 7); next }
   /^@@/ {
     match($0, /\+[0-9]+/)

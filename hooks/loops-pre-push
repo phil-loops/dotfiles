@@ -2,21 +2,31 @@
 
 export PATH="$HOME/.volta/bin:/opt/homebrew/bin:$PATH"
 
+# git pipes one line per ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
+# Every check below keys off the PUSHED ref, never the checked-out HEAD — a push can run
+# from a worktree sitting on a different branch (the viewer's pinned-cwd fallback did,
+# and HEAD-based checks blocked a clean push on the wrong branch's gap, 2026-08-03).
+refs=$(cat)
+
 # Block work-in-progress commits (X-WIP trailer / wip subjects) from reaching a remote.
-# Reads the ref lines git pipes in on stdin; the rest of this hook doesn't use stdin.
-"$HOME/.dotfiles/scripts/stack-prepush-guard" || exit 1
+printf '%s\n' "$refs" | "$HOME/.dotfiles/scripts/stack-prepush-guard" || exit 1
+
+# the pushed commit: first ref line that isn't a delete (all-zero sha)
+push_sha=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $2; exit }')
+push_ref=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $1; exit }')
+[ -n "$push_sha" ] || exit 0
 
 # Block TODOs from reaching the shared repo (forks still push freely).
-"$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
+PUSH_SHA="$push_sha" "$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
 
-# Warn if branch is behind main
-behind=$(git rev-list --count HEAD..origin/main 2>/dev/null)
+# Warn if the pushed branch is behind main
+behind=$(git rev-list --count "$push_sha"..origin/main 2>/dev/null)
 if [ "$behind" -gt 0 ] 2>/dev/null; then
-  echo "⚠️  Branch is $behind commits behind origin/main. Consider: git rebase origin/main"
+  echo "⚠️  Pushed branch is $behind commits behind origin/main. Consider: git rebase origin/main"
 
   # Check for deploy-critical changes missed from main (three-dot: only
   # main-side changes, so the branch's own new migrations don't show up)
-  critical=$(git diff HEAD...origin/main --name-only -- \
+  critical=$(git diff "$push_sha"...origin/main --name-only -- \
     'k8s/charts/loops/values.staging.yaml' \
     'k8s/charts/loops/values.production.yaml' \
     'packages/prisma/migrations/*' \
@@ -34,6 +44,12 @@ if [ "$behind" -gt 0 ] 2>/dev/null; then
   fi
 fi
 
+# oxfmt/tsgo below read the WORKING TREE, so they're only honest when the checkout
+# actually holds the pushed commit; otherwise skip them — the push gates cover both.
+if [ "$(git rev-parse HEAD 2>/dev/null)" != "$push_sha" ]; then
+  echo "pre-push: worktree isn't on the pushed commit — skipping oxfmt/tsgo tree checks"
+  files=""
+else
 # Format-check files that differ from main; block the push if any are mis-formatted.
 # merge-base against origin/main, never the local main ref: a stale local main inflates
 # the file set with other branches' files (169 red for a 3-file branch, 2026-07-30).
@@ -44,6 +60,7 @@ if [ -n "$files" ]; then
   if ! echo "$files" | xargs npx oxfmt --check; then
     exit 1
   fi
+fi
 fi
 
 # Native-tsgo full typecheck of TS pushes — front-loads CI's type failures locally (~5-25s).
@@ -81,9 +98,9 @@ fi
 # Push is proceeding → kick off a detached, on-demand CI watcher for this branch.
 # It waits for the PR's checks to resolve, notifies once, then exits — so a watcher
 # lives only while CI is in flight (replaces the old always-on launchd sweep).
-branch=$(git rev-parse --abbrev-ref HEAD)
+branch=${push_ref#refs/heads/}
 case "$branch" in
-  main|HEAD) ;;  # never watch main or a detached HEAD
+  main|""|refs/*) ;;  # never watch main; a non-branch ref (tag) has no PR to watch
   *) ( "$HOME/.dotfiles/scripts/prwatch" --await "$branch" >/dev/null 2>&1 </dev/null & ) ;;
 esac
 

@@ -199,7 +199,9 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     fi
     seed_prisma_client "$dir" "$src" || exit 1
     marker="$dir/.gen/.seed-gen-sha"
-    [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0
+    # trust the marker only in a private .gen — through a symlink it is MAIN's marker, and a
+    # concurrent stamp-through-the-link can make it claim this branch's HEAD (2026-08-03)
+    [[ ! -L "$dir/.gen" && -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0
     if [[ -L "$dir/.gen" ]]; then
       # main's .gen through a link — keep it only if it already describes this HEAD.
       # The diff must cover everything root.d.ts inlines through, not trpc/ alone: router
@@ -223,7 +225,9 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     [[ -x "$tsgo" ]] || { echo "no repo-local tsgo — cannot rebuild types here (tsc trips TS2883 outside main)"; exit 0; }
     take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
     if out=$(cd "$dir" && "$tsgo" --project "$proj" --pretty false 2>&1); then
-      [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
+      # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
+      # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
+      [[ ! -L "$dir/.gen" && "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
       drop_lock "$dir/.gen"
       echo "rebuilt tRPC types for ${head:0:10} in this tree"
     else
