@@ -111,7 +111,7 @@ print -r -- ".gen seeding"
 # a tsconfig loops had moved, and every scratch tree quietly kept a frozen copy of main's types.
 if [[ -d "$MAIN/.gen" ]]; then
   g="$T/gen"; mkdir -p "$g"
-  gdir=$(STACK_OPEN_DIR="$g" "$SO" --path "$BRANCH" 2>/dev/null)
+  gdir=$(STACK_OPEN_DIR="$g" STACK_OPEN_NO_GEN_SYNC=1 "$SO" --path "$BRANCH" 2>/dev/null)
   [[ -L "$gdir/.gen" ]] && ok "a scratch tree shares the main checkout's .gen" \
                         || no "a scratch tree got a .gen of its own"
 
@@ -119,7 +119,7 @@ if [[ -d "$MAIN/.gen" ]]; then
   # a scratch tree rebuilds (symlinked node_modules can't emit the aggregates the client resolves through).
   rm -f "$gdir/.gen"
   cp -cR "$MAIN/.gen" "$gdir/.gen" 2>/dev/null || cp -R "$MAIN/.gen" "$gdir/.gen" 2>/dev/null
-  STACK_OPEN_DIR="$g" "$SO" --path "$BRANCH" >/dev/null 2>&1
+  STACK_OPEN_DIR="$g" STACK_OPEN_NO_GEN_SYNC=1 "$SO" --path "$BRANCH" >/dev/null 2>&1
   [[ -L "$gdir/.gen" ]] && ok "a frozen .gen copy is traded for the link" \
                         || no "kept a frozen .gen copy"
 

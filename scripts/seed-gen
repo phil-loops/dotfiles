@@ -201,10 +201,13 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     marker="$dir/.gen/.seed-gen-sha"
     [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0
     if [[ -L "$dir/.gen" ]]; then
-      # main's .gen through a link — keep it only if it already describes this HEAD
+      # main's .gen through a link — keep it only if it already describes this HEAD.
+      # The diff must cover everything root.d.ts inlines through, not trpc/ alone: router
+      # inputs come from lib/ zod schemas and outputs from models/ + queries/ (a branch
+      # adding a lib/types/UserPreferences key kept main's stale link, 2026-08-03).
       sha=$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)
       if [[ -n "$sha" ]] && git -C "$dir" merge-base --is-ancestor "$sha" "$head" 2>/dev/null \
-         && git -C "$dir" diff --quiet "$sha" "$head" -- trpc 2>/dev/null; then
+         && git -C "$dir" diff --quiet "$sha" "$head" -- trpc lib models queries packages ':(exclude)packages/prisma/migrations' 2>/dev/null; then
         exit 0
       fi
       rm -f "$dir/.gen"
