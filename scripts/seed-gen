@@ -74,12 +74,16 @@ explode_node_modules(){ # $1 = tree, $2 = main checkout; idempotent, tops up new
     for e in "$src_nm"/*; do
       b=$(basename "$e")
       [[ "$b" == "@loops" ]] && continue
-      [[ -e "$nm/$b" || -L "$nm/$b" ]] || ln -s "$e" "$nm/$b"
+      [[ -e "$nm/$b" || -L "$nm/$b" ]] || ln -sh "$e" "$nm/$b"
     done )
   local p
+  # -h + the -L guard: a dangling @loops link passes ! -e, and plain ln descends into a
+  # symlinked-dir destination — minting a packages/<p>/<p> self-link (2026-08-04 push block)
   for p in "$1"/packages/*/; do
     b=$(basename "$p")
-    [[ -f "$p/package.json" && ! -e "$nm/@loops/$b" ]] && ln -s "../../packages/$b" "$nm/@loops/$b"
+    [[ -L "$p$b" && "$(readlink "$p$b")" == "../../packages/$b" ]] && rm "$p$b"
+    [[ -f "$p/package.json" && ! -e "$nm/@loops/$b" && ! -L "$nm/@loops/$b" ]] \
+      && ln -sh "../../packages/$b" "$nm/@loops/$b"
   done
   return 0
 }
