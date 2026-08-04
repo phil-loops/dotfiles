@@ -141,12 +141,19 @@ check_migrations() {
   [ -n "$url" ] || url="postgres://postgres:password@localhost:5432/postgres"
   latest_dir="$(ls "$co/packages/prisma/migrations" 2>/dev/null | grep -E '^[0-9]' | sort | tail -1)"
   [ -n "$latest_dir" ] || return 0
-  latest_db="$(command psql "$url" -Atc     "select migration_name from _prisma_migrations where finished_at is not null order by started_at desc limit 1" 2>/dev/null)"
+  latest_db="$(command psql "$url" -Atc "select migration_name from _prisma_migrations where finished_at is not null order by started_at desc limit 1" 2>/dev/null)"
   [ -n "$latest_db" ] || return 0   # DB down or no psql client — check_docker owns that story
-  if [ "$latest_db" != "$latest_dir" ]; then
-    row "migrations" "$(amber DRIFT)" "db at ${latest_db:0:28}, repo at ${latest_dir:0:28} — task dev:migrate"
+  local applied
+  applied="$(command psql "$url" -Atc "select count(*) from _prisma_migrations where migration_name='$latest_dir' and finished_at is not null" 2>/dev/null)"
+  if [ "$applied" = "0" ]; then
+    row "migrations" "$(amber BEHIND)" "repo has ${latest_dir:0:28} unapplied — task dev:migrate"
     PROBLEMS=$((PROBLEMS + 1))
     return 1
+  fi
+  if [ ! -d "$co/packages/prisma/migrations/$latest_db" ]; then
+    # db ahead of this checkout: usually a parked/stale main checkout, not a db problem
+    row "migrations" "$(dim ahead)" "$(dim "db has ${latest_db:0:28} this checkout lacks — checkout behind origin?")"
+    return 0
   fi
   row "migrations" "$(green ok)" "$(dim "${latest_dir:0:40}")"
 }
