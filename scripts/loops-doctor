@@ -132,6 +132,25 @@ check_docker() {
   row "docker" "$(green ok)" "$(dim "$(docker ps --format '{{.Names}}' 2>/dev/null | grep -c '^loops-') containers")"
 }
 
+# Migrations land on main faster than the long-lived dev DB applies them, and nothing
+# surfaces the gap until a query hits a missing column (Prisma buries the real error).
+check_migrations() {
+  local co="$HOME/coding/loops" url latest_dir latest_db
+  [ -d "$co/packages/prisma/migrations" ] || return 0
+  url="$(grep -m1 '^DATABASE_URL=' "$co/.env" 2>/dev/null | cut -d= -f2- | tr -d '"')"
+  [ -n "$url" ] || url="postgres://postgres:password@localhost:5432/postgres"
+  latest_dir="$(ls "$co/packages/prisma/migrations" 2>/dev/null | grep -E '^[0-9]' | sort | tail -1)"
+  [ -n "$latest_dir" ] || return 0
+  latest_db="$(command psql "$url" -Atc     "select migration_name from _prisma_migrations where finished_at is not null order by started_at desc limit 1" 2>/dev/null)"
+  [ -n "$latest_db" ] || return 0   # DB down or no psql client — check_docker owns that story
+  if [ "$latest_db" != "$latest_dir" ]; then
+    row "migrations" "$(amber DRIFT)" "db at ${latest_db:0:28}, repo at ${latest_dir:0:28} — task dev:migrate"
+    PROBLEMS=$((PROBLEMS + 1))
+    return 1
+  fi
+  row "migrations" "$(green ok)" "$(dim "${latest_dir:0:40}")"
+}
+
 # The real test for a queue consumer: does the backlog actually move?
 check_jobs_consumer() {
   local d1 d2 health
@@ -196,6 +215,7 @@ check_previews() {
 run_checks() {
   PROBLEMS=0
   check_docker || true
+  check_migrations || true
   check_next_server "dev server" 3000 "http://localhost:3000/" || true
   check_jobs_consumer || true
   check_http "mail-schedule" 3005 "http://localhost:3005/" || true
