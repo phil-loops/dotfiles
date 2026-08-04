@@ -225,10 +225,29 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
       rm -rf "$dir/.gen/.rebuilding"      # a lock riding along in the copy is not ours
     fi
     proj=$(trpc_types_project "$dir") || exit 0
-    tsgo="$dir/node_modules/.bin/tsgo"
-    [[ -x "$tsgo" ]] || { echo "no repo-local tsgo — cannot rebuild types here (tsc trips TS2883 outside main)"; exit 0; }
+    tsc="$dir/node_modules/typescript/bin/tsc"
+    [[ -e "$tsc" ]] || { echo "no repo-local tsc — cannot rebuild types here"; exit 0; }
+    # declaration emit names .prisma types relative to where node_modules PHYSICALLY lives — through
+    # a symlinked node_modules the reference escapes the tree: tsc trips TS2883, and tsgo silently
+    # emits `user?: Prisma` (namespace-as-type → every consumer goes unknown/any, 2026-08-04).
+    # Real tree-local .prisma/@prisma keep the reference inside; emit with tsc, never tsgo.
+    if ! exploded "$dir"; then
+      explode_node_modules "$dir" "$src" && echo "exploded node_modules for a tree-local types rebuild"
+      if out=$(build_packages "$dir"); then
+        [[ -n "$out" ]] && { echo "tree-local packages dist build:"; echo "$out" | tail -3; }
+      else
+        echo "tree-local packages dist build FAILED:"; echo "$out" | tail -5
+        exit 1
+      fi
+    fi
+    for _pkg in .prisma @prisma; do
+      [[ -L "$dir/node_modules/$_pkg" ]] || continue
+      rm "$dir/node_modules/$_pkg"
+      cp -cR "$src/node_modules/$_pkg" "$dir/node_modules/$_pkg" 2>/dev/null \
+        || cp -R "$src/node_modules/$_pkg" "$dir/node_modules/$_pkg"
+    done
     take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
-    if out=$(cd "$dir" && "$tsgo" --project "$proj" --pretty false 2>&1); then
+    if out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
       # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
       # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
       [[ ! -L "$dir/.gen" && "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
