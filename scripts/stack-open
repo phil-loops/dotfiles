@@ -261,12 +261,29 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
   seed_gen "$dir"   # .gen for #trpc resolution — a scratch tree shares the main checkout's
   # The seed is main's types; when this branch's trpc surface differs they are WRONG in the
-  # editor (phantom errors on new router inputs, 2026-08-03). Heal in the background — the
-  # no-op path (marker matches HEAD) exits in ms, a real rebuild lands seconds after open.
-  # STACK_OPEN_NO_GEN_SYNC opts out (stack-open-test's bare-seeding cases assert the link).
-  [[ -n "${STACK_OPEN_NO_GEN_SYNC:-}" ]] \
-    || ( "$SCRIPTS/seed-gen" --sync "$dir" \
-           >"$(git -C "$dir" rev-parse --git-dir 2>/dev/null)/seed-gen-sync.log" 2>&1 & )
+  # editor (phantom errors on new router inputs, 2026-08-03). The heal cannot run foreground:
+  # the viewer SIGKILLs the whole open after ~8s and a ~5s rebuild starves the cursor drive.
+  # So heal in the background and, when the rebuild actually changed types, say so with the
+  # one keystroke that completes it — tsgo holds what it loaded at startup until :lsp-restart.
+  # Accurate types no-op in ms and stay silent. STACK_OPEN_NO_GEN_SYNC opts out
+  # (stack-open-test's bare-seeding cases assert the link).
+  if [[ -z "${STACK_OPEN_NO_GEN_SYNC:-}" ]]; then
+    local glog
+    glog="$(git -C "$dir" rev-parse --git-dir 2>/dev/null)/seed-gen-sync.log"
+    # double-wrap + full fd redirect: ensure_worktree runs inside $(...), and a bg child
+    # holding that pipe's write end blocks the caller until the heal finishes — the exact
+    # "background rebuild blocks the caller" trap seed-gen documents (starved the hx drive).
+    ( ( "$SCRIPTS/seed-gen" --sync "$dir" >"$glog" 2>&1
+        if command -v terminal-notifier >/dev/null; then
+          if grep -q FAILED "$glog" 2>/dev/null; then
+            terminal-notifier -title stack-open -message "types heal FAILED: ${dir:t} — see $glog" \
+              </dev/null >/dev/null 2>&1
+          elif grep -q rebuilt "$glog" 2>/dev/null; then
+            terminal-notifier -title stack-open -message "types rebuilt for ${dir:t} — :lsp-restart to pick them up" \
+              </dev/null >/dev/null 2>&1
+          fi
+        fi ) >/dev/null 2>&1 & )
+  fi
   "$SCRIPTS/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
   # record the branch + install the follow-hook so commits here advance the ref
   # instead of stranding on the detached HEAD (see install_followup_hook).
