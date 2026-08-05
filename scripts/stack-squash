@@ -315,17 +315,22 @@ diffstat = git(["diff", "--stat", f"{base}...{branch}"]).stdout.strip()
 patch = git(["diff", f"{base}...{branch}"]).stdout
 patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 
-# scope comes from the forest project, not the code area the voice corpus (main) teaches
+# scope comes from the forest project — or its Linear ticket when one is tied
+# (stack-project.<p>.ticket) — not the code area the voice corpus (main) teaches
 project = (git(["config", f"branch.{branch}.stack-project"]).stdout.strip()
            or git(["config", f"stack-branch.{branch}.project"]).stdout.strip())
+ticket = (git(["config", f"stack-project.{project}.ticket"]).stdout.strip().lower()
+          if project else "")
+scope = ticket or project
 
 _SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!?):\s*(?P<rest>.+)$")
 
 
 def force_scope(msg):
-    """Pin the subject's conventional-commit scope to the stack project. Saying it in the
-    prompt isn't enough: the drafter studies main, where scope IS a code area, and drifts."""
-    if not (project and msg):
+    """Pin the subject's conventional-commit scope to the stack project (or its Linear
+    ticket). Saying it in the prompt isn't enough: the drafter studies main, where scope
+    IS a code area, and drifts."""
+    if not (scope and msg):
         return msg
     lines = msg.splitlines()
     m = _SUBJECT_RE.match(lines[0].strip())
@@ -339,15 +344,16 @@ def force_scope(msg):
                   if cm), "")
         if not t:
             return msg
-        lines[0] = f"{t}({project}): {lines[0].strip()}"
+        lines[0] = f"{t}({scope}): {lines[0].strip()}"
         return "\n".join(lines)
-    lines[0] = f"{m['type']}({project}){m['bang']}: {m['rest'].strip()}"
+    lines[0] = f"{m['type']}({scope}){m['bang']}: {m['rest'].strip()}"
     return "\n".join(lines)
 
 
 scope_instr = (
-    f"\nThe conventional-commit scope MUST be exactly `{project}`: this branch belongs to the\n"
-    f"`{project}` stack project, and every branch in a forest carries the project as its scope so\n"
+    f"\nThe conventional-commit scope MUST be exactly `{scope}`: this branch belongs to the\n"
+    f"`{project}` stack project" + (f" (Linear ticket `{ticket}`)" if ticket else "")
+    + ", and every branch in a forest carries the same scope so\n"
     f"the forest is legible from `git log` alone. The code-area scopes in the voice examples are\n"
     f"main's convention, NOT this forest's — do not copy them.\n"
 ) if project else ""

@@ -37,7 +37,7 @@ _MODEL_CFG = re.compile(
     r"|branch\.[^=]+\.description="
     r"|branch\.[^=]+\.stack-(parent|requires|project)="
     r"|stack-branch\.[^=]+\.(parent|requires|project)="
-    r"|stack-project\.[^=]+\.(branch|archived|interest)=)")
+    r"|stack-project\.[^=]+\.(branch|archived|interest|ticket)=)")
 
 
 def _forest_sig(branches):
@@ -150,6 +150,9 @@ def _enrich(raw, branch):
         iv = ctx.run(["git", "config", f"stack-project.{proj}.interest"]).stdout.strip()
         if iv.lstrip("-").isdigit() and int(iv) > 0:
             data["interest"] = int(iv)
+        tv = ctx.run(["git", "config", f"stack-project.{proj}.ticket"]).stdout.strip()
+        if tv:
+            data["ticket"] = tv.lower()
     if order:
         data["mergeOrder"] = order
     return json.dumps(data)

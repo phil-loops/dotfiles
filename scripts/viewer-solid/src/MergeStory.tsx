@@ -130,7 +130,7 @@ export default function MergeStory(props: {
     });
   });
 
-  const scope = () => leafOf(props.project);
+  const scope = () => props.model?.ticket ?? leafOf(props.project);
 
   // opt-in LLM pass: crisp each subject AND read the node's diff for one non-trivial detail.
   const [polished, setPolished] = createSignal<Record<string, { subject?: string; detail?: string }>>({});
