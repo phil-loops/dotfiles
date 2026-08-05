@@ -2,34 +2,29 @@
 
 ## Layering: queries → models → wiring
 
-Follow a strict layering pattern:
-
 - **Queries** are thin data-access wrappers — one DB call per function, no business logic, no authorization, no cross-table joins or transactions
 - **Models** contain business logic with dependency injection — validation, authorization, cross-entity operations, cascading deletes
-- **Wiring** integrates models into handlers/routers/jobs — minimal glue code
-- tRPC routers, API routes, and job handlers are all **wiring** — they call models, not queries directly
-- If a function touches multiple tables, has conditional logic, or does authorization checks, it belongs in models, not queries
+- **Wiring** (tRPC routers, API routes, job handlers) integrates models — minimal glue; it calls models, never queries directly
+- A function that touches multiple tables, branches, or authorizes belongs in models, not queries
 
 ## Naming conventions
 
 - **File names** follow the team's kebab-case convention: `goal-contact-window.ts`, not `goalContactWindow.ts`
-- **Query imports** use namespace imports with the full descriptive name: `import * as GoalContactWindowQueries from "..."` — not shorthand like `GCWQueries`. In tests the bare function name (`insert`, `findActiveByContact`) is obvious from context, but in model/wiring code the qualified name (`GoalContactWindowQueries.insert`) improves legibility.
+- **Query imports** use namespace imports with the full name: `import * as GoalContactWindowQueries from "..."` — never shorthand like `GCWQueries`. Bare function names are fine in tests where context is obvious; model/wiring code uses the qualified name.
 
 ## Type style
 
-- **Inline object-parameter type literals in function signatures.** Don't declare a separate named type alias just to name the input shape. Example: `function update(input: { id: string; name?: string })` — not `type UpdateInput = { ... }; function update(input: UpdateInput)`. Standalone aliases pollute the file's mental context: readers have to scroll up to resolve the alias to understand the contract. Inlining keeps the contract at the call site, even with 5+ fields. Test code that uses `Deps<typeof fn>` / `Parameters<typeof fn>` extracts from the function itself, so inline types don't break it. Don't refactor pre-existing standalone types unless asked.
-- **A deps parameter needs only the `typeof`, never the value.** Type each dep as `typeof realFn` and import it with `import type`; make `deps` required and let the caller (wiring) pass the real implementations. Never default a deps object to the real functions when that default is the only thing forcing a runtime import — a value import that exists purely to seed a default couples heavy modules for nothing (sesUtils pulling in transactionalEmails just to name a default) and invites cycles; `import type` erases the edge at compile time. Exception: a same-module thin default-deps wrapper (the script-runner pattern) is fine — there the wrapper IS the wiring and the defaults live where the values already are.
+- **Inline object-parameter type literals in function signatures** — `function update(input: { id: string; name?: string })`, never a standalone `type UpdateInput = { … }` alias readers must scroll to resolve. Inlining keeps the contract at the call site, even with 5+ fields; `Deps<typeof fn>` / `Parameters<typeof fn>` extract from the function itself, so tests don't break. Don't refactor pre-existing aliases unless asked.
+- **A deps parameter needs only the `typeof`, never the value.** Type each dep `typeof realFn` with `import type`; make `deps` required and let wiring pass the real implementations. Never default a deps object to the real functions when that default is the only thing forcing a runtime import — it couples heavy modules and invites cycles (sesUtils once pulled in transactionalEmails just to name a default); `import type` erases the edge. Exception: a same-module thin default-deps wrapper (the script-runner pattern) — there the wrapper IS the wiring.
 
 ## Comments
 
-**Default to zero comments.** Code carries the *what*; names and types carry intent and shape. A comment is a last resort for a fact none of those can hold — not a companion to the diff. Most commits should add **no** comments; a diff dotted with explanatory prose is the smell this rule exists to kill.
+**Default to zero comments.** Code carries the *what*; names and types carry intent and shape. Most commits add **no** comments — a diff dotted with explanatory prose is the smell this rule exists to kill.
 
-Before writing a comment, it must clear **every** bar — fail any, delete it:
+A comment must clear **every** bar — fail any, delete it:
 
-- **Misleading without it, not merely nice-to-have.** Its absence would lead a competent reader to a *wrong change* or a bug. "Helpful context," "for clarity," or restating the obvious does not qualify.
-- **Unrecoverable from the code.** If a sharper name, a named constant, or an extracted well-named function would carry the fact, do **that** instead — always. A comment is an admission the code couldn't say it itself.
-- **One line.** Needing two-plus lines of prose means the *code* is wrong, not under-documented — restructure (rename, split, introduce a named intermediate) until the note is trivial or unnecessary. A paragraph above a statement is never the answer.
+- **Misleading without it** — its absence would lead a competent reader to a wrong change or a bug; "helpful context" doesn't qualify.
+- **Unrecoverable from the code** — if a sharper name, a named constant, or an extracted function would carry the fact, do that instead, always.
+- **One line** — two-plus lines of prose means the *code* is wrong, not under-documented; restructure until the note is trivial or unnecessary.
 
-**"Why" is not a license to narrate.** Restating the adjacent code with "so that…" or "because…" bolted on is still narration — the call and the names already show it. A genuine *why* points **outside** this code: an external constraint, a bug being worked around, an invariant enforced elsewhere, a deliberate deviation from the obvious approach. (Narration, delete it: `// disable sole members so the Loops sync stops pushing them`. Why, keep it: `// sole members only — multi-team users get disabled via <other path>; double-disabling races it`.)
-
-Banned outright: restating the next line, section-header comments (`// fetch users`), step-by-step narration of an obvious sequence, and any comment that will silently rot when the code beside it moves.
+**"Why" is not a license to narrate.** Restating the adjacent code with "so that…" / "because…" bolted on is still narration. A genuine *why* points **outside** this code: an external constraint, a bug worked around, an invariant enforced elsewhere, a deliberate deviation from the obvious approach. (Narration, delete: `// disable sole members so the Loops sync stops pushing them`. Why, keep: `// sole members only — multi-team users get disabled via <other path>; double-disabling races it`.) Banned outright: restating the next line, section headers (`// fetch users`), step narration, anything that silently rots when the code beside it moves.

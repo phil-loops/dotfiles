@@ -8,7 +8,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 **Pushing & PRs**
 
-- **Never push branches or open PRs — Phil handles both himself** (pushes to `origin` = `Loops-so/loops` via GH Desktop / the viewer; opens every PR manually). Claude's job ends at a prepped local branch + a drafted PR body. PR branches and PRs live on `origin` directly (origin-internal, not fork PRs); the `phil-loops` fork is only for bench/experimental branches (and is `stack-push.remote`), never the PR flow. Never let tooling open PRs — that's manual.
+- **Never push branches or open PRs — Phil handles both himself**, and never let tooling do either. Claude's job ends at a prepped local branch + a drafted PR body. (Remote topology: loops topic file.)
 - Committing locally is fine — make clean, self-contained commits.
 
 **History**
@@ -30,30 +30,17 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 # Just do both
 
-**If a project has two things to do and both are yours to do, do them — don't make me pick the order.**
-Independent work has no order to get wrong: when neither blocks the other and each stands on its own,
-sequencing is your call. Asking costs a round trip and buys nothing — and once you've split out a base
-so its consumers are siblings, "which sibling first?" is a question you just engineered away. Do one,
-do the next, say in a line what you did.
+**If a project has two things to do and both are yours to do, do them — don't make me pick the order.** Independent work has no order to get wrong; sequencing is your call. Do one, do the next, say in a line what you did.
 
-**Only ask when my answer changes what gets built** — a real fork with a wrong branch: a design
-direction, a data model, a destructive or outward-facing step, a genuine ambiguity in the request.
-**Never ask when my input doesn't move the needle downstream**: which of two independent things goes
-first, whether to do the obvious next increment, permission to keep going, or re-confirming something
-I already said. Pick the sensible option, state it, keep moving.
-
-If a real fork *is* hiding under the fake one, ask **that** instead — the upstream unknown both paths
-share, not the ordering. (Anti-pattern, 2026-07-16: after hoisting a shared primitive out so the map
-badge and the spine became independent consumers, I was asked "which order?" — when the only thing
-that mattered was the data gap sitting underneath both.)
+**Only ask when my answer changes what gets built** — a design direction, a data model, a destructive or outward-facing step, a genuine ambiguity in the request. Never ask which of two independent things goes first, whether to do the obvious next increment, permission to keep going, or to re-confirm something I already said: pick the sensible option, state it, keep moving. If a real fork *is* hiding under the fake one, ask **that** — the upstream unknown both paths share, not the ordering. (2026-07-16: asked "which order?" about two freshly-independent siblings when the only real question was the data gap under both.)
 
 # Skills
 
-**The `design` skill (nvim whiteboard `:submit` loop) is opt-in only.** Phrases like "let's spec X", "design Y", "write up a plan", or "whiteboard it" do NOT mean launch it — they mean produce a spec. Default to writing the spec **inline** in chat (or a plain markdown file the user can read). Only start the design-doc loop when the user **explicitly** asks for that tool/flow. *Offer* it ("want to iterate on this in the design whiteboard?") rather than launching it. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
+**The `design` skill (nvim whiteboard `:submit` loop) is opt-in only.** "Spec X", "design Y", "write up a plan", "whiteboard it" mean *produce a spec* — inline in chat or a plain markdown file — not launch the tool; *offer* it, launch only on an explicit ask. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
 
 # Browser / "open in web"
 
-**The Claude browser extension is NOT installed/connected.** The `mcp__claude-in-chrome__*` tools *load* via ToolSearch but fail at runtime with "browser extension is not connected" — don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a headless-Chromium script — `npx puppeteer`, or a small node script that launches Chromium, navigates, screenshots, and asserts on the DOM). When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `stack web`, which is the forest viewer server the user reviews on himself.)
+**The Claude browser extension is NOT installed/connected** — the `mcp__claude-in-chrome__*` tools load via ToolSearch but fail at runtime; don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a small node script that launches headless Chromium, navigates, screenshots, asserts on the DOM). **"open in web" / "open in the browser" means run `open <url-or-path>`** — hand off to the default browser, don't drive one. (Distinct from `stack web`, the forest viewer Phil reviews on himself.)
 
 # Topic files
 
