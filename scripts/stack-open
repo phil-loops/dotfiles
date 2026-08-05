@@ -263,26 +263,23 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   # The seed is main's types; when this branch's trpc surface differs they are WRONG in the
   # editor (phantom errors on new router inputs, 2026-08-03). The heal cannot run foreground:
   # the viewer SIGKILLs the whole open after ~8s and a ~5s rebuild starves the cursor drive.
-  # So heal in the background and, when the rebuild actually changed types, say so with the
-  # one keystroke that completes it — tsgo holds what it loaded at startup until :lsp-restart.
-  # Accurate types no-op in ms and stay silent. STACK_OPEN_NO_GEN_SYNC opts out
-  # (stack-open-test's bare-seeding cases assert the link).
+  # So heal in the background; when the rebuild actually changed types, --heal-notify drives
+  # ':lsp-restart' into the warm Helix itself (tsgo holds what it loaded at startup) and only
+  # falls back to a banner when it can't. Accurate types no-op in ms and stay silent.
+  # STACK_OPEN_NO_GEN_SYNC opts out (stack-open-test's bare-seeding cases assert the link).
   if [[ -z "${STACK_OPEN_NO_GEN_SYNC:-}" ]]; then
     local glog
     glog="$(git -C "$dir" rev-parse --git-dir 2>/dev/null)/seed-gen-sync.log"
     # double-wrap + full fd redirect: ensure_worktree runs inside $(...), and a bg child
     # holding that pipe's write end blocks the caller until the heal finishes — the exact
     # "background rebuild blocks the caller" trap seed-gen documents (starved the hx drive).
+    # --heal-notify re-execs setsid'd into its OWN session: the viewer's ~8s group-SIGKILL
+    # would otherwise land mid-batch and leave a half-typed prompt in the buffer.
     ( ( "$SCRIPTS/seed-gen" --sync "$dir" >"$glog" 2>&1
-        if command -v terminal-notifier >/dev/null; then
-          if grep -q FAILED "$glog" 2>/dev/null; then
-            terminal-notifier -title stack-open -message "types heal FAILED: ${dir:t} — see $glog" \
-              </dev/null >/dev/null 2>&1
-          elif grep -q rebuilt "$glog" 2>/dev/null; then
-            terminal-notifier -title stack-open -message "types rebuilt for ${dir:t} — :lsp-restart to pick them up" \
-              </dev/null >/dev/null 2>&1
-          fi
-        fi ) >/dev/null 2>&1 & )
+        builtin cd -q "$dir" 2>/dev/null || true
+        perl -e 'use POSIX (); POSIX::setsid(); exec @ARGV' \
+          "$SCRIPTS/stack-open" --heal-notify "$dir" "$glog" </dev/null >/dev/null 2>&1
+      ) >/dev/null 2>&1 & )
   fi
   "$SCRIPTS/helix-tsgo-stamp" "$dir" 2>/dev/null || true   # local-only Helix→tsgo override
   # record the branch + install the follow-hook so commits here advance the ref
@@ -416,6 +413,39 @@ hx_goto_line(){   # land on <line> (no-op without one) through the verified ':' 
   [[ -n "$line" ]] || return 0
   hx_verify_normal "$pane" || return 1
   hx_cmd "$pane" "goto ${line}"
+}
+
+notify(){ command -v terminal-notifier >/dev/null \
+  && terminal-notifier -title stack-open -message "$1" </dev/null >/dev/null 2>&1 || true }
+
+hx_heal_restart(){   # deliver a types heal to the warm Helix: drive ':lsp-restart' through the
+                     # verified prompt so tsgo reloads the rebuilt .gen with no human action.
+                     # 0 = delivered, or no pane holds stale types (a later cold hx loads fresh);
+                     # 1 = a pane exists but wouldn't take the command — caller falls back to a banner.
+  local pane="" i dirty_before=""
+  for i in {1..20}; do   # the open that spawned this heal may still be LAUNCHING the pane
+    # match hx_open's targeting: the PANE running hx in the review-hx window, never the window
+    pane=$(tmux list-panes -s -t "$SESSION" \
+            -F '#{pane_id} #{pane_current_command} #{window_name}' 2>/dev/null \
+          | awk '$2=="hx" && $3=="review-hx" {print $1; exit}') || true
+    [[ -n "$pane" ]] && break
+    sleep 0.5
+  done
+  [[ -n "$pane" ]] || return 0
+  hx_lock "$pane" || hx_lock "$pane" || return 1   # the open's own drive holds it for up to ~8s
+  hx_modified "$pane" && dirty_before=1
+  if hx_verify_normal "$pane" && hx_cmd "$pane" "lsp-restart"; then
+    hx_unlock
+    tmux display-message -t "$pane" "stack-open: types rebuilt — LSP restarted" 2>/dev/null || true
+    return 0
+  fi
+  # a batch that died mid-way may have typed its body into the buffer — undo only when the
+  # pane was clean before we touched it (the same recovery hx_open runs)
+  if hx_verify_normal "$pane" && [[ -z "$dirty_before" ]] && hx_modified "$pane"; then
+    tmux send-keys -t "$pane" -l u
+  fi
+  hx_unlock
+  return 1
 }
 
 hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-keys), else launch hx
@@ -561,6 +591,15 @@ case "${1:-}" in
   --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
   --serve-path) STACK_OPEN_SKIP_PRIMARY=1 ensure_worktree "${2:?branch}"; exit 0;;   # --path, but never
              # the primary checkout — a dir loops-preview may serve (it refuses MAIN)
+  --heal-notify)   # (internal, setsid'd from the heal) read the heal log and deliver the outcome:
+    # auto ':lsp-restart' in the warm Helix; a banner only for failures we can't act on.
+    hdir="${2:?dir}"; hlog="${3:?log}"
+    if grep -q FAILED "$hlog" 2>/dev/null; then
+      notify "types heal FAILED: ${hdir:t} — see $hlog"
+    elif grep -q rebuilt "$hlog" 2>/dev/null; then
+      hx_heal_restart || notify "types rebuilt for ${hdir:t} — :lsp-restart to pick them up"
+    fi
+    exit 0;;
   --review)  # open <branch> for whole-PR review: Helix → its changed files as buffers; nvim → the gm Diffview
     rbranch="${2:?usage: stack-open --review <branch>}"
     EDITOR_CHOICE="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
