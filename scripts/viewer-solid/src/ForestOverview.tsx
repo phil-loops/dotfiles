@@ -344,6 +344,27 @@ export function ForestOverview() {
   const hideTip = () => { tipBranch = null; setTip(null); };
   const ovShipPlan = useShipPlan(project);
   const [chatPick, setChatPick] = createSignal(false);
+  const editTicket = async () => {
+    if (!canMutate) {
+      return;
+    }
+    const cur = model.data?.ticket?.toUpperCase() ?? "";
+    const v = window.prompt("Linear ticket for this forest (blank clears):", cur || "LOO-");
+    if (v === null || v.trim().toUpperCase() === cur) {
+      return;
+    }
+    const r = await fetch(withRepo("/ticket"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ project: project(), ticket: v.trim() }),
+    });
+    if (r.ok) {
+      ovQc.invalidateQueries({ queryKey: ["model"] });
+    } else {
+      const e = (await r.json().catch(() => null)) as { error?: string } | null;
+      window.alert(e?.error ?? "ticket save failed");
+    }
+  };
 
   return (
     <div class="forest-overview min-h-screen bg-vellum-night">
@@ -353,6 +374,17 @@ export function ForestOverview() {
           <span class="fo-interest text-[11px] tracking-[-1px] text-gold-leaf" title={`interest ${model.data!.interest} — promoted on the Forests home`}>
             {interestPips(model.data!.interest!)}
           </span>
+        </Show>
+        <Show when={canMutate || model.data?.ticket}>
+          <button
+            class="fo-ticket cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[4px] py-[1px] font-mono text-[11px] text-ink-faint hover:border-rule hover:text-ink-dim"
+            title={model.data?.ticket
+              ? `Linear ${model.data.ticket.toUpperCase()} — commit scopes read type(${model.data.ticket}):; click to change`
+              : "tie this forest to a Linear ticket — commit scopes become type(loo-####):"}
+            onClick={editTicket}
+          >
+            {model.data?.ticket ?? "＋ ticket"}
+          </button>
         </Show>
         <Show when={spine().length}>
           <span class="fo-meta text-[12px] tracking-[0.04em] text-ink-faint">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>

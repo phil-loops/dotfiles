@@ -452,6 +452,8 @@ class H(BaseHTTPRequestHandler):
             return review.plan_template_set(self, raw)
         if self.path == "/interest":   # promote/demote a branch's manual interest (stack-project.<p>.interest)
             return review.interest_bump(self, raw)
+        if self.path == "/ticket":     # tie a forest to its Linear ticket (stack-project.<p>.ticket)
+            return review.ticket_set(self, raw)
         if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
             return review.shelve(self, raw)
         if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
