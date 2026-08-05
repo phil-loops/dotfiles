@@ -2,8 +2,8 @@
 
 ## Remotes
 
-- `origin` (`Loops-so/loops`) — the shared team repo, and where branches **and** PRs actually live: branches are pushed straight to origin and PRs are opened origin-internal (head branch → `main`, same repo — not fork PRs). **Claude never pushes here and never opens PRs.** Phil pushes branches himself (GH Desktop, → viewer per the push-to-origin work) and opens every PR manually. Claude's job ends at a prepped local branch + a drafted PR body handed off.
-- `phil-loops` (`phil-loops/loops`) — Phil's fork. **Not part of the PR workflow** (those branches are origin-internal, above), but not dead: it holds bench/experimental branches (e.g. `bench/goal-metrics`) and is the repo's `stack-push.remote` default. So a *PR* branch never goes here (it'd be orphaned); a throwaway/bench branch may. When in doubt, it's Phil's push either way.
+- `origin` (`Loops-so/loops`) — the shared team repo; branches and PRs live here, origin-internal (head branch → `main`, same repo — never fork PRs). Phil pushes via GH Desktop / the viewer and opens every PR manually (spine hard rule).
+- `phil-loops` (`phil-loops/loops`) — Phil's fork: bench/experimental branches only (e.g. `bench/goal-metrics`), and the repo's `stack-push.remote` default. A PR branch never goes here — it'd be orphaned. When in doubt, it's Phil's push either way.
 
 ## Script runner
 
@@ -29,17 +29,17 @@ task clickhouse:migrate  # run ClickHouse migrations (uses correct URL)
 task ci:run              # full CI pipeline locally
 ```
 
-Run `task --list` to see all available tasks. Use the team's tools — don't reinvent with raw commands.
+Run `task --list` for the full set.
 
 ## Migrations
 
-**A new migration must pass squawk before it ships, unless there's a stated reason it shouldn't.** Run it locally the moment the migration file exists — CI (`lint-migrations`) runs the same check and comments on the PR, so this front-loads it:
+**A new migration must pass squawk before it ships**, absent a stated reason. Run it the moment the file exists — CI (`lint-migrations`) runs the same check:
 
 ```bash
 npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
 ```
 
-The repo's `.squawk.toml` applies automatically (it already excludes `require-timeout-settings` and `prefer-timestamp-tz`). Repo conventions squawk enforces: `CREATE TABLE IF NOT EXISTS` (robust statements). When a warning is wrong for the case (e.g. `prefer-bigint-over-int` on a small bounded counter), suppress it with an inline `-- squawk-ignore <rule>` comment directly above the statement — bare rule name only, no trailing text — and put the reason in the commit message.
+`.squawk.toml` applies automatically (already excludes `require-timeout-settings`, `prefer-timestamp-tz`); repo convention: `CREATE TABLE IF NOT EXISTS`. A wrong-for-the-case warning (e.g. `prefer-bigint-over-int` on a small bounded counter) gets an inline `-- squawk-ignore <rule>` directly above the statement — bare rule name, no trailing text — with the reason in the commit message.
 
 ## Typecheck
 
@@ -50,10 +50,8 @@ tsgo --project typescript/tsconfig.runtime.json --noEmit   # the default full ty
 tsgo --project typescript/tsconfig.test.json --noEmit      # + tests
 ```
 
-(`tsconfig.node.json` was split into these two by PR #9599 on 2026-07-19 — a branch from before the split still carries the old single config. The loops pre-push hook runs the same checks, gated to TS-changed pushes; bypass with `TSGO_SKIP=1`.)
+(The two configs split from `tsconfig.node.json` in #9599, 2026-07-19 — a pre-split branch still carries the old single config. The pre-push hook runs the same checks; bypass with `TSGO_SKIP=1`.)
 
-CI typechecks the same surfaces via `task lint:typecheck` (many per-entry configs) and agrees with tsgo on this repo, so **don't run tsc locally as a routine check** — reach for it only when you need the CI-exact verdict (e.g. CI is red but tsgo is green), and then always queued: `tsc-turn npx tsc --project typescript/tsconfig.runtime.json --noEmit`. `tsc-turn` (`~/.dotfiles/scripts/tsc-turn`) is a machine-wide compile queue: at most 2 heavy checks run at once, extra callers wait their turn. With several Claude sessions live, seven concurrent `tsc` runs flatten the machine (2026-07-06) — route any tsc run or build through it; it adds nothing when the machine is idle.
+CI (`task lint:typecheck`) agrees with tsgo on this repo, so **tsc is not a routine local check** — it's only for the CI-exact verdict (CI red, tsgo green), and then always queued: `tsc-turn npx tsc --project typescript/tsconfig.runtime.json --noEmit`. `tsc-turn` is a machine-wide compile queue, max 2 heavy checks at once — route every tsc run or build through it (2026-07-06: seven concurrent tscs flattened the machine). `oxlint --type-aware` and `oxfmt` are lints and formatting, NOT typecheckers.
 
-`oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
-
-**Caveat — the tRPC client type is a generated artifact.** A worktree with stale/missing generated types floods `tsc` with hundreds of `.tsx` errors that all trace to one collapsed type (`TS2339` "Property X does not exist on type '...collides with a built-in method...'" plus cascading implicit-`any` params). That's noise from un-built types, not your change. Filter to what you touched (`... --noEmit 2>&1 | grep <your-file>`) to read the real signal, or build the types first (`task trpc:types`).
+**Caveat — the tRPC client type is a generated artifact.** Stale/missing generated types flood `tsc` with hundreds of `.tsx` errors tracing to one collapsed type (`TS2339` "…collides with a built-in method…" + cascading implicit-`any` params) — noise from un-built types, not your change. Filter to what you touched (`… --noEmit 2>&1 | grep <your-file>`) or build the types first (`task trpc:types`).
