@@ -25,7 +25,9 @@ they approve.
 ## 1 · Read the work
 
 Identify the source — a branch (`git diff main...<branch>`), a PR, or uncommitted changes — and
-inventory it by **capability, not by file**.
+inventory it by **capability, not by file**. For work already shaped into branches, the first
+check per branch is **atomicity**: diff vs its own description — anything the diff does that the
+description doesn't say is an accreted concern, a candidate split.
 
 ## 2 · Propose the forest
 
@@ -84,3 +86,6 @@ you go — reforesting is the free moment to delete narration.
 - Plan → approval → surgery, in that order. Worktree only. No push, no PRs (spine).
 - A base that doesn't compile alone, or a query/model branch without tests, is mis-split — re-cut.
 - More small independently-mergeable bases beats one fused branch.
+- **Atomicity decays through iteration** — each revision round lands fixes "where the code already
+  is." Re-run the diff-vs-description gate on every touched branch after every round, not only at
+  creation.
