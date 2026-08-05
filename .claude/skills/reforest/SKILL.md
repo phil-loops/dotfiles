@@ -14,6 +14,8 @@ workflow: read → propose → merge-story plan → sign-off → execute, ending
 > own description; anything the diff does that the description doesn't say is another branch.
 > Runs on first read of existing branches, and again on every touched branch after EVERY revision
 > round — atomicity decays through iteration, each fix landing "where the code already is."
+> Companion final-state check at the forest's tip: **every `export` the forest adds needs a
+> consumer outside its module** — unused = un-export it in the branch that introduced it.
 
 ## When to use
 
