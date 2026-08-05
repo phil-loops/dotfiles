@@ -1,6 +1,6 @@
 # How this file is organized
 
-Hard rules and behavioral defaults live here, always in view. Mechanics live in the imported topic files at the bottom. When adding guidance: an invariant goes under *Hard rules*, a procedure goes in the matching topic file, and a dated war story gets compressed to a one-line parenthetical (the full story belongs in memory, not here).
+Hard rules and behavioral defaults live here, always in view. Mechanics live in the imported topic files at the bottom. When adding guidance: an invariant goes under *Hard rules*, a procedure goes in the matching topic file, and a dated war story gets compressed to a one-line parenthetical (the full story belongs in memory, not here). **Every addition contracts**: fold the lesson into the existing rule that should have caught it and delete what that makes redundant — a new section is a last resort, net growth needs a reason, and guidance that only accretes dilutes every rule already there.
 
 # Hard rules
 
