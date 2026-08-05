@@ -46,6 +46,8 @@ export const ForestModel = z.object({
   mergeOrder: z.array(z.string()).optional(),
   // Phil's manual promote/demote level (stack-project.<name>.interest), grafted on by /model.
   interest: z.number().optional(),
+  // Linear ticket tied to the project (stack-project.<name>.ticket, lowercased), grafted on by /model.
+  ticket: z.string().optional(),
 });
 export type ForestModel = z.infer<typeof ForestModel>;
 

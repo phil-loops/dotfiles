@@ -79,6 +79,8 @@ Present the forest as the **merge-story** — the same artifact the viewer rende
   order is `stack-merge-rank <project>` (a stable sort with the declared-order tie-break baked in) —
   consume it, don't re-derive.
 - **`type`** = `feat` for a new capability, `refactor`/`chore` for cleanup, by the branch's nature.
+- **`<scope>`** = the project's Linear ticket lowercased (`stack-project.<project>.ticket`, e.g.
+  `loo-5474`) when the project is tied to one, else the project name. Same scope on every branch.
 - Distinguish **`↳ builds on N`** (a true `parent` — stacked code) from **`⤿ requires N — merges
   after`** (an integrator carrying ≥2 bases beyond its parent lists the extras this way). A branch
   with exactly ONE prerequisite builds on it — one dep is a parent, never a lone `requires`.
@@ -111,6 +113,9 @@ Desktop concurrently). Walk the branches in dependency order; per branch:
   - `git config stack-branch.<branch>.project <project>` and
     `git config --add stack-project.<project>.branch <branch>`
   - fan-in: `git config --add stack-branch.<branch>.requires <dep>` per dep
+  - once per project, when the work is tied to a Linear ticket:
+    `git config stack-project.<project>.ticket LOO-####` — commit scopes and the viewer's merge
+    story then use the lowercased ticket instead of the project name
 - **Never push, never open PRs** — the user does that.
 
 When done, the viewer renders the forest's story straight from this config (`⌘K → "merge story"`,
