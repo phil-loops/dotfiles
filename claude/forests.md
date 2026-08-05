@@ -11,6 +11,14 @@
 - **The ladder**: cleanup-that-later-bands-build-on (bottom, only when downstream depends on it) → queries+tests → models+tests → wiring+tests → endpoints+tests (tRPC routers are wiring). Let a band be empty rather than fuse two. Tests ride in the band of the code they cover. UI branches separate from API branches. Observability/metrics get their own small PRs.
 - **Don't**: business logic in query branches; queries+tRPC+UI in one branch; 3+ unrelated directories (split it); a migration in a middle branch when a schema branch exists. A branch that only makes sense with its child merges into the child.
 
+## When the split rules bind — while building, not at review
+
+Shape rules consulted only at reforest time have already failed. They bind at three moments:
+
+- **Before the first commit: plan the forest.** Name the branches and their one-line purposes before writing code. Work discovered mid-build gets its own branch — usually a base cut underneath — never a commit on top of the current one.
+- **Before every commit: the description is the gate.** If the diff does anything `branch.<n>.description` doesn't say, stop — that work is another branch. A commit subject needing a different verb than the description IS the "and" test failing, caught while the fix is one `git checkout -b`. (2026-08-04: "move the domain writes into query functions" committed onto a branch described "moves the sending-domain insert into the model" — queries introduced, modified, and consumed in one node.)
+- **Before handoff: the band scan.** Bands map to directories — `queries/` → `models/` → wiring (`pages/api`, tRPC, jobs) → UI. A `parent...branch` diff spanning three bands is fused: re-cut it. Two adjacent bands is occasionally legit (a model plus its single adoption site).
+
 ## Two relationships per branch
 
 - `parent` (single) — the rebase base: `git config stack-branch.<n>.parent <p>`.
