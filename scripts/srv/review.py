@@ -433,6 +433,25 @@ def interest_bump(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "interest": nxt}))
 
 
+def ticket_set(req, raw):
+    # Tie a forest to its Linear ticket (stack-project.<p>.ticket) — commit scopes and the
+    # merge story then read type(loo-####): instead of the project name. Body carries
+    # {project, ticket} ({branch} resolves to its project); blank ticket unsets.
+    d = json.loads(raw or "{}")
+    proj = d.get("project", "") or (picker._project_of(d["branch"]) if d.get("branch") else "")
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project for ticket"}))
+    ticket = (d.get("ticket") or "").strip().upper()
+    if ticket and not re.fullmatch(r"[A-Za-z]+-\d+", ticket):
+        return req._send(400, json.dumps({"ok": False, "error": "ticket must look like LOO-1234"}))
+    key = f"stack-project.{proj}.ticket"
+    if ticket:
+        ctx.run(["git", "config", key, ticket])
+    else:
+        ctx.run(["git", "config", "--unset", key])
+    req._send(200, json.dumps({"ok": True, "project": proj, "ticket": ticket.lower()}))
+
+
 def shelve(req, raw):
     # Mark/unmark a forest deliberately paused (stack-project.<p>.shelved true). Phil's own
     # signal — a shelved forest leaves the active bands for the shelved fold until unshelved,
