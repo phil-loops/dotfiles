@@ -10,6 +10,11 @@ into a clean stacked-PR forest. **Every shape, purpose, and config rule lives in
 `claude/forests.md` — apply it, never re-derive or restate it here.** This skill adds only the
 workflow: read → propose → merge-story plan → sign-off → execute, ending in the viewer's story view.
 
+> **THE ATOMICITY GATE — the one check that is never skipped.** Per branch: diff it against its
+> own description; anything the diff does that the description doesn't say is another branch.
+> Runs on first read of existing branches, and again on every touched branch after EVERY revision
+> round — atomicity decays through iteration, each fix landing "where the code already is."
+
 ## When to use
 
 - "reforest this", "split this branch into a forest/stack", "restructure these changes into PRs",
@@ -25,9 +30,7 @@ they approve.
 ## 1 · Read the work
 
 Identify the source — a branch (`git diff main...<branch>`), a PR, or uncommitted changes — and
-inventory it by **capability, not by file**. For work already shaped into branches, the first
-check per branch is **atomicity**: diff vs its own description — anything the diff does that the
-description doesn't say is an accreted concern, a candidate split.
+inventory it by **capability, not by file**.
 
 ## 2 · Propose the forest
 
@@ -86,6 +89,3 @@ you go — reforesting is the free moment to delete narration.
 - Plan → approval → surgery, in that order. Worktree only. No push, no PRs (spine).
 - A base that doesn't compile alone, or a query/model branch without tests, is mis-split — re-cut.
 - More small independently-mergeable bases beats one fused branch.
-- **Atomicity decays through iteration** — each revision round lands fixes "where the code already
-  is." Re-run the diff-vs-description gate on every touched branch after every round, not only at
-  creation.
