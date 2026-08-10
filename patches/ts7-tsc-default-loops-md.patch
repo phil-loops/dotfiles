@@ -1,0 +1,25 @@
+diff --git a/claude/loops.md b/claude/loops.md
+index 5942334..e29d2c0 100644
+--- a/claude/loops.md
++++ b/claude/loops.md
+@@ -43,15 +43,15 @@ npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
+ 
+ ## Typecheck
+ 
+-Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to tsgo** — since the nodenext migration it typechecks this repo cleanly and ~3.6× faster than tsc (≈10s vs ≈37s):
++Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc`** — since TS7 landed on main (#9866, 2026-08-10) tsc IS the native fast compiler (~16s full runtime check), so the routine check and the CI-exact verdict are the same command; the tsgo-vs-tsc split-brain is retired:
+ 
+ ```bash
+-tsgo --project typescript/tsconfig.runtime.json --noEmit   # the default full typecheck
+-tsgo --project typescript/tsconfig.test.json --noEmit      # + tests
++npx tsc --project typescript/tsconfig.runtime.json --noEmit   # the default full typecheck
++npx tsc --project typescript/tsconfig.test.json --noEmit      # + tests
+ ```
+ 
+-(The two configs split from `tsconfig.node.json` in #9599, 2026-07-19 — a pre-split branch still carries the old single config. The pre-push hook runs the same checks; bypass with `TSGO_SKIP=1`.)
++(The two configs split from `tsconfig.node.json` in #9599, 2026-07-19 — a pre-split branch still carries the old single config, and a pre-TS7 branch still pins the slow tsc 6: the global `tsgo` preview survives only for those parked trees, plus as the Helix LSP via `helix-tsgo-stamp` until the repo's `.helix` drops tsserver. The pre-push hook runs the same checks; bypass with `TSC_SKIP=1`.)
+ 
+-CI (`task lint:typecheck`) agrees with tsgo on this repo, so **tsc is not a routine local check** — it's only for the CI-exact verdict (CI red, tsgo green), and then always queued: `tsc-turn npx tsc --project typescript/tsconfig.runtime.json --noEmit`. `tsc-turn` is a machine-wide compile queue, max 2 heavy checks at once — route every tsc run or build through it (2026-07-06: seven concurrent tscs flattened the machine). `oxlint --type-aware` and `oxfmt` are lints and formatting, NOT typecheckers.
++`tsc-turn <cmd>` is still the machine-wide compile queue, max 2 heavy checks at once — route batch or concurrent typechecks through it (2026-07-06: seven concurrent tscs flattened the machine). `oxlint --type-aware` and `oxfmt` are lints and formatting, NOT typecheckers.
+ 
+ **Caveat — the tRPC client type is a generated artifact.** Stale/missing generated types flood `tsc` with hundreds of `.tsx` errors tracing to one collapsed type (`TS2339` "…collides with a built-in method…" + cascading implicit-`any` params) — noise from un-built types, not your change. Filter to what you touched (`… --noEmit 2>&1 | grep <your-file>`) or build the types first (`task trpc:types`).
