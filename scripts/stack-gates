@@ -7,11 +7,11 @@ needs the laptop" — you can't fix code from a phone).
 
 Gates are git-config driven so each repo declares its own, e.g.:
 
-    git config --add stack-gates.cmd "typecheck::./node_modules/.bin/tsgo --project tsconfig.node.json --noEmit"
+    git config --add stack-gates.cmd "typecheck::./node_modules/.bin/tsc --project tsconfig.node.json --noEmit"
     git config --add stack-gates.cmd "format::git diff --name-only main HEAD -- '*.ts' '*.tsx' | xargs -r ./node_modules/.bin/oxfmt --check"
 
 Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With no
-config, falls back to auto-detected defaults (tsgo if tsconfig.node.json exists,
+config, falls back to auto-detected defaults (repo-local tsc if a tsconfig exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
   stack-gates [<branch> | --branch <b>] [--fix] [--progress <file>]
@@ -106,20 +106,6 @@ def repo_local(cmd, cwd):
     return local if os.path.exists(local) else None
 
 
-def ensure_tsgo_link(cwd):
-    # tsgo is not an npm dep — a fresh `npm install` wipes the hand-made link and the typecheck gate goes red.
-    bindir = os.path.join(cwd, "node_modules", ".bin")
-    if not os.path.isdir(bindir) or os.path.exists(os.path.join(bindir, "tsgo")):
-        return
-    cache = os.path.expanduser("~/.cache/tsperf/tsgo/node_modules/.bin/tsgo")
-    if not os.path.exists(cache):
-        return
-    try:
-        os.symlink(cache, os.path.join(bindir, "tsgo"))
-    except OSError:
-        pass
-
-
 # Files where a behind-origin/main branch is a hard push-block, not just a warning —
 # kept in lockstep with the loops-pre-push hook's deploy-critical list (drift here =
 # the gate and the hook disagree on what blocks a push).
@@ -139,11 +125,10 @@ def default_gates(cwd):
               f'miss="$(git diff HEAD..origin/main --name-only -- {DEPLOY_CRITICAL})"; '
               '[ -z "$miss" ] && exit 0; '
               'echo "behind origin/main, missing deploy-critical:"; echo "$miss"; exit 1')]
-    # Typecheck with the repo-PINNED tsgo: a global dev build rejects configs the repo's
-    # own toolchain accepts (e.g. moduleResolution=node10 removed), which surfaces as a
-    # false "blocked, needs the laptop". No tsc fallback — CI is the slow-and-exact check.
-    ensure_tsgo_link(cwd)
-    tsgo = repo_local("tsgo", cwd)
+    # Typecheck with the repo-PINNED tsc: since TS7 landed on main (#9866, 2026-08-10)
+    # tsc IS the native fast compiler, and on parked pre-TS7 branches the pinned tsc is
+    # still the version their configs were written for — slow there, but exact.
+    tsc = repo_local("tsc", cwd)
     oxfmt = resolve("oxfmt", cwd)
     # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
     # branches from before the split still carry the old single config.
@@ -154,16 +139,16 @@ def default_gates(cwd):
     else:
         ts_projects = []
     # env_repair syncs the generated tRPC types before gates run, but when that couldn't happen
-    # (no tsgo, rebuild failed) a red here may still be the types, not the code. Say so ON the
+    # (no compiler, rebuild failed) a red here may still be the types, not the code. Say so ON the
     # failure rather than gating separately: a provenance gate would block every push on this
     # machine until the seed is rebuilt, which is not ours to impose.
     seed_gen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seed-gen")
     why_red = f' || {{ {seed_gen} --check . ; exit 1; }}' if os.path.exists(seed_gen) else ""
-    if ts_projects and not tsgo:
-        gates.append(("typecheck", 'echo "no repo-local tsgo (node_modules/.bin/tsgo) — run npm install"; exit 1'))
+    if ts_projects and not tsc:
+        gates.append(("typecheck", 'echo "no repo-local tsc (node_modules/.bin/tsc) — run npm install"; exit 1'))
     elif ts_projects:
         gates.append(("typecheck",
-                      "{ " + " && ".join(f"{tsgo} --project {p} --noEmit" for p in ts_projects)
+                      "{ " + " && ".join(f"{tsc} --project {p} --noEmit" for p in ts_projects)
                       + f" ; }}{why_red}"))
     if oxfmt:
         # merge-base against origin/main, never the local main ref: a stale local main inflates

@@ -44,10 +44,10 @@ if [ "$behind" -gt 0 ] 2>/dev/null; then
   fi
 fi
 
-# oxfmt/tsgo below read the WORKING TREE, so they're only honest when the checkout
+# oxfmt/tsc below read the WORKING TREE, so they're only honest when the checkout
 # actually holds the pushed commit; otherwise skip them — the push gates cover both.
 if [ "$(git rev-parse HEAD 2>/dev/null)" != "$push_sha" ]; then
-  echo "pre-push: worktree isn't on the pushed commit — skipping oxfmt/tsgo tree checks"
+  echo "pre-push: worktree isn't on the pushed commit — skipping oxfmt/tsc tree checks"
   files=""
 else
 # Format-check files that differ from main; block the push if any are mis-formatted.
@@ -63,19 +63,32 @@ if [ -n "$files" ]; then
 fi
 fi
 
-# Native-tsgo full typecheck of TS pushes — front-loads CI's type failures locally (~5-25s).
-# seed-gen --sync first repairs what the typecheck reads (node_modules donor, .gen for THIS
-# HEAD, tree-local packages dist when the branch changes packages source) — foreground,
-# silent no-op when already accurate — so a red below means the code, not the tree.
-# Skips if tsgo is absent; bypass a run with TSGO_SKIP=1.
-if [ -n "$files" ] && [ "$TSGO_SKIP" != "1" ] && command -v tsgo >/dev/null 2>&1; then
+# Full typecheck of TS pushes — front-loads CI's type failures locally (~15-35s).
+# tsc IS the native compiler since TS7 landed on main (#9866, 2026-08-10), so the repo's
+# own `npx tsc` is CI-exact AND fast; branches still pinned to typescript <7 fall back to
+# the global tsgo preview rather than the old ~37s tsc. seed-gen --sync first repairs
+# what the typecheck reads (node_modules donor, .gen for THIS HEAD, tree-local packages
+# dist when the branch changes packages source) — foreground, silent no-op when already
+# accurate — so a red below means the code, not the tree.
+# Bypass a run with TSC_SKIP=1 (legacy TSGO_SKIP=1 still honored).
+if [ -n "$files" ] && [ "$TSC_SKIP" != "1" ] && [ "$TSGO_SKIP" != "1" ]; then
+  ts_major=$(sed -n 's/.*"version": *"\([0-9]*\)\..*/\1/p' node_modules/typescript/package.json 2>/dev/null | head -1)
+  if [ "${ts_major:-0}" -ge 7 ] 2>/dev/null; then
+    tscheck="npx tsc"
+  elif command -v tsgo >/dev/null 2>&1; then
+    tscheck="tsgo"
+  else
+    tscheck=""
+  fi
   seed_gen="$HOME/.dotfiles/scripts/seed-gen"
-  if [ -x "$seed_gen" ]; then
+  if [ -n "$tscheck" ] && [ -x "$seed_gen" ]; then
     main_wt=$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
     [ -n "$main_wt" ] && "$seed_gen" --sync "$main_wt"
     "$seed_gen" --sync "$PWD"
   fi
-  if [ -f .gen/trpc-types/trpc/root.d.ts ]; then
+  if [ -z "$tscheck" ]; then
+    echo "pre-push: no typescript >=7 in node_modules and no tsgo — skipping local typecheck"
+  elif [ -f .gen/trpc-types/trpc/root.d.ts ]; then
     # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
     # branches from before the split still carry the old single config.
     if [ -f typescript/tsconfig.runtime.json ]; then
@@ -84,14 +97,14 @@ if [ -n "$files" ] && [ "$TSGO_SKIP" != "1" ] && command -v tsgo >/dev/null 2>&1
       ts_projects="tsconfig.node.json"
     fi
     for proj in $ts_projects; do
-      echo "tsgo: typechecking $proj..."
-      if ! tsgo --project "$proj" --noEmit; then
-        echo "🚨 tsgo: type errors above — fix before pushing (TSGO_SKIP=1 to bypass)"
+      echo "$tscheck: typechecking $proj..."
+      if ! $tscheck --project "$proj" --noEmit; then
+        echo "🚨 type errors above — fix before pushing (TSC_SKIP=1 to bypass)"
         exit 1
       fi
     done
   else
-    echo "tsgo: .gen not built in this worktree — skipping local typecheck"
+    echo "typecheck: .gen not built in this worktree — skipping local typecheck"
   fi
 fi
 
