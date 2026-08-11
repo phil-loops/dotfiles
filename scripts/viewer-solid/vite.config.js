@@ -11,12 +11,22 @@ import tailwindcss from "@tailwindcss/vite";
 // arg the helper derives from cwd = this repo (dotfiles), which is where you dev the viewer.
 const PORT = execSync(`${process.env.HOME}/.dotfiles/scripts/stack-review-port`).toString().trim();
 const API = `http://127.0.0.1:${PORT}`;
+// Every route the SPA fetches must be listed — a missing one falls through to the SPA
+// fallback, which answers 200 + index.html, so dev-mode saves "succeed" without reaching
+// the backend (that's how /ticket silently no-opped under `npm run dev`).
 const ROUTES = [
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/events", "/restack-status", "/branches", "/standalone",
   "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
   "/claude", "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
   "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
+  "/ticket", "/story", "/interest", "/focus", "/contract", "/ship", "/stage", "/merge-subjects",
+  "/plan-steps", "/plan-section", "/plan-template", "/plan-preview",
+  "/commit-diff", "/commit-dirty", "/dirty-resolve", "/diverged-detail",
+  "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",
+  "/fix-upstream", "/integrate-here", "/reseat-children",
+  "/prep-route", "/prep-push", "/preview-wait", "/push-preview", "/processes",
+  "/chat-attach", "/chat-jobs", "/chat-popout", "/chat-stop", "/chat-tmux", "/claude-sessions", "/tmux-targets",
 ];
 
 // Dev-only keep-alive: the Python backend self-reaps after 15min without an /events

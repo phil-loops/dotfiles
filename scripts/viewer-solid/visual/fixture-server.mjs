@@ -25,6 +25,9 @@ const API = new Set([
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/restack-status", "/branches", "/standalone",
   "/check-origin", "/purpose", "/heartbeat", "/previews", "/preview-log", "/processes",
+  "/commit-diff", "/diverged-detail", "/forest-health", "/forest-branches", "/forest-purposes",
+  "/gates-progress", "/plan-steps", "/plan-section", "/plan-preview", "/prep-route", "/prep-push",
+  "/preview-wait", "/push-preview", "/chat-jobs", "/claude-sessions", "/tmux-targets",
 ]);
 const MIME = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",
