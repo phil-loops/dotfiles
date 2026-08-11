@@ -69,7 +69,10 @@ if (( ${#paths} )); then
     if ! out=$(git -C "$root" commit -m "$msg" -- "${paths[@]}" 2>&1); then
       die "commit failed: ${out}"
     fi
-    committed="✦ $(git -C "$root" rev-parse --short HEAD) ${msg} (${#paths} file$( (( ${#paths} > 1 )) && echo s ))"
+    # plural computed via if: a bare `(( n > 1 )) && echo s` substitution exits 1 for one file,
+    # the assignment inherits it, and set -e kills the script AFTER the commit landed
+    plural=""; if (( ${#paths} > 1 )); then plural="s"; fi
+    committed="✦ $(git -C "$root" rev-parse --short HEAD) ${msg} (${#paths} file${plural})"
   fi
 else
   committed="nothing new to commit"
