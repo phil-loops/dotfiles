@@ -109,7 +109,7 @@ function TicketPop(props: { project: string; ticket?: string; onClose: () => voi
         {(p) => (
           <Portal>
             <div
-              class="ticket-pop fixed z-[62] flex w-[240px] cursor-default flex-col gap-[6px] rounded-lg border border-[#3a332b] bg-[#1b1815] p-[8px] text-left text-[11.5px] normal-case not-italic shadow-[0_12px_32px_rgba(0,0,0,.5)] [letter-spacing:normal]"
+              class="ticket-pop fixed z-[62] flex w-[260px] cursor-default flex-col gap-[6px] rounded-lg border border-[#3a332b] bg-[#1b1815] p-[8px] text-left text-[11.5px] normal-case not-italic shadow-[0_12px_32px_rgba(0,0,0,.5)] [letter-spacing:normal]"
               style={{ top: `${p().top}px`, left: `${p().left}px` }}
               ref={el}
             >
@@ -134,7 +134,7 @@ function TicketPop(props: { project: string; ticket?: string; onClose: () => voi
               <div class="flex items-center gap-2 px-1">
                 <button class="tk-save flex-none cursor-pointer text-[11px] leading-[1.55] text-gold-leaf enabled:hover:text-ink" disabled={busy()} onClick={save}>save</button>
                 <button class="tk-cancel flex-none cursor-pointer text-[11px] leading-[1.55] text-ink-faint enabled:hover:text-ink" disabled={busy()} onClick={() => props.onClose()}>cancel</button>
-                <span class="tk-hint ml-auto text-[10px] text-[#6f675a]">↵ save · esc close</span>
+                <span class="tk-hint ml-auto text-[10px] whitespace-nowrap text-[#6f675a]">↵ save · esc close</span>
               </div>
             </div>
           </Portal>
