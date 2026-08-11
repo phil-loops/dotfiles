@@ -13,7 +13,8 @@
 #   POST /preview-reap                → {ok, out}             stop orphaned/crashed previews
 #   POST /stack-up         {dir?}    → {ok, starting, dir}    docker compose up -d the shared stack
 #   GET  /previews                    → {previews[], substrate}  health-probed list + shared dev stack
-#   GET  /preview-log      ?dir=      → {ok, log}             tail the preview's next-dev log
+#   GET  /preview-log      ?dir= [&which=jobs] → {ok, log}    tail the preview's next-dev log, or its
+#                                                             --jobs worker log
 #
 # Health is more than "is the port open": a probe of the running preview classifies it as
 # healthy / compiling / error / wedged, and dead/orphaned come from the port/worktree state.
@@ -85,6 +86,11 @@ def _meta_get(name, key):
 
 def _log_path(name):
     return "/tmp/loops-preview-%s.log" % name
+
+
+def _jobs_log_path(name):
+    # the loops-preview --jobs worker's stream (also the convention for a hand-run worker)
+    return "/tmp/loops-preview-%s-jobs.log" % name
 
 
 def _log_state(name):
@@ -489,6 +495,7 @@ def previews(req):
             pv["borrows"] = main_wt
             if pv.get("managed", True):
                 pv["log"] = _log_path(pv.get("name", ""))
+                pv["jobs"] = os.path.exists(_jobs_log_path(pv.get("name", "")))
         if pvs:
             with ThreadPoolExecutor(max_workers=min(8, len(pvs))) as ex:
                 pvs = list(ex.map(_health, pvs))
@@ -503,7 +510,8 @@ def log(req):
     if not name:
         req._send(400, json.dumps({"ok": False, "err": "no dir"}))
         return
-    path = _log_path(name)
+    which = q.get("which", [""])[0]
+    path = _jobs_log_path(name) if which == "jobs" else _log_path(name)
     try:
         with open(path) as f:
             text = _ANSI.sub("", "".join(f.readlines()[-200:]))
