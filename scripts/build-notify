@@ -18,9 +18,10 @@
 # (matching the PR's current head) completes — with the ready-to-paste
 # `task release:staging VERSION=...` deploy command. Seeds silently on first v3 run.
 #
-# v4 adds the staging-flip sweep: after a [staging] deploy-v2 enqueue completes, watch
-# app.l3s.email's Next.js buildId and notify when staging is ACTUALLY serving a new
-# build (the enqueue run itself finishes in ~10s and proves nothing).
+# v4 adds the staging-flip sweep: after a [staging] deploy-v2 enqueue completes, notify
+# when staging is ACTUALLY serving that deploy (the enqueue run itself finishes in ~10s
+# and proves nothing). /api/build's version suffix resolves the watch; the Next.js
+# buildId scrape survives as the freshness clock + fallback for non-tag deploy titles.
 #
 #   build-notify                 one sweep (what launchd runs)
 #   BUILD_NOTIFY_REPO=...        override repo (default Loops-so/loops)
@@ -174,6 +175,8 @@ pend="$statedir/staging-pending"
 
 # the 404 shell also embeds buildId, so no auth needed (no head/exit → SIGPIPE-safe)
 bid_now=$(curl -sS --max-time 8 "$STAGING_URL" 2>/dev/null | sed -n 's/.*"buildId":"\([^"]*\)".*/\1/p' | awk 'NR==1' || true)
+# /api/build reports the served appVersion — public, unauthenticated, exists as a version probe
+ver_now=$(curl -sS --max-time 8 "${STAGING_URL%/}/api/build" 2>/dev/null | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' | awk 'NR==1' || true)
 
 # Staleness ground truth: the buildId only changes when staging actually SERVES a new
 # build, so its flip time is "how fresh is staging" — no kubectl (needs an aws-vault
@@ -210,20 +213,34 @@ while IFS=$'\t' read -r rid concl title updatedAt url; do
   if [ "$concl" = "success" ]; then
     actor=$(gh api "repos/$REPO/actions/runs/$rid" -q '.actor.login' 2>/dev/null || echo "?")
     printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$rid" "$now_s" "${bid_now:-unknown}" "$ver" "$actor" "$url" > "$pend"
-    echo "build-notify: ⛴ staging deploy $ver enqueued by $actor — watching for buildId flip"
-    journal_silent armed "staging $ver" "enqueued by $actor; watching for the buildId flip" "$url"
+    echo "build-notify: ⛴ staging deploy $ver enqueued by $actor — watching for staging to serve it"
+    journal_silent armed "staging $ver" "enqueued by $actor; watching for staging to serve it" "$url"
   else
     notify "✗ staging enqueue ${concl:-failed}" "$title — deploy never enqueued. Re-run at the run page ↗" "$url"
   fi
   echo "$rid" >> "$seen"
 done <<< "$deps"
 
-if [ -s "$pend" ] && [ -n "$bid_now" ]; then
+if [ -s "$pend" ]; then
   IFS=$'\t' read -r prid parm_s pbid pver pactor purl < "$pend"
-  if [ "$pbid" = "unknown" ] && [ "$flipped" = "0" ]; then
-    # baseline fetch failed at arm time and nothing has flipped since; take it now
-    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$prid" "$parm_s" "$bid_now" "$pver" "$pactor" "$purl" > "$pend"
-  elif [ "$bid_now" != "$pbid" ]; then
+  # Resolver: /api/build's appVersion shares the deploy tag's <run>-<attempt> suffix — an
+  # absolute per-deploy match, immune to the flip-before-arm race (a rollout finishing
+  # inside the sweep gap baselines pbid post-flip, so the bid comparison can never fire;
+  # false-stalled twice on 2026-08-10). Bid flip = fallback for non-tag deploy titles.
+  psuf=$(printf '%s' "$pver" | awk -F- 'NF>=2 && $NF ~ /^[0-9]+$/ && $(NF-1) ~ /^[0-9]+$/ {print $(NF-1)"-"$NF}')
+  vsuf=$(printf '%s' "$ver_now" | awk -F- 'NF>=2{print $(NF-1)"-"$NF}')
+  live=0
+  if [ -n "$psuf" ] && [ "$psuf" = "$vsuf" ]; then
+    live=1
+  elif [ -n "$bid_now" ]; then
+    if [ "$pbid" = "unknown" ] && [ "$flipped" = "0" ]; then
+      # baseline fetch failed at arm time and nothing has flipped since; take it now
+      printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$prid" "$parm_s" "$bid_now" "$pver" "$pactor" "$purl" > "$pend"
+    elif [ "$bid_now" != "$pbid" ]; then
+      live=1
+    fi
+  fi
+  if [ "$live" = "1" ]; then
     mins=$(( (now_s - parm_s) / 60 ))
     # Only MY deploys tap the shoulder — someone else's flip is ambient state, not my cue
     # to go test. It still updates the clock (staging-last / menubar / `staging` CLI).
@@ -237,10 +254,10 @@ if [ -s "$pend" ] && [ -n "$bid_now" ]; then
     printf '%s\t%s\t%s\n' "$pver" "$pactor" "$now_s" > "$lastfile"
     : > "$pend"
     flipped=0
-  elif [ $(( now_s - parm_s )) -gt $(( STALL_MIN * 60 )) ]; then
+  elif [ -n "$ver_now$bid_now" ] && [ $(( now_s - parm_s )) -gt $(( STALL_MIN * 60 )) ]; then
     me=$(gh api user -q .login 2>/dev/null || true)
     if [ -n "$me" ] && [ "$pactor" = "$me" ]; then
-      notify "⏳ staging deploy stalled" "$pver enqueued >${STALL_MIN}m ago and staging's buildId hasn't changed — check the Slack thread" "$purl"
+      notify "⏳ staging deploy stalled" "$pver enqueued >${STALL_MIN}m ago and staging isn't serving it (api/build: ${ver_now:-unreachable}) — check the Slack thread" "$purl"
     else
       journal_silent silent-other-actor "staging $pver" "stalled >${STALL_MIN}m (by $pactor) — recorded, not mine" "$purl"
     fi
