@@ -12,11 +12,11 @@
 # and stack-open's copy watched only trpc/ while this one watched the real input set.
 #
 # Which trees can build a correct .gen: the main checkout always (real node_modules, either
-# compiler). Everywhere else node_modules is a symlink, and *tsc* trips TS2883 there
-# (prisma-inferred exports resolve outside the project root), silently skipping the aggregates
-# the client type resolves through — but *tsgo* emits the full tree correctly (verified
-# 2026-07-30: aggregates rewritten, concrete types, gate typechecks green). So in-tree
-# rebuilds outside the main checkout are tsgo-only.
+# compiler). Everywhere else node_modules is a symlink, and typescript<7's tsc trips TS2883
+# there (prisma-inferred exports resolve outside the project root), silently skipping the
+# aggregates the client type resolves through — the native compiler (tsgo, and tsc itself
+# since TS7) emits the full tree correctly (verified 2026-07-30). So in-tree rebuilds outside
+# the main checkout are native-compiler-only: the tree's own tsc on TS7, tsgo on pre-TS7.
 #
 #   default (hooks; async, never blocks):
 #     main checkout        rebuild whenever HEAD moved off what .gen was built for
@@ -25,7 +25,7 @@
 #
 #   --sync (stack-gates; foreground): make THIS tree's .gen describe THIS tree's HEAD —
 #     reseed from main if absent, trade a symlink for a private copy rather than write
-#     through it, tsgo-emit in-tree, stamp .gen/.seed-gen-sha with the HEAD it now
+#     through it, emit in-tree, stamp .gen/.seed-gen-sha with the HEAD it now
 #     describes. Prints one line per action taken; silent no-op when already accurate.
 #
 # NB: .gen does NOT reduce tsc memory — purely correctness.
@@ -297,17 +297,20 @@ marker="$dir/.gen/.seed-gen-sha"
 
 proj=$(trpc_types_project "$dir") || exit 0
 
-tsgo="$dir/node_modules/.bin/tsgo"                           # ~3x faster; falls back to tsc
-[[ -x "$tsgo" ]] || tsgo=""
 tsc="$dir/node_modules/typescript/bin/tsc"
+ts_major=$(sed -n 's/.*"version": *"\([0-9]*\)\..*/\1/p' "$dir/node_modules/typescript/package.json" 2>/dev/null | head -1)
+tsgo="$dir/node_modules/.bin/tsgo"
+[[ -x "$tsgo" ]] || tsgo=$(command -v tsgo 2>/dev/null) || tsgo=""
 [[ -n "$tsgo" || -e "$tsc" ]] || exit 0                      # no compiler → keep what's there
 if ! take_lock "$dir/.gen"; then
   (( sync )) && { echo "a types rebuild is already in flight in the main checkout"; exit 1; }
   exit 0
 fi
 
-if [[ -n "$tsgo" ]]; then
-  build=("$tsgo")
+if [[ -e "$tsc" && "${ts_major:-0}" -ge 7 ]]; then
+  build=("$HOME/.volta/bin/node" "$tsc")     # TS7 tsc IS the native compiler
+elif [[ -n "$tsgo" ]]; then
+  build=("$tsgo")                            # pre-TS7 tsc: TS2883 partial emit (header)
 else
   build=("$HOME/.volta/bin/node" "$tsc")
 fi
