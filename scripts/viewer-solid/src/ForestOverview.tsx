@@ -9,6 +9,7 @@ import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
 import { chatToTmux } from "./chatDrawer";
 import { SessionPicker } from "./SessionPicker";
+import { TicketChip } from "./TicketChip";
 import type { Purpose } from "./types";
 
 // ── forest overview: the map as the landing hero (no node selected) ──────
@@ -344,27 +345,6 @@ export function ForestOverview() {
   const hideTip = () => { tipBranch = null; setTip(null); };
   const ovShipPlan = useShipPlan(project);
   const [chatPick, setChatPick] = createSignal(false);
-  const editTicket = async () => {
-    if (!canMutate) {
-      return;
-    }
-    const cur = model.data?.ticket?.toUpperCase() ?? "";
-    const v = window.prompt("Linear ticket for this forest (blank clears):", cur || "LOO-");
-    if (v === null || v.trim().toUpperCase() === cur) {
-      return;
-    }
-    const r = await fetch(withRepo("/ticket"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: project(), ticket: v.trim() }),
-    });
-    if (r.ok) {
-      ovQc.invalidateQueries({ queryKey: ["model"] });
-    } else {
-      const e = (await r.json().catch(() => null)) as { error?: string } | null;
-      window.alert(e?.error ?? "ticket save failed");
-    }
-  };
 
   return (
     <div class="forest-overview min-h-screen bg-vellum-night">
@@ -376,15 +356,7 @@ export function ForestOverview() {
           </span>
         </Show>
         <Show when={canMutate || model.data?.ticket}>
-          <button
-            class="fo-ticket cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[4px] py-[1px] font-mono text-[11px] text-ink-faint hover:border-rule hover:text-ink-dim"
-            title={model.data?.ticket
-              ? `Linear ${model.data.ticket.toUpperCase()} — commit scopes read type(${model.data.ticket}):; click to change`
-              : "tie this forest to a Linear ticket — commit scopes become type(loo-####):"}
-            onClick={editTicket}
-          >
-            {model.data?.ticket ?? "＋ ticket"}
-          </button>
+          <TicketChip project={project()} ticket={model.data?.ticket} />
         </Show>
         <Show when={spine().length}>
           <span class="fo-meta text-[12px] tracking-[0.04em] text-ink-faint">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
