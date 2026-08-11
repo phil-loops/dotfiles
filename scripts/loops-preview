@@ -286,6 +286,12 @@ BUNDLER=""
 if [ "$DIR" = "$MAIN" ]; then
   [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] || { err "MAIN's node_modules is missing or a symlink — run npm install in $MAIN"; exit 1; }
 else
+  # a seed-gen "repointed" tree (per-entry symlinks out to MAIN) boots next fine but Turbopack
+  # refuses out-of-root symlinks — zero compile, every request 500s on missing build manifests
+  if [ -d "$DIR/node_modules" ] && [ -L "$DIR/node_modules/next" ]; then
+    cyan "node_modules entries are symlinks to MAIN (Turbopack-fatal) — re-cloning real"
+    rm -rf "$DIR/node_modules"
+  fi
   if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
     cyan "MAIN reinstalled since this clone — refreshing node_modules"
     rm -rf "$DIR/node_modules"
@@ -331,9 +337,6 @@ if [ -z "$PORT" ]; then
 fi
 [ -n "$PORT" ] || { err "no free port in 3010-3060"; exit 1; }
 
-# stale .next from a prior branch/session serves old route manifests — dynamic routes (/api/trpc/[trpc]) 404 and the client never bootstraps (blank page); rebuild clean
-rm -rf "$DIR/.next"
-
 # --jobs: per-preview queue + a worker from THIS checkout (see header). The env overrides cover
 # every queue var that defaults to the shared elasticmq/dev (lib/app-env/sqs.ts); the worker gets
 # the same set so a job that re-enqueues stays inside the preview queue.
@@ -360,6 +363,11 @@ if [ -n "$JOBS" ]; then
 fi
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
+# stale .next from a prior branch/session serves old route manifests — dynamic routes
+# (/api/trpc/[trpc]) 404 and the client never bootstraps (blank page); rebuild clean.
+# Only AFTER the old session is dead — deleting under a live server wedges it into
+# endless build-manifest ENOENTs.
+rm -rf "$DIR/.next"
 tmux new-session -d -s "$SESSION" "cd '$DIR' && $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
 if [ -n "$JOBS" ]; then
   JLOG="/tmp/$SESSION-jobs.log"
