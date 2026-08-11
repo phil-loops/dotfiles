@@ -27,6 +27,7 @@ type Preview = {
   error?: string;
   borrows?: string;
   log?: string;
+  jobs?: boolean; // a --jobs worker log exists alongside the web log
   managed?: boolean; // false = a next-dev listener no preview session owns (task dev, leftover headless server)
   pid?: string;
   behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
@@ -123,14 +124,16 @@ export function ServersDrawer() {
   const sub = () => (q.isPlaceholderData ? undefined : q.data?.substrate);   // the seed's stub would read "0/0 up"
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
+  // which stream the pane tails: the web server's, or the --jobs worker's (jobs run there, not in next dev)
+  const [logSrc, setLogSrc] = createSignal<"web" | "jobs">("web");
   // the tail follows new output only while the reader is at the bottom — scrolling up to study a
   // line pins the view until they scroll back down. Drawer-level, not per-card: a card that
   // re-renders mid-read must not silently re-arm following.
   let logPinned = true;
   // live tail — next dev keeps appending, so poll while a log pane is open
   const logQ = createQuery<{ log?: string }>(() => ({
-    queryKey: ["preview-log", logFor()],
-    queryFn: () => fetch("/preview-log?dir=" + encodeURIComponent(logFor() ?? "")).then((r) => r.json() as Promise<{ log?: string }>),
+    queryKey: ["preview-log", logFor(), logSrc()],
+    queryFn: () => fetch("/preview-log?dir=" + encodeURIComponent(logFor() ?? "") + (logSrc() === "jobs" ? "&which=jobs" : "")).then((r) => r.json() as Promise<{ log?: string }>),
     enabled: logFor() != null,
     refetchInterval: logFor() != null ? 1500 : false,
   }));
@@ -153,7 +156,8 @@ export function ServersDrawer() {
     await q.refetch();
     setBusy(null);
   };
-  const showLog = (dir: string) => { logPinned = true; setLogFor(logFor() === dir ? null : dir); };
+  const showLog = (dir: string) => { logPinned = true; setLogSrc("web"); setLogFor(logFor() === dir ? null : dir); };
+  const pickSrc = (s: "web" | "jobs") => { logPinned = true; setLogSrc(s); };
   const startStack = async () => { setBusy("__stack__"); await post("/stack-up", { dir: sub()?.dir }); await q.refetch(); setBusy(null); };
   const stackStarting = () => busy() === "__stack__" || !!sub()?.starting;
 
@@ -331,6 +335,23 @@ export function ServersDrawer() {
                       <button class={BTN_DANGER} disabled={busy() === p().dir + p().port} onClick={() => act(p(), "/preview-kill")}>kill</button>
                     </div>
                     <Show when={logFor() === p().dir}>
+                      {/* two streams, one pane — the toggle only exists when a worker actually wrote a log */}
+                      <Show when={p().jobs}>
+                        <div class="mt-[9px] flex gap-[5px]">
+                          <For each={["web", "jobs"] as const}>
+                            {(s) => (
+                              <button
+                                class="cursor-pointer rounded-md border bg-vellum-night px-[7px] py-px text-[10px] transition-colors duration-[120ms]"
+                                classList={{
+                                  "border-ink-faint text-ink": logSrc() === s,
+                                  "border-rule text-ink-faint hover:text-ink": logSrc() !== s,
+                                }}
+                                onClick={() => pickSrc(s)}
+                              >{s === "jobs" ? "jobs worker" : "web"}</button>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
                       <pre
                         ref={logPre}
                         onScroll={() => { if (logPre) { logPinned = logPre.scrollHeight - logPre.scrollTop - logPre.clientHeight < 40; } }}
