@@ -23,7 +23,9 @@
 # member's `parent` is it, OR if another member `requires` (carries) it — the
 # carried copy already rides inside the requiring branch's history, adapted to
 # that context, so merging the carried branch's own tip too would conflict with
-# its adapted copy by construction.
+# its adapted copy by construction. role=proof members are never leaves — a proof
+# branch duplicates the forest's content as one runnable spike, so octopusing it
+# in conflicts with the real branches by construction.
 #
 # On conflict, exits 1 and prints which leaves conflict. Caller can then review
 # leaves individually instead.
@@ -143,6 +145,8 @@ build_integration() {
   # Leaves = project members with no project-member child and no carrier.
   local -a leaves
   for m in "${members[@]}"; do
+    local role=$(git config "branch.${m}.stack-role" 2>/dev/null || git config "stack-branch.${m}.role" 2>/dev/null || true)
+    [[ "$role" == "proof" ]] && continue
     local has_child=0
     for other in "${members[@]}"; do
       [[ "$other" == "$m" ]] && continue
