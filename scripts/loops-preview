@@ -9,7 +9,7 @@
 # Docker project, no collision with `task dev` on :3000.
 #
 # Usage:
-#   loops-preview [dir] [--port N] [--main path] [--open]  # start (dir defaults to $PWD)
+#   loops-preview [dir] [--port N] [--main path] [--open] [--jobs]  # start (dir defaults to $PWD)
 #   loops-preview [dir] --kill                             # stop the preview for that dir
 #   loops-preview --list                                  # rich list: port · url · branch · age · state
 #   loops-preview --json                                  # same, machine-readable (the viewer dock reads this)
@@ -19,6 +19,13 @@
 #   loops-preview --reap [--older-than MINUTES]           # stop orphaned/crashed (and optionally old) previews
 #
 # Env: LOOPS_MAIN overrides the main checkout (default ~/coding/loops).
+#
+# --jobs: give the preview its OWN jobs pipeline. Creates a per-preview elasticmq queue
+# (preview-<name>, DLQ'd to dlq-dev), points the web server's queue env vars at it, and runs
+# a jobs worker FROM THE PREVIEW CHECKOUT in a second tmux window — so jobs enqueued by this
+# preview run this branch's code instead of whatever branch the main dev stack's worker is on.
+# Needs the branch to carry the HEALTH_PORT change (lib/job-queue/index.ts); otherwise the
+# preview falls back to the shared queue with a warning. DB/ClickHouse/Valkey stay shared.
 #
 # Caveat: copies MAIN's built workspace packages (packages/*/dist), so a preview that
 # changes packages/* won't reflect those until MAIN rebuilds them.
@@ -36,6 +43,7 @@ ACTION="start"
 DIR=""
 OLDER_THAN=""
 OPEN=""
+JOBS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -45,6 +53,7 @@ while [ $# -gt 0 ]; do
     --list) ACTION="list" ;;
     --json) ACTION="json" ;;
     --open) OPEN=1 ;;
+    --jobs) JOBS=1 ;;
     --older-than) OLDER_THAN="${2:-}"; shift ;;
     --port) PORT="${2:-}"; shift ;;
     --main) MAIN="${2:-}"; shift ;;
@@ -123,9 +132,11 @@ kill_port() {
   cyan "killed :$port (pid $pid)"
 }
 
-# Stop one session by NAME: kill tmux + drop its meta. Echoes nothing.
+# Stop one session by NAME: kill tmux + drop its meta (and its jobs queue). Echoes nothing.
 stop_one() {
-  local name="$1"
+  local name="$1" queue
+  queue="$(meta_get "$(meta_of "$name")" QUEUE)"
+  [ -n "$queue" ] && curl -s --max-time 3 "$queue?Action=DeleteQueue" >/dev/null 2>&1 || true
   tmux kill-session -t "${PREFIX}${name}" 2>/dev/null || true
   rm -f "$(meta_of "$name")"
 }
@@ -143,6 +154,10 @@ if [ "$ACTION" = "list" ]; then
     printf '  %-22s :%-5s  %-24s %-6s %s\n' \
       "$name" "${port:-?}" "$branch" "$(age_human "$(age_secs "$started")")" "$state"
     [ "$state" = "up" ] && dim "                         http://localhost:$port"
+    if [ -n "$(meta_get "$m" QUEUE)" ]; then
+      jport="$(meta_get "$m" JPORT)"
+      dim "                         jobs: $(listening "$jport" && echo "up (:$jport)" || echo dead) · queue preview-$name"
+    fi
   done
   while read -r port pid; do
     [ -n "$port" ] || continue
@@ -170,12 +185,16 @@ if [ "$ACTION" = "json" ]; then
     state="$(state_of "$dir" "$port")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; behind="$(behind_of "$dir")"; else branch=""; behind=""; fi
     url=""; [ "$state" = "up" ] && url="http://localhost:$port"
+    jstate=""
+    if [ -n "$(meta_get "$m" QUEUE)" ]; then
+      listening "$(meta_get "$m" JPORT)" && jstate="up" || jstate="dead"
+    fi
     [ -n "$first" ] || printf ','
     first=""
-    printf '{"name":"%s","port":"%s","dir":"%s","branch":"%s","started":"%s","age":"%s","state":"%s","url":"%s","managed":true,"behind":"%s"}' \
+    printf '{"name":"%s","port":"%s","dir":"%s","branch":"%s","started":"%s","age":"%s","state":"%s","url":"%s","managed":true,"behind":"%s","jobs":"%s"}' \
       "$(json_esc "$name")" "$(json_esc "$port")" "$(json_esc "$dir")" "$(json_esc "$branch")" \
       "$(json_esc "$started")" "$(json_esc "$(age_human "$(age_secs "$started")")")" "$(json_esc "$state")" "$(json_esc "$url")" \
-      "$(json_esc "$behind")"
+      "$(json_esc "$behind")" "$(json_esc "$jstate")"
   done
   while read -r port pid; do
     [ -n "$port" ] || continue
@@ -315,9 +334,38 @@ fi
 # stale .next from a prior branch/session serves old route manifests — dynamic routes (/api/trpc/[trpc]) 404 and the client never bootstraps (blank page); rebuild clean
 rm -rf "$DIR/.next"
 
+# --jobs: per-preview queue + a worker from THIS checkout (see header). The env overrides cover
+# every queue var that defaults to the shared elasticmq/dev (lib/app-env/sqs.ts); the worker gets
+# the same set so a job that re-enqueues stays inside the preview queue.
+QUEUE_URL=""
+JPORT=""
+QUEUE_ENV=""
+if [ -n "$JOBS" ] && ! grep -q HEALTH_PORT "$DIR/lib/job-queue/index.ts" 2>/dev/null; then
+  err "--jobs: this branch predates the HEALTH_PORT override in lib/job-queue/index.ts — jobs stay on the shared queue/worker"
+  JOBS=""
+fi
+if [ -n "$JOBS" ]; then
+  QUEUE_URL="$(curl -sG --max-time 5 "http://localhost:9324/" \
+    --data-urlencode "Action=CreateQueue" \
+    --data-urlencode "QueueName=preview-$NAME" \
+    --data-urlencode "Attribute.1.Name=RedrivePolicy" \
+    --data-urlencode 'Attribute.1.Value={"deadLetterTargetArn":"arn:aws:sqs:elasticmq:000000000000:dlq-dev","maxReceiveCount":"2"}' \
+    | sed -n 's:.*<QueueUrl>\(.*\)</QueueUrl>.*:\1:p')"
+  [ -n "$QUEUE_URL" ] || { err "--jobs: elasticmq CreateQueue failed (is the dev Docker stack up?)"; exit 1; }
+  for p in $(seq 4001 4060); do
+    if ! listening "$p"; then JPORT="$p"; break; fi
+  done
+  [ -n "$JPORT" ] || { err "--jobs: no free healthcheck port in 4001-4060"; exit 1; }
+  QUEUE_ENV="UI_QUEUE_URL='$QUEUE_URL' BACKGROUND_QUEUE_URL='$QUEUE_URL' SQS_UNSUBSCRIBE_QUEUE_URL='$QUEUE_URL' SQS_WEBHOOKS_JOBS_QUEUE_URL='$QUEUE_URL' MAIL_RENDER_QUEUE_URL='$QUEUE_URL' MAIL_SEND_QUEUE_URL='$QUEUE_URL'"
+fi
+
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-tmux new-session -d -s "$SESSION" "cd '$DIR' && npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
-printf 'DIR=%s\nPORT=%s\nSTARTED=%s\n' "$DIR" "$PORT" "$(date +%s)" > "$META"
+tmux new-session -d -s "$SESSION" "cd '$DIR' && $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
+if [ -n "$JOBS" ]; then
+  JLOG="/tmp/$SESSION-jobs.log"
+  tmux new-window -t "$SESSION" -n jobs "cd '$DIR' && $QUEUE_ENV HEALTH_PORT=$JPORT npx tsx --watch --watch-preserve-output --tsconfig lib/job-queue/tsconfig.json --import dotenv/config lib/job-queue/index.js '$QUEUE_URL' 10 > '$JLOG' 2>&1"
+fi
+printf 'DIR=%s\nPORT=%s\nSTARTED=%s\nQUEUE=%s\nJPORT=%s\n' "$DIR" "$PORT" "$(date +%s)" "$QUEUE_URL" "$JPORT" > "$META"
 
 # next dev rewrites the tracked next-env.d.ts at boot (and only at boot) to a types path the
 # committed file doesn't carry, so every preview would leave its checkout dirty — restore it as
@@ -335,6 +383,7 @@ fi
 
 cyan "preview $NAME  →  http://localhost:$PORT"
 cyan "branch:  $(branch_of "$DIR")"
+[ -n "$JOBS" ] && cyan "jobs:    own worker from this checkout · queue preview-$NAME · health :$JPORT · log /tmp/$SESSION-jobs.log"
 cyan "watch:   tmux attach -t $SESSION   ·   log: $LOG"
 cyan "stop:    loops-preview '$DIR' --kill"
 echo "(clean build — first request compiles from scratch, ~20-60s)"
