@@ -40,10 +40,15 @@ if [[ -n "$(running_pid | head -1)" ]]; then
   echo "already watching $root  (log: $log)"; exit 0
 fi
 
-# tsgo where it's available (incremental rebuilds are ~instant); else tsc.
-tsc="$root/node_modules/.bin/tsgo"
-[[ -x "$tsc" ]] || tsc="$root/node_modules/.bin/tsc"
-[[ -x "$tsc" ]] || { echo "trpc-watch: no compiler in $root/node_modules/.bin" >&2; exit 1; }
+# TS7 tsc IS the native compiler; pre-TS7 trees fall back to tsgo for ~instant incremental rebuilds.
+ts_major=$(sed -n 's/.*"version": *"\([0-9]*\)\..*/\1/p' "$root/node_modules/typescript/package.json" 2>/dev/null | head -1)
+tsc="$root/node_modules/.bin/tsc"
+if [[ "${ts_major:-0}" -lt 7 ]]; then
+  for cand in "$root/node_modules/.bin/tsgo" "$(command -v tsgo 2>/dev/null || true)"; do
+    [[ -n "$cand" && -x "$cand" ]] && { tsc="$cand"; break; }
+  done
+fi
+[[ -x "$tsc" ]] || { echo "trpc-watch: no compiler for $root" >&2; exit 1; }
 
 nohup "$tsc" -p "$proj" --watch --preserveWatchOutput --pretty false \
   >"$log" 2>&1 &
