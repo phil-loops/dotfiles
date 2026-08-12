@@ -108,13 +108,15 @@ export function ForestMap(props: {
   // the merged-ghost badge's contextual next step: drop this branch + rewire its children
   // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
   onContract?: (branch: string) => Promise<{ status: number; ok?: boolean; err?: string }>;
-  // the merged-with-follow-on ghost's next step: ready the WHOLE forest (POST /ship —
-  // contract merged work first, then restack survivors onto fresh main, in that order).
-  // A node-local rebase here would move the node off its parent mid-graph; the forest
-  // walk is the only ordering that keeps children seated. Absent → badge is read-only.
-  onReady?: () => Promise<unknown>;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
+  // landed = this node's CURRENT work is fully in main: merged PR AND contractable. A merged
+  // PR with a live follow-on commit is a normal node again — `merged` alone is the branch's
+  // history, not its state, and ghost dress on it reads "done" over work the team hasn't seen.
+  const landed = (id: string): boolean => {
+    const h = nhealth(id);
+    return !!h?.merged && !!h.contractable;
+  };
   // the one-dep test: exactly one `requires` on a main-rooted branch is a mis-encoded
   // chain (requires is reserved for converging 2+ bases) — same rule as stack-doctor ⛓
   const misChain = (n: SpineNode) =>
@@ -126,7 +128,7 @@ export function ForestMap(props: {
   // that stays quiet. The dot keeps meaning BLESSING; this is its own mark.
   const nstation = (n: SpineNode): Station =>
     stationOf({
-      merged: nhealth(n.id)?.merged,
+      merged: landed(n.id),
       nothingOutgoing: !!nhealth(n.id)?.upstream && !nhealth(n.id)?.ahead,
       blessed: n.clean,
       total: n.total,
@@ -135,29 +137,23 @@ export function ForestMap(props: {
   const [hov, setHov] = createSignal<string | null>(null);
   const [contracting, setContracting] = createSignal<string | null>(null);
   const [contractErr, setContractErr] = createSignal<{ id: string; err: string } | null>(null);
-  const [readying, setReadying] = createSignal(false);
   // A contracted node leaves the map the moment the server says it's gone, rather than waiting
   // on the /model + /forest-health refetch — those are seconds slow on a big forest, and a ghost
   // still standing under its idle "⊘ drop & rewire →" pill reads as "the auto-drop never ran".
   // It did: the second press then 404s on a branch that no longer exists (2026-07-21).
   const [dropped, setDropped] = createSignal<ReadonlySet<string>>(new Set());
-  // the merged-ghost next step, keyed off CONTRACTABLE (rebase-classify exit 20), not merged:
-  //   drop    — fully contractable + we can mutate → ⊘ drop & rewire (POST /contract)
-  //   forward — merged PR but a newer commit rides on top → not droppable alone; the verb is
-  //             the whole-forest ready motion (contract first, THEN restack — never a
-  //             node-local rebase, which would unseat the graph mid-chain)
+  // the merged-ghost next step, keyed off LANDED (merged + contractable), never merged alone
+  // — a merged PR with a follow-on commit is a live node, not a ghost, and gets no pill:
+  //   drop    — we can mutate → ⊘ drop & rewire (POST /contract)
   //   merged  — read-only → passive ghost, no action
-  const ghostMode = (id: string): "drop" | "forward" | "merged" | null => {
-    const h = nhealth(id);
-    if (!h?.merged) return null;
-    if (h.contractable) return props.onContract ? "drop" : "merged";
-    return props.onReady ? "forward" : "merged";
+  const ghostMode = (id: string): "drop" | "merged" | null => {
+    if (!landed(id)) return null;
+    return props.onContract ? "drop" : "merged";
   };
   const ghostLabel = (id: string): string => {
-    if (contracting() === id) return readying() ? "▸ readying forest…" : "⊘ dropping & rewiring…";
+    if (contracting() === id) return "⊘ dropping & rewiring…";
     if (contractErr()?.id === id) return "⊘ drop failed ↻";
-    const m = ghostMode(id);
-    return m === "drop" ? "⊘ drop & rewire →" : m === "forward" ? "▸ ready forest →" : "✦ merged ghost";
+    return ghostMode(id) === "drop" ? "⊘ drop & rewire →" : "✦ merged ghost";
   };
   const pillW = (s: string): number => [...s].length * 6.9 + 18;
   const fireContract = (id: string) => {
@@ -454,7 +450,7 @@ export function ForestMap(props: {
       : kilnMark || conflict || dam ? "stroke-del"
       : ghost ? "stroke-ink-faint"
       : lumen(n) === "blessed" ? "stroke-gold-deep"
-      : h?.merged ? "stroke-patina"
+      : landed(id) ? "stroke-patina"
       : h?.drifted ? "stroke-del"
       : active ? "stroke-gold-leaf"
       : head ? "stroke-ink-dim"
@@ -465,7 +461,7 @@ export function ForestMap(props: {
       : ks === "set" ? "stroke-[1.6]"
       : dam ? "stroke-[2]"
       : ghost ? "stroke-[1.3]"
-      : h?.merged ? "stroke-[2.2]"
+      : landed(id) ? "stroke-[2.2]"
       : h?.drifted ? "stroke-[2.4]"
       : active ? "stroke-[2]"
       : head ? "stroke-[1.6]"
@@ -474,7 +470,7 @@ export function ForestMap(props: {
       ks === "parked" ? "[stroke-dasharray:5_3]"
       : conflict ? "[stroke-dasharray:4_3]"
       : ghost ? "[stroke-dasharray:5_4]"
-      : h?.merged ? "[stroke-dasharray:2_3]"
+      : landed(id) ? "[stroke-dasharray:2_3]"
       : h?.drifted ? "[stroke-dasharray:5_3]"
       : "";
     const fill =
@@ -486,7 +482,7 @@ export function ForestMap(props: {
       : ks === "parked" ? "drop-shadow-[0_0_9px_var(--color-del)]"
       : ks === "current" ? "drop-shadow-[0_0_11px_var(--color-del)]"
       : dam ? "drop-shadow-[0_0_8px_var(--color-del)]"
-      : h?.merged ? "drop-shadow-[0_0_6px_var(--color-patina)]"
+      : landed(id) ? "drop-shadow-[0_0_6px_var(--color-patina)]"
       : h?.drifted ? "drop-shadow-[0_0_7px_var(--color-del)]"
       : active ? "drop-shadow-[0_0_9px_var(--color-gold-wash)]"
       : head ? "drop-shadow-[0_0_5px_var(--color-gold-wash)]"
@@ -694,7 +690,7 @@ export function ForestMap(props: {
                     "kiln-pending": kilnState(n.id) === "pending",
                     "kiln-parked": kilnState(n.id) === "parked",
                     drifted: !!nhealth(n.id)?.drifted,
-                    merged: !!nhealth(n.id)?.merged,
+                    merged: landed(n.id),
                   }}
                   style={{ "animation-delay": `${120 + i() * 45}ms` }}
                   transform={`translate(${p().x},${p().y})`}
@@ -714,9 +710,9 @@ export function ForestMap(props: {
                   <Show when={dams().damSet.has(n.id)}>
                     <title>dirty — downstream conflict on {dams().dirtyOf(n.id).join(", ")}</title>
                   </Show>
-                  <Show when={!dams().damSet.has(n.id) && (nhealth(n.id)?.drifted || nhealth(n.id)?.merged)}>
+                  <Show when={!dams().damSet.has(n.id) && (nhealth(n.id)?.drifted || landed(n.id))}>
                     <Show
-                      when={nhealth(n.id)?.merged}
+                      when={landed(n.id)}
                       fallback={
                         <text
                           class={`fm-warn drift font-mono text-[9.5px] tracking-[0.03em] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-del"}`}
@@ -730,23 +726,13 @@ export function ForestMap(props: {
                     >
                       <g
                         class="fm-ghost-pill group/pill cursor-pointer"
-                        classList={{ drop: ghostMode(n.id) === "drop", forward: ghostMode(n.id) === "forward" }}
+                        classList={{ drop: ghostMode(n.id) === "drop" }}
                         transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}
                         onClick={(e) => {
                           e.stopPropagation();
                           if (contracting() === n.id) return;
-                          const m = ghostMode(n.id);
-                          if (m === "drop") {
+                          if (ghostMode(n.id) === "drop") {
                             fireContract(n.id);
-                          } else if (m === "forward") {
-                            // not droppable alone — run the whole ready motion: contract merged
-                            // work into fresh main FIRST, then restack survivors root-down.
-                            setContracting(n.id);
-                            setReadying(true);
-                            Promise.resolve(props.onReady!()).finally(() => {
-                              setContracting(null);
-                              setReadying(false);
-                            });
                           }
                         }}
                       >
@@ -755,17 +741,13 @@ export function ForestMap(props: {
                             ? `${contractErr()!.err} — click to retry`
                             : ghostMode(n.id) === "drop"
                             ? "already merged AND fully contractable — drops this branch, rebases + rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
-                            : ghostMode(n.id) === "forward"
-                              ? "the PR merged but a newer commit rides on top — not droppable alone. Readies the whole forest: merged work contracts into fresh main first, then everything (the follow-on included) restacks in order. A conflict restores every branch."
-                              : "merged into main (ghost)"}
+                            : "merged into main (ghost)"}
                         </title>
                         <rect
                           class={`fill-vellum-night stroke-[1.2] ${
                             ghostMode(n.id) === "drop"
                               ? "stroke-ember group-hover/pill:fill-ember"
-                              : ghostMode(n.id) === "forward"
-                                ? "stroke-gold-leaf group-hover/pill:fill-gold-leaf"
-                                : "stroke-rule"
+                              : "stroke-rule"
                           }`}
                           x={-pillW(ghostLabel(n.id)) / 2}
                           y={-11}
@@ -777,9 +759,7 @@ export function ForestMap(props: {
                           class={`${PILL_TEXT} ${
                             ghostMode(n.id) === "drop"
                               ? "fill-ember group-hover/pill:fill-vellum-night"
-                              : ghostMode(n.id) === "forward"
-                                ? "fill-gold-leaf group-hover/pill:fill-vellum-night"
-                                : "fill-ink-dim"
+                              : "fill-ink-dim"
                           }`}
                           x={0}
                           y={4}
@@ -840,7 +820,7 @@ export function ForestMap(props: {
                   {/* drifted hides the purpose like merged does — the ⤺ off-parent warn draws in
                       the same sub-node slot (NODE_H/2+12 vs +13) and the two overprint; the ⛓
                       and ∅ marks share that slot too, so each state yields to the one above it */}
-                  <Show when={misChain(n) && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted && !dams().damSet.has(n.id)}>
+                  <Show when={misChain(n) && !landed(n.id) && !nhealth(n.id)?.drifted && !dams().damSet.has(n.id)}>
                     <text
                       class={`fm-warn font-mono text-[9.5px] tracking-[0.03em] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-del"}`}
                       x={w / 2}
@@ -850,7 +830,7 @@ export function ForestMap(props: {
                       ⛓ mis-encoded chain
                     </text>
                   </Show>
-                  <Show when={!isGhostId(n.id) && !misChain(n) && n.description && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted}>
+                  <Show when={!isGhostId(n.id) && !misChain(n) && n.description && !landed(n.id) && !nhealth(n.id)?.drifted}>
                     <For each={wrapPurpose(n.description!, w)}>
                       {(line, i) => (
                         <text class={`fm-purpose ${purposeClass(n.id)}`} x={w / 2} y={NODE_H / 2 + 13 + i() * 10}>
@@ -860,7 +840,7 @@ export function ForestMap(props: {
                       )}
                     </For>
                   </Show>
-                  <Show when={!isGhostId(n.id) && !misChain(n) && !n.description && !nhealth(n.id)?.merged && !nhealth(n.id)?.drifted}>
+                  <Show when={!isGhostId(n.id) && !misChain(n) && !n.description && !landed(n.id) && !nhealth(n.id)?.drifted}>
                     <text
                       class={`fm-purpose font-mono text-[9px] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-ink-faint"}`}
                       x={w / 2}
