@@ -15,8 +15,9 @@ the net for a push that skips the flow (e.g. straight from the laptop).
 It also blocks **merge commits on a feature branch** — one means a `git pull`
 (merge) on a diverged branch, which (because PRs squash-merge) drags landed
 commits back in and bloats the PR with phantom "new" commits. Rebase onto
-origin/main instead. Exempt: a catch-up merge OF origin/main (second parent on
-main — GitHub's "Update branch" shape), the additive way to refresh a stale PR.
+origin/main instead. Exempt: a catch-up merge OF the branch's base — origin/main,
+or its stack parent for a stacked child (second parent on that base — GitHub's
+"Update branch" shape), the additive way to refresh a stale PR.
 
 It also refuses **proof branches** (`role=proof`, set with `stack-proof`) — a
 never-merge forest member that exists to prove the forest works, not to ship.
@@ -74,31 +75,51 @@ def wip_commits(rev_args):
     return found
 
 
-def is_catchup(sha):
-    """A catch-up merge — second parent on origin/main, GitHub's own 'Update branch'
-    shape — refreshes a stale PR without rewriting shared history. Allowed: a pull-merge
-    (the thing this guard exists for) has its second parent on the branch, not main."""
+def catchup_bases(branch):
+    """Refs a catch-up merge may bring in: origin/main, plus the branch's stack parent
+    (a stacked child's PR base) when it exists on origin. Never the branch itself —
+    that's a pull-merge, the thing this guard exists for."""
+    bases = ["origin/main"]
+    for key in (f"branch.{branch}.stack-parent", f"stack-branch.{branch}.parent"):
+        sp = subprocess.run(
+            ["git", "config", "--get", key], capture_output=True, text=True,
+        ).stdout.strip()
+        if sp:
+            if sp not in ("main", "master") and sp != branch and subprocess.run(
+                    ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{sp}"],
+                    capture_output=True).returncode == 0:
+                bases.append(f"origin/{sp}")
+            break
+    return bases
+
+
+def is_catchup(sha, bases):
+    """A catch-up merge — second parent on the branch's base, GitHub's own 'Update
+    branch' shape — refreshes a stale PR without rewriting shared history."""
     parents = subprocess.run(
         ["git", "log", "-1", "--format=%P", sha], capture_output=True, text=True,
     ).stdout.split()
-    return len(parents) == 2 and subprocess.run(
-        ["git", "merge-base", "--is-ancestor", parents[1], "origin/main"],
-        capture_output=True,
-    ).returncode == 0
+    return len(parents) == 2 and any(
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", parents[1], base],
+            capture_output=True,
+        ).returncode == 0
+        for base in bases)
 
 
-def merge_commits(rev_args):
+def merge_commits(rev_args, branch):
     """[(sha, subject)] for merge commits in the range, newest first."""
     out = subprocess.run(
         ["git", "log", "--merges", "--format=%H\x1f%s", *rev_args],
         capture_output=True, text=True,
     ).stdout
     found = []
+    bases = catchup_bases(branch)
     for line in out.splitlines():
         if "\x1f" not in line:
             continue
         sha, subject = line.split("\x1f", 1)
-        if is_catchup(sha):
+        if is_catchup(sha, bases):
             continue
         found.append((sha[:9], subject))
     return found
@@ -165,7 +186,8 @@ def main():
                 continue
             if branch_merge_pass(remote_ref):
                 continue
-            merges += merge_commits(range_for(local_sha, remote_sha))
+            merges += merge_commits(range_for(local_sha, remote_sha),
+                                    remote_ref.removeprefix("refs/heads/"))
         if merges:
             seen = set()
             print("\n✋ push blocked — merge commit(s) on a feature branch:\n", file=sys.stderr)
