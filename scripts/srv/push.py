@@ -267,6 +267,29 @@ def _open_web(url):
         return False
 
 
+def _is_restack(branch):
+    """True when local is origin/<branch> restacked onto a newer origin/main: the merge-base
+    with main strictly advanced AND every pushed commit rides patch-equivalent in local
+    (git cherry survives context drift a rebase introduces). This state is ADOPTED, never
+    rebuilt — the additive vehicle re-roots the new-base tree onto the stale pushed head,
+    manufacturing imports of files that only exist on new main (the phantom-TS2307 flatten,
+    2026-08-12). Origin catches up via the human's force-with-lease, not from here."""
+    mb_local = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
+    mb_remote = ctx.run(["git", "merge-base", f"origin/{branch}", "origin/main"]).stdout.strip()
+    if not mb_local or not mb_remote or mb_local == mb_remote:
+        return False
+    if ctx.run(["git", "merge-base", "--is-ancestor", mb_remote, mb_local]).returncode != 0:
+        return False
+    cherry = [l for l in ctx.run(["git", "cherry", branch, f"origin/{branch}"]).stdout.splitlines() if l.strip()]
+    if bool(cherry) and all(l.startswith("-") for l in cherry):
+        return True
+    # a sealed adoption: prep collapsed the restack to one commit, so per-commit patch-ids
+    # no longer match origin's — the stamp remembers which origin head the seal superseded,
+    # and goes inert the moment origin moves (force-push lands, or someone else pushes)
+    seen = ctx.run(["git", "config", f"stack-branch.{branch}.restack-supersedes"]).stdout.strip()
+    return bool(seen) and seen == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
+
+
 def _origin_verdict(branch):
     """Every /push-origin guard, recomputed from git — shared by the read-only
     preview (drives the crossing view + wards + arming) and the push itself
@@ -362,6 +385,9 @@ def _origin_verdict(branch):
              bool(ctx.run(["git", "config", f"branch.{branch}.description"]).stdout.strip()),
              "no branch description — a forest member without a purpose is an unfinished operation", advisory=True),
         ward("ff", "fast-forward", ff,
+             "" if ff else
+             "restacked onto newer main — kept as-is; origin needs your force-with-lease (GH Desktop)"
+             if has_remote and _is_restack(branch) else
              "diverged from origin — reconcile first; shared history is never overwritten"),
         ward("watch", "deploy watch clear", not deploy_critical,
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
@@ -475,6 +501,7 @@ def _squash_unpushed(branch, message=""):
 
 def prep_push(req, raw):
     """POST /prep-push {branch} — route by state and land on 'exactly one outgoing commit':
+      restacked + open PR   → adopt local, seal onto its OWN base (never the stale PR head)
       diverged + open PR    → build the additive vehicle, absorb it as the branch tip
       diverged, no PR       → refuse (⋯ reconcile is the manual override)
       behind + unpublished  → forward-rebase onto origin/main first (skipped on conflict)
@@ -499,22 +526,54 @@ def prep_push(req, raw):
             return req._send(200, json.dumps({
                 "ok": False, "reconcile": True,
                 "err": "diverged from origin without an open PR — handing to Claude to work out the source of truth"}))
-        res = sync.build_additive(branch)
-        if not res.get("ok"):
-            return req._send(res.pop("code", 200), json.dumps(res))
-        sha = res["shaFull"]
-        holder = next((p for p, b in stage._worktrees() if b == branch), None)
-        if holder and stage._dirty(holder):
-            ctx.run(["git", "branch", "-D", res["vehicle"]])
-            return req._send(200, json.dumps({
-                "ok": False, "err": f"{holder} holds {branch} with uncommitted changes — commit or stash first"}))
-        if holder:
-            ctx.run(["git", "-C", holder, "reset", "--hard", sha])
+        if _is_restack(branch):
+            holder = next((p for p, b in stage._worktrees() if b == branch), None)
+            if holder and stage._dirty(holder):
+                return req._send(200, json.dumps({
+                    "ok": False, "err": f"{holder} holds {branch} with uncommitted changes — commit or stash first"}))
+            if v["outgoing"] > 1:
+                # seal onto the branch's OWN base — stack-squash --unpushed re-bases onto
+                # origin's stale tip, which is exactly the flatten adoption exists to avoid
+                tip = _tip(branch)
+                base = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
+                meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
+                env = dict(os.environ)
+                if len(meta) == 3:
+                    env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
+                msg = ctx.run(["git", "log", "-1", "--format=%B", tip]).stdout.strip()
+                cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", base, "-m", msg]
+                if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
+                    cmd.insert(2, "-S")
+                r = subprocess.run(cmd, cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
+                sealed = r.stdout.strip()
+                if r.returncode != 0 or not sealed:
+                    return req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
+                if holder:
+                    ctx.run(["git", "-C", holder, "reset", "--hard", sealed])
+                else:
+                    ctx.run(["git", "update-ref", f"refs/heads/{branch}", sealed, tip])
+                routed.append(f"sealed the restack's {v['outgoing']} commits into one on its own base")
+            ctx.run(["git", "config", f"stack-branch.{branch}.restack-supersedes",
+                     ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()])
+            routed.append("kept your restack — origin's commits ride it patch-equivalent on a newer base; "
+                          "push it force-with-lease from GH Desktop")
         else:
-            ctx.run(["git", "branch", "-f", branch, sha])
-        ctx.run(["git", "branch", "-D", res["vehicle"]])
-        ctx.run(["git", "config", "--remove-section", f"branch.{res['vehicle']}"])
-        routed.append("carried your rework onto the PR head as one additive commit")
+            res = sync.build_additive(branch)
+            if not res.get("ok"):
+                return req._send(res.pop("code", 200), json.dumps(res))
+            sha = res["shaFull"]
+            holder = next((p for p, b in stage._worktrees() if b == branch), None)
+            if holder and stage._dirty(holder):
+                ctx.run(["git", "branch", "-D", res["vehicle"]])
+                return req._send(200, json.dumps({
+                    "ok": False, "err": f"{holder} holds {branch} with uncommitted changes — commit or stash first"}))
+            if holder:
+                ctx.run(["git", "-C", holder, "reset", "--hard", sha])
+            else:
+                ctx.run(["git", "branch", "-f", branch, sha])
+            ctx.run(["git", "branch", "-D", res["vehicle"]])
+            ctx.run(["git", "config", "--remove-section", f"branch.{res['vehicle']}"])
+            routed.append("carried your rework onto the PR head as one additive commit")
     else:
         state = sync.state(branch, fresh_prs=True)
         if state["behind"] > 0 and not published and state.get("parent") == "main" and v["outgoing"] > 0:
