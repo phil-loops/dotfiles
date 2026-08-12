@@ -145,7 +145,9 @@ def _shared(branch):
     "ahead" (origin's copy is N commits behind), "synced", or "gone" (deleted on
     origin after merge). Reads the last fetch's refs — no network."""
     if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0:
-        raw = ctx.run(["git", "rev-list", "--count", f"origin/{branch}..{branch}"]).stdout.strip()
+        # --first-parent: a catch-up merge is ONE commit ahead — its mainline side is
+        # already shared history, not unpushed work
+        raw = ctx.run(["git", "rev-list", "--count", "--first-parent", f"origin/{branch}..{branch}"]).stdout.strip()
         try:
             ahead = int(raw)
         except ValueError:

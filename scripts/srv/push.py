@@ -284,8 +284,10 @@ def _origin_verdict(branch):
         ff = ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode == 0
     # outgoing = commits origin doesn't have. On a first push, --not --remotes=origin keeps a
     # stacked branch's parent commits (already on origin via the parent) out of the count.
+    # --first-parent: a catch-up merge's mainline commits arrive via the merge edge — they are
+    # not this branch's outgoing work and must not trip the seal (which would flatten the merge).
     range_args = [f"origin/{branch}..{branch}"] if has_remote else [branch, "--not", "--remotes=origin"]
-    log = ctx.run(["git", "log", "--format=%H\x1f%s\x1f%ad\x1f%at", "--date=format:%b %e", *range_args]).stdout
+    log = ctx.run(["git", "log", "--first-parent", "--format=%H\x1f%s\x1f%ad\x1f%at", "--date=format:%b %e", *range_args]).stdout
     outgoing = []
     for rec in log.splitlines():
         parts = rec.split("\x1f")
@@ -318,14 +320,21 @@ def _origin_verdict(branch):
                 })
 
     commit = None
-    voiced = said_why = not_merge = False
+    voiced = said_why = not_merge = catchup = False
     if len(outgoing) == 1:
         sha = outgoing[0]["sha"]
         subject = outgoing[0]["subject"]
         body = ctx.run(["git", "log", "-1", "--format=%b", sha]).stdout.strip()
         voiced = not _WIP_SUBJECT.match(subject)
         said_why = bool(re.sub(r"^X-WIP:.*$", "", body, flags=re.IGNORECASE | re.MULTILINE).strip())
-        not_merge = not ctx.run(["git", "rev-list", "--no-walk", "--merges", sha]).stdout.strip()
+        parents = ctx.run(["git", "log", "-1", "--format=%P", sha]).stdout.split()
+        not_merge = len(parents) < 2
+        # catch-up merge — GitHub's own "Update branch" shape, the one additive way a stale-fork
+        # PR gets its review diff back to the branch's own work: first parent is origin's PR
+        # head, second parent sits on origin/main. Anything else stays refused.
+        catchup = (len(parents) == 2 and has_remote
+                   and parents[0] == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
+                   and ctx.run(["git", "merge-base", "--is-ancestor", parents[1], "origin/main"]).returncode == 0)
         commit = {"sha": sha, "subject": subject, "body": body}
     tip = _tip(branch)
     gates_green = _green_tree(branch) == _tree(tip)
@@ -333,10 +342,10 @@ def _origin_verdict(branch):
     def ward(k, label, ok, why, advisory=False):
         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
     wards = [
-        ward("one", "one commit", len(outgoing) == 1 and not_merge,
+        ward("one", "one commit", len(outgoing) == 1 and (not_merge or catchup),
              "nothing to push — origin already has this" if not outgoing
              else f"{len(outgoing)} commits — prep seals them into one" if len(outgoing) > 1
-             else "outgoing commit is a merge commit"),
+             else "outgoing commit is a merge that isn't a catch-up of origin/main"),
         ward("voiced", "voiced subject", voiced and len(outgoing) == 1,
              "" if len(outgoing) != 1 else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
         ward("why", "says why", said_why and len(outgoing) == 1,
@@ -518,6 +527,14 @@ def prep_push(req, raw):
                 ctx.run(["git", "worktree", "remove", "--force", scratch])
         v = _origin_verdict(branch)
         if v["outgoing"] > 1:
+            # sealing resets onto origin's tip and re-commits the tree — across a merge that
+            # linearizes it, turning "caught up with main" into main's diff re-declared as
+            # branch content (the 22-files-changed failure, 2026-08-12)
+            if ctx.run(["git", "rev-list", "--first-parent", "--merges",
+                        f"origin/{branch}..{branch}"]).stdout.strip():
+                return req._send(200, json.dumps({
+                    "ok": False, "routed": routed,
+                    "err": "unpushed commits include a merge — sealing would flatten it; push the merge first, then prep the rest"}))
             sq = _squash_unpushed(branch)
             if not sq.get("ok"):
                 return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "squash failed", "routed": routed}))
