@@ -105,11 +105,6 @@ def ship(req, raw):
     if not members:
         return req._send(400, json.dumps({"ok": False, "err": "no live branches in this forest"}))
 
-    published = sync._open_pr_heads(fresh=True)
-    prd = [b for b in members if b in published]
-    if prd:
-        return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — ship rebases, and pushed history is never rewritten"}))
-
     # A ghost is exactly what the map's drop pill calls droppable: merged — GitHub-authoritative
     # when the branch has a PR — AND contractable. The local exit-20 probe alone missed a node
     # whose work had landed but whose branch was already restacked onto that landing, so ship
@@ -125,10 +120,23 @@ def ship(req, raw):
         return req._send(200, json.dumps({"ok": False, "err": f"worktree {dirty_squat[0]} holds a forest branch with uncommitted changes"}))
 
     survivors = [b for b in members if b not in ghosts]
-    behind = max((int(ctx.run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip() or "0")
-                  for b in survivors), default=0)
+    behind_by = {b: int(ctx.run(["git", "rev-list", "--count", f"{b}..origin/main"]).stdout.strip() or "0")
+                 for b in survivors}
+    behind = max(behind_by.values(), default=0)
     sset = set(survivors)
     drifted = [b for b in survivors if _parent(b) in sset and _drifted(b, _parent(b))]
+
+    # An open PR refuses only when ship would actually move that branch: a ghost being
+    # contracted, or a survivor that's behind fresh main / off its parent. An up-to-date
+    # pushed branch comes through the walk SHA-identical (rebase no-ops on its own base),
+    # so it's a spectator — the old any-member guard refused forests with nothing to do
+    # the moment one landed node had an open PR beside it (2026-08-12, restore-replay).
+    published = sync._open_pr_heads(fresh=True)
+    moving = set(ghosts) | {b for b in survivors if behind_by[b] or b in drifted}
+    prd = [b for b in members if b in moving and b in published]
+    if prd:
+        return req._send(200, json.dumps({"ok": False, "err": f"{', '.join(prd)} has an open PR — ship rebases, and pushed history is never rewritten"}))
+
     plan = {"ok": True, "project": project, "ghosts": ghosts, "members": survivors, "behind": behind,
             "drifted": drifted, "alreadyReady": not ghosts and behind == 0}
     if dry:
