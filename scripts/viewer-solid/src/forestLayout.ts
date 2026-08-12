@@ -17,12 +17,17 @@ export function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
 }
 
 // Story-aligned tree layout: the map reads exactly like the merge-story text. Each branch
-// is a ROW; depth in the parent tree is an INDENT column, so the parent relationship is
-// carried by geometry (a thin elbow guide, drawn always). `requires` fan-in draws as a
-// resting dashed arc in the right-side lane, always flowing downward: sibling blocks are
-// topo-sorted over cross-block requires, so the vertical order IS the landing order and
-// a prerequisite always sits above its dependent. The ghost culmination sorts last (it's
-// the destination, not work). Pure and deterministic.
+// is a ROW; a node's INDENT column clears its DEEPEST upstream — the parent chain gives
+// the tree shape (a thin elbow guide, drawn always), and a `requires` fan-in pushes the
+// dependent right of every base it carries, so indentation always means "lands after
+// everything left of me". `requires` fan-in draws as a resting dashed arc in the
+// right-side lane, always flowing downward: sibling blocks are topo-sorted over
+// cross-block requires, so the vertical order IS the landing order and a prerequisite
+// always sits above its dependent. The ghost culmination is a SINK, not a sibling: it
+// never joins the tree, rendering instead as the last row seated back on main's own
+// column — main's spine runs down into it (kind "spine") and the tips' work arcs in as
+// "lands" edges — so the picture opens forking OFF main and closes landing ON it.
+// Pure and deterministic.
 export function computeForestLayout(model: { list: SpineNode[]; byId: Record<string, SpineNode> }) {
     const { list, byId } = model;
     const ids = list.map((n) => n.id);
@@ -48,19 +53,20 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     };
     ids.forEach(rankOf);
 
+    // the ✦ culmination is a sink, never a tree node — it leaves the root list entirely
+    // and takes the sink seat after every work row is placed.
+    const ghosts = list.filter((n) => isGhostId(n.id));
     const kids: Record<string, string[]> = {};
     const roots: string[] = [];
     list.forEach((n) => {
+      if (isGhostId(n.id)) return;
       const p = n.parent && n.parent !== "main" && byId[n.parent] ? n.parent : "main";
       if (p === "main") roots.push(n.id);
       else (kids[p] ||= []).push(n.id);
     });
     const declared: Record<string, number> = {};
     ids.forEach((b, i) => (declared[b] = i));
-    const order = (a: string, b: string) =>
-      (isGhostId(a) ? 1 : 0) - (isGhostId(b) ? 1 : 0) ||
-      rankOf(a) - rankOf(b) ||
-      declared[a] - declared[b];
+    const order = (a: string, b: string) => rankOf(a) - rankOf(b) || declared[a] - declared[b];
     // A sibling's whole subtree renders as one contiguous block, so "vertical order is the
     // landing order" holds only if any block containing a prerequisite sorts above the block
     // whose member requires it. Rank alone can't see that (the block tops may tie — a rank-1
@@ -97,10 +103,17 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     Object.keys(kids).forEach((p) => (kids[p] = sortBlocks(kids[p])));
 
     // DFS: row per node, indent per depth — parent always directly above its subtree.
+    // Fan-in truth: a node's column clears EVERY upstream, so a `requires` base deeper
+    // than the parent chain pushes the dependent (and its subtree) further right —
+    // indentation reads "lands after everything left of me", not just "child of parent".
+    // Block topo-sorting placed each prerequisite's row (hence depth) before its dependent.
     const pos: Record<string, { x: number; y: number }> = {};
     const depth: Record<string, number> = {};
     let row = 0;
     const place = (id: string, d: number) => {
+      (byId[id]?.requires || []).forEach((rq) => {
+        if (depth[rq] != null) d = Math.max(d, depth[rq] + 1);
+      });
       depth[id] = d;
       pos[id] = { x: LEFT + d * INDENT, y: TOP + row * ROW_H };
       row++;
@@ -109,21 +122,48 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     roots.forEach((r) => place(r, 0));
 
     const mainPos = { x: LEFT - 62, y: TOP - ROW_H * 0.62 };
+    // the sink seat: a breath below the last work row, back on main's own column — the
+    // spine drop (mainPos.x) enters the ✦ row right above its name glyph (local x=16).
+    const SINK_GAP = ROW_H * 0.4;
+    ghosts.forEach((g) => {
+      depth[g.id] = 0;
+      pos[g.id] = { x: mainPos.x - 16, y: TOP + row * ROW_H + SINK_GAP };
+      row++;
+    });
     let maxX = mainPos.x + 60;
     list.forEach((n) => { if (pos[n.id]) maxX = Math.max(maxX, pos[n.id].x + nodeW(n.id)); });
     const W = maxX + PAD_R;
-    const H = TOP + row * ROW_H + PAD_B;
+    const H = TOP + row * ROW_H + (ghosts.length ? SINK_GAP : 0) + PAD_B;
 
     // Edges. Parent edges are ELBOW GUIDES (file-tree style): drop from the guardian's dot,
     // then turn into the child's left edge — geometry the renderer draws as M x1,y1 V y2 H x2.
     // The guardian is the parent node, or main for roots (main's spine runs down the left).
     // `requires` edges carry kind "fanin" and their own right-side lane geometry; block
     // topo-sorting above guarantees the prerequisite row is higher, so the arc flows down.
+    // The ✦ sink draws no parent elbow: main's spine continues straight down into it
+    // (kind "spine"), and its synthetic requires — the tips the preview assembles — arc
+    // in as kind "lands", a different dependence than fan-in (bookkeeping, not merge-blocking).
     type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string };
     const edges: Edge[] = [];
     list.forEach((n) => {
       const me = pos[n.id];
       if (!me) return;
+      if (isGhostId(n.id)) {
+        edges.push({
+          x1: mainPos.x, y1: mainPos.y + 10, x2: mainPos.x, y2: me.y - NODE_H / 2 - 4,
+          kind: "spine", from: "main", to: n.id,
+        });
+        (n.requires || []).forEach((rq) => {
+          if (pos[rq]) {
+            edges.push({
+              x1: pos[rq].x + nodeW(rq) + 6, y1: pos[rq].y,
+              x2: me.x + nodeW(n.id) + 6, y2: me.y,
+              kind: "lands", from: rq, to: n.id,
+            });
+          }
+        });
+        return;
+      }
       const p = n.parent && n.parent !== "main" && pos[n.parent] ? n.parent : "main";
       const gx = p === "main" ? mainPos.x : pos[p].x + 16; // drop from the dot column
       // start the drop BELOW the parent's purpose subtitle (two lines now) so it never strikes it.
