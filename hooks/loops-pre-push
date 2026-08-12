@@ -44,9 +44,19 @@ if [ "$behind" -gt 0 ] 2>/dev/null; then
   fi
 fi
 
+# A green push-gates verdict is keyed by TREE sha (server-recorded; new namespace first,
+# legacy stack-branch fallback) — a match means tsc/oxfmt already certified this exact
+# content, so the duplicate ~30s run below is skipped. Read-only: forging the key stays taboo.
+push_branch=${push_ref#refs/heads/}
+green_tree=$(git config --get "branch.$push_branch.stack-gates-green-tree" 2>/dev/null)
+[ -n "$green_tree" ] || green_tree=$(git config --get "stack-branch.$push_branch.gates-green-tree" 2>/dev/null)
+
 # oxfmt/tsc below read the WORKING TREE, so they're only honest when the checkout
 # actually holds the pushed commit; otherwise skip them — the push gates cover both.
-if [ "$(git rev-parse HEAD 2>/dev/null)" != "$push_sha" ]; then
+if [ -n "$green_tree" ] && [ "$green_tree" = "$(git rev-parse "$push_sha^{tree}" 2>/dev/null)" ]; then
+  echo "pre-push: push gates already green for this exact tree — skipping oxfmt/tsc"
+  files=""
+elif [ "$(git rev-parse HEAD 2>/dev/null)" != "$push_sha" ]; then
   echo "pre-push: worktree isn't on the pushed commit — skipping oxfmt/tsc tree checks"
   files=""
 else
