@@ -214,9 +214,6 @@ function useShipPlan(project: () => string) {
   };
 }
 
-const shipHasWork = (plan: { contract: number; rebase: number; conflict: number } | null) =>
-  !plan || plan.contract > 0 || plan.rebase > 0 || plan.conflict > 0;
-
 // The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
 // restacks every survivor onto fresh origin/main (trees included), and reports the push
 // order. Prep/push stay per-node so the outgoing commit message remains editable.
@@ -343,7 +340,6 @@ export function ForestOverview() {
     setTip({ branch, text: p.thesis });
   };
   const hideTip = () => { tipBranch = null; setTip(null); };
-  const ovShipPlan = useShipPlan(project);
   const [chatPick, setChatPick] = createSignal(false);
 
   return (
@@ -413,9 +409,6 @@ export function ForestOverview() {
                 ovQc.invalidateQueries({ queryKey: ["projects"] });
                 return { status: r.status, ...body };
               } : undefined}
-              // a forest with nothing to ship gets no verb — the merged-with-follow-on node stays a
-              // passive ghost instead of a "ready forest →" that fires and reports "already ready".
-              onReady={canMutate && shipHasWork(ovShipPlan()) ? () => runShip(project(), ovQc) : undefined}
             />
           }
         >
