@@ -10,7 +10,7 @@
 ## Naming conventions
 
 - **File names** follow the team's kebab-case convention: `goal-contact-window.ts`, not `goalContactWindow.ts`
-- **Query imports** use namespace imports with the full name: `import * as GoalContactWindowQueries from "..."` — never shorthand like `GCWQueries`. Bare function names are fine in tests where context is obvious; model/wiring code uses the qualified name.
+- **Query and model imports** use namespace imports with the full name: `import * as GoalContactWindowQueries from "..."`, `import * as ContactModel from "../models/contact"` — never shorthand like `GCWQueries`, never the functions directly. Bare function names are fine in tests where context is obvious; model/wiring code uses the qualified name.
 
 ## Type style
 
