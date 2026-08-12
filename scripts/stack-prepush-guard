@@ -15,7 +15,8 @@ the net for a push that skips the flow (e.g. straight from the laptop).
 It also blocks **merge commits on a feature branch** — one means a `git pull`
 (merge) on a diverged branch, which (because PRs squash-merge) drags landed
 commits back in and bloats the PR with phantom "new" commits. Rebase onto
-origin/main instead.
+origin/main instead. Exempt: a catch-up merge OF origin/main (second parent on
+main — GitHub's "Update branch" shape), the additive way to refresh a stale PR.
 
 It also refuses **proof branches** (`role=proof`, set with `stack-proof`) — a
 never-merge forest member that exists to prove the forest works, not to ship.
@@ -73,6 +74,19 @@ def wip_commits(rev_args):
     return found
 
 
+def is_catchup(sha):
+    """A catch-up merge — second parent on origin/main, GitHub's own 'Update branch'
+    shape — refreshes a stale PR without rewriting shared history. Allowed: a pull-merge
+    (the thing this guard exists for) has its second parent on the branch, not main."""
+    parents = subprocess.run(
+        ["git", "log", "-1", "--format=%P", sha], capture_output=True, text=True,
+    ).stdout.split()
+    return len(parents) == 2 and subprocess.run(
+        ["git", "merge-base", "--is-ancestor", parents[1], "origin/main"],
+        capture_output=True,
+    ).returncode == 0
+
+
 def merge_commits(rev_args):
     """[(sha, subject)] for merge commits in the range, newest first."""
     out = subprocess.run(
@@ -84,6 +98,8 @@ def merge_commits(rev_args):
         if "\x1f" not in line:
             continue
         sha, subject = line.split("\x1f", 1)
+        if is_catchup(sha):
+            continue
         found.append((sha[:9], subject))
     return found
 
