@@ -273,7 +273,7 @@ def _is_restack(branch):
     (git cherry survives context drift a rebase introduces). This state is ADOPTED, never
     rebuilt — the additive vehicle re-roots the new-base tree onto the stale pushed head,
     manufacturing imports of files that only exist on new main (the phantom-TS2307 flatten,
-    2026-08-12). Origin catches up via the human's force-with-lease, not from here."""
+    2026-08-12). Origin catches up via prep's catch-up merge carrier — additive, never force."""
     mb_local = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
     mb_remote = ctx.run(["git", "merge-base", f"origin/{branch}", "origin/main"]).stdout.strip()
     if not mb_local or not mb_remote or mb_local == mb_remote:
@@ -386,7 +386,7 @@ def _origin_verdict(branch):
              "no branch description — a forest member without a purpose is an unfinished operation", advisory=True),
         ward("ff", "fast-forward", ff,
              "" if ff else
-             "restacked onto newer main — kept as-is; origin needs your force-with-lease (GH Desktop)"
+             "restacked onto newer main — prep folds it into a catch-up merge of origin's head (plain push)"
              if has_remote and _is_restack(branch) else
              "diverged from origin — reconcile first; shared history is never overwritten"),
         ward("watch", "deploy watch clear", not deploy_critical,
@@ -501,7 +501,7 @@ def _squash_unpushed(branch, message=""):
 
 def prep_push(req, raw):
     """POST /prep-push {branch} — route by state and land on 'exactly one outgoing commit':
-      restacked + open PR   → adopt local, seal onto its OWN base (never the stale PR head)
+      restacked + open PR   → carry as a catch-up merge on origin's head (additive, plain push)
       diverged + open PR    → build the additive vehicle, absorb it as the branch tip
       diverged, no PR       → refuse (⋯ reconcile is the manual override)
       behind + unpublished  → forward-rebase onto origin/main first (skipped on conflict)
@@ -531,32 +531,43 @@ def prep_push(req, raw):
             if holder and stage._dirty(holder):
                 return req._send(200, json.dumps({
                     "ok": False, "err": f"{holder} holds {branch} with uncommitted changes — commit or stash first"}))
-            if v["outgoing"] > 1:
-                # seal onto the branch's OWN base — stack-squash --unpushed re-bases onto
-                # origin's stale tip, which is exactly the flatten adoption exists to avoid
-                tip = _tip(branch)
-                base = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
-                meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
-                env = dict(os.environ)
-                if len(meta) == 3:
-                    env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
-                msg = ctx.run(["git", "log", "-1", "--format=%B", tip]).stdout.strip()
-                cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", base, "-m", msg]
-                if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
-                    cmd.insert(2, "-S")
-                r = subprocess.run(cmd, cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
-                sealed = r.stdout.strip()
-                if r.returncode != 0 or not sealed:
-                    return req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
-                if holder:
-                    ctx.run(["git", "-C", holder, "reset", "--hard", sealed])
-                else:
-                    ctx.run(["git", "update-ref", f"refs/heads/{branch}", sealed, tip])
-                routed.append(f"sealed the restack's {v['outgoing']} commits into one on its own base")
-            ctx.run(["git", "config", f"stack-branch.{branch}.restack-supersedes",
-                     ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()])
-            routed.append("kept your restack — origin's commits ride it patch-equivalent on a newer base; "
-                          "push it force-with-lease from GH Desktop")
+            # carry the restack as a catch-up merge: one commit whose tree is the restacked
+            # tree and whose parents are origin's PR head + the new base — additive over
+            # pushed history, so the door's plain FF push moves origin (no force, ever).
+            # The tree is unchanged, so a green gates verdict rides along.
+            tip = _tip(branch)
+            origin_tip = ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
+            sp = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+                  or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip())
+            base_ref = (f"origin/{sp}" if sp and sp not in ("main", "master") and ctx.run(
+                ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{sp}"]).returncode == 0
+                else "origin/main")
+            base = ctx.run(["git", "merge-base", branch, base_ref]).stdout.strip()
+            if not origin_tip or not base:
+                return req._send(500, json.dumps({"ok": False, "err": "couldn't resolve origin head / new base for the catch-up merge"}))
+            folded = ctx.run(["git", "rev-list", "--count", f"{base}..{tip}"]).stdout.strip()
+            meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
+            env = dict(os.environ)
+            if len(meta) == 3:
+                env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
+            msg = ctx.run(["git", "log", "-1", "--format=%B", tip]).stdout.strip()
+            cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", origin_tip, "-p", base, "-m", msg]
+            if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
+                cmd.insert(2, "-S")
+            r = subprocess.run(cmd, cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
+            carrier = r.stdout.strip()
+            if r.returncode != 0 or not carrier:
+                return req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
+            if holder:
+                r = ctx.run(["git", "-C", holder, "reset", "--hard", carrier])
+            else:
+                r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", carrier, tip])
+            if r.returncode != 0:
+                return req._send(200, json.dumps({"ok": False, "err": "branch moved while building the catch-up merge — reload and retry"}))
+            # the seal-era stamp is now moot — the carrier state is self-describing (ff again)
+            ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.restack-supersedes"])
+            routed.append(f"carried your restack ({folded} commit{'s' if folded != '1' else ''} on the new base) "
+                          "as a catch-up merge on origin's head — additive history, plain push")
         else:
             res = sync.build_additive(branch)
             if not res.get("ok"):
@@ -707,9 +718,6 @@ def prep_message(req, raw):
     tip = v["commit"]["sha"]
     if ctx.run(["git", "rev-parse", branch]).stdout.strip() != tip:
         return req._send(200, json.dumps({"ok": False, "err": "the outgoing commit isn't the branch tip — run prep first"}))
-    if len(ctx.run(["git", "rev-list", "--no-walk", "--merges", tip]).stdout.split()) > 0:
-        # commit-tree below writes ONE parent — rewording a merge would silently linearize it
-        return req._send(200, json.dumps({"ok": False, "err": "the tip is a merge commit — can't reword it safely"}))
     meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
     env = dict(os.environ)
     if len(meta) == 3:
@@ -727,8 +735,12 @@ def prep_message(req, raw):
             "commit": {"sha": tip, "subject": subject, "body": body},
             "reseated": [],
         }))
-    parent = ctx.run(["git", "rev-parse", f"{tip}~1"]).stdout.strip()
-    cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", parent, "-m", msg]
+    # every parent, in order — rewording a catch-up merge must not linearize it
+    parents = ctx.run(["git", "log", "-1", "--format=%P", tip]).stdout.split()
+    cmd = ["git", "commit-tree", f"{tip}^{{tree}}"]
+    for p in parents:
+        cmd += ["-p", p]
+    cmd += ["-m", msg]
     if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
         cmd.insert(2, "-S")   # plumbing ignores commit.gpgsign — unsigned reword pushes as Unverified
     r = subprocess.run(cmd, cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
