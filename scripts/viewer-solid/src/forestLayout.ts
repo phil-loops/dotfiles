@@ -6,9 +6,10 @@ export const isGhostId = (id: string): boolean => id.startsWith("✦");
 export const nodeW = (b: string): number => 50 + leafOf(b).length * 7.2 + 34;
 
 // story-tree layout constants: one branch per row, indentation IS the parent edge.
-// PAD_R only has to clear the fan-in arc's bow (control point +58 → the curve reaches ~+43
-// past the widest node); the rest was dead viewBox that pushed the map off-centre.
-const ROW_H = 74, INDENT = 46, LEFT = 96, TOP = 64, PAD_R = 90, PAD_B = 56;
+// Fan-in routes through vertical rails in the right margin (RAIL_PAD past the widest
+// node, RAIL_GAP apart), so PAD_R only clears the arrowhead + hover glow.
+const ROW_H = 74, INDENT = 46, LEFT = 96, TOP = 64, PAD_R = 36, PAD_B = 56;
+const RAIL_PAD = 24, RAIL_GAP = 13;
 
 export function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
   if (n.stale > 0) return "stale";
@@ -20,10 +21,13 @@ export function lumen(n: SpineNode): "stale" | "blessed" | "unblessed" {
 // is a ROW; a node's INDENT column clears its DEEPEST upstream — the parent chain gives
 // the tree shape (a thin elbow guide, drawn always), and a `requires` fan-in pushes the
 // dependent right of every base it carries, so indentation always means "lands after
-// everything left of me". `requires` fan-in draws as a resting dashed arc in the
-// right-side lane, always flowing downward: sibling blocks are topo-sorted over
-// cross-block requires, so the vertical order IS the landing order and a prerequisite
-// always sits above its dependent. The ghost culmination is a SINK, not a sibling: it
+// everything left of me". `requires` fan-in routes orthogonally through the right
+// margin — each dependent owns one vertical rail there, every carried base stubs into
+// it, and one arrow enters the dependent — so dense fan-in reads as a schematic bus,
+// never curves crossing the map body. Sibling blocks are topo-sorted over cross-block
+// requires, so the vertical order IS the landing order and a prerequisite sits above
+// its dependent whenever the block graph allows it (a block-level cycle can still force
+// an upward rail; the rail geometry handles either direction). The ghost culmination is a SINK, not a sibling: it
 // never joins the tree, rendering instead as the last row seated back on main's own
 // column — main's spine runs down into it (kind "spine") and the tips' work arcs in as
 // "lands" edges — so the picture opens forking OFF main and closes landing ON it.
@@ -132,18 +136,17 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     });
     let maxX = mainPos.x + 60;
     list.forEach((n) => { if (pos[n.id]) maxX = Math.max(maxX, pos[n.id].x + nodeW(n.id)); });
-    const W = maxX + PAD_R;
     const H = TOP + row * ROW_H + (ghosts.length ? SINK_GAP : 0) + PAD_B;
 
     // Edges. Parent edges are ELBOW GUIDES (file-tree style): drop from the guardian's dot,
     // then turn into the child's left edge — geometry the renderer draws as M x1,y1 V y2 H x2.
     // The guardian is the parent node, or main for roots (main's spine runs down the left).
-    // `requires` edges carry kind "fanin" and their own right-side lane geometry; block
-    // topo-sorting above guarantees the prerequisite row is higher, so the arc flows down.
+    // `requires` edges carry kind "fanin"; each dependent gets one vertical rail in the
+    // right margin (laneX, assigned below) that all its carried bases run through.
     // The ✦ sink draws no parent elbow: main's spine continues straight down into it
-    // (kind "spine"), and its synthetic requires — the tips the preview assembles — arc
+    // (kind "spine"), and its synthetic requires — the tips the preview assembles — run
     // in as kind "lands", a different dependence than fan-in (bookkeeping, not merge-blocking).
-    type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string };
+    type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string; laneX?: number };
     const edges: Edge[] = [];
     list.forEach((n) => {
       const me = pos[n.id];
@@ -182,6 +185,17 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
         }
       });
     });
+
+    // Rail assignment: one vertical rail per fan-in dependent (the ✦ sink included),
+    // inner rails to higher targets, every rail right of every node — a source stub only
+    // ever crosses another rail at a right angle, never a node.
+    const railTargets = [...new Set(edges.filter((e) => e.kind === "fanin" || e.kind === "lands").map((e) => e.to))]
+      .sort((a, b) => pos[a].y - pos[b].y);
+    railTargets.forEach((t, i) => {
+      const laneX = maxX + RAIL_PAD + i * RAIL_GAP;
+      edges.forEach((e) => { if (e.to === t && (e.kind === "fanin" || e.kind === "lands")) e.laneX = laneX; });
+    });
+    const W = (railTargets.length ? maxX + RAIL_PAD + (railTargets.length - 1) * RAIL_GAP : maxX) + PAD_R;
 
     return { list, pos, mainPos, W, H, edges };
 }

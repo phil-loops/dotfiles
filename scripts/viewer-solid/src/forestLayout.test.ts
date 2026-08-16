@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeForestLayout, NODE_H } from "./forestLayout.ts";
+import { computeForestLayout, NODE_H, nodeW } from "./forestLayout.ts";
 import { indexById } from "./forestGraph.ts";
 import type { SpineNode } from "./types.ts";
 
@@ -60,6 +60,24 @@ test("a real branch's requires still draws merge-blocking fan-in, not lands", ()
   const { edges } = layoutOf();
   const fanins = edges.filter((e) => e.kind === "fanin");
   assert.deepEqual(fanins.map((e) => `${e.from}→${e.to}`), ["mid→fan"]);
+});
+
+test("each fan-in dependent owns one rail, right of every node, inside the canvas", () => {
+  const { edges, pos, W } = layoutOf();
+  const railed = edges.filter((e) => e.kind === "fanin" || e.kind === "lands");
+  const lanes: Record<string, Set<number>> = {};
+  for (const e of railed) {
+    assert.ok(e.laneX !== undefined, `${e.from}→${e.to} must carry a rail`);
+    (lanes[e.to] ||= new Set()).add(e.laneX!);
+  }
+  for (const [to, xs] of Object.entries(lanes)) assert.equal(xs.size, 1, `${to} must own exactly one rail`);
+  const laneXs = Object.values(lanes).map((s) => [...s][0]);
+  assert.equal(new Set(laneXs).size, laneXs.length, "rails must not collide");
+  const maxNodeRight = Math.max(...Object.keys(pos).map((id) => pos[id].x + nodeW(id)));
+  for (const x of laneXs) {
+    assert.ok(x > maxNodeRight, "a rail never runs through a node");
+    assert.ok(x < W, "the canvas covers every rail");
+  }
 });
 
 test("no ghost, no sink machinery: a plain forest emits only tree + fanin edges", () => {
