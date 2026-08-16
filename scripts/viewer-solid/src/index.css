@@ -307,8 +307,11 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left: 5px solid transparent; 
 td.d2h-ins:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-add); }
 td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del); }
 .d2h-info { color: var(--ink-faint); }
-/* wrap long lines inside each side-by-side column instead of clipping at its edge */
+/* wrap long lines in LINE-BY-LINE diffs only. Side-by-side is two independent tables —
+   a wrapped row on one side shears every row below it out of alignment — so there long
+   lines stay pre and scroll inside their own column (stock .d2h-file-side-diff overflow-x). */
 .d2h-code-line-ctn { white-space: pre-wrap; word-break: break-word; }
+.d2h-files-diff .d2h-code-line-ctn { white-space: pre; word-break: normal; }
 
 /* ── the foil moment: one orchestrated gold-leaf settle on bless ──────── */
 @media (prefers-reduced-motion: no-preference) {
