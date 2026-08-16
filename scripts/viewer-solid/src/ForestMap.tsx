@@ -3,9 +3,9 @@
 // AND carried `requires` bases), vertical order = landing order (merge rank). The parent
 // relationship is carried by geometry — a thin file-tree elbow from the guardian's dot
 // into the child's left edge. Three kinds of dependence, three strokes: parent elbows
-// (rebase base), `requires` fan-in arcs resting solid-weight in the right lane (merge-
-// blocking — the branch carries those commits and cannot land first), and faint "lands"
-// arcs into the ✦ sink (preview assembly — bookkeeping, not a merge dependency). The ✦
+// (rebase base), `requires` fan-in routed through per-dependent rails in the right
+// margin (merge-blocking — the branch carries those commits and cannot land first), and
+// faint "lands" runs into the ✦ sink (preview assembly — bookkeeping, not merge). The ✦
 // culmination is a sink, not a sibling: it seats on main's own column at the bottom with
 // main's spine running down into it — fork off main up top, land back on main at the end.
 // Deterministic, no force relaxation, never jitters.
@@ -62,12 +62,21 @@ const wrapPurpose = (s: string, w: number): string[] => {
 // parent edges are file-tree elbow guides: drop from the guardian's dot column, turn
 // into the child's left edge. The arrowhead rides the horizontal run, so it always
 // enters a node level from the left — indentation and the elbow agree by construction.
-// `requires` (fanin) and ✦-assembly (lands) edges rest as right-lane arcs from the
-// prerequisite's right edge down to the dependent's right edge (block sorting keeps the
-// prerequisite higher). The spine is main's own column continuing down into the ✦ sink.
-const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: string }): string =>
+// `requires` (fanin) and ✦-assembly (lands) edges route orthogonally through the
+// dependent's rail (laneX, right margin): out of the prerequisite's right edge, along
+// the rail, one arrow into the dependent. Same-rail runs overlap pixel-identically, so
+// a dense fan-in reads as one bus that darkens toward its arrow, not N crossing curves.
+// The spine is main's own column continuing down into the ✦ sink.
+const RAIL_R = 7;
+const railPath = (e: { x1: number; y1: number; x2: number; y2: number; laneX?: number }): string => {
+  const lane = e.laneX ?? e.x1;
+  const dir = e.y2 > e.y1 ? 1 : -1;
+  if (Math.abs(e.y2 - e.y1) < RAIL_R * 2 + 2) return `M${e.x1},${e.y1} L${e.x2},${e.y2}`;
+  return `M${e.x1},${e.y1} H${lane - RAIL_R} Q${lane},${e.y1} ${lane},${e.y1 + dir * RAIL_R} V${e.y2 - dir * RAIL_R} Q${lane},${e.y2} ${lane - RAIL_R},${e.y2} H${e.x2}`;
+};
+const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: string; laneX?: number }): string =>
   e.kind === "fanin" || e.kind === "lands"
-    ? `M${e.x1},${e.y1} C${e.x1 + 58},${e.y1} ${e.x2 + 58},${e.y2} ${e.x2},${e.y2}`
+    ? railPath(e)
     : e.kind === "spine"
       ? `M${e.x1},${e.y1} L${e.x2},${e.y2}`
       : `M${e.x1},${e.y1} L${e.x1},${e.y2} L${e.x2},${e.y2}`;
@@ -396,25 +405,26 @@ export function ForestMap(props: {
     }
     return `${EDGE_STROKE[kind]} stroke-[1.4] animate-fm-fade motion-reduce:animate-none motion-reduce:opacity-100`;
   };
-  // fan-in is MERGE-BLOCKING (the branch carries the prerequisite as cherry-picks), so it
-  // rests at full presence — the same visual citizenship as a parent elbow, arc texture
-  // saying "carried, not based on". The ✦-assembly (lands) edges are the opposite pole:
-  // pure bookkeeping, resting barely-there dots so they never read as a dependency.
+  // fan-in rests at half presence, SOLID and thin — the rails carry the structure now,
+  // so texture would only braid where same-rail runs overlap (solid overlaps merge
+  // pixel-identically; dashes can't). Patina keeps it distinct from the status-colored
+  // parent elbows; hover still lights the full run gold. The ✦-assembly (lands) edges
+  // stay the quiet pole: pure bookkeeping, one thin outermost rail.
   const faninEdgeClass = (lit: boolean): string => {
     if (spot()) {
       return lit
-        ? "opacity-100! stroke-gold-leaf! stroke-[2.3] [stroke-dasharray:7_4] animate-fm-fade transition-[opacity,stroke] duration-[140ms]"
-        : "opacity-[0.05]! stroke-patina stroke-[2] [stroke-dasharray:7_4] animate-fm-fade transition-opacity duration-[140ms]";
+        ? "opacity-100! stroke-gold-leaf! stroke-[2.3] animate-fm-fade transition-[opacity,stroke] duration-[140ms]"
+        : "opacity-[0.05]! stroke-patina stroke-[1.5] animate-fm-fade-half transition-opacity duration-[140ms]";
     }
-    return "stroke-patina stroke-[2] [stroke-dasharray:7_4] animate-fm-fade motion-reduce:animate-none motion-reduce:opacity-100";
+    return "stroke-patina stroke-[1.5] animate-fm-fade-half motion-reduce:animate-none motion-reduce:opacity-50";
   };
   const landsEdgeClass = (lit: boolean): string => {
     if (spot()) {
       return lit
-        ? "opacity-85! stroke-gold-leaf! stroke-[1.7] [stroke-dasharray:2_6] animate-fm-fade-half transition-[opacity,stroke] duration-[140ms]"
-        : "opacity-[0.04]! stroke-patina stroke-[1.1] [stroke-dasharray:2_6] animate-fm-fade-half transition-opacity duration-[140ms]";
+        ? "opacity-85! stroke-gold-leaf! stroke-[1.7] animate-fm-fade-half transition-[opacity,stroke] duration-[140ms]"
+        : "opacity-[0.04]! stroke-patina stroke-[1] animate-fm-fade-half transition-opacity duration-[140ms]";
     }
-    return "stroke-patina stroke-[1.1] [stroke-dasharray:2_6] animate-fm-fade-half motion-reduce:animate-none motion-reduce:opacity-50";
+    return "stroke-patina stroke-[1] animate-fm-fade-half motion-reduce:animate-none motion-reduce:opacity-50";
   };
   const spineEdgeClass = (lit: boolean): string => {
     if (spot()) {
@@ -616,8 +626,8 @@ export function ForestMap(props: {
             />
           )}
         </For>
-        {/* requires edges rest solid-weight in the right lane — merge-blocking dependence
-            reads at rest, same citizenship as a parent elbow; hover brightens the arc. */}
+        {/* requires edges run the dependent's right-margin rail — merge-blocking
+            dependence reads at rest; hover lights the full run gold. */}
         <For each={layout().edges.filter((e) => e.kind === "fanin")}>
           {(e) => (
             <path
