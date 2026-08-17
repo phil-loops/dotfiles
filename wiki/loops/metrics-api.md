@@ -11,7 +11,12 @@ Metrics storage has two economies. Per-message totals are denormalized counters 
 
 **Surface 1 — counters as a sub-resource** (sync, cheap, the 90% question):
 
-`GET /v1/campaigns/{id}/metrics` · `GET /v1/transactional-emails/{id}/metrics` — bare-resource body: raw counts plus computed `rates`, `"timezone": "UTC"` explicit from day one. `EmailMessage` is the shared entity underneath all three message types, so `/v1/email-messages/{id}/metrics` is the canonical form (and the only route to loop emails, which have no public noun); campaigns/transactional are the ergonomic front doors. The dormant forest already builds the bottom rungs: `metrics-api/flag` (per-team gate, the standard Content-API rollout idiom) → `metrics-api/queries` (read the counters) → `metrics-api/model` (rates over the right denominator). Missing only the endpoint band. **No foundation dependency — buildable off main now.**
+**One canonical URL per metric object (Phil, 2026-08-17), bare-resource bodies, `"timezone": "UTC"` explicit:**
+- `/v1/campaigns/{id}/metrics` — one-shot; counters freeze after the send window, so they're honestly date-attributable.
+- `/v1/email-messages/{id}/metrics` — **workflow/loop-owned messages ONLY** (their all-time accruing counters); campaign- and transactional-owned ids get a coded 400 pointing at the canonical URL (the workflow API's `UseEmailMessageApi` idiom).
+- `/v1/transactional-emails/{id}/metrics` — ONLY the rolled-up `Transactional.n*` lifetime totals, never per-version: opens attribute to whichever version sent them, so version-level numbers slice one logical email's engagement across publish boundaries customers don't think in. Drafts are all-zeros rows; no URL.
+
+No date-windowed aggregates anywhere in surface 1 — per-message counters are all-time accumulators; a windowed rollup would misattribute loop/transactional volume. Send-per-day time-series needs a daily rollup table (the cheap half of the storage decision); open/click time-series needs timestamped events (the expensive half). Built: `flag` → `queries` → `model` → `endpoints` (fan-in, requires flag) → `email-message-queries` → `email-message-metrics`. **No foundation dependency.**
 
 **Surface 2 — the report run, a new top-level noun** (async, expensive, filterable):
 
