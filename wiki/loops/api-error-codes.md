@@ -21,3 +21,5 @@ Highest-leverage move: stamp codes into the three frozen shared auth/rate-limit 
 2. `api-error-codes/workflow-adapter` — mapping table, forward the code; resolves the workflow 409 overload. (Forwarding the RevisionConflict catch-up payload is a separate size decision, not here.)
 
 **Later, separate:** the per-route adoption sweep (touches the same endpoint files as the idempotency legacy fix — sequence after it), and OpenAPI consolidation of 24 error schemas into one shared `Error` with a code enum as a 1.22.0 bump.
+
+**End state (Phil, 2026-08-17): `code` goes required.** The optional field and the `code ? … : …` render guard are migration scaffolding only — they exist because legacy call sites bypass the seams and because statuses like 409 have no honest default (a filler code clients would branch on is worse than absence). Once the sweep gives every emission a specific code, flip the type to required, delete the guard, and declare `code` required in the OpenAPI `Error` schema. The sweep ticket carries this as its exit criterion.
