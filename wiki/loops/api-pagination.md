@@ -22,3 +22,5 @@ Every public list route returns a [`nextPage` URL](src:lib/rest-api/pagination.t
 3. `api-pagination/per-page-min` — relax the arbitrary min-10 clamp to 1, plus its duplicate in the workflow list validator and ~10 doc strings; only turns 400s into 200s.
 
 **Out of scope:** migrating those two routes to `defineRoute` (auth/validation ordering flips 400↔401), and legacy `/v1/transactional` (deprecated; its post-filter cursor has a documented dangling-cursor quirk we're leaving alone).
+
+**Merge priority (Phil, 2026-08-17):** branch 1 is the prerequisite — it's the shared util the metrics list endpoints build on, and its old-endpoint touches are byte-neutral signature mechanics. Branches 2 and 3 are pure-conformance polish, explicitly **parkable** — push them whenever, or never; nothing downstream depends on them.
