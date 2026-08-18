@@ -31,6 +31,7 @@ SESSION="${STACK_OPEN_TMUX:-loops}"
 main_root=$(git rev-parse --show-toplevel)
 SCRIPTS="${0:A:h}"   # resolve our own dir HERE: inside a function zsh's $0 is the function name,
                      # so ${0:A:h} there is the CWD and the sibling script silently never runs
+SELF="${0:A}"; SELF_ARGV=("$@")   # for the starved-drive self-retry — captured HERE for the same reason
 
 _wt_list=""
 wt_list(){   # the porcelain worktree list, computed once — it's repo-global and costs ~70ms at 147 worktrees
@@ -542,9 +543,20 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
       pane=""
     fi
     # Out of budget anywhere in there means the worktree work ate the 8s the viewer allows. The
-    # pane is fine and now warm, so say so — piling a rival window on a healthy one is the disease.
+    # pane is fine and warm — piling a rival window on a healthy one is the disease — but "press
+    # o again" only helps when the eater was one-time worktree creation; a page-cold prep costs
+    # ~3.5s EVERY press (measured 2026-08-18), so consecutive presses starve identically. Finish
+    # the open ourselves instead: re-exec detached (setsid escapes the viewer's group-SIGKILL,
+    # same trick as --heal-notify) with a fresh clock; hx_lock serializes it against any rival.
     if [[ -n "$starved" ]]; then
-      echo "stack-open: no time left to drive review-hx (cold worktree) — press o again, it's warm now" >&2
+      if [[ -z "${STACK_OPEN_RETRY:-}" ]]; then
+        echo "stack-open: prep ate the drive budget — finishing this open in the background" >&2
+        ( perl -e 'use POSIX (); POSIX::setsid(); exec @ARGV' \
+            env STACK_OPEN_RETRY=1 STACK_OPEN_HX_BUDGET=30 \
+            "$SELF" "${SELF_ARGV[@]}" </dev/null >/dev/null 2>&1 & )
+      else
+        echo "stack-open: no time left to drive review-hx — press o again, it's warm now" >&2
+      fi
       return 1
     fi
   fi
