@@ -232,13 +232,26 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
       && echo "stack-open: $dir was no longer a worktree — parked at $parked, recreating" >&2
     git worktree prune 2>/dev/null || true
   fi
-  if [[ -d "$dir" ]]; then
-    # already at the branch's tip → skip the (~0.3s) re-checkout; only sync when it moved.
-    # Retry until HEAD actually matches the tip: a concurrent prepare (background warm) holds
-    # git's index.lock, and a single swallowed failure used to leave the worktree pinned to a
-    # stale (e.g. force-pushed) head — so a precise line-open landed on an old snapshot. Loop a
-    # few times instead of trusting one attempt.
-    if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "$b" 2>/dev/null)" ]]; then
+  if [[ ! -d "$dir" ]]; then
+    # Two opens race this add (a gates run vs the viewer's background warm, 2026-08-18): the
+    # loser fatals "already exists" while the winner is still writing the gitfile — under
+    # set -e that aborted the whole open. Tolerate the failure and wait to ADOPT the winner's
+    # checkout instead; the resync below pins HEAD to the tip either way.
+    git worktree add --detach "$dir" "$b" -q 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 && break
+      [[ -d "$dir" ]] || git worktree add --detach "$dir" "$b" -q 2>/dev/null || true
+      sleep 0.3
+    done
+    git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 \
+      || { echo "stack-open: could not materialize a worktree at $dir for $b" >&2; return 1; }
+  fi
+  # already at the branch's tip → skip the (~0.3s) re-checkout; only sync when it moved.
+  # Retry until HEAD actually matches the tip: a concurrent prepare (background warm) holds
+  # git's index.lock, and a single swallowed failure used to leave the worktree pinned to a
+  # stale (e.g. force-pushed) head — so a precise line-open landed on an old snapshot. Loop a
+  # few times instead of trusting one attempt.
+  if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$(git rev-parse "$b" 2>/dev/null)" ]]; then
       # The resync always wins: this worktree exists to show the branch as the viewer shows it,
       # so it must never sit on a stale head. Dirty tracked files would be eaten by the -f below
       # (and skipping the sync over them is what used to pin the worktree at an old snapshot for
@@ -254,9 +267,6 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
         [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$(git rev-parse "$b" 2>/dev/null)" ]] && break
         sleep 0.2
       done
-    fi
-  else
-    git worktree add --detach "$dir" "$b" -q
   fi
   [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
   seed_gen "$dir"   # .gen for #trpc resolution — a scratch tree shares the main checkout's
