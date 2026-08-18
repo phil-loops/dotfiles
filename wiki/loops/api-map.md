@@ -40,7 +40,7 @@ lede: Every direction the public API is considering, and the lines none of them 
 - Multi-value filter params: serialization is a deliberate compile error until someone decides the wire format.
 
 **Parked with triggers:**
-- `POST/GET /v1/metric-reports` (+`/rows`) and `POST/GET /v1/contact-queries` — triggers: a customer asks for filtered/cross-message metrics or contact enumeration; the storage decision lands; list-iteration pain.
+- `POST/GET /v1/metric-reports` (+`/rows`) and `POST/GET /v1/contact-queries` — triggers: a customer asks for filtered/cross-message metrics or contact enumeration; the storage decision lands; list-iteration pain. Enhancement (Phil, 2026-08-18): completion push via the existing Svix webhook stream ("report ready") so polling is the floor, not the obligation.
 - Goals metrics — computed-on-demand = async class; never rolled into email metrics (no TableFilter drilldown); natural fit = a report type when reports un-park; attachment-ids-only is the acknowledged can-kick.
 - Error-code sweep, OpenAPI Error-schema consolidation, code-primary/required flip (sweep's exit criterion), workflow-adapter branch (whole branch parked; one-line serialize-existing-code alternative recorded).
 
