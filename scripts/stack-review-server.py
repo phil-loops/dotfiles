@@ -679,4 +679,5 @@ threading.Thread(target=pack_watcher, daemon=True).start()   # ext source → pa
 threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
+threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees
 httpd.serve_forever()
