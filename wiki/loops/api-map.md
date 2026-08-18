@@ -24,6 +24,9 @@ lede: Every direction the public API is considering, and the lines none of them 
 
 ## Directions in play, by state
 
+**Proposed with demonstrated pain (2026-08-18):**
+- `api-error-codes/transactional-send-codes` — distinct codes for POST /v1/transactional's ~dozen 400 conditions (quota.monthly_emails_exceeded, domain.not_verified, transactional.removed, send.too_many_attempts, …). The sweep's park condition fired for this one route: highest-traffic endpoint, four divergent client recovery behaviors (drop/retry-later/back-off/dead-letter) discriminated only by prose that customers already regex — which freezes every message. Codes are the thaw. Targeted branch, statuses untouched, ~40 additive lines; its codes join the vocabulary read (13 → ~21).
+
 **Proposed with stakeholder demand (Adam, Jul 7 — support-driven):**
 - `GET /v1/campaigns/{id}/recipients` — paginated contact interactions per message; FK-bounded, sync-safe.
 - `GET /v1/contacts/{id}/email-activity` — a contact's recent emails + what they did with them; bounded by contact. *Verify an `Email(contactId, createdAt)` index exists before promising cheap.*
