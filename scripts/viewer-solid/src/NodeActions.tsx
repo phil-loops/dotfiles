@@ -340,9 +340,11 @@ export function NodeActions(props: {
         stepSet("rebase", "run");
         const sy = await post<SyncResult>("/sync", { branch: props.branch });
         if (sy.ok && sy.restack) {
-          const rs = await post<{ ok?: boolean; err?: string }>("/restack", { project: sy.project });
+          const rs = await post<{ ok?: boolean; err?: string; queued?: boolean; behind?: string }>("/restack", { project: sy.project });
           if (rs.ok) {
-            stepSet("rebase", "run", `restacking ${sy.project} in the background — rerun sync once it lands`);
+            stepSet("rebase", "run", rs.queued
+              ? `queued behind ${rs.behind || "the running restack"} — runs next, rerun sync once it lands`
+              : `restacking ${sy.project} in the background — rerun sync once it lands`);
             return { phase: "restacking" as const };
           }
           stepSet("rebase", "fail", rs.err || "restack refused");

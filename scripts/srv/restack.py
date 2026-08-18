@@ -12,6 +12,7 @@ import time
 import shlex
 import shutil
 import signal
+import threading
 import subprocess
 from urllib.parse import parse_qs
 
@@ -146,6 +147,84 @@ def _resolvers():
 def _state_path():
     gd = _gitdir()
     return os.path.join(gd, "stack-restack-state", "state") if gd else ""
+
+
+def _queue_path():
+    gd = _gitdir()
+    return os.path.join(gd, "restack-queue") if gd else ""
+
+
+def _queue_read():
+    # Lines of "<kind> <project>", kind ∈ {now, batch}. "now" entries are interactive
+    # (a sync click) and always sit ahead of "batch" ones; stack-restack-all also
+    # splices "now" entries in between its own projects, so a sync never waits for a
+    # whole sweep — only for the project currently mid-rebase.
+    qp = _queue_path()
+    if not qp or not os.path.exists(qp):
+        return []
+    entries = []
+    with open(qp) as fh:
+        for line in fh:
+            parts = line.split()
+            if len(parts) == 2 and parts[0] in ("now", "batch"):
+                entries.append((parts[0], parts[1]))
+    return entries
+
+
+def _queue_write(entries):
+    qp = _queue_path()
+    if not qp:
+        return
+    tmp = qp + ".tmp"
+    with open(tmp, "w") as fh:
+        fh.writelines(f"{k} {p}\n" for k, p in entries)
+    os.replace(tmp, qp)
+
+
+_queue_lock = threading.Lock()
+
+
+def _enqueue(project, kind="now"):
+    # Dedup by project (a re-click refreshes position, never doubles the work); "now"
+    # entries go after existing "now"s but ahead of every "batch".
+    with _queue_lock:
+        entries = [(k, p) for k, p in _queue_read() if p != project]
+        if kind == "now":
+            head = [e for e in entries if e[0] == "now"]
+            tail = [e for e in entries if e[0] != "now"]
+            entries = head + [("now", project)] + tail
+        else:
+            entries = entries + [("batch", project)]
+        _queue_write(entries)
+        return entries
+
+
+def drain_forever():
+    # Started once at server boot. Feeds queued restacks whenever the driver seat is
+    # free — one project per pop, so an interactive request never waits behind more
+    # than the project currently mid-rebase. A parked conflict pauses draining (it
+    # needs a human or resolver first); the queue file is durable, so nothing queued
+    # is lost across a server bounce. stack-restack-all splices "now" entries itself
+    # between its projects — while it runs, _running() keeps this loop hands-off.
+    while True:
+        time.sleep(3)
+        try:
+            if not _queue_read() or _running():
+                continue
+            sp = _state_path()
+            if sp and os.path.exists(sp):
+                continue
+            with _queue_lock:
+                entries = _queue_read()
+                if not entries:
+                    continue
+                (kind, project), rest = entries[0], entries[1:]
+                _queue_write(rest)
+            wt = worktree()
+            ctx.run(["git", "-C", wt, "checkout", "--detach"])
+            _spawn(cmd(project, wt), wt)
+        except Exception:
+            pass  # a transient (repo busy, disk hiccup) must never kill the drainer
 
 
 def _running_msg():
@@ -293,6 +372,7 @@ def status(req, u):
                                "done": done, "total": total,
                                "completed": completed, "pending": pending,
                                "drivers": _drivers(), "resolvers": _resolvers(),
+                               "queue": [{"kind": k, "project": p} for k, p in _queue_read()],
                                "last": _journal_last()}))
 
 
@@ -301,6 +381,16 @@ def restack(req, raw):
     project = d.get("project", "")
     if not project or project in ("whole forest", "--all"):
         req._send(400, json.dumps({"ok": False, "err": "no registered project to restack"}))
+        return
+    if _running():
+        # Don't refuse — queue it. The drainer (or a running stack-restack-all, at its
+        # next project boundary) picks it up the moment the current project finishes.
+        entries = _enqueue(project, "now")
+        ds = _drivers()
+        behind = ds[0]["project"] if ds and ds[0].get("project") else "the running restack"
+        ahead = next(i for i, (_, p) in enumerate(entries) if p == project)
+        req._send(200, json.dumps({"ok": True, "project": project, "queued": True,
+                                   "behind": behind, "ahead": ahead}))
         return
     b = blocked()
     if b:

@@ -1,0 +1,38 @@
+diff --git a/scripts/stack-restack-all b/scripts/stack-restack-all
+index be23db7..f33010e 100755
+--- a/scripts/stack-restack-all
++++ b/scripts/stack-restack-all
+@@ -97,9 +97,33 @@ for a in "$@"; do
+   esac
+ done
+ 
++pop_now() {  # pop the first interactive "now" entry from the shared restack queue, if any
++  # The viewer's /restack enqueues "now <project>" here when a driver is busy. Lost-pop /
++  # re-appear races with the server's rewrite are harmless: a re-run restack is a no-op,
++  # an un-popped entry gets drained after the batch.
++  local qf="$GIT_COMMON_DIR/restack-queue" first
++  [[ -f "$qf" ]] || return 1
++  first="$(head -1 "$qf" 2>/dev/null)"
++  [[ "$first" == now\ * ]] || return 1
++  sed '1d' "$qf" > "$qf.tmp" && mv "$qf.tmp" "$qf"
++  print -r -- "${first#now }"
++}
++
+ typeset -a problems
++typeset spliced
+ problems=()
+ for p in "${projects[@]}"; do
++  # Interactive sync clicks jump in at project boundaries — they wait for ONE
++  # mid-rebase project, never the whole sweep.
++  while spliced="$(pop_now)"; do
++    if "$SCRIPTS/stack-restack" "$spliced" "${rflags[@]}"; then
++      echo "✓ $spliced restacked (spliced ahead of the sweep)"
++    else
++      echo "⚠ $spliced parked on a conflict — aborting to continue with the rest"
++      problems+=("$spliced")
++      abort_park "$spliced"
++    fi
++  done
+   if "$SCRIPTS/stack-restack" "$p" "${rflags[@]}"; then
+     echo "✓ $p restacked"
+   else
