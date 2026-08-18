@@ -185,12 +185,19 @@ else
     md5_before=$(md5 -q "$wt/$probe" 2>/dev/null)
     live_before=$(tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | awk '$1=="review-hx"' | wc -l | tr -d ' ')
     err=$(env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx \
-              STACK_OPEN_DIR="$T/hx" STACK_OPEN_HX_BUDGET=0.2 "$SO" "$BRANCH" "$probe" 5 2>&1 >/dev/null)
+              STACK_OPEN_DIR="$T/hx" STACK_OPEN_HX_BUDGET=0.2 "$SO" "$BRANCH" "$probe" 39 2>&1 >/dev/null)
     code=$?
-    sleep 0.5
-    { (( code != 0 )) && [[ "$err" == *"press o again"* ]] } \
-      && ok "an exhausted budget refuses the drive and says so" \
+    { (( code != 0 )) && [[ "$err" == *"finishing this open in the background"* ]] } \
+      && ok "an exhausted budget refuses the drive and hands off" \
       || no "an exhausted budget drove anyway (exit $code): ${err:0:70}"
+    # the detached self-retry (fresh clock, no group-kill) must then finish the open itself
+    for i in {1..40}; do
+      line=$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2 | head -1)
+      [[ "$line" == *39:* ]] && break
+      sleep 0.25
+    done
+    [[ "$line" == *39:* ]] && ok "the background retry lands the open on the asked-for line" \
+                          || no "the background retry never landed on line 39 (statusline: ${line:0:60})"
     live_after=$(tmux list-windows -t "$SESSION" -F '#{window_name}' 2>/dev/null | awk '$1=="review-hx"' | wc -l | tr -d ' ')
     (( live_after == live_before )) && ok "a refused open piles on no rival window" \
                                     || no "spawned a rival review-hx window (${live_before} → ${live_after})"
