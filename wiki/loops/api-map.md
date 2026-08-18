@@ -33,7 +33,7 @@ lede: Every direction the public API is considering, and the lines none of them 
 - `GET /v1/workflows/{id}/metrics` — one rolled summary; per-node breakdown via the list's `workflowId` filter.
 
 **Open rulings:**
-- Transactional body: strip opens/clicks/unsubscribes (July notes say yes — tracking unreliable; built route currently exposes them)?
+- ~~Transactional body~~ RULED (Phil, 2026-08-18): opens/clicks/unsubscribes STRIPPED — "we don't calculate metrics on those"; transactional serves `{ sent, delivered, bounces, complaints, rates: { bounce, complaint } }` over delivered.
 - Workflow node addressing: `/email-messages/{id}/metrics` (built, canonical) vs `/workflows/{id}/nodes/{id}/metrics` (graph-scoped)?
 - `perPage` min 10→1 (built, parkable) — ship or park?
 - `totalResults` when filters arrive: counting a filtered list costs as much as the page — optional/lazy/estimated, or count rides async?
