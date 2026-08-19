@@ -101,7 +101,8 @@ def trunk_base(parent):
 
 # ---- one config read → parents / children / requires / project seeds ------
 parents, children, seeds, requires, archived = {}, {}, {}, {}, set()
-new_parents, new_requires, new_tags, old_tags = {}, {}, {}, {}
+after = {}
+new_parents, new_requires, new_after, new_tags, old_tags = {}, {}, {}, {}, {}
 for line in git_out(["config", "--local", "--list"]).splitlines():
     if "=" not in line:
         continue
@@ -122,6 +123,15 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
     m = re.match(r"^branch\.(.+)\.stack-requires$", k)
     if m:
         new_requires.setdefault(m.group(1), []).append(v)
+        continue
+    # merge-order-only deps (multivar): content-independent, but must land later
+    m = re.match(r"^stack-branch\.(.+)\.after$", k)
+    if m:
+        after.setdefault(m.group(1), []).append(v)
+        continue
+    m = re.match(r"^branch\.(.+)\.stack-after$", k)
+    if m:
+        new_after.setdefault(m.group(1), []).append(v)
         continue
     # per-branch project tag (stack-branch.<b>.project = <name>) — the rot-free
     # successor to the stack-project.<name>.branch registry: the tag lives on the
@@ -147,6 +157,7 @@ for line in git_out(["config", "--local", "--list"]).splitlines():
         archived.add(m.group(1))
 parents.update(new_parents)
 requires.update(new_requires)
+after.update(new_after)
 for b, p in new_tags.items():
     old = old_tags.get(b)
     if old and old != p and b in seeds.get(old, []):
@@ -175,12 +186,12 @@ def expand(seedlist):
             seen.add(cur)
             cur = parents.get(cur, "")
         descend(s)
-    # pull in `requires` deps (fan-in) + their chains until stable
+    # pull in `requires` (fan-in) + `after` (merge-order) deps + their chains until stable
     changed = True
     while changed:
         changed = False
         for b in list(seen):
-            for req in requires.get(b, []):
+            for req in requires.get(b, []) + after.get(b, []):
                 if req not in seen:
                     cur = req
                     while cur and not is_trunk(cur):
@@ -201,7 +212,8 @@ _existing = set(git_out(["for-each-ref", "--format=%(refname:short)", "refs/head
 
 
 def mergeable(b):
-    upstream = ([parents.get(b, MAIN)] if not is_trunk(parents.get(b, MAIN)) else []) + requires.get(b, [])
+    upstream = ([parents.get(b, MAIN)] if not is_trunk(parents.get(b, MAIN)) else []) \
+        + requires.get(b, []) + after.get(b, [])
     return not any(u in _existing for u in upstream)
 
 
@@ -604,6 +616,7 @@ def build(branch):
         "files": [{"path": r["path"], "status": r["status"], "add": r["add"], "del": r["del"]} for r in rows],
         "children": [c for c in children.get(branch, []) if c in members],
         "requires": [r for r in requires.get(branch, []) if r in members],
+        **({"after": [a for a in after.get(branch, []) if a in members]} if after.get(branch) else {}),
         **({"requires_meta": {r: m for r, m in req_meta.items() if r in members}} if req_meta else {}),
         **({"churn": churn} if churn else {}),
         "mergeable": mergeable(branch),
