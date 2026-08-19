@@ -336,7 +336,13 @@ export function Home() {
     <div class="ledger min-h-screen">
       <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[30px] pb-[100px]">
         <header class="home-head mb-[16px] flex items-center justify-between">
-          <div class="brand inline-block pb-[2px] font-display text-[21px] font-semibold italic text-ink">
+          {/* the logo IS a refresh — 47 clicks on the inert brand in 21d, six followed by a
+              hand cmd+r (telemetry, 2026-08-19): Phil already believes the convention, honor it */}
+          <div
+            class="brand inline-block cursor-pointer pb-[2px] font-display text-[21px] font-semibold italic text-ink"
+            title="refresh"
+            onClick={() => qc.invalidateQueries()}
+          >
             <span class="brand-mark text-[12px] not-italic text-gold-leaf">✦</span> canopy
           </div>
           <Show when={landedChip(merges.data, projects.data)}>
