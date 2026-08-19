@@ -1077,7 +1077,10 @@ def build_additive(branch):
             return {"ok": False, "err": "nothing to commit - the PR files already match", "code": 200}
         delta = ctx.run(["git", "-C", tmp, "diff", "--cached"]).stdout
         subject, body = _draft_additive_message(branch, delta)
-        r = ctx.run(["git", "-C", tmp, "commit", "-q", "-m", subject + ("\n\n" + body if body else "")])
+        # identity trailer: this commit becomes the branch tip on absorb — exactly the shape the
+        # 2026-08-19 incident couldn't attribute. Squash-merge strips it from origin.
+        r = ctx.run(["git", "-C", tmp, "commit", "-q",
+                     "-m", subject + ("\n\n" + body if body else "") + "\n\nVia: build-additive (stack-review-server)"])
         if r.returncode != 0:
             return {"ok": False, "err": (r.stderr or "commit failed").strip()[:300], "code": 500}
         sha = ctx.run(["git", "-C", tmp, "rev-parse", "HEAD"]).stdout.strip()

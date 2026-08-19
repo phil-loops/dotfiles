@@ -628,7 +628,9 @@ def commit_dirty(req, raw):
     if add_r.returncode != 0:
         req._send(500, json.dumps({"ok": False, "err": add_r.stderr or "git add failed"}))
         return
-    commit_r = ctx.run(["git", "-C", wt, "commit", "-m", message, *(["--", path] if path else [])])
+    commit_r = ctx.run(["git", "-C", wt, "commit", "-m", message,
+                        "--trailer", "Via: /commit-dirty (stack-review-server)",
+                        *(["--", path] if path else [])])
     if commit_r.returncode != 0:
         req._send(500, json.dumps({"ok": False, "err": commit_r.stderr or "git commit failed"}))
         return

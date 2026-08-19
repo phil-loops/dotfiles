@@ -565,6 +565,9 @@ def prep_push(req, raw):
             if len(meta) == 3:
                 env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
             msg = ctx.run(["git", "log", "-1", "--format=%B", tip]).stdout.strip()
+            # identity trailer: machine-authored commits were anonymous — the 2026-08-19 absorb
+            # incident was unattributable for it. Squash-merge strips it from origin.
+            msg += "\n\nVia: /prep-push catch-up (stack-review-server)"
             cmd = ["git", "commit-tree", f"{tip}^{{tree}}", "-p", origin_tip, "-p", base, "-m", msg]
             if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
                 cmd.insert(2, "-S")
