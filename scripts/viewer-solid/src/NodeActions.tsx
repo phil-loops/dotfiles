@@ -361,12 +361,21 @@ export function NodeActions(props: {
         stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
       }
       stepSet("route", "run");
-      const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
+      const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; vehiclePending?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
         "/prep-push", { branch: props.branch });
       if (!pr.ok) {
         if (pr.reconcile) {
           stepSet("route", "fail", pr.err || "no mechanical route — handing to Claude");
           return { phase: "claude" as const };
+        }
+        // a built-and-waiting vehicle is a STATE, not a failure — the error tone invited
+        // retry clicks (the 2026-08-19 10:26 delete-user row) when the next move is the push.
+        if (pr.vehiclePending) {
+          stepSet("route", "ok", "additive vehicle already built — push it, or delete it to rebuild");
+          stepSet("tests", "skip");
+          stepSet("gates", "skip");
+          stepSet("editor", "skip", "vehicle push-pending");
+          return { phase: "done" as const, routed: ["additive vehicle push-pending"], commit: null };
         }
         if ((pr.err ?? "").startsWith("nothing to push")) {
           stepSet("route", "ok", "nothing to push — origin already has this");
