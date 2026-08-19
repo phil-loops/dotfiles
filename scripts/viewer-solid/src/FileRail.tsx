@@ -459,17 +459,45 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
   );
 }
 
+const DIVIDER =
+  "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
+
 export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; onChat: (f: FileDiff, session?: string) => void }) {
   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
+  // the origin waterline — GitHub Desktop's push line: everything above it goes out on
+  // push, everything below origin already has. Index of the first pushed own row; -1 when
+  // no remote ref exists (never pushed anywhere → no line to draw).
+  const waterline = () => {
+    if (!own().some((c) => c.pushed !== undefined)) return -1;
+    const f = own().findIndex((c) => c.pushed === true);
+    return f === -1 ? own().length : f;
+  };
+  const waterlineText = () =>
+    waterline() === 0
+      ? "origin is current — a push sends nothing"
+      : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
   return (
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
         <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
           <ol class="commits mx-0 mt-2 mb-0 list-none p-0">
+            <Show when={waterline() === 0}>
+              <li class={DIVIDER}><span>{waterlineText()}</span></li>
+            </Show>
             <For each={own()}>
-              {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
+              {(c, i) => (
+                <>
+                  <Show when={i() === waterline() && i() > 0}>
+                    <li class={DIVIDER}><span>{waterlineText()}</span></li>
+                  </Show>
+                  <CommitRow c={c} branch={props.branch} onChat={props.onChat} />
+                </>
+              )}
             </For>
+            <Show when={waterline() === own().length && own().length > 0}>
+              <li class={DIVIDER}><span>{waterlineText()}</span></li>
+            </Show>
             <Show when={ancestors().length}>
               <li class="commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']"><span>earlier history</span></li>
               <For each={ancestors()}>
