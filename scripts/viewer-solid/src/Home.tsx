@@ -5,7 +5,6 @@ import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { type Action } from "./actions";
 import { Hearth } from "./Hearth";
-import { ReEntry } from "./ReEntry";
 import { NextQueue } from "./NextQueue";
 import { ForestRow } from "./ForestRow";
 import { useRestack } from "./useRestack";
@@ -361,12 +360,6 @@ export function Home() {
         </header>
 
         <Hearth />
-
-        <ReEntry
-          projects={() => projects.data}
-          prOf={prOf}
-          reviewCount={() => (reviewReqs.data || []).filter((r) => !r.imported).length}
-        />
 
       <Show when={stripChats().length}>
         <section class="work-sec chat-live mb-[30px]">
