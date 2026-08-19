@@ -7,7 +7,9 @@
   POST /heartbeat        keepalive; the server self-reaps after IDLE seconds idle
 
 Args: <servedir> <scriptsdir> <repodir>. Prints the chosen 127.0.0.1 port, then serves.
-$STACK_REVIEW_LOG=1 logs one line per request (method path status ms) to stderr; silent otherwise.
+Request logging (method path status ms) is default-on: stderr + a size-capped durable file at
+<git-common-dir>/stack-review.log (survives bounces — attribution must outlive the process).
+$STACK_REVIEW_LOG=0 silences both.
 The page is same-origin with the server, so /model and /bless are plain relative fetches.
 """
 import sys, os, json, re, subprocess, threading, time, hashlib, shlex
@@ -50,14 +52,40 @@ _pulse_subs = [0]                  # open /events streams — pulse() only runs 
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
 _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
-LOG = os.environ.get("STACK_REVIEW_LOG", "") not in ("", "0")   # $STACK_REVIEW_LOG=1 → one line per request
+LOG = os.environ.get("STACK_REVIEW_LOG", "1") not in ("", "0")   # default-on; STACK_REVIEW_LOG=0 silences
 _log_lock = threading.Lock()
+# Durable sink beside stderr: the servedir log dies with the server (mktemp, reaped on bounce),
+# which is why the 2026-08-19 absorb incident is unattributable — attribution must outlive the
+# process. One rotation generation keeps the cap simple; the .1 file is the history.
+_LOG_MAX = 5 * 1024 * 1024
+
+
+def _durable_log_path():
+    try:
+        r = subprocess.run(["git", "-C", CWD, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                           capture_output=True, text=True)
+        d = r.stdout.strip()
+        return os.path.join(d, "stack-review.log") if r.returncode == 0 and d else ""
+    except Exception:
+        return ""
+
+
+_LOG_FILE = _durable_log_path()
 
 
 def _log(line):
     with _log_lock:   # threaded server: one locked write, or concurrent requests interleave mid-line
-        sys.stderr.write(f"{time.strftime('%H:%M:%S')} {line}\n")
+        msg = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n"
+        sys.stderr.write(msg)
         sys.stderr.flush()
+        if _LOG_FILE:
+            try:
+                if os.path.exists(_LOG_FILE) and os.path.getsize(_LOG_FILE) > _LOG_MAX:
+                    os.replace(_LOG_FILE, _LOG_FILE + ".1")
+                with open(_LOG_FILE, "a") as f:
+                    f.write(msg)
+            except Exception:
+                pass   # a full disk or permissions hiccup must never take a request down
 
 
 def run(args, timeout=None):
