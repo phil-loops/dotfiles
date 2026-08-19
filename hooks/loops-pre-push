@@ -2,10 +2,14 @@
 
 export PATH="$HOME/.volta/bin:/opt/homebrew/bin:$PATH"
 
+# Slimmed 2026-08-19: correctness checks (behind-main, deploy-critical, oxfmt/tsc,
+# green-tree skip) live ONLY in the viewer push gates now — the hook stopped
+# duplicating them after the two deadlocked an additive push to an approved PR
+# (the branch must sit on the PR tip to fast-forward, so "contains main's
+# migrations" can never pass there). Full previous hook is in git history.
+# What remains are the instant safety nets the gates don't cover.
+
 # git pipes one line per ref on stdin: <local ref> <local sha> <remote ref> <remote sha>.
-# Every check below keys off the PUSHED ref, never the checked-out HEAD — a push can run
-# from a worktree sitting on a different branch (the viewer's pinned-cwd fallback did,
-# and HEAD-based checks blocked a clean push on the wrong branch's gap, 2026-08-03).
 refs=$(cat)
 
 # Block work-in-progress commits (X-WIP trailer / wip subjects) from reaching a remote.
@@ -13,121 +17,9 @@ printf '%s\n' "$refs" | "$HOME/.dotfiles/scripts/stack-prepush-guard" || exit 1
 
 # the pushed commit: first ref line that isn't a delete (all-zero sha)
 push_sha=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $2; exit }')
-push_ref=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $1; exit }')
 [ -n "$push_sha" ] || exit 0
 
 # Block TODOs from reaching the shared repo (forks still push freely).
 PUSH_SHA="$push_sha" "$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
 
-# Warn if the pushed branch is behind main
-behind=$(git rev-list --count "$push_sha"..origin/main 2>/dev/null)
-if [ "$behind" -gt 0 ] 2>/dev/null; then
-  echo "⚠️  Pushed branch is $behind commits behind origin/main. Consider: git rebase origin/main"
-
-  # Check for deploy-critical changes missed from main (three-dot: only
-  # main-side changes, so the branch's own new migrations don't show up)
-  critical=$(git diff "$push_sha"...origin/main --name-only -- \
-    'k8s/charts/loops/values.staging.yaml' \
-    'k8s/charts/loops/values.production.yaml' \
-    'packages/prisma/migrations/*' \
-    'clickhouse/migrations/*' \
-    'jobs.ts' \
-    'jobs/index.ts' \
-    '.env.template' \
-    2>/dev/null)
-
-  if [ -n "$critical" ]; then
-    echo "🚨 Main has changes to deploy-critical files you're missing:"
-    echo "$critical" | sed 's/^/   /'
-    echo "   Run: git rebase origin/main"
-    exit 1
-  fi
-fi
-
-# A green push-gates verdict is keyed by TREE sha (server-recorded; new namespace first,
-# legacy stack-branch fallback) — a match means tsc/oxfmt already certified this exact
-# content, so the duplicate ~30s run below is skipped. Read-only: forging the key stays taboo.
-push_branch=${push_ref#refs/heads/}
-green_tree=$(git config --get "branch.$push_branch.stack-gates-green-tree" 2>/dev/null)
-[ -n "$green_tree" ] || green_tree=$(git config --get "stack-branch.$push_branch.gates-green-tree" 2>/dev/null)
-
-# oxfmt/tsc below read the WORKING TREE, so they're only honest when the checkout
-# actually holds the pushed commit; otherwise skip them — the push gates cover both.
-if [ -n "$green_tree" ] && [ "$green_tree" = "$(git rev-parse "$push_sha^{tree}" 2>/dev/null)" ]; then
-  echo "pre-push: push gates already green for this exact tree — skipping oxfmt/tsc"
-  files=""
-elif [ "$(git rev-parse HEAD 2>/dev/null)" != "$push_sha" ]; then
-  echo "pre-push: worktree isn't on the pushed commit — skipping oxfmt/tsc tree checks"
-  files=""
-else
-# Format-check files that differ from main; block the push if any are mis-formatted.
-# merge-base against origin/main, never the local main ref: a stale local main inflates
-# the file set with other branches' files (169 red for a 3-file branch, 2026-07-30).
-base=$(git merge-base origin/main HEAD 2>/dev/null || echo main)
-files=$(git diff --name-only "$base" HEAD --diff-filter=ACMR -- '*.ts' '*.tsx')
-if [ -n "$files" ]; then
-  echo "oxfmt: checking $(echo "$files" | wc -l | tr -d ' ') changed files..."
-  if ! echo "$files" | xargs npx oxfmt --check; then
-    exit 1
-  fi
-fi
-fi
-
-# Full typecheck of TS pushes — front-loads CI's type failures locally (~15-35s).
-# tsc IS the native compiler since TS7 landed on main (#9866, 2026-08-10), so the repo's
-# own `npx tsc` is CI-exact AND fast; branches still pinned to typescript <7 fall back to
-# the global tsgo preview rather than the old ~37s tsc. seed-gen --sync first repairs
-# what the typecheck reads (node_modules donor, .gen for THIS HEAD, tree-local packages
-# dist when the branch changes packages source) — foreground, silent no-op when already
-# accurate — so a red below means the code, not the tree.
-# Bypass a run with TSC_SKIP=1 (legacy TSGO_SKIP=1 still honored).
-if [ -n "$files" ] && [ "$TSC_SKIP" != "1" ] && [ "$TSGO_SKIP" != "1" ]; then
-  ts_major=$(sed -n 's/.*"version": *"\([0-9]*\)\..*/\1/p' node_modules/typescript/package.json 2>/dev/null | head -1)
-  if [ "${ts_major:-0}" -ge 7 ] 2>/dev/null; then
-    tscheck="npx tsc"
-  elif command -v tsgo >/dev/null 2>&1; then
-    tscheck="tsgo"
-  else
-    tscheck=""
-  fi
-  seed_gen="$HOME/.dotfiles/scripts/seed-gen"
-  if [ -n "$tscheck" ] && [ -x "$seed_gen" ]; then
-    main_wt=$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
-    [ -n "$main_wt" ] && "$seed_gen" --sync "$main_wt"
-    "$seed_gen" --sync "$PWD"
-  fi
-  if [ -z "$tscheck" ]; then
-    echo "pre-push: no typescript >=7 in node_modules and no tsgo — skipping local typecheck"
-  elif [ -f .gen/trpc-types/trpc/root.d.ts ]; then
-    # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
-    # branches from before the split still carry the old single config.
-    if [ -f typescript/tsconfig.runtime.json ]; then
-      ts_projects="typescript/tsconfig.runtime.json typescript/tsconfig.test.json"
-    else
-      ts_projects="tsconfig.node.json"
-    fi
-    for proj in $ts_projects; do
-      echo "$tscheck: typechecking $proj..."
-      if ! $tscheck --project "$proj" --noEmit; then
-        echo "🚨 type errors above — fix before pushing (TSC_SKIP=1 to bypass)"
-        exit 1
-      fi
-    done
-  else
-    echo "typecheck: .gen not built in this worktree — skipping local typecheck"
-  fi
-fi
-
-# Push is proceeding → kick off a detached, on-demand CI watcher for this branch.
-# It waits for the PR's checks to resolve, notifies once, then exits — so a watcher
-# lives only while CI is in flight (replaces the old always-on launchd sweep).
-branch=${push_ref#refs/heads/}
-case "$branch" in
-  main|""|refs/*) ;;  # never watch main; a non-branch ref (tag) has no PR to watch
-  *) ( "$HOME/.dotfiles/scripts/prwatch" --await "$branch" >/dev/null 2>&1 </dev/null & ) ;;
-esac
-
-# usage telemetry: log what this push is sending to GitHub (branch/project/ahead/subjects),
-# for the local-vs-pushed workflow read. Detached + best-effort — never blocks the push.
-( "$HOME/.dotfiles/scripts/stack-usage-event" push >/dev/null 2>&1 </dev/null & )
 exit 0
