@@ -112,11 +112,23 @@ function Layout(props: { children?: JSX.Element }) {
       refresh(); // we may have missed updates while hidden
     }
   };
+  // visibilitychange never fires on an APP switch that leaves the window rendered (terminal on
+  // one half of the screen, cmd+tab back) — the page sat stale and Phil hand-reloaded ~3×/day
+  // for it (telemetry, 2026-08-19: 17/36 cmd+r's landed on an untouched forest page). Window
+  // focus covers that path; throttled so focus/visibility double-fires cost one refetch fan-out.
+  let focusRefreshedAt = 0;
+  const onFocus = () => {
+    if (document.hidden || Date.now() - focusRefreshedAt < 10_000) return;
+    focusRefreshedAt = Date.now();
+    refresh();
+  };
   if (!document.hidden) openStream();
   reconcileChats(); // re-attach any chat turn left in flight by a reload, so its badge resolves
   document.addEventListener("visibilitychange", onVisibility);
+  window.addEventListener("focus", onFocus);
   onCleanup(() => {
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("focus", onFocus);
     closeStream();
   });
 
