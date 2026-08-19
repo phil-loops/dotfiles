@@ -143,6 +143,7 @@ export function NodeDetail() {
                 diverged?: boolean;
                 ahead?: number;
                 behind?: number;
+                frozenOrigin?: boolean;
               }
             >
           >,
@@ -351,7 +352,7 @@ export function NodeDetail() {
           setShowChats={setShowChats}
         />
         <TestNotes branch={active} />
-        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
+        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} frozen={!!health.data?.[active()]?.frozenOrigin} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
             <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>
