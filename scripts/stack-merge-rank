@@ -44,11 +44,15 @@ def compute(key, conf):
     if not branches:
         return {"project": project, "rank": {}, "order": []}
 
-    parent, requires = {}, {}
+    parent, requires, after = {}, {}, {}
     known = set(branches)
     for b in branches:
         parent[b] = one(f"branch.{b}.stack-parent") or one(f"stack-branch.{b}.parent") or "main"
         requires[b] = many(f"branch.{b}.stack-requires") or many(f"stack-branch.{b}.requires")
+        # `after` = merge-order-only dependence: no carried commits, no rebase coupling —
+        # the branch is content-independent but must land later (deploy invariants).
+        # Counts fully in rank so the canonical order honors it.
+        after[b] = many(f"branch.{b}.stack-after") or many(f"stack-branch.{b}.after")
 
     memo = {}
 
@@ -64,6 +68,7 @@ def compute(key, conf):
         if parent[b] != "main" and parent[b] in known:
             ups.append(parent[b])
         ups += [r for r in requires[b] if r in known]
+        ups += [a for a in after[b] if a in known]
         r = 1 + max((rank(u, seen) for u in ups), default=0)
         memo[b] = r
         return r

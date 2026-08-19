@@ -297,12 +297,35 @@ for proj in $projects; do
     if { [ "$parent" = "main" ] || [ "$parent" = "origin/main" ]; } && [ "$nreq" = "1" ]; then
       lines+="  ⛓ $b — one requires ($reqs) on a main-rooted branch: mis-encoded chain — set parent=$reqs, drop the requires"$'\n'; proj_problem=1
     fi
+    afters=$(git config --get-all "branch.$b.stack-after" 2>/dev/null || git config --get-all "stack-branch.$b.after" 2>/dev/null || true)
+    if [ -n "$afters" ]; then
+      # ⌫ an `after` already reachable through the parent chain is pure config debt
+      while IFS= read -r af; do
+        [ -n "$af" ] || continue
+        if cfg_chain_has "$parent" "$af"; then
+          lines+="  ⌫ $b — after $af is already ancestral via the parent chain: drop the entry"$'\n'; proj_problem=1
+        fi
+      done <<< "$afters"
+    fi
     if [ -n "$reqs" ]; then
       # ⌫ a requires already reachable through the parent chain is pure config debt
       while IFS= read -r rq; do
         [ -n "$rq" ] || continue
         if cfg_chain_has "$parent" "$rq"; then
           lines+="  ⌫ $b — requires $rq is already ancestral via the parent chain: drop the entry"$'\n'; proj_problem=1
+        fi
+      done <<< "$reqs"
+      # ⇢ a requires that carries none of the dep's commits is merge-order metadata
+      # wearing fan-in clothes — the `after` key says that honestly (no picks, no
+      # rebase coupling; still counts fully in stack-merge-rank)
+      while IFS= read -r rq; do
+        [ -n "$rq" ] || continue
+        git rev-parse --verify -q "$rq" >/dev/null || continue
+        own_ids=$(git log -p --no-merges "$parent..$b" 2>/dev/null | git patch-id --stable | cut -d' ' -f1 | sort)
+        dep_ids=$(git log -p --no-merges "$(cfg_parent "$rq")..$rq" 2>/dev/null | git patch-id --stable | cut -d' ' -f1 | sort)
+        { [ -n "$own_ids" ] && [ -n "$dep_ids" ]; } || continue
+        if [ -z "$(comm -12 <(echo "$own_ids") <(echo "$dep_ids"))" ]; then
+          lines+="  ⇢ $b — requires $rq carries none of its commits: merge-order only — move it to stack-branch.$b.after"$'\n'; proj_problem=1
         fi
       done <<< "$reqs"
       # ⑂ converged bases must be independent — one building on another means linearize
