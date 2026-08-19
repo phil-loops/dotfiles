@@ -50,7 +50,7 @@ def _candidate():
         tree = push._tree(b)
         if not tree or push._green_tree(b) == tree:
             continue
-        job = push._GATE_JOBS.get(b) or push._adopt_job(b)
+        job = push._GATE_JOBS.get(push._jkey(b)) or push._adopt_job(b)
         if job and job["tree"] == tree:
             if push._job_running(job):
                 continue

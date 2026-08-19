@@ -10,9 +10,10 @@ import json
 import os
 import re
 import subprocess
+import hashlib
 import tempfile
 import time
-from urllib.parse import parse_qs
+from urllib.parse import quote, parse_qs
 
 from . import ctx, stage, sync
 
@@ -59,10 +60,28 @@ def delta_tests(req, raw):
 # at spawn}. The dict is just a warm cache: every spawn also writes a sidecar json next to the
 # journal, so a bounced server re-adopts the still-running detached child instead of losing it.
 _GATE_JOBS = {}
+_REPO_IDS = {}
+
+
+def _repo_id():
+    # stable per REPO (not per worktree): key off the git common dir, cached per request-cwd.
+    cwd = ctx.repo_cwd()
+    rid = _REPO_IDS.get(cwd)
+    if rid is None:
+        gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+        rid = hashlib.sha1((gd or cwd).encode()).hexdigest()[:8]
+        _REPO_IDS[cwd] = rid
+    return rid
+
+
+def _jkey(branch):
+    return (_repo_id(), branch)
 
 
 def _job_file(branch):
-    return os.path.join(tempfile.gettempdir(), f"stack-gates-{branch.replace('/', '-')}.job.json")
+    # repo id + reversible encoding: the old '/'→'-' mangle collided (a/b-c vs a-b/c) and
+    # carried no repo, so a multi-repo server could adopt/harvest the WRONG run's sidecar.
+    return os.path.join(tempfile.gettempdir(), f"stack-gates-{_repo_id()}-{quote(branch, safe='')}.job.json")
 
 
 def _adopt_job(branch):
@@ -74,7 +93,7 @@ def _adopt_job(branch):
         job = {"path": j["path"], "pid": int(j["pid"]), "t0": float(j["t0"]), "tree": j["tree"]}
     except Exception:
         return None
-    _GATE_JOBS[branch] = job
+    _GATE_JOBS[_jkey(branch)] = job
     return job
 
 
@@ -120,7 +139,7 @@ def gates(req, raw):
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
-        old = _GATE_JOBS.get(branch) or _adopt_job(branch)
+        old = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
         if old and _job_running(old):
             return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
         if old and old["tree"] == _tree(branch):
@@ -151,11 +170,11 @@ def _spawn_gates(branch, fix=False):
         cmd.append("--fix")
     path = os.path.join(
         tempfile.gettempdir(),
-        f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
+        f"stack-gates-{_repo_id()}-{quote(branch, safe='')}-{int(time.time())}.jsonl")
     proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
-    _GATE_JOBS[branch] = job
+    _GATE_JOBS[_jkey(branch)] = job
     with open(_job_file(branch), "w") as f:
         json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
     return job
@@ -164,7 +183,7 @@ def _spawn_gates(branch, fix=False):
 def gates_progress(req, u):
     qs = parse_qs(u.query)
     branch = (qs.get("branch") or [""])[0]
-    job = _GATE_JOBS.get(branch) or _adopt_job(branch)
+    job = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
     if not job:
         return req._send(200, json.dumps({"running": False, "err": "no gates run for this branch"}))
     events = _journal_events(job["path"])
