@@ -122,7 +122,9 @@ def default_gates(cwd):
     # first — its rebase, when it fires, must land before typecheck/format see the tree.
     gates = [("fresh",
               '[ "$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)" -eq 0 ] && exit 0; '
-              f'miss="$(git diff HEAD..origin/main --name-only -- {DEPLOY_CRITICAL})"; '
+              # three-dot like the hook: main-side changes only, so the branch's own
+              # new migrations don't read as "missing" (two-dot red-locked any schema branch)
+              f'miss="$(git diff HEAD...origin/main --name-only -- {DEPLOY_CRITICAL})"; '
               '[ -z "$miss" ] && exit 0; '
               'echo "behind origin/main, missing deploy-critical:"; echo "$miss"; exit 1')]
     # Typecheck with the repo-PINNED tsc: since TS7 landed on main (#9866, 2026-08-10)
