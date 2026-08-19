@@ -1,0 +1,47 @@
+#!/bin/zsh
+# loops-dev-login — mint a magic-link login for the local loops dev app, so a
+# test drive never needs the email round-trip. Optionally registers the user
+# first (fresh solo user + domainless team — the real signup path).
+#
+#   loops-dev-login [email]                mint a login link (default user-1@example.com)
+#   loops-dev-login <email> --register     register first (name/company derived), then mint
+#   loops-dev-login <email> --base URL     app to register against (default http://localhost:3000)
+#
+# The callback always lands on the NEXTAUTH_URL app (:3000); to drive a preview
+# server, log in first, then navigate to the preview port — the session cookie
+# is shared across localhost ports.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+LOOPS_MAIN="${LOOPS_MAIN:-$HOME/coding/loops}"
+email="user-1@example.com"; register=0; base="http://localhost:3000"
+while (( $# )); do
+  case "$1" in
+    --register) register=1; shift;;
+    --base) base="$2"; shift 2;;
+    *) email="$1"; shift;;
+  esac
+done
+
+if (( register )); then
+  name="${email%%@*}"
+  resp=$(curl -s -X POST "$base/api/auth/register" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$email\",\"name\":\"$name\",\"company\":\"$name co\",\"inviteCode\":\"\"}")
+  echo "register: $resp" >&2
+fi
+
+secret=$(grep '^NEXTAUTH_SECRET' "$LOOPS_MAIN/.env" | cut -d= -f2-)
+[[ -n "$secret" ]] || { echo "loops-dev-login: NEXTAUTH_SECRET not found in $LOOPS_MAIN/.env" >&2; exit 1; }
+
+token=$(openssl rand -hex 32)
+hash=$(printf '%s%s' "$token" "$secret" | openssl dgst -sha256 -hex | awk '{print $NF}')
+id=$(uuidgen | tr 'A-Z' 'a-z')
+PGPASSWORD=password psql -h localhost -U postgres -d postgres -q -c \
+  "insert into \"VerificationToken\" (id, identifier, token, expires) values ('$id', '$email', '$hash', now() + interval '24 hours');"
+
+python3 - "$token" "$email" <<'EOF'
+import sys, urllib.parse
+token, email = sys.argv[1], sys.argv[2]
+q = urllib.parse.urlencode({"callbackUrl": "http://localhost:3000", "token": token, "email": email})
+print(f"http://localhost:3000/api/auth/callback/email?{q}")
+EOF
