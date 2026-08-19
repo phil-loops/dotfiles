@@ -259,6 +259,14 @@ def commits(req, u):
     parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
               or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
     own = set(ctx.run(["git", "rev-list", f"{parent}..{branch}"]).stdout.split())
+    # origin waterline: which commits the remote already has, so the list can draw the
+    # GitHub-Desktop push line. Upstream first; a tracking-less branch (Phil pushes from
+    # another checkout) still gets one if origin/<branch> exists. Absent ref → no key.
+    up = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
+    upref = up.stdout.strip() if up.returncode == 0 else ""
+    if not upref and ctx.run(["git", "rev-parse", "--verify", "-q", f"origin/{branch}"]).returncode == 0:
+        upref = f"origin/{branch}"
+    pushed = set(ctx.run(["git", "rev-list", "-n", "400", upref]).stdout.split()) if upref else None
     fmt = "%H\x1f%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
     out = ctx.run(["git", "log", branch, f"--format={fmt}", "--date=short", "-n", "80"]).stdout
     rows = []
@@ -267,7 +275,8 @@ def commits(req, u):
         if len(p) >= 3:
             rows.append({"sha": p[1], "subject": p[2],
                          "author": p[3] if len(p) > 3 else "", "date": p[4] if len(p) > 4 else "",
-                         "own": p[0] in own})
+                         "own": p[0] in own,
+                         **({"pushed": p[0] in pushed} if pushed is not None else {})})
     req._send(200, json.dumps(rows))
 
 

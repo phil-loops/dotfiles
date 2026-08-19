@@ -180,6 +180,7 @@ export const Commit = z.object({
   author: z.string(),
   date: z.string(),
   own: z.boolean().optional(), // true = on this branch (parent..branch); false = inherited ancestor
+  pushed: z.boolean().optional(), // origin already has it (upstream / origin/<branch>); absent = no remote ref
 });
 export type Commit = z.infer<typeof Commit>;
 
