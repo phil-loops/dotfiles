@@ -171,6 +171,9 @@ allow_published = False   # --allow-published: squash BELOW the remote head anyw
 provided_msg = ""   # --message=<msg>: use this verbatim (the composer wrote it), skip drafting
 rest = []
 for a in argv:
+    if a in ("-h", "--help"):
+        print(__doc__.strip())
+        sys.exit(0)
     if a == "--dry":
         dry = True
     elif a == "--unpushed":
@@ -189,6 +192,8 @@ for a in argv:
         allow_published = True
     elif a.startswith("--message="):
         provided_msg = a[len("--message="):]
+    elif a.startswith("-"):
+        out({"ok": False, "err": f"unknown flag: {a} — see stack-squash --help"})
     else:
         rest.append(a)
 branch = (rest[0] if rest else "").strip()
