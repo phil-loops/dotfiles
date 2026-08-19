@@ -394,9 +394,12 @@ def _upstream_state(branch, main):
     # upstream is the safe state (nothing to pull-merge), so it's never flagged.
     r = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
     up = r.stdout.strip() if r.returncode == 0 else ""
+    # deliberate divergence: origin holds the frozen PR (the review artifact), local holds
+    # the restacked truth; squash-merge reconciles. The bit calms the ⇄ warning + prep.
+    frozen = bool(ctx.run(["git", "config", f"stack-branch.{branch}.frozen-origin"]).stdout.strip())
     if not up:
         return {"upstream": "", "upstreamBad": False, "upstreamReason": "",
-                "diverged": False, "ahead": 0, "behind": 0}
+                "diverged": False, "ahead": 0, "behind": 0, "frozenOrigin": frozen}
     remote = ctx.run(["git", "config", f"branch.{branch}.remote"]).stdout.strip()
     up_branch = up[len(remote) + 1:] if remote and up.startswith(remote + "/") else up
     bad = up_branch == main
@@ -414,7 +417,7 @@ def _upstream_state(branch, main):
     diverged = (not bad) and ahead > 0 and behind > 0
     reason = f"tracks {up} (the trunk) — a Pull would merge main into this branch" if bad else ""
     return {"upstream": up, "upstreamBad": bad, "upstreamReason": reason,
-            "diverged": diverged, "ahead": ahead, "behind": behind}
+            "diverged": diverged, "ahead": ahead, "behind": behind, "frozenOrigin": frozen}
 
 
 # rebase-classify (the PR-less merged-detection fallback) is a ~0.3s trial rebase, and health_many

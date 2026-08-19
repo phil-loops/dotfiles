@@ -66,6 +66,11 @@ def route(req, u):
         return
 
     if up.get("diverged") and h.get("published"):
+        if up.get("frozenOrigin"):
+            send("frozen-origin",
+                 "origin deliberately frozen — the open PR is the review artifact; "
+                 "squash-merge reconciles it, nothing to push")
+            return
         vehicle = f"{branch}-additive"
         if ctx.run(["git", "rev-parse", "--verify", "--quiet",
                     f"refs/heads/{vehicle}"]).returncode == 0:

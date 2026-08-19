@@ -382,6 +382,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
+        elif u.path == "/notes":          return review.notes_get(self, u)   # per-branch test/repro notes
         elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template
         elif u.path == "/plan-preview":   return review.plan_preview(self, u)        # rendered plan for a branch
         elif u.path == "/plan-steps":     return review.plan_steps(self, u)          # structured steps for per-step story editing
@@ -446,6 +447,8 @@ class H(BaseHTTPRequestHandler):
             return picker.drop_project(self, raw)
         if self.path == "/purpose":   # save a thesis as the git branch description
             return review.purpose_set(self, raw)
+        if self.path == "/notes":   # save a branch's test/repro notes (stack-notes sidecar)
+            return review.notes_set(self, raw)
         if self.path == "/story":   # save a branch's durable per-step merge story (job_of prefers it)
             return review.story_set(self, raw)
         if self.path == "/plan-template":   # save the per-project body template (edit once, carries forward)
@@ -456,6 +459,8 @@ class H(BaseHTTPRequestHandler):
             return review.ticket_set(self, raw)
         if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
             return review.shelve(self, raw)
+        if self.path == "/frozen-origin":  # mark/unmark deliberate origin divergence (stack-branch.<b>.frozen-origin)
+            return review.frozen_origin_set(self, raw)
         if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
             return review.focus_set(self, raw)
         if self.path == "/tier":       # set a forest's conviction tier (stack-project.<p>.tier)
