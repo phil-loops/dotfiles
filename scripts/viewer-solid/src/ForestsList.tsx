@@ -1,4 +1,5 @@
 import { createSignal, createMemo, onCleanup, Show, For, type JSX } from "solid-js";
+import { useQueryClient } from "@tanstack/solid-query";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
@@ -30,6 +31,7 @@ export function ForestsList(props: {
   prOf: (name: string) => PR | undefined;
   setTier: (repo: string, project: string, tier: string) => void;
 }) {
+  const qc = useQueryClient();
   const [forestQuery, setForestQuery] = createSignal("");
   // Forests recency — "most recently alive": the latest of local commit, PR opened, and
   // merge-to-main. The within-band sort, never the grouping.
@@ -160,9 +162,11 @@ export function ForestsList(props: {
     (triageList().length > 0 || tryingList().length > 0 || spikeList().length > 0));
   const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
 
-  // ── drag a row up into the focus lane to pin it (only this page has the drop target) ────
-  // The grip publishes the pointer to the focusDrag store; FocusLane hit-tests and commits the
-  // drop. Release anywhere else is a no-op.
+  // ── the gutter ☆: click pins to the end of the focus lane; drag places it precisely ────
+  // A bare press-and-release is the common motion (Phil, 2026-08-18: "anything I'm revisiting
+  // ends up pinned anyway — should be easier"), so the drag machinery only engages past a 5px
+  // slop: rowDrag stays unpublished for a click, keeping the lane's drop chrome and the ghost
+  // from flashing. FocusLane hit-tests the published drag and commits the drop.
   // the lane lives at the top of a long page — auto-scroll while the pointer holds an edge zone.
   // Timer-driven, not per-move: scroll must keep flowing while the pointer sits still, and each
   // tick re-publishes the drag so the lane's indicator/hit-test re-measure the scrolled rect.
@@ -175,34 +179,54 @@ export function ForestsList(props: {
     else return;
     setRowDrag({ ...d });
   };
+  const pinToEnd = (p: Project) => {
+    qc.setQueryData<Project[]>(["projects"], (cur) => {
+      if (!cur) return cur;
+      const maxRank = Math.max(0, ...cur.filter((q) => q.focus != null).map((q) => q.focus ?? 0));
+      return cur.map((q) => (pkey(q) === pkey(p) ? { ...q, focus: maxRank + 1 } : q));
+    });
+    fetch("/focus", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: p.repo || "loops", project: p.name, on: true }) })
+      .then(() => qc.invalidateQueries({ queryKey: ["projects"] }));
+  };
+  let press: { p: Project; x: number; y: number } | null = null;
   const dragDown = (e: PointerEvent, p: Project) => {
     e.preventDefault();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-    setRowDrag({ repo: p.repo || "loops", name: p.name, x: e.clientX, y: e.clientY });
-    scrollTimer = window.setInterval(autoScroll, 50);
+    press = { p, x: e.clientX, y: e.clientY };
   };
   const dragMove = (e: PointerEvent) => {
     const d = rowDrag();
-    if (!d) return;
-    setRowDrag({ ...d, x: e.clientX, y: e.clientY });
+    if (d) { setRowDrag({ ...d, x: e.clientX, y: e.clientY }); return; }
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 5) {
+      setRowDrag({ repo: press.p.repo || "loops", name: press.p.name, x: e.clientX, y: e.clientY });
+      scrollTimer = window.setInterval(autoScroll, 50);
+    }
   };
   const dragUp = () => {
     window.clearInterval(scrollTimer);
     const d = rowDrag();
     setRowDrag(null);
     if (d) dropOnLane(d);
+    else if (press) pinToEnd(press.p);
+    press = null;
+  };
+  const dragCancel = () => {
+    window.clearInterval(scrollTimer);
+    setRowDrag(null);
+    press = null;
   };
   onCleanup(() => window.clearInterval(scrollTimer));
   const dragWrap = (p: Project, inner: JSX.Element) => (
     <div class="row-drag-wrap group/drag relative">
       <span
-        class="row-drag-grip absolute -left-5 top-1/2 z-[2] -translate-y-1/2 cursor-grab select-none touch-none px-[3px] py-[6px] text-[12px] text-ink-faint opacity-0 transition-opacity duration-[120ms] hover:text-gold-leaf active:cursor-grabbing group-hover/drag:opacity-100"
-        title="drag to focus lane"
+        class="row-drag-grip absolute -left-5 top-1/2 z-[2] -translate-y-1/2 cursor-pointer select-none touch-none px-[4px] py-[6px] text-[13px] text-ink-faint opacity-0 transition-opacity duration-[120ms] hover:text-gold-leaf active:cursor-grabbing group-hover/drag:opacity-100"
+        title="pin to focus — click pins, drag to place"
         onPointerDown={(e) => dragDown(e, p)}
         onPointerMove={dragMove}
         onPointerUp={dragUp}
-        onPointerCancel={dragUp}
-      >⠿</span>
+        onPointerCancel={dragCancel}
+      >☆</span>
       {inner}
     </div>
   );
