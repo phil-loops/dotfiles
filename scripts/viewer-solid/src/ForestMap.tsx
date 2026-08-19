@@ -100,6 +100,18 @@ const PILL_TEXT = "font-mono text-[11.5px] font-medium tracking-[0.02em] [text-a
 // the here pill never re-pinned mono the way play did, so the ghost's display face bleeds in
 const HERE_TEXT = "font-display text-[13.5px] font-medium tracking-[0.02em] [text-anchor:middle]";
 
+// Contraction outcomes live at MODULE scope: per-mount state meant every navigation back to a
+// forest re-ran the auto-drop against cached health — re-dropping already-gone branches (200→404
+// pairs) and auto-retrying deterministic 409 refusals on each visit, 43% of /contract calls
+// failing in the 2026-08 telemetry window. Gone nodes stay gone and a parked refusal blocks the
+// auto-fire for the page's lifetime; a manual pill click still retries.
+const [contractGone, setContractGone] = createSignal<ReadonlySet<string>>(new Set());
+const [contractParked, setContractParked] = createSignal<Record<string, string>>({});
+// the two deterministic refusal families get a pill-sized name; the full err stays in the title
+const shortContractErr = (err: string): string =>
+  /unmerged/i.test(err) ? "unmerged work — no drop"
+  : /left standing|rebase|conflict/i.test(err) ? "rewire conflict"
+  : "drop failed";
 
 export function ForestMap(props: {
   spine: () => SpineNode[];
@@ -169,12 +181,6 @@ export function ForestMap(props: {
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
   const [contracting, setContracting] = createSignal<string | null>(null);
-  const [contractErr, setContractErr] = createSignal<{ id: string; err: string } | null>(null);
-  // A contracted node leaves the map the moment the server says it's gone, rather than waiting
-  // on the /model + /forest-health refetch — those are seconds slow on a big forest, and a ghost
-  // still standing under its idle "⊘ drop & rewire →" pill reads as "the auto-drop never ran".
-  // It did: the second press then 404s on a branch that no longer exists (2026-07-21).
-  const [dropped, setDropped] = createSignal<ReadonlySet<string>>(new Set());
   // the merged-ghost next step, keyed off LANDED (merged + contractable), never merged alone
   // — a merged PR with a follow-on commit is a live node, not a ghost, and gets no pill:
   //   drop    — we can mutate → ⊘ drop & rewire (POST /contract)
@@ -185,24 +191,25 @@ export function ForestMap(props: {
   };
   const ghostLabel = (id: string): string => {
     if (contracting() === id) return "⊘ dropping & rewiring…";
-    if (contractErr()?.id === id) return "⊘ drop failed ↻";
+    const err = contractParked()[id];
+    if (err) return `⊘ ${shortContractErr(err)} ↻`;
     return ghostMode(id) === "drop" ? "⊘ drop & rewire →" : "✦ merged ghost";
   };
   const pillW = (s: string): number => [...s].length * 6.9 + 18;
   const fireContract = (id: string) => {
     setContracting(id);
-    setContractErr(null);
+    setContractParked(({ [id]: _, ...rest }) => rest);
     Promise.resolve(props.onContract!(id))
       // The branch already being gone IS the outcome contraction was asking for — reporting it as
       // "⊘ drop failed" taught Phil to distrust the auto-drop (2026-07-21). Every other refusal
       // (409 unmerged work, 500) still parks on the pill.
       .then((r) => {
-        if (contractionDone(r)) setDropped((s) => new Set(s).add(id));
-        else setContractErr({ id, err: r.err || "contract failed" });
+        if (contractionDone(r)) setContractGone((s) => new Set(s).add(id));
+        else setContractParked((m) => ({ ...m, [id]: r.err || "contract failed" }));
       })
       // a throw (server bounced mid-request, non-JSON body) used to leave the pill back on its
       // idle label with nothing said — the one failure that looks exactly like never having run
-      .catch((e: unknown) => setContractErr({ id, err: (e as Error)?.message || "contract failed" }))
+      .catch((e: unknown) => setContractParked((m) => ({ ...m, [id]: (e as Error)?.message || "contract failed" })))
       .finally(() => setContracting(null));
   };
 
@@ -342,7 +349,7 @@ export function ForestMap(props: {
     return "checks the whole feature out into a scratch worktree you can run and edit — refreshed on each open, your edits there are never clobbered; copies the cd command";
   };
 
-  const model = createMemo(() => Graph.indexById(Graph.contractNodes(props.spine(), dropped())));
+  const model = createMemo(() => Graph.indexById(Graph.contractNodes(props.spine(), contractGone())));
 
   const heads = createMemo(() => Graph.headsOf(model().list));
   const upstreamOf = (id: string): Set<string> => Graph.upstreamOf(model().byId, id);
@@ -398,11 +405,13 @@ export function ForestMap(props: {
   // auto-contract (Phil, 2026-07-20): a merged, fully-contractable node has exactly one correct
   // resolution, so fire the drop on sight instead of waiting for the pill click — narrower than
   // ambient auto-rebase, which stays rejected. One node at a time; a failure parks on the pill
-  // (⊘ drop failed ↻, click to retry) and is never auto-retried.
+  // (reason named, click to retry) and is never auto-retried — the parked map is module-scoped,
+  // so a remount can't re-fire what already refused.
   const autoTried = new Set<string>();
   createEffect(() => {
     if (!props.onContract || contracting()) return;
-    const ghost = layout().list.find((n) => !autoTried.has(n.id) && ghostMode(n.id) === "drop");
+    const ghost = layout().list.find((n) =>
+      !autoTried.has(n.id) && !contractParked()[n.id] && ghostMode(n.id) === "drop");
     if (!ghost) return;
     autoTried.add(ghost.id);
     fireContract(ghost.id);
@@ -780,8 +789,8 @@ export function ForestMap(props: {
                         }}
                       >
                         <title>
-                          {contractErr()?.id === n.id
-                            ? `${contractErr()!.err} — click to retry`
+                          {contractParked()[n.id]
+                            ? `${contractParked()[n.id]} — click to retry`
                             : ghostMode(n.id) === "drop"
                             ? "already merged AND fully contractable — drops this branch, rebases + rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
                             : "merged into main (ghost)"}
