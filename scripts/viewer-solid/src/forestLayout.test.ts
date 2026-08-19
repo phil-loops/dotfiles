@@ -20,13 +20,21 @@ const forest = (): SpineNode[] => [
 
 const layoutOf = () => computeForestLayout(indexById(forest()));
 
-test("fan-in indent clears every carried base, not just the parent chain", () => {
+test("indent is spent only at branch points; fan-in still clears every carried base", () => {
   const { pos } = layoutOf();
-  const unit = pos["mid"].x - pos["base"].x;
-  // parent (side) alone would put fan one unit in; carrying mid (itself one unit deep)
-  // pushes it to two — indentation reads "lands after everything left of me".
-  assert.equal(pos["fan"].x, pos["base"].x + 2 * unit);
-  assert.equal(pos["leaf"].x, pos["fan"].x + unit, "a deepened node's subtree stays right of it");
+  assert.equal(pos["mid"].x, pos["base"].x, "a single-child chain stacks in its parent's column");
+  assert.ok(pos["fan"].x > pos["mid"].x, "carrying mid pushes fan right of it — lands after everything left");
+  assert.equal(pos["leaf"].x, pos["fan"].x, "a deepened node's chain subtree keeps its column");
+});
+
+test("branch-point children indent one step; a deep straight chain stays one column", () => {
+  const list = [node("root"), node("a", "root"), node("b", "root"), node("a1", "a"), node("a2", "a1"), node("a3", "a2")];
+  const { pos, edges } = computeForestLayout(indexById(list));
+  assert.ok(pos["a"].x > pos["root"].x, "children of a branch point indent");
+  assert.equal(pos["a"].x, pos["b"].x, "siblings share a column");
+  assert.equal(pos["a3"].x, pos["a1"].x, "the chain below never staircases");
+  const drop = edges.find((e) => e.from === "a1" && e.to === "a2")!;
+  assert.equal(drop.x1, drop.x2, "a same-column chain edge is a straight vertical drop");
 });
 
 test("a prerequisite's row sits above its dependent's", () => {
