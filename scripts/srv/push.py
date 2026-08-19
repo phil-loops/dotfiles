@@ -130,15 +130,7 @@ def gates(req, raw):
             if result and result.get("ok"):
                 _record_green(branch, old["tree"])
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
-        path = os.path.join(
-            tempfile.gettempdir(),
-            f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
-        proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
-        _GATE_JOBS[branch] = job
-        with open(_job_file(branch), "w") as f:
-            json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
+        _spawn_gates(branch, fix=d.get("fix", True))
         return req._send(200, json.dumps({"ok": True, "started": True}))
     r = ctx.run(cmd)
     # stack-gates always prints a JSON verdict on stdout and exits 0
@@ -148,6 +140,25 @@ def gates(req, raw):
     except Exception:
         pass
     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+
+
+def _spawn_gates(branch, fix=True):
+    """Spawn the detached stack-gates child (journal + sidecar job file). Shared by the
+    interactive /gates detach path and the ambient pregate loop — one spawn shape, so a
+    bounced server re-adopts either kind identically."""
+    cmd = [os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
+    if fix:
+        cmd.append("--fix")
+    path = os.path.join(
+        tempfile.gettempdir(),
+        f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
+    proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
+    _GATE_JOBS[branch] = job
+    with open(_job_file(branch), "w") as f:
+        json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
+    return job
 
 
 def gates_progress(req, u):
