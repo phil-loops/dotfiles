@@ -106,24 +106,33 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     roots.splice(0, roots.length, ...sortBlocks(roots));
     Object.keys(kids).forEach((p) => (kids[p] = sortBlocks(kids[p])));
 
-    // DFS: row per node, indent per depth — parent always directly above its subtree.
-    // Fan-in truth: a node's column clears EVERY upstream, so a `requires` base deeper
-    // than the parent chain pushes the dependent (and its subtree) further right —
-    // indentation reads "lands after everything left of me", not just "child of parent".
-    // Block topo-sorting placed each prerequisite's row (hence depth) before its dependent.
+    // DFS: row per node — parent always directly above its subtree. Indent is spent only
+    // where the story BRANCHES: vertical order already IS the landing order, so a straight
+    // single-child chain stacks in its parent's column instead of staircasing right (a
+    // 13-deep linearized spine stays one column). Branch-point children take the full
+    // step, and fan-in truth still holds: a node's column clears EVERY upstream — a
+    // `requires` base pushes the dependent (and its subtree) right of it, so indentation
+    // keeps reading "lands after everything left of me".
     const pos: Record<string, { x: number; y: number }> = {};
     const depth: Record<string, number> = {};
+    const vx: Record<string, number> = {};
     let row = 0;
-    const place = (id: string, d: number) => {
+    const place = (id: string, d: number, pv: number, branched: boolean) => {
       (byId[id]?.requires || []).forEach((rq) => {
         if (depth[rq] != null) d = Math.max(d, depth[rq] + 1);
       });
+      let v = pv + (branched ? INDENT : 0);
+      (byId[id]?.requires || []).forEach((rq) => {
+        if (vx[rq] != null) v = Math.max(v, vx[rq] + INDENT);
+      });
       depth[id] = d;
-      pos[id] = { x: LEFT + d * INDENT, y: TOP + row * ROW_H };
+      vx[id] = v;
+      pos[id] = { x: LEFT + v, y: TOP + row * ROW_H };
       row++;
-      (kids[id] || []).forEach((c) => place(c, d + 1));
+      const cs = kids[id] || [];
+      cs.forEach((c) => place(c, d + 1, v, cs.length > 1));
     };
-    roots.forEach((r) => place(r, 0));
+    roots.forEach((r) => place(r, 0, 0, false));
 
     const mainPos = { x: LEFT - 62, y: TOP - ROW_H * 0.62 };
     // the sink seat: a breath below the last work row, back on main's own column — the
@@ -171,7 +180,13 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
       const gx = p === "main" ? mainPos.x : pos[p].x + 16; // drop from the dot column
       // start the drop BELOW the parent's purpose subtitle (two lines now) so it never strikes it.
       const gy = p === "main" ? mainPos.y + 10 : pos[p].y + NODE_H / 2 + (byId[p]?.description ? 31 : 4);
-      edges.push({ x1: gx, y1: gy, x2: me.x - 7, y2: me.y, kind: lumen(n), from: p, to: n.id });
+      // a same-column chain child gets a straight vertical drop into its top edge —
+      // the elbow's rightward turn has nowhere to go when nothing indented.
+      if (p !== "main" && me.x === pos[p].x) {
+        edges.push({ x1: gx, y1: gy, x2: gx, y2: me.y - NODE_H / 2 - 4, kind: lumen(n), from: p, to: n.id });
+      } else {
+        edges.push({ x1: gx, y1: gy, x2: me.x - 7, y2: me.y, kind: lumen(n), from: p, to: n.id });
+      }
       const ancestors = new Set<string>();
       let x: string | undefined = n.parent, guard = 0;
       while (x && x !== "main" && byId[x] && guard++ < 64) { ancestors.add(x); x = byId[x].parent; }

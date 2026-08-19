@@ -79,7 +79,9 @@ const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: str
     ? railPath(e)
     : e.kind === "spine"
       ? `M${e.x1},${e.y1} L${e.x2},${e.y2}`
-      : `M${e.x1},${e.y1} L${e.x1},${e.y2} L${e.x2},${e.y2}`;
+      : Math.abs(e.x2 - e.x1) < 0.5
+        ? `M${e.x1},${e.y1} L${e.x1},${e.y2}`
+        : `M${e.x1},${e.y1} L${e.x1},${e.y2} L${e.x2},${e.y2}`;
 
 const OVERLAY =
   "fm-overlay fixed inset-0 z-50 flex items-center justify-center overflow-auto bg-[rgba(8,6,3,0.93)] backdrop-blur-[3px]";
