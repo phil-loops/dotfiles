@@ -110,12 +110,12 @@ def gates(req, raw):
     # answer green instantly instead of re-paying the typecheck.
     if d.get("useCache") and branch and _green_tree(branch) == _tree(branch):
         return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
-    # --fix: a red gate with a remediation (e.g. fresh → rebase onto origin/main, format
-    # → oxfmt) gets one auto-fix attempt before the verdict, so the card clears what it can.
-    # The sync strip passes fix:false — its route step already sealed the ONE outgoing
-    # commit, and a fix that commits (format cascade) or rebases would move the tip under it.
+    # --fix is OPT-IN (fix:true): a red gate with a remediation (fresh → rebase, format →
+    # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
+    # a bare gates check used to rebase stale branches as a side effect of observing, and
+    # observation must never mutate. The sync strip passes fix:false explicitly anyway.
     cmd = [os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
-    if d.get("fix", True):
+    if d.get("fix", False):
         cmd.append("--fix")
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
@@ -130,7 +130,7 @@ def gates(req, raw):
             if result and result.get("ok"):
                 _record_green(branch, old["tree"])
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
-        _spawn_gates(branch, fix=d.get("fix", True))
+        _spawn_gates(branch, fix=d.get("fix", False))
         return req._send(200, json.dumps({"ok": True, "started": True}))
     r = ctx.run(cmd)
     # stack-gates always prints a JSON verdict on stdout and exits 0
@@ -142,7 +142,7 @@ def gates(req, raw):
     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
 
 
-def _spawn_gates(branch, fix=True):
+def _spawn_gates(branch, fix=False):
     """Spawn the detached stack-gates child (journal + sidecar job file). Shared by the
     interactive /gates detach path and the ambient pregate loop — one spawn shape, so a
     bounced server re-adopts either kind identically."""
