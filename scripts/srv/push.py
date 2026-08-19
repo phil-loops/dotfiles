@@ -590,6 +590,17 @@ def prep_push(req, raw):
             if not res.get("ok"):
                 return req._send(res.pop("code", 200), json.dumps(res))
             sha = res["shaFull"]
+            # verdict-preserving ward: the normal absorb is tree-preserving (the vehicle carries
+            # local's content), so this fires only when the move would REPLACE a currently
+            # gates-green tree with a different one — the 2026-08-19 delete-user shape. That is
+            # never routine; it needs an explicit confirm:true, not a silent hard reset.
+            green = _green_tree(branch)
+            if (green and green == _tree(branch) and _tree(sha) != green and not d.get("confirm")):
+                ctx.run(["git", "branch", "-D", res["vehicle"]])
+                return req._send(200, json.dumps({
+                    "ok": False, "confirmable": True,
+                    "err": f"{branch} sits on a gates-green tree and the absorb would replace it with "
+                           "different content — re-check the vehicle is what you mean, then retry with confirm"}))
             holder = next((p for p, b in stage._worktrees() if b == branch), None)
             if holder and stage._dirty(holder):
                 ctx.run(["git", "branch", "-D", res["vehicle"]])
