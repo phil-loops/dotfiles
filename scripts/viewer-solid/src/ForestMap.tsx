@@ -75,7 +75,7 @@ const railPath = (e: { x1: number; y1: number; x2: number; y2: number; laneX?: n
   return `M${e.x1},${e.y1} H${lane - RAIL_R} Q${lane},${e.y1} ${lane},${e.y1 + dir * RAIL_R} V${e.y2 - dir * RAIL_R} Q${lane},${e.y2} ${lane - RAIL_R},${e.y2} H${e.x2}`;
 };
 const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: string; laneX?: number }): string =>
-  e.kind === "fanin" || e.kind === "lands"
+  e.kind === "fanin" || e.kind === "lands" || e.kind === "after"
     ? railPath(e)
     : e.kind === "spine"
       ? `M${e.x1},${e.y1} L${e.x2},${e.y2}`
@@ -651,7 +651,7 @@ export function ForestMap(props: {
             <path d="M0.5,0.5 L7.5,4 L0.5,7.5 Z" fill="context-stroke" />
           </marker>
         </defs>
-        <For each={layout().edges.filter((e) => e.kind !== "fanin" && e.kind !== "lands" && e.kind !== "spine")}>
+        <For each={layout().edges.filter((e) => e.kind !== "fanin" && e.kind !== "lands" && e.kind !== "spine" && e.kind !== "after")}>
           {(e, i) => (
             <path
               class={`fm-edge ${e.kind} fill-none opacity-0 ${treeEdgeClass(e.kind, litEdge(e.from, e.to), dams().frozen.has(e.to))}`}
@@ -679,6 +679,19 @@ export function ForestMap(props: {
                     ? `merge-order only: carries none of ${leafOf(e.from)}'s ${e.meta.of} commits — no code dependency, ordering is the whole edge`
                     : `fan-in: carries ${e.meta.carried} of ${leafOf(e.from)}'s ${e.meta.of} commits as cherry-picks — cannot land before it`
               }</title>
+            </path>
+          )}
+        </For>
+        {/* `after` edges: merge-order only — same rail grammar as fan-in, ordering tone */}
+        <For each={layout().edges.filter((e) => e.kind === "after")}>
+          {(e) => (
+            <path
+              class={`fm-edge after fill-none opacity-0 ${faninEdgeClass(litEdge(e.from, e.to), true)}`}
+              classList={{ lit: litEdge(e.from, e.to) }}
+              marker-end="url(#fm-arrow)"
+              d={edgePath(e)}
+            >
+              <title>merge-order only: lands after {leafOf(e.from)} — content-independent, no rebase coupling</title>
             </path>
           )}
         </For>

@@ -51,6 +51,7 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
         const ups: string[] = [];
         if (n.parent && n.parent !== "main" && byId[n.parent]) ups.push(n.parent);
         (n.requires || []).forEach((rq) => { if (byId[rq]) ups.push(rq); });
+        (n.after || []).forEach((aq) => { if (byId[aq]) ups.push(aq); });
         ups.forEach((u) => { r = Math.max(r, rankOf(u) + 1); });
       }
       return (rankCache[id] = r);
@@ -89,7 +90,7 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
       siblings.forEach((s) => (before[s] = new Set()));
       siblings.forEach((s) => {
         members[s].forEach((m) => {
-          (byId[m]?.requires || []).forEach((rq) => {
+          [...(byId[m]?.requires || []), ...(byId[m]?.after || [])].forEach((rq) => {
             const b = blockOf(rq);
             if (b && b !== s) before[s].add(b);
           });
@@ -199,16 +200,27 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
           });
         }
       });
+      // `after` = merge-order only: rides the same right-margin rail as fan-in but never
+      // pushes indent (content-independent) — vertical order + the rail carry the story.
+      (n.after || []).forEach((aq) => {
+        if (pos[aq] && !ancestors.has(aq)) {
+          edges.push({
+            x1: pos[aq].x + nodeW(aq) + 6, y1: pos[aq].y,
+            x2: me.x + nodeW(n.id) + 6, y2: me.y,
+            kind: "after", from: aq, to: n.id,
+          });
+        }
+      });
     });
 
     // Rail assignment: one vertical rail per fan-in dependent (the ✦ sink included),
     // inner rails to higher targets, every rail right of every node — a source stub only
     // ever crosses another rail at a right angle, never a node.
-    const railTargets = [...new Set(edges.filter((e) => e.kind === "fanin" || e.kind === "lands").map((e) => e.to))]
+    const railTargets = [...new Set(edges.filter((e) => e.kind === "fanin" || e.kind === "lands" || e.kind === "after").map((e) => e.to))]
       .sort((a, b) => pos[a].y - pos[b].y);
     railTargets.forEach((t, i) => {
       const laneX = maxX + RAIL_PAD + i * RAIL_GAP;
-      edges.forEach((e) => { if (e.to === t && (e.kind === "fanin" || e.kind === "lands")) e.laneX = laneX; });
+      edges.forEach((e) => { if (e.to === t && (e.kind === "fanin" || e.kind === "lands" || e.kind === "after")) e.laneX = laneX; });
     });
     const W = (railTargets.length ? maxX + RAIL_PAD + (railTargets.length - 1) * RAIL_GAP : maxX) + PAD_R;
 

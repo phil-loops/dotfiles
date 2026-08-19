@@ -113,7 +113,7 @@ export default function MergeStory(props: {
       // parent (≠ main, in-forest) = a CODE dependency — this branch is stacked on it. requires =
       // MERGE-AFTER fan-in: separate bases that must land first. The story labels them differently.
       const parent = m?.parent && inForest.has(m.parent) && m.parent !== "main" ? m.parent : null;
-      const reqs = (m?.requires ?? []).filter((r) => inForest.has(r));
+      const reqs = [...(m?.requires ?? []), ...(m?.after ?? [])].filter((r) => inForest.has(r));
       const { subject, why } = splitPurpose(m?.description);
       return {
         id,
