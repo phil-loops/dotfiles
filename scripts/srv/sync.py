@@ -1031,7 +1031,8 @@ def build_additive(branch):
     trunk = _trunk(ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main")
     vehicle = f"{branch}-additive"
     if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{vehicle}"]).returncode == 0:
-        return {"ok": False, "err": f"{vehicle} already exists - push it or delete it first", "code": 409}
+        return {"ok": False, "vehiclePending": True,
+                "err": f"{vehicle} already exists - push it or delete it first", "code": 409}
 
     # Frame poisoning: a pushed head carrying trunk's history DUPLICATED under foreign SHAs
     # (a backwards rebase) drags merge-base(trunk, head) into the ancient past, so the PR
