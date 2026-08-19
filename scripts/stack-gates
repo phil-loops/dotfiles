@@ -39,6 +39,7 @@ Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary","fixed"?}]}
 """
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -120,11 +121,20 @@ DEPLOY_CRITICAL = (
 )
 
 
-def default_gates(cwd):
-    # fresh: the pre-push hook rejects a branch behind origin/main on a deploy-critical
-    # file, so catch it here (with an auto-rebase fix) instead of at the push wall. Runs
-    # first — its rebase, when it fires, must land before typecheck/format see the tree.
-    gates = [("fresh",
+def default_gates(cwd, branch=""):
+    # fresh: reject a branch behind origin/main on a deploy-critical file (with an
+    # auto-rebase fix) instead of at the push wall. Runs first — its rebase, when it
+    # fires, must land before typecheck/format see the tree.
+    # EXEMPT: an additive update to an already-pushed head (origin/<branch> is an
+    # ancestor of the tip). That push fast-forwards a published PR — it cannot rebase
+    # forward without rewriting shared history, so "contains main's migrations" can
+    # never pass and the gate deadlocks the flow (2026-08-19, models/delete-user).
+    ff = ""
+    if branch:
+        q = shlex.quote(f"refs/remotes/origin/{branch}")
+        ff = (f'git rev-parse --verify -q {q} >/dev/null 2>&1 '
+              f'&& git merge-base --is-ancestor {q} HEAD 2>/dev/null && exit 0; ')
+    gates = [("fresh", ff +
               '[ "$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)" -eq 0 ] && exit 0; '
               # three-dot like the hook: main-side changes only, so the branch's own
               # new migrations don't read as "missing" (two-dot red-locked any schema branch)
@@ -324,7 +334,7 @@ def main():
     t0 = time.time()
     env_notes, env_ok = env_repair(cwd)
     env_ms = int((time.time() - t0) * 1000)
-    gates = configured_gates(cwd) or default_gates(cwd)
+    gates = configured_gates(cwd) or default_gates(cwd, branch)
     fixes = (configured_fixes(cwd) or default_fixes(cwd, branch, borrowed)) if do_fix else {}
 
     if not gates:
