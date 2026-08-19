@@ -60,16 +60,35 @@ function Layout(props: { children?: JSX.Element }) {
   const qc = useQueryClient();
   installFetchTracking(); // every action POST is tracked at the fetch seam — see track.ts
   installUiTracking(); // + button clicks and keyboard shortcuts (the client-only layer)
-  // usage telemetry: one event per route change (what you open, in what order). Dwell +
-  // bounce are derived offline from the gap between consecutive nav events.
+  // usage telemetry: one event per route change (what you open, in what order), carrying
+  // `dwell` = VISIBLE ms spent on the page being left — wall-clock gaps lie (a tab hidden
+  // overnight reads as 14h on one node), so the clock pauses while the tab is hidden.
   const { location: loc } = useViewerLocation();
+  let navAt = performance.now();
+  let navHiddenAt: number | null = document.hidden ? performance.now() : null;
+  let navHiddenTotal = 0;
+  const takeDwell = (): number => {
+    const now = performance.now();
+    if (navHiddenAt != null) {
+      navHiddenTotal += now - navHiddenAt;
+      navHiddenAt = now;
+    }
+    const d = Math.max(0, now - navAt - navHiddenTotal);
+    navAt = now;
+    navHiddenTotal = 0;
+    return Math.round(d);
+  };
+  let firstNav = true;
   createEffect(() => {
     const l = loc();
+    const dwell = takeDwell();
     track("nav", {
       kind: l.kind,
       project: forestKey(l) || undefined,
       node: "node" in l ? l.node : undefined,
+      ...(firstNav ? {} : { dwell }),
     });
+    firstNav = false;
     trackRecent(l); // here, not in the rail — it's hidden on node review but history still counts
   });
   // /events is a persistent SSE stream and the browser only allows ~6 connections per origin
@@ -106,8 +125,13 @@ function Layout(props: { children?: JSX.Element }) {
   };
   const onVisibility = () => {
     if (document.hidden) {
+      navHiddenAt = performance.now(); // dwell clock pauses — hidden time isn't time-on-page
       closeStream();
     } else {
+      if (navHiddenAt != null) {
+        navHiddenTotal += performance.now() - navHiddenAt;
+        navHiddenAt = null;
+      }
       openStream();
       refresh(); // we may have missed updates while hidden
     }

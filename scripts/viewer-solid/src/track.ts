@@ -103,6 +103,9 @@ export function installUiTracking(): void {
       if (t && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) {
         return; // typing into a field, not firing a shortcut
       }
+      if (e.key === "Meta" || e.key === "Control" || e.key === "Alt" || e.key === "Shift") {
+        return; // a modifier ALONE isn't a shortcut — bare Cmd was 627 "cmd+Meta" rows, half the key stream
+      }
       const mods = e.metaKey || e.ctrlKey || e.altKey;
       if (e.key.length !== 1 && !mods) return; // bare Arrow/Enter/Escape/Tab = navigation noise, skip
       const prefix = [e.metaKey && "cmd", e.ctrlKey && "ctrl", e.altKey && "alt", e.shiftKey && "shift"].filter(Boolean);
