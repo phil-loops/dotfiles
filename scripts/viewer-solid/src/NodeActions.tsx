@@ -659,7 +659,7 @@ export function NodeActions(props: {
     queryKey: ["push-preview", props.branch],
     queryFn: () =>
       fetch(withRepo("/push-preview") + "?branch=" + encodeURIComponent(props.branch)).then(
-        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string; originExists?: boolean; published?: boolean; commit?: { sha: string; subject: string; body: string } | null }>,
+        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string; originExists?: boolean; published?: boolean; commit?: { sha: string; subject: string; body: string } | null; review?: { flags: string[] } | null }>,
       ),
     enabled: !!props.branch && !props.isReview,
   }));
@@ -837,6 +837,23 @@ export function NodeActions(props: {
         >
           {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push to origin"}
         </button>
+      </Show>
+
+      {/* push-ready's review verdict for THIS exact tree — tree-keyed like gates-green, so a
+          moved tree silently retires it (the server sends null). Flags are the reviewer's
+          unapplied findings, full text on hover; a fresh EMPTY list is reviewed-clean. */}
+      <Show when={!isReview() && preview.data?.review}>
+        {(rv) =>
+          rv().flags.length ? (
+            <span class="nh-review-flags cursor-help whitespace-nowrap text-[12px] text-patina" title={rv().flags.join("\n")}>
+              ⚑ {rv().flags.length} review flag{rv().flags.length === 1 ? "" : "s"}
+            </span>
+          ) : (
+            <span class="nh-reviewed cursor-help whitespace-nowrap text-[12px] text-ink-faint" title="push-ready reviewed this exact tree — no unapplied findings">
+              ✓ reviewed
+            </span>
+          )
+        }
       </Show>
 
       {/* open the ONE outgoing commit's message on demand — play with it (or ✦ voice it) and

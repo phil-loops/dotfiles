@@ -232,6 +232,18 @@ def _tree(rev):
     return ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
 
 
+def _review_flags(branch):
+    """push-ready's unapplied review findings (stack-branch.<b>.review-flag, multivar), valid
+    only for the tree they were written against (review-flags-tree — same staleness contract
+    as gates-green-tree). Stale/absent → None (the UI hides); an EMPTY fresh list is a state:
+    reviewed-clean."""
+    tree = ctx.run(["git", "config", f"stack-branch.{branch}.review-flags-tree"]).stdout.strip()
+    if not tree or tree != _tree(branch):
+        return None
+    out = ctx.run(["git", "config", "--get-all", f"stack-branch.{branch}.review-flag"]).stdout
+    return {"flags": [l.strip() for l in out.splitlines() if l.strip()]}
+
+
 def _pr_base(branch):
     """The compare form's base: the nearest stack ancestor with an OPEN PR on origin, else
     main. A stacked child targets its parent's PR so the review diff stays that branch's own
@@ -439,6 +451,7 @@ def _origin_verdict(branch):
         # dead push button into 'view PR ↗' (has one) vs 'open PR ↗' (pushed, none yet).
         "published": branch in sync._open_pr_heads(),
         "wards": wards, "ok": not reasons, "reasons": reasons,
+        "review": _review_flags(branch),
     }
 
 
