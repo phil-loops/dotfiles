@@ -410,13 +410,16 @@ export function ForestMap(props: {
   // pixel-identically; dashes can't). Patina keeps it distinct from the status-colored
   // parent elbows; hover still lights the full run gold. The ✦-assembly (lands) edges
   // stay the quiet pole: pure bookkeeping, one thin outermost rail.
-  const faninEdgeClass = (lit: boolean): string => {
+  // ordering-only fan-in (carries zero of the dep's commits — pure merge-order metadata)
+  // stays SOLID like carried fan-in (dashes braid on shared rails) but drops to ink-faint
+  // and a hair thinner: the graph stops asserting a code dependency that isn't there.
+  const faninEdgeClass = (lit: boolean, ordering?: boolean): string => {
     if (spot()) {
       return lit
         ? "opacity-100! stroke-gold-leaf! stroke-[2.3] animate-fm-fade transition-[opacity,stroke] duration-[140ms]"
-        : "opacity-[0.05]! stroke-patina stroke-[1.5] animate-fm-fade-half transition-opacity duration-[140ms]";
+        : `opacity-[0.05]! ${ordering ? "stroke-ink-faint stroke-[1.2]" : "stroke-patina stroke-[1.5]"} animate-fm-fade-half transition-opacity duration-[140ms]`;
     }
-    return "stroke-patina stroke-[1.5] animate-fm-fade-half motion-reduce:animate-none motion-reduce:opacity-50";
+    return `${ordering ? "stroke-ink-faint stroke-[1.2]" : "stroke-patina stroke-[1.5]"} animate-fm-fade-half motion-reduce:animate-none motion-reduce:opacity-50`;
   };
   const landsEdgeClass = (lit: boolean): string => {
     if (spot()) {
@@ -631,12 +634,18 @@ export function ForestMap(props: {
         <For each={layout().edges.filter((e) => e.kind === "fanin")}>
           {(e) => (
             <path
-              class={`fm-edge fanin fill-none opacity-0 ${faninEdgeClass(litEdge(e.from, e.to))}`}
+              class={`fm-edge fanin fill-none opacity-0 ${faninEdgeClass(litEdge(e.from, e.to), e.meta?.carried === 0)}`}
               classList={{ lit: litEdge(e.from, e.to) }}
               marker-end="url(#fm-arrow)"
               d={edgePath(e)}
             >
-              <title>fan-in: carries {leafOf(e.from)} as cherry-picks — cannot land before it</title>
+              <title>{
+                e.meta === undefined
+                  ? `fan-in: carries ${leafOf(e.from)} as cherry-picks — cannot land before it`
+                  : e.meta.carried === 0
+                    ? `merge-order only: carries none of ${leafOf(e.from)}'s ${e.meta.of} commits — no code dependency, ordering is the whole edge`
+                    : `fan-in: carries ${e.meta.carried} of ${leafOf(e.from)}'s ${e.meta.of} commits as cherry-picks — cannot land before it`
+              }</title>
             </path>
           )}
         </For>

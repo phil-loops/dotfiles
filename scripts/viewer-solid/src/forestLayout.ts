@@ -146,7 +146,7 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
     // The ✦ sink draws no parent elbow: main's spine continues straight down into it
     // (kind "spine"), and its synthetic requires — the tips the preview assembles — run
     // in as kind "lands", a different dependence than fan-in (bookkeeping, not merge-blocking).
-    type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string; laneX?: number };
+    type Edge = { x1: number; y1: number; x2: number; y2: number; kind: string; from: string; to: string; laneX?: number; meta?: { carried: number; of: number } };
     const edges: Edge[] = [];
     list.forEach((n) => {
       const me = pos[n.id];
@@ -180,7 +180,7 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
           edges.push({
             x1: pos[rq].x + nodeW(rq) + 6, y1: pos[rq].y,
             x2: me.x + nodeW(n.id) + 6, y2: me.y,
-            kind: "fanin", from: rq, to: n.id,
+            kind: "fanin", from: rq, to: n.id, meta: n.requires_meta?.[rq],
           });
         }
       });
