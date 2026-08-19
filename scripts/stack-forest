@@ -564,6 +564,12 @@ def commit_patch_ids(range_spec):
 def build(branch):
     parent = parents.get(branch, MAIN)
     rows, clean, stale, unbl = file_status(branch, trunk_base(parent))
+    # net-zero churn: paths some commit touches that the cumulative diff no longer
+    # contains — an oops/un-oops pair hiding in history. Rebase-dangerous (the pair
+    # can re-apply against a moved parent as a revert of the parent's own work).
+    log_paths = set(git_out(["log", "--format=", "--name-only", f"{parent}..{branch}"]).split("\n"))
+    log_paths.discard("")
+    churn = sorted(log_paths - {row["path"] for row in rows})
     # fan-in: a node CARRIES its `requires` deps' files (cherry-picked). Subtract
     # those paths so the node shows only its OWN work — clean counts, not the
     # carried content. (Path-level; the forest keeps one provider per file.)
@@ -599,6 +605,7 @@ def build(branch):
         "children": [c for c in children.get(branch, []) if c in members],
         "requires": [r for r in requires.get(branch, []) if r in members],
         **({"requires_meta": {r: m for r, m in req_meta.items() if r in members}} if req_meta else {}),
+        **({"churn": churn} if churn else {}),
         "mergeable": mergeable(branch),
         "landed": landed(branch),
     }

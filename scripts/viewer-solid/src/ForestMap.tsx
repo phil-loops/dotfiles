@@ -130,6 +130,28 @@ export function ForestMap(props: {
   // chain (requires is reserved for converging 2+ bases) — same rule as stack-doctor ⛓
   const misChain = (n: SpineNode) =>
     !isGhostId(n.id) && (!n.parent || n.parent === "main") && (n.requires?.length ?? 0) === 1;
+  // shape lints beyond ⛓ — mechanically-detectable dishonesty in the graph, one quiet
+  // chip at a time (highest severity wins; same sub-node slot, same yield chain).
+  const shapeLint = (n: SpineNode): { mark: string; label: string; title: string } | null => {
+    if (isGhostId(n.id)) return null;
+    const byId = model().byId;
+    const chainOf = (start: string | undefined): Set<string> => {
+      const s = new Set<string>();
+      let x = start, g = 0;
+      while (x && x !== "main" && byId[x] && g++ < 64) { s.add(x); x = byId[x].parent; }
+      return s;
+    };
+    const reqs = n.requires || [];
+    const ancReq = reqs.find((r) => chainOf(n.parent).has(r));
+    if (ancReq) return { mark: "⌫", label: "requires already ancestral", title: `\`requires ${ancReq}\` is already in the parent chain — pure config debt, drop the entry` };
+    for (const a of reqs) {
+      const up = chainOf(byId[a]?.parent);
+      const b = reqs.find((r) => r !== a && up.has(r));
+      if (b) return { mark: "⑂", label: "bases share ancestry", title: `converged bases aren't independent: ${a} builds on ${b} — linearize into one spine` };
+    }
+    if (n.churn?.length) return { mark: "∿", label: "net-zero churn", title: `commits touch ${n.churn.slice(0, 4).join(", ")}${n.churn.length > 4 ? ` +${n.churn.length - 4}` : ""} but the branch nets zero there — an oops/un-oops pair is hiding in history; it can re-apply as a revert on rebase` };
+    return null;
+  };
   // The map asks the same question the review surface asks, from the data /forest-health
   // already returns: an existing upstream with nothing ahead of it IS "nothing outgoing".
   // It never learns "ready" (that needs a per-node prep-route — a fresh gh fetch each), so
@@ -849,7 +871,17 @@ export function ForestMap(props: {
                       ⛓ mis-encoded chain
                     </text>
                   </Show>
-                  <Show when={!isGhostId(n.id) && !misChain(n) && n.description && !landed(n.id) && !nhealth(n.id)?.drifted}>
+                  <Show when={!misChain(n) && shapeLint(n) && !landed(n.id) && !nhealth(n.id)?.drifted && !dams().damSet.has(n.id)}>
+                    <text
+                      class={`fm-warn font-mono text-[9.5px] tracking-[0.03em] [text-anchor:middle] ${inkFlip(n.id) ? "fill-ink" : "fill-del"}`}
+                      x={w / 2}
+                      y={NODE_H / 2 + 12}
+                    >
+                      <title>{shapeLint(n)!.title}</title>
+                      {shapeLint(n)!.mark} {shapeLint(n)!.label}
+                    </text>
+                  </Show>
+                  <Show when={!isGhostId(n.id) && !misChain(n) && n.description && !landed(n.id) && !nhealth(n.id)?.drifted && (dams().damSet.has(n.id) || !shapeLint(n))}>
                     <For each={wrapPurpose(n.description!, w)}>
                       {(line, i) => (
                         <text class={`fm-purpose ${purposeClass(n.id)}`} x={w / 2} y={NODE_H / 2 + 13 + i() * 10}>

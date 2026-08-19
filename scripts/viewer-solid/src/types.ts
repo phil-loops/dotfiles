@@ -25,6 +25,9 @@ export const NodeMeta = z.object({
   // per-`requires` evidence: how many of the dep's own commits this branch actually
   // carries as cherry-picks (patch-id match). carried=0 → merge-order-only edge.
   requires_meta: z.record(z.string(), z.object({ carried: z.number(), of: z.number() })).optional(),
+  // paths some commit touches that the cumulative diff nets to zero on — an
+  // oops/un-oops pair hiding in history (rebase-dangerous: can re-apply as a revert).
+  churn: z.array(z.string()).optional(),
   // one-line branch purpose (git branch.<name>.description), grafted on by /model.
   description: z.string().optional(),
   // deterministic merge-order depth (stack-merge-rank), grafted on by /model. Canonical
