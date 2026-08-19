@@ -5,7 +5,6 @@ import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
 import { nextStep, type NextStep } from "./homeModel";
-import { FocusLane } from "./FocusLane";
 import { ForgottenBand, isForgotten } from "./ForgottenBand";
 import { rowDrag, setRowDrag, dropOnLane } from "./focusDrag";
 import type { Project, Parked, PR } from "./types";
@@ -286,7 +285,6 @@ export function ForestsList(props: {
             onInput={(e) => setForestQuery(e.currentTarget.value)}
           />
         </Show>
-        <FocusLane projects={props.projects} prOf={props.prOf} />
         <ForgottenBand projects={props.projects} forestRow={props.forestRow} />
         <Show
           when={filteredForests().length}

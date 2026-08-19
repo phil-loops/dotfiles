@@ -5,6 +5,7 @@ import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { type Action } from "./actions";
 import { Hearth } from "./Hearth";
+import { FocusLane } from "./FocusLane";
 import { NextQueue } from "./NextQueue";
 import { ForestRow } from "./ForestRow";
 import { useRestack } from "./useRestack";
@@ -333,10 +334,10 @@ export function Home() {
 
   return (
     <div class="ledger min-h-screen">
-      <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[60px] pb-[100px]">
-        <header class="home-head mb-[34px] flex items-center justify-between">
-          <div class="brand big inline-block px-[20px] pb-[2px] font-display text-[44px] font-semibold italic text-ink">
-            <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span> canopy
+      <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[30px] pb-[100px]">
+        <header class="home-head mb-[16px] flex items-center justify-between">
+          <div class="brand inline-block pb-[2px] font-display text-[21px] font-semibold italic text-ink">
+            <span class="brand-mark text-[12px] not-italic text-gold-leaf">✦</span> canopy
           </div>
           <Show when={landedChip(merges.data, projects.data)}>
             {(c) => c().to
@@ -360,6 +361,10 @@ export function Home() {
         </header>
 
         <Hearth />
+
+        {/* the focus lane IS the home surface (Phil, ninth strike) — it leads the page on
+            every tab; the bands below are the archive it was hoisted out of. */}
+        <FocusLane projects={() => projects.data} prOf={prOf} />
 
       <Show when={stripChats().length}>
         <section class="work-sec chat-live mb-[30px]">
