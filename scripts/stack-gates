@@ -78,7 +78,11 @@ def scratch_checkout(branch, cwd):
     head = run(["git", "rev-parse", "HEAD"], path).stdout.strip()
     if head != tip:
         return None, f"scratch worktree {path} is pinned off the branch tip"
-    if run(["git", "status", "--porcelain"], path).stdout.strip():
+    # helix-tsgo-stamp seeds machine-local editor config into every worktree — tooling
+    # dirt, not branch content; a red here poisons callers' per-tree memos (pregate)
+    dirt = [ln for ln in run(["git", "status", "--porcelain"], path).stdout.splitlines()
+            if ln.strip() and ln[3:] not in (".helix/", ".helix/languages.toml")]
+    if dirt:
         return None, f"scratch worktree {path} has uncommitted edits (in-flight work?)"
     return path, ""
 
