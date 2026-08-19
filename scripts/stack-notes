@@ -1,0 +1,58 @@
+#!/bin/zsh
+# stack-notes — per-branch test/repro notes: how to recreate the state that
+# verified this branch (fixtures, logins, expected behavior), so tomorrow-you
+# doesn't re-derive the drive by hand.
+#
+# Storage: <git-common-dir>/stack-notes/<branch>.md — sidecar markdown, shared
+# across worktrees, never committed, survives rebases. The viewer reads it via
+# /notes and shows it on the branch's review surface.
+#
+#   stack-notes <branch>               print the note (nothing if unset)
+#   stack-notes --edit <branch>        open the note in $EDITOR
+#   stack-notes --set - <branch>       write the note from stdin
+#   stack-notes --set-file <f> <branch>  write the note from a file (empty file deletes)
+#   stack-notes --json <branch>        {"branch","markdown","mtime"} for the viewer
+#   stack-notes --rm <branch>          delete the note
+#   stack-notes --list                 branches that have notes
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+
+branch=""; mode="print"
+while (( $# )); do
+  case "$1" in
+    --edit) mode="edit"; shift;;
+    --set)  mode="set"; [[ "${2:-}" == "-" ]] || { echo "stack-notes: --set only reads stdin (use --set -)" >&2; exit 2; }; shift 2;;
+    --set-file) mode="setfile"; src="$2"; shift 2;;
+    --json) mode="json"; shift;;
+    --rm)   mode="rm"; shift;;
+    --list) mode="list"; shift;;
+    *) branch="$1"; shift;;
+  esac
+done
+
+dir="$(git rev-parse --path-format=absolute --git-common-dir)/stack-notes"
+
+if [[ "$mode" == "list" ]]; then
+  [[ -d "$dir" ]] || exit 0
+  ( cd "$dir" && find . -name '*.md' | sed -E 's|^\./||; s|\.md$||' | sort )
+  exit 0
+fi
+
+[[ -n "$branch" ]] || { echo "usage: stack-notes [--edit|--set -|--json|--rm|--list] <branch>" >&2; exit 2; }
+file="$dir/$branch.md"
+
+case "$mode" in
+  print) [[ -f "$file" ]] && cat "$file" || true;;
+  edit)  mkdir -p "${file:h}"; "${EDITOR:-nvim}" "$file";;
+  set)   mkdir -p "${file:h}"; cat > "$file";;
+  setfile)
+    if [[ -s "$src" ]]; then mkdir -p "${file:h}"; cp "$src" "$file"; else rm -f "$file"; fi;;
+  rm)    rm -f "$file";;
+  json)
+    if [[ -f "$file" ]]; then
+      jq -n --arg b "$branch" --arg m "$(cat "$file")" --arg t "$(stat -f %m "$file")" \
+        '{branch:$b, markdown:$m, mtime:($t|tonumber)}'
+    else
+      jq -n --arg b "$branch" '{branch:$b, markdown:"", mtime:0}'
+    fi;;
+esac
