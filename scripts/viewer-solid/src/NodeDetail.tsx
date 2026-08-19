@@ -6,7 +6,6 @@ import { leaf, isBlessed, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
 import { DirtyRail, FileEntry, CommitsList } from "./FileRail";
 import { FilePanel } from "./FilePanel";
-import { TestNotes } from "./TestNotes";
 import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
@@ -350,7 +349,6 @@ export function NodeDetail() {
           blessedOf={blessedOf}
           setShowChats={setShowChats}
         />
-        <TestNotes branch={active} />
         <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
             <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
