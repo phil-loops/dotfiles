@@ -22,6 +22,9 @@ export const NodeMeta = z.object({
   parent: z.string().optional(),
   children: z.array(z.string()).optional(),
   requires: z.array(z.string()).optional(),
+  // merge-order-only deps (stack-branch.<b>.after): content-independent — no carried
+  // commits, no rebase coupling — but must land later (deploy invariants).
+  after: z.array(z.string()).optional(),
   // per-`requires` evidence: how many of the dep's own commits this branch actually
   // carries as cherry-picks (patch-id match). carried=0 → merge-order-only edge.
   requires_meta: z.record(z.string(), z.object({ carried: z.number(), of: z.number() })).optional(),
