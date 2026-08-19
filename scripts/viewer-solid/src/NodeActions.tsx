@@ -117,7 +117,7 @@ export function NodeActions(props: {
   health?: {
     drifted?: boolean; contractable?: boolean; parent?: string;
     upstreamBad?: boolean; upstreamReason?: string; upstream?: string;
-    diverged?: boolean; ahead?: number; behind?: number;
+    diverged?: boolean; ahead?: number; behind?: number; frozenOrigin?: boolean;
   } | null;
   onReseat?: () => void; // rebase drifted children back onto the parent's tip (App owns the mutation)
   onDetach?: () => void; // unset a footgun tracking ref
@@ -751,7 +751,9 @@ export function NodeActions(props: {
       parts.push(`⚠ tracks ${h.upstream ?? "?"} — ${h.upstreamReason ?? "wrong remote"} (⋯ → detach)`);
     }
     if (h?.diverged) {
-      parts.push(`⇄ diverged from ${h.upstream ?? "its pushed head"} (${h.ahead ?? 0}↑ ${h.behind ?? 0}↓) — ⌁ prep carries it additively; ⋯ → inspect / reconcile`);
+      parts.push(h.frozenOrigin
+        ? `❄ origin frozen (${h.ahead ?? 0}↑ ${h.behind ?? 0}↓) — the pushed PR is the review artifact; squash-merge reconciles, nothing to push`
+        : `⇄ diverged from ${h.upstream ?? "its pushed head"} (${h.ahead ?? 0}↑ ${h.behind ?? 0}↓) — ⌁ prep carries it additively; ⋯ → inspect / reconcile`);
     }
     if ((sync.data?.dirty?.length ?? 0) > 0) {
       parts.push(`± ${sync.data!.dirty!.length} uncommitted in ${sync.data!.dirtyWorktree}:\n${sync.data!.dirty!.join("\n")}`);

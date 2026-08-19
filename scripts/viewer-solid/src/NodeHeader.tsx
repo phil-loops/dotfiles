@@ -1,4 +1,4 @@
-import { Show, createSignal } from "solid-js";
+import { Show, createSignal, createEffect, on } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { Link, forestRepo, type ViewerLocation } from "./router";
 import { leaf, interestPips } from "./shared";
@@ -12,7 +12,7 @@ import type { NodeData, FileDiff } from "./types";
 type HealthEntry = {
   drifted?: boolean; merged?: boolean; contractable?: boolean; parent?: string;
   upstream?: string; upstreamBad?: boolean; upstreamReason?: string;
-  diverged?: boolean; ahead?: number; behind?: number;
+  diverged?: boolean; ahead?: number; behind?: number; frozenOrigin?: boolean;
 };
 
 const GHOST_BTN =
@@ -72,6 +72,9 @@ export function NodeHeader(props: {
   setShowChats: (v: boolean) => void;
 }) {
   const [chatPick, setChatPick] = createSignal(false);
+  // optimistic freeze-toggle state; server truth re-arrives with the health poll
+  const [frozenLocal, setFrozenLocal] = createSignal<boolean | undefined>(undefined);
+  createEffect(on(() => props.active(), () => setFrozenLocal(undefined), { defer: true }));
   return (
         <header class="node-head mb-[20px] flex flex-col gap-[12px]">
           {/* forest strip — forest altitude: which project + restack-forest. Lifted out of the
@@ -145,6 +148,21 @@ export function NodeHeader(props: {
           </div>
           <Show when={props.divergedOpen() && props.nodeHealth(props.active())?.diverged}>
             <DivergedDetailPanel data={props.divergedData()} />
+            {/* deliberate-divergence outcome: freeze declares "origin's PR is the review
+                artifact; squash-merge reconciles" — calms the ⇄ chip and prep's additive
+                advice. Optimistic label; the chip itself catches up on the next health poll. */}
+            <button
+              class="mt-[4px] cursor-pointer rounded-[6px] border border-rule bg-transparent px-[9px] py-[3px] text-[11.5px] text-ink-faint hover:bg-vellum-edge hover:text-ink"
+              onClick={() => {
+                const next = !(frozenLocal() ?? props.nodeHealth(props.active())?.frozenOrigin);
+                setFrozenLocal(next);
+                void fetch("/frozen-origin", { method: "POST", body: JSON.stringify({ branch: props.active(), value: next }) });
+              }}
+            >
+              {(frozenLocal() ?? props.nodeHealth(props.active())?.frozenOrigin)
+                ? "⇄ unfreeze origin — divergence is real again, reconcile before pushing"
+                : "❄ mark origin frozen — the pushed PR is the review artifact; squash-merge reconciles"}
+            </button>
           </Show>
           {/* tier 2 — controls: view switches on the left, branch state + actions on the right.
               The blessed count lives in the spine; the map opens from the spine + `m`. */}

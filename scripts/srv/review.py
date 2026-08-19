@@ -12,6 +12,7 @@
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import json
+import tempfile
 import re
 import hashlib
 import threading
@@ -313,10 +314,48 @@ def bless(req, raw):
               json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
 
 
+def frozen_origin_set(req, raw):
+    # mark/unmark a branch's origin as deliberately frozen (stack-branch.<b>.frozen-origin):
+    # the pushed PR stays the review artifact while local carries the restacked truth.
+    d = json.loads(raw or "{}")
+    b = d.get("branch", "")
+    if not b:
+        req._send(400, "{}")
+        return
+    if d.get("value"):
+        r = ctx.run(["git", "config", f"stack-branch.{b}.frozen-origin", "1"])
+        ok = r.returncode == 0
+    else:
+        r = ctx.run(["git", "config", "--unset", f"stack-branch.{b}.frozen-origin"])
+        ok = r.returncode in (0, 5)  # 5 = already unset
+    req._send(200 if ok else 500, "{}")
+
+
 def purpose_set(req, raw):
     d = json.loads(raw or "{}")
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-purpose"), "--set", d.get("text", ""), d.get("branch", "")])
     req._send(200 if r.returncode == 0 else 500, r.stdout if r.returncode == 0 else "{}")
+
+
+def notes_get(req, u):
+    # per-branch test/repro notes (the stack-notes sidecar) — how to recreate the verified state
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-notes"), "--json", branch])
+    req._send(200 if r.returncode == 0 else 500,
+              r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "markdown": "", "mtime": 0}))
+
+
+def notes_set(req, raw):
+    # ctx.run has no stdin path, so the note body travels via a temp file (--set-file; empty deletes)
+    d = json.loads(raw or "{}")
+    with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+        f.write(d.get("markdown", ""))
+        tmp = f.name
+    try:
+        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-notes"), "--set-file", tmp, d.get("branch", "")])
+    finally:
+        os.unlink(tmp)
+    req._send(200 if r.returncode == 0 else 500, json.dumps({"ok": r.returncode == 0}))
 
 
 def _plan_defaults():
