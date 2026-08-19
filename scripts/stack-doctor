@@ -160,6 +160,15 @@ OM=$(git rev-parse --verify -q origin/main 2>/dev/null || git rev-parse --verify
 sha() { git rev-parse --short "$1" 2>/dev/null; }
 # real parent commit of a branch = its first-parent commit
 realparent() { git rev-parse --short "$1^" 2>/dev/null; }
+cfg_parent() { git config "branch.$1.stack-parent" 2>/dev/null || git config "stack-branch.$1.parent" 2>/dev/null || echo main; }
+cfg_chain_has() { # walk the CONFIG parent chain from $1 (inclusive); true if $2 appears
+  local x="$1" g=0
+  while [ -n "$x" ] && [ "$x" != "main" ] && [ "$x" != "origin/main" ] && [ "$g" -lt 64 ]; do
+    [ "$x" = "$2" ] && return 0
+    x=$(cfg_parent "$x"); g=$((g+1))
+  done
+  return 1
+}
 
 # ── viewer model drift ──────────────────────────────────────────────────────
 # Comparing what the viewer SERVES to what git says is the only way a frozen /model
@@ -287,6 +296,25 @@ for proj in $projects; do
     nreq=$(printf '%s' "$reqs" | grep -c . || true)
     if { [ "$parent" = "main" ] || [ "$parent" = "origin/main" ]; } && [ "$nreq" = "1" ]; then
       lines+="  ⛓ $b — one requires ($reqs) on a main-rooted branch: mis-encoded chain — set parent=$reqs, drop the requires"$'\n'; proj_problem=1
+    fi
+    if [ -n "$reqs" ]; then
+      # ⌫ a requires already reachable through the parent chain is pure config debt
+      while IFS= read -r rq; do
+        [ -n "$rq" ] || continue
+        if cfg_chain_has "$parent" "$rq"; then
+          lines+="  ⌫ $b — requires $rq is already ancestral via the parent chain: drop the entry"$'\n'; proj_problem=1
+        fi
+      done <<< "$reqs"
+      # ⑂ converged bases must be independent — one building on another means linearize
+      while IFS= read -r a; do
+        [ -n "$a" ] || continue
+        while IFS= read -r c; do
+          { [ -n "$c" ] && [ "$c" != "$a" ]; } || continue
+          if cfg_chain_has "$(cfg_parent "$a")" "$c"; then
+            lines+="  ⑂ $b — converged bases aren't independent: $a builds on $c — linearize into one spine"$'\n'; proj_problem=1
+          fi
+        done <<< "$reqs"
+      done <<< "$reqs"
     fi
     if [ "$role" != "proof" ] && [ -z "$(git config "branch.$b.description" 2>/dev/null || true)" ]; then
       lines+="  ∅ $b — no purpose: git config branch.$b.description \"<thesis>\""$'\n'; proj_problem=1
