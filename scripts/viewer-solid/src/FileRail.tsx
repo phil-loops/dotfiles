@@ -462,7 +462,7 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
 const DIVIDER =
   "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
 
-export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; onChat: (f: FileDiff, session?: string) => void }) {
+export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; frozen?: boolean; onChat: (f: FileDiff, session?: string) => void }) {
   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
   // the origin waterline — GitHub Desktop's push line: everything above it goes out on
@@ -474,9 +474,11 @@ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: 
     return f === -1 ? own().length : f;
   };
   const waterlineText = () =>
-    waterline() === 0
-      ? "origin is current — a push sends nothing"
-      : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
+    props.frozen && waterline() > 0
+      ? "origin frozen — local carries the restacked truth; squash-merge reconciles, nothing to push"
+      : waterline() === 0
+        ? "origin is current — a push sends nothing"
+        : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
   return (
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
