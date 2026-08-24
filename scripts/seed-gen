@@ -265,10 +265,20 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
       fi
     fi
     for _pkg in .prisma @prisma; do
-      [[ -L "$dir/node_modules/$_pkg" ]] || continue
-      rm "$dir/node_modules/$_pkg"
-      cp -cR "$src/node_modules/$_pkg" "$dir/node_modules/$_pkg" 2>/dev/null \
-        || cp -R "$src/node_modules/$_pkg" "$dir/node_modules/$_pkg"
+      if [[ -L "$dir/node_modules/$_pkg" ]]; then
+        rm "$dir/node_modules/$_pkg"
+        cp -cR "$src/node_modules/$_pkg" "$dir/node_modules/$_pkg" 2>/dev/null \
+          || cp -R "$src/node_modules/$_pkg" "$dir/node_modules/$_pkg"
+      elif [[ -d "$dir/node_modules/$_pkg" && ! -L "$dir/node_modules/$_pkg" ]]; then
+        # per-package exploded scope: a linked @prisma/client child still names the donor's
+        # runtime in declaration emit → TS2883, so trade each symlinked child for a real copy
+        for _sub in "$dir/node_modules/$_pkg"/*; do
+          [[ -L "$_sub" ]] || continue
+          rm "$_sub"
+          cp -cR "$src/node_modules/$_pkg/$(basename "$_sub")" "$_sub" 2>/dev/null \
+            || cp -R "$src/node_modules/$_pkg/$(basename "$_sub")" "$_sub"
+        done
+      fi
     done
     take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
     if out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
