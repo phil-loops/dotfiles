@@ -90,6 +90,8 @@ typeset -ga CONTRACTED
 CONTRACTED=()
 typeset -ga SKIPPED_PUBLISHED
 SKIPPED_PUBLISHED=()
+typeset -ga CONFORMED_PUBLISHED
+CONFORMED_PUBLISHED=()
 typeset -ga SKIPPED_TRUNK
 SKIPPED_TRUNK=()
 typeset -ga FAILED_REBASE
@@ -1024,11 +1026,17 @@ try_contracted_resolve() {
 # a force-push. Routine restacks leave PR'd branches alone (pushed-but-no-PR stays free
 # game per the 2026-06-30 rule); rewriting one is deliberate via STACK_RESTACK_REWRITE_PUBLISHED=1.
 OPEN_PR_HEADS=""
+PR_HEADS_KNOWN=1
 if [[ -z "${STACK_RESTACK_REWRITE_PUBLISHED:-}" ]]; then
   if [[ -n "${STACK_RESTACK_OPEN_PR_HEADS:-}" ]]; then
     OPEN_PR_HEADS="$STACK_RESTACK_OPEN_PR_HEADS"   # batch driver fetched once for all projects
+  elif _pr_list=$(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null); then
+    OPEN_PR_HEADS=" $(print -r -- "$_pr_list" | tr '\n' ' ') "
   else
-    OPEN_PR_HEADS=" $(gh pr list --state open --limit 200 --json headRefName --jq '.[].headRefName' 2>/dev/null | tr '\n' ' ' || true) "
+    # gh outage ≠ "no open PRs" — running with an empty guard is how a published branch
+    # gets rewritten. Freeze every pushed branch instead (unpushed can't have a PR).
+    PR_HEADS_KNOWN=0
+    echo "  ⚠ gh unreachable — can't tell which pushed branches have open PRs; freezing ALL pushed branches this run" >&2
   fi
 fi
 
@@ -1046,7 +1054,71 @@ while (( ${#PENDING[@]} > 0 )); do
     continue
   fi
 
+  IS_PUBLISHED=0
   if [[ "$OPEN_PR_HEADS" == *" $BRANCH "* ]]; then
+    IS_PUBLISHED=1
+  elif (( ! PR_HEADS_KNOWN )) && git rev-parse --verify -q "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1; then
+    IS_PUBLISHED=1
+  fi
+
+  if (( IS_PUBLISHED )); then
+    git fetch origin "$BRANCH" >/dev/null 2>&1 || true
+    if git rev-parse --verify -q "refs/remotes/origin/${BRANCH}" >/dev/null 2>&1 && \
+       ! is_ancestor "origin/${BRANCH}" "$BRANCH"; then
+      # Local carries a REWRITE of published history (a rebase crossed the publish boundary,
+      # 2026-08-23: downloads/adopt-download-reads). Origin's copy is canon — skipping here
+      # would keep stacking children on commits origin will never have (push is FF-only).
+      # Conform: reset to origin's head + cherry-pick only the genuinely-new local commits.
+      # NOT a rebase --onto: the twins a boundary-crossing rebase leaves carry context
+      # drift, so rebase's already-upstream drop conflicts instead of skipping them.
+      echo "  ⇤ ${BRANCH} has published history but local diverged from origin/${BRANCH} — conforming to origin (reset + re-apply its own new commits)"
+      ORIG_TIP=$(git rev-parse "$BRANCH")
+      _fork=$(git merge-base "$BRANCH" "$MAIN_BRANCH" 2>/dev/null || true)
+      _wt=$(worktree_of "$BRANCH")
+      if [[ -z "$_fork" ]]; then
+        echo "  ⚠ ${BRANCH} not conformed — no merge-base with ${MAIN_BRANCH}, can't isolate its own commits"
+        FAILED_REBASE+=("$BRANCH")
+        continue
+      fi
+      if [[ -n "$_wt" && -n "$(git -C "$_wt" status --porcelain 2>/dev/null)" ]]; then
+        echo "  ⚠ ${BRANCH} not conformed — its worktree is dirty (${_wt}); NOT touched"
+        FAILED_REBASE+=("$BRANCH")
+        continue
+      fi
+      typeset -a _new; _new=()
+      while IFS= read -r _c; do [[ -n "$_c" ]] && _new+=("$_c"); done \
+        < <(git cherry "origin/${BRANCH}" "$BRANCH" "$_fork" 2>/dev/null | awk '/^\+/{print $2}')
+      CURRENT="$BRANCH"; save_state
+      _ok=1
+      in_branch_place "$BRANCH" reset --hard "origin/${BRANCH}" >/dev/null 2>&1 || _ok=0
+      if (( _ok )); then
+        for _c in "${_new[@]}"; do
+          if ! in_branch_place "$BRANCH" cherry-pick "$_c" >/dev/null 2>&1; then
+            in_branch_place "$BRANCH" cherry-pick --abort >/dev/null 2>&1 || true
+            in_branch_place "$BRANCH" reset --hard "$ORIG_TIP" >/dev/null 2>&1 || true
+            _ok=0
+            break
+          fi
+        done
+      fi
+      CURRENT=""
+      if (( ! _ok )); then
+        echo "  ⚠ ${BRANCH} could not be conformed cleanly (a new commit conflicts with origin's copy) — restored to its old tip; the push ward keeps its subtree blocked"
+        FAILED_REBASE+=("$BRANCH")
+        save_state
+        continue
+      fi
+      # Review base = where origin's history forks from the real parent, NOT origin's tip
+      # (that would hide the pushed commits from the parent...branch review diff).
+      _rp=$(git config "branch.${BRANCH}.stack-parent" 2>/dev/null || git config "stack-branch.${BRANCH}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
+      NEW_BASE=$(git merge-base "$_rp" "$BRANCH" 2>/dev/null || true)
+      [[ -n "$NEW_BASE" ]] && git config "stack-branch.${BRANCH}.base" "$NEW_BASE"
+      echo "  ✓ ${BRANCH} conformed: origin/${BRANCH} + ${#_new[@]} re-applied commit(s); children reseat onto it"
+      CONFORMED_PUBLISHED+=("$BRANCH")
+      COMPLETED+=("$BRANCH")
+      save_state
+      continue
+    fi
     echo "  ⤼ ${BRANCH} left alone — open PR (published history); STACK_RESTACK_REWRITE_PUBLISHED=1 to rewrite deliberately"
     SKIPPED_PUBLISHED+=("$BRANCH")
     continue
@@ -1337,6 +1409,9 @@ if (( ${#SKIPPED_TRUNK[@]} > 0 )); then
 fi
 if (( ${#SKIPPED_PUBLISHED[@]} > 0 )); then
   echo "  left published branches alone: ${SKIPPED_PUBLISHED[*]}"
+fi
+if (( ${#CONFORMED_PUBLISHED[@]} > 0 )); then
+  echo "  conformed diverged published branches to origin: ${CONFORMED_PUBLISHED[*]}"
 fi
 if (( ${#FAILED_REBASE[@]} > 0 )); then
   echo "  ⚠ NOT rebased (refused): ${FAILED_REBASE[*]}"
