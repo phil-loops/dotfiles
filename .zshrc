@@ -385,19 +385,45 @@ git-swap-remote() {
 
 export GPG_TTY=$(tty)
 
-task() {
-    if [[ "$1" == "dev" ]]; then
-        echo "silly! did you reaaaally want to run with ngrok?"
-        echo "  hint: use 'dev' to run without ngrok"
-        read -r "reply?continue with ngrok? [y/N] "
-        if [[ "$reply" =~ ^[Yy]$ ]]; then
-            command task "$@"
-        else
-            echo "ok, bailing out. use 'dev' next time!"
-        fi
+# Route heavy TypeScript compiles through the machine-wide queue (scripts/tsc-turn,
+# cap 2) — N concurrent sessions each firing a tsc otherwise flatten the box
+# (2026-07-06). Gates the three launch paths a session uses: bare tsc, `npx tsc`,
+# and the go-task typecheck/type-gen tasks; :watch tasks stay ungated — they'd
+# never release a slot.
+tsc() {
+    case "$1" in
+        ""|-v|--version|-h|--help|--init) command tsc "$@" ;;
+        *) tsc-turn command tsc "$@" ;;
+    esac
+}
+
+npx() {
+    if [[ " $* " == *" tsc "* ]]; then
+        tsc-turn command npx "$@"
     else
-        command task "$@"
+        command npx "$@"
     fi
+}
+
+task() {
+    case "$1" in
+        dev)
+            echo "silly! did you reaaaally want to run with ngrok?"
+            echo "  hint: use 'dev' to run without ngrok"
+            read -r "reply?continue with ngrok? [y/N] "
+            if [[ "$reply" =~ ^[Yy]$ ]]; then
+                command task "$@"
+            else
+                echo "ok, bailing out. use 'dev' next time!"
+            fi
+            ;;
+        lint|lint:typecheck|lint:typecheck:*|trpc:types|next:types|ci:run)
+            tsc-turn command task "$@"
+            ;;
+        *)
+            command task "$@"
+            ;;
+    esac
 }
 
 alias dev="NGROK=false command task dev 2>&1 | tee /tmp/loops-dev.log"
