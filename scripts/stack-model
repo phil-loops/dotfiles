@@ -24,6 +24,10 @@ done
 links_json='[]'
 for child in "${chain[@]}"; do
   parent=$(git config "branch.${child}.stack-parent" 2>/dev/null || git config "stack-branch.${child}.parent" 2>/dev/null || echo "$MAIN")
+  # trunk base is the REMOTE trunk — mirrors stack-bless/stack-forest trunk_base
+  if [[ "$parent" == "$MAIN" ]] && git rev-parse --verify --quiet "origin/${MAIN}" >/dev/null; then
+    parent="origin/${MAIN}"
+  fi
   state=$("$here/stack-blessed-status" "$child" --parent "$parent")
   files_json='[]'
   while IFS= read -r row; do
