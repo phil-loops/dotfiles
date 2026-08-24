@@ -69,11 +69,25 @@ explode_node_modules(){ # $1 = tree, $2 = main checkout; idempotent, tops up new
   [[ -d "$src_nm" ]] || return 1
   [[ -L "$nm" ]] && rm "$nm"
   mkdir -p "$nm/@loops"
-  local e b
+  local e b s sb
   ( shopt -s dotglob nullglob
     for e in "$src_nm"/*; do
       b=$(basename "$e")
       [[ "$b" == "@loops" ]] && continue
+      # scope dirs get a REAL dir with per-package links, never a whole-scope symlink:
+      # npm reify in the tree resolves paths THROUGH a scope symlink and deletes/stages
+      # inside the DONOR (gutted @esbuild/@typescript + stranded .staging dirs, 2026-08-24).
+      # A per-package symlink caps the blast radius — rm unlinks it, the donor survives.
+      if [[ "$b" == @* && -d "$e" && ! -L "$e" ]]; then
+        # convert a legacy whole-scope symlink left by an older explode
+        [[ -L "$nm/$b" ]] && rm "$nm/$b"
+        mkdir -p "$nm/$b"
+        for s in "$e"/*; do
+          sb=$(basename "$s")
+          [[ -e "$nm/$b/$sb" || -L "$nm/$b/$sb" ]] || ln -sh "$s" "$nm/$b/$sb"
+        done
+        continue
+      fi
       [[ -e "$nm/$b" || -L "$nm/$b" ]] || ln -sh "$e" "$nm/$b"
     done )
   local p
@@ -102,12 +116,22 @@ seed_prisma_client(){ # $1 = tree, $2 = main checkout; a schema.prisma that diff
      && git -C "$tree" diff --quiet "$src_head" HEAD -- packages/prisma/schema.prisma 2>/dev/null; then
     return 0                       # donor's client through the link still describes this schema
   fi
-  local pkg
+  local pkg sub
   for pkg in .prisma @prisma; do
-    [[ -L "$tree/node_modules/$pkg" ]] || continue
-    rm "$tree/node_modules/$pkg"
-    cp -cR "$src/node_modules/$pkg" "$tree/node_modules/$pkg" 2>/dev/null \
-      || cp -R "$src/node_modules/$pkg" "$tree/node_modules/$pkg"
+    if [[ -L "$tree/node_modules/$pkg" ]]; then
+      rm "$tree/node_modules/$pkg"
+      cp -cR "$src/node_modules/$pkg" "$tree/node_modules/$pkg" 2>/dev/null \
+        || cp -R "$src/node_modules/$pkg" "$tree/node_modules/$pkg"
+    elif [[ -d "$tree/node_modules/$pkg" && ! -L "$tree/node_modules/$pkg" ]]; then
+      # per-package exploded scope: trade each symlinked child — a linked @prisma/client
+      # still names the DONOR's runtime in declaration emit (the TS2883 escape)
+      for sub in "$tree/node_modules/$pkg"/*; do
+        [[ -L "$sub" ]] || continue
+        rm "$sub"
+        cp -cR "$src/node_modules/$pkg/$(basename "$sub")" "$sub" 2>/dev/null \
+          || cp -R "$src/node_modules/$pkg/$(basename "$sub")" "$sub"
+      done
+    fi
   done
   local out
   # generate never connects; prisma.config.ts still demands DATABASE_URL, and PRISMA_SCHEMA
