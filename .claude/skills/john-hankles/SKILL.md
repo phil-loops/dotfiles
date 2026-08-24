@@ -55,7 +55,9 @@ is where Phil actually reviews:
   `POST /review-import`), then write the full ranked review as the node's notes card:
   `stack-notes --set - review/pr-<N>` (sidecar markdown, never committed, survives
   rebases). Phil reads it beside the diff and carries what he agrees with to GitHub
-  himself.
+  himself. The card renders as prose-styled markdown (`wiki-prose`): fence every
+  command in ```bash blocks, bullet the caveats, never leave bare hard-wrapped lines —
+  they flow into paragraph soup in a serif face.
 - **Own branch** → per-finding pins via push-ready's flag mechanics
   (`stack-branch.<b>.review-flag` + `review-flags-tree`), and the prose review as a
   `stack-notes` card when it's worth keeping.
