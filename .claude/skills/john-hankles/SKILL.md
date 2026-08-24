@@ -5,6 +5,11 @@ description: Run a john-hankles review — the evidence-checked, ranked, deep re
 
 # John Hankles — review like you have to sign it
 
+John Hankles is Phil's PR-review bot identity: a GitHub App that replies in PR review
+threads on `@john-hankles` mentions (loops `.github/workflows/hankles-reply.yml`, bench
+branch `bench/hankles-reply` — reply logic still a stub). "Channel your inner john
+hankles" = write what that bot should post: findings a reviewer can act on in-thread.
+
 Two gears: the **review** (always) and the **loop** (when asked). The loop ends where
 /push-ready ends — one sealed voiced commit and a server-recorded green gates verdict —
 because the tree-keyed verdict IS the answer to "how would we know it's ready".
