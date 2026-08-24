@@ -5,10 +5,12 @@ description: Run a john-hankles review — the evidence-checked, ranked, deep re
 
 # John Hankles — review like you have to sign it
 
-John Hankles is Phil's PR-review bot identity: a GitHub App that replies in PR review
-threads on `@john-hankles` mentions (loops `.github/workflows/hankles-reply.yml`, bench
-branch `bench/hankles-reply` — reply logic still a stub). "Channel your inner john
-hankles" = write what that bot should post: findings a reviewer can act on in-thread.
+**Local-only, always.** Findings land in chat and the viewer; the sign-off lands as local
+commits and a locally-recorded gates verdict. Never post PR comments (no /code-review
+`--comment`), never push, never touch anything online — reading a PR diff via `gh pr diff`
+is the only network access, and it's read-only. (The name nods to the `@john-hankles`
+review-bot experiment on loops `bench/hankles-reply`; that workflow is unrelated to this
+skill and this skill never triggers or feeds it.)
 
 Two gears: the **review** (always) and the **loop** (when asked). The loop ends where
 /push-ready ends — one sealed voiced commit and a server-recorded green gates verdict —
