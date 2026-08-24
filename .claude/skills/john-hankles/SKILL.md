@@ -46,6 +46,20 @@ because the tree-keyed verdict IS the answer to "how would we know it's ready".
 6. Style/comment nits: one line each, marked as team-convention-dependent. Never lead
    with them.
 
+## Surfacing the findings — durable and local
+
+Chat scrolls away; the review also lands on the branch's node in the forest viewer, which
+is where Phil actually reviews:
+
+- **Teammate PR** → make sure it's imported as `review/pr-<N>` (viewer Home does this; or
+  `POST /review-import`), then write the full ranked review as the node's notes card:
+  `stack-notes --set - review/pr-<N>` (sidecar markdown, never committed, survives
+  rebases). Phil reads it beside the diff and carries what he agrees with to GitHub
+  himself.
+- **Own branch** → per-finding pins via push-ready's flag mechanics
+  (`stack-branch.<b>.review-flag` + `review-flags-tree`), and the prose review as a
+  `stack-notes` card when it's worth keeping.
+
 ## The loop — review, then sign it
 
 Order matters: **reshape before gating** — reshaping after gates invalidates the verdict.
