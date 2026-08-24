@@ -571,11 +571,14 @@ def _rebase_onto(child, parent, cut):
             ctx.run(["git", "worktree", "remove", "--force", tmp])
 
 
-def _reseat_walk(parent, results):
+def _reseat_walk(parent, results, published=None):
     # top-down: seat each child on its (possibly just-moved) parent, then descend. A subtree
     # whose root conflicts is left alone — its own recorded cuts stay valid for a manual pass.
+    # published is fetched ONCE per walk and threaded down — a fresh gh poll per recursion
+    # level made a chain-base reword sit on "saving…" for ~a minute (2026-08-24).
     parent_tip = ctx.run(["git", "rev-parse", parent]).stdout.strip()
-    published = sync._open_pr_heads(fresh=True)
+    if published is None:
+        published = sync._open_pr_heads(fresh=True)
     for child in _children_of(parent):
         if _seated(parent, child):
             results.append({"branch": child, "status": "seated"})
@@ -591,7 +594,7 @@ def _reseat_walk(parent, results):
                 continue
             ctx.run(["git", "config", f"stack-branch.{child}.base", parent_tip])
             results.append({"branch": child, "status": "reseated"})
-        _reseat_walk(child, results)
+        _reseat_walk(child, results, published)
 
 
 def _decision(num):
