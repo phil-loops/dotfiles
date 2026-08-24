@@ -103,12 +103,21 @@ def _sweep_pr_heads(slugs):
 def _store_pr_heads(repo, swept):
     with _pr_lock:
         ent = _pr_ent(repo)
+        ent["outage"] = swept is None
         if swept is not None:
             ent["heads"] = swept   # keep last-good heads on a full gh outage
         elif ent["heads"] is None:
             ent["heads"] = set()   # cache empty on outage so we don't re-block every call
         ent["at"] = time.monotonic()
         return ent["heads"]
+
+
+def _pr_sweep_failed():
+    """Last gh sweep came back empty-handed — the open-PR set is a guess (last-good or
+    empty), not evidence. Mutating guards must not read 'not in the set' as 'unpublished'
+    for a PUSHED branch; that empty-guard path is how a PR'd parent got rewritten."""
+    with _pr_lock:
+        return bool(_pr_ent(ctx.repo_cwd()).get("outage"))
 
 
 def _refresh_pr_heads(repo, slugs):
@@ -199,6 +208,14 @@ def state(branch, fresh_prs=False, with_patches=False):
     elif published:
         why = "has an open PR — rebase would rewrite pushed commits"
     shared, ahead = _shared(branch)
+    # gh outage: "not in the open-PR set" stops being evidence that a PUSHED branch is
+    # unpublished — refuse to auto-rewrite it rather than run with a toothless guard
+    # (2026-08-23: exactly how a PR'd parent got rebased under its child). Unpushed
+    # branches can't have an open PR, so they stay syncable through an outage.
+    pr_blind = shared in ("ahead", "synced") and not published and _pr_sweep_failed()
+    if pr_blind:
+        restack = False
+        why = "pushed to origin but gh is unreachable — can't verify it has no open PR; not rebasing"
     # working-tree dirt of the worktree HOLDING this branch (incl. untracked — clean-tree
     # guards trip on those too). Dirt is per-worktree state; it ambushes whatever branch
     # the checkout holds, which is why it rides the branch payload.
@@ -224,7 +241,7 @@ def state(branch, fresh_prs=False, with_patches=False):
                 dirty_rows.append({"path": p, "code": code,
                                    "patch": ctx.run(args).stdout[:20000]})
     return {"branch": branch, "behind": behind, "parent": parent, "published": published,
-            "syncable": behind > 0 and parent == "main" and not published,
+            "syncable": behind > 0 and parent == "main" and not published and not pr_blind,
             "restack": restack, "project": proj,
             "shared": shared, "aheadOfOrigin": ahead,
             "dirty": dirty, "dirtyRows": dirty_rows, "dirtyWorktree": dirty_wt,

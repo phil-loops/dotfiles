@@ -332,6 +332,27 @@ def _is_restack(branch):
     return bool(seen) and seen == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
 
 
+def _chain_break(branch):
+    """First stack ancestor whose ORIGIN copy is missing from this branch's history —
+    the signature of a rebase that crossed a publish boundary (2026-08-23:
+    schema/drop-download-fk carried rewritten twins of its PR'd parent). Pushing then
+    makes the child's PR diff vs that parent show the parent's replayed commits plus
+    main drift; no FF-only push sequence can clean it up after the fact. Returns the
+    offending ancestor name, or ""."""
+    seen, cur = set(), branch
+    while cur and cur not in seen and len(seen) < 30:
+        seen.add(cur)
+        p = (ctx.run(["git", "config", f"branch.{cur}.stack-parent"]).stdout.strip()
+             or ctx.run(["git", "config", f"stack-branch.{cur}.parent"]).stdout.strip())
+        if not p or p in ("main", "master"):
+            return ""
+        if (ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{p}"]).returncode == 0
+                and ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{p}", branch]).returncode != 0):
+            return p
+        cur = p
+    return ""
+
+
 def _origin_verdict(branch):
     """Every /push-origin guard, recomputed from git — shared by the read-only
     preview (drives the crossing view + wards + arming) and the push itself
@@ -411,6 +432,7 @@ def _origin_verdict(branch):
         commit = {"sha": sha, "subject": subject, "body": body}
     tip = _tip(branch)
     gates_green = _green_tree(branch) == _tree(tip)
+    chain_broken = _chain_break(branch)
 
     def ward(k, label, ok, why, advisory=False):
         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
@@ -431,6 +453,9 @@ def _origin_verdict(branch):
              "restacked onto newer main — prep folds it into a catch-up merge of origin's head (plain push)"
              if has_remote and _is_restack(branch) else
              "diverged from origin — reconcile first; shared history is never overwritten"),
+        ward("chain", "stacked on origin history", not chain_broken,
+             f"history diverged from origin/{chain_broken} — its PR won't stack clean; "
+             f"reset the chain onto origin's copy and replay (restack conforms it)"),
         # FF-additive to a published head is exempt (mirrors the gates' fresh gate,
         # d051e01): the branch must sit on the PR tip to fast-forward, so it can never
         # "rebase forward" without rewriting shared history.
