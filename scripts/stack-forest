@@ -579,7 +579,7 @@ def build(branch):
     # net-zero churn: paths some commit touches that the cumulative diff no longer
     # contains — an oops/un-oops pair hiding in history. Rebase-dangerous (the pair
     # can re-apply against a moved parent as a revert of the parent's own work).
-    log_paths = set(git_out(["log", "--format=", "--name-only", f"{parent}..{branch}"]).split("\n"))
+    log_paths = set(git_out(["log", "--format=", "--name-only", f"{trunk_base(parent)}..{branch}"]).split("\n"))
     log_paths.discard("")
     churn = sorted(log_paths - {row["path"] for row in rows})
     # fan-in: a node CARRIES its `requires` deps' files (cherry-picked). Subtract
@@ -592,10 +592,10 @@ def build(branch):
         # branch as cherry-picks) or merge-order-only metadata; the map renders them
         # differently, so measure which: patch-id overlap between the dep's own range
         # and this branch's range. Only fan-in nodes pay these calls.
-        own_ids = commit_patch_ids(f"{parent}..{branch}")
+        own_ids = commit_patch_ids(f"{trunk_base(parent)}..{branch}")
         carried = set()
         for r in reqs:
-            dep_ids = commit_patch_ids(f"{parents.get(r, MAIN)}..{r}")
+            dep_ids = commit_patch_ids(f"{trunk_base(parents.get(r, MAIN))}..{r}")
             req_meta[r] = {"carried": len(own_ids & dep_ids), "of": len(dep_ids)}
             carried.update(git_out(["diff", "--name-only", f"{MAIN}...{r}"]).split())
         rows = [row for row in rows if row["path"] not in carried]
