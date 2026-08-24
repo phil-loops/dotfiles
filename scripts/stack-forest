@@ -480,7 +480,7 @@ if node_mode:
     # fan-in: drop carried `requires` files so the INCREMENTAL (parent) view shows
     # only own work. Against an arbitrary base (e.g. main) we want the FULL diff.
     reqs = requires.get(branch, []) if diff_base in (parent, trunk_base(parent)) else []
-    req_fs = [pool.submit(git_out, ["diff", "--name-only", f"{MAIN}...{r}"]) for r in reqs]
+    req_fs = [pool.submit(git_out, ["diff", "--name-only", f"{REMOTE_MAIN}...{r}"]) for r in reqs]
     rows, *_ = rows_f.result()
     if req_fs:
         carried = set()
@@ -597,7 +597,7 @@ def build(branch):
         for r in reqs:
             dep_ids = commit_patch_ids(f"{trunk_base(parents.get(r, MAIN))}..{r}")
             req_meta[r] = {"carried": len(own_ids & dep_ids), "of": len(dep_ids)}
-            carried.update(git_out(["diff", "--name-only", f"{MAIN}...{r}"]).split())
+            carried.update(git_out(["diff", "--name-only", f"{REMOTE_MAIN}...{r}"]).split())
         rows = [row for row in rows if row["path"] not in carried]
         clean = sum(1 for r in rows if r["status"] == "clean")
         stale = sum(1 for r in rows if r["status"] == "stale")

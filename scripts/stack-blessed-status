@@ -33,6 +33,13 @@ done
 [[ -n "$parent" ]] || parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "stack-branch.${branch}.parent" 2>/dev/null || true)
 [[ -n "$parent" ]] || parent=$(git config stack.main-branch 2>/dev/null || echo main)
 
+# the trunk base is the REMOTE trunk (origin/main) — a stale local main must not shift
+# the patch-ids. Mirrors stack-bless/stack-forest trunk_base.
+_main=$(git config stack.main-branch 2>/dev/null || echo main)
+if [[ "$parent" == "$_main" ]] && git rev-parse --verify --quiet "origin/${_main}" >/dev/null; then
+  parent="origin/${_main}"
+fi
+
 git_dir=$(git rev-parse --path-format=absolute --git-common-dir)
 ledger="$git_dir/stack-blessed.json"
 [[ -f "$ledger" ]] || echo '{}' > "$ledger"
