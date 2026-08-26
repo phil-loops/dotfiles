@@ -550,6 +550,8 @@ class H(BaseHTTPRequestHandler):
             return push.delta_tests(self, raw)
         if self.path == "/push-origin":  # shared-history door: FF-only single-clean-commit push; human finger only
             return push.push_origin(self, raw)
+        if self.path == "/force-origin":  # the ONE force exception: draft PR, zero reviews/comments, lease-guarded
+            return push.force_origin(self, raw)
         if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser
             return push.open_pr(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
