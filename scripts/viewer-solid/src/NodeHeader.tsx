@@ -147,7 +147,7 @@ export function NodeHeader(props: {
             </Show>
           </div>
           <Show when={props.divergedOpen() && props.nodeHealth(props.active())?.diverged}>
-            <DivergedDetailPanel data={props.divergedData()} />
+            <DivergedDetailPanel data={props.divergedData()} branch={props.active()} />
             {/* deliberate-divergence outcome: freeze declares "origin's PR is the review
                 artifact; squash-merge reconciles" — calms the ⇄ chip and prep's additive
                 advice. Optimistic label; the chip itself catches up on the next health poll. */}

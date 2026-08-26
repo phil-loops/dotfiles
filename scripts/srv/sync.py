@@ -1002,7 +1002,51 @@ def diverged_detail(req, u):
         "ok": True, "upstream": up, "trunk": trunk, "ahead": ahead, "behind": behind,
         "containment": containment, "overlap": overlap,
         "prNow": shortstat(f"{trunk}...{up}"), "prAfter": shortstat(f"{trunk}...{branch}"),
-        "prFiles": pr_files[:60]}))
+        "prFiles": pr_files[:60],
+        "forceScope": force_scope(branch, up)}))
+
+
+def force_scope(branch, upstream):
+    """The scoped-force guard sheet: force-with-lease is offered ONLY while the PR is still
+    private review surface — a draft nobody has reviewed or commented on. Recomputed fresh
+    here (one gh call; this endpoint is human-initiated, never polled) and AGAIN inside
+    /force-origin — the push never trusts the panel's copy. `lease` is origin's head at
+    inspection time; the push passes it to --force-with-lease so git itself refuses if
+    origin moves after Phil read this sheet."""
+    lease = ctx.run(["git", "rev-parse", f"refs/remotes/{upstream}"]).stdout.strip()
+    tip_tree = ctx.run(["git", "rev-parse", f"{branch}^{{tree}}"]).stdout.strip()
+    gates_green = bool(tip_tree) and tip_tree == ctx.run(
+        ["git", "config", f"stack-branch.{branch}.gates-green-tree"]).stdout.strip()
+    pr = None
+    try:
+        url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
+        m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
+        if m:
+            out = ctx.run(["gh", "pr", "list", "-R", m.group(1), "--head", branch,
+                           "--state", "open", "--limit", "1",
+                           "--json", "number,url,isDraft,reviews,comments,author"]).stdout
+            arr = json.loads(out or "[]")
+            pr = arr[0] if arr else None
+    except Exception:
+        pr = None
+    guards = [
+        {"k": "pr", "label": "open PR on origin", "ok": bool(pr)},
+        {"k": "draft", "label": "still a draft", "ok": bool(pr and pr.get("isDraft"))},
+        {"k": "reviews", "label": "zero reviews", "ok": bool(pr) and not pr.get("reviews")},
+        # the author's own comments (Traffic-Cop checklists, notes-to-self) invalidate nobody's
+        # read-state — only someone ELSE having engaged takes the PR out of scope
+        {"k": "comments", "label": "no one else's comments",
+         "ok": bool(pr) and not [c for c in pr.get("comments") or []
+                                 if (c.get("author") or {}).get("login") != (pr.get("author") or {}).get("login")]},
+        {"k": "gates", "label": "gates green for this exact tree", "ok": gates_green},
+    ]
+    return {
+        "eligible": all(g["ok"] for g in guards),
+        "guards": guards,
+        "lease": lease,
+        "prNumber": pr.get("number") if pr else None,
+        "prUrl": pr.get("url") if pr else None,
+    }
 
 
 def _draft_additive_message(branch, diff_text):

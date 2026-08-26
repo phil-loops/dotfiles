@@ -526,6 +526,45 @@ def _branch_worktree(branch):
     return ""
 
 
+def force_origin(req, raw):
+    """POST /force-origin {branch, lease} — the ONE sanctioned exception to FF-only: replace a
+    stacked draft's pushed history so its PR re-acquires base ancestry (squash-merge repos
+    force this on every mid-stack edit). Scope is the whole safety story, re-verified here
+    with a fresh gh call — never the panel's copy: the PR must still be a DRAFT with ZERO
+    reviews and ZERO comments (nobody's read-state gets invalidated), gates green for this
+    exact tree, and the client's lease must still be origin's head — then the push itself is
+    --force-with-lease, so git refuses if origin moves in the gap. Human finger only, same
+    as push-origin; anything outside this scope stays the additive vehicle's job."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    lease = d.get("lease", "")
+    if not branch or branch in ("main", "master"):
+        return req._send(400, json.dumps({"ok": False, "err": "refusing: no branch / trunk"}))
+    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode != 0:
+        return req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
+    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode != 0:
+        return req._send(400, json.dumps({"ok": False, "err": "never pushed — plain push, no force needed"}))
+    if ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode == 0:
+        return req._send(400, json.dumps({"ok": False, "err": "fast-forwardable — plain push, no force needed"}))
+    scope = sync.force_scope(branch, f"origin/{branch}")
+    if not scope["eligible"]:
+        bad = "; ".join(g["label"] for g in scope["guards"] if not g["ok"])
+        return req._send(200, json.dumps({"ok": False, "err": f"out of scope: {bad}", "forceScope": scope}))
+    if not lease or lease != scope["lease"]:
+        return req._send(200, json.dumps({"ok": False, "forceScope": scope,
+                                          "err": "origin moved since you read the sheet — re-open the panel"}))
+    wt = _branch_worktree(branch)
+    r = ctx.run((["git", "-C", wt] if wt else ["git"])
+                + ["push", f"--force-with-lease={branch}:{lease}", "origin", branch])
+    ok = r.returncode == 0
+    target = scope.get("prUrl") or ""
+    opened = _open_web(target) if ok and target else False
+    req._send(200, json.dumps({
+        "ok": ok, "remote": "origin", "web": target, "opened": opened,
+        "out": (r.stdout or "").strip(), "err": (r.stderr or "").strip(),
+    }))
+
+
 def push_origin(req, raw):
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
