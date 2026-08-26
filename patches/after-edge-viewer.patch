@@ -1,0 +1,120 @@
+diff --git a/scripts/viewer-solid/src/ForestMap.tsx b/scripts/viewer-solid/src/ForestMap.tsx
+index cf2a4f5..993268f 100644
+--- a/scripts/viewer-solid/src/ForestMap.tsx
++++ b/scripts/viewer-solid/src/ForestMap.tsx
+@@ -75,7 +75,7 @@ const railPath = (e: { x1: number; y1: number; x2: number; y2: number; laneX?: n
+   return `M${e.x1},${e.y1} H${lane - RAIL_R} Q${lane},${e.y1} ${lane},${e.y1 + dir * RAIL_R} V${e.y2 - dir * RAIL_R} Q${lane},${e.y2} ${lane - RAIL_R},${e.y2} H${e.x2}`;
+ };
+ const edgePath = (e: { x1: number; y1: number; x2: number; y2: number; kind: string; laneX?: number }): string =>
+-  e.kind === "fanin" || e.kind === "lands"
++  e.kind === "fanin" || e.kind === "lands" || e.kind === "after"
+     ? railPath(e)
+     : e.kind === "spine"
+       ? `M${e.x1},${e.y1} L${e.x2},${e.y2}`
+@@ -651,7 +651,7 @@ export function ForestMap(props: {
+             <path d="M0.5,0.5 L7.5,4 L0.5,7.5 Z" fill="context-stroke" />
+           </marker>
+         </defs>
+-        <For each={layout().edges.filter((e) => e.kind !== "fanin" && e.kind !== "lands" && e.kind !== "spine")}>
++        <For each={layout().edges.filter((e) => e.kind !== "fanin" && e.kind !== "lands" && e.kind !== "spine" && e.kind !== "after")}>
+           {(e, i) => (
+             <path
+               class={`fm-edge ${e.kind} fill-none opacity-0 ${treeEdgeClass(e.kind, litEdge(e.from, e.to), dams().frozen.has(e.to))}`}
+@@ -682,6 +682,19 @@ export function ForestMap(props: {
+             </path>
+           )}
+         </For>
++        {/* `after` edges: merge-order only — same rail grammar as fan-in, ordering tone */}
++        <For each={layout().edges.filter((e) => e.kind === "after")}>
++          {(e) => (
++            <path
++              class={`fm-edge after fill-none opacity-0 ${faninEdgeClass(litEdge(e.from, e.to), true)}`}
++              classList={{ lit: litEdge(e.from, e.to) }}
++              marker-end="url(#fm-arrow)"
++              d={edgePath(e)}
++            >
++              <title>merge-order only: lands after {leafOf(e.from)} — content-independent, no rebase coupling</title>
++            </path>
++          )}
++        </For>
+         {/* ✦-assembly edges rest barely-there — the preview gathers the tips, but nothing
+             here blocks a merge; a heavier stroke would lie about the dependence. */}
+         <For each={layout().edges.filter((e) => e.kind === "lands")}>
+diff --git a/scripts/viewer-solid/src/MergeStory.tsx b/scripts/viewer-solid/src/MergeStory.tsx
+index 4821b00..bffacbb 100644
+--- a/scripts/viewer-solid/src/MergeStory.tsx
++++ b/scripts/viewer-solid/src/MergeStory.tsx
+@@ -113,7 +113,7 @@ export default function MergeStory(props: {
+       // parent (≠ main, in-forest) = a CODE dependency — this branch is stacked on it. requires =
+       // MERGE-AFTER fan-in: separate bases that must land first. The story labels them differently.
+       const parent = m?.parent && inForest.has(m.parent) && m.parent !== "main" ? m.parent : null;
+-      const reqs = (m?.requires ?? []).filter((r) => inForest.has(r));
++      const reqs = [...(m?.requires ?? []), ...(m?.after ?? [])].filter((r) => inForest.has(r));
+       const { subject, why } = splitPurpose(m?.description);
+       return {
+         id,
+diff --git a/scripts/viewer-solid/src/forestLayout.ts b/scripts/viewer-solid/src/forestLayout.ts
+index bb1792c..16db075 100644
+--- a/scripts/viewer-solid/src/forestLayout.ts
++++ b/scripts/viewer-solid/src/forestLayout.ts
+@@ -51,6 +51,7 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
+         const ups: string[] = [];
+         if (n.parent && n.parent !== "main" && byId[n.parent]) ups.push(n.parent);
+         (n.requires || []).forEach((rq) => { if (byId[rq]) ups.push(rq); });
++        (n.after || []).forEach((aq) => { if (byId[aq]) ups.push(aq); });
+         ups.forEach((u) => { r = Math.max(r, rankOf(u) + 1); });
+       }
+       return (rankCache[id] = r);
+@@ -89,7 +90,7 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
+       siblings.forEach((s) => (before[s] = new Set()));
+       siblings.forEach((s) => {
+         members[s].forEach((m) => {
+-          (byId[m]?.requires || []).forEach((rq) => {
++          [...(byId[m]?.requires || []), ...(byId[m]?.after || [])].forEach((rq) => {
+             const b = blockOf(rq);
+             if (b && b !== s) before[s].add(b);
+           });
+@@ -199,16 +200,27 @@ export function computeForestLayout(model: { list: SpineNode[]; byId: Record<str
+           });
+         }
+       });
++      // `after` = merge-order only: rides the same right-margin rail as fan-in but never
++      // pushes indent (content-independent) — vertical order + the rail carry the story.
++      (n.after || []).forEach((aq) => {
++        if (pos[aq] && !ancestors.has(aq)) {
++          edges.push({
++            x1: pos[aq].x + nodeW(aq) + 6, y1: pos[aq].y,
++            x2: me.x + nodeW(n.id) + 6, y2: me.y,
++            kind: "after", from: aq, to: n.id,
++          });
++        }
++      });
+     });
+ 
+     // Rail assignment: one vertical rail per fan-in dependent (the ✦ sink included),
+     // inner rails to higher targets, every rail right of every node — a source stub only
+     // ever crosses another rail at a right angle, never a node.
+-    const railTargets = [...new Set(edges.filter((e) => e.kind === "fanin" || e.kind === "lands").map((e) => e.to))]
++    const railTargets = [...new Set(edges.filter((e) => e.kind === "fanin" || e.kind === "lands" || e.kind === "after").map((e) => e.to))]
+       .sort((a, b) => pos[a].y - pos[b].y);
+     railTargets.forEach((t, i) => {
+       const laneX = maxX + RAIL_PAD + i * RAIL_GAP;
+-      edges.forEach((e) => { if (e.to === t && (e.kind === "fanin" || e.kind === "lands")) e.laneX = laneX; });
++      edges.forEach((e) => { if (e.to === t && (e.kind === "fanin" || e.kind === "lands" || e.kind === "after")) e.laneX = laneX; });
+     });
+     const W = (railTargets.length ? maxX + RAIL_PAD + (railTargets.length - 1) * RAIL_GAP : maxX) + PAD_R;
+ 
+diff --git a/scripts/viewer-solid/src/types.ts b/scripts/viewer-solid/src/types.ts
+index ee45c83..7b3ae10 100644
+--- a/scripts/viewer-solid/src/types.ts
++++ b/scripts/viewer-solid/src/types.ts
+@@ -22,6 +22,9 @@ export const NodeMeta = z.object({
+   parent: z.string().optional(),
+   children: z.array(z.string()).optional(),
+   requires: z.array(z.string()).optional(),
++  // merge-order-only deps (stack-branch.<b>.after): content-independent — no carried
++  // commits, no rebase coupling — but must land later (deploy invariants).
++  after: z.array(z.string()).optional(),
+   // per-`requires` evidence: how many of the dep's own commits this branch actually
+   // carries as cherry-picks (patch-id match). carried=0 → merge-order-only edge.
+   requires_meta: z.record(z.string(), z.object({ carried: z.number(), of: z.number() })).optional(),

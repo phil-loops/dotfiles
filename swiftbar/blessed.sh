@@ -1,7 +1,8 @@
 #!/bin/zsh
 # SwiftBar plugin — blessed: menu-bar launcher for the blessing-ledger review viewer.
-# Three verbs — Start (background, no browser), Start + open in Chrome, and the loops
-# API Postman console (:7070). The badge ✦ is green when the viewer is live, grey when down.
+# Verbs — Start (background, no browser), Start + open in Chrome, the loops API Postman
+# console (:7070), and the mail-map pipeline wiki (:62555). The badge ✦ is green when the
+# viewer is live, grey when down.
 #
 # <bitbar.title>blessed viewer launcher</bitbar.title>
 # <bitbar.desc>Start/open the blessing-ledger viewer, or the loops API Postman console.</bitbar.desc>
@@ -23,7 +24,8 @@ serve="$HOME/.dotfiles/scripts/stack-review-serve"
 postman="$HOME/.dotfiles/scripts/loops-postman"
 spec="$repo/public/openapi.json"   # local spec → unreleased endpoints too
 pmport=7070; pmbase="http://127.0.0.1:${pmport}"
-bugdoc="$HOME/daily-log/2026-07-07-workflow-api-bugs.md"   # workflow-API adversarial findings (repro via the Postman console above)
+mailmap="$HOME/.dotfiles/scripts/mail-map-serve"
+mmport=62555; mmbase="http://127.0.0.1:${mmport}"
 
 poke() { open -g "swiftbar://refreshplugin?name=blessed" 2>/dev/null; }
 # Detach (nohup + subshell) so the server survives SwiftBar reaping the click process.
@@ -46,10 +48,23 @@ case "${1:-}" in
       ( nohup "$postman" serve --spec "$spec" >/dev/null 2>&1 </dev/null & )
     fi
     poke; exit 0 ;;
+  --mailmap)     # the mail-pipeline wiki. Warm → focus it. Cold → start detached, then poll
+    # until it answers and open — the server doesn't open a browser itself.
+    if curl -sf --max-time 1 "$mmbase/" >/dev/null 2>&1; then
+      open "$mmbase/"
+    else
+      ( nohup "$mailmap" "$mmport" >/dev/null 2>&1 </dev/null &
+        for _ in $(seq 1 30); do
+          curl -sf --max-time 1 "$mmbase/" >/dev/null 2>&1 && { open "$mmbase/"; break; }
+          sleep 0.3
+        done ) &
+    fi
+    poke; exit 0 ;;
 esac
 
 # --- render the menu -----------------------------------------------------------------
 up=0; curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && up=1
+mmup=0; curl -sf --max-time 1 "$mmbase/" >/dev/null 2>&1 && mmup=1
 
 # menu-bar badge: ✦ tinted green when the viewer is live, grey when it's down
 if (( up )); then
@@ -67,6 +82,10 @@ else
   echo "▷ Start + open in Chrome | color=#3fb950 bash=\"$self\" param1=--open terminal=false"
 fi
 echo "⚡ Postman console · :${pmport} | bash=\"$self\" param1=--postman terminal=false"
-[ -f "$bugdoc" ] && echo "🐞 Workflow API bugs (doc) | bash=\"/usr/bin/open\" param1=\"$bugdoc\" terminal=false"
+if (( mmup )); then
+  echo "📬 Mail map · :${mmport} — open | color=#3fb950 bash=\"$self\" param1=--mailmap terminal=false"
+else
+  echo "📬 Mail map · :${mmport} | bash=\"$self\" param1=--mailmap terminal=false"
+fi
 echo "---"
 echo "Refresh | refresh=true"

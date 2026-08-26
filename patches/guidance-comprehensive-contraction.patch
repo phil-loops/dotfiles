@@ -1,0 +1,189 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 8323a2f..a0d56b2 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -8,7 +8,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
+ 
+ **Pushing & PRs**
+ 
+-- **Never push branches or open PRs — Phil handles both himself** (pushes to `origin` = `Loops-so/loops` via GH Desktop / the viewer; opens every PR manually). Claude's job ends at a prepped local branch + a drafted PR body. PR branches and PRs live on `origin` directly (origin-internal, not fork PRs); the `phil-loops` fork is only for bench/experimental branches (and is `stack-push.remote`), never the PR flow. Never let tooling open PRs — that's manual.
++- **Never push branches or open PRs — Phil handles both himself**, and never let tooling do either. Claude's job ends at a prepped local branch + a drafted PR body. (Remote topology: loops topic file.)
+ - Committing locally is fine — make clean, self-contained commits.
+ 
+ **History**
+@@ -30,30 +30,17 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
+ 
+ # Just do both
+ 
+-**If a project has two things to do and both are yours to do, do them — don't make me pick the order.**
+-Independent work has no order to get wrong: when neither blocks the other and each stands on its own,
+-sequencing is your call. Asking costs a round trip and buys nothing — and once you've split out a base
+-so its consumers are siblings, "which sibling first?" is a question you just engineered away. Do one,
+-do the next, say in a line what you did.
++**If a project has two things to do and both are yours to do, do them — don't make me pick the order.** Independent work has no order to get wrong; sequencing is your call. Do one, do the next, say in a line what you did.
+ 
+-**Only ask when my answer changes what gets built** — a real fork with a wrong branch: a design
+-direction, a data model, a destructive or outward-facing step, a genuine ambiguity in the request.
+-**Never ask when my input doesn't move the needle downstream**: which of two independent things goes
+-first, whether to do the obvious next increment, permission to keep going, or re-confirming something
+-I already said. Pick the sensible option, state it, keep moving.
+-
+-If a real fork *is* hiding under the fake one, ask **that** instead — the upstream unknown both paths
+-share, not the ordering. (Anti-pattern, 2026-07-16: after hoisting a shared primitive out so the map
+-badge and the spine became independent consumers, I was asked "which order?" — when the only thing
+-that mattered was the data gap sitting underneath both.)
++**Only ask when my answer changes what gets built** — a design direction, a data model, a destructive or outward-facing step, a genuine ambiguity in the request. Never ask which of two independent things goes first, whether to do the obvious next increment, permission to keep going, or to re-confirm something I already said: pick the sensible option, state it, keep moving. If a real fork *is* hiding under the fake one, ask **that** — the upstream unknown both paths share, not the ordering. (2026-07-16: asked "which order?" about two freshly-independent siblings when the only real question was the data gap under both.)
+ 
+ # Skills
+ 
+-**The `design` skill (nvim whiteboard `:submit` loop) is opt-in only.** Phrases like "let's spec X", "design Y", "write up a plan", or "whiteboard it" do NOT mean launch it — they mean produce a spec. Default to writing the spec **inline** in chat (or a plain markdown file the user can read). Only start the design-doc loop when the user **explicitly** asks for that tool/flow. *Offer* it ("want to iterate on this in the design whiteboard?") rather than launching it. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
++**The `design` skill (nvim whiteboard `:submit` loop) is opt-in only.** "Spec X", "design Y", "write up a plan", "whiteboard it" mean *produce a spec* — inline in chat or a plain markdown file — not launch the tool; *offer* it, launch only on an explicit ask. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
+ 
+ # Browser / "open in web"
+ 
+-**The Claude browser extension is NOT installed/connected.** The `mcp__claude-in-chrome__*` tools *load* via ToolSearch but fail at runtime with "browser extension is not connected" — don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a headless-Chromium script — `npx puppeteer`, or a small node script that launches Chromium, navigates, screenshots, and asserts on the DOM). When the user says **"open in web"** (or "open in the browser"), they mean run the commandline **`open <url-or-path>`** to hand it off to the default browser — not drive a browser via Claude. (Distinct from `stack web`, which is the forest viewer server the user reviews on himself.)
++**The Claude browser extension is NOT installed/connected** — the `mcp__claude-in-chrome__*` tools load via ToolSearch but fail at runtime; don't rely on them. **For browser automation or visual verification of a running app, use Puppeteer** (a small node script that launches headless Chromium, navigates, screenshots, asserts on the DOM). **"open in web" / "open in the browser" means run `open <url-or-path>`** — hand off to the default browser, don't drive one. (Distinct from `stack web`, the forest viewer Phil reviews on himself.)
+ 
+ # Topic files
+ 
+diff --git a/claude/dotfiles.md b/claude/dotfiles.md
+index e7cfc1e..68d3107 100644
+--- a/claude/dotfiles.md
++++ b/claude/dotfiles.md
+@@ -2,26 +2,25 @@
+ 
+ Rules first; mechanics below.
+ 
+-- **Never `zsource` / `git add -A` here.** Phil's `zsource` alias (`git add -A && git commit && git push && source ~/.zshrc`) is his to run, not Claude's: he often has concurrent in-progress dotfiles work, and `-A` sweeps his uncommitted WIP into your commit (it once bundled his ledger scripts into an unrelated `.zshrc` commit). Instead: run `git status` as its own step, then stage **explicit paths** (`git add .zshrc`), commit, push.
+-- **Pathspec commits cannot UNTRACK — delete from disk first.** `git commit -- X` re-reads X from the working tree, silently discarding a staged `git rm --cached X` and re-committing the bytes with a success exit code (98f9041 "untrack bytecode" did exactly this; all 23 .pyc stayed tracked). The safe form records an absence: `rm -rf X && git commit -m "…" -- X` (4f56495). Only for generated/regenerable files; a file that must survive on disk gets copied out, untrack-committed, copied back.
+-- **Never `git push --force` a branch another session may be live on** — that clobbers pushed work; leave a cosmetically-wrong commit message alone rather than rewrite shared history.
+-- **Reloads don't propagate.** `source ~/.zshrc` only affects your own subshell — tell Phil to source it in his terminal to pick up the change.
+-- **Never put scripts in ~/bin.** Everything lives in `~/.dotfiles/` so it's version controlled and nothing is lost if the computer dies: shell functions in `.zshrc` (or dedicated files sourced from it), standalone scripts in `~/.dotfiles/scripts/`.
++- **No `zsource` / `git add -A`** (spine rule) — mechanics: `git status` as its own step, then stage **explicit paths** (`git add .zshrc`), commit, push. (Phil's `zsource` alias is his to run; `-A` once swept his in-progress ledger scripts into an unrelated commit.)
++- **Pathspec commits cannot UNTRACK — delete from disk first.** `git commit -- X` re-reads X from the working tree, silently discarding a staged `git rm --cached X` and re-committing the bytes with a success exit code (98f9041: all 23 .pyc stayed tracked). The safe form records an absence: `rm -rf X && git commit -m "…" -- X` (4f56495). Only for regenerable files; a file that must survive on disk gets copied out, untrack-committed, copied back.
++- **Reloads don't propagate.** `source ~/.zshrc` only affects your own subshell — tell Phil to source it in his terminal.
++- **Script placement** (spine bans `~/bin`): shell functions in `.zshrc` (or dedicated files sourced from it), standalone scripts in `~/.dotfiles/scripts/`.
+ 
+ ## Concurrent sessions: claim a lane (`own` + `OWNERS`)
+ 
+-When multiple Claude sessions work this repo in parallel, each takes ONE lane (viewer / forest / stack / docs — see `~/.dotfiles/OWNERS`). At the start of dotfiles work run `own claim <your-lane>`; before editing any file run `own who <path>` — if it's YOUR lane, edit directly; if it's another lane (especially one flagged ⚠ ACTIVE), use the patch protocol below. Explicit lanes keep two sessions out of the same file.
++Each concurrent session takes ONE lane (see `~/.dotfiles/OWNERS`). Start of dotfiles work: `own claim <your-lane>`; before editing any file: `own who <path>` — your lane → edit directly; another lane (especially ⚠ ACTIVE) → patch protocol below.
+ 
+ ## Editing a live file → author via patch, never direct
+ 
+ A file is "live" if it's dirty in `git status`, has a recent mtime, or changed between your Read and Edit. Writing it directly races/clobbers the other session. Instead:
+ 
+-1. **Author in a throwaway worktree at HEAD** — `git worktree add --detach /tmp/wt HEAD`, edit there (clean surface, zero collision).
+-2. **Capture a patch artifact** — `git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch` (durable, reviewable, timing-independent, hand-off-able).
+-3. **Land with `git apply --3way`** — merges non-overlapping hunks, leaves conflict markers on overlap, *never* silent-clobbers. `git apply --check` tests it read-only first.
++1. **Author in a throwaway worktree at HEAD** — `git worktree add --detach /tmp/wt HEAD`, edit there.
++2. **Capture a patch artifact** — `git -C /tmp/wt diff > ~/.dotfiles/patches/<name>.patch` (durable, reviewable, hand-off-able).
++3. **Land with `git apply --3way`** — merges non-overlapping hunks, conflicts loudly on overlap, never silent-clobbers; `git apply --check` tests read-only first.
+ 
+-Apply when the file goes quiet, or hand the `.patch` to the session that owns the file. This is the standard for any contested file — it turns "two hands on one file" into a clean merge-or-conflict.
++Apply when the file goes quiet, or hand the `.patch` to the session that owns the file. Standard for any contested file.
+ 
+ ## Messaging another session: `claude-say <who> "<note>"` — SEND, don't draft
+ 
+-The tool submits by default (types into the target pane and presses Enter); that's the right default for session-to-session notes (fold-in heads-ups, lane handoffs) — a drafted note in an unattended pane is silently lost. Never pass `--draft` for these. `--draft` exists only for text a human must finish before sending (e.g. the viewer's ✦ seeded prompt stubs). The tool already guards the risky cases itself: it refuses non-Claude panes and auto-downgrades to draft if the target composer already holds text.
++Submits by default (types into the target pane + Enter) — right for session-to-session notes; a drafted note in an unattended pane is silently lost. `--draft` is only for text a human must finish (e.g. the viewer's ✦ seeded prompt stubs). The tool guards the risky cases itself: refuses non-Claude panes, auto-downgrades to draft if the target composer holds text.
+diff --git a/claude/loops.md b/claude/loops.md
+index fe1a9e7..5942334 100644
+--- a/claude/loops.md
++++ b/claude/loops.md
+@@ -2,8 +2,8 @@
+ 
+ ## Remotes
+ 
+-- `origin` (`Loops-so/loops`) — the shared team repo, and where branches **and** PRs actually live: branches are pushed straight to origin and PRs are opened origin-internal (head branch → `main`, same repo — not fork PRs). **Claude never pushes here and never opens PRs.** Phil pushes branches himself (GH Desktop, → viewer per the push-to-origin work) and opens every PR manually. Claude's job ends at a prepped local branch + a drafted PR body handed off.
+-- `phil-loops` (`phil-loops/loops`) — Phil's fork. **Not part of the PR workflow** (those branches are origin-internal, above), but not dead: it holds bench/experimental branches (e.g. `bench/goal-metrics`) and is the repo's `stack-push.remote` default. So a *PR* branch never goes here (it'd be orphaned); a throwaway/bench branch may. When in doubt, it's Phil's push either way.
++- `origin` (`Loops-so/loops`) — the shared team repo; branches and PRs live here, origin-internal (head branch → `main`, same repo — never fork PRs). Phil pushes via GH Desktop / the viewer and opens every PR manually (spine hard rule).
++- `phil-loops` (`phil-loops/loops`) — Phil's fork: bench/experimental branches only (e.g. `bench/goal-metrics`), and the repo's `stack-push.remote` default. A PR branch never goes here — it'd be orphaned. When in doubt, it's Phil's push either way.
+ 
+ ## Script runner
+ 
+@@ -29,17 +29,17 @@ task clickhouse:migrate  # run ClickHouse migrations (uses correct URL)
+ task ci:run              # full CI pipeline locally
+ ```
+ 
+-Run `task --list` to see all available tasks. Use the team's tools — don't reinvent with raw commands.
++Run `task --list` for the full set.
+ 
+ ## Migrations
+ 
+-**A new migration must pass squawk before it ships, unless there's a stated reason it shouldn't.** Run it locally the moment the migration file exists — CI (`lint-migrations`) runs the same check and comments on the PR, so this front-loads it:
++**A new migration must pass squawk before it ships**, absent a stated reason. Run it the moment the file exists — CI (`lint-migrations`) runs the same check:
+ 
+ ```bash
+ npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
+ ```
+ 
+-The repo's `.squawk.toml` applies automatically (it already excludes `require-timeout-settings` and `prefer-timestamp-tz`). Repo conventions squawk enforces: `CREATE TABLE IF NOT EXISTS` (robust statements). When a warning is wrong for the case (e.g. `prefer-bigint-over-int` on a small bounded counter), suppress it with an inline `-- squawk-ignore <rule>` comment directly above the statement — bare rule name only, no trailing text — and put the reason in the commit message.
++`.squawk.toml` applies automatically (already excludes `require-timeout-settings`, `prefer-timestamp-tz`); repo convention: `CREATE TABLE IF NOT EXISTS`. A wrong-for-the-case warning (e.g. `prefer-bigint-over-int` on a small bounded counter) gets an inline `-- squawk-ignore <rule>` directly above the statement — bare rule name, no trailing text — with the reason in the commit message.
+ 
+ ## Typecheck
+ 
+@@ -50,10 +50,8 @@ tsgo --project typescript/tsconfig.runtime.json --noEmit   # the default full ty
+ tsgo --project typescript/tsconfig.test.json --noEmit      # + tests
+ ```
+ 
+-(`tsconfig.node.json` was split into these two by PR #9599 on 2026-07-19 — a branch from before the split still carries the old single config. The loops pre-push hook runs the same checks, gated to TS-changed pushes; bypass with `TSGO_SKIP=1`.)
++(The two configs split from `tsconfig.node.json` in #9599, 2026-07-19 — a pre-split branch still carries the old single config. The pre-push hook runs the same checks; bypass with `TSGO_SKIP=1`.)
+ 
+-CI typechecks the same surfaces via `task lint:typecheck` (many per-entry configs) and agrees with tsgo on this repo, so **don't run tsc locally as a routine check** — reach for it only when you need the CI-exact verdict (e.g. CI is red but tsgo is green), and then always queued: `tsc-turn npx tsc --project typescript/tsconfig.runtime.json --noEmit`. `tsc-turn` (`~/.dotfiles/scripts/tsc-turn`) is a machine-wide compile queue: at most 2 heavy checks run at once, extra callers wait their turn. With several Claude sessions live, seven concurrent `tsc` runs flatten the machine (2026-07-06) — route any tsc run or build through it; it adds nothing when the machine is idle.
++CI (`task lint:typecheck`) agrees with tsgo on this repo, so **tsc is not a routine local check** — it's only for the CI-exact verdict (CI red, tsgo green), and then always queued: `tsc-turn npx tsc --project typescript/tsconfig.runtime.json --noEmit`. `tsc-turn` is a machine-wide compile queue, max 2 heavy checks at once — route every tsc run or build through it (2026-07-06: seven concurrent tscs flattened the machine). `oxlint --type-aware` and `oxfmt` are lints and formatting, NOT typecheckers.
+ 
+-`oxlint --type-aware` and `oxfmt` are NOT typecheckers — they catch lints and formatting, not assignment compatibility across function boundaries.
+-
+-**Caveat — the tRPC client type is a generated artifact.** A worktree with stale/missing generated types floods `tsc` with hundreds of `.tsx` errors that all trace to one collapsed type (`TS2339` "Property X does not exist on type '...collides with a built-in method...'" plus cascading implicit-`any` params). That's noise from un-built types, not your change. Filter to what you touched (`... --noEmit 2>&1 | grep <your-file>`) to read the real signal, or build the types first (`task trpc:types`).
++**Caveat — the tRPC client type is a generated artifact.** Stale/missing generated types flood `tsc` with hundreds of `.tsx` errors tracing to one collapsed type (`TS2339` "…collides with a built-in method…" + cascading implicit-`any` params) — noise from un-built types, not your change. Filter to what you touched (`… --noEmit 2>&1 | grep <your-file>`) or build the types first (`task trpc:types`).
+diff --git a/claude/style.md b/claude/style.md
+index 157c78c..455d0ce 100644
+--- a/claude/style.md
++++ b/claude/style.md
+@@ -2,34 +2,29 @@
+ 
+ ## Layering: queries → models → wiring
+ 
+-Follow a strict layering pattern:
+-
+ - **Queries** are thin data-access wrappers — one DB call per function, no business logic, no authorization, no cross-table joins or transactions
+ - **Models** contain business logic with dependency injection — validation, authorization, cross-entity operations, cascading deletes
+-- **Wiring** integrates models into handlers/routers/jobs — minimal glue code
+-- tRPC routers, API routes, and job handlers are all **wiring** — they call models, not queries directly
+-- If a function touches multiple tables, has conditional logic, or does authorization checks, it belongs in models, not queries
++- **Wiring** (tRPC routers, API routes, job handlers) integrates models — minimal glue; it calls models, never queries directly
++- A function that touches multiple tables, branches, or authorizes belongs in models, not queries
+ 
+ ## Naming conventions
+ 
+ - **File names** follow the team's kebab-case convention: `goal-contact-window.ts`, not `goalContactWindow.ts`
+-- **Query imports** use namespace imports with the full descriptive name: `import * as GoalContactWindowQueries from "..."` — not shorthand like `GCWQueries`. In tests the bare function name (`insert`, `findActiveByContact`) is obvious from context, but in model/wiring code the qualified name (`GoalContactWindowQueries.insert`) improves legibility.
++- **Query imports** use namespace imports with the full name: `import * as GoalContactWindowQueries from "..."` — never shorthand like `GCWQueries`. Bare function names are fine in tests where context is obvious; model/wiring code uses the qualified name.
+ 
+ ## Type style
+ 
+-- **Inline object-parameter type literals in function signatures.** Don't declare a separate named type alias just to name the input shape. Example: `function update(input: { id: string; name?: string })` — not `type UpdateInput = { ... }; function update(input: UpdateInput)`. Standalone aliases pollute the file's mental context: readers have to scroll up to resolve the alias to understand the contract. Inlining keeps the contract at the call site, even with 5+ fields. Test code that uses `Deps<typeof fn>` / `Parameters<typeof fn>` extracts from the function itself, so inline types don't break it. Don't refactor pre-existing standalone types unless asked.
+-- **A deps parameter needs only the `typeof`, never the value.** Type each dep as `typeof realFn` and import it with `import type`; make `deps` required and let the caller (wiring) pass the real implementations. Never default a deps object to the real functions when that default is the only thing forcing a runtime import — a value import that exists purely to seed a default couples heavy modules for nothing (sesUtils pulling in transactionalEmails just to name a default) and invites cycles; `import type` erases the edge at compile time. Exception: a same-module thin default-deps wrapper (the script-runner pattern) is fine — there the wrapper IS the wiring and the defaults live where the values already are.
++- **Inline object-parameter type literals in function signatures** — `function update(input: { id: string; name?: string })`, never a standalone `type UpdateInput = { … }` alias readers must scroll to resolve. Inlining keeps the contract at the call site, even with 5+ fields; `Deps<typeof fn>` / `Parameters<typeof fn>` extract from the function itself, so tests don't break. Don't refactor pre-existing aliases unless asked.
++- **A deps parameter needs only the `typeof`, never the value.** Type each dep `typeof realFn` with `import type`; make `deps` required and let wiring pass the real implementations. Never default a deps object to the real functions when that default is the only thing forcing a runtime import — it couples heavy modules and invites cycles (sesUtils once pulled in transactionalEmails just to name a default); `import type` erases the edge. Exception: a same-module thin default-deps wrapper (the script-runner pattern) — there the wrapper IS the wiring.
+ 
+ ## Comments
+ 
+-**Default to zero comments.** Code carries the *what*; names and types carry intent and shape. A comment is a last resort for a fact none of those can hold — not a companion to the diff. Most commits should add **no** comments; a diff dotted with explanatory prose is the smell this rule exists to kill.
+-
+-Before writing a comment, it must clear **every** bar — fail any, delete it:
++**Default to zero comments.** Code carries the *what*; names and types carry intent and shape. Most commits add **no** comments — a diff dotted with explanatory prose is the smell this rule exists to kill.
+ 
+-- **Misleading without it, not merely nice-to-have.** Its absence would lead a competent reader to a *wrong change* or a bug. "Helpful context," "for clarity," or restating the obvious does not qualify.
+-- **Unrecoverable from the code.** If a sharper name, a named constant, or an extracted well-named function would carry the fact, do **that** instead — always. A comment is an admission the code couldn't say it itself.
+-- **One line.** Needing two-plus lines of prose means the *code* is wrong, not under-documented — restructure (rename, split, introduce a named intermediate) until the note is trivial or unnecessary. A paragraph above a statement is never the answer.
++A comment must clear **every** bar — fail any, delete it:
+ 
+-**"Why" is not a license to narrate.** Restating the adjacent code with "so that…" or "because…" bolted on is still narration — the call and the names already show it. A genuine *why* points **outside** this code: an external constraint, a bug being worked around, an invariant enforced elsewhere, a deliberate deviation from the obvious approach. (Narration, delete it: `// disable sole members so the Loops sync stops pushing them`. Why, keep it: `// sole members only — multi-team users get disabled via <other path>; double-disabling races it`.)
++- **Misleading without it** — its absence would lead a competent reader to a wrong change or a bug; "helpful context" doesn't qualify.
++- **Unrecoverable from the code** — if a sharper name, a named constant, or an extracted function would carry the fact, do that instead, always.
++- **One line** — two-plus lines of prose means the *code* is wrong, not under-documented; restructure until the note is trivial or unnecessary.
+ 
+-Banned outright: restating the next line, section-header comments (`// fetch users`), step-by-step narration of an obvious sequence, and any comment that will silently rot when the code beside it moves.
++**"Why" is not a license to narrate.** Restating the adjacent code with "so that…" / "because…" bolted on is still narration. A genuine *why* points **outside** this code: an external constraint, a bug worked around, an invariant enforced elsewhere, a deliberate deviation from the obvious approach. (Narration, delete: `// disable sole members so the Loops sync stops pushing them`. Why, keep: `// sole members only — multi-team users get disabled via <other path>; double-disabling races it`.) Banned outright: restating the next line, section headers (`// fetch users`), step narration, anything that silently rots when the code beside it moves.

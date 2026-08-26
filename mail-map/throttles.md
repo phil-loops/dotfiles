@@ -10,7 +10,7 @@ lede: Valkey — a global token balance, and a per-team sliding window.
 
 It is funded by transactional health. Every send inside the SLA deposits a little; every send that misses [multiplies the balance by 0.9](src:lib/mail-send-tokens.ts#DECREASE_LOW_PRIORITY_TOKENS_SCRIPT). Decay is a Lua script rather than a read-modify-write for the same reason the peek is — see [[hop-peek]].
 
-**`scheduled-rate:<teamId>`** is the other axis: a rolling one-second log, member = email id, score = when it was scheduled.
+**`scheduled-rate:<teamId>`** is the other axis: a rolling one-second log, member = email id, score = when it was scheduled. Each [[hop-peek]] trims it to the last second and may send at most `cap − whatever remains`, where the team's `cap` lives in `team-rate-limit:<teamId>` (a built-in default when that key is unset). Zero headroom and the peek returns nothing until the oldest entry ages out. This is the hard sends-per-second ceiling, and it is checked **before** priority — it caps the whole batch, transactional and bulk alike.
 
 Why a log rather than a counter? A counter with a one-second expiry gives you **fixed** windows, and fixed windows leak: 1,000 sends at 0.99s plus 1,000 at 1.01s is 2,000 in 20ms, both "legal." Scoring each id by its own timestamp makes the window **slide** — trim everything older than a second and what remains is, exactly, the last second. Any 1,000ms interval you pick holds at most the cap.
 

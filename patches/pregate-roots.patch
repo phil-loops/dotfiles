@@ -1,0 +1,150 @@
+diff --git a/scripts/srv/pregate.py b/scripts/srv/pregate.py
+new file mode 100644
+index 0000000..ca5f6e0
+--- /dev/null
++++ b/scripts/srv/pregate.py
+@@ -0,0 +1,79 @@
++# srv/pregate.py — ambient root pre-gating: push is clicks, not waits.
++#
++# Any root (stack-branch parent == main) that is CURRENT with origin/main but holds no
++# green verdict for its tree gets the same detached stack-gates run the ready strip
++# spawns — ahead of the click, one at a time, never with --fix (an ambient run must not
++# move a branch or author a commit). Green lands in stack-branch.<b>.gates-green-tree
++# exactly as an interactive run would, so the strip answers from cache and the push door
++# is already unlocked. A red run leaves its journal + job sidecar, which doubles as the
++# "already tried this tree" memo: a failing root costs ONE typecheck per tree, not one
++# per tick, and its verdict is waiting the moment the branch is opened.
++#
++# The currency filter is what keeps this cheap: stale roots (the archived/parked
++# hundreds) are behind origin/main and never qualify; a root becomes a candidate exactly
++# when a restack brings it current — which is exactly when its old verdict died.
++
++import time
++
++from . import ctx, push, restack
++
++POLL_S = 45
++
++
++def _roots():
++    out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout
++    for ln in out.splitlines():
++        key, _, parent = ln.partition(" ")
++        if parent.strip() in ("main", "origin/main"):
++            yield key[len("stack-branch."):-len(".parent")]
++
++
++def _archived(branch):
++    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
++    if not proj:
++        return False
++    return ctx.run(["git", "config", "--bool", f"stack-project.{proj}.archived"]).stdout.strip() == "true"
++
++
++def _exists(branch):
++    return ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode == 0
++
++
++def _current(branch):
++    return ctx.run(["git", "merge-base", "--is-ancestor", "origin/main", branch]).returncode == 0
++
++
++def _candidate():
++    for b in _roots():
++        if not _exists(b) or _archived(b) or not _current(b):
++            continue
++        tree = push._tree(b)
++        if not tree or push._green_tree(b) == tree:
++            continue
++        job = push._GATE_JOBS.get(b) or push._adopt_job(b)
++        if job and job["tree"] == tree:
++            if push._job_running(job):
++                continue
++            # finished for this exact tree — harvest a green, let a red stand as the memo
++            result = next((e for e in push._journal_events(job["path"])
++                           if e.get("event") == "result"), None)
++            if result and result.get("ok"):
++                push._record_green(b, tree)
++            continue
++        return b
++    return None
++
++
++def pregate_forever():
++    while True:
++        time.sleep(POLL_S)
++        try:
++            if restack._running() or restack._queue_read():
++                continue   # trees about to move — gate after the restack, not before
++            if any(push._job_running(j) for j in list(push._GATE_JOBS.values())):
++                continue   # one gates run machine-wide: never stack a tsc under Phil's click
++            b = _candidate()
++            if b:
++                push._spawn_gates(b, fix=False)
++        except Exception:
++            pass   # an ambient nicety must never take the server down
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index ddcfb70..8b39516 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -130,15 +130,7 @@ def gates(req, raw):
+             if result and result.get("ok"):
+                 _record_green(branch, old["tree"])
+                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
+-        path = os.path.join(
+-            tempfile.gettempdir(),
+-            f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
+-        proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
+-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+-        job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
+-        _GATE_JOBS[branch] = job
+-        with open(_job_file(branch), "w") as f:
+-            json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
++        _spawn_gates(branch, fix=d.get("fix", True))
+         return req._send(200, json.dumps({"ok": True, "started": True}))
+     r = ctx.run(cmd)
+     # stack-gates always prints a JSON verdict on stdout and exits 0
+@@ -150,6 +142,25 @@ def gates(req, raw):
+     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+ 
+ 
++def _spawn_gates(branch, fix=True):
++    """Spawn the detached stack-gates child (journal + sidecar job file). Shared by the
++    interactive /gates detach path and the ambient pregate loop — one spawn shape, so a
++    bounced server re-adopts either kind identically."""
++    cmd = [os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
++    if fix:
++        cmd.append("--fix")
++    path = os.path.join(
++        tempfile.gettempdir(),
++        f"stack-gates-{branch.replace('/', '-')}-{int(time.time())}.jsonl")
++    proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
++                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
++    job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
++    _GATE_JOBS[branch] = job
++    with open(_job_file(branch), "w") as f:
++        json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
++    return job
++
++
+ def gates_progress(req, u):
+     qs = parse_qs(u.query)
+     branch = (qs.get("branch") or [""])[0]
+diff --git a/scripts/stack-review-server.py b/scripts/stack-review-server.py
+index 05735a3..49010e3 100755
+--- a/scripts/stack-review-server.py
++++ b/scripts/stack-review-server.py
+@@ -22,6 +22,7 @@ from srv import stage   # own line: the big srv import above is contested across
+ from srv import ship    # own line: same reason
+ from srv import prep    # own line: same reason
+ from srv import wiki    # own line: same reason
++from srv import pregate   # own line: same reason
+ srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
+ DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
+ 
+@@ -685,4 +686,5 @@ threading.Thread(target=reaper, daemon=True).start()
+ threading.Thread(target=watcher, daemon=True).start()
+ threading.Thread(target=pulse, daemon=True).start()
+ threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees
++threading.Thread(target=pregate.pregate_forever, daemon=True).start()   # current roots pre-gated → the push door is already unlocked (or the red is already parked) on arrival
+ httpd.serve_forever()

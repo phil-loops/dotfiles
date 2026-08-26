@@ -527,6 +527,12 @@ h2:first-child { margin-top:0; }
   transition:width .12s ease; }
 .slot:focus { outline:none; border-color:var(--verb); box-shadow:0 0 0 3px color-mix(in srgb, var(--verb) 16%, transparent); }
 .slot.filled { color:var(--verb); }
+.slotpair { display:inline-flex; align-items:stretch; vertical-align:middle; }
+.slotpair .slot { border-radius:5px 0 0 3px; }
+.slotback { background:var(--well); border:1px solid var(--edge-lit); border-left:none;
+  border-bottom:2px solid var(--verb); border-radius:0 5px 3px 0; color:var(--muted);
+  font:500 12px/1 var(--mono); padding:0 7px; cursor:pointer; }
+.slotback:hover { color:var(--verb); }
 .sum { color:var(--muted); font-size:12px; margin:12px 0 0; max-width:70ch; }
 .sum a, .sum code { color:var(--fg); }
 
@@ -630,8 +636,13 @@ pre { background:var(--well); border:1px solid var(--edge); border-radius:8px; p
   border:1px solid var(--edge); background:var(--well); margin-bottom:5px; }
 .var:hover { border-color:var(--verb); }
 .var b { color:var(--fg); font-weight:500; font-size:12px; }
-.var .val { color:var(--faint); margin-left:auto; max-width:130px; overflow:hidden; text-overflow:ellipsis;
-  white-space:nowrap; font-size:11px; }
+.var .val { color:var(--muted); margin-left:auto; flex:0 0 138px; width:138px; text-align:right;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:500 11px/1 var(--mono);
+  background:var(--ink); border:1px solid var(--edge-lit); border-radius:5px; padding:5px 7px; cursor:text; }
+.var .val::placeholder { color:var(--faint); font-style:italic; }
+.var .val:hover { border-color:var(--muted); }
+.var .val:focus { outline:none; color:var(--fg); border-color:var(--verb); text-overflow:clip;
+  box-shadow:0 0 0 3px color-mix(in srgb, var(--verb) 16%, transparent); }
 .related a { display:block; color:var(--muted); cursor:pointer; padding:4px 0; font-size:12px; }
 .related a:hover { color:var(--fg); }
 .empty { color:var(--faint); font-size:11px; line-height:1.7; }
@@ -774,6 +785,7 @@ function selectEndpoint(e, node, push = true) {
   });
   st = {
     path: Object.fromEntries(e.pathParams.map(p => [p.name, lookupStore(p.alias || p.name) || p.sample || ''])),
+    pathCustom: {},
     query: { fields: seedFields({ fields: e.queryParams, oneOf: e.queryOneOf }), extra: {}, custom: null },
     body: e.body ? subState({ shapes: e.body.shapes }, e.body.shapes[0].label) : null,
     tab: 'fields',
@@ -839,21 +851,41 @@ function urlLine(e) {
   return wrap;
 }
 
+const CUSTOM_SLOT = ' custom';
+
 // Once the graph is known, the node slot is a closed set — so it picks, it doesn't type. A datalist
 // looked like a dropdown but filtered its options against whatever the slot already held, so a slot
-// reading "n3" offered only n3 and the trigger looked unreachable. A select cannot hide a node.
+// reading "n3" offered only n3 and the trigger looked unreachable. A select cannot hide a node — so
+// its last option, "custom…", drops the slot to a free-text input for an id the graph doesn't hold
+// (a node from a workflow you've navigated past, or one you're probing for a 404).
 function nodeSlot(name) {
-  const sel = el('<select class="slot" title="' + esc(name) + '"></select>');
   const ids = nodeOrder();
+  if (st.pathCustom[name]) {
+    const wrap = el('<span class="slotpair"></span>');
+    const input = el('<input class="slot filled" spellcheck="false" autocomplete="off" placeholder="' + esc(name) + '" title="' + esc(name) + '" />');
+    input.value = st.path[name] || '';
+    const fit = () => input.style.width = Math.min(Math.max(name.length, input.value.length) + 2, 64) + 'ch';
+    fit();
+    input.oninput = () => { st.path[name] = input.value; fit(); };
+    const back = el('<button class="slotback" title="pick from workflow nodes">&#9662;</button>');
+    back.onclick = () => { st.pathCustom[name] = false; if (!ids.includes(st.path[name])) st.path[name] = ids[0]; render(); };
+    wrap.appendChild(input);
+    wrap.appendChild(back);
+    return wrap;
+  }
+  const sel = el('<select class="slot filled" title="' + esc(name) + '"></select>');
   if (!ids.includes(st.path[name])) st.path[name] = ids[0];
   for (const id of ids) {
     const opt = el('<option value="' + esc(id) + '">' + esc(nodeLabel(id)) + '</option>');
     if (id === st.path[name]) opt.selected = true;
     sel.appendChild(opt);
   }
-  sel.classList.add('filled');
+  sel.appendChild(el('<option value="' + CUSTOM_SLOT + '">custom…</option>'));
   sel.style.width = 'auto';
-  sel.onchange = () => { st.path[name] = sel.value; render(); };
+  sel.onchange = () => {
+    if (sel.value === CUSTOM_SLOT) { st.pathCustom[name] = true; st.path[name] = ''; render(); return; }
+    st.path[name] = sel.value; render();
+  };
   return sel;
 }
 
@@ -1540,10 +1572,20 @@ function renderStore() {
   }
   vars.innerHTML = '';
   for (const k of keys) {
-    const row = el('<div class="var"><b>' + esc(k) + '</b><span class="val">' + esc(store[k]) + '</span></div>');
+    const row = el('<div class="var"><b>' + esc(k) + '</b></div>');
     row.onclick = () => selectVar(k);
+    const val = el('<input class="val" spellcheck="false" autocomplete="off" placeholder="set value" title="edit ' + esc(k) + '" />');
+    val.value = store[k];
+    val.onclick = ev => ev.stopPropagation();
+    val.oninput = () => { store[k] = val.value; saveSession(); bindVarToPath(k); if (st) render(); };
+    row.appendChild(val);
     vars.appendChild(row);
   }
+}
+
+function bindVarToPath(k) {
+  if (!st) return;
+  for (const p of current.pathParams) if (p.alias === k || idMatch(p.name, k)) st.path[p.name] = store[k];
 }
 
 function idMatch(param, key) {
@@ -1561,10 +1603,7 @@ function lookupStore(param) {
 
 function selectVar(k) {
   selectedVar = k;
-  if (st) {
-    for (const p of current.pathParams) if (p.alias === k || idMatch(p.name, k)) st.path[p.name] = store[k];
-    render();
-  }
+  if (st) { bindVarToPath(k); render(); }
   const rel = document.getElementById('related');
   const matches = ENDPOINTS.filter(e => e.pathParams.some(p => p.alias === k || idMatch(p.name, k)) || e.queryParams.some(q => idMatch(q.name, k)));
   if (!matches.length) { rel.innerHTML = '<p class="empty">No endpoint takes ' + esc(k) + '.</p>'; return; }

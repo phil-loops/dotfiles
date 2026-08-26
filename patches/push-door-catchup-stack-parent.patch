@@ -1,0 +1,34 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index 7bb3489..70562ec 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -331,10 +331,18 @@ def _origin_verdict(branch):
+         not_merge = len(parents) < 2
+         # catch-up merge — GitHub's own "Update branch" shape, the one additive way a stale-fork
+         # PR gets its review diff back to the branch's own work: first parent is origin's PR
+-        # head, second parent sits on origin/main. Anything else stays refused.
++        # head, second parent sits on the PR's base — origin/main, or the stack parent for a
++        # stacked child. Anything else stays refused.
++        bases = ["origin/main"]
++        sp = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
++              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip())
++        if sp and sp not in ("main", "master") and ctx.run(
++                ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{sp}"]).returncode == 0:
++            bases.append(f"origin/{sp}")
+         catchup = (len(parents) == 2 and has_remote
+                    and parents[0] == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
+-                   and ctx.run(["git", "merge-base", "--is-ancestor", parents[1], "origin/main"]).returncode == 0)
++                   and any(ctx.run(["git", "merge-base", "--is-ancestor", parents[1], b]).returncode == 0
++                           for b in bases))
+         commit = {"sha": sha, "subject": subject, "body": body}
+     tip = _tip(branch)
+     gates_green = _green_tree(branch) == _tree(tip)
+@@ -345,7 +353,7 @@ def _origin_verdict(branch):
+         ward("one", "one commit", len(outgoing) == 1 and (not_merge or catchup),
+              "nothing to push — origin already has this" if not outgoing
+              else f"{len(outgoing)} commits — prep seals them into one" if len(outgoing) > 1
+-             else "outgoing commit is a merge that isn't a catch-up of origin/main"),
++             else "outgoing commit is a merge that isn't a catch-up of this branch's base"),
+         ward("voiced", "voiced subject", voiced and len(outgoing) == 1,
+              "" if len(outgoing) != 1 else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
+         ward("why", "says why", said_why and len(outgoing) == 1,

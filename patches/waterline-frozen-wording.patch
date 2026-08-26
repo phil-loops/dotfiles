@@ -1,0 +1,49 @@
+diff --git a/scripts/viewer-solid/src/FileRail.tsx b/scripts/viewer-solid/src/FileRail.tsx
+index b7ac38f..86c9879 100644
+--- a/scripts/viewer-solid/src/FileRail.tsx
++++ b/scripts/viewer-solid/src/FileRail.tsx
+@@ -462,7 +462,7 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
+ const DIVIDER =
+   "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
+ 
+-export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; onChat: (f: FileDiff, session?: string) => void }) {
++export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; frozen?: boolean; onChat: (f: FileDiff, session?: string) => void }) {
+   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
+   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
+   // the origin waterline — GitHub Desktop's push line: everything above it goes out on
+@@ -474,9 +474,11 @@ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch:
+     return f === -1 ? own().length : f;
+   };
+   const waterlineText = () =>
+-    waterline() === 0
+-      ? "origin is current — a push sends nothing"
+-      : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
++    props.frozen && waterline() > 0
++      ? "origin frozen — local carries the restacked truth; squash-merge reconciles, nothing to push"
++      : waterline() === 0
++        ? "origin is current — a push sends nothing"
++        : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
+   return (
+     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
+       {(data) => (
+diff --git a/scripts/viewer-solid/src/NodeDetail.tsx b/scripts/viewer-solid/src/NodeDetail.tsx
+index 5f66a25..3a86c99 100644
+--- a/scripts/viewer-solid/src/NodeDetail.tsx
++++ b/scripts/viewer-solid/src/NodeDetail.tsx
+@@ -143,6 +143,7 @@ export function NodeDetail() {
+                 diverged?: boolean;
+                 ahead?: number;
+                 behind?: number;
++                frozenOrigin?: boolean;
+               }
+             >
+           >,
+@@ -351,7 +352,7 @@ export function NodeDetail() {
+           setShowChats={setShowChats}
+         />
+         <TestNotes branch={active} />
+-        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
++        <Show when={view() === "diffs"} fallback={<CommitsList q={commits} branch={active()} frozen={!!health.data?.[active()]?.frozenOrigin} onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })} />}>
+           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
+             <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
+           </div>
