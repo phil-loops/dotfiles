@@ -1,0 +1,257 @@
+diff --git a/scripts/viewer-solid/src/ForestOverview.tsx b/scripts/viewer-solid/src/ForestOverview.tsx
+index 02e42b8..76ac753 100644
+--- a/scripts/viewer-solid/src/ForestOverview.tsx
++++ b/scripts/viewer-solid/src/ForestOverview.tsx
+@@ -9,6 +9,7 @@ import { ForestMap } from "./ForestMap";
+ import MergeStory from "./MergeStory";
+ import { chatToTmux } from "./chatDrawer";
+ import { SessionPicker } from "./SessionPicker";
++import { TicketChip } from "./TicketChip";
+ import type { Purpose } from "./types";
+ 
+ // ── forest overview: the map as the landing hero (no node selected) ──────
+@@ -344,27 +345,6 @@ export function ForestOverview() {
+   const hideTip = () => { tipBranch = null; setTip(null); };
+   const ovShipPlan = useShipPlan(project);
+   const [chatPick, setChatPick] = createSignal(false);
+-  const editTicket = async () => {
+-    if (!canMutate) {
+-      return;
+-    }
+-    const cur = model.data?.ticket?.toUpperCase() ?? "";
+-    const v = window.prompt("Linear ticket for this forest (blank clears):", cur || "LOO-");
+-    if (v === null || v.trim().toUpperCase() === cur) {
+-      return;
+-    }
+-    const r = await fetch(withRepo("/ticket"), {
+-      method: "POST",
+-      headers: { "Content-Type": "application/json" },
+-      body: JSON.stringify({ project: project(), ticket: v.trim() }),
+-    });
+-    if (r.ok) {
+-      ovQc.invalidateQueries({ queryKey: ["model"] });
+-    } else {
+-      const e = (await r.json().catch(() => null)) as { error?: string } | null;
+-      window.alert(e?.error ?? "ticket save failed");
+-    }
+-  };
+ 
+   return (
+     <div class="forest-overview min-h-screen bg-vellum-night">
+@@ -376,15 +356,7 @@ export function ForestOverview() {
+           </span>
+         </Show>
+         <Show when={canMutate || model.data?.ticket}>
+-          <button
+-            class="fo-ticket cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[4px] py-[1px] font-mono text-[11px] text-ink-faint hover:border-rule hover:text-ink-dim"
+-            title={model.data?.ticket
+-              ? `Linear ${model.data.ticket.toUpperCase()} — commit scopes read type(${model.data.ticket}):; click to change`
+-              : "tie this forest to a Linear ticket — commit scopes become type(loo-####):"}
+-            onClick={editTicket}
+-          >
+-            {model.data?.ticket ?? "＋ ticket"}
+-          </button>
++          <TicketChip project={project()} ticket={model.data?.ticket} />
+         </Show>
+         <Show when={spine().length}>
+           <span class="fo-meta text-[12px] tracking-[0.04em] text-ink-faint">{nodeCount()} {nodeCount() === 1 ? "node" : "nodes"}</span>
+diff --git a/scripts/viewer-solid/src/TicketChip.tsx b/scripts/viewer-solid/src/TicketChip.tsx
+new file mode 100644
+index 0000000..e754946
+--- /dev/null
++++ b/scripts/viewer-solid/src/TicketChip.tsx
+@@ -0,0 +1,145 @@
++import { createSignal, Show, onMount, onCleanup } from "solid-js";
++import { Portal } from "solid-js/web";
++import { useQueryClient } from "@tanstack/solid-query";
++import { canMutate, withRepo } from "./provider";
++import { normalizeTicket } from "./ticket";
++
++// The forest⇄Linear tie point (was a bare window.prompt). Same portal mechanics as
++// SessionPicker — an in-place absolute pop gets clipped/out-stacked by the sticky header.
++export function TicketChip(props: { project: string; ticket?: string }) {
++  const [open, setOpen] = createSignal(false);
++  return (
++    <span class="sp-anchor relative inline-flex">
++      <button
++        class="fo-ticket cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[4px] py-[1px] font-mono text-[11px] text-ink-faint hover:border-rule hover:text-ink-dim"
++        title={props.ticket
++          ? `Linear ${props.ticket.toUpperCase()} — commit scopes read type(${props.ticket}):; click to change`
++          : "tie this forest to a Linear ticket — commit scopes become type(loo-####):"}
++        onClick={() => canMutate && setOpen((v) => !v)}
++      >
++        {props.ticket ?? "＋ ticket"}
++      </button>
++      <Show when={open()}>
++        <TicketPop project={props.project} ticket={props.ticket} onClose={() => setOpen(false)} />
++      </Show>
++    </span>
++  );
++}
++
++function TicketPop(props: { project: string; ticket?: string; onClose: () => void }) {
++  const qc = useQueryClient();
++  const [draft, setDraft] = createSignal(props.ticket?.toUpperCase() ?? "LOO-");
++  const [busy, setBusy] = createSignal(false);
++  const [error, setError] = createSignal<string | null>(null);
++  const [pos, setPos] = createSignal<{ top: number; left: number } | null>(null);
++  let marker: HTMLSpanElement | undefined;
++  let el: HTMLDivElement | undefined;
++  let inputEl: HTMLInputElement | undefined;
++  const away = (e: MouseEvent) => {
++    if (el && !el.contains(e.target as Node)) {
++      props.onClose();
++    }
++  };
++  const key = (e: KeyboardEvent) => {
++    if (e.key === "Escape") {
++      e.stopPropagation();
++      props.onClose();
++    }
++  };
++  const drift = (e: Event) => {
++    // fixed positioning doesn't track a scrolling anchor — close instead of floating away
++    if (!el || !el.contains(e.target as Node)) {
++      props.onClose();
++    }
++  };
++  onMount(() => {
++    const anchor = marker?.parentElement;
++    if (anchor) {
++      const r = anchor.getBoundingClientRect();
++      setPos({ top: r.bottom + 6, left: r.left });
++    }
++    // capture phase, registered after the opening click's mousedown already fired — so the
++    // very next press anywhere outside dismisses, even on stopPropagation-happy targets.
++    document.addEventListener("mousedown", away, true);
++    document.addEventListener("keydown", key, true);
++    document.addEventListener("scroll", drift, true);
++    window.addEventListener("resize", drift);
++    requestAnimationFrame(() => inputEl?.focus());
++  });
++  onCleanup(() => {
++    document.removeEventListener("mousedown", away, true);
++    document.removeEventListener("keydown", key, true);
++    document.removeEventListener("scroll", drift, true);
++    window.removeEventListener("resize", drift);
++  });
++  const save = async () => {
++    const t = normalizeTicket(draft());
++    if (t === null) {
++      setError("must look like LOO-1234");
++      return;
++    }
++    if (t === (props.ticket?.toUpperCase() ?? "")) {
++      props.onClose();
++      return;
++    }
++    setBusy(true);
++    try {
++      const r = await fetch(withRepo("/ticket"), {
++        method: "POST",
++        headers: { "Content-Type": "application/json" },
++        body: JSON.stringify({ project: props.project, ticket: t }),
++      });
++      if (r.ok) {
++        qc.invalidateQueries({ queryKey: ["model"] });
++        props.onClose();
++        return;
++      }
++      const e = (await r.json().catch(() => null)) as { error?: string } | null;
++      setError(e?.error ?? "ticket save failed");
++    } catch {
++      setError("ticket save failed");
++    } finally {
++      setBusy(false);
++    }
++  };
++  return (
++    <>
++      <span ref={marker} class="hidden" aria-hidden="true" />
++      <Show when={pos()}>
++        {(p) => (
++          <Portal>
++            <div
++              class="ticket-pop fixed z-[62] flex w-[240px] cursor-default flex-col gap-[6px] rounded-lg border border-[#3a332b] bg-[#1b1815] p-[8px] text-left text-[11.5px] normal-case not-italic shadow-[0_12px_32px_rgba(0,0,0,.5)] [letter-spacing:normal]"
++              style={{ top: `${p().top}px`, left: `${p().left}px` }}
++              ref={el}
++            >
++              <div class="tk-head px-1 text-[9.5px] tracking-[.08em] uppercase text-[#6f675a]">Linear ticket — blank clears</div>
++              <input
++                class="tk-input min-w-0 rounded-[5px] border border-gold-deep bg-vellum-raise px-[7px] py-[4px] font-mono text-[12.5px] text-ink outline-none"
++                value={draft()}
++                disabled={busy()}
++                spellcheck={false}
++                onInput={(e) => {
++                  setDraft(e.currentTarget.value);
++                  setError(null);
++                }}
++                onKeyDown={(e) => {
++                  if (e.key === "Enter") save();
++                }}
++                ref={inputEl}
++              />
++              <Show when={error()}>
++                <div class="tk-error px-1 text-[10.5px] text-del">{error()}</div>
++              </Show>
++              <div class="flex items-center gap-2 px-1">
++                <button class="tk-save flex-none cursor-pointer text-[11px] leading-[1.55] text-gold-leaf enabled:hover:text-ink" disabled={busy()} onClick={save}>save</button>
++                <button class="tk-cancel flex-none cursor-pointer text-[11px] leading-[1.55] text-ink-faint enabled:hover:text-ink" disabled={busy()} onClick={() => props.onClose()}>cancel</button>
++                <span class="tk-hint ml-auto text-[10px] text-[#6f675a]">↵ save · esc close</span>
++              </div>
++            </div>
++          </Portal>
++        )}
++      </Show>
++    </>
++  );
++}
+diff --git a/scripts/viewer-solid/src/ticket.test.ts b/scripts/viewer-solid/src/ticket.test.ts
+new file mode 100644
+index 0000000..cc332b9
+--- /dev/null
++++ b/scripts/viewer-solid/src/ticket.test.ts
+@@ -0,0 +1,27 @@
++import { test } from "node:test";
++import assert from "node:assert/strict";
++import { normalizeTicket } from "./ticket.ts";
++
++test("canonical and sloppy forms normalize to TEAM-####", () => {
++  assert.equal(normalizeTicket("LOO-5271"), "LOO-5271");
++  assert.equal(normalizeTicket("loo-5271"), "LOO-5271");
++  assert.equal(normalizeTicket("loo5271"), "LOO-5271");
++  assert.equal(normalizeTicket("  eng-42  "), "ENG-42");
++});
++
++test("bare digits assume the LOO team", () => {
++  assert.equal(normalizeTicket("5271"), "LOO-5271");
++});
++
++test("blank clears", () => {
++  assert.equal(normalizeTicket(""), "");
++  assert.equal(normalizeTicket("   "), "");
++});
++
++test("junk is invalid, not silently saved", () => {
++  assert.equal(normalizeTicket("LOO-"), null);
++  assert.equal(normalizeTicket("x 123"), null);
++  assert.equal(normalizeTicket("12a"), null);
++  assert.equal(normalizeTicket("loo-12b"), null);
++  assert.equal(normalizeTicket("-42"), null);
++});
+diff --git a/scripts/viewer-solid/src/ticket.ts b/scripts/viewer-solid/src/ticket.ts
+new file mode 100644
+index 0000000..ad59e98
+--- /dev/null
++++ b/scripts/viewer-solid/src/ticket.ts
+@@ -0,0 +1,10 @@
++// Mirrors srv/review.py ticket_set's shape check ([A-Za-z]+-\d+) so a typo errors inline
++// instead of after a round-trip. "" clears the ticket; null = invalid.
++export function normalizeTicket(raw: string): string | null {
++  const v = raw.trim().toUpperCase();
++  if (!v) return "";
++  const m = /^([A-Z]+)-?(\d+)$/.exec(v);
++  if (m) return `${m[1]}-${m[2]}`;
++  if (/^\d+$/.test(v)) return `LOO-${v}`;
++  return null;
++}

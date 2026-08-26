@@ -1,0 +1,58 @@
+diff --git a/claude/context-index.md b/claude/context-index.md
+new file mode 100644
+index 0000000..6ec4068
+--- /dev/null
++++ b/claude/context-index.md
+@@ -0,0 +1,52 @@
++# Claude context index
++
++Every documentation surface that feeds Claude sessions on this machine, by load behavior.
++A map, not more guidance — pointers only; the spine's contraction rule applies here too.
++Word counts are a 2026-08-04 snapshot; regenerate with `wc -w`.
++
++## Always loaded — every session
++
++| surface | path | words |
++|---|---|---|
++| Spine (hard rules + defaults) | `~/.claude/CLAUDE.md` → `~/.dotfiles/CLAUDE.md` | 665 |
++| ↳ dotfiles topic | `~/.dotfiles/claude/dotfiles.md` | 402 |
++| ↳ forests topic (all forest shape/config/restack rules) | `~/.dotfiles/claude/forests.md` | 1,063 |
++| ↳ loops topic | `~/.dotfiles/claude/loops.md` | 500 |
++| ↳ style topic | `~/.dotfiles/claude/style.md` | 506 |
++| loops memory index (hooks only) | `~/.claude/projects/-Users-philbrockman-coding-loops/memory/MEMORY.md` | ~1,200 |
++
++≈4.3k words of always-on context in a loops session. Skill *descriptions* also ride in every
++session (bodies don't — see below).
++
++## Loaded on recall — memory topic files
++
++- `~/.claude/projects/-Users-philbrockman-coding-loops/memory/` — 345 files, ~187k words.
++  Only MEMORY.md auto-loads; topic files surface by description match or by following an index hook.
++- `MEMORY-archive.md` (same dir) — closed chapters; checked before re-proposing dead work.
++
++## Loaded on invocation — skills (`~/.dotfiles/.claude/skills/`)
++
++reforest 751 · land-forest 525 · design 1,126 · tutor 1,085 · loops-lmx 990 (+5,648 refs) ·
++loops-restart 698 · trigger-doi 664 · bench-shas 651 · loops-preview 556 · prwatch 542 ·
++loops-email-sending-best-practices 502 (+1,952 refs) · dev-tail 447 · ticket-check 390
++
++reforest + land-forest defer all forest rules to `claude/forests.md` (one governing text).
++Harness-bundled skills (artifact-*, dataviz, run, …) are Anthropic-owned — not indexed here.
++
++## Agents & commands
++
++- `~/.claude/agents/reforest.md` (1,551) — subagent definition; self-contained by design.
++  ⚠ carries its own copy of the forest principles — the remaining duplicate of forests.md.
++- `~/.claude/commands/log.md` (198) — `/log`.
++
++## Per-repo
++
++- loops: no repo CLAUDE.md — global spine only.
++- `~/coding/kerrigan/CLAUDE.md` (1,111) — kerrigan sessions only.
++
++## Adjacent (not injected, but shapes sessions)
++
++- `~/.dotfiles/OWNERS` — lane map, read by `own` and the own-hook.
++- Hooks (`~/.claude/settings.json`): own-hook (PreToolUse lane guard), claude-session-track
++  (SessionStart presence) — enforcement/telemetry; their output reaches Claude as tool feedback.
++- Viewer Wiki tab — human-facing docs; in context only when a session reads them.

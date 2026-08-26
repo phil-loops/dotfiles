@@ -1,0 +1,47 @@
+diff --git a/scripts/stack-open b/scripts/stack-open
+index a3c8385..1370cb9 100755
+--- a/scripts/stack-open
++++ b/scripts/stack-open
+@@ -493,6 +493,22 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
+   # Open by RELATIVE path once we've cd'd: Helix re-completes the whole prompt on every
+   # keystroke, so a 100-char absolute path costs it over a second of stat()s per open.
+   local rel_target="$file"; [[ "$file" == "$dir"/* ]] && rel_target="${file#$dir/}"
++  # tsgo binds its TS project at COLD LAUNCH to the worktree Helix started in and never re-roots
++  # on a warm :cd (proven: :lsp-restart re-binds the SAME wrong root) — so reusing a review-hx
++  # rooted at another worktree type-checks this file against the wrong tsconfig: phantom
++  # implicit-any across the whole file whenever the branch's trpc/prisma surface differs from that
++  # root (2026-08-25: a hover+o into a scratch worktree read against the main checkout's types).
++  # Reuse only a pane we can PROVE is rooted at $dir (a window option stamped at cold launch);
++  # else retire it and relaunch cold here — clean pane killed (free its tsgo), unsaved kept aside.
++  if [[ -n "${pane:-}" ]] && [[ "$(tmux show-window-options -t "${SESSION}:${win}" -v @stack-open-hx-root 2>/dev/null)" != "$dir" ]]; then
++    local rootsnap; rootsnap=$(hx_pane_line "$pane" 2)
++    if [[ ( "$rootsnap" == *NOR* || "$rootsnap" == *INS* || "$rootsnap" == *SEL* ) && "$rootsnap" != *"[+]"* ]]; then
++      tmux kill-window -t "$pane" 2>/dev/null || true
++    else
++      retire=1
++    fi
++    pane=""; win=""
++  fi
+   # A multi-file open relaunches cold, which retires the warm window — so it must never happen
+   # over UNSAVED work. Fail CLOSED: only a statusline that positively reads clean (a mode word,
+   # no [+]) earns the retire; an unreadable pane counts as dirty and downgrades the open to the
+@@ -519,7 +535,8 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
+     # :cd into this file's worktree first — the warm Helix's cwd is pinned to whichever scratch
+     # worktree it was first launched in, and gd/reference pickers render entries relative to cwd,
+     # so a file from any OTHER branch (every scratch worktree is a fresh path) shows absolute
+-    # without this. LSP workspace root is resolved per-file, so :cd never disturbs it.
++    # without this. We only reach here when the pane is ALREADY rooted at $dir (the guard above
++    # relaunches cold otherwise) — :cd fixes the pickers' cwd but tsgo does NOT re-root on it.
+     local dirty_before="" starved=""
+     HX_DEADLINE=${STACK_OPEN_HX_BUDGET:-5}   # seconds of THIS script's life, not of the drive:
+                                              # the worktree work before us spends the same 8s
+@@ -594,6 +611,9 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
+     tmux new-window -t "$SESSION" -n review-hx "cd ${(q)dir} && hx ${(j: :)args}" \
+       || { echo "stack-open: couldn't open a tmux window (is the '$SESSION' session running?)" >&2; return 1; }
+     win=$(tmux list-windows -t "$SESSION" -F '#{window_index} #{window_name}' 2>/dev/null | awk '$2=="review-hx"{print $1; exit}') || true
++    # Stamp the worktree this Helix cold-rooted its tsgo at, so a later open into a DIFFERENT
++    # worktree relaunches cold instead of warm-reusing a mis-rooted LSP (the guard above reads it).
++    [[ -n "${win:-}" ]] && tmux set-window-option -t "${SESSION}:${win}" @stack-open-hx-root "$dir" 2>/dev/null || true
+   fi
+   if ! quiet_open && [[ -n "${win:-}" ]]; then
+     tmux select-window -t "${SESSION}:${win}" 2>/dev/null || true

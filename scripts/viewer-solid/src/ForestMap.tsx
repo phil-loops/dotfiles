@@ -573,7 +573,7 @@ export function ForestMap(props: {
   const purposeClass = (id: string): string => {
     const lift = hov() === id || id === props.active();
     return `font-mono text-[9px] [text-anchor:middle] ${
-      lift ? "fill-ink-dim opacity-100" : kilnState(id) === "current" ? "fill-ink opacity-[0.72]" : "fill-ink-faint opacity-[0.72]"
+      lift ? "fill-ink-dim opacity-100" : kilnState(id) === "current" ? "fill-ink opacity-100" : "fill-ink-faint opacity-100"
     }`;
   };
   const integClass = (id: string): string => {

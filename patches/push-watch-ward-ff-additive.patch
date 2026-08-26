@@ -1,0 +1,16 @@
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index 8b39516..a887681 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -400,7 +400,10 @@ def _origin_verdict(branch):
+              "restacked onto newer main — prep folds it into a catch-up merge of origin's head (plain push)"
+              if has_remote and _is_restack(branch) else
+              "diverged from origin — reconcile first; shared history is never overwritten"),
+-        ward("watch", "deploy watch clear", not deploy_critical,
++        # FF-additive to a published head is exempt (mirrors the gates' fresh gate,
++        # d051e01): the branch must sit on the PR tip to fast-forward, so it can never
++        # "rebase forward" without rewriting shared history.
++        ward("watch", "deploy watch clear", not deploy_critical or (has_remote and ff and bool(outgoing)),
+              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
+         ward("gates", "gates green", gates_green,
+              "not green for this exact commit — ⟲ sync runs the gates"),

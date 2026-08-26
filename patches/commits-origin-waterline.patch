@@ -1,0 +1,92 @@
+diff --git a/scripts/srv/review.py b/scripts/srv/review.py
+index ca44e70..9644cd9 100644
+--- a/scripts/srv/review.py
++++ b/scripts/srv/review.py
+@@ -259,6 +259,14 @@ def commits(req, u):
+     parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+               or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
+     own = set(ctx.run(["git", "rev-list", f"{parent}..{branch}"]).stdout.split())
++    # origin waterline: which commits the remote already has, so the list can draw the
++    # GitHub-Desktop push line. Upstream first; a tracking-less branch (Phil pushes from
++    # another checkout) still gets one if origin/<branch> exists. Absent ref → no key.
++    up = ctx.run(["git", "rev-parse", "--abbrev-ref", f"{branch}@{{upstream}}"])
++    upref = up.stdout.strip() if up.returncode == 0 else ""
++    if not upref and ctx.run(["git", "rev-parse", "--verify", "-q", f"origin/{branch}"]).returncode == 0:
++        upref = f"origin/{branch}"
++    pushed = set(ctx.run(["git", "rev-list", "-n", "400", upref]).stdout.split()) if upref else None
+     fmt = "%H\x1f%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
+     out = ctx.run(["git", "log", branch, f"--format={fmt}", "--date=short", "-n", "80"]).stdout
+     rows = []
+@@ -267,7 +275,8 @@ def commits(req, u):
+         if len(p) >= 3:
+             rows.append({"sha": p[1], "subject": p[2],
+                          "author": p[3] if len(p) > 3 else "", "date": p[4] if len(p) > 4 else "",
+-                         "own": p[0] in own})
++                         "own": p[0] in own,
++                         **({"pushed": p[0] in pushed} if pushed is not None else {})})
+     req._send(200, json.dumps(rows))
+ 
+ 
+diff --git a/scripts/viewer-solid/src/FileRail.tsx b/scripts/viewer-solid/src/FileRail.tsx
+index 31e7326..b7ac38f 100644
+--- a/scripts/viewer-solid/src/FileRail.tsx
++++ b/scripts/viewer-solid/src/FileRail.tsx
+@@ -459,17 +459,45 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
+   );
+ }
+ 
++const DIVIDER =
++  "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
++
+ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; onChat: (f: FileDiff, session?: string) => void }) {
+   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
+   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
++  // the origin waterline — GitHub Desktop's push line: everything above it goes out on
++  // push, everything below origin already has. Index of the first pushed own row; -1 when
++  // no remote ref exists (never pushed anywhere → no line to draw).
++  const waterline = () => {
++    if (!own().some((c) => c.pushed !== undefined)) return -1;
++    const f = own().findIndex((c) => c.pushed === true);
++    return f === -1 ? own().length : f;
++  };
++  const waterlineText = () =>
++    waterline() === 0
++      ? "origin is current — a push sends nothing"
++      : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
+   return (
+     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
+       {(data) => (
+         <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
+           <ol class="commits mx-0 mt-2 mb-0 list-none p-0">
++            <Show when={waterline() === 0}>
++              <li class={DIVIDER}><span>{waterlineText()}</span></li>
++            </Show>
+             <For each={own()}>
+-              {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
++              {(c, i) => (
++                <>
++                  <Show when={i() === waterline() && i() > 0}>
++                    <li class={DIVIDER}><span>{waterlineText()}</span></li>
++                  </Show>
++                  <CommitRow c={c} branch={props.branch} onChat={props.onChat} />
++                </>
++              )}
+             </For>
++            <Show when={waterline() === own().length && own().length > 0}>
++              <li class={DIVIDER}><span>{waterlineText()}</span></li>
++            </Show>
+             <Show when={ancestors().length}>
+               <li class="commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']"><span>earlier history</span></li>
+               <For each={ancestors()}>
+diff --git a/scripts/viewer-solid/src/types.ts b/scripts/viewer-solid/src/types.ts
+index 925dd06..ee45c83 100644
+--- a/scripts/viewer-solid/src/types.ts
++++ b/scripts/viewer-solid/src/types.ts
+@@ -180,6 +180,7 @@ export const Commit = z.object({
+   author: z.string(),
+   date: z.string(),
+   own: z.boolean().optional(), // true = on this branch (parent..branch); false = inherited ancestor
++  pushed: z.boolean().optional(), // origin already has it (upstream / origin/<branch>); absent = no remote ref
+ });
+ export type Commit = z.infer<typeof Commit>;
+ 

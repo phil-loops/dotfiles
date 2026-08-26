@@ -29,14 +29,14 @@
   --color-vellum-edge: #221c11;
   --color-ink: #e8dcc4;
   --color-ink-dim: #9a8e78;
-  --color-ink-faint: #675d4d;
+  --color-ink-faint: #847a63;
   --color-gold-leaf: #e6b64e;
   --color-gold-deep: #6e521d;
   --color-gold-wash: rgba(230, 182, 78, 0.08);
   --color-ember: #d2732a;
   --color-ember-wash: rgba(210, 115, 42, 0.12);
   --color-patina: #7fa093;
-  --color-rule: #2c2517;
+  --color-rule: #3d3421;
   --color-add: #8fae7a;
   --color-add-bg: rgba(143, 174, 122, 0.09);
   --color-del: #c87a55;
@@ -157,12 +157,12 @@
                              surface — high contrast via hue, easy on the eyes */
   --diff-bg: #0a0a0d;     /* cool near-black surface behind the diff (not the warm page) */
   --ink-dim: #9a8e78;
-  --ink-faint: #675d4d;
+  --ink-faint: #847a63;
   --gold-leaf: #e6b64e;   /* blessed — the only gold on the page; keep-list: foil-edge */
   --gold-wash: rgba(230, 182, 78, 0.08); /* keep-list: foil-edge */
   --ember: #d2732a;       /* kiln heat — warming, deliberately not the blessed gold;
                              keep-list only: nh-settle / nh-step[run] */
-  --rule: #2c2517;
+  --rule: #3d3421;
   --add: #8fae7a;         /* diff additions: sage, deliberately NOT gold;
                              keep-list only: nh-step[ok] */
   --del: #c87a55;         /* diff deletions: ember; keep-list: nh-step[fail] */
