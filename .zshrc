@@ -19,9 +19,6 @@ alias zconfig="nvim ~/.zshrc"
 alias zsource='(cd ~/.dotfiles && git add -A && git commit -m "Update dotfiles"; git push); source ~/.zshrc'
 alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design doc (see scripts/dd-design)
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
-alias db="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion-tunnel"
-alias db:rw="LOCAL_PORT=54322 aws-vault exec staging -- ~/.dotfiles/scripts/bastion-tunnel --writer --cluster db-loops-staging"
-alias db:prod="LOCAL_PORT=54322 aws-vault exec prod -- ~/.dotfiles/scripts/bastion-tunnel --cluster db-loops-production"
 alias refresh="rm -fr .next node_modules && task dev"
 alias tl="$HOME/.dotfiles/scripts/loops-tail"  # tail loops: combined dev-stack log tail; tl -p to fzf-pick sources, defaults in loops-tail.conf
 alias keys="$HOME/.dotfiles/scripts/keys"  # cheatsheet of the keys we've bound ourselves, read live from helix/tmux config; keys --md, keys helix
