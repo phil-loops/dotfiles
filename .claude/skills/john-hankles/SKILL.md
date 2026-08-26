@@ -30,6 +30,12 @@ because the tree-keyed verdict IS the answer to "how would we know it's ready".
    touches but doesn't show: the legacy path being replaced, callee implementations,
    sibling patterns in the same directory, the schema. Open the repo (or `git show
    origin/main:<path>` when no checkout fits) — a claim you didn't verify doesn't ship.
+   **That includes the repo's policy docs**: read AGENTS.md / CONTRIBUTING fresh each
+   review (they change — 2026-08-25: AGENTS.md landed that morning and a new query
+   shipped testless against it). New-code policies (tests ship in the same PR, layering
+   direction, naming, commit types) apply to the diff even where surrounding code
+   predates them; "the file already does it" only counters under an explicit
+   do-not-refactor carve-out.
 2. **Rank ruthlessly.** Lead with the 2–3 points that decide the surface people live with
    after merge — API semantics, data-model shape, transactional claims. Then a
    comment-thread tier. Then test gaps. Close by naming the ONE comment you'd lead the
