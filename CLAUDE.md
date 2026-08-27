@@ -8,7 +8,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 **Pushing & PRs**
 
-- **Never push branches or open PRs — Phil handles both himself**, and never let tooling do either. Claude's job ends at a prepped local branch + a drafted PR body. (Remote topology: loops topic file.)
+- **Never push branches or open PRs — Phil handles both himself**, and never let tooling do either. Claude's job ends at a prepped local branch + a drafted PR body — and when the branch is bound for a push (a new PR against main, or new commits onto an open PR), "prepped" includes sealed + server-recorded gates-green (`/push-ready`): run the gates unprompted, and any commit landing on a gated tip re-runs them. (Remote topology: loops topic file.)
 - Committing locally is fine — make clean, self-contained commits.
 
 **History**
