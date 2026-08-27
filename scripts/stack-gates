@@ -146,10 +146,21 @@ def default_gates(cwd, branch=""):
     # still the version their configs were written for — slow there, but exact.
     tsc = repo_local("tsc", cwd)
     oxfmt = resolve("oxfmt", cwd)
-    # tsconfig.node.json was split into typescript/tsconfig.{runtime,test}.json (PR #9599);
-    # branches from before the split still carry the old single config.
+    # Mirror CI's typecheck surface (lint:typecheck:entries), NOT tsconfig.runtime.json:
+    # that config nodenext-checks every file in the repo, which no CI job and no build
+    # ever does — it reds on code CI accepts (stripe's cjs typings drop event namespaces,
+    # so main's #10157 only compiles under the bundler resolution CI uses; 2026-08-27).
+    # next+test = CI's bundler configs; runtime-build = the union of CI's node-entry
+    # checks; apps/realtime is CI's remaining standalone entry. CI's `tsc -b packages`
+    # is deliberately absent: composite emit through scratch-tree symlinks is the
+    # TS2883/poisoned-dts trap seed-gen exists to avoid.
     if os.path.exists(os.path.join(cwd, "typescript/tsconfig.runtime.json")):
-        ts_projects = ["typescript/tsconfig.runtime.json", "typescript/tsconfig.test.json"]
+        ts_projects = [p for p in ("typescript/tsconfig.next.json",
+                                   "typescript/tsconfig.test.json",
+                                   "typescript/tsconfig.runtime-build.json",
+                                   "apps/realtime/tsconfig.json")
+                       if os.path.exists(os.path.join(cwd, p))]
+    # tsconfig.node.json predates the #9599 split; parked pre-split branches keep it.
     elif os.path.exists(os.path.join(cwd, "tsconfig.node.json")):
         ts_projects = ["tsconfig.node.json"]
     else:
