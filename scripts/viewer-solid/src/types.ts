@@ -204,6 +204,7 @@ export type RestackDriver = z.infer<typeof RestackDriver>;
 export const RestackStatus = z.object({
   running: z.boolean(),
   paused: z.boolean().optional(),
+  orphaned: z.boolean().optional(), // leftover state whose parked branch is gone — dead walk, not a park
   project: z.string().optional(),
   current: z.string().optional(),
   reason: z.string().optional(),

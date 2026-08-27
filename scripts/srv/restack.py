@@ -357,7 +357,17 @@ def status(req, u):
     # paused == "escalated, needs a human": state left behind with no driver alive. State
     # + a live driver is just a walk in progress — reporting that as paused made the home
     # screen paint every healthy run as a parked conflict.
-    paused = state_present and not running and ((not want) or proj == want)
+    # Parked also means RESUMABLE: the walk stopped ON a branch a human can pick back up.
+    # If that branch (or, between nodes, every pending branch) no longer exists, the
+    # forest was reshaped out from under the state file — an orphan, not a park; reporting
+    # it paused dimmed the whole map for days (2026-08-27). Classify only, never delete:
+    # a bare status check stays read-only.
+    def _branch_exists(b):
+        return ctx.run(["git", "show-ref", "--verify", "--quiet",
+                        f"refs/heads/{b}"]).returncode == 0
+    orphaned = state_present and not running and (
+        not _branch_exists(cur) if cur else not any(_branch_exists(b) for b in pending))
+    paused = state_present and not running and not orphaned and ((not want) or proj == want)
     reason = ""
     if paused:
         try:
@@ -367,7 +377,8 @@ def status(req, u):
                         reason = line.split("claude escalated:", 1)[1].strip()
         except Exception:
             pass
-    req._send(200, json.dumps({"paused": paused, "project": proj, "current": cur,
+    req._send(200, json.dumps({"paused": paused, "orphaned": orphaned,
+                               "project": proj, "current": cur,
                                "running": running, "reason": reason,
                                "done": done, "total": total,
                                "completed": completed, "pending": pending,
