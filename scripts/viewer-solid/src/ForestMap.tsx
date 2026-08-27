@@ -390,7 +390,10 @@ export function ForestMap(props: {
       (n) => completed.has(n.id) || pending.has(n.id) || n.id === current
     );
     if (!touches) return null;
-    return { completed, pending, current, parked: !!s.paused && !s.running };
+    const parked = !!s.paused && !s.running;
+    // a parked walk dims only when its parked node is visible here — a dim with no anchor greys the map with nothing to point at (2026-08-27: 4-day-old orphan state)
+    if (parked && !model().byId[current]) return null;
+    return { completed, pending, current, parked };
   });
   const kilnState = (id: string): "" | "set" | "current" | "pending" | "parked" => {
     const k = kiln();
