@@ -80,8 +80,8 @@ order; per branch:
 - Fork from the intended parent (`git checkout <parent> && git checkout -b <branch>`), move its
   slice on (cherry-pick, or `git restore -p` the capability's hunks), commit clean and
   single-purpose.
-- **Each base must compile alone** — `tsgo --project typescript/tsconfig.runtime.json --noEmit` —
-  and query/model branches run their tests before moving on. Failing either = mis-split; re-cut.
+- **Each base must compile alone** — typecheck per loops.md *Typecheck* — and query/model
+  branches run their tests before moving on. Failing either = mis-split; re-cut.
 - Set description + parent/project/requires (+ the project's Linear ticket, once) in the same
   motion, per forests.md *Config + purpose*.
 
