@@ -1,0 +1,52 @@
+diff --git a/scripts/stack-restack b/scripts/stack-restack
+index c91be7a..d944542 100755
+--- a/scripts/stack-restack
++++ b/scripts/stack-restack
+@@ -167,10 +167,25 @@ release_lock() {
+   [[ "${holder%% *}" == "$$" ]] && rm -f "$LOCK_HELD"
+   LOCK_HELD=""
+ }
++walk_exit() {
++  # A driver dying MID-WALK (kill, closed pane → HUP, crash) must leave a record: the
++  # state file stays for --continue, but without a journal line it reads as a deliberate
++  # park forever (2026-08-23: an unexplained state file dimmed the map for four days).
++  if [[ -n "${STATE_OWNED:-}" && -z "${OUTCOME:-}" ]]; then
++    journal interrupted
++  fi
++  release_lock
++}
+ # Every mutating mode takes the lock; --plan is read-only and --abort is the escape
+ # hatch (it clears a wedged holder's lock via clear_state, so it must never block on it).
++# HUP is trapped too — a closed terminal/pane otherwise kills the driver with no EXIT trap.
++# Signal traps must `exit` explicitly: a zsh trap that returns RESUMES the script, so a
++# bare shared trap would release the lock and keep walking after a TERM.
+ if [[ "$MODE" != "plan" && "$MODE" != "abort" ]]; then
+-  trap 'release_lock' EXIT INT TERM
++  trap 'walk_exit; exit 129' HUP
++  trap 'walk_exit; exit 130' INT
++  trap 'walk_exit; exit 143' TERM
++  trap 'walk_exit' EXIT
+   acquire_lock "$MODE $PROJECT"
+ fi
+ 
+@@ -676,6 +691,7 @@ EOF
+ # ---------- state file (used by --continue) ----------
+ 
+ save_state() {
++  STATE_OWNED=1   # this run wrote the walk state → walk_exit journals if we die unexplained
+   mkdir -p "$STATE_DIR"
+   {
+     echo "PROJECT=${PROJECT}"
+@@ -724,8 +740,11 @@ clear_state() {
+ }
+ 
+ # Append-only run journal — the viewer's status endpoint reads the last line so a run
+-# that finished (or parked) before anyone looked stays identifiable. $1 = done|parked|aborted.
++# that finished (or parked) before anyone looked stays identifiable.
++# $1 = done|parked|aborted|interrupted; recording it as OUTCOME tells walk_exit this
++# exit was deliberate.
+ journal() {
++  OUTCOME="$1"
+   local n=${COMPLETED+${#COMPLETED[@]}}
+   local s=${SKIPPED_PUBLISHED+${#SKIPPED_PUBLISHED[@]}}
+   local f=${FAILED_REBASE+${#FAILED_REBASE[@]}}
