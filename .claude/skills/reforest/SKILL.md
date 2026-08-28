@@ -61,6 +61,13 @@ Present the forest as the **merge-story** — the same artifact the viewer rende
   (`stack-project.<project>.ticket`), else the project name. Same scope on every branch.
 - **`↳ builds on N`** = a true `parent` (indent these); **`⤿ requires N — merges after`** = the
   extra bases an integrator carries. One dep is a parent, never a lone `requires`.
+- **`⇢ after N — deploy order only`** = zero code dependency, but merging out of order breaks
+  prod (the FK drop before the deleter; a migration before its reader):
+  `git config --add stack-branch.<n>.after <dep>`. **The plan must ask this for every sibling
+  pair: "if these merge in the wrong order, does production survive?"** Nothing local fails when
+  the edge is missing — both trees are green alone; the hazard lives only in the cross product —
+  so the question is asked here, at plan time, or never. Also name any rollback asymmetry the
+  order creates (once the dependent runs in prod, the base may be unrevertable).
 - Per branch: the plain subject + one **non-trivial implementation note** from its slice of the
   diff (a mechanism, invariant, gotcha, or perf/correctness choice).
 - This is the **contract** — revise until split, order, labels, and purposes are right.

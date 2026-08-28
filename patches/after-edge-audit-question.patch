@@ -1,0 +1,13 @@
+diff --git a/claude/forests.md b/claude/forests.md
+index 6ff8e9b..b8e5c8b 100644
+--- a/claude/forests.md
++++ b/claude/forests.md
+@@ -13,7 +13,7 @@
+ 
+ - `parent` (single) — the rebase base: `git config stack-branch.<n>.parent <p>`. **Ancestry = necessity**: the parent is the nearest node the branch cannot build without — else main. Band order is presentation (merge rank carries it), never a reason to chain.
+ - `requires` (multivar) — fan-in deps this branch carries as cherry-picks beyond its parent: `git config --add stack-branch.<n>.requires <dep>`. Metadata only — the review diff stays `parent...child`. **Reserved for branches converging 2+ truly independent bases** (no cross-dependency between the converged subtrees — else linearize); exactly one dep is a chain (`parent = <dep>`) — a lone `requires` makes the diff re-review the dep. Never merge commits; history stays linear.
+-- `after` (multivar) — merge-order only, zero code dependency: `git config --add stack-branch.<n>.after <dep>`. No cherry-picks, no rebase coupling — the branch sits on its true content base and this edge alone makes it land later (deploy invariants: the FK drop before the deleter). Counts fully in merge rank and blocks mergeable; a `requires` whose patch-ids carry none of its dep's commits IS an `after` (doctor ⇢ flags the migration). Born 2026-08-19 after chaining deploy-order deps cost three full-spine ripples in a day.
++- `after` (multivar) — merge-order only, zero code dependency: `git config --add stack-branch.<n>.after <dep>`. No cherry-picks, no rebase coupling — the branch sits on its true content base and this edge alone makes it land later (deploy invariants: the FK drop before the deleter). Counts fully in merge rank and blocks mergeable; a `requires` whose patch-ids carry none of its dep's commits IS an `after` (doctor ⇢ flags the migration). Born 2026-08-19 after chaining deploy-order deps cost three full-spine ripples in a day. **Plan-time forcing function: for every sibling pair ask “if these merge in the wrong order, does prod survive?” — nothing local reds when the edge is missing (both trees green alone; the hazard lives in the cross product), so it's caught at planning or never; also name any rollback asymmetry the order creates (2026-08-27: compute-doomed-users vs the invite-FK drop).**
+ 
+ ## Config + purpose — part of the operation itself, never a follow-up
+ 
