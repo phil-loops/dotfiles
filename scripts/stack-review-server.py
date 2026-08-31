@@ -270,7 +270,7 @@ class H(BaseHTTPRequestHandler):
             srvctx.clear_repo()
 
     def _dispatch_get(self, u):
-        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki")
+        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/"))):
             # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
             # every client route: path-based routing (History API) means a deep-link/refresh to

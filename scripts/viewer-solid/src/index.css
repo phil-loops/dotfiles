@@ -381,3 +381,29 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 .wiki-cite:focus-visible, .wiki-link:focus-visible { outline: 1px solid var(--gold-leaf); outline-offset: 2px; }
 .wiki-link { color: var(--patina); text-decoration: none; border-bottom: 1px solid transparent; }
 .wiki-link:hover { border-bottom-color: var(--patina); }
+
+/* ── the Machine page's bus: one line, many taps (see MachinePage.tsx). The vertical run,
+   each server's tap tick, and the node dots are pseudo-element plumbing utilities can't
+   express inline; geometry states the page's thesis — N servers, one substrate. ── */
+.machine-bus { position: relative; }
+.machine-bus::before {
+  content: "";
+  position: absolute; left: 11px; top: 14px; bottom: -14px;
+  width: 2px; border-radius: 1px;
+  background: var(--color-patina); opacity: 0.3;
+}
+.machine-tap { position: relative; width: 30px; flex: none; }
+.machine-tap::before { /* the tick from the bus into the card */
+  content: "";
+  position: absolute; left: 12px; top: 21px; right: -1px; height: 2px;
+  background: var(--color-patina); opacity: 0.3;
+}
+.machine-tap::after { /* the node on the bus */
+  content: "";
+  position: absolute; left: 7px; top: 17px; width: 10px; height: 10px;
+  border-radius: 50%; box-sizing: border-box;
+  background: var(--color-vellum-night);
+  border: 2px solid var(--color-patina);
+}
+.machine-tap.tap-off::after { border-color: var(--color-ink-faint); opacity: 0.7; }
+.machine-terminus { position: relative; }
