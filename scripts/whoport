@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# whoport — what is each local port actually serving?
+# For every listening dev port (or the ones you name): pid · process · the checkout
+# it runs FROM (lsof cwd → branch@sha, dirty flag) · and for HTTP ports the
+# X-Dev-Worktree header the server itself sends (proof at the point of use;
+# stamp via loops-provenance). Flags a mismatch between the two loudly.
+#
+# usage: whoport [port ...]   # default: 3000 3005 4000 + every node/next listener
+set -uo pipefail
+
+ports=("$@")
+if [ ${#ports[@]} -eq 0 ]; then
+  ports=(3000 3005 4000)
+  while read -r p; do
+    case " ${ports[*]} " in *" $p "*) ;; *) ports+=("$p") ;; esac
+  done < <(lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null \
+    | awk '$1 ~ /^(node|next-serv|bun|tsx)/ {sub(".*:","",$9); print $9}' | sort -un)
+fi
+
+for port in "${ports[@]}"; do
+  pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1)"
+  if [ -z "$pid" ]; then
+    printf ':%-5s —\n' "$port"
+    continue
+  fi
+  cmd="$(ps -o comm= -p "$pid" 2>/dev/null | xargs basename 2>/dev/null)"
+  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
+  git=""
+  if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
+    branch="$(git -C "$cwd" branch --show-current)"
+    [ -n "$branch" ] || branch="detached"
+    sha="$(git -C "$cwd" rev-parse --short HEAD 2>/dev/null)"
+    dirty=""
+    [ -n "$(git -C "$cwd" status --porcelain 2>/dev/null | head -1)" ] && dirty="*"
+    git="${branch}@${sha}${dirty}"
+  fi
+  printf ':%-5s pid %-6s %-12s %-28s %s\n' "$port" "$pid" "${cmd:-?}" "${git:--}" "${cwd:--}"
+
+  hdr="$(curl -m 2 -sI "http://localhost:$port/" 2>/dev/null \
+    | awk 'tolower($1)=="x-dev-worktree:"{$1="";sub(/^ /,"");print;exit}' | tr -d '\r')"
+  if [ -n "$hdr" ]; then
+    hdr_path="${hdr##* }"
+    if [ -n "$cwd" ] && [ "$hdr_path" != "$cwd" ]; then
+      printf '       ⚠ serves %s (header) but process cwd is %s\n' "$hdr" "$cwd"
+    else
+      printf '       serves %s\n' "$hdr"
+    fi
+  elif [ "${cmd:-}" = "next-server" ] || [ "${cmd:-}" = "node" ] && [ -n "$git" ]; then
+    printf '       (no X-Dev-Worktree stamp — loops-provenance %s)\n' "${cwd:-<dir>}"
+  fi
+done

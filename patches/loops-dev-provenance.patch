@@ -1,0 +1,35 @@
+diff --git a/next.config.js b/next.config.js
+index 2c969ca776..bd2b80f38d 100644
+--- a/next.config.js
++++ b/next.config.js
+@@ -2,6 +2,20 @@
+ 
+ /** @typedef {import("next").NextConfig} NextConfig */
+ 
++const { execSync } = require("node:child_process");
++
++// Local dev-only provenance stamp (never committed): applied by ~/.dotfiles/scripts/loops-provenance
++const devWorktreeStamp = (() => {
++  if (process.env.NODE_ENV === "production") return null;
++  try {
++    const git = (args) =>
++      execSync(`git ${args}`, { cwd: __dirname, encoding: "utf8" }).trim();
++    return `${git("rev-parse --abbrev-ref HEAD")}@${git("rev-parse --short HEAD")} ${__dirname}`;
++  } catch {
++    return null;
++  }
++})();
++
+ /** @type {NextConfig} */
+ const nextConfig = {
+   devIndicators: false,
+@@ -68,6 +82,9 @@ const nextConfig = {
+       {
+         source: "/(.*)",
+         headers: [
++          ...(devWorktreeStamp
++            ? [{ key: "X-Dev-Worktree", value: devWorktreeStamp }]
++            : []),
+           {
+             key: "X-Robots-Tag",
+             value: "none",

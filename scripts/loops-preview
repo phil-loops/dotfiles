@@ -368,6 +368,7 @@ tmux kill-session -t "$SESSION" 2>/dev/null || true
 # Only AFTER the old session is dead — deleting under a live server wedges it into
 # endless build-manifest ENOENTs.
 rm -rf "$DIR/.next"
+"$HOME/.dotfiles/scripts/loops-provenance" "$DIR" --no-agent >/dev/null 2>&1 || true  # best-effort X-Dev-Worktree stamp
 tmux new-session -d -s "$SESSION" "cd '$DIR' && $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
 if [ -n "$JOBS" ]; then
   JLOG="/tmp/$SESSION-jobs.log"
