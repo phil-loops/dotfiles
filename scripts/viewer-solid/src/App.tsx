@@ -9,12 +9,12 @@ import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { Activity } from "./Activity";
-import { ServersDrawer } from "./ServersDrawer";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
 import { Wiki } from "./Wiki";
 import { ForestOverview } from "./ForestOverview";
 import { NavRail } from "./NavRail";
+import { MachinePage } from "./MachinePage";
 import { trackRecent } from "./recents";
 
 
@@ -43,6 +43,9 @@ function Routes() {
       </Match>
       <Match when={location().kind === "wiki"}>
         <Wiki />
+      </Match>
+      <Match when={location().kind === "machine"}>
+        <MachinePage />
       </Match>
       <Match when={isForestOverview(location())}>
         <ForestOverview />
@@ -160,7 +163,7 @@ function Layout(props: { children?: JSX.Element }) {
   // home and the forest overview keep it.
   const showRail = () => {
     const l = loc();
-    return l.kind === "home" || l.kind === "wiki" || isForestOverview(l);
+    return l.kind === "home" || l.kind === "wiki" || l.kind === "machine" || isForestOverview(l);
   };
   return (
     <>
@@ -182,7 +185,6 @@ function Layout(props: { children?: JSX.Element }) {
         </span>
       </Show>
       <Activity />
-      <ServersDrawer />
     </>
   );
 }

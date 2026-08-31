@@ -2,14 +2,14 @@
 // jobs, restacks walking a forest, and fired claudes editing in worktrees. The Hearth
 // alarms on restack *tangles* at home; this is the always-available list of live work,
 // including fired claudes, which nothing else in the viewer surfaces. Polls /processes.
-// Dev-server previews don't list inline — they collapse to one launcher that opens the
-// Servers drawer (health, connections, restart/kill/log live there, not as dock rows).
+// Dev-server previews don't list inline — they collapse to one launcher into the
+// Machine page (health, connections, restart/kill/log live there, not as dock rows).
 //
 // Styling: Tailwind utilities against the ledger @theme. Ember marks work-in-motion,
 // mirroring the Hearth; gold is never spent here (blessed only).
 import { createQuery } from "@tanstack/solid-query";
 import { createSignal, Show, For } from "solid-js";
-import { openServers } from "./ServersDrawer";
+import { useViewerLocation } from "./router";
 
 type Proc = {
   kind: "chat" | "restack" | "claude" | "preview";
@@ -40,6 +40,7 @@ const glyphTint = (p: Proc) =>
 const ROW = "flex items-baseline gap-2 border-b border-[rgba(44,37,23,0.5)] px-3 py-1.5 text-[12px] last:border-b-0";
 
 export function Activity() {
+  const { navigate } = useViewerLocation();
   const q = createQuery<Proc[]>(() => ({
     queryKey: ["processes"],
     queryFn: () => fetch("/processes").then((r) => r.json() as Promise<Proc[]>),
@@ -103,13 +104,13 @@ export function Activity() {
         </button>
         <Show when={open()}>
           <div class="max-h-[44vh] overflow-auto border-t border-rule">
-            {/* dev servers → one launcher into the Servers drawer, never inline rows. One pip per
-                server; "listening" is all the dock knows — real health is probed in the drawer. */}
+            {/* dev servers → one launcher into the Machine page, never inline rows. One pip per
+                server; "listening" is all the dock knows — real health is probed on the Machine. */}
             <Show when={previews().length > 0}>
               <button
                 class={`activity-row launcher ${ROW} group w-full cursor-pointer text-left leading-[1.55] transition-colors duration-[120ms] hover:bg-vellum-edge`}
-                onClick={() => openServers()}
-                title="open the Servers panel — which branch each server runs, real health, restart · kill · log"
+                onClick={() => navigate({ kind: "machine" })}
+                title="open the Machine — which branch each server runs, real health, restart · kill · log"
               >
                 <span class="flex-none text-[12px] text-patina">▷</span>
                 <span class="truncate text-ink">{previews().length} dev {previews().length === 1 ? "server" : "servers"}</span>
