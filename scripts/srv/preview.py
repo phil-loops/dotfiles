@@ -489,6 +489,37 @@ def restart(req, raw):
     req._send(200, json.dumps({"ok": True, "port": newport, "url": "http://localhost:%d" % newport, "dir": dirp}))
 
 
+def swap(req, raw):
+    # before/after in ONE tab: kill the server on this port and relaunch it serving a DIFFERENT
+    # branch's worktree — the URL survives, and the X-Dev-Worktree stamp proves each flip. Never
+    # a `git checkout` in the old worktree: that rotates a tree some session may be working in.
+    d = json.loads(raw or "{}")
+    port = str(d.get("port", "") or "")
+    branch, dirp = d.get("branch", ""), d.get("dir", "")
+    if not port.isdigit() or not (branch or dirp):
+        req._send(400, json.dumps({"ok": False, "err": "need port + branch or dir"}))
+        return
+    if not dirp:
+        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--serve-path", branch])
+        dirp = (r.stdout or "").strip()
+        if r.returncode != 0 or not dirp:
+            req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (r.stderr or "could not resolve a worktree").strip())}))
+            return
+    subprocess.run([_script(), "/", "--kill", "--port", port], capture_output=True, text=True)
+    for _ in range(20):   # the killed group releases the socket a beat later — never launch onto a busy port
+        if not _listening(int(port)):
+            break
+        time.sleep(0.25)
+    p = subprocess.run([_script(), dirp, "--port", port, "--main", checkout._active_main_wt()],
+                       capture_output=True, text=True)
+    _list_invalidate()
+    m = re.search(r"localhost:(\d+)", p.stdout)
+    if not m:
+        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "swap failed").strip())[:400]}))
+        return
+    req._send(200, json.dumps({"ok": True, "port": int(m.group(1)), "url": "http://localhost:%s" % m.group(1), "dir": dirp}))
+
+
 def kill(req, raw):
     d = json.loads(raw or "{}")
     dirp = d.get("dir", "")
@@ -551,6 +582,15 @@ def previews(req):
             if pv.get("managed", True):
                 pv["log"] = _log_path(pv.get("name", ""))
                 pv["jobs"] = os.path.exists(_jobs_log_path(pv.get("name", "")))
+                br = pv.get("branch") or ""
+                # the natural "before" for a swap: the branch's stack parent, else main
+                if br and br != "main" and not br.startswith("detached"):
+                    try:
+                        pr = subprocess.run(["git", "-C", main_wt, "config", "stack-branch.%s.parent" % br],
+                                            capture_output=True, text=True, timeout=4)
+                        pv["swapTo"] = pr.stdout.strip() or "main"
+                    except Exception:
+                        pv["swapTo"] = "main"
         if pvs:
             with ThreadPoolExecutor(max_workers=min(8, len(pvs))) as ex:
                 pvs = list(ex.map(_health, pvs))
