@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# loops-provenance — stamp a loops checkout with the dev-only X-Dev-Worktree header.
+# The stamp lives ONLY as a working-tree patch (never commit it to loops); once
+# applied, every dev response carries `X-Dev-Worktree: <branch>@<sha> <path>` so the
+# browser proves which worktree a port serves (whoport reads it back).
+#
+# usage: loops-provenance [dir] [--status | --revert] [--no-agent]
+#   dir defaults to the git toplevel of $PWD.
+# On patch drift: falls back to a claude agent that re-derives the patch — its first
+# instruction is to read patches/loops-dev-provenance-notes.md (previous findings)
+# and its last is to update that file for the next agent.
+set -euo pipefail
+
+PATCH="$HOME/.dotfiles/patches/loops-dev-provenance.patch"
+NOTES="$HOME/.dotfiles/patches/loops-dev-provenance-notes.md"
+
+DIR="" MODE=apply AGENT=1
+for a in "$@"; do case "$a" in
+  --status)   MODE=status ;;
+  --revert)   MODE=revert ;;
+  --no-agent) AGENT=0 ;;
+  -h|--help)  sed -n '2,12p' "$0"; exit 0 ;;
+  *)          DIR="$a" ;;
+esac; done
+[ -n "$DIR" ] || DIR="$(git rev-parse --show-toplevel)"
+cd "$DIR"
+[ -f next.config.js ] || { echo "loops-provenance: no next.config.js in $DIR" >&2; exit 1; }
+
+applied() { grep -q "X-Dev-Worktree" next.config.js; }
+
+case "$MODE" in
+  status)
+    if applied; then echo "stamped: $DIR"; else echo "unstamped: $DIR"; exit 1; fi; exit 0 ;;
+  revert)
+    applied || { echo "already unstamped: $DIR"; exit 0; }
+    git restore --staged -- next.config.js 2>/dev/null || true
+    git apply -R "$PATCH" 2>/dev/null || git checkout -- next.config.js
+    echo "reverted: $DIR"; exit 0 ;;
+esac
+
+applied && { echo "already stamped: $DIR"; exit 0; }
+
+if git apply --check --3way "$PATCH" 2>/dev/null; then
+  git apply --3way "$PATCH"
+  git restore --staged -- next.config.js 2>/dev/null || true
+  echo "stamped: $DIR ($(git branch --show-current || true)@$(git rev-parse --short HEAD))"
+  exit 0
+fi
+
+echo "loops-provenance: patch no longer applies — next.config.js drifted" >&2
+if [ "$AGENT" != 1 ]; then
+  echo "loops-provenance: run without --no-agent to have an agent re-derive it" >&2
+  exit 1
+fi
+
+echo "loops-provenance: launching agent to re-derive the patch (notes: $NOTES)" >&2
+claude -p --permission-mode bypassPermissions "You are regenerating the local dev-provenance patch for the loops repo checkout at $DIR (you are already in it).
+
+FIRST: read $NOTES — previous agents' summarization of where the stamp lives and why. Trust the contract there over the stale diff in $PATCH.
+
+Goal: re-derive the stamp so every non-production response carries the header 'X-Dev-Worktree: <branch>@<shortsha> <absolute worktree path>', computed once at server boot from the serving checkout. Anchor it wherever response headers are emitted now (historically next.config.js headers()).
+
+Then, in order:
+1. Make the minimal working-tree change here and verify it: the config must load under node and produce the header (verification recipe is in the notes).
+2. Regenerate $PATCH so 'git apply --check --3way' passes on a PRISTINE checkout: capture 'git diff' of ONLY this change (temporarily stash-free baseline: author the diff from the unmodified file, e.g. via 'git diff -- <file>' when this is the only local change to it).
+3. Leave THIS checkout stamped (working tree only). NEVER commit anything in the loops repo, never touch other local changes.
+4. Rewrite $NOTES as a compact updated summary: what drifted, where the stamp lives now, verification, gotchas; add one line to its drift log with today's date."
