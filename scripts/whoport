@@ -6,8 +6,117 @@
 # stamp via loops-provenance). Flags a mismatch between the two loudly.
 #
 # usage: whoport [port ...]   # default: 3000 3005 4000 + every node/next listener
+#        whoport --stack      # shared-infra provenance: who booted the data plane,
+#                             # DB/CH schema drift per active checkout, queue consumers,
+#                             # which checkouts are connected to each shared service
 set -uo pipefail
 
+cwd_of() { lsof -a -p "$1" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'; }
+
+# ── shared-infra report ─────────────────────────────────────────────────────────
+stack_report() {
+  local t; t="$(mktemp -d "${TMPDIR:-/tmp}/whoport.XXXXXX")"
+  trap "rm -rf '$t'" EXIT
+
+  echo "── data plane (docker)"
+  local c img started dir
+  for c in loops-psql-1 loops-clickhouse-server-1 loops-elasticmq-1 loops-valkey-1; do
+    if docker inspect "$c" >/dev/null 2>&1; then
+      img="$(docker inspect "$c" --format '{{.Config.Image}}')"
+      started="$(docker inspect "$c" --format '{{.State.StartedAt}}' | cut -c6-16 | tr T ' ')"
+      dir="$(docker inspect "$c" --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}')"
+      printf '  %-24s %-36s up since %s  compose: %s\n' "${c#loops-}" "$img" "$started" "$dir"
+    else
+      printf '  %-24s down\n' "${c#loops-}"
+    fi
+  done
+
+  # active checkouts = compose dir + cwds of node listeners + clients of shared ports
+  {
+    git rev-parse --show-toplevel 2>/dev/null
+    docker inspect loops-psql-1 --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' 2>/dev/null
+    lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk '$1 ~ /^(node|next-serv|bun|tsx)/ {print $2}' | sort -u \
+      | while read -r pid; do cwd_of "$pid"; done
+    lsof -iTCP -sTCP:ESTABLISHED -P -n 2>/dev/null | awk '$9 ~ /:(5432|8123|9324|6378)$/ {print $2}' | sort -u \
+      | while read -r pid; do cwd_of "$pid"; done
+  } | sort -u | while read -r d; do
+    [ -d "$d/packages/prisma/migrations" ] && echo "$d"
+  done > "$t/checkouts"
+
+  echo
+  if docker exec loops-psql-1 psql -U postgres -d postgres -tAc \
+       "select migration_name from _prisma_migrations where finished_at is not null" \
+       2>/dev/null | sort > "$t/pg_applied"; then
+    printf '── postgres schema  (applied head: %s)\n' "$(tail -1 "$t/pg_applied")"
+    local d behind ahead note
+    while read -r d; do
+      ls "$d/packages/prisma/migrations" 2>/dev/null | grep -v migration_lock | sort > "$t/local"
+      behind="$(comm -23 "$t/local" "$t/pg_applied" | wc -l | tr -d ' ')"
+      ahead="$(comm -13 "$t/local" "$t/pg_applied" | wc -l | tr -d ' ')"
+      note="in sync"
+      [ "$behind" != 0 ] && note="db missing $behind local (latest: $(comm -23 "$t/local" "$t/pg_applied" | tail -1))"
+      [ "$ahead" != 0 ] && note="$note · db has $ahead not in checkout (latest: $(comm -13 "$t/local" "$t/pg_applied" | tail -1))"
+      [ "$behind" != 0 ] || [ "$ahead" != 0 ] && note="⚠ $note"
+      printf '  %-52s %s\n' "$d" "$note"
+    done < "$t/checkouts"
+  else
+    echo "── postgres schema: unreachable (loops-psql-1 down?)"
+  fi
+
+  echo
+  if docker exec loops-clickhouse-server-1 clickhouse-client -q \
+       "select version from loops_dev.schema_migrations where applied=1" \
+       2>/dev/null | sort -u > "$t/ch_applied"; then
+    printf '── clickhouse schema  (loops_dev applied head: %s)\n' "$(tail -1 "$t/ch_applied")"
+    local d behind
+    while read -r d; do
+      ls "$d/clickhouse/migrations" 2>/dev/null | sed 's/_.*//' | sort -u > "$t/ch_local"
+      behind="$(comm -23 "$t/ch_local" "$t/ch_applied" | wc -l | tr -d ' ')"
+      if [ "$behind" = 0 ]; then
+        printf '  %-52s in sync\n' "$d"
+      else
+        printf '  %-52s ⚠ db missing %s local (latest: %s)\n' "$d" "$behind" "$(comm -23 "$t/ch_local" "$t/ch_applied" | tail -1)"
+      fi
+    done < "$t/checkouts"
+  else
+    echo "── clickhouse schema: unreachable (loops-clickhouse-server-1 down?)"
+  fi
+
+  echo
+  echo "── queues (elasticmq :9324)"
+  local queues previews
+  queues="$(curl -s --max-time 3 "http://localhost:9324/?Action=ListQueues" \
+    | grep -o '<QueueUrl>[^<]*</QueueUrl>' | sed 's/<[^>]*>//g;s:.*/::' | sort)"
+  if [ -n "$queues" ]; then
+    previews="$(echo "$queues" | grep '^preview-' || true)"
+    echo "  shared: $(echo "$queues" | grep -v '^preview-' | grep -v '^dlq-' | tr '\n' ' ')"
+    [ -n "$previews" ] && echo "  previews: $(echo "$previews" | tr '\n' ' ')" || echo "  previews: none"
+  else
+    echo "  unreachable (dev docker stack down?)"
+  fi
+
+  echo
+  echo "── connected checkouts per shared service"
+  local port label
+  for port in 5432 8123 9324 6378; do
+    case $port in 5432) label=postgres ;; 8123) label=clickhouse ;; 9324) label=elasticmq ;; 6378) label=valkey ;; esac
+    lsof -iTCP -sTCP:ESTABLISHED -P -n 2>/dev/null | awk -v p=":$port$" '$9 ~ p {print $2}' | sort -u \
+      | while read -r pid; do cwd_of "$pid"; done | sort | uniq -c | sort -rn > "$t/clients"
+    if [ -s "$t/clients" ]; then
+      printf '  :%-5s %-11s' "$port" "$label"
+      awk '{printf "%s%s× %s", (NR>1?" · ":""), $1, $2} END {print ""}' "$t/clients"
+    else
+      printf '  :%-5s %-11s —\n' "$port" "$label"
+    fi
+  done
+}
+
+if [ "${1:-}" = "--stack" ] || [ "${1:-}" = "-s" ]; then
+  stack_report
+  exit 0
+fi
+
+# ── per-port report ─────────────────────────────────────────────────────────────
 ports=("$@")
 if [ ${#ports[@]} -eq 0 ]; then
   ports=(3000 3005 4000)
@@ -24,7 +133,7 @@ for port in "${ports[@]}"; do
     continue
   fi
   cmd="$(ps -o comm= -p "$pid" 2>/dev/null | xargs basename 2>/dev/null)"
-  cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')"
+  cwd="$(cwd_of "$pid")"
   git=""
   if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then
     branch="$(git -C "$cwd" branch --show-current)"
