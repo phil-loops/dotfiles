@@ -1,0 +1,186 @@
+diff --git a/scripts/srv/preview.py b/scripts/srv/preview.py
+index d89de9e..aaa2394 100644
+--- a/scripts/srv/preview.py
++++ b/scripts/srv/preview.py
+@@ -113,18 +113,20 @@ def _log_state(name):
+ 
+ 
+ def _probe(port):
+-    # (status_code|None, latency_ms|None). A 5xx is still an HTTP response (compile/runtime error);
+-    # None means no response at all (refused/timeout) — the caller falls back to the log state.
++    # (status_code|None, latency_ms|None, x_dev_worktree|None). A 5xx is still an HTTP response
++    # (compile/runtime error); None status means no response at all (refused/timeout) — the caller
++    # falls back to the log state. The third value is the loops-provenance stamp header (the server
++    # naming the checkout it serves), when the served checkout carries it.
+     if not port:
+-        return None, None
++        return None, None, None
+     t0 = time.monotonic()
+     try:
+         with urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=3) as r:
+-            return r.status, int((time.monotonic() - t0) * 1000)
++            return r.status, int((time.monotonic() - t0) * 1000), r.headers.get("X-Dev-Worktree")
+     except urllib.error.HTTPError as e:
+-        return e.code, int((time.monotonic() - t0) * 1000)
++        return e.code, int((time.monotonic() - t0) * 1000), e.headers.get("X-Dev-Worktree")
+     except Exception:
+-        return None, None
++        return None, None, None
+ 
+ 
+ def _listening(port):
+@@ -147,7 +149,13 @@ def _health(pv):
+         pv["health"] = "dead"
+         return pv
+     port = int(pv["port"]) if str(pv.get("port", "")).isdigit() else 0
+-    code, lat = _probe(port)
++    code, lat, serves = _probe(port)
++    # the stamp is the server's own claim of what it serves — stronger than pid archaeology.
++    # A mismatch (header path ≠ the dir we think this is) means the port is NOT what the card says.
++    if serves:
++        pv["serves"] = serves
++        if serves.rsplit(" ", 1)[-1] != pv.get("dir"):
++            pv["servesMismatch"] = True
+     # an unmanaged stray has no preview log — and its dir's basename can collide with a
+     # registered preview's log (same worktree, two servers), so never read one for it
+     if pv.get("managed", True):
+@@ -236,6 +244,52 @@ def _db_state(services):
+     return val
+ 
+ 
++_schema_cache = {"at": 0.0, "key": None, "val": None}
++_SCHEMA_TTL = 30.0
++
++
++def _schema_state(services, main_wt):
++    # migration drift between the SHARED databases and main's checkout — both directions matter:
++    # another branch may have migrated the shared DB under you (ahead), or nobody applied yours
++    # (behind). Compared against main as the reference; per-branch drift stays whoport's job.
++    psql = next((s for s in services if s.get("svc") == "psql" and s["up"]), None)
++    ch = next((s for s in services if "clickhouse" in (s.get("svc") or "") and s["up"]), None)
++    now = time.monotonic()
++    key = (psql and psql["name"], ch and ch["name"], main_wt)
++    if _schema_cache["key"] == key and now - _schema_cache["at"] < _SCHEMA_TTL:
++        return _schema_cache["val"]
++    val = {}
++    if psql:
++        try:
++            p = subprocess.run(
++                ["docker", "exec", psql["name"], "psql", "-U", "postgres", "-d", "postgres",
++                 "-tAc", "select migration_name from _prisma_migrations where finished_at is not null"],
++                capture_output=True, text=True, timeout=8)
++            applied = set(p.stdout.split())
++            local = set(x for x in os.listdir(os.path.join(main_wt, "packages", "prisma", "migrations"))
++                        if x != "migration_lock.toml")
++            behind, ahead = sorted(local - applied), sorted(applied - local)
++            val["pg"] = {"head": max(applied, default=""), "behind": len(behind), "ahead": len(ahead),
++                         "latestBehind": behind[-1] if behind else "", "latestAhead": ahead[-1] if ahead else ""}
++        except Exception:
++            pass
++    if ch:
++        try:
++            p = subprocess.run(
++                ["docker", "exec", ch["name"], "clickhouse-client", "-q",
++                 "select version from loops_dev.schema_migrations where applied=1"],
++                capture_output=True, text=True, timeout=8)
++            applied = set(p.stdout.split())
++            local = set(x.split("_", 1)[0] for x in os.listdir(os.path.join(main_wt, "clickhouse", "migrations")))
++            behind = sorted(local - applied)
++            val["ch"] = {"head": max(applied, default=""), "behind": len(behind),
++                         "latestBehind": behind[-1] if behind else ""}
++        except Exception:
++            pass
++    _schema_cache.update(key=key, at=now, val=val)
++    return val
++
++
+ def _stack_err():
+     if _stack_up is None or _stack_up.poll() in (None, 0):
+         return None
+@@ -289,6 +343,7 @@ def _substrate(main_wt):
+         "starting": _stack_up is not None and _stack_up.poll() is None,
+         "err": _stack_err(),
+         "db": _db_state(services),
++        "schema": _schema_state(services, main_wt),
+         "up": sum(1 for s in services if s["up"]),
+         "total": sum(1 for s in services if s["state"] != "done"),
+         "services": services,
+diff --git a/scripts/viewer-solid/src/ServersDrawer.tsx b/scripts/viewer-solid/src/ServersDrawer.tsx
+index 7679cc1..8233f82 100644
+--- a/scripts/viewer-solid/src/ServersDrawer.tsx
++++ b/scripts/viewer-solid/src/ServersDrawer.tsx
+@@ -31,14 +31,21 @@ type Preview = {
+   managed?: boolean; // false = a next-dev listener no preview session owns (task dev, leftover headless server)
+   pid?: string;
+   behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
++  serves?: string; // the server's own X-Dev-Worktree claim: "<branch>@<sha> <path>" (loops-provenance stamp)
++  servesMismatch?: boolean; // header path ≠ the dir this card claims — the port is NOT what it says
+ };
+ type Service = { name: string; status: string; up: boolean; state?: string }; // up · done (finished init job) · failed
+ // project/dir name the compose project that actually holds the ports — often a worktree's, not
+ // main's (home=false), and a worktree stack carries its own volumes. starting = a start click's
+ // `compose up` still running; err = that run's last line after it failed.
++type SchemaDrift = {
++  pg?: { head: string; behind: number; ahead: number; latestBehind: string; latestAhead: string };
++  ch?: { head: string; behind: number; latestBehind: string };
++};
+ type Substrate = {
+   project: string; dir?: string; home?: boolean; shared: boolean;
+   starting?: boolean; err?: string | null; db?: string | null; up: number; total: number; services: Service[];
++  schema?: SchemaDrift;
+ };
+ type PreviewsResp = { ok: boolean; previews: Preview[]; substrate: Substrate };
+ 
+@@ -89,6 +96,7 @@ async function post(url: string, body: unknown) {
+ const shortSvc = (n: string, project: string) =>
+   (project && n.startsWith(project + "-") ? n.slice(project.length + 1) : n.replace(/^loops-/, "")).replace(/-1$/, "");
+ const shortDir = (d: string) => d.split("/").filter(Boolean).pop() ?? d;
++const shortMig = (m: string) => m.replace(/^[0-9]+_?/, "").replace(/\.sql$/, "");
+ 
+ export function ServersDrawer() {
+   const qc = useQueryClient();
+@@ -122,6 +130,13 @@ export function ServersDrawer() {
+   // "main" via stack-open intent), wherever it landed — NOT whatever squats :3000.
+   const mainSrv = () => previews().find((p) => p.branch === "main");
+   const sub = () => (q.isPlaceholderData ? undefined : q.data?.substrate);   // the seed's stub would read "0/0 up"
++  // drift renders only when real — schema in sync stays silent (ambient stays quiet)
++  const drift = () => {
++    const sc = sub()?.schema;
++    if (!sc) return null;
++    const noisy = (sc.pg && (sc.pg.behind > 0 || sc.pg.ahead > 0)) || (sc.ch && sc.ch.behind > 0);
++    return noisy ? sc : null;
++  };
+   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
+   const [logFor, setLogFor] = createSignal<string | null>(null);
+   // which stream the pane tails: the web server's, or the --jobs worker's (jobs run there, not in next dev)
+@@ -241,6 +256,17 @@ export function ServersDrawer() {
+             </p>
+           </Show>
+           <p class="mt-[7px] mb-[9px] text-[11px] leading-[1.5] text-ember opacity-85">One stack for everything — every preview and :3000 read/write the same DB. Not isolated; concurrent seeds/migrations collide.</p>
++          {/* the invisible hazard made visible: a branch migrated (or lagged) the shared DB */}
++          <Show when={drift()}>
++            {(sc) => (
++              <p class="mt-[-3px] mb-[9px] text-[11px] leading-[1.5] text-ember" title={`applied heads — pg: ${sc().pg?.head || "?"} · ch: ${sc().ch?.head || "?"}`}>
++                schema drift vs main:
++                <Show when={(sc().pg?.behind ?? 0) > 0}>{" "}DB missing {sc().pg!.behind} migration{sc().pg!.behind === 1 ? "" : "s"} ({shortMig(sc().pg!.latestBehind)})</Show>
++                <Show when={(sc().pg?.ahead ?? 0) > 0}>{" "}· DB carries {sc().pg!.ahead} not in main ({shortMig(sc().pg!.latestAhead)})</Show>
++                <Show when={(sc().ch?.behind ?? 0) > 0}>{" "}· ClickHouse {sc().ch!.behind} behind</Show>
++              </p>
++            )}
++          </Show>
+           <Show when={sub()?.err}>
+             {(e) => <p class="mt-[-3px] mb-[9px] text-[11px] leading-[1.5] text-del">docker compose up: {e()}</p>}
+           </Show>
+@@ -309,6 +335,12 @@ export function ServersDrawer() {
+                       <Show when={p().behind && p().behind !== "0"}>
+                         <span class="text-[10.5px] text-ember" title="the checkout this server serves trails origin/main — healthy means answering, not fresh">{p().behind} behind main</span>
+                       </Show>
++                      {/* the server's own claim of what it serves — proof beyond pid archaeology */}
++                      <Show when={p().serves}>
++                        <span class={p().servesMismatch ? "text-[10.5px] font-semibold text-del" : "text-[10.5px] text-ink-faint"} title={p().serves}>
++                          {p().servesMismatch ? `⚠ serves ${p().serves}` : `✓ ${p().serves!.split(" ")[0]}`}
++                        </span>
++                      </Show>
+                     </div>
+                     <Show when={p().error}>
+                       <div class="mt-[7px] truncate text-[10.5px] text-del" title={p().error}>{p().error}</div>
