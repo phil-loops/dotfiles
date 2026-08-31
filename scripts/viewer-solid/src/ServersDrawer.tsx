@@ -33,6 +33,7 @@ type Preview = {
   behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
   serves?: string; // the server's own X-Dev-Worktree claim: "<branch>@<sha> <path>" (loops-provenance stamp)
   servesMismatch?: boolean; // header path ≠ the dir this card claims — the port is NOT what it says
+  swapTo?: string; // the natural "before" for this branch: its stack parent, else main
 };
 type Service = { name: string; status: string; up: boolean; state?: string }; // up · done (finished init job) · failed
 // project/dir name the compose project that actually holds the ports — often a worktree's, not
@@ -168,6 +169,17 @@ export function ServersDrawer() {
   const killAll = async () => {
     setBusy("__all__");
     for (const p of previews()) { await post("/preview-kill", { dir: p.dir, port: p.port }); }
+    await q.refetch();
+    setBusy(null);
+  };
+  // before/after on one port: remember what a swapped card used to serve so it can swing back
+  const [swapPrev, setSwapPrev] = createSignal<Record<string, { dir: string; label: string }>>({});
+  const doSwap = async (p: Preview, target: { branch?: string; dir?: string }, remember: boolean) => {
+    setBusy(p.dir + p.port);
+    const prev = { ...swapPrev() };
+    if (remember) { prev[p.port] = { dir: p.dir, label: p.branch || p.name }; } else { delete prev[p.port]; }
+    await post("/preview-swap", { port: p.port, ...target });
+    setSwapPrev(prev);
     await q.refetch();
     setBusy(null);
   };
@@ -362,6 +374,23 @@ export function ServersDrawer() {
                           {busy() === p().dir + p().port ? "…" : "restart"}
                         </button>
                         <button class={BTN} onClick={() => showLog(p().dir)}>{logFor() === p().dir ? "hide log" : "log"}</button>
+                        {/* before/after: flip this SAME port to another branch's build — the stamp proves each flip */}
+                        <Show
+                          when={swapPrev()[p().port]}
+                          fallback={
+                            <Show when={p().swapTo}>
+                              <button class={BTN} disabled={busy() === p().dir + p().port} title={`kill + relaunch :${p().port} serving ${p().swapTo} — same tab, other build`} onClick={() => doSwap(p(), { branch: p().swapTo }, true)}>
+                                {busy() === p().dir + p().port ? "…" : `⇄ ${p().swapTo}`}
+                              </button>
+                            </Show>
+                          }
+                        >
+                          {(prev) => (
+                            <button class={BTN} disabled={busy() === p().dir + p().port} title={`swing :${p().port} back to ${prev().label}`} onClick={() => doSwap(p(), { dir: prev().dir }, false)}>
+                              {busy() === p().dir + p().port ? "…" : `⇄ back to ${prev().label}`}
+                            </button>
+                          )}
+                        </Show>
                       </Show>
                       {/* kill stands apart — the one destructive act on the card, in the ledger's del voice */}
                       <button class={BTN_DANGER} disabled={busy() === p().dir + p().port} onClick={() => act(p(), "/preview-kill")}>kill</button>

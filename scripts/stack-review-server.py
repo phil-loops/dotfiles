@@ -512,6 +512,8 @@ class H(BaseHTTPRequestHandler):
             return preview.kill(self, raw)
         if self.path == "/preview-restart":   # kill + fresh next dev on the same port
             return preview.restart(self, raw)
+        if self.path == "/preview-swap":   # flip the SAME port to another branch's build (before/after in one tab)
+            return preview.swap(self, raw)
         if self.path == "/preview-reap":   # stop orphaned/crashed previews
             return preview.reap(self, raw)
         if self.path == "/stack-up":   # bring the shared Docker stack (Postgres/ClickHouse/…) up
