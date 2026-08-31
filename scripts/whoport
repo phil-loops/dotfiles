@@ -53,10 +53,12 @@ stack_report() {
       ls "$d/packages/prisma/migrations" 2>/dev/null | grep -v migration_lock | sort > "$t/local"
       behind="$(comm -23 "$t/local" "$t/pg_applied" | wc -l | tr -d ' ')"
       ahead="$(comm -13 "$t/local" "$t/pg_applied" | wc -l | tr -d ' ')"
-      note="in sync"
+      note=""
       [ "$behind" != 0 ] && note="db missing $behind local (latest: $(comm -23 "$t/local" "$t/pg_applied" | tail -1))"
-      [ "$ahead" != 0 ] && note="$note · db has $ahead not in checkout (latest: $(comm -13 "$t/local" "$t/pg_applied" | tail -1))"
-      [ "$behind" != 0 ] || [ "$ahead" != 0 ] && note="⚠ $note"
+      if [ "$ahead" != 0 ]; then
+        note="${note:+$note · }db has $ahead not in checkout (latest: $(comm -13 "$t/local" "$t/pg_applied" | tail -1))"
+      fi
+      if [ -n "$note" ]; then note="⚠ $note"; else note="in sync"; fi
       printf '  %-52s %s\n' "$d" "$note"
     done < "$t/checkouts"
   else
