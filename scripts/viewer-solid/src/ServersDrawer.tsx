@@ -31,14 +31,21 @@ type Preview = {
   managed?: boolean; // false = a next-dev listener no preview session owns (task dev, leftover headless server)
   pid?: string;
   behind?: string; // commits the served checkout trails origin/main — healthy ≠ fresh
+  serves?: string; // the server's own X-Dev-Worktree claim: "<branch>@<sha> <path>" (loops-provenance stamp)
+  servesMismatch?: boolean; // header path ≠ the dir this card claims — the port is NOT what it says
 };
 type Service = { name: string; status: string; up: boolean; state?: string }; // up · done (finished init job) · failed
 // project/dir name the compose project that actually holds the ports — often a worktree's, not
 // main's (home=false), and a worktree stack carries its own volumes. starting = a start click's
 // `compose up` still running; err = that run's last line after it failed.
+type SchemaDrift = {
+  pg?: { head: string; behind: number; ahead: number; latestBehind: string; latestAhead: string };
+  ch?: { head: string; behind: number; latestBehind: string };
+};
 type Substrate = {
   project: string; dir?: string; home?: boolean; shared: boolean;
   starting?: boolean; err?: string | null; db?: string | null; up: number; total: number; services: Service[];
+  schema?: SchemaDrift;
 };
 type PreviewsResp = { ok: boolean; previews: Preview[]; substrate: Substrate };
 
@@ -89,6 +96,7 @@ async function post(url: string, body: unknown) {
 const shortSvc = (n: string, project: string) =>
   (project && n.startsWith(project + "-") ? n.slice(project.length + 1) : n.replace(/^loops-/, "")).replace(/-1$/, "");
 const shortDir = (d: string) => d.split("/").filter(Boolean).pop() ?? d;
+const shortMig = (m: string) => m.replace(/^[0-9]+_?/, "").replace(/\.sql$/, "");
 
 export function ServersDrawer() {
   const qc = useQueryClient();
@@ -122,6 +130,13 @@ export function ServersDrawer() {
   // "main" via stack-open intent), wherever it landed — NOT whatever squats :3000.
   const mainSrv = () => previews().find((p) => p.branch === "main");
   const sub = () => (q.isPlaceholderData ? undefined : q.data?.substrate);   // the seed's stub would read "0/0 up"
+  // drift renders only when real — schema in sync stays silent (ambient stays quiet)
+  const drift = () => {
+    const sc = sub()?.schema;
+    if (!sc) return null;
+    const noisy = (sc.pg && (sc.pg.behind > 0 || sc.pg.ahead > 0)) || (sc.ch && sc.ch.behind > 0);
+    return noisy ? sc : null;
+  };
   const [busy, setBusy] = createSignal<string | null>(null); // dir (or "__all__") mid-action
   const [logFor, setLogFor] = createSignal<string | null>(null);
   // which stream the pane tails: the web server's, or the --jobs worker's (jobs run there, not in next dev)
@@ -241,6 +256,17 @@ export function ServersDrawer() {
             </p>
           </Show>
           <p class="mt-[7px] mb-[9px] text-[11px] leading-[1.5] text-ember opacity-85">One stack for everything — every preview and :3000 read/write the same DB. Not isolated; concurrent seeds/migrations collide.</p>
+          {/* the invisible hazard made visible: a branch migrated (or lagged) the shared DB */}
+          <Show when={drift()}>
+            {(sc) => (
+              <p class="mt-[-3px] mb-[9px] text-[11px] leading-[1.5] text-ember" title={`applied heads — pg: ${sc().pg?.head || "?"} · ch: ${sc().ch?.head || "?"}`}>
+                schema drift vs main:
+                <Show when={(sc().pg?.behind ?? 0) > 0}>{" "}DB missing {sc().pg!.behind} migration{sc().pg!.behind === 1 ? "" : "s"} ({shortMig(sc().pg!.latestBehind)})</Show>
+                <Show when={(sc().pg?.ahead ?? 0) > 0}>{" "}· DB carries {sc().pg!.ahead} not in main ({shortMig(sc().pg!.latestAhead)})</Show>
+                <Show when={(sc().ch?.behind ?? 0) > 0}>{" "}· ClickHouse {sc().ch!.behind} behind</Show>
+              </p>
+            )}
+          </Show>
           <Show when={sub()?.err}>
             {(e) => <p class="mt-[-3px] mb-[9px] text-[11px] leading-[1.5] text-del">docker compose up: {e()}</p>}
           </Show>
@@ -308,6 +334,12 @@ export function ServersDrawer() {
                       </Show>
                       <Show when={p().behind && p().behind !== "0"}>
                         <span class="text-[10.5px] text-ember" title="the checkout this server serves trails origin/main — healthy means answering, not fresh">{p().behind} behind main</span>
+                      </Show>
+                      {/* the server's own claim of what it serves — proof beyond pid archaeology */}
+                      <Show when={p().serves}>
+                        <span class={p().servesMismatch ? "text-[10.5px] font-semibold text-del" : "text-[10.5px] text-ink-faint"} title={p().serves}>
+                          {p().servesMismatch ? `⚠ serves ${p().serves}` : `✓ ${p().serves!.split(" ")[0]}`}
+                        </span>
                       </Show>
                     </div>
                     <Show when={p().error}>

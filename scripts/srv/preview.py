@@ -113,18 +113,20 @@ def _log_state(name):
 
 
 def _probe(port):
-    # (status_code|None, latency_ms|None). A 5xx is still an HTTP response (compile/runtime error);
-    # None means no response at all (refused/timeout) — the caller falls back to the log state.
+    # (status_code|None, latency_ms|None, x_dev_worktree|None). A 5xx is still an HTTP response
+    # (compile/runtime error); None status means no response at all (refused/timeout) — the caller
+    # falls back to the log state. The third value is the loops-provenance stamp header (the server
+    # naming the checkout it serves), when the served checkout carries it.
     if not port:
-        return None, None
+        return None, None, None
     t0 = time.monotonic()
     try:
         with urllib.request.urlopen("http://127.0.0.1:%d/" % port, timeout=3) as r:
-            return r.status, int((time.monotonic() - t0) * 1000)
+            return r.status, int((time.monotonic() - t0) * 1000), r.headers.get("X-Dev-Worktree")
     except urllib.error.HTTPError as e:
-        return e.code, int((time.monotonic() - t0) * 1000)
+        return e.code, int((time.monotonic() - t0) * 1000), e.headers.get("X-Dev-Worktree")
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _listening(port):
@@ -147,7 +149,13 @@ def _health(pv):
         pv["health"] = "dead"
         return pv
     port = int(pv["port"]) if str(pv.get("port", "")).isdigit() else 0
-    code, lat = _probe(port)
+    code, lat, serves = _probe(port)
+    # the stamp is the server's own claim of what it serves — stronger than pid archaeology.
+    # A mismatch (header path ≠ the dir we think this is) means the port is NOT what the card says.
+    if serves:
+        pv["serves"] = serves
+        if serves.rsplit(" ", 1)[-1] != pv.get("dir"):
+            pv["servesMismatch"] = True
     # an unmanaged stray has no preview log — and its dir's basename can collide with a
     # registered preview's log (same worktree, two servers), so never read one for it
     if pv.get("managed", True):
@@ -236,6 +244,52 @@ def _db_state(services):
     return val
 
 
+_schema_cache = {"at": 0.0, "key": None, "val": None}
+_SCHEMA_TTL = 30.0
+
+
+def _schema_state(services, main_wt):
+    # migration drift between the SHARED databases and main's checkout — both directions matter:
+    # another branch may have migrated the shared DB under you (ahead), or nobody applied yours
+    # (behind). Compared against main as the reference; per-branch drift stays whoport's job.
+    psql = next((s for s in services if s.get("svc") == "psql" and s["up"]), None)
+    ch = next((s for s in services if "clickhouse" in (s.get("svc") or "") and s["up"]), None)
+    now = time.monotonic()
+    key = (psql and psql["name"], ch and ch["name"], main_wt)
+    if _schema_cache["key"] == key and now - _schema_cache["at"] < _SCHEMA_TTL:
+        return _schema_cache["val"]
+    val = {}
+    if psql:
+        try:
+            p = subprocess.run(
+                ["docker", "exec", psql["name"], "psql", "-U", "postgres", "-d", "postgres",
+                 "-tAc", "select migration_name from _prisma_migrations where finished_at is not null"],
+                capture_output=True, text=True, timeout=8)
+            applied = set(p.stdout.split())
+            local = set(x for x in os.listdir(os.path.join(main_wt, "packages", "prisma", "migrations"))
+                        if x != "migration_lock.toml")
+            behind, ahead = sorted(local - applied), sorted(applied - local)
+            val["pg"] = {"head": max(applied, default=""), "behind": len(behind), "ahead": len(ahead),
+                         "latestBehind": behind[-1] if behind else "", "latestAhead": ahead[-1] if ahead else ""}
+        except Exception:
+            pass
+    if ch:
+        try:
+            p = subprocess.run(
+                ["docker", "exec", ch["name"], "clickhouse-client", "-q",
+                 "select version from loops_dev.schema_migrations where applied=1"],
+                capture_output=True, text=True, timeout=8)
+            applied = set(p.stdout.split())
+            local = set(x.split("_", 1)[0] for x in os.listdir(os.path.join(main_wt, "clickhouse", "migrations")))
+            behind = sorted(local - applied)
+            val["ch"] = {"head": max(applied, default=""), "behind": len(behind),
+                         "latestBehind": behind[-1] if behind else ""}
+        except Exception:
+            pass
+    _schema_cache.update(key=key, at=now, val=val)
+    return val
+
+
 def _stack_err():
     if _stack_up is None or _stack_up.poll() in (None, 0):
         return None
@@ -289,6 +343,7 @@ def _substrate(main_wt):
         "starting": _stack_up is not None and _stack_up.poll() is None,
         "err": _stack_err(),
         "db": _db_state(services),
+        "schema": _schema_state(services, main_wt),
         "up": sum(1 for s in services if s["up"]),
         "total": sum(1 for s in services if s["state"] != "done"),
         "services": services,
