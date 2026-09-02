@@ -304,8 +304,16 @@ else
       ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
       err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
     else
-      # a quarantine-inheriting ancestor (e.g. Chrome-launched viewer) taints the clone; Gatekeeper then refuses dlopen of .node bindings
-      xattr -dr com.apple.quarantine "$DIR/node_modules" 2>/dev/null || true
+      # a quarantine-flagged ancestor (e.g. Chrome-launched viewer) stamps EVERY file it clones, so one
+      # canary tells whether the tree is tainted; Gatekeeper only blocks Mach-O dlopen/exec, so a tainted
+      # clone needs its ~1.3k executables stripped, never a full xattr walk of the ~310k-file tree
+      canary="$DIR/node_modules/@next/swc-darwin-arm64/next-swc.darwin-arm64.node"
+      [ -e "$canary" ] || canary=$(find "$DIR/node_modules" -type f -name '*.node' -print -quit 2>/dev/null)
+      if [ -n "$canary" ] && xattr -p com.apple.quarantine "$canary" >/dev/null 2>&1; then
+        cyan "clone inherited quarantine — stripping native binaries"
+        find "$DIR/node_modules" -type f \( -name '*.node' -o -perm -111 \) -print0 2>/dev/null \
+          | xargs -0 xattr -d com.apple.quarantine 2>/dev/null || true
+      fi
     fi
   fi
 fi
