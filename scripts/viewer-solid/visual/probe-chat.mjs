@@ -33,7 +33,7 @@ const JOBS = [
   { turn: "t1", branch: "admin-user-membership-queries", path: "queries/user.ts", question: "is this index safe?", repo: "loops", project: "admin-user-memberships", status: "reading the diff", chars: 4200, done: false, ok: null, created: NOW - 90 },
   { turn: "t2", branch: "admin-user-membership-models", path: "", question: "summarize", repo: "loops", project: "admin-user-memberships", status: "done", chars: 12100, done: true, ok: true, created: NOW - 300 },
   { turn: "t3", branch: "cdc-parity", path: "models/contact/index.ts", question: "why does this fail?", repo: "loops", project: "cdc-parity", status: "done", chars: 800, done: true, ok: false, created: NOW - 500 },
-  // rides a forest that renders as a live ForestRow (admin-user-memberships sits in the forgotten band)
+  // rides a forest that renders as a live ForestRow
   { turn: "t4", branch: "goals/attach-flow", path: "", question: "does the attach flow hold?", repo: "loops", project: "goals-ga", status: "reading the diff", chars: 900, done: false, ok: null, created: NOW - 45 },
 ];
 const TARGETS = [
