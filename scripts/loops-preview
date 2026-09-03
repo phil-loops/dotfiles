@@ -287,8 +287,10 @@ if [ "$DIR" = "$MAIN" ]; then
   [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] || { err "MAIN's node_modules is missing or a symlink — run npm install in $MAIN"; exit 1; }
 else
   # a seed-gen "repointed" tree (per-entry symlinks out to MAIN) boots next fine but Turbopack
-  # refuses out-of-root symlinks — zero compile, every request 500s on missing build manifests
-  if [ -d "$DIR/node_modules" ] && [ -L "$DIR/node_modules/next" ]; then
+  # refuses out-of-root symlinks — zero compile, every request 500s on missing build manifests.
+  # Two runs racing in one checkout leave a HYBRID (real top-level dirs, nested @scope/pkg + .prisma
+  # links; 2026-09-03), so scan two levels deep — MAIN's own pkg/pkg self-links are benign, skip them.
+  if [ -d "$DIR/node_modules" ] && [ -n "$(find "$DIR/node_modules" -maxdepth 2 -type l -lname "$MAIN/*" 2>/dev/null | awk -F/ '$NF != $(NF-1)' | head -1)" ]; then
     cyan "node_modules entries are symlinks to MAIN (Turbopack-fatal) — re-cloning real"
     rm -rf "$DIR/node_modules"
   fi
