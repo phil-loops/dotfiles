@@ -285,7 +285,6 @@ export function ForestsList(props: {
             onInput={(e) => setForestQuery(e.currentTarget.value)}
           />
         </Show>
-        <ForgottenBand projects={props.projects} forestRow={props.forestRow} />
         <Show
           when={filteredForests().length}
           fallback={
@@ -302,6 +301,8 @@ export function ForestsList(props: {
             </div>
             <For each={triageList()}>{(p) => triageRow(p)}</For>
           </Show>
+          {/* below triage on purpose — fresh untriaged work outranks the wall of unsettled bets */}
+          <ForgottenBand projects={props.projects} forestRow={props.forestRow} />
           <Show when={showTierHeads()}>
             <div class="tier-head mt-[18px] mb-1 border-0 border-b border-solid border-gold-deep pb-[3px] font-mono text-[11px] uppercase tracking-[0.14em] text-gold-leaf" title="the forests you're serious about — full lifecycle bands below">committed</div>
           </Show>
