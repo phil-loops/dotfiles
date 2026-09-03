@@ -337,6 +337,24 @@ for e in .env .env.local .env.development; do
   fi
 done
 
+# A reused clone can be missing a native file — 2026-09-02: sharp's libvips dylib vanished from an
+# otherwise-complete clone and every later start re-crashed on the first page that imports lib/image.ts.
+# Canary-load sharp from the checkout; on failure re-clone just its packages from MAIN and re-test.
+if [ ! -L "$DIR/node_modules" ]; then
+  sharp_loads() { (cd "$DIR" && node -e "require('sharp')" >/dev/null 2>&1); }
+  if ! sharp_loads; then
+    cyan "clone can't load sharp — re-cloning sharp + @img from $MAIN"
+    for pkg in sharp @img; do
+      [ -d "$MAIN/node_modules/$pkg" ] || continue
+      rm -rf "$DIR/node_modules/$pkg"
+      cp -Rc "$MAIN/node_modules/$pkg" "$DIR/node_modules/$pkg" 2>/dev/null || cp -R "$MAIN/node_modules/$pkg" "$DIR/node_modules/$pkg"
+      find "$DIR/node_modules/$pkg" -type f \( -name '*.node' -o -name '*.dylib' -o -perm -111 \) -print0 2>/dev/null \
+        | xargs -0 xattr -d com.apple.quarantine 2>/dev/null || true
+    done
+    sharp_loads || err "sharp still fails to load from $DIR/node_modules — rm -rf it to force a full re-clone on the next start"
+  fi
+fi
+
 # Auto-pick the first free port (3010-3060) unless one was given.
 if [ -z "$PORT" ]; then
   for p in $(seq 3010 3060); do
