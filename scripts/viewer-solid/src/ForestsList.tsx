@@ -5,7 +5,6 @@ import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
 import { nextStep, type NextStep } from "./homeModel";
-import { ForgottenBand, isForgotten } from "./ForgottenBand";
 import { rowDrag, setRowDrag, dropOnLane } from "./focusDrag";
 import type { Project, Parked, PR } from "./types";
 
@@ -18,7 +17,7 @@ const MFOLD = "forest-mfold mt-2 block w-full cursor-pointer px-1 pt-[9px] pb-[5
 // is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
 // folds for dormant + recently-merged. One opinionated order (Phil, 2026-07-11): the manual
 // interest pips no longer rank the page (they demoted to passive row metadata); the PR bands
-// order by next-step urgency, other bands by recency. Owns its own filter/fold state; the
+// order by next-step urgency, other bands by recency. Owns its own fold state; the
 // row itself comes in as a prop (Home wires its hover/ctx/parked handlers).
 export function ForestsList(props: {
   tab: () => string;
@@ -31,7 +30,6 @@ export function ForestsList(props: {
   setTier: (repo: string, project: string, tier: string) => void;
 }) {
   const qc = useQueryClient();
-  const [forestQuery, setForestQuery] = createSignal("");
   // Forests recency — "most recently alive": the latest of local commit, PR opened, and
   // merge-to-main. The within-band sort, never the grouping.
   const forestTs = (p: Project): number =>
@@ -40,11 +38,7 @@ export function ForestsList(props: {
       p.prOpened ? Date.parse(p.prOpened) : 0,
       p.merged?.at ? Date.parse(p.merged.at) : 0,
     );
-  const filteredForests = createMemo(() => {
-    const needle = forestQuery().trim().toLowerCase();
-    const list = props.projects() || [];
-    return needle ? list.filter((p) => p.name.toLowerCase().includes(needle)) : list;
-  });
+  const forests = createMemo(() => props.projects() || []);
   // A forest folds into "recently merged" only once it's fully wrapped up: a recent merge AND no
   // mergeable roots left (every branch landed AND got contracted). A forest where one base merged
   // but others are still open/unpushed keeps mergeable roots, so it stays in the active list —
@@ -88,7 +82,7 @@ export function ForestsList(props: {
   // normal band — pulling one row out into a lone "cluster" would only fragment the list.
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
-    for (const p of filteredForests()) {
+    for (const p of forests()) {
       if (!p.epic || recentlyMerged(p) || p.shelved || p.tier !== "committed" || p.focus != null) continue;
       (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
     }
@@ -108,7 +102,7 @@ export function ForestsList(props: {
   const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
     const clustered = clusteredKeys();
-    const active = filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.tier === "committed" && p.focus == null && !clustered.has(pkey(p)));
+    const active = forests().filter((p) => !recentlyMerged(p) && !p.shelved && p.tier === "committed" && p.focus == null && !clustered.has(pkey(p)));
     return BANDS.map((band, i) => ({
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
@@ -131,19 +125,17 @@ export function ForestsList(props: {
     return step ? { step, start: pkey(p) === startKey() } : undefined;
   };
   const merged = createMemo(() =>
-    filteredForests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
+    forests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
   // deliberately paused — Phil's explicit mark (right-click → shelve); a shelf, not a band
   const shelvedList = createMemo(() =>
-    filteredForests().filter((p) => p.shelved && !recentlyMerged(p)).sort((a, b) => forestTs(b) - forestTs(a)));
+    forests().filter((p) => p.shelved && !recentlyMerged(p)).sort((a, b) => forestTs(b) - forestTs(a)));
 
   // ── conviction tiers (orthogonal to the bands) ──────────────────────────
   // committed → the lifecycle bands above; trying/spike/untriaged get their own sections. A pool of
   // everything still in play (not merged, not shelved) — and NOT already pinned to the focus lane:
   // pinning IS a decision, so a focused forest leaves the triage pile (and every band) for the lane.
-  // A forgotten row is claimed by its own band and leaves the tier sections — listed in both, the
-  // stale copy reads as live work in the newest-first sort that hid it in the first place.
   const tierPool = createMemo(() =>
-    filteredForests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null && !isForgotten(p)));
+    forests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null));
   // any interaction counts as triaged: a forest you've rated (interest>0) keeps its triage-zone
   // spot but no longer nags for a tier — the nag count reflects only the still-untouched ones.
   const triaged = (p: Project) => (p.interest ?? 0) > 0;
@@ -159,7 +151,7 @@ export function ForestsList(props: {
   const showTierHeads = createMemo(() =>
     tierPool().some((p) => p.tier === "committed") &&
     (triageList().length > 0 || tryingList().length > 0 || spikeList().length > 0));
-  const multiRepo = createMemo(() => new Set(filteredForests().map((p) => p.repo || "loops")).size > 1);
+  const multiRepo = createMemo(() => new Set(forests().map((p) => p.repo || "loops")).size > 1);
 
   // ── the gutter ☆: click pins to the end of the focus lane; drag places it precisely ────
   // A bare press-and-release is the common motion (Phil, 2026-08-18: "anything I'm revisiting
@@ -277,22 +269,10 @@ export function ForestsList(props: {
             <ActionBar actions={[props.restackAllAction()]} />
           </Show>
         </div>
-        <Show when={(props.projects() || []).length > 6}>
-          <input
-            class="forest-search mx-0 mt-0 mb-[12px] w-full rounded-[9px] border border-rule bg-vellum-raise px-[13px] py-[9px] font-mono text-[13px] leading-[1.55] text-ink focus:border-gold-deep focus:outline-none"
-            placeholder="filter forests…"
-            value={forestQuery()}
-            onInput={(e) => setForestQuery(e.currentTarget.value)}
-          />
-        </Show>
         <Show
-          when={filteredForests().length}
+          when={forests().length}
           fallback={
-            <p class="loading px-1 py-[14px] italic text-ink-faint">
-              {forestQuery()
-                ? `no forest matches “${forestQuery()}”`
-                : "no forests configured"}
-            </p>
+            <p class="loading px-1 py-[14px] italic text-ink-faint">no forests configured</p>
           }
         >
           <Show when={triageList().length}>
@@ -301,8 +281,6 @@ export function ForestsList(props: {
             </div>
             <For each={triageList()}>{(p) => triageRow(p)}</For>
           </Show>
-          {/* below triage on purpose — fresh untriaged work outranks the wall of unsettled bets */}
-          <ForgottenBand projects={props.projects} forestRow={props.forestRow} />
           <Show when={showTierHeads()}>
             <div class="tier-head mt-[18px] mb-1 border-0 border-b border-solid border-gold-deep pb-[3px] font-mono text-[11px] uppercase tracking-[0.14em] text-gold-leaf" title="the forests you're serious about — full lifecycle bands below">committed</div>
           </Show>

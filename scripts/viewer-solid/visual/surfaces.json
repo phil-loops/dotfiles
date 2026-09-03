@@ -12,12 +12,6 @@
     "settle": 2000
   },
   {
-    "name": "home-forgotten",
-    "path": "/forests",
-    "waitFor": ".forgotten-band",
-    "settle": 2000
-  },
-  {
     "name": "forest-overview",
     "path": "/forests/admin-user-memberships",
     "waitFor": ".forest-overview",
