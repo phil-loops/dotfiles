@@ -17,6 +17,7 @@
 #                                                         # on :3000-3060 that no preview session owns
 #   loops-preview --kill-all                              # stop every preview
 #   loops-preview --reap [--older-than MINUTES]           # stop orphaned/crashed (and optionally old) previews
+#   loops-preview --warm                                  # pre-clone one node_modules into the pool (see below)
 #
 # Env: LOOPS_MAIN overrides the main checkout (default ~/coding/loops).
 #
@@ -50,6 +51,7 @@ while [ $# -gt 0 ]; do
     --kill) ACTION="kill" ;;
     --kill-all) ACTION="kill-all" ;;
     --reap) ACTION="reap" ;;
+    --warm) ACTION="warm" ;;
     --list) ACTION="list" ;;
     --json) ACTION="json" ;;
     --open) OPEN=1 ;;
@@ -213,6 +215,67 @@ EOF
   exit 0
 fi
 
+# Warm pool: a pre-cloned node_modules parked under ~/.cache so a new checkout gets one by rename
+# (instant) instead of the 310k-file APFS clone — ~30s idle, minutes under memory pressure
+# (2026-09-03: a viewer preview sat in "materialising worktree" for 2.5 min on the clone alone).
+# Entries are stamped with MAIN's package-lock hash; a stale stamp is discarded at the next warm.
+POOL="$HOME/.cache/loops-preview/nm-pool"
+POOL_SIZE="${LOOPS_PREVIEW_POOL_SIZE:-1}"
+lock_stamp() { md5 -q "$MAIN/package-lock.json" 2>/dev/null; }
+pool_take() {   # $1 = destination path; moves a fresh entry there, false when the pool is empty/stale
+  local stamp e
+  stamp="$(lock_stamp)"
+  for e in "$POOL"/*/; do
+    [ -d "$e/node_modules" ] || continue
+    [ "$(cat "$e/stamp" 2>/dev/null)" = "$stamp" ] || continue
+    mv "$e/node_modules" "$1" 2>/dev/null || continue
+    rm -rf "$e"
+    return 0
+  done
+  return 1
+}
+pool_warm_bg() { nohup "$HOME/.dotfiles/scripts/loops-preview" --warm --main "$MAIN" >/dev/null 2>&1 & }
+# a quarantine-flagged ancestor (e.g. Chrome-launched viewer) stamps EVERY file it clones, so one
+# canary tells whether the tree is tainted; Gatekeeper only blocks Mach-O dlopen/exec, so a tainted
+# clone needs its ~1.3k executables stripped, never a full xattr walk of the ~310k-file tree
+strip_quarantine() {   # $1 = a cloned node_modules
+  local canary
+  canary="$1/@next/swc-darwin-arm64/next-swc.darwin-arm64.node"
+  [ -e "$canary" ] || canary=$(find "$1" -type f -name '*.node' -print -quit 2>/dev/null)
+  if [ -n "$canary" ] && xattr -p com.apple.quarantine "$canary" >/dev/null 2>&1; then
+    cyan "clone inherited quarantine — stripping native binaries"
+    find "$1" -type f \( -name '*.node' -o -perm -111 \) -print0 2>/dev/null \
+      | xargs -0 xattr -d com.apple.quarantine 2>/dev/null || true
+  fi
+}
+
+if [ "$ACTION" = "warm" ]; then
+  [ -d "$MAIN/node_modules" ] && [ ! -L "$MAIN/node_modules" ] || { err "MAIN's node_modules is missing or a symlink"; exit 1; }
+  mkdir -p "$POOL"
+  lock="$POOL/.lock"
+  # single-flight; a lock older than 20 min is a leak from a killed clone — steal it
+  if ! mkdir "$lock" 2>/dev/null; then
+    [ -n "$(find "$lock" -maxdepth 0 -mmin +20 2>/dev/null)" ] || exit 0
+    rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || exit 0
+  fi
+  trap 'rmdir "$lock" 2>/dev/null' EXIT
+  stamp="$(lock_stamp)"
+  for e in "$POOL"/*/; do
+    [ -d "$e" ] || continue
+    [ "$(cat "$e/stamp" 2>/dev/null)" = "$stamp" ] || rm -rf "$e"
+  done
+  n=0
+  for e in "$POOL"/*/; do [ -d "$e" ] && n=$((n+1)); done
+  [ "$n" -lt "$POOL_SIZE" ] || exit 0
+  e="$POOL/$(date +%s)-$$"
+  mkdir -p "$e"
+  if ! cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
+  strip_quarantine "$e/node_modules"
+  echo "$stamp" > "$e/stamp"
+  dim "pool: warmed $e"
+  exit 0
+fi
+
 if [ "$ACTION" = "kill-all" ]; then
   n=0
   for s in $(sessions); do stop_one "$(name_of "$s")"; n=$((n+1)); done
@@ -300,24 +363,19 @@ else
   fi
   if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
     rm -f "$DIR/node_modules"
-    cyan "cloning node_modules from $MAIN (once per checkout, ~30s)"
-    if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
-      rm -rf "$DIR/node_modules"
-      ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
-      err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
+    if pool_take "$DIR/node_modules"; then
+      cyan "took a warm node_modules from the pool"
     else
-      # a quarantine-flagged ancestor (e.g. Chrome-launched viewer) stamps EVERY file it clones, so one
-      # canary tells whether the tree is tainted; Gatekeeper only blocks Mach-O dlopen/exec, so a tainted
-      # clone needs its ~1.3k executables stripped, never a full xattr walk of the ~310k-file tree
-      canary="$DIR/node_modules/@next/swc-darwin-arm64/next-swc.darwin-arm64.node"
-      [ -e "$canary" ] || canary=$(find "$DIR/node_modules" -type f -name '*.node' -print -quit 2>/dev/null)
-      if [ -n "$canary" ] && xattr -p com.apple.quarantine "$canary" >/dev/null 2>&1; then
-        cyan "clone inherited quarantine — stripping native binaries"
-        find "$DIR/node_modules" -type f \( -name '*.node' -o -perm -111 \) -print0 2>/dev/null \
-          | xargs -0 xattr -d com.apple.quarantine 2>/dev/null || true
+      cyan "cloning node_modules from $MAIN (pool empty; once per checkout, ~30s)"
+      if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
+        rm -rf "$DIR/node_modules"
+        ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
+        err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
       fi
     fi
+    [ -L "$DIR/node_modules" ] || strip_quarantine "$DIR/node_modules"
   fi
+  pool_warm_bg
 fi
 if [ -L "$DIR/node_modules" ]; then BUNDLER="--webpack"; fi
 
