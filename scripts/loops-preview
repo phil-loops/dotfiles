@@ -222,12 +222,17 @@ fi
 POOL="$HOME/.cache/loops-preview/nm-pool"
 POOL_SIZE="${LOOPS_PREVIEW_POOL_SIZE:-1}"
 lock_stamp() { md5 -q "$MAIN/package-lock.json" 2>/dev/null; }
+# npm writes .bin/<name> and .package-lock.json LAST, so a tree missing either is a clone taken while
+# `npm install` was still running on MAIN — it carries the right stamp and boots to "sh: next: command
+# not found" (2026-09-06: a pool entry warmed mid-install fed a preview three hours later).
+nm_complete() { [ -e "$1/.bin/next" ] && [ -e "$1/.package-lock.json" ]; }   # $1 = a node_modules
 pool_take() {   # $1 = destination path; moves a fresh entry there, false when the pool is empty/stale
   local stamp e
   stamp="$(lock_stamp)"
   for e in "$POOL"/*/; do
     [ -d "$e/node_modules" ] || continue
     [ "$(cat "$e/stamp" 2>/dev/null)" = "$stamp" ] || continue
+    nm_complete "$e/node_modules" || { rm -rf "$e"; continue; }
     mv "$e/node_modules" "$1" 2>/dev/null || continue
     rm -rf "$e"
     return 0
@@ -267,9 +272,11 @@ if [ "$ACTION" = "warm" ]; then
   n=0
   for e in "$POOL"/*/; do [ -d "$e" ] && n=$((n+1)); done
   [ "$n" -lt "$POOL_SIZE" ] || exit 0
+  nm_complete "$MAIN/node_modules" || { err "MAIN's node_modules is mid-install (no .bin/next) — not warming"; exit 1; }
   e="$POOL/$(date +%s)-$$"
   mkdir -p "$e"
   if ! cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
+  nm_complete "$e/node_modules" || { rm -rf "$e"; err "clone caught MAIN mid-install — discarded"; exit 1; }
   strip_quarantine "$e/node_modules"
   echo "$stamp" > "$e/stamp"
   dim "pool: warmed $e"
@@ -361,8 +368,13 @@ else
     cyan "MAIN reinstalled since this clone — refreshing node_modules"
     rm -rf "$DIR/node_modules"
   fi
+  if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && ! nm_complete "$DIR/node_modules"; then
+    cyan "node_modules has no .bin/next (cloned mid-install) — re-cloning"
+    rm -rf "$DIR/node_modules"
+  fi
   if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
     rm -f "$DIR/node_modules"
+    nm_complete "$MAIN/node_modules" || { err "MAIN's node_modules is mid-install (no .bin/next) — let npm install finish in $MAIN first"; exit 1; }
     if pool_take "$DIR/node_modules"; then
       cyan "took a warm node_modules from the pool"
     else
