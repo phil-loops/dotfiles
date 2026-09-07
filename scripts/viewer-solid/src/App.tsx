@@ -8,6 +8,7 @@ import { reconcile as reconcileChats } from "./chatRunner";
 import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
+import { ServingChip } from "./ServingChip";
 import { Activity } from "./Activity";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
@@ -176,6 +177,7 @@ function Layout(props: { children?: JSX.Element }) {
       <ChatDrawerHost />
       <CommandPalette />
       <ServerStatus />
+      <ServingChip />
       <Show when={staleOrigin()}>
         <span
           class="pointer-events-none fixed bottom-8 left-[14px] z-[70] font-mono text-[11px] tracking-[0.02em] text-gold"
