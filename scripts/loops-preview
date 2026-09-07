@@ -402,6 +402,19 @@ for src in "$MAIN"/packages/*/dist; do
     cp -Rc "$src" "$dest" 2>/dev/null || cp -R "$src" "$dest"
   fi
 done
+# A borrowed dist can be unbuilt — MAIN between `task dev` runs, or on a branch that lacks the
+# package entirely — and every page importing it then 500s "Module not found: @loops/<pkg>".
+# Worse, a stale tsconfig.tsbuildinfo in an outputless dist makes a plain `tsc -b` a no-op, so
+# build any dist with zero .js in the checkout itself, with --force (2026-09-07: realtime-client).
+unbuilt=""
+for cfg in "$DIR"/packages/*/tsconfig.json; do
+  [ -f "$cfg" ] || continue
+  ls "$(dirname "$cfg")"/dist/*.js >/dev/null 2>&1 || unbuilt="$unbuilt $cfg"
+done
+if [ -n "$unbuilt" ]; then
+  cyan "building unbuilt workspace package(s):$(printf '%s\n' $unbuilt | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
+  (cd "$DIR" && npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
+fi
 for e in .env .env.local .env.development; do
   if [ -f "$MAIN/$e" ] && [ ! -e "$DIR/$e" ]; then
     ln -sfn "$MAIN/$e" "$DIR/$e"
