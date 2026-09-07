@@ -47,11 +47,19 @@ A `srv/foreign.py` that turns `gh` PR JSON into the same graph shape `forestGrap
 
 ### 3 · The walk rail
 
-On a foreign node, ONE pipeline verb: **⇄ preview here** → `/preview-swap` onto the node's branch (materializing the worktree first if needed) via the `/preview-wait` interstitial. Prev/next follow stack order — the spine grammar already encodes navigation. Per-node review state (seen / commented, from GitHub data) is a quiet dot, never a button. Four-slot check: verb = preview-swap; checkpoint = none (nothing to voice); shared-world door = the GitHub deep-link; status = spine.
+On a foreign node, ONE pipeline verb: **⇄ preview here** → `/preview-swap` onto the node's branch (materializing the worktree first if needed) via the `/preview-wait` interstitial. Prev/next follow stack order — the spine grammar already encodes navigation. Per-node review state (seen / commented, from GitHub data) is a quiet dot, never a button. Four-slot check: verb = preview-swap; checkpoint = none (nothing to voice); shared-world door = the GitHub deep-link; status = spine. (Under the switcher pattern below, this rail is simply the *open* state of the serving chip.)
 
 ### 4 · Readiness at swap
 
 Fold the predictions *inside* the preview verb, not as peer buttons: at swap time run the `whoport --stack` migration diff, the unbuilt-dist check (now in `loops-preview` itself, 529df51), and a Prisma-client staleness check. Green = swap proceeds silently. Red = the interstitial names what it's fixing (`applying 2 migrations · building realtime-client`) or parks with the reason. The condition may also render as passive metadata on the node ("needs migration") — metadata, not a button.
+
+## The switcher pattern (GitHub Desktop)
+
+Phil's reference point: GitHub Desktop's branch selector — a persistent "Current Branch: …" control that is both the *answer* ("what am I on") and the *door* (click to switch), with Branches / Pull Requests tabs, filter-first input, the default branch pinned, recents ranked by age, and "Last fetched just now" sitting adjacent. Three things to steal:
+
+- **Identity and switching are ONE control.** A persistent `serving: <branch@sha> on :<port>` chip in the viewer chrome that, clicked, opens the swap target list — slices 1 and 3 collapse into this one widget. Closed, it is the always-visible answer (and the ⚠ carrier on mismatch); open, it is the walk rail.
+- **The Pull Requests tab is the foreign-work passthrough.** Foreign stacks enter through a PR tab on that switcher — pick a PR, never think about branches or fetch. Discoverable at the exact moment of switching, invisible otherwise.
+- **The list grammar:** filter-first, recency-ranked, default pinned; freshness ("last fetched just now") rendered adjacent to the control — the same grammar readiness-at-swap uses (state beside the verb, never a peer button).
 
 ## The honest cost
 
@@ -59,6 +67,6 @@ This adds a **second audience** to the viewer: today it serves the author (Phil'
 
 ## Open questions for Phil
 
-1. **Where does a foreign forest live in the UI?** Proposed: same `ForestsList`, visibly foreign. Alternative: behind a Cmd+K jump only, no list presence at all (quieter, but undiscoverable).
+1. **Where does a foreign forest live in the UI?** Three candidates: rows in `ForestsList` (visibly foreign), Cmd+K-only (quieter, undiscoverable), or the switcher's PR tab (discoverable exactly when switching, invisible otherwise — arguably the winner, per the pattern above). If the PR tab wins, does the forests list carry foreign forests at all?
 2. **How much GitHub state on the node?** Diff + CI + comment *count* with deep-links (proposed), or render full comment threads read-only in the viewer (heavier, duplicates GitHub, but keeps review in one place)?
 3. **Does slice-4 auto-apply migrations to the shared dev DB, or park and ask?** Auto is the smoother walk; the DB is shared with the main checkout, and a teammate branch could carry a migration main doesn't have yet (this morning's were already on origin/main, so safe — that's not always true).
