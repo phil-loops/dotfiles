@@ -65,8 +65,8 @@ Phil's reference point: GitHub Desktop's branch selector — a persistent "Curre
 
 This adds a **second audience** to the viewer: today it serves the author (Phil's forests, gates, push); this serves the reviewer (anyone's stack, read + run). That is a real scope expansion, on top of an open list that already includes the forest-detail redesign, semantic zoom, and lifecycle debt. Mitigations: slice 1 is not actually foreign-forest work (it hardens existing preview provenance and would have prevented this morning's damage alone); slices 2–4 reuse the map, the swap, and the interstitial rather than growing new surfaces; and the read-only constraint keeps the authoring grammar from leaking sideways.
 
-## Open questions for Phil
+## Decided (2026-09-07, "best guess" calls)
 
-1. **Where does a foreign forest live in the UI?** Three candidates: rows in `ForestsList` (visibly foreign), Cmd+K-only (quieter, undiscoverable), or the switcher's PR tab (discoverable exactly when switching, invisible otherwise — arguably the winner, per the pattern above). If the PR tab wins, does the forests list carry foreign forests at all?
-2. **How much GitHub state on the node?** Diff + CI + comment *count* with deep-links (proposed), or render full comment threads read-only in the viewer (heavier, duplicates GitHub, but keeps review in one place)?
-3. **Does slice-4 auto-apply migrations to the shared dev DB, or park and ask?** Auto is the smoother walk; the DB is shared with the main checkout, and a teammate branch could carry a migration main doesn't have yet (this morning's were already on origin/main, so safe — that's not always true).
+1. **Placement: the switcher's PR tab.** Foreign forests do NOT appear in the forests list — the authored surface stays quiet; foreign work is discoverable exactly at the moment of switching, invisible otherwise.
+2. **GitHub depth: comment counts + deep-links out.** No in-viewer thread rendering — the viewer reads GitHub, never becomes a second comment surface.
+3. **Migrations at swap: split by provenance.** Auto-apply migrations already on `origin/main` (the DB is merely behind); park-and-ask for teammate-only migrations; the interstitial names exactly what it wants to run either way.
