@@ -56,6 +56,15 @@ export function NavRail() {
     // add our own churn — a node-review tab shouldn't rerun the /projects fan-out on focus.
     refetchOnWindowFocus: false,
   }));
+  // dev servers listening right now — the one ambient count the rail carries for the Machine.
+  const processes = createQuery<{ kind: string; status: string }[]>(() => ({
+    queryKey: ["processes"],
+    queryFn: () => fetch("/processes").then((r) => r.json()),
+    refetchInterval: 3000,
+  }));
+  const serversUp = createMemo(
+    () => (processes.data ?? []).filter((p) => p.kind === "preview" && p.status === "up").length
+  );
   const active = createMemo(() => tileOf(location()));
   // where you're standing, when it's deeper than home — one gold tile, climbs to the overview.
   const context = createMemo(() => contextOf(location()));
@@ -105,6 +114,12 @@ export function NavRail() {
         onClick={() => navigate({ kind: "machine" })}
       >
         <span class={THUMB_LBL}>Machine</span>
+        <Show when={serversUp()}>
+          <span
+            class={`${COUNT} ${location().kind === "machine" ? "border-gold-deep text-gold-leaf" : "border-rule text-ink-faint"}`}
+            title={`${serversUp()} dev ${serversUp() === 1 ? "server" : "servers"} listening`}
+          >{serversUp()}</span>
+        </Show>
       </button>
       <Show when={context() || others().length}>
         <div class="rail-sep mx-[18px] my-[6px] h-px flex-none bg-rule max-[640px]:hidden" />

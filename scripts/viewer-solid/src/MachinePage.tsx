@@ -1,8 +1,9 @@
 // The Machine — the workstation's dev resources as one first-class page: every server
 // that's serving, the ONE shared substrate they all ride, and the levers (run · swap ·
-// restart · kill). Replaces the Servers drawer, whose only opener was an Activity-dock row
+// restart · kill). Replaces the Servers drawer, whose only opener was an activity-dock row
 // that existed while previews ran — "nothing is running" was an unnavigable state instead
-// of an invitation. Route: /machine, always reachable from the rail.
+// of an invitation. Route: /machine, always reachable from the rail, which carries the
+// listening-server count as its chip.
 //
 // Layout thesis — the bus: one patina line down the left gutter; every server taps into
 // it, and it terminates in the substrate block spanning the page's full width. N servers,
@@ -87,9 +88,9 @@ const driftBits = (sc: SchemaDrift) => {
 
 export function MachinePage() {
   const qc = useQueryClient();
-  // the Activity dock polls /processes ambiently and already knows every preview — seed from
-  // its cache so the page paints instantly with health "probing", and the /previews probe
-  // fills in real health ~a second later.
+  // the rail polls /processes ambiently for its Machine count and already knows every preview —
+  // seed from its cache so the page paints instantly with health "probing", and the /previews
+  // probe fills in real health ~a second later.
   const seedFromDock = (): PreviewsResp | undefined => {
     type DockProc = { kind: string; id: string; label: string; dir?: string; url?: string; status: string; detail: string; age: string };
     const procs = qc.getQueryData<DockProc[]>(["processes"]);

@@ -9,7 +9,6 @@ import CommandPalette from "./CommandPalette";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { ServingChip } from "./ServingChip";
-import { Activity } from "./Activity";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
 import { Wiki } from "./Wiki";
@@ -186,7 +185,6 @@ function Layout(props: { children?: JSX.Element }) {
           origin checks failing — world may be stale
         </span>
       </Show>
-      <Activity />
     </>
   );
 }

@@ -974,7 +974,7 @@ export function NodeActions(props: {
 
           {/* preview — open the warming tab: it spins a dev server for this branch on a side
               port (or attaches to the running one) WITHOUT moving your main checkout off :3000,
-              and shows the boot until the server can answer. Stop it from the Activity dock. */}
+              and shows the boot until the server can answer. Stop it from the Machine page. */}
           <button
             class={`nh-item ${ITEM}`}
             role="menuitem"
