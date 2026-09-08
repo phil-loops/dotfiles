@@ -1,7 +1,6 @@
 # Converting a surface to Tailwind — the rules
 
-The reference conversions are `ServersDrawer.tsx` and `Activity.tsx` (their `.css` files are
-deleted). Mimic them exactly. The goal of a conversion commit is **pixel parity**, not redesign.
+The reference conversion is `NavRail.tsx` (its `.css` file is deleted). Mimic them exactly. The goal of a conversion commit is **pixel parity**, not redesign.
 
 ## Gates (all must pass before commit)
 
