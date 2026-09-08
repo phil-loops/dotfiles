@@ -35,15 +35,27 @@ realpath_of(){ (cd "$1" 2>/dev/null && pwd -P); }
 
 # .rebuilding is the single-flight lock. A crashed build strands it, and a stranded lock
 # silently freezes that tree's .gen forever (bit us 2026-07-30) — steal locks older than 10m.
-take_lock(){ # $1 = the .gen dir
-  local lock="$1/.rebuilding"
-  mkdir "$lock" 2>/dev/null && return 0
-  local age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || echo 0) ))
-  (( age > 600 )) && rm -rf "$lock" && mkdir "$lock" 2>/dev/null && return 0
-  return 1
+# A live lock means someone else is doing the work we came to do — join it (wait, then
+# re-check) instead of failing: the gate's --sync used to red on the viewer's background heal
+# of the same scratch tree, and the typecheck then ran against the stale types (2026-09-08).
+wait_lock(){ # $1 = lock dir; returns once we hold it, 1 after 600s of someone else holding it
+  local lock="$1" waited=0 age
+  until mkdir "$lock" 2>/dev/null; do
+    age=$(( $(date +%s) - $(stat -f %m "$lock" 2>/dev/null || echo 0) ))
+    (( age > 600 )) && { rm -rf "$lock"; continue; }
+    (( waited >= 600 )) && return 1
+    sleep 2; waited=$(( waited + 2 ))
+  done
+  return 0
 }
-
+take_lock(){ wait_lock "$1/.rebuilding"; }   # $1 = the .gen dir
 drop_lock(){ rmdir "$1/.rebuilding" 2>/dev/null; }
+
+# One seed-gen at a time per tree: the whole materialization (node_modules view, packages
+# dist, prisma client, .gen) is serialized on a lock in the worktree's own git dir — never
+# under .gen, which may still be a link into MAIN's.
+tree_lock=""
+drop_tree_lock(){ [[ -n "$tree_lock" ]] && rmdir "$tree_lock" 2>/dev/null; }
 
 # A node_modules symlink aimed anywhere but the main checkout reads some other tree's frozen
 # packages/*/dist (the wt-075238 donor rot, 2026-07-30) — repoint it. A real dir is left alone.
@@ -226,6 +238,9 @@ src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{pr
 [[ -n "$src" && -d "$src/.gen" ]] || exit 0                  # nothing to seed from
 
 if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
+  _gitdir=$(git -C "$dir" rev-parse --path-format=absolute --git-dir 2>/dev/null) || exit 0
+  wait_lock "$_gitdir/seed-gen.lock" || { echo "a seed-gen run has held this tree for over 10 minutes"; exit 1; }
+  tree_lock="$_gitdir/seed-gen.lock"; trap drop_tree_lock EXIT
 
   if (( sync )); then
     head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || exit 0
@@ -362,8 +377,11 @@ tsgo="$dir/node_modules/.bin/tsgo"
 [[ -x "$tsgo" ]] || tsgo=$(command -v tsgo 2>/dev/null) || tsgo=""
 [[ -n "$tsgo" || -e "$tsc" ]] || exit 0                      # no compiler → keep what's there
 if ! take_lock "$dir/.gen"; then
-  (( sync )) && { echo "a types rebuild is already in flight in the main checkout"; exit 1; }
+  (( sync )) && { echo "a types rebuild has held the main checkout for over 10 minutes"; exit 1; }
   exit 0
+fi
+if [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]]; then
+  drop_lock "$dir/.gen"; (( sync )) && echo "joined a types rebuild that just finished for ${head:0:10}"; exit 0
 fi
 
 if [[ -e "$tsc" && "${ts_major:-0}" -ge 7 ]]; then

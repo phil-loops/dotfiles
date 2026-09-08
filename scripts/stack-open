@@ -121,6 +121,7 @@ ours(){   # $SCRATCH is one shared directory but stack-open runs from whatever r
   [[ "$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" == "$_common_dir" ]]
 }
 _common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || _common_dir=""
+_caller_no_gen_sync="${STACK_OPEN_NO_GEN_SYNC:-}"   # read before the machine-caller modes set it themselves
 human_kb(){ (( $1 >= 1048576 )) && printf '%.1fG' $(( $1 / 1048576.0 )) || printf '%dM' $(( $1 / 1024 )) }
 
 # Two different things get reclaimed here, on two different clocks.
@@ -231,6 +232,11 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without 
               # TS2883 on prisma-inferred exports and the aggregates never re-emit at all.
   "$SCRIPTS/seed-gen" "$1" >/dev/null 2>&1 || true
 }
+sync_tree(){   # foreground heal for machine callers; a caller's STACK_OPEN_NO_GEN_SYNC still opts out
+  [[ -n "${_caller_no_gen_sync:-}" ]] && return 0
+  "$SCRIPTS/seed-gen" --sync "$1" >/dev/null 2>&1 || true
+}
+
 ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
   local b="$1" ex dir
   ex=$(existing_worktree "$b"); if [[ -n "$ex" ]]; then echo "$ex"; return; fi
@@ -621,9 +627,16 @@ case "${1:-}" in
       echo "scratch now $(du -sh "$SCRATCH" 2>/dev/null | cut -f1) in $(ls -d "$SCRATCH"/*/ 2>/dev/null | wc -l | tr -d ' ') worktrees"
     fi
     exit 0;;
-  --prepare) ensure_worktree "${2:?branch}" >/dev/null; exit 0;;
-  --path)    ensure_worktree "${2:?branch}"; exit 0;;   # create-if-needed + print the checkout dir
-  --serve-path) STACK_OPEN_SKIP_PRIMARY=1 ensure_worktree "${2:?branch}"; exit 0;;   # --path, but never
+  # Machine callers (gates, delta-tests, previews, the viewer's warm) get a FULLY materialized
+  # tree: the heal runs in the foreground here instead of racing them from the background
+  # (a gates run and a delta-tests run on a fresh scratch both used to red on the heal's
+  # half-swapped node_modules and its in-flight .gen rebuild, 2026-09-07). The editor path
+  # below keeps the background heal — it has an ~8s budget before the viewer kills it.
+  # STACK_OPEN_NO_GEN_SYNC set by the caller still opts out of any heal (stack-open-test's
+  # bare-seeding cases assert the link).
+  --prepare) d=$(STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") && sync_tree "$d"; exit 0;;
+  --path)    d=$(STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # create-if-needed + print the checkout dir
+  --serve-path) d=$(STACK_OPEN_SKIP_PRIMARY=1 STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # --path, but never
              # the primary checkout — a dir loops-preview may serve (it refuses MAIN)
   --heal-notify)   # (internal, setsid'd from the heal) read the heal log and deliver the outcome:
     # auto ':lsp-restart' in the warm Helix; a banner only for failures we can't act on.
