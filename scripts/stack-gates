@@ -363,6 +363,15 @@ def main():
                         "summary": "\n".join(env_notes)})
         emit({"event": "done", "gate": "env", "ok": env_ok, "ms": env_ms})
         all_ok = all_ok and env_ok
+    if not env_ok:
+        # The types the typecheck would read are not vouched for; running it anyway produced
+        # code-shaped reds in files the branch never touched (2026-09-08). Say "environment" and
+        # stop — the verdict is not about the branch.
+        verdict = {"ok": False, "gates": results,
+                   "note": "environment not ready — typecheck, format and tests skipped; re-run"}
+        emit({"event": "result", **verdict})
+        print(json.dumps(verdict))
+        return 0
     for name, cmd in gates:
         t0 = time.time()
         emit({"event": "start", "gate": name, "ts": t0})
