@@ -180,11 +180,28 @@ say "restarting in $DIR via: $TASK   (mode=$MODE, log=$LOG, tmux=$SESSION)"
 # ECONNREFUSED. Reset mode's `task dev` already deps on :docker:compose:up.
 NEED_DOCKER_UP=$([ "$MODE" = keep ] && echo 1 || echo 0)
 
+# `task npm:install` keys on package.json + the prisma schema, so a lockfile that moved on its own
+# (a new workspace package, a bumped dep) never reinstalls — and @loops/<new-pkg> stays unresolvable
+# (2026-09-08: safe-fetch, #10419). npm writes node_modules/.package-lock.json LAST, so a checked-out
+# lockfile newer than it is an install this checkout still owes.
+NEED_INSTALL=0
+if [ -f "$DIR/package-lock.json" ] && [ ! -L "$DIR/node_modules" ] \
+   && { [ ! -f "$DIR/node_modules/.package-lock.json" ] || [ "$DIR/package-lock.json" -nt "$DIR/node_modules/.package-lock.json" ]; }; then
+  NEED_INSTALL=1
+fi
+
 if [ "$DRY" = 1 ]; then
+  [ "$NEED_INSTALL" = 1 ] && say "would: (cd $DIR && npm install)   # package-lock.json moved past node_modules"
   [ "$NEED_DOCKER_UP" = 1 ] && say "would: (cd $DIR && docker compose up -d --remove-orphans)"
   [ "$NEED_DOCKER_UP" = 1 ] && say "would: (cd $DIR && npx prisma migrate deploy; seed if DB empty)"
   say "dry-run: not launching"
   exit 0
+fi
+
+if [ "$NEED_INSTALL" = 1 ]; then
+  say "package-lock.json moved past node_modules — running npm install in $DIR"
+  (cd "$DIR" && PRISMA_SCHEMA='["native"]' npm install --no-audit --no-fund) 2>&1 | tail -3 \
+    || say "npm install failed — @loops/* and new deps may not resolve"
 fi
 
 if [ "$NEED_DOCKER_UP" = 1 ]; then

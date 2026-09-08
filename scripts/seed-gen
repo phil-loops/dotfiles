@@ -146,6 +146,28 @@ seed_prisma_client(){ # $1 = tree, $2 = main checkout; a schema.prisma that diff
   fi
 }
 
+# A workspace package (packages/<p>) only becomes resolvable as @loops/<p> when npm install
+# writes the node_modules/@loops link; the Taskfile's npm:install keys on package.json + the
+# prisma schema, and a new workspace package changes neither (2026-09-08: safe-fetch, #10419).
+# npm rewrites node_modules/.package-lock.json LAST, so a checked-out lockfile newer than it is
+# an install the tree still owes.
+lock_moved(){ # $1 = tree
+  [[ -f "$1/package-lock.json" ]] || return 1
+  [[ ! -f "$1/node_modules/.package-lock.json" || "$1/package-lock.json" -nt "$1/node_modules/.package-lock.json" ]]
+}
+
+install_if_lock_moved(){ # $1 = tree with a REAL node_modules; echoes a note when it acted
+  lock_moved "$1" || return 0
+  [[ -d "$1/node_modules" && ! -L "$1/node_modules" ]] || return 0
+  local out
+  if out=$(cd "$1" && PRISMA_SCHEMA='["native"]' npm install --no-audit --no-fund 2>&1); then
+    echo "package-lock.json moved past node_modules — ran npm install"
+  else
+    echo "package-lock.json moved past node_modules but npm install FAILED:"; echo "$out" | tail -5
+    return 1
+  fi
+}
+
 build_packages(){ # $1 = tree; every packages/*/tsconfig.json, with the canonical tsc (no-op-fast when current)
   local tsc="$1/node_modules/typescript/bin/tsc"
   [[ -e "$tsc" ]] || return 0
@@ -324,6 +346,9 @@ fi
 
 head=$(git -C "$dir" rev-parse HEAD 2>/dev/null) || exit 0
 marker="$dir/.gen/.seed-gen-sha"
+# Ahead of the marker early-exit: the marker vouches for .gen, not for node_modules, and every
+# other tree resolves @loops/* and its deps through this checkout's node_modules.
+if (( sync )); then install_if_lock_moved "$dir" || exit 1; fi
 [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0   # already built for this HEAD
 # Gate on HEAD alone, never on `git diff main...HEAD -- <inputs>`: that gate is empty when the
 # checkout comes back TO main, so .gen kept whatever shape the last feature branch left it —
@@ -355,11 +380,7 @@ build_main(){
   # and the app typecheck, and `tsc -b` is a no-op when nothing changed. Build with tsc (not
   # tsgo) to match the canonical `task build:packages`, so the shared dist/*.tsbuildinfo never
   # thrashes between two compilers.
-  if [[ -e "$tsc" ]]; then
-    "$HOME/.volta/bin/node" "$tsc" -b \
-      packages/settings/tsconfig.json packages/valkey/tsconfig.json packages/mail-pg/tsconfig.json \
-      packages/realtime-client/tsconfig.json packages/prisma/tsconfig.json --pretty false >/dev/null 2>&1
-  fi
+  build_packages "$dir" >/dev/null 2>&1
   # A HEAD that moved during the build would make this stamp claim a shape .gen doesn't have.
   "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
     && [[ "$(git rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
