@@ -28,25 +28,38 @@ cd "$DIR"
 
 applied() { grep -q "X-Dev-Worktree" next.config.js; }
 
+# The stamp must NEVER be staged/committed — the viewer's dirty-include does a blanket
+# `git add -A` that otherwise folds it into a pushable commit. skip-worktree makes git
+# ignore working-tree changes to the file, so no `git add` anywhere stages it and it stops
+# reading as "dirty". Cleared before any unstamp/regenerate so git apply / git diff see it.
+skip_on()  { git update-index --skip-worktree next.config.js 2>/dev/null || true; }
+skip_off() { git update-index --no-skip-worktree next.config.js 2>/dev/null || true; }
+
 case "$MODE" in
   status)
     if applied; then echo "stamped: $DIR"; else echo "unstamped: $DIR"; exit 1; fi; exit 0 ;;
   revert)
     applied || { echo "already unstamped: $DIR"; exit 0; }
+    skip_off
     git restore --staged -- next.config.js 2>/dev/null || true
     git apply -R "$PATCH" 2>/dev/null || git checkout -- next.config.js
     echo "reverted: $DIR"; exit 0 ;;
 esac
 
-applied && { echo "already stamped: $DIR"; exit 0; }
+# re-invoking on an already-stamped worktree also (re)asserts skip-worktree, so worktrees
+# stamped before this guard existed get protected on the next stamp call.
+applied && { skip_on; echo "already stamped: $DIR"; exit 0; }
 
 if git apply --check --3way "$PATCH" 2>/dev/null; then
   git apply --3way "$PATCH"
   git restore --staged -- next.config.js 2>/dev/null || true
+  skip_on
   echo "stamped: $DIR ($(git branch --show-current || true)@$(git rev-parse --short HEAD))"
   exit 0
 fi
 
+# drift/regenerate path needs git to see the real working-tree file
+skip_off
 echo "loops-provenance: patch no longer applies — next.config.js drifted" >&2
 if [ "$AGENT" != 1 ]; then
   echo "loops-provenance: run without --no-agent to have an agent re-derive it" >&2
