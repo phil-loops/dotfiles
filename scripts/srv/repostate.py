@@ -1,0 +1,147 @@
+# srv/repostate.py — ONE snapshot of everything the read-only verdicts derive from: every ref
+# (local + remote, with upstream tracking), the repo's local git config parsed once, and the
+# cached open-PR set. Two git spawns build it; a fingerprint of those two outputs keys it, so
+# every reader in the same request burst (nine panels on a node open) shares one snapshot
+# instead of each re-spawning `git config` and `git rev-parse` for the same facts.
+#
+# Readers ask the snapshot, never git, for: a branch's parent/project/description/any
+# stack-branch key (both namespaces resolved here, in one place), local + origin tips,
+# upstream tracking, published. Anything that needs a *walk* (rev-list counts, merge-base)
+# still spawns — but memoised per snapshot, so the same walk isn't repeated within one epoch.
+import hashlib
+import threading
+import time
+
+from . import ctx
+
+_LOCK = threading.Lock()
+_SNAP = {}   # repo cwd -> RepoState
+_MAX_AGE = 5.0   # seconds a snapshot may serve without re-checking its fingerprint
+
+
+class RepoState:
+    def __init__(self, refs_raw, cfg_raw, pr_heads):
+        self.fingerprint = hashlib.sha1((refs_raw + "\x1e" + cfg_raw).encode()).hexdigest()
+        self.at = time.monotonic()
+        self.checked = self.at
+        self.sha = {}        # refname -> objectname (refs/heads/x, refs/remotes/origin/x)
+        self.upstream = {}   # short branch -> (upstream short, track e.g. "[gone]" / "[ahead 1]" / "")
+        for ln in refs_raw.splitlines():
+            p = ln.split(" ", 3)
+            if len(p) >= 2:
+                self.sha[p[0]] = p[1]
+                if p[0].startswith("refs/heads/"):
+                    self.upstream[p[0][11:]] = (p[2] if len(p) > 2 else "", p[3] if len(p) > 3 else "")
+        self.cfg = {}        # key -> [values] (multivar keys keep every value, in order)
+        for ln in cfg_raw.split("\0"):
+            if not ln:
+                continue
+            k, _, v = ln.partition("\n")
+            self.cfg.setdefault(k, []).append(v)
+        self.pr_heads = pr_heads
+        self._memo = {}
+
+    # ── config ────────────────────────────────────────────────────────────
+    def get(self, key, default=""):
+        vals = self.cfg.get(key)
+        return vals[-1] if vals else default
+
+    def get_all(self, key):
+        return list(self.cfg.get(key, []))
+
+    def branch_key(self, branch, key, default=""):
+        """stack-branch.<b>.<key>, falling back to the legacy branch.<b>.stack-<key> spelling —
+        the ONE place both namespaces are read (namespace migration: delete the fallback here)."""
+        return self.get(f"stack-branch.{branch}.{key}") or self.get(f"branch.{branch}.stack-{key}") or default
+
+    def parent(self, branch):
+        return self.branch_key(branch, "parent") or self.main()
+
+    def project(self, branch):
+        return self.branch_key(branch, "project")
+
+    def description(self, branch):
+        return self.get(f"branch.{branch}.description")
+
+    def main(self):
+        return self.get("stack.main-branch") or "main"
+
+    # ── refs ──────────────────────────────────────────────────────────────
+    def local(self, branch):
+        return self.sha.get(f"refs/heads/{branch}", "")
+
+    def remote(self, branch, remote="origin"):
+        return self.sha.get(f"refs/remotes/{remote}/{branch}", "")
+
+    def exists(self, branch):
+        return f"refs/heads/{branch}" in self.sha
+
+    def track(self, branch):
+        return self.upstream.get(branch, ("", ""))
+
+    def published(self, branch):
+        return branch in self.pr_heads
+
+    def branch_fingerprint(self, branch):
+        """Everything a single-branch verdict reads: its refs (every remote's copy), its parent's,
+        origin/main, its config block, and open-PR membership. Cheap — no spawn."""
+        sp = self.parent(branch)
+        parts = [self.local(branch), self.remote(branch), self.local(sp), self.remote(sp), self.remote(self.main()),
+                 self.track(branch)[1], str(self.published(branch))]
+        parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items()) if k.startswith((f"stack-branch.{branch}.", f"branch.{branch}."))
+                  for v in vs]
+        parts += [self.sha.get(r, "") for r in sorted(self.sha) if r.startswith("refs/remotes/") and r.endswith(f"/{branch}")]
+        return hashlib.sha1("\x1f".join(parts).encode()).hexdigest()
+
+    # ── walks, memoised for the snapshot's life ──────────────────────────
+    def count(self, rng, first_parent=False):
+        key = ("count", rng, first_parent)
+        if key not in self._memo:
+            args = ["git", "rev-list", "--count"] + (["--first-parent"] if first_parent else []) + [rng]
+            raw = ctx.run(args).stdout.strip()
+            self._memo[key] = int(raw) if raw.isdigit() else 0
+        return self._memo[key]
+
+    def is_ancestor(self, a, b):
+        key = ("anc", a, b)
+        if key not in self._memo:
+            self._memo[key] = ctx.run(["git", "merge-base", "--is-ancestor", a, b]).returncode == 0
+        return self._memo[key]
+
+
+def _read():
+    refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname) %(upstream:short) %(upstream:track)",
+                    "refs/heads", "refs/remotes"]).stdout
+    cfg = ctx.run(["git", "config", "--local", "--list", "-z"]).stdout
+    return refs, cfg
+
+
+def snapshot(fresh_prs=False):
+    """The current RepoState for the request's repo. Re-reads the two inputs at most every
+    _MAX_AGE seconds; a changed fingerprint rebuilds, an unchanged one keeps the memoised
+    walks. Mutating callers pass fresh_prs=True so the open-PR set is live, never stale."""
+    from . import sync
+    repo = ctx.repo_cwd()
+    now = time.monotonic()
+    with _LOCK:
+        cur = _SNAP.get(repo)
+    if cur and not fresh_prs and now - cur.checked < _MAX_AGE:
+        return cur
+    refs, cfg = _read()
+    heads = sync._open_pr_heads(fresh=fresh_prs)
+    fp = hashlib.sha1((refs + "\x1e" + cfg).encode()).hexdigest()
+    with _LOCK:
+        cur = _SNAP.get(repo)
+        if cur and cur.fingerprint == fp and cur.pr_heads == heads:
+            cur.checked = now
+            return cur
+        snap = RepoState(refs, cfg, heads)
+        _SNAP[repo] = snap
+        return snap
+
+
+def invalidate():
+    """A mutation this server made (reword, squash, restack, config write) — drop the snapshot
+    so the next reader rebuilds instead of riding out _MAX_AGE."""
+    with _LOCK:
+        _SNAP.pop(ctx.repo_cwd(), None)

@@ -25,6 +25,7 @@ from srv import ship    # own line: same reason
 from srv import prep    # own line: same reason
 from srv import wiki    # own line: same reason
 from srv import footprint   # own line: same reason
+from srv import repostate   # own line: same reason
 from srv import pregate   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -444,6 +445,9 @@ class H(BaseHTTPRequestHandler):
         try:
             self._dispatch_post(raw)
         finally:
+            # any POST may have moved a ref or written config: drop the shared snapshot so the
+            # very next reader rebuilds instead of riding out its freshness window
+            repostate.invalidate()
             srvctx.clear_repo()
 
     def _dispatch_post(self, raw):
