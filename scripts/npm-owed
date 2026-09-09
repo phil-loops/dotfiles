@@ -13,7 +13,8 @@
 # an identical lockfile all lied under the old lock-mtime check (2026-09-09: MAIN read "current"
 # while npm wanted 1,100 changes). The dry run is gated by content hashes of package-lock.json
 # and npm's own node_modules/.package-lock.json (written last by every install), cached in
-# node_modules/.npm-owed — an unchanged pair costs two hashes, ~40ms.
+# node_modules/.npm-owed — an unchanged pair costs two hashes, ~40ms. A successful --install
+# writes the post-install pair as settled, so npm's occasional stray "changed N" never loops.
 #
 # A symlinked node_modules belongs to another tree and is never judged or installed here.
 set -uo pipefail
@@ -52,7 +53,10 @@ echo "added $a removed $r changed $c"
 (( install )) || exit 0
 
 if out="$(cd "$dir" && PRISMA_SCHEMA='["native"]' npm install --no-audit --no-fund 2>&1)"; then
-  rm -f "$cache"
+  # Settle on what the install produced: npm can keep reporting a couple of "changed" packages
+  # after a converged install (2026-09-09: 2 on the loops tree), and re-judging would install on
+  # every tick. Only a changed lockfile or hidden lockfile re-opens the question.
+  echo "$(hash_of "$dir/package-lock.json") $(hash_of "$dir/node_modules/.package-lock.json") 0/0/0" > "$cache"
   exit 0
 fi
 echo "npm install failed in $dir: $(tail -3 <<<"$out" | tr '\n' ' ')" >&2
