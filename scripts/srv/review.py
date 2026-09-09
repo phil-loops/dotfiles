@@ -154,6 +154,9 @@ def _enrich(raw, branch):
         tv = ctx.run(["git", "config", f"stack-project.{proj}.ticket"]).stdout.strip()
         if tv:
             data["ticket"] = tv.lower()
+        fv = ctx.run(["git", "config", f"stack-project.{proj}.focus"]).stdout.strip()
+        if fv.isdigit() and int(fv) > 0:
+            data["focus"] = int(fv)
     if order:
         data["mergeOrder"] = order
     return json.dumps(data)

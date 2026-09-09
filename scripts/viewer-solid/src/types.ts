@@ -57,6 +57,8 @@ export const ForestModel = z.object({
   interest: z.number().optional(),
   // Linear ticket tied to the project (stack-project.<name>.ticket, lowercased), grafted on by /model.
   ticket: z.string().optional(),
+  // 1-based focus-lane rank (stack-project.<name>.focus), grafted on by /model; absent = not pinned.
+  focus: z.number().optional(),
 });
 export type ForestModel = z.infer<typeof ForestModel>;
 
