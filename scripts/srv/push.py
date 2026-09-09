@@ -204,8 +204,10 @@ def gates_progress(req, u):
 
 # ── origin push — the shared-history door ────────────────────────────────────
 # Design + boundaries: ~/daily-log/2026-07-02-deprecate-gh-desktop/design.md.
-# Phil's rules: FF-only, never force; outgoing must be exactly ONE commit with a
-# voiced subject + real body; gates green for the exact tree pushed; the app never
+# Phil's rules: FF-only, never force; a FIRST push is exactly ONE commit with a voiced
+# subject + real body (it becomes the PR); follow-ups onto an open PR push as they are —
+# each additive commit is a review round the reviewer reads as "changes since" — so long
+# as every subject is voiced; gates green for the exact tree pushed; the app never
 # authors PRs (at most a plain github.com link). Claude never calls /push-origin.
 
 # Gates-green lives in git config (stack-branch.<b>.gates-green-tree), server-recorded and
@@ -368,6 +370,11 @@ def _origin_verdict(branch):
     ff = True
     if has_remote:
         ff = ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode == 0
+    # published (cached open-PR set, no per-poll gh call): with outgoing==0 it splits the
+    # dead push button into 'view PR ↗' (has one) vs 'open PR ↗' (pushed, none yet); with
+    # outgoing>1 it relaxes the seal — follow-ups onto an open PR are review rounds.
+    published = branch in sync._open_pr_heads()
+    followup = has_remote and published
     # outgoing = commits origin doesn't have. On a first push, --not --remotes=origin keeps a
     # stacked branch's parent commits (already on origin via the parent) out of the count.
     # --first-parent: a catch-up merge's mainline commits arrive via the merge edge — they are
@@ -405,16 +412,28 @@ def _origin_verdict(branch):
                     "del": int(p[1]) if p[1].isdigit() else 0,
                 })
 
+    # per-commit facts for the manifest (what each outgoing commit carries) and the wards
+    for c in outgoing:
+        parents = ctx.run(["git", "log", "-1", "--format=%P", c["sha"]]).stdout.split()
+        c["merge"] = len(parents) > 1
+        c["voiced"] = not _WIP_SUBJECT.match(c["subject"])
+        stat = ctx.run(["git", "diff", "--shortstat", f"{c['sha']}^1", c["sha"]]).stdout if parents else ""
+        for key, pat in (("files", r"(\d+) files? changed"), ("add", r"(\d+) insertion"), ("del", r"(\d+) deletion")):
+            m = re.search(pat, stat)
+            c[key] = int(m.group(1)) if m else 0
+
     commit = None
     voiced = said_why = not_merge = catchup = False
-    if len(outgoing) == 1:
+    if outgoing:
+        # the tip carries the body the reviewer reads first; the oldest outgoing commit is the
+        # only place a catch-up merge can sit (its first parent must be origin's head)
         sha = outgoing[0]["sha"]
         subject = outgoing[0]["subject"]
         body = ctx.run(["git", "log", "-1", "--format=%b", sha]).stdout.strip()
-        voiced = not _WIP_SUBJECT.match(subject)
+        voiced = all(c["voiced"] for c in outgoing)
         said_why = bool(re.sub(r"^X-WIP:.*$", "", body, flags=re.IGNORECASE | re.MULTILINE).strip())
-        parents = ctx.run(["git", "log", "-1", "--format=%P", sha]).stdout.split()
-        not_merge = len(parents) < 2
+        parents = ctx.run(["git", "log", "-1", "--format=%P", outgoing[-1]["sha"]]).stdout.split()
+        not_merge = not any(c["merge"] for c in outgoing)
         # catch-up merge — GitHub's own "Update branch" shape, the one additive way a stale-fork
         # PR gets its review diff back to the branch's own work: first parent is origin's PR
         # head, second parent sits on the PR's base — origin/main, or the stack parent for a
@@ -428,8 +447,13 @@ def _origin_verdict(branch):
         catchup = (len(parents) == 2 and has_remote
                    and parents[0] == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
                    and any(ctx.run(["git", "merge-base", "--is-ancestor", parents[1], b]).returncode == 0
-                           for b in bases))
-        commit = {"sha": sha, "subject": subject, "body": body}
+                           for b in bases)
+                   and not any(c["merge"] for c in outgoing[:-1]))
+        if len(outgoing) == 1:
+            commit = {"sha": sha, "subject": subject, "body": body}
+    n_out = len(outgoing)
+    one_or_followup = n_out == 1 or (followup and n_out > 1)
+    wip = [c for c in outgoing if not c["voiced"]]
     tip = _tip(branch)
     gates_green = _green_tree(branch) == _tree(tip)
     chain_broken = _chain_break(branch)
@@ -437,14 +461,17 @@ def _origin_verdict(branch):
     def ward(k, label, ok, why, advisory=False):
         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
     wards = [
-        ward("one", "one commit", len(outgoing) == 1 and (not_merge or catchup),
+        ward("one", f"{n_out} follow-up commits" if followup and n_out > 1 else "one commit",
+             one_or_followup and (not_merge or catchup),
              "nothing to push — origin already has this" if not outgoing
-             else f"{len(outgoing)} commits — prep seals them into one" if len(outgoing) > 1
-             else "outgoing commit is a merge that isn't a catch-up of this branch's base"),
-        ward("voiced", "voiced subject", voiced and len(outgoing) == 1,
-             "" if len(outgoing) != 1 else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
-        ward("why", "says why", said_why and len(outgoing) == 1,
-             "" if len(outgoing) != 1 else "no commit body — optional; add a why if it helps a reviewer", advisory=True),
+             else f"{n_out} commits — prep seals them into one" if n_out > 1 and not followup
+             else "outgoing includes a merge that isn't a catch-up of this branch's base"),
+        ward("voiced", "voiced subject", voiced and one_or_followup,
+             "" if not one_or_followup
+             else f"{len(wip)} of {n_out} subjects are WIP/fixup placeholders — reword before pushing" if n_out > 1
+             else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
+        ward("why", "says why", said_why and one_or_followup,
+             "" if not one_or_followup else "no commit body on the tip — optional; add a why if it helps a reviewer", advisory=True),
         ward("purpose", "purpose set",
              bool(ctx.run(["git", "config", f"branch.{branch}.description"]).stdout.strip()),
              "no branch description — a forest member without a purpose is an unfinished operation", advisory=True),
@@ -467,14 +494,13 @@ def _origin_verdict(branch):
     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
     return {
         "branch": branch, "originExists": has_remote, "ff": ff, "outgoing": len(outgoing),
-        "commits": outgoing[:8], "ageDays": age_days,
+        "commits": outgoing[:8], "moreCommits": max(0, n_out - 8), "ageDays": age_days,
+        "followup": followup,
         "fork": {"sha": fork, "date": fork_date}, "mainSince": main_since,
         "deployCritical": deploy_critical,
         "files": files[:20], "moreFiles": max(0, len(files) - 20),
         "commit": commit, "gatesGreen": gates_green, "web": _origin_web(branch),
-        # published (cached open-PR set, no per-poll gh call): with outgoing==0 it splits the
-        # dead push button into 'view PR ↗' (has one) vs 'open PR ↗' (pushed, none yet).
-        "published": branch in sync._open_pr_heads(),
+        "published": published,
         "wards": wards, "ok": not reasons, "reasons": reasons,
         "review": _review_flags(branch),
     }
@@ -728,7 +754,9 @@ def prep_push(req, raw):
                     routed.append("restack skipped (branch is checked out) — pushing from the current base")
                 ctx.run(["git", "worktree", "remove", "--force", scratch])
         v = _origin_verdict(branch)
-        if v["outgoing"] > 1:
+        if v["outgoing"] > 1 and published:
+            routed.append(f"{v['outgoing']} follow-up commits on the open PR — pushed as they are, no seal")
+        elif v["outgoing"] > 1:
             # sealing resets onto origin's tip and re-commits the tree — across a merge that
             # linearizes it, turning "caught up with main" into main's diff re-declared as
             # branch content (the 22-files-changed failure, 2026-08-12)

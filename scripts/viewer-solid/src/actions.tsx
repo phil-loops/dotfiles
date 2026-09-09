@@ -31,12 +31,13 @@ export interface Action {
 // NodeActions.armSquash each reinvented.
 export function useArm(ms = 3000): {
   armed: () => string | null;
-  trigger: (id: string, run: () => void) => void;
+  trigger: (id: string, run: () => void, holdMs?: number) => void;
+  disarm: () => void;
 } {
   const [armed, setArmed] = createSignal<string | null>(null);
   let t: ReturnType<typeof setTimeout> | undefined;
   onCleanup(() => clearTimeout(t));
-  const trigger = (id: string, run: () => void) => {
+  const trigger = (id: string, run: () => void, holdMs = ms) => {
     if (armed() === id) {
       clearTimeout(t);
       setArmed(null);
@@ -45,9 +46,13 @@ export function useArm(ms = 3000): {
     }
     setArmed(id);
     clearTimeout(t);
-    t = setTimeout(() => setArmed(null), ms);
+    t = setTimeout(() => setArmed(null), holdMs);
   };
-  return { armed, trigger };
+  const disarm = () => {
+    clearTimeout(t);
+    setArmed(null);
+  };
+  return { armed, trigger, disarm };
 }
 
 // Renders a row of actions. Each button swallows the click (so an enclosing <Link> row doesn't

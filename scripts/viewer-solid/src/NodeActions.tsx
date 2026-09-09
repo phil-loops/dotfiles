@@ -141,7 +141,7 @@ export function NodeActions(props: {
   // so the free button must escalate — and say so.
   const [heldLive, setHeldLive] = createSignal(false);
   // squashing rewrites history → two-click arm (shared useArm) before it fires.
-  const { armed, trigger } = useArm(4000);
+  const { armed, trigger, disarm } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
   const [done, setDone] = createSignal<string | null>(null);
   // raises the result line to the ember alert style — a rebase conflict parks a worktree and
@@ -659,10 +659,46 @@ export function NodeActions(props: {
     queryKey: ["push-preview", props.branch],
     queryFn: () =>
       fetch(withRepo("/push-preview") + "?branch=" + encodeURIComponent(props.branch)).then(
-        (r) => r.json() as Promise<{ ok?: boolean; outgoing?: number; reasons?: string[]; web?: string; originExists?: boolean; published?: boolean; commit?: { sha: string; subject: string; body: string } | null; review?: { flags: string[] } | null }>,
+        (r) =>
+          r.json() as Promise<{
+            ok?: boolean;
+            outgoing?: number;
+            reasons?: string[];
+            web?: string;
+            originExists?: boolean;
+            published?: boolean;
+            followup?: boolean;
+            commits?: { sha: string; subject: string; date: string; files: number; add: number; del: number; merge: boolean; voiced: boolean }[];
+            moreCommits?: number;
+            files?: { path: string; add: number; del: number }[];
+            moreFiles?: number;
+            commit?: { sha: string; subject: string; body: string } | null;
+            review?: { flags: string[] } | null;
+          }>,
       ),
     enabled: !!props.branch && !props.isReview,
   }));
+  // the manifest — GitHub Desktop's "what goes out on push" answered in the header: the
+  // outgoing commits with their churn, the files origin receives, where it lands.
+  const outN = () => preview.data?.outgoing ?? 0;
+  const outLabel = () => (outN() === 1 ? "to origin" : `${outN()} commits`);
+  const outChurn = () => {
+    const cs = preview.data?.commits ?? [];
+    return { add: cs.reduce((a, c) => a + c.add, 0), del: cs.reduce((a, c) => a + c.del, 0) };
+  };
+  const landing = () =>
+    preview.data?.followup ? "onto the open PR — pushed as they are" : preview.data?.originExists ? "fast-forward of origin's copy" : "new branch on origin";
+  const pushSummary = () => {
+    const p = preview.data;
+    if (!p) return "";
+    const nFiles = (p.files?.length ?? 0) + (p.moreFiles ?? 0);
+    return [
+      `→ origin/${props.branch} · ${landing()}`,
+      ...(p.commits ?? []).map((c) => `${c.sha.slice(0, 10)}  ${c.subject}  +${c.add} −${c.del}`),
+      ...(p.moreCommits ? [`+${p.moreCommits} more`] : []),
+      `${nFiles} file${nFiles === 1 ? "" : "s"}  +${outChurn().add} −${outChurn().del}`,
+    ].join("\n");
+  };
   const [pushedWeb, setPushedWeb] = createSignal<string | null>(null);
   const pushOrigin = createMutation(() => ({
     mutationFn: () =>
@@ -830,13 +866,64 @@ export function NodeActions(props: {
           disabled={busy() || !preview.data?.ok}
           title={
             preview.data?.ok
-              ? "push to origin — the team sees this the moment it lands (fast-forward, one reviewed commit)"
+              ? `push to origin — the team sees this the moment it lands\n${pushSummary()}`
               : `not pushable yet:\n${(preview.data?.reasons ?? ["reading the branch…"]).join("\n")}`
           }
-          onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate()))}
+          onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate(), 20000))}
         >
-          {pushOrigin.isPending ? "pushing…" : armed() === "pushOrigin" ? "confirm: push to origin" : "⇧ push to origin"}
+          {pushOrigin.isPending
+            ? "pushing…"
+            : armed() === "pushOrigin"
+              ? `confirm: push ${outN() === 1 ? "" : `${outN()} commits `}to origin`
+              : `⇧ push ${outLabel()}`}
         </button>
+      </Show>
+
+      {/* the crossing manifest — shown while the door is armed, so the second click is made
+          knowing exactly what origin receives: each outgoing commit with its churn, the files,
+          where it lands. Arming holds 20s here (not the 4s of the local motions) for reading. */}
+      <Show when={!isReview() && armed() === "pushOrigin" && preview.data}>
+        {(p) => (
+          <div class="nh-manifest mt-1 flex basis-full flex-col gap-[7px] rounded-[9px] border border-solid border-del px-[14px] py-3">
+            <div class="flex flex-wrap items-baseline gap-x-[10px]">
+              <span class="font-display text-[15px] font-semibold italic text-del">
+                pushing {outN()} commit{outN() === 1 ? "" : "s"} → origin/{props.branch}
+              </span>
+              <span class="text-[11px] text-ink-faint">{landing()}</span>
+            </div>
+            <ol class="m-0 flex list-none flex-col gap-[3px] p-0">
+              <For each={p().commits ?? []}>
+                {(c) => (
+                  <li class="flex items-baseline gap-[8px] text-[12px]">
+                    <span class="font-mono text-[11px] text-ink-faint">{c.sha.slice(0, 10)}</span>
+                    <span class={`flex-1 ${c.voiced ? "text-ink" : "text-del"}`}>{c.subject}</span>
+                    <span class="whitespace-nowrap font-mono text-[11px] text-ink-faint">
+                      {c.files} file{c.files === 1 ? "" : "s"} <span class="text-add">+{c.add}</span> <span class="text-del">−{c.del}</span>
+                    </span>
+                  </li>
+                )}
+              </For>
+              <Show when={p().moreCommits}>{(m) => <li class="text-[11px] italic text-ink-faint">+{m()} more commits</li>}</Show>
+            </ol>
+            <div class="flex flex-wrap gap-x-[12px] gap-y-[2px] font-mono text-[11px] text-ink-dim">
+              <For each={p().files ?? []}>
+                {(f) => (
+                  <span class="whitespace-nowrap">
+                    {f.path} <span class="text-add">+{f.add}</span> <span class="text-del">−{f.del}</span>
+                  </span>
+                )}
+              </For>
+              <Show when={p().moreFiles}>{(m) => <span class="italic text-ink-faint">+{m()} more files</span>}</Show>
+            </div>
+            <div class="flex items-center gap-[10px] text-[11px] text-ink-faint">
+              <span>✓ gates green for this exact tree</span>
+              <Show when={p().review}>{(rv) => <span>{rv().flags.length ? `⚑ ${rv().flags.length} review flag${rv().flags.length === 1 ? "" : "s"} unapplied` : "✓ reviewed"}</span>}</Show>
+              <button class={`nh-editor-close ${EDITOR_CLOSE}`} onClick={() => disarm()}>
+                cancel
+              </button>
+            </div>
+          </div>
+        )}
       </Show>
 
       {/* push-ready's review verdict for THIS exact tree — tree-keyed like gates-green, so a
