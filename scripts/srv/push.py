@@ -506,16 +506,44 @@ def _origin_verdict(branch):
     }
 
 
+# The read-only verdict is ~18 git spawns and every panel polls it. Everything it reads is a
+# ref (branch, origin copy, origin/main, stack parent) or this branch's git config (gates-green,
+# review flags, description, parent…) plus the cached open-PR set — so two spawns fingerprint
+# it and a hit answers from memory. Belt and braces: a hit also expires after a minute.
+# /push-origin never reads this cache; it recomputes the verdict at push time.
+_PREVIEW_CACHE = {}   # (repo, branch) -> (fingerprint, monotonic, json)
+_PREVIEW_TTL = 60.0
+
+
+def _preview_fingerprint(branch):
+    sp = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+          or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
+    refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)",
+                    f"refs/heads/{branch}", f"refs/remotes/*/{branch}", "refs/remotes/origin/main",
+                    f"refs/heads/{sp}", f"refs/remotes/*/{sp}"]).stdout
+    conf = ctx.run(["git", "config", "--get-regexp", rf"^(stack-)?branch\.{re.escape(branch)}\."]).stdout
+    return refs + "\x1e" + conf + "\x1e" + str(branch in sync._open_pr_heads())
+
+
 def preview(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
     # keep origin/main loosely fresh (throttled bg fetch) so the deploy-watch / behind wards
     # stop trailing a stale origin — they were computed against whatever the last fetch left.
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     sync._freshen_trunk(main)
+    key = (ctx.repo_cwd(), branch)
+    fp = _preview_fingerprint(branch) if branch else ""
+    hit = _PREVIEW_CACHE.get(key)
+    if hit and hit[0] == fp and time.monotonic() - hit[1] < _PREVIEW_TTL:
+        return req._send(200, hit[2])
     v = _origin_verdict(branch)
     if v is None:
         return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
-    req._send(200, json.dumps(v))
+    out_json = json.dumps(v)
+    _PREVIEW_CACHE[key] = (fp, time.monotonic(), out_json)
+    if len(_PREVIEW_CACHE) > 200:
+        _PREVIEW_CACHE.pop(next(iter(_PREVIEW_CACHE)))
+    req._send(200, out_json)
 
 
 def open_pr(req, raw):
