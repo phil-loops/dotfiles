@@ -218,8 +218,7 @@ def gates_progress(req, u):
 # a message reword must not relock push — the tip-sha key stranded green on rewords
 # (2026-07-12). Config, not process memory, so a server bounce doesn't relock push either.
 def _green_tree(branch):
-    return (ctx.run(["git", "config", "--get", f"branch.{branch}.stack-gates-green-tree"]).stdout.strip()
-            or ctx.run(["git", "config", "--get", f"stack-branch.{branch}.gates-green-tree"]).stdout.strip())
+    return repostate.snapshot().branch_key(branch, "gates-green-tree")
 
 
 def _record_green(branch, tree):
@@ -242,28 +241,25 @@ def _review_flags(branch):
     only for the tree they were written against (review-flags-tree — same staleness contract
     as gates-green-tree). Stale/absent → None (the UI hides); an EMPTY fresh list is a state:
     reviewed-clean."""
-    tree = ctx.run(["git", "config", f"stack-branch.{branch}.review-flags-tree"]).stdout.strip()
-    if not tree or tree != _tree(branch):
+    snap = repostate.snapshot()
+    tree = snap.get(f"stack-branch.{branch}.review-flags-tree")
+    if not tree or tree != snap.tree(branch):
         return None
-    out = ctx.run(["git", "config", "--get-all", f"stack-branch.{branch}.review-flag"]).stdout
-    return {"flags": [l.strip() for l in out.splitlines() if l.strip()]}
+    return {"flags": [l.strip() for l in snap.get_all(f"stack-branch.{branch}.review-flag") if l.strip()]}
 
 
 def _pr_base(branch):
     """The compare form's base: the nearest stack ancestor with an OPEN PR on origin, else
     main. A stacked child targets its parent's PR so the review diff stays that branch's own
     work; GitHub retargets the child to main itself when the parent PR merges."""
-    heads = sync._open_pr_heads()
+    snap = repostate.snapshot()
     seen = {branch}
     b = branch
     while True:
-        parent = (ctx.run(["git", "config", f"branch.{b}.stack-parent"]).stdout.strip()
-                  or ctx.run(["git", "config", f"stack-branch.{b}.parent"]).stdout.strip())
+        parent = snap.branch_key(b, "parent")
         if not parent or parent in ("main", "master") or parent in seen:
             return "main"
-        if (parent in heads
-                and ctx.run(["git", "rev-parse", "--verify", "-q",
-                             f"refs/remotes/origin/{parent}"]).returncode == 0):
+        if snap.published(parent) and snap.remote(parent):
             return parent
         seen.add(parent)
         b = parent
@@ -274,7 +270,7 @@ def _origin_web(branch):
     request' form (?expand=1) with the base prefilled by _pr_base. Authoring still
     happens on the website — this only opens the form; it never prefills a
     title/body or calls gh pr create."""
-    url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
+    url = repostate.snapshot().get("remote.origin.url")
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
     return f"https://github.com/{m.group(1)}/compare/{_pr_base(branch)}...{branch}?expand=1" if m else ""
 
@@ -321,11 +317,12 @@ def _is_restack(branch):
     rebuilt — the additive vehicle re-roots the new-base tree onto the stale pushed head,
     manufacturing imports of files that only exist on new main (the phantom-TS2307 flatten,
     2026-08-12). Origin catches up via prep's catch-up merge carrier — additive, never force."""
-    mb_local = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
-    mb_remote = ctx.run(["git", "merge-base", f"origin/{branch}", "origin/main"]).stdout.strip()
+    snap = repostate.snapshot()
+    mb_local = snap.merge_base(branch, "origin/main")
+    mb_remote = snap.merge_base(f"origin/{branch}", "origin/main")
     if not mb_local or not mb_remote or mb_local == mb_remote:
         return False
-    if ctx.run(["git", "merge-base", "--is-ancestor", mb_remote, mb_local]).returncode != 0:
+    if not snap.is_ancestor(mb_remote, mb_local):
         return False
     cherry = [l for l in ctx.run(["git", "cherry", branch, f"origin/{branch}"]).stdout.splitlines() if l.strip()]
     if bool(cherry) and all(l.startswith("-") for l in cherry):
@@ -333,8 +330,8 @@ def _is_restack(branch):
     # a sealed adoption: prep collapsed the restack to one commit, so per-commit patch-ids
     # no longer match origin's — the stamp remembers which origin head the seal superseded,
     # and goes inert the moment origin moves (force-push lands, or someone else pushes)
-    seen = ctx.run(["git", "config", f"stack-branch.{branch}.restack-supersedes"]).stdout.strip()
-    return bool(seen) and seen == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
+    seen = snap.get(f"stack-branch.{branch}.restack-supersedes")
+    return bool(seen) and seen == snap.remote(branch)
 
 
 def _chain_break(branch):
@@ -344,15 +341,14 @@ def _chain_break(branch):
     makes the child's PR diff vs that parent show the parent's replayed commits plus
     main drift; no FF-only push sequence can clean it up after the fact. Returns the
     offending ancestor name, or ""."""
+    snap = repostate.snapshot()
     seen, cur = set(), branch
     while cur and cur not in seen and len(seen) < 30:
         seen.add(cur)
-        p = (ctx.run(["git", "config", f"branch.{cur}.stack-parent"]).stdout.strip()
-             or ctx.run(["git", "config", f"stack-branch.{cur}.parent"]).stdout.strip())
+        p = snap.branch_key(cur, "parent")
         if not p or p in ("main", "master"):
             return ""
-        if (ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{p}"]).returncode == 0
-                and ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{p}", branch]).returncode != 0):
+        if snap.remote(p) and not snap.is_ancestor(f"origin/{p}", branch):
             return p
         cur = p
     return ""
@@ -364,19 +360,20 @@ def _origin_verdict(branch):
     (never trusts the client's copy of this verdict). The preview renders the
     whole threshold: what came before (the outgoing commits), what main has
     done since the fork, and the wards holding the door."""
-    if not branch or ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode != 0:
+    snap = repostate.snapshot()
+    if not branch or not snap.exists(branch):
         return None
     hard = []   # refusals outside the normal ward path
     if branch in ("main", "master"):
         hard.append("refusing to push trunk from here")
-    has_remote = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0
+    has_remote = bool(snap.remote(branch))
     ff = True
     if has_remote:
-        ff = ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode == 0
+        ff = snap.is_ancestor(f"origin/{branch}", branch)
     # published (cached open-PR set, no per-poll gh call): with outgoing==0 it splits the
     # dead push button into 'view PR ↗' (has one) vs 'open PR ↗' (pushed, none yet); with
     # outgoing>1 it relaxes the seal — follow-ups onto an open PR are review rounds.
-    published = branch in sync._open_pr_heads()
+    published = snap.published(branch)
     followup = has_remote and published
     # outgoing = commits origin doesn't have. On a first push, --not --remotes=origin keeps a
     # stacked branch's parent commits (already on origin via the parent) out of the count.
@@ -392,12 +389,9 @@ def _origin_verdict(branch):
     age_days = max(0, int((time.time() - outgoing[-1]["at"]) / 86400)) if outgoing else 0
 
     # the other side of the crossing: how far shared history moved since this work forked
-    fork = ctx.run(["git", "merge-base", branch, "origin/main"]).stdout.strip()
+    fork = snap.merge_base(branch, "origin/main")
     fork_date = ctx.run(["git", "log", "-1", "--format=%ad", "--date=format:%b %e", fork]).stdout.strip() if fork else ""
-    main_since = 0
-    if fork:
-        raw = ctx.run(["git", "rev-list", "--count", f"{fork}..origin/main"]).stdout.strip()
-        main_since = int(raw) if raw.isdigit() else 0
+    main_since = snap.count(f"{fork}..origin/main") if fork else 0
     deploy_critical = sync._deploy_critical(branch)
 
     # what origin receives: per-file churn over the whole outgoing range (numstat lines
@@ -442,23 +436,20 @@ def _origin_verdict(branch):
         # head, second parent sits on the PR's base — origin/main, or the stack parent for a
         # stacked child. Anything else stays refused.
         bases = ["origin/main"]
-        sp = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip())
-        if sp and sp not in ("main", "master") and ctx.run(
-                ["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{sp}"]).returncode == 0:
+        sp = snap.branch_key(branch, "parent")
+        if sp and sp not in ("main", "master") and snap.remote(sp):
             bases.append(f"origin/{sp}")
         catchup = (len(parents) == 2 and has_remote
-                   and parents[0] == ctx.run(["git", "rev-parse", f"origin/{branch}"]).stdout.strip()
-                   and any(ctx.run(["git", "merge-base", "--is-ancestor", parents[1], b]).returncode == 0
-                           for b in bases)
+                   and parents[0] == snap.remote(branch)
+                   and any(snap.is_ancestor(parents[1], b) for b in bases)
                    and not any(c["merge"] for c in outgoing[:-1]))
         if len(outgoing) == 1:
             commit = {"sha": sha, "subject": subject, "body": body}
     n_out = len(outgoing)
     one_or_followup = n_out == 1 or (followup and n_out > 1)
     wip = [c for c in outgoing if not c["voiced"]]
-    tip = _tip(branch)
-    gates_green = _green_tree(branch) == _tree(tip)
+    tip = snap.local(branch)
+    gates_green = _green_tree(branch) == snap.tree(tip)
     chain_broken = _chain_break(branch)
 
     def ward(k, label, ok, why, advisory=False):
@@ -476,7 +467,7 @@ def _origin_verdict(branch):
         ward("why", "says why", said_why and one_or_followup,
              "" if not one_or_followup else "no commit body on the tip — optional; add a why if it helps a reviewer", advisory=True),
         ward("purpose", "purpose set",
-             bool(ctx.run(["git", "config", f"branch.{branch}.description"]).stdout.strip()),
+             bool(snap.description(branch)),
              "no branch description — a forest member without a purpose is an unfinished operation", advisory=True),
         ward("ff", "fast-forward", ff,
              "" if ff else
