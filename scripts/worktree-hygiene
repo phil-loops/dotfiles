@@ -42,7 +42,7 @@ def worktrees():
 
 
 def cwds_in_use():
-    out = subprocess.run(["lsof", "-Fn", "-d", "cwd"], capture_output=True, text=True).stdout
+    out = subprocess.run(["/usr/sbin/lsof", "-Fn", "-d", "cwd"], capture_output=True, text=True).stdout
     return {ln[1:] for ln in out.splitlines() if ln.startswith("n/")}
 
 
