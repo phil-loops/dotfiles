@@ -474,7 +474,9 @@ def plan_steps(req, u):
     except Exception:
         return req._send(500, json.dumps({"steps": []}))
     steps = [{"n": s.get("n"), "branch": s.get("branch"), "job": s.get("job"),
-              "story": s.get("story", ""), "landed": s.get("landed", False), "me": s.get("me", False)}
+              "story": s.get("story", ""), "description": s.get("description", ""),
+              "subject": s.get("subject", ""), "pr": s.get("pr"),
+              "landed": s.get("landed", False), "me": s.get("me", False)}
              for s in f.get("plan", [])]
     req._send(200, json.dumps({"branch": branch, "project": f.get("project"), "steps": steps}))
 
