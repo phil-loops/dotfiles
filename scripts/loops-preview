@@ -415,6 +415,21 @@ if [ -n "$unbuilt" ]; then
   cyan "building unbuilt workspace package(s):$(printf '%s\n' $unbuilt | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
   (cd "$DIR" && npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
 fi
+# The clone carries MAIN's node_modules/@loops links, so a workspace package the previewed branch
+# has and MAIN's branch lacks resolves nowhere and every importer 500s "Module not found"
+# (2026-09-09: @loops/safe-fetch, MAIN parked on an older branch). Only `npm install` writes that
+# link; mint it here the way seed-gen does. Deps of such a package (undici) must already be in
+# the clone — if MAIN's lock never had them, the page still fails and `npm install` on MAIN is owed.
+if [ ! -L "$DIR/node_modules" ] && [ -d "$DIR/node_modules" ]; then
+  mkdir -p "$DIR/node_modules/@loops"
+  for p in "$DIR"/packages/*/; do
+    b=$(basename "$p")
+    [ -f "$p/package.json" ] || continue
+    [ -e "$DIR/node_modules/@loops/$b" ] || [ -L "$DIR/node_modules/@loops/$b" ] && continue
+    ln -sh "../../packages/$b" "$DIR/node_modules/@loops/$b"
+    cyan "linked @loops/$b — the previewed branch has it, MAIN's node_modules doesn't"
+  done
+fi
 for e in .env .env.local .env.development; do
   if [ -f "$MAIN/$e" ] && [ ! -e "$DIR/$e" ]; then
     ln -sfn "$MAIN/$e" "$DIR/$e"
