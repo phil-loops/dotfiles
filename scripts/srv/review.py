@@ -29,16 +29,17 @@ _mcache_lock = threading.Lock()
 
 
 # the config keys the /model payload is actually built from (stack-forest's structure
-# reads + _enrich's description/interest grafts). The sig hashes ONLY these lines —
-# whole-file config mtime busted every forest's cache on any unrelated write (gates
-# verdicts, shelve/focus/usage counters churn it constantly with live sessions), so
-# /model rebuilt ~1s on nearly every fetch.
+# reads + _enrich's description/interest/ticket/focus grafts). The sig hashes ONLY these
+# lines — whole-file config mtime busted every forest's cache on any unrelated write (gates
+# verdicts, shelve/usage counters churn it constantly with live sessions), so /model
+# rebuilt ~1s on nearly every fetch. Anything _enrich grafts on MUST be listed here, or
+# the cache serves the pre-write payload after a toggle (focus, 2026-09-09).
 _MODEL_CFG = re.compile(
     r"^(stack\.main-branch="
     r"|branch\.[^=]+\.description="
     r"|branch\.[^=]+\.stack-(parent|requires|project)="
     r"|stack-branch\.[^=]+\.(parent|requires|project)="
-    r"|stack-project\.[^=]+\.(branch|archived|interest|ticket)=)")
+    r"|stack-project\.[^=]+\.(branch|archived|interest|ticket|focus)=)")
 
 
 def _forest_sig(branches):
