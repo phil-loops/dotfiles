@@ -102,6 +102,18 @@ class RepoState:
             self._memo[key] = int(raw) if raw.isdigit() else 0
         return self._memo[key]
 
+    def merge_base(self, a, b):
+        key = ("mb", a, b)
+        if key not in self._memo:
+            self._memo[key] = ctx.run(["git", "merge-base", a, b]).stdout.strip()
+        return self._memo[key]
+
+    def tree(self, rev):
+        key = ("tree", rev)
+        if key not in self._memo:
+            self._memo[key] = ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
+        return self._memo[key]
+
     def is_ancestor(self, a, b):
         key = ("anc", a, b)
         if key not in self._memo:
