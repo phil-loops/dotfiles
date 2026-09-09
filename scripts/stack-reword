@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""stack-reword — change the message (subject and/or body) of ANY unpushed commit on a
+forest branch, keeping every tree byte-identical and carrying stacked children along.
+
+  stack-reword <sha>                      open $EDITOR pre-filled with the commit's current
+                                          message (subject + body); save to reword, leave it
+                                          unchanged or empty to abort
+  stack-reword <sha> -m <subject> [-m <body>]   non-interactive: first -m is the subject,
+                                          each further -m a body paragraph (git commit rules)
+  stack-reword <sha> -F <file>            take the whole message from <file>
+  stack-reword --branch <b> <sha>         name the branch instead of using the checkout's
+
+The commit must sit strictly above the branch's frozen base (stack-base); a commit that
+belongs to the parent gets reworded on the parent. Refuses if ANY remote ref already holds
+the commit — rewording pushed history is a force-push, and that's never this tool's call.
+
+Mechanics: no rebase, no checkout, no working-tree contact. Every commit from <sha> up to
+the branch tip — and up every descendant branch (stack-branch.*.parent) — is rebuilt with
+`git commit-tree` on the same tree, same author, new parent. Refs move via update-ref,
+which is safe even for a checked-out branch because the tree it points at is unchanged.
+Tree-keyed verdicts (gates-green-tree, review-flags-tree) therefore survive; a recorded
+frozen base (stack-branch.<child>.base) that pointed at a rewritten commit is re-pointed.
+
+A descendant that no longer sits on its parent's tip is left alone with a warning
+(restack it first). Prints one line per moved ref; exit 0 on success, 1 on refusal, 2 on usage.
+"""
+import os
+import subprocess
+import sys
+import tempfile
+
+STACK_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-base")
+
+
+def git(args, check=True, **kw):
+    r = subprocess.run(["git", *args], capture_output=True, text=True, **kw)
+    if check and r.returncode != 0:
+        die(f"git {' '.join(args)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def die(msg, code=1):
+    print(f"stack-reword: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def usage():
+    die("usage: stack-reword [--branch <b>] <sha> [-m <subject> [-m <body>]... | -F <file>]", 2)
+
+
+# ---- args ----------------------------------------------------------------
+argv = sys.argv[1:]
+branch = None
+sha_arg = None
+messages = []
+msg_file = None
+while argv:
+    a = argv.pop(0)
+    if a == "--branch":
+        branch = argv.pop(0) if argv else usage()
+    elif a == "-m":
+        messages.append(argv.pop(0) if argv else usage())
+    elif a == "-F":
+        msg_file = argv.pop(0) if argv else usage()
+    elif a.startswith("-"):
+        usage()
+    elif sha_arg is None:
+        sha_arg = a
+    else:
+        usage()
+if sha_arg is None or (messages and msg_file):
+    usage()
+
+if branch is None:
+    branch = git(["symbolic-ref", "--quiet", "--short", "HEAD"], check=False).strip()
+    if not branch:
+        die("HEAD is detached — pass --branch <b>")
+if git(["rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], check=False) == "":
+    die(f"no such branch: {branch}")
+
+sha = git(["rev-parse", "--verify", "--quiet", f"{sha_arg}^{{commit}}"], check=False).strip()
+if not sha:
+    die(f"not a commit: {sha_arg}")
+
+# ---- placement + safety ------------------------------------------------
+base = subprocess.run([STACK_BASE, branch], capture_output=True, text=True).stdout.strip()
+if not base:
+    die(f"stack-base could not resolve a base for {branch}")
+if subprocess.run(["git", "merge-base", "--is-ancestor", sha, branch]).returncode != 0:
+    die(f"{sha[:10]} is not on {branch}")
+if subprocess.run(["git", "merge-base", "--is-ancestor", sha, base]).returncode == 0:
+    parent = git(["config", f"stack-branch.{branch}.parent"], check=False).strip() or "its parent"
+    die(f"{sha[:10]} sits at or below {branch}'s base {base[:10]} — it belongs to {parent}; reword it there")
+
+remote_holders = [ln.strip() for ln in git(["branch", "-r", "--contains", sha]).splitlines()]
+if remote_holders:
+    die(f"{sha[:10]} is already pushed ({', '.join(remote_holders)}) — rewording it would force-push")
+
+
+def children_of(b):
+    parents = {}
+    for ln in git(["config", "--get-regexp", r"^stack-branch\..*\.parent$"], check=False).splitlines():
+        key, _, val = ln.partition(" ")
+        parents[key[len("stack-branch."):-len(".parent")]] = val.strip()
+    return sorted(c for c, p in parents.items() if p == b)
+
+
+def subtree(root):
+    order, frontier = [root], [root]
+    while frontier:
+        node = frontier.pop(0)
+        for c in children_of(node):
+            order.append(c)
+            frontier.append(c)
+    return order
+
+
+# ---- the new message ----------------------------------------------------
+old_message = git(["log", "-1", "--format=%B", sha])
+
+if messages:
+    new_message = "\n\n".join(m.strip() for m in messages) + "\n"
+elif msg_file:
+    with open(msg_file) as fh:
+        new_message = fh.read()
+else:
+    editor = git(["var", "GIT_EDITOR"]).strip()
+    subject = old_message.splitlines()[0] if old_message.strip() else ""
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="stack-reword-", delete=False) as fh:
+        fh.write(old_message.rstrip("\n") + "\n")
+        fh.write(f"\n# Rewording {sha[:10]} on {branch}: {subject}\n")
+        fh.write("# Edit the subject and/or body. Lines starting with # are dropped.\n")
+        fh.write("# Save unchanged or empty to abort.\n")
+        path = fh.name
+    try:
+        if subprocess.run(f"{editor} {path}", shell=True).returncode != 0:
+            die("editor exited non-zero — nothing changed")
+        with open(path) as fh:
+            new_message = fh.read()
+    finally:
+        os.unlink(path)
+
+new_message = subprocess.run(["git", "stripspace", "--strip-comments"], input=new_message,
+                             capture_output=True, text=True).stdout
+if not new_message.strip():
+    die("empty message — nothing changed")
+if new_message == subprocess.run(["git", "stripspace"], input=old_message, capture_output=True, text=True).stdout:
+    print("stack-reword: message unchanged — nothing to do")
+    sys.exit(0)
+
+# ---- rewrite: sha..tip on the branch, then every descendant above its parent's old tip ----
+rewritten = {}   # old sha -> new sha
+
+
+def rebuild(old, new_parent, message=None):
+    tree = git(["rev-parse", f"{old}^{{tree}}"]).strip()
+    an, ae, ad = git(["log", "-1", "--format=%an%x00%ae%x00%aD", old]).rstrip("\n").split("\x00")
+    env = {**os.environ, "GIT_AUTHOR_NAME": an, "GIT_AUTHOR_EMAIL": ae, "GIT_AUTHOR_DATE": ad}
+    body = message if message is not None else git(["log", "-1", "--format=%B", old])
+    r = subprocess.run(["git", "commit-tree", tree, "-p", new_parent], input=body,
+                       capture_output=True, text=True, env=env)
+    if r.returncode != 0:
+        die(f"commit-tree failed: {r.stderr.strip()}")
+    rewritten[old] = r.stdout.strip()
+    return rewritten[old]
+
+
+def rewrite_range(node, cut):
+    """Rebuild cut..node (oldest first) onto rewritten[cut]; return (old_tip, new_tip)."""
+    old_tip = git(["rev-parse", node]).strip()
+    commits = git(["rev-list", "--reverse", f"{cut}..{node}"]).split()
+    new_parent = rewritten[cut]
+    for c in commits:
+        if len(git(["rev-list", "--parents", "-1", c]).split()) > 2:
+            die(f"{c[:10]} on {node} is a merge commit — reword by hand")
+        new_parent = rebuild(c, new_parent)
+    return old_tip, new_parent
+
+
+sha_parent = git(["rev-parse", f"{sha}^"]).strip()
+rebuild(sha, sha_parent, new_message)
+moves = [(branch, *rewrite_range(branch, sha))]
+
+for child in subtree(branch)[1:]:
+    parent = git(["config", f"stack-branch.{child}.parent"]).strip()
+    moved = {n: (o, nw) for n, o, nw in moves}
+    if parent not in moved:
+        continue
+    old_parent_tip = moved[parent][0]
+    if subprocess.run(["git", "merge-base", "--is-ancestor", old_parent_tip, child]).returncode != 0:
+        print(f"stack-reword: {child} does not sit on {parent}'s tip — left untouched (restack it)", file=sys.stderr)
+        continue
+    rewritten[old_parent_tip] = moved[parent][1]
+    moves.append((child, *rewrite_range(child, old_parent_tip)))
+
+for node, old_tip, new_tip in moves:
+    git(["update-ref", "-m", f"stack-reword {sha[:10]}", f"refs/heads/{node}", new_tip, old_tip])
+    for key in (f"stack-branch.{node}.base", f"branch.{node}.stack-base"):
+        recorded = git(["config", key], check=False).strip()
+        if recorded in rewritten:
+            git(["config", key, rewritten[recorded]])
+    print(f"{node}: {old_tip[:10]} → {new_tip[:10]}")
+print(f"reworded {sha[:10]} → {rewritten[sha][:10]}")
