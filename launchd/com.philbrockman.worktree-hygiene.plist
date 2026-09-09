@@ -6,7 +6,7 @@
   <key>ProgramArguments</key>
   <array><string>/usr/bin/env</string><string>python3</string><string>/Users/philbrockman/.dotfiles/scripts/worktree-hygiene</string><string>--apply</string></array>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin</string></dict>
   <key>WorkingDirectory</key><string>/Users/philbrockman/coding/loops</string>
   <key>StartInterval</key><integer>21600</integer>
   <key>RunAtLoad</key><true/>
