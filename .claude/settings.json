@@ -1,0 +1,59 @@
+{
+  "permissions": {
+    "defaultMode": "auto"
+  },
+  "model": "fable[1m]",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philbrockman/.dotfiles/scripts/own-hook"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philbrockman/.dotfiles/scripts/claude-session-track"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/Users/philbrockman/.dotfiles/scripts/claude-session-track"
+          }
+        ]
+      }
+    ]
+  },
+  "enableWorkflows": false,
+  "workflowKeywordTriggerEnabled": false,
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": false
+  },
+  "effortLevel": "high",
+  "promptSuggestionEnabled": false,
+  "awaySummaryEnabled": false,
+  "askUserQuestionTimeout": "10m",
+  "tui": "fullscreen",
+  "skipDangerousModePermissionPrompt": true,
+  "fileCheckpointingEnabled": false,
+  "remoteControlAtStartup": false,
+  "skipAutoPermissionPrompt": true,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}
