@@ -24,6 +24,7 @@ from srv import stage   # own line: the big srv import above is contested across
 from srv import ship    # own line: same reason
 from srv import prep    # own line: same reason
 from srv import wiki    # own line: same reason
+from srv import footprint   # own line: same reason
 from srv import pregate   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -423,6 +424,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/claude-sessions": return assist.claude_sessions(self)   # live sessions for the ✦ picker
         elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
         elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
+        elif u.path == "/footprint":      return footprint.get(self, u)      # machine / repo sprawl / this server's own footprint
         elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
         elif u.path == "/preview-log":    return preview.log(self)   # tail one preview's next-dev log
         elif u.path == "/preview-wait":   return preview.wait(self)   # warming page: boots + hands off to the preview
