@@ -224,10 +224,10 @@ async function runShip(project: string, qc: ReturnType<typeof useQueryClient>): 
 // verb never vanishes just because the classification is missing.
 function useShipPlan(project: () => string) {
   const shipAmbient = createQuery(() => ({
-    queryKey: ["restack-ambient"], queryFn: () => provider.restackAmbient(), refetchInterval: 15000,
+    queryKey: ["restack-ambient"], queryFn: () => provider.restackAmbient(),
   }));
   const shipForestBranches = createQuery(() => ({
-    queryKey: ["forest-branches"], queryFn: () => provider.forestBranches(), refetchInterval: 60000,
+    queryKey: ["forest-branches"], queryFn: () => provider.forestBranches(),
   }));
   return () => {
     const a = shipAmbient.data;

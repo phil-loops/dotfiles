@@ -124,7 +124,6 @@ export function MachinePage() {
   const q = createQuery<PreviewsResp>(() => ({
     queryKey: ["previews"],
     queryFn: () => fetch("/previews").then((r) => r.json() as Promise<PreviewsResp>),
-    refetchInterval: 3000,
     placeholderData: seedFromDock,
   }));
   const previews = () => q.data?.previews ?? [];

@@ -30,9 +30,8 @@ export function ServingChip() {
   if (!canMutate) return null; // static snapshot: no live ports to name
   const { location, navigate } = useViewerLocation();
   const q = createQuery<PreviewsResp>(() => ({
-    queryKey: ["previews"], // shared with MachinePage — its 3s poll wins while it's open
+    queryKey: ["previews"], // shared with MachinePage; refreshed by the pulse's procs event
     queryFn: () => fetch("/previews").then((r) => r.json() as Promise<PreviewsResp>),
-    refetchInterval: 10_000,
   }));
   // the branch whose diff is on screen right now — same derivation as the chat drawer's
   const viewing = () => {

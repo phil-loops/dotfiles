@@ -60,7 +60,6 @@ export function NavRail() {
   const processes = createQuery<{ kind: string; status: string }[]>(() => ({
     queryKey: ["processes"],
     queryFn: () => fetch("/processes").then((r) => r.json()),
-    refetchInterval: 3000,
   }));
   const serversUp = createMemo(
     () => (processes.data ?? []).filter((p) => p.kind === "preview" && p.status === "up").length

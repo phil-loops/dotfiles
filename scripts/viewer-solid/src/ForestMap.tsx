@@ -377,7 +377,6 @@ export function ForestMap(props: {
   const kilnQ = createQuery<RestackStatus>(() => ({
     queryKey: ["forestmap-restack"],
     queryFn: () => provider.restackStatus(),
-    refetchInterval: 2000,
     enabled: canMutate, // a static snapshot has no live engine to watch
   }));
   const kiln = createMemo(() => {

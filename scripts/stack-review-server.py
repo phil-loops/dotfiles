@@ -26,6 +26,7 @@ from srv import prep    # own line: same reason
 from srv import wiki    # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import repostate   # own line: same reason
+from srv import procsig   # own line: same reason
 from srv import pregate   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
@@ -49,7 +50,7 @@ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts 
              # fresh python boot + an uncached stack-forest git fan-out on the next /model)
 last = [time.time()]
 _render_lock = threading.Lock()
-_pulse = {"sig": "", "asset": "", "world": ""}  # model+asset+remote-world fingerprints, refreshed ~1/s by pulse()
+_pulse = {"sig": "", "asset": "", "world": "", "procs": ""}  # model+asset+remote-world fingerprints, refreshed ~1/s by pulse()
 _pulse_subs = [0]                  # open /events streams — pulse() only runs while this is > 0
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
@@ -191,6 +192,10 @@ def asset_sig():
 
 def _pulse_refresh():
     _pulse["sig"], _pulse["asset"], _pulse["world"] = srvctx.model_sig(), asset_sig(), sync.world_sig()
+    try:
+        _pulse["procs"] = procsig.sig()   # non-git state: agents, chat turns, restack, previews
+    except Exception:
+        pass
 
 
 def pulse():
@@ -359,7 +364,7 @@ class H(BaseHTTPRequestHandler):
                 except Exception:      # subscriber would read as a change and reload this tab on sight
                     pass
                 _pulse_wake.set()
-            seen_sig, seen_asset, seen_world = _pulse["sig"], _pulse["asset"], _pulse["world"]
+            seen_sig, seen_asset, seen_world, seen_procs = _pulse["sig"], _pulse["asset"], _pulse["world"], _pulse["procs"]
             seen_failing = False
             beat = 0
             try:
@@ -379,6 +384,10 @@ class H(BaseHTTPRequestHandler):
                     if _pulse["world"] != seen_world:    # remote moved (merge, PR flip) → refetch in place
                         seen_world = _pulse["world"]
                         self.wfile.write(b"event: update\ndata: 1\n\n")
+                        self.wfile.flush()
+                    if _pulse["procs"] != seen_procs:    # a process/agent/preview moved → the process panels refetch
+                        seen_procs = _pulse["procs"]
+                        self.wfile.write(b"event: procs\ndata: 1\n\n")
                         self.wfile.flush()
                     failing, age = sync.fresh_state()
                     if failing != seen_failing:          # origin checks broke/recovered → honesty chip
