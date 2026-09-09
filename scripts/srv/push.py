@@ -799,6 +799,41 @@ def prep_push(req, raw):
     }))
 
 
+def reword_message(req, raw):
+    """POST /reword-message {branch, sha, subject, body} — reword ANY unpushed commit on the
+    branch, not only the tip: tree untouched, author kept, stacked children carried along.
+    Shells to stack-reword, which refuses a commit any remote ref already holds (that would
+    be a force-push) or one at/below the branch's base (it belongs to the parent)."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    sha = (d.get("sha") or "").strip()
+    subject = (d.get("subject") or "").strip()
+    body = (d.get("body") or "").strip()
+    if not branch or not sha:
+        return req._send(400, json.dumps({"ok": False, "err": "branch and sha required"}))
+    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode != 0:
+        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
+    if not subject or _WIP_SUBJECT.match(subject):
+        return req._send(200, json.dumps({"ok": False, "err": "subject must be a real voiced line, not a placeholder"}))
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="reword-", delete=False) as fh:
+        fh.write(subject + (f"\n\n{body}" if body else "") + "\n")
+        path = fh.name
+    try:
+        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-reword"), "--branch", branch, sha, "-F", path])
+    finally:
+        os.unlink(path)
+    out = (r.stdout or "").strip()
+    err = (r.stderr or "").strip().replace("stack-reword: ", "")
+    if r.returncode != 0:
+        return req._send(200, json.dumps({"ok": False, "err": err or "reword failed"}))
+    m = re.search(r"reworded \S+ → (\S+)", out)
+    req._send(200, json.dumps({
+        "ok": True, "unchanged": "unchanged" in out, "sha": m.group(1) if m else None,
+        "moves": [ln for ln in out.splitlines() if "→" in ln and not ln.startswith("reworded")],
+        "warnings": [ln for ln in err.splitlines() if ln],
+    }))
+
+
 def _forest_section(branch):
     """The one line the project writes about itself: where this change sits in the merge order and
     what it builds on. Free — every fact comes from git config. Silent outside a project.

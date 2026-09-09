@@ -182,6 +182,7 @@ export const Commit = z.object({
   subject: z.string(),
   author: z.string(),
   date: z.string(),
+  body: z.string().optional(), // full message body — the reword editor's prefill
   own: z.boolean().optional(), // true = on this branch (parent..branch); false = inherited ancestor
   pushed: z.boolean().optional(), // origin already has it (upstream / origin/<branch>); absent = no remote ref
 });
