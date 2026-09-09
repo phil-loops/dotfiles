@@ -81,6 +81,32 @@ fi
 now() { date +%s; }
 logline() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$log"; }
 
+# The checkout owes an `npm install` when its package-lock.json is newer than
+# node_modules/.package-lock.json (npm writes that one LAST) — a new workspace package
+# (packages/<p>, 2026-09-08 safe-fetch) only resolves as @loops/<p> after that install, and
+# nothing else runs it ambiently (task dev keys on package.json + schema.prisma). Two stats per
+# tick; the install itself runs backgrounded + nice'd under a lock dir so a second tick, a
+# relaunch, or another session's seed-gen --sync can't stack a second install on top.
+settle_owed_install() { # $1 = checkout with a REAL node_modules
+  local tree="$1" lock="$gd/npm-install.lock" out
+  [[ -f "$tree/package-lock.json" && -d "$tree/node_modules" && ! -L "$tree/node_modules" ]] || return 0
+  [[ ! -f "$tree/node_modules/.package-lock.json" || "$tree/package-lock.json" -nt "$tree/node_modules/.package-lock.json" ]] || return 0
+  if ! mkdir "$lock" 2>/dev/null; then
+    [[ -n "$(find "$lock" -maxdepth 0 -mmin +30 2>/dev/null)" ]] || return 0   # live install in flight
+    rmdir "$lock" 2>/dev/null; mkdir "$lock" 2>/dev/null || return 0             # stale leak: steal it
+  fi
+  logline "package-lock.json moved past node_modules in $tree — running npm install (bg)"
+  (
+    trap 'rmdir "$lock" 2>/dev/null' EXIT
+    if out=$(cd "$tree" && PRISMA_SCHEMA='["native"]' nice -n 10 npm install --no-audit --no-fund 2>&1); then
+      logline "npm install done in $tree"
+    else
+      logline "npm install FAILED in $tree: $(echo "$out" | tail -3 | tr '\n' ' ')"
+    fi
+  ) </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
+
 # ---- merge attribution: trunk moved → which PRs, and were any mine? ----
 merges_state="$gd/restack-merges.json"
 me_login=""
@@ -416,6 +442,7 @@ logline "daemon start pid=$$ interval=${interval}s ($mode_desc)"
 prev_tip="$(jq -r '.trunk_tip // empty' "$state" 2>/dev/null || true)"
 last_tip=""
 while (( running )); do
+  settle_owed_install "$(git rev-parse --show-toplevel 2>/dev/null)"
   git fetch -q origin "$MAIN" 2>/dev/null || true
   tip="$(git rev-parse --verify --quiet "origin/$MAIN" || git rev-parse --verify --quiet "$MAIN" || echo "")"
   if [[ -n "$tip" && "$tip" != "$last_tip" ]]; then
