@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# npm-owed — does this checkout's node_modules match its package-lock.json? npm decides.
+#
+#   npm-owed <checkout>             exit 0 = an install is owed (prints "added A removed R changed C"),
+#                                   exit 1 = up to date, exit 2 = not applicable (no lockfile, no real
+#                                   node_modules) or npm failed
+#   npm-owed --install <checkout>   when owed, run the install right here (foreground); exit 0 when
+#                                   the tree ends up current, 2 when npm failed
+#
+# The verdict is `npm install --dry-run`, the resolver's own answer (~1s on the loops repo):
+# platform-optional packages, hoisting and workspace links are all judged by the thing that
+# installs them. Timestamps are not consulted — a clone, a `touch`, or a checkout that rewrote
+# an identical lockfile all lied under the old lock-mtime check (2026-09-09: MAIN read "current"
+# while npm wanted 1,100 changes). The dry run is gated by content hashes of package-lock.json
+# and npm's own node_modules/.package-lock.json (written last by every install), cached in
+# node_modules/.npm-owed — an unchanged pair costs two hashes, ~40ms.
+#
+# A symlinked node_modules belongs to another tree and is never judged or installed here.
+set -uo pipefail
+
+install=0
+[[ "${1:-}" == --install ]] && { install=1; shift; }
+dir="${1:?usage: npm-owed [--install] <checkout>}"
+dir="${dir%/}"
+
+[[ -f "$dir/package-lock.json" ]] || exit 2
+[[ -d "$dir/node_modules" && ! -L "$dir/node_modules" ]] || exit 2
+
+hash_of() { [[ -f "$1" ]] && shasum -a 256 "$1" | cut -c1-32 || echo none; }
+cache="$dir/node_modules/.npm-owed"
+key="$(hash_of "$dir/package-lock.json") $(hash_of "$dir/node_modules/.package-lock.json")"
+
+verdict=""
+if [[ -f "$cache" ]]; then
+  cached="$(cat "$cache" 2>/dev/null)"
+  [[ "${cached% *}" == "$key" ]] && verdict="${cached##* }"
+fi
+if [[ -z "$verdict" ]]; then
+  out="$(cd "$dir" && PRISMA_SCHEMA='["native"]' npm install --dry-run --no-audit --no-fund 2>&1)" || { echo "npm dry-run failed: $(tail -2 <<<"$out" | tr '\n' ' ')" >&2; exit 2; }
+  a="$(grep -oE 'added [0-9]+' <<<"$out" | tail -1 | tr -cd '0-9')"
+  r="$(grep -oE 'removed [0-9]+' <<<"$out" | tail -1 | tr -cd '0-9')"
+  c="$(grep -oE 'changed [0-9]+' <<<"$out" | tail -1 | tr -cd '0-9')"
+  verdict="${a:-0}/${r:-0}/${c:-0}"
+  echo "$key $verdict" > "$cache"
+fi
+
+IFS=/ read -r a r c <<<"$verdict"
+if (( a == 0 && r == 0 && c == 0 )); then
+  exit 1
+fi
+echo "added $a removed $r changed $c"
+(( install )) || exit 0
+
+if out="$(cd "$dir" && PRISMA_SCHEMA='["native"]' npm install --no-audit --no-fund 2>&1)"; then
+  rm -f "$cache"
+  exit 0
+fi
+echo "npm install failed in $dir: $(tail -3 <<<"$out" | tr '\n' ' ')" >&2
+exit 2
