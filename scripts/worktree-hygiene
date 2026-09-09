@@ -1,0 +1,114 @@
+#!/usr/bin/env python3
+"""worktree-hygiene — shed regenerable weight (node_modules, .next) from loops worktrees nobody
+has touched in a while, keeping the checkout itself: branch, files and forest config untouched.
+The preview tooling re-materialises node_modules on demand (loops-preview's warm pool), so a
+stripped tree costs a re-clone the next time it's opened, not any work.
+
+  worktree-hygiene                 dry run: list what would be stripped and why the rest is kept
+  worktree-hygiene --apply         strip for real, appending one JSON line per removal to the log
+  worktree-hygiene --days N        idle threshold (default 7)
+
+Idle means the newest of: the directory's mtime, its .git gitfile, and every file git status
+reports as changed — so a tree with fresh uncommitted edits is never idle, even if the dir
+mtime is old. A tree with any process's cwd inside it is in use regardless of age. Review
+scratch under /private/tmp/stack-study belongs to stack-open's own ladder and is skipped, as
+are the main checkout and dot-prefixed tooling trees.
+
+Log: ~/.cache/worktree-hygiene/log.jsonl (one line per removal) + last.json (the last run's
+summary, which the viewer's Machine page reads).
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+
+REPO = os.path.expanduser("~/coding/loops")
+CACHE = os.path.expanduser("~/.cache/worktree-hygiene")
+FAT = ("node_modules", ".next")
+
+
+def git(args, cwd=REPO):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True).stdout
+
+
+def worktrees():
+    paths = []
+    for ln in git(["worktree", "list", "--porcelain"]).splitlines():
+        if ln.startswith("worktree "):
+            paths.append(ln[9:])
+    main = paths[0] if paths else None
+    return main, paths[1:]
+
+
+def cwds_in_use():
+    out = subprocess.run(["lsof", "-Fn", "-d", "cwd"], capture_output=True, text=True).stdout
+    return {ln[1:] for ln in out.splitlines() if ln.startswith("n/")}
+
+
+def newest_touch(path):
+    latest = os.stat(path).st_mtime
+    gitfile = os.path.join(path, ".git")
+    if os.path.exists(gitfile):
+        latest = max(latest, os.stat(gitfile).st_mtime)
+    for rec in git(["status", "--porcelain", "-z", "--untracked-files=normal"], cwd=path).split("\0"):
+        if len(rec) > 3:
+            f = os.path.join(path, rec[3:])
+            try:
+                latest = max(latest, os.stat(f).st_mtime)
+            except OSError:
+                pass
+    return latest
+
+
+def apparent_mb(path):
+    out = subprocess.run(["du", "-sk", path], capture_output=True, text=True).stdout.split()
+    return int(out[0]) // 1024 if out and out[0].isdigit() else 0
+
+
+def main():
+    apply = "--apply" in sys.argv
+    days = 7
+    if "--days" in sys.argv:
+        days = int(sys.argv[sys.argv.index("--days") + 1])
+    main_wt, trees = worktrees()
+    busy = cwds_in_use()
+    now = time.time()
+    stripped, kept = [], []
+    for wt in trees:
+        name = os.path.basename(wt)
+        if "/stack-study/" in wt or name.startswith(".") or wt == main_wt:
+            continue
+        fat = [f for f in FAT if os.path.isdir(os.path.join(wt, f))]
+        if not fat:
+            continue
+        if any(c == wt or c.startswith(wt + "/") for c in busy):
+            kept.append((name, "in use"))
+            continue
+        idle = (now - newest_touch(wt)) / 86400
+        if idle < days:
+            kept.append((name, f"touched {idle:.1f}d ago"))
+            continue
+        freed = sum(apparent_mb(os.path.join(wt, f)) for f in fat)
+        if apply:
+            for f in fat:
+                subprocess.run(["rm", "-rf", os.path.join(wt, f)])
+        stripped.append({"at": now, "worktree": wt, "idleDays": round(idle, 1), "removed": fat, "apparentMb": freed})
+    os.makedirs(CACHE, exist_ok=True)
+    if apply:
+        with open(os.path.join(CACHE, "log.jsonl"), "a") as fh:
+            for s in stripped:
+                fh.write(json.dumps(s) + "\n")
+        with open(os.path.join(CACHE, "last.json"), "w") as fh:
+            json.dump({"at": now, "days": days, "stripped": len(stripped),
+                       "apparentMb": sum(s["apparentMb"] for s in stripped), "kept": len(kept)}, fh)
+    verb = "stripped" if apply else "would strip"
+    for s in stripped:
+        print(f"{verb} {os.path.basename(s['worktree'])}: {' + '.join(s['removed'])} ({s['apparentMb']} MB apparent, idle {s['idleDays']}d)")
+    for name, why in kept:
+        print(f"kept {name}: {why}")
+    print(f"{verb} {len(stripped)} tree(s), {sum(s['apparentMb'] for s in stripped)} MB apparent; kept {len(kept)}")
+
+
+if __name__ == "__main__":
+    main()

@@ -92,7 +92,13 @@ def _repo():
         p = df[1].split()
         if len(p) >= 5 and p[1].isdigit():
             disk = {"usedGb": int(p[2]) // 2**20, "totalGb": int(p[1]) // 2**20, "pct": int(p[4].rstrip("%")) if p[4].rstrip("%").isdigit() else 0}
-    return {"worktrees": len(paths), "scratch": len(scratch), "nodeModulesClones": nm, "disk": disk}
+    hygiene = None
+    try:
+        with open(os.path.expanduser("~/.cache/worktree-hygiene/last.json")) as fh:
+            hygiene = json.load(fh)
+    except (OSError, ValueError):
+        pass
+    return {"worktrees": len(paths), "scratch": len(scratch), "nodeModulesClones": nm, "disk": disk, "hygiene": hygiene}
 
 
 def get(req, u):
