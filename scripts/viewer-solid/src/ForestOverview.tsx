@@ -7,6 +7,7 @@ import { cameFrom } from "./cameFrom";
 import { overviewView, setOverviewView } from "./overviewView";
 import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
+import { StoriesEditor } from "./StoriesEditor";
 import { chatToTmux } from "./chatDrawer";
 import { SessionPicker } from "./SessionPicker";
 import { TicketChip } from "./TicketChip";
@@ -360,6 +361,7 @@ export function ForestOverview() {
           <div class="fo-views ml-auto inline-flex gap-[2px]" role="group" aria-label="overview view">
             <button class={`${FO_BTN} border ${ovView() === "map" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
             <button class={`fo-view-story ${FO_BTN} border ${ovView() === "story" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
+            <button class={`fo-view-stories ${FO_BTN} border ${ovView() === "stories" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "stories" }} onClick={() => setOvView("stories")} title="one plain-English line per branch, edited in place">✎ stories</button>
           </div>
           <Show when={canMutate}>
             <span class="sp-anchor relative inline-flex">
@@ -385,7 +387,7 @@ export function ForestOverview() {
         fallback={<p class="loading fo-empty px-6 py-10 italic text-ink-faint">{model.isLoading ? "loading…" : "no branches in this forest"}</p>}
       >
         <Show
-          when={ovView() === "story"}
+          when={ovView() !== "map"}
           fallback={
             <ForestMap
               page
@@ -412,7 +414,9 @@ export function ForestOverview() {
             />
           }
         >
-          <MergeStory model={model.data} project={project()} onPick={open} />
+          <Show when={ovView() === "stories"} fallback={<MergeStory model={model.data} project={project()} onPick={open} />}>
+            <StoriesEditor project={project()} branch={spine()[0].id} onPick={open} />
+          </Show>
         </Show>
       </Show>
       <Show when={tip()}>

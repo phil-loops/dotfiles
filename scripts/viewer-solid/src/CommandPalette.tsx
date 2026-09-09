@@ -80,6 +80,11 @@ export default function CommandPalette() {
         sub: "the feature as ordered commits, in merge order",
         run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
       });
+      cmds.push({
+        label: `✎ stories — ${leaf(c.project)}`,
+        sub: "one plain-English line per branch, edited in place",
+        run: () => { setOverviewView("stories"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
+      });
     } else {
       cmds.push({
         label: "≣ merge story view",

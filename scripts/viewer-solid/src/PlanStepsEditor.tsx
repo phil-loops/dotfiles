@@ -1,5 +1,7 @@
 import { createSignal, createResource, For, Show } from "solid-js";
 import { withRepo } from "./provider";
+import { Link } from "./router";
+import { setOverviewView } from "./overviewView";
 
 // ── per-step story editor ───────────────────────────────────────────────────
 // The forest plan (the "Part of …" block) is regenerated on every branch from each step's own
@@ -18,7 +20,7 @@ export function PlanStepsEditor(props: { branch: string; onSaved?: () => void })
   const [data, { refetch }] = createResource(
     () => props.branch,
     (b) => fetch(withRepo("/plan-steps") + "?branch=" + encodeURIComponent(b))
-      .then((r) => r.json() as Promise<{ steps: Step[] }>),
+      .then((r) => r.json() as Promise<{ project: string | null; steps: Step[] }>),
   );
   const [editing, setEditing] = createSignal<string | null>(null);
   const [draft, setDraft] = createSignal("");
@@ -42,7 +44,19 @@ export function PlanStepsEditor(props: { branch: string; onSaved?: () => void })
   return (
     <Show when={(data()?.steps?.length ?? 0) > 0}>
       <div class="plan-steps flex flex-col gap-[2px] border-b border-rule py-[4px]">
-        <div class="plan-steps-head px-[1px] pt-[2px] pb-[5px] text-[10px] uppercase tracking-[0.07em] text-ink-faint">forest steps — edit a line to set that branch's durable story</div>
+        <div class="plan-steps-head flex items-baseline gap-[10px] px-[1px] pt-[2px] pb-[5px] text-[10px] uppercase tracking-[0.07em] text-ink-faint">
+          <span>forest steps — edit a line to set that branch's durable story</span>
+          <Show when={data()?.project}>
+            {(proj) => (
+              <Link
+                to={{ kind: "forest", name: proj() }}
+                class="ml-auto normal-case tracking-normal text-gold-leaf hover:text-ink"
+                title="edit every branch's story at once, as one plain-English list"
+                onClick={() => setOverviewView("stories")}
+              >✎ edit all stories ↗</Link>
+            )}
+          </Show>
+        </div>
         <For each={data()!.steps}>
           {(s) => (
             <div class={`plan-step flex min-h-[26px] items-center gap-[8px] ${s.landed ? "landed opacity-50" : ""} ${s.me ? "me" : ""}`}>

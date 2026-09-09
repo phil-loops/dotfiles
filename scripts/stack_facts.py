@@ -88,6 +88,24 @@ def plan_omitted(branch):
             or cfg(f"stack-branch.{branch}.plan-omit")) == "true"
 
 
+def _subject_of(branch):
+    subject = git("log", "-1", "--format=%s", f"{parent_of(branch)}..{branch}")
+    if ": " in subject:
+        subject = subject.split(": ", 1)[1]
+    return subject
+
+
+def sources_of(branch):
+    """Every candidate for a branch's one-line story, in the order job_of ranks them — so an
+    editor can show which one won and what it is shadowing, instead of a silent override."""
+    return {
+        "story": (cfg(f"branch.{branch}.stack-story")
+                  or cfg(f"stack-branch.{branch}.story")),
+        "description": cfg(f"branch.{branch}.description"),
+        "subject": _subject_of(branch),
+    }
+
+
 def job_of(branch):
     """What this branch DOES, in one voiced line. A hand-authored `stack-branch.<b>.story` wins —
     it's the durable per-step merge story, editable from any branch's plan and re-read on every
@@ -101,10 +119,7 @@ def job_of(branch):
     description = cfg(f"branch.{branch}.description")
     if description:
         return description
-    subject = git("log", "-1", "--format=%s", f"{parent_of(branch)}..{branch}")
-    if ": " in subject:
-        subject = subject.split(": ", 1)[1]
-    return subject or branch
+    return _subject_of(branch) or branch
 
 
 def _prs():
@@ -213,7 +228,11 @@ def steps(branch):
     """The plan alone, minus the PR decoration and graph edges `facts` also derives — no gh
     network call, so the viewer's steps editor loads in one beat instead of several seconds."""
     project = project_of(branch)
-    return {"branch": branch, "project": project, "plan": _plan(branch, project, {})}
+    plan = _plan(branch, project, {})
+    for s in plan:
+        if not s["landed"]:
+            s.update(sources_of(s["branch"]))
+    return {"branch": branch, "project": project, "plan": plan}
 
 
 def facts(branch):
