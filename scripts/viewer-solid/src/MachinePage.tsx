@@ -105,6 +105,22 @@ export function MachinePage() {
       substrate: { project: "loops", shared: true, up: 0, total: 0, services: [] },
     };
   };
+  // the footprint — what the tooling costs this workstation. Memory pressure is the thing that
+  // actually kills dev (next dies with 144 when swap fills), so it leads; the repo's sprawl
+  // (worktrees, review scratch, node_modules clones) is what fills swap; the server's own
+  // numbers are here so a leak in it would be seen rather than assumed.
+  type Footprint = {
+    machine: { totalMb: number; pressure: "ok" | "high" | "critical"; freeMb: number; activeMb: number; inactiveMb: number; wiredMb: number; compressedMb: number; swap: { totalMb: number; usedMb: number }; top: { rssMb: number; pid: number; cpu: number; name: string }[] };
+    repo: { worktrees: number; scratch: number; nodeModulesClones: number; disk: { usedGb?: number; totalGb?: number; pct?: number } };
+    server: { pid: number; rssMb: number; threads: number; children: number; uptimeS: number; caches: Record<string, number> };
+  };
+  const fp = createQuery<Footprint>(() => ({
+    queryKey: ["footprint"],
+    queryFn: () => fetch("/footprint").then((r) => r.json() as Promise<Footprint>),
+    refetchInterval: 15000,
+  }));
+  const gb = (mb: number) => (mb / 1024).toFixed(1);
+  const uptime = (s: number) => (s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`);
   const q = createQuery<PreviewsResp>(() => ({
     queryKey: ["previews"],
     queryFn: () => fetch("/previews").then((r) => r.json() as Promise<PreviewsResp>),
@@ -343,6 +359,81 @@ export function MachinePage() {
             </Show>
           </div>
         </div>
+      </section>
+
+      {/* the footprint — memory first (it's what kills dev), then what's filling it */}
+      <section class="machine-footprint mb-6 rounded-[10px] border border-rule px-[17px] py-[14px]">
+        <Show when={fp.data} fallback={<div class="text-[11px] text-ink-faint">taking stock of the machine…</div>}>
+          {(f) => {
+            const m = () => f().machine;
+            const used = () => m().activeMb + m().wiredMb + m().compressedMb;
+            const pct = (mb: number) => `${Math.max(0, Math.min(100, (mb / Math.max(1, m().totalMb)) * 100))}%`;
+            return (
+              <>
+                <div class="flex flex-wrap items-center gap-2.5">
+                  <span
+                    class="h-[8px] w-[8px] flex-none rounded-full"
+                    classList={{
+                      "bg-add shadow-[0_0_6px_rgba(143,174,122,0.5)]": m().pressure === "ok",
+                      "animate-breathe bg-ember motion-reduce:animate-none": m().pressure === "high",
+                      "bg-del shadow-[0_0_6px_rgba(200,122,85,0.5)]": m().pressure === "critical",
+                    }}
+                  />
+                  <span class="font-display text-[16px] italic text-ink">Footprint</span>
+                  <span class="text-[11px] text-ink-dim">
+                    memory {gb(used())} of {gb(m().totalMb)} GB in use · {m().freeMb} MB free · swap {gb(m().swap.usedMb)} of {gb(m().swap.totalMb)} GB
+                  </span>
+                  <span class="ml-auto text-[11px] text-ink-faint">
+                    {m().pressure === "ok" ? "headroom" : m().pressure === "high" ? "pressure building — dev may slow" : "critical — next dev dies here"}
+                  </span>
+                </div>
+                {/* one bar, one scale: the machine's RAM. Wired + active + compressed is what's spoken for */}
+                <div class="mt-3 flex h-[6px] w-full overflow-hidden rounded-[3px] bg-vellum-edge" title="wired · active · compressed · inactive (reclaimable) · free">
+                  <div class="bg-ink-dim" style={{ width: pct(m().wiredMb) }} />
+                  <div class="bg-gold-leaf" style={{ width: pct(m().activeMb) }} />
+                  <div class="bg-ember" style={{ width: pct(m().compressedMb) }} />
+                  <div class="bg-rule" style={{ width: pct(m().inactiveMb) }} />
+                </div>
+                <div class="mt-4 grid grid-cols-3 gap-x-6 gap-y-3 text-[11.5px] max-[640px]:grid-cols-1">
+                  <div>
+                    <div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-faint">biggest residents</div>
+                    <ol class="m-0 flex list-none flex-col gap-[3px] p-0 tabular-nums">
+                      <For each={m().top.slice(0, 6)}>
+                        {(p) => (
+                          <li class="flex items-baseline gap-2">
+                            <span class="w-[58px] flex-none text-right text-ink">{p.rssMb >= 1024 ? `${gb(p.rssMb)} GB` : `${p.rssMb} MB`}</span>
+                            <span class="min-w-0 flex-1 truncate text-ink-dim">{p.name}</span>
+                            <span class="flex-none text-ink-faint">{p.cpu.toFixed(0)}%</span>
+                          </li>
+                        )}
+                      </For>
+                    </ol>
+                  </div>
+                  <div>
+                    <div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-faint">what fills it</div>
+                    <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-[3px] tabular-nums">
+                      <dt class="text-right text-ink">{f().repo.worktrees}</dt><dd class="m-0 text-ink-dim">registered worktrees</dd>
+                      <dt class="text-right text-ink">{f().repo.scratch}</dt><dd class="m-0 text-ink-dim">review scratch trees</dd>
+                      <dt class="text-right text-ink">{f().repo.nodeModulesClones}</dt><dd class="m-0 text-ink-dim">node_modules clones in ~/coding</dd>
+                      <Show when={f().repo.disk.totalGb}>
+                        <dt class="text-right text-ink">{f().repo.disk.pct}%</dt><dd class="m-0 text-ink-dim">disk · {f().repo.disk.usedGb} of {f().repo.disk.totalGb} GB</dd>
+                      </Show>
+                    </dl>
+                  </div>
+                  <div>
+                    <div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-faint">this server</div>
+                    <dl class="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-[3px] tabular-nums">
+                      <dt class="text-right text-ink">{f().server.rssMb} MB</dt><dd class="m-0 text-ink-dim">resident · up {uptime(f().server.uptimeS)}</dd>
+                      <dt class="text-right text-ink">{f().server.threads}</dt><dd class="m-0 text-ink-dim">threads · {f().server.children} child process{f().server.children === 1 ? "" : "es"}</dd>
+                      <dt class="text-right text-ink">{Object.values(f().server.caches).reduce((a, b) => a + b, 0)}</dt>
+                      <dd class="m-0 text-ink-dim" title={Object.entries(f().server.caches).map(([k, v]) => `${k}: ${v}`).join("\n")}>cached answers (bounded)</dd>
+                    </dl>
+                  </div>
+                </div>
+              </>
+            );
+          }}
+        </Show>
       </section>
 
       {/* the terminus — the ONE substrate every tap above flows into; full width on purpose:
