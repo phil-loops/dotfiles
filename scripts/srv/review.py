@@ -18,7 +18,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, picker
+from . import ctx, repostate, picker
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
@@ -269,14 +269,9 @@ def commits(req, u):
     # ancestor history it forked from (own:false) so the list reads like a real timeline —
     # not just the parent..branch delta. `own` membership is the rev-list of parent..branch.
     branch = parse_qs(u.query).get("branch", [""])[0]
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    # one spawn fingerprints every ref the answer depends on (for-each-ref never fails on a
-    # missing pattern, so a tracking-less branch still keys on origin's copy); a miss costs
-    # the same as before
-    fp = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)",
-                  f"refs/heads/{branch}", f"refs/heads/{parent}", f"refs/remotes/*/{branch}", f"refs/remotes/*/{parent}"]).stdout
-    key = (ctx.repo_cwd(), branch, fp)
+    snap = repostate.snapshot()
+    parent = snap.parent(branch)
+    key = (ctx.repo_cwd(), branch, snap.branch_fingerprint(branch))
     hit = _COMMITS_CACHE.get(key)
     if hit is not None:
         return req._send(200, hit)

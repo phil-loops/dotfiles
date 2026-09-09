@@ -153,17 +153,14 @@ def _shared(branch):
     """Local-vs-shared vs origin: "local" (never pushed — the team can't see it),
     "ahead" (origin's copy is N commits behind), "synced", or "gone" (deleted on
     origin after merge). Reads the last fetch's refs — no network."""
-    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0:
+    from . import repostate
+    snap = repostate.snapshot()
+    if snap.remote(branch):
         # --first-parent: a catch-up merge is ONE commit ahead — its mainline side is
         # already shared history, not unpushed work
-        raw = ctx.run(["git", "rev-list", "--count", "--first-parent", f"origin/{branch}..{branch}"]).stdout.strip()
-        try:
-            ahead = int(raw)
-        except ValueError:
-            ahead = 0
+        ahead = snap.count(f"origin/{branch}..{branch}", first_parent=True)
         return ("ahead" if ahead else "synced"), ahead
-    track = ctx.run(["git", "for-each-ref", f"refs/heads/{branch}", "--format=%(upstream:track)"]).stdout.strip()
-    return ("gone" if track == "[gone]" else "local"), 0
+    return ("gone" if snap.track(branch)[1] == "[gone]" else "local"), 0
 
 
 def state(branch, fresh_prs=False, with_patches=False):
@@ -183,17 +180,13 @@ def state(branch, fresh_prs=False, with_patches=False):
     Pure inspection: no fetch, no mutation."""
     if not branch:
         return {"branch": "", "behind": 0, "syncable": False, "why": "no branch"}
-    raw = ctx.run(["git", "rev-list", "--count", f"{branch}..origin/main"]).stdout.strip()
-    try:
-        behind = int(raw)
-    except ValueError:
-        behind = 0   # origin/main absent or bad ref → treat as up-to-date (no badge)
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
+    from . import repostate
+    snap = repostate.snapshot(fresh_prs=fresh_prs)
+    behind = snap.count(f"{branch}..origin/main")   # origin/main absent → 0 → no badge
+    parent = snap.parent(branch)
     # published = has an OPEN PR (Phil's rule: only an open PR counts, not a bare remote ref).
-    published = branch in _open_pr_heads(fresh=fresh_prs)
-    proj = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
-            or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
+    published = snap.published(branch)
+    proj = snap.project(branch)
     # A stacked branch behind main can't forward-rebase alone, but its PROJECT can — sync
     # delegates those to the restack machine instead of shrugging (the button leads to the
     # rebase and executes it).
@@ -477,9 +470,10 @@ def _node_health(branch, pr=None):
     Read-only page-load signals; the fix for both is a restack (contracts ghosts, rebases drift)."""
     if not branch:
         return {"branch": "", "drifted": False, "merged": False, "parent": "", "pr": None}
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main)
+    from . import repostate
+    snap = repostate.snapshot()
+    main = snap.main()
+    parent = snap.parent(branch)
     trunk = _trunk(main)
     # Both spellings of the trunk are root parents. A root branch is never "off-parent" — it's
     # just behind, which is what a restack is for. Testing the literal "main" alone badged every

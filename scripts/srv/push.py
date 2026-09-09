@@ -15,7 +15,7 @@ import tempfile
 import time
 from urllib.parse import quote, parse_qs
 
-from . import ctx, stage, sync
+from . import ctx, stage, sync, repostate
 
 
 def delta_tests(req, raw):
@@ -148,6 +148,7 @@ def gates(req, raw):
             result = next((e for e in _journal_events(old["path"]) if e.get("event") == "result"), None)
             if result and result.get("ok"):
                 _record_green(branch, old["tree"])
+                repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
         _spawn_gates(branch, fix=d.get("fix", False))
         return req._send(200, json.dumps({"ok": True, "started": True}))
@@ -156,6 +157,7 @@ def gates(req, raw):
     try:
         if json.loads(r.stdout).get("ok"):
             _record_green(branch, _tree(branch))
+            repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     except Exception:
         pass
     req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
@@ -193,6 +195,7 @@ def gates_progress(req, u):
         # while the gates ran keeps the same tree, so the verdict carries; any content change
         # (rebase, new commit) makes a new tree and the door stays locked
         _record_green(branch, job["tree"])
+        repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     running = _job_running(job)
     out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
     if result:
@@ -516,13 +519,7 @@ _PREVIEW_TTL = 60.0
 
 
 def _preview_fingerprint(branch):
-    sp = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-          or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)",
-                    f"refs/heads/{branch}", f"refs/remotes/*/{branch}", "refs/remotes/origin/main",
-                    f"refs/heads/{sp}", f"refs/remotes/*/{sp}"]).stdout
-    conf = ctx.run(["git", "config", "--get-regexp", rf"^(stack-)?branch\.{re.escape(branch)}\."]).stdout
-    return refs + "\x1e" + conf + "\x1e" + str(branch in sync._open_pr_heads())
+    return repostate.snapshot().branch_fingerprint(branch)
 
 
 def preview(req, u):
