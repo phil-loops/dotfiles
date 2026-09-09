@@ -422,8 +422,8 @@ export function MachinePage() {
                     {/* the hygiene agent's last pass — proof the sprawl is being tended, not just counted */}
                     <Show when={f().repo.hygiene} fallback={<div class="mt-2 text-[10.5px] text-ink-faint">hygiene agent has not run yet</div>}>
                       {(h) => (
-                        <div class="mt-2 text-[10.5px] text-ink-faint" title={`strips node_modules + .next from worktrees idle > ${h().days}d with no live process; every 6h`}>
-                          hygiene {uptime(Math.max(60, Math.floor(Date.now() / 1000 - h().at)))} ago · stripped {h().stripped}, kept {h().kept}
+                        <div class="mt-2 text-[10.5px] text-ink-faint" title={`relinks any unused real node_modules to the main checkout and drops .next idle > ${h().days}d; every 6h`}>
+                          hygiene {uptime(Math.max(60, Math.floor(Date.now() / 1000 - h().at)))} ago · relinked {h().stripped}, in use {h().kept}
                         </div>
                       )}
                     </Show>
