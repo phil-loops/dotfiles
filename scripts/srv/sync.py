@@ -54,7 +54,9 @@ def _deploy_critical(branch):
     Three-dot (merge-base→origin/main): two-dot is a tree diff that flags the branch's
     OWN new migrations as main-side changes and locks push on every migration branch."""
     globs = _deploy_critical_globs()
-    out = ctx.run(["git", "diff", f"{branch}...origin/main", "--name-only", "--", *globs]).stdout
+    from . import repostate
+    out = repostate.snapshot().once(("deploy-critical", branch), lambda: ctx.run(
+        ["git", "diff", f"{branch}...origin/main", "--name-only", "--", *globs]).stdout)
     return [f for f in out.splitlines() if f.strip()]
 
 

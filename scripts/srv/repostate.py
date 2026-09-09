@@ -9,6 +9,7 @@
 # upstream tracking, published. Anything that needs a *walk* (rev-list counts, merge-base)
 # still spawns — but memoised per snapshot, so the same walk isn't repeated within one epoch.
 import hashlib
+import os
 import threading
 import time
 
@@ -16,7 +17,7 @@ from . import ctx
 
 _LOCK = threading.Lock()
 _SNAP = {}   # repo cwd -> RepoState
-_MAX_AGE = 5.0   # seconds a snapshot may serve without re-checking its fingerprint
+_MAX_AGE = 2.0   # seconds a snapshot may serve without re-checking its fingerprint (the pulse reads it ~1/s)
 
 
 class RepoState:
@@ -114,6 +115,12 @@ class RepoState:
             self._memo[key] = ctx.run(["git", "rev-parse", f"{rev}^{{tree}}"]).stdout.strip()
         return self._memo[key]
 
+    def once(self, key, fn):
+        """Memoise any per-snapshot computation (a diff, a script's JSON) under `key`."""
+        if key not in self._memo:
+            self._memo[key] = fn()
+        return self._memo[key]
+
     def is_ancestor(self, a, b):
         key = ("anc", a, b)
         if key not in self._memo:
@@ -125,6 +132,14 @@ def _read():
     refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname) %(upstream:short) %(upstream:track)",
                     "refs/heads", "refs/remotes"]).stdout
     cfg = ctx.run(["git", "config", "--local", "--list", "-z"]).stdout
+    # the blessing ledgers live beside the config and change on every bless — they're part of
+    # what the model view depends on, so their mtimes ride in the fingerprint
+    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+    for name in ("stack-blessed.json", "stack-blessed-contrib.json"):
+        try:
+            cfg += f"\0#mtime:{name}={os.path.getmtime(os.path.join(gd, name))}"
+        except OSError:
+            pass
     return refs, cfg
 
 
