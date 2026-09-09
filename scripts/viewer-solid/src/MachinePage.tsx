@@ -110,7 +110,7 @@ export function MachinePage() {
   // (worktrees, review scratch, node_modules clones) is what fills swap; the server's own
   // numbers are here so a leak in it would be seen rather than assumed.
   type Footprint = {
-    machine: { totalMb: number; pressure: "ok" | "high" | "critical"; freeMb: number; activeMb: number; inactiveMb: number; wiredMb: number; compressedMb: number; swap: { totalMb: number; usedMb: number }; top: { rssMb: number; pid: number; cpu: number; name: string }[] };
+    machine: { totalMb: number; pressure: "ok" | "high" | "critical"; levelPct: number; freeMb: number; activeMb: number; inactiveMb: number; wiredMb: number; compressedMb: number; swap: { totalMb: number; usedMb: number }; top: { rssMb: number; pid: number; cpu: number; name: string }[] };
     repo: { worktrees: number; scratch: number; nodeModulesClones: number; disk: { usedGb?: number; totalGb?: number; pct?: number }; hygiene?: { at: number; days: number; stripped: number; apparentMb: number; kept: number } | null };
     server: { pid: number; rssMb: number; threads: number; children: number; uptimeS: number; caches: Record<string, number> };
   };
@@ -381,7 +381,7 @@ export function MachinePage() {
                   />
                   <span class="font-display text-[16px] italic text-ink">Footprint</span>
                   <span class="text-[11px] text-ink-dim">
-                    memory {gb(used())} of {gb(m().totalMb)} GB in use · {m().freeMb} MB free · swap {gb(m().swap.usedMb)} of {gb(m().swap.totalMb)} GB
+                    memory {gb(used())} of {gb(m().totalMb)} GB in use · {m().levelPct >= 0 ? `${m().levelPct}% headroom` : `${m().freeMb} MB free`} · swap {gb(m().swap.usedMb)} of {gb(m().swap.totalMb)} GB
                   </span>
                   <span class="ml-auto text-[11px] text-ink-faint">
                     {m().pressure === "ok" ? "headroom" : m().pressure === "high" ? "pressure building — dev may slow" : "critical — next dev dies here"}
