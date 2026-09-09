@@ -99,12 +99,14 @@ function Layout(props: { children?: JSX.Element }) {
   // loads hang. Hold the stream ONLY while the tab is visible: a backgrounded tab closes it
   // (frees its slot), and re-opening on show refetches to catch up on anything missed.
   let es: EventSource | null = null;
+  // the server's pulse fired (a ref, the config, or a blessing ledger moved): every query that
+  // derives from git refreshes here — including the node header's verdicts, which used to
+  // sit stale on a terminal commit until the next click. Each is served from a snapshot-keyed
+  // memo server-side, so the fan-out costs only what actually changed.
   const refresh = () => {
-    qc.invalidateQueries({ queryKey: ["node"] });
-    qc.invalidateQueries({ queryKey: ["model"] });
-    qc.invalidateQueries({ queryKey: ["projects"] });
-    qc.invalidateQueries({ queryKey: ["forest-health"] });
-    qc.invalidateQueries({ queryKey: ["branch-prs"] });
+    for (const key of ["node", "model", "projects", "forest-health", "branch-prs", "sync", "push-preview", "commits", "prep-route"]) {
+      qc.invalidateQueries({ queryKey: [key] });
+    }
   };
   // origin checks failing server-side → the page may be rendering a stale world; say so
   // (nothing shows while healthy — the chip is the failure mode's only footprint).

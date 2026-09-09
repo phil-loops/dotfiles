@@ -43,23 +43,13 @@ _MODEL_CFG = re.compile(
 
 
 def _forest_sig(branches):
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    pats = [f"refs/heads/{b}" for b in branches]
-    pats += [f"refs/heads/{main}", f"refs/remotes/origin/{main}"]
-    refs = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)", *pats]).stdout
-    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
-    cfg = "\n".join(ln for ln in ctx.run(["git", "config", "--local", "--list"]).stdout.splitlines()
-                    if _MODEL_CFG.match(ln))
-
-    def mt(p):
-        try:
-            return os.path.getmtime(p)
-        except OSError:
-            return 0
-    stamp = (refs + cfg
-             + str(mt(os.path.join(gd, "stack-blessed.json")))
-             + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
-    return hashlib.sha1(stamp.encode()).hexdigest()
+    snap = repostate.snapshot()
+    main = snap.main()
+    names = [f"refs/heads/{b}" for b in branches] + [f"refs/heads/{main}", f"refs/remotes/origin/{main}"]
+    refs = "".join(f"{r} {snap.sha.get(r, '')}\n" for r in names)
+    cfg = "\n".join(f"{k}={v}" for k, vs in sorted(snap.cfg.items()) for v in vs if _MODEL_CFG.match(f"{k}={v}"))
+    ledgers = "".join(f"{k}{v}" for k, vs in snap.cfg.items() if k.startswith("#mtime:") for v in vs)
+    return hashlib.sha1((refs + cfg + ledgers).encode()).hexdigest()
 
 
 def _known_forest_name(name):
@@ -67,7 +57,7 @@ def _known_forest_name(name):
     one-node forest for ANY string, so /model must gate or /forests/<typo> renders a ghost."""
     if not name:
         return False
-    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{name}"]).returncode == 0:
+    if repostate.snapshot().exists(name):
         return True
     if ctx.run(["git", "config", "--get-all", f"stack-project.{name}.branch"]).stdout.strip():
         return True

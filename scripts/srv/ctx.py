@@ -48,15 +48,8 @@ def model_sig():
     # cheap fingerprint of everything the model depends on: ref tips + config +
     # blessing ledger. Changes on re-point, commit, re-parent, or bless. Shared by
     # /model (_mcache), /projects (_pcache), and /sig — hence it lives in ctx.
-    refs = run(["git", "for-each-ref", "--format=%(objectname)", "refs/heads"]).stdout
-    gd = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
-
-    def mt(p):
-        try:
-            return os.path.getmtime(p)
-        except OSError:
-            return 0
-    stamp = (refs + str(mt(os.path.join(gd, "config")))
-             + str(mt(os.path.join(gd, "stack-blessed.json")))
-             + str(mt(os.path.join(gd, "stack-blessed-contrib.json"))))
-    return hashlib.sha1(stamp.encode()).hexdigest()
+    # the RepoState fingerprint: every ref (remotes too — origin moving is a change the page
+    # should see), the local config's content, and the blessing ledgers' mtimes; re-read at
+    # most every 2s, so the pulse's ~1/s reads cost one snapshot rebuild per 2s, not 2 spawns/s
+    from . import repostate
+    return repostate.snapshot().fingerprint
