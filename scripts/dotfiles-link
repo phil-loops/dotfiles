@@ -1,0 +1,96 @@
+#!/bin/zsh
+# dotfiles-link — create every symlink that wires ~/.dotfiles into $HOME, idempotently.
+#
+#   dotfiles-link                    link everything under $HOME (skips links already correct)
+#   dotfiles-link --loops <repo>     link the loops git hooks (hooks/loops-*) into <repo>'s
+#                                    common git dir instead — one install covers every worktree
+#   dotfiles-link [...] --check      report only; exit 1 if anything is missing or wrong
+#   dotfiles-link [...] --dry-run    print what would change, touch nothing
+#
+# A real file already at a link path is moved aside to <path>.pre-dotfiles before the
+# link is made — nothing is ever deleted. A symlink pointing elsewhere is replaced.
+# The tables below are the single source of truth for what lives where; README.md points
+# here rather than repeating it.
+set -uo pipefail
+
+DOTFILES="$HOME/.dotfiles"
+mode=link
+loops_repo=""
+while (( $# )); do
+  case "$1" in
+    --check) mode=check ;;
+    --dry-run) mode=dry ;;
+    --loops) shift; loops_repo="${1:-}"; [[ -n "$loops_repo" ]] || { print -u2 "--loops needs a repo path"; exit 2; } ;;
+    *) print -u2 "usage: dotfiles-link [--loops <repo>] [--check|--dry-run]"; exit 2 ;;
+  esac
+  shift
+done
+
+# link-path  repo-path (relative to ~/.dotfiles)
+if [[ -n "$loops_repo" ]]; then
+  hooks_dir="$(git -C "$loops_repo" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/hooks"
+  [[ -d "${hooks_dir:h}" ]] || { print -u2 "not a git repo: $loops_repo"; exit 2; }
+  LINKS=(
+    "$hooks_dir/post-checkout"       hooks/loops-post-checkout
+    "$hooks_dir/post-merge"          hooks/loops-seed-gen
+    "$hooks_dir/post-rewrite"        hooks/loops-seed-gen
+    "$hooks_dir/pre-push"            hooks/loops-pre-push
+    "$hooks_dir/prepare-commit-msg"  hooks/loops-prepare-commit-msg
+  )
+else
+LINKS=(
+  "$HOME/.zshenv"                 .zshenv
+  "$HOME/.zshrc"                  .zshrc
+  "$HOME/.tmux.conf"              tmux.conf
+  "$HOME/.hammerspoon"            hammerspoon
+  "$HOME/.config/helix"           helix
+  "$HOME/.config/nvim"            nvim
+  "$HOME/.config/starship.toml"   starship.toml
+  "$HOME/.claude/CLAUDE.md"       CLAUDE.md
+  "$HOME/.claude/settings.json"   .claude/settings.json
+  "$HOME/.claude/agents"          .claude/agents
+  "$HOME/.claude/skills"          .claude/skills
+)
+for plist in "$DOTFILES"/launchd/*.plist(N); do
+  LINKS+=("$HOME/Library/LaunchAgents/${plist:t}" "launchd/${plist:t}")
+done
+fi
+
+bad=0
+for ((i = 1; i <= ${#LINKS}; i += 2)); do
+  link="${LINKS[i]}"
+  target="$DOTFILES/${LINKS[i+1]}"
+  short="${link/#$HOME/~}"
+
+  if [[ ! -e "$target" ]]; then
+    print "  MISSING TARGET  $short -> $target"; bad=1; continue
+  fi
+  if [[ -L "$link" && "$(readlink "$link")" == "$target" ]]; then
+    print "  ok              $short"; continue
+  fi
+
+  bad=1
+  if [[ -L "$link" ]]; then
+    action="RELINK          $short (was -> $(readlink "$link"))"
+  elif [[ -e "$link" ]]; then
+    action="LINK (moved aside) $short (existing -> ${short}.pre-dotfiles)"
+  else
+    action="LINK            $short"
+  fi
+  print "  $action"
+  [[ $mode == link ]] || continue
+
+  mkdir -p "${link:h}"
+  if [[ -L "$link" ]]; then
+    rm "$link"
+  elif [[ -e "$link" ]]; then
+    mv "$link" "$link.pre-dotfiles"
+  fi
+  ln -s "$target" "$link"
+done
+
+case $mode in
+  link)  [[ -n "$loops_repo" ]] || print "linked. New launchd agents need: launchctl bootstrap gui/\$(id -u) ~/Library/LaunchAgents/<name>.plist" ;;
+  check) exit $bad ;;
+  dry)   exit 0 ;;
+esac
