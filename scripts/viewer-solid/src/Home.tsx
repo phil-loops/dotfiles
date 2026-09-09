@@ -48,7 +48,6 @@ export function Home() {
   const chatJobs = createQuery(() => ({
     queryKey: ["chat-jobs"],
     queryFn: () => fetch("/chat-jobs").then((r) => r.json() as Promise<ChatJob[]>),
-    refetchInterval: 5_000,
   }));
   const liveChats = createMemo(() => (chatJobs.data || []).filter((j) => !j.done));
   // a finished chat lingers in the strip briefly as "done ✓" so an answer that landed while you
@@ -89,14 +88,12 @@ export function Home() {
   const ambient = createQuery(() => ({
     queryKey: ["restack-ambient"],
     queryFn: () => provider.restackAmbient(),
-    refetchInterval: 15000,
   }));
   // shared cache with the Cmd+K index — lets the ambient chip resolve which forest its
   // actionable branches live in, so a click routes straight to that forest's ▸ ready button.
   const forestBranches = createQuery(() => ({
     queryKey: ["forest-branches"],
     queryFn: () => provider.forestBranches(),
-    refetchInterval: 60000,
   }));
 
   // what just landed on main (the daemon's merge attribution) → a second quiet chip.
@@ -104,15 +101,11 @@ export function Home() {
   const merges = createQuery(() => ({
     queryKey: ["restack-merges"],
     queryFn: () => provider.restackMerges(),
-    refetchInterval: 15000,
   }));
 
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
     queryFn: () => provider.reviewRequests(),
-    // keep the queue warm in the background so newly-requested PRs surface on their
-    // own; 30s matches the server's gh-search cache TTL, so most polls are free.
-    refetchInterval: 30_000,
     refetchOnWindowFocus: true,
   }));
   const importReview = createMutation(() => ({

@@ -89,7 +89,6 @@ export function useRestack(deps: {
         running() && running() !== "__all__" ? running()! : undefined
       ),
     enabled: !!running(),
-    refetchInterval: (q) => (q.state.data?.running === false ? false : 2500),
   }));
   createEffect(() => {
     if (!running()) return;
@@ -113,7 +112,6 @@ export function useRestack(deps: {
   const homeStatus = createQuery(() => ({
     queryKey: ["home-restack-status"],
     queryFn: () => provider.restackStatus(),
-    refetchInterval: 5000,
   }));
   createEffect(() => {
     if (running()) return; // the running-restack effect owns `parked` mid-walk

@@ -380,8 +380,10 @@ def world_sig():
     # health. The pulse folds this in beside model_sig, so a trunk move or a PR state flip
     # pushes an SSE update to open tabs — model_sig itself must NOT include these (it keys
     # the /model cache, and remote drift shouldn't rebuild the model).
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    tip = ctx.run(["git", "rev-parse", "-q", "--verify", f"origin/{main}"]).stdout.strip()
+    from . import repostate
+    snap = repostate.snapshot()   # read ~1/s by the pulse: no spawns on the beat
+    main = snap.main()
+    tip = snap.remote(main)
     with _PR_STATE_LOCK:
         data = _pr_state_ent(ctx.repo_cwd())["data"] or {}
         states = sorted(

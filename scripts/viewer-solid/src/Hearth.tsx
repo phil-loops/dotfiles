@@ -32,7 +32,6 @@ export function Hearth() {
   const q = createQuery<RestackStatus>(() => ({
     queryKey: ["hearth-status"],
     queryFn: () => provider.restackStatus(),
-    refetchInterval: 2000,
     enabled: canMutate, // a baked static snapshot has no live engine to watch
   }));
 

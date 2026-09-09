@@ -104,7 +104,14 @@ function Layout(props: { children?: JSX.Element }) {
   // sit stale on a terminal commit until the next click. Each is served from a snapshot-keyed
   // memo server-side, so the fan-out costs only what actually changed.
   const refresh = () => {
-    for (const key of ["node", "model", "projects", "forest-health", "branch-prs", "sync", "push-preview", "commits", "prep-route"]) {
+    for (const key of ["node", "model", "projects", "forest-health", "branch-prs", "sync", "push-preview", "commits", "prep-route", "forest-branches", "review-requests"]) {
+      qc.invalidateQueries({ queryKey: [key] });
+    }
+  };
+  // the pulse's other fingerprint: agents, chat turns, restack drivers + reports, previews.
+  // These panels used to run their own 2–15s timers; now one server-side check pushes here.
+  const refreshProcs = () => {
+    for (const key of ["processes", "previews", "chat-jobs", "hearth-status", "restack-status", "home-restack-status", "restack-ambient", "restack-merges", "forestmap-restack"]) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -122,6 +129,7 @@ function Layout(props: { children?: JSX.Element }) {
     if (!canMutate || es) return; // static snapshot: no live event stream
     es = new EventSource("/events");
     es.addEventListener("update", refresh);
+    es.addEventListener("procs", refreshProcs);
     es.addEventListener("stale", onStale);
   };
   const closeStream = () => {
@@ -139,6 +147,7 @@ function Layout(props: { children?: JSX.Element }) {
       }
       openStream();
       refresh(); // we may have missed updates while hidden
+      refreshProcs();
     }
   };
   // visibilitychange never fires on an APP switch that leaves the window rendered (terminal on

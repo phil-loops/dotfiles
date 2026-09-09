@@ -163,7 +163,6 @@ export function NodeDetail() {
   const ambient = createQuery(() => ({
     queryKey: ["restack-ambient"],
     queryFn: () => provider.restackAmbient(),
-    refetchInterval: 15000,
   }));
   const nodeAmbient = (b: string) => ambient.data?.report?.branches.find((x) => x.branch === b);
 
