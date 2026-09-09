@@ -251,6 +251,19 @@ def file(req, u):
               "text/plain; charset=utf-8")
 
 
+# Answers are pure functions of refs, so they're memoised the way GitHub Desktop keeps
+# history in its store: /commits by (branch tip, origin tip, parent tip), /commit-diff by
+# sha — a commit's diff can never change. Bounded so a long-lived server doesn't grow forever.
+_COMMITS_CACHE = {}   # (repo, branch, refs-fingerprint) -> rows json
+_CDIFF_CACHE = {}     # (repo, sha) -> diff json
+
+
+def _bound(cache, cap):
+    if len(cache) > cap:
+        for k in list(cache)[: len(cache) // 2]:
+            del cache[k]
+
+
 def commits(req, u):
     # GitHub-Desktop-style history: the branch's OWN commits first (own:true), then the
     # ancestor history it forked from (own:false) so the list reads like a real timeline —
@@ -258,6 +271,15 @@ def commits(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
     parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
               or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
+    # one spawn fingerprints every ref the answer depends on (for-each-ref never fails on a
+    # missing pattern, so a tracking-less branch still keys on origin's copy); a miss costs
+    # the same as before
+    fp = ctx.run(["git", "for-each-ref", "--format=%(refname) %(objectname)",
+                  f"refs/heads/{branch}", f"refs/heads/{parent}", f"refs/remotes/*/{branch}", f"refs/remotes/*/{parent}"]).stdout
+    key = (ctx.repo_cwd(), branch, fp)
+    hit = _COMMITS_CACHE.get(key)
+    if hit is not None:
+        return req._send(200, hit)
     own = set(ctx.run(["git", "rev-list", f"{parent}..{branch}"]).stdout.split())
     # origin waterline: which commits the remote already has, so the list can draw the
     # GitHub-Desktop push line. Upstream first; a tracking-less branch (Phil pushes from
@@ -279,7 +301,10 @@ def commits(req, u):
                          "body": p[5].strip() if len(p) > 5 else "",
                          "own": p[0] in own,
                          **({"pushed": p[0] in pushed} if pushed is not None else {})})
-    req._send(200, json.dumps(rows))
+    out_json = json.dumps(rows)
+    _COMMITS_CACHE[key] = out_json
+    _bound(_COMMITS_CACHE, 200)
+    req._send(200, out_json)
 
 
 _CDIFF_HDR = re.compile(r"^diff --git a/(.+?) b/(.+)$")
@@ -290,6 +315,10 @@ def commit_diff(req, u):
     # node view renders — so the history list can expand a commit inline. Read-only: these are
     # historical commits, nothing to bless. Diffed against the commit's first parent.
     sha = parse_qs(u.query).get("sha", [""])[0]
+    key = (ctx.repo_cwd(), sha)
+    hit = _CDIFF_CACHE.get(key) if len(sha) >= 7 else None
+    if hit is not None:
+        return req._send(200, hit)
     counts = {}
     for ln in ctx.run(["git", "show", "--numstat", "--format=", sha]).stdout.splitlines():
         p = ln.split("\t")
@@ -307,7 +336,11 @@ def commit_diff(req, u):
         add, dele = counts.get(path, (0, 0))
         files.append({"path": path, "status": "clean", "add": add, "del": dele,
                       "patch": ch.rstrip("\n") + "\n"})
-    req._send(200, json.dumps({"sha": sha, "files": files}))
+    out_json = json.dumps({"sha": sha, "files": files})
+    if files and len(sha) >= 7:
+        _CDIFF_CACHE[key] = out_json
+        _bound(_CDIFF_CACHE, 300)
+    req._send(200, out_json)
 
 
 # --- POST ---

@@ -1,4 +1,5 @@
-import { createSignal, createMemo, createEffect, on, createResource, Show, For, type JSX } from "solid-js";
+import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
+import { createQuery, useQueryClient } from "@tanstack/solid-query";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, withRepo, canMutate } from "./provider";
@@ -431,7 +432,15 @@ export function FileEntry(props: {
 // lazily on first expand and are read-only (historical commits, nothing to bless).
 function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, session?: string) => void; onReworded?: () => void }) {
   const [open, setOpen] = createSignal(false);
-  const [diff] = createResource(() => (open() ? props.c.sha : undefined), (sha) => provider.commitDiff(sha));
+  // a commit's diff never changes, so it's cached for the session (and prefetched for the
+  // rows above the origin waterline by CommitsList) — expanding is a render, not a fetch
+  const diffQ = createQuery(() => ({
+    queryKey: ["commit-diff", props.c.sha],
+    queryFn: () => provider.commitDiff(props.c.sha),
+    enabled: open(),
+    staleTime: Infinity,
+  }));
+  const diff = () => diffQ.data;
   const noBless = { mutate: () => {} };
   // reword — GitHub Desktop's "amend" for any commit above the origin waterline: the message
   // changes, the tree does not (stack-reword rebuilds sha..tip and carries stacked children).
@@ -545,6 +554,14 @@ const DIVIDER =
 export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; frozen?: boolean; onChat: (f: FileDiff, session?: string) => void; onReworded?: () => void }) {
   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
+  // warm the diffs of what a push would send (the rows above the waterline, a handful at
+  // most) so those open instantly; everything else stays lazy
+  const qc = useQueryClient();
+  createEffect(() => {
+    for (const c of own().filter((c) => c.pushed === false).slice(0, 6)) {
+      void qc.prefetchQuery({ queryKey: ["commit-diff", c.sha], queryFn: () => provider.commitDiff(c.sha), staleTime: Infinity });
+    }
+  });
   // the origin waterline — GitHub Desktop's push line: everything above it goes out on
   // push, everything below origin already has. Index of the first pushed own row; -1 when
   // no remote ref exists (never pushed anywhere → no line to draw).

@@ -99,10 +99,12 @@ export function NodeDetail() {
     enabled: !!active(),
     placeholderData: keepPreviousData,
   }));
+  // fetched with the page (not on the first `c`) so the flip to history is instant — the
+  // branch-detail burst already runs in parallel and this one is a single ~150ms call
   const commits = createQuery(() => ({
     queryKey: ["commits", repoKey(), active()],
     queryFn: () => provider.commits(active()),
-    enabled: !!active() && view() === "commits",
+    enabled: !!active(),
     placeholderData: keepPreviousData,
   }));
 
