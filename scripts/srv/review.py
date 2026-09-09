@@ -267,14 +267,16 @@ def commits(req, u):
     if not upref and ctx.run(["git", "rev-parse", "--verify", "-q", f"origin/{branch}"]).returncode == 0:
         upref = f"origin/{branch}"
     pushed = set(ctx.run(["git", "rev-list", "-n", "400", upref]).stdout.split()) if upref else None
-    fmt = "%H\x1f%h\x1f%s\x1f%an\x1f%ad"   # \x1f = unit-sep: safe field split (subjects can hold anything)
+    # \x1f = unit-sep between fields, \x1e = record-sep between commits (bodies span lines)
+    fmt = "%H\x1f%h\x1f%s\x1f%an\x1f%ad\x1f%b\x1e"
     out = ctx.run(["git", "log", branch, f"--format={fmt}", "--date=short", "-n", "80"]).stdout
     rows = []
-    for ln in out.splitlines():
-        p = ln.split("\x1f")
+    for rec in out.split("\x1e"):
+        p = rec.strip("\n").split("\x1f")
         if len(p) >= 3:
             rows.append({"sha": p[1], "subject": p[2],
                          "author": p[3] if len(p) > 3 else "", "date": p[4] if len(p) > 4 else "",
+                         "body": p[5].strip() if len(p) > 5 else "",
                          "own": p[0] in own,
                          **({"pushed": p[0] in pushed} if pushed is not None else {})})
     req._send(200, json.dumps(rows))
