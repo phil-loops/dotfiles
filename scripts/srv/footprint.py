@@ -39,6 +39,14 @@ def _swap():
     return {"totalMb": int(float(m.group(1))), "usedMb": int(float(m.group(2)))} if m else {"totalMb": 0, "usedMb": 0}
 
 
+def _level():
+    # the kernel's own memorystatus level — the percentage it reports to memory_pressure(1).
+    # vm_stat's "free" is not a pressure signal on macOS: the file cache keeps it near zero by
+    # design (78 MB free with 5 GB reclaimable during a delete storm, 2026-09-09).
+    out = subprocess.run(["sysctl", "-n", "kern.memorystatus_level"], capture_output=True, text=True).stdout.strip()
+    return int(out) if out.isdigit() else -1
+
+
 def _total_mb():
     out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True).stdout.strip()
     return int(out) // 2**20 if out.isdigit() else 0
@@ -82,7 +90,9 @@ def _repo():
     nm = 0
     try:
         for d in os.listdir(home):
-            if os.path.isdir(os.path.join(home, d, "node_modules")):
+            nmp = os.path.join(home, d, "node_modules")
+            # a symlink to the main checkout is the intended shape; only a real clone counts
+            if os.path.isdir(nmp) and not os.path.islink(nmp):
                 nm += 1
     except OSError:
         pass
@@ -105,14 +115,16 @@ def get(req, u):
     total = _total_mb()
     vm = _vm_stat()
     swap = _swap()
-    # the same thresholds the incident memory names: swap near-full or free < 500MB is the
-    # state where next dev dies with 144 — everything else is information, not alarm
-    pressure = "critical" if (swap["totalMb"] and swap["usedMb"] / swap["totalMb"] > 0.85) or vm["freeMb"] < 300 \
-        else "high" if (swap["totalMb"] and swap["usedMb"] / swap["totalMb"] > 0.6) or vm["freeMb"] < 700 \
+    level = _level()
+    swap_pct = swap["usedMb"] / swap["totalMb"] if swap["totalMb"] else 0
+    # the kernel's level is the signal (it's what memory_pressure(1) reports); swap near-full
+    # is the state where next dev dies with 144, so it overrides upward
+    pressure = "critical" if (0 <= level < 10) or swap_pct > 0.85 \
+        else "high" if (0 <= level < 25) or swap_pct > 0.6 \
         else "ok"
     req._send(200, json.dumps({
         "at": time.time(),
-        "machine": {"totalMb": total, "pressure": pressure, **vm, "swap": swap, "top": _top()},
+        "machine": {"totalMb": total, "pressure": pressure, "levelPct": level, **vm, "swap": swap, "top": _top()},
         "repo": _repo(),
         "server": _self(),
     }))
