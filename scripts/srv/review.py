@@ -147,7 +147,9 @@ def _enrich(raw, branch):
             meta["description"] = desc
         if bid in ranks:
             meta["mergeRank"] = ranks[bid]
-    proj = picker._project_of(branch)
+    # the overview asks for the model by PROJECT name, which _project_of can't resolve (it maps a
+    # branch to its project) — the payload names its own project, so fall back to that
+    proj = picker._project_of(branch) or data.get("project")
     if proj:
         iv = ctx.run(["git", "config", f"stack-project.{proj}.interest"]).stdout.strip()
         if iv.lstrip("-").isdigit() and int(iv) > 0:
