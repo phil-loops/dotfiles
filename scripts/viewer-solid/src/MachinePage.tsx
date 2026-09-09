@@ -111,7 +111,7 @@ export function MachinePage() {
   // numbers are here so a leak in it would be seen rather than assumed.
   type Footprint = {
     machine: { totalMb: number; pressure: "ok" | "high" | "critical"; freeMb: number; activeMb: number; inactiveMb: number; wiredMb: number; compressedMb: number; swap: { totalMb: number; usedMb: number }; top: { rssMb: number; pid: number; cpu: number; name: string }[] };
-    repo: { worktrees: number; scratch: number; nodeModulesClones: number; disk: { usedGb?: number; totalGb?: number; pct?: number } };
+    repo: { worktrees: number; scratch: number; nodeModulesClones: number; disk: { usedGb?: number; totalGb?: number; pct?: number }; hygiene?: { at: number; days: number; stripped: number; apparentMb: number; kept: number } | null };
     server: { pid: number; rssMb: number; threads: number; children: number; uptimeS: number; caches: Record<string, number> };
   };
   const fp = createQuery<Footprint>(() => ({
@@ -419,6 +419,14 @@ export function MachinePage() {
                         <dt class="text-right text-ink">{f().repo.disk.pct}%</dt><dd class="m-0 text-ink-dim">disk · {f().repo.disk.usedGb} of {f().repo.disk.totalGb} GB</dd>
                       </Show>
                     </dl>
+                    {/* the hygiene agent's last pass — proof the sprawl is being tended, not just counted */}
+                    <Show when={f().repo.hygiene} fallback={<div class="mt-2 text-[10.5px] text-ink-faint">hygiene agent has not run yet</div>}>
+                      {(h) => (
+                        <div class="mt-2 text-[10.5px] text-ink-faint" title={`strips node_modules + .next from worktrees idle > ${h().days}d with no live process; every 6h`}>
+                          hygiene {uptime(Math.max(60, Math.floor(Date.now() / 1000 - h().at)))} ago · stripped {h().stripped}, kept {h().kept}
+                        </div>
+                      )}
+                    </Show>
                   </div>
                   <div>
                     <div class="mb-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-faint">this server</div>
