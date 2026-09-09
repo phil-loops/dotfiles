@@ -101,6 +101,33 @@ function WarmingRibbon(props: {
 // move the MAIN working tree onto the tip so the :3000 dev server serves the whole feature.
 // Two-click armed (it moves Phil's checkout); every guard re-verified server-side, and a
 // mid-chain conflict restores all branches to their pre-stage snapshots.
+// Pin/unpin this forest to the focus lane from its own page — the same stack-project.<p>.focus
+// rank Home's context menu writes, so no trip back to Home to mark what you're pushing now.
+function FocusPin(props: { project: string; repo?: string; focused: boolean }) {
+  const qc = useQueryClient();
+  const [busy, setBusy] = createSignal(false);
+  const toggle = async () => {
+    setBusy(true);
+    await fetch("/focus", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo: props.repo ?? "", project: props.project, on: !props.focused }),
+    }).catch(() => {});
+    await qc.invalidateQueries({ queryKey: ["model"] });
+    qc.invalidateQueries({ queryKey: ["projects"] });
+    setBusy(false);
+  };
+  return (
+    <button
+      class={`fo-focus cursor-pointer border-0 bg-transparent p-0 text-[13px] leading-none ${props.focused ? "text-gold-leaf hover:text-ink-dim" : "text-ink-faint hover:text-gold-leaf"}`}
+      classList={{ on: props.focused }}
+      disabled={busy()}
+      title={props.focused ? "unpin from the focus lane" : "pin to the focus lane — the hand-ordered 'pushing now' strip at the top of Home"}
+      onClick={toggle}
+    >{props.focused ? "★" : "☆"}</button>
+  );
+}
+
 function StageButton(props: { project: string }) {
   const [armed, setArmed] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
@@ -347,6 +374,9 @@ export function ForestOverview() {
     <div class="forest-overview min-h-screen bg-vellum-night">
       <header class="fo-head sticky top-0 z-[2] flex items-baseline gap-4 border-x-0 border-t-0 border-b border-solid border-rule bg-vellum-night px-6 py-4">
         <span class="fo-project font-display text-[21px] italic text-ink">{project()}</span>
+        <Show when={canMutate && model.data}>
+          <FocusPin project={project()} repo={forestRepo(location())} focused={model.data!.focus != null} />
+        </Show>
         <Show when={(model.data?.interest ?? 0) > 0}>
           <span class="fo-interest text-[11px] tracking-[-1px] text-gold-leaf" title={`interest ${model.data!.interest} — promoted on the Forests home`}>
             {interestPips(model.data!.interest!)}
