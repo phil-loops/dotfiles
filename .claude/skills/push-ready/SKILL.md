@@ -50,9 +50,13 @@ line in the final report.
 
 ### 4 · Seal
 
-`stack-squash --unpushed <branch>` — one voiced commit beyond the parent. If it reports nothing
-to squash, the branch is already sealed; move on. Squash preserves the tree, so an existing
-verdict survives sealing.
+**First push only** (no open PR): `stack-squash --unpushed <branch>` — one voiced commit beyond
+the parent. If it reports nothing to squash, the branch is already sealed; move on. Squash
+preserves the tree, so an existing verdict survives sealing.
+
+**Branch with an open PR: do NOT seal.** Follow-up commits are review rounds and push as they
+are (the door's `one` ward relaxes to "N follow-up commits", 2026-09-09); each subject must be
+voiced (no wip/fixup). Sealing them costs the reviewer the "changes since" view.
 
 ### 5 · Gate through the server — the CLI does not record
 
