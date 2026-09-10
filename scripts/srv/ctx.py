@@ -38,6 +38,16 @@ def repo_path(name):
     return REPOS.get(name)
 
 
+# Open /events streams. The server owns the counting; background threads read it to decide
+# whether speculative work is worth doing at all — idle has to be genuinely free, or the
+# server can't be left running (which is the root of the whole resurrection apparatus).
+PULSE_SUBS = [0]
+
+
+def watched():
+    return PULSE_SUBS[0] > 0
+
+
 def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT, repos):
     g = globals()
     g["run"], g["ROOT"], g["SCRIPTS"], g["CWD"], g["MAIN_WT"], g["REPOS"] = (
