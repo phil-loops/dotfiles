@@ -8,6 +8,7 @@
 // Visuals: an Action carries an optional `class` so it reuses the existing per-context styling
 // (.watch-pin, …) — the model is behaviour, not a restyle.
 import { createSignal, For, onCleanup, type JSX } from "solid-js";
+import { withRepo } from "./provider";
 
 export interface Action {
   id: string;
@@ -96,4 +97,31 @@ export function ActionBar(props: { actions: Action[]; class?: string }): JSX.Ele
       </For>
     </div>
   );
+}
+
+
+// Every mutating call in the viewer goes through here. Lived in NodeActions until the push door
+// moved out and both needed it; the repo prefix is the reason it can't just be `fetch`.
+export async function postStatus<T>(url: string, body: unknown): Promise<{ status: number; body: T }> {
+  // prefix the active repo (/monotoad/checkout) so the server pins the right repo — without it
+  // every node action (checkout/squash/rebase/contract/…) runs against the launched repo (loops).
+  const r = await fetch(withRepo(url), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  // /checkout & /squash send a JSON body on success AND on handled failure (409 held
+  // elsewhere, 500 git error) — parse it either way so onSuccess can branch on r.ok.
+  // A non-JSON body (server down / restarting, proxy 502, crash before the JSON path)
+  // throws here instead of failing silently — the mutations' onError surfaces it.
+  const text = await r.text();
+  try {
+    return { status: r.status, body: JSON.parse(text) as T };
+  } catch {
+    throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : " (empty response)"}`);
+  }
+}
+
+export async function post<T>(url: string, body: unknown): Promise<T> {
+  return (await postStatus<T>(url, body)).body;
 }

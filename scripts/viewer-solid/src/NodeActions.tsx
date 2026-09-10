@@ -20,7 +20,8 @@
 import { createSignal, For, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
-import { useArm } from "./actions";
+import { useArm, post, postStatus } from "./actions";
+import { PushDoor, usePushDoor } from "./PushDoor";
 import RebaseStream from "./RebaseStream";
 import { PlanStepsEditor } from "./PlanStepsEditor";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
@@ -45,7 +46,6 @@ const shortWt = (p: string) => p.split("/").pop() || p;
 
 const FIX_SHAPE = "cursor-pointer rounded-[5px] border bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-50";
 const FIX = `${FIX_SHAPE} border-del text-del`;
-const PUSH_RED = "cursor-pointer rounded-[5px] border border-del px-[9px] py-[3px] text-[12px] font-semibold leading-[1.55] opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-35";
 const ITEM = "flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] border border-transparent bg-transparent px-[10px] py-[7px] text-left text-[12px] leading-[1.55] text-patina enabled:hover:border-patina enabled:hover:bg-vellum-edge disabled:cursor-default disabled:opacity-45";
 const IC = "w-[14px] flex-none text-center opacity-85";
 const DONE = "text-[12px] transition-opacity duration-[240ms] ease-[ease] starting:opacity-0";
@@ -82,30 +82,6 @@ interface DeltaTestResult {
   failed?: number;
   total?: number;
   summary?: string; // tail of the runner output (for the tooltip)
-}
-
-async function postStatus<T>(url: string, body: unknown): Promise<{ status: number; body: T }> {
-  // prefix the active repo (/monotoad/checkout) so the server pins the right repo — without it
-  // every node action (checkout/squash/rebase/contract/…) runs against the launched repo (loops).
-  const r = await fetch(withRepo(url), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  // /checkout & /squash send a JSON body on success AND on handled failure (409 held
-  // elsewhere, 500 git error) — parse it either way so onSuccess can branch on r.ok.
-  // A non-JSON body (server down / restarting, proxy 502, crash before the JSON path)
-  // throws here instead of failing silently — the mutations' onError surfaces it.
-  const text = await r.text();
-  try {
-    return { status: r.status, body: JSON.parse(text) as T };
-  } catch {
-    throw new Error(`HTTP ${r.status}${text ? ": " + text.slice(0, 200) : " (empty response)"}`);
-  }
-}
-
-async function post<T>(url: string, body: unknown): Promise<T> {
-  return (await postStatus<T>(url, body)).body;
 }
 
 export function NodeActions(props: {
@@ -653,94 +629,17 @@ export function NodeActions(props: {
     enabled: !!props.branch && !props.isReview,
   }));
 
-  // push: the Phase-1 wards, mirrored from the /push card — server recomputes them all
-  // at push time; this button only arms when the read-only verdict is green.
-  const preview = createQuery(() => ({
-    queryKey: ["push-preview", props.branch],
-    queryFn: () =>
-      fetch(withRepo("/push-preview") + "?branch=" + encodeURIComponent(props.branch)).then(
-        (r) =>
-          r.json() as Promise<{
-            ok?: boolean;
-            outgoing?: number;
-            reasons?: string[];
-            web?: string;
-            originExists?: boolean;
-            published?: boolean;
-            followup?: boolean;
-            commits?: { sha: string; subject: string; date: string; files: number; add: number; del: number; merge: boolean; voiced: boolean }[];
-            moreCommits?: number;
-            files?: { path: string; add: number; del: number }[];
-            moreFiles?: number;
-            commit?: { sha: string; subject: string; body: string } | null;
-            review?: { flags: string[] } | null;
-          }>,
-      ),
-    enabled: !!props.branch && !props.isReview,
-  }));
-  // the manifest — GitHub Desktop's "what goes out on push" answered in the header: the
-  // outgoing commits with their churn, the files origin receives, where it lands.
-  const outN = () => preview.data?.outgoing ?? 0;
-  const outLabel = () => (outN() === 1 ? "to origin" : `${outN()} commits`);
-  const outChurn = () => {
-    const cs = preview.data?.commits ?? [];
-    return { add: cs.reduce((a, c) => a + c.add, 0), del: cs.reduce((a, c) => a + c.del, 0) };
-  };
-  const landing = () =>
-    preview.data?.followup ? "onto the open PR — pushed as they are" : preview.data?.originExists ? "fast-forward of origin's copy" : "new branch on origin";
-  const pushSummary = () => {
-    const p = preview.data;
-    if (!p) return "";
-    const nFiles = (p.files?.length ?? 0) + (p.moreFiles ?? 0);
-    return [
-      `→ origin/${props.branch} · ${landing()}`,
-      ...(p.commits ?? []).map((c) => `${c.sha.slice(0, 10)}  ${c.subject}  +${c.add} −${c.del}`),
-      ...(p.moreCommits ? [`+${p.moreCommits} more`] : []),
-      `${nFiles} file${nFiles === 1 ? "" : "s"}  +${outChurn().add} −${outChurn().del}`,
-    ].join("\n");
-  };
-  const [pushedWeb, setPushedWeb] = createSignal<string | null>(null);
-  const pushOrigin = createMutation(() => ({
-    mutationFn: () =>
-      post<{ ok?: boolean; err?: string; web?: string; opened?: boolean }>("/push-origin", { branch: props.branch }),
-    onSuccess: (r) => {
-      refreshAfterPrep();
-      if (!r.ok) {
-        setDone(`✗ ${r.err || "push refused"}`);
-        return;
-      }
-      // The server opens the target in the local browser on success (the open PR if one
-      // exists, else the compare-and-create form); the link below is the fallback
-      // (mobile, or a headless host with no `open`).
-      const isPr = (r.web ?? "").includes("/pull/");
-      setDone(
-        r.opened
-          ? isPr
-            ? "✓ pushed — opening the open PR"
-            : "✓ pushed — opening the compare view to author the PR"
-          : "✓ pushed — origin has it",
-      );
-      setPushedWeb(r.web ?? null);
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "push failed"}`),
-  }));
-
-  // outgoing==0 but the branch is up-to-date on origin: no push to make, so open the PR page
-  // directly — the open PR if one exists (view), else the compare-and-create form (author).
-  // The push-less exit from the dead-push-button trap; opens a browser tab, never gh pr create.
-  const openPr = createMutation(() => ({
-    mutationFn: () =>
-      post<{ ok?: boolean; web?: string; opened?: boolean; hadPr?: boolean }>("/open-pr", { branch: props.branch }),
-    onSuccess: (r) => {
-      if (!r.ok) {
-        setDone("✗ no origin remote to open");
-        return;
-      }
-      setDone(r.opened ? (r.hadPr ? "✓ opening the open PR" : "✓ opening the compare view to author the PR") : "✓ PR page ready");
-      setPushedWeb(r.web ?? null);
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn’t open"}`),
-  }));
+  // the shared-history door — its query, its two mutations and its manifest live in PushDoor;
+  // the aliases keep the rest of this header reading the same names it always did
+  const door = usePushDoor({
+    branch: () => props.branch,
+    isReview: () => props.isReview,
+    setDone,
+    refresh: refreshAfterPrep,
+  });
+  const preview = door.preview;
+  const pushOrigin = door.pushOrigin;
+  const pushedWeb = door.pushedWeb;
 
   // reconcile — the ⋯ override for a divergence prep can't route (no PR, or you want
   // Claude to work out the source of truth in a worktree). No force-push, no blind pull.
@@ -855,133 +754,22 @@ export function NodeActions(props: {
         />
       </Show>
 
-      {/* THE red button — the only way anything here reaches origin (Phil: "whatever is
-          being shared publicly needs to be with me at the helm"). Deliberately not the
-          spine's slot: local motions and the shared-history door never share a control.
-          Appears only when a commit is actually outgoing; arms only when the wards are
-          green; the server re-verifies everything at push time regardless. */}
-      <Show when={!isReview() && (preview.data?.outgoing ?? 0) > 0}>
-        <button
-          class={`nh-fix nh-push-red ${PUSH_RED} ${armed() === "pushOrigin" ? "armed bg-del text-vellum-night" : "bg-transparent text-del enabled:hover:bg-del-bg"}`}
-          disabled={busy() || !preview.data?.ok}
-          title={
-            preview.data?.ok
-              ? `push to origin — the team sees this the moment it lands\n${pushSummary()}`
-              : `not pushable yet:\n${(preview.data?.reasons ?? ["reading the branch…"]).join("\n")}`
-          }
-          onClick={fire(() => trigger("pushOrigin", () => pushOrigin.mutate(), 20000))}
-        >
-          {pushOrigin.isPending
-            ? "pushing…"
-            : armed() === "pushOrigin"
-              ? `confirm: push ${outN() === 1 ? "" : `${outN()} commits `}to origin`
-              : `⇧ push ${outLabel()}`}
-        </button>
-      </Show>
-
-      {/* the crossing manifest — shown while the door is armed, so the second click is made
-          knowing exactly what origin receives: each outgoing commit with its churn, the files,
-          where it lands. Arming holds 20s here (not the 4s of the local motions) for reading. */}
-      <Show when={!isReview() && armed() === "pushOrigin" && preview.data}>
-        {(p) => (
-          <div class="nh-manifest mt-1 flex basis-full flex-col gap-[7px] rounded-[9px] border border-solid border-del px-[14px] py-3">
-            <div class="flex flex-wrap items-baseline gap-x-[10px]">
-              <span class="font-display text-[15px] font-semibold italic text-del">
-                pushing {outN()} commit{outN() === 1 ? "" : "s"} → origin/{props.branch}
-              </span>
-              <span class="text-[11px] text-ink-faint">{landing()}</span>
-            </div>
-            <ol class="m-0 flex list-none flex-col gap-[3px] p-0">
-              <For each={p().commits ?? []}>
-                {(c) => (
-                  <li class="flex items-baseline gap-[8px] text-[12px]">
-                    <span class="font-mono text-[11px] text-ink-faint">{c.sha.slice(0, 10)}</span>
-                    <span class={`flex-1 ${c.voiced ? "text-ink" : "text-del"}`}>{c.subject}</span>
-                    <span class="whitespace-nowrap font-mono text-[11px] text-ink-faint">
-                      {c.files} file{c.files === 1 ? "" : "s"} <span class="text-add">+{c.add}</span> <span class="text-del">−{c.del}</span>
-                    </span>
-                  </li>
-                )}
-              </For>
-              <Show when={p().moreCommits}>{(m) => <li class="text-[11px] italic text-ink-faint">+{m()} more commits</li>}</Show>
-            </ol>
-            <div class="flex flex-wrap gap-x-[12px] gap-y-[2px] font-mono text-[11px] text-ink-dim">
-              <For each={p().files ?? []}>
-                {(f) => (
-                  <span class="whitespace-nowrap">
-                    {f.path} <span class="text-add">+{f.add}</span> <span class="text-del">−{f.del}</span>
-                  </span>
-                )}
-              </For>
-              <Show when={p().moreFiles}>{(m) => <span class="italic text-ink-faint">+{m()} more files</span>}</Show>
-            </div>
-            <div class="flex items-center gap-[10px] text-[11px] text-ink-faint">
-              <span>✓ gates green for this exact tree</span>
-              <Show when={p().review}>{(rv) => <span>{rv().flags.length ? `⚑ ${rv().flags.length} review flag${rv().flags.length === 1 ? "" : "s"} unapplied` : "✓ reviewed"}</span>}</Show>
-              <button class={`nh-editor-close ${EDITOR_CLOSE}`} onClick={() => disarm()}>
-                cancel
-              </button>
-            </div>
-          </div>
-        )}
-      </Show>
-
-      {/* push-ready's review verdict for THIS exact tree — tree-keyed like gates-green, so a
-          moved tree silently retires it (the server sends null). Flags are the reviewer's
-          unapplied findings, full text on hover; a fresh EMPTY list is reviewed-clean. */}
-      <Show when={!isReview() && preview.data?.review}>
-        {(rv) =>
-          rv().flags.length ? (
-            <span class="nh-review-flags cursor-help whitespace-nowrap text-[12px] text-patina" title={rv().flags.join("\n")}>
-              ⚑ {rv().flags.length} review flag{rv().flags.length === 1 ? "" : "s"}
-            </span>
-          ) : (
-            <span class="nh-reviewed cursor-help whitespace-nowrap text-[12px] text-ink-faint" title="push-ready reviewed this exact tree — no unapplied findings">
-              ✓ reviewed
-            </span>
-          )
-        }
-      </Show>
-
-      {/* open the ONE outgoing commit's message on demand — play with it (or ✦ voice it) and
-          push, without running the whole sync motion first. Pre-filled from the push-preview
-          verdict; the editor it opens is the same one prep ends at. Hidden while it's already
-          open so a re-click can't clobber unsaved edits. */}
-      <Show when={!isReview() && preview.data?.commit && !editorOpen()}>
-        <button
-          class={`nh-fix nh-open-pr ${FIX}`}
-          disabled={busy()}
-          title="edit this commit's message (subject + body) before pushing — no sync needed"
-          onClick={() => {
-            const c = preview.data!.commit!;
-            setMsgSubject(c.subject);
-            setMsgBody(c.body);
-            setEditorOpen(true);
-          }}
-        >
-          ✎ message
-        </button>
-      </Show>
-
-      {/* the branch IS on origin: the PR page is one click away regardless of outgoing state.
-          Open the PR (view/tweak) or the compare-and-create form (author) — no push, no gh pr
-          create. With a commit still outgoing it shows what origin has NOW; push adds yours. */}
-      <Show when={!isReview() && preview.data?.originExists}>
-        <button
-          class={`nh-fix nh-open-pr ${FIX}`}
-          disabled={busy() || openPr.isPending}
-          title={
-            preview.data?.published
-              ? "opens this branch's open PR in a browser — tweak it on github.com (no push)"
-              : (preview.data?.outgoing ?? 0) > 0
-                ? "opens the compare-and-create page for what origin already has — author or tweak the PR there; the outgoing commit joins it once you push (no push, no gh pr create)"
-                : "pushed to origin but no PR yet — opens the compare-and-create page to author it (no push, no gh pr create)"
-          }
-          onClick={() => openPr.mutate()}
-        >
-          {openPr.isPending ? "opening…" : preview.data?.published ? "↗ view PR" : "↗ open PR"}
-        </button>
-      </Show>
+      <PushDoor
+        door={door}
+        branch={() => props.branch}
+        isReview={isReview}
+        busy={busy}
+        armed={armed}
+        trigger={trigger}
+        disarm={disarm}
+        fire={fire}
+        editorOpen={editorOpen}
+        openEditor={(subject, body) => {
+          setMsgSubject(subject);
+          setMsgBody(body);
+          setEditorOpen(true);
+        }}
+      />
 
       {/* review node: when the author pushed, surface it on load + offer the keep-blessings pull */}
       <Show when={isReview() && remote.data?.available}>
