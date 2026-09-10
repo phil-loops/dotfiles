@@ -16,10 +16,14 @@ workflow: read → propose → merge-story plan → sign-off → execute, ending
 > round — atomicity decays through iteration, each fix landing "where the code already is."
 > Companion final-state check at the forest's tip: **every `export` the forest adds needs a
 > consumer outside its module** — unused = un-export it in the branch that introduced it.
-> Companion routing check, per branch: **rationale belongs in the node's description, its
-> implementation note, or the PR body — not in the diff.** A comment running past one line, or any
-> block sitting above an import or a constant rather than an exported symbol, is prose in the wrong
-> container: move it into the story rather than deleting it.
+> Companion comment check, per branch — every added comment resolves one of three ways.
+> **Supplies meaning the next line lacks** = a naming bug, not a comment: name the constant or
+> extract the predicate until the line reads without it (`return false` under "means non-match"
+> wants `return NON_MATCH`), and a comment repeated verbatim is a missing abstraction.
+> **Rationale** = route it into the node's description, implementation note, or PR body; never
+> merely delete it. **Restates the next line** = delete. Length is not the test — the worst
+> offenders are one-liners, and a slab above an `import` or a `const` was never the JSDoc
+> exemption's to claim.
 
 ## When to use
 
@@ -93,7 +97,7 @@ order; per branch:
 The viewer then renders the story (`⌘K → "merge story"`, or `≣ story`), and
 `stack-pr-body <branch>` drafts each PR body — the container the routing check empties into,
 so run that check per branch as you go, not after. The repo's `AGENTS.md` §Comments owns the
-rule itself; its JSDoc exemption covers doc comments on exported symbols only.
+rule itself; the check above is just its three bars applied at forest time.
 
 ## Guardrails
 
