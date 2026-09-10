@@ -159,7 +159,7 @@ def _build_registry():
 REPOS = _build_registry()
 
 # wire the shared context for the extracted handler modules (srv/*)
-srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT, repos=REPOS)
+srvctx.init(run=run, ROOT=ROOT, SCRIPTS=SCRIPTS, CWD=CWD, MAIN_WT=MAIN_WT, repos=REPOS, log=_log)
 
 
 # restack helpers + endpoints now live in srv/restack.py (delegated below).

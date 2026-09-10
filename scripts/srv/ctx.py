@@ -7,6 +7,12 @@ import hashlib
 import threading
 
 run = None      # run(argv, timeout=None) -> CompletedProcess, cwd=repo_cwd(); expiry = rc 124
+
+
+def log(line):
+    # replaced by the server's durable logger at init; stderr is the fallback so a srv module
+    # imported outside the server (the fixture harness) still says things out loud
+    print(line, file=__import__("sys").stderr)
 ROOT = ""       # servedir (where restack.log / index.html live)
 SCRIPTS = ""    # ~/.dotfiles/scripts
 CWD = ""        # the repo the server was launched in (the default when no ?repo= is selected)
@@ -48,10 +54,12 @@ def watched():
     return PULSE_SUBS[0] > 0
 
 
-def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT, repos):
+def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT, repos, log=None):
     g = globals()
     g["run"], g["ROOT"], g["SCRIPTS"], g["CWD"], g["MAIN_WT"], g["REPOS"] = (
         run, ROOT, SCRIPTS, CWD, MAIN_WT, repos)
+    if log is not None:
+        g["log"] = log
 
 
 def model_sig():

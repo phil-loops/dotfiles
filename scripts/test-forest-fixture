@@ -343,6 +343,45 @@ def run_checks(repo, shas, only):
         review.commit_diff(r, U(f"sha={shas['d']}"))
         check("commit-diff: one commit's files", len(json.loads(r.body)["files"]) == 1, r.body[:120])
 
+    if want("shellout"):
+        print("script boundary")
+        from srv import shellout
+        import stat as _stat
+        d = os.path.join(os.path.dirname(repo), "fakescripts")
+        os.makedirs(d, exist_ok=True)
+
+        def fake(name, body, rc=0):
+            path = os.path.join(d, name)
+            with open(path, "w") as fh:
+                fh.write(f"#!/bin/sh\n{body}\nexit {rc}\n")
+            os.chmod(path, os.stat(path).st_mode | _stat.S_IEXEC)
+            return path
+
+        v, e = shellout.json_out(fake("ok", 'echo \'{"ok": true, "gates": []}\''), require=("ok",))
+        check("shellout: a clean verdict parses", e is None and v["ok"] is True, str(e))
+        v, e = shellout.json_out(fake("noisy", 'echo "warning: something"; echo \'{"ok": true}\''), require=("ok",))
+        check("shellout: a verdict behind a warning line still parses", e is None and v["ok"] is True, str(e))
+        v, e = shellout.json_out(fake("garbage", 'echo "zsh: command not found: nope"'), require=("ok",))
+        check("shellout: garbage is an error, never passed through", v is None and e is not None)
+        check("shellout: the error names the script and quotes it",
+              e and "garbage" in e["err"] and "not found" in e["detail"]["stdout"], str(e))
+        v, e = shellout.json_out(fake("renamed", 'echo \'{"okay": true}\''), require=("ok",))
+        check("shellout: a renamed key is a contract break, not a default",
+              v is None and e and "missing ok" in e["err"], str(e))
+        v, e = shellout.json_out(fake("crash", 'echo "fatal: bad revision" >&2', rc=128), require=("ok",))
+        check("shellout: a nonzero exit reports the script's own last words",
+              v is None and e and "bad revision" in e["err"], str(e))
+        check("shellout: the exit code rides along", e and e["detail"]["exit"] == 128, str(e))
+        v, e = shellout.json_out(fake("list", 'echo \'[1,2,3]\''), want=list)
+        check("shellout: a list verdict is allowed when asked for", e is None and v == [1, 2, 3], str(e))
+        v, e = shellout.json_out(fake("wrongtype", 'echo \'[1,2]\''), require=("ok",))
+        check("shellout: a list where a dict was wanted is an error",
+              v is None and e and "expected dict" in e["err"], str(e))
+        # the REAL contract, not a stand-in: stack-gates is the script the push door believes
+        v, e = shellout.json_out(os.path.join(HERE, "stack-gates"), ["--branch", "main"], require=("ok",))
+        check("shellout: the real stack-gates verdict satisfies the contract",
+              e is None and isinstance(v.get("gates"), list), str(e))
+
     if want("reword"):
         print("stack-reword")
         before_tree = git(repo, "rev-parse", "child^{tree}")
