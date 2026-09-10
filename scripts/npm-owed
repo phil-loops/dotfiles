@@ -16,7 +16,12 @@
 # node_modules/.npm-owed — an unchanged pair costs two hashes, ~40ms. A successful --install
 # writes the post-install pair as settled, so npm's occasional stray "changed N" never loops.
 #
-# A symlinked node_modules belongs to another tree and is never judged or installed here.
+# A borrowed node_modules is never judged or installed here, in either of its two shapes: a
+# plain symlink to the donor, and seed-gen's EXPLODED view (a directory of per-entry symlinks,
+# built because Turbopack refuses a node_modules symlinked out of the project root). Both hold
+# no packages of their own, so npm's verdict on them is meaningless, and installing would swap
+# ~190MB of links for a ~3.5GB real tree — the state worktree-hygiene exists to reclaim. Same
+# majority-of-entries-are-symlinks discriminator that script uses, so the two agree on shapes.
 set -uo pipefail
 
 install=0
@@ -26,6 +31,9 @@ dir="${dir%/}"
 
 [[ -f "$dir/package-lock.json" ]] || exit 2
 [[ -d "$dir/node_modules" && ! -L "$dir/node_modules" ]] || exit 2
+nm_entries=$(ls -A "$dir/node_modules" 2>/dev/null | wc -l)
+nm_links=$(find "$dir/node_modules" -mindepth 1 -maxdepth 1 -type l 2>/dev/null | wc -l)
+(( nm_links * 2 > nm_entries )) && exit 2
 
 hash_of() { [[ -f "$1" ]] && shasum -a 256 "$1" | cut -c1-32 || echo none; }
 cache="$dir/node_modules/.npm-owed"
