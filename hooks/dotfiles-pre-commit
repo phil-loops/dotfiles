@@ -1,0 +1,28 @@
+#!/bin/sh
+# dotfiles pre-commit — run the forest fixture harness when this commit could break it.
+#
+# Gated on path, because the harness is ~11s: it fires only when scripts/srv/**, a stack-*
+# script, worktree-hygiene, or the harness itself is staged. The index is SHARED across this
+# repo's worktrees and Phil commits by pathspec, so the path list here is deliberately
+# over-inclusive — running once too often costs 11s, missing a break costs a debugging session.
+#
+# CANOPY_TEST_SKIP=1 git commit …   bypasses (say so in the commit message when you use it).
+[ -n "$CANOPY_TEST_SKIP" ] && exit 0
+
+root=$(git rev-parse --show-toplevel)
+staged=$(git diff --cached --name-only; git diff --name-only)
+echo "$staged" | grep -qE '^scripts/(srv/|stack-|worktree-hygiene|test-forest-fixture)' || exit 0
+
+printf 'canopy fixture harness … '
+# the harness scrubs GIT_* itself; dropping them here too keeps the fixture honest if it is
+# ever run through a shell that re-exports them
+out=$(env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX -u GIT_AUTHOR_DATE \
+  python3 "$root/scripts/test-forest-fixture" 2>&1)
+if [ $? -eq 0 ]; then
+  printf '%s\n' "$(printf '%s' "$out" | tail -1)"
+  exit 0
+fi
+printf 'FAILED\n\n'
+printf '%s\n' "$out" | grep -E '✗|FAILED:'
+printf '\nthe commit is blocked. Fix it, or commit anyway with CANOPY_TEST_SKIP=1 git commit …\n'
+exit 1

@@ -1,0 +1,359 @@
+#!/usr/bin/env python3
+"""test-forest-fixture — build a throwaway repo with a small forest, then assert the tooling's
+read-only verdicts and its ref-rewriting scripts against it.
+
+  test-forest-fixture              run every check
+  test-forest-fixture --keep       leave the fixture on disk and print its path
+  test-forest-fixture -k <substr>  only checks whose name contains <substr>
+
+Why: everything load-bearing here was verified by hand — a throwaway branch in the real repo,
+a curl, an eyeball. That works and leaves nothing behind. This is the same ritual with the
+repo built from scratch (so the expected answer is known, not inferred) and the assertions
+written down, so the namespace migration and the zsh rewrites have something to fail against.
+
+Two layers, no server and no network:
+  · the srv modules called directly (repostate, push, sync, review) with ctx pinned at the
+    fixture and the open-PR cache SEEDED — a fixture has no GitHub, and seeding the cache dict
+    is test setup, not a production seam, so the real gh path stays the only one that runs live.
+  · the scripts as subprocesses (stack-reword, worktree-hygiene) — the ones that move refs.
+
+The fixture:
+    A─B─C            main, origin/main = C
+       └─D           base   (parent main, unpushed, 1 commit)
+          └─E        child  (parent base)
+       └─F─G         pub    (origin/pub = F → 1 outgoing, published)
+       └─J─K         pubtwo (origin/pubtwo = B → 2 outgoing, published)
+       └─H─I         two    (parent main, unpushed, 2 commits)
+       └─W           wip    (subject "wip: not voiced")
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+
+# Every git call below targets a temp repo by explicit cwd, so an INHERITED git environment is
+# always wrong and never harmless: run from a pre-commit hook, git exports GIT_DIR and
+# GIT_INDEX_FILE, and the fixture's `git init` re-inits the caller's repo instead (2026-09-09 —
+# it landed on ~/.dotfiles itself and only failed at `remote add`). Scrub before anything runs.
+for _k in [k for k in os.environ if k.startswith("GIT_")]:
+    del os.environ[_k]
+
+FAIL = []
+PASS = []
+
+
+def check(name, cond, detail=""):
+    (PASS if cond else FAIL).append(name)
+    print(f"  {'✓' if cond else '✗'} {name}" + (f"\n      {detail}" if not cond and detail else ""))
+
+
+def git(repo, *args, check_rc=True):
+    r = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+    if check_rc and r.returncode != 0:
+        raise SystemExit(f"fixture git failed: git {' '.join(args)}\n{r.stderr}")
+    return r.stdout.strip()
+
+
+def commit(repo, msg, path="f.txt", body=None):
+    with open(os.path.join(repo, path), "a") as fh:
+        fh.write((body or msg) + "\n")
+    git(repo, "add", path)
+    git(repo, "commit", "-qm", msg)
+    return git(repo, "rev-parse", "HEAD")
+
+
+def build():
+    """A repo whose forest shape is known, with a bare 'origin' holding main + pub."""
+    root = tempfile.mkdtemp(prefix="forest-fixture-")
+    repo, remote = os.path.join(root, "work"), os.path.join(root, "origin.git")
+    subprocess.run(["git", "init", "-q", "--bare", "--initial-branch=main", remote], check=True)
+    subprocess.run(["git", "init", "-q", "--initial-branch=main", repo], check=True)
+    for k, v in (("user.email", "t@t.t"), ("user.name", "Fixture"), ("commit.gpgsign", "false")):
+        git(repo, "config", k, v)
+    git(repo, "remote", "add", "origin", remote)
+
+    a = commit(repo, "A")
+    b = commit(repo, "B")
+    c = commit(repo, "C")
+    git(repo, "push", "-q", "origin", "main")
+
+    git(repo, "checkout", "-q", "-b", "base", b)
+    d = commit(repo, "add the base thing")
+    git(repo, "checkout", "-q", "-b", "child", d)
+    e = commit(repo, "use the base thing in the child")
+
+    git(repo, "checkout", "-q", "-b", "pub", b)
+    f = commit(repo, "publish this one")
+    git(repo, "push", "-q", "origin", "pub")
+    g = commit(repo, "then follow it up")
+
+    git(repo, "checkout", "-q", "-b", "two", b)
+    h = commit(repo, "first of two")
+    i = commit(repo, "second of two")
+
+    # a published branch with TWO outgoing commits: the remote-tracking ref is planted at B
+    # directly rather than pushed, so `two` above stays genuinely unpushed for the reword checks
+    git(repo, "checkout", "-q", "-b", "pubtwo", b)
+    commit(repo, "first follow-up")
+    commit(repo, "second follow-up")
+    git(repo, "update-ref", "refs/remotes/origin/pubtwo", b)
+
+    git(repo, "checkout", "-q", "-b", "wip", b)
+    w = commit(repo, "wip: not voiced")
+
+    git(repo, "checkout", "-q", "main")
+    for br, parent in (("base", "main"), ("child", "base"), ("pub", "main"), ("two", "main"),
+                       ("pubtwo", "main"), ("wip", "main")):
+        git(repo, "config", f"stack-branch.{br}.parent", parent)
+        git(repo, "config", f"stack-branch.{br}.project", "fixture")
+        git(repo, "config", f"branch.{br}.description", f"{br}: one line of purpose")
+        git(repo, "config", "--add", "stack-project.fixture.branch", br)
+    # a branch carrying ONLY the legacy namespace — the migration's canary
+    git(repo, "checkout", "-q", "-b", "legacy", b)
+    commit(repo, "legacy-namespace branch")
+    git(repo, "checkout", "-q", "main")
+    git(repo, "config", "branch.legacy.stack-parent", "base")
+    return root, repo, {"a": a, "b": b, "c": c, "d": d, "e": e, "f": f, "g": g, "h": h, "i": i, "w": w}
+
+
+def wire_srv(repo):
+    """Point the srv modules at the fixture: our own `run` (ctx's is the server's), and a
+    SEEDED open-PR cache so nothing reaches for gh."""
+    from srv import ctx
+
+    def run(args, timeout=None):
+        return subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True, timeout=timeout)
+
+    ctx.CWD = repo
+    ctx.init(run=run, ROOT=repo, SCRIPTS=HERE, CWD=repo, MAIN_WT=repo, repos={})
+    ctx.set_repo(repo)
+    from srv import sync
+    sync._pr_cache[repo] = {"at": time.monotonic(), "heads": set(), "outage": False}
+    return sync
+
+
+def set_prs(sync, repo, heads):
+    sync._pr_cache[repo] = {"at": time.monotonic(), "heads": set(heads), "outage": False}
+    from srv import repostate
+    repostate.invalidate()
+
+
+def ward(v, k):
+    return next((w for w in v["wards"] if w["k"] == k), None)
+
+
+def run_checks(repo, shas, only):
+    def want(name):
+        return not only or only in name
+
+    sync = wire_srv(repo)
+    from srv import repostate, push, review
+
+    if want("repostate"):
+        print("repostate")
+        snap = repostate.snapshot()
+        check("repostate: parent from stack-branch", snap.parent("child") == "base", snap.parent("child"))
+        check("repostate: parent falls back to main", snap.parent("base") == "main", snap.parent("base"))
+        check("repostate: unknown branch → main", snap.parent("nope") == "main", snap.parent("nope"))
+        check("repostate: legacy branch.<b>.stack-parent still resolves",
+              snap.parent("legacy") == "base", snap.parent("legacy"))
+        check("repostate: local tip", snap.local("base") == shas["d"], snap.local("base"))
+        check("repostate: origin copy present only where pushed",
+              bool(snap.remote("pub")) and not snap.remote("base"))
+        check("repostate: description", snap.description("base").startswith("base:"), snap.description("base"))
+        check("repostate: multivar config keeps every value",
+              len(snap.get_all("stack-project.fixture.branch")) == 6,
+              str(snap.get_all("stack-project.fixture.branch")))
+        fp = snap.fingerprint
+        git(repo, "branch", "fp-probe", shas["b"])
+        repostate.invalidate()
+        check("repostate: fingerprint moves on a ref change", repostate.snapshot().fingerprint != fp)
+        fp2 = repostate.snapshot().fingerprint
+        git(repo, "config", "stack-branch.base.role", "proof")
+        repostate.invalidate()
+        check("repostate: fingerprint moves on a config write", repostate.snapshot().fingerprint != fp2)
+        git(repo, "branch", "-D", "fp-probe")
+        git(repo, "config", "--unset", "stack-branch.base.role")
+        repostate.invalidate()
+
+    if want("verdict"):
+        print("push verdict")
+        set_prs(sync, repo, [])
+        v = push._origin_verdict("base")
+        check("verdict: one unpushed commit counts as outgoing", v["outgoing"] == 1, str(v["outgoing"]))
+        check("verdict: unpushed branch has no origin copy", v["originExists"] is False)
+        check("verdict: gates ward red with no recorded verdict", not ward(v, "gates")["ok"])
+        check("verdict: not pushable while a hard ward is red", v["ok"] is False, str(v["reasons"]))
+        git(repo, "config", "stack-branch.base.gates-green-tree", git(repo, "rev-parse", "base^{tree}"))
+        repostate.invalidate()
+        v = push._origin_verdict("base")
+        check("verdict: recorded green tree opens the door", v["ok"] is True, str(v["reasons"]))
+        check("verdict: manifest carries per-commit churn",
+              v["commits"] and v["commits"][0]["files"] == 1 and v["commits"][0]["add"] >= 1,
+              json.dumps(v["commits"][:1]))
+
+        v = push._origin_verdict("two")
+        check("verdict: two commits on an UNPUBLISHED branch are refused",
+              not ward(v, "one")["ok"] and "2 commits" in ward(v, "one")["why"], ward(v, "one")["why"])
+        set_prs(sync, repo, ["pubtwo"])
+        v = push._origin_verdict("pubtwo")
+        check("verdict: two follow-ups on a PUBLISHED branch are allowed",
+              ward(v, "one")["ok"] and "follow-up" in ward(v, "one")["label"], json.dumps(ward(v, "one")))
+        check("verdict: follow-up flag set", v["followup"] is True)
+
+        set_prs(sync, repo, [])
+        v = push._origin_verdict("wip")
+        check("verdict: a wip subject fails the voiced ward", not ward(v, "voiced")["ok"])
+        v = push._origin_verdict("main")
+        check("verdict: trunk is refused outright",
+              any("trunk" in r for r in v["reasons"]), str(v["reasons"]))
+        check("verdict: missing branch → None", push._origin_verdict("no-such-branch") is None)
+
+        v = push._origin_verdict("pub")
+        check("verdict: published branch with 1 outgoing", v["outgoing"] == 1 and v["published"] is False)
+        set_prs(sync, repo, ["pub"])
+        v = push._origin_verdict("pub")
+        check("verdict: published comes from the PR head set", v["published"] is True)
+        check("verdict: fast-forward holds when origin is an ancestor", v["ff"] is True)
+
+    if want("chain"):
+        print("chain + pr base")
+        set_prs(sync, repo, ["pub"])
+        check("chain: stacked child targets its parent's open PR",
+              push._pr_base("legacy") == "main", push._pr_base("legacy"))
+        git(repo, "config", "stack-branch.stacked-on-pub.parent", "pub")
+        git(repo, "branch", "stacked-on-pub", "pub")
+        from srv import repostate as rs
+        rs.invalidate()
+        check("chain: child of a published parent bases its PR on that parent",
+              push._pr_base("stacked-on-pub") == "pub", push._pr_base("stacked-on-pub"))
+        check("chain: intact chain reports no break", push._chain_break("stacked-on-pub") == "")
+        git(repo, "branch", "-f", "stacked-on-pub", shas["b"])   # drop the parent's pushed commit
+        rs.invalidate()
+        check("chain: a child missing its parent's ORIGIN copy is flagged",
+              push._chain_break("stacked-on-pub") == "pub", push._chain_break("stacked-on-pub"))
+        git(repo, "branch", "-D", "stacked-on-pub")
+        git(repo, "config", "--remove-section", "stack-branch.stacked-on-pub")
+        rs.invalidate()
+
+    if want("sync"):
+        print("sync state")
+        set_prs(sync, repo, ["pub"])
+        st = sync.state("base")
+        check("sync: behind counts main's commits the branch lacks", st["behind"] == 1, str(st["behind"]))
+        check("sync: an unpublished root off main is syncable", st["syncable"] is True, st["why"])
+        check("sync: never pushed reads as local", st["shared"] == "local", st["shared"])
+        st = sync.state("pub")
+        check("sync: a published branch is not syncable", st["syncable"] is False, st["why"])
+        check("sync: unpushed commits read as ahead", st["shared"] == "ahead" and st["aheadOfOrigin"] == 1,
+              f'{st["shared"]}/{st["aheadOfOrigin"]}')
+        st = sync.state("child")
+        check("sync: a stacked branch with a project routes to restack", st["restack"] is True, st["why"])
+
+    if want("commits"):
+        print("commits + diff")
+
+        class Req:
+            def __init__(self):
+                self.body = None
+
+            def _send(self, code, body, ctype=None):
+                self.code, self.body = code, body
+
+        class U:
+            def __init__(self, q):
+                self.query = q
+
+        r = Req()
+        review.commits(r, U("branch=child"))
+        rows = json.loads(r.body)
+        own = [c for c in rows if c["own"]]
+        check("commits: own set is parent..branch", len(own) == 1 and own[0]["subject"].startswith("use the base"),
+              json.dumps([c["subject"] for c in own]))
+        check("commits: ancestors are present but not own", any(not c["own"] for c in rows))
+        check("commits: body rides along for the reword prefill", "body" in rows[0])
+        r = Req()
+        review.commits(r, U("branch=pub"))
+        rows = json.loads(r.body)
+        pushed = [c["pushed"] for c in rows if c["own"]]
+        check("commits: the origin waterline marks what is already pushed",
+              pushed == [False, True], str(pushed))
+        r = Req()
+        review.commit_diff(r, U(f"sha={shas['d']}"))
+        check("commit-diff: one commit's files", len(json.loads(r.body)["files"]) == 1, r.body[:120])
+
+    if want("reword"):
+        print("stack-reword")
+        before_tree = git(repo, "rev-parse", "child^{tree}")
+        base_before = git(repo, "rev-parse", "base")
+        r = subprocess.run([os.path.join(HERE, "stack-reword"), "--branch", "child", shas["e"],
+                            "-m", "reworded child subject", "-m", "and a body"],
+                           cwd=repo, capture_output=True, text=True)
+        check("reword: exits clean on an unpushed commit", r.returncode == 0, r.stderr.strip()[:200])
+        check("reword: the tree is untouched", git(repo, "rev-parse", "child^{tree}") == before_tree)
+        check("reword: the new subject is in place",
+              git(repo, "log", "-1", "--format=%s", "child") == "reworded child subject",
+              git(repo, "log", "-1", "--format=%s", "child"))
+        check("reword: the body landed", "and a body" in git(repo, "log", "-1", "--format=%b", "child"))
+        check("reword: the parent branch did not move", git(repo, "rev-parse", "base") == base_before)
+
+        # rewording a commit BELOW the tip carries the commits above it
+        tip_subject = git(repo, "log", "-1", "--format=%s", "two")
+        r = subprocess.run([os.path.join(HERE, "stack-reword"), "--branch", "two", shas["h"],
+                            "-m", "reworded the lower commit"], cwd=repo, capture_output=True, text=True)
+        check("reword: a non-tip commit rewords", r.returncode == 0, r.stderr.strip()[:200])
+        check("reword: the commits above it are carried",
+              git(repo, "log", "-1", "--format=%s", "two") == tip_subject,
+              git(repo, "log", "-1", "--format=%s", "two"))
+        check("reword: the lower commit's new subject is in history",
+              "reworded the lower commit" in git(repo, "log", "--format=%s", "two"))
+
+        r = subprocess.run([os.path.join(HERE, "stack-reword"), "--branch", "pub", shas["f"],
+                            "-m", "should be refused"], cwd=repo, capture_output=True, text=True)
+        check("reword: refuses a commit origin already holds", r.returncode != 0, r.stdout.strip()[:160])
+        check("reword: says why it refused", "pushed" in r.stderr.lower(), r.stderr.strip()[:160])
+
+    if want("hygiene"):
+        print("worktree-hygiene")
+        wt = os.path.join(os.path.dirname(repo), "wt-idle")
+        git(repo, "worktree", "add", "-q", "--detach", wt, "main")
+        os.makedirs(os.path.join(repo, "node_modules"), exist_ok=True)      # the main checkout's real one
+        os.makedirs(os.path.join(wt, "node_modules", "pkg"), exist_ok=True)  # a stray clone
+        env = {**os.environ, "HOME": os.environ["HOME"]}
+        r = subprocess.run([sys.executable, os.path.join(HERE, "worktree-hygiene")],
+                           cwd=repo, capture_output=True, text=True, env=env)
+        # the script reads ~/coding/loops, so a fixture run is a smoke test of its refusal path
+        check("hygiene: runs without touching the fixture", r.returncode in (0, 1))
+        check("hygiene: dry run never writes", os.path.isdir(os.path.join(wt, "node_modules")))
+        git(repo, "worktree", "remove", "--force", wt)
+
+
+def main():
+    only = ""
+    if "-k" in sys.argv:
+        only = sys.argv[sys.argv.index("-k") + 1]
+    root, repo, shas = build()
+    keep = "--keep" in sys.argv
+    print(f"fixture: {repo}")
+    try:
+        run_checks(repo, shas, only)
+    finally:
+        if keep:
+            print(f"\nkept: {root}")
+        else:
+            shutil.rmtree(root, ignore_errors=True)
+    print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
+    if FAIL:
+        for f in FAIL:
+            print(f"  FAILED: {f}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
