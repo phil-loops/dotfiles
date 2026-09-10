@@ -30,11 +30,12 @@ const BADGE_TITLE: Record<Source, string> = {
   merged: "already merged — its line is its PR title, from the merge ledger",
 };
 
-const postStory = (branch: string, text: string) =>
+const postStory = (branch: string, text: string): Promise<{ ok: boolean; prev: string }> =>
   fetch(withRepo("/story"), {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ branch, text }),
-  });
+  }).then(async (r) => ({ ok: r.ok, prev: r.ok ? ((await r.json()) as { prev?: string }).prev ?? "" : "" }))
+    .catch(() => ({ ok: false, prev: "" }));
 
 export function StoriesEditor(props: { project: string; branch: string; onPick: (branch: string) => void }) {
   const [data, { refetch }] = createResource(
@@ -44,6 +45,9 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
   );
   const [drafts, setDrafts] = createSignal<Record<string, string>>({});
   const [saving, setSaving] = createSignal<Record<string, "saving" | "saved" | "failed">>({});
+  // the story this row just overwrote, offered back for a few seconds — a story is hand-written
+  // prose and git config keeps no history, so a wrong save must be one click from undone
+  const [undoable, setUndoable] = createSignal<Record<string, string>>({});
   const areas: Record<string, HTMLTextAreaElement | undefined> = {};
 
   const draftOf = (s: Step): string => drafts()[s.branch] ?? s.job;
@@ -57,9 +61,9 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
 
   // Typing the description back verbatim clears the override rather than storing a copy of it —
   // the description stays the single source, and the badge flips back to "description".
-  const save = async (s: Step, text: string) => {
+  const save = async (s: Step, text: string, verbatim = false) => {
     const t = text.trim();
-    const stored = t === s.description.trim() ? "" : t;
+    const stored = !verbatim && t === s.description.trim() ? "" : t;
     if (stored === s.story.trim()) {
       setDrafts((d) => { const n = { ...d }; delete n[s.branch]; return n; });
       return;
@@ -74,6 +78,10 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
     setDrafts((d) => { const n = { ...d }; delete n[s.branch]; return n; });
     mark(s.branch, "saved");
     setTimeout(() => mark(s.branch, null), 1800);
+    if (r.prev && r.prev !== stored) {
+      setUndoable((u) => ({ ...u, [s.branch]: r.prev }));
+      setTimeout(() => setUndoable((u) => { const n = { ...u }; delete n[s.branch]; return n; }), 15000);
+    }
   };
   const revert = (s: Step) => setDrafts((d) => { const n = { ...d }; delete n[s.branch]; return n; });
   const focusNext = (from: Step) => {
@@ -116,7 +124,7 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
                         value={draftOf(s)}
                         disabled={state() === "saving"}
                         onInput={(e) => setDrafts((d) => ({ ...d, [s.branch]: e.currentTarget.value }))}
-                        onBlur={() => { if (dirty(s)) void save(s, draftOf(s)); }}
+                        onBlur={() => { if (dirty(s) && !saving()[s.branch]) void save(s, draftOf(s)); }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter" && !e.shiftKey) {
                             e.preventDefault();
@@ -132,6 +140,15 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
                     <span class="stories-tail flex flex-none items-baseline gap-[8px] pt-[4px]">
                       <Show when={state()}>
                         <span class={`text-[10px] ${state() === "failed" ? "text-del" : "text-patina"}`}>{state() === "saving" ? "saving…" : state() === "saved" ? "saved ✓" : "couldn’t save"}</span>
+                      </Show>
+                      <Show when={undoable()[s.branch]}>
+                        {(prev) => (
+                          <button
+                            class="stories-undo cursor-pointer border-0 bg-transparent p-0 text-[10px] text-gold-leaf underline decoration-dotted hover:text-ink"
+                            title={`put back: ${prev()}`}
+                            onClick={() => { setUndoable((u) => { const n = { ...u }; delete n[s.branch]; return n; }); void save(s, prev(), true); }}
+                          >undo</button>
+                        )}
                       </Show>
                       <span class={`stories-src rounded-[4px] border px-[5px] text-[9.5px] uppercase tracking-[0.06em] ${BADGE[src()]}`} title={BADGE_TITLE[src()]}>
                         {src() === "merged" && s.pr ? `merged #${s.pr}` : src()}
