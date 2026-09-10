@@ -64,6 +64,32 @@ export STACK_REVIEW_PORT="$STABLE_PORT"
 # starts a SECOND server on a random port.
 sig=$(curl -sf --max-time 3 "http://127.0.0.1:${STABLE_PORT}/sig" 2>/dev/null) || sig=""
 
+# ── ONE owner of "start" ─────────────────────────────────────────────────────────────────
+# Everything that can bring this server up comes through this script: the interactive launch,
+# `--ensure` from the repo's predev hook, hx-ship, and gh-to-nvim-host (which is also how the
+# browser extension launches it). Until now each of those could SPAWN, and against a supervised
+# owner that is a race the owner loses — tried 2026-09-09: the launchd agent ended up on a
+# random port while an on-demand server held the stable one, healthy to launchd and invisible
+# to every consumer. So when an owner exists for THIS repo, nobody else spawns: they kick the
+# agent and wait for its port.
+AGENT="com.philbrockman.canopy-server"
+OWNER_FILE="$HOME/.cache/canopy-server/owner"
+
+owner_is_ours() {   # the agent is loaded AND it supervises this repo (it is per-repo)
+  launchctl print "gui/$(id -u)/${AGENT}" >/dev/null 2>&1 || return 1
+  [[ -r "$OWNER_FILE" ]] || return 1
+  [[ "$(head -1 "$OWNER_FILE")" == "$repo_id" ]]
+}
+
+wait_for_port() {   # $1 = seconds to wait for /sig to answer
+  local tries=$(( ${1:-20} * 4 ))
+  for i in $(seq 1 $tries); do
+    curl -sf --max-time 3 "http://127.0.0.1:${STABLE_PORT}/sig" >/dev/null 2>&1 && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
 if (( supervise )); then
   # take the port: any live holder is either a stale on-demand server for this repo or a
   # foreign squatter, and either way the supervised process is the owner now.
@@ -80,6 +106,7 @@ if (( supervise )); then
   fi
   servedir="$HOME/.cache/canopy-server"   # stable, not mktemp: it outlives every restart
   mkdir -p "$servedir"
+  print -r -- "$repo_id" > "$OWNER_FILE"   # what the deferral above reads: this repo has an owner
   viewer="$here/viewer-solid"
   [[ -f "$viewer/dist/index.html" ]] || ( cd "$viewer" && npm run build >/dev/null 2>&1 ) || true
   export STACK_REVIEW_SUPERVISED=1
@@ -114,6 +141,25 @@ if [[ -n "$sig" ]]; then
     done
   fi
   echo "✦ reclaimed :${STABLE_PORT} from another repo (${other}) → rebinding to $(basename "$repo")" >&2
+fi
+
+# The owner starts servers for this repo; we only ask. (Not in --supervise: that IS the owner.)
+if (( ! supervise )) && owner_is_ours; then
+  launchctl kickstart "gui/$(id -u)/${AGENT}" >/dev/null 2>&1 || true
+  if wait_for_port 20; then
+    if (( ensure )); then
+      echo "stack-review-serve: backend ensured live → http://127.0.0.1:${STABLE_PORT}"
+    elif (( no_open )); then
+      echo "✦ owner serving (not opened) → http://127.0.0.1:${STABLE_PORT}"
+    else
+      open "http://127.0.0.1:${STABLE_PORT}/${qs}"
+      echo "✦ live review → http://127.0.0.1:${STABLE_PORT}  (${branch:-project picker})"
+    fi
+    exit 0
+  fi
+  # the owner is installed but didn't come up: say so and start one here rather than leave the
+  # consumer with nothing — a wedged agent must not become a dead tool
+  echo "stack-review-serve: ${AGENT} is installed but didn't answer on :${STABLE_PORT} — starting one here" >&2
 fi
 
 servedir="$(mktemp -d)"   # scratch ROOT (restack.log etc.); the page itself is the built dist/
