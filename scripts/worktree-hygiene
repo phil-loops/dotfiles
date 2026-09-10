@@ -11,6 +11,10 @@ relinked regardless of age; .next keeps an idle window.
   worktree-hygiene --apply         do it, appending one JSON line per tree to the log
   worktree-hygiene --days N        idle window for .next (default 2)
 
+Three shapes count as fine, not just the symlink: see nm_state — seed-gen's exploded
+per-entry-symlink view is deliberate (Turbopack refuses a node_modules that links out of the
+project root) and nearly free, so only a REAL clone with no live process is reclaimed.
+
 In use means any process has its cwd inside the tree (a preview server, a Claude session, an
 editor shell). Idle for .next means the newest of: the directory's mtime, its .git gitfile,
 and every file git status reports as changed. Review scratch under /private/tmp/stack-study
@@ -64,6 +68,33 @@ def newest_touch(path):
     return latest
 
 
+def nm_state(path):
+    """Which of the three node_modules shapes this is — the discriminator hygiene turned out to
+    need. seed-gen builds an EXPLODED view (a directory of per-entry symlinks into the donor)
+    because Turbopack refuses a node_modules that symlinks out of the project root, and that view
+    costs almost nothing. Treating it as "a real directory, so wrong state" made this script and
+    seed-gen fight: relink, re-explode, relink (4 trees twice on 2026-09-10). Measured: exploded
+    = 580 of 662 entries are symlinks, 186 MB; a real clone = 0 symlinks, ~3.5 GB.
+
+      "link"     — one symlink to the donor: what stack-open installs. Nothing to do.
+      "exploded" — a directory of per-entry symlinks: seed-gen's, deliberate. Nothing to do.
+      "real"     — actual packages on disk: only a running preview needs this.
+      "absent"   — no node_modules at all.
+    """
+    if os.path.islink(path):
+        return "link"
+    if not os.path.isdir(path):
+        return "absent"
+    try:
+        entries = os.listdir(path)
+    except OSError:
+        return "absent"
+    if not entries:
+        return "absent"
+    links = sum(1 for e in entries if os.path.islink(os.path.join(path, e)))
+    return "exploded" if links * 2 > len(entries) else "real"
+
+
 def apparent_mb(path):
     out = subprocess.run(["du", "-sk", path], capture_output=True, text=True).stdout.split()
     return int(out[0]) // 1024 if out and out[0].isdigit() else 0
@@ -88,7 +119,7 @@ def main():
             continue
         nm = os.path.join(wt, "node_modules")
         nxt = os.path.join(wt, ".next")
-        real_nm = os.path.isdir(nm) and not os.path.islink(nm)
+        real_nm = nm_state(nm) == "real"
         has_next = os.path.isdir(nxt)
         if not real_nm and not has_next:
             continue

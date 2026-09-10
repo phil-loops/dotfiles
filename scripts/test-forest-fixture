@@ -28,6 +28,7 @@ The fixture:
 """
 import json
 import os
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -420,6 +421,37 @@ def run_checks(repo, shas, only):
         os.makedirs(os.path.join(repo, "node_modules"), exist_ok=True)      # the main checkout's real one
         os.makedirs(os.path.join(wt, "node_modules", "pkg"), exist_ok=True)  # a stray clone
         env = {**os.environ, "HOME": os.environ["HOME"]}
+        # the discriminator that stopped hygiene from fighting seed-gen: three shapes, and only
+        # a REAL clone is worth reclaiming
+        # one dict for globals AND locals: split them and the script's own `import os` lands in
+        # locals while its functions look up globals
+        ns = {"__name__": "wh"}
+        exec(compile(pathlib.Path(os.path.join(HERE, "worktree-hygiene")).read_text(),
+                     "worktree-hygiene", "exec"), ns)
+        state = ns["nm_state"]
+        donor = os.path.join(os.path.dirname(repo), "donor-nm")
+        os.makedirs(os.path.join(donor, "pkg-a"), exist_ok=True)
+        os.makedirs(os.path.join(donor, "pkg-b"), exist_ok=True)
+        shapes = os.path.join(os.path.dirname(repo), "shapes")
+        os.makedirs(shapes, exist_ok=True)
+        whole = os.path.join(shapes, "whole")
+        os.path.islink(whole) or os.symlink(donor, whole)
+        exploded = os.path.join(shapes, "exploded")
+        os.makedirs(exploded, exist_ok=True)
+        for e in ("pkg-a", "pkg-b"):
+            tgt = os.path.join(exploded, e)
+            os.path.islink(tgt) or os.symlink(os.path.join(donor, e), tgt)
+        os.makedirs(os.path.join(exploded, ".prisma"), exist_ok=True)   # seed-gen copies this one for real
+        real = os.path.join(shapes, "real")
+        os.makedirs(os.path.join(real, "pkg-a"), exist_ok=True)
+        os.makedirs(os.path.join(real, "pkg-b"), exist_ok=True)
+        check("hygiene: one symlink to the donor is the intended shape", state(whole) == "link", state(whole))
+        check("hygiene: seed-gen's per-entry-symlink view is left alone",
+              state(exploded) == "exploded", state(exploded))
+        check("hygiene: real packages on disk are the reclaimable shape", state(real) == "real", state(real))
+        check("hygiene: no node_modules reads as absent",
+              state(os.path.join(shapes, "nope")) == "absent", state(os.path.join(shapes, "nope")))
+
         r = subprocess.run([sys.executable, os.path.join(HERE, "worktree-hygiene")],
                            cwd=repo, capture_output=True, text=True, env=env)
         # the script reads ~/coding/loops, so a fixture run is a smoke test of its refusal path
