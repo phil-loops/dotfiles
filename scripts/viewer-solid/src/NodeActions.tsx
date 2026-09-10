@@ -22,8 +22,8 @@ import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm, post, postStatus } from "./actions";
 import { PushDoor, usePushDoor } from "./PushDoor";
+import { MessageEditor, useMessageEditor } from "./MessageEditor";
 import RebaseStream from "./RebaseStream";
-import { PlanStepsEditor } from "./PlanStepsEditor";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
 import { conflictWarning, nextStepOf, stationOf, type Station } from "./nodeStation";
 import { patchHtml, patchLineCounts } from "./FileRail";
@@ -49,7 +49,6 @@ const FIX = `${FIX_SHAPE} border-del text-del`;
 const ITEM = "flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] border border-transparent bg-transparent px-[10px] py-[7px] text-left text-[12px] leading-[1.55] text-patina enabled:hover:border-patina enabled:hover:bg-vellum-edge disabled:cursor-default disabled:opacity-45";
 const IC = "w-[14px] flex-none text-center opacity-85";
 const DONE = "text-[12px] transition-opacity duration-[240ms] ease-[ease] starting:opacity-0";
-const EDITOR_CLOSE = "cursor-pointer text-[11px] leading-[1.55] text-ink-faint";
 
 function holdReason(r: CheckoutResult): string {
   const parts: string[] = [];
@@ -553,8 +552,6 @@ export function NodeActions(props: {
 
   // ── the editor — where every sync lands: the one outgoing commit, editable pre-push ──
   const [editorOpen, setEditorOpen] = createSignal(false);
-  const [msgSubject, setMsgSubject] = createSignal("");
-  const [msgBody, setMsgBody] = createSignal("");
   const [routedNotes, setRoutedNotes] = createSignal<string[]>([]);
   const refreshAfterPrep = () => {
     qc.invalidateQueries({ queryKey: ["node", props.branch] });
@@ -563,61 +560,16 @@ export function NodeActions(props: {
     sync.refetch();
     preview.refetch();
   };
-  const saveMsg = createMutation(() => ({
-    mutationFn: () =>
-      post<{ ok?: boolean; err?: string }>("/prep-message", {
-        branch: props.branch, subject: msgSubject(), body: msgBody(),
-      }),
-    onSuccess: (r) => {
-      if (!r.ok) {
-        setDone(`✗ ${r.err || "couldn't save the message"}`);
-        return;
-      }
-      setDone("✓ message saved");
-      setEditorOpen(false);
-      refreshAfterPrep();
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't save the message"}`),
-  }));
-
-  // the opt-in claude pass — prep commits with a mechanical message so it never waits
-  // on a model; this button is the only thing that asks claude to voice it
-  const draftMsg = createMutation(() => ({
-    mutationFn: () =>
-      post<{ ok?: boolean; err?: string; subject?: string; body?: string }>("/draft-message", {
-        branch: props.branch,
-      }),
-    onSuccess: (r) => {
-      if (!r.ok || !r.subject) {
-        setDone(`✗ ${r.err || "couldn't draft the message"}`);
-        return;
-      }
-      setMsgSubject(r.subject);
-      setMsgBody(r.body ?? "");
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't draft the message"}`),
-  }));
-
-  // recompute this branch's forest-plan block from stack config and fold it into the body,
-  // replacing any stale plan already there. Free — no model call, just where-it-fits facts.
-  const planFill = createMutation(() => ({
-    mutationFn: () =>
-      fetch(withRepo("/plan-section") + "?branch=" + encodeURIComponent(props.branch)).then((r) =>
-        r.text(),
-      ),
-    onSuccess: (section) => {
-      const s = section.trim();
-      if (!s) {
-        setDone("✗ no plan — this branch isn't in a project");
-        return;
-      }
-      const lines = msgBody().split("\n");
-      const cut = lines.findIndex((l) => l.startsWith("Part of "));
-      const prose = (cut === -1 ? msgBody() : lines.slice(0, cut).join("\n")).replace(/\s+$/, "");
-      setMsgBody(prose ? `${prose}\n\n${s}` : s);
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "couldn't recompute the plan"}`),
-  }));
+  // the message editor — its three mutations and the box live in MessageEditor; the header
+  // keeps only "is it open" and hands the draft back through the hook
+  const ed = useMessageEditor({
+    branch: () => props.branch,
+    setDone,
+    refresh: refreshAfterPrep,
+    close: () => setEditorOpen(false),
+  });
+  const setMsgSubject = ed.setSubject;
+  const setMsgBody = ed.setBody;
 
   // what prep WOULD do — the read-only routed verdict, so the button teaches before it acts
   const prepRoute = createQuery(() => ({
@@ -1014,61 +966,14 @@ export function NodeActions(props: {
         </a>
       </Show>
 
-      {/* the message editor — prep always ends here: the ONE outgoing commit's subject +
-          body, editable before the push. Saving rewrites only that unpushed commit
-          (server-verified); the tree, author, and gates verdict are untouched. */}
       <Show when={editorOpen()}>
-        {/* the marker class stays wired into index.css's unfold grammar (transition,
-            overflow: clip, @starting-style) — only the box styling lives here */}
-        <div class="nh-editor mt-1 flex basis-full flex-col gap-[7px] rounded-[9px] border border-solid border-gold-deep bg-gold-wash px-[14px] py-3">
-          <Show when={routedNotes().length}>
-            <div class="nh-editor-routed text-[11px] italic text-patina">{routedNotes().join(" · ")}</div>
-          </Show>
-          <input
-            class="nh-editor-subject border-x-0 border-t-0 border-b border-rule bg-transparent px-[1px] py-[3px] font-display text-[17px] font-semibold italic text-ink outline-none focus:border-b-gold-leaf"
-            value={msgSubject()}
-            placeholder="subject — the one line the team reads in history"
-            onInput={(e) => setMsgSubject(e.currentTarget.value)}
-          />
-          {/* each step's line writes its OWN branch's durable story — so a story survives this
-              branch's merge, instead of being frozen as text in this one commit's plan block */}
-          <PlanStepsEditor branch={props.branch} onSaved={() => planFill.mutate()} />
-          <textarea
-            class="nh-editor-body resize-y border-0 bg-transparent p-[1px] font-mono text-[12px] leading-[1.55] text-ink-dim outline-none"
-            value={msgBody()}
-            placeholder="body — what ships and why"
-            rows={5}
-            onInput={(e) => setMsgBody(e.currentTarget.value)}
-          />
-          <div class="nh-editor-row flex items-center gap-[10px]">
-            <button
-              class={`nh-fix nh-editor-save ${FIX_SHAPE} border-gold-deep text-gold-leaf`}
-              disabled={saveMsg.isPending || !msgSubject().trim()}
-              onClick={() => saveMsg.mutate()}
-            >
-              {saveMsg.isPending ? "saving…" : "save message"}
-            </button>
-            <button
-              class={`nh-editor-close ${EDITOR_CLOSE}`}
-              disabled={planFill.isPending}
-              title="recompute this branch's forest-plan block from the stack config (free — no model call)"
-              onClick={() => planFill.mutate()}
-            >
-              {planFill.isPending ? "…" : "↻ plan"}
-            </button>
-            <button
-              class={`nh-editor-close ${EDITOR_CLOSE}`}
-              disabled={draftMsg.isPending}
-              title="ask claude to draft the message in your voice from the outgoing diff"
-              onClick={() => draftMsg.mutate()}
-            >
-              {draftMsg.isPending ? "voicing…" : "✦ voice"}
-            </button>
-            <button class={`nh-editor-close ${EDITOR_CLOSE}`} onClick={() => setEditorOpen(false)}>
-              close
-            </button>
-          </div>
-        </div>
+        <MessageEditor
+          ed={ed}
+          branch={() => props.branch}
+          routedNotes={routedNotes}
+          onClose={() => setEditorOpen(false)}
+          onPlanSaved={() => ed.planFill.mutate()}
+        />
       </Show>
 
       <Show when={rebaseStreaming()}>
