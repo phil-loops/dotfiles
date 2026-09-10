@@ -15,7 +15,7 @@ import tempfile
 import time
 from urllib.parse import quote, parse_qs
 
-from . import ctx, stage, sync, repostate
+from . import ctx, stage, sync, repostate, shellout
 
 
 def delta_tests(req, raw):
@@ -152,15 +152,16 @@ def gates(req, raw):
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
         _spawn_gates(branch, fix=d.get("fix", False))
         return req._send(200, json.dumps({"ok": True, "started": True}))
-    r = ctx.run(cmd)
-    # stack-gates always prints a JSON verdict on stdout and exits 0
-    try:
-        if json.loads(r.stdout).get("ok"):
-            _record_green(branch, _tree(branch))
-            repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
-    except Exception:
-        pass
-    req._send(200, r.stdout or json.dumps({"ok": False, "gates": [], "err": r.stderr or "gates crashed"}))
+    # The verdict the push door hangs on: validated, never passed through. It used to ship
+    # whatever stack-gates printed to the browser as HTTP 200, and decide green inside a bare
+    # `except: pass` — so a line of noise ahead of the JSON silently left push locked.
+    verdict, err = shellout.json_out(cmd[0], cmd[1:], require=("ok",))
+    if err:
+        return req._send(200, json.dumps({**err, "gates": []}))
+    if verdict.get("ok"):
+        _record_green(branch, _tree(branch))
+        repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
+    req._send(200, json.dumps(verdict))
 
 
 def _spawn_gates(branch, fix=False):
@@ -644,11 +645,8 @@ def _squash_unpushed(branch, message=""):
     cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format", "--no-voice"]
     if message:
         cmd.append(f"--message={message}")
-    r = ctx.run([*cmd, branch])
-    try:
-        return json.loads(r.stdout)
-    except Exception:
-        return {"ok": False, "err": (r.stderr or r.stdout or "squash failed").strip()[:300]}
+    verdict, err = shellout.json_out(cmd[0], [*cmd[1:], branch], require=("ok",))
+    return err if err else verdict
 
 
 def prep_push(req, raw):

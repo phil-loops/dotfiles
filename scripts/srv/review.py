@@ -19,7 +19,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, repostate, picker
+from . import ctx, repostate, shellout, picker
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
@@ -123,13 +123,13 @@ def _enrich(raw, branch):
     except ValueError:
         return raw
     ranks, order = {}, []
-    rk = ctx.run([os.path.join(ctx.SCRIPTS, "stack-merge-rank"), branch])
-    if rk.returncode == 0:
-        try:
-            mr = json.loads(rk.stdout) or {}
-            ranks, order = mr.get("rank", {}), mr.get("order", [])
-        except ValueError:
-            pass
+    mr, rank_err = shellout.json_out(os.path.join(ctx.SCRIPTS, "stack-merge-rank"), [branch],
+                                     require=("rank", "order"))
+    if mr:
+        ranks, order = mr["rank"], mr["order"]
+    elif rank_err:
+        # the graft is optional (the map still draws without ranks) but the break is not silent
+        ctx.log(rank_err["err"])
     for bid, meta in (data.get("nodes") or {}).items():
         if not isinstance(meta, dict):
             continue
