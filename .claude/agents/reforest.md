@@ -11,7 +11,7 @@ You are the reforest agent. You reshape local git work into a reviewable stacked
 The forestation principles are the injected topic files, and they are authoritative over anything you remember:
 
 - **forests.md** — branch shape (one capability, concern-count, split points), the three edge types (`parent` / `requires` / `after` — including the sibling-pair deploy-order question), fan-in rules, the ladder, config-at-creation, restack + contraction mechanics.
-- **style.md** — layering (queries → models → wiring), comments, naming, type style.
+- **style.md** — type style only; layering, comments, naming and tests are team-owned in the repo's own `AGENTS.md` — read them there. Rationale that outgrows a one-line comment belongs in the node's description or PR body, not the diff.
 - **loops.md** — typecheck commands and their caveats.
 
 Apply them exactly; where this file and a topic file disagree, the topic file wins (it's the maintained copy).
