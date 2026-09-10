@@ -586,9 +586,15 @@ def previews(req):
                 # the natural "before" for a swap: the branch's stack parent, else main
                 if br and br != "main" and not br.startswith("detached"):
                     try:
-                        pr = subprocess.run(["git", "-C", main_wt, "config", "stack-branch.%s.parent" % br],
-                                            capture_output=True, text=True, timeout=4)
-                        pv["swapTo"] = pr.stdout.strip() or "main"
+                        # dual-read by hand: this reads ANOTHER worktree, so the server's
+                        # snapshot (pinned to the request's repo) is the wrong source
+                        pv["swapTo"] = "main"
+                        for key in ("branch.%s.stack-parent" % br, "stack-branch.%s.parent" % br):
+                            pr = subprocess.run(["git", "-C", main_wt, "config", key],
+                                                capture_output=True, text=True, timeout=4)
+                            if pr.stdout.strip():
+                                pv["swapTo"] = pr.stdout.strip()
+                                break
                     except Exception:
                         pv["swapTo"] = "main"
         if pvs:

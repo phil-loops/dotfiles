@@ -410,7 +410,8 @@ def _upstream_state(branch, main):
     up = r.stdout.strip() if r.returncode == 0 else ""
     # deliberate divergence: origin holds the frozen PR (the review artifact), local holds
     # the restacked truth; squash-merge reconciles. The bit calms the ⇄ warning + prep.
-    frozen = bool(ctx.run(["git", "config", f"stack-branch.{branch}.frozen-origin"]).stdout.strip())
+    from . import repostate
+    frozen = bool(repostate.snapshot().branch_key(branch, "frozen-origin"))
     if not up:
         return {"upstream": "", "upstreamBad": False, "upstreamReason": "",
                 "diverged": False, "ahead": 0, "behind": 0, "frozenOrigin": frozen}
@@ -1013,8 +1014,8 @@ def force_scope(branch, upstream):
     origin moves after Phil read this sheet."""
     lease = ctx.run(["git", "rev-parse", f"refs/remotes/{upstream}"]).stdout.strip()
     tip_tree = ctx.run(["git", "rev-parse", f"{branch}^{{tree}}"]).stdout.strip()
-    gates_green = bool(tip_tree) and tip_tree == ctx.run(
-        ["git", "config", f"stack-branch.{branch}.gates-green-tree"]).stdout.strip()
+    from . import repostate
+    gates_green = bool(tip_tree) and tip_tree == repostate.snapshot().branch_key(branch, "gates-green-tree")
     pr = None
     try:
         url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
