@@ -309,7 +309,7 @@ def run_checks(repo, shas, only):
         import shlex as _shlex
         # PENDING only ever shrinks. stack-config-move is the sweep itself — it moves legacy to
         # target and deletes legacy, so dual-writing would be nonsense; it stays exempt.
-        PENDING = {"stack-restack", "stack-rm"}
+        PENDING = set()   # empty: every writer dual-writes, so the sweep can run
         EXEMPT = {"stack-config-move"}
 
         def _kind(ln):
@@ -353,8 +353,8 @@ def run_checks(repo, shas, only):
             zsh_offenders += _legacy_writes(f)
         check("dualwrite: no legacy-only write left in the converted zsh scripts",
               not zsh_offenders, str(zsh_offenders[:5]))
-        check("dualwrite: only the two contested files are still pending",
-              PENDING == {"stack-restack", "stack-rm"}, str(sorted(PENDING)))
+        check("dualwrite: nothing is pending — the sweep's gate is met",
+              not PENDING, str(sorted(PENDING)))
         # read vs write, textually: a read closes the key and the arg list — f"stack-branch.…"])
         # — while a write follows the key with a comma and a value. --unset / --add /
         # --remove-section are writes whatever follows.

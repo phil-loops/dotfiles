@@ -294,7 +294,7 @@ is_ancestor() {
 # the viewer and the next restack trip over.  $1 = the removed branch
 _purge_member_refs() {
   local gone="$1" key v
-  git config --unset "stack-branch.${gone}.project" 2>/dev/null || true
+  stack_cfg_unset "$gone" project
   while IFS= read -r key; do
     [[ -z "$key" ]] && continue
     typeset -a keep; keep=()
@@ -985,8 +985,8 @@ elif [[ "$MODE" == "start" ]]; then
           [[ -z "$child" ]] && continue
           if [[ "$val" == "$b" ]]; then
             echo "    rewire: $child parent → $bp"
-            git config "stack-branch.${child}.parent" "$bp"
-            git config --unset "stack-branch.${child}.base" 2>/dev/null || true
+            stack_cfg_set "$child" parent "$bp"
+            stack_cfg_unset "$child" base
           fi
         done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
                    git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
@@ -1131,7 +1131,7 @@ while (( ${#PENDING[@]} > 0 )); do
       # (that would hide the pushed commits from the parent...branch review diff).
       _rp=$(git config "branch.${BRANCH}.stack-parent" 2>/dev/null || git config "stack-branch.${BRANCH}.parent" 2>/dev/null || echo "$MAIN_BRANCH")
       NEW_BASE=$(git merge-base "$_rp" "$BRANCH" 2>/dev/null || true)
-      [[ -n "$NEW_BASE" ]] && git config "stack-branch.${BRANCH}.base" "$NEW_BASE"
+      [[ -n "$NEW_BASE" ]] && stack_cfg_set "$BRANCH" base "$NEW_BASE"
       echo "  ✓ ${BRANCH} conformed: origin/${BRANCH} + ${#_new[@]} re-applied commit(s); children reseat onto it"
       CONFORMED_PUBLISHED+=("$BRANCH")
       COMPLETED+=("$BRANCH")
@@ -1150,7 +1150,7 @@ while (( ${#PENDING[@]} > 0 )); do
     # than silently skipping, which strands the branch forever "behind".
     PARENT_NAME="$MAIN_BRANCH"
     echo "  ! $BRANCH has no parent recorded — assuming '$MAIN_BRANCH' (root) and recording it" >&2
-    git config "stack-branch.${BRANCH}.parent" "$MAIN_BRANCH"
+    stack_cfg_set "$BRANCH" parent "$MAIN_BRANCH"
   fi
 
   OLD_PARENT_SHA="${SNAPSHOT[$PARENT_NAME]:-}"
@@ -1249,7 +1249,7 @@ EOF
   # Independent ops (stack-squash, the viewer) read this instead of resolving the
   # moving parent name; stack-base recomputes it if ever unset or stale.
   NEW_BASE=$(git rev-parse "$PARENT_NAME" 2>/dev/null || true)
-  [[ -n "$NEW_BASE" ]] && git config "stack-branch.${BRANCH}.base" "$NEW_BASE"
+  [[ -n "$NEW_BASE" ]] && stack_cfg_set "$BRANCH" base "$NEW_BASE"
 
   CURRENT=""
   COMPLETED+=("$BRANCH")
@@ -1305,14 +1305,14 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         [[ -z "$child" ]] && continue
         if [[ "$val" == "$orphan" ]]; then
           echo "  rewire: $child parent → $op"
-          git config "stack-branch.${child}.parent" "$op"
+          stack_cfg_set "$child" parent "$op"
           # Parent changed → drop the stale base so stack-base recomputes it.
-          git config --unset "stack-branch.${child}.base" 2>/dev/null || true
+          stack_cfg_unset "$child" base
         fi
       done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
                  git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
                } | awk 'NF && !seen[$1]++')
-      git config --unset "stack-branch.${orphan}.parent" 2>/dev/null || true
+      stack_cfg_unset "$orphan" parent
       _purge_member_refs "$orphan"
 
       typeset -a remaining
@@ -1338,9 +1338,9 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         [[ -z "$child" ]] && continue
         if [[ "$val" == "$dropped" ]]; then
           echo "  rewire: $child parent → $dropped_parent"
-          git config "stack-branch.${child}.parent" "$dropped_parent"
+          stack_cfg_set "$child" parent "$dropped_parent"
           # Parent changed → drop the stale base so stack-base recomputes it.
-          git config --unset "stack-branch.${child}.base" 2>/dev/null || true
+          stack_cfg_unset "$child" base
         fi
       done < <({ git config --get-regexp '^branch\..*\.stack-parent$' 2>/dev/null | sed -E 's/^branch\.(.*)\.stack-parent /\1 /'
                  git config --get-regexp '^stack-branch\..*\.parent$' 2>/dev/null | sed -E 's/^stack-branch\.(.*)\.parent /\1 /'
@@ -1364,8 +1364,8 @@ if (( ${#TO_DROP[@]} + ${#ORPHANS[@]} > 0 )); then
         echo "    ⚠ couldn't delete $b (still checked out?) — left intact (parent + membership kept); re-run restack once it's free" >&2
         continue
       fi
-      git config --unset "stack-branch.${b}.parent" 2>/dev/null || true
-      git config --unset "stack-branch.${b}.base" 2>/dev/null || true
+      stack_cfg_unset "$b" parent
+      stack_cfg_unset "$b" base
       _purge_member_refs "$b"
 
       # Remove from project listing.
