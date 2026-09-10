@@ -67,10 +67,14 @@ has "the map calls it the same"     "2 · the second step"  "$(facts mermaid thr
 
 print -- "
 THE PLAN — the whole project, this branch marked"
+# The marker and the count changed deliberately in e80a4c8 ("forest: let this branch name
+# itself, and nothing more"): the current step reads "[this branch]" and the running "N of M"
+# count is gone. These assertions were updated to that, and the hasnt below pins the decision
+# so a count creeping back is a failure rather than a surprise.
 p=$(facts plan two)
-has "names every step"        "3. the third step"  "$p"
-has "marks this branch"       "<- this branch"     "$p"
-has "counts them"             "2 of 3"             "$p"
+has   "names every step"      "3. the third step"  "$p"
+has   "marks this branch"     "2. [this branch]"   "$p"
+hasnt "and nothing more — no running count" "2 of 3" "$p"
 
 print -- "
 CONTRACTION — a landed step keeps its place and its PR after the branch is dropped"
@@ -85,11 +89,14 @@ cat > "$stub/stack-merge-rank" <<'EOF'
 echo '{"order":["two","three"]}'
 EOF
 chmod +x "$stub/stack-merge-rank"
+# A landed step's face is its PR NUMBER ALONE, on purpose (_render_step: "a PR number is enough:
+# GitHub expands it to the title and its merged/open state") — so the old expectation of
+# "#9560 (merged) the first step" was asking the generator to duplicate what GitHub renders.
 p=$(facts plan three)
-has  "the landed step survives the contraction" "1. #9560 (merged) the first step" "$p"
-has  "the live steps renumber after it"         "3. the third step"                "$p"
-has  "the count still includes what shipped"    "3 of 3"                           "$p"
-hasnt "and it is not told twice"                "1. the first step"                "$p"
+has  "the landed step survives the contraction" "1. #9560"          "$p"
+has  "the live steps sit after it, renumbered"  "2. the second step" "$p"
+has  "and the numbering counts what shipped"    "3. [this branch]"   "$p"
+hasnt "and it is not told twice"                "1. the first step"  "$p"
 has  "the map marks it merged"                  "✓"                                "$(facts mermaid three)"
 
 print -- "
@@ -110,16 +117,26 @@ is "STALE once the code actually changes" "stale" "$("$SCRIPTS/stack-summary" th
 
 print -- "
 QUOTING — an apostrophe in a branch's job must not blow up the generator"
+# Self-contained: the blocks above leave a merges fixture and their own registry entries behind,
+# and this case is about QUOTING, not about inherited forest state.
+rm -f "$gd/stack-project-merges.json"
+git config --unset-all stack-project.proj.branch 2>/dev/null || true
 git checkout -q main && git checkout -qb quoted
 echo q > q.txt; git add -A; git commit -qm "fix(q): don't let a branch's name break it"
 git config stack-branch.quoted.parent main
 git config stack-branch.quoted.project proj
+# The PROJECT REGISTRY is what makes a branch a plan member — a .project tag on the branch alone
+# renders nothing. This case never added the entry, which is why it could not have passed.
+git config --add stack-project.proj.branch quoted
 cat > "$stub/stack-merge-rank" <<'EOF'
 #!/bin/sh
 echo '{"order":["quoted"]}'
 EOF
 chmod +x "$stub/stack-merge-rank"
-out=$(facts plan quoted 2>&1)
+# The quoting risk is in GENERATION, so assert on the generator's output directly rather than
+# through a rendered plan: a plan only shows a branch's job when that branch is not the current
+# step, and staging a second member here made the case depend on forest state instead of quoting.
+out=$(facts facts quoted 2>&1)
 has "renders an apostrophe rather than dying" "don't let a branch's name break it" "$out"
 
 print -- "
