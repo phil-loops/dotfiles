@@ -253,6 +253,87 @@ def run_checks(repo, shas, only):
         git(repo, "config", "branch.base.description", "base: one line of purpose")
         repostate.invalidate()
 
+    if want("dualwrite"):
+        print("dual-write (namespace migration)")
+        from srv import stackcfg, ctx
+        cfg = lambda k: git(repo, "config", "--get", k, check_rc=False)
+        stackcfg.set_key("base", "role", "proof")
+        check("dualwrite: set writes the target spelling",
+              cfg("branch.base.stack-role") == "proof", cfg("branch.base.stack-role"))
+        check("dualwrite: set writes the legacy spelling too",
+              cfg("stack-branch.base.role") == "proof", cfg("stack-branch.base.role"))
+        stackcfg.unset_key("base", "role")
+        check("dualwrite: unset clears both",
+              cfg("branch.base.stack-role") == "" and cfg("stack-branch.base.role") == "")
+        stackcfg.add_key("base", "requires", "dep-a")
+        stackcfg.add_key("base", "requires", "dep-b")
+        both = (git(repo, "config", "--get-all", "branch.base.stack-requires", check_rc=False).split(),
+                git(repo, "config", "--get-all", "stack-branch.base.requires", check_rc=False).split())
+        check("dualwrite: add keeps every value in both", both == (["dep-a", "dep-b"], ["dep-a", "dep-b"]), str(both))
+        stackcfg.unset_key("base", "requires", "dep-a")
+        both = (git(repo, "config", "--get-all", "branch.base.stack-requires", check_rc=False).split(),
+                git(repo, "config", "--get-all", "stack-branch.base.requires", check_rc=False).split())
+        check("dualwrite: a valued unset removes that value from both", both == (["dep-b"], ["dep-b"]), str(both))
+
+        # the trap: the target side must NEVER be `--remove-section branch.<b>`
+        desc_before = cfg("branch.base.description")
+        git(repo, "config", "branch.base.remote", "origin")
+        stackcfg.remove_stack_section("base")
+        check("dualwrite: removing the stack section clears both namespaces' stack keys",
+              cfg("branch.base.stack-requires") == "" and cfg("stack-branch.base.requires") == "")
+        check("dualwrite: and leaves git's OWN branch keys intact",
+              cfg("branch.base.description") == desc_before and cfg("branch.base.remote") == "origin",
+              f'{cfg("branch.base.description")!r} / {cfg("branch.base.remote")!r}')
+
+        # the shadow backstop: disagreeing namespaces read the target and say so
+        git(repo, "config", "branch.base.stack-parent", "main")
+        git(repo, "config", "stack-branch.base.parent", "stale-parent")
+        repostate.invalidate()
+        logged = []
+        real_log = ctx.log
+        ctx.log = lambda line: logged.append(line)
+        try:
+            answer = repostate.snapshot().parent("base")
+        finally:
+            ctx.log = real_log
+        check("dualwrite: a shadowed legacy key still reads the target", answer == "main", answer)
+        check("dualwrite: and the shadowing is logged, naming the branch and key",
+              any("base" in l and "parent" in l and "stale-parent" in l for l in logged), str(logged))
+        git(repo, "config", "--unset", "stack-branch.base.parent")
+        git(repo, "config", "--unset", "branch.base.stack-parent")
+        git(repo, "config", "branch.base.description", "base: one line of purpose")
+        repostate.invalidate()
+
+        # the ratchet: a file already converted must never grow a legacy-only write again
+        import re as _re
+        PENDING = {   # zsh writers not yet dual-writing — this set only ever shrinks
+            "stack-restack", "stack-summary", "stack-doctor", "stack-base", "stack-review",
+            "stack-reword", "stack-proof", "stack-fmt", "stack-plan-omit", "stack-model",
+            "stack-integrate", "stack-squash", "stack-review-import", "stack-rm", "stack-purpose",
+            "stack-list", "stack-usage-event", "stack-pr-body", "stack-forest", "stack-bless",
+            "stack-blessed-status", "stack-delta-tests", "stack-prepush-guard", "stack-config-move",
+        }
+        # read vs write, textually: a read closes the key and the arg list — f"stack-branch.…"])
+        # — while a write follows the key with a comma and a value. --unset / --add /
+        # --remove-section are writes whatever follows.
+        KEY_THEN_VALUE = _re.compile(r'stack-branch\.[^"\']*["\']\s*,')
+        MUTATOR = _re.compile(r'--unset|--add|--remove-section')
+        offenders = []
+        for f in sorted(pathlib.Path(HERE).glob("srv/*.py")):
+            if f.name == "stackcfg.py":
+                continue
+            for i, ln in enumerate(f.read_text().splitlines(), 1):
+                if "stack-branch." not in ln or "config" not in ln:
+                    continue
+                if _re.search(r'--get\b|get-regexp', ln):
+                    continue
+                if MUTATOR.search(ln) or KEY_THEN_VALUE.search(ln):
+                    offenders.append(f"{f.name}:{i}")
+        check("dualwrite: no legacy-only write left in srv/ (the ratchet)",
+              not offenders, str(offenders[:4]))
+        check("dualwrite: the pending list is the zsh writers still to convert",
+              len(PENDING) == 24, str(len(PENDING)))
+
     if want("verdict"):
         print("push verdict")
         set_prs(sync, repo, [])

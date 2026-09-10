@@ -15,6 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from . import ctx
 from . import prompts
+from . import stackcfg
 from . import rebase
 
 
@@ -739,8 +740,7 @@ def _rebase_tree(branch, onto, cut):
         err = _rebase_tree(c, branch, c_cut)
         if err:
             return err
-        ctx.run(["git", "config", f"stack-branch.{c}.base",
-                 ctx.run(["git", "rev-parse", branch]).stdout.strip()])
+        stackcfg.set_key(c, "base", ctx.run(["git", "rev-parse", branch]).stdout.strip())
     return ""
 
 
@@ -769,13 +769,13 @@ def _contract(branch):
             err = _rebase_tree(k, onto, cut)
             if err:
                 return f"{err}; {branch} left standing", kids, [], parent
-        ctx.run(["git", "config", f"stack-branch.{k}.parent", parent])
-        ctx.run(["git", "config", f"stack-branch.{k}.base", base])
+        stackcfg.set_key(k, "parent", parent)
+        stackcfg.set_key(k, "base", base)
     # Fan-in dependents: the required base landed in main, so the edge is now redundant — drop it,
     # else the integrator carries a `requires` pointing at a branch that no longer exists.
     deps = _requirers_of(branch)
     for d in deps:
-        ctx.run(["git", "config", "--unset", f"stack-branch.{d}.requires", esc])
+        stackcfg.unset_key(d, "requires", esc)
     wt = _worktree_of(branch)
     if wt:
         ctx.run(["git", "-C", wt, "checkout", "--detach"])   # release so branch -D can run
@@ -784,7 +784,7 @@ def _contract(branch):
             or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
     # the whole section, not named keys — a straggler like gates-green-tree otherwise outlives
     # the branch (stack-branch.* sits outside the branch.<n>.* namespace git GCs on branch -D)
-    ctx.run(["git", "config", "--remove-section", f"stack-branch.{branch}"])
+    stackcfg.remove_stack_section(branch)
     # Sweep EVERY project's branch list, not just .project's — a dangling entry under some
     # other project is exactly the phantom-forest rot contraction exists to clean.
     projs = {proj} if proj else set()

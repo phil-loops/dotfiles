@@ -19,7 +19,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs
 
-from . import ctx
+from . import ctx, stackcfg
 
 _pcache = {}  # repo-name -> ((content-sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
 _PROJ_SNAP_V = 5  # projects card shape version — bump when a build adds a field, else the
@@ -803,8 +803,8 @@ def promote(req, raw):   # POST /promote — graduate a watched branch into its 
         return
     project = branch.rsplit("/", 1)[-1]   # the branch leaf becomes the forest tag
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    ctx.run(["git", "config", f"stack-branch.{branch}.parent", main])   # forks off main → a root
-    ctx.run(["git", "config", f"stack-branch.{branch}.project", project])
+    stackcfg.set_key(branch, "parent", main)   # forks off main → a root
+    stackcfg.set_key(branch, "project", project)
     members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.splitlines()
     if branch not in members:
         ctx.run(["git", "config", "--add", f"stack-project.{project}.branch", branch])
@@ -910,7 +910,7 @@ def drop_project(req, raw):   # POST /drop-project — forget a forest grouping 
             continue
         if (ctx.run(["git", "config", f"branch.{b}.stack-project"]).stdout.strip()
                 or ctx.run(["git", "config", f"stack-branch.{b}.project"]).stdout.strip()) == project:
-            ctx.run(["git", "config", "--unset", f"stack-branch.{b}.project"])
+            stackcfg.unset_key(b, "project")
             untagged += 1
     # Drop the whole [stack-project "<name>"] section (the branch list + any sibling keys).
     ctx.run(["git", "config", "--remove-section", f"stack-project.{project}"])

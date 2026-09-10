@@ -15,7 +15,7 @@ import tempfile
 import time
 from urllib.parse import quote, parse_qs
 
-from . import ctx, stage, sync, repostate, shellout
+from . import ctx, stage, sync, repostate, shellout, stackcfg
 
 
 def delta_tests(req, raw):
@@ -223,7 +223,7 @@ def _green_tree(branch):
 
 
 def _record_green(branch, tree):
-    ctx.run(["git", "config", f"stack-branch.{branch}.gates-green-tree", tree])
+    stackcfg.set_key(branch, "gates-green-tree", tree)
 
 
 _WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
@@ -718,7 +718,7 @@ def prep_push(req, raw):
             if r.returncode != 0:
                 return req._send(200, json.dumps({"ok": False, "err": "branch moved while building the catch-up merge — reload and retry"}))
             # the seal-era stamp is now moot — the carrier state is self-describing (ff again)
-            ctx.run(["git", "config", "--unset", f"stack-branch.{branch}.restack-supersedes"])
+            stackcfg.unset_key(branch, "restack-supersedes")
             routed.append(f"carried your restack ({folded} commit{'s' if folded != '1' else ''} on the new base) "
                           "as a catch-up merge on origin's head — additive history, plain push")
         else:
