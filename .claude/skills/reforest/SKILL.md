@@ -16,6 +16,10 @@ workflow: read → propose → merge-story plan → sign-off → execute, ending
 > round — atomicity decays through iteration, each fix landing "where the code already is."
 > Companion final-state check at the forest's tip: **every `export` the forest adds needs a
 > consumer outside its module** — unused = un-export it in the branch that introduced it.
+> Companion routing check, per branch: **rationale belongs in the node's description, its
+> implementation note, or the PR body — not in the diff.** A comment running past one line, or any
+> block sitting above an import or a constant rather than an exported symbol, is prose in the wrong
+> container: move it into the story rather than deleting it.
 
 ## When to use
 
@@ -65,7 +69,8 @@ Present the forest as the **merge-story** — the same artifact the viewer rende
   (forests.md *after*). The plan asks it for every sibling pair — "wrong merge order: does prod
   survive?" — because nothing local reds when the edge is missing; plan time is the only catch.
 - Per branch: the plain subject + one **non-trivial implementation note** from its slice of the
-  diff (a mechanism, invariant, gotcha, or perf/correctness choice).
+  diff (a mechanism, invariant, gotcha, or perf/correctness choice) — this note is
+  where a design-rationale comment block lands when the routing check pulls it out of the code.
 - This is the **contract** — revise until split, order, labels, and purposes are right.
 
 ## 4 · Sign-off
@@ -86,8 +91,9 @@ order; per branch:
   motion, per forests.md *Config + purpose*.
 
 The viewer then renders the story (`⌘K → "merge story"`, or `≣ story`), and
-`stack-pr-body <branch>` drafts each PR body. Run the comment gate (style topic *Comments*) as
-you go — reforesting is the free moment to delete narration.
+`stack-pr-body <branch>` drafts each PR body — the container the routing check empties into,
+so run that check per branch as you go, not after. The repo's `AGENTS.md` §Comments owns the
+rule itself; its JSDoc exemption covers doc comments on exported symbols only.
 
 ## Guardrails
 

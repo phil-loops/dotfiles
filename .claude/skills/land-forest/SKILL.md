@@ -47,8 +47,8 @@ after its parent lands.
 ### 5 · Contract until drained
 
 Each time a base squash-merges, repeat step 2 — the merged node drops, its children rewire, the
-graph contracts by one. A rebase is the comment-gate checkpoint (style topic *Comments*). Loop
-until only `main` remains.
+graph contracts by one. A rebase is the comment-gate checkpoint (repo `AGENTS.md` §Comments;
+route rationale into the PR body rather than deleting it). Loop until only `main` remains.
 
 ## Guardrails
 
