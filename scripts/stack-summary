@@ -14,6 +14,9 @@
 #   stack-summary <branch> --refresh  → regenerate now, whatever the stored one says
 #   stack-summary <branch> --status   → fresh | stale | absent, without spending a token
 set -euo pipefail
+# dual-write both stack-config namespaces (see the library header)
+source "${0:A:h}/stack-config-lib.zsh"
+
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 branch="${1:-}"
@@ -76,6 +79,6 @@ EOF
 resp=$(claude -p --model sonnet "$prompt" 2>/dev/null || true)
 [[ -n "$resp" ]] || { echo "stack-summary: could not draft — is \`claude\` on PATH?" >&2; exit 1; }
 
-git config "stack-branch.${branch}.summary" "$resp"
-git config "stack-branch.${branch}.summary-patchid" "$patch_id"
+stack_cfg_set "$branch" summary "$resp"
+stack_cfg_set "$branch" summary-patchid "$patch_id"
 print -r -- "$resp"

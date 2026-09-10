@@ -306,13 +306,55 @@ def run_checks(repo, shas, only):
 
         # the ratchet: a file already converted must never grow a legacy-only write again
         import re as _re
-        PENDING = {   # zsh writers not yet dual-writing — this set only ever shrinks
-            "stack-restack", "stack-summary", "stack-doctor", "stack-base", "stack-review",
-            "stack-reword", "stack-proof", "stack-fmt", "stack-plan-omit", "stack-model",
-            "stack-integrate", "stack-squash", "stack-review-import", "stack-rm", "stack-purpose",
-            "stack-list", "stack-usage-event", "stack-pr-body", "stack-forest", "stack-bless",
-            "stack-blessed-status", "stack-delta-tests", "stack-prepush-guard", "stack-config-move",
-        }
+        import shlex as _shlex
+        # PENDING only ever shrinks. stack-config-move is the sweep itself — it moves legacy to
+        # target and deletes legacy, so dual-writing would be nonsense; it stays exempt.
+        PENDING = {"stack-restack", "stack-rm"}
+        EXEMPT = {"stack-config-move"}
+
+        def _kind(ln):
+            """read | set | add | unset — by counting positionals after `config`, because a read
+            is `git config <key>` and a write is `git config <key> <value>`. Pattern-matching
+            this got it wrong twice (dual-read second arms and echo'd advice both looked like
+            writes), so the classifier tokenizes."""
+            m = _re.search(r"git\s+(?:-C\s+\S+\s+)?config\b(.*)$", ln)
+            if not m:
+                return None
+            rest = _re.split(r"\s(?:2>|>|\|\||\||;|&&)|\s#", m.group(1))[0]
+            if "--unset" in rest or "--remove-section" in rest:
+                return "unset"
+            if "--add" in rest:
+                return "add"
+            try:
+                toks = _shlex.split(rest, posix=False)
+            except ValueError:
+                toks = rest.split()
+            return "set" if len([t for t in toks if not t.startswith("--")]) >= 2 else "read"
+
+        def _legacy_writes(path):
+            out = []
+            for i, ln in enumerate(path.read_text(errors="replace").splitlines(), 1):
+                if "stack-branch." not in ln or "config" not in ln:
+                    continue
+                if _re.search(r"--get\b|get-regexp", ln):
+                    continue
+                k = _kind(ln)
+                if k and k != "read":
+                    out.append(f"{path.name}:{i}")
+            return out
+
+        zsh_offenders = []
+        for f in sorted(pathlib.Path(HERE).glob("stack-*")):
+            if (not f.is_file() or f.suffix in (".md", ".zsh") or f.name in PENDING | EXEMPT
+                    or f.name.startswith("test-")):
+                continue
+            if f.read_text(errors="replace").startswith("#!/usr/bin/env python3"):
+                continue
+            zsh_offenders += _legacy_writes(f)
+        check("dualwrite: no legacy-only write left in the converted zsh scripts",
+              not zsh_offenders, str(zsh_offenders[:5]))
+        check("dualwrite: only the two contested files are still pending",
+              PENDING == {"stack-restack", "stack-rm"}, str(sorted(PENDING)))
         # read vs write, textually: a read closes the key and the arg list — f"stack-branch.…"])
         # — while a write follows the key with a comma and a value. --unset / --add /
         # --remove-section are writes whatever follows.
@@ -331,8 +373,7 @@ def run_checks(repo, shas, only):
                     offenders.append(f"{f.name}:{i}")
         check("dualwrite: no legacy-only write left in srv/ (the ratchet)",
               not offenders, str(offenders[:4]))
-        check("dualwrite: the pending list is the zsh writers still to convert",
-              len(PENDING) == 24, str(len(PENDING)))
+
 
     if want("verdict"):
         print("push verdict")
