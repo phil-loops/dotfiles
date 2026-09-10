@@ -673,6 +673,12 @@ else:
             break
         except OSError:
             time.sleep(0.25)
+    if httpd is None and os.environ.get("STACK_REVIEW_SUPERVISED"):
+        # the supervised server IS the owner of this port: binding a random one instead makes
+        # it invisible to every consumer while looking healthy to launchd. Exit and let launchd
+        # retry (ThrottleInterval) until whatever holds the port is gone.
+        _log(f"supervised: stable port {PORT} held by another process — exiting for a retry")
+        raise SystemExit(75)
     if httpd is None:
         httpd = Server(("127.0.0.1", 0), H)
         _log(f"stable port {PORT} still held after 5s — bound {httpd.server_address[1]} instead; "
