@@ -12,6 +12,7 @@
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
 import json
+import time
 import tempfile
 import re
 import hashlib
@@ -472,21 +473,43 @@ def plan_steps(req, u):
     req._send(200, json.dumps({"branch": branch, "project": f.get("project"), "steps": steps}))
 
 
+def _story_journal(branch, before, after):
+    """Every story write, appended to .git/stack-story-log.jsonl before it lands. A story is
+    hand-written prose that lives in git config, which keeps no history — an overwrite or a
+    reset used to be unrecoverable (2026-09-09: a headless probe clicked "use description" and
+    the line was simply gone). Recover one with:
+        python3 -c 'import json;[print(r["ts"],r["before"]) for r in map(json.loads,open(".git/stack-story-log.jsonl")) if r["branch"]=="<b>"]'
+    """
+    gd = ctx.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).stdout.strip()
+    if not gd:
+        return
+    try:
+        with open(os.path.join(gd, "stack-story-log.jsonl"), "a") as fh:
+            fh.write(json.dumps({"ts": int(time.time()), "branch": branch,
+                                 "before": before, "after": after}) + "\n")
+    except OSError:
+        pass
+
+
 def story_set(req, raw):
     # POST /story {branch, text} → set (or, on empty text, unset → revert to the commit-subject
     # gloss) a branch's durable merge story. job_of() prefers it, so the plan renders it on EVERY
-    # branch in the forest and it survives this branch's merge.
+    # branch in the forest and it survives this branch's merge. The prior value is journalled and
+    # returned as `prev`, so a wrong overwrite is recoverable and the editor can offer an undo.
     d = json.loads(raw or "{}")
     branch = (d.get("branch") or "").strip()
     text = (d.get("text") or "").strip()
     if not branch:
         return req._send(400, json.dumps({"ok": False, "err": "no branch"}))
     key = f"stack-branch.{branch}.story"
+    before = ctx.run(["git", "config", key]).stdout.strip()
     if text:
         ctx.run(["git", "config", key, text])
     else:
         ctx.run(["git", "config", "--unset", key])
-    req._send(200, json.dumps({"ok": True, "branch": branch, "story": text}))
+    if before != text:
+        _story_journal(branch, before, text)
+    req._send(200, json.dumps({"ok": True, "branch": branch, "story": text, "prev": before}))
 
 
 def interest_bump(req, raw):
