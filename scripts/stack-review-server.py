@@ -12,7 +12,7 @@ Request logging (method path status ms) is default-on: stderr + a size-capped du
 $STACK_REVIEW_LOG=0 silences both.
 The page is same-origin with the server, so /model and /bless are plain relative fetches.
 """
-import sys, os, json, re, subprocess, threading, time, hashlib, shlex
+import sys, os, json, re, socket, subprocess, threading, time, hashlib, shlex
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -655,17 +655,28 @@ def reaper():
 # self-reload. If the stable port is taken (a stale/foreign holder), fall back to
 # an ephemeral one rather than failing to start.
 PORT = int(sys.argv[4]) if len(sys.argv) > 4 else int(os.environ.get("STACK_REVIEW_PORT", "62333"))
-httpd = None
-for _attempt in range(20):   # a just-killed predecessor can hold the port for a moment; the
-    try:                     # ephemeral fallback is invisible to every consumer that computes
-        httpd = Server(("127.0.0.1", PORT), H)   # the stable port, so earn it before giving up
-        break
-    except OSError:
-        time.sleep(0.25)
-if httpd is None:
-    httpd = Server(("127.0.0.1", 0), H)
-    _log(f"stable port {PORT} still held after 5s — bound {httpd.server_address[1]} instead; "
-         "consumers that compute the stable port will not find this server")
+# A re-exec (source-watcher hot reload) INHERITS the listening socket rather than rebinding
+# it: closing and re-binding raced the old socket's teardown, and after 5s of trying the
+# fallback bound a random port — a server alive but invisible to every consumer that computes
+# the stable one (2026-09-09, caught by the log line below). Handing the fd over removes the
+# race entirely: the port is never released, so it cannot be lost or stolen mid-reload.
+_INHERITED_FD = os.environ.pop("STACK_REVIEW_FD", "")
+if _INHERITED_FD:
+    httpd = Server(("127.0.0.1", PORT), H, bind_and_activate=False)
+    httpd.socket = socket.socket(fileno=int(_INHERITED_FD))
+    httpd.server_address = httpd.socket.getsockname()
+else:
+    httpd = None
+    for _attempt in range(20):   # a just-killed predecessor can hold the port for a moment
+        try:
+            httpd = Server(("127.0.0.1", PORT), H)
+            break
+        except OSError:
+            time.sleep(0.25)
+    if httpd is None:
+        httpd = Server(("127.0.0.1", 0), H)
+        _log(f"stable port {PORT} still held after 5s — bound {httpd.server_address[1]} instead; "
+             "consumers that compute the stable port will not find this server")
 PORT = httpd.server_address[1]
 if len(sys.argv) <= 4:
     print(PORT, flush=True)  # announce the port only on the first launch
@@ -688,7 +699,10 @@ def watcher():
         time.sleep(1.0)
         try:
             if stamp() != m0:
-                httpd.socket.close()
+                # keep the socket OPEN and inheritable; the new image adopts it by fd
+                fd = httpd.socket.fileno()
+                os.set_inheritable(fd, True)
+                os.environ["STACK_REVIEW_FD"] = str(fd)
                 os.execv(sys.executable, [sys.executable, src, ROOT, SCRIPTS, CWD, str(PORT)])
         except OSError:
             pass
@@ -743,7 +757,11 @@ def warm():
 threading.Thread(target=warm, daemon=True).start()
 threading.Thread(target=reviews.warm_requests_forever, daemon=True).start()   # review-requested PRs → worktree ready before the first jump
 threading.Thread(target=pack_watcher, daemon=True).start()   # ext source → packed, so the installed copy has something newer to fetch
-threading.Thread(target=reaper, daemon=True).start()
+# The reaper exists because an unsupervised server nobody owns must not linger. Under
+# launchd (KeepAlive) it would instead be a restart loop on a 15-minute clock — and now
+# that idle costs 0.3% of a core there is nothing to shed. The supervised runner sets this.
+if not os.environ.get("STACK_REVIEW_SUPERVISED"):
+    threading.Thread(target=reaper, daemon=True).start()
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
 threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees

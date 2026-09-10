@@ -21,7 +21,7 @@ _MAX_AGE = 2.0   # seconds a snapshot may serve without re-checking its fingerpr
 
 
 class RepoState:
-    def __init__(self, refs_raw, cfg_raw, pr_heads):
+    def __init__(self, refs_raw, cfg_raw):
         self.fingerprint = hashlib.sha1((refs_raw + "\x1e" + cfg_raw).encode()).hexdigest()
         self.at = time.monotonic()
         self.checked = self.at
@@ -39,7 +39,12 @@ class RepoState:
                 continue
             k, _, v = ln.partition("\n")
             self.cfg.setdefault(k, []).append(v)
-        self.pr_heads = pr_heads
+        # The open-PR set is LAZY and deliberately not part of the fingerprint: it comes from
+        # gh, a cold read of it blocks, and /sig — the cheap change-detector the extension polls
+        # every 2s — goes through this object's fingerprint. Eager loading made /sig take 6s on a
+        # cold server. Refs and config identify a snapshot; PR membership is its own TTL'd cache
+        # in sync, consulted on first use, and the pulse's world_sig already carries PR flips.
+        self._pr_heads = None
         self._memo = {}
 
     # ── config ────────────────────────────────────────────────────────────
@@ -106,8 +111,14 @@ class RepoState:
     def track(self, branch):
         return self.upstream.get(branch, ("", ""))
 
+    def pr_heads(self, fresh=False):
+        if self._pr_heads is None or fresh:
+            from . import sync
+            self._pr_heads = sync._open_pr_heads(fresh=fresh)
+        return self._pr_heads
+
     def published(self, branch):
-        return branch in self.pr_heads
+        return branch in self.pr_heads()
 
     def branch_fingerprint(self, branch):
         """Everything a single-branch verdict reads: its refs (every remote's copy), its parent's,
@@ -173,24 +184,27 @@ def snapshot(fresh_prs=False):
     """The current RepoState for the request's repo. Re-reads the two inputs at most every
     _MAX_AGE seconds; a changed fingerprint rebuilds, an unchanged one keeps the memoised
     walks. Mutating callers pass fresh_prs=True so the open-PR set is live, never stale."""
-    from . import sync
     repo = ctx.repo_cwd()
     now = time.monotonic()
     with _LOCK:
         cur = _SNAP.get(repo)
-    if cur and not fresh_prs and now - cur.checked < _MAX_AGE:
+    if cur and now - cur.checked < _MAX_AGE:
+        if fresh_prs:
+            cur.pr_heads(fresh=True)
         return cur
     refs, cfg = _read()
-    heads = sync._open_pr_heads(fresh=fresh_prs)
     fp = hashlib.sha1((refs + "\x1e" + cfg).encode()).hexdigest()
     with _LOCK:
         cur = _SNAP.get(repo)
-        if cur and cur.fingerprint == fp and cur.pr_heads == heads:
+        if cur and cur.fingerprint == fp:
             cur.checked = now
-            return cur
-        snap = RepoState(refs, cfg, heads)
-        _SNAP[repo] = snap
-        return snap
+            snap = cur
+        else:
+            snap = RepoState(refs, cfg)
+            _SNAP[repo] = snap
+    if fresh_prs:
+        snap.pr_heads(fresh=True)
+    return snap
 
 
 def invalidate():
