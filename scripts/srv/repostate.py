@@ -51,9 +51,35 @@ class RepoState:
         return list(self.cfg.get(key, []))
 
     def branch_key(self, branch, key, default=""):
-        """stack-branch.<b>.<key>, falling back to the legacy branch.<b>.stack-<key> spelling —
-        the ONE place both namespaces are read (namespace migration: delete the fallback here)."""
-        return self.get(f"stack-branch.{branch}.{key}") or self.get(f"branch.{branch}.stack-{key}") or default
+        """branch.<b>.stack-<key> — the TARGET namespace, so git GCs it when the branch is
+        deleted and carries it on rename — falling back to the pre-migration stack-branch.<b>.<key>
+        spelling. The target wins, matching every other reader in the tree: during the keystone
+        sweep a key exists in both, and a reader that preferred the old copy would answer with
+        the value the sweep just superseded. This is the ONE place both are read; the migration
+        ends by deleting the fallback arm here."""
+        return self.get(f"branch.{branch}.stack-{key}") or self.get(f"stack-branch.{branch}.{key}") or default
+
+    def branch_key_all(self, branch, key):
+        """The multivar form of branch_key: the target namespace's values if it has any, else
+        the pre-migration spelling's. Never concatenated — a half-swept key would double
+        every requires edge."""
+        return (self.get_all(f"branch.{branch}.stack-{key}")
+                or self.get_all(f"stack-branch.{branch}.{key}"))
+
+    def branch_keys(self, key):
+        """{branch: value} for one suffix across every branch, both namespaces, target winning.
+        Branch names contain dots (viewer/map-shows-gates, wt-1.2), so affixes are stripped —
+        never split on "." — which is also why this lives here instead of in each enumerator."""
+        out = {}
+        old_pre, old_suf = "stack-branch.", f".{key}"
+        new_pre, new_suf = "branch.", f".stack-{key}"
+        for k in self.cfg:
+            if k.startswith(old_pre) and k.endswith(old_suf):
+                out.setdefault(k[len(old_pre):-len(old_suf)], self.get(k))
+        for k in self.cfg:   # second pass: the target namespace overwrites
+            if k.startswith(new_pre) and k.endswith(new_suf):
+                out[k[len(new_pre):-len(new_suf)]] = self.get(k)
+        return {b: v for b, v in out.items() if v}
 
     def parent(self, branch):
         return self.branch_key(branch, "parent") or self.main()

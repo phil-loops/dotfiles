@@ -21,15 +21,15 @@ POLL_S = 45
 
 
 def _roots():
-    out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.parent$"]).stdout
-    for ln in out.splitlines():
-        key, _, parent = ln.partition(" ")
-        if parent.strip() in ("main", "origin/main"):
-            yield key[len("stack-branch."):-len(".parent")]
+    from . import repostate
+    for branch, parent in repostate.snapshot().branch_keys("parent").items():
+        if parent in ("main", "origin/main"):
+            yield branch
 
 
 def _archived(branch):
-    proj = ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip()
+    from . import repostate
+    proj = repostate.snapshot().project(branch)
     if not proj:
         return False
     return ctx.run(["git", "config", "--bool", f"stack-project.{proj}.archived"]).stdout.strip() == "true"

@@ -242,10 +242,10 @@ def _review_flags(branch):
     as gates-green-tree). Stale/absent → None (the UI hides); an EMPTY fresh list is a state:
     reviewed-clean."""
     snap = repostate.snapshot()
-    tree = snap.get(f"stack-branch.{branch}.review-flags-tree")
+    tree = snap.branch_key(branch, "review-flags-tree")
     if not tree or tree != snap.tree(branch):
         return None
-    return {"flags": [l.strip() for l in snap.get_all(f"stack-branch.{branch}.review-flag") if l.strip()]}
+    return {"flags": [l.strip() for l in snap.branch_key_all(branch, "review-flag") if l.strip()]}
 
 
 def _pr_base(branch):
@@ -330,7 +330,7 @@ def _is_restack(branch):
     # a sealed adoption: prep collapsed the restack to one commit, so per-commit patch-ids
     # no longer match origin's — the stamp remembers which origin head the seal superseded,
     # and goes inert the moment origin moves (force-push lands, or someone else pushes)
-    seen = snap.get(f"stack-branch.{branch}.restack-supersedes")
+    seen = snap.branch_key(branch, "restack-supersedes")
     return bool(seen) and seen == snap.remote(branch)
 
 
