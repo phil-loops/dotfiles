@@ -54,8 +54,16 @@ def check(name, cond, detail=""):
     print(f"  {'✓' if cond else '✗'} {name}" + (f"\n      {detail}" if not cond and detail else ""))
 
 
+# Identity and signing ride on the COMMAND, never written into a repo's config. The config
+# form escaped once: with GIT_DIR inherited from a pre-commit hook, `git -C <tmp> config
+# user.name Fixture` wrote into ~/.dotfiles itself, and 15 commits across three sessions were
+# authored "Fixture <t@t.t>" before anyone noticed (2026-09-10). Scrubbing GIT_* fixed the
+# cause; this makes the blast radius zero even if something else ever reintroduces it.
+_ID = ["-c", "user.name=Fixture", "-c", "user.email=t@t.t", "-c", "commit.gpgsign=false"]
+
+
 def git(repo, *args, check_rc=True):
-    r = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True)
+    r = subprocess.run(["git", *_ID, *args], cwd=repo, capture_output=True, text=True)
     if check_rc and r.returncode != 0:
         raise SystemExit(f"fixture git failed: git {' '.join(args)}\n{r.stderr}")
     return r.stdout.strip()
@@ -75,8 +83,15 @@ def build():
     repo, remote = os.path.join(root, "work"), os.path.join(root, "origin.git")
     subprocess.run(["git", "init", "-q", "--bare", "--initial-branch=main", remote], check=True)
     subprocess.run(["git", "init", "-q", "--initial-branch=main", repo], check=True)
-    for k, v in (("user.email", "t@t.t"), ("user.name", "Fixture"), ("commit.gpgsign", "false")):
-        git(repo, "config", k, v)
+    # tripwire: if this fixture's git dir is not inside the temp root, every command below is
+    # about to operate on somebody's real repo. Refuse loudly rather than write to it.
+    gd = subprocess.run(["git", "-C", repo, "rev-parse", "--absolute-git-dir"],
+                        capture_output=True, text=True).stdout.strip()
+    # realpath both sides: macOS resolves /var → /private/var, so a raw prefix check on a
+    # mkdtemp path fails on every clean run
+    if not os.path.realpath(gd).startswith(os.path.realpath(root)):
+        raise SystemExit(f"fixture refuses to run: git dir resolved OUTSIDE the fixture — {gd}\n"
+                         "  (a stray GIT_DIR/GIT_WORK_TREE in the environment; the scrub at the top failed)")
     git(repo, "remote", "add", "origin", remote)
 
     a = commit(repo, "A")
