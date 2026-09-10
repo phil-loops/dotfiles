@@ -51,7 +51,7 @@ IDLE = 900   # self-reap after 15min idle (was 90s — too eager; cold restarts 
 last = [time.time()]
 _render_lock = threading.Lock()
 _pulse = {"sig": "", "asset": "", "world": "", "procs": ""}  # model+asset+remote-world fingerprints, refreshed ~1/s by pulse()
-_pulse_subs = [0]                  # open /events streams — pulse() only runs while this is > 0
+_pulse_subs = srvctx.PULSE_SUBS    # open /events streams — pulse() only runs while this is > 0
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
 _index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
@@ -655,10 +655,17 @@ def reaper():
 # self-reload. If the stable port is taken (a stale/foreign holder), fall back to
 # an ephemeral one rather than failing to start.
 PORT = int(sys.argv[4]) if len(sys.argv) > 4 else int(os.environ.get("STACK_REVIEW_PORT", "62333"))
-try:
-    httpd = Server(("127.0.0.1", PORT), H)
-except OSError:
+httpd = None
+for _attempt in range(20):   # a just-killed predecessor can hold the port for a moment; the
+    try:                     # ephemeral fallback is invisible to every consumer that computes
+        httpd = Server(("127.0.0.1", PORT), H)   # the stable port, so earn it before giving up
+        break
+    except OSError:
+        time.sleep(0.25)
+if httpd is None:
     httpd = Server(("127.0.0.1", 0), H)
+    _log(f"stable port {PORT} still held after 5s — bound {httpd.server_address[1]} instead; "
+         "consumers that compute the stable port will not find this server")
 PORT = httpd.server_address[1]
 if len(sys.argv) <= 4:
     print(PORT, flush=True)  # announce the port only on the first launch
@@ -670,12 +677,17 @@ def watcher():
     # restart. (The shell scripts it shells out to are already hot — run per request.)
     import glob
     src = os.path.abspath(__file__)
-    srcs = [src] + glob.glob(os.path.join(os.path.dirname(src), "srv", "*.py"))
-    m0 = max(os.path.getmtime(f) for f in srcs)
+    srvdir = os.path.join(os.path.dirname(src), "srv", "*.py")
+
+    def stamp():
+        # re-globbed every pass: a module ADDED after boot was invisible to a one-shot glob,
+        # so a new srv/*.py needed a hand-bounce to take effect (three of them today)
+        return max(os.path.getmtime(f) for f in [src] + glob.glob(srvdir))
+    m0 = stamp()
     while True:
         time.sleep(1.0)
         try:
-            if max(os.path.getmtime(f) for f in srcs) != m0:
+            if stamp() != m0:
                 httpd.socket.close()
                 os.execv(sys.executable, [sys.executable, src, ROOT, SCRIPTS, CWD, str(PORT)])
         except OSError:

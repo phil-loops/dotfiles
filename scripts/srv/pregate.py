@@ -27,27 +27,32 @@ def _roots():
             yield branch
 
 
-def _archived(branch):
-    from . import repostate
-    proj = repostate.snapshot().project(branch)
-    if not proj:
-        return False
-    return ctx.run(["git", "config", "--bool", f"stack-project.{proj}.archived"]).stdout.strip() == "true"
+def _archived(snap, branch):
+    proj = snap.project(branch)
+    return bool(proj) and snap.get(f"stack-project.{proj}.archived") == "true"
 
 
-def _exists(branch):
-    return ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode == 0
+def _current_set():
+    """Every branch containing origin/main, in ONE spawn. This is the currency filter the
+    header comment calls cheap, and per-branch `merge-base --is-ancestor` made it the most
+    expensive thing the idle server did: 564 roots × a spawn each, every 45s (measured
+    2026-09-09 at ~10% of a core with nobody watching). 17 of those 564 are actually current."""
+    out = ctx.run(["git", "for-each-ref", "--contains", "origin/main",
+                   "--format=%(refname:short)", "refs/heads"]).stdout
+    return {ln.strip() for ln in out.splitlines() if ln.strip()}
 
 
-def _current(branch):
-    return ctx.run(["git", "merge-base", "--is-ancestor", "origin/main", branch]).returncode == 0
+
 
 
 def _candidate():
+    from . import repostate
+    snap = repostate.snapshot()
+    current = _current_set()
     for b in _roots():
-        if not _exists(b) or _archived(b) or not _current(b):
+        if b not in current or not snap.exists(b) or _archived(snap, b):
             continue
-        tree = push._tree(b)
+        tree = snap.tree(b)
         if not tree or push._green_tree(b) == tree:
             continue
         job = push._GATE_JOBS.get(push._jkey(b)) or push._adopt_job(b)
@@ -68,6 +73,8 @@ def pregate_forever():
     while True:
         time.sleep(POLL_S)
         try:
+            if not ctx.watched():
+                continue   # nobody is looking: a speculative typecheck is pure heat
             if restack._running() or restack._queue_read():
                 continue   # trees about to move — gate after the restack, not before
             if any(push._job_running(j) for j in list(push._GATE_JOBS.values())):
