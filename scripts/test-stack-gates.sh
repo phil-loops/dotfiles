@@ -24,7 +24,10 @@ echo "stack-gates"
 r="$(mkrepo)"
 out="$(cd "$r" && "$gates")"
 [[ "$(echo "$out" | field "['ok']")" == "True" ]] && ok "no gates → ok:true" || bad "no gates: $out"
-[[ "$(echo "$out" | field ".get('note','')" | grep -c "no gates")" == "1" ]] && ok "no gates → note present" || bad "no note: $out"
+# No CONFIGURED gates no longer means no gates at all: default_gates always supplies the
+# built-in `fresh` check, so the "no gates configured" note became unreachable. What matters is
+# that the defaults actually ran.
+[[ "$(echo "$out" | field "['gates'][0]['name']")" == "fresh" ]] && ok "no configured gates → the built-in defaults run" || bad "no defaults: $out"
 
 # one passing gate → ok:true
 r="$(mkrepo)"
