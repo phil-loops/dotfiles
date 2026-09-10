@@ -57,15 +57,34 @@ drop_lock(){ rmdir "$1/.rebuilding" 2>/dev/null; }
 tree_lock=""
 drop_tree_lock(){ [[ -n "$tree_lock" ]] && rmdir "$tree_lock" 2>/dev/null; }
 
-# A node_modules symlink aimed anywhere but the main checkout reads some other tree's frozen
-# packages/*/dist (the wt-075238 donor rot, 2026-07-30) — repoint it. A real dir is left alone.
+# A tree's node_modules is in one of three states and every one of them rots, so all three are
+# handled here — the guard used to return unless it was a symlink, and the other two went unseen.
+#   symlink elsewhere: reads some other tree's frozen packages/*/dist (wt-075238, 2026-07-30)
+#   missing entirely:  the gate dies on ./node_modules/.bin/prisma (loops-wt-044724, 2026-09-09)
+#   exploded view:     a SNAPSHOT nothing else re-runs, so a donor install (404 added / 348
+#                      removed, 2026-09-09) freezes it against a donor that has moved on
 repair_node_modules(){ # $1 = tree, $2 = main checkout; echoes a note when it acted
   local nm="$1/node_modules" target="$2/node_modules"
-  [[ -L "$nm" && -d "$target" ]] || return 0
-  [[ "$(realpath_of "$nm")" == "$(realpath_of "$target")" ]] && return 0
-  local old; old=$(readlink "$nm")
-  rm "$nm" && ln -s "$target" "$nm" && echo "node_modules pointed at $old — repointed at the main checkout"
+  [[ -d "$target" ]] || return 0
+  if [[ ! -e "$nm" && ! -L "$nm" ]]; then
+    ln -s "$target" "$nm" && echo "node_modules was missing — linked the main checkout's"
+    return 0
+  fi
+  if [[ -L "$nm" ]]; then
+    [[ "$(realpath_of "$nm")" == "$(realpath_of "$target")" ]] && return 0
+    local old; old=$(readlink "$nm")
+    rm "$nm" && ln -s "$target" "$nm" && echo "node_modules pointed at $old — repointed at the main checkout"
+    return 0
+  fi
+  local before after
+  before=$(view_entry_count "$nm")
+  explode_node_modules "$1" "$2" || return 0
+  after=$(view_entry_count "$nm")
+  (( before != after )) && echo "node_modules view was $before entries, donor has $after — resynced"
+  return 0
 }
+
+view_entry_count(){ ( shopt -s dotglob nullglob; set -- "$1"/* "$1"/@*/*; echo $#; ) }
 
 # @loops/* resolves through node_modules/@loops/<p> → ../../packages/<p>, relative to where
 # node_modules PHYSICALLY lives — so a tree whose node_modules is a symlink to main's can never
@@ -76,12 +95,20 @@ exploded(){ # $1 = tree: real node_modules whose @loops resolves tree-locally
     && [[ "$(realpath_of "$1/node_modules/@loops/prisma")" == "$(realpath_of "$1/packages/prisma")" ]]
 }
 
-explode_node_modules(){ # $1 = tree, $2 = main checkout; idempotent, tops up new entries
+explode_node_modules(){ # $1 = tree, $2 = main checkout; idempotent: prunes dead links, tops up new ones
   local nm="$1/node_modules" src_nm="$2/node_modules"
   [[ -d "$src_nm" ]] || return 1
   [[ -L "$nm" ]] && rm "$nm"
   mkdir -p "$nm/@loops"
   local e b s sb
+  # Prune BEFORE topping up: a package the donor retired leaves a link resolving to nothing,
+  # which is worse than an absent one (a resolver finds it, then fails), and the top-up below
+  # skips any name that already exists — dangling included — so a stale link would never heal.
+  # Only symlinks are considered: seed_prisma_client turns .prisma/@prisma into real copies.
+  ( shopt -s dotglob nullglob
+    for e in "$nm"/* "$nm"/@*/*; do
+      [[ -L "$e" && ! -e "$e" ]] && rm "$e"
+    done )
   ( shopt -s dotglob nullglob
     for e in "$src_nm"/*; do
       b=$(basename "$e")
