@@ -17,6 +17,7 @@ import time
 from urllib.parse import parse_qs, unquote
 
 from srv import ctx
+from . import stackcfg
 from srv import picker
 from srv import sync
 
@@ -592,7 +593,7 @@ def _reseat_walk(parent, results, published=None):
             if not ok:
                 results.append({"branch": child, "status": "conflict", "err": err})
                 continue
-            ctx.run(["git", "config", f"stack-branch.{child}.base", parent_tip])
+            stackcfg.set_key(child, "base", parent_tip)
             results.append({"branch": child, "status": "reseated"})
         _reseat_walk(child, results, published)
 

@@ -19,7 +19,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, repostate, shellout, picker
+from . import ctx, repostate, shellout, stackcfg, picker
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
@@ -359,11 +359,11 @@ def frozen_origin_set(req, raw):
         req._send(400, "{}")
         return
     if d.get("value"):
-        r = ctx.run(["git", "config", f"stack-branch.{b}.frozen-origin", "1"])
-        ok = r.returncode == 0
+        stackcfg.set_key(b, "frozen-origin", "1")
+        ok = True
     else:
-        r = ctx.run(["git", "config", "--unset", f"stack-branch.{b}.frozen-origin"])
-        ok = r.returncode in (0, 5)  # 5 = already unset
+        stackcfg.unset_key(b, "frozen-origin")
+        ok = True   # unsetting a key that was never set is not a failure (git exits 5)
     req._send(200 if ok else 500, "{}")
 
 

@@ -16,6 +16,18 @@ import time
 from . import ctx
 
 _LOCK = threading.Lock()
+_SHADOW_SEEN = set()
+
+
+def _shadowed(branch, key, target, legacy):
+    # once per (branch, key, pair) — a hot read path must not spam the log
+    sig = (branch, key, target, legacy)
+    if sig in _SHADOW_SEEN:
+        return
+    _SHADOW_SEEN.add(sig)
+    ctx.log(f"stack-config: {branch}.{key} disagrees across namespaces — reading "
+            f"branch.{branch}.stack-{key}={target!r}, ignoring stack-branch.{branch}.{key}={legacy!r}. "
+            "Something wrote the old spelling only; route it through srv/stackcfg.py.")
 _SNAP = {}   # repo cwd -> RepoState
 _MAX_AGE = 2.0   # seconds a snapshot may serve without re-checking its fingerprint (the pulse reads it ~1/s)
 
@@ -62,7 +74,15 @@ class RepoState:
         sweep a key exists in both, and a reader that preferred the old copy would answer with
         the value the sweep just superseded. This is the ONE place both are read; the migration
         ends by deleting the fallback arm here."""
-        return self.get(f"branch.{branch}.stack-{key}") or self.get(f"stack-branch.{branch}.{key}") or default
+        target = self.get(f"branch.{branch}.stack-{key}")
+        legacy = self.get(f"stack-branch.{branch}.{key}")
+        if target and legacy and target != legacy:
+            # The migration's one silent failure mode, made loud: a writer still emitting only
+            # the legacy spelling after the sweep is SHADOWED — readers take the target, so the
+            # write reports success and does nothing (a re-parent that no-ops). Every read comes
+            # through here, so this is the cheapest possible place to notice it.
+            _shadowed(branch, key, target, legacy)
+        return target or legacy or default
 
     def branch_key_all(self, branch, key):
         """The multivar form of branch_key: the target namespace's values if it has any, else
