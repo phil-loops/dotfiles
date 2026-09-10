@@ -13,6 +13,9 @@
 #
 # Usage: stack-base <branch>      → prints a full SHA on stdout
 set -uo pipefail
+# dual-write both stack-config namespaces (see the library header)
+source "${0:A:h}/stack-config-lib.zsh"
+
 
 local branch="${1:-}"
 [[ -z "$branch" ]] && { print -u2 "usage: stack-base <branch>"; exit 2; }
@@ -43,5 +46,5 @@ if [[ -z "$base" ]]; then
 fi
 
 # Persist so it's authoritative from here on.
-git config "stack-branch.${branch}.base" "$base"
+stack_cfg_set "$branch" base "$base"
 print -- "$base"

@@ -9,6 +9,9 @@
 #   stack-proof --clear <branch>...  clear the role
 #   stack-proof --list               show every proof branch
 set -euo pipefail
+# dual-write both stack-config namespaces (see the library header)
+source "${0:A:h}/stack-config-lib.zsh"
+
 
 mode="proof"
 case "${1:-}" in
@@ -28,10 +31,10 @@ for b in "$@"; do
     || { echo "stack-proof: no branch named '$b'" >&2; exit 1; }
   if [[ "$mode" == "clear" ]]; then
     git config --unset "branch.$b.stack-role" 2>/dev/null || true
-    git config --unset "stack-branch.$b.role" 2>/dev/null || true
+    stack_cfg_unset "$b" role
     echo "$b: role cleared — a shippable branch again"
   else
-    git config "stack-branch.$b.role" proof
+    stack_cfg_set "$b" role proof
     echo "$b: role=proof — never ships; omitted from stories; push will refuse it"
   fi
 done

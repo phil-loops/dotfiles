@@ -8,6 +8,9 @@
 #   stack-plan-omit --clear <branch>...  re-include them
 #   stack-plan-omit --list               show every omitted branch
 set -euo pipefail
+# dual-write both stack-config namespaces (see the library header)
+source "${0:A:h}/stack-config-lib.zsh"
+
 
 mode="omit"
 case "${1:-}" in
@@ -27,10 +30,10 @@ for b in "$@"; do
     || { echo "stack-plan-omit: no branch named '$b'" >&2; exit 1; }
   if [[ "$mode" == "clear" ]]; then
     git config --unset "branch.$b.stack-plan-omit" 2>/dev/null || true
-    git config --unset "stack-branch.$b.plan-omit" 2>/dev/null || true
+    stack_cfg_unset "$b" plan-omit
     echo "$b: back in the story"
   else
-    git config "stack-branch.$b.plan-omit" true
+    stack_cfg_set "$b" plan-omit true
     echo "$b: omitted from rendered stories"
   fi
 done

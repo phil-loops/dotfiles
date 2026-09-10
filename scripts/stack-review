@@ -122,7 +122,7 @@ fi
 PARENT=$(git config "branch.${BRANCH}.stack-parent" 2>/dev/null || git config "stack-branch.${BRANCH}.parent" 2>/dev/null)
 if [[ -z "$PARENT" ]]; then
   echo "Branch '$BRANCH' has no parent recorded."
-  echo "Run: git config stack-branch.$BRANCH.parent <parent-branch>"
+  echo "Run: git config branch.$BRANCH.stack-parent <parent-branch>"
   exit 1
 fi
 

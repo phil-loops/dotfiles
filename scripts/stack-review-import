@@ -11,6 +11,9 @@
 # Prints the local branch name on success. Idempotent: re-running refreshes the
 # fetched head and leaves the single watch-list entry intact.
 set -euo pipefail
+# dual-write both stack-config namespaces (see the library header)
+source "${0:A:h}/stack-config-lib.zsh"
+
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 num="${1:?usage: stack-review-import <pr-number>}"
@@ -28,7 +31,7 @@ branch="review/pr-${num}"
 git fetch -q --force origin "pull/${num}/head:${branch}"
 git fetch -q origin "$base" || true   # refresh refs/remotes/origin/<base> — the diff base
 
-git config "stack-branch.${branch}.parent" "origin/${base}"
+stack_cfg_set "$branch" parent "origin/${base}"
 git config "branch.${branch}.description" "#${num} ${title} — @${login}"
 
 if ! git config --get-all stack.standalone | grep -qxF "$branch"; then
