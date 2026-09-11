@@ -1,8 +1,12 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "permissions": {
     "defaultMode": "auto"
   },
-  "model": "fable[1m]",
+  "model": "claude-fable-5-1[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -51,9 +55,5 @@
   "skipDangerousModePermissionPrompt": true,
   "fileCheckpointingEnabled": false,
   "remoteControlAtStartup": false,
-  "skipAutoPermissionPrompt": true,
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  }
+  "skipAutoPermissionPrompt": true
 }
