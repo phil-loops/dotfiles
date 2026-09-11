@@ -11,8 +11,6 @@
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
   <key>ThrottleInterval</key><integer>10</integer>
-  <key>Nice</key><integer>5</integer>
-  <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>/Users/philbrockman/.cache/canopy-server/agent.out.log</string>
   <key>StandardErrorPath</key><string>/Users/philbrockman/.cache/canopy-server/agent.err.log</string>
 </dict>
