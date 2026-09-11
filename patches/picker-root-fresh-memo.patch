@@ -1,0 +1,43 @@
+diff --git a/scripts/srv/picker.py b/scripts/srv/picker.py
+index 2025a56..901aefd 100644
+--- a/scripts/srv/picker.py
++++ b/scripts/srv/picker.py
+@@ -535,6 +535,7 @@ def _overlay_live(projs, cfg, green):
+ # (dozens of subprocesses), starving the accept queue into connection-refused. Misses now
+ # queue on one build and re-check the cache inside the lock.
+ _pbuild_lock = threading.Lock()
++_root_fresh_cache = {}   # (repo path, root tip sha, base tip sha) -> (behind, overlap, merged)
+ 
+ 
+ def _projects_for(name, path):
+@@ -582,9 +583,29 @@ def _projects_build(name, path, pck):
+         prmap = {}
+     # Per mergeable root: how far it trails origin/main (behind), and whether main's new
+     # commits touch files the branch also touches (overlap → a consequential restack vs
+-    # pure SHA churn). Fanned out through a thread pool (git releases the GIL).
++    # pure SHA churn). Fanned out through a thread pool (git releases the GIL). The verdict
++    # is a pure function of the two tips, so it's memoised on (tip, base tip): a rebuild
++    # after one commit anywhere re-sweeps only the roots that moved, not all ~170 of them
++    # (5 spawns each — the whole sweep was ~5s of git per ref move).
++    tips = dict(ln.split(" ", 1) for ln in ctx.run(
++        ["git", "for-each-ref", "--format=%(refname:short) %(objectname)",
++         "refs/heads", "refs/remotes/origin/main"]).stdout.splitlines() if " " in ln)
++
+     def _root_fresh(b):
+         base = _base_of(b)
++        key = (path, tips.get(b), tips.get(base))
++        hit = _root_fresh_cache.get(key) if key[1] and key[2] else None
++        if hit is not None:
++            return hit
++        out = _root_fresh_cold(b, base)
++        if key[1] and key[2]:
++            _root_fresh_cache[key] = out
++            if len(_root_fresh_cache) > 2000:
++                for k in list(_root_fresh_cache)[:1000]:
++                    _root_fresh_cache.pop(k, None)
++        return out
++
++    def _root_fresh_cold(b, base):
+         n = ctx.run(["git", "rev-list", "--count", f"{b}..{base}"]).stdout.strip()
+         behind = int(n) if n.isdigit() else 0
+         overlap, merged = False, False
