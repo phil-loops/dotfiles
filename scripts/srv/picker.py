@@ -103,19 +103,28 @@ def _gh_pr(num):
         return None
 
 
-def _is_trunk(branch):
-    # A trunk anchor: an approved-but-unmerged node the forest treats as its base
-    # (stack-branch.<b>.trunk=true). Set/cleared via POST /trunk; dies with the branch.
-    return (ctx.run(["git", "config", "--bool", f"branch.{branch}.stack-trunk"]).stdout.strip()
-            or ctx.run(["git", "config", "--bool", f"stack-branch.{branch}.trunk"]).stdout.strip()) == "true"
+def _trunk_set():
+    # Every frozen-base flag in one spawn. Per-branch `git config` reads (two per branch,
+    # ~20ms each) ran serially over ~500 branches per rebuild — the bulk of a 16s /projects.
+    out = set()
+    for line in ctx.run(["git", "config", "--get-regexp",
+                         r"^(branch\..*\.stack-trunk|stack-branch\..*\.trunk)$"]).stdout.splitlines():
+        key, _, val = line.partition(" ")
+        if val.strip().lower() not in ("", "true", "yes", "on", "1"):
+            continue
+        if key.startswith("branch.") and key.endswith(".stack-trunk"):
+            out.add(key[len("branch."):-len(".stack-trunk")])
+        elif key.startswith("stack-branch.") and key.endswith(".trunk"):
+            out.add(key[len("stack-branch."):-len(".trunk")])
+    return out
 
 
-def _base_of(branch):
+def _base_of(branch, trunks):
     # The ref a branch is measured for freshness against — and, later, rebased onto. A trunk anchor
     # is frozen (approved, merges as-is), so it's measured against ITSELF → never "behind main," and
     # later never rebased onto main (its descendants rebase onto it instead). Everything else sits on
     # origin/main. This is the ONE seam so trunk overrides main in a single place, not scattered.
-    if _is_trunk(branch):
+    if branch in trunks:
         return branch
     return "origin/main"
 
@@ -591,8 +600,10 @@ def _projects_build(name, path, pck):
         ["git", "for-each-ref", "--format=%(refname:short) %(objectname)",
          "refs/heads", "refs/remotes/origin/main"]).stdout.splitlines() if " " in ln)
 
+    trunks = _trunk_set()
+
     def _root_fresh(b):
-        base = _base_of(b)
+        base = _base_of(b, trunks)
         key = (path, tips.get(b), tips.get(base))
         hit = _root_fresh_cache.get(key) if key[1] and key[2] else None
         if hit is not None:
@@ -649,7 +660,7 @@ def _projects_build(name, path, pck):
         p["landed"] = landed
         p["shipped"] = shipped.get(p["name"])
         branches = members.get(p["name"]) or bs
-        p["trunk"] = next((b for b in branches if _is_trunk(b)), None)   # the forest's frozen base, if any
+        p["trunk"] = next((b for b in branches if b in trunks), None)   # the forest's frozen base, if any
         p["unpushed"] = sum(1 for b in branches if unpushed.get(b, False))
         p["lastCommit"] = max((commits[b] for b in branches if b in commits), default=None)
         p["lastAuthored"] = max((authored[b] for b in branches if b in authored), default=None)
