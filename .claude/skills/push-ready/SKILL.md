@@ -6,7 +6,7 @@ description: Get a branch to a green, push-ready state in one motion — reviews
 # Push Ready — sealed, gates green, push button unlocked
 
 A branch isn't done when the code is done. "Ready to push" = ONE voiced outgoing commit + a
-**server-recorded** green gates verdict (`stack-branch.<b>.gates-green-tree` == the branch's tree
+**server-recorded** green gates verdict (`branch.<b>.stack-gates-green-tree` == the branch's tree
 SHA). Restack mechanics live in `claude/forests.md` (*Restacking after a merge*) — apply, don't
 restate.
 
@@ -38,9 +38,9 @@ name a level, or say "no review" to skip). Findings split by verdict:
   gates verdict so they die with the next edit:
 
 ```bash
-git config --unset-all stack-branch.<b>.review-flag 2>/dev/null || true
-git config --add stack-branch.<b>.review-flag '<file>:<line> — <one-line finding>'   # per finding
-git config stack-branch.<b>.review-flags-tree "$(git rev-parse '<b>^{tree}')"
+git config --unset-all branch.<b>.stack-review-flag 2>/dev/null || true
+git config --add branch.<b>.stack-review-flag '<file>:<line> — <one-line finding>'   # per finding
+git config branch.<b>.stack-review-flags-tree "$(git rev-parse '<b>^{tree}')"
 ```
 
 Record flags AFTER any confirmed fixes land (the fixes move the tree). A clean review still
@@ -75,7 +75,7 @@ fix honestly, new commit, re-run. Never hand-write `gates-green-tree` (spine har
 
 ### 6 · Verify + hand off
 
-Done means `git config stack-branch.<b>.gates-green-tree` equals
+Done means `git config branch.<b>.stack-gates-green-tree` equals
 `git rev-parse '<b>^{tree}'` — check it, don't assume. Any commit landed after green invalidates
 the verdict; re-run. Point the viewer (`stack-review-serve <project>` reuses the live server;
 `open` the URL if the user isn't already there) and report in a few lines: branch, tip SHA,

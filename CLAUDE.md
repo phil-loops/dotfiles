@@ -26,7 +26,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 **Forest viewer & gates**
 
 - **Never curl-probe a mutating viewer endpoint with a real branch name** — `POST /checkout` yanks the main working tree off a live branch. Probe with a nonexistent branch (`__probe__`) or empty body and assert 400/404.
-- **Never hand-write the `gates-green-tree` config key for a real branch** — that forges a green gates verdict without running the gates.
+- **Never hand-write the `branch.<b>.stack-gates-green-tree` config key for a real branch** — that forges a green gates verdict without running the gates.
 
 # Just do both
 
