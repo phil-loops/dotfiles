@@ -71,7 +71,7 @@ fixed is already in the diff; drop it from the card the moment it lands (full di
 history belongs in chat and commit messages). Re-prune on every revisit — same decay rule
 as the tree-keyed flags.
 - **Own branch** → per-finding pins via push-ready's flag mechanics
-  (`stack-branch.<b>.review-flag` + `review-flags-tree`), and the prose review as a
+  (`branch.<b>.stack-review-flag` + `stack-review-flags-tree`), and the prose review as a
   `stack-notes` card when it's worth keeping.
 
 ## The loop — review, then sign it

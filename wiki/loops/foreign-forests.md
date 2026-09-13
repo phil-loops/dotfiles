@@ -14,7 +14,7 @@ lede: The viewer can author your forests but cannot see anyone else's. Reviewing
 2. **Walk-the-stack round trips.** Every "now look at footers-12" was a manual sequence — fetch, checkout, kill server, relaunch, poll — with port roulette (3011→3012→3011) when the old listener hadn't freed.
 3. **Drift discovered by 500.** The shared dev DB was missing the footer migrations; the borrowed Prisma client and package dists were stale. Each surfaced as a runtime error mid-review, though the machinery to *predict* all three already exists.
 
-The viewer's world is `stack-branch.*` git config. Maksim's stack has none, so the viewer cannot render it, and every capability that would have helped — preview swap, provenance, drift detection — has no node to hang off.
+The viewer's world is `branch.<b>.stack-*` git config. Maksim's stack has none, so the viewer cannot render it, and every capability that would have helped — preview swap, provenance, drift detection — has no node to hang off.
 
 ## What already exists (inventory, not redesign)
 
