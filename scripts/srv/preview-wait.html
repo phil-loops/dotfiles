@@ -122,19 +122,24 @@
     } catch {}
   }
 
+  let deadPolls = 0; // one "dead" poll can be a stale snapshot straddling the boot; two in a row is real
   async function watch() {
     try {
       const r = await fetch(base + "/previews").then((x) => x.json());
       const pv = (r.previews || []).find((p) => p.dir === dir);
       if (!pv) { return; }
       if (pv.health === "healthy") {
+        if (parked) { unpark(); }
         setState("ready — opening", "ok");
         location.replace(url);
         return;
       }
       if (parked) { return; } // error is showing; let restart drive the next transition
+      const down = pv.health === "dead" || pv.health === "orphaned";
+      deadPolls = down ? deadPolls + 1 : 0;
       if (pv.health === "error") { setState("compile error", "err"); park(pv.error); }
-      else if (pv.health === "dead" || pv.health === "orphaned") { setState("server died", "err"); park("the dev server is no longer listening on :" + pv.port); }
+      else if (down && deadPolls >= 2) { setState("server died", "err"); park("the dev server is no longer listening on :" + pv.port); }
+      else if (down) { setState("checking health…"); }
       else { setState(pv.health === "compiling" ? "compiling…" : "booting… (clean build, ~20–60s)"); }
     } catch {}
   }
