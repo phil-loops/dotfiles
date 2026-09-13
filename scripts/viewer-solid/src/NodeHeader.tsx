@@ -35,7 +35,7 @@ function GhostActions(props: { project: () => string }) {
     <button
       class={`nh-ghost-preview ${GHOST_BTN}`}
       title="build this project's integration into its playground worktree and serve it on a side port (3010+) — leaves :3000 and your checkout alone"
-      onClick={() => window.open(withRepo("/preview-wait") + "?project=" + encodeURIComponent(props.project()), "_blank")}
+      onClick={() => window.open(withRepo("/preview-wait") + "?project=" + encodeURIComponent(props.project()), "_blank", "noopener")}
     >
       {(() => {
         const pv = live();
