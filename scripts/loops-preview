@@ -87,8 +87,11 @@ branch_of()  {
 }
 behind_of()  { git -C "$1" rev-list --count HEAD..origin/main 2>/dev/null || true; }      # $1=DIR
 json_esc()   { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
-# state of one preview, echoed as: orphaned (dir gone) · up (listening) · dead (crashed, session lingers)
-state_of()   { local dir="$1" port="$2"; { [ -z "$dir" ] || [ ! -d "$dir" ]; } && { echo orphaned; return; }; listening "$port" && echo up || echo dead; }
+# state of one preview: orphaned (dir gone) · up (listening) · booting (spawned <BOOT_GRACE s ago, port
+# not bound yet — the meta lands before `next dev` binds; without the grace every launch read "dead") · dead
+BOOT_GRACE=90
+state_of()   { local dir="$1" port="$2" started="$3"; { [ -z "$dir" ] || [ ! -d "$dir" ]; } && { echo orphaned; return; }
+               listening "$port" && { echo up; return; }; [ "$(age_secs "$started")" -lt "$BOOT_GRACE" ] && echo booting || echo dead; }
 
 # Unmanaged next-dev listeners on :3000-3060 — servers no preview session owns (a leftover
 # headless `next dev`, a `task dev` in a worktree). Echoes "PORT PID" per stray; $1 = ports
@@ -151,7 +154,7 @@ if [ "$ACTION" = "list" ]; then
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
     reg_ports="$reg_ports $port"
-    state="$(state_of "$dir" "$port")"
+    state="$(state_of "$dir" "$port" "$started")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch="(dir gone)"; fi
     printf '  %-22s :%-5s  %-24s %-6s %s\n' \
       "$name" "${port:-?}" "$branch" "$(age_human "$(age_secs "$started")")" "$state"
@@ -184,7 +187,7 @@ if [ "$ACTION" = "json" ]; then
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
     reg_ports="$reg_ports $port"
-    state="$(state_of "$dir" "$port")"
+    state="$(state_of "$dir" "$port" "$started")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; behind="$(behind_of "$dir")"; else branch=""; behind=""; fi
     url=""; [ "$state" = "up" ] && url="http://localhost:$port"
     jstate=""
@@ -297,7 +300,7 @@ if [ "$ACTION" = "reap" ]; then
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
     reason=""
     if [ -z "$dir" ] || [ ! -d "$dir" ]; then reason="orphaned (dir gone)"
-    elif ! listening "$port"; then reason="dead (not listening on :$port)"
+    elif [ "$(state_of "$dir" "$port" "$started")" = dead ]; then reason="dead (not listening on :$port)"
     elif [ -n "$OLDER_THAN" ] && [ "$(age_secs "$started")" -gt "$((OLDER_THAN * 60))" ]; then
       reason="older than ${OLDER_THAN}m"
     fi
