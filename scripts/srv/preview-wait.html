@@ -131,6 +131,7 @@
       if (pv.health === "healthy") {
         if (parked) { unpark(); }
         setState("ready — opening", "ok");
+        try { window.opener = null; } catch {}
         location.replace(url);
         return;
       }

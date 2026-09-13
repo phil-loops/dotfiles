@@ -176,7 +176,7 @@ export function NodeActions(props: {
   // window.open stays synchronous in the click so popup blockers see the user gesture.
   const openPreview = () => {
     setOpen(false);
-    window.open(withRepo("/preview-wait") + "?branch=" + encodeURIComponent(props.branch), "_blank");
+    window.open(withRepo("/preview-wait") + "?branch=" + encodeURIComponent(props.branch), "_blank", "noopener");
   };
   // running preview for this branch, fetched only while the menu is open — flips the menu row
   // from "start one" to "open the one on :<port>". /previews health-probes serverside.
