@@ -21,6 +21,7 @@ alias dd="$HOME/.dotfiles/scripts/dd-design"  # jump into the current /design do
 alias check="aws-vault exec prod -- ./scripts/check-suppression-list.sh"
 alias refresh="rm -fr .next node_modules && task dev"
 alias tl="$HOME/.dotfiles/scripts/loops-tail"  # tail loops: combined dev-stack log tail; tl -p to fzf-pick sources, defaults in loops-tail.conf
+alias loops-staging="LOOPS_ENDPOINT_URL=https://app.l3s.email/api/v1 loops"  # loops CLI against staging (key "staging" in loops auth); bare `loops` hits prod and the staging key 401s
 alias keys="$HOME/.dotfiles/scripts/keys"  # cheatsheet of the keys we've bound ourselves, read live from helix/tmux config; keys --md, keys helix
 alias docs="cd ~/coding/docs && mintlify dev"
 
