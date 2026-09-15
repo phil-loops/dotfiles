@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/zsh
 # stack-review-import <pr-number> — pull a GitHub PR you've been asked to review
 # into the local forest viewer as a checkout-able node off its base.
 #
