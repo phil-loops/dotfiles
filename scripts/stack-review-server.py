@@ -426,6 +426,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template
         elif u.path == "/plan-preview":   return review.plan_preview(self, u)        # rendered plan for a branch
         elif u.path == "/plan-steps":     return review.plan_steps(self, u)          # structured steps for per-step story editing
+        elif u.path == "/step-evidence":  return review.step_evidence(self, u)       # a branch's commits + diff shape, to write its story from
         elif u.path == "/forest-purposes": return review.forest_purposes(self, u)
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)

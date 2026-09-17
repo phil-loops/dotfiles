@@ -1,18 +1,22 @@
-import { createSignal, createResource, For, Show } from "solid-js";
+import { createSignal, createResource, createEffect, For, Show } from "solid-js";
 import { withRepo, canMutate } from "./provider";
 
 // The forest as a plain-English story, one line per branch in merge order, every line editable at
-// once. The plan is fetched through any one branch of the forest — the view has no "this branch". Each line is the branch's `job` — what it DOES, in a sentence a teammate reads without the
-// diff — and saving writes that branch's own `stack-branch.<b>.story`, so the wording renders on
-// every branch's plan block and outlives the branch you happened to edit from.
+// once. The plan is fetched through any one branch of the forest — the view has no "this branch".
+// Saving writes that branch's own `stack-branch.<b>.story`, so the wording renders on every
+// branch's plan block and outlives the branch you happened to edit from.
 //
-// job_of ranks story > description > subject. The badge names which one is showing, and a story
-// that overrides a description shows the description underneath — an override is never silent here.
+// Every box starts BLANK — it holds the hand-written story and nothing else. The derived gloss
+// (description, or the commit subject) is shown underneath as what the plan falls back to, not
+// pre-filled as a draft: a story is your own read of the point, and a pre-filled line gets
+// nudged instead of written. What to write it FROM is the row's own evidence — its commits and
+// the shape of its diff, fetched on demand and opened when you start typing.
 type Step = {
   n: number; branch: string; job: string; story: string; description: string; subject: string;
   pr: number | null; landed: boolean;
 };
 type Source = "story" | "description" | "subject" | "merged";
+type Evidence = { subjects: string[]; files: string[]; fileCount: number; adds: number; dels: number };
 
 const sourceOf = (s: Step): Source => (s.landed ? "merged" : s.story ? "story" : s.description ? "description" : "subject");
 const leafOf = (b: string): string => b.split("/").pop() || b;
@@ -25,8 +29,8 @@ const BADGE: Record<Source, string> = {
 };
 const BADGE_TITLE: Record<Source, string> = {
   story: "a hand-written story — beats the description and the commit subject",
-  description: "the branch description (git config branch.<b>.description) — no story override set",
-  subject: "auto-derived from the newest commit's subject — no description, no story",
+  description: "no story yet — the plan falls back to the branch description (git config branch.<b>.description)",
+  subject: "no story, no description — the plan falls back to the newest commit's subject",
   merged: "already merged — its line is its PR title, from the merge ledger",
 };
 
@@ -37,7 +41,20 @@ const postStory = (branch: string, text: string): Promise<{ ok: boolean; prev: s
   }).then(async (r) => ({ ok: r.ok, prev: r.ok ? ((await r.json()) as { prev?: string }).prev ?? "" : "" }))
     .catch(() => ({ ok: false, prev: "" }));
 
-export function StoriesEditor(props: { project: string; branch: string; onPick: (branch: string) => void }) {
+const fetchEvidence = (branch: string): Promise<Evidence | null> =>
+  fetch(withRepo("/step-evidence") + "?branch=" + encodeURIComponent(branch))
+    .then((r) => r.json() as Promise<Evidence>)
+    .catch(() => null);
+
+export function StoriesEditor(props: {
+  project: string;
+  branch: string;
+  // the branch whose node you came from, marked "this branch" — the forest view has none
+  here?: string;
+  // the row to open on: focused, scrolled to, evidence already unfolded
+  focus?: string;
+  onPick: (branch: string) => void;
+}) {
   const [data, { refetch }] = createResource(
     () => props.branch,
     (b) => fetch(withRepo("/plan-steps") + "?branch=" + encodeURIComponent(b))
@@ -48,16 +65,26 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
   // the story this row just overwrote, offered back for a few seconds — a story is hand-written
   // prose and git config keeps no history, so a wrong save must be one click from undone
   const [undoable, setUndoable] = createSignal<Record<string, string>>({});
+  const [shown, setShown] = createSignal<Record<string, boolean>>({});
+  const [evidence, setEvidence] = createSignal<Record<string, Evidence | null>>({});
   const areas: Record<string, HTMLTextAreaElement | undefined> = {};
 
-  const draftOf = (s: Step): string => drafts()[s.branch] ?? s.job;
-  const dirty = (s: Step): boolean => draftOf(s).trim() !== s.job.trim();
+  const draftOf = (s: Step): string => drafts()[s.branch] ?? s.story;
+  const dirty = (s: Step): boolean => draftOf(s).trim() !== s.story.trim();
   const mark = (branch: string, v: "saving" | "saved" | "failed" | null) =>
     setSaving((m) => {
       const next = { ...m };
       if (v) next[branch] = v; else delete next[branch];
       return next;
     });
+
+  const reveal = async (branch: string) => {
+    setShown((m) => ({ ...m, [branch]: true }));
+    if (branch in evidence()) return;
+    setEvidence((m) => ({ ...m, [branch]: null }));
+    const e = await fetchEvidence(branch);
+    setEvidence((m) => ({ ...m, [branch]: e }));
+  };
 
   // Typing the description back verbatim clears the override rather than storing a copy of it —
   // the description stays the single source, and the badge flips back to "description".
@@ -91,6 +118,20 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
     if (next) areas[next.branch]?.focus();
   };
 
+  // the rows only exist once the plan resolves, so the opening focus waits for them
+  let landed = false;
+  createEffect(() => {
+    const b = props.focus;
+    if (landed || !b || !data()) return;
+    landed = true;
+    void reveal(b);
+    requestAnimationFrame(() => {
+      const el = areas[b];
+      el?.focus();
+      el?.scrollIntoView({ block: "center" });
+    });
+  });
+
   return (
     <div class="stories mx-auto my-0 max-w-[900px] pt-[8px] px-[16px] pb-[40px] font-mono">
       <div class="stories-head flex items-baseline gap-[12px] pt-[6px] px-[2px] pb-[4px]">
@@ -98,7 +139,7 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
         <span class="stories-cap text-[11px] uppercase tracking-[0.08em] text-ink-faint">stories · in merge order</span>
       </div>
       <p class="stories-hint mt-0 mx-[2px] mb-[14px] text-[11px] leading-[1.5] text-ink-dim">
-        one line per branch: what it does, as a sentence a teammate reads without the diff. ↵ or leaving the line saves it to that branch; ⇥ moves on; esc reverts.
+        one line per branch: what it does, as a sentence a teammate reads without the diff. every box starts blank — ⌄ opens that branch's commits to read the point off. ↵ saves and moves on, esc reverts, empty falls back to the line underneath.
       </p>
       <Show when={data()} fallback={<p class="stories-empty italic text-ink-faint">loading…</p>}>
         <ol class="stories-list m-0 flex list-none flex-col gap-[3px] p-0">
@@ -107,22 +148,27 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
               const src = () => sourceOf(s);
               const state = () => saving()[s.branch];
               const shadowed = () => (src() === "story" && s.description ? s.description : "");
+              const blank = () => !draftOf(s).trim();
+              const here = () => props.here === s.branch;
+              const ev = () => evidence()[s.branch];
               return (
-                <li class={`stories-row flex flex-col gap-[3px] rounded-[8px] border border-transparent py-[6px] px-[10px] focus-within:border-rule focus-within:bg-vellum-raise ${s.landed ? "landed opacity-50" : ""}`}>
+                <li class={`stories-row flex flex-col gap-[3px] rounded-[8px] border py-[6px] px-[10px] focus-within:border-rule focus-within:bg-vellum-raise ${here() ? "border-l-2 border-l-ember border-y-transparent border-r-transparent" : "border-transparent"} ${s.landed ? "landed opacity-50" : ""}`}>
                   <div class="flex items-start gap-[10px]">
-                    <span class="stories-n min-w-[18px] flex-none pt-[4px] text-right text-[11px] text-gold-leaf">{s.n}</span>
+                    <span class={`stories-n min-w-[18px] flex-none pt-[4px] text-right text-[11px] ${here() ? "text-ember" : "text-gold-leaf"}`}>{s.n}</span>
                     <Show
                       when={!s.landed && canMutate}
                       fallback={<span class="stories-line min-w-0 flex-1 px-[7px] py-[3px] text-[12.5px] leading-[1.55] text-ink-dim">{s.job}</span>}
                     >
                       <textarea
                         ref={(el) => { areas[s.branch] = el; }}
-                        class={`stories-input min-w-0 flex-1 resize-none rounded-[5px] border bg-transparent px-[7px] py-[3px] text-[12.5px] leading-[1.55] outline-none ${dirty(s) ? "border-gold-deep text-ink" : "border-transparent text-ink-dim focus:border-gold-deep focus:text-ink hover:border-rule"}`}
+                        class={`stories-input min-w-0 flex-1 resize-none rounded-[5px] border bg-transparent px-[7px] py-[3px] text-[12.5px] leading-[1.55] outline-none placeholder:italic placeholder:text-ink-faint ${dirty(s) ? "border-solid border-gold-deep text-ink" : blank() ? "border-dashed border-rule text-ink-dim focus:border-solid focus:border-gold-deep focus:text-ink" : "border-solid border-transparent text-ink-dim focus:border-gold-deep focus:text-ink hover:border-rule"}`}
                         style={{ "field-sizing": "content" }}
                         rows={1}
                         spellcheck={true}
+                        placeholder="what is the point of this branch?"
                         value={draftOf(s)}
                         disabled={state() === "saving"}
+                        onFocus={() => void reveal(s.branch)}
                         onInput={(e) => setDrafts((d) => ({ ...d, [s.branch]: e.currentTarget.value }))}
                         onBlur={() => { if (dirty(s) && !saving()[s.branch]) void save(s, draftOf(s)); }}
                         onKeyDown={(e) => {
@@ -150,6 +196,9 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
                           >undo</button>
                         )}
                       </Show>
+                      <Show when={here()}>
+                        <span class="stories-here text-[9.5px] uppercase tracking-[0.06em] text-ember">this branch</span>
+                      </Show>
                       <span class={`stories-src rounded-[4px] border px-[5px] text-[9.5px] uppercase tracking-[0.06em] ${BADGE[src()]}`} title={BADGE_TITLE[src()]}>
                         {src() === "merged" && s.pr ? `merged #${s.pr}` : src()}
                       </span>
@@ -160,6 +209,20 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
                       >{leafOf(s.branch)}</button>
                     </span>
                   </div>
+                  <Show when={blank() && !s.landed && s.job}>
+                    <div class="stories-under flex items-baseline gap-[8px] pl-[35px] text-[10.5px] leading-[1.5] text-ink-faint">
+                      <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={s.job}>
+                        <span class="text-ink-faint">falls back to the {src()} ·</span> {s.job}
+                      </span>
+                      <Show when={canMutate}>
+                        <button
+                          class="flex-none cursor-pointer border-0 bg-transparent p-0 text-[10.5px] text-ink-faint underline decoration-dotted hover:text-ink"
+                          title="start from that line instead of a blank box"
+                          onClick={() => { setDrafts((d) => ({ ...d, [s.branch]: s.job })); areas[s.branch]?.focus(); }}
+                        >start from it</button>
+                      </Show>
+                    </div>
+                  </Show>
                   <Show when={shadowed()}>
                     <div class="stories-under flex items-baseline gap-[8px] pl-[35px] text-[10.5px] leading-[1.5] text-ink-faint">
                       <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={shadowed()}>
@@ -171,6 +234,31 @@ export function StoriesEditor(props: { project: string; branch: string; onPick: 
                           title="drop the story override — the description shows again"
                           onClick={() => void save(s, s.description)}
                         >use description</button>
+                      </Show>
+                    </div>
+                  </Show>
+                  <Show when={!s.landed}>
+                    <div class="stories-ev pl-[35px]">
+                      <button
+                        class="stories-ev-toggle cursor-pointer border-0 bg-transparent p-0 text-[10px] uppercase tracking-[0.06em] text-ink-faint hover:text-ink"
+                        title="what this branch actually changes — its commits and diff shape"
+                        onClick={() => (shown()[s.branch] ? setShown((m) => ({ ...m, [s.branch]: false })) : void reveal(s.branch))}
+                      >{shown()[s.branch] ? "⌃ what it changes" : "⌄ what it changes"}</button>
+                      <Show when={shown()[s.branch]}>
+                        <Show when={ev()} fallback={<div class="text-[10.5px] italic text-ink-faint">reading the branch…</div>}>
+                          {(e) => (
+                            <div class="stories-ev-body mt-[3px] flex flex-col gap-[2px] border-l border-rule pl-[9px]">
+                              <div class="text-[10px] text-ink-faint">
+                                {e().subjects.length} commit{e().subjects.length === 1 ? "" : "s"} · {e().fileCount} file{e().fileCount === 1 ? "" : "s"}
+                                {" "}<span class="text-add">+{e().adds}</span> <span class="text-del">−{e().dels}</span>
+                              </div>
+                              <For each={e().subjects}>
+                                {(sub) => <div class="text-[11px] leading-[1.5] text-ink-dim">{sub}</div>}
+                              </For>
+                              <div class="text-[10.5px] leading-[1.5] text-ink-faint">{e().files.join("  ")}{e().fileCount > e().files.length ? ` … +${e().fileCount - e().files.length} more` : ""}</div>
+                            </div>
+                          )}
+                        </Show>
                       </Show>
                     </div>
                   </Show>
