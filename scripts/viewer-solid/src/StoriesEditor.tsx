@@ -107,8 +107,12 @@ export function StoriesEditor(props: {
     setFolded((m) => ({ ...m, [foldKey(branch, path)]: !m[foldKey(branch, path)] }));
 
   // reading a branch's change: its commits (cheap) and its per-file patches, fetched once each
+  let readPane: HTMLDivElement | undefined;
   const select = async (branch: string) => {
     setSelected(branch);
+    // a new branch's change starts at the top — inheriting the last one's scroll drops you into
+    // the middle of a diff you have not read
+    if (readPane) readPane.scrollTop = 0;
     if (branch in evidence()) return;
     setEvidence((m) => ({ ...m, [branch]: null }));
     setChanged((m) => ({ ...m, [branch]: null }));
@@ -302,7 +306,7 @@ export function StoriesEditor(props: {
       </div>
 
       {/* the change itself — its own scroll, so reading it never moves the box you type in */}
-      <div class="stories-read min-w-0 flex-1 overflow-y-auto px-[16px] pt-[10px] pb-[40px]">
+      <div ref={readPane} class="stories-read min-w-0 flex-1 overflow-y-auto px-[16px] pt-[10px] pb-[40px]">
         <Show
           when={selected()}
           fallback={<p class="stories-read-empty px-[2px] pt-[6px] text-[11px] italic text-ink-faint">pick a branch to read its change</p>}
@@ -349,7 +353,9 @@ export function StoriesEditor(props: {
                           <span class="flex-none text-[10px]"><span class="text-add">+{f.add}</span> <span class="text-del">−{f.del}</span></span>
                         </button>
                         <Show when={!isFolded(selected(), f.path) && f.patch}>
-                          <div class="stories-file-diff diff mt-[2px] overflow-x-auto rounded-[6px] border border-rule" innerHTML={patchHtml(f.patch)} />
+                          {/* relative + isolate: d2h line numbers are position:absolute, so each
+                              file owns the containing block and paint layer its rows sit in */}
+                          <div class="stories-file-diff diff relative isolate mt-[2px] overflow-x-auto rounded-[6px] border border-rule" innerHTML={patchHtml(f.patch, { narrow: true })} />
                         </Show>
                       </div>
                     )}

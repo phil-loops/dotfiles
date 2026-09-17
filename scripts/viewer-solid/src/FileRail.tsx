@@ -34,11 +34,13 @@ const oneSided = (patch: string) => {
 };
 
 // the one way any surface renders a patch — the node cards and the dirt gate must look identical.
-export function patchHtml(patch: string | undefined): string {
+// `narrow` forces one column: in a half-width reading pane each side-by-side half gets ~430px
+// and truncates every line mid-token, which is worse than no columns at all.
+export function patchHtml(patch: string | undefined, opts?: { narrow?: boolean }): string {
   return patch
     ? Diff2Html.html(patch, {
         drawFileList: false,
-        outputFormat: oneSided(patch) ? "line-by-line" : "side-by-side",
+        outputFormat: opts?.narrow || oneSided(patch) ? "line-by-line" : "side-by-side",
         matching: "lines",
         colorScheme: ColorSchemeType.DARK,
       })
