@@ -224,21 +224,38 @@ fi
 # Entries are stamped with MAIN's package-lock hash; a stale stamp is discarded at the next warm.
 POOL="$HOME/.cache/loops-preview/nm-pool"
 POOL_SIZE="${LOOPS_PREVIEW_POOL_SIZE:-1}"
-lock_stamp() { md5 -q "$MAIN/package-lock.json" 2>/dev/null; }
+POOL_TOOK=""
+# A node_modules is identified by the package-lock it was installed from — so the pool is
+# CONTENT-ADDRESSED: an entry is only a match for a checkout whose lock hashes the same.
+# Keying the take on MAIN's lock instead (until 2026-09-17) silently handed every preview a
+# tree built for whatever MAIN happened to be parked on. When MAIN sat 44 commits behind on a
+# detached HEAD, that was a ~920-line lock delta, so npm-owed reconciled it on EVERY launch —
+# minutes of "materialising worktree…" that no amount of warming could fix, because the pool
+# was pre-cloning the wrong answer.
+lock_stamp() { md5 -q "${1:-$MAIN}/package-lock.json" 2>/dev/null; }
 # npm writes .bin/<name> and .package-lock.json LAST, so a tree missing either is a clone taken while
 # `npm install` was still running on MAIN — it carries the right stamp and boots to "sh: next: command
 # not found" (2026-09-06: a pool entry warmed mid-install fed a preview three hours later).
 nm_complete() { [ -e "$1/.bin/next" ] && [ -e "$1/.package-lock.json" ]; }   # $1 = a node_modules
-pool_take() {   # $1 = destination path; moves a fresh entry there, false when the pool is empty/stale
-  local stamp e
-  stamp="$(lock_stamp)"
-  for e in "$POOL"/*/; do
-    [ -d "$e/node_modules" ] || continue
-    [ "$(cat "$e/stamp" 2>/dev/null)" = "$stamp" ] || continue
-    nm_complete "$e/node_modules" || { rm -rf "$e"; continue; }
-    mv "$e/node_modules" "$1" 2>/dev/null || continue
-    rm -rf "$e"
-    return 0
+# Two passes, and the second one matters: an exact lock match is free (npm-owed then finds
+# nothing owed), but a NON-matching entry still beats cloning 310k files from MAIN — npm
+# reconciles the delta either way, and this at least skips the clone. Exact-match-only would
+# have made a parked MAIN *slower* than before, trading a 90s reconcile for a 30s clone plus
+# the same 90s reconcile.
+pool_take() {   # $1 = destination path, $2 = the lock stamp it wants; false when the pool is empty
+  local want="$2" exact e
+  for exact in 1 0; do
+    for e in "$POOL"/*/; do
+      [ -d "$e/node_modules" ] || continue
+      if [ "$exact" = 1 ]; then
+        [ -n "$want" ] && [ "$(cat "$e/stamp" 2>/dev/null)" = "$want" ] || continue
+      fi
+      nm_complete "$e/node_modules" || { rm -rf "$e"; continue; }
+      mv "$e/node_modules" "$1" 2>/dev/null || continue
+      rm -rf "$e"
+      POOL_TOOK="$([ "$exact" = 1 ] && echo exact || echo approx)"
+      return 0
+    done
   done
   return 1
 }
@@ -276,6 +293,14 @@ if [ "$ACTION" = "warm" ]; then
   for e in "$POOL"/*/; do [ -d "$e" ] && n=$((n+1)); done
   [ "$n" -lt "$POOL_SIZE" ] || exit 0
   nm_complete "$MAIN/node_modules" || { err "MAIN's node_modules is mid-install (no .bin/next) — not warming"; exit 1; }
+  # The pool can only ever hold a copy of MAIN's tree, so a MAIN that has drifted from
+  # origin/main poisons every entry in it — warming harder just pre-clones the wrong answer
+  # faster. No fetch (this runs in the background on every preview); an origin/main ref that is
+  # itself stale simply says nothing, which is the right failure.
+  om="$(git -C "$MAIN" show origin/main:package-lock.json 2>/dev/null | md5 -q 2>/dev/null)"
+  if [ -n "$om" ] && [ "$om" != "$stamp" ]; then
+    err "pool donor $MAIN is on lock ${stamp:0:8} but origin/main wants ${om:0:8} — every entry warmed from it will need an npm reconcile. Move $MAIN to origin/main and npm install there."
+  fi
   e="$POOL/$(date +%s)-$$"
   mkdir -p "$e"
   if ! cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
@@ -378,10 +403,16 @@ else
   if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
     rm -f "$DIR/node_modules"
     nm_complete "$MAIN/node_modules" || { err "MAIN's node_modules is mid-install (no .bin/next) — let npm install finish in $MAIN first"; exit 1; }
-    if pool_take "$DIR/node_modules"; then
-      cyan "took a warm node_modules from the pool"
+    want="$(lock_stamp "$DIR")"      # what this BRANCH's lockfile asks for
+    have="$(lock_stamp)"             # what MAIN's node_modules actually is
+    if pool_take "$DIR/node_modules" "$want"; then
+      if [ "$POOL_TOOK" = exact ]; then
+        cyan "took a warm node_modules from the pool (lock ${want:0:8})"
+      else
+        cyan "took a pool entry built for a different lock — npm will reconcile it"
+      fi
     else
-      cyan "cloning node_modules from $MAIN (pool empty; once per checkout, ~30s)"
+      cyan "cloning node_modules from $MAIN (no pool entry for lock ${want:0:8}; ~30s)"
       if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
         rm -rf "$DIR/node_modules"
         ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
@@ -389,6 +420,12 @@ else
       fi
     fi
     [ -L "$DIR/node_modules" ] || strip_quarantine "$DIR/node_modules"
+    # The donor is the only complete tree we have, so a mismatch is not fatal — npm-owed will
+    # reconcile it below. But that reconcile is the expensive phase, and it is invisible unless
+    # someone says WHY it is happening, so say it here rather than let it read as a slow preview.
+    if [ -n "$want" ] && [ -n "$have" ] && [ "$want" != "$have" ]; then
+      err "donor mismatch: $MAIN is on lock ${have:0:8}, this branch wants ${want:0:8} — npm must reconcile the difference (slow). Move $MAIN to a commit matching this branch, or npm install there, to make previews cheap again."
+    fi
   fi
   pool_warm_bg
 fi
