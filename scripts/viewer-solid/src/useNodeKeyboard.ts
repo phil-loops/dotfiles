@@ -2,6 +2,7 @@ import { onCleanup } from "solid-js";
 import type { ViewerLocation } from "./router";
 import { forestRepo } from "./router";
 import { chatTarget } from "./chatDrawer";
+import { storySheetOpen } from "./StorySheet";
 import type { SpineNode } from "./types";
 
 // The node review keyboard: j/k walk the spine, 1–4 pick the diff base, c flips diffs⇄commits,
@@ -32,6 +33,9 @@ export function useNodeKeyboard(deps: {
   const onKey = (e: KeyboardEvent) => {
     // already typing (incl. the filter box) → let everything bubble: a 2nd ⌘F reaches native find
     if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
+    // a sheet over the page owns the keyboard: Esc there closes the sheet rather than also
+    // popping up to the forest, and m/j/k don't navigate out from under an open editor
+    if (storySheetOpen()) return;
     if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); deps.focusFilter(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return; // leave OS/browser chords alone
     const list = deps.spine();
