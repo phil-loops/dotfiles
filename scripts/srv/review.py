@@ -481,11 +481,17 @@ def step_evidence(req, u):
     branch = parse_qs(u.query).get("branch", [""])[0]
     if not branch:
         return req._send(400, json.dumps({"error": "no branch"}))
+    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    rng = f"{parent}..{branch}"
-    subjects = [s for s in ctx.run(["git", "log", "--format=%s", "--no-merges", rng]).stdout.splitlines() if s]
-    stat = ctx.run(["git", "diff", "--numstat", f"{parent}...{branch}"]).stdout.splitlines()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or main)
+    # the diff base is stack-forest's trunk_base rule: the parent, except a local-trunk parent
+    # resolves to the REMOTE trunk. A stale local main folds everybody else's merged commits
+    # into the range — the "garbage diff", a one-commit branch reading as 21 commits.
+    base = parent
+    if parent == main:
+        base = f"origin/{main}" if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"origin/{main}"]).stdout.strip() else main
+    subjects = [s for s in ctx.run(["git", "log", "--format=%s", "--no-merges", f"{base}..{branch}"]).stdout.splitlines() if s]
+    stat = ctx.run(["git", "diff", "--numstat", f"{base}...{branch}"]).stdout.splitlines()
     files, adds, dels = [], 0, 0
     for line in stat:
         cols = line.split("\t")
@@ -495,7 +501,7 @@ def step_evidence(req, u):
         adds += int(cols[0]) if cols[0].isdigit() else 0
         dels += int(cols[1]) if cols[1].isdigit() else 0
     req._send(200, json.dumps({
-        "branch": branch, "parent": parent, "subjects": subjects[:12],
+        "branch": branch, "parent": parent, "base": base, "subjects": subjects[:12],
         "files": files[:12], "fileCount": len(files), "adds": adds, "dels": dels,
     }))
 
@@ -528,12 +534,15 @@ def story_set(req, raw):
     text = (d.get("text") or "").strip()
     if not branch:
         return req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-    key = f"stack-branch.{branch}.story"
-    before = ctx.run(["git", "config", key]).stdout.strip()
+    # BOTH spellings, target first, exactly as stackcfg does — the namespace sweep moved every
+    # live story to `branch.<b>.stack-story`, and readers prefer it, so a legacy-only write is
+    # silently shadowed: the save returns ok and job_of keeps serving the pre-sweep line.
+    before = (ctx.run(["git", "config", f"branch.{branch}.stack-story"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.story"]).stdout.strip())
     if text:
-        ctx.run(["git", "config", key, text])
+        stackcfg.set_key(branch, "story", text)
     else:
-        ctx.run(["git", "config", "--unset", key])
+        stackcfg.unset_key(branch, "story")
     if before != text:
         _story_journal(branch, before, text)
     req._send(200, json.dumps({"ok": True, "branch": branch, "story": text, "prev": before}))
