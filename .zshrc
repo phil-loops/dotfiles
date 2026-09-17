@@ -156,6 +156,11 @@ stack() {
                 ~/.dotfiles/scripts/stack-purpose "$b" | jq -r '.thesis | if . == "" then "(no purpose set)" else . end'
             fi
             ;;
+        stories)
+            # every branch's one-line story in ONE $EDITOR buffer: blank boxes, each branch's
+            # commits + diff shape as comments to read the point off. No arg = this forest.
+            ~/.dotfiles/scripts/stack-stories "$@"
+            ;;
         *)
             echo "Usage: stack <command>        (loops is the Loops CLI again — no longer shadowed)"
             echo ""
@@ -172,6 +177,7 @@ stack() {
             echo "  stack bless [branch]             bless (mark reviewed) a branch's files"
             echo "  stack blessed [branch]           clean/stale/unblessed status for a branch"
             echo "  stack purpose [branch] [text]    view/set a branch's purpose (git branch description)"
+            echo "  stack stories [project]          write every branch's story in one \$EDITOR buffer"
             echo "  stack staging                    build/deploy status, watch, or deploy"
             echo "  stack clean-migrations           remove empty migration folders"
             ;;
@@ -196,6 +202,7 @@ _stack() {
             'bless[mark a branch reviewed]' \
             'blessed[clean/stale/unblessed status]' \
             'purpose[view/set branch purpose]' \
+            'stories[write every branch story in one $EDITOR buffer]' \
             'staging[staging build/deploy status]' \
             'clean-migrations[remove empty migration folders]'
     elif (( CURRENT == 3 )) && [[ "${words[2]}" == "review" ]]; then

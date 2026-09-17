@@ -1,0 +1,304 @@
+#!/usr/bin/env python3
+"""stack-stories — write a whole forest's stories in one $EDITOR buffer.
+
+A story is the one plain-English line that says what a branch DOES
+(`branch.<b>.stack-story`): it renders on every branch's plan block, feeds the PR body, and
+outlives the branch you edit it from. The viewer has two surfaces for them; this is the same
+job in the editor, `git rebase -i`-shaped — one block per branch in merge order, its evidence
+as comments, one editable line underneath.
+
+  stack-stories                  the forest of the checked-out branch
+  stack-stories <project>        that forest
+  stack-stories --branch <b>     the forest <b> belongs to
+  stack-stories --print          write the buffer to stdout, edit nothing
+  stack-stories --apply <file>   parse a filled-in buffer and write it — no editor
+
+Every box starts BLANK: it holds the hand-written story and nothing else, with the line the
+plan currently falls back to (description, else commit subject) shown above it as a comment.
+A pre-filled line gets nudged instead of written, which is the whole reason the viewer's
+boxes start blank too.
+
+The buffer round-trips by branch NAME, not by position: a missing line leaves that branch
+alone, an empty value clears its story, and a name that isn't in the forest aborts the whole
+write rather than guessing. Stories that changed elsewhere (the viewer, another session)
+while the buffer was open are refused by name and reported — never overwritten.
+
+Writes land under BOTH spellings (`branch.<b>.stack-story` and legacy
+`stack-branch.<b>.story`), matching srv/stackcfg.py: readers prefer the target, so a
+legacy-only write is silently shadowed. Every change is journalled to
+<git-common-dir>/stack-story-log.jsonl first — git config keeps no history and a story is
+hand-written prose, so an overwrite has to stay recoverable.
+"""
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+SCRIPTS = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPTS)
+import stack_facts  # noqa: E402  — the single source of truth for a branch's place in its forest
+
+RULE = "─" * 74
+KEY_LINE = re.compile(r"^(?P<branch>[^\s:#][^:]*):[ \t]*(?P<text>.*?)[ \t]*$")
+SIG_LINE = re.compile(r"^#\s*sig:\s*(?P<digest>[0-9a-f]{10})\b")
+
+
+def digest(text):
+    """The story a line was rendered FROM, carried in the buffer so a write can tell "I changed
+    this" from "somebody else changed it while I was editing" — the buffer outlives the process
+    that made it (--apply a file from an hour ago), so the before-state cannot live in memory."""
+    return hashlib.sha1((text or "").encode()).hexdigest()[:10]
+
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+
+
+def die(msg, code=2):
+    print(f"✗ {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def story_of(branch):
+    """Target spelling first, exactly as stack_facts.job_of ranks them."""
+    return (git("config", f"branch.{branch}.stack-story")
+            or git("config", f"stack-branch.{branch}.story"))
+
+
+def base_of(parent):
+    """A node's diff base, the same rule stack-forest's trunk_base uses: the parent, except a
+    local-trunk parent resolves to the REMOTE trunk. A stale local main lags a fetch and folds
+    everybody else's merged commits into the range — the "garbage diff", a one-commit branch
+    rendering as 21 commits and 67 files."""
+    main = git("config", "stack.main-branch") or "main"
+    if parent and parent != main:
+        return parent
+    return f"origin/{main}" if git("rev-parse", "--verify", "--quiet", f"origin/{main}") else main
+
+
+def evidence_of(branch, parent):
+    base = base_of(parent)
+    subjects = [s for s in git("log", "--format=%s", "--no-merges", f"{base}..{branch}").splitlines() if s]
+    files, adds, dels = [], 0, 0
+    for line in git("diff", "--numstat", f"{base}...{branch}").splitlines():
+        cols = line.split("\t")
+        if len(cols) != 3:
+            continue
+        files.append(cols[2])
+        adds += int(cols[0]) if cols[0].isdigit() else 0
+        dels += int(cols[1]) if cols[1].isdigit() else 0
+    return {"subjects": subjects, "files": files, "adds": adds, "dels": dels}
+
+
+def plan_of(project, branch):
+    """The forest's steps in merge order. stack_facts fetches a plan THROUGH a branch, so a
+    bare project name resolves to any live branch registered under it."""
+    if not branch:
+        for b in git("config", "--get-all", f"stack-project.{project}.branch").split():
+            if subprocess.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{b}"],
+                              capture_output=True).returncode == 0:
+                branch = b
+                break
+    if not branch:
+        die(f"no live branches registered for {project}")
+    f = stack_facts.steps(branch)
+    return f.get("plan", []), branch
+
+
+def source_of(step):
+    if step.get("landed"):
+        return "merged"
+    if step.get("story"):
+        return "story"
+    return "description" if step.get("description") else "subject"
+
+
+def render(project, plan, here):
+    out = [
+        f"# stack-stories · {project} → main",
+        "#",
+        "# One line per branch, in merge order: what it DOES, as a sentence a teammate reads",
+        "# without the diff. The text after `<branch>:` is that branch's own durable story —",
+        "# it renders on every branch's plan block and outlives the branch you edit it from.",
+        "#",
+        "#   · a blank value clears the story: the plan falls back to the `fallback:` line",
+        "#   · delete a whole line to leave that branch exactly as it is",
+        "#   · `#` lines are ignored — save and quit to write, empty the file to abort",
+        "",
+    ]
+    for s in plan:
+        b = s["branch"]
+        mark = "  ← THIS BRANCH" if b == here else ""
+        if s.get("landed"):
+            pr = f" · merged #{s['pr']}" if s.get("pr") else " · merged"
+            out += [f"# {RULE}",
+                    f"# {s['n']}{pr} · {b}",
+                    f"#   {s['job']}",
+                    "#   (its line is its PR title, from the merge ledger — not editable here)",
+                    ""]
+            continue
+        ev = evidence_of(b, s.get("parent") or "main")
+        out += [f"# {RULE}", f"# {s['n']} · {b}{mark}"]
+        out.append(f"#   {len(ev['subjects'])} commit{'' if len(ev['subjects']) == 1 else 's'}"
+                   f" · {len(ev['files'])} file{'' if len(ev['files']) == 1 else 's'}"
+                   f" +{ev['adds']} −{ev['dels']}")
+        for sub in ev["subjects"][:12]:
+            out.append(f"#     {sub}")
+        for path in ev["files"][:12]:
+            out.append(f"#     {path}")
+        if len(ev["files"]) > 12:
+            out.append(f"#     … +{len(ev['files']) - 12} more")
+        if not s.get("story"):
+            out.append(f"#   fallback: {source_of(s)} · {s['job']}")
+        out.append(f"# sig: {digest(s.get('story'))}  (leave this — it's how a save knows nobody else moved the line)")
+        out += [f"{b}: {s.get('story') or ''}".rstrip(), ""]
+    return "\n".join(out) + "\n"
+
+
+def parse(text, live):
+    """({branch: new story}, {branch: base digest}) for every line present, or die on anything
+    ambiguous. A line the buffer omits is absent from the result, which is what leaves that
+    branch alone. A `# sig:` marker applies to the next story line; a hand-written buffer with
+    no markers writes unguarded, which is what makes --apply scriptable."""
+    wanted, bases = {}, {}
+    body = False
+    pending = None
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if line.startswith("#"):
+            m = SIG_LINE.match(line)
+            if m:
+                pending = m.group("digest")
+            continue
+        if not line:
+            continue
+        body = True
+        m = KEY_LINE.match(line)
+        if not m:
+            die(f"line {n}: a story is one line, `<branch>: text` — got {line!r}")
+        b = m.group("branch").strip()
+        if b not in live:
+            die(f"line {n}: {b} isn't an unmerged branch of this forest")
+        if b in wanted:
+            die(f"line {n}: {b} appears twice — one line per branch")
+        wanted[b] = m.group("text").strip()
+        if pending:
+            bases[b] = pending
+        pending = None
+    if not body:
+        print("· buffer emptied — nothing written")
+        sys.exit(0)
+    return wanted, bases
+
+
+def journal(branch, before, after):
+    gd = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+    if not gd:
+        return
+    try:
+        with open(os.path.join(gd, "stack-story-log.jsonl"), "a") as fh:
+            fh.write(json.dumps({"ts": int(time.time()), "branch": branch,
+                                 "before": before, "after": after}) + "\n")
+    except OSError:
+        pass
+
+
+def write_story(branch, text):
+    journal(branch, story_of(branch), text)
+    for key in (f"branch.{branch}.stack-story", f"stack-branch.{branch}.story"):
+        if text:
+            subprocess.run(["git", "config", key, text], capture_output=True)
+        else:
+            subprocess.run(["git", "config", "--unset", key], capture_output=True)
+
+
+def apply(wanted, bases):
+    """Write what actually changed. A branch whose story moved since the buffer was rendered is
+    reported and left alone — this tool never resolves that race by picking."""
+    wrote, cleared, stomped = [], [], []
+    for b, text in wanted.items():
+        now = story_of(b)
+        if text == now:
+            continue
+        if b in bases and bases[b] != digest(now):
+            stomped.append((b, now))
+            continue
+        write_story(b, text)
+        (wrote if text else cleared).append(b)
+    return wrote, cleared, stomped
+
+
+def main():
+    args = sys.argv[1:]
+    project = branch = apply_file = None
+    printing = False
+    while args:
+        a = args.pop(0)
+        if a == "--print":
+            printing = True
+        elif a == "--branch":
+            branch = args.pop(0) if args else die("--branch needs a branch")
+        elif a == "--apply":
+            apply_file = args.pop(0) if args else die("--apply needs a file")
+        elif a in ("-h", "--help"):
+            print(__doc__.strip())
+            return
+        elif a.startswith("-"):
+            die(f"unknown flag {a}")
+        else:
+            project = a
+
+    here = branch or git("branch", "--show-current")
+    if not project:
+        project = stack_facts.project_of(here) if here else None
+    if not project:
+        die("no forest here — name one: stack-stories <project>")
+
+    plan, through = plan_of(project, branch)
+    live = {s["branch"] for s in plan if not s.get("landed")}
+    if not live:
+        die(f"{project} has no unmerged branches — every story is its PR title now", code=0)
+    buf = render(project, plan, here if here in live else through)
+
+    if printing:
+        sys.stdout.write(buf)
+        return
+
+    if apply_file:
+        with open(apply_file) as fh:
+            filled = fh.read()
+    else:
+        gd = git("rev-parse", "--path-format=absolute", "--git-common-dir")
+        path = os.path.join(gd, f"STACK_STORIES-{project.replace('/', '-')}")
+        with open(path, "w") as fh:
+            fh.write(buf)
+        editor = git("var", "GIT_EDITOR") or os.environ.get("EDITOR") or "vi"
+        rc = subprocess.call(f'{editor} "{path}"', shell=True)
+        if rc != 0:
+            die(f"editor exited {rc} — nothing written")
+        with open(path) as fh:
+            filled = fh.read()
+        if filled == buf:
+            print("· nothing changed")
+            return
+
+    wanted, bases = parse(filled, live)
+    wrote, cleared, stomped = apply(wanted, bases)
+
+    for b in wrote:
+        print(f"✓ {b}: {wanted[b]}")
+    for b in cleared:
+        print(f"✓ {b}: cleared — falls back to its description or subject")
+    for b, now in stomped:
+        print(f"⚠ {b}: changed elsewhere while you were editing (now {now!r}) — left alone", file=sys.stderr)
+    if not wrote and not cleared and not stomped:
+        print("· nothing changed")
+    if stomped:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
