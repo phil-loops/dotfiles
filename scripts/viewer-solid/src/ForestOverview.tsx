@@ -445,7 +445,9 @@ export function ForestOverview() {
           }
         >
           <Show when={ovView() === "stories"} fallback={<MergeStory model={model.data} project={project()} onPick={open} />}>
-            <StoriesEditor project={project()} branch={spine()[0].id} onPick={open} />
+            <div class="fo-stories h-[calc(100dvh-62px)] min-h-0">
+              <StoriesEditor project={project()} branch={spine()[0].id} onPick={open} />
+            </div>
           </Show>
         </Show>
       </Show>

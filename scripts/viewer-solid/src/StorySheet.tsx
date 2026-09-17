@@ -42,14 +42,14 @@ export function StorySheet() {
     <Show when={storySheet()}>
       {(sheet) => (
         <div
-          class="stories-backdrop fixed inset-0 z-[120] flex justify-center overflow-y-auto bg-[rgba(8,6,3,0.9)] px-[16px] py-[28px] backdrop-blur-[2px]"
+          class="stories-backdrop fixed inset-0 z-[120] flex items-center justify-center overflow-hidden bg-[rgba(8,6,3,0.9)] px-[16px] py-[24px] backdrop-blur-[2px]"
           onClick={closeStorySheet}
         >
           <div
-            class="stories-sheet h-fit w-full max-w-[1180px] rounded-[12px] border border-rule bg-vellum-night shadow-[0_18px_50px_rgba(0,0,0,0.55)]"
+            class="stories-sheet flex h-[min(90vh,1000px)] w-full max-w-[1320px] flex-col overflow-hidden rounded-[12px] border border-rule bg-vellum-night shadow-[0_18px_50px_rgba(0,0,0,0.55)]"
             onClick={(e) => e.stopPropagation()}
           >
-            <header class="flex items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] py-[12px] font-mono">
+            <header class="flex flex-none items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] py-[12px] font-mono">
               <span class="text-[13px] text-ink">✎ stories</span>
               <span class="text-[10.5px] text-ink-faint">each line is that branch's own — durable past its merge</span>
               <button
@@ -58,6 +58,7 @@ export function StorySheet() {
                 onClick={closeStorySheet}
               >close ✕</button>
             </header>
+            <div class="flex min-h-0 flex-1 flex-col">
             <Show
               when={data()?.project}
               fallback={<p class="px-[18px] py-[22px] font-mono text-[12px] italic text-ink-faint">{data.loading ? "reading the forest…" : "this branch isn't in a forest — no plan to tell"}</p>}
@@ -70,6 +71,7 @@ export function StorySheet() {
                 onPick={(b) => { closeStorySheet(); navigate(withNode(location(), b)); }}
               />
             </Show>
+            </div>
           </div>
         </div>
       )}
