@@ -5,6 +5,7 @@ import { deleteMode, setDeleteMode } from "./deleteMode";
 import { track } from "./track";
 import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
 import { setOverviewView } from "./overviewView";
+import { openStorySheet } from "./StorySheet";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
 // forest by name (type a branch → Enter → you're there); it also carries a few safe global
@@ -80,10 +81,16 @@ export default function CommandPalette() {
         sub: "the feature as ordered commits, in merge order",
         run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
       });
+      // on a node, the sheet opens over the page you're on; from the forest overview there is
+      // no page to cover, so it switches to the stories face instead
       cmds.push({
         label: `✎ stories — ${leaf(c.project)}`,
-        sub: "one plain-English line per branch, edited in place",
-        run: () => { setOverviewView("stories"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
+        sub: c.node ? "blank boxes over this page, with each branch's commits" : "one plain-English line per branch, edited in place",
+        run: () => {
+          if (c.node) return openStorySheet(c.node);
+          setOverviewView("stories");
+          navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) });
+        },
       });
     } else {
       cmds.push({

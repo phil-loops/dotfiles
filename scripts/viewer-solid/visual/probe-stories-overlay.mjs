@@ -167,6 +167,33 @@ await settle(400);
 const closed = await page.evaluate(() => !document.querySelector(".stories-sheet"));
 console.log(`esc in row keeps it open: ${stillOpen} · esc outside closes: ${closed}`);
 
+// ⌘K → "✎ stories" must open the same sheet over the node page, with no message editor open
+await page.evaluate(() => {
+  const b = [...document.querySelectorAll("button")].find((x) => x.textContent === "close");
+  b?.click();                                       // shut the message editor
+});
+await settle(300);
+const stripGone = await page.evaluate(() => !document.querySelector(".plan-step"));
+await page.keyboard.down("Meta");
+await page.keyboard.press("k");
+await page.keyboard.up("Meta");
+await page.waitForSelector(".cmdk-backdrop", { timeout: 10000 });
+await page.type(".cmdk-backdrop input", "stories");
+await settle(400);
+await snap("stories-palette");
+await page.keyboard.press("Enter");
+await page.waitForSelector(".stories-sheet", { timeout: 10000 });
+await settle(600);
+const fromPalette = await page.evaluate(() => ({
+  sheet: !!document.querySelector(".stories-sheet"),
+  editorOpen: !!document.querySelector(".nh-editor"),
+  rows: document.querySelectorAll(".stories-row").length,
+  navigated: location.pathname,
+}));
+console.log(`strip gone with the editor: ${stripGone} · ⌘K opened: ${JSON.stringify(fromPalette)}`);
+await snap("stories-from-palette");
+if (!stripGone || !fromPalette.sheet || fromPalette.editorOpen) process.exitCode = 5;
+
 await browser.close();
 if (mutations.length) process.exit(3);
 if (!stillOpen || !closed) process.exit(4);

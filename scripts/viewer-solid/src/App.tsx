@@ -6,6 +6,7 @@ import ChatPanel from "./ChatPanel";
 import { chatTarget, closeChat } from "./chatDrawer";
 import { reconcile as reconcileChats } from "./chatRunner";
 import CommandPalette from "./CommandPalette";
+import { StorySheet } from "./StorySheet";
 import { track, installFetchTracking, installUiTracking } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { ServingChip } from "./ServingChip";
@@ -186,6 +187,7 @@ function Layout(props: { children?: JSX.Element }) {
       </div>
       <ChatDrawerHost />
       <CommandPalette />
+      <StorySheet />
       <ServerStatus />
       <ServingChip />
       <Show when={staleOrigin()}>
