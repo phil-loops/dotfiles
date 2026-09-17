@@ -45,6 +45,21 @@ const EVIDENCE = {
   files: ["queries/team-membership.ts", "queries/team-membership.test.ts", "queries/user.ts"],
   fileCount: 3, adds: 184, dels: 12,
 };
+// the per-file payload the story fold reads the change off — same shape as /node
+const PATCH = `diff --git a/queries/team-membership.ts b/queries/team-membership.ts
+index 1111111..2222222 100644
+--- a/queries/team-membership.ts
++++ b/queries/team-membership.ts
+@@ -1,3 +1,7 @@
+ import prisma from "../lib/prisma.js";
++
++export const findByUserAndTeam = (userId: string, teamId: string) =>
++  prisma.teamMembership.findFirst({ where: { userId, teamId } });
+`;
+const NODE_FILES = { branch: BRANCH, files: [
+  { path: "queries/team-membership.ts", status: "unblessed", add: "4", del: "0", patch: PATCH, stale: "" },
+  { path: "queries/team-membership.test.ts", status: "unblessed", add: "12", del: "1", patch: PATCH, stale: "" },
+], dirty: [], worktree: "" };
 const PREP_ROUTE = { route: "squash", why: "3 commits outgoing" };
 const REMOTE = { available: true, remote: "abc1234", local: "def5678" };
 
@@ -73,6 +88,7 @@ page.on("request", (req) => {
   if (u.pathname.endsWith("/push-preview")) return json(PREVIEW);
   if (u.pathname.endsWith("/plan-steps")) return json(PLAN_STEPS);
   if (u.pathname.endsWith("/step-evidence")) return json(EVIDENCE);
+  if (u.pathname.endsWith("/node")) return json(NODE_FILES);
   if (u.pathname.endsWith("/prep-route")) return json(PREP_ROUTE);
   if (u.pathname.endsWith("/review-remote")) return json(REMOTE);
   req.continue();
@@ -126,7 +142,7 @@ await page.evaluate(() => {
   lines[1].click();
 });
 await page.waitForSelector(".stories-sheet", { timeout: 10000 });
-await page.waitForSelector(".stories-ev-body", { timeout: 10000 });
+await page.waitForSelector(".stories-file-diff", { timeout: 10000 });
 await settle(700);
 await snap("stories-overlay");
 
@@ -149,6 +165,9 @@ const audit = await page.evaluate(() => {
     focusedIsTextarea: focused?.tagName === "TEXTAREA",
     focusedValue: focused?.tagName === "TEXTAREA" ? focused.value : null,
     evidence: document.querySelector(".stories-ev-body")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+    fileRows: [...document.querySelectorAll(".stories-file-head")].map((el) => el.textContent?.replace(/\s+/g, " ").trim()),
+    diffsOpen: document.querySelectorAll(".stories-file-diff").length,
+    diffHasCode: (document.querySelector(".stories-file-diff")?.textContent ?? "").includes("findByUserAndTeam"),
     overlayCoversEditor: (() => {
       const sheet = document.querySelector(".stories-sheet")?.getBoundingClientRect();
       return sheet ? Math.round(sheet.width) : 0;
