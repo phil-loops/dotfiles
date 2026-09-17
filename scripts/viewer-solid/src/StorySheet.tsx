@@ -46,7 +46,7 @@ export function StorySheet() {
           onClick={closeStorySheet}
         >
           <div
-            class="stories-sheet h-fit w-full max-w-[940px] rounded-[12px] border border-rule bg-vellum-night shadow-[0_18px_50px_rgba(0,0,0,0.55)]"
+            class="stories-sheet h-fit w-full max-w-[1180px] rounded-[12px] border border-rule bg-vellum-night shadow-[0_18px_50px_rgba(0,0,0,0.55)]"
             onClick={(e) => e.stopPropagation()}
           >
             <header class="flex items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] py-[12px] font-mono">
