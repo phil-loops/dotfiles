@@ -540,6 +540,15 @@ if [ -n "$JOBS" ]; then
 fi
 printf 'DIR=%s\nPORT=%s\nSTARTED=%s\nQUEUE=%s\nJPORT=%s\n' "$DIR" "$PORT" "$(date +%s)" "$QUEUE_URL" "$JPORT" > "$META"
 
+# Without --jobs a preview does not run a worker, it ASSUMES the shared one — and said nothing
+# when there was none. 2026-09-17: no worker existed anywhere, so countAudience/listAudience sat
+# Pending forever and the audience page spun on "Counting audience…" with every container green.
+# Enqueueing works whether or not anything consumes, so this is invisible from inside the app:
+# the preview is the last place that can still say it out loud.
+if [ -z "$JOBS" ] && ! curl -s -o /dev/null -m 3 http://localhost:4000/ 2>/dev/null; then
+  err "no jobs worker on :4000 — this preview can enqueue jobs but nothing will run them (audience counts, sends and imports will hang on Pending). Start one with 'task dev:jobs' in a checkout, or re-run this with --jobs for a worker on the preview's own branch."
+fi
+
 # next dev rewrites the tracked next-env.d.ts at boot (and only at boot) to a types path the
 # committed file doesn't carry, so every preview would leave its checkout dirty — restore it as
 # soon as the server has written it, and only when we didn't inherit real edits to the file.
