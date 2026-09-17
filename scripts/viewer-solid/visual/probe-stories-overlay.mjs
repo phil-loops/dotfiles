@@ -64,9 +64,26 @@ index 3333333..4444444 100644
  import prisma from "../lib/prisma.js";
 ${Array.from({ length: 20 }, (_, i) => `+export const lookup${i} = (id: string) => prisma.user.findFirst({ where: { id } });`).join("\n")}
 `;
+// a TWO-SIDED patch (both + and -) makes diff2html emit its float-based side-by-side layout —
+// the add-only fixtures above render line-by-line and never exercised it
+const TWO_SIDED = `diff --git a/lib/processBulkJob.ts b/lib/processBulkJob.ts
+index 5555555..6666666 100644
+--- a/lib/processBulkJob.ts
++++ b/lib/processBulkJob.ts
+@@ -187,7 +188,7 @@ export const handleSegmentToMailingList = async () => {
+         originalContact: originalContact,
+         updatedContact: updatedContact,
+         contactProperties: record.team.contactProperties,
+-        shouldTrigger: true,
++        shouldTrigger: triggerWorkflows,
+       });
+     }
+     await rawQuery(
+`;
 const NODE_FILES = { branch: BRANCH, files: [
   { path: "queries/team-membership.ts", status: "unblessed", add: "4", del: "0", patch: PATCH, stale: "" },
   { path: "queries/team-membership.test.ts", status: "unblessed", add: "12", del: "1", patch: PATCH, stale: "" },
+  { path: "lib/processBulkJob.ts", status: "unblessed", add: "1", del: "1", patch: TWO_SIDED, stale: "" },
   { path: "queries/user.ts", status: "unblessed", add: "20", del: "0", patch: LONG_PATCH, stale: "" },
 ], dirty: [], worktree: "" };
 const PREP_ROUTE = { route: "squash", why: "3 commits outgoing" };
@@ -198,6 +215,22 @@ const audit = await page.evaluate(() => {
   };
 });
 console.log(JSON.stringify(audit, null, 2));
+const layout = await page.evaluate(() => {
+  const blocks = [...document.querySelectorAll(".stories-file")];
+  const rows = blocks.map((b) => {
+    const r = b.getBoundingClientRect();
+    const d = b.querySelector(".stories-file-diff");
+    const dr = d?.getBoundingClientRect();
+    const sides = d ? d.querySelectorAll(".d2h-file-side-diff").length : 0;
+    return { path: b.querySelector(".stories-file-head span:nth-child(2)")?.textContent, top: Math.round(r.top), bottom: Math.round(r.bottom),
+             diffH: dr ? Math.round(dr.height) : 0, sideBySide: sides > 0,
+             containsFloats: d ? dr.height > 20 : true };
+  });
+  const overlaps = rows.slice(1).some((r, i) => r.top < rows[i].bottom - 1);
+  return { rows, overlaps };
+});
+console.log("LAYOUT " + JSON.stringify(layout, null, 2));
+if (layout.overlaps) process.exitCode = 7;
 // the ergonomics under test: scrolling the change must not move the box you type in, and the
 // keyboard alone must walk the list (↵ and ↓), the reading pane following each row
 const ergo = await page.evaluate(async () => {
