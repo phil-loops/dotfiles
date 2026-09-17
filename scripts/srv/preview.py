@@ -301,6 +301,21 @@ def _stack_err():
     return _ANSI.sub("", lines[-1])[:200] if lines else "docker compose up failed"
 
 
+def _doctor():
+    # ONE health oracle. `docker ps` can only see containers, so the card used to read
+    # "10/11 services up" with no jobs worker running at all (2026-09-17) — every enqueued
+    # job sat Pending and the page spun on "Counting audience…". loops-doctor already knew
+    # how to tell absent from wedged (port + backlog-across-a-sample + health endpoint); it
+    # just had no machine-readable mode. Containers are not the substrate: the substrate is
+    # whatever must be true for a unit of work to COMPLETE, which `required` names.
+    try:
+        p = subprocess.run([os.path.join(ctx.SCRIPTS, "loops-doctor"), "--json"],
+                           capture_output=True, text=True, timeout=45)
+        return json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:
+        return None
+
+
 def _substrate(main_wt):
     # the ONE shared dev stack (Postgres/ClickHouse/Valkey/…) every preview + :3000 use — NOT
     # per-preview and NOT isolated, so a preview's writes hit the same DB. Compose names a project
@@ -347,6 +362,24 @@ def _substrate(main_wt):
         "up": sum(1 for s in services if s["up"]),
         "total": sum(1 for s in services if s["state"] != "done"),
         "services": services,
+        **_with_doctor(services),
+    }
+
+
+def _with_doctor(services):
+    # A container count answers "are the parts present", never "can work happen" — the two
+    # came apart the day a green card sat on top of a dead job pipeline. The doctor's
+    # required checks join the SAME numerator/denominator, so a missing worker is as red as
+    # a missing Postgres, and its optional rows (croon/permaloop/mail-schedule) stay out of
+    # the fraction rather than making it permanently short.
+    d = _doctor()
+    if not d:
+        return {"doctor": None}
+    broken = [c for c in d.get("checks", []) if c.get("required") and c.get("severity") != "ok"]
+    return {
+        "doctor": {"checks": d.get("checks", []), "ok": d.get("ok"), "broken": broken},
+        "up": sum(1 for s in services if s["up"]) + d.get("up", 0),
+        "total": sum(1 for s in services if s["state"] != "done") + d.get("total", 0),
     }
 
 

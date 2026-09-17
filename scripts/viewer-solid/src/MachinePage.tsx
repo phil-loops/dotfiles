@@ -40,10 +40,12 @@ type SchemaDrift = {
   pg?: { head: string; behind: number; ahead: number; latestBehind: string; latestAhead: string };
   ch?: { head: string; behind: number; latestBehind: string };
 };
+type DoctorCheck = { name: string; state: string; detail: string; severity: string; required: boolean };
 type Substrate = {
   project: string; dir?: string; home?: boolean; shared: boolean;
   starting?: boolean; err?: string | null; db?: string | null; up: number; total: number; services: Service[];
   schema?: SchemaDrift;
+  doctor?: { checks: DoctorCheck[]; ok: boolean; broken: DoctorCheck[] } | null;
 };
 type PreviewsResp = { ok: boolean; previews: Preview[]; substrate: Substrate };
 
@@ -482,6 +484,13 @@ export function MachinePage() {
         <Show when={sub()?.home === false && sub()?.dir}>
           <p class="mt-[7px] mb-0 text-[10.5px] leading-[1.5] text-ember opacity-85">
             running from {shortDir(sub()!.dir!)} — its own Postgres/ClickHouse volumes, not main's
+          </p>
+        </Show>
+        {/* the substrate is not its containers: a full stack with no jobs worker runs nothing.
+            loops-doctor's required checks share this card's fraction, so name the ones that broke */}
+        <Show when={(sub()?.doctor?.broken?.length ?? 0) > 0}>
+          <p class="mt-[7px] mb-0 text-[11px] leading-[1.5] text-del">
+            {sub()!.doctor!.broken.map((c) => `${c.name} — ${c.detail}`).join(" · ")}
           </p>
         </Show>
         {/* a preview probes HEALTHY against a database with no tables — say so before its first query does */}

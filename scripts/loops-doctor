@@ -16,6 +16,13 @@
 #   loops-doctor            # report a table
 #   loops-doctor --fix      # bounce what is safely bounceable, then re-report
 #   loops-doctor --quiet    # only print problems (for a prompt hook / cron)
+#   loops-doctor --json     # machine-readable, for the forest viewer's substrate card
+#
+# --json exists so ONE oracle answers "is local loops working". The viewer used to count
+# `docker ps` rows, which cannot see the Node-side singletons: on 2026-09-17 it read
+# "10/11 services up" with no jobs worker running at all, while audience counts hung on
+# Pending JobStatus rows. Containers are not the substrate — the substrate is whatever
+# has to be true for a unit of work to complete, and `required` marks exactly that set.
 #
 # Exit: 0 all healthy · 1 something wedged/down · 2 usage error
 set -uo pipefail
@@ -25,11 +32,13 @@ JOBS_QUEUE="dev"
 NEXT_COMPILE_TIMEOUT="${LOOPS_DOCTOR_COMPILE_TIMEOUT:-30}"
 FIX=""
 QUIET=""
+JSON=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --fix) FIX=1 ;;
     --quiet|-q) QUIET=1 ;;
+    --json) JSON=1 ;;
     -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) printf 'unknown flag: %s\n' "$1" >&2; exit 2 ;;
   esac
@@ -42,10 +51,56 @@ amber() { printf '\033[33m%s\033[0m' "$*"; }
 dim()   { printf '\033[2m%s\033[0m' "$*"; }
 
 PROBLEMS=0
+RECORDS="$(mktemp -t loops-doctor)"
 
+# Every check already funnels through row(), so recording here keeps --json a single-point
+# change — a new check is machine-readable for free, and can never drift from the table.
 row() { # name state detail
+  printf '%s\t%s\t%s\n' "$1" "$(plain "$2")" "$(plain "$3")" >> "$RECORDS"
+  [ -n "$JSON" ] && return 0
   printf '  %-18s %-22s %s\n' "$1" "$2" "$3"
 }
+
+plain() { printf '%s' "$1" | sed $'s/\033\[[0-9;]*m//g'; }
+
+# What has to be true for a unit of work to COMPLETE. croon/permaloop/mail-schedule are
+# periodic extras — normal to run without. The jobs worker is not: with it absent every
+# enqueued job sits Pending forever, which is the failure the old docker-ps count missed.
+required_check() { # name
+  case "$1" in
+    docker|migrations|"jobs queue"|"jobs worker") return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Severity collapses the table's vocabulary (ok/down/WEDGED/stalled/BEHIND/ahead/...) into
+# the three states a consumer can act on.
+severity_of() { # state
+  case "$1" in
+    ok|ahead|none) printf 'ok' ;;
+    down|unknown) printf 'down' ;;
+    *) printf 'broken' ;;
+  esac
+}
+
+emit_json() {
+  local name state detail sev req first=1 up=0 total=0
+  printf '{"checks":['
+  while IFS=$'\t' read -r name state detail; do
+    [ -n "$name" ] || continue
+    sev="$(severity_of "$state")"
+    if required_check "$name"; then req=true; total=$((total + 1)); else req=false; fi
+    [ "$req" = true ] && [ "$sev" = ok ] && up=$((up + 1))
+    [ "$first" = 1 ] || printf ','
+    first=0
+    printf '{"name":"%s","state":"%s","detail":"%s","severity":"%s","required":%s}' \
+      "$(jesc "$name")" "$(jesc "$state")" "$(jesc "$detail")" "$sev" "$req"
+  done < "$RECORDS"
+  printf '],"up":%d,"total":%d,"problems":%d,"ok":%s}\n' \
+    "$up" "$total" "$PROBLEMS" "$([ "$up" -eq "$total" ] && [ "$PROBLEMS" -eq 0 ] && echo true || echo false)"
+}
+
+jesc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 listening() { lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }
 
@@ -221,6 +276,7 @@ check_previews() {
 # Redirected to a file by the caller, never $(...) — a subshell would discard PROBLEMS.
 run_checks() {
   PROBLEMS=0
+  : > "$RECORDS"
   check_docker || true
   check_migrations || true
   check_next_server "dev server" 3000 "http://localhost:3000/" || true
@@ -266,8 +322,13 @@ bounce_mail_schedule() {
 }
 
 OUT="$(mktemp -t loops-doctor)"
-trap 'rm -f "$OUT"' EXIT
+trap 'rm -f "$OUT" "$RECORDS"' EXIT
 run_checks > "$OUT"
+
+if [ -n "$JSON" ]; then
+  emit_json
+  [ "$PROBLEMS" -eq 0 ] && exit 0 || exit 1
+fi
 
 if [ -n "$QUIET" ] && [ "$PROBLEMS" -eq 0 ]; then
   exit 0
