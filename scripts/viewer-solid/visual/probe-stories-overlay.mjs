@@ -56,9 +56,18 @@ index 1111111..2222222 100644
 +export const findByUserAndTeam = (userId: string, teamId: string) =>
 +  prisma.teamMembership.findFirst({ where: { userId, teamId } });
 `;
+const LONG_PATCH = `diff --git a/queries/user.ts b/queries/user.ts
+index 3333333..4444444 100644
+--- a/queries/user.ts
++++ b/queries/user.ts
+@@ -1,4 +1,24 @@
+ import prisma from "../lib/prisma.js";
+${Array.from({ length: 20 }, (_, i) => `+export const lookup${i} = (id: string) => prisma.user.findFirst({ where: { id } });`).join("\n")}
+`;
 const NODE_FILES = { branch: BRANCH, files: [
   { path: "queries/team-membership.ts", status: "unblessed", add: "4", del: "0", patch: PATCH, stale: "" },
   { path: "queries/team-membership.test.ts", status: "unblessed", add: "12", del: "1", patch: PATCH, stale: "" },
+  { path: "queries/user.ts", status: "unblessed", add: "20", del: "0", patch: LONG_PATCH, stale: "" },
 ], dirty: [], worktree: "" };
 const PREP_ROUTE = { route: "squash", why: "3 commits outgoing" };
 const REMOTE = { available: true, remote: "abc1234", local: "def5678" };
@@ -168,6 +177,20 @@ const audit = await page.evaluate(() => {
     fileRows: [...document.querySelectorAll(".stories-file-head")].map((el) => el.textContent?.replace(/\s+/g, " ").trim()),
     diffsOpen: document.querySelectorAll(".stories-file-diff").length,
     diffHasCode: (document.querySelector(".stories-file-diff")?.textContent ?? "").includes("findByUserAndTeam"),
+    readingHead: document.querySelector(".stories-read-head")?.textContent?.replace(/\s+/g, " ").trim() ?? "",
+    // the ergonomic claim: two panes that scroll separately, and the typing column holds its place
+    panes: (() => {
+      const col = document.querySelector(".stories-col");
+      const read = document.querySelector(".stories-read");
+      if (!col || !read) return null;
+      const box = document.querySelector(".stories-row.on textarea")?.getBoundingClientRect();
+      return {
+        colScrolls: col.scrollHeight > col.clientHeight + 1,
+        readScrolls: read.scrollHeight > read.clientHeight + 1,
+        sideBySide: Math.abs(col.getBoundingClientRect().top - read.getBoundingClientRect().top) < 2,
+        boxTop: box ? Math.round(box.top) : null,
+      };
+    })(),
     overlayCoversEditor: (() => {
       const sheet = document.querySelector(".stories-sheet")?.getBoundingClientRect();
       return sheet ? Math.round(sheet.width) : 0;
@@ -175,6 +198,32 @@ const audit = await page.evaluate(() => {
   };
 });
 console.log(JSON.stringify(audit, null, 2));
+// the ergonomics under test: scrolling the change must not move the box you type in, and the
+// keyboard alone must walk the list (↵ and ↓), the reading pane following each row
+const ergo = await page.evaluate(async () => {
+  const boxOf = () => document.querySelector(".stories-row.on textarea")?.getBoundingClientRect().top ?? null;
+  const read = document.querySelector(".stories-read");
+  const before = boxOf();
+  read.scrollTop = read.scrollHeight;
+  await new Promise((r) => requestAnimationFrame(r));
+  return { boxBefore: Math.round(before ?? -1), boxAfterScroll: Math.round(boxOf() ?? -1), scrolled: read.scrollTop > 0 };
+});
+const focusedBranch = () => page.evaluate(() =>
+  document.activeElement?.closest(".stories-row")?.querySelector(".stories-branch")?.textContent ?? "");
+await page.evaluate(() => document.querySelector(".stories-row.on textarea")?.focus());
+const fromRow = await focusedBranch();
+// from mid-text the first ArrowUp takes the caret to the start of the line (every text field
+// does); the next one, with nowhere left to go, walks up the list
+await page.keyboard.press("ArrowUp");
+await settle(120);
+await page.keyboard.press("ArrowUp");
+await settle(250);
+const afterUp = await focusedBranch();
+const readAfterUp = await page.evaluate(() => document.querySelector(".stories-read-head span")?.textContent?.trim() ?? "");
+console.log(`typing box held still while the change scrolled: ${ergo.boxBefore === ergo.boxAfterScroll} (${ergo.boxBefore} → ${ergo.boxAfterScroll}, scrolled=${ergo.scrolled})`);
+console.log(`↑ moved rows: ${fromRow} → ${afterUp} · reading pane followed: ${readAfterUp}`);
+if (ergo.boxBefore !== ergo.boxAfterScroll || afterUp === fromRow) process.exitCode = 6;
+
 console.log("mutating requests attempted: " + (mutations.length ? mutations.join(", ") : "none"));
 
 await page.keyboard.press("Escape");   // esc inside a row reverts, does not close
