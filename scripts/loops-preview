@@ -455,6 +455,20 @@ if [ -n "$unbuilt" ]; then
   cyan "building unbuilt workspace package(s):$(printf '%s\n' $unbuilt | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
   (cd "$DIR" && npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
 fi
+# A dist BORROWED from MAIN is built from MAIN's sources, not this branch's, and the check above
+# only catches an *empty* dist — so a branch that edits packages/** boots against MAIN's build and
+# every direct `tsc`/LSP in the tree reports phantom errors against the borrowed .d.ts (2026-09-17:
+# a fresh worktree threw ~12 errors in packages/mail-pg/dist that the gates, which run seed-gen,
+# did not). `tsc -b` without --force is incremental: a no-op when current, a rebuild when not.
+built_cfgs=""
+for cfg in "$DIR"/packages/*/tsconfig.json; do
+  [ -f "$cfg" ] || continue
+  built_cfgs="$built_cfgs $cfg"
+done
+if [ -n "$built_cfgs" ]; then
+  (cd "$DIR" && npx tsc -b $built_cfgs --pretty false) \
+    || err "workspace package rebuild failed — this branch's packages/** changes are not compiled"
+fi
 # The clone is MAIN's node_modules, and the previewed branch may want a different tree — a
 # workspace package MAIN's branch lacks (2026-09-09: @loops/safe-fetch, every importer 500ed
 # "Module not found"), a bumped dep. npm-owed asks npm; when the clone is behind, install the
