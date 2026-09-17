@@ -473,6 +473,33 @@ def plan_steps(req, u):
     req._send(200, json.dumps({"branch": branch, "project": f.get("project"), "steps": steps}))
 
 
+def step_evidence(req, u):
+    # GET /step-evidence?branch=X → what this branch actually DOES, as facts: its own commit
+    # subjects and the shape of its diff against its parent. The story editor starts every line
+    # blank, so this is the material you read to write one — the derived gloss is a hint, not a
+    # draft to nudge. Fetched per row, on demand: two git spawns a branch, never the whole forest.
+    branch = parse_qs(u.query).get("branch", [""])[0]
+    if not branch:
+        return req._send(400, json.dumps({"error": "no branch"}))
+    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
+              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
+    rng = f"{parent}..{branch}"
+    subjects = [s for s in ctx.run(["git", "log", "--format=%s", "--no-merges", rng]).stdout.splitlines() if s]
+    stat = ctx.run(["git", "diff", "--numstat", f"{parent}...{branch}"]).stdout.splitlines()
+    files, adds, dels = [], 0, 0
+    for line in stat:
+        cols = line.split("\t")
+        if len(cols) != 3:
+            continue
+        files.append(cols[2])
+        adds += int(cols[0]) if cols[0].isdigit() else 0
+        dels += int(cols[1]) if cols[1].isdigit() else 0
+    req._send(200, json.dumps({
+        "branch": branch, "parent": parent, "subjects": subjects[:12],
+        "files": files[:12], "fileCount": len(files), "adds": adds, "dels": dels,
+    }))
+
+
 def _story_journal(branch, before, after):
     """Every story write, appended to .git/stack-story-log.jsonl before it lands. A story is
     hand-written prose that lives in git config, which keeps no history — an overwrite or a
