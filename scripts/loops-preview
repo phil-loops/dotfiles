@@ -433,6 +433,7 @@ if [ -L "$DIR/node_modules" ]; then BUNDLER="--webpack"; fi
 
 # the workspace links resolve to the checkout's OWN packages/*, which carry source but no build —
 # take MAIN's dist for each (gitignored, so the checkout stays clean)
+borrowed_cfgs=""
 for src in "$MAIN"/packages/*/dist; do
   [ -d "$src" ] || continue
   dest="$DIR/packages/$(basename "$(dirname "$src")")/dist"
@@ -440,6 +441,9 @@ for src in "$MAIN"/packages/*/dist; do
   if [ ! -d "$dest" ] || [ "$src" -nt "$dest" ]; then
     rm -rf "$dest"
     cp -Rc "$src" "$dest" 2>/dev/null || cp -R "$src" "$dest"
+    if [ -f "$(dirname "$dest")/tsconfig.json" ]; then
+      borrowed_cfgs="$borrowed_cfgs $(dirname "$dest")/tsconfig.json"
+    fi
   fi
 done
 # A borrowed dist can be unbuilt — MAIN between `task dev` runs, or on a branch that lacks the
@@ -455,19 +459,22 @@ if [ -n "$unbuilt" ]; then
   cyan "building unbuilt workspace package(s):$(printf '%s\n' $unbuilt | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
   (cd "$DIR" && npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
 fi
-# A dist BORROWED from MAIN is built from MAIN's sources, not this branch's, and the check above
-# only catches an *empty* dist — so a branch that edits packages/** boots against MAIN's build and
-# every direct `tsc`/LSP in the tree reports phantom errors against the borrowed .d.ts (2026-09-17:
-# a fresh worktree threw ~12 errors in packages/mail-pg/dist that the gates, which run seed-gen,
-# did not). `tsc -b` without --force is incremental: a no-op when current, a rebuild when not.
-built_cfgs=""
-for cfg in "$DIR"/packages/*/tsconfig.json; do
-  [ -f "$cfg" ] || continue
-  built_cfgs="$built_cfgs $cfg"
-done
-if [ -n "$built_cfgs" ]; then
-  (cd "$DIR" && npx tsc -b $built_cfgs --pretty false) \
-    || err "workspace package rebuild failed — this branch's packages/** changes are not compiled"
+# A dist BORROWED above is MAIN's build of MAIN's sources, and `cp -Rc` preserves MAIN's mtimes —
+# so when this branch edits packages/**, a plain `tsc -b` compares its older sources against those
+# newer outputs, calls the project up to date, and the borrow silently wins. Only --force defeats
+# that (same reason the block above forces). Restricted to what was actually borrowed AND to
+# branches whose packages/ really differ from MAIN's, so an unrelated branch keeps booting on the
+# free clone. 2026-09-17: a preview served MAIN's packages/mail-pg while every direct tsc/LSP in
+# the tree reported phantom errors against the borrowed .d.ts; the gates never saw it (seed-gen
+# builds packages itself).
+if [ -n "$borrowed_cfgs" ]; then
+  main_head="$(git -C "$MAIN" rev-parse HEAD 2>/dev/null || true)"
+  # No MAIN sha (or git says nothing) ⇒ can't prove they match ⇒ rebuild rather than serve a guess.
+  if [ -z "$main_head" ] || ! git -C "$DIR" diff --quiet "$main_head" -- packages/ 2>/dev/null; then
+    cyan "rebuilding borrowed workspace package(s) against this branch:$(printf '%s\n' $borrowed_cfgs | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
+    (cd "$DIR" && npx tsc -b --force $borrowed_cfgs --pretty false) \
+      || err "workspace package rebuild failed — this branch's packages/** changes are NOT compiled; the preview is serving MAIN's build"
+  fi
 fi
 # The clone is MAIN's node_modules, and the previewed branch may want a different tree — a
 # workspace package MAIN's branch lacks (2026-09-09: @loops/safe-fetch, every importer 500ed
