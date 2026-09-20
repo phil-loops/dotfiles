@@ -147,7 +147,7 @@ def gates(req, raw):
             # instead of re-paying the typecheck for the same tree
             result = next((e for e in _journal_events(old["path"]) if e.get("event") == "result"), None)
             if result and result.get("ok"):
-                _record_green(branch, old["tree"])
+                _record_green(branch, old["tree"], result.get("gates", []))
                 repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
         _spawn_gates(branch, fix=d.get("fix", False))
@@ -159,7 +159,7 @@ def gates(req, raw):
     if err:
         return req._send(200, json.dumps({**err, "gates": []}))
     if verdict.get("ok"):
-        _record_green(branch, _tree(branch))
+        _record_green(branch, _tree(branch), verdict.get("gates", []))
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     req._send(200, json.dumps(verdict))
 
@@ -195,7 +195,7 @@ def gates_progress(req, u):
         # green is recorded against the TREE the run was spawned on — a message-only reword
         # while the gates ran keeps the same tree, so the verdict carries; any content change
         # (rebase, new commit) makes a new tree and the door stays locked
-        _record_green(branch, job["tree"])
+        _record_green(branch, job["tree"], result.get("gates", []))
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     running = _job_running(job)
     out = {"running": running, "elapsed": round(time.time() - job["t0"], 1), "events": events}
@@ -222,8 +222,16 @@ def _green_tree(branch):
     return repostate.snapshot().branch_key(branch, "gates-green-tree")
 
 
-def _record_green(branch, tree):
+def _record_green(branch, tree, gates=()):
     stackcfg.set_key(branch, "gates-green-tree", tree)
+    # A green earned with a WAIVED gate (stack-gates marks it advisory — unsatisfiable, not
+    # unmet) must say so at the door, or the waiver is a silent bypass. Tree-keyed like the
+    # verdict it qualifies, so the next edit retires it with the green.
+    warns = [g.get("warn", "") for g in (gates or ()) if g.get("advisory")]
+    stackcfg.unset_all(branch, "gates-waived")
+    for w in warns:
+        if w:
+            stackcfg.add_key(branch, "gates-waived", w)
 
 
 _WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
@@ -451,6 +459,9 @@ def _origin_verdict(branch):
     wip = [c for c in outgoing if not c["voiced"]]
     tip = snap.local(branch)
     gates_green = _green_tree(branch) == snap.tree(tip)
+    # Waivers recorded alongside the green (a gate that was unsatisfiable, not unmet). Shown
+    # at the door so the green says what it cost; retired with the green when the tree moves.
+    gates_waived = snap.branch_key_all(branch, "gates-waived") if gates_green else []
     chain_broken = _chain_break(branch)
 
     def ward(k, label, ok, why, advisory=False):
@@ -483,7 +494,7 @@ def _origin_verdict(branch):
         # "rebase forward" without rewriting shared history.
         ward("watch", "deploy watch clear", not deploy_critical or (has_remote and ff and bool(outgoing)),
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
-        ward("gates", "gates green", gates_green,
+        ward("gates", "gates green" if not gates_waived else "gates green (1 waived)", gates_green,
              "not green for this exact commit — ⟲ sync runs the gates"),
     ]
     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
@@ -494,7 +505,8 @@ def _origin_verdict(branch):
         "fork": {"sha": fork, "date": fork_date}, "mainSince": main_since,
         "deployCritical": deploy_critical,
         "files": files[:20], "moreFiles": max(0, len(files) - 20),
-        "commit": commit, "gatesGreen": gates_green, "web": _origin_web(branch),
+        "commit": commit, "gatesGreen": gates_green, "gatesWaived": gates_waived,
+        "web": _origin_web(branch),
         "published": published,
         "wards": wards, "ok": not reasons, "reasons": reasons,
         "review": _review_flags(branch),

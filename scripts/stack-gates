@@ -35,7 +35,11 @@ built-in) gets one fix attempt + re-check. The built-in format fix cascades stac
 across the branch's forest (or folds an oxfmt commit on a standalone branch). A fixed
 gate reports "fixed": true.
 
-Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary","fixed"?}]}
+Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary","fixed"?,"advisory"?,"warn"?}]}
+
+A gate that is UNSATISFIABLE rather than unmet is waived: it reports ok with "advisory":
+true and its finding in "warn", so the verdict stays green but the warning is still told.
+Today that is `fresh` on a branch pinned under an open PR (see pinning_ancestor).
 """
 import json
 import os
@@ -196,6 +200,32 @@ def gconf(key, cwd):
     return run(["git", "config", "--get", key], cwd).stdout.strip()
 
 
+def pinning_ancestor(cwd, branch):
+    """The nearest PUBLISHED stack ancestor this branch is pinned behind, or "".
+
+    A branch stacked under an open PR must sit on that pushed tip to stay stackable, so it
+    can never rebase forward onto a newer main — exactly the bind the fresh gate already
+    exempts a published branch for (2026-08-19), one level up. The self-only exemption made
+    the gate hardest to satisfy when SETTING A STACK UP and silent for every update after,
+    which is backwards; here it makes `fresh` advisory instead of removing it, so the
+    staleness is still reported, just not fatal. A forest with no published ancestor CAN
+    rebase freely and stays fully gated."""
+    if not branch:
+        return ""
+    seen, cur = set(), branch
+    while cur and cur not in seen and len(seen) < 30:
+        seen.add(cur)
+        cur = (gconf(f"branch.{cur}.stack-parent", cwd)
+               or gconf(f"stack-branch.{cur}.parent", cwd))
+        if not cur or cur in ("main", "master"):
+            return ""
+        ref = f"refs/remotes/origin/{cur}"
+        if (run(["git", "rev-parse", "--verify", "-q", ref], cwd).returncode == 0
+                and run(["git", "merge-base", "--is-ancestor", ref, branch], cwd).returncode == 0):
+            return cur
+    return ""
+
+
 def configured_fixes(cwd):
     """Optional per-gate remediation: `stack-gates.fix "<name>::<cmd>"`, mirroring
     stack-gates.cmd. A failing gate with a fix can be auto-remediated under --fix."""
@@ -347,6 +377,9 @@ def main():
     env_ms = int((time.time() - t0) * 1000)
     gates = configured_gates(cwd) or default_gates(cwd, branch)
     fixes = (configured_fixes(cwd) or default_fixes(cwd, branch, borrowed)) if do_fix else {}
+    # fresh is unsatisfiable — not merely unmet — for a branch pinned under an open PR.
+    pinned_by = pinning_ancestor(cwd, branch)
+    advisory = {"fresh"} if pinned_by else set()
 
     if not gates:
         verdict = {"ok": True, "gates": [], "note": "no gates configured for this repo"}
@@ -386,13 +419,22 @@ def main():
                 ok = True
                 fixed = True
         ms = int((time.time() - t0) * 1000)
-        all_ok = all_ok and ok
         summary = "" if ok else last_lines((r.stdout or "") + "\n" + (r.stderr or ""))
         entry = {"name": name, "ok": ok, "ms": ms, "summary": summary}
+        # A waived gate reports ok (so the verdict is green and the door opens) but carries
+        # its finding in `warn` — never drop the text on the floor, or the waiver is a
+        # silent bypass rather than a warning.
+        if not ok and name in advisory:
+            entry["ok"] = ok = True
+            entry["advisory"] = True
+            entry["warn"] = f"{summary} — waived: stacked under published {pinned_by}"
+            entry["summary"] = ""
+        all_ok = all_ok and ok
         if fixed:
             entry["fixed"] = True
         results.append(entry)
-        emit({"event": "done", "gate": name, "ok": ok, "ms": ms})
+        emit({"event": "done", "gate": name, "ok": ok, "ms": ms,
+              **({"warn": entry["warn"]} if entry.get("advisory") else {})})
 
     verdict = {"ok": all_ok, "gates": results}
     emit({"event": "result", **verdict})

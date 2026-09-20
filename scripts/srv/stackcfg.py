@@ -38,6 +38,14 @@ def unset_key(branch, key, value_regex=None):
     repostate.invalidate()
 
 
+def unset_all(branch, key):
+    """Drop every value of a multivar, both spellings — `--unset` refuses when more than one
+    value is set, so a rewritten list needs this before it is re-added."""
+    for k in _pair(branch, key):
+        ctx.run(["git", "config", "--unset-all", k])
+    repostate.invalidate()
+
+
 def remove_stack_section(branch):
     """Every stack key for a branch, both spellings. The target side is unset KEY BY KEY on
     purpose: `--remove-section branch.<b>` would take git's own branch.<b>.remote / .merge /
