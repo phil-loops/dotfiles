@@ -42,6 +42,7 @@ export function usePushDoor(d: {
             moreFiles?: number;
             commit?: { sha: string; subject: string; body: string } | null;
             review?: { flags: string[] } | null;
+            gatesWaived?: string[];
           }>,
       ),
     enabled: !!d.branch() && !d.isReview(),
@@ -197,7 +198,12 @@ export function PushDoor(props: {
               <Show when={p().moreFiles}>{(m) => <span class="italic text-ink-faint">+{m()} more files</span>}</Show>
             </div>
             <div class="flex items-center gap-[10px] text-[11px] text-ink-faint">
-              <span>✓ gates green for this exact tree</span>
+              <span>{(p().gatesWaived?.length ?? 0) ? "✓ gates green (waived) for this exact tree" : "✓ gates green for this exact tree"}</span>
+              <Show when={p().gatesWaived?.length}>
+                <span class="cursor-help whitespace-nowrap text-ember" title={(p().gatesWaived ?? []).join("\n\n")}>
+                  ⚠ {p().gatesWaived!.length} gate waived
+                </span>
+              </Show>
               <Show when={p().review}>{(rv) => <span>{rv().flags.length ? `⚑ ${rv().flags.length} review flag${rv().flags.length === 1 ? "" : "s"} unapplied` : "✓ reviewed"}</span>}</Show>
               <button class={`nh-editor-close ${EDITOR_CLOSE}`} onClick={() => disarm()}>
                 cancel
@@ -210,6 +216,17 @@ export function PushDoor(props: {
       {/* push-ready's review verdict for THIS exact tree — tree-keyed like gates-green, so a
           moved tree silently retires it (the server sends null). Flags are the reviewer's
           unapplied findings, full text on hover; a fresh EMPTY list is reviewed-clean. */}
+      {/* a green earned with a WAIVED gate says so in the header, not only behind the arm —
+          the waiver is the whole point of letting a pinned stack push, so it stays visible. */}
+      <Show when={!isReview() && preview.data?.gatesWaived?.length}>
+        <span
+          class="nh-gates-waived cursor-help whitespace-nowrap text-[12px] text-ember"
+          title={(preview.data?.gatesWaived ?? []).join("\n\n")}
+        >
+          ⚠ gate waived
+        </span>
+      </Show>
+
       <Show when={!isReview() && preview.data?.review}>
         {(rv) =>
           rv().flags.length ? (

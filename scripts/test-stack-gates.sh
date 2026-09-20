@@ -52,6 +52,41 @@ out="$(cd "$r" && "$gates")"
 n="$(echo "$out" | python3 -c "import sys,json; print(len(json.load(sys.stdin)['gates']))")"
 [[ "$n" == 2 ]] && ok "both gates reported" || bad "gate count $n"
 
+# ── waiver: a gate that is UNSATISFIABLE, not unmet ──────────────────────────
+# A branch pinned under a PUBLISHED stack parent cannot rebase forward without rewriting
+# that parent's pushed history, so `fresh` can never pass there. It is waived (ok, with the
+# finding in `warn`) rather than dropped — and a branch with NO published ancestor, which
+# CAN rebase, must still red.
+mkstack() {   # → repo with main, a "published" parent (origin/<p> exists) and a child on it
+  local d; d="$(mktemp -d)"
+  git -C "$d" init -q -b main
+  git -C "$d" config user.email t@t.t; git -C "$d" config user.name t
+  git -C "$d" config commit.gpgsign false
+  echo x > "$d/x"; git -C "$d" add .; git -C "$d" commit -qm init
+  git -C "$d" checkout -q -b parent
+  echo p > "$d/p"; git -C "$d" add .; git -C "$d" commit -qm parent
+  git -C "$d" checkout -q -b child
+  echo c > "$d/c"; git -C "$d" add .; git -C "$d" commit -qm child
+  git -C "$d" config branch.child.stack-parent parent
+  echo "$d"
+}
+
+r="$(mkstack)"
+git -C "$r" update-ref refs/remotes/origin/parent parent          # parent is published
+git -C "$r" config --add stack-gates.cmd "fresh::echo behind >&2; false"
+out="$(cd "$r" && "$gates" --branch child)"
+[[ "$(echo "$out" | field "['ok']")" == "True" ]] && ok "fresh waived under a published parent → ok:true" || bad "waive: $out"
+[[ "$(echo "$out" | field "['gates'][0].get('advisory')")" == "True" ]] && ok "waived gate marked advisory" || bad "advisory: $out"
+[[ "$(echo "$out" | field "['gates'][0].get('warn','')" | grep -c 'waived: stacked under published parent')" == "1" ]] \
+  && ok "waiver names the pinning parent" || bad "warn: $out"
+
+# same stack, parent NOT published → the branch can rebase, so the gate still reds
+r="$(mkstack)"
+git -C "$r" config --add stack-gates.cmd "fresh::echo behind >&2; false"
+out="$(cd "$r" && "$gates" --branch child)"
+[[ "$(echo "$out" | field "['ok']")" == "False" ]] && ok "no published ancestor → fresh still reds" || bad "no-waive: $out"
+[[ "$(echo "$out" | field "['gates'][0].get('advisory')")" == "None" ]] && ok "unwaived gate carries no advisory flag" || bad "advisory leak: $out"
+
 # gate exit code: process exits 0 (verdict is in JSON, not exit code)
 r="$(mkrepo)"
 git -C "$r" config --add stack-gates.cmd "b::false"
