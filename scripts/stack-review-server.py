@@ -276,32 +276,35 @@ class H(BaseHTTPRequestHandler):
         finally:
             srvctx.clear_repo()
 
+    def _send_app_shell(self):
+        # The built Solid app (scripts/viewer-solid/dist/index.html), served for the shell AND
+        # every client route: path-based routing (History API) means a deep-link/refresh to
+        # /forests/x hits the server, which must return index.html (SPA fallback) so the client
+        # can route it. API routes (/branch-url, /review-requests, /node, …) don't match those
+        # prefixes, so they still fall through to their own handlers.
+        # Cached in-process, re-read only when asset_sig moves (a fresh `npm run build`).
+        # Same-origin with this server, so the app's /model, /node, /bless… are plain
+        # relative fetches — no dev proxy.
+        sig = asset_sig()
+        with _render_lock:
+            if _index_cache["html"] is None or _index_cache["asset"] != sig:
+                try:
+                    html = open(os.path.join(DIST, "index.html"), "rb").read()
+                except OSError:
+                    self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
+                    return
+                # Inject the registry repo names so the client router can tell a <repo> path
+                # segment from a <project> one (/forests/<repo>/<project> vs /forests/<project>).
+                inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))}</script>".encode()
+                _index_cache["html"] = html.replace(b"<head>", b"<head>" + inject, 1)
+                _index_cache["asset"] = sig
+            body = _index_cache["html"]
+        self._send(200, body, "text/html; charset=utf-8")
+
     def _dispatch_get(self, u):
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/"))):
-            # Serve the built Solid app (scripts/viewer-solid/dist/index.html) for the shell AND
-            # every client route: path-based routing (History API) means a deep-link/refresh to
-            # /forest/x hits the server, which must return index.html (SPA fallback) so the client
-            # can route it. API routes (/branch-url, /review-requests, /node, …) don't match these
-            # prefixes, so they still fall through to their own handlers below.
-            # Cached in-process, re-read only when asset_sig moves (a fresh `npm run build`).
-            # Same-origin with this server, so the app's /model, /node, /bless… are plain
-            # relative fetches — no dev proxy.
-            sig = asset_sig()
-            with _render_lock:
-                if _index_cache["html"] is None or _index_cache["asset"] != sig:
-                    try:
-                        html = open(os.path.join(DIST, "index.html"), "rb").read()
-                    except OSError:
-                        self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
-                        return
-                    # Inject the registry repo names so the client router can tell a <repo> path
-                    # segment from a <project> one (/forests/<repo>/<project> vs /forests/<project>).
-                    inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))}</script>".encode()
-                    _index_cache["html"] = html.replace(b"<head>", b"<head>" + inject, 1)
-                    _index_cache["asset"] = sig
-                body = _index_cache["html"]
-            self._send(200, body, "text/html; charset=utf-8")
+            self._send_app_shell()
         elif u.path.startswith("/assets/"):
             # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the
             # path can't escape dist/assets. Cache hard — the filename changes on rebuild.
@@ -439,6 +442,12 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
         elif u.path == "/preview-log":    return preview.log(self)   # tail one preview's next-dev log
         elif u.path == "/preview-wait":   return preview.wait(self)   # warming page: boots + hands off to the preview
+        elif "text/html" in self.headers.get("Accept", ""):
+            # A browser NAVIGATION that matched no route above is a human on a page URL that
+            # moved, was mistyped, or predates a rename (/forest/x before /forests/x) — hand
+            # them the app and let the client router fall home, rather than a bare `{}` in the
+            # face. fetch/XHR doesn't ask for text/html, so API 404s stay honest JSON.
+            self._send_app_shell()
         else:
             self._send(404, "{}")
 
