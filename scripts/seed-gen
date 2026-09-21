@@ -138,6 +138,10 @@ explode_node_modules(){ # $1 = tree, $2 = main checkout; idempotent: prunes dead
     [[ -f "$p/package.json" && ! -e "$nm/@loops/$b" && ! -L "$nm/@loops/$b" ]] \
       && ln -sh "../../packages/$b" "$nm/@loops/$b"
   done
+  # An exploded view is never LEFT drifted. This lives here rather than at the call sites because
+  # the tree gets exploded from three of them, and the first one runs before the explode — which
+  # is how the first cut of this silently never fired (2026-09-21).
+  repoint_drifted_deps "$1"
   return 0
 }
 
@@ -189,6 +193,102 @@ seed_prisma_client(){ # $1 = tree, $2 = main checkout; a schema.prisma that diff
 # writes the node_modules/@loops link; the Taskfile's npm:install keys on package.json + the
 # prisma schema, and a new workspace package changes neither (2026-09-08: safe-fetch, #10419).
 # npm-owed asks npm whether this tree's node_modules matches its lockfile (dry run, hash-cached).
+# Exploding fixes @loops/*, and stops there: every OTHER entry is still a symlink into the donor,
+# so it carries whatever version the MAIN checkout's lockfile installed. A branch then typechecks
+# its own source against another branch's dependencies, and the reds land in files the diff never
+# touched — 2026-09-21, a branch 54 commits ahead of a parked main: stripe's apiVersion union
+# (lib/stripe.ts) and @prisma/client's missing models, none of them the branch's doing. Repointing
+# the drifted entries at their pinned versions closes that gap; a tree whose node_modules is a
+# plain symlink has no per-entry link to repoint and is left alone.
+deps_drift(){ # $1 = tree; prints "<name>\t<version this branch pins>" for each drifted borrowed dep
+  python3 - "$1" <<'PYEOF'
+import json, os, re, sys
+tree = sys.argv[1]
+
+# npm normalises a lockfile version, the published package.json need not be normalised at all:
+# @upstash/ratelimit ships "v2.0.8" against a lock that pins "2.0.8". Comparing the raw strings
+# called that drifted forever — repointing it on every single sync (caught 2026-09-21 by the
+# repoint not being idempotent). Anything that still disagrees after this is real drift.
+def norm(v):
+    return re.sub(r"^[vV]", "", v).strip() if isinstance(v, str) else v
+try:
+    lock = json.load(open(os.path.join(tree, "package-lock.json")))
+except Exception:
+    sys.exit(0)
+for path, meta in (lock.get("packages") or {}).items():
+    if not path.startswith("node_modules/"):
+        continue
+    name = path[len("node_modules/"):]
+    if "node_modules/" in name or meta.get("link"):
+        continue                      # a nested dep, or a workspace link — explode owns those
+    want = meta.get("version")
+    if not want:
+        continue
+    entry = os.path.join(tree, "node_modules", name)
+    if not os.path.islink(entry):
+        continue                      # already tree-local: npm-owed judges those
+    try:
+        have = json.load(open(os.path.join(entry, "package.json"))).get("version")
+    except Exception:
+        continue
+    # a git/file/link/alias dep carries a version the registry cannot be asked for — npm would
+    # resolve the spec, not the number, so leave those to npm-owed rather than guess
+    resolved = meta.get("resolved") or ""
+    if resolved and not resolved.startswith(("http://", "https://")):
+        continue
+    if have and norm(have) != norm(want):
+        print("%s\t%s" % (name, want))
+PYEOF
+}
+
+repoint_drifted_deps(){ # $1 = tree; echoes a note when it acted
+  local tree="$1" drift n stamp scratch name ver landed
+  [[ -f "$tree/package-lock.json" ]] || return 0
+  exploded "$tree" || return 0
+  drift=$(deps_drift "$tree" 2>/dev/null) || return 0
+  [[ -n "$drift" ]] || return 0
+  n=$(grep -c . <<<"$drift")
+  # A big delta means the donor is simply the wrong tree, not that a few packages slipped, and
+  # installing 170 packages per worktree is not the answer to that — measured on this machine,
+  # a branch a few weeks behind a parked main drifts 140-170 deps. Warn and move on: a gate that
+  # refused to run here would wedge every worktree on the machine, and blocking a push over the
+  # environment is not this tool's call (the same reason the .gen provenance check only explains
+  # a red). --check reports the drift at any size, so a red is never left looking like the code.
+  if (( n > 60 )); then
+    echo "node_modules borrows $n deps at versions this branch does not pin — too many to repoint; npm install in the main checkout, or give this tree a real node_modules"
+    return 0
+  fi
+  stamp=$(md5 -q "$tree/package-lock.json" 2>/dev/null) || return 0
+  # Keyed by lockfile, so trees on the same lock share one install. OUTSIDE the worktree on
+  # purpose: npm takes its project root from the nearest package.json, so a scratch under the
+  # tree would reify into the tree itself — the same stomp the per-package explode exists to stop.
+  scratch="$HOME/.cache/seed-gen/deps/$stamp"
+  mkdir -p "$scratch" || return 0
+  [[ -f "$scratch/package.json" ]] || printf '{"name":"seed-gen-deps","private":true}\n' > "$scratch/package.json"
+  # a plain string, not an array: bash 3.2 expands an empty "${a[@]:-}" to one EMPTY argument,
+  # so the array form seeds npm with a bare "" on the first append. Specs never contain spaces.
+  local specs=""
+  while IFS=$'\t' read -r name ver; do
+    [[ -n "$name" ]] && specs="$specs $name@$ver"
+  done <<<"$drift"
+  [[ -n "$specs" ]] || return 0
+  if ! ( cd "$scratch" && npm install --no-save --no-audit --no-fund $specs ) >/dev/null 2>&1; then
+    echo "node_modules borrows $n dep(s) at the wrong version ($(cut -f1 <<<"$drift" | head -3 | tr '\n' ' ')…) and the repoint install failed — a typecheck here answers for the main checkout, not this branch"
+    return 0
+  fi
+  landed=0
+  while IFS=$'\t' read -r name ver; do
+    [[ -n "$name" && -L "$tree/node_modules/$name" && -d "$scratch/node_modules/$name" ]] || continue
+    if rm "$tree/node_modules/$name" && ln -sh "$scratch/node_modules/$name" "$tree/node_modules/$name"; then
+      landed=$((landed + 1))
+    fi
+  done <<<"$drift"
+  if (( landed )); then
+    echo "node_modules borrowed $landed dep(s) at the main checkout's versions — repointed at this branch's: $(cut -f1 <<<"$drift" | tr '\n' ' ')"
+  fi
+  return 0
+}
+
 install_if_owed(){ # $1 = tree with a REAL node_modules; echoes a note when it acted
   local what
   what="$("$(dirname "$0")/npm-owed" "$1" 2>/dev/null)" || return 0
@@ -215,7 +315,8 @@ trpc_types_project(){ # $1 = tree; echoes the tsconfig path or nothing
   [[ -f "$1/$proj" ]] && echo "$proj"
 }
 
-# --check <worktree>: is the .gen this tree reads trustworthy FOR THE BRANCH IT IS ON?
+# --check <worktree>: are the generated types AND the borrowed dependencies this tree reads
+# trustworthy FOR THE BRANCH IT IS ON?
 # The marker is read from THIS tree's .gen (through a symlink that is main's marker; a
 # self-built copy carries its own) — a copy with no marker has no provenance at all.
 # Exit 0 = trustworthy. Exit 1 = say so out loud instead of reporting a confident red.
@@ -227,6 +328,12 @@ if [[ "${1:-}" == --check ]]; then
   branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
   [[ "$branch" == HEAD ]] && branch=$(cat "$(git -C "$dir" rev-parse --git-dir)/stack-open-branch" 2>/dev/null || echo "$head")
   fix="$(cd "$(dirname "$0")" && pwd -P)/seed-gen --sync ${dir}"
+  drift=$(deps_drift "$dir" 2>/dev/null) || drift=""
+  if [[ -n "$drift" ]]; then
+    echo "this tree borrows $(grep -c . <<<"$drift") dependency(ies) from the main checkout at versions this branch does not pin: $(cut -f1 <<<"$drift" | head -5 | tr '\n' ' ')"
+    echo "  errors above in files your diff never touched may be those deps, not your code"
+    echo "  repair: $fix"; exit 1
+  fi
   if [[ -z "$sha" ]]; then
     echo "generated tRPC types have no provenance marker — cannot tell what they describe"
     echo "  rebuild for this tree: $fix"; exit 1
