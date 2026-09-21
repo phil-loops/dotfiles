@@ -384,28 +384,39 @@ BUNDLER=""
 if [ "$DIR" = "$MAIN" ]; then
   [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] || { err "MAIN's node_modules is missing or a symlink — run npm install in $MAIN"; exit 1; }
 else
+  # Reap staging/retired trees an interrupted run left behind. Age-gated, never by PID: a second
+  # preview of the same checkout is a different process, and sweeping its in-flight staging dir
+  # would be exactly the stomp this whole block exists to stop.
+  find "$DIR" -maxdepth 1 \( -name '.node_modules.staging.*' -o -name '.node_modules.retired.*' \) \
+    -mmin +60 -exec rm -rf {} + 2>/dev/null || true
+
   # a seed-gen "repointed" tree (per-entry symlinks out to MAIN) boots next fine but Turbopack
   # refuses out-of-root symlinks — zero compile, every request 500s on missing build manifests.
   # Two runs racing in one checkout leave a HYBRID (real top-level dirs, nested @scope/pkg + .prisma
   # links; 2026-09-03), so scan two levels deep — MAIN's own pkg/pkg self-links are benign, skip them.
+  nm_stale=""
   if [ -d "$DIR/node_modules" ] && [ -n "$(find "$DIR/node_modules" -maxdepth 2 -type l -lname "$MAIN/*" 2>/dev/null | awk -F/ '$NF != $(NF-1)' | head -1)" ]; then
-    cyan "node_modules entries are symlinks to MAIN (Turbopack-fatal) — re-cloning real"
-    rm -rf "$DIR/node_modules"
+    nm_stale="node_modules entries are symlinks to MAIN (Turbopack-fatal)"
+  elif [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
+    nm_stale="MAIN reinstalled since this clone"
+  elif [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && ! nm_complete "$DIR/node_modules"; then
+    nm_stale="node_modules has no .bin/next (cloned mid-install)"
   fi
-  if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
-    cyan "MAIN reinstalled since this clone — refreshing node_modules"
-    rm -rf "$DIR/node_modules"
-  fi
-  if [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && ! nm_complete "$DIR/node_modules"; then
-    cyan "node_modules has no .bin/next (cloned mid-install) — re-cloning"
-    rm -rf "$DIR/node_modules"
-  fi
-  if [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
-    rm -f "$DIR/node_modules"
+
+  # Build the replacement ASIDE, then swap. Until 2026-09-21 each staleness test rm -rf'd the live
+  # tree on the spot and the replacement came later, so anything between the two — ^C, a failed
+  # clone, the viewer killing a slow preview — left the checkout with NO node_modules at all: a
+  # preview that "could not start" also destroyed the tree it was repairing (loops-wt-163039).
+  if [ -n "$nm_stale" ] || [ ! -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
+    if [ -n "$nm_stale" ]; then
+      cyan "$nm_stale — rebuilding node_modules (the existing tree stays until the new one lands)"
+    fi
     nm_complete "$MAIN/node_modules" || { err "MAIN's node_modules is mid-install (no .bin/next) — let npm install finish in $MAIN first"; exit 1; }
     want="$(lock_stamp "$DIR")"      # what this BRANCH's lockfile asks for
     have="$(lock_stamp)"             # what MAIN's node_modules actually is
-    if pool_take "$DIR/node_modules" "$want"; then
+    staging="$DIR/.node_modules.staging.$$"
+    rm -rf "$staging"
+    if pool_take "$staging" "$want"; then
       if [ "$POOL_TOOK" = exact ]; then
         cyan "took a warm node_modules from the pool (lock ${want:0:8})"
       else
@@ -413,13 +424,29 @@ else
       fi
     else
       cyan "cloning node_modules from $MAIN (no pool entry for lock ${want:0:8}; ~30s)"
-      if ! cp -Rc "$MAIN/node_modules" "$DIR/node_modules" 2>/dev/null; then
-        rm -rf "$DIR/node_modules"
-        ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
-        err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
-      fi
+      cp -Rc "$MAIN/node_modules" "$staging" 2>/dev/null || rm -rf "$staging"
     fi
-    [ -L "$DIR/node_modules" ] || strip_quarantine "$DIR/node_modules"
+    if [ -d "$staging" ]; then
+      strip_quarantine "$staging"
+      retired="$DIR/.node_modules.retired.$$"
+      if [ -e "$DIR/node_modules" ] || [ -L "$DIR/node_modules" ]; then
+        mv "$DIR/node_modules" "$retired" 2>/dev/null || rm -f "$DIR/node_modules"
+      fi
+      if mv "$staging" "$DIR/node_modules" 2>/dev/null; then
+        # 310k inodes; the preview has what it needs, so nothing waits on the unlink
+        rm -rf "$retired" >/dev/null 2>&1 &
+      else
+        if [ -e "$retired" ]; then mv "$retired" "$DIR/node_modules"; fi
+        rm -rf "$staging"
+        err "could not swap in the new node_modules — left the existing tree in place"
+      fi
+    else
+      # Nothing materialized. Every path into this block either had no usable tree or had a
+      # Turbopack-fatal one, so the symlink fallback (old bundler) is still the better answer.
+      rm -rf "$DIR/node_modules"
+      ln -sfn "$MAIN/node_modules" "$DIR/node_modules"
+      err "clone failed — linked MAIN's node_modules; this preview runs on webpack"
+    fi
     # The donor is the only complete tree we have, so a mismatch is not fatal — npm-owed will
     # reconcile it below. But that reconcile is the expensive phase, and it is invisible unless
     # someone says WHY it is happening, so say it here rather than let it read as a slow preview.
