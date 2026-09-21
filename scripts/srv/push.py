@@ -257,6 +257,33 @@ def _review_flags(branch):
     return {"flags": [l.strip() for l in snap.branch_key_all(branch, "review-flag") if l.strip()]}
 
 
+def _todo_debt(branch, tip, scan=True):
+    """What the pre-push TODO guard would say about this branch — asked of the guard
+    itself rather than reimplemented, so the door and the hook can never disagree about
+    what blocks. Without this the guard only speaks after a failed push, as a truncated
+    one-line stderr (2026-09-21, #10564: a reviewer-requested `TODO: Fix in LOO-5922`).
+
+    {"blocked": [<file:line:text>], "acks": [<ticket — why>]}; empty `blocked` means the
+    push would clear, including on a repo the guard doesn't guard at all. The acks are read
+    either way — with nothing outgoing there is nothing to block, but the branch's standing
+    declaration is still what the door should show."""
+    snap = repostate.snapshot()
+    acks = [a.strip() for a in snap.branch_key_all(branch, "todo-ack") if a.strip()]
+    guard = os.path.join(ctx.SCRIPTS, "prepush-todo-guard")
+    url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip() if scan else ""
+    if not scan or not url or not os.access(guard, os.X_OK):
+        return {"blocked": [], "acks": acks}
+    r = subprocess.run(
+        [guard, "origin", url], cwd=ctx.repo_cwd(), capture_output=True, text=True,
+        env={**os.environ, "PUSH_SHA": tip, "PUSH_REF": f"refs/heads/{branch}", "TODO_GUARD": "1"},
+    )
+    if r.returncode == 0:
+        return {"blocked": [], "acks": acks}
+    return {"blocked": [l.strip() for l in (r.stdout or "").splitlines()
+                        if re.match(r"^\s+\S+:\d+:", l)],
+            "acks": acks}
+
+
 def _pr_base(branch):
     """The compare form's base: the nearest stack ancestor with an OPEN PR on origin, else
     main. A stacked child targets its parent's PR so the review diff stays that branch's own
@@ -462,6 +489,7 @@ def _origin_verdict(branch):
     # Waivers recorded alongside the green (a gate that was unsatisfiable, not unmet). Shown
     # at the door so the green says what it cost; retired with the green when the tree moves.
     gates_waived = snap.branch_key_all(branch, "gates-waived") if gates_green else []
+    todo = _todo_debt(branch, tip, scan=bool(outgoing))
     chain_broken = _chain_break(branch)
 
     def ward(k, label, ok, why, advisory=False):
@@ -496,6 +524,13 @@ def _origin_verdict(branch):
              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
         ward("gates", "gates green" if not gates_waived else "gates green (1 waived)", gates_green,
              "not green for this exact commit — ⟲ sync runs the gates"),
+        # The pre-push TODO ratchet, moved to the door: a TODO clears by naming a ticket the
+        # branch acked (`branch.<b>.stack-todo-ack`), so a reviewer-requested marker ships
+        # while undeclared debt still stops here.
+        ward("todo", f"TODO debt acked ({len(todo['acks'])})" if todo["acks"] else "no TODO debt",
+             not todo["blocked"],
+             f"{len(todo['blocked'])} TODO{'s' if len(todo['blocked']) != 1 else ''} added with no ticket acked on this branch — "
+             f"resolve them, or ack the ticket: git config --add branch.{branch}.stack-todo-ack '<TICKET> — <why this ships>'"),
     ]
     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
     return {
@@ -506,6 +541,7 @@ def _origin_verdict(branch):
         "deployCritical": deploy_critical,
         "files": files[:20], "moreFiles": max(0, len(files) - 20),
         "commit": commit, "gatesGreen": gates_green, "gatesWaived": gates_waived,
+        "todoDebt": todo,
         "web": _origin_web(branch),
         "published": published,
         "wards": wards, "ok": not reasons, "reasons": reasons,

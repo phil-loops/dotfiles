@@ -1,15 +1,30 @@
 #!/usr/bin/env bash
-# Block a push to the SHARED repo when the branch adds TODOs.
+# Block a push to the SHARED repo when the branch adds TODOs — unless the TODO names
+# a ticket the branch has acked.
 #
 # TODO markers are fine as local scaffolding — they're how we park a decision
 # while keeping types honest. This guard is the ratchet that stops that debt
 # from reaching the team's repo: finish the TODO, or push to your fork.
 #
+# The ratchet has one door, because a reviewer can legitimately ASK for a TODO
+# ("mind adding a `TODO: Fix in LOO-5922` comment above this?", #10564). A TODO
+# clears the guard when it (a) names a ticket and (b) that ticket is acked on the
+# branch:
+#
+#   git config --add branch.<branch>.stack-todo-ack 'LOO-5922 — reviewer asked on #10564'
+#
+# The leading token is the ticket; the rest is the reason, for the viewer and for
+# whoever reads the config later. Per-branch, so git drops it with the branch —
+# an ack covers this branch's debt, never the next one's. A TODO with no ticket,
+# or with an unacked one, still blocks: the ratchet holds for everything nobody
+# deliberately signed for.
+#
 # Called from .git/hooks/pre-push with the hook's own args ("$@"):
 #   $1 = remote name   $2 = remote URL
 # Does NOT read stdin (the hook captures it); $PUSH_SHA carries the pushed commit —
 # fall back to HEAD only when absent, since the push may run from a worktree that
-# has a different branch checked out.
+# has a different branch checked out. $PUSH_REF carries the ref being pushed, which
+# is what names the branch whose acks count; without it we resolve the sha.
 #
 # Bypass: TODO_GUARD=0 git push ...   (or git push --no-verify)
 set -uo pipefail
@@ -43,11 +58,58 @@ added=$(git diff -U0 --diff-filter=ACMR "$base...$pushed" 2>/dev/null | awk '
 
 [ -z "$added" ] && exit 0
 
-count=$(printf '%s\n' "$added" | wc -l | tr -d ' ')
-echo "🚫 push blocked: this branch adds $count TODO$([ "$count" = 1 ] || echo s) and its destination is the shared repo."
+# Whose acks count: the branch being pushed, not whatever this worktree has checked out.
+branch="${PUSH_REF:-}"
+branch="${branch#refs/heads/}"
+if [ -z "$branch" ]; then
+  branch=$(git for-each-ref --format='%(refname:short)' --points-at "$pushed" refs/heads/ 2>/dev/null | head -1)
+fi
+[ -n "$branch" ] || branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || branch=""
+
+acked=""
+[ -n "$branch" ] && acked=$(git config --get-all "branch.$branch.stack-todo-ack" 2>/dev/null \
+  | awk 'NF { print toupper($1) }')
+
+TICKET_RE='[A-Z][A-Z0-9]+-[0-9]+'
+
+blocked=""
+wanted=""   # ticketed-but-unacked, for the copy-paste line
+while IFS= read -r entry; do
+  [ -n "$entry" ] || continue
+  tickets=$(printf '%s\n' "$entry" | grep -oE "$TICKET_RE" | tr '[:lower:]' '[:upper:]' | sort -u)
+  cleared=0
+  for t in $tickets; do
+    printf '%s\n' "$acked" | grep -qx "$t" && { cleared=1; break; }
+  done
+  [ "$cleared" = 1 ] && continue
+  blocked="${blocked}${entry}"$'\n'
+  [ -n "$tickets" ] && wanted="${wanted}${tickets}"$'\n'
+done <<EOF
+$added
+EOF
+
+blocked=$(printf '%s' "$blocked" | sed '/^$/d')
+[ -z "$blocked" ] && exit 0
+
+count=$(printf '%s\n' "$blocked" | wc -l | tr -d ' ')
+echo "🚫 push blocked: this branch adds $count unacked TODO$([ "$count" = 1 ] || echo s) and its destination is the shared repo."
 echo
-printf '%s\n' "$added" | cut -c1-140
+printf '%s\n' "$blocked" | cut -c1-140
 echo
 echo "   Resolve them, or push to your fork instead:  git push phil-loops HEAD"
-echo "   Deliberate exception:                        TODO_GUARD=0 git push …"
+
+wanted=$(printf '%s' "$wanted" | sed '/^$/d' | sort -u)
+if [ -n "$wanted" ] && [ -n "$branch" ]; then
+  echo
+  echo "   Deliberate and tracked? Ack the ticket on this branch (say why — it outlives the push):"
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    echo "     git config --add branch.$branch.stack-todo-ack '$t — <why this ships>'"
+  done <<EOF
+$wanted
+EOF
+fi
+
+echo
+echo "   Untracked exception:                         TODO_GUARD=0 git push …"
 exit 1

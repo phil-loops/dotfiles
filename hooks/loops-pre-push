@@ -18,8 +18,10 @@ printf '%s\n' "$refs" | "$HOME/.dotfiles/scripts/stack-prepush-guard" || exit 1
 # the pushed commit: first ref line that isn't a delete (all-zero sha)
 push_sha=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $2; exit }')
 [ -n "$push_sha" ] || exit 0
+# its local ref, which names the branch whose stack-todo-ack entries count
+push_ref=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $1; exit }')
 
 # Block TODOs from reaching the shared repo (forks still push freely).
-PUSH_SHA="$push_sha" "$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
+PUSH_SHA="$push_sha" PUSH_REF="$push_ref" "$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
 
 exit 0
