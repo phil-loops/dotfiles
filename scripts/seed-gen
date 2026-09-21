@@ -241,6 +241,109 @@ for path, meta in (lock.get("packages") or {}).items():
 PYEOF
 }
 
+# The repair has to be DETERMINISTIC — it runs inside stack-gates' env_repair, whose whole
+# contract is that a gate red means the code is wrong, not the environment. `npm install <pkg>@<v>`
+# is not: it asks the registry to re-resolve that package's own dependency ranges, so the tree it
+# builds depends on what was published today, carries no integrity pinning from this branch, and
+# needs the network. That is the same defect this function exists to fix, one level down.
+# The branch's lockfile already pins the exact answer — version, tarball URL and integrity — for
+# the package AND its whole closure, so build a minimal lockfile out of it and `npm ci` that: no
+# resolver, integrity-checked, and offline once npm's cache is warm.
+deps_scratch_lock(){ # $1 = tree, $2 = scratch, rest = package names. exit 3 = scratch already serves them
+  local tree="$1" scratch="$2"; shift 2
+  python3 - "$tree" "$scratch" "$@" <<'PYEOF'
+import json, os, sys
+tree, scratch, names = sys.argv[1], sys.argv[2], sys.argv[3:]
+lock = json.load(open(os.path.join(tree, "package-lock.json")))
+pkgs = lock.get("packages") or {}
+
+def resolve(frm, dep):
+    """npm's own lookup: nearest enclosing node_modules, then walk outward."""
+    base = frm
+    while True:
+        cand = (base + "/node_modules/" + dep) if base else ("node_modules/" + dep)
+        if cand in pkgs:
+            return cand
+        if not base:
+            return None
+        i = base.rfind("/node_modules/")
+        base = base[:i] if i != -1 else ""
+
+roots = {}
+queue = []
+for n in names:
+    k = "node_modules/" + n
+    meta = pkgs.get(k)
+    if meta and meta.get("version") and not meta.get("link"):
+        roots[n] = meta["version"]
+        queue.append(k)
+if not roots:
+    sys.exit(1)
+
+# Union with whatever this scratch already serves: another tree on the same lockfile may be
+# reading through it right now, and npm ci rebuilds node_modules from scratch — dropping its
+# packages mid-typecheck would be exactly the stomp the shared scratch is supposed to avoid.
+prev = {}
+try:
+    prev = (json.load(open(os.path.join(scratch, "package.json"))).get("dependencies") or {})
+except Exception:
+    pass
+merged = dict(prev); merged.update(roots)
+# Only names this lockfile can actually satisfy. The scratch is keyed by lock hash so a stale
+# root should be impossible, but a manifest claiming a dep the lock has no entry for makes
+# `npm ci` refuse the whole tree — a cheap filter beats a scratch that can never install again.
+merged = {n: v for n, v in merged.items()
+          if pkgs.get("node_modules/" + n) and not pkgs["node_modules/" + n].get("link")}
+if not merged:
+    sys.exit(1)
+
+keep, seen = {}, set()
+queue = [("node_modules/" + n) for n in merged if ("node_modules/" + n) in pkgs]
+while queue:
+    k = queue.pop()
+    if k in seen:
+        continue
+    seen.add(k)
+    meta = dict(pkgs[k])
+    if meta.get("link"):          # a workspace ref has no tarball to fetch; not our business
+        continue
+    # The closure is installed for its own sake, so a `dev` mark would make npm prune exactly
+    # what we asked for. `optional` must SURVIVE though: it is what lets npm skip a dependency
+    # built for another platform, and stripping it turned @oxc-parser's android/arm binary into
+    # a required install — npm ci dies EBADPLATFORM on a mac. devOptional is the optional dep of
+    # a dev dep, so it becomes plainly optional here rather than plainly required.
+    if meta.pop("devOptional", None):
+        meta["optional"] = True
+    meta.pop("dev", None)
+    keep[k] = meta
+    for field in ("dependencies", "optionalDependencies", "peerDependencies"):
+        for d in (meta.get(field) or {}):
+            r = resolve(k, d)
+            if r and r not in seen:
+                queue.append(r)
+
+root = {"name": "seed-gen-deps", "version": "0.0.0", "license": "UNLICENSED", "dependencies": merged}
+manifest = {"name": "seed-gen-deps", "version": "0.0.0", "private": True,
+            "license": "UNLICENSED", "dependencies": merged}
+new_lock = {"name": "seed-gen-deps", "version": "0.0.0", "lockfileVersion": 3, "requires": True,
+            "packages": dict([("", root)] + sorted(keep.items()))}
+
+def same(path, obj):
+    try:
+        return json.load(open(path)) == obj
+    except Exception:
+        return False
+
+lp = os.path.join(scratch, "package-lock.json")
+mp = os.path.join(scratch, "package.json")
+if same(mp, manifest) and same(lp, new_lock) and all(
+        os.path.exists(os.path.join(scratch, "node_modules", n)) for n in merged):
+    sys.exit(3)
+json.dump(manifest, open(mp, "w"), indent=2)
+json.dump(new_lock, open(lp, "w"), indent=2)
+PYEOF
+}
+
 repoint_drifted_deps(){ # $1 = tree; echoes a note when it acted
   local tree="$1" drift n stamp scratch name ver landed
   [[ -f "$tree/package-lock.json" ]] || return 0
@@ -264,18 +367,23 @@ repoint_drifted_deps(){ # $1 = tree; echoes a note when it acted
   # tree would reify into the tree itself — the same stomp the per-package explode exists to stop.
   scratch="$HOME/.cache/seed-gen/deps/$stamp"
   mkdir -p "$scratch" || return 0
-  [[ -f "$scratch/package.json" ]] || printf '{"name":"seed-gen-deps","private":true}\n' > "$scratch/package.json"
   # a plain string, not an array: bash 3.2 expands an empty "${a[@]:-}" to one EMPTY argument,
-  # so the array form seeds npm with a bare "" on the first append. Specs never contain spaces.
-  local specs=""
+  # so the array form seeds the command with a bare "". Package names never contain spaces.
+  local wanted=""
   while IFS=$'\t' read -r name ver; do
-    [[ -n "$name" ]] && specs="$specs $name@$ver"
+    [[ -n "$name" ]] && wanted="$wanted $name"
   done <<<"$drift"
-  [[ -n "$specs" ]] || return 0
-  if ! ( cd "$scratch" && npm install --no-save --no-audit --no-fund $specs ) >/dev/null 2>&1; then
-    echo "node_modules borrows $n dep(s) at the wrong version ($(cut -f1 <<<"$drift" | head -3 | tr '\n' ' ')…) and the repoint install failed — a typecheck here answers for the main checkout, not this branch"
-    return 0
-  fi
+  [[ -n "$wanted" ]] || return 0
+  deps_scratch_lock "$tree" "$scratch" $wanted
+  case $? in
+    0) if ! ( cd "$scratch" && npm ci --no-audit --no-fund ) >/dev/null 2>&1; then
+         echo "node_modules borrows $n dep(s) at the wrong version ($(cut -f1 <<<"$drift" | head -3 | tr '\n' ' ')…) and the pinned repoint install failed — a typecheck here answers for the main checkout, not this branch"
+         return 0
+       fi ;;
+    3) ;;                        # the scratch already serves every one of them, pinned
+    *) echo "node_modules borrows $n dep(s) at the wrong version but this branch's lockfile does not pin them — leaving the donor's"
+       return 0 ;;
+  esac
   landed=0
   while IFS=$'\t' read -r name ver; do
     [[ -n "$name" && -L "$tree/node_modules/$name" && -d "$scratch/node_modules/$name" ]] || continue
