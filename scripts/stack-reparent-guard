@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# stack-reparent-guard — refuse a commit that would bake a revert of merged work.
+#
+# `git reset --soft <ref>` preserves the tree, so it looks safe for a reword or a squash. It is
+# only content-preserving when <ref> is an ancestor of the branch's current tip. Reset onto a ref
+# that has MOVED since the branch was cut — `origin/main` is the usual one — and the commit you
+# make next keeps the old tree against a newer parent, which is a revert of everything merged in
+# between. It compiles, typechecks, formats and tests clean, so nothing downstream catches it;
+# twice in one session it reached a gates-green branch, once deleting a Prisma migration.
+#
+# The evidence exists only in the window between the reset and the commit, which is where this
+# runs. stack-squash does the safe thing already (a frozen base via stack-base); this catches the
+# hand-rolled path.
+#
+#   STACK_ALLOW_REPARENT=1 git commit …     deliberate reparent, skip the check
+set -euo pipefail
+
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+[[ -n "${STACK_ALLOW_REPARENT:-}" ]] && exit 0
+
+gitdir="$(git rev-parse --absolute-git-dir)"
+# a replay writes commits whose parent legitimately differs from the previous tip
+for inflight in rebase-merge rebase-apply MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD BISECT_LOG; do
+  [[ -e "$gitdir/$inflight" ]] && exit 0
+done
+
+op="$(git reflog show HEAD -1 --format=%gs 2>/dev/null || true)"
+[[ "$op" == reset:* ]] || exit 0          # only the post-reset window can bake a revert
+
+target="$(git rev-parse HEAD 2>/dev/null || true)"          # the parent this commit will get
+before="$(git rev-parse HEAD@{1} 2>/dev/null || true)"      # the tip the reset moved off
+[[ -n "$target" && -n "$before" ]] || exit 0
+
+git merge-base --is-ancestor "$target" "$before" 2>/dev/null && exit 0
+
+cat >&2 <<MSG
+✗ refusing: this commit would bake a revert of merged work.
+
+  reset moved the branch onto   $(git rev-parse --short "$target")  $(git log -1 --format=%s "$target" 2>/dev/null | cut -c1-54)
+  but the tip before it was     $(git rev-parse --short "$before")  $(git log -1 --format=%s "$before" 2>/dev/null | cut -c1-54)
+
+  That target is NOT an ancestor of the branch, so keeping the old tree against it
+  reverts everything merged in between — $(git rev-list --count "$before".."$target" 2>/dev/null || echo '?') commit(s).
+  It would compile, typecheck and gate green anyway.
+
+  To reword or squash, reset onto the branch's OWN base, not a live ref:
+      stack-squash --unpushed <branch>
+      git reset --soft \$(git merge-base <parent> <branch>)
+
+  If the reparent is deliberate:  STACK_ALLOW_REPARENT=1 git commit …
+MSG
+exit 1
