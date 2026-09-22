@@ -170,7 +170,7 @@ PLIST_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
   <array><string>{python}</string><string>{script}</string><string>--watch</string></array>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>NTFY_TOPIC</key><string>{topic}</string>
   </dict>
   <key>RunAtLoad</key><true/>

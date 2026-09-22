@@ -6,7 +6,7 @@
   <key>ProgramArguments</key>
   <array><string>/bin/zsh</string><string>/Users/philbrockman/.dotfiles/scripts/stack-review-serve</string><string>--supervise</string></array>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/Users/philbrockman/.local/bin</string></dict>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/philbrockman/.local/bin</string></dict>
   <key>WorkingDirectory</key><string>/Users/philbrockman/coding/loops</string>
   <key>KeepAlive</key><true/>
   <key>RunAtLoad</key><true/>
