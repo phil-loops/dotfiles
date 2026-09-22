@@ -6,7 +6,7 @@
   <key>ProgramArguments</key>
   <array><string>/bin/bash</string><string>/Users/philbrockman/.dotfiles/scripts/build-notify</string></array>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
   <key>StartInterval</key><integer>120</integer>
   <key>RunAtLoad</key><true/>
   <key>Nice</key><integer>10</integer>

@@ -396,7 +396,7 @@ case "$mode" in
   <array><string>/bin/bash</string><string>$self</string><string>--interval</string><string>$interval</string>$applyarg$contractarg</array>
   <key>WorkingDirectory</key><string>$repo</string>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>Nice</key><integer>10</integer>

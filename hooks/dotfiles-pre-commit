@@ -11,6 +11,15 @@
 
 root=$(git rev-parse --show-toplevel)
 staged=$(git diff --cached --name-only; git diff --name-only)
+# A launchd agent gets exactly the PATH its plist declares, and every script it spawns inherits
+# that and nothing else. md5 lives in /sbin and lsof in /usr/sbin, so a plist missing either
+# breaks tools that look fine in a terminal: a preview died at exit 127 on md5 while every lsof
+# probe answered "nothing is listening" (2026-09-22). Caught here, not a week later.
+if ! python3 "$root/scripts/check-launchd-path" $(printf '%s\n' "$staged" | sort -u); then
+  printf '\nthe commit is blocked. Add the missing directory to the PATH line.\n'
+  exit 1
+fi
+
 echo "$staged" | grep -qE '^scripts/(srv/|stack-|worktree-hygiene|test-forest-fixture)' || exit 0
 
 printf 'canopy fixture harness … '
