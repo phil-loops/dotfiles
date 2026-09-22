@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { watch } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
@@ -215,6 +216,8 @@ const balancedExpr = (s, start) => {
   return text;
 };
 
+export const catalogFor = (repo) => catalog(repo);
+
 const catalog = async (repo) => {
   const root = await readTs(resolve(repo, "trpc/root"));
   if (!root) return [];
@@ -225,9 +228,40 @@ const catalog = async (repo) => {
 };
 
 export async function serveTrpc({ repo = process.cwd(), port = 7071, open = true } = {}) {
-  const procedures = await catalog(repo);
   const tool = `http://localhost:${port}`;
-  const html = page({ procedures, tool });
+  const self = new URL(import.meta.url).pathname;
+  let procedures = await catalog(repo);
+  let html = page({ procedures, tool });
+  let version = Date.now();
+
+  // The catalog is the repo's routers and the page is this file: both change while you work,
+  // so both are rebuilt on change and open tabs are told to reload.
+  const rebuild = async (what) => {
+    try {
+      const rebuilt = await import(`${self}?v=${Date.now()}`);
+      procedures = await rebuilt.catalogFor(repo);
+      html = rebuilt.pageFor({ procedures, tool });
+      version = Date.now();
+      console.log(`reloaded (${what}) — ${procedures.length} procedures`);
+      for (const send of [...reloadClients]) send();
+    } catch (err) {
+      console.error(`reload failed (${what}):`, err.message);
+    }
+  };
+  const reloadClients = new Set();
+  const debounce = (fn) => {
+    let t;
+    return (...a) => {
+      clearTimeout(t);
+      t = setTimeout(() => fn(...a), 150);
+    };
+  };
+  const onSelf = debounce(() => rebuild("bench"));
+  const onRepo = debounce(() => rebuild("routers"));
+  watch(self, onSelf);
+  try {
+    watch(resolve(repo, "trpc"), { recursive: true }, onRepo);
+  } catch {}
 
   // The bridge tab and the bench page never meet: each call is parked here until the tab
   // long-polls for it, and the tab's answer is parked until the page that asked collects it.
@@ -350,6 +384,14 @@ export async function serveTrpc({ repo = process.cwd(), port = 7071, open = true
       return;
     }
     if (url.pathname === "/procedures.json") return json(res, 200, procedures);
+    if (url.pathname === "/api/reload") {
+      res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
+      res.write(`data: ${version}\n\n`);
+      const send = () => res.write(`data: ${Date.now()}\n\n`);
+      reloadClients.add(send);
+      res.on("close", () => reloadClients.delete(send));
+      return;
+    }
 
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(html);
@@ -400,6 +442,8 @@ const bridgeSnippet = (tool) => `(() => {
     console.log("loops tRPC bridge stopped");
   })();
 })();`;
+
+export const pageFor = (opts) => page(opts);
 
 const page = ({ procedures, tool }) => `<!doctype html>
 <html>
@@ -512,6 +556,10 @@ async function poll() {
 }
 poll();
 setInterval(poll, 1500);
+new EventSource("/api/reload").onmessage = (e) => {
+  if (window.__benchVersion && window.__benchVersion !== e.data) location.reload();
+  window.__benchVersion = e.data;
+};
 document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 
 function show(d) {
