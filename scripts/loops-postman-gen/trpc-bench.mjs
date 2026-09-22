@@ -592,10 +592,14 @@ async function poll() {
     $("conn").textContent = s.connected ? "bridge: " + s.origin + (prod ? " \u2014 PRODUCTION" : "") : "bridge: not connected";
     $("conn").className = "pill " + (s.connected ? (prod ? "prod" : "ok") : "");
     $("send").disabled = !s.connected;
+    $("send").textContent = s.connected ? "Send" : "Not connected";
+    $("why").textContent = s.connected ? "" : "\u2191 paste the snippet into the app tab's console (re-paste after the bench restarts)";
   } catch {
     $("conn").textContent = "bench server not running";
     $("conn").className = "pill";
     $("send").disabled = true;
+    $("send").textContent = "Not connected";
+    $("why").textContent = "\u2191 the bench server isn't running — start it with loops-postman trpc";
   }
 }
 poll();
@@ -649,6 +653,7 @@ $("send").onclick = async () => {
     $("out").textContent = String(err);
   } finally {
     $("send").disabled = !bridgeOrigin;
+    poll();
   }
 };
 
