@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
-# stack-install-precommit-hook — wire stack-precommit-fmt as a repo's pre-commit hook,
-# so staged .ts/.tsx is oxfmt-clean before it ever lands on a branch. Idempotent.
+# stack-install-precommit-hook — wire the repo's pre-commit hook: staged .ts/.tsx is oxfmt-clean
+# before it lands, and a commit that would bake a revert of merged work is refused. Idempotent.
 #
-#   stack-install-precommit-hook            # install into the current repo
+#   stack-install-precommit-hook             # install into the current repo
 #   stack-install-precommit-hook /path/repo
+#   stack-install-precommit-hook --guard-only  # the revert guard alone, no formatting on commit
 #
 # Note: git hooks live in the common git dir, so one install covers every linked
 # worktree of the repo.
 set -euo pipefail
 
-fmt="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/stack-precommit-fmt"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fmt="$here/stack-precommit-fmt"
+guard="$here/stack-reparent-guard"
+guard_only=0
+[[ "${1:-}" == "--guard-only" ]] && { guard_only=1; shift; }
 repo="${1:-$PWD}"
 hooks_dir="$(git -C "$repo" rev-parse --absolute-git-dir)/hooks"
 hook="$hooks_dir/pre-commit"
@@ -22,10 +27,15 @@ if [[ -e "$hook" ]] && ! grep -q "stack-precommit-fmt" "$hook" 2>/dev/null; then
   exit 1
 fi
 
-cat > "$hook" <<EOF
-#!/usr/bin/env bash
-# installed by stack-install-precommit-hook — oxfmt staged .ts/.tsx before commit
-"$fmt"
-EOF
+{
+  echo '#!/usr/bin/env bash'
+  echo '# installed by stack-install-precommit-hook'
+  echo '# refuse a commit that would bake a revert of merged work (soft-reset onto a moved ref)'
+  echo "\"$guard\""
+  if (( ! guard_only )); then
+    echo '# oxfmt staged .ts/.tsx before commit'
+    echo "\"$fmt\""
+  fi
+} > "$hook"
 chmod +x "$hook"
-echo "✓ pre-commit oxfmt installed → $hook"
+echo "✓ pre-commit $( (( guard_only )) && echo "reparent guard" || echo "oxfmt + reparent guard") installed → $hook"
