@@ -4,6 +4,7 @@ import { useViewerLocation, forestKey, forestRepo, withNode } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, interestPips, flattenForest } from "./shared";
 import { cameFrom } from "./cameFrom";
+import { cachedModel, rememberModel } from "./modelCache";
 import { overviewView, setOverviewView } from "./overviewView";
 import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
@@ -310,7 +311,9 @@ export function ForestOverview() {
     queryKey: ["model", forestRepo(location()) ?? "loops", project()],
     queryFn: () => provider.model(project()),
     enabled: !!project(),
+    initialData: () => cachedModel(forestRepo(location()) ?? "loops", project()),
   }));
+  createEffect(() => rememberModel(forestRepo(location()) ?? "loops", project(), model.data));
   const spine = createMemo(() => flattenForest(model.data));
   const healthIds = createMemo(() => spine().map((n) => n.id).filter(Boolean));
   const health = createQuery(() => ({
