@@ -45,6 +45,19 @@ _MODEL_CFG = re.compile(
     r"|stack-project\.[^=]+\.(branch|archived|interest|ticket|focus)=)")
 
 
+def _builder_sig():
+    """The scripts that BUILD the payload, by mtime. Without them a tooling change — a new
+    filter in stack-forest — leaves every cached model serving the old shape until someone
+    bounces the server, and the map quietly disagrees with the script (2026-09-22)."""
+    stamps = []
+    for name in ("stack-forest", "stack-merge-rank"):
+        try:
+            stamps.append(str(os.path.getmtime(os.path.join(ctx.SCRIPTS, name))))
+        except OSError:
+            stamps.append("")
+    return ",".join(stamps)
+
+
 def _forest_sig(branches):
     snap = repostate.snapshot()
     main = snap.main()
@@ -52,7 +65,7 @@ def _forest_sig(branches):
     refs = "".join(f"{r} {snap.sha.get(r, '')}\n" for r in names)
     cfg = "\n".join(f"{k}={v}" for k, vs in sorted(snap.cfg.items()) for v in vs if _MODEL_CFG.match(f"{k}={v}"))
     ledgers = "".join(f"{k}{v}" for k, vs in snap.cfg.items() if k.startswith("#mtime:") for v in vs)
-    return hashlib.sha1((refs + cfg + ledgers).encode()).hexdigest()
+    return hashlib.sha1((refs + cfg + ledgers + _builder_sig()).encode()).hexdigest()
 
 
 def _known_forest_name(name):
