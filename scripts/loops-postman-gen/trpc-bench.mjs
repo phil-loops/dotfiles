@@ -447,7 +447,10 @@ export async function serveTrpc({ repo = process.cwd(), port = 7071, open = true
 
 const bridgeSnippet = (tool) => `(() => {
   const TOOL = ${JSON.stringify(tool)};
-  if (window.__loopsTrpcBridge) window.__loopsTrpcBridge.stop = true;
+  if (window.__loopsTrpcBridge) {
+    window.__loopsTrpcBridge.stop = true;
+    clearInterval(window.__loopsTrpcBridge.timer);
+  }
   const me = { stop: false };
   window.__loopsTrpcBridge = me;
   const post = (path, body) =>
@@ -487,7 +490,10 @@ const bridgeSnippet = (tool) => `(() => {
       e.source.postMessage({ type: "loops-trpc-result", ...(await call(e.data)) }, TOOL);
     });
     const hello = () => !me.stop && peer && !peer.closed && peer.postMessage({ type: "loops-trpc-hello", origin: location.origin }, TOOL);
+    const bye = () => peer && !peer.closed && peer.postMessage({ type: "loops-trpc-bye" }, TOOL);
     me.timer = setInterval(hello, 1500);
+    me.bye = bye;
+    addEventListener("pagehide", bye);
     hello();
     console.log("%cloops tRPC bridge connected (console) → " + TOOL, "color:#16a34a;font-weight:bold");
   };
@@ -623,6 +629,11 @@ window.addEventListener("message", (e) => {
     bridgeOrigin = e.origin;
     paint(true, e.origin, "console");
   }
+  if (d.type === "loops-trpc-bye" && e.source === pm) {
+    pm = null;
+    bridgeOrigin = null;
+    paint(false);
+  }
   if (d.type === "loops-trpc-result" && pendingPm.has(d.id)) {
     const settle = pendingPm.get(d.id);
     pendingPm.delete(d.id);
@@ -643,7 +654,9 @@ $("copy").onclick = async () => { await navigator.clipboard.writeText(SNIPPET); 
 $("openApp").onclick = () => window.open($("app").value, "_blank");
 
 async function poll() {
-  if (pm && !pm.closed && Date.now() - pmSeenAt < 6000) return;   // the console bridge is live
+  // The app tab's heartbeat gets throttled to a crawl while it sits in the background, so a
+  // late ping means nothing. The window handle closing is the honest signal.
+  if (pm && !pm.closed) return;
   if (pm) { pm = null; bridgeOrigin = null; }
   try {
     const s = await (await fetch("/api/status")).json();
