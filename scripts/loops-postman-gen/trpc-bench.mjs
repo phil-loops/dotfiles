@@ -5,8 +5,8 @@ import { dirname, resolve } from "node:path";
 
 // tRPC procedures are session-authed: the cookie is HttpOnly and lives in the app tab, so
 // requests can't be proxied from here. Instead a snippet pasted into the app tab's console
-// becomes a bridge — this page postMessages each call to it, the app tab runs the fetch with
-// its own session, and posts the response back.
+// long-polls this server for calls, runs each fetch with that tab's own session, and posts the
+// response back — so any bench tab sees the same bridge, whoever opened what.
 
 const APPS = {
   dev: "http://localhost:3000",
@@ -228,12 +228,129 @@ export async function serveTrpc({ repo = process.cwd(), port = 7071, open = true
   const procedures = await catalog(repo);
   const tool = `http://localhost:${port}`;
   const html = page({ procedures, tool });
-  createServer((req, res) => {
-    if (req.url === "/procedures.json") {
-      res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify(procedures));
+
+  // The bridge tab and the bench page never meet: each call is parked here until the tab
+  // long-polls for it, and the tab's answer is parked until the page that asked collects it.
+  let bridge = null;
+  const queue = [];
+  const waitingTabs = [];
+  const results = new Map();
+  const waitingPages = new Map();
+
+  const deliver = (call) => {
+    const tab = waitingTabs.shift();
+    if (tab) tab(call);
+    else queue.push(call);
+  };
+  const settle = (result) => {
+    const page = waitingPages.get(result.id);
+    if (page) {
+      waitingPages.delete(result.id);
+      page(result);
+    } else {
+      results.set(result.id, result);
+    }
+  };
+
+  const json = (res, code, body, origin) => {
+    res.writeHead(code, {
+      "content-type": "application/json",
+      "access-control-allow-origin": origin ?? "*",
+      "access-control-allow-headers": "content-type",
+      "access-control-allow-private-network": "true",
+      "cache-control": "no-store",
+    });
+    res.end(JSON.stringify(body));
+  };
+  const readBody = (req) =>
+    new Promise((resolve) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        try {
+          resolve(JSON.parse(raw || "{}"));
+        } catch {
+          resolve({});
+        }
+      });
+    });
+
+  let seq = 0;
+  createServer(async (req, res) => {
+    const url = new URL(req.url, tool);
+    const origin = req.headers.origin;
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "access-control-allow-origin": origin ?? "*",
+        "access-control-allow-headers": "content-type",
+        "access-control-allow-methods": "GET,POST,OPTIONS",
+        "access-control-allow-private-network": "true",
+        "access-control-max-age": "600",
+      });
+      return res.end();
+    }
+
+    // — the bridged app tab —
+    if (url.pathname === "/bridge/hello") {
+      const body = await readBody(req);
+      bridge = { origin: body.origin ?? origin ?? "unknown", at: Date.now() };
+      return json(res, 200, { ok: true }, origin);
+    }
+    if (url.pathname === "/bridge/next") {
+      if (bridge) bridge.at = Date.now();
+      const queued = queue.shift();
+      if (queued) return json(res, 200, queued, origin);
+      const timer = setTimeout(() => {
+        waitingTabs.splice(waitingTabs.indexOf(send), 1);
+        json(res, 200, null, origin);
+      }, 20000);
+      const send = (call) => {
+        clearTimeout(timer);
+        json(res, 200, call, origin);
+      };
+      waitingTabs.push(send);
+      // A poll socket dying before we answered means the tab went away (closed or reloaded),
+      // so the bridge is gone now — not in 30s when its heartbeat goes stale.
+      res.on("close", () => {
+        const at = waitingTabs.indexOf(send);
+        if (at < 0) return;
+        clearTimeout(timer);
+        waitingTabs.splice(at, 1);
+        bridge = null;
+      });
       return;
     }
+    if (url.pathname === "/bridge/result") {
+      settle(await readBody(req));
+      return json(res, 200, { ok: true }, origin);
+    }
+
+    // — the bench page —
+    if (url.pathname === "/api/status") {
+      const connected = bridge && Date.now() - bridge.at < 30000;
+      return json(res, 200, { connected: Boolean(connected), origin: bridge?.origin ?? null });
+    }
+    if (url.pathname === "/api/call") {
+      const call = { id: ++seq, ...(await readBody(req)) };
+      if (!bridge) return json(res, 409, { error: "No app tab is bridged. Paste the snippet first." });
+      deliver(call);
+      const done = results.get(call.id);
+      if (done) {
+        results.delete(call.id);
+        return json(res, 200, done);
+      }
+      const timer = setTimeout(() => {
+        waitingPages.delete(call.id);
+        json(res, 200, { id: call.id, status: 0, ms: 0, body: "No answer from the app tab — is the snippet still running?" });
+      }, 60000);
+      waitingPages.set(call.id, (result) => {
+        clearTimeout(timer);
+        json(res, 200, result);
+      });
+      return;
+    }
+    if (url.pathname === "/procedures.json") return json(res, 200, procedures);
+
     res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     res.end(html);
   }).listen(port, "127.0.0.1", () => {
@@ -244,37 +361,44 @@ export async function serveTrpc({ repo = process.cwd(), port = 7071, open = true
 
 const bridgeSnippet = (tool) => `(() => {
   const TOOL = ${JSON.stringify(tool)};
-  if (window.__loopsTrpcBridge) {
-    window.removeEventListener("message", window.__loopsTrpcBridge.handler);
-    clearInterval(window.__loopsTrpcBridge.timer);
-  }
-  const handler = async (e) => {
-    if (e.origin !== TOOL || e.data?.type !== "loops-trpc-call") return;
-    const { id, path, kind, input } = e.data;
+  if (window.__loopsTrpcBridge) window.__loopsTrpcBridge.stop = true;
+  const me = { stop: false };
+  window.__loopsTrpcBridge = me;
+  const post = (path, body) =>
+    fetch(TOOL + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const run = async ({ id, path, kind, input }) => {
     const payload = JSON.stringify({ json: input });
     const url = "/api/trpc/" + path + (kind === "query" ? "?input=" + encodeURIComponent(payload) : "");
     const started = performance.now();
-    const reply = (status, body) =>
-      e.source.postMessage({ type: "loops-trpc-result", id, status, body, ms: Math.round(performance.now() - started) }, TOOL);
+    let status = 0, body = null;
     try {
       const r = await fetch(url, kind === "query"
         ? { credentials: "include" }
         : { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: payload });
       const text = await r.text();
-      let body;
+      status = r.status;
       try { body = JSON.parse(text); } catch { body = text; }
-      reply(r.status, body);
     } catch (err) {
-      reply(0, String(err));
+      body = String(err);
     }
+    await post("/bridge/result", { id, status, body, ms: Math.round(performance.now() - started) });
   };
-  window.addEventListener("message", handler);
-  const peer = window.opener && !window.opener.closed ? window.opener : window.open(TOOL, "loops-trpc-bench");
-  const hello = () => peer && !peer.closed && peer.postMessage({ type: "loops-trpc-hello", origin: location.origin }, TOOL);
-  const timer = setInterval(hello, 1500);
-  hello();
-  window.__loopsTrpcBridge = { handler, timer };
-  console.log("%cloops tRPC bridge → " + TOOL, "color:#16a34a;font-weight:bold");
+  (async () => {
+    await post("/bridge/hello", { origin: location.origin });
+    console.log("%cloops tRPC bridge connected → " + TOOL, "color:#16a34a;font-weight:bold");
+    while (!me.stop) {
+      try {
+        const r = await fetch(TOOL + "/bridge/next");
+        const call = await r.json();
+        if (call) await run(call);
+        else await post("/bridge/hello", { origin: location.origin });
+      } catch (err) {
+        console.warn("loops tRPC bridge: bench unreachable, retrying", err);
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+    }
+    console.log("loops tRPC bridge stopped");
+  })();
 })();`;
 
 const page = ({ procedures, tool }) => `<!doctype html>
@@ -364,29 +488,31 @@ const page = ({ procedures, tool }) => `<!doctype html>
 <script>
 const PROCS = ${JSON.stringify(procedures).replace(/</g, "\\u003c")};
 const SNIPPET = ${JSON.stringify(bridgeSnippet(tool)).replace(/</g, "\\u003c")};
-window.name = "loops-trpc-bench";
+const PROD = ${JSON.stringify(APPS.prod)};
 const $ = (id) => document.getElementById(id);
 $("snip").textContent = SNIPPET;
-let bridge = null, bridgeOrigin = null, seq = 0;
-const pending = new Map();
+let bridgeOrigin = null;
 
-$("copy").onclick = async () => { await navigator.clipboard.writeText(SNIPPET); $("copy").textContent = "Copied ✓"; setTimeout(() => $("copy").textContent = "Copy console snippet", 1500); };
+$("copy").onclick = async () => { await navigator.clipboard.writeText(SNIPPET); $("copy").textContent = "Copied \u2713"; setTimeout(() => $("copy").textContent = "Copy console snippet", 1500); };
 $("openApp").onclick = () => window.open($("app").value, "_blank");
 
-window.addEventListener("message", (e) => {
-  const d = e.data || {};
-  if (d.type === "loops-trpc-hello" && d.origin === e.origin) {
-    bridge = e.source; bridgeOrigin = e.origin;
-    const prod = e.origin === ${JSON.stringify(APPS.prod)};
-    $("conn").textContent = "bridge: " + e.origin + (prod ? " — PRODUCTION" : "");
-    $("conn").className = "pill " + (prod ? "prod" : "ok");
-    $("send").disabled = false;
+async function poll() {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    bridgeOrigin = s.connected ? s.origin : null;
+    const prod = s.origin === PROD;
+    $("conn").textContent = s.connected ? "bridge: " + s.origin + (prod ? " \u2014 PRODUCTION" : "") : "bridge: not connected";
+    $("conn").className = "pill " + (s.connected ? (prod ? "prod" : "ok") : "");
+    $("send").disabled = !s.connected;
+  } catch {
+    $("conn").textContent = "bench server not running";
+    $("conn").className = "pill";
+    $("send").disabled = true;
   }
-  if (d.type === "loops-trpc-result" && e.origin === bridgeOrigin && pending.has(d.id)) {
-    const req = pending.get(d.id); pending.delete(d.id);
-    show(d); record(req, d);
-  }
-});
+}
+poll();
+setInterval(poll, 1500);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) poll(); });
 
 function show(d) {
   const cls = "s" + String(d.status)[0];
@@ -397,16 +523,26 @@ function show(d) {
   $("out").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
 }
 
-$("send").onclick = () => {
+$("send").onclick = async () => {
   let input;
   try { input = JSON.parse($("input").value || "null"); } catch (err) { $("out").textContent = "Invalid JSON: " + err.message; return; }
   const path = $("path").value.trim(), kind = $("kind").value;
   if (!path) return;
-  if (bridgeOrigin === ${JSON.stringify(APPS.prod)} && kind === "mutation" && !confirm("Run a MUTATION against PRODUCTION?")) return;
-  const id = ++seq;
-  pending.set(id, { path, kind, input, origin: bridgeOrigin, at: new Date().toLocaleTimeString() });
-  $("meta").textContent = "sending…";
-  bridge.postMessage({ type: "loops-trpc-call", id, path, kind, input }, bridgeOrigin);
+  if (bridgeOrigin === PROD && kind === "mutation" && !confirm("Run a MUTATION against PRODUCTION?")) return;
+  const req = { path, kind, input, origin: bridgeOrigin, at: new Date().toLocaleTimeString() };
+  $("meta").textContent = "sending\u2026";
+  $("send").disabled = true;
+  try {
+    const d = await (await fetch("/api/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, kind, input }) })).json();
+    if (d.error) { $("meta").textContent = ""; $("out").textContent = d.error; return; }
+    show(d);
+    record(req, d);
+  } catch (err) {
+    $("meta").textContent = "";
+    $("out").textContent = String(err);
+  } finally {
+    $("send").disabled = !bridgeOrigin;
+  }
 };
 
 function select(p, keepInput) {
