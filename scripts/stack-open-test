@@ -72,6 +72,11 @@ sleep 0.3
 touch -t "$(date -v-60H +%Y%m%d%H%M)" "$s/idle"        # 2.5d: clear of BOTH rung edges
                                                        # (find counts whole days, so 2d exactly is a coin flip)
 touch -t 202001010000 "$s/ancient" "$s/busy" "$s/alien"  # idle for years: both rungs
+# macOS tmp_cleaner rubble: the gitfile and every stale file deleted, the dir re-stamped fresh
+mkdir -p "$s/gutted/apps/web" "$s/parked.zombie-20260101000000"
+touch -t "$(date -v-1H +%Y%m%d%H%M)" "$s/gutted"
+print edit > "$s/parked.zombie-20260101000000/recent.ts"
+touch -t "$(date -v-1H +%Y%m%d%H%M)" "$s/parked.zombie-20260101000000"
 
 STACK_OPEN_DIR="$s" "$SO" --gc 1 --dry-run >/dev/null 2>&1
 yes "--dry-run reclaims nothing" "$([[ -d $s/idle/.next ]] && print y)"
@@ -94,6 +99,9 @@ fi
 # stripped by rung 1 must keep its old timestamp, or our own sweep would hide it from removal.
 [[ -d "$s/ancient" ]] && no "a years-idle worktree survived removal" || ok "a years-idle worktree is removed"
 [[ -d "$s/busy" ]] && ok "removal spares a dir with a live process" || no "removed a dir under a live process"
+[[ -d "$s/gutted" ]] && no "gutted rubble with a fresh mtime survived" || ok "gutted rubble is removed despite a fresh mtime"
+[[ -f "$s/parked.zombie-20260101000000/recent.ts" ]] && ok "a gitless dir with recent edits is kept" \
+                                                    || no "removed a gitless dir holding recent edits"
 
 # lsof lives in /usr/sbin; off the PATH the script exports, the cwd probe returns nothing.
 # That has to read as "the probe broke", never as "nothing is running".
