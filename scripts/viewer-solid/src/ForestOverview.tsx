@@ -5,6 +5,7 @@ import { provider, canMutate, withRepo } from "./provider";
 import { leaf, interestPips, flattenForest } from "./shared";
 import { cameFrom } from "./cameFrom";
 import { cachedModel, rememberModel } from "./modelCache";
+import { ContinuesStrip } from "./ContinuesStrip";
 import { overviewView, setOverviewView } from "./overviewView";
 import { ForestMap } from "./ForestMap";
 import MergeStory from "./MergeStory";
@@ -421,7 +422,8 @@ export function ForestOverview() {
       >
         <Show
           when={ovView() !== "map"}
-          fallback={
+          fallback={<>
+            <ContinuesStrip model={() => model.data} onOpen={(p) => navigate({ kind: "forest", name: p, repo: forestRepo(location()) })} />
             <ForestMap
               page
               spine={spine}
@@ -445,7 +447,7 @@ export function ForestOverview() {
                 return { status: r.status, ...body };
               } : undefined}
             />
-          }
+          </>}
         >
           <Show when={ovView() === "stories"} fallback={<MergeStory model={model.data} project={project()} onPick={open} />}>
             <div class="fo-stories h-[calc(100dvh-62px)] min-h-0">

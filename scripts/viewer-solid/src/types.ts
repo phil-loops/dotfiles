@@ -59,6 +59,12 @@ export const ForestModel = z.object({
   ticket: z.string().optional(),
   // 1-based focus-lane rank (stack-project.<name>.focus), grafted on by /model; absent = not pinned.
   focus: z.number().optional(),
+  // follow-up work re-projected OUT of this forest, keyed by where it hangs off (srv _continuations)
+  continues: z.array(z.object({
+    project: z.string(),
+    from: z.string(),
+    branches: z.array(z.string()),
+  })).optional(),
 });
 export type ForestModel = z.infer<typeof ForestModel>;
 
