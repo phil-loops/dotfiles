@@ -7,7 +7,6 @@ import glob
 import os
 import json
 import re
-import subprocess
 import time
 
 from . import ctx
@@ -97,8 +96,7 @@ def head(req):
 
 def prepare(req, raw):
     d = json.loads(raw or "{}")
-    subprocess.Popen([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", d.get("branch", "")],
-                     cwd=ctx.CWD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ctx.fire([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", d.get("branch", "")], cwd=ctx.CWD)
     req._send(200, '{"ok":true}')
 
 
@@ -115,7 +113,7 @@ def worktree(req, raw):
     if r.returncode != 0 or not path:
         req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a worktree").strip()}))
         return
-    subprocess.Popen(["open", path])  # reveal in Finder (macOS); fire-and-forget
+    ctx.fire(["open", path])  # reveal in Finder (macOS)
     req._send(200, json.dumps({"ok": True, "path": path}))
 
 

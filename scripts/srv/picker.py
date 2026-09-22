@@ -913,8 +913,8 @@ def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in t
 
 
 def prepare_branch(branch):   # background worktree prefetch (stack-open --prepare) — fire-and-forget
-    subprocess.Popen([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
-                     cwd=ctx.repo_cwd(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    ctx.fire([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
+             cwd=ctx.repo_cwd(), start_new_session=True)
 
 
 def open_file(req, raw):   # POST /open — open a file on a branch in the warm review-nvim

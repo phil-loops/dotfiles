@@ -340,7 +340,7 @@ def _open_web(url):
     if not url:
         return False
     try:
-        subprocess.Popen(["open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ctx.fire(["open", url])
         return True
     except Exception:
         return False
