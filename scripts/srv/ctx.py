@@ -26,6 +26,16 @@ REPOS = {}      # multi-repo registry: name -> main worktree path (drives /proje
 _local = threading.local()
 
 
+# Bumped when a background rebuild replaces a cache entry the page is already showing. The
+# pulse fingerprint includes it, so the tabs holding the stale payload refetch — without it a
+# stale-while-revalidate answer would sit on screen until the next unrelated git change.
+pulse_nonce = [0]
+
+
+def bump_pulse():
+    pulse_nonce[0] += 1
+
+
 def fire(argv, **kw):
     """Fire-and-forget a child — reaped by a waiter thread, so it can't linger as <defunct>."""
     import subprocess
