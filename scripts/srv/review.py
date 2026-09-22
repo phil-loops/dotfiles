@@ -212,7 +212,38 @@ def _enrich(raw, branch):
             data["focus"] = int(fv)
     if order:
         data["mergeOrder"] = order
+    data["continues"] = _continuations(data.get("nodes") or {}, proj)
     return json.dumps(data)
+
+
+def _continuations(nodes, project):
+    """Where this forest's work carries on in ANOTHER project: a branch whose parent is a node
+    this project OWNS, but which was re-projected out (the follow-up strand a reviewer deferred).
+    stack-forest stops its descent at that boundary, so without this the map just ends and the
+    follow-up is invisible — the reviewer cannot tell the story continues, or where.
+
+    Ancestors pulled in for context don't count as attachment points: the strand's own view shows
+    the spine it builds on, and a sibling further up that spine is the MAIN line, not a follow-up.
+    """
+    if not project or not nodes:
+        return []
+    snap = repostate.snapshot()
+    tags = snap.branch_keys("project")
+    registry = set(ctx.run(["git", "config", "--get-all",
+                            f"stack-project.{project}.branch"]).stdout.split())
+    owned = {b for b in nodes if tags.get(b) == project or b in registry}
+    out = {}
+    for branch, parent in snap.branch_keys("parent").items():
+        if parent not in owned or branch in nodes:
+            continue
+        other = tags.get(branch)
+        if not other or other == project:
+            continue
+        entry = out.setdefault((other, parent), {"project": other, "from": parent, "branches": []})
+        entry["branches"].append(branch)
+    for entry in out.values():
+        entry["branches"].sort()
+    return sorted(out.values(), key=lambda e: (e["project"], e["from"]))
 
 
 def _is_convergence(branch, stdout):
