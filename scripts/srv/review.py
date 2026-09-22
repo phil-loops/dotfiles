@@ -302,31 +302,53 @@ def commits(req, u):
 _CDIFF_HDR = re.compile(r"^diff --git a/(.+?) b/(.+)$")
 
 
+# Whitespace is hidden by default, the way GitHub's ?w=1 is the only way most of us read a
+# diff: re-indentation is the single biggest inflator here (wrapping a body in a useCallback
+# read as 60+/53- where the real change was 15+/8-). `?ws=1` brings it back. A patch that is
+# ENTIRELY whitespace would otherwise render as an empty card, so those fall back to the raw
+# chunk rather than showing a file with no hunks.
+def _hide_ws(u):
+    return parse_qs(u.query).get("ws", ["0"])[0] not in ("1", "true")
+
+
+def _chunks(patch):   # path -> its `diff --git` chunk
+    out = {}
+    for ch in re.split(r"(?m)^(?=diff --git )", patch):
+        if not ch.startswith("diff --git "):
+            continue
+        m = _CDIFF_HDR.match(ch.splitlines()[0])
+        if m:
+            out[m.group(2)] = ch
+    return out
+
+
 def commit_diff(req, u):
     # one commit's changed files + patches (git show <sha>), in the same FileDiff shape the
     # node view renders — so the history list can expand a commit inline. Read-only: these are
     # historical commits, nothing to bless. Diffed against the commit's first parent.
     sha = parse_qs(u.query).get("sha", [""])[0]
-    key = (ctx.repo_cwd(), sha)
+    hide_ws = _hide_ws(u)
+    key = (ctx.repo_cwd(), sha, hide_ws)
     hit = _CDIFF_CACHE.get(key) if len(sha) >= 7 else None
     if hit is not None:
         return req._send(200, hit)
+    ws = ["-w"] if hide_ws else []
     counts = {}
-    for ln in ctx.run(["git", "show", "--numstat", "--format=", sha]).stdout.splitlines():
+    for ln in ctx.run(["git", "show", "--numstat", "--format=", *ws, sha]).stdout.splitlines():
         p = ln.split("\t")
         if len(p) == 3:
             counts[p[2]] = (0 if p[0] == "-" else int(p[0]), 0 if p[1] == "-" else int(p[1]))
-    full = ctx.run(["git", "show", "-p", "--format=", sha]).stdout
+    full = ctx.run(["git", "show", "-p", "--format=", *ws, sha]).stdout
+    # a whitespace-only file drops out of the -w patch entirely; recover it from the raw one so
+    # the card says something instead of rendering blank
+    raw = _chunks(ctx.run(["git", "show", "-p", "--format=", sha]).stdout) if hide_ws else {}
+    shown = _chunks(full)
     files = []
-    for ch in re.split(r"(?m)^(?=diff --git )", full):
-        if not ch.startswith("diff --git "):
-            continue
-        m = _CDIFF_HDR.match(ch.splitlines()[0])
-        if not m:
-            continue
-        path = m.group(2)
+    for path, ch in (raw | shown).items() if hide_ws else shown.items():
+        ch = shown.get(path, raw.get(path, ch))
         add, dele = counts.get(path, (0, 0))
         files.append({"path": path, "status": "clean", "add": add, "del": dele,
+                      "wsOnly": hide_ws and path not in shown,
                       "patch": ch.rstrip("\n") + "\n"})
     out_json = json.dumps({"sha": sha, "files": files})
     if files and len(sha) >= 7:
@@ -491,7 +513,7 @@ def step_evidence(req, u):
     if parent == main:
         base = f"origin/{main}" if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"origin/{main}"]).stdout.strip() else main
     subjects = [s for s in ctx.run(["git", "log", "--format=%s", "--no-merges", f"{base}..{branch}"]).stdout.splitlines() if s]
-    stat = ctx.run(["git", "diff", "--numstat", f"{base}...{branch}"]).stdout.splitlines()
+    stat = ctx.run(["git", "diff", "--numstat", "-w", f"{base}...{branch}"]).stdout.splitlines()
     files, adds, dels = [], 0, 0
     for line in stat:
         cols = line.split("\t")
