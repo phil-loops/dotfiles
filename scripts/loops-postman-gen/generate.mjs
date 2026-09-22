@@ -35,6 +35,7 @@ const HELP = `loops-postman — generate a Postman collection from an OpenAPI sp
 Usage:
   loops-postman [--spec <path-or-url>] [--out <dir>] [--name <name>] [--html|--open]
   loops-postman serve [--base <url>] [--token <key>] [--spec <path-or-url>] [--port <n>]
+  loops-postman trpc [--repo <loops checkout>] [--port <n>]
 
 Generate options:
   -s, --spec   OpenAPI spec URL or local path   (default: ${DEFAULT_SPEC})
@@ -48,6 +49,11 @@ serve — responsive console that calls the API live and chains captured ids:
   -t, --token  Bearer token    (default: the seeded dev key)
   -p, --port   Console port    (default: 7070)
       --no-open  Don't open the browser
+
+trpc — bench for the app's session-authed tRPC procedures (dev/staging/prod):
+  -r, --repo   loops checkout to read trpc/root.ts from (default: cwd)
+  -p, --port   Bench port      (default: 7071)
+  Paste the bench's console snippet into a logged-in app tab; calls run with that session.
 
 Generate writes <out>/loops.postman_collection.json + loops.postman_environment.json.
 Import both into Postman, then set the environment's apiKey.`;
@@ -218,9 +224,28 @@ const runServe = async (argv) => {
   await serve(opts);
 };
 
+const runTrpc = async (argv) => {
+  const { serveTrpc } = await import("./trpc-bench.mjs");
+  const opts = { open: true };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === "--repo" || arg === "-r") {
+      opts.repo = argv[++i];
+    } else if (arg === "--port" || arg === "-p") {
+      opts.port = Number(argv[++i]);
+    } else if (arg === "--no-open") {
+      opts.open = false;
+    }
+  }
+  await serveTrpc(opts);
+};
+
 const main = async () => {
   if (process.argv[2] === "serve") {
     return runServe(process.argv.slice(3));
+  }
+  if (process.argv[2] === "trpc") {
+    return runTrpc(process.argv.slice(3));
   }
 
   const args = parseArgs(process.argv.slice(2));
