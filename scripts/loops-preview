@@ -38,6 +38,11 @@ cyan() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 dim()  { printf '\033[2m%s\033[0m\n' "$*"; }
 err()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; }
 
+# md5 lives in /sbin and lsof in /usr/sbin; launchd hands the viewer server a PATH with
+# neither, so a preview it started died at `want="$(lock_stamp "$DIR")"` with exit 127 while
+# every lsof probe quietly answered "nothing is listening" (2026-09-22).
+export PATH="$PATH:/sbin:/usr/sbin"
+
 MAIN="${LOOPS_MAIN:-$HOME/coding/loops}"
 PORT=""
 ACTION="start"
