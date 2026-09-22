@@ -11,9 +11,7 @@ import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
 import { useScrollSpy } from "./useScrollSpy";
-import { useNodeChat } from "./useNodeChat";
 import { useOpenInNvim } from "./useOpenInNvim";
-import ChatIndex from "./ChatIndex";
 import { chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
 import type { FileDiff } from "./types";
@@ -199,13 +197,6 @@ export function NodeDetail() {
     enabled: divergedOpen() && !!nodeHealth(active())?.diverged,
   }));
 
-  const { showChats, setShowChats, openChatInContext } = useNodeChat({
-    active,
-    location,
-    nodeData: () => node.data,
-    navigate,
-  });
-
   // the sidebar is a GitHub-PR-style file list for the active node; clicking a row
   // scrolls its diff card into view and lights the row. activeFile tracks the lit row.
   const [activeFile, setActiveFile] = createSignal("");
@@ -350,7 +341,6 @@ export function NodeDetail() {
           nodeAmbient={nodeAmbient}
           nodeData={() => node.data}
           blessedOf={blessedOf}
-          setShowChats={setShowChats}
         />
         <TestNotes branch={active} />
         <Show when={view() === "diffs"} fallback={
@@ -358,7 +348,6 @@ export function NodeDetail() {
               q={commits}
               branch={active()}
               frozen={!!health.data?.[active()]?.frozenOrigin}
-              onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })}
               onReworded={() => {
                 // the shas moved (tree didn't): refresh the list, the push manifest, the model
                 commits.refetch();
@@ -386,7 +375,7 @@ export function NodeDetail() {
                   {/* off-parent bases are view-only — bless keys on the parent...child patch-id, not the shown diff */}
                   <For each={data().files.filter(matchFilter)}>
                     {/* the ghost has no real branch — send the project so the seed resolves the integrator ref */}
-                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={base() !== ""} onChat={(file, session) => chatToTmux(isGhost() ? { project: project(), path: file.path, patch: file.patch, session } : { branch: active(), path: file.path, patch: file.patch, session })} />}
+                    {(f) => <FileEntry file={f} blessed={() => blessedOf(f)} bless={bless} branch={active()} readOnly={base() !== ""} />}
                   </For>
                 </Show>
               </Show>
@@ -410,7 +399,6 @@ export function NodeDetail() {
                   dirtReceiptT = setTimeout(() => setDirtReceipt(null), 8000);
                 }
               }}
-              onChat={(file, session) => chatToTmux({ branch: active(), path: file.path, patch: file.patch, session })}
             />
           </Show>
           <Show when={dirtReceipt()}>
@@ -418,9 +406,6 @@ export function NodeDetail() {
           </Show>
         </Show>
       </main>
-      <Show when={showChats()}>
-        <ChatIndex onClose={() => setShowChats(false)} onOpen={openChatInContext} />
-      </Show>
       <Show when={showHelp()}>
         <div class="kbd-help-scrim fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(8,7,6,0.55)]" onClick={() => setShowHelp(false)}>
           <div class="kbd-help min-w-[320px] max-w-[92vw] rounded-[12px] border border-solid border-rule bg-[#1b1815] px-5 py-[18px] font-mono text-ink shadow-[0_24px_64px_rgba(0,0,0,0.5)]" onClick={(e) => e.stopPropagation()}>

@@ -3,8 +3,6 @@ import { createQuery } from "@tanstack/solid-query";
 import { Link, forestRepo, type ViewerLocation } from "./router";
 import { leaf, interestPips } from "./shared";
 import { canMutate, withRepo } from "./provider";
-import { chatToTmux } from "./chatDrawer";
-import { SessionPicker } from "./SessionPicker";
 import { DivergedDetailPanel, type DivergedDetail } from "./DivergedDetailPanel";
 import { NodeActions } from "./NodeActions";
 import type { NodeData, FileDiff } from "./types";
@@ -83,9 +81,7 @@ export function NodeHeader(props: {
   nodeAmbient: (b: string) => { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | undefined;
   nodeData: () => NodeData | undefined;
   blessedOf: (f: FileDiff) => boolean;
-  setShowChats: (v: boolean) => void;
 }) {
-  const [chatPick, setChatPick] = createSignal(false);
   // optimistic freeze-toggle state; server truth re-arrives with the health poll
   const [frozenLocal, setFrozenLocal] = createSignal<boolean | undefined>(undefined);
   createEffect(on(() => props.active(), () => setFrozenLocal(undefined), { defer: true }));
@@ -205,21 +201,7 @@ export function NodeHeader(props: {
                 onInspect={() => props.setDivergedOpen(!props.divergedOpen())}
                 interest={canMutate ? props.interestOf() : undefined}
                 onBump={canMutate ? (delta) => props.bumpInterest.mutate({ project: props.project(), delta }) : undefined}
-                onAllChats={() => props.setShowChats(true)}
               />
-            </Show>
-            <Show when={canMutate}>
-              <span class="sp-anchor relative inline-flex">
-                <button class="icon-btn cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[9px] py-1 text-[15px] leading-none text-ink-faint hover:border-rule hover:bg-vellum-edge hover:text-ink" onClick={() => setChatPick((v) => !v)} title="chat about this whole branch — pick a live claude session or a new pane beside you">
-                  ✦
-                </button>
-                <Show when={chatPick()}>
-                  <SessionPicker
-                    onClose={() => setChatPick(false)}
-                    onPick={(session) => { setChatPick(false); chatToTmux({ branch: props.active(), session }); }}
-                  />
-                </Show>
-              </span>
             </Show>
           </div>
         </header>

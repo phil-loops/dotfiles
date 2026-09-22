@@ -102,7 +102,6 @@ export function NodeActions(props: {
   ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
   interest?: number; // the forest's Home-ordering interest — drives the ⋯ promote/demote items
   onBump?: (delta: number) => void;
-  onAllChats?: () => void;
 }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
@@ -864,11 +863,6 @@ export function NodeActions(props: {
                 <span class={`nh-item-ic ${IC}`}>▼</span> demote
               </button>
             </Show>
-          </Show>
-          <Show when={props.onAllChats}>
-            <button class={`nh-item ${ITEM}`} role="menuitem" onClick={() => { setOpen(false); props.onAllChats!(); }}>
-              <span class={`nh-item-ic ${IC}`}>💬</span> all chat threads
-            </button>
           </Show>
 
         </div>
