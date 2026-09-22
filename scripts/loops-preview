@@ -223,7 +223,7 @@ fi
 # (2026-09-03: a viewer preview sat in "materialising worktree" for 2.5 min on the clone alone).
 # Entries are stamped with MAIN's package-lock hash; a stale stamp is discarded at the next warm.
 POOL="$HOME/.cache/loops-preview/nm-pool"
-POOL_SIZE="${LOOPS_PREVIEW_POOL_SIZE:-1}"
+POOL_SIZE="${LOOPS_PREVIEW_POOL_SIZE:-2}"
 POOL_TOOK=""
 # A node_modules is identified by the package-lock it was installed from — so the pool is
 # CONTENT-ADDRESSED: an entry is only a match for a checkout whose lock hashes the same.
@@ -301,13 +301,18 @@ if [ "$ACTION" = "warm" ]; then
   if [ -n "$om" ] && [ "$om" != "$stamp" ]; then
     err "pool donor $MAIN is on lock ${stamp:0:8} but origin/main wants ${om:0:8} — every entry warmed from it will need an npm reconcile. Move $MAIN to origin/main and npm install there."
   fi
-  e="$POOL/$(date +%s)-$$"
-  mkdir -p "$e"
-  if ! cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
-  nm_complete "$e/node_modules" || { rm -rf "$e"; err "clone caught MAIN mid-install — discarded"; exit 1; }
-  strip_quarantine "$e/node_modules"
-  echo "$stamp" > "$e/stamp"
-  dim "pool: warmed $e"
+  # Fill to POOL_SIZE, not one per run: two previews started a minute apart used to find the
+  # second take empty while the refill was still cloning, and paid a full clone (2026-09-22).
+  while [ "$n" -lt "$POOL_SIZE" ]; do
+    e="$POOL/$(date +%s)-$$-$n"
+    mkdir -p "$e"
+    if ! cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
+    nm_complete "$e/node_modules" || { rm -rf "$e"; err "clone caught MAIN mid-install — discarded"; exit 1; }
+    strip_quarantine "$e/node_modules"
+    echo "$stamp" > "$e/stamp"
+    dim "pool: warmed $e"
+    n=$((n+1))
+  done
   exit 0
 fi
 
@@ -365,6 +370,12 @@ DIR="$(cd "${DIR:-$PWD}" && pwd)"
 NAME="$(basename "$DIR")"
 SESSION="${PREFIX}${NAME}"
 LOG="/tmp/$SESSION.log"
+# Everything before `next dev` owns LOG was unlogged, and under set -e a failing command exits
+# without a word — the viewer showed only the last ▸ line as "could not start" (2026-09-22).
+SETUP_LOG="/tmp/$SESSION.setup.log"
+: > "$SETUP_LOG"
+exec > >(tee -a "$SETUP_LOG") 2> >(tee -a "$SETUP_LOG" >&2)
+trap 'rc=$?; err "stopped at line $LINENO (exit $rc): $BASH_COMMAND — setup log: $SETUP_LOG"' ERR
 META="$(meta_of "$NAME")"
 
 [ -f "$DIR/package.json" ] || { err "$DIR is not a loops checkout (no package.json)"; exit 1; }

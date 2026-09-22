@@ -396,6 +396,13 @@ def wait(req):
     req._send(200, body, "text/html; charset=utf-8")
 
 
+
+def _failure(p, fallback):
+    """loops-preview's output for a failed run, ending where it stopped: its ERR trap prints the
+    failing line last, so the tail carries the reason a head-truncation cut off."""
+    out = _ANSI.sub("", (p.stdout or "") + (p.stderr or "")).strip() or fallback
+    return out[-600:]
+
 def _serve_dir(req, dirp, extra=None):
     # attach, don't restart: loops-preview cold-reboots an existing session (kills tmux, wipes
     # .next), so re-clicking preview on a warm checkout must NOT destroy the running server.
@@ -410,7 +417,7 @@ def _serve_dir(req, dirp, extra=None):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "preview failed").strip())[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _failure(p, "preview failed")}))
         return
     port = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port,
@@ -494,7 +501,7 @@ def start_main(req, raw):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "launch failed").strip())[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _failure(p, "launch failed")}))
         return
     port = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": port, "url": "http://localhost:%d" % port, "dir": dirp}))
@@ -516,7 +523,7 @@ def restart(req, raw):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "restart failed").strip())[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _failure(p, "restart failed")}))
         return
     newport = int(m.group(1))
     req._send(200, json.dumps({"ok": True, "port": newport, "url": "http://localhost:%d" % newport, "dir": dirp}))
@@ -548,7 +555,7 @@ def swap(req, raw):
     _list_invalidate()
     m = re.search(r"localhost:(\d+)", p.stdout)
     if not m:
-        req._send(500, json.dumps({"ok": False, "err": _ANSI.sub("", (p.stderr or p.stdout or "swap failed").strip())[:400]}))
+        req._send(500, json.dumps({"ok": False, "err": _failure(p, "swap failed")}))
         return
     req._send(200, json.dumps({"ok": True, "port": int(m.group(1)), "url": "http://localhost:%s" % m.group(1), "dir": dirp}))
 
