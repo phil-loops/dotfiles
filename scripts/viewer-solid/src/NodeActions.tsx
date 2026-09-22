@@ -273,7 +273,8 @@ export function NodeActions(props: {
         const ts = started.get(g);
         return ts ? `${g} ⟳ ${Math.max(0, Math.floor(Date.now() / 1000 - ts))}s` : `${g} ·`;
       }).join(" · ");
-      return `${line || "running"} — push unlocks when green`;
+      const idle = events.some((e) => e.event === "queued") ? "queued behind another gates run" : "running";
+      return `${line || idle} — push unlocks when green`;
     };
     const poll = () => setTimeout(async () => {
       if (token !== gatesRun) return;
