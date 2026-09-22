@@ -191,7 +191,8 @@ def asset_sig():
 
 
 def _pulse_refresh():
-    _pulse["sig"], _pulse["asset"], _pulse["world"] = srvctx.model_sig(), asset_sig(), sync.world_sig()
+    _pulse["sig"] = srvctx.model_sig() + str(srvctx.pulse_nonce[0])
+    _pulse["asset"], _pulse["world"] = asset_sig(), sync.world_sig()
     try:
         _pulse["procs"] = procsig.sig()   # non-git state: agents, chat turns, restack, previews
     except Exception:

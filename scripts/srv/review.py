@@ -27,6 +27,8 @@ from . import ctx, repostate, shellout, stackcfg, picker
 _mcache = {}
 _MCACHE_MAX = 8
 _mcache_lock = threading.Lock()
+_SWR_GRACE = 1.0     # how long a request waits on the rebuild before answering from cache
+_mbuilding = {}      # key -> Event: the in-flight rebuild, so N requests cost one build
 
 
 # the config keys the /model payload is actually built from (stack-forest's structure
@@ -81,13 +83,57 @@ def model(req, u):
     if ent and ent["sig"] == pre_sig:
         req._send(200, ent["out"])
         return
+    # Stale-while-revalidate: a rebuild is ~25 serial git spawns (17.6s on a loaded machine,
+    # measured 2026-09-22) and the map is the whole page. Rebuild behind the payload we already
+    # have, give it a moment to land (a warm machine rebuilds well inside it, so a click still
+    # reads as instant), and otherwise answer stale now — the pulse bump brings the tab back for
+    # the fresh one. A page that draws late is the failure this trades away.
+    if ent:
+        repo = ctx.repo_cwd()
+        with _mcache_lock:
+            done = _mbuilding.get(ck)
+            kick = done is None
+            if kick:
+                done = _mbuilding[ck] = threading.Event()
+        if kick:
+            threading.Thread(target=_rebuild, args=(repo, ck, branch, done, ent["out"]), daemon=True).start()
+        done.wait(_SWR_GRACE)
+        with _mcache_lock:
+            fresh = _mcache.get(ck)
+        req._send(200, (fresh or ent)["out"])
+        return
     if not _known_forest_name(branch):
         req._send(404, json.dumps({"error": f"no branch or forest named {branch!r}"}))
         return
+    out, err = _build(branch, ck)
+    req._send(500 if err else 200, err or out)
+
+
+def _rebuild(repo, ck, branch, done, was):
+    ctx.set_repo(repo)
+    try:
+        _build(branch, ck)
+    except Exception as exc:
+        ctx.log(f"/model background rebuild for {branch} failed: {exc}")
+    finally:
+        with _mcache_lock:
+            _mbuilding.pop(ck, None)
+            ent = _mcache.get(ck) or {}
+        done.set()
+        ctx.clear_repo()
+    # Pulse only for a SETTLED rebuild that actually says something new. An empty sig means the
+    # repo moved mid-build (stale on arrival), and an identical payload would wake every open
+    # tab's whole query fan-out to redraw the map it is already showing.
+    if ent.get("sig") and ent.get("out") != was:
+        ctx.bump_pulse()
+
+
+def _build(branch, ck):
+    """(payload, error-json). Builds the forest model and caches it under ck."""
     guard = ctx.model_sig()   # what the build is about to read, fingerprinted BEFORE it reads it
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), branch])
     if r.returncode != 0:
-        req._send(500, json.dumps({"error": r.stderr}))
+        return None, json.dumps({"error": r.stderr})
     else:
         out = _enrich(r.stdout, branch)
         try:
@@ -105,7 +151,7 @@ def model(req, u):
             _mcache[ck] = {"sig": sig, "branches": branches, "out": out}
             while len(_mcache) > _MCACHE_MAX:
                 _mcache.pop(next(iter(_mcache)))
-        req._send(200, out)
+        return out, None
 
 
 def _enrich(raw, branch):
