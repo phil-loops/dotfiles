@@ -162,6 +162,16 @@ attribute_merges() {
 # A trunk move is also the signal that the LOCAL main ref went stale. Fast-forward it so
 # viewer diffs read against true main, not yesterday's (pure ref move — git itself refuses
 # if main is checked out in some worktree, in which case we log and leave it alone).
+refresh_donor() { # stack-donor: pin the borrowing trees' donor to the new trunk, in the background
+  (
+    if err="$(nice -n 10 "$here/stack-donor" --refresh "$(git rev-parse --show-toplevel)" 2>&1 >/dev/null)"; then
+      logline "donor refreshed to ${1:0:9}"
+    else
+      logline "donor refresh FAILED at ${1:0:9}: $(echo "$err" | tail -3 | tr '\n' ' ')"
+    fi
+  ) </dev/null >/dev/null 2>&1 &
+  disown 2>/dev/null || true
+}
 refresh_local_main() {
   local tip="$1" cur
   cur="$(git rev-parse --verify --quiet "refs/heads/$MAIN" || echo "")"
@@ -449,6 +459,7 @@ while (( running )); do
     base="${last_tip:-$prev_tip}"
     [[ -n "$base" ]] && attribute_merges "$base" "$tip"
     refresh_local_main "$tip"
+    refresh_donor "$tip"
     if reclassify "$$" "$tip"; then
       last_tip="$tip"
       if (( apply )); then apply_if_safe "$$" "$tip"
