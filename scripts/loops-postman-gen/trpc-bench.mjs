@@ -452,7 +452,7 @@ const bridgeSnippet = (tool) => `(() => {
   window.__loopsTrpcBridge = me;
   const post = (path, body) =>
     fetch(TOOL + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const run = async ({ id, path, kind, input }) => {
+  const call = async ({ id, path, kind, input }) => {
     const payload = JSON.stringify({ json: input });
     const url = "/api/trpc/" + path + (kind === "query" ? "?input=" + encodeURIComponent(payload) : "");
     const started = performance.now();
@@ -467,16 +467,43 @@ const bridgeSnippet = (tool) => `(() => {
     } catch (err) {
       body = String(err);
     }
-    await post("/bridge/result", { id, status, body, ms: Math.round(performance.now() - started) });
+    return { id, status, body, ms: Math.round(performance.now() - started) };
   };
+
+  // The app's CSP allows connect-src 'self' only, so talking to the bench over HTTP is blocked
+  // on every deployed env. postMessage isn't subject to CSP, so it's the fallback — it just
+  // needs a window handle, which is the bench tab that opened this one, or one opened here.
+  const overPostMessage = () => {
+    const peer = window.opener && !window.opener.closed ? window.opener : window.open(TOOL, "loops-trpc-bench");
+    if (!peer) {
+      console.error("loops tRPC bridge: couldn't reach the bench. Allow popups for this site, or click 'Open app' in the bench and paste this in the tab it opens.");
+      return;
+    }
+    if (!window.opener) {
+      console.warn("loops tRPC bridge: this tab wasn't opened by the bench, so a bench tab was opened for you — use that one.");
+    }
+    window.addEventListener("message", async (e) => {
+      if (me.stop || e.origin !== TOOL || e.data?.type !== "loops-trpc-call") return;
+      e.source.postMessage({ type: "loops-trpc-result", ...(await call(e.data)) }, TOOL);
+    });
+    const hello = () => !me.stop && peer && !peer.closed && peer.postMessage({ type: "loops-trpc-hello", origin: location.origin }, TOOL);
+    me.timer = setInterval(hello, 1500);
+    hello();
+    console.log("%cloops tRPC bridge connected (console) → " + TOOL, "color:#16a34a;font-weight:bold");
+  };
+
   (async () => {
-    await post("/bridge/hello", { origin: location.origin });
-    console.log("%cloops tRPC bridge connected → " + TOOL, "color:#16a34a;font-weight:bold");
+    try {
+      await post("/bridge/hello", { origin: location.origin });
+    } catch {
+      return overPostMessage();
+    }
+    console.log("%cloops tRPC bridge connected (http) → " + TOOL, "color:#16a34a;font-weight:bold");
     while (!me.stop) {
       try {
         const r = await fetch(TOOL + "/bridge/next");
-        const call = await r.json();
-        if (call) await run(call);
+        const next = await r.json();
+        if (next) await post("/bridge/result", await call(next));
         else await post("/bridge/hello", { origin: location.origin });
       } catch (err) {
         console.warn("loops tRPC bridge: bench unreachable, retrying", err);
@@ -549,7 +576,7 @@ const page = ({ procedures, tool }) => `<!doctype html>
         <button id="openApp">Open app</button>
         <button id="copy" class="primary">Copy console snippet</button>
       </div>
-      <p class="hint">Log in, open DevTools → Console in the app tab, paste, Enter. Calls run with that tab's session. Chrome may ask you to type <code>allow pasting</code> first.</p>
+      <p class="hint"><b>Open the app from here</b> \u2014 the app's CSP blocks talking to this bench over HTTP, so the fallback needs the tab to have been opened by this page. Then log in, open DevTools \u2192 Console in <em>that</em> tab, paste, Enter. Chrome may ask you to type <code>allow pasting</code> first.</p>
       <details><summary>snippet</summary><pre class="snip" id="snip"></pre></details>
     </div>
     <div class="card">
@@ -583,20 +610,45 @@ const PROD = ${JSON.stringify(APPS.prod)};
 const $ = (id) => document.getElementById(id);
 $("snip").textContent = SNIPPET;
 let bridgeOrigin = null;
+let pm = null;            // the app tab's window, when it bridged over postMessage
+let pmSeenAt = 0;
+let seq = 0;
+const pendingPm = new Map();
+
+window.addEventListener("message", (e) => {
+  const d = e.data || {};
+  if (d.type === "loops-trpc-hello" && d.origin === e.origin) {
+    pm = e.source;
+    pmSeenAt = Date.now();
+    bridgeOrigin = e.origin;
+    paint(true, e.origin, "console");
+  }
+  if (d.type === "loops-trpc-result" && pendingPm.has(d.id)) {
+    const settle = pendingPm.get(d.id);
+    pendingPm.delete(d.id);
+    settle(d);
+  }
+});
+
+function paint(connected, origin, how) {
+  const prod = origin === PROD;
+  $("conn").textContent = connected ? "bridge: " + origin + " (" + how + ")" + (prod ? " \u2014 PRODUCTION" : "") : "bridge: not connected";
+  $("conn").className = "pill " + (connected ? (prod ? "prod" : "ok") : "");
+  $("send").disabled = !connected;
+  $("send").textContent = connected ? "Send" : "Not connected";
+  $("why").textContent = connected ? "" : "\u2191 paste the snippet into the app tab's console (re-paste after the bench restarts)";
+}
 
 $("copy").onclick = async () => { await navigator.clipboard.writeText(SNIPPET); $("copy").textContent = "Copied \u2713"; setTimeout(() => $("copy").textContent = "Copy console snippet", 1500); };
 $("openApp").onclick = () => window.open($("app").value, "_blank");
 
 async function poll() {
+  if (pm && !pm.closed && Date.now() - pmSeenAt < 6000) return;   // the console bridge is live
+  if (pm) { pm = null; bridgeOrigin = null; }
   try {
     const s = await (await fetch("/api/status")).json();
     bridgeOrigin = s.connected ? s.origin : null;
-    const prod = s.origin === PROD;
-    $("conn").textContent = s.connected ? "bridge: " + s.origin + (prod ? " \u2014 PRODUCTION" : "") : "bridge: not connected";
-    $("conn").className = "pill " + (s.connected ? (prod ? "prod" : "ok") : "");
-    $("send").disabled = !s.connected;
-    $("send").textContent = s.connected ? "Send" : "Not connected";
-    $("why").textContent = s.connected ? "" : "\u2191 paste the snippet into the app tab's console (re-paste after the bench restarts)";
+    paint(s.connected, s.origin, "http");
   } catch {
     $("conn").textContent = "bench server not running";
     $("conn").className = "pill";
@@ -647,7 +699,14 @@ $("send").onclick = async () => {
   $("meta").textContent = "sending\u2026";
   $("send").disabled = true;
   try {
-    const d = await (await fetch("/api/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, kind, input }) })).json();
+    const d = pm
+      ? await new Promise((resolve) => {
+          const id = ++seq;
+          pendingPm.set(id, resolve);
+          setTimeout(() => pendingPm.has(id) && (pendingPm.delete(id), resolve({ status: 0, ms: 0, body: "No answer from the app tab \u2014 is the snippet still running?" })), 60000);
+          pm.postMessage({ type: "loops-trpc-call", id, path, kind, input }, bridgeOrigin);
+        })
+      : await (await fetch("/api/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, kind, input }) })).json();
     if (d.error) { $("meta").textContent = ""; $("out").textContent = d.error; return; }
     show(d);
     record(req, d);
