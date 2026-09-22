@@ -557,7 +557,10 @@ const page = ({ procedures, tool }) => `<!doctype html>
       <div class="row">
         <select id="kind"><option>mutation</option><option>query</option></select>
         <input id="path" class="path" placeholder="incomingWebook.updateWebhook" />
-        <button id="send" class="primary" disabled>Send</button>
+        <button id="send" class="primary" disabled>Not connected</button>
+      </div>
+      <div class="row">
+        <span id="why" class="hint"></span>
       </div>
       <p class="hint">Input — sent as <code>{ "json": … }</code> (superjson). Strict JSON, a JS object literal, or a whole <code>{"json":…}</code> body pasted from the network tab all work.</p>
       <textarea id="input" spellcheck="false">{}</textarea>
