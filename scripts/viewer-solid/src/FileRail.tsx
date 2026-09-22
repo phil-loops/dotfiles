@@ -4,8 +4,6 @@ import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, withRepo, canMutate } from "./provider";
 import { isBlessed } from "./shared";
-import { threadWorking, threadUnseenDone, threadMsgCount } from "./chatStore";
-import { SessionPicker } from "./SessionPicker";
 import type { FileDiff, Commit } from "./types";
 
 const FILE_ACT =
@@ -62,7 +60,6 @@ export function DirtyRail(props: {
   branch: string;
   bless: { mutate: (file: string) => void };
   onCommit: (receipt?: string) => void;
-  onChat: (f: FileDiff, session?: string) => void;
 }) {
   const [msg, setMsg] = createSignal("");
   const [err, setErr] = createSignal("");
@@ -154,7 +151,7 @@ export function DirtyRail(props: {
         </Show>
       </Show>
       <For each={props.dirty}>
-        {(f) => <DirtFile f={f} branch={props.branch} bless={props.bless} onChat={props.onChat} onDone={props.onCommit} />}
+        {(f) => <DirtFile f={f} branch={props.branch} bless={props.bless} onDone={props.onCommit} />}
       </For>
     </div>
   );
@@ -166,7 +163,6 @@ function DirtFile(props: {
   f: { path: string; code: string; patch: string };
   branch: string;
   bless: { mutate: (file: string) => void };
-  onChat: (f: FileDiff, session?: string) => void;
   onDone: (receipt?: string) => void;
 }) {
   const [form, setForm] = createSignal(false);
@@ -274,7 +270,7 @@ function DirtFile(props: {
         bless={props.bless}
         branch={props.branch}
         readOnly
-        onChat={props.onChat}
+       
       />
     </div>
   );
@@ -286,7 +282,6 @@ export function FileEntry(props: {
   bless: { mutate: (file: string) => void };
   branch: string;
   readOnly?: boolean;
-  onChat: (f: FileDiff, session?: string) => void;
 }) {
   const [foil, setFoil] = createSignal(false);
   const [copied, setCopied] = createSignal(false);
@@ -301,9 +296,6 @@ export function FileEntry(props: {
   // follow bless state in place: ⇧B collapses this card, ⇧U expands it — no row teardown, so the
   // diff isn't re-rendered from scratch (defer skips the initial value, keeping manual toggles).
   createEffect(on(blessed, (b) => setCollapsed(b), { defer: true }));
-  const chatWorking = () => threadWorking(props.branch, props.file.path);
-  const chatUnseen = () => threadUnseenDone(props.branch, props.file.path);
-  const [pick, setPick] = createSignal(false);
   const doBless = () => {
     setFoil(true); // play the foil on the click; the steady gold lands as the override flips
     props.bless.mutate(props.file.path);
@@ -378,39 +370,7 @@ export function FileEntry(props: {
         >
           {copied() ? "copied ✓" : "⎘ copy ref"}
         </button>
-        <Show when={threadMsgCount(props.branch, props.file.path) > 0}>
-          <span class="chat-badge flex-none whitespace-nowrap rounded-[5px] border border-rule bg-vellum-edge px-[6px] py-px text-[11px] text-ink-dim" title="this file has a chat thread">
-            💬 {threadMsgCount(props.branch, props.file.path)}
-          </span>
-        </Show>
         <Show when={canMutate}>
-          <span class="sp-anchor relative inline-flex">
-            <button
-              class={`${FILE_ACT} chat-act ml-auto ${
-                chatWorking()
-                  ? "working border-ink-dim bg-transparent text-ink-dim animate-chat-pulse motion-reduce:animate-none"
-                  : !chatWorking() && chatUnseen()
-                    ? "done border-add bg-transparent text-add"
-                    : FILE_ACT_QUIET
-              }`}
-              title={
-                chatWorking()
-                  ? "Claude is still answering on this file — click to watch"
-                  : chatUnseen()
-                    ? "Claude finished while the drawer was closed — click to read"
-                    : "chat about this file with Claude — pick a live session or a new pane"
-              }
-              onClick={() => setPick((v) => !v)}
-            >
-              {chatWorking() ? "✦ working…" : chatUnseen() ? "✦ done ✓" : "✦ chat"}
-            </button>
-            <Show when={pick()}>
-              <SessionPicker
-                onClose={() => setPick(false)}
-                onPick={(session) => { setPick(false); props.onChat(props.file, session); }}
-              />
-            </Show>
-          </span>
           <Show when={!props.readOnly}>
             <button
               class="bless-btn ml-auto flex-none cursor-pointer rounded-[7px] border border-gold-deep bg-transparent px-3 py-1 text-[11px] leading-[1.55] tracking-[0.04em] text-gold-leaf transition-[background,border-color,color] duration-[120ms] enabled:hover:border-gold-leaf enabled:hover:bg-gold-wash disabled:cursor-default disabled:border-transparent disabled:text-[10px] disabled:uppercase disabled:tracking-[0.14em] disabled:opacity-85"
@@ -432,7 +392,7 @@ export function FileEntry(props: {
 // One history row. Click it to expand that commit's diff inline (git show <sha>) —
 // GitHub-Desktop's History tab: the whole commit, not just a subject line. Diffs load
 // lazily on first expand and are read-only (historical commits, nothing to bless).
-function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, session?: string) => void; onReworded?: () => void }) {
+function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }) {
   const [open, setOpen] = createSignal(false);
   // a commit's diff never changes, so it's cached for the session (and prefetched for the
   // rows above the origin waterline by CommitsList) — expanding is a render, not a fetch
@@ -539,7 +499,7 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
             {(d) => (
               <Show when={d().files.length} fallback={<p class={LOADING}>no file changes (merge or empty commit)</p>}>
                 <For each={d().files}>
-                  {(f) => <FileEntry file={f} bless={noBless} branch={props.branch} readOnly onChat={props.onChat} />}
+                  {(f) => <FileEntry file={f} bless={noBless} branch={props.branch} readOnly />}
                 </For>
               </Show>
             )}
@@ -553,7 +513,7 @@ function CommitRow(props: { c: Commit; branch: string; onChat: (f: FileDiff, ses
 const DIVIDER =
   "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
 
-export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; frozen?: boolean; onChat: (f: FileDiff, session?: string) => void; onReworded?: () => void }) {
+export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; frozen?: boolean; onReworded?: () => void }) {
   const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
   const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
   // warm the diffs of what a push would send (the rows above the waterline, a handful at
@@ -592,7 +552,7 @@ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: 
                   <Show when={i() === waterline() && i() > 0}>
                     <li class={DIVIDER}><span>{waterlineText()}</span></li>
                   </Show>
-                  <CommitRow c={c} branch={props.branch} onChat={props.onChat} onReworded={props.onReworded} />
+                  <CommitRow c={c} branch={props.branch} onReworded={props.onReworded} />
                 </>
               )}
             </For>
@@ -602,7 +562,7 @@ export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: 
             <Show when={ancestors().length}>
               <li class="commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']"><span>earlier history</span></li>
               <For each={ancestors()}>
-                {(c) => <CommitRow c={c} branch={props.branch} onChat={props.onChat} />}
+                {(c) => <CommitRow c={c} branch={props.branch} />}
               </For>
             </Show>
           </ol>
