@@ -110,12 +110,13 @@ def main():
     if not os.path.isdir(main_nm) or os.path.islink(main_nm):
         print(f"main checkout {main_wt} has no real node_modules — nothing to link to; refusing", file=sys.stderr)
         sys.exit(1)
+    donor = git(["config", "--get", "stack.donor"]).strip()
     busy = cwds_in_use()
     now = time.time()
     acted, kept = [], []
     for wt in trees:
         name = os.path.basename(wt)
-        if "/stack-study/" in wt or name.startswith(".") or wt == main_wt:
+        if "/stack-study/" in wt or name.startswith(".") or wt in (main_wt, donor):
             continue
         nm = os.path.join(wt, "node_modules")
         nxt = os.path.join(wt, ".next")

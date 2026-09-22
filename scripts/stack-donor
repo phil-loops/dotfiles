@@ -1,0 +1,81 @@
+#!/bin/zsh
+# stack-donor — the checkout every borrowing tree (scratch worktrees, gated trees) takes
+# node_modules, the prisma client and .gen from. The primary worktree used to be the donor,
+# but Phil parks it on whatever he is reviewing; a donor behind origin/main made every gate on
+# a current branch rebuild prisma + tRPC types privately (a ~2 GB tsc each) and red on deps
+# main had moved past (2026-09-09, -21, -22). A dedicated donor pinned to origin/main pays each
+# install and regen once per trunk move instead.
+#
+#   stack-donor                    print the donor for the cwd's repo
+#   stack-donor <tree>             print the donor <tree> borrows from — the primary answers itself
+#   stack-donor --init [<dir>]     create it: a detached worktree at origin/main, seeded by
+#                                  APFS clones of the primary's node_modules and .gen
+#   stack-donor --refresh [<dir>]  move it to origin/main and settle node_modules + generated
+#                                  types; a no-op for a repo with no donor. restack-daemon runs
+#                                  this on every trunk move.
+#
+# The donor is `git config stack.donor` (repo-scoped). Unset or broken → the primary worktree,
+# today's behavior. The primary always answers itself: it keeps its own real node_modules and
+# must never be treated as a borrower.
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
+here="${0:A:h}"
+
+mode=print
+case "${1:-}" in
+  --init) mode=init; shift ;;
+  --refresh) mode=refresh; shift ;;
+esac
+dir="${1:-$PWD}"
+asker="${1:-}"
+
+primary=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}') || true
+[[ -n "$primary" ]] || { echo "stack-donor: $dir is not in a git repo" >&2; exit 1; }
+configured=$(git -C "$primary" config --get stack.donor 2>/dev/null || true)
+
+usable(){ [[ -n "$1" && -d "$1/node_modules" && -d "$1/.gen" ]] && git -C "$1" rev-parse --git-dir >/dev/null 2>&1 }
+
+# gates hold this same single slot (srv/push.py), so a refresh never swaps node_modules or
+# .gen out from under a running gate, and a gate never reads a half-refreshed donor
+turn_dir(){ print -r -- "${${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR)}%/}/stack-gates-turn" }
+
+refresh(){
+  local donor="$1" tip
+  git -C "$primary" fetch -q origin main 2>/dev/null || true
+  tip=$(git -C "$primary" rev-parse --verify --quiet origin/main) || { echo "stack-donor: no origin/main" >&2; return 1; }
+  if [[ "$(git -C "$donor" rev-parse HEAD)" != "$tip" ]]; then
+    git -C "$donor" checkout -q -f --detach "$tip"
+  fi
+  "$here/npm-owed" --install "$donor" >/dev/null
+  "$here/seed-gen" --sync "$donor"
+}
+
+case $mode in
+  print)
+    real=""
+    [[ -n "$asker" ]] && { real=$(cd "$asker" && git rev-parse --show-toplevel 2>/dev/null) || real=""; }
+    if [[ "$real" != "$primary" ]] && usable "$configured"; then
+      print -r -- "$configured"
+    else
+      print -r -- "$primary"
+    fi ;;
+  init)
+    donor="${configured:-$HOME/Library/Caches/${primary:t}-donor}"
+    if ! git -C "$donor" rev-parse --git-dir >/dev/null 2>&1; then
+      git -C "$primary" fetch -q origin main 2>/dev/null || true
+      git -C "$primary" worktree add -q --detach "$donor" origin/main
+    fi
+    [[ -e "$donor/node_modules" ]] || cp -cR "$primary/node_modules" "$donor/node_modules"
+    [[ -e "$donor/.gen" ]] || cp -cR "$primary/.gen" "$donor/.gen"
+    rm -f "$donor/.gen/.seed-gen-sha"
+    git -C "$primary" config stack.donor "$donor"
+    "$0" --refresh "$donor"
+    echo "stack-donor: $donor is the donor for $primary" ;;
+  refresh)
+    usable "$configured" || exit 0
+    if [[ -n "${STACK_DONOR_LOCKED:-}" ]]; then
+      refresh "$configured"
+    else
+      STACK_DONOR_LOCKED=1 TSC_TURN_SLOTS=1 TSC_TURN_DIR="$(turn_dir)" "$here/tsc-turn" "$0" --refresh "$dir"
+    fi ;;
+esac
