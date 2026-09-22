@@ -1,22 +1,23 @@
-// NodeActions — the branch-level "do something to this branch" affordances that live on
-// the right of NodeDetail's node-head: a fork-state badge (behind / push-blocked) and a
-// ⋯ menu collapsing the three rare, history-touching mutations — move the main checkout
-// (~/coding/loops) onto this branch, squash parent..branch into one voiced commit, and
-// rebase forward onto origin/main. Collapsing them into a menu keeps the header calm and
-// adds a click of friction before anything rewrites history. All three are SECONDARY
-// actions, so they wear --patina (stale/tarnished green), never gold — gold is reserved
-// for blessed work. This component owns its wiring + state so it drops into App.tsx with a
-// single mount line.
+// NodeActions — the branch-level affordances on the right of NodeDetail's node-head:
+// the waymark spine (one station chip + one slot for the single local next step), the push
+// door, and a ⋯ menu holding the rare or conditional mutations. The slot is the whole local
+// motion: ⟲ sync chains reseat → rebase forward → route to one voiced commit → gates →
+// delta tests → message editor, and the same slot becomes a contraction offer when this
+// branch, or its parent, has already landed. The shared world only ever moves from the push
+// door. This component owns its wiring + state, so it drops in with a single mount line.
 //
-//   <NodeActions branch={active()} />
+//   <NodeActions branch={active()} parentGhost={…} />
 //
-// Endpoints (Python review server, unchanged):
-//   POST /checkout {branch, force?}  → {ok} | 409 {ok:false, worktree} when another
-//                                       worktree holds the branch (force:true frees it)
-//   POST /squash   {branch}          → {ok, n, base, unstaged}  (stack-squash --unstage:
-//                                       collapse parent..branch to unstaged changes, no commit)
-//   POST /sync     {branch}          → {ok, rebased?, ejected?, conflict?, summary?} | 409
-//                                       (rebase forward: in place when clean, else eject Claude)
+// Endpoints (Python review server):
+//   POST /checkout  {branch, force?, dirt?, evictLive?} → {ok} | 409 {ok:false, worktree}
+//                                     when another worktree holds the branch
+//   POST /sync      {branch}         → {ok, rebased?, ejected?, conflict?, contract?, restack?}
+//   POST /restack   {project}        → {ok, queued?, behind?} when the chain is the restacker's
+//   POST /prep-push {branch}         → {ok, routed?, commit?} | {reconcile} (seals the tail)
+//   POST /gates     {branch, ...}    → detached; poll GET /gates-progress, whose journal
+//                                     carries a "queued" event while another run holds the slot
+//   POST /contract  {branch}         → drop a landed ghost and rewire its children onto main
+//   POST /delta-tests, /dirty-resolve, /reseat-children, /fix-upstream, /interest
 import { createSignal, For, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
@@ -87,6 +88,7 @@ export function NodeActions(props: {
   branch: string;
   isReview: boolean;
   merged?: boolean; // forest-health flagged this branch a merged ghost → offer contraction on load
+  parentGhost?: string; // this node's PARENT is a droppable merged ghost — contract it from here
   blessing?: { total: number; blessed: number }; // the node's review progress — the spine's review station + gold mark
   // the old header health badges, folded into the spine's reasons + ⋯ overrides
   health?: {
@@ -121,9 +123,7 @@ export function NodeActions(props: {
   const [done, setDone] = createSignal<string | null>(null);
   // raises the result line to the ember alert style — a rebase conflict parks a worktree and
   // blocks restacks, so it can't read as a quiet ✓ success like every other outcome.
-  const [doneAlert, setDoneAlert] = createSignal(false);
   // /sync found the branch already merged into main — children awaiting a drop+rewire confirm.
-  const [contractKids, setContractKids] = createSignal<string[] | null>(null);
   // an eject to a headless rebase is live → tail its output stream inline (RebaseStream) instead
   // of the old frozen "rebasing onto origin/main via Claude" line that couldn't show liveness.
   const [rebaseStreaming, setRebaseStreaming] = createSignal(false);
@@ -500,8 +500,8 @@ export function NodeActions(props: {
   // Confirm of the already-merged offer above: drop the empty branch and rewire its children
   // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
   const contract = createMutation(() => ({
-    mutationFn: () =>
-      postStatus<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch: props.branch }),
+    mutationFn: (branch: string) =>
+      postStatus<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch }),
     // The branch already being gone (a stale node still on screen after the map's auto-drop) IS
     // contraction's outcome, so it reads as done, never as ✗.
     onSuccess: ({ status, body }) => {
@@ -509,7 +509,6 @@ export function NodeActions(props: {
         setDone(`✗ ${body.err || "contract failed"}`);
         return;
       }
-      setContractKids(null);
       setDone(status === 404 ? "✓ already dropped" : `✓ ${body.summary || "contracted"}`);
       qc.invalidateQueries({ queryKey: ["model"] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
@@ -663,7 +662,7 @@ export function NodeActions(props: {
     const step = nextStepOf({
       merged: props.merged,
       contractable: props.health?.contractable,
-      contractKids: contractKids(),
+      parentGhost: props.parentGhost,
       drifted: props.health?.drifted,
       behind: behind(),
       syncable: sync.data?.syncable,
@@ -673,7 +672,8 @@ export function NodeActions(props: {
     if (!step) {
       return null;
     }
-    const contracting = step.kind === "contract";
+    const contracting = step.kind === "contract" || step.kind === "contract-parent";
+    const dropTarget = step.kind === "contract-parent" ? props.parentGhost! : props.branch;
     // a predicted collision rides the button that would hit it, not a badge of its own
     const warning = contracting ? "" : conflictWarning(props.ambient);
     return {
@@ -681,12 +681,11 @@ export function NodeActions(props: {
       kind: step.kind,
       title: warning ? `${step.title}\n\n${warning}` : step.title,
       pending: contracting ? contract.isPending : omniSync.isPending,
-      onClick: fire(contracting ? () => contract.mutate() : startSync),
+      onClick: fire(contracting ? () => contract.mutate(dropTarget) : startSync),
     };
   };
   const fire = (fn: () => void) => () => {
     setDone(null);
-    setDoneAlert(false);
     fn();
   };
 
@@ -959,7 +958,7 @@ export function NodeActions(props: {
       </Show>
 
       <Show when={done()}>
-        <span class={`nh-done ${DONE} ${doneAlert() ? "nh-done-alert overflow-visible whitespace-normal rounded-[5px] border border-del bg-del-bg px-[7px] py-[2px] font-semibold text-del" : "max-w-[22ch] overflow-hidden text-ellipsis whitespace-nowrap text-patina opacity-90"}`} title={done() ?? ""}>{done()}</span>
+        <span class={`nh-done ${DONE} max-w-[22ch] overflow-hidden text-ellipsis whitespace-nowrap text-patina opacity-90`} title={done() ?? ""}>{done()}</span>
       </Show>
       <Show when={pushedWeb()}>
         <a class={`nh-pushed-link text-add ${DONE}`} href={pushedWeb()!} target="_blank" rel="noreferrer">
