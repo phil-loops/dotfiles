@@ -5,7 +5,7 @@
 // server or GitHub connection), and nothing else in the app has to change.
 //
 // `capabilities.mutate` lets the UI hide the live-only actions (bless / checkout /
-// squash / restack / integrate / chat) in static mode instead of rendering dead ones.
+// sync / restack / integrate / chat) in static mode instead of rendering dead ones.
 import { z } from "zod";
 import { fetchJSON } from "./api";
 import { knownRepos } from "./router";
@@ -166,7 +166,7 @@ export class StaticProvider implements DataProvider {
 const isStatic = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_STATIC === "1";
 export const provider: DataProvider = isStatic ? new StaticProvider() : new HttpProvider();
 
-// Convenience for the UI: gate live-only actions (bless / checkout / squash /
+// Convenience for the UI: gate live-only actions (bless / checkout / sync /
 // restack / integrate / chat / open) behind this so static mode shows no dead
 // buttons. Fixed at module load — the provider never changes within a session.
 export const canMutate = provider.capabilities.mutate;

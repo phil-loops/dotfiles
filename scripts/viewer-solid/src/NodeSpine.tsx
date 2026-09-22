@@ -16,10 +16,9 @@ import type { Station } from "./nodeStation";
 // finished history. No new tokens.
 
 export interface SpineEdge {
-  label: string; // the step, named as the step: "prep: squash 3→1", "edit the why", "push"
-  kind: "prep" | "edit" | "push" | "contract";
+  label: string; // the step, named as the step: "⟲ sync", "drop ghost & rewire →"
+  kind: "prep" | "contract" | "contract-parent";
   pending: boolean;
-  armed?: boolean; // push only: two-click arm state
   title: string;
   onClick: () => void;
 }
@@ -64,11 +63,6 @@ export default function NodeSpine(props: {
   };
   const slotState = (e: SpineEdge): string => {
     const cursor = e.pending ? "cursor-progress" : "cursor-pointer";
-    if (e.kind === "push") {
-      return e.armed
-        ? `${cursor} border-ember bg-ember-wash text-ink`
-        : `${cursor} border-ember bg-transparent text-ember hover:bg-ember-wash`;
-    }
     return `${cursor} border-rule bg-transparent hover:border-ink-dim ${e.pending ? "text-ink-dim" : "text-ink"}`;
   };
 
@@ -103,12 +97,12 @@ export default function NodeSpine(props: {
       <Show when={props.edge}>
         <button
           class={`spine-slot slot-${props.edge!.kind} ${SLOT} ${slotState(props.edge!)}`}
-          classList={{ armed: !!props.edge!.armed, pending: props.edge!.pending }}
+          classList={{ pending: props.edge!.pending }}
           disabled={props.edge!.pending}
           title={props.edge!.title}
           onClick={props.edge!.onClick}
         >
-          {props.edge!.pending ? "…" : props.edge!.armed ? `confirm: ${props.edge!.label}` : props.edge!.label}
+          {props.edge!.pending ? "…" : props.edge!.label}
         </button>
       </Show>
     </span>
