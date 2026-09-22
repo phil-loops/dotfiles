@@ -467,9 +467,10 @@ dir="${1:?usage: seed-gen [--sync] <worktree-dir>}"
 # (/private/tmp realpaths) and dts emit fails with TS2883
 dir=$(realpath_of "$dir") || exit 0
 
-# source .gen from the MAIN checkout (first worktree), not wherever this runs — a sibling
-# worktree has no .gen of its own (gitignored, only routinely built in main).
-src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
+# source .gen from the donor (stack-donor: the origin/main donor, else the first worktree), not
+# wherever this runs — a sibling worktree has no .gen of its own (gitignored).
+src=$("$(dirname "$0")/stack-donor" "$dir" 2>/dev/null) \
+  || src=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
 [[ -n "$src" && -d "$src/.gen" ]] || exit 0                  # nothing to seed from
 
 if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then

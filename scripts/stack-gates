@@ -289,8 +289,7 @@ def env_repair(cwd):
     actions actually taken — a healthy tree stays silent."""
     notes = []
     ok = True
-    out = run(["git", "worktree", "list", "--porcelain"], cwd).stdout
-    main = next((ln[len("worktree "):] for ln in out.splitlines() if ln.startswith("worktree ")), "")
+    main = run([os.path.join(os.path.dirname(os.path.abspath(__file__)), "stack-donor")], cwd).stdout.strip()
     if not main:
         return notes, ok
     # seed-gen --sync owns every repair (node_modules donor, tree-local packages dist, .gen) —

@@ -49,6 +49,9 @@ main_checkout(){   # the repo's FIRST worktree — the only one that really has 
   print -r -- "${first:-$main_root}"
 }
 
+donor_checkout(){   # where borrowed node_modules/.gen come from — a dedicated origin/main donor when set
+  "$SCRIPTS/stack-donor" 2>/dev/null || main_checkout
+}
 existing_worktree(){   # echo the path of a real worktree holding <branch>, if any
   # Claude session scratchpads (/tmp/claude-*/…) are deleted when their session ends — opening
   # into one strands Helix buffers and space-t watchers on a vanished dir; prefer our own scratch.
@@ -141,7 +144,7 @@ strip_fat(){   # <days> [--dry-run] — shed regenerable weight from worktrees n
                # lately, but KEEP the checkout: a stripped worktree still opens instantly.
   [[ -d "$SCRATCH" ]] || return 0
   local days="$1" dry="${2:-}" d kb total=0 nm mine=0 clock idle=""
-  nm="$(main_checkout)/node_modules"
+  nm="$(donor_checkout)/node_modules"
   clock=$(mktemp)
   idle=$'\n'"$(idle_dirs "$days")"$'\n'
   for d in "$SCRATCH"/*(N/); do
@@ -299,7 +302,7 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
         sleep 0.2
       done
   fi
-  [[ -e "$dir/node_modules" ]] || ln -sfn "$(main_checkout)/node_modules" "$dir/node_modules"
+  [[ -e "$dir/node_modules" ]] || ln -sfn "$(donor_checkout)/node_modules" "$dir/node_modules"
   seed_gen "$dir"   # .gen for #trpc resolution — a scratch tree shares the main checkout's
   # The seed is main's types; when this branch's trpc surface differs they are WRONG in the
   # editor (phantom errors on new router inputs, 2026-08-03). The heal cannot run foreground:
