@@ -16,12 +16,14 @@ hidden = false
 display-progress-messages = true
 
 # Implicitly trust the loops worktrees and the hover+o scratch worktrees
-# (/tmp/stack-study via stack-open; macOS canonicalizes /tmp → /private/tmp).
+# (~/Library/Caches/stack-study via stack-open; the /tmp pair covers the legacy dir,
+# which macOS canonicalizes /tmp → /private/tmp).
 # Scratch worktrees get a fresh path per open, so without this every hover+o
 # re-prompts "Trust this workspace?".
 [editor.workspace-trust]
 trusted = [
   "~/coding/loops*",
+  "~/Library/Caches/stack-study/*",
   "/tmp/stack-study/*",
   "/private/tmp/stack-study/*",
 ]

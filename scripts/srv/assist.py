@@ -79,7 +79,7 @@ def _edit_cwd(branch):
                    cwd=ctx.CWD, capture_output=True, text=True)
     d = chat._worktree_for(branch)
     if not d:
-        d = os.path.join(os.environ.get("STACK_OPEN_DIR", "/tmp/stack-study"), branch.replace("/", "_"))
+        d = os.path.join(os.environ.get("STACK_OPEN_DIR", os.path.expanduser("~/Library/Caches/stack-study")), branch.replace("/", "_"))
     return d if os.path.isdir(d) else None
 
 

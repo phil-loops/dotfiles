@@ -13,7 +13,7 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
-SCRATCH="${STACK_OPEN_DIR:-/tmp/stack-study}"
+SCRATCH="${STACK_OPEN_DIR:-$HOME/Library/Caches/stack-study}"
 SESSION="${STACK_OPEN_TMUX:-loops}"
 here="${0:A:h}"
 
