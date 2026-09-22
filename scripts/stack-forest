@@ -170,16 +170,23 @@ for b, p in parents.items():
 # a branch may appear in seeds from both the legacy registry and its per-branch
 # tag during migration — dedupe (order-preserving) so counts/lists don't double.
 seeds = {n: list(dict.fromkeys(bs)) for n, bs in seeds.items()}
+# A branch's own project tag bounds the DESCENT: a child tagged into another project — a
+# follow-up strand deliberately re-projected out of this one — belongs to that project's view,
+# not this one's, even though the parent edge still ties them. Ancestors are never filtered:
+# you cannot read a node without what it builds on. Untagged children descend as before.
+owner = dict(old_tags)
+owner.update(new_tags)
 
 
-def expand(seedlist):
+def expand(seedlist, project=""):
     seen = set()
 
     def descend(b):
         for c in children.get(b, []):
-            if c not in seen:
-                seen.add(c)
-                descend(c)
+            if c in seen or (project and owner.get(c, project) != project):
+                continue
+            seen.add(c)
+            descend(c)
     for s in seedlist:
         cur = s
         while cur and not is_trunk(cur):
@@ -288,7 +295,7 @@ if not node_mode and target == "--pr-state":
 # browser shows these as buttons; clicking one opens ?branch=<name> (resolved below).
 if not node_mode and target == "--projects":
     include_archived = "--all" in argv[1:]
-    print(json.dumps([{"name": n, "branches": len(expand(seeds[n])),
+    print(json.dumps([{"name": n, "branches": len(expand(seeds[n], n)),
                        "mergeable": [b for b in seeds[n] if mergeable(b)],
                        "archived": n in archived}
                       for n in sorted(seeds)
@@ -552,10 +559,10 @@ if target in ("--all", "*", ":forest:"):
     members.discard(MAIN)
     project = "whole forest"
 elif target in seeds:
-    project, members = target, expand(seeds[target])
+    project, members = target, expand(seeds[target], target)
 else:
     for name, sd in seeds.items():
-        mem = expand(sd)
+        mem = expand(sd, name)
         if target in mem:
             project, members = name, mem
             break
