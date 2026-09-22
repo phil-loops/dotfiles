@@ -26,6 +26,16 @@ REPOS = {}      # multi-repo registry: name -> main worktree path (drives /proje
 _local = threading.local()
 
 
+def fire(argv, **kw):
+    """Fire-and-forget a child — reaped by a waiter thread, so it can't linger as <defunct>."""
+    import subprocess
+    kw.setdefault("stdout", subprocess.DEVNULL)
+    kw.setdefault("stderr", subprocess.DEVNULL)
+    proc = subprocess.Popen(argv, **kw)
+    threading.Thread(target=proc.wait, daemon=True).start()
+    return proc
+
+
 def set_repo(path):
     _local.repo = path
 
