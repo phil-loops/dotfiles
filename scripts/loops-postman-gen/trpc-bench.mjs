@@ -38,7 +38,9 @@ const balanced = (src, open) => {
 };
 
 // Placeholder input from the zod source: top-level keys of the first z.object({...}).
-const skeleton = (zodText) => {
+// A field whose type is a named schema (goalNameSchema, FooValidator) resolves through the
+// resolver so it prefills as its real type rather than an empty string.
+const skeleton = async (zodText, resolve) => {
   const at = zodText.indexOf("z.object(");
   if (at < 0) return {};
   const body = balanced(zodText, zodText.indexOf("{", at));
@@ -60,25 +62,8 @@ const skeleton = (zodText) => {
           else if (")}]".includes(body[j])) d--;
           j++;
         }
-        const v = body.slice(valueStart, j);
-        const optional = /\.(optional|default|nullish)\((?:[^()]|\([^()]*\))*\)\s*$/.test(v.trim());
-        if (!optional) {
-          out[m[1]] = /\.nullable\(\)\s*$/.test(v.trim())
-            ? null
-            : /^z\.array\(\s*z\.object\(/.test(v)
-              ? [skeleton(v.slice(v.indexOf("z.object(")))]
-            : /^z\.(string|enum|literal|nativeEnum)/.test(v)
-              ? ""
-              : /^z\.(number|coerce\.number)/.test(v)
-                ? 0
-                : /^z\.boolean/.test(v)
-                  ? false
-                  : /^z\.array/.test(v)
-                    ? []
-                    : /^z\.(object|record)/.test(v)
-                      ? {}
-                      : "";
-        }
+        const value = await valueOf(body.slice(valueStart, j), resolve);
+        if (value !== SKIP) out[m[1]] = value;
         i = j + 1;
         continue;
       }
@@ -86,6 +71,41 @@ const skeleton = (zodText) => {
     i++;
   }
   return out;
+};
+
+const SKIP = Symbol("optional");
+
+const valueOf = async (raw, resolve, hops = 0) => {
+  const v = raw.trim();
+  if (/\.(optional|default|nullish)\((?:[^()]|\([^()]*\))*\)\s*$/.test(v)) return SKIP;
+  if (/\.nullable\(\)\s*$/.test(v)) return null;
+  if (/^z\.array\(\s*z\.object\(/.test(v)) return [await skeleton(v.slice(v.indexOf("z.object(")), resolve)];
+  if (/^z\.array\(/.test(v)) return [];
+  if (/^z\.(string|coerce\.string)/.test(v)) return "";
+  if (/^z\.(number|coerce\.number)/.test(v)) return 0;
+  if (/^z\.(boolean|coerce\.boolean)/.test(v)) return false;
+  if (/^z\.(date|coerce\.date)/.test(v)) return new Date().toISOString();
+  if (/^z\.(enum|nativeEnum)\(/.test(v)) {
+    const first = /["'`]([^"'`]+)["'`]/.exec(balanced(v, v.indexOf("(")));
+    return first ? first[1] : "";
+  }
+  if (/^z\.literal\(/.test(v)) {
+    const lit = /\(\s*["'`]?([^"'`)]+)["'`]?\s*\)/.exec(v);
+    return lit ? lit[1] : "";
+  }
+  if (/^z\.(object|record)\(/.test(v)) return v.startsWith("z.object(") ? await skeleton(v, resolve) : {};
+  if (/^z\.union\(|^z\.discriminatedUnion\(/.test(v)) {
+    const inner = balanced(v, v.indexOf("["));
+    const first = inner.slice(1).trim();
+    return first.startsWith("z.") ? await valueOf(first.replace(/,[\s\S]*$/, ""), resolve, hops + 1) : {};
+  }
+  // a named schema: resolve it and read the definition instead
+  const named = /^([A-Za-z_$][\w$]*)/.exec(v);
+  if (named && !v.startsWith("z.") && hops < 2 && resolve) {
+    const def = await resolve(named[1]);
+    if (def) return await valueOf(def + v.slice(named[1].length), resolve, hops + 1);
+  }
+  return "";
 };
 
 const importsOf = (src, fromFile) => {
@@ -159,14 +179,38 @@ const definitionOf = async (name, file, src) => {
   return read ? definitionOf(name, read.file, read.src) : null;
 };
 
-const procedureFrom = (path, text) => {
+const procedureFrom = async (path, text, file, src) => {
   const kindAt = text.search(/\.(query|mutation|subscription)\(/);
   if (kindAt < 0) return null;
   const kind = /\.(query|mutation|subscription)\(/.exec(text)[1];
   const builder = /^(\w+)/.exec(text.trim())?.[1] ?? "";
+  const resolve = async (name) => (await definitionOf(name, file, src))?.text ?? null;
+  const zod = await zodInputOf(text.slice(0, kindAt), file, src, resolve);
+  return { path, kind, builder, zod, input: await skeleton(zod, resolve) };
+};
+
+// The input schema is inline (`loopsAuth({ input: z.object(…) })`), or it lives in a const the
+// builder is handed whole (`loopsAuth(getFullJob)`), or the `input:` value is itself a named
+// schema. Follow whichever it is.
+const zodInputOf = async (text, file, src, resolve, hops = 0) => {
+  const keyed = /(?:^|[^\w.])input\s*:\s*/.exec(text);
+  if (keyed) {
+    const rest = text.slice(keyed.index + keyed[0].length);
+    if (rest.startsWith("z.")) return balancedExpr(rest, 0);
+    const name = /^([A-Za-z_$][\w$]*)/.exec(rest)?.[1];
+    if (name && hops < 2) {
+      const def = await resolve(name);
+      if (def) return def.trim().startsWith("z.") ? def.trim() : await zodInputOf(def, file, src, resolve, hops + 1);
+    }
+  }
   const z = text.indexOf("z.");
-  const zod = z >= 0 && z < kindAt ? balancedExpr(text, z) : "";
-  return { path, kind, builder, zod, input: skeleton(zod) };
+  if (z >= 0) return balancedExpr(text, z);
+  const arg = /^\w+\(\s*([A-Za-z_$][\w$]*)\s*\)/.exec(text.trim())?.[1];
+  if (arg && hops < 2) {
+    const def = await resolve(arg);
+    if (def) return await zodInputOf(def, file, src, resolve, hops + 1);
+  }
+  return "";
 };
 
 // Walks a createTRPCRouter({...}) body: an entry resolving to another router recurses, one
@@ -192,7 +236,7 @@ const walkRouter = async (file, src, routerText, prefix, out, seen) => {
       await walkRouter(def.file, def.src, def.text, `${prefix}${key}.`, out, seen);
       continue;
     }
-    const proc = procedureFrom(`${prefix}${key}`, def.text);
+    const proc = await procedureFrom(`${prefix}${key}`, def.text, def.file, def.src);
     if (proc) out.push(proc);
   }
 };
@@ -515,7 +559,7 @@ const page = ({ procedures, tool }) => `<!doctype html>
         <input id="path" class="path" placeholder="incomingWebook.updateWebhook" />
         <button id="send" class="primary" disabled>Send</button>
       </div>
-      <p class="hint">Input JSON — sent as <code>{ "json": … }</code> (superjson).</p>
+      <p class="hint">Input — sent as <code>{ "json": … }</code> (superjson). Strict JSON, a JS object literal, or a whole <code>{"json":…}</code> body pasted from the network tab all work.</p>
       <textarea id="input" spellcheck="false">{}</textarea>
       <details id="zodBox"><summary>input schema (from source)</summary><pre id="zod"></pre></details>
     </div>
@@ -571,9 +615,24 @@ function show(d) {
   $("out").textContent = typeof data === "string" ? data : JSON.stringify(data, null, 2);
 }
 
+// Paste what you have: strict JSON, a JS object literal copied out of the source, or a whole
+// { "json": … } superjson body lifted from the network tab — all mean the same input.
+function parseInput(text) {
+  const raw = text.trim();
+  if (!raw) return null;
+  let value;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    value = Function('"use strict"; return (' + raw + ")")();
+  }
+  const keys = value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+  return keys.length === 1 && keys[0] === "json" ? value.json : value;
+}
+
 $("send").onclick = async () => {
   let input;
-  try { input = JSON.parse($("input").value || "null"); } catch (err) { $("out").textContent = "Invalid JSON: " + err.message; return; }
+  try { input = parseInput($("input").value); } catch (err) { $("out").textContent = "Can't read that input: " + err.message; return; }
   const path = $("path").value.trim(), kind = $("kind").value;
   if (!path) return;
   if (bridgeOrigin === PROD && kind === "mutation" && !confirm("Run a MUTATION against PRODUCTION?")) return;
