@@ -63,7 +63,7 @@ export function useNodeMutations(deps: {
   // it — config-only, keeps every commit; GitHub Desktop then offers Publish, not a Pull.
   const detachUpstream = createMutation(() => ({
     mutationFn: (branch: string) =>
-      fetch("/fix-upstream", {
+      fetch(withRepo("/fix-upstream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch }),
@@ -76,7 +76,7 @@ export function useNodeMutations(deps: {
   // unlike a full restack. Local only; conflicts leave that subtree parked for a manual pass.
   const reseatChildren = createMutation(() => ({
     mutationFn: (parent: string) =>
-      fetch("/reseat-children", {
+      fetch(withRepo("/reseat-children"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ branch: parent }),

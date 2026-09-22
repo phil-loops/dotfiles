@@ -1,6 +1,6 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
-import { provider, canMutate } from "./provider";
+import { provider, canMutate, withRepo } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { track } from "./track";
 import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
@@ -19,7 +19,7 @@ type Cmd = { label: string; sub?: string; run: () => void };
 
 const leaf = (s: string) => (s || "").split("/").pop() ?? "";
 const post = (url: string, body: unknown) =>
-  fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  fetch(withRepo(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 export default function CommandPalette() {
   const [open, setOpen] = createSignal(false);
