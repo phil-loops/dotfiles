@@ -218,11 +218,21 @@ export function ForestMap(props: {
   // thing land clean? Result keyed by project, shown as a badge on the ghost.
   type Playground = { path?: string; exists?: boolean; dirty?: boolean; fresh?: boolean };
   type Integ = {
-    loading?: boolean; opening?: boolean; clean?: boolean; detail?: string;
+    loading?: boolean; opening?: boolean; clean?: boolean; failed?: boolean; detail?: string;
     playground?: Playground; cdCopied?: boolean; armReset?: boolean;
     hereBusy?: boolean; hereDone?: boolean; herePrev?: string; hereErr?: string;
   };
   const [integ, setInteg] = createSignal<Record<string, Integ>>({});
+  // A verdict describes ONE shape of the forest. A restack, a contraction or a new commit makes it
+  // a claim about a forest that no longer exists, and nothing was clearing it — the badge kept
+  // answering for the old shape until the tab was reloaded (2026-09-22). Drop it when the shape moves.
+  const forestStamp = createMemo(() =>
+    props.spine().map((n) => `${n.id}:${n.total ?? ""}:${n.stale ?? ""}:${n.clean ?? ""}`).join("|"));
+  createEffect((prev: string | undefined) => {
+    const now = forestStamp();
+    if (prev !== undefined && prev !== now) setInteg({});
+    return now;
+  });
   const ghostProject = (id: string) => id.replace(/^✦\s*/, "");
   const runIntegrate = async (id: string) => {
     if (!canMutate) return; // static snapshot: no live integrate-preview
@@ -237,7 +247,9 @@ export function ForestMap(props: {
       const d = await r.json();
       setInteg((s) => ({ ...s, [project]: { clean: !!d.clean, detail: d.detail || "", playground: d.playground || {} } }));
     } catch {
-      setInteg((s) => ({ ...s, [project]: { clean: false, detail: "integrate check failed — is the server up?" } }));
+      // A check that never ran is NOT a conflict: painting the two the same way told a reviewer
+      // their forest was broken when the server had merely gone away (2026-09-22).
+      setInteg((s) => ({ ...s, [project]: { failed: true, detail: "integrate check could not run — is the server up?" } }));
     }
   };
   // clean integration → the ghost grows a pill (the ghost-verb slot): check the whole
@@ -942,9 +954,11 @@ export function ForestMap(props: {
                       {integ()[ghostProject(n.id)]?.loading
                         ? "checking…"
                         : integ()[ghostProject(n.id)]
-                          ? integ()[ghostProject(n.id)]!.clean
-                            ? "✓ lands clean"
-                            : "⚠ conflicts"
+                          ? integ()[ghostProject(n.id)]!.failed
+                            ? "↻ check failed — retry"
+                            : integ()[ghostProject(n.id)]!.clean
+                              ? "✓ lands clean"
+                              : "⚠ conflicts"
                           : "▸ preview"}
                       <Show when={integ()[ghostProject(n.id)]?.detail}>
                         <title>{integ()[ghostProject(n.id)]!.detail}</title>
