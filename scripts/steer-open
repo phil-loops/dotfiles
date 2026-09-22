@@ -28,7 +28,7 @@ parent=$(git config "branch.${branch}.stack-parent" 2>/dev/null || git config "s
 "$SCRIPTS/stack-open" --prepare "$branch" >/dev/null 2>&1 || true
 wt=$(git worktree list --porcelain | awk -v ref="refs/heads/$branch" \
   '/^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}')
-[[ -n "$wt" ]] || wt="${STACK_OPEN_DIR:-/tmp/stack-study}/${branch//\//_}"
+[[ -n "$wt" ]] || wt="${STACK_OPEN_DIR:-$HOME/Library/Caches/stack-study}/${branch//\//_}"
 
 # pick the file to steer: explicit arg → top-changed .ts/.tsx → first changed file
 relpath="$want"

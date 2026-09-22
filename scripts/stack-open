@@ -24,7 +24,9 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
-SCRATCH="${STACK_OPEN_DIR:-/tmp/stack-study}"
+# Not /tmp: macOS tmp_cleaner nightly deletes /tmp files unread for 3 days — source, gitfiles and all.
+SCRATCH="${STACK_OPEN_DIR:-$HOME/Library/Caches/stack-study}"
+LEGACY_SCRATCH=/tmp/stack-study
 SOCK="${STACK_OPEN_SOCK:-/tmp/stack-review-nvim.sock}"
 SESSION="${STACK_OPEN_TMUX:-loops}"
 
@@ -722,7 +724,7 @@ else
   pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
   # lazy self-clean, two rungs: shed regenerable weight after a day idle, remove the worktree
   # after three. Drops our pipes so it can't block a piped caller.
-  ( strip_fat 1; prune_old 3 ) >/dev/null 2>&1 &!
+  ( strip_fat 1; prune_old 3; [[ -z "${STACK_OPEN_DIR:-}" ]] && SCRATCH=$LEGACY_SCRATCH prune_old 3 ) >/dev/null 2>&1 &!
   dir=$(ensure_worktree "$branch")
 fi
 file="$dir/$rel"

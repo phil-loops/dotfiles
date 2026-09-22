@@ -17,7 +17,7 @@ project root) and nearly free, so only a REAL clone with no live process is recl
 
 In use means any process has its cwd inside the tree (a preview server, a Claude session, an
 editor shell). Idle for .next means the newest of: the directory's mtime, its .git gitfile,
-and every file git status reports as changed. Review scratch under /private/tmp/stack-study
+and every file git status reports as changed. Review scratch under ~/Library/Caches/stack-study
 belongs to stack-open's own ladder and is skipped, as are the main checkout and dot-prefixed
 tooling trees.
 

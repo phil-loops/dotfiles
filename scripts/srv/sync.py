@@ -623,7 +623,7 @@ def _eject_worktree(branch):
     wt = _worktree_of(branch)
     if wt:
         return wt
-    scratch = os.environ.get("STACK_OPEN_DIR", "/tmp/stack-study")
+    scratch = os.environ.get("STACK_OPEN_DIR", os.path.expanduser("~/Library/Caches/stack-study"))
     return os.path.join(scratch, branch.replace("/", "_"))
 
 

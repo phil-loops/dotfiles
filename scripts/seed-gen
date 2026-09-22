@@ -567,7 +567,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     exit 0
   fi
 
-  scratch=$(realpath_of "${STACK_OPEN_DIR:-/tmp/stack-study}")
+  scratch=$(realpath_of "${STACK_OPEN_DIR:-$HOME/Library/Caches/stack-study}")
   if [[ -n "$scratch" && "$(realpath_of "$dir")" == "$scratch"/* ]]; then
     # Nothing in a scratch tree rebuilds .gen on the async path, so a private copy is 17M of
     # types frozen at whenever it was seeded — including the 47 the pre-2026-07-22 seeders left
