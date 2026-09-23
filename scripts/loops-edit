@@ -1,0 +1,138 @@
+#!/usr/bin/env zsh
+# loops-edit — edit a Loops email (campaign / loop / transactional) in $EDITOR via the loops CLI.
+#
+#   loops-edit [-s] [-w] <emailMessageId | campaignId | app URL>
+#
+#   -s  staging (app.l3s.email) — bare `loops` talks to prod
+#   -w  watch: push on every save while the editor is open (the app updates live over SSE)
+#
+# The file is frontmatter (subject, preview text, sender) + the LMX body. Only changed
+# fields are sent, guarded by the contentRevisionId pulled at open — a concurrent edit in
+# the app fails the push instead of being clobbered.
+emulate -L zsh
+
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; }
+
+watch=0
+while getopts "swh" opt; do
+  case $opt in
+    s) export LOOPS_ENDPOINT_URL=https://app.l3s.email/api/v1 ;;
+    w) watch=1 ;;
+    *) usage; exit 0 ;;
+  esac
+done
+shift $((OPTIND - 1))
+[[ -n $1 ]] || { usage >&2; exit 2; }
+
+ref=$1
+[[ $ref =~ '/(c[a-z0-9]{20,})' ]] && ref=$match[1]
+
+dir=$(mktemp -d "${${TMPDIR:-/tmp}%/}/loops-edit.XXXXXX")
+json=$dir/remote.json
+
+if ! loops email-messages get "$ref" -o json >$json 2>/dev/null; then
+  if ! loops campaigns get "$ref" -o json >$dir/parent.json 2>/dev/null; then
+    print -u2 "loops-edit: no email message or campaign '$ref' (endpoint: ${LOOPS_ENDPOINT_URL:-prod})"
+    exit 1
+  fi
+  ref=$(jq -r .emailMessageId $dir/parent.json)
+  loops email-messages get "$ref" -o json >$json
+fi
+
+id=$(jq -r .id $json)
+jq -r .contentRevisionId $json >$dir/rev
+file=$dir/${id}.lmx.md
+fields=(subject previewText fromName fromEmail replyToEmail)
+typeset -A flag_for=(
+  subject --subject previewText --preview-text fromName --from-name
+  fromEmail --from-email replyToEmail --reply-to
+)
+
+render() {
+  print -- ---
+  for f in $fields; print -r -- "$f: $(jq -r ".$f // \"\"" $1)"
+  print -- ---
+  jq -r .lmx $1
+}
+
+field() { awk -v k="$2" 'NR>1 && /^---$/ {exit} NR>1 && index($0, k": ")==1 {print substr($0, length(k)+3)}' $1; }
+body() { awk 'f {print} /^---$/ {n++; if (n==2) f=1}' $1; }
+header_lines() { awk '/^---$/ {n++; if (n==2) {print NR; exit}}' $1; }
+
+render $json >$file
+cp $file $dir/pushed
+
+# push: 0 pushed, 1 nothing changed, 2 rejected (message in $dir/err)
+push() {
+  local args=() f
+  for f in $fields; do
+    [[ "$(field $file $f)" == "$(field $dir/pushed $f)" ]] || args+=($flag_for[$f] "$(field $file $f)")
+  done
+  body $file >$dir/body.lmx
+  body $dir/pushed | cmp -s - $dir/body.lmx || args+=(--lmx-file $dir/body.lmx)
+  (( $#args )) || return 1
+
+  if loops email-messages update $id -r $(<$dir/rev) $args -o json >$dir/out.json 2>&1; then
+    jq -r .contentRevisionId $dir/out.json >$dir/rev
+    cp $file $dir/pushed
+    return 0
+  fi
+  local msg=$(jq -r '.message // empty' $dir/out.json 2>/dev/null)
+  [[ -n $msg ]] || msg=$(<$dir/out.json)
+  local off=$(header_lines $file)
+  if [[ $msg =~ '^line ([0-9]+):([0-9]+): (.*)' ]]; then
+    msg="$file:$((match[1] + off)):${match[2]}: ${match[3]}"
+  fi
+  print -r -- $msg >$dir/err
+  return 2
+}
+
+editor=${VISUAL:-${EDITOR:-hx}}
+
+if (( watch )); then
+  (
+    last=$(cksum <$file)
+    while sleep 0.5; do
+      now=$(cksum <$file 2>/dev/null) || exit 0
+      [[ $now == $last ]] && continue
+      last=$now
+      sleep 0.3
+      push
+      rc=$?
+      if (( rc == 0 )); then
+        print "$(date +%T) pushed" >>$dir/log
+      elif (( rc == 2 )); then
+        print -r "$(date +%T) $(<$dir/err)" >>$dir/log
+        osascript -e "display notification \"$(tr -d '"\\' <$dir/err | head -c 200)\" with title \"loops-edit: push rejected\"" 2>/dev/null
+      fi
+    done
+  ) &
+  poller=$!
+  $=editor $file
+  kill $poller 2>/dev/null
+  wait $poller 2>/dev/null
+  [[ -f $dir/log ]] && cat $dir/log
+  push && print "$(date +%T) pushed"
+  cmp -s $file $dir/pushed && { rm -rf $dir; exit 0; }
+  print -u2 "loops-edit: last save not pushed — your edits are in $file"
+  exit 1
+fi
+
+while true; do
+  $=editor $file
+  push
+  rc=$?
+  (( rc == 0 )) && { print "pushed $id (revision $(<$dir/rev))"; rm -rf $dir; exit 0; }
+  (( rc == 1 )) && { print "no changes"; rm -rf $dir; exit 0; }
+  print -u2 -r -- "rejected: $(<$dir/err)"
+  if [[ $(<$dir/err) == *contentRevisionId\ mismatch* ]]; then
+    read -q -u0 "?someone else edited it — overwrite their changes with yours? [y/N] " && {
+      print; loops email-messages get $id -o json | jq -r .contentRevisionId >$dir/rev
+      push && { print "pushed $id (revision $(<$dir/rev))"; rm -rf $dir; exit 0; }
+      print -u2 -r -- "rejected: $(<$dir/err)"
+    }
+    print
+  fi
+  read -k1 -u0 "reply?re-open the editor? [Y/n] "; print
+  [[ $reply == [nN] ]] && { print -u2 "edits kept in $file"; exit 1; }
+done
