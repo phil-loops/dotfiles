@@ -72,12 +72,18 @@ if [[ "$1" == "--edit" ]]; then
   exit 0
 fi
 
-# --- ↗ open a todo's link. A blessing-viewer URL (…?branch=X) is routed through
+# --- ↗ open a todo's link. A blessing-viewer URL is routed through
 # stack-review-serve (reuse-or-start the server); anything else opens raw.
+# Two shapes: the current /forests/<name>, and ?branch=<name> as stored by todos
+# written before that param was pruned.
 if [[ "$1" == "--open" ]]; then
   url="$2"
-  if [[ "$url" == *"127.0.0.1"*"branch="* ]]; then
-    branch="${url##*branch=}"; branch="${branch%%&*}"
+  if [[ "$url" == *"127.0.0.1"*"/forests/"* || "$url" == *"127.0.0.1"*"branch="* ]]; then
+    if [[ "$url" == *"/forests/"* ]]; then
+      branch="${url##*/forests/}"; branch="${branch%%\#*}"; branch="${branch%%\?*}"
+    else
+      branch="${url##*branch=}"; branch="${branch%%&*}"
+    fi
     ( cd "$HOME/coding/loops" && nohup "$HOME/.dotfiles/scripts/stack-review-serve" "$branch" >/dev/null 2>&1 </dev/null & )
   else
     open "$url" 2>/dev/null

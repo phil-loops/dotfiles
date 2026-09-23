@@ -44,10 +44,7 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   const [head, ...rest] = pathname.split("/").filter(Boolean);
 
   if (!head) {
-    // legacy launch entry: `stack web <name>` opens /?branch=<name> — honour it as a forest
-    // (RouterProvider canonicalises the URL to /forests/<name> on load).
-    const branch = new URLSearchParams(search).get("branch");
-    return branch ? { kind: "forest", name: branch } : { kind: "home", tab: "work" };
+    return { kind: "home", tab: "work" };
   }
   // /forests is the home tab; /forests/<project>[/<branch...>] is a forest — project is one
   // segment, the active node (a branch, slashes and all) is the tail.
@@ -161,10 +158,6 @@ const Ctx = createContext<RouterCtx>();
 export function RouterProvider(props: { children: JSX.Element }) {
   const read = (): ViewerLocation => parseLocation(window.location.pathname, window.location.search);
   const [location, setLocation] = createSignal<ViewerLocation>(read());
-  // Canonicalise a legacy launch URL (`/?branch=<name>`) to its clean path so the bar reads right.
-  if (window.location.pathname === "/" && new URLSearchParams(window.location.search).get("branch")) {
-    history.replaceState(null, "", buildPath(location()));
-  }
   // Back/forward fire popstate; pushState/replaceState do NOT, so navigate() syncs by hand.
   const onPop = () => setLocation(read());
   window.addEventListener("popstate", onPop);

@@ -292,7 +292,7 @@ if not node_mode and target == "--pr-state":
 
 # ---- project list (the picker) -------------------------------------------
 # names + branch counts + the mergeable seed branches — no git diffs, instant. The
-# browser shows these as buttons; clicking one opens ?branch=<name> (resolved below).
+# browser shows these as buttons; clicking one opens /forests/<name> (resolved below).
 if not node_mode and target == "--projects":
     include_archived = "--all" in argv[1:]
     print(json.dumps([{"name": n, "branches": len(expand(seeds[n], n)),
@@ -308,7 +308,7 @@ if not node_mode and target == "--projects":
 # `stack.standalone`), NOT auto-discovery. With ~1.5k stale local heads in a real
 # repo, auto-listing every loose branch is noise — so nothing shows unless added.
 # Each pinned branch that still exists emits a row {branch, commits, add, del};
-# in the picker each opens as its own one-root view (?branch=X → expand([X])). A
+# in the picker each opens as its own one-root view (/forests/X → expand([X])). A
 # pinned branch is shown regardless of ahead-ness (you chose it); only a deleted
 # ref drops out. numstat per branch, fanned out — the list is small by design.
 if not node_mode and target == "--standalone":

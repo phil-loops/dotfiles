@@ -33,7 +33,7 @@ case "${1:-}" in
     # browser is Chrome that lands in Chrome too. Detach so it survives SwiftBar
     # reaping the click process.
     if is_up; then
-      open -a "$chrome" "${base}/${2:+?branch=$2}"
+      open -a "$chrome" "${base}/${2:+forests/$2}"
     else
       ( cd "$repo" && nohup "$serve" "${2:-}" >/dev/null 2>&1 </dev/null & )
     fi
