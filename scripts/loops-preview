@@ -597,7 +597,12 @@ tmux kill-session -t "$SESSION" 2>/dev/null || true
 # endless build-manifest ENOENTs.
 rm -rf "$DIR/.next"
 "$HOME/.dotfiles/scripts/loops-provenance" "$DIR" --no-agent >/dev/null 2>&1 || true  # best-effort X-Dev-Worktree stamp
-tmux new-session -d -s "$SESSION" "cd '$DIR' && $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
+# BASE_URL must name THIS preview's port. The session cookie is host-scoped so it carries
+# from :3000 to any preview port for free, but an Origin is port-specific — so a server
+# that still thinks it is :3000 rejects every session-backed write from a preview tab as
+# cross-origin (loops#10650) and the tab reads as logged out. NEXTAUTH_URL stays whatever
+# .env says, so sign-in is untouched.
+tmux new-session -d -s "$SESSION" "cd '$DIR' && BASE_URL=http://localhost:$PORT $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
 if [ -n "$JOBS" ]; then
   JLOG="/tmp/$SESSION-jobs.log"
   tmux new-window -t "$SESSION" -n jobs "cd '$DIR' && $QUEUE_ENV HEALTH_PORT=$JPORT npx tsx --watch --watch-preserve-output --tsconfig lib/job-queue/tsconfig.json --import dotenv/config lib/job-queue/index.js '$QUEUE_URL' 10 > '$JLOG' 2>&1"
