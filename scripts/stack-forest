@@ -12,7 +12,7 @@ Two modes (the server maps endpoints to them):
       since-blessed delta). Expensive, but scoped to a single node and fetched
       lazily when you actually look at it.
 
-Resolution matches stack-review: parents/children from stack-branch.*.parent,
+Resolution: parents/children from stack-branch.*.parent,
 seeds from stack-project.*.branch, expand along the pointers. Bounded to the
 project's connected component.
 """

@@ -40,5 +40,5 @@ Conflicts: resolve them yourself, honestly; a real overlapping-logic conflict �
 ## Reviewing
 
 - **`stack web [<project>]`** — the primary review surface (browser; per-repo port from `stack-review-port`; reads git config live). This is where Phil reviews.
-- **`wt [base]`** — cross-worktree, single-branch cumulative diff picker. **`stack review`** — legacy nvim stepping, offline only.
+- **`wt [base]`** — cross-worktree, single-branch cumulative diff picker.
 - The viewer also has mutating endpoints (`/checkout` moves the main working tree, `/squash`, `/restack`, `/prep`, …) and a read-only per-file `✦ chat`. Bouncing the server is safe and free — state is durable (gates verdicts in git config keyed by tree SHA; detached runs re-adopted via sidecar). The two hard taboos (probe mutating routes only with `__probe__`, never hand-write `gates-green-tree`) live in the spine.

@@ -1,5 +1,5 @@
 -- Review Bindings - shared keybindings for reviewing branches with blessing
--- Used by both stack-review.lua and branch-review.lua
+-- Used by branch-review.lua
 --
 -- ctx = {
 --   get_branch()  -> string       current branch being reviewed

@@ -2,23 +2,19 @@
 # Stack List - print all registered stack-projects in this repo, optionally fzf-pick.
 # Usage: stack list                 # pretty-print all projects
 #        stack list <project>       # print dependency tree for one project
-#        stack list --pick          # fzf-pick, open in stack review
-#        stack list --pick --echo   # fzf-pick, print chosen name (no open)
+#        stack list --pick          # fzf-pick, print the chosen name
 #        stack list --names         # one name per line (for completion/scripts)
-# Any extra args (e.g. --html) after --pick are forwarded to `stack review`.
 
 set -e
 
 PICK=0
 NAMES_ONLY=0
-ECHO_ONLY=0
 TARGET=""
 FORWARD=()
 for arg in "$@"; do
   case "$arg" in
     --pick|-p) PICK=1 ;;
     --names) NAMES_ONLY=1 ;;
-    --echo) ECHO_ONLY=1 ;;
     --*) FORWARD+=("$arg") ;;
     *) [[ -z "$TARGET" ]] && TARGET="$arg" || FORWARD+=("$arg") ;;
   esac
@@ -118,11 +114,8 @@ if (( PICK )); then
       --reverse
   ) || exit 130
   name="${chosen%%$'\t'*}"
-  if (( ECHO_ONLY )); then
-    echo "$name"
-    exit 0
-  fi
-  exec ~/.dotfiles/scripts/stack-review "$name" "${FORWARD[@]}"
+  echo "$name"
+  exit 0
 fi
 
 # Default: pretty print.

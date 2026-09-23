@@ -62,22 +62,6 @@ stack() {
     shift 2>/dev/null
 
     case "$cmd" in
-        review)
-            # No arg: if the current branch is part of a stack (has a
-            # recorded parent), let stack-review auto-resolve it — it
-            # upgrades any member branch to its project view. Only when
-            # we're not on a stack at all (e.g. main) do we fzf-pick.
-            if (( $# == 0 )); then
-                local cur=$(git branch --show-current 2>/dev/null)
-                if [[ -z "$(git config stack-branch.${cur}.parent 2>/dev/null)" ]]; then
-                    local picked=$(~/.dotfiles/scripts/stack-list --pick) || return $?
-                    [[ -z "$picked" ]] && return 130
-                    ~/.dotfiles/scripts/stack-review "$picked"
-                    return $?
-                fi
-            fi
-            ~/.dotfiles/scripts/stack-review "$@"
-            ;;
         web)
             # live blessing-aware browser review of a project (illuminated
             # ledger): tree-rail, graph map, since-blessed deltas, live bless.
@@ -86,7 +70,7 @@ stack() {
             local web_target="$1"
             if [[ -z "$web_target" ]]; then
                 if [[ -t 1 ]]; then
-                    web_target=$(~/.dotfiles/scripts/stack-list --pick --echo) || return $?
+                    web_target=$(~/.dotfiles/scripts/stack-list --pick) || return $?
                     [[ -z "$web_target" ]] && return 130
                 else
                     ~/.dotfiles/scripts/stack-list
@@ -164,7 +148,6 @@ stack() {
         *)
             echo "Usage: stack <command>        (loops is the Loops CLI again — no longer shadowed)"
             echo ""
-            echo "  stack review [project|branch]    review stack in nvim diffview"
             echo "  stack web [project|branch]       live blessing review in the browser"
             echo "  stack list [--pick]              list registered stack-projects"
             echo "  stack integrate <project>        build virtual integration ref"
@@ -310,7 +293,7 @@ stack-print() {
 # Inspect a sibling git worktree's diff without touching the current checkout.
 # Default: open in nvim (DiffviewOpen). --html: render as side-by-side HTML and open in the browser.
 # Usage: wt [base-branch] [--html|-H]   (base defaults to main)
-# For stack-aware review, use `stack review` (which also accepts --html).
+# For stack-aware review, use `stack web` (the forest viewer).
 wt() {
     local base="main"
     local html=0
