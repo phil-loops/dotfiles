@@ -406,13 +406,15 @@ else
   find "$DIR" -maxdepth 1 \( -name '.node_modules.staging.*' -o -name '.node_modules.retired.*' \) \
     -mmin +60 -exec rm -rf {} + 2>/dev/null || true
 
-  # a seed-gen "repointed" tree (per-entry symlinks out to MAIN) boots next fine but Turbopack
+  # a seed-gen "repointed" tree (per-entry symlinks out to the donor) boots next fine but Turbopack
   # refuses out-of-root symlinks — zero compile, every request 500s on missing build manifests.
+  # Match ANY absolute link leaving the checkout, not just MAIN: since 2026-09-22 the donor is
+  # `stack-donor` (~/Library/Caches/loops-donor), and a MAIN-only match missed the whole farm.
   # Two runs racing in one checkout leave a HYBRID (real top-level dirs, nested @scope/pkg + .prisma
-  # links; 2026-09-03), so scan two levels deep — MAIN's own pkg/pkg self-links are benign, skip them.
+  # links; 2026-09-03), so scan two levels deep — pkg/pkg self-links are benign, skip them.
   nm_stale=""
-  if [ -d "$DIR/node_modules" ] && [ -n "$(find "$DIR/node_modules" -maxdepth 2 -type l -lname "$MAIN/*" 2>/dev/null | awk -F/ '$NF != $(NF-1)' | head -1)" ]; then
-    nm_stale="node_modules entries are symlinks to MAIN (Turbopack-fatal)"
+  if [ -d "$DIR/node_modules" ] && [ -n "$(find "$DIR/node_modules" -maxdepth 2 -type l -lname '/*' ! -lname "$DIR/*" 2>/dev/null | awk -F/ '$NF != $(NF-1)' | head -1)" ]; then
+    nm_stale="node_modules entries are symlinks out of the checkout (Turbopack-fatal)"
   elif [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && [ "$MAIN/package-lock.json" -nt "$DIR/node_modules" ]; then
     nm_stale="MAIN reinstalled since this clone"
   elif [ -d "$DIR/node_modules" ] && [ ! -L "$DIR/node_modules" ] && ! nm_complete "$DIR/node_modules"; then
