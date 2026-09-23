@@ -33,6 +33,9 @@ export const NodeMeta = z.object({
   churn: z.array(z.string()).optional(),
   // one-line branch purpose (git branch.<name>.description), grafted on by /model.
   description: z.string().optional(),
+  // this node's OWN Linear ticket (branch.<name>.stack-ticket, lowercased), grafted on by
+  // /model. Absent = the node inherits the forest's ForestModel.ticket.
+  ticket: z.string().optional(),
   // deterministic merge-order depth (stack-merge-rank), grafted on by /model. Canonical
   // order = stable sort by mergeRank asc. Shared authority with stack-pr-body — see _enrich.
   mergeRank: z.number().optional(),

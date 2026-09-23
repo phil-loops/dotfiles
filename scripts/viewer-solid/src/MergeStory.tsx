@@ -31,6 +31,7 @@ type Step = {
   why: string; // the description's remainder past the first clause — "" when it's one clause
   purpose: string; // the full plain description, sent to the LLM polish
   hasPurpose: boolean;
+  ticket?: string; // this node's own sub-issue — absent = it inherits the forest's
   buildsOn: number | null; // parent position — a CODE dep (this branch is stacked on it)
   requires: number[]; // requires positions — MERGE-AFTER fan-in deps (separate bases off main)
   depth: number; // how deep in the parent (builds-on) chain — drives the visual indent
@@ -122,6 +123,7 @@ export default function MergeStory(props: {
         why,
         purpose: m?.description ?? "",
         hasPurpose: !!m?.description,
+        ticket: m?.ticket,
         buildsOn: parent ? (pos.get(parent) ?? null) : null,
         requires: reqs.map((r) => pos.get(r) ?? 0).filter((n) => n > 0).sort((a, b) => a - b),
         depth: depthOf(id),
@@ -131,6 +133,8 @@ export default function MergeStory(props: {
   });
 
   const scope = () => props.model?.ticket ?? leafOf(props.project);
+  // a node answering its own sub-issue scopes to that, not to the forest's epic
+  const scopeOf = (ticket?: string) => ticket ?? scope();
 
   // opt-in LLM pass: crisp each subject AND read the node's diff for one non-trivial detail.
   const [polished, setPolished] = createSignal<Record<string, { subject?: string; detail?: string }>>({});
@@ -312,7 +316,7 @@ export default function MergeStory(props: {
                     class={`ms-type ${s.type === "refactor" ? "text-[#e0ad4e]" : "text-patina"}`}
                     classList={{ refactor: s.type === "refactor" }}
                   >{s.type}</span>
-                  <span class="ms-scope text-ink-dim">({scope()})</span>: {subj()}
+                  <span class="ms-scope text-ink-dim">({scopeOf(s.ticket)})</span>: {subj()}
                 </code>
                 <Show when={sub() && sub() !== subj()}>
                   <p class="ms-detail mt-[2px] mx-0 mb-0 max-w-[64ch] text-[12px] leading-[1.55] text-ink-dim">{sub()}</p>

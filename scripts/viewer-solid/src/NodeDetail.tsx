@@ -45,6 +45,8 @@ export function NodeDetail() {
     nodeParam() || spine().find((n) => (n.total ?? 0) > 0)?.id || spine()[0]?.id || project();
   const parentOf = () => model.data?.nodes?.[active()]?.parent;
   const interestOf = () => model.data?.interest ?? 0;
+  const ticketOf = () => model.data?.nodes?.[active()]?.ticket;
+  const forestTicket = () => model.data?.ticket;
   // remember the node you're on, so popping back to the forest map highlights where you were.
   createEffect(() => active() && setCameFrom(active()));
 
@@ -328,6 +330,8 @@ export function NodeDetail() {
           active={active}
           parentOf={parentOf}
           interestOf={interestOf}
+          ticketOf={ticketOf}
+          forestTicket={forestTicket}
           reseatChildren={reseatChildren}
           detachUpstream={detachUpstream}
           bumpInterest={bumpInterest}

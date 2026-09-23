@@ -320,12 +320,16 @@ diffstat = git(["diff", "--stat", f"{base}...{branch}"]).stdout.strip()
 patch = git(["diff", f"{base}...{branch}"]).stdout
 patch_clip = "\n".join(patch.splitlines()[:300])   # keep the prompt bounded
 
-# scope comes from the forest project — or its Linear ticket when one is tied
-# (stack-project.<p>.ticket) — not the code area the voice corpus (main) teaches
+# scope comes from the forest project — or its Linear ticket when one is tied — not the code
+# area the voice corpus (main) teaches. The branch's OWN ticket
+# (branch.<b>.stack-ticket) beats the project's (stack-project.<p>.ticket): a forest whose
+# nodes each answer a sub-issue scopes each commit to the sub-issue it actually fixes.
 project = (git(["config", f"branch.{branch}.stack-project"]).stdout.strip()
            or git(["config", f"stack-branch.{branch}.project"]).stdout.strip())
-ticket = (git(["config", f"stack-project.{project}.ticket"]).stdout.strip().lower()
-          if project else "")
+ticket = (git(["config", f"branch.{branch}.stack-ticket"]).stdout.strip()
+          or git(["config", f"stack-branch.{branch}.ticket"]).stdout.strip()
+          or (git(["config", f"stack-project.{project}.ticket"]).stdout.strip()
+              if project else "")).lower()
 scope = ticket or project
 
 _SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\((?P<scope>[^)]*)\))?(?P<bang>!?):\s*(?P<rest>.+)$")

@@ -40,8 +40,8 @@ _mbuilding = {}      # key -> Event: the in-flight rebuild, so N requests cost o
 _MODEL_CFG = re.compile(
     r"^(stack\.main-branch="
     r"|branch\.[^=]+\.description="
-    r"|branch\.[^=]+\.stack-(parent|requires|project)="
-    r"|stack-branch\.[^=]+\.(parent|requires|project)="
+    r"|branch\.[^=]+\.stack-(parent|requires|project|ticket)="
+    r"|stack-branch\.[^=]+\.(parent|requires|project|ticket)="
     r"|stack-project\.[^=]+\.(branch|archived|interest|ticket|focus)=)")
 
 
@@ -170,6 +170,9 @@ def _build(branch, ck):
 def _enrich(raw, branch):
     # graft what the forest views want without an N-fetch round trip:
     #   description    — the branch's one-line purpose (git branch description), per node
+    #   ticket         — the node's OWN Linear ticket, per node; a sub-issue of the forest's,
+    #                    so a pentest finding split across branches scopes each commit to the
+    #                    branch that fixes it instead of all of them to the parent epic
     #   mergeRank      — deterministic merge-order depth, per node (handy for layout/labels)
     #   mergeOrder     — the canonical total order as a flat array, top-level. Consume this
     #                    VERBATIM: sorting nodes by mergeRank client-side reintroduces drift
@@ -189,12 +192,15 @@ def _enrich(raw, branch):
     elif rank_err:
         # the graft is optional (the map still draws without ranks) but the break is not silent
         ctx.log(rank_err["err"])
+    tickets = repostate.snapshot().branch_keys("ticket")
     for bid, meta in (data.get("nodes") or {}).items():
         if not isinstance(meta, dict):
             continue
         desc = ctx.run(["git", "config", f"branch.{bid}.description"]).stdout.strip()
         if desc:
             meta["description"] = desc
+        if bid in tickets:
+            meta["ticket"] = tickets[bid].lower()
         if bid in ranks:
             meta["mergeRank"] = ranks[bid]
     # the overview asks for the model by PROJECT name, which _project_of can't resolve (it maps a
@@ -681,16 +687,29 @@ def interest_bump(req, raw):
 
 
 def ticket_set(req, raw):
-    # Tie a forest to its Linear ticket (stack-project.<p>.ticket) — commit scopes and the
-    # merge story then read type(loo-####): instead of the project name. Body carries
+    # Tie a forest — or one node of it — to its Linear ticket. Commit scopes and the merge
+    # story then read type(loo-####): instead of the project name. Body carries
     # {project, ticket} ({branch} resolves to its project); blank ticket unsets.
+    #
+    # `scope: "branch"` writes the NODE's own ticket (branch.<b>.stack-ticket) instead, for a
+    # forest whose branches each answer a sub-issue of the project's epic. The node ticket
+    # wins where it is set; every other node keeps inheriting the project's.
     d = json.loads(raw or "{}")
-    proj = d.get("project", "") or (picker._project_of(d["branch"]) if d.get("branch") else "")
-    if not proj:
-        return req._send(400, json.dumps({"ok": False, "error": "no project for ticket"}))
     ticket = (d.get("ticket") or "").strip().upper()
     if ticket and not re.fullmatch(r"[A-Za-z]+-\d+", ticket):
         return req._send(400, json.dumps({"ok": False, "error": "ticket must look like LOO-1234"}))
+    if d.get("scope") == "branch":
+        branch = (d.get("branch") or "").strip()
+        if not branch:
+            return req._send(400, json.dumps({"ok": False, "error": "no branch for ticket"}))
+        if ticket:
+            stackcfg.set_key(branch, "ticket", ticket)
+        else:
+            stackcfg.unset_key(branch, "ticket")
+        return req._send(200, json.dumps({"ok": True, "branch": branch, "ticket": ticket.lower()}))
+    proj = d.get("project", "") or (picker._project_of(d["branch"]) if d.get("branch") else "")
+    if not proj:
+        return req._send(400, json.dumps({"ok": False, "error": "no project for ticket"}))
     key = f"stack-project.{proj}.ticket"
     if ticket:
         ctx.run(["git", "config", key, ticket])
