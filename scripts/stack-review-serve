@@ -36,10 +36,12 @@ while [[ "${1:-}" == --* ]]; do
   esac
 done
 
-# No arg → land on the project picker (no ?branch). An explicit branch/project
-# name (or `--all`) opens straight into that view.
+# No arg → land on the project picker (bare /). An explicit branch/project name
+# (or `--all`) opens straight into that view via its canonical /forests/<name>
+# path — the viewer router reads PATHS, and an unrecognised query param silently
+# falls home (the SPA answers 200 for every URL, so a wrong link looks fine).
 branch="${1:-}"
-qs=""; [[ -n "$branch" ]] && qs="?branch=${branch}"
+qs=""; [[ -n "$branch" ]] && qs="forests/${branch}"
 here="${0:A:h}"
 # pin the server's git context to the repo ROOT, not raw $(pwd) — launching from
 # a subdir still scopes right, and launching outside a repo errors loudly instead
