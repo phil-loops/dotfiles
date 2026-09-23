@@ -44,7 +44,11 @@ def route(req, u):
                               f"refs/heads/{branch}"]).returncode != 0:
         req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
         return
-    h = sync.state(branch, fresh_prs=True)
+    # SWR open-PR set, not a blocking sweep: this GET only NAMES the next motion, and the
+    # endpoints it delegates to (POST /prep, /sync, /diverged-additive) each re-check fresh
+    # before rewriting anything. fresh=True here cost two serial `gh pr list` calls on every
+    # pulse tick — the node page's long pole.
+    h = sync.state(branch)
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     up = sync._upstream_state(branch, main)
 
