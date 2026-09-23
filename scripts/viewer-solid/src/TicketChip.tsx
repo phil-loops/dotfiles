@@ -6,27 +6,41 @@ import { normalizeTicket } from "./ticket";
 
 // The forest⇄Linear tie point (was a bare window.prompt). Same portal mechanics as
 // SessionPicker — an in-place absolute pop gets clipped/out-stacked by the sticky header.
-export function TicketChip(props: { project: string; ticket?: string }) {
+//
+// `branch` switches it to the NODE's own ticket, with `inherited` the forest's — a sub-issue
+// per branch, shown faint while the node is still inheriting so the two never read alike.
+export function TicketChip(props: { project: string; ticket?: string; branch?: string; inherited?: string }) {
   const [open, setOpen] = createSignal(false);
+  const shown = () => props.ticket ?? (props.branch ? props.inherited : undefined);
+  const title = () => {
+    if (props.ticket) {
+      return `Linear ${props.ticket.toUpperCase()} — commit scopes read type(${props.ticket}):; click to change`;
+    }
+    if (props.branch) {
+      return props.inherited
+        ? `inherited from the forest (${props.inherited.toUpperCase()}) — click to give this branch its own sub-issue`
+        : "give this branch its own Linear ticket — its commit scope becomes type(loo-####):";
+    }
+    return "tie this forest to a Linear ticket — commit scopes become type(loo-####):";
+  };
   return (
     <span class="sp-anchor relative inline-flex">
       <button
         class="fo-ticket cursor-pointer rounded-[6px] border border-transparent bg-transparent px-[4px] py-[1px] font-mono text-[11px] text-ink-faint hover:border-rule hover:text-ink-dim"
-        title={props.ticket
-          ? `Linear ${props.ticket.toUpperCase()} — commit scopes read type(${props.ticket}):; click to change`
-          : "tie this forest to a Linear ticket — commit scopes become type(loo-####):"}
+        classList={{ "opacity-50": !props.ticket && !!shown() }}
+        title={title()}
         onClick={() => canMutate && setOpen((v) => !v)}
       >
-        {props.ticket ?? "＋ ticket"}
+        {shown() ?? "＋ ticket"}
       </button>
       <Show when={open()}>
-        <TicketPop project={props.project} ticket={props.ticket} onClose={() => setOpen(false)} />
+        <TicketPop project={props.project} ticket={props.ticket} branch={props.branch} onClose={() => setOpen(false)} />
       </Show>
     </span>
   );
 }
 
-function TicketPop(props: { project: string; ticket?: string; onClose: () => void }) {
+function TicketPop(props: { project: string; ticket?: string; branch?: string; onClose: () => void }) {
   const qc = useQueryClient();
   const [draft, setDraft] = createSignal(props.ticket?.toUpperCase() ?? "LOO-");
   const [busy, setBusy] = createSignal(false);
@@ -87,7 +101,9 @@ function TicketPop(props: { project: string; ticket?: string; onClose: () => voi
       const r = await fetch(withRepo("/ticket"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: props.project, ticket: t }),
+        body: props.branch
+          ? JSON.stringify({ scope: "branch", branch: props.branch, ticket: t })
+          : JSON.stringify({ project: props.project, ticket: t }),
       });
       if (r.ok) {
         qc.invalidateQueries({ queryKey: ["model"] });
@@ -113,7 +129,9 @@ function TicketPop(props: { project: string; ticket?: string; onClose: () => voi
               style={{ top: `${p().top}px`, left: `${p().left}px` }}
               ref={el}
             >
-              <div class="tk-head px-1 text-[9.5px] tracking-[.08em] uppercase text-[#6f675a]">Linear ticket — blank clears</div>
+              <div class="tk-head px-1 text-[9.5px] tracking-[.08em] uppercase text-[#6f675a]">
+                {props.branch ? "this branch's ticket — blank inherits the forest's" : "Linear ticket — blank clears"}
+              </div>
               <input
                 class="tk-input min-w-0 rounded-[5px] border border-gold-deep bg-vellum-raise px-[7px] py-[4px] font-mono text-[12.5px] text-ink outline-none"
                 value={draft()}

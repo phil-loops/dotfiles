@@ -5,6 +5,7 @@ import { leaf, interestPips } from "./shared";
 import { canMutate, withRepo } from "./provider";
 import { DivergedDetailPanel, type DivergedDetail } from "./DivergedDetailPanel";
 import { NodeActions } from "./NodeActions";
+import { TicketChip } from "./TicketChip";
 import type { NodeData, FileDiff } from "./types";
 
 type HealthEntry = {
@@ -68,6 +69,8 @@ export function NodeHeader(props: {
   active: () => string;
   parentOf: () => string | undefined;
   interestOf: () => number;
+  ticketOf: () => string | undefined;
+  forestTicket: () => string | undefined;
   reseatChildren: { isPending: boolean; data?: { ok: boolean; conflicts: { branch: string; err: string }[] } | null; mutate: (p: string) => void };
   detachUpstream: { isPending: boolean; mutate: (b: string) => void };
   bumpInterest: { mutate: (arg: { project: string; delta: number }) => void };
@@ -136,6 +139,16 @@ export function NodeHeader(props: {
               }
             >
               <span class="against flex-none text-[13px] text-ink-faint">◂ main · all changes on this project</span>
+            </Show>
+            {/* the node's own sub-issue — faint while it still inherits the forest's, so the
+                epic and the branch that answers one of its findings never read alike. */}
+            <Show when={!props.isGhost() && (canMutate || props.ticketOf())}>
+              <TicketChip
+                project={props.project()}
+                branch={props.active()}
+                ticket={props.ticketOf()}
+                inherited={props.forestTicket()}
+              />
             </Show>
             <Show when={!props.isGhost() && props.interestOf() > 0}>
               <span class="nh-ready cursor-help text-[12px] tracking-[0.02em] text-gold-leaf" title={`interest ${props.interestOf()} — this forest is promoted on the Forests home`}>
