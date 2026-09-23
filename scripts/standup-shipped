@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# standup-shipped [YYYY-MM-DD] — my PRs merged that (local) day, as Slack-pasteable bullets.
+set -euo pipefail
+
+day="${1:-$(date +%F)}"
+repo="${STANDUP_REPO:-Loops-so/loops}"
+tz="$(date +%z)"
+tz="${tz:0:3}:${tz:3:2}"
+
+echo "*Shipped*"
+gh pr list --repo "$repo" --author @me --state merged \
+  --search "merged:${day}T00:00:00${tz}..${day}T23:59:59${tz}" \
+  --limit 100 --json title,url,mergedAt \
+  --jq 'sort_by(.mergedAt) | reverse | .[] | "• \(.title) — \(.url)"'
