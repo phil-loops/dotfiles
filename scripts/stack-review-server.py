@@ -568,6 +568,8 @@ class H(BaseHTTPRequestHandler):
             return sync.post_reconcile(self, raw)
         if self.path == "/discard-dirty":  # per-file reject: restore a tracked file to HEAD / delete an untracked one
             return review.discard_dirty(self, raw)
+        if self.path == "/revert-commit":  # history row ↶: undo one own commit with a new revert commit
+            return review.revert_commit(self, raw)
         if self.path == "/commit-dirty":  # commit all uncommitted worktree changes to the branch
             return review.commit_dirty(self, raw)
         if self.path == "/squash":   # collapse parent..branch into one voiced commit

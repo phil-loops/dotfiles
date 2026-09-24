@@ -4,6 +4,7 @@ import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, withRepo, canMutate } from "./provider";
 import { isBlessed } from "./shared";
+import { useArm } from "./actions";
 import type { FileDiff, Commit } from "./types";
 
 const FILE_ACT =
@@ -413,6 +414,32 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
   const [body, setBody] = createSignal("");
   const [saving, setSaving] = createSignal(false);
   const [rewordErr, setRewordErr] = createSignal("");
+  // revert — additive (a new commit undoing this one), so pushed commits get it too
+  const revertable = () => canMutate && props.c.own !== false;
+  const { armed: revertArmed, trigger: armRevert } = useArm();
+  const [reverting, setReverting] = createSignal(false);
+  const [revertErr, setRevertErr] = createSignal("");
+  const revert = async () => {
+    setReverting(true);
+    setRevertErr("");
+    try {
+      const r = await fetch(withRepo("/revert-commit"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ branch: props.branch, sha: props.c.sha }),
+      });
+      const j = (await r.json()) as { ok?: boolean; err?: string };
+      if (!j.ok) {
+        setRevertErr(j.err ?? "revert failed");
+        return;
+      }
+      props.onReworded?.();
+    } catch (e) {
+      setRevertErr(String(e));
+    } finally {
+      setReverting(false);
+    }
+  };
   const startReword = () => {
     setSubj(props.c.subject);
     setBody(props.c.body ?? "");
@@ -460,7 +487,21 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
             ✎
           </button>
         </Show>
+        <Show when={revertable() && !editing()}>
+          <button
+            class="c-revert flex-none cursor-pointer text-[12px] text-ink-faint hover:text-del disabled:cursor-default disabled:opacity-35"
+            classList={{ "text-del": revertArmed() === props.c.sha }}
+            title="revert this commit — adds a new commit that undoes it (click twice)"
+            disabled={reverting()}
+            onClick={() => armRevert(props.c.sha, () => void revert())}
+          >
+            {reverting() ? "reverting…" : revertArmed() === props.c.sha ? "revert?" : "↶"}
+          </button>
+        </Show>
       </div>
+      <Show when={revertErr()}>
+        <p class="px-1 pb-2 text-[11px] text-del">{revertErr()}</p>
+      </Show>
       <Show when={editing()}>
         <div class="mx-1 mb-3 flex flex-col gap-[7px] rounded-[9px] border border-solid border-gold-deep bg-gold-wash px-[14px] py-3">
           <input
