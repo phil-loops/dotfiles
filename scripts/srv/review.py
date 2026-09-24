@@ -11,6 +11,7 @@
 #   POST /squash {branch}        collapse parent..branch into unstaged working-tree changes
 #   POST /prep {branch}          prep-for-push: squash unpushed → one, then oxfmt
 import os
+import subprocess
 import json
 import time
 import tempfile
@@ -855,9 +856,27 @@ def commit_dirty(req, raw):
     req._send(200, json.dumps({"ok": True}))
 
 
+def _replay_without(drop, tip):
+    # rebuild drop..tip minus `drop` in memory (merge-tree + commit-tree, authors kept); None on a conflict
+    new = ctx.run(["git", "rev-parse", f"{drop}^"]).stdout.strip()
+    for c in reversed(ctx.run(["git", "rev-list", f"{drop}..{tip}"]).stdout.split()):
+        mt = ctx.run(["git", "merge-tree", "--write-tree", f"--merge-base={c}^", new, c])
+        if mt.returncode != 0:
+            return None
+        an, ae, ad = ctx.run(["git", "log", "-1", "--format=%an%x00%ae%x00%aD", c]).stdout.rstrip("\n").split("\x00")
+        body = ctx.run(["git", "log", "-1", "--format=%B", c]).stdout
+        r = subprocess.run(["git", "commit-tree", mt.stdout.split()[0], "-p", new], input=body, text=True,
+                           capture_output=True, cwd=ctx.repo_cwd(),
+                           env={**os.environ, "GIT_AUTHOR_NAME": an, "GIT_AUTHOR_EMAIL": ae, "GIT_AUTHOR_DATE": ad})
+        if r.returncode != 0:
+            return None
+        new = r.stdout.strip()
+    return new
+
+
 def revert_commit(req, raw):
-    # {branch, sha} — the history row's ↶: undo one of the branch's own commits with a NEW
-    # revert commit (additive, so it's safe above or below the origin waterline).
+    # {branch, sha} — the history row's ↶: an unpushed commit is dropped from history outright;
+    # a pushed one gets a NEW revert commit (rewriting it would be a force-push).
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
     sha = (d.get("sha") or "").strip()
@@ -877,6 +896,16 @@ def revert_commit(req, raw):
         return req._send(400, json.dumps({"ok": False, "err": f"{branch!r} is not checked out in any worktree"}))
     if ctx.run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip() != tip:
         return req._send(409, json.dumps({"ok": False, "err": "the branch's worktree isn't at the branch tip"}))
+    if not ctx.run(["git", "for-each-ref", "--contains", full, "refs/remotes"]).stdout.strip():
+        new = _replay_without(full, tip)
+        if not new:
+            return req._send(200, json.dumps({"ok": False, "err": "later commits conflict without this one — nothing changed"}))
+        r = ctx.run(["git", "-C", wt, "reset", "--keep", new])
+        if r.returncode != 0:
+            return req._send(200, json.dumps({"ok": False, "err": (r.stderr or "reset failed").strip()[:300]}))
+        if ctx.run(["git", "rev-parse", f"refs/heads/{branch}"]).stdout.strip() != new:
+            ctx.run(["git", "update-ref", "-m", f"drop {full[:10]}", f"refs/heads/{branch}", new, tip])
+        return req._send(200, json.dumps({"ok": True, "dropped": True, "sha": new}))
     r = ctx.run(["git", "-C", wt, "revert", "--no-edit", full])
     if r.returncode != 0:
         ctx.run(["git", "-C", wt, "revert", "--abort"])
@@ -885,7 +914,7 @@ def revert_commit(req, raw):
     # a detached scratch worktree follows its branch via stack-open's post-commit hook; this is the CAS backstop
     if ctx.run(["git", "rev-parse", f"refs/heads/{branch}"]).stdout.strip() != head:
         ctx.run(["git", "update-ref", "-m", f"revert {full[:10]}", f"refs/heads/{branch}", head, tip])
-    req._send(200, json.dumps({"ok": True, "sha": head}))
+    req._send(200, json.dumps({"ok": True, "dropped": False, "sha": head}))
 
 
 def discard_dirty(req, raw):
