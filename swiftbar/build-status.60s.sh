@@ -1,38 +1,24 @@
 #!/usr/bin/env bash
 # SwiftBar plugin — build-status: shows in-progress build-and-test image builds (main +
 # my own branch builds), my dispatched deploy-v2 runs (`task release:staging|production VERSION=…`),
-# active prwatch watches (~/.cache/prwatch/tracking), and unacknowledged sticky
-# completions (~/.cache/prwatch/done — prwatch notify_sticky). Badge is ONE template
-# SF symbol (+ count), most-urgent state: checkmark unacked done > paperplane deploy >
-# hammer.fill building > eye watching > hammer idle (SwiftBar renders an empty title
-# as a [?] placeholder, so true hiding isn't an option). Menu grammar: named sections
-# (IN FLIGHT / FINISHED / WATCHING); status rows carry an SF symbol, action rows are
-# bare sentence-case verbs — the icon/no-icon split IS the status/action distinction.
-# Complements build-notify / the prwatch sweep (which fire the completion desktop
-# notifications); this is the in-flight glance + the can't-miss-it residue.
+# and staging staleness. Badge is ONE template SF symbol (+ count), most-urgent state:
+# paperplane deploy > hammer.fill building > hammer idle (SwiftBar renders an empty
+# title as a [?] placeholder, so true hiding isn't an option). Menu grammar: named
+# sections (IN FLIGHT / STAGING); status rows carry an SF symbol, action rows are bare
+# sentence-case verbs — the icon/no-icon split IS the status/action distinction.
+# Complements build-notify (which fires the completion desktop notifications); this is
+# the in-flight glance.
 #
 # No refreshOnOpen: the gh calls take seconds, and refreshOnOpen blocks the menu on
-# them. The 60s poll + prwatch's pokes (swiftbar://refreshplugin?name=build-status on
-# watch start/stop/finish) keep it fresh; opening the menu shows the last render.
+# them. The 60s poll keeps it fresh; opening the menu shows the last render.
 #
 # <bitbar.title>main build status</bitbar.title>
-# <bitbar.desc>In-progress build-and-test main image builds (loops) + prwatch watches.</bitbar.desc>
+# <bitbar.desc>In-progress build-and-test image builds (loops) + my deploys.</bitbar.desc>
 # <bitbar.author>phil</bitbar.author>
 # <swiftbar.hideAbout>true</swiftbar.hideAbout>
 # <swiftbar.hideRunInTerminal>true</swiftbar.hideRunInTerminal>
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 REPO="${BUILD_STATUS_REPO:-Loops-so/loops}"
-donedir="$HOME/.cache/prwatch/done"
-
-# click actions: acknowledge sticky ✅ completions (prwatch notify_sticky writes them)
-if [ "${1:-}" = "--ack" ]; then
-  rm -f "$donedir/$2.tsv"
-  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null; exit 0
-fi
-if [ "${1:-}" = "--ack-all" ]; then
-  rm -f "$donedir"/*.tsv
-  open -g "swiftbar://refreshplugin?name=build-status" 2>/dev/null; exit 0
-fi
 
 elapsed() {  # ISO startedAt -> "Nm"
   [ -n "$1" ] || { echo "?"; return; }
@@ -69,47 +55,18 @@ if [ -n "$me" ]; then
 fi
 d=0; [ -n "$deploys" ] && d=$(printf '%s\n' "$deploys" | grep -c .)
 
-# active prwatch watches — local marker files, no network; prune markers whose watcher died
-trackdir="$HOME/.cache/prwatch/tracking"
-watches=""
-for f in "$trackdir"/*.tsv; do
-  [ -e "$f" ] || continue
-  IFS=$'\t' read -r wrepo wid wtitle wurl _ wpid < "$f"
-  kill -0 "$wpid" 2>/dev/null || { rm -f "$f"; continue; }
-  key=$(basename "$f" .tsv)
-  watches="${watches}${key}"$'\t'"${wrepo}"$'\t'"${wid}"$'\t'"${wtitle}"$'\t'"${wurl}"$'\n'
-done
-w=0; [ -n "$watches" ] && w=$(printf '%s' "$watches" | grep -c .)
-
-# unacknowledged sticky completions (deploy landed / explicit watch finished).
-# Rows expire after BUILD_STATUS_DONE_TTL_HOURS (default 48) — this is a catch-up
-# ledger for a glance away, not an archive; days-old deploys are just noise.
-ttl_s=$(( ${BUILD_STATUS_DONE_TTL_HOURS:-48} * 3600 )); now=$(date +%s)
-dones=""
-for f in "$donedir"/*.tsv; do
-  [ -e "$f" ] || continue
-  IFS=$'\t' read -r dst dmsg durl dts < "$f"
-  case "$dts" in *[!0-9]*|"") dts=$(stat -f %m "$f" 2>/dev/null || echo "$now") ;; esac
-  [ $(( now - dts )) -gt "$ttl_s" ] && { rm -f "$f"; continue; }
-  dones="${dones}$(basename "$f" .tsv)"$'\t'"$dst"$'\t'"$dmsg"$'\t'"$durl"$'\n'
-done
-k=0; [ -n "$dones" ] && k=$(printf '%s' "$dones" | grep -c .)
-
 deploy_title() {  # gh displayTitle "[staging] deploying 2026.07.13-20248-1" → "2026.07.13-20248-1 to staging"
   printf '%s' "$1" | sed -E 's/^\[([a-z-]+)\] +deploying +(.+)$/\2 to \1/'
 }
 
 # ONE template symbol in the menu bar, always — stacking glyphs reads as separate
 # menu-bar items, and emoji reads as a Slack reaction among the native extras.
-# Overlapping states show the most urgent (unacked done > deploy > main build >
-# watches > idle); the menu below lists everything regardless.
-if   [ "$k" -gt 1 ]; then badge=":checkmark.circle.fill: $k"
-elif [ "$k" -gt 0 ]; then badge=":checkmark.circle.fill:"
-elif [ "$d" -gt 1 ]; then badge=":paperplane.fill: $d"
+# Overlapping states show the most urgent (deploy > build > idle); the menu below
+# lists everything regardless.
+if   [ "$d" -gt 1 ]; then badge=":paperplane.fill: $d"
 elif [ "$d" -gt 0 ]; then badge=":paperplane.fill:"
 elif [ "$b" -gt 1 ]; then badge=":hammer.fill: $b"
 elif [ "$b" -gt 0 ]; then badge=":hammer.fill:"
-elif [ "$w" -gt 0 ]; then badge=":eye: $w"
 else badge=":hammer:"
 fi
 echo "$badge"
@@ -161,35 +118,6 @@ if [ -n "$staging_line" ]; then
   echo "STAGING | color=gray size=11"
   echo "$staging_line"
 fi
-if [ "$k" -gt 0 ]; then
-  echo "---"
-  echo "FINISHED | color=gray size=11"
-  while IFS=$'\t' read -r key dst dmsg durl; do
-    [ -n "$key" ] || continue
-    # dst picks the symbol only; the message carries the words (legacy rows still
-    # hold glyph-prefixed dst strings — match on the failure words, not the glyph)
-    case "$dst" in
-      *fail*|*✗*|*cancel*|*timed_out*) ic=":xmark.circle.fill:" ;;
-      *) ic=":checkmark.circle.fill:" ;;
-    esac
-    echo "${ic} ${dmsg} | href=${durl}"
-    echo "-- Dismiss | bash=\"$0\" param1=--ack param2=${key} terminal=false"
-  done <<< "$dones"
-  if [ "$k" -gt 1 ]; then
-    echo "Clear all | bash=\"$0\" param1=--ack-all terminal=false"
-  fi
-fi
-if [ "$w" -gt 0 ]; then
-  echo "---"
-  echo "WATCHING | color=gray size=11"
-  while IFS=$'\t' read -r key wrepo wid wtitle wurl; do
-    [ -n "$key" ] || continue
-    echo ":eye: ${wrepo}#${wid} — ${wtitle} | href=${wurl}"
-    echo "-- Stop watching | bash=\"$HOME/.dotfiles/swiftbar/prwatch.sh\" param1=--stop param2=${key} terminal=false"
-  done <<< "$watches"
-fi
 echo "---"
-# delegates to the prwatch plugin's prompt: dialog → detached prwatch → notify on done/failed
-echo "Watch a PR or run… | bash=\"$HOME/.dotfiles/swiftbar/prwatch.sh\" param1=--prompt terminal=false"
 echo "Open GitHub Actions | href=https://github.com/$REPO/actions/workflows/build-and-test.yml"
 echo "Refresh | refresh=true"
