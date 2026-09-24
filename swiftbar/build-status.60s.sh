@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # SwiftBar plugin — build-status: shows in-progress build-and-test image builds (main +
-# my own branch builds), my dispatched deploy-v2 runs (`task release:staging|production VERSION=…`),
-# and staging staleness. Badge is ONE template SF symbol (+ count), most-urgent state:
+# my own branch builds) and my dispatched deploy-v2 runs (`task release:staging|production VERSION=…`).
+# Badge is ONE template SF symbol (+ count), most-urgent state:
 # paperplane deploy > hammer.fill building > hammer idle (SwiftBar renders an empty
 # title as a [?] placeholder, so true hiding isn't an option). Menu grammar: named
-# sections (IN FLIGHT / STAGING); status rows carry an SF symbol, action rows are bare
+# sections (IN FLIGHT); status rows carry an SF symbol, action rows are bare
 # sentence-case verbs — the icon/no-icon split IS the status/action distinction.
-# Complements build-notify (which fires the completion desktop notifications); this is
-# the in-flight glance.
 #
 # No refreshOnOpen: the gh calls take seconds, and refreshOnOpen blocks the menu on
 # them. The 60s poll keeps it fresh; opening the menu shows the last render.
@@ -92,31 +90,6 @@ if [ "$d" -gt 0 ]; then
     [ -n "$title" ] || continue
     echo ":paperplane.fill: Deploying $(deploy_title "$title") · $(elapsed "$st") | href=$url"
   done <<< "$deploys"
-fi
-# staging staleness — ground truth is build-notify's buildId probe (staging-last: version,
-# actor, flip-epoch; staging-pending: an enqueue whose buildId flip hasn't been seen yet).
-# Rolling-out is the "would have checked Slack" state; live-age answers "how stale is staging".
-bn="$HOME/.cache/build-notify"
-staging_url="${BUILD_NOTIFY_STAGING_URL:-https://app.l3s.email/}"
-staging_line=""
-if [ -s "$bn/staging-pending" ]; then
-  IFS=$'\t' read -r _ parm_s _ pver pactor purl < "$bn/staging-pending"
-  am=$(( ($(date +%s) - ${parm_s:-0}) / 60 ))
-  staging_line=":ferry.fill: Staging: ${pver} (${pactor}) rolling out · ${am}m | href=${purl:-$staging_url}"
-elif [ -s "$bn/staging-last" ]; then
-  IFS=$'\t' read -r sver sactor sflip < "$bn/staging-last"
-  sm=$(( ($(date +%s) - ${sflip:-0}) / 60 ))
-  age="${sm}m"; [ "$sm" -ge 60 ] && age="$(( sm / 60 ))h $(( sm % 60 ))m"
-  if [ "$sver" = "?" ]; then
-    staging_line=":ferry: Staging flipped ${age} ago (untracked deploy) | href=$staging_url"
-  else
-    staging_line=":ferry: Staging: ${sver} (${sactor}) · live ${age} | href=$staging_url"
-  fi
-fi
-if [ -n "$staging_line" ]; then
-  echo "---"
-  echo "STAGING | color=gray size=11"
-  echo "$staging_line"
 fi
 echo "---"
 echo "Open GitHub Actions | href=https://github.com/$REPO/actions/workflows/build-and-test.yml"
