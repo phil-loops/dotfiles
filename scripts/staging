@@ -55,7 +55,7 @@ get_latest_build() {
 }
 
 # Derive the deploy-v2 chart version from a build run: YYYY.MM.DD-<run>-<attempt>
-# (the date comes from the build's createdAt — same derivation build-notify uses)
+# (the date comes from the build's createdAt)
 get_tag_from_build() {
   local number=$1
   local attempt=$2
@@ -172,23 +172,18 @@ print_deploy_status() {
   echo -e "  Tag:      ${CYAN}${deployed_tag}${NC} ${DIM}(${actor})${NC}"
 
   # deploy-v2 "success" = ENQUEUED only (~10s shim); the deployer worker does the helm
-  # rollout afterwards. Live truth is the buildId flip that build-notify records ambiently.
+  # rollout afterwards, so a fresh enqueue may not be serving yet.
   local now=$(date +%s)
   local enq_epoch=$(to_epoch "$started")
-  local flip_epoch=0
-  [[ -s "$HOME/.cache/build-notify/staging-last" ]] && \
-    flip_epoch=$(cut -f3 "$HOME/.cache/build-notify/staging-last" 2>/dev/null || echo 0)
 
   if [[ "$status" != "completed" ]]; then
     echo -e "  Status:   ${YELLOW}⟳ enqueueing${NC} (started $(relative_time "$started"))"
   elif [[ "$conclusion" != "success" ]]; then
     echo -e "  Status:   ${RED}✗ ${conclusion}${NC} $(relative_time "$started")"
-  elif (( flip_epoch > enq_epoch )); then
-    echo -e "  Status:   ${GREEN}✓ live${NC} — flipped $(relative_time "$flip_epoch") (enqueued $(relative_time "$started"))"
   elif (( now - enq_epoch > 2700 )); then
-    echo -e "  Status:   ${GREEN}✓ deployed${NC} $(relative_time "$started") ${DIM}(flip unobserved — age is enqueue time)${NC}"
+    echo -e "  Status:   ${GREEN}✓ deployed${NC} $(relative_time "$started") ${DIM}(age is enqueue time)${NC}"
   else
-    echo -e "  Status:   ${YELLOW}⟳ rolling out${NC} — enqueued $(relative_time "$started"), staging not serving it yet"
+    echo -e "  Status:   ${YELLOW}⟳ rolling out${NC} — enqueued $(relative_time "$started")"
   fi
 
   echo -e "  Run:      ${DIM}https://github.com/${REPO}/actions/runs/${run_id}${NC}"
