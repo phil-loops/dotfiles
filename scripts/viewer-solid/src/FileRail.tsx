@@ -414,7 +414,7 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
   const [body, setBody] = createSignal("");
   const [saving, setSaving] = createSignal(false);
   const [rewordErr, setRewordErr] = createSignal("");
-  // revert — additive (a new commit undoing this one), so pushed commits get it too
+  // revert — an unpushed commit is dropped outright; a pushed one gets an additive revert commit
   const revertable = () => canMutate && props.c.own !== false;
   const { armed: revertArmed, trigger: armRevert } = useArm();
   const [reverting, setReverting] = createSignal(false);
@@ -491,11 +491,15 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
           <button
             class="c-revert flex-none cursor-pointer text-[12px] text-ink-faint hover:text-del disabled:cursor-default disabled:opacity-35"
             classList={{ "text-del": revertArmed() === props.c.sha }}
-            title="revert this commit — adds a new commit that undoes it (click twice)"
+            title={
+              props.c.pushed === false
+                ? "drop this commit — unpushed, so it leaves history entirely (click twice)"
+                : "revert this commit — pushed, so a new commit undoes it (click twice)"
+            }
             disabled={reverting()}
             onClick={() => armRevert(props.c.sha, () => void revert())}
           >
-            {reverting() ? "reverting…" : revertArmed() === props.c.sha ? "revert?" : "↶"}
+            {reverting() ? "…" : revertArmed() === props.c.sha ? (props.c.pushed === false ? "drop?" : "revert?") : "↶"}
           </button>
         </Show>
       </div>
