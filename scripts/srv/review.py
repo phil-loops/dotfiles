@@ -855,6 +855,39 @@ def commit_dirty(req, raw):
     req._send(200, json.dumps({"ok": True}))
 
 
+def revert_commit(req, raw):
+    # {branch, sha} — the history row's ↶: undo one of the branch's own commits with a NEW
+    # revert commit (additive, so it's safe above or below the origin waterline).
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    sha = (d.get("sha") or "").strip()
+    if not branch or not sha:
+        return req._send(400, json.dumps({"ok": False, "err": "branch and sha required"}))
+    tip = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).stdout.strip()
+    if not tip:
+        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
+    full = ctx.run(["git", "rev-parse", "--verify", "-q", f"{sha}^{{commit}}"]).stdout.strip()
+    snap = repostate.snapshot()
+    trunk = [f"^{r}" for r in (f"refs/remotes/origin/{snap.main()}",) if snap.sha.get(r)]
+    own = ctx.run(["git", "rev-list", tip, f"^{snap.parent(branch)}", *trunk]).stdout.split()
+    if not full or full not in own:
+        return req._send(400, json.dumps({"ok": False, "err": "not one of this branch's own commits"}))
+    wt = _worktree_for_branch(branch)
+    if not wt:
+        return req._send(400, json.dumps({"ok": False, "err": f"{branch!r} is not checked out in any worktree"}))
+    if ctx.run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip() != tip:
+        return req._send(409, json.dumps({"ok": False, "err": "the branch's worktree isn't at the branch tip"}))
+    r = ctx.run(["git", "-C", wt, "revert", "--no-edit", full])
+    if r.returncode != 0:
+        ctx.run(["git", "-C", wt, "revert", "--abort"])
+        return req._send(200, json.dumps({"ok": False, "err": (r.stderr or r.stdout or "revert failed").strip()[:300]}))
+    head = ctx.run(["git", "-C", wt, "rev-parse", "HEAD"]).stdout.strip()
+    # a detached scratch worktree follows its branch via stack-open's post-commit hook; this is the CAS backstop
+    if ctx.run(["git", "rev-parse", f"refs/heads/{branch}"]).stdout.strip() != head:
+        ctx.run(["git", "update-ref", "-m", f"revert {full[:10]}", f"refs/heads/{branch}", head, tip])
+    req._send(200, json.dumps({"ok": True, "sha": head}))
+
+
 def discard_dirty(req, raw):
     # {branch, path} — the rail's per-file reject: a tracked file restores to HEAD, an
     # untracked one is deleted. Destructive by design (the UI arms it); path must be a
