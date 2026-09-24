@@ -47,7 +47,7 @@ launchctl list | grep philbrockman           # every agent listed, status 0
 ### 4. Sign in
 
 ```bash
-gh auth login                                # GitHub CLI; the viewer and prwatch use it
+gh auth login                                # GitHub CLI; the viewer uses it
 claude                                       # first run signs in to claude.ai
 ```
 

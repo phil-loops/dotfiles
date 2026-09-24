@@ -27,7 +27,7 @@ session (bodies don't — see below).
 ## Loaded on invocation — skills (`~/.dotfiles/.claude/skills/`)
 
 reforest 751 · land-forest 525 · design 1,126 · tutor 1,085 · loops-lmx 990 (+5,648 refs) ·
-loops-restart 698 · trigger-doi 664 · bench-shas 651 · loops-preview 556 · prwatch 542 ·
+loops-restart 698 · trigger-doi 664 · bench-shas 651 · loops-preview 556 ·
 loops-email-sending-best-practices 502 (+1,952 refs) · dev-tail 447 · ticket-check 390
 
 reforest + land-forest defer all forest rules to `claude/forests.md` (one governing text).
