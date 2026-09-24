@@ -422,7 +422,7 @@ def _origin_verdict(branch):
         ff = snap.is_ancestor(f"origin/{branch}", branch)
     # published (cached open-PR set, no per-poll gh call): with outgoing==0 it splits the
     # dead push button into 'view PR ↗' (has one) vs 'open PR ↗' (pushed, none yet); with
-    # outgoing>1 it relaxes the seal — follow-ups onto an open PR are review rounds.
+    # outgoing>1 it only changes the label — follow-ups onto an open PR are review rounds.
     published = snap.published(branch)
     followup = has_remote and published
     # outgoing = commits origin doesn't have. On a first push, --not --remotes=origin keeps a
@@ -496,7 +496,7 @@ def _origin_verdict(branch):
         if len(outgoing) == 1:
             commit = {"sha": sha, "subject": subject, "body": body}
     n_out = len(outgoing)
-    one_or_followup = n_out == 1 or (followup and n_out > 1)
+    has_outgoing = n_out >= 1
     wip = [c for c in outgoing if not c["voiced"]]
     tip = snap.local(branch)
     gates_green = _green_tree(branch) == snap.tree(tip)
@@ -509,17 +509,20 @@ def _origin_verdict(branch):
     def ward(k, label, ok, why, advisory=False):
         return {"k": k, "label": label, "ok": bool(ok), "why": "" if ok else why, "advisory": advisory}
     wards = [
-        ward("one", f"{n_out} follow-up commits" if followup and n_out > 1 else "one commit",
-             one_or_followup and (not_merge or catchup),
+        # Any number of deliberate commits may go out (2026-09-24: a deps refactor + the fix
+        # it enables, kept apart for the reviewer); the shape ward now only refuses stray
+        # merges. Placeholders are the voiced ward's business, and prep still seals those.
+        ward("one", "one commit" if n_out == 1
+             else f"{n_out} follow-up commits" if followup else f"{n_out} commits",
+             has_outgoing and (not_merge or catchup),
              "nothing to push — origin already has this" if not outgoing
-             else f"{n_out} commits — prep seals them into one" if n_out > 1 and not followup
              else "outgoing includes a merge that isn't a catch-up of this branch's base"),
-        ward("voiced", "voiced subject", voiced and one_or_followup,
-             "" if not one_or_followup
-             else f"{len(wip)} of {n_out} subjects are WIP/fixup placeholders — reword before pushing" if n_out > 1
+        ward("voiced", "voiced subjects" if n_out > 1 else "voiced subject", voiced and has_outgoing,
+             "" if not has_outgoing
+             else f"{len(wip)} of {n_out} subjects are WIP/fixup placeholders — prep seals them into one voiced commit" if n_out > 1
              else "subject is a WIP/fixup placeholder — prep writes a voiced one"),
-        ward("why", "says why", said_why and one_or_followup,
-             "" if not one_or_followup else "no commit body on the tip — optional; add a why if it helps a reviewer", advisory=True),
+        ward("why", "says why", said_why and has_outgoing,
+             "" if not has_outgoing else "no commit body on the tip — optional; add a why if it helps a reviewer", advisory=True),
         ward("purpose", "purpose set",
              bool(snap.description(branch)),
              "no branch description — a forest member without a purpose is an unfinished operation", advisory=True),
@@ -548,7 +551,7 @@ def _origin_verdict(branch):
     ]
     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
     return {
-        "branch": branch, "originExists": has_remote, "ff": ff, "outgoing": len(outgoing),
+        "branch": branch, "originExists": has_remote, "ff": ff, "outgoing": len(outgoing), "wip": len(wip),
         "commits": outgoing[:8], "moreCommits": max(0, n_out - 8), "ageDays": age_days,
         "followup": followup,
         "fork": {"sha": fork, "date": fork_date}, "mainSince": main_since,
@@ -712,7 +715,8 @@ def _squash_unpushed(branch, message=""):
 
 
 def prep_push(req, raw):
-    """POST /prep-push {branch} — route by state and land on 'exactly one outgoing commit':
+    """POST /prep-push {branch} — route by state and land on 'voiced outgoing commits' (a WIP
+    tail is sealed into one; deliberate voiced commits go out as they are):
       restacked + open PR   → carry as a catch-up merge on origin's head (additive, plain push)
       diverged + open PR    → build the additive vehicle, absorb it as the branch tip
       diverged, no PR       → refuse (⋯ reconcile is the manual override)
@@ -832,6 +836,8 @@ def prep_push(req, raw):
         v = _origin_verdict(branch)
         if v["outgoing"] > 1 and published:
             routed.append(f"{v['outgoing']} follow-up commits on the open PR — pushed as they are, no seal")
+        elif v["outgoing"] > 1 and not v["wip"]:
+            routed.append(f"{v['outgoing']} voiced commits — pushed as they are, no seal")
         elif v["outgoing"] > 1:
             # sealing resets onto origin's tip and re-commits the tree — across a merge that
             # linearizes it, turning "caught up with main" into main's diff re-declared as

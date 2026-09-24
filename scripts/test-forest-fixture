@@ -392,8 +392,8 @@ def run_checks(repo, shas, only):
               json.dumps(v["commits"][:1]))
 
         v = push._origin_verdict("two")
-        check("verdict: two commits on an UNPUBLISHED branch are refused",
-              not ward(v, "one")["ok"] and "2 commits" in ward(v, "one")["why"], ward(v, "one")["why"])
+        check("verdict: two voiced commits on an UNPUBLISHED branch pass the shape ward",
+              ward(v, "one")["ok"] and ward(v, "one")["label"] == "2 commits", json.dumps(ward(v, "one")))
         set_prs(sync, repo, ["pubtwo"])
         v = push._origin_verdict("pubtwo")
         check("verdict: two follow-ups on a PUBLISHED branch are allowed",

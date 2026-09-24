@@ -229,7 +229,7 @@ export function NodeActions(props: {
       });
     }
     steps.push(
-      { id: "route", label: "one commit", state: "idle" },
+      { id: "route", label: "commit shape", state: "idle" },
       { id: "tests", label: "tests", state: "idle" },
       { id: "gates", label: "push gates", state: "idle" },
       { id: "editor", label: "editor", state: "idle" },
