@@ -77,9 +77,9 @@ export function ForestsList(props: {
 
   // A project's identity is (repo, name) — the same forest name can exist in two repos.
   const pkey = (p: Project) => (p.repo || "loops") + " " + p.name;
-  // Cross-repo "epic" clusters: same stack-project.<name>.epic tag spanning ≥2 repos folds into
-  // one card, placed in the band of its most urgent member. A single-repo epic is left in its
-  // normal band — pulling one row out into a lone "cluster" would only fragment the list.
+  // "Epic" clusters: the same stack-project.<name>.epic tag on ≥2 forests (one repo or several)
+  // folds them into one headed card, placed in the band of its most urgent member. A lone tagged
+  // forest stays in its normal band — a one-row "cluster" would only fragment the list.
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
     for (const p of forests()) {
@@ -87,9 +87,10 @@ export function ForestsList(props: {
       (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
     }
     return [...byEpic.entries()]
-      .filter(([, items]) => new Set(items.map((p) => p.repo || "loops")).size >= 2)
+      .filter(([, items]) => items.length >= 2)
       .map(([epic, items]) => ({
         epic,
+        crossRepo: new Set(items.map((p) => p.repo || "loops")).size >= 2,
         band: Math.min(...items.map(bandIdx)),
         ts: Math.max(...items.map(forestTs)),
         items: items.sort((a, b) => forestTs(b) - forestTs(a)),
@@ -305,13 +306,13 @@ export function ForestsList(props: {
                 <For each={band.clusters}>
                   {(cluster) => (
                     <div class="epic-cluster mx-0 mt-[2px] mb-[16px] rounded-[12px] border border-gold-deep bg-[color-mix(in_srgb,var(--color-gold-leaf)_5%,var(--color-vellum-raise))] px-[11px] pt-[9px] pb-[4px]">
-                      <h3 class="epic-head mx-[2px] mt-[2px] mb-[8px] text-[11px] uppercase tracking-[0.08em] text-gold-deep" title="one effort spanning repos, linked by epic tag (advisory — each half still merges on its own main)">
+                      <h3 class="epic-head mx-[2px] mt-[2px] mb-[8px] text-[11px] uppercase tracking-[0.08em] text-gold-deep" title="one effort spanning forests, linked by epic tag (advisory — each forest still merges on its own)">
                         ⇌ {cluster.epic}
                       </h3>
                       <For each={cluster.items}>
                         {(p) => dragWrap(p, (
                           <div class={SUBROW}>
-                            <span class={BADGE}>{p.repo || "loops"}</span>
+                            <Show when={cluster.crossRepo}><span class={BADGE}>{p.repo || "loops"}</span></Show>
                             {props.forestRow(p, false, stepInfo(p, false))}
                           </div>
                         ))}
