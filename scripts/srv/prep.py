@@ -37,8 +37,9 @@ def route(req, u):
     #   additive     — diverged w/ open PR: draft the vehicle        → POST /diverged-additive
     #   restack      — behind origin/main, unpublished root          → POST /sync
     #   nothing      — outgoing set is empty: everything is shared
-    #   squash       — >1 outgoing, or a WIP subject: collapse/voice → POST /prep
-    #   ready        — exactly one voiced commit (needsBody flags an empty why)
+    #   squash       — any WIP/fixup subject: collapse/voice → POST /prep
+    #   ready        — every outgoing subject voiced: one commit, or an outline of several
+    #                  deliberate ones kept for the reviewer (needsBody flags an empty why)
     branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
     if not branch or ctx.run(["git", "rev-parse", "--verify", "--quiet",
                               f"refs/heads/{branch}"]).returncode != 0:
@@ -100,15 +101,18 @@ def route(req, u):
         send("nothing", "everything here is already shared with origin", outgoing=None)
         return
     tip = _commit(outgoing[0])
-    if len(outgoing) > 1 or push._WIP_SUBJECT.match(tip["subject"]):
+    subjects = [ctx.run(["git", "log", "-1", "--format=%s", sha]).stdout.strip() for sha in outgoing]
+    placeholders = [s for s in subjects if push._WIP_SUBJECT.match(s)]
+    if placeholders:
         send("squash",
-             (f"{len(outgoing)} unpushed commits" if len(outgoing) > 1
-              else "the unpushed commit has a WIP subject")
-             + " — collapse the unpushed tail to one voiced commit",
+             f"{len(placeholders)} of {len(outgoing)} unpushed subjects "
+             f"{'is a' if len(placeholders) == 1 else 'are'} WIP/fixup placeholder"
+             f"{'' if len(placeholders) == 1 else 's'} — collapse the unpushed tail to one voiced commit",
              {"method": "POST", "path": "/prep", "body": {"branch": branch}},
              outgoing={"count": len(outgoing), "tip": tip})
         return
     send("ready",
-         "one voiced commit outgoing"
+         ("one voiced commit outgoing" if len(outgoing) == 1
+          else f"{len(outgoing)} voiced commits outgoing — the branch's outline")
          + ("" if tip["body"] else " — no body (optional; add a why if it helps a reviewer)"),
-         outgoing={"count": 1, "tip": tip}, needsBody=not tip["body"])
+         outgoing={"count": len(outgoing), "tip": tip}, needsBody=not tip["body"])
