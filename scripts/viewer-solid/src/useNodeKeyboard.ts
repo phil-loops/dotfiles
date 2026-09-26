@@ -5,7 +5,8 @@ import { chatTarget } from "./chatDrawer";
 import { storySheetOpen } from "./StorySheet";
 import type { SpineNode } from "./types";
 
-// The node review keyboard: j/k walk the spine, 1–4 pick the diff base, c flips diffs⇄commits,
+// The node review keyboard: j/k walk the spine, 1–4 pick the diff base, c flips diffs⇄commits
+// ([ / ] step commits there),
 // b toggles the file panel, ⇧B/⇧U bless/unbless the focused file, o opens the hovered line in
 // nvim, m/Esc go up to the forest, ? toggles help. Installed on mount, torn down on cleanup.
 export function useNodeKeyboard(deps: {
@@ -17,6 +18,8 @@ export function useNodeKeyboard(deps: {
   hover: () => { path: string; line: number } | null;
   openInNvim: (path: string, line: number | null) => void;
   setView: (fn: (v: "diffs" | "commits") => "diffs" | "commits") => void;
+  view: () => "diffs" | "commits";
+  stepCommit: (delta: number) => void;
   togglePanel: () => void;
   activeFile: () => string;
   base: () => string;
@@ -48,6 +51,7 @@ export function useNodeKeyboard(deps: {
     else if (e.key === "4") deps.setBase("@origin");
     else if (e.key === "o" && deps.hover()) { e.preventDefault(); const h = deps.hover()!; deps.openInNvim(h.path, h.line); }
     else if (e.key === "c") deps.setView((v) => (v === "commits" ? "diffs" : "commits"));
+    else if ((e.key === "[" || e.key === "]") && deps.view() === "commits") { e.preventDefault(); deps.stepCommit(e.key === "]" ? 1 : -1); }
     else if (e.key === "b") { e.preventDefault(); deps.togglePanel(); } // show / hide the file panel
     // ⇧B blesses the focused file and advances (B·B·B down a branch, no mouse); ⇧U unblesses it in
     // place. Per-file only — there is deliberately no bless-all key.

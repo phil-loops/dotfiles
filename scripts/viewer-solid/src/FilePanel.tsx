@@ -22,6 +22,7 @@ export function FilePanel(props: {
   project: () => string;
   nodeData: () => NodeData | undefined;
   isGhost: () => boolean;
+  caption?: () => string | undefined; // overrides the blessed count (a commit's files have no bless state)
   blessedOf: (f: FileDiff) => boolean;
   activeFile: () => string;
   fileFilter: () => string;
@@ -52,9 +53,10 @@ export function FilePanel(props: {
             {(data) => (
               <>
                 <div class={SPINE_META}>
-                  {props.isGhost()
-                    ? `${data().files.length} files · ✦ all changes`
-                    : `${data().files.filter(props.blessedOf).length}/${data().files.length} files blessed`}
+                  {props.caption?.() ??
+                    (props.isGhost()
+                      ? `${data().files.length} files · ✦ all changes`
+                      : `${data().files.filter(props.blessedOf).length}/${data().files.length} files blessed`)}
                 </div>
                 <Show
                   when={data().files.length}

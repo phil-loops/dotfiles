@@ -1,11 +1,12 @@
 import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
-import { createQuery, useQueryClient } from "@tanstack/solid-query";
+import { useQueryClient } from "@tanstack/solid-query";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
 import { provider, withRepo, canMutate } from "./provider";
 import { isBlessed } from "./shared";
 import { useArm } from "./actions";
-import type { FileDiff, Commit } from "./types";
+import type { FileDiff, Commit, CommitDiff } from "./types";
+import { outlineOf, outlineNumber } from "./commitOutline";
 
 const FILE_ACT =
   "file-act flex-none cursor-pointer rounded-[7px] border px-[10px] py-1 text-[11px] leading-[1.55] tracking-[0.04em] transition-[background,border-color,color] duration-[120ms]";
@@ -390,21 +391,17 @@ export function FileEntry(props: {
   );
 }
 
-// One history row. Click it to expand that commit's diff inline (git show <sha>) —
-// GitHub-Desktop's History tab: the whole commit, not just a subject line. Diffs load
-// lazily on first expand and are read-only (historical commits, nothing to bless).
-function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }) {
-  const [open, setOpen] = createSignal(false);
-  // a commit's diff never changes, so it's cached for the session (and prefetched for the
-  // rows above the origin waterline by CommitsList) — expanding is a render, not a fetch
-  const diffQ = createQuery(() => ({
-    queryKey: ["commit-diff", props.c.sha],
-    queryFn: () => provider.commitDiff(props.c.sha),
-    enabled: open(),
-    staleTime: Infinity,
-  }));
-  const diff = () => diffQ.data;
-  const noBless = { mutate: () => {} };
+// One history row. Click it to select that commit — its message and its own diff (git show
+// <sha>) render in the CommitDetail below the list, one commit at a time, and [ / ] step.
+// An own row shows its body under the subject: the outline is subjects + one-line whys.
+function CommitRow(props: {
+  c: Commit;
+  n?: number;
+  branch: string;
+  selected: boolean;
+  onSelect: () => void;
+  onReworded?: () => void;
+}) {
   // reword — GitHub Desktop's "amend" for any commit above the origin waterline: the message
   // changes, the tree does not (stack-reword rebuilds sha..tip and carries stacked children).
   // Pushed commits get no pencil: rewording them would be a force-push.
@@ -468,14 +465,31 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
       setSaving(false);
     }
   };
+  const mine = () => props.c.own !== false && !props.c.carried;
   return (
-    <li class="commit border-x-0 border-t-0 border-b border-solid border-rule" classList={{ own: props.c.own !== false, "commit-open": open() }}>
-      <div class="commit-head flex w-full items-baseline gap-[13px] px-1 py-[9px] leading-[1.55] hover:bg-[rgba(255,255,255,0.03)]">
-        <button class="flex flex-1 cursor-pointer items-baseline gap-[13px] text-left leading-[1.55]" onClick={() => setOpen((v) => !v)}>
-          <span class="c-caret w-[10px] flex-none text-[10px] text-ink-faint">{open() ? "▾" : "▸"}</span>
+    <li
+      class="commit border-x-0 border-t-0 border-b border-solid border-rule"
+      classList={{ own: props.c.own !== false, carried: !!props.c.carried, "commit-open": props.selected }}
+    >
+      <div
+        class={`commit-head flex w-full items-baseline gap-[13px] px-1 py-[9px] leading-[1.55] ${
+          props.selected ? "bg-gold-wash" : "hover:bg-[rgba(255,255,255,0.03)]"
+        }`}
+      >
+        <button class="flex flex-1 cursor-pointer items-baseline gap-[13px] text-left leading-[1.55]" onClick={() => props.onSelect()}>
+          <span class={`c-num w-[16px] flex-none text-right text-[11px] tabular-nums ${props.selected ? "text-gold-leaf" : "text-ink-faint"}`}>
+            {props.n ?? ""}
+          </span>
           <span class="c-sha flex-none text-[11px] text-ink-faint tabular-nums">{props.c.sha}</span>
-          {/* inherited ancestors dim — they're not this branch's work */}
-          <span class={`c-subject flex-1 ${props.c.own !== false ? "text-ink" : "text-ink-faint"}`}>{props.c.subject}</span>
+          {/* inherited ancestors and carried fan-in picks dim — they're not this branch's outline */}
+          <span class={`c-subject flex-1 ${mine() ? "text-ink" : "text-ink-faint"}`}>
+            {props.c.subject}
+            <Show when={props.c.carried}>
+              <span class="c-carried ml-2 text-[10.5px] tracking-[0.04em] text-ink-faint" title="a cherry-pick of a fan-in dep (stack-requires) — reviewed on that branch">
+                carried
+              </span>
+            </Show>
+          </span>
           <span class="c-meta flex-none text-[10.5px] text-ink-faint">{props.c.author} · {props.c.date}</span>
         </button>
         <Show when={rewordable() && !editing()}>
@@ -503,6 +517,9 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
           </button>
         </Show>
       </div>
+      <Show when={mine() && props.c.body && !editing() && !props.selected}>
+        <p class="c-body m-0 pb-[9px] pl-[88px] pr-1 text-[11.5px] leading-[1.5] whitespace-pre-wrap text-ink-faint">{props.c.body}</p>
+      </Show>
       <Show when={revertErr()}>
         <p class="px-1 pb-2 text-[11px] text-del">{revertErr()}</p>
       </Show>
@@ -538,19 +555,6 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
           </div>
         </div>
       </Show>
-      <Show when={open()}>
-        <div class="commit-diff px-1 pt-1 pb-3">
-          <Show when={diff()} fallback={<p class={LOADING}>loading…</p>}>
-            {(d) => (
-              <Show when={d().files.length} fallback={<p class={LOADING}>no file changes (merge or empty commit)</p>}>
-                <For each={d().files}>
-                  {(f) => <FileEntry file={f} bless={noBless} branch={props.branch} readOnly />}
-                </For>
-              </Show>
-            )}
-          </Show>
-        </div>
-      </Show>
     </li>
   );
 }
@@ -558,60 +562,115 @@ function CommitRow(props: { c: Commit; branch: string; onReworded?: () => void }
 const DIVIDER =
   "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
 
-export function CommitsList(props: { q: { data: Commit[] | undefined }; branch: string; frozen?: boolean; onReworded?: () => void }) {
-  const own = () => (props.q.data ?? []).filter((c) => c.own !== false);
-  const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
-  // warm the diffs of what a push would send (the rows above the waterline, a handful at
-  // most) so those open instantly; everything else stays lazy
+export function CommitsList(props: {
+  q: { data: Commit[] | undefined };
+  branch: string;
+  frozen?: boolean;
+  selected: string;
+  onSelect: (sha: string) => void;
+  onReworded?: () => void;
+}) {
+  const outline = () => outlineOf(props.q.data);
+  // warm every outline commit's diff (a handful by convention) so stepping is a render, not a fetch
   const qc = useQueryClient();
   createEffect(() => {
-    for (const c of own().filter((c) => c.pushed === false).slice(0, 6)) {
+    for (const c of outline().slice(-8)) {
       void qc.prefetchQuery({ queryKey: ["commit-diff", c.sha], queryFn: () => provider.commitDiff(c.sha), staleTime: Infinity });
     }
   });
-  // the origin waterline — GitHub Desktop's push line: everything above it goes out on
-  // push, everything below origin already has. Index of the first pushed own row; -1 when
-  // no remote ref exists (never pushed anywhere → no line to draw).
+  // the origin waterline — GitHub Desktop's push line, drawn oldest-first: everything below it
+  // goes out on push, everything above origin already has. Index of the first unpushed row;
+  // -1 when no remote ref exists (never pushed anywhere → no line to draw).
   const waterline = () => {
-    if (!own().some((c) => c.pushed !== undefined)) return -1;
-    const f = own().findIndex((c) => c.pushed === true);
-    return f === -1 ? own().length : f;
+    if (!outline().some((c) => c.pushed !== undefined)) return -1;
+    const f = outline().findIndex((c) => c.pushed === false);
+    return f === -1 ? outline().length : f;
   };
+  const outgoing = () => outline().length - waterline();
   const waterlineText = () =>
-    props.frozen && waterline() > 0
+    props.frozen && outgoing() > 0
       ? "origin frozen — local carries the restacked truth; squash-merge reconciles, nothing to push"
-      : waterline() === 0
+      : outgoing() === 0
         ? "origin is current — a push sends nothing"
-        : `origin is here — ${waterline()} commit${waterline() === 1 ? "" : "s"} above go out on push · 4 = combined line diff`;
+        : `origin is here — ${outgoing()} commit${outgoing() === 1 ? "" : "s"} below go out on push · 4 = combined line diff`;
   return (
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
         <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
           <ol class="commits mx-0 mt-2 mb-0 list-none p-0">
-            <Show when={waterline() === 0}>
-              <li class={DIVIDER}><span>{waterlineText()}</span></li>
-            </Show>
-            <For each={own()}>
+            <For each={outline()}>
               {(c, i) => (
                 <>
-                  <Show when={i() === waterline() && i() > 0}>
+                  <Show when={i() === waterline()}>
                     <li class={DIVIDER}><span>{waterlineText()}</span></li>
                   </Show>
-                  <CommitRow c={c} branch={props.branch} onReworded={props.onReworded} />
+                  <CommitRow
+                    c={c}
+                    n={outlineNumber(outline(), c.sha)}
+                    branch={props.branch}
+                    selected={props.selected === c.sha}
+                    onSelect={() => props.onSelect(c.sha)}
+                    onReworded={props.onReworded}
+                  />
                 </>
               )}
             </For>
-            <Show when={waterline() === own().length && own().length > 0}>
+            <Show when={waterline() === outline().length && outline().length > 0}>
               <li class={DIVIDER}><span>{waterlineText()}</span></li>
-            </Show>
-            <Show when={ancestors().length}>
-              <li class="commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']"><span>earlier history</span></li>
-              <For each={ancestors()}>
-                {(c) => <CommitRow c={c} branch={props.branch} />}
-              </For>
             </Show>
           </ol>
         </Show>
+      )}
+    </Show>
+  );
+}
+
+// The history this branch forked from — below the selected commit so it never pushes that
+// commit's diff off-screen; folded until asked for (it's context, not this branch's work).
+export function EarlierHistory(props: { q: { data: Commit[] | undefined }; branch: string; selected: string; onSelect: (sha: string) => void }) {
+  const ancestors = () => (props.q.data ?? []).filter((c) => c.own === false);
+  const [open, setOpen] = createSignal(false);
+  return (
+    <Show when={ancestors().length}>
+      <ol class="commits mx-0 mt-[30px] mb-0 list-none p-0">
+        <li class={DIVIDER}>
+          <button class="cursor-pointer uppercase tracking-[0.08em] text-ink-faint hover:text-ink-dim" onClick={() => setOpen((v) => !v)}>
+            {open() ? "▾" : "▸"} earlier history · {ancestors().length}
+          </button>
+        </li>
+        <Show when={open()}>
+          <For each={ancestors()}>
+            {(c) => <CommitRow c={c} branch={props.branch} selected={props.selected === c.sha} onSelect={() => props.onSelect(c.sha)} />}
+          </For>
+        </Show>
+      </ol>
+    </Show>
+  );
+}
+
+// The selected commit, read on its own: its message, then only the files it touched. Read-only
+// — a historical commit has nothing to bless.
+export function CommitDetail(props: { commit: Commit | undefined; label: string; diff: CommitDiff | undefined; branch: string }) {
+  const noBless = { mutate: () => {} };
+  return (
+    <Show when={props.commit}>
+      {(c) => (
+        <section class="commit-detail mt-[26px] scroll-mt-[18px]">
+          <header class="mb-[14px] border-x-0 border-t-0 border-b border-solid border-rule pb-[12px]">
+            <div class="text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">{props.label}</div>
+            <h3 class="m-0 mt-[5px] font-display text-[17px] font-semibold text-ink">{c().subject}</h3>
+            <Show when={c().body}>
+              <p class="m-0 mt-[5px] text-[12px] leading-[1.55] whitespace-pre-wrap text-ink-dim">{c().body}</p>
+            </Show>
+          </header>
+          <Show when={props.diff} fallback={<p class={LOADING}>loading…</p>}>
+            {(d) => (
+              <Show when={d().files.length} fallback={<p class={LOADING}>no file changes (merge or empty commit)</p>}>
+                <For each={d().files}>{(f) => <FileEntry file={f} blessed={() => false} bless={noBless} branch={props.branch} readOnly />}</For>
+              </Show>
+            )}
+          </Show>
+        </section>
       )}
     </Show>
   );

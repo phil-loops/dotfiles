@@ -4,7 +4,8 @@ import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./ro
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, isBlessed, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
-import { DirtyRail, FileEntry, CommitsList } from "./FileRail";
+import { DirtyRail, FileEntry, CommitsList, CommitDetail, EarlierHistory } from "./FileRail";
+import { outlineOf, outlineNumber } from "./commitOutline";
 import { FilePanel } from "./FilePanel";
 import { TestNotes } from "./TestNotes";
 import { useNodeMutations } from "./useNodeMutations";
@@ -59,6 +60,7 @@ export function NodeDetail() {
       lastActive = active();
       setBase("");
       setView("diffs");
+      setSelectedCommit("");
       setActiveFile("");
       fileCycle.setCurrent("");
     }
@@ -107,6 +109,46 @@ export function NodeDetail() {
     enabled: !!active(),
     placeholderData: keepPreviousData,
   }));
+
+  // commits view = the branch read one commit at a time: the outline on top, the selected
+  // commit's message + own diff below, [ / ] stepping through the outline (oldest first).
+  const [selectedCommit, setSelectedCommit] = createSignal("");
+  const outline = createMemo(() => outlineOf(commits.data));
+  const firstOwn = () => (outline().find((c) => !c.carried) ?? outline()[0])?.sha ?? "";
+  const selected = () => (commits.data ?? []).find((c) => c.sha === selectedCommit());
+  createEffect(() => {
+    if (view() === "commits" && !selected()) setSelectedCommit(firstOwn());
+  });
+  const commitDiff = createQuery(() => ({
+    queryKey: ["commit-diff", selectedCommit()],
+    queryFn: () => provider.commitDiff(selectedCommit()),
+    enabled: view() === "commits" && !!selectedCommit(),
+    staleTime: Infinity,
+  }));
+  const commitLabel = () => {
+    const c = selected();
+    if (!c) return "";
+    if (c.own === false) return "earlier history";
+    if (c.carried) return "carried from a fan-in dep";
+    const total = outline().filter((o) => !o.carried).length;
+    return `commit ${outlineNumber(outline(), c.sha)} of ${total}`;
+  };
+  const selectCommit = (sha: string) => {
+    setSelectedCommit(sha);
+    setActiveFile("");
+    fileCycle.setCurrent("");
+  };
+  const stepCommit = (delta: number) => {
+    const list = outline();
+    const next = list[list.findIndex((c) => c.sha === selectedCommit()) + delta];
+    if (!next) return;
+    selectCommit(next.sha);
+    queueMicrotask(() => document.querySelector(".commit-detail")?.scrollIntoView({ behavior: "instant", block: "start" }));
+  };
+  const panelData = () =>
+    view() === "diffs"
+      ? node.data
+      : commitDiff.data && { branch: active(), files: commitDiff.data.files, dirty: [] };
 
   const { bless, unbless, bumpInterest, detachUpstream, reseatChildren } = useNodeMutations({
     active,
@@ -268,6 +310,8 @@ export function NodeDetail() {
     hover,
     openInNvim,
     setView,
+    view,
+    stepCommit,
     togglePanel: () => { filterAutoOpenedPanel = false; setPanelOpen((v) => !v); },
     activeFile,
     base,
@@ -297,9 +341,10 @@ export function NodeDetail() {
       <FilePanel
         spine={spine}
         project={project}
-        nodeData={() => node.data}
+        nodeData={panelData}
         isGhost={isGhost}
-        blessedOf={blessedOf}
+        caption={() => (view() === "commits" && commitDiff.data ? `${commitDiff.data.files.length} files in this commit` : undefined)}
+        blessedOf={(f) => view() === "diffs" && blessedOf(f)}
         activeFile={activeFile}
         fileFilter={fileFilter}
         setFileFilter={setFileFilter}
@@ -340,6 +385,7 @@ export function NodeDetail() {
           nodeHealth={nodeHealth}
           divergedData={() => divergedDetail.data}
           view={view}
+          commitLabel={commitLabel}
           base={base}
           BASES={BASES}
           nodeAmbient={nodeAmbient}
@@ -348,17 +394,24 @@ export function NodeDetail() {
         />
         <TestNotes branch={active} />
         <Show when={view() === "diffs"} fallback={
-            <CommitsList
-              q={commits}
-              branch={active()}
-              frozen={!!health.data?.[active()]?.frozenOrigin}
-              onReworded={() => {
-                // the shas moved (tree didn't): refresh the list, the push manifest, the model
-                commits.refetch();
-                qc.invalidateQueries({ queryKey: ["push-preview"] });
-                qc.invalidateQueries({ queryKey: ["model"] });
-              }}
-            />
+            <>
+              <CommitsList
+                q={commits}
+                branch={active()}
+                frozen={!!health.data?.[active()]?.frozenOrigin}
+                selected={selectedCommit()}
+                onSelect={selectCommit}
+                onReworded={() => {
+                  // the shas moved (tree didn't): refresh the list, the push manifest, the model
+                  setSelectedCommit("");
+                  commits.refetch();
+                  qc.invalidateQueries({ queryKey: ["push-preview"] });
+                  qc.invalidateQueries({ queryKey: ["model"] });
+                }}
+              />
+              <CommitDetail commit={selected()} label={commitLabel()} diff={commitDiff.data} branch={active()} />
+              <EarlierHistory q={commits} branch={active()} selected={selectedCommit()} onSelect={selectCommit} />
+            </>
           }>
           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
             <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
@@ -417,6 +470,7 @@ export function NodeDetail() {
             <dl class="m-0 grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2">
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>tab</span></dt><dd class={KBD_DD}>next file</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>c</span></dt><dd class={KBD_DD}>flip diffs ⇄ commits</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>[</span><span class={KBD_K}>]</span></dt><dd class={KBD_DD}>previous / next commit (commits view)</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>1</span><span class={KBD_K}>2</span><span class={KBD_K}>3</span><span class={KBD_K}>4</span></dt><dd class={KBD_DD}>diff vs parent / main / last blessed / outgoing (what a push sends)</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>b</span></dt><dd class={KBD_DD}>show / hide the file panel</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⌘F</span></dt><dd class={KBD_DD}>filter files</dd></div>
