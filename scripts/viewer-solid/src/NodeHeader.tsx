@@ -79,6 +79,7 @@ export function NodeHeader(props: {
   nodeHealth: (b: string) => HealthEntry | undefined;
   divergedData: () => DivergedDetail | undefined;
   view: () => "diffs" | "commits";
+  commitLabel: () => string;
   base: () => string;
   BASES: [string, string][];
   nodeAmbient: (b: string) => { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | undefined;
@@ -194,7 +195,7 @@ export function NodeHeader(props: {
               only when it's not the default, so a non-parent diff can't masquerade. */}
           <div class="nh-bar flex items-center gap-[16px] border-t border-rule pt-[11px]">
             <Show when={props.view() === "commits"}>
-              <span class="nh-viewnote text-[11px] tracking-[0.03em] text-ink-faint">commits · c for diffs</span>
+              <span class="nh-viewnote text-[11px] tracking-[0.03em] text-ink-faint">{props.commitLabel() || "commits"} · [ ] step · c for diffs</span>
             </Show>
             <Show when={props.view() === "diffs" && props.base() !== "" && !props.isGhost()}>
               <span class="nh-viewnote text-[11px] tracking-[0.03em] text-ink-faint">vs {(props.BASES.find(([v]) => v === props.base()) ?? props.BASES[0])[1]} · 1 for parent</span>

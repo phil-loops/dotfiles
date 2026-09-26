@@ -361,15 +361,25 @@ def _bound(cache, cap):
 def commits(req, u):
     # GitHub-Desktop-style history: the branch's OWN commits first (own:true), then the
     # ancestor history it forked from (own:false) so the list reads like a real timeline —
-    # not just the parent..branch delta. `own` membership is the rev-list of parent..branch.
+    # not just the parent..branch delta. `own` membership is the rev-list of parent..branch —
+    # origin/main for a root branch, the same base /node diffs against, since a stale local
+    # main would count merged work as the branch's own.
     branch = parse_qs(u.query).get("branch", [""])[0]
     snap = repostate.snapshot()
     parent = snap.parent(branch)
+    if parent == snap.main() and ctx.run(["git", "rev-parse", "--verify", "-q", f"origin/{parent}"]).returncode == 0:
+        parent = f"origin/{parent}"
     key = (ctx.repo_cwd(), branch, snap.branch_fingerprint(branch))
     hit = _COMMITS_CACHE.get(key)
     if hit is not None:
         return req._send(200, hit)
     own = set(ctx.run(["git", "rev-list", f"{parent}..{branch}"]).stdout.split())
+    # fan-in: commits carried as cherry-picks of a `requires` dep are the dep's outline, not
+    # this branch's — matched by patch-id (git cherry marks them "-")
+    carried = set()
+    for dep in ctx.run(["git", "config", "--get-all", f"branch.{branch}.stack-requires"]).stdout.split():
+        carried |= {ln[2:] for ln in ctx.run(["git", "cherry", dep, branch, parent]).stdout.splitlines()
+                    if ln.startswith("- ")}
     # origin waterline: which commits the remote already has, so the list can draw the
     # GitHub-Desktop push line. Upstream first; a tracking-less branch (Phil pushes from
     # another checkout) still gets one if origin/<branch> exists. Absent ref → no key.
@@ -389,6 +399,7 @@ def commits(req, u):
                          "author": p[3] if len(p) > 3 else "", "date": p[4] if len(p) > 4 else "",
                          "body": p[5].strip() if len(p) > 5 else "",
                          "own": p[0] in own,
+                         **({"carried": True} if p[0] in carried else {}),
                          **({"pushed": p[0] in pushed} if pushed is not None else {})})
     out_json = json.dumps(rows)
     _COMMITS_CACHE[key] = out_json
