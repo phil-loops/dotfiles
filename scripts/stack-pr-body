@@ -10,7 +10,7 @@
 # commit body or the map. Only --full touches stack-summary, which may spend a model call when
 # the stored summary is stale.
 #
-#   stack-pr-body <branch>           → purpose + merge-order furniture on stdout
+#   stack-pr-body <branch>           → purpose + commit outline + merge-order furniture on stdout
 #   stack-pr-body <branch> --full    → the full document (title, where-it-fits, stored change
 #                                      summary, merge order, mermaid map)
 #   stack-pr-body <branch> --link    → also link the fork's assembled integration (opt-in: that
@@ -41,12 +41,32 @@ else
   change=""
 fi
 
-FACTS="$facts" CHANGE="$change" FULL="$full" python3 - <<'PY'
-import json, os
+BRANCH="$branch" FACTS="$facts" CHANGE="$change" FULL="$full" python3 - <<'PY'
+import json, os, re, subprocess
 
 f = json.loads(os.environ["FACTS"])
 full = os.environ["FULL"] == "1"
 out = []
+
+def git(*args):
+    return subprocess.run(["git", *args], capture_output=True, text=True).stdout
+
+def own_subjects(branch):
+    # The branch's own commits, oldest first — the outline a reviewer reads the diff by. A
+    # repo squash-merges with PR_BODY, so this list is what survives on main. Fan-in commits
+    # carried as cherry-picks of a `requires` dep are the dep's story, not this branch's.
+    parent = git("config", f"branch.{branch}.stack-parent").strip() or "main"
+    base = (git("merge-base", "origin/main", branch).strip()
+            if parent in ("main", "master") else parent)
+    shas = git("rev-list", "--reverse", f"{base}..{branch}").split()
+    for dep in git("config", "--get-all", f"branch.{branch}.stack-requires").split():
+        carried = {line[2:] for line in git("cherry", dep, branch, base).splitlines()
+                   if line.startswith("- ")}
+        shas = [sha for sha in shas if sha not in carried]
+    return [re.sub(r"^(\w+)\([^)]*\)(!?):", r"\1\2:", git("log", "-1", "--format=%s", sha).strip())
+            for sha in shas]
+
+outline = own_subjects(os.environ["BRANCH"])
 
 def step_ref(s):
     if not s.get("pr"):
@@ -55,6 +75,9 @@ def step_ref(s):
 
 if not full:
     out.append(f["purpose"] or f["job"])
+    if len(outline) > 1:
+        out.append("\nCommits, in order:")
+        out += ["  %d. %s" % (i, s) for i, s in enumerate(outline, 1)]
     if f["project"] and len(f["plan"]) > 1:
         out.append("\nPart of a stack, in merge order:")
         for s in f["plan"]:
@@ -95,6 +118,10 @@ if f["project"]:
     if f["unblocks"]:
         out.append("Unblocks (waits on this):")
         out += ["- %s%s" % (u["job"], step_ref(u)) for u in f["unblocks"]] + [""]
+
+if len(outline) > 1:
+    out.append("\n### Commits\n")
+    out += ["%d. %s" % (i, s) for i, s in enumerate(outline, 1)]
 
 out.append("\n### The change\n")
 out.append(os.environ["CHANGE"])
