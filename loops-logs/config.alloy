@@ -1,0 +1,147 @@
+// Every source loops-tail knows, labelled with the same names: server, svc:<name>,
+// preview:<name>, docker:<container>. Files are read from their end — history stays in the files.
+local.file_match "loops" {
+  path_targets = [{"__path__" = "/hostlogs/loops-*.log"}]
+  sync_period  = "5s"
+}
+
+discovery.relabel "files" {
+  targets = local.file_match.loops.targets
+  rule {
+    source_labels = ["__path__"]
+    regex         = ".*\\.setup\\.log"
+    action        = "drop"
+  }
+  rule {
+    source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-(.+)\\.log"
+    target_label  = "source"
+    replacement   = "svc:$1"
+  }
+  rule {
+    source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-preview-(.+)\\.log"
+    target_label  = "source"
+    replacement   = "preview:$1"
+  }
+  rule {
+    source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-dev\\.log"
+    target_label  = "source"
+    replacement   = "server"
+  }
+}
+
+import.file "ports" {
+  filename       = "/gen/ports.alloy"
+  detector       = "poll"
+  poll_frequency = "5s"
+}
+
+ports.ports "files" {
+  targets = discovery.relabel.files.output
+}
+
+loki.source.file "loops" {
+  targets       = ports.ports.files.output
+  tail_from_end = true
+  forward_to    = [loki.process.loops.receiver]
+}
+
+discovery.docker "loops" {
+  host = "unix:///var/run/docker.sock"
+  filter {
+    name   = "label"
+    values = ["com.docker.compose.project=loops"]
+  }
+}
+
+discovery.relabel "docker" {
+  targets = []
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "source"
+    replacement   = "docker:$1"
+  }
+}
+
+loki.source.docker "loops" {
+  host          = "unix:///var/run/docker.sock"
+  targets       = discovery.docker.loops.targets
+  relabel_rules = discovery.relabel.docker.rules
+  forward_to    = [loki.process.loops.receiver]
+}
+
+loki.process "loops" {
+  // Next prints an error as a banner plus an indented code frame and object dump; fold those
+  // continuation lines into the entry that started them. Docker sources are already per-entry.
+  stage.match {
+    selector = "{source!~\"docker:.*\"}"
+    stage.multiline {
+      firstline     = "^(\\x1b\\[[0-9;]*m)*(⨯|⚠|✓|○|▲|\\{\"|LOOPS |DATADOG |\\[|[A-Za-z]| ?(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD) /)"
+      max_wait_time = "1s"
+      max_lines     = 200
+    }
+  }
+
+  stage.replace {
+    expression = "(\\x1b\\[[0-9;]*m)"
+    replace    = ""
+  }
+
+  // pino JSON lines carry their own level.
+  stage.match {
+    selector = "{source=~\".+\"} |~ \"^\\\\{.*\\\"level\\\"\""
+    stage.json {
+      expressions = { level = "level", msg = "msg", err_type = "err.type", stack = "err.stack", page = "err.page" }
+    }
+    stage.labels {
+      values = { level = "" }
+    }
+    stage.structured_metadata {
+      values = { err_type = "", stack = "", page = "" }
+    }
+    stage.template {
+      source   = "summary"
+      template = "{{ .msg }}{{ if .err_type }} [{{ .err_type }}]{{ end }}{{ if .page }} page={{ .page }}{{ end }}"
+    }
+    stage.output {
+      source = "summary"
+    }
+  }
+
+  // Next's access lines: " POST /api/auth/register 500 in 41ms (...)".
+  stage.match {
+    selector = "{source=~\".+\"} |~ \"^ ?(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD) /\""
+    stage.regex {
+      expression = "^ ?(?P<method>[A-Z]+) (?P<path>\\S+) (?P<status>\\d{3}) in"
+    }
+    stage.template {
+      source   = "level"
+      template = "{{ if hasPrefix \"5\" .status }}error{{ else if hasPrefix \"4\" .status }}warn{{ else }}info{{ end }}"
+    }
+    stage.labels {
+      values = { level = "", status = "" }
+    }
+    stage.structured_metadata {
+      values = { path = "", method = "" }
+    }
+  }
+
+  // Next's uncaught-error banner: "⨯ Error [UpstashError]: ...".
+  stage.match {
+    selector = "{source=~\".+\"} |~ \"^ ?⨯\""
+    stage.static_labels {
+      values = { level = "error" }
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
