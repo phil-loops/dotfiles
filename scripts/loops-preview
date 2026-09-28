@@ -75,6 +75,17 @@ meta_of()    { printf '/tmp/%s%s.meta' "$PREFIX" "$1"; }        # $1 = NAME
 sessions()   { tmux ls 2>/dev/null | sed -n "s/^\(${PREFIX}[^:]*\):.*/\1/p"; }
 name_of()    { printf '%s' "${1#$PREFIX}"; }                     # $1 = SESSION → NAME
 meta_get()   { [ -f "$1" ] && grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- || true; }  # $1=metafile $2=KEY
+# The value Next would load for $2 from $1's env files — later files win, like @next/env's
+# .env < .env.development < .env.local order; inline comments and quotes stripped.
+env_value() {
+  local f v="" line
+  for f in .env .env.development .env.local .env.development.local; do
+    line="$(grep -E "^[[:space:]]*$2=" "$1/$f" 2>/dev/null | tail -1)" || true
+    [ -n "$line" ] && v="$line"
+  done
+  v="${v#*=}"; v="${v%%#*}"; v="$(printf '%s' "$v" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/^["'\'']|["'\'']$//g')"
+  printf '%s' "$v"
+}
 listening()  { [ -n "$1" ] && lsof -iTCP:"$1" -sTCP:LISTEN -n >/dev/null 2>&1; }          # $1=PORT
 age_secs()   { [ -n "$1" ] && echo $(( $(date +%s) - $1 )) || echo 0; }                   # $1=STARTED epoch
 age_human()  { local s="$1"; [ "$s" -lt 60 ] && echo "${s}s" || { [ "$s" -lt 3600 ] && echo "$((s/60))m" || echo "$((s/3600))h"; }; }
@@ -613,7 +624,18 @@ rm -rf "$DIR/.next"
 # that still thinks it is :3000 rejects every session-backed write from a preview tab as
 # cross-origin (loops#10650) and the tab reads as logged out. NEXTAUTH_URL stays whatever
 # .env says, so sign-in is untouched.
-tmux new-session -d -s "$SESSION" "cd '$DIR' && BASE_URL=http://localhost:$PORT $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
+# Image URLs name a port too: uploads are saved with CLOUDFRONT_IMAGE_URL baked in, and both
+# the dev default and .env.template point the local fake-cloudfront at :3000 — so a preview's
+# images rendered only while :3000 happened to be up (2026-09-28: an .env left pointing at a
+# dead ngrok tunnel rendered every upload as an empty box). Re-point any fake-cloudfront URL at
+# THIS port; a real CDN URL in .env is deliberate and left alone.
+IMAGE_ENV=""
+for var in CLOUDFRONT_IMAGE_URL CLOUDFRONT_LEGACY_IMAGE_URL; do
+  case "$(env_value "$DIR" "$var")" in
+    ""|*/api/dev/fake-cloudfront/*) IMAGE_ENV="$IMAGE_ENV $var=http://localhost:$PORT/api/dev/fake-cloudfront/images" ;;
+  esac
+done
+tmux new-session -d -s "$SESSION" "cd '$DIR' && BASE_URL=http://localhost:$PORT$IMAGE_ENV $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
 if [ -n "$JOBS" ]; then
   JLOG="/tmp/$SESSION-jobs.log"
   tmux new-window -t "$SESSION" -n jobs "cd '$DIR' && $QUEUE_ENV HEALTH_PORT=$JPORT npx tsx --watch --watch-preserve-output --tsconfig lib/job-queue/tsconfig.json --import dotenv/config lib/job-queue/index.js '$QUEUE_URL' 10 > '$JLOG' 2>&1"
