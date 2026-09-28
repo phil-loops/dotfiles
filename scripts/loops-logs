@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# loops-logs — local Grafana + Loki over every loops dev log (the same sources loops-tail knows:
+# server, svc:<name>, preview:<name>, docker:<container>).
+#
+#   loops-logs            start (if needed) and open the dashboard
+#   loops-logs live       start and open Explore in live-tail mode
+#   loops-logs down       stop it (data volume kept; `down -v` also wipes it)
+#   loops-logs status     containers + URL
+#
+# Compose project: ~/.dotfiles/loops-logs. Grafana on :3900 (no login), Loki on :3100.
+set -euo pipefail
+DIR="$HOME/.dotfiles/loops-logs"
+URL="http://localhost:3900"
+compose() { docker compose -f "$DIR/docker-compose.yml" "$@"; }
+
+up() {
+  compose up -d --quiet-pull >/dev/null 2>&1 || compose up -d
+  for _ in $(seq 1 60); do
+    curl -fs -o /dev/null "$URL/api/health" && return 0
+    sleep 1
+  done
+  echo "grafana didn't come up on $URL — check: docker compose -f $DIR/docker-compose.yml logs" >&2
+  exit 1
+}
+
+case "${1:-open}" in
+  open)   up; open "$URL/d/loops-logs" ;;
+  live)
+    up
+    q='{"datasource":"loki","queries":[{"refId":"A","expr":"{source=~\".+\"}"}],"range":{"from":"now-5m","to":"now"}}'
+    open "$URL/explore?schemaVersion=1&panes=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "{\"a\":$q}")&liveNow=true"
+    ;;
+  down)   shift; compose down "$@" ;;
+  status) compose ps; echo "$URL/d/loops-logs" ;;
+  *)      sed -n '2,10p' "$0"; exit 1 ;;
+esac
