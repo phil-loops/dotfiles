@@ -3,7 +3,7 @@
 # server, svc:<name>, preview:<name>, docker:<container>).
 #
 #   loops-logs            start (if needed) and open the dashboard
-#   loops-logs live       start and open Explore in live-tail mode
+#   loops-logs live       start and open Explore on every source (press ▷ Live to stream)
 #   loops-logs down       stop it (data volume kept; `down -v` also wipes it)
 #   loops-logs status     containers + URL
 #
@@ -28,7 +28,7 @@ case "${1:-open}" in
   live)
     up
     q='{"datasource":"loki","queries":[{"refId":"A","expr":"{source=~\".+\"}"}],"range":{"from":"now-5m","to":"now"}}'
-    open "$URL/explore?schemaVersion=1&panes=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "{\"a\":$q}")&liveNow=true"
+    open "$URL/explore?schemaVersion=1&panes=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "{\"a\":$q}")"
     ;;
   down)   shift; compose down "$@" ;;
   status) compose ps; echo "$URL/d/loops-logs" ;;

@@ -26,6 +26,8 @@ spec="$repo/public/openapi.json"   # local spec → unreleased endpoints too
 pmport=7070; pmbase="http://127.0.0.1:${pmport}"
 mailmap="$HOME/.dotfiles/scripts/mail-map-serve"
 mmport=62555; mmbase="http://127.0.0.1:${mmport}"
+logs="$HOME/.dotfiles/scripts/loops-logs"
+lgport=3900; lgbase="http://127.0.0.1:${lgport}"
 
 poke() { open -g "swiftbar://refreshplugin?name=blessed" 2>/dev/null; }
 # Detach (nohup + subshell) so the server survives SwiftBar reaping the click process.
@@ -60,11 +62,16 @@ case "${1:-}" in
         done ) &
     fi
     poke; exit 0 ;;
+  --logs)        # Grafana over the dev logs. loops-logs starts the stack if needed, waits for
+    # Grafana to answer, then opens it — detached, since a cold start takes a few seconds.
+    ( nohup "$logs" "${2:-open}" >/dev/null 2>&1 </dev/null & )
+    poke; exit 0 ;;
 esac
 
 # --- render the menu -----------------------------------------------------------------
 up=0; curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && up=1
 mmup=0; curl -sf --max-time 1 "$mmbase/" >/dev/null 2>&1 && mmup=1
+lgup=0; curl -sf --max-time 1 "$lgbase/api/health" >/dev/null 2>&1 && lgup=1
 
 # menu-bar badge: ✦ tinted green when the viewer is live, grey when it's down
 if (( up )); then
@@ -87,5 +94,13 @@ if (( mmup )); then
 else
   echo "📬 Mail map · :${mmport} | bash=\"$self\" param1=--mailmap terminal=false"
 fi
+if (( lgup )); then
+  echo "📜 Logs · :${lgport} — open | color=#3fb950 bash=\"$self\" param1=--logs terminal=false"
+else
+  echo "📜 Logs · :${lgport} | bash=\"$self\" param1=--logs terminal=false"
+fi
+echo "--Dashboard | bash=\"$self\" param1=--logs param2=open terminal=false"
+echo "--Explore (press ▷ Live) | bash=\"$self\" param1=--logs param2=live terminal=false"
+(( lgup )) && echo "--Stop | bash=\"$self\" param1=--logs param2=down terminal=false"
 echo "---"
 echo "Refresh | refresh=true"
