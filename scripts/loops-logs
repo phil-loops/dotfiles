@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # loops-logs — local Grafana + Loki over every loops dev log (the same sources loops-tail knows:
-# server, svc:<name>, preview:<name>, docker:<container>).
+# server, svc:<name>, preview:<name>, docker:<container> — plus loops-script runs), split by app.
 #
-#   loops-logs            start (if needed) and open the dashboard
+#   loops-logs            start (if needed) and open the dashboard: one panel per app
+#   loops-logs apps       start and open Logs Drilldown — a tile per app, click in to break it down
 #   loops-logs live       start and open Explore on every source (press ▷ Live to stream)
 #   loops-logs down       stop it (data volume kept; `down -v` also wipes it)
 #   loops-logs status     containers + URL
@@ -25,12 +26,13 @@ up() {
 
 case "${1:-open}" in
   open)   up; open "$URL/d/loops-logs" ;;
+  apps)   up; open "$URL/a/grafana-lokiexplore-app/explore" ;;
   live)
     up
-    q='{"datasource":"loki","queries":[{"refId":"A","expr":"{source=~\".+\"}"}],"range":{"from":"now-5m","to":"now"}}'
+    q='{"datasource":"loki","queries":[{"refId":"A","expr":"{source=~\".+\"}"}],"panelsState":{"logs":{"displayedFields":["app"]}},"range":{"from":"now-5m","to":"now"}}'
     open "$URL/explore?schemaVersion=1&panes=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.quote(sys.argv[1]))' "{\"a\":$q}")"
     ;;
   down)   shift; compose down "$@" ;;
   status) compose ps; echo "$URL/d/loops-logs" ;;
-  *)      sed -n '2,10p' "$0"; exit 1 ;;
+  *)      sed -n '2,11p' "$0"; exit 1 ;;
 esac
