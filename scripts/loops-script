@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# loops-script — run a script-runner script from the current loops checkout, teeing its output
+# (tagged [<script>]) to /tmp/loops-script-runner.log so loops-logs shows it as app=script-runner,
+# source=script:<script>.
+#
+#   loops-script <scriptName> [args…]          dry run (script-runner's default)
+#   DRY_RUN=false loops-script <scriptName> …  for real
+set -uo pipefail
+[ $# -ge 1 ] || { sed -n '2,7p' "$0"; exit 1; }
+log=/tmp/loops-script-runner.log
+{
+  echo "=== $(date '+%F %T') $* · DRY_RUN=${DRY_RUN:-true} · $PWD"
+  npm run --silent script-runner -- "$@" 2>&1
+} | tee >(awk -v s="$1" '{ print "[" s "] " $0; fflush() }' >> "$log")
+exit "${PIPESTATUS[0]}"

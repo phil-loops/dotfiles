@@ -1,5 +1,11 @@
 // Every source loops-tail knows, labelled with the same names: server, svc:<name>,
-// preview:<name>, docker:<container>. Files are read from their end — history stays in the files.
+// preview:<name>, docker:<container> — plus script:<name> from loops-script. Files are read from
+// their end — history stays in the files.
+//
+// Labels: source = which log (instance), app = which program wrote the line (loops, jobs, croon,
+// permaloop, realtime, mail-schedule, script-runner, a compose service…; also Loki's service_name),
+// kind = what the line is (log = pino, http = Next access line, console = LOOPS LOG, tracer =
+// dd-trace chatter, raw = anything else), level, port.
 local.file_match "loops" {
   path_targets = [{"__path__" = "/hostlogs/loops-*.log"}]
   sync_period  = "5s"
@@ -20,15 +26,40 @@ discovery.relabel "files" {
   }
   rule {
     source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-(.+)\\.log"
+    target_label  = "app"
+    replacement   = "$1"
+  }
+  rule {
+    source_labels = ["__path__"]
     regex         = "/hostlogs/loops-preview-(.+)\\.log"
     target_label  = "source"
     replacement   = "preview:$1"
   }
   rule {
     source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-preview-.+\\.log"
+    target_label  = "app"
+    replacement   = "loops"
+  }
+  rule {
+    source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-preview-.+-jobs\\.log"
+    target_label  = "app"
+    replacement   = "jobs"
+  }
+  // The dev stack log interleaves every app; loki.process reads each line's [dev:<app>] prefix.
+  rule {
+    source_labels = ["__path__"]
     regex         = "/hostlogs/loops-dev\\.log"
     target_label  = "source"
     replacement   = "server"
+  }
+  rule {
+    source_labels = ["__path__"]
+    regex         = "/hostlogs/loops-dev\\.log"
+    target_label  = "app"
+    replacement   = ""
   }
 }
 
@@ -42,10 +73,34 @@ ports.ports "files" {
   targets = discovery.relabel.files.output
 }
 
+discovery.relabel "tail_from_end" {
+  targets = ports.ports.files.output
+  rule {
+    source_labels = ["app"]
+    regex         = "script-runner"
+    action        = "drop"
+  }
+}
+
 loki.source.file "loops" {
-  targets       = ports.ports.files.output
+  targets       = discovery.relabel.tail_from_end.output
   tail_from_end = true
   forward_to    = [loki.process.loops.receiver]
+}
+
+// loops-script creates its log on first use, before Alloy has discovered it — read it whole.
+discovery.relabel "from_start" {
+  targets = ports.ports.files.output
+  rule {
+    source_labels = ["app"]
+    regex         = "script-runner"
+    action        = "keep"
+  }
+}
+
+loki.source.file "scripts" {
+  targets    = discovery.relabel.from_start.output
+  forward_to = [loki.process.loops.receiver]
 }
 
 discovery.docker "loops" {
@@ -64,6 +119,10 @@ discovery.relabel "docker" {
     target_label  = "source"
     replacement   = "docker:$1"
   }
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "app"
+  }
 }
 
 loki.source.docker "loops" {
@@ -74,30 +133,92 @@ loki.source.docker "loops" {
 }
 
 loki.process "loops" {
-  // Next prints an error as a banner plus an indented code frame and object dump; fold those
-  // continuation lines into the entry that started them. Docker sources are already per-entry.
-  stage.match {
-    selector = "{source!~\"docker:.*\"}"
-    stage.multiline {
-      firstline     = "^(\\x1b\\[[0-9;]*m)*(⨯|⚠|✓|○|▲|\\{\"|LOOPS |DATADOG |\\[|[A-Za-z]| ?(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD) /)"
-      max_wait_time = "1s"
-      max_lines     = 200
-    }
-  }
-
   stage.replace {
     expression = "(\\x1b\\[[0-9;]*m)"
     replace    = ""
   }
 
-  // pino JSON lines carry their own level.
+  // task --output=prefixed: "[dev:jobs] {...}", "[trpc:types:watch] ...".
+  stage.match {
+    selector = "{source=\"server\"}"
+    stage.regex {
+      expression = "^\\[(?:dev:)?(?P<app>[^\\]]+)\\] ?(?P<rest>.*)$"
+    }
+    stage.replace {
+      source     = "app"
+      expression = "(:watch)$"
+      replace    = ""
+    }
+    stage.replace {
+      source     = "app"
+      expression = "(:)"
+      replace    = "-"
+    }
+    stage.labels {
+      values = { app = "" }
+    }
+    stage.output {
+      source = "rest"
+    }
+  }
+
+  // loops-script: "[<script>] line" → source=script:<script>.
+  stage.match {
+    selector = "{app=\"script-runner\"}"
+    stage.regex {
+      expression = "^\\[(?P<script>[^\\]]+)\\] ?(?P<rest>.*)$"
+    }
+    stage.template {
+      source   = "source"
+      template = "{{ if .script }}script:{{ .script }}{{ else }}{{ .source }}{{ end }}"
+    }
+    stage.labels {
+      values = { source = "" }
+    }
+    stage.output {
+      source = "rest"
+    }
+  }
+
+  stage.labels {
+    values = { service_name = "app" }
+  }
+
+  // Only the Next app in the dev stack listens on :3000; croon, jobs, … share its log, not its port.
+  stage.match {
+    selector = "{source=\"server\", app!=\"loops\"}"
+    stage.label_drop {
+      values = ["port"]
+    }
+  }
+
+  // Next prints an error as a banner plus an indented code frame and object dump; fold those
+  // continuation lines into the entry that started them. Docker sources are already per-entry.
+  stage.match {
+    selector = "{source!~\"docker:.*\"}"
+    stage.multiline {
+      firstline     = "^(⨯|⚠|✓|○|▲|\\{\"|LOOPS |DATADOG |===|\\[|[A-Za-z]| ?(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD) /)"
+      max_wait_time = "1s"
+      max_lines     = 200
+    }
+  }
+
+  // pino JSON lines carry their own level — a name, or pino's number when the logger has no
+  // level formatter.
   stage.match {
     selector = "{source=~\".+\"} |~ \"^\\\\{.*\\\"level\\\"\""
     stage.json {
       expressions = { level = "level", msg = "msg", err_type = "err.type", stack = "err.stack", page = "err.page" }
     }
+    stage.template {
+      source   = "level"
+      template = "{{ $l := printf \"%v\" .level }}{{ if eq $l \"10\" }}trace{{ else if eq $l \"20\" }}debug{{ else if eq $l \"30\" }}info{{ else if eq $l \"40\" }}warn{{ else if eq $l \"50\" }}error{{ else if eq $l \"60\" }}fatal{{ else }}{{ $l }}{{ end }}"
+    }
     stage.labels {
       values = { level = "" }
+    }
+    stage.static_labels {
+      values = { kind = "log" }
     }
     stage.structured_metadata {
       values = { err_type = "", stack = "", page = "" }
@@ -124,8 +245,25 @@ loki.process "loops" {
     stage.labels {
       values = { level = "", status = "" }
     }
+    stage.static_labels {
+      values = { kind = "http" }
+    }
     stage.structured_metadata {
       values = { path = "", method = "" }
+    }
+  }
+
+  stage.match {
+    selector = "{source=~\".+\"} |~ \"^LOOPS LOG:\""
+    stage.static_labels {
+      values = { kind = "console" }
+    }
+  }
+
+  stage.match {
+    selector = "{source=~\".+\"} |~ \"^DATADOG TRACER\""
+    stage.static_labels {
+      values = { kind = "tracer", level = "debug" }
     }
   }
 
@@ -134,6 +272,13 @@ loki.process "loops" {
     selector = "{source=~\".+\"} |~ \"^ ?⨯\""
     stage.static_labels {
       values = { level = "error" }
+    }
+  }
+
+  stage.match {
+    selector = "{source=~\".+\", kind=\"\"}"
+    stage.static_labels {
+      values = { kind = "raw" }
     }
   }
 

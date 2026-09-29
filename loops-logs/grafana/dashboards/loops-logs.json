@@ -2,6 +2,7 @@
   "uid": "loops-logs",
   "title": "Loops dev logs",
   "editable": true,
+  "description": "Every loops dev log, split by app. Pick apps at the top; each gets its own panel.",
   "time": {
     "from": "now-15m",
     "to": "now"
@@ -9,6 +10,48 @@
   "refresh": "5s",
   "templating": {
     "list": [
+      {
+        "name": "app",
+        "label": "App",
+        "type": "query",
+        "datasource": {
+          "type": "loki",
+          "uid": "loki"
+        },
+        "query": {
+          "type": 1,
+          "label": "app",
+          "stream": "{app=~\".+\"}",
+          "refId": "app"
+        },
+        "definition": "label_values({app=~\".+\"}, app)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".+",
+        "current": {
+          "text": [
+            "loops",
+            "jobs",
+            "croon",
+            "permaloop",
+            "realtime",
+            "mail-schedule",
+            "script-runner"
+          ],
+          "value": [
+            "loops",
+            "jobs",
+            "croon",
+            "permaloop",
+            "realtime",
+            "mail-schedule",
+            "script-runner"
+          ]
+        },
+        "sort": 1,
+        "description": "Defaults to the Node apps; docker services (psql, svix, valkey\u2026) are in the list too."
+      },
       {
         "name": "source",
         "label": "Source",
@@ -20,10 +63,10 @@
         "query": {
           "type": 1,
           "label": "source",
-          "stream": "",
-          "refId": "src"
+          "stream": "{app=~\"$app\"}",
+          "refId": "source"
         },
-        "definition": "label_values(source)",
+        "definition": "label_values({app=~\"$app\"}, source)",
         "refresh": 2,
         "multi": true,
         "includeAll": true,
@@ -49,10 +92,10 @@
         "query": {
           "type": 1,
           "label": "port",
-          "stream": "",
+          "stream": "{app=~\"$app\", source=~\"$source\"}",
           "refId": "port"
         },
-        "definition": "label_values(port)",
+        "definition": "label_values({app=~\"$app\", source=~\"$source\"}, port)",
         "refresh": 2,
         "multi": true,
         "includeAll": true,
@@ -66,6 +109,95 @@
           ]
         },
         "sort": 3
+      },
+      {
+        "name": "level",
+        "label": "Level",
+        "type": "custom",
+        "query": "error,warn,info,debug",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "options": [
+          {
+            "text": "error",
+            "value": "error",
+            "selected": false
+          },
+          {
+            "text": "warn",
+            "value": "warn",
+            "selected": false
+          },
+          {
+            "text": "info",
+            "value": "info",
+            "selected": false
+          },
+          {
+            "text": "debug",
+            "value": "debug",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "kind",
+        "label": "Kind",
+        "type": "custom",
+        "query": "log,http,console,raw,tracer",
+        "multi": true,
+        "includeAll": true,
+        "allValue": ".*",
+        "options": [
+          {
+            "text": "log",
+            "value": "log",
+            "selected": true
+          },
+          {
+            "text": "http",
+            "value": "http",
+            "selected": true
+          },
+          {
+            "text": "console",
+            "value": "console",
+            "selected": true
+          },
+          {
+            "text": "raw",
+            "value": "raw",
+            "selected": true
+          },
+          {
+            "text": "tracer",
+            "value": "tracer",
+            "selected": false
+          }
+        ],
+        "current": {
+          "text": [
+            "log",
+            "http",
+            "console",
+            "raw"
+          ],
+          "value": [
+            "log",
+            "http",
+            "console",
+            "raw"
+          ]
+        }
       },
       {
         "name": "search",
@@ -83,7 +215,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "Errors per source",
+      "title": "Lines per app",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -92,7 +224,7 @@
         "x": 0,
         "y": 0,
         "w": 24,
-        "h": 6
+        "h": 5
       },
       "targets": [
         {
@@ -101,10 +233,21 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (source, port) (count_over_time({source=~\"$source\", port=~\"$port\", level=\"error\"} |~ \"(?i)$search\" [$__auto]))",
-          "legendFormat": "{{source}} {{port}}"
+          "expr": "sum by (app) (count_over_time({app=~\"$app\", source=~\"$source\", port=~\"$port\", kind=~\"$kind\", level=~\"$level\"} |~ \"(?i)$search\" [$__auto]))",
+          "legendFormat": "{{app}}"
         }
       ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right",
+          "calcs": [
+            "sum"
+          ],
+          "sortBy": "Total",
+          "sortDesc": true
+        }
+      },
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -121,16 +264,16 @@
     {
       "id": 2,
       "type": "logs",
-      "title": "Errors (pino level=error, 5xx responses, \u2a2f banners)",
+      "title": "Errors \u2014 every selected app",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
         "x": 0,
-        "y": 6,
+        "y": 5,
         "w": 24,
-        "h": 10
+        "h": 8
       },
       "targets": [
         {
@@ -139,7 +282,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{source=~\"$source\", port=~\"$port\", level=\"error\"} |~ \"(?i)$search\""
+          "expr": "{app=~\"$app\", source=~\"$source\", port=~\"$port\", level=~\"error|fatal\"} |~ \"(?i)$search\""
         }
       ],
       "options": {
@@ -147,23 +290,41 @@
         "wrapLogMessage": true,
         "enableLogDetails": true,
         "sortOrder": "Descending",
-        "showLabels": true
+        "showLabels": true,
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false
       }
     },
     {
       "id": 3,
+      "type": "row",
+      "title": "Per app",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 4,
       "type": "logs",
-      "title": "All logs",
+      "title": "$app",
       "datasource": {
         "type": "loki",
         "uid": "loki"
       },
       "gridPos": {
         "x": 0,
-        "y": 16,
-        "w": 24,
-        "h": 16
+        "y": 14,
+        "w": 12,
+        "h": 12
       },
+      "repeat": "app",
+      "repeatDirection": "h",
+      "maxPerRow": 2,
       "targets": [
         {
           "refId": "A",
@@ -171,7 +332,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "{source=~\"$source\", port=~\"$port\"} |~ \"(?i)$search\""
+          "expr": "{app=\"$app\", source=~\"$source\", port=~\"$port\", kind=~\"$kind\", level=~\"$level\"} |~ \"(?i)$search\""
         }
       ],
       "options": {
@@ -179,8 +340,58 @@
         "wrapLogMessage": true,
         "enableLogDetails": true,
         "sortOrder": "Descending",
-        "showLabels": true
+        "showLabels": false,
+        "dedupStrategy": "none",
+        "prettifyLogMessage": false
       }
+    },
+    {
+      "id": 5,
+      "type": "row",
+      "title": "Everything, merged",
+      "collapsed": true,
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 24,
+        "h": 1
+      },
+      "panels": [
+        {
+          "id": 6,
+          "type": "logs",
+          "title": "All selected logs",
+          "datasource": {
+            "type": "loki",
+            "uid": "loki"
+          },
+          "gridPos": {
+            "x": 0,
+            "y": 29,
+            "w": 24,
+            "h": 16
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "datasource": {
+                "type": "loki",
+                "uid": "loki"
+              },
+              "expr": "{app=~\"$app\", source=~\"$source\", port=~\"$port\", kind=~\"$kind\", level=~\"$level\"} |~ \"(?i)$search\""
+            }
+          ],
+          "options": {
+            "showTime": true,
+            "wrapLogMessage": true,
+            "enableLogDetails": true,
+            "sortOrder": "Descending",
+            "showLabels": true,
+            "dedupStrategy": "none",
+            "prettifyLogMessage": false
+          }
+        }
+      ]
     }
   ],
   "schemaVersion": 39
