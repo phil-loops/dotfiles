@@ -20,6 +20,11 @@
 #   loops-preview --warm                                  # pre-clone one node_modules into the pool (see below)
 #
 # Env: LOOPS_MAIN overrides the main checkout (default ~/coding/loops).
+#      LOOPS_PREVIEW_NO_BADGE=1 runs next dev directly on the port, without the log badge.
+#
+# The public port is a tiny proxy (scripts/loops-preview-proxy.mjs) in front of `next dev`
+# on port+10000: it injects a log badge into every page (bottom-right pill, Ctrl+` opens a
+# live tail of this preview's server + setup logs) and shows the boot log while next compiles.
 #
 # --jobs: give the preview its OWN jobs pipeline. Creates a per-preview elasticmq queue
 # (preview-<name>, DLQ'd to dlq-dev), points the web server's queue env vars at it, and runs
@@ -106,8 +111,8 @@ json_esc()   { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 # state of one preview: orphaned (dir gone) · up (listening) · booting (spawned <BOOT_GRACE s ago, port
 # not bound yet — the meta lands before `next dev` binds; without the grace every launch read "dead") · dead
 BOOT_GRACE=90
-state_of()   { local dir="$1" port="$2" started="$3"; { [ -z "$dir" ] || [ ! -d "$dir" ]; } && { echo orphaned; return; }
-               listening "$port" && { echo up; return; }; [ "$(age_secs "$started")" -lt "$BOOT_GRACE" ] && echo booting || echo dead; }
+state_of()   { local dir="$1" port="$2" started="$3" uport="$4"; { [ -z "$dir" ] || [ ! -d "$dir" ]; } && { echo orphaned; return; }
+               listening "$port" && { [ -z "$uport" ] || listening "$uport"; } && { echo up; return; }; [ "$(age_secs "$started")" -lt "$BOOT_GRACE" ] && echo booting || echo dead; }
 
 # Unmanaged next-dev listeners on :3000-3060 — servers no preview session owns (a leftover
 # headless `next dev`, a `task dev` in a worktree). Echoes "PORT PID" per stray; $1 = ports
@@ -118,7 +123,7 @@ stray_listeners() {
     | awk 'NR>1 {n=split($9,a,":"); print a[n], $2}' | sort -u -k1,1n \
     | while read -r port pid; do
         case "$known" in *" $port "*) continue ;; esac
-        ps -p "$pid" -o command= 2>/dev/null | grep -q next || continue
+        ps -p "$pid" -o command= 2>/dev/null | grep -qE 'next|loops-preview-proxy' || continue
         echo "$port $pid"
       done
 }
@@ -143,7 +148,7 @@ kill_port() {
   pid="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -1)"
   [ -n "$pid" ] || { err "nothing listening on :$port"; exit 1; }
   cmd="$(ps -p "$pid" -o command= 2>/dev/null)"
-  case "$cmd" in *next*) ;; *) err "refusing to kill :$port — not a next dev server ($cmd)"; exit 1 ;; esac
+  case "$cmd" in *next*|*loops-preview-proxy*) ;; *) err "refusing to kill :$port — not a next dev server ($cmd)"; exit 1 ;; esac
   pgid="$(ps -p "$pid" -o pgid= 2>/dev/null | tr -d ' ')"
   if [ -n "$pgid" ] && [ "$pgid" -gt 1 ] 2>/dev/null; then
     kill -TERM -- "-$pgid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
@@ -170,7 +175,7 @@ if [ "$ACTION" = "list" ]; then
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
     reg_ports="$reg_ports $port"
-    state="$(state_of "$dir" "$port" "$started")"
+    state="$(state_of "$dir" "$port" "$started" "$(meta_get "$m" UPORT)")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; else branch="(dir gone)"; fi
     printf '  %-22s :%-5s  %-24s %-6s %s\n' \
       "$name" "${port:-?}" "$branch" "$(age_human "$(age_secs "$started")")" "$state"
@@ -203,7 +208,7 @@ if [ "$ACTION" = "json" ]; then
     name="$(name_of "$s")"; m="$(meta_of "$name")"
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
     reg_ports="$reg_ports $port"
-    state="$(state_of "$dir" "$port" "$started")"
+    state="$(state_of "$dir" "$port" "$started" "$(meta_get "$m" UPORT)")"
     if [ -n "$dir" ] && [ -d "$dir" ]; then branch="$(branch_of "$dir")"; behind="$(behind_of "$dir")"; else branch=""; behind=""; fi
     url=""; [ "$state" = "up" ] && url="http://localhost:$port"
     jstate=""
@@ -346,7 +351,7 @@ if [ "$ACTION" = "reap" ]; then
     port="$(meta_get "$m" PORT)"; dir="$(meta_get "$m" DIR)"; started="$(meta_get "$m" STARTED)"
     reason=""
     if [ -z "$dir" ] || [ ! -d "$dir" ]; then reason="orphaned (dir gone)"
-    elif [ "$(state_of "$dir" "$port" "$started")" = dead ]; then reason="dead (not listening on :$port)"
+    elif [ "$(state_of "$dir" "$port" "$started" "$(meta_get "$m" UPORT)")" = dead ]; then reason="dead (not listening on :$port)"
     elif [ -n "$OLDER_THAN" ] && [ "$(age_secs "$started")" -gt "$((OLDER_THAN * 60))" ]; then
       reason="older than ${OLDER_THAN}m"
     fi
@@ -636,12 +641,22 @@ for var in CLOUDFRONT_IMAGE_URL CLOUDFRONT_LEGACY_IMAGE_URL; do
     ""|*/api/dev/fake-cloudfront/*) IMAGE_ENV="$IMAGE_ENV $var=http://localhost:$PORT/api/dev/fake-cloudfront/images" ;;
   esac
 done
-tmux new-session -d -s "$SESSION" "cd '$DIR' && BASE_URL=http://localhost:$PORT$IMAGE_ENV $QUEUE_ENV npx next dev $BUNDLER -p $PORT > '$LOG' 2>&1"
+UPORT=""
+if [ -z "${LOOPS_PREVIEW_NO_BADGE:-}" ]; then
+  UPORT=$((PORT + 10000))
+  listening "$UPORT" && { err "next dev's internal port :$UPORT is taken — pick another --port or set LOOPS_PREVIEW_NO_BADGE=1"; exit 1; }
+fi
+NEXT_PORT="${UPORT:-$PORT}"
+tmux new-session -d -s "$SESSION" "cd '$DIR' && BASE_URL=http://localhost:$PORT$IMAGE_ENV $QUEUE_ENV npx next dev $BUNDLER -p $NEXT_PORT > '$LOG' 2>&1"
+if [ -n "$UPORT" ]; then
+  PLOG="/tmp/$SESSION-proxy.log"
+  tmux new-window -d -t "$SESSION" -n proxy "node '$HOME/.dotfiles/scripts/loops-preview-proxy.mjs' --port $PORT --upstream $UPORT --log '$LOG' --setup-log '$SETUP_LOG' --name '$NAME' --dir '$DIR' --branch '$(branch_of "$DIR")' > '$PLOG' 2>&1"
+fi
 if [ -n "$JOBS" ]; then
   JLOG="/tmp/$SESSION-jobs.log"
   tmux new-window -t "$SESSION" -n jobs "cd '$DIR' && $QUEUE_ENV HEALTH_PORT=$JPORT npx tsx --watch --watch-preserve-output --tsconfig lib/job-queue/tsconfig.json --import dotenv/config lib/job-queue/index.js '$QUEUE_URL' 10 > '$JLOG' 2>&1"
 fi
-printf 'DIR=%s\nPORT=%s\nSTARTED=%s\nQUEUE=%s\nJPORT=%s\n' "$DIR" "$PORT" "$(date +%s)" "$QUEUE_URL" "$JPORT" > "$META"
+printf 'DIR=%s\nPORT=%s\nSTARTED=%s\nQUEUE=%s\nJPORT=%s\nUPORT=%s\n' "$DIR" "$PORT" "$(date +%s)" "$QUEUE_URL" "$JPORT" "$UPORT" > "$META"
 
 # Without --jobs a preview does not run a worker, it ASSUMES the shared one — and said nothing
 # when there was none. 2026-09-17: no worker existed anywhere, so countAudience/listAudience sat
@@ -670,6 +685,7 @@ cyan "preview $NAME  →  http://localhost:$PORT"
 cyan "branch:  $(branch_of "$DIR")"
 [ -n "$JOBS" ] && cyan "jobs:    own worker from this checkout · queue preview-$NAME · health :$JPORT · log /tmp/$SESSION-jobs.log"
 cyan "watch:   tmux attach -t $SESSION   ·   log: $LOG"
+[ -n "$UPORT" ] && cyan "badge:   bottom-right pill on every page (Ctrl+\`) tails this log · next dev itself is on :$UPORT"
 cyan "stop:    loops-preview '$DIR' --kill"
 echo "(clean build — first request compiles from scratch, ~20-60s)"
 [ -n "$OPEN" ] && open "http://localhost:$PORT" || true
