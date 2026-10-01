@@ -12,7 +12,7 @@ Part of [[content-safety-epic]]. Today we run the desk with one doctor glancing 
 
 **The exam notes.** A physician writes what they observe, not a diagnosis: who the patient says they are, what they're asking for, whether handing it over would hurt them. Three lines, quoting the patient. If they can't tell, they write "can't tell." They never write "admit."
 
-**The protocol.** A written protocol reads the vitals and the notes together: discharge, hold for observation, or admit. The protocol is a binder anyone can read and change in writing; the numbers in it are on a laminated card swapped without rewriting the binder. New lines start as "hold for observation" and earn the right to admit only after enough reviewed cases show they were right.
+**The protocol.** A written protocol reads the vitals and the notes together: discharge, hold for observation, or admit. It's a binder anyone can read and change in writing; its numbers are on a laminated card swapped without rewriting the binder. New lines start as "hold" and earn the right to admit after enough reviewed cases show they were right.
 
 **The attending's note.** When a patient is held who shouldn't be, the attending writes a dated note: this patient, this reading, expected, valid for ninety days. It bends one case. It doesn't switch the monitors off.
 
