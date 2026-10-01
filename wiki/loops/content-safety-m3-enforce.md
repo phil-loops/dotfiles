@@ -14,4 +14,4 @@ Part of [[content-safety-epic]]. Starts only after M2's replay passes.
 
 Transactional publish goes first on the assumption that false positives there, a blocked password-reset flow, are the louder pain today. If misses on campaigns are louder, campaign send goes first instead; the mechanism is the same row.
 
-Done when: thresholds change by a config row; every decision is explainable in the admin from facts and quoted evidence; the false-block rate on transactional publish is lower than the baseline from M0, measured on the labeled set and on the override rate.
+Done when: thresholds change by a config row; every decision is explainable in the admin from facts and quoted evidence; the false-block rate on transactional publish is lower than the baseline from M0, measured on the labeled set and on the override rate; and the queue clears holds faster than the operation creates them. A desk that makes better decisions but can't handle the patients it asks to wait hasn't earned the operation.
