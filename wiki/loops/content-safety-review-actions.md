@@ -17,9 +17,9 @@ Part of [[content-safety-m4-viewer]]. The queue is the labeling tool. Support en
 
 **Confirming a block** is the mirror: verdict fraud with a subtype from a short list.
 
-**Other.** Allowed, requires a sentence, counted per rule on the dashboard. When its share climbs for a rule, the notes are read and either a new code is minted or the UI nudges toward one of the first three actions next time.
+**Other.** Allowed, requires a sentence, counted per rule. When its share climbs for a rule, the notes are read and either a new code is minted or the UI nudges toward one of the first three actions.
 
-**Scope picker, narrowest first.** This message. This rule for this team, with expiry. Every rule for this team, short expiry, required note, which is the old skip flag made honest. Widening is a deliberate click.
+**Scope picker, narrowest first.** This message. This rule for this team, with expiry. Every rule for this team, short expiry, required note: the old skip flag made honest.
 
 **Clusters.** A block across twelve teams on one template family is one queue item; one confirm or release covers the family.
 
