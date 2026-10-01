@@ -23,6 +23,7 @@ print -r -- "exercising ${REPO:t} (main checkout: $MAIN)"; print
 # matches worktree paths by prefix
 T="$(cd "$(mktemp -d)" && pwd -P)/so-test"; mkdir -p "$T"
 BRANCH="__so_test_$$"
+DBRANCH="__so_diff_$$"; OBRANCH="__so_own_$$"   # diff view: a child of $BRANCH, and one held by a real worktree
 SESSION="so-test-$$"
 
 cleanup(){
@@ -30,7 +31,7 @@ cleanup(){
   local w; for w in ${(f)"$(git worktree list --porcelain | awk -v t="$T" '/^worktree /{if (index($2,t)==1) print $2}')"}; do
     [[ -n "$w" ]] && git worktree remove --force "$w" 2>/dev/null
   done
-  git branch -D "$BRANCH" 2>/dev/null >/dev/null
+  git branch -D "$BRANCH" "$DBRANCH" "$OBRANCH" 2>/dev/null >/dev/null
   rm -rf "$T"
   git worktree prune 2>/dev/null   # after the dirs are gone, so stale registrations go too
 }
@@ -146,10 +147,90 @@ else
   skipped=$(( skipped + 4 ))
 fi
 
+print
+print -r -- "diff view"
+
+# A child of $BRANCH that MODIFIES one tracked file and ADDS another, built with plumbing so no
+# checkout moves. Two files, because the bug this guards is a one-file commit reverting the other.
+dfile=$(git ls-tree -r --name-only "$BRANCH" | awk '/\.md$/{print; exit}')
+dmode=$(git ls-tree "$BRANCH" -- "$dfile" | awk '{print $1}')
+didx="$T/didx"
+blobA=$( { git show "$BRANCH:$dfile"; print -r -- "so-test: a line the branch added" } | git hash-object -w --stdin)
+blobB=$(print -r -- "so-test: a file the branch added" | git hash-object -w --stdin)
+GIT_INDEX_FILE="$didx" git read-tree "$BRANCH"
+GIT_INDEX_FILE="$didx" git update-index --add --cacheinfo "$dmode,$blobA,$dfile" --cacheinfo "100644,$blobB,__so_added.txt"
+dtree=$(GIT_INDEX_FILE="$didx" git write-tree)
+dbase=$(git rev-parse "$BRANCH")
+dtip=$(git commit-tree "$dtree" -p "$dbase" -m "so-test: diff view")
+git branch -f "$DBRANCH" "$dtip" 2>/dev/null
+git config "branch.$DBRANCH.stack-parent" "$BRANCH"
+
+dv(){ STACK_OPEN_DIR="$T/diff" STACK_OPEN_NO_GEN_SYNC=1 "$SO" "$@" 2>/dev/null }
+dd=$(dv --diff-path "$DBRANCH")
+[[ "$dd" == *.diffbase && -d "$dd" ]] && ok "a branch with changes gets its own diff-view checkout" \
+                                     || no "no diff-view checkout (got: ${dd:-nothing})"
+[[ "$(git -C "$dd" rev-parse HEAD 2>/dev/null)" == "$dbase" ]] && ok "its HEAD is the branch's parent" \
+                                                              || no "diff view HEAD is not the parent"
+{ [[ -f "$dd/__so_added.txt" ]] && [[ "$(git -C "$dd" write-tree 2>/dev/null)" == "$dtree" ]] \
+  && git -C "$dd" diff --quiet 2>/dev/null } && ok "its files and index are the branch's tip" \
+                                             || no "diff view files are not the tip"
+nd=$(dv --path "$DBRANCH")
+[[ "$nd" != "$dd" && "$(git -C "$nd" rev-parse HEAD 2>/dev/null)" == "$dtip" ]] \
+  && ok "the ordinary checkout still sits on the tip" || no "the diff view disturbed the ordinary checkout"
+
+# hx-wc's exact shape: a PATHSPEC commit, whose tree is HEAD (the parent!) plus that one file
+print -r -- "so-test: typed in the diff view" >> "$dd/$dfile"
+git -C "$dd" add -- "$dfile" 2>/dev/null
+git -C "$dd" commit -q -m "so-test: edit" -- "$dfile" >/dev/null 2>&1
+ntip=$(git rev-parse "$DBRANCH")
+[[ "$ntip" != "$dtip" && "$(git rev-parse "$ntip^" 2>/dev/null)" == "$dtip" ]] \
+  && ok "a commit made there lands on top of the branch's tip" || no "the commit did not land on the tip"
+[[ "$(git diff --name-only "$dtip" "$ntip" 2>/dev/null)" == "$dfile" ]] \
+  && ok "… carrying only the edited file (the branch's other file survives)" \
+  || no "the replayed commit touched: $(git diff --name-only "$dtip" "$ntip" 2>/dev/null | tr '\n' ' ')"
+[[ "$(git -C "$dd" rev-parse HEAD 2>/dev/null)" == "$dbase" ]] && ok "… and HEAD goes back to the parent" \
+                                                              || no "HEAD stayed on the scratch commit"
+[[ "$(git log -1 --format=%s "$ntip" 2>/dev/null)" == "so-test: edit" ]] && ok "… with its message" \
+                                                                        || no "the replay lost the message"
+git -C "$dd" commit -q -m "so-test: noop" -- __so_added.txt >/dev/null 2>&1
+[[ "$(git rev-parse "$DBRANCH")" == "$ntip" && "$(git -C "$dd" rev-parse HEAD 2>/dev/null)" == "$dbase" ]] \
+  && ok "committing a file the branch already has adds nothing" || no "a no-op commit moved the branch"
+
+# the branch is rewritten elsewhere (a restack): the next open must show the new tip
+mtip=$(git commit-tree "$dtree" -p "$dbase" -m "so-test: rewritten")
+git branch -f "$DBRANCH" "$mtip" 2>/dev/null
+dd2=$(dv --diff-path "$DBRANCH")
+{ [[ "$dd2" == "$dd" ]] && [[ "$(git -C "$dd" write-tree 2>/dev/null)" == "$dtree" ]] \
+  && [[ "$(git -C "$dd" rev-parse HEAD 2>/dev/null)" == "$dbase" ]] && git -C "$dd" diff --quiet 2>/dev/null } \
+  && ok "a branch that moved is re-synced on the next open" || no "the diff view kept a stale tip"
+
+git config "branch.$BRANCH.stack-parent" "$BRANCH"   # its own parent → nothing to mark
+[[ "$(dv --diff-path "$BRANCH")" != *.diffbase ]] && ok "a branch with nothing to mark opens the ordinary checkout" \
+                                                 || no "built a diff view with nothing to mark"
+git config --unset "branch.$BRANCH.stack-parent"
+
+# The common case here: the branch is checked out in a REAL worktree, so its ref can't be moved
+# from outside — the commit has to fast-forward that worktree instead.
+git worktree add -q -b "$OBRANCH" "$T/owner" "$dtip" 2>/dev/null
+git config "branch.$OBRANCH.stack-parent" "$BRANCH"
+od=$(dv --diff-path "$OBRANCH")
+if [[ "$od" == *.diffbase ]]; then
+  print -r -- "so-test: typed for the owner" >> "$od/$dfile"
+  git -C "$od" add -- "$dfile" 2>/dev/null
+  git -C "$od" commit -q -m "so-test: owner edit" -- "$dfile" >/dev/null 2>&1
+  otip=$(git rev-parse "$OBRANCH")
+  { [[ "$(git rev-parse "$otip^" 2>/dev/null)" == "$dtip" ]] && [[ "$(git -C "$T/owner" rev-parse HEAD)" == "$otip" ]] \
+    && grep -q "typed for the owner" "$T/owner/$dfile" && [[ -z "$(git -C "$T/owner" status --porcelain -uno)" ]] } \
+    && ok "a branch held by a real worktree is fast-forwarded there, files and all" \
+    || no "the commit did not reach the worktree that holds the branch"
+else
+  no "no diff view for a branch held by a real worktree (got: ${od:-nothing})"
+fi
+
 if [[ "${1:-}" == --no-hx ]] || ! command -v tmux >/dev/null || ! command -v hx >/dev/null; then
   print
   print -r -- "editor drive: skipped"
-  skipped=$(( skipped + 3 ))
+  skipped=$(( skipped + 4 ))
 else
   print
   print -r -- "editor drive"
@@ -198,8 +279,10 @@ else
     { (( code != 0 )) && [[ "$err" == *"finishing this open in the background"* ]] } \
       && ok "an exhausted budget refuses the drive and hands off" \
       || no "an exhausted budget drove anyway (exit $code): ${err:0:70}"
-    # the detached self-retry (fresh clock, no group-kill) must then finish the open itself
-    for i in {1..40}; do
+    # the detached self-retry (fresh clock, no group-kill) must then finish the open itself.
+    # Its prep queues behind the per-tree seed-gen lock, which each earlier open's background
+    # heal holds for ~6s — two of those are ahead of it here, so give it the retry's own 30s.
+    for i in {1..120}; do
       line=$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2 | head -1)
       [[ "$line" == *39:* ]] && break
       sleep 0.25
@@ -211,6 +294,19 @@ else
                                     || no "spawned a rival review-hx window (${live_before} → ${live_after})"
     [[ "$(md5 -q "$wt/$probe" 2>/dev/null)" == "$md5_before" ]] && ok "the file on disk is untouched" \
                                                                || no "the drive wrote into the file"
+
+    # the point of the diff view: the editor itself marks what the branch changed
+    dlast=$(( $(wc -l < "$dd/$dfile") ))
+    env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx STACK_OPEN_HX_BUDGET=20 \
+        STACK_OPEN_NO_GEN_SYNC=1 STACK_OPEN_DIR="$T/diff" "$SO" "$DBRANCH" "$dfile" "$dlast" >/dev/null 2>&1
+    marks=""
+    for i in {1..40}; do
+      marks=$(tmux capture-pane -p -t "$pane" 2>/dev/null | grep -c '▍')
+      (( marks > 0 )) && break
+      sleep 0.25
+    done
+    (( marks > 0 )) && ok "Helix marks the branch's changed lines in the gutter" \
+                    || no "no change marks in the Helix gutter"
   fi
 fi
 

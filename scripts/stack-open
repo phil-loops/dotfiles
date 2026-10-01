@@ -19,8 +19,15 @@
 #                                       > 3d loses the whole worktree. Runs on every open too,
 #                                       quietly; a dir any live process sits in is never touched.
 #
+#   stack-open --diff-path <branch>  print the diff-view checkout (see "diff view" below)
+#
 # A branch already checked out in a real worktree is opened there (editable);
 # otherwise a scratch worktree under $STACK_OPEN_DIR is used.
+#
+# Helix opens land in the DIFF VIEW instead: a `<branch>.diffbase` scratch whose HEAD is the
+# branch's stack-parent, so the gutter marks what the branch changed (]g / [g step through it,
+# space-g lists the changed files). Opt out: STACK_OPEN_NO_DIFF_BASE=1 or
+# `git config stack.open-diff-base false`.
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
@@ -83,10 +90,59 @@ install_followup_hook(){   # idempotently install the detached-HEAD → branch-f
 # stack-open: advance a detached scratch review worktree's branch ref to follow
 # commits, so `:wc` / `git commit` here don't strand on a detached HEAD.
 git symbolic-ref -q HEAD >/dev/null 2>&1 && exit 0          # attached → not a scratch commit
-marker="$(git rev-parse --git-dir)/stack-open-branch"
+gd=$(git rev-parse --git-dir)
+marker="$gd/stack-open-branch"
 [ -f "$marker" ] || exit 0                                  # no marker → not a stack-open worktree
 b=$(cat "$marker")
-[ -n "$b" ] && git branch -f "$b" HEAD 2>/dev/null || true  # follow (skip silently if branch is locked elsewhere)
+[ -n "$b" ] || exit 0
+dmark="$gd/stack-open-diff-base"
+if [ ! -f "$dmark" ]; then
+  git branch -f "$b" HEAD 2>/dev/null || true               # follow (skip silently if branch is locked elsewhere)
+  exit 0
+fi
+
+# Diff view (ensure_diff_worktree): HEAD sits on the branch's diff BASE so the editor's gutter
+# marks the branch's own changes. This commit is therefore parented on the base, and following
+# it would replace the branch's whole history with it. Its TREE can't be trusted either — a
+# pathspec commit (hx-wc) is "HEAD + that one file", i.e. the base with every OTHER branch file
+# reverted. So replay only the paths the commit changed onto the real tip, then put HEAD back.
+say(){ echo "stack-open: $1" >&2; [ -n "${TMUX:-}" ] && tmux display-message "stack-open: $1" 2>/dev/null; true; }
+base=$(cut -d' ' -f1 "$dmark")
+made=$(git rev-parse --short HEAD)
+tip=$(git rev-parse -q --verify "refs/heads/$b^{commit}") || exit 0
+if [ "$(git rev-parse -q --verify 'HEAD^' 2>/dev/null)" != "$base" ]; then
+  say "diff view of $b lost its base — commit $made was left off the branch"; exit 0
+fi
+idx="$gd/stack-open-replay-index"; rm -f "$idx"
+new_tree=$(
+  GIT_INDEX_FILE="$idx" git read-tree "$tip" \
+  && git -c core.quotePath=false diff-tree -r --no-renames 'HEAD^' HEAD \
+     | awk -F'\t' '{ split($1, a, " "); print a[2] " " a[4] "\t" $2 }' \
+     | GIT_INDEX_FILE="$idx" git update-index --index-info \
+  && GIT_INDEX_FILE="$idx" git write-tree
+) || new_tree=""
+rm -f "$idx"
+if [ -z "$new_tree" ]; then
+  say "couldn't replay commit $made onto $b — it was left off the branch"; exit 0
+fi
+if [ "$new_tree" = "$(git rev-parse "$tip^{tree}")" ]; then
+  git reset -q --soft "$base"; exit 0                       # nothing beyond what the branch already has
+fi
+new=$(git log -1 --format=%B HEAD | git commit-tree "$new_tree" -p "$tip") || {
+  say "couldn't replay commit $made onto $b — it was left off the branch"; exit 0; }
+if ! git branch -f "$b" "$new" 2>/dev/null; then
+  # the branch is checked out in a real worktree: fast-forward it THERE (git refuses if that
+  # tree's own edits are in the way), never move the ref out from under its index
+  owner=$(git worktree list --porcelain | awk -v ref="refs/heads/$b" '/^worktree /{p=substr($0,10)} /^branch /{if($2==ref){print p; exit}}')
+  if [ -z "$owner" ] || ! env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE -u GIT_PREFIX \
+       git -C "$owner" merge -q --ff-only "$new" >/dev/null 2>&1; then
+    git reset -q --soft "$base"
+    say "$b is checked out at ${owner:-another worktree} and would not fast-forward — your commit is $new"
+    exit 0
+  fi
+fi
+git reset -q --soft "$base"
+echo "$base $new" > "$dmark"
 HOOK
   chmod +x "$hook"
 }
@@ -332,6 +388,104 @@ ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scr
   install_followup_hook "$dir"
   touch "$dir"; echo "$dir"
 }
+
+# ── diff view ────────────────────────────────────────────────────────
+# Helix marks its gutter against HEAD's copy of the file and has no setting to diff against
+# anything else. So a Helix open gets a SECOND scratch worktree, `<branch>.diffbase`, whose files
+# are the branch's tip but whose HEAD is the commit the review diff starts from: the gutter then
+# marks exactly the lines the viewer's diff shows, `]g`/`[g` step through them, and `space-g`
+# lists the branch's changed files. It is a separate tree because everything else that touches
+# the ordinary scratch (seed-gen stamps, gates, the background warm, the resync above) keys on
+# HEAD being the tip. Commits made here are replayed onto the real tip by the follow-hook.
+wants_diff_base(){   # Helix opens only; STACK_OPEN_NO_DIFF_BASE=1 or `git config stack.open-diff-base false` opts out
+  local ed="${STACK_OPEN_EDITOR:-$(git -C "$main_root" config stack.open-editor 2>/dev/null || true)}"
+  [[ "$ed" == hx || "$ed" == helix ]] || return 1
+  [[ -z "${STACK_OPEN_NO_DIFF_BASE:-}" ]] || return 1
+  [[ "$(git -C "$main_root" config --type=bool stack.open-diff-base 2>/dev/null || true)" != false ]]
+}
+diff_base_of(){   # the commit <branch>'s review diff starts from: the merge-base with its
+                  # stack-parent, else with trunk. Fails when there is nothing to mark.
+  local b="$1" p base
+  p=$(git config "branch.$b.stack-parent" 2>/dev/null || true)
+  [[ -n "$p" ]] && git rev-parse -q --verify "$p^{commit}" >/dev/null 2>&1 || p=""
+  if [[ -z "$p" ]]; then
+    p=origin/main; git rev-parse -q --verify "$p^{commit}" >/dev/null 2>&1 || p=main
+  fi
+  base=$(git merge-base "$p" "$b" 2>/dev/null) || return 1
+  [[ -n "$base" && "$base" != "$(git rev-parse "$b^{commit}" 2>/dev/null)" ]] || return 1
+  print -r -- "$base"
+}
+diffbase_sync(){   # <dir> <branch> <base> <tip> — make the files the tip and HEAD the base
+  local dir="$1" b="$2" base="$3" tip="$4" gd marker old
+  gd=$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  marker="$gd/stack-open-diff-base"
+  # Against the base EVERY branch change reads as dirty. Put HEAD back on the tip this tree was
+  # showing first, so what gets parked is only what someone actually typed here.
+  if [[ -f "$marker" ]]; then
+    old="${$(<"$marker")##* }"
+    git -C "$dir" cat-file -e "${old}^{commit}" 2>/dev/null && git -C "$dir" reset -q --soft "$old" 2>/dev/null || true
+    rm -f "$marker"
+  fi
+  if [[ -n "$(git -C "$dir" status --porcelain --untracked-files=no 2>/dev/null)" ]]; then
+    git -C "$dir" stash push -q -m "stack-open: parked $b edits (diff view) $(date +%Y-%m-%dT%H:%M:%S)" 2>/dev/null \
+      && echo "stack-open: parked uncommitted $b edits in a stash — git -C $dir stash list" >&2
+  fi
+  for _ in 1 2 3 4 5; do
+    git -C "$dir" checkout --detach -f "$tip" -q 2>/dev/null \
+      || git -C "$dir" reset --hard "$tip" -q 2>/dev/null || true
+    [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$tip" ]] && break
+    sleep 0.2
+  done
+  [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$tip" ]] || return 1
+  git -C "$dir" reset -q --soft "$base" 2>/dev/null || return 1
+  print -r -- "$base $tip" > "$marker"
+}
+ensure_diff_worktree(){   # echo the diff-view checkout for <branch>; the ordinary one when there
+                          # is nothing to mark or the diff view can't be built
+  local b="$1" base tip src dir gd
+  src=$(ensure_worktree "$b") || return 1
+  base=$(diff_base_of "$b") || { echo "$src"; return 0; }
+  tip=$(git rev-parse "$b^{commit}")
+  dir="$SCRATCH/${b//\//_}.diffbase"
+  if [[ -d "$dir" ]] && ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    mv "$dir" "${dir}.zombie-$(date +%Y%m%d%H%M%S)" 2>/dev/null || true   # same zombie rule as above: park, never delete
+    git worktree prune 2>/dev/null || true
+  fi
+  if [[ ! -d "$dir" ]]; then
+    git worktree add --detach "$dir" "$tip" -q 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 && break
+      sleep 0.3
+    done
+  fi
+  gd=$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || {
+    echo "stack-open: no diff view for $b (couldn't materialize $dir) — opening without change marks" >&2
+    echo "$src"; return 0; }
+  if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$base" \
+        || "$(cat "$gd/stack-open-diff-base" 2>/dev/null)" != "$base $tip" ]]; then
+    diffbase_sync "$dir" "$b" "$base" "$tip" || {
+      echo "stack-open: no diff view for $b (couldn't sync $dir) — opening without change marks" >&2
+      echo "$src"; return 0; }
+  fi
+  [[ -e "$dir/node_modules" ]] || ln -sfn "$(donor_checkout)/node_modules" "$dir/node_modules"
+  # Types: seed-gen decides what a tree's .gen should be from its HEAD, which here is the base —
+  # it would hand this tree the PARENT's types. Borrow the ordinary checkout's .gen instead; that
+  # one is kept honest for the tip by the heal ensure_worktree just kicked off. Link it even
+  # while it is mid-rebuild and briefly absent: running seed-gen here instead joins that rebuild
+  # and blocks the open for its full ~5s.
+  if [[ ! -L "$dir/.gen" || "$(readlink "$dir/.gen" 2>/dev/null)" != "$src/.gen" ]]; then
+    [[ -d "$dir/.gen" && ! -L "$dir/.gen" ]] && rm -rf "$dir/.gen"
+    ln -sfn "$src/.gen" "$dir/.gen"
+  fi
+  "$SCRIPTS/helix-tsgo-stamp" "$dir" 2>/dev/null || true
+  echo "$b" > "$gd/stack-open-branch"
+  install_followup_hook "$dir"
+  touch "$dir"; echo "$dir"
+}
+hx_worktree(){   # the checkout a Helix open lands in
+  if wants_diff_base; then ensure_diff_worktree "$1"; else ensure_worktree "$1"; fi
+}
+
 focus_terminal(){   # raise the GUI terminal hosting tmux so the buffer is actually visible
   local app="${STACK_OPEN_TERMINAL:-}"
   [[ "$app" == none ]] && return 0   # STACK_OPEN_TERMINAL=none — for scripted/batch opens, which
@@ -437,8 +591,14 @@ hx_cmd(){   # run one ':' command: open the prompt, watch the body echo back OUT
   done
   [[ -n "$opened" ]] || return 1
   width=$(tmux display -p -t "$pane" '#{pane_width}' 2>/dev/null) || width=0
-  tmux send-keys -t "$pane" -l "$cmd"
-  for i in {1..60}; do   # Helix's path completion needs >1s to echo a long path back
+  # PASTE the body, never type it: Helix re-lists the directory being completed on every
+  # keystroke, and a path into the 120-worktree scratch dir took 4.6s to echo typed — past this
+  # poll, so the open "failed" into a rival cold window. One bracketed-paste event completes
+  # once: 0.2s for the same path (measured 2026-09-30). -p falls back to plain keys if Helix
+  # ever stops asking for bracketed paste; the echo check below guards both.
+  tmux set-buffer -b "so-$$" -- "$cmd" 2>/dev/null && tmux paste-buffer -p -d -b "so-$$" -t "$pane" 2>/dev/null \
+    || tmux send-keys -t "$pane" -l "$cmd"
+  for i in {1..60}; do
     hx_out_of_time && return 1
     sleep 0.05
     last=$(hx_pane_line "$pane")
@@ -653,6 +813,7 @@ case "${1:-}" in
   --path)    d=$(STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # create-if-needed + print the checkout dir
   --serve-path) d=$(STACK_OPEN_SKIP_PRIMARY=1 STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # --path, but never
              # the primary checkout — a dir loops-preview may serve (it refuses MAIN)
+  --diff-path) d=$(STACK_OPEN_NO_GEN_SYNC=1 STACK_OPEN_EDITOR=hx ensure_diff_worktree "${2:?branch}") || exit 1; echo "$d"; exit 0;;   # the diff-view checkout (HEAD = diff base, files = tip)
   --heal-notify)   # (internal, setsid'd from the heal) read the heal log and deliver the outcome:
     # auto ':lsp-restart' in the warm Helix; a banner only for failures we can't act on.
     hdir="${2:?dir}"; hlog="${3:?log}"
@@ -669,8 +830,11 @@ case "${1:-}" in
       # Helix has no Diffview. Open the branch's changed files as BUFFERS instead, biggest churn
       # first — `space-b` is then a fuzzy picker scoped to exactly this PR, and `space-g` picks up
       # whatever you go on to edit. Land on the biggest file at its first hunk.
-      rdir=$(ensure_worktree "$rbranch")
+      rdir=$(hx_worktree "$rbranch")
       mbref="origin/main"; git -C "$rdir" rev-parse -q --verify origin/main >/dev/null 2>&1 || mbref="main"
+      # in the diff view the gutter is measured from the stack-parent — list the same files it marks
+      rbase=$(cut -d' ' -f1 "$(git -C "$rdir" rev-parse --absolute-git-dir 2>/dev/null)/stack-open-diff-base" 2>/dev/null) || rbase=""
+      [[ -n "$rbase" ]] && mbref="$rbase"
       # --no-renames: numstat renders a rename as `pkg/{old => new}/f.ts`, which is not a path.
       # --diff-filter=d: a deleted file opens as a phantom empty buffer named after the corpse.
       # Binary files report churn as `-`; they sort last rather than crashing the arithmetic.
@@ -728,7 +892,7 @@ else
   # lazy self-clean, two rungs: shed regenerable weight after a day idle, remove the worktree
   # after three. Drops our pipes so it can't block a piped caller.
   ( strip_fat 1; prune_old 3; [[ -z "${STACK_OPEN_DIR:-}" ]] && SCRATCH=$LEGACY_SCRATCH prune_old 3 ) >/dev/null 2>&1 &!
-  dir=$(ensure_worktree "$branch")
+  dir=$(hx_worktree "$branch")
 fi
 file="$dir/$rel"
 [[ -f "$file" ]] || { echo "stack-open: '$rel' not in $branch" >&2; exit 1; }
@@ -744,7 +908,11 @@ if [[ -n "$want_line" ]]; then
   nlines=$(wc -l < "$file" 2>/dev/null || echo 0)
   if (( want_line > nlines + 1 )); then
     if [[ "$dir" == "$SCRATCH"/* ]]; then
-      git -C "$dir" checkout --detach -f "$branch" -q 2>/dev/null || git -C "$dir" reset --hard "$branch" -q 2>/dev/null || true
+      if [[ "$dir" == *.diffbase ]] && dbase=$(diff_base_of "$branch"); then
+        diffbase_sync "$dir" "$branch" "$dbase" "$(git rev-parse "$branch^{commit}")" || true
+      else
+        git -C "$dir" checkout --detach -f "$branch" -q 2>/dev/null || git -C "$dir" reset --hard "$branch" -q 2>/dev/null || true
+      fi
       nlines=$(wc -l < "$file" 2>/dev/null || echo 0)
     fi
     if (( want_line > nlines + 1 )); then
