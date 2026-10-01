@@ -28,9 +28,19 @@ msg="${*:-wip}"
 file="${file:A}"   # absolutize: %{buffer_name} is cwd-relative, git -C below re-anchors paths
 dir="${file:h}"
 
+# stack-open's diff view keeps HEAD on the branch's diff BASE, so every file the branch touched
+# reads as modified whether or not you edited it — measure against the tip it is showing instead.
+dmark="$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)/stack-open-diff-base"
+shown=""; [[ -f "$dmark" ]] && shown="${$(<"$dmark")##* }"
+
 # pre-check instead of letting commit fail: detached-HEAD commit failure output is a noisy
 # two-liner ("Not currently on any branch." + "nothing to commit") in the hx popup
-if [[ -z "$(git -C "$dir" status --porcelain -- "$file")" ]]; then
+if [[ -n "$shown" ]] && git -C "$dir" ls-files --error-unmatch -- "$file" >/dev/null 2>&1; then
+  if git -C "$dir" diff --quiet "$shown" -- "$file" 2>/dev/null; then
+    note "hx-wc: nothing to commit"
+    exit 0
+  fi
+elif [[ -z "$(git -C "$dir" status --porcelain -- "$file")" ]]; then
   note "hx-wc: nothing to commit"
   exit 0
 fi
@@ -40,5 +50,7 @@ if ! out=$(git -C "$dir" commit -m "$msg" -- "$file" 2>&1); then
   exit 1
 fi
 sha=$(git -C "$dir" rev-parse --short HEAD)
+# in the diff view the follow-hook replayed the commit onto the branch and put HEAD back
+[[ -f "$dmark" ]] && sha=$(git -C "$dir" rev-parse --short "${$(<"$dmark")##* }" 2>/dev/null || echo "$sha")
 
 note "✦ committed ${sha}  ${msg}"
