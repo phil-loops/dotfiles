@@ -6,7 +6,7 @@ project: safety-shadow
 lede: Freeze evidence, start labeling, and run facts, the claim extractor, and rules beside the classifier, recording every decision and enforcing none.
 ---
 
-Part of [[content-safety-epic]]. The largest forest; nothing in it changes what a customer sees. A spine from tables to replay, plus the verdict tab as a sibling off the tables node, because labels take calendar time and must start first.
+Part of [[content-safety-epic]]. The largest forest; nothing in it changes what a customer sees. A spine from tables to replay, plus the verdict tab as a sibling off the tables node, since labels must start first.
 
 1. **Tables.** Evidence by hash; a signal row per detector run; decisions separate from signals so re-evaluation never overwrites; labels with the ARF feedback type, a fraud assessment, observation corrections, and a holdout split hashed from team and template family.
 2. **Evidence bundle.** Pure: compiled HTML and headers in; segments, link table, placeholders, coverage, hash out.
