@@ -52,6 +52,23 @@ V = [":write", ":sh $HOME/.dotfiles/scripts/hx-ship %{buffer_name}"]
 t = [":write", ":sh $HOME/.dotfiles/scripts/hx-test %{buffer_name}"]
 # the cheatsheet of every key we've bound ourselves — the one place :sh's popup is the point
 K = ":sh $HOME/.dotfiles/scripts/keys"
+# show the change under the cursor, old text beside new, in a pane on the right
+i = ":sh $HOME/.dotfiles/scripts/hx-hunk --show %{buffer_name} %{cursor_line}"
+# close that pane
+I = ":sh $HOME/.dotfiles/scripts/hx-hunk --close"
+
+# space-i / space-I = "what did this used to say?": Helix's gutter marks a changed line but can't show the
+# text it replaced, so hx-hunk paints the change under the cursor (old and new lines, differing
+# words highlighted) into a tmux pane beside Helix (bound in [keys.normal.space] above as i / I).
+# Alt-j / Alt-k hop panes. See scripts/hx-hunk.
+# ]g / [g are Helix's own change jumps; chaining the repaint makes the pane follow them. A no-op
+# while the pane is closed.
+[keys.normal."]"]
+# next change, repainting the change pane if it is open
+g = ["goto_next_change", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
+[keys.normal."["]
+# previous change, repainting the change pane if it is open
+g = ["goto_prev_change", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
 
 # space-x = the destructive menu, deliberately two keys. Helix has no file-delete command of its
 # own (:delete/:remove/:file complete to nothing), and hx-rm makes the deletion recoverable —

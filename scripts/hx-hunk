@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+# hx-hunk [--show|--refresh|--close] <file> <line> — "what did this used to say?" for Helix.
+#
+# Helix's gutter marks a changed line but cannot show the text it replaced. This paints the
+# change under the cursor, old lines and new lines together, into a tmux pane beside Helix.
+# helix/config.toml binds
+#   space-i  = show   (open the pane if needed, paint the change at the cursor)
+#   space-I  = close
+#   ]g / [g  = jump to the next / previous change, then repaint if the pane is open
+# so the pane follows the keys you already use and nothing polls.
+#
+# The comparison is `git diff HEAD`, the same base Helix's gutter uses. In a stack-open diff
+# view (<branch>.diffbase) HEAD is the branch's parent, so the pane shows the branch's change;
+# in an ordinary checkout it shows your uncommitted edits. It reads the file on disk, so an
+# unsaved edit appears after :w.
+#
+# The pane runs nothing but `tail -f /dev/null`; each call writes a finished frame to its tty.
+# No daemon, no state beyond the pane id stored on the Helix pane as @hx-hunk-pane.
+import difflib
+import os
+import re
+import subprocess
+import sys
+
+RESET, DIM, BOLD = "\033[0m", "\033[2m", "\033[1m"
+RED, GREEN, CYAN = "\033[31m", "\033[32m", "\033[36m"
+RED_HI, GREEN_HI = "\033[1;97;41m", "\033[1;30;42m"
+
+
+def run(*cmd, cwd=None):
+    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+
+
+def tmux(*args):
+    return run("tmux", *args).stdout.strip()
+
+
+def find_pane(hx_pane):
+    pane = tmux("show-options", "-pqv", "-t", hx_pane, "@hx-hunk-pane")
+    if pane and pane in tmux("list-panes", "-a", "-F", "#{pane_id}").split():
+        return pane
+    return ""
+
+
+def open_pane(hx_pane):
+    pane = tmux(
+        "split-window", "-d", "-h", "-l", "42%", "-t", hx_pane, "-P", "-F", "#{pane_id}",
+        "stty -echo; printf '\\033[?25l'; exec tail -f /dev/null",
+    )
+    tmux("select-pane", "-t", pane, "-T", "hx-hunk")
+    tmux("select-pane", "-t", hx_pane)
+    tmux("set-option", "-p", "-t", hx_pane, "@hx-hunk-pane", pane)
+    return pane
+
+
+def parse_hunks(diff):
+    """[(new_start, new_end, [(kind, old_no, new_no, text)])] from a unified diff."""
+    hunks, rows, old, new = [], None, 0, 0
+    for raw in diff.splitlines():
+        m = re.match(r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", raw)
+        if m:
+            old, new = int(m[1]), int(m[3])
+            count = int(m[4]) if m[4] is not None else 1
+            rows = []
+            hunks.append((new, new + max(count, 1) - 1, rows))
+        elif rows is None or raw.startswith("\\"):
+            continue
+        elif raw.startswith("-"):
+            rows.append(("-", old, None, raw[1:]))
+            old += 1
+        elif raw.startswith("+"):
+            rows.append(("+", None, new, raw[1:]))
+            new += 1
+        else:
+            rows.append((" ", old, new, raw[1:]))
+            old += 1
+            new += 1
+    return hunks
+
+
+def pick(hunks, line):
+    def distance(h):
+        start, end, _ = h
+        return 0 if start <= line <= end else min(abs(line - start), abs(line - end))
+    index = min(range(len(hunks)), key=lambda i: distance(hunks[i]))
+    return index, distance(hunks[index])
+
+
+def spans(old_text, new_text):
+    """Which character ranges differ between a removed line and the line that replaced it."""
+    split = lambda s: re.findall(r"\w+|\s+|.", s)
+    a, b = split(old_text), split(new_text)
+    matcher = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    if matcher.ratio() < 0.5:
+        return None, None
+    old_hi, new_hi = [], []
+    apos = [0]
+    for tok in a:
+        apos.append(apos[-1] + len(tok))
+    bpos = [0]
+    for tok in b:
+        bpos.append(bpos[-1] + len(tok))
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        if i2 > i1:
+            old_hi.append((apos[i1], apos[i2]))
+        if j2 > j1:
+            new_hi.append((bpos[j1], bpos[j2]))
+    return old_hi, new_hi
+
+
+def pair_changes(rows):
+    """Map row index -> highlight spans, pairing each run of removals with the additions after it."""
+    marks, i = {}, 0
+    while i < len(rows):
+        if rows[i][0] != "-":
+            i += 1
+            continue
+        dels = i
+        while i < len(rows) and rows[i][0] == "-":
+            i += 1
+        adds = i
+        while i < len(rows) and rows[i][0] == "+":
+            i += 1
+        # Word-level marks only when the run is line-for-line (N removed, N added). A rewrite
+        # of a different shape pairs unrelated lines and the marks become noise.
+        if adds - dels != i - adds:
+            continue
+        for k in range(adds - dels):
+            old_hi, new_hi = spans(rows[dels + k][3], rows[adds + k][3])
+            if old_hi is not None:
+                marks[dels + k], marks[adds + k] = old_hi, new_hi
+    return marks
+
+
+def paint(text, hi, base, strong, width):
+    """Wrap text to width, colouring highlighted spans; returns a list of screen lines."""
+    text = text.expandtabs(2)
+    hi = hi or []
+    out, col, line = [], 0, base
+    state = None
+    for pos, ch in enumerate(text):
+        want = strong if any(s <= pos < e for s, e in hi) else base
+        if col == width:
+            out.append(line + RESET)
+            line, col, state = base, 0, None
+        if want != state:
+            line += RESET + want
+            state = want
+        line += ch
+        col += 1
+    out.append(line + RESET)
+    return out
+
+
+def frame(path, line, width, height):
+    folder, name = os.path.split(path)
+    inside = run("git", "rev-parse", "--show-toplevel", cwd=folder)
+    if inside.returncode != 0:
+        return [f"{DIM}{name}: not in a git checkout{RESET}"]
+    root = inside.stdout.strip()
+    rel = os.path.relpath(os.path.realpath(path), os.path.realpath(root))
+    base = run("git", "rev-parse", "--short", "HEAD", cwd=root).stdout.strip()
+    title = f"{BOLD}{rel}{RESET}"
+
+    tracked = run("git", "cat-file", "-e", f"HEAD:{rel}", cwd=root).returncode == 0
+    if not tracked:
+        return [title, "", f"{GREEN}New file. It does not exist in {base}, so every line is new.{RESET}"]
+    diff = run("git", "diff", "--no-color", "--no-ext-diff", "-U3", "HEAD", "--", rel, cwd=root).stdout
+    hunks = parse_hunks(diff)
+    if not hunks:
+        return [title, "", f"{DIM}No changes against {base}.{RESET}"]
+
+    index, distance = pick(hunks, line)
+    start, end, rows = hunks[index]
+    where = "" if distance == 0 else f"  {DIM}(nearest to line {line}){RESET}"
+    head = [
+        title,
+        f"{CYAN}change {index + 1} of {len(hunks)}{RESET}  {DIM}lines {start}-{end}  against {base}{RESET}{where}",
+        "",
+    ]
+
+    marks = pair_changes(rows)
+    numw = len(str(max(end, max((r[1] or 0) for r in rows))))
+    textw = max(20, width - numw - 4)
+    body, cursor_row = [], 0
+    for i, (kind, old_no, new_no, text) in enumerate(rows):
+        number = new_no if new_no is not None else old_no
+        if kind == "-":
+            base_c, strong, sign = RED, RED_HI, "-"
+        elif kind == "+":
+            base_c, strong, sign = GREEN, GREEN_HI, "+"
+        else:
+            base_c, strong, sign = DIM, DIM, " "
+        pointer = "▶" if new_no == line else " "
+        if new_no == line:
+            cursor_row = len(body)
+        wrapped = paint(text, marks.get(i), base_c, strong, textw)
+        for n, piece in enumerate(wrapped):
+            if n == 0:
+                gutter = f"{pointer}{base_c}{number:>{numw}} {sign}{RESET} "
+            else:
+                gutter = " " * (numw + 4)
+            body.append(gutter + piece)
+
+    room = max(3, height - len(head))
+    if len(body) > room:
+        top = max(0, min(cursor_row - room // 2, len(body) - room))
+        clipped = body[top:top + room]
+        if top > 0:
+            clipped[0] = f"{DIM}  ↑ {top} more{RESET}"
+        below = len(body) - (top + room)
+        if below > 0:
+            clipped[-1] = f"{DIM}  ↓ {below} more{RESET}"
+        body = clipped
+    return head + body
+
+
+def main():
+    args = sys.argv[1:]
+    mode = "--show"
+    if args and args[0] in ("--show", "--refresh", "--close"):
+        mode = args.pop(0)
+    hx_pane = os.environ.get("TMUX_PANE", "")
+    if not hx_pane:
+        print("hx-hunk: not in tmux")
+        return
+    pane = find_pane(hx_pane)
+    if mode == "--close":
+        if pane:
+            tmux("kill-pane", "-t", pane)
+        tmux("set-option", "-p", "-u", "-t", hx_pane, "@hx-hunk-pane")
+        return
+    if mode == "--refresh" and not pane:
+        return
+    if len(args) < 2 or not os.path.isfile(args[0]):
+        if mode == "--show":
+            print("hx-hunk: this buffer is not a file on disk")
+        return
+    path = os.path.abspath(args[0])
+    line = int(args[1]) if args[1].isdigit() else 1
+    if not pane:
+        pane = open_pane(hx_pane)
+    tty, width, height = tmux(
+        "display-message", "-p", "-t", pane, "#{pane_tty} #{pane_width} #{pane_height}"
+    ).split()
+    lines = frame(path, line, int(width) - 1, int(height) - 1)
+    with open(tty, "w") as out:
+        out.write("\033[?25l\033[H\033[2J\033[3J" + "\r\n".join(lines))
+
+
+if __name__ == "__main__":
+    main()
