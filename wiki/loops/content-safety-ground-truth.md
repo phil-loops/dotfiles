@@ -14,8 +14,8 @@ Part of [[content-safety-m2-shadow]]. Companion to [[content-safety-measure-bare
 
 **Disagreements write the rubric.** Each double-label disagreement goes to a third reviewer: either one reviewer was right, or the rubric didn't say, and the second kind changes the rubric. Whether "update the card on file" is a sensitive request is settled by sharpening the definition: supplying card details, versus being sent to one's own account page. The rubric is versioned, every label carries its version, and labels under a changed definition are re-adjudicated or excluded.
 
-**Model and humans read the same text.** The rubric's definition of each observation is the definition in the model's prompt. When the standard sharpens, both move together.
+**Model and humans read the same text.** The rubric's definition of each observation is the one in the model's prompt. When the standard sharpens, both move.
 
-**Reviewers are measured.** Labels carry reviewer, mode (blind or operational), and rubric version. A reviewer whose labels are often overturned is a calibration conversation.
+**Reviewers are measured.** Labels carry reviewer, mode (blind or operational), and rubric version. A reviewer often overturned is a calibration conversation.
 
-**Some truth arrives late.** A changed-bank-details message is undecidable from its text. Its verdict stays `unknown`, the policy holds it, and the outcome, whether the account was compromised, is written as a later entry, never backward into what the reviewer knew.
+**Some truth arrives late.** A changed-bank-details message is undecidable from its text. Its verdict stays `unknown`, the policy holds it, and whether the account was compromised is written as a later entry, never backward into what the reviewer knew.
