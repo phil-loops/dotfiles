@@ -12,7 +12,7 @@ Part of [[content-safety-m2-shadow]]; companion to [[content-safety-measure-bare
 
 **Inter-rater agreement is the ceiling.** A random slice of the holdout is labeled twice, blind, by different reviewers, and their agreement is reported beside the model's. A model at 0.91 against a human ceiling of 0.94 is a different finding from 0.91 against 0.80; the second says the rubric is the problem.
 
-**Disagreements write the rubric.** Each double-label disagreement goes to a third reviewer: either one reviewer was right, or the rubric didn't say, and the second kind changes the rubric. Whether "update the card on file" is a sensitive request is settled by sharpening the definition: supplying card details, versus being sent to one's own account page. The rubric is versioned, every label carries its version, and labels under a changed definition are re-adjudicated or excluded.
+**Disagreements write the rubric.** Each double-label disagreement goes to a third reviewer: either one reviewer was right, or the rubric didn't say, and the second kind changes the rubric. Whether "update the card on file" is a sensitive request is settled by sharpening the definition: supplying card details, versus being sent to one's own account page. The rubric is versioned, labels carry the version, and labels under a changed definition are re-adjudicated.
 
 **Model and humans read the same text.** The rubric's definition of each observation is the one in the model's prompt. When the standard sharpens, both move.
 
