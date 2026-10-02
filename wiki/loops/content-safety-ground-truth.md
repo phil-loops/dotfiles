@@ -6,11 +6,11 @@ project: safety-shadow
 lede: A versioned rubric applied by people who are measured against each other; the model is scored against the observations, where they agree, not the verdicts, where they sometimes can't.
 ---
 
-Part of [[content-safety-m2-shadow]]. Companion to [[content-safety-measure-bare]].
+Part of [[content-safety-m2-shadow]]; companion to [[content-safety-measure-bare]].
 
-**Judge observations, adjudicate verdicts.** The three observations are built to be low-disagreement: what the from-line presents as, whether the reader is asked to supply credentials or data, whether money is requested or redirected, each with a span. The model is measured against those. The fraud verdict is an adjudication; `unknown` is a legal answer.
+**Judge observations, adjudicate verdicts.** The three observations are built to be low-disagreement: what the from-line presents as, whether credentials or data are requested, whether money is requested or redirected, each with a span. The model is measured against those. The fraud verdict is an adjudication; `unknown` is a legal answer.
 
-**Inter-rater agreement is the ceiling.** A random slice of the holdout is labeled twice, blind, by different reviewers. Agreement per observation and per slice is reported beside the model's. A model at 0.91 against a human ceiling of 0.94 is a different finding from 0.91 against 0.80; the second says the rubric is the problem.
+**Inter-rater agreement is the ceiling.** A random slice of the holdout is labeled twice, blind, by different reviewers, and their agreement is reported beside the model's. A model at 0.91 against a human ceiling of 0.94 is a different finding from 0.91 against 0.80; the second says the rubric is the problem.
 
 **Disagreements write the rubric.** Each double-label disagreement goes to a third reviewer: either one reviewer was right, or the rubric didn't say, and the second kind changes the rubric. Whether "update the card on file" is a sensitive request is settled by sharpening the definition: supplying card details, versus being sent to one's own account page. The rubric is versioned, every label carries its version, and labels under a changed definition are re-adjudicated or excluded.
 
