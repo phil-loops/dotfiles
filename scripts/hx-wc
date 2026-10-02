@@ -28,6 +28,13 @@ msg="${*:-wip}"
 file="${file:A}"   # absolutize: %{buffer_name} is cwd-relative, git -C below re-anchors paths
 dir="${file:h}"
 
+# stack-open's parent-side checkout (hx-hunk --parent) shows the code BEFORE the branch, with HEAD
+# on the tip: a commit there would land the old text on top of the branch. Refuse.
+if [[ -f "$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)/stack-open-diff-old" ]]; then
+  note "hx-wc: this pane is the parent's version (read-only) — edit in the left pane"
+  exit 0
+fi
+
 # stack-open's diff view keeps HEAD on the branch's diff BASE, so every file the branch touched
 # reads as modified whether or not you edited it — measure against the tip it is showing instead.
 dmark="$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null)/stack-open-diff-base"

@@ -204,6 +204,18 @@ dd2=$(dv --diff-path "$DBRANCH")
   && [[ "$(git -C "$dd" rev-parse HEAD 2>/dev/null)" == "$dbase" ]] && git -C "$dd" diff --quiet 2>/dev/null } \
   && ok "a branch that moved is re-synced on the next open" || no "the diff view kept a stale tip"
 
+# the parent-side checkout (hx-hunk --parent): the diff view inside out, and never committable
+dold=$(dv --old-path "$DBRANCH")
+{ [[ "$dold" == *.diffold ]] && [[ "$(git -C "$dold" rev-parse HEAD 2>/dev/null)" == "$mtip" ]] \
+  && git -C "$dold" diff --quiet "$dbase" 2>/dev/null } \
+  && ok "the parent-side checkout holds the parent's files with HEAD on the tip" \
+  || no "the parent-side checkout is the wrong shape (got: ${dold:-nothing})"
+[[ -f "$dold/$dfile" && ! -w "$dold/$dfile" ]] && ok "a file the branch changed is read-only there" \
+                                               || no "the parent-side copy of a changed file is writable"
+"${SO:h}/hx-wc" "$dold/$dfile" >/dev/null 2>&1
+[[ "$(git rev-parse "$DBRANCH")" == "$mtip" && "$(git -C "$dold" rev-parse HEAD 2>/dev/null)" == "$mtip" ]] \
+  && ok "the commit key refuses in the parent-side checkout" || no "a commit from the parent-side checkout moved something"
+
 git config "branch.$BRANCH.stack-parent" "$BRANCH"   # its own parent → nothing to mark
 [[ "$(dv --diff-path "$BRANCH")" != *.diffbase ]] && ok "a branch with nothing to mark opens the ordinary checkout" \
                                                  || no "built a diff view with nothing to mark"
