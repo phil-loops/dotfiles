@@ -18,4 +18,4 @@ Part of [[content-safety-m2-shadow]]; companion to [[content-safety-measure-bare
 
 **Reviewers are measured.** Labels carry reviewer, mode (blind or operational), and rubric version. A reviewer often overturned is a calibration conversation.
 
-**Some truth arrives late.** A changed-bank-details message is undecidable from its text. Its verdict stays `unknown`, the policy holds it, and whether the account was compromised is written as a later entry, never backward into what the reviewer knew.
+**Some truth arrives late.** A changed-bank-details message is undecidable from its text. Its verdict stays `unknown`, the policy holds it, and whether the account was compromised is a later entry, never written backward.
