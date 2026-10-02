@@ -6,11 +6,11 @@ project: safety-shadow
 lede: Freeze evidence, start labeling, and run facts, the claim extractor, and rules beside the classifier, recording every decision and enforcing none.
 ---
 
-Part of [[content-safety-epic]]. The largest forest; nothing in it changes what a customer sees. A spine from tables to replay, plus the verdict tab as a sibling off the tables node, since labels must start first.
+Part of [[content-safety-epic]], chained on [[content-safety-m-packages]]: tables in `safety-pg`, pure code in `safety-core`, replay in `safety-replay`. Nothing in it changes what a customer sees. A spine from tables to replay, plus the verdict tab as a sibling, since labels must start first.
 
-1. **Tables.** Evidence by hash; a signal row per detector run; decisions separate from signals so re-evaluation never overwrites; labels with the ARF feedback type, a fraud assessment, observation corrections, and a holdout split hashed from team and template family.
-2. **Evidence bundle.** Pure: compiled HTML and headers in; segments, link table, placeholders, coverage, hash out.
-3. **Capture.** Every existing check writes the bundle as a side effect.
+1. **Tables.** Evidence by hash; a signal row per detector run; decisions separate from signals so re-evaluation never overwrites; labels with the ARF feedback type, fraud assessment, corrections, and a holdout split hashed from team and family.
+2. **Evidence bundle.** Pure: compiled HTML and headers in; segments, links, placeholders, coverage, hash out.
+3. **Capture.** Every existing check writes the bundle.
 4. **Verdict tab.** Three-way verdict on flagged messages, as label rows.
 5. **Deterministic detectors.** The fact vocabulary, the detectors, the catalogues.
 6. **Claim extractor.** One model call: `claimed_sender`, `sensitive_request`, `payment_request`, each with quoted evidence that code validates. Authorization is computed by code from what is on file. The legacy tag stays as a detector emitting a fact.

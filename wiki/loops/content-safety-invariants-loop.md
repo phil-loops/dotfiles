@@ -20,7 +20,7 @@ Part of [[content-safety-epic]]. The decision path's own twelve: [[content-safet
 19. No operation moves to enforce while its hold backlog is growing.
 
 **Storage and operations**
-20. Durable state lives in Postgres. Valkey holds only projections rebuildable from rows.
+20. Durable state lives in the safety database, owned by `safety-pg`, never in the application schema. Valkey holds only projections rebuildable from rows.
 21. Evidence has a retention window, and tokens are redacted before storage.
 22. Shadow always writes and never gates. Every cutover is a config row with a way back.
 23. A prompt change and a rule change never share a PR.

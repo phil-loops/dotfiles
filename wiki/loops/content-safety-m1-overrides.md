@@ -6,7 +6,7 @@ project: safety-overrides
 lede: Replace the team-wide skip and the per-message magic string with rows that have a scope, a reason, an author, and an expiry.
 ---
 
-Part of [[content-safety-epic]]. One spine of four.
+Part of [[content-safety-epic]]. One spine of four, chained on [[content-safety-m-packages]]; the table lives in the safety database.
 
 Today an admin has two levers: `Team.skipSafetyChecks`, which turns off every check for a team, and writing the string `override` into a message's classification, which also re-enables the domain and skips the banned-word scan. Neither carries a reason or expires, and a domain re-enable rewrites every phishing-tagged message on the team.
 
