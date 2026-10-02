@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-# hx-hunk [--show|--refresh|--close] <file> <line> — "what did this used to say?" for Helix.
+# hx-hunk [--show|--parent|--refresh|--close] <file> <line> — "what did this used to say?" for Helix.
 #
 # Helix's gutter marks a changed line but cannot show the text it replaced. This paints the
 # change under the cursor, old lines and new lines together, into a tmux pane beside Helix.
 # helix/config.toml binds
 #   space-i  = show   (open the pane if needed, paint the change at the cursor)
 #   space-I  = close
+#   space-o p = the parent's version in a second Helix (see --parent below)
 #   ]g / [g  = jump to the next / previous change, then repaint if the pane is open
 # so the pane follows the keys you already use and nothing polls.
 #
@@ -14,13 +15,21 @@
 # in an ordinary checkout it shows your uncommitted edits. It reads the file on disk, so an
 # unsaved edit appears after :w.
 #
-# The pane runs nothing but `tail -f /dev/null`; each call writes a finished frame to its tty.
+# --parent (space-o p) swaps the painted pane for a second HELIX on the parent's version of the
+# file: `stack-open --old-path` keeps a checkout whose files are the branch's diff base, so the
+# old code gets a language server (hover, gd) of its own, and its gutter marks the lines the
+# branch went on to change. Only for files opened in stack-open's diff view; ]g / [g then move
+# that Helix to the matching old line. Helix has no remote control, so it is steered the way
+# stack-open steers review-hx: a ':' prompt whose echo is verified before Enter.
+#
+# The painted pane runs nothing but `tail -f /dev/null`; each call writes a finished frame to its tty.
 # No daemon, no state beyond the pane id stored on the Helix pane as @hx-hunk-pane.
 import difflib
 import os
 import re
 import subprocess
 import sys
+import time
 
 RESET, DIM, BOLD = "\033[0m", "\033[2m", "\033[1m"
 RED, GREEN, CYAN = "\033[31m", "\033[32m", "\033[36m"
@@ -42,15 +51,160 @@ def find_pane(hx_pane):
     return ""
 
 
-def open_pane(hx_pane):
-    pane = tmux(
-        "split-window", "-d", "-h", "-l", "42%", "-t", hx_pane, "-P", "-F", "#{pane_id}",
-        "stty -echo; printf '\\033[?25l'; exec tail -f /dev/null",
-    )
+def pane_kind(hx_pane):
+    return tmux("show-options", "-pqv", "-t", hx_pane, "@hx-hunk-kind") or "paint"
+
+
+def close_pane(hx_pane, pane):
+    if pane:
+        tmux("kill-pane", "-t", pane)
+    tmux("set-option", "-p", "-u", "-t", hx_pane, "@hx-hunk-pane")
+    tmux("set-option", "-p", "-u", "-t", hx_pane, "@hx-hunk-kind")
+
+
+def open_pane(hx_pane, kind="paint", cwd=None, command=None):
+    size = "42%" if kind == "paint" else "50%"
+    args = ["split-window", "-d", "-h", "-l", size, "-t", hx_pane, "-P", "-F", "#{pane_id}"]
+    if cwd:
+        args += ["-c", cwd]
+    args.append(command or "stty -echo; printf '\\033[?25l'; exec tail -f /dev/null")
+    pane = tmux(*args)
     tmux("select-pane", "-t", pane, "-T", "hx-hunk")
     tmux("select-pane", "-t", hx_pane)
     tmux("set-option", "-p", "-t", hx_pane, "@hx-hunk-pane", pane)
+    tmux("set-option", "-p", "-t", hx_pane, "@hx-hunk-kind", kind)
     return pane
+
+
+def old_line(diff, line):
+    """The parent-side line that sits where <line> does now, from a -U0 diff."""
+    shift = 0
+    for m in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", diff, re.M):
+        os_, oc = int(m[1]), int(m[2]) if m[2] is not None else 1
+        ns, nc = int(m[3]), int(m[4]) if m[4] is not None else 1
+        if nc == 0:
+            if line <= ns:
+                break
+            if line == ns + 1:
+                return os_
+        else:
+            if line < ns:
+                break
+            if line <= ns + nc - 1:
+                return os_ if oc else os_ + 1
+        shift += oc - nc
+    return max(1, line + shift)
+
+
+def diff_view(path):
+    """(root, rel, branch) when <path> sits in a stack-open diff view, else None."""
+    inside = run("git", "rev-parse", "--show-toplevel", "--absolute-git-dir", cwd=os.path.dirname(path))
+    if inside.returncode != 0:
+        return None
+    root, gitdir = inside.stdout.split("\n")[:2]
+    try:
+        branch = open(os.path.join(gitdir, "stack-open-branch")).read().strip()
+    except OSError:
+        return None
+    if not branch or not os.path.exists(os.path.join(gitdir, "stack-open-diff-base")):
+        return None
+    return root, os.path.relpath(os.path.realpath(path), os.path.realpath(root)), branch
+
+
+def parent_target(path, line):
+    """(old checkout, rel path, old line) for the file's parent-side twin; a message on failure."""
+    view = diff_view(path)
+    if not view:
+        return None, "the parent's version needs a file opened from the viewer (diff view)"
+    root, rel, branch = view
+    built = run(os.path.expanduser("~/.dotfiles/scripts/stack-open"), "--old-path", branch, cwd=root)
+    old_root = built.stdout.strip().split("\n")[-1] if built.returncode == 0 else ""
+    if not old_root or not os.path.isdir(old_root):
+        return None, f"could not build the parent's checkout for {branch}"
+    if not os.path.isfile(os.path.join(old_root, rel)):
+        return None, f"{rel} is new on this branch: the parent has no version of it"
+    diff = run("git", "diff", "--no-color", "--no-ext-diff", "-U0", "HEAD", "--", rel, cwd=root).stdout
+    return (old_root, rel, old_line(diff, line)), ""
+
+
+def tail(pane, n=1):
+    return run("tmux", "capture-pane", "-p", "-t", pane).stdout.rstrip("\n").split("\n")[-n:]
+
+
+def steer(pane, command):
+    """Run one ':' command in the Helix in <pane>, proving each step from the screen."""
+    for _ in range(3):
+        tmux("send-keys", "-t", pane, "Escape")
+        for _ in range(12):
+            time.sleep(0.04)
+            last = tail(pane, 2)
+            if any("NOR" in row for row in last) and not last[-1].startswith(":"):
+                break
+        else:
+            continue
+        break
+    else:
+        return False
+    before = tail(pane)[0]
+    tmux("send-keys", "-t", pane, ":")
+    for _ in range(30):
+        time.sleep(0.04)
+        now = tail(pane)[0]
+        if now.startswith(":") and now != before:
+            break
+    else:
+        return False
+    buffer = f"hx-hunk-{os.getpid()}"
+    run("tmux", "set-buffer", "-b", buffer, "--", command)
+    run("tmux", "paste-buffer", "-p", "-d", "-b", buffer, "-t", pane)
+    width = int(tmux("display-message", "-p", "-t", pane, "#{pane_width}") or 0)
+    expect = ":" + command
+    for _ in range(50):
+        time.sleep(0.04)
+        now = tail(pane)[0]
+        if now == expect or (len(expect) >= width and now and expect.endswith(now)):
+            tmux("send-keys", "-t", pane, "Enter")
+            return True
+    tmux("send-keys", "-t", pane, "Escape")
+    return False
+
+
+def follow(hx_pane, pane, path, line):
+    """Move the parent-side Helix to <path>'s old line. Latest request wins; one driver at a time."""
+    target, problem = parent_target(path, line)
+    if not target:
+        tmux("display-message", "hx-hunk: " + problem)
+        return
+    _, rel, old = target
+    state = os.path.join(os.environ.get("TMPDIR", "/tmp"), "hx-hunk-" + pane.strip("%"))
+    stamp = f"{os.getpid()}-{time.time()}"
+    with open(state + ".want", "w") as out:
+        out.write(stamp)
+    lock = state + ".lock"
+    for _ in range(60):
+        try:
+            os.mkdir(lock)
+            break
+        except FileExistsError:
+            try:
+                if time.time() - os.path.getmtime(lock) > 5:
+                    os.rmdir(lock)
+            except OSError:
+                pass
+            time.sleep(0.05)
+    else:
+        return
+    try:
+        if open(state + ".want").read() != stamp:
+            return
+        if steer(pane, f"open {rel}:{old}"):
+            time.sleep(0.05)
+            tmux("send-keys", "-t", pane, "z", "z")
+    finally:
+        try:
+            os.rmdir(lock)
+        except OSError:
+            pass
 
 
 def parse_hunks(diff):
@@ -220,26 +374,47 @@ def frame(path, line, width, height):
 def main():
     args = sys.argv[1:]
     mode = "--show"
-    if args and args[0] in ("--show", "--refresh", "--close"):
+    if args and args[0] in ("--show", "--parent", "--refresh", "--close"):
         mode = args.pop(0)
     hx_pane = os.environ.get("TMUX_PANE", "")
     if not hx_pane:
         print("hx-hunk: not in tmux")
         return
     pane = find_pane(hx_pane)
+    kind = pane_kind(hx_pane) if pane else ""
     if mode == "--close":
-        if pane:
-            tmux("kill-pane", "-t", pane)
-        tmux("set-option", "-p", "-u", "-t", hx_pane, "@hx-hunk-pane")
+        close_pane(hx_pane, pane)
         return
     if mode == "--refresh" and not pane:
         return
     if len(args) < 2 or not os.path.isfile(args[0]):
-        if mode == "--show":
+        if mode != "--refresh":
             print("hx-hunk: this buffer is not a file on disk")
         return
     path = os.path.abspath(args[0])
     line = int(args[1]) if args[1].isdigit() else 1
+    want = kind if mode == "--refresh" else ("parent" if mode == "--parent" else "paint")
+
+    if want == "parent":
+        if kind == "parent":
+            # Steering takes a few tenths of a second; never hold Helix's :sh for it.
+            if os.fork():
+                return
+            os.setsid()
+            follow(hx_pane, pane, path, line)
+            return
+        target, problem = parent_target(path, line)
+        if not target:
+            tmux("display-message", "hx-hunk: " + problem)
+            return
+        old_root, rel, old = target
+        close_pane(hx_pane, pane)
+        open_pane(hx_pane, "parent", old_root, f"exec hx {rel}:{old}")
+        return
+
+    if kind == "parent":
+        close_pane(hx_pane, pane)
+        pane = ""
     if not pane:
         pane = open_pane(hx_pane)
     tty, width, height = tmux(

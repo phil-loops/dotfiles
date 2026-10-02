@@ -20,6 +20,7 @@
 #                                       quietly; a dir any live process sits in is never touched.
 #
 #   stack-open --diff-path <branch>  print the diff-view checkout (see "diff view" below)
+#   stack-open --old-path <branch>   print the parent-side checkout (files = the diff base; read-only)
 #
 # A branch already checked out in a real worktree is opened there (editable);
 # otherwise a scratch worktree under $STACK_OPEN_DIR is used.
@@ -482,6 +483,56 @@ ensure_diff_worktree(){   # echo the diff-view checkout for <branch>; the ordina
   install_followup_hook "$dir"
   touch "$dir"; echo "$dir"
 }
+ensure_old_worktree(){   # echo the PARENT-side checkout for <branch>: files are the diff base, HEAD is
+                         # the tip — the diff view inside out. A second Helix beside the diff view
+                         # opens here (hx-hunk --parent) so the old code has a language server too,
+                         # and its gutter marks the lines the branch went on to change.
+                         # Read-only by intent: no stack-open-branch marker, so the follow hook
+                         # ignores it; hx-wc refuses on the stack-open-diff-old marker; the files
+                         # the branch touched are chmod a-w so a stray :w fails in the editor.
+  local b="$1" base tip dir gd p psrc f
+  base=$(diff_base_of "$b") || return 1
+  tip=$(git rev-parse "$b^{commit}")
+  dir="$SCRATCH/${b//\//_}.diffold"
+  if [[ -d "$dir" ]] && ! git -C "$dir" rev-parse --git-dir >/dev/null 2>&1; then
+    mv "$dir" "${dir}.zombie-$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+    git worktree prune 2>/dev/null || true
+  fi
+  if [[ ! -d "$dir" ]]; then
+    git worktree add --detach "$dir" "$base" -q 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      git -C "$dir" rev-parse --git-dir >/dev/null 2>&1 && break
+      sleep 0.3
+    done
+  fi
+  gd=$(git -C "$dir" rev-parse --absolute-git-dir 2>/dev/null) || return 1
+  if [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" != "$tip" \
+        || "$(cat "$gd/stack-open-diff-old" 2>/dev/null)" != "$base $tip" ]]; then
+    rm -f "$gd/stack-open-diff-old"
+    git -C "$dir" checkout --detach -f "$base" -q 2>/dev/null || git -C "$dir" reset --hard "$base" -q 2>/dev/null || return 1
+    [[ "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$base" ]] || return 1
+    git -C "$dir" reset -q --soft "$tip" 2>/dev/null || return 1
+    git -C "$dir" diff --name-only --no-renames "$base" "$tip" 2>/dev/null | while IFS= read -r f; do
+      [[ -f "$dir/$f" ]] && chmod a-w "$dir/$f" 2>/dev/null || true
+    done
+    print -r -- "$base $tip" > "$gd/stack-open-diff-old"
+  fi
+  [[ -e "$dir/node_modules" ]] || ln -sfn "$(donor_checkout)/node_modules" "$dir/node_modules"
+  # Types for the PARENT's code: borrow a checkout that already has them rather than build any.
+  p=$(git config "branch.$b.stack-parent" 2>/dev/null || true)
+  psrc=""
+  if [[ -n "$p" ]]; then
+    psrc=$(existing_worktree "$p" 2>/dev/null || true)
+    [[ -n "$psrc" ]] || psrc="$SCRATCH/${p//\//_}"
+  fi
+  [[ -n "$psrc" && -d "$psrc/.gen" ]] || psrc=$(donor_checkout)
+  if [[ ! -L "$dir/.gen" || "$(readlink "$dir/.gen" 2>/dev/null)" != "$psrc/.gen" ]]; then
+    [[ -d "$dir/.gen" && ! -L "$dir/.gen" ]] && rm -rf "$dir/.gen"
+    ln -sfn "$psrc/.gen" "$dir/.gen"
+  fi
+  "$SCRIPTS/helix-tsgo-stamp" "$dir" 2>/dev/null || true
+  touch "$dir"; echo "$dir"
+}
 hx_worktree(){   # the checkout a Helix open lands in
   if wants_diff_base; then ensure_diff_worktree "$1"; else ensure_worktree "$1"; fi
 }
@@ -814,6 +865,7 @@ case "${1:-}" in
   --serve-path) d=$(STACK_OPEN_SKIP_PRIMARY=1 STACK_OPEN_NO_GEN_SYNC=1 ensure_worktree "${2:?branch}") || exit 1; sync_tree "$d"; echo "$d"; exit 0;;   # --path, but never
              # the primary checkout — a dir loops-preview may serve (it refuses MAIN)
   --diff-path) d=$(STACK_OPEN_NO_GEN_SYNC=1 STACK_OPEN_EDITOR=hx ensure_diff_worktree "${2:?branch}") || exit 1; echo "$d"; exit 0;;   # the diff-view checkout (HEAD = diff base, files = tip)
+  --old-path) d=$(ensure_old_worktree "${2:?branch}") || exit 1; echo "$d"; exit 0;;   # the parent-side checkout (files = diff base, HEAD = tip), for hx-hunk --parent
   --heal-notify)   # (internal, setsid'd from the heal) read the heal log and deliver the outcome:
     # auto ':lsp-restart' in the warm Helix; a banner only for failures we can't act on.
     hdir="${2:?dir}"; hlog="${3:?log}"
