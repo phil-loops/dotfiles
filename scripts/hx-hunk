@@ -77,7 +77,13 @@ def open_pane(hx_pane, kind="paint", cwd=None, command=None):
 
 
 def old_line(diff, line):
-    """The parent-side line that sits where <line> does now, from a -U0 diff."""
+    """(parent-side line, rows the cursor sits below the change's first line), from a -U0 diff.
+
+    Inside a change the parent-side line is the change's FIRST old line (or, for a pure
+    addition, the line the new code was inserted before); the offset lets the caller put that
+    line on the screen row of the change's first new line, so the unchanged code above the
+    change sits level in both panes.
+    """
     shift = 0
     for m in re.finditer(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", diff, re.M):
         os_, oc = int(m[1]), int(m[2]) if m[2] is not None else 1
@@ -86,14 +92,44 @@ def old_line(diff, line):
             if line <= ns:
                 break
             if line == ns + 1:
-                return os_
+                return os_, 0
         else:
             if line < ns:
                 break
             if line <= ns + nc - 1:
-                return os_ if oc else os_ + 1
+                return (os_ if oc else os_ + 1), line - ns
         shift += oc - nc
-    return max(1, line + shift)
+    return max(1, line + shift), 0
+
+
+def row_of(pane, number):
+    """The screen row showing line <number> in the Helix in <pane> (None if off screen)."""
+    rows = run("tmux", "capture-pane", "-p", "-t", pane).stdout.split("\n")
+    for index, row in enumerate(rows[:-2]):
+        m = re.match(r"\s*(\d+)\b", row)
+        if m and int(m[1]) == number:
+            return index
+    return None
+
+
+def level(hx_pane, pane, line, offset, old):
+    """Scroll the parent-side Helix until line <old> sits on the row of the change's first line."""
+    here = row_of(hx_pane, line)
+    if here is None:
+        return
+    height = int(tmux("display-message", "-p", "-t", pane, "#{pane_height}") or 0)
+    want = min(max(here - offset, 0), max(height - 3, 0))
+    for _ in range(25):
+        there = row_of(pane, old)
+        if there is not None:
+            break
+        time.sleep(0.04)
+    else:
+        return
+    move = there - want
+    if move:
+        # z j / z k scroll the view a line at a time and take a count
+        tmux("send-keys", "-t", pane, *str(abs(move)), "z", "j" if move > 0 else "k")
 
 
 def diff_view(path):
@@ -124,7 +160,8 @@ def parent_target(path, line):
     if not os.path.isfile(os.path.join(old_root, rel)):
         return None, f"{rel} is new on this branch: the parent has no version of it"
     diff = run("git", "diff", "--no-color", "--no-ext-diff", "-U0", "HEAD", "--", rel, cwd=root).stdout
-    return (old_root, rel, old_line(diff, line)), ""
+    old, offset = old_line(diff, line)
+    return (old_root, rel, old, offset), ""
 
 
 def tail(pane, n=1):
@@ -175,7 +212,7 @@ def follow(hx_pane, pane, path, line):
     if not target:
         tmux("display-message", "hx-hunk: " + problem)
         return
-    _, rel, old = target
+    _, rel, old, offset = target
     state = os.path.join(os.environ.get("TMPDIR", "/tmp"), "hx-hunk-" + pane.strip("%"))
     stamp = f"{os.getpid()}-{time.time()}"
     with open(state + ".want", "w") as out:
@@ -200,6 +237,8 @@ def follow(hx_pane, pane, path, line):
         if steer(pane, f"open {rel}:{old}"):
             time.sleep(0.05)
             tmux("send-keys", "-t", pane, "z", "z")
+            time.sleep(0.08)
+            level(hx_pane, pane, line, offset, old)
     finally:
         try:
             os.rmdir(lock)
@@ -407,9 +446,17 @@ def main():
         if not target:
             tmux("display-message", "hx-hunk: " + problem)
             return
-        old_root, rel, old = target
+        old_root, rel, old, _ = target
         close_pane(hx_pane, pane)
-        open_pane(hx_pane, "parent", old_root, f"exec hx {rel}:{old}")
+        pane = open_pane(hx_pane, "parent", old_root, f"exec hx {rel}:{old}")
+        if os.fork():
+            return
+        os.setsid()
+        for _ in range(75):   # the new Helix has to draw before it can be levelled
+            if any("NOR" in row for row in tail(pane, 2)):
+                break
+            time.sleep(0.04)
+        follow(hx_pane, pane, path, line)
         return
 
     if kind == "parent":
