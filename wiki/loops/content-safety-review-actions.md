@@ -3,24 +3,28 @@ title: What a support engineer can do with a hold
 section: Content safety
 order: 62
 project: safety-viewer
-lede: Four actions, each a row; "other" is allowed, carries a note, and is counted per rule.
+lede: One question per message. The reasons for a release are the labels; "other" is allowed, carries a note, and is counted per rule.
 ---
 
-Part of [[content-safety-m4-viewer]]. The queue is the labeling tool. Support engineers label by doing their job.
+Part of [[content-safety-m4-viewer]]. The queue is the labeling tool: support engineers label by doing their job, and the screen asks one thing.
 
-**Four actions on a held or rejected message.**
+**Is the hold right?** Release, block, or can't tell. Nothing else is on the screen until that is answered.
 
-1. **Correct an observation.** The model misread the claim, the request, or the payment. Fix the field; the system re-evaluates; if the rule no longer fires, the release follows. The correction is the reason, and it moves the extractor's accuracy number.
-2. **Record a relationship.** This agency sends for that client; this brand is theirs. A representation on file. The next send passes authorization untouched.
-3. **Waive a rule.** Right in general, wrong for this team. Scope, rule, expiry. Waivers per rule are that rule's false-positive rate, measured for free.
-4. **Release once.** Nothing to correct, record, or waive. The only action that needs a stated reason, from a closed list: first-party flow, disclosed representation, known customer relationship, expected brand mention, rule too broad, other.
+**Release asks why**, with choices built from the file, so only applicable ones appear:
 
-**Confirming a block** is the mirror: verdict fraud with a subtype from a short list.
+1. **The model misread it.** Fix the wrong line; the rules run again and the release follows if nothing fires. The fix is an exemplar for similar messages.
+2. **This team sends for that entity.** Only when the claim is unestablished. A representation on file.
+3. **This rule should not apply to this team.** One per live rule, with scope and expiry. Waivers per rule are that rule's false-positive rate.
+4. **Just this once.** Reason from a closed list: first-party flow, disclosed representation, known customer relationship, expected brand mention, rule too broad, other.
 
-**Other.** Allowed, requires a sentence, counted per rule. When its share climbs for a rule, the notes are read and either a new code is minted or the UI nudges toward one of the first three actions.
+If a reason leaves the message held, the screen names the rule still holding it.
 
-**Scope picker, narrowest first.** This message. This rule for this team, with expiry. Every rule for this team, short expiry, required note: the old skip flag made honest.
+**Block asks what it is**: a subtype, and whether to suspend the team. **Can't tell** leaves it held with a note and a fraud assessment of unknown.
 
-**Clusters.** A block across twelve teams on one template family is one queue item; one confirm or release covers the family.
+**Disagreement is not a button.** A release against a hold is the disagreement, counted per rule with the waivers; past a threshold the rule drops from reject to hold.
 
-Every action writes a label row and an audit entry.
+**Other** requires a sentence and is counted per rule; a climbing share mints a new code.
+
+**Clusters.** A template family across many teams is one item; one verdict covers it.
+
+Every answer writes label rows and an audit entry.
