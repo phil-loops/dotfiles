@@ -27,9 +27,11 @@ different ref. So seed once, then run each ref's *code* against it. A
 **scenario** names the call to make and the dataset to hit; the harness runs
 that scenario inside a worktree per ref.
 
-In the loops repo the harness exists: `scripts/bench-shas/` (run
-`~/.volta/bin/node --import tsx scripts/bench-shas/index.ts <refA> <refB>
---scenario <name>`). Elsewhere, build the same shape from the steps below.
+In the loops repo the harness lives on the `phil/bench-shas-harness` branch, not
+main: check that branch out in a worktree (or `git checkout phil/bench-shas-harness
+-- scripts/bench-shas` into yours), then run `~/.volta/bin/node --import tsx
+scripts/bench-shas/index.ts <refA> <refB> --scenario <name>`. Elsewhere, build
+the same shape from the steps below.
 
 ## Procedure
 
