@@ -83,14 +83,6 @@ When they reach the summit or want to stop:
   misconception that surfaced (with how it was unlocked), and any calibration note for next time.
   Keep the entry tight; this is what makes future sessions adaptive.
 
-## Anti-patterns (the failure modes to never commit)
-- Answering your own question / pre-loading the payoff / hinting before they're stuck.
-- Dumping the diff or a wall of explanation instead of asking.
-- More than one open question in a single message.
-- Blank-box "exam" format (intimidating; kills momentum).
-- Spoiling the trap before they can walk into it.
-- Praising-then-not-correcting, or correcting in a way that reads as "you failed."
-
 ## Invocation
 `/tutor <PR# | branch | file | concept>` — or any of the trigger phrases. With no argument, ask what
 they want to dig into. Works on a GitHub PR, a local branch, a file, or a pure concept.
