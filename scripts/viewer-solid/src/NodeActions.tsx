@@ -952,7 +952,13 @@ export function NodeActions(props: {
       </Show>
 
       <Show when={done()}>
-        <span class={`nh-done ${DONE} max-w-[22ch] overflow-hidden text-ellipsis whitespace-nowrap text-patina opacity-90`} title={done() ?? ""}>{done()}</span>
+        {/* a ✗ is a refusal Phil has to act on — give it the row and the del register; a ✓ stays a chip */}
+        <span
+          class={`nh-done ${DONE} ${done()!.startsWith("✗") ? "basis-full whitespace-normal text-del" : "max-w-[22ch] overflow-hidden text-ellipsis whitespace-nowrap text-patina"} opacity-90`}
+          title={done() ?? ""}
+        >
+          {done()}
+        </span>
       </Show>
       <Show when={pushedWeb()}>
         <a class={`nh-pushed-link text-add ${DONE}`} href={pushedWeb()!} target="_blank" rel="noreferrer">
