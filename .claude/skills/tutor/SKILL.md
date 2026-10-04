@@ -1,6 +1,6 @@
 ---
 name: tutor
-description: Socratically teach a PR, branch, file, or concept one rung at a time — productive struggle, no spoilers — and track the learner's progress + recurring mistakes in memory. Use when the user wants to *understand* code (theirs or a teammate's) deeply, not just have it explained. Triggers — "/tutor X", "teach me this PR/branch", "Socratic walkthrough of X", "make me work through this", "help me understand how X works", "walk me through X one rung at a time", or after a juicy PR lands and they want to learn from it. NOT for "just explain X quickly" (answer directly) or designing-before-code (that's /design).
+description: Socratically teach a PR, branch, file, or concept one rung at a time — productive struggle, no spoilers — and track the learner's progress + recurring mistakes in memory. Use when the user wants to *understand* code (theirs or a teammate's) deeply, not just have it explained. Triggers — "/tutor X", "teach me this PR/branch", "Socratic walkthrough of X", "make me work through this", "help me understand how X works", "walk me through X one rung at a time", or after a juicy PR lands and they want to learn from it. NOT for "just explain X quickly" (answer directly).
 ---
 
 # Tutor: Socratic, one rung at a time

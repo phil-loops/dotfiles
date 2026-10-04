@@ -36,7 +36,7 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 
 # Skills
 
-**The `design` skill (nvim whiteboard `:submit` loop) is opt-in only.** "Spec X", "design Y", "write up a plan", "whiteboard it" mean *produce a spec* — inline in chat or a plain markdown file — not launch the tool; *offer* it, launch only on an explicit ask. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
+**"Spec X", "design Y", "write up a plan", "whiteboard it" mean *produce a spec*** — inline in chat or a plain markdown file — not launch a tool. Same restraint for any heavyweight skill: pick the lightest action that fits, and let the user opt into the heavier tool.
 
 # Browser / "open in web"
 

@@ -1,6 +1,6 @@
 ---
 name: reforest
-description: Reshape a chunk of work into a reviewable stacked-PR forest, then execute it. Splits the work into single-capability branches (bases + children + fan-in), writes a plain one-line purpose for each, and emits the MERGE-STORY plan — ordered semantic commits (type(scope): subject) with builds-on/requires sequencing and a per-node implementation note — for sign-off, then creates the branches + sets parent/requires/project/description and moves the commits. Use when the user wants to restructure a fat branch, a fused PR, or a pile of uncommitted changes into properly-scoped PRs — "reforest this", "split this into a forest/stack", "restructure these changes into PRs", "turn this branch into a forest". NOT for designing-before-code (that's /design) or routine restack-after-merge (raw git per forests.md *Restacking*).
+description: Reshape a chunk of work into a reviewable stacked-PR forest, then execute it. Splits the work into single-capability branches (bases + children + fan-in), writes a plain one-line purpose for each, and emits the MERGE-STORY plan — ordered semantic commits (type(scope): subject) with builds-on/requires sequencing and a per-node implementation note — for sign-off, then creates the branches + sets parent/requires/project/description and moves the commits. Use when the user wants to restructure a fat branch, a fused PR, or a pile of uncommitted changes into properly-scoped PRs — "reforest this", "split this into a forest/stack", "restructure these changes into PRs", "turn this branch into a forest". NOT for routine restack-after-merge (raw git per forests.md *Restacking*).
 ---
 
 # Reforest — reshape work into a reviewable forest
@@ -29,7 +29,7 @@ workflow: read → propose → merge-story plan → sign-off → execute, ending
 
 - "reforest this", "split this branch into a forest/stack", "restructure these changes into PRs",
   "this fat branch should be N PRs".
-- NOT `/design` (designing *before* code), NOT routine restack-after-merge (forests.md *Restacking*).
+- NOT routine restack-after-merge (forests.md *Restacking*).
 
 ## The loop
 
