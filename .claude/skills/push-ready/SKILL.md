@@ -71,7 +71,7 @@ Reshaping an existing squashed branch into an outline is a rebuild from its base
 tree parity (the branch's final `^{tree}` must equal the old one) — never a code change.
 
 **Branch with an open PR: do NOT seal.** Follow-up commits are review rounds and push as they
-are (the door's `one` ward relaxes to "N follow-up commits", 2026-09-09); each subject must be
+are (the door's `one` ward accepts N follow-up commits there); each subject must be
 voiced (no wip/fixup). Sealing them costs the reviewer the "changes since" view.
 
 ### 5 · Gate through the server — the CLI does not record
