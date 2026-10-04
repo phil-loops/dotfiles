@@ -65,15 +65,16 @@ I = ":sh $HOME/.dotfiles/scripts/hx-hunk --close"
 # painted change, or the parent-side Helix from space-o p). Centring the view keeps the two
 # sides on the same screen row. The repaint is a no-op while the pane is closed.
 [keys.normal."]"]
-# next function, cursor at its START (Helix selects the whole thing and leaves you at the end)
+# next function, cursor at its START: Helix selects the whole thing and leaves you at the end
+# going forwards, at the start going backwards, so only the forward jumps need the flip
 f = ["goto_next_function", "flip_selections"]
 # next change, repainting the change pane if it is open
 g = ["goto_next_change", "flip_selections", "align_view_center", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
 [keys.normal."["]
-# previous function, cursor at its start
-f = ["goto_prev_function", "flip_selections"]
+# previous function (Helix already lands the cursor at the start going backwards)
+f = "goto_prev_function"
 # previous change, repainting the change pane if it is open
-g = ["goto_prev_change", "flip_selections", "align_view_center", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
+g = ["goto_prev_change", "align_view_center", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
 
 # space-x = the destructive menu, deliberately two keys. Helix has no file-delete command of its
 # own (:delete/:remove/:file complete to nothing), and hx-rm makes the deletion recoverable —
