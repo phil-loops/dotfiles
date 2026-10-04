@@ -17,17 +17,11 @@ Inspects the running loops dev server's recent output to surface the actual erro
 
 ## How to use
 
-The user's dev server runs via `task dev:loops` (or similar) and writes stdout/stderr to a known log file. Convention: `/tmp/loops-dev.log`. If the user's running dev without piping to that file, ask them to restart with:
-
-```
-task dev:loops 2>&1 | tee /tmp/loops-dev.log
-```
-
-(Or whichever `task dev:*` command they're using.)
+A dev server started through the `loops-restart` skill runs in the `loops-dev` tmux session and logs to `/tmp/loops-dev.log`. A server started any other way has no log file to read.
 
 ### Steps
 
-1. **Check the log exists**: `ls -la /tmp/loops-dev.log`. If it doesn't, ask the user to enable it as above and stop.
+1. **Check the log exists**: `ls -la /tmp/loops-dev.log`. If it doesn't, the server wasn't started through `loops-restart` — offer that restart (keep mode, the default, preserves the dev DB) and stop.
 
 2. **Tail the recent output**: `tail -n 300 /tmp/loops-dev.log` and look for:
    - Stack traces or `error` lines
