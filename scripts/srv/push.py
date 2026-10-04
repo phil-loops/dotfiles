@@ -681,6 +681,17 @@ def push_origin(req, raw):
         return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
     if not v["ok"]:
         return req._send(200, json.dumps({"ok": False, "err": "; ".join(v["reasons"]), "verdict": v}))
+    # The verdict's ff ward read the last fetch's origin/<branch>; only trunk is fetched on a
+    # throttle. A commit landed from github.com (an accepted suggestion) leaves that ref stale,
+    # the ward green, and the push rejected with a stderr the header can't show. Fetch the one
+    # ref now and refuse in words before git does.
+    ctx.run(["git", "fetch", "--quiet", "origin", branch])
+    if ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode != 0:
+        n = ctx.run(["git", "rev-list", "--count", f"{branch}..origin/{branch}"]).stdout.strip() or "?"
+        return req._send(200, json.dumps({
+            "ok": False, "verdict": v,
+            "err": f"origin/{branch} has {n} commit{'' if n == '1' else 's'} you don't — sync first",
+        }))
     # plain push — no --force under any circumstance; the pre-push hook still runs
     # underneath as the last net (WIP trailers, merge commits, deploy-critical gap). Run it in
     # the branch's own worktree so the hook checks the tree that went green; no /checkout-to-main
