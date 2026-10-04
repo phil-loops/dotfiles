@@ -35,7 +35,7 @@ The `AND "optInEnabledAt" IS NULL` clause makes this idempotent — if DOI was a
 Run it directly with dotenv loaded:
 
 ```bash
-npx tsx --tsconfig tsconfig.node.json --import dotenv/config scripts/generate-opt-in-contact.ts
+npx tsx --tsconfig scripts/tsconfig.json --import dotenv/config scripts/generate-opt-in-contact.ts
 ```
 
 The script:
