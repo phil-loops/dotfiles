@@ -66,7 +66,7 @@ Present the forest as the **merge-story** — the same artifact the viewer rende
   `stack-merge-rank <project>` — don't re-derive.
 - **`type`** = `feat` for a new capability, `refactor`/`chore` for cleanup.
 - **`<scope>`** = the project's lowercased Linear ticket when one is set
-  (`stack-project.<project>.ticket`), else the project name. Same scope on every branch.
+  (`stack-project.<project>.ticket`); no ticket, no scope (`type: subject`). Same on every branch.
 - **`↳ builds on N`** = a true `parent` (indent these); **`⤿ requires N — merges after`** = the
   extra bases an integrator carries. One dep is a parent, never a lone `requires`.
 - **`⇢ after N — deploy order only`** = zero code dependency, merge order is a prod invariant
