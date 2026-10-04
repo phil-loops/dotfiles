@@ -65,9 +65,13 @@ I = ":sh $HOME/.dotfiles/scripts/hx-hunk --close"
 # painted change, or the parent-side Helix from space-o p). Centring the view keeps the two
 # sides on the same screen row. The repaint is a no-op while the pane is closed.
 [keys.normal."]"]
+# next function, cursor at its START (Helix selects the whole thing and leaves you at the end)
+f = ["goto_next_function", "flip_selections"]
 # next change, repainting the change pane if it is open
 g = ["goto_next_change", "flip_selections", "align_view_center", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
 [keys.normal."["]
+# previous function, cursor at its start
+f = ["goto_prev_function", "flip_selections"]
 # previous change, repainting the change pane if it is open
 g = ["goto_prev_change", "flip_selections", "align_view_center", ":sh $HOME/.dotfiles/scripts/hx-hunk --refresh %{buffer_name} %{cursor_line}"]
 
