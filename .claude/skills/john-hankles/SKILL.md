@@ -13,8 +13,9 @@ review-bot experiment on loops `bench/hankles-reply`; that workflow is unrelated
 skill and this skill never triggers or feeds it.)
 
 Two gears: the **review** (always) and the **loop** (when asked). The loop ends where
-/push-ready ends — one sealed voiced commit and a server-recorded green gates verdict —
-because the tree-keyed verdict IS the answer to "how would we know it's ready".
+/push-ready ends — a voiced commit outline (placeholder history sealed into one voiced
+commit) and a server-recorded green gates verdict — because the tree-keyed verdict IS the
+answer to "how would we know it's ready".
 
 ## Resolve the target
 
@@ -84,9 +85,9 @@ Order matters: **reshape before gating** — reshaping after gates invalidates t
 2. **Fold the review findings**: confirmed → NEW commits on the branch (never amend);
    plausible-but-unverified → record for the viewer tree-keyed, exactly push-ready's
    mechanics — never silently drop a finding.
-3. **Hand off to /push-ready** for the sign-off motion: seal into one voiced commit →
-   server-recorded gates → restack only if the fresh gate complains → push button
-   unlocked. Don't restate its mechanics; invoke it.
+3. **Hand off to /push-ready** for the sign-off motion: keep the voiced outline (seal only
+   placeholder history) → server-recorded gates → restack only if the fresh gate complains →
+   push button unlocked. Don't restate its mechanics; invoke it.
 4. **Report**: the ranked findings and where each landed (folded / flagged / dismissed
    with reason), the gates verdict, and the viewer URL pointed at the result.
 
