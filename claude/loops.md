@@ -43,14 +43,14 @@ npx -y squawk-cli packages/prisma/migrations/<dir>/migration.sql
 
 ## Typecheck
 
-Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc`** — since TS7 landed on main (#9866, 2026-08-10) tsc IS the native fast compiler (~16s full runtime check), so the routine check and the CI-exact verdict are the same command; the tsgo-vs-tsc split-brain is retired:
+Whenever a change touches a typed boundary (zod validators, tRPC inputs, model/query signatures, exported types) run a full project typecheck before declaring done. **Default to `npx tsc`** — on main, tsc is the native fast compiler (~16s full runtime check), so the routine check and the CI-exact verdict are the same command:
 
 ```bash
 npx tsc --project typescript/tsconfig.runtime.json --noEmit   # the default full typecheck
 npx tsc --project typescript/tsconfig.test.json --noEmit      # + tests
 ```
 
-(The two configs split from `tsconfig.node.json` in #9599, 2026-07-19 — a pre-split branch still carries the old single config, and a pre-TS7 branch still pins the slow tsc 6: the global `tsgo` preview survives only for those parked trees, plus as the Helix LSP via `helix-tsgo-stamp` until the repo's `.helix` drops tsserver. The pre-push hook runs the same checks; bypass with `TSC_SKIP=1`.)
+(A parked branch that predates the TS7 upgrade or the config split may still carry a single `tsconfig.node.json` and pin the slow tsc 6: the global `tsgo` preview exists for those trees. Typecheck runs in the viewer push gates, not the pre-push hook, which only blocks WIP commits and TODOs.)
 
 `tsc-turn <cmd>` is still the machine-wide compile queue, max 2 heavy checks at once — route batch or concurrent typechecks through it (2026-07-06: seven concurrent tscs flattened the machine). `oxlint --type-aware` and `oxfmt` are lints and formatting, NOT typecheckers.
 
