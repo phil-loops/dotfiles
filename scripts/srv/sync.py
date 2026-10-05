@@ -1043,15 +1043,17 @@ def force_scope(branch, upstream):
             pr = arr[0] if arr else None
     except Exception:
         pr = None
+    # the author's own reviews and comments (Traffic-Cop checklists, suggestions left on one's
+    # own PR, notes-to-self) invalidate nobody's read-state — only someone ELSE having engaged
+    # takes the PR out of scope
+    author = (pr.get("author") or {}).get("login") if pr else None
+    def by_others(items):
+        return [i for i in items or [] if (i.get("author") or {}).get("login") != author]
     guards = [
         {"k": "pr", "label": "open PR on origin", "ok": bool(pr)},
         {"k": "draft", "label": "still a draft", "ok": bool(pr and pr.get("isDraft"))},
-        {"k": "reviews", "label": "zero reviews", "ok": bool(pr) and not pr.get("reviews")},
-        # the author's own comments (Traffic-Cop checklists, notes-to-self) invalidate nobody's
-        # read-state — only someone ELSE having engaged takes the PR out of scope
-        {"k": "comments", "label": "no one else's comments",
-         "ok": bool(pr) and not [c for c in pr.get("comments") or []
-                                 if (c.get("author") or {}).get("login") != (pr.get("author") or {}).get("login")]},
+        {"k": "reviews", "label": "no one else's reviews", "ok": bool(pr) and not by_others(pr.get("reviews"))},
+        {"k": "comments", "label": "no one else's comments", "ok": bool(pr) and not by_others(pr.get("comments"))},
         {"k": "gates", "label": "gates green for this exact tree", "ok": gates_green},
     ]
     return {
