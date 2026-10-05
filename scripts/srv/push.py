@@ -13,9 +13,10 @@ import subprocess
 import hashlib
 import tempfile
 import time
+import threading
 from urllib.parse import quote, parse_qs
 
-from . import ctx, stage, sync, repostate, shellout, stackcfg
+from . import ctx, stage, sync, repostate, shellout, stackcfg, gate_queue
 
 
 def delta_tests(req, raw):
@@ -60,6 +61,7 @@ def delta_tests(req, raw):
 # at spawn}. The dict is just a warm cache: every spawn also writes a sidecar json next to the
 # journal, so a bounced server re-adopts the still-running detached child instead of losing it.
 _GATE_JOBS = {}
+_GATE_LOCK = threading.RLock()
 _REPO_IDS = {}
 
 
@@ -134,12 +136,13 @@ def gates(req, raw):
     # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
     # a bare gates check used to rebase stale branches as a side effect of observing, and
     # observation must never mutate. The sync strip passes fix:false explicitly anyway.
-    cmd = _gates_cmd(branch, fix=d.get("fix", False))
+    cmd = _gates_cmd(branch, fix=d.get("fix", False), tree=tree)
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
         old = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
-        if old and _job_running(old):
+        if old and old["tree"] == tree and _job_running(old):
+            gate_queue.promote(_queue_file(old))
             return req._send(200, json.dumps({"ok": True, "started": True, "already": True}))
         if old and old["tree"] == _tree(branch):
             # an orphaned run finished while no server was watching — harvest its verdict
@@ -158,43 +161,55 @@ def gates(req, raw):
     if err:
         return req._send(200, json.dumps({**err, "gates": []}))
     if verdict.get("ok"):
-        _record_green(branch, _tree(branch), verdict.get("gates", []))
+        _record_green(branch, tree, verdict.get("gates", []))
         repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
     req._send(200, json.dumps(verdict))
 
 
 # One gates run at a time, machine-wide: each run is 4-5 full tsc programs at 2-3 GB apiece,
 # and four overlapping runs (2026-09-22, 09:26) swapped the machine for 37 minutes each where
-# one alone takes ~40s. tsc-turn's slot lock queues the rest; a queued run is still a live
-# job (pid alive), so dedup, re-adoption and the pregate loop's "one at a time" all hold.
+# one alone takes ~40s. The priority queue shares tsc-turn's slot lock, so donor refreshes
+# and surviving older gate runs stay serialized with interactive and background checks.
 GATES_TURN_DIR = os.path.join(tempfile.gettempdir(), "stack-gates-turn")
 
 
-def _gates_cmd(branch, fix=False):
-    cmd = ["env", "TSC_TURN_SLOTS=1", f"TSC_TURN_DIR={GATES_TURN_DIR}", os.path.join(ctx.SCRIPTS, "tsc-turn"),
+def _queue_file(job):
+    return os.path.join(GATES_TURN_DIR, os.path.basename(job["path"]) + ".queue.json")
+
+
+def _gates_cmd(branch, fix=False, background=False, tree=None):
+    cmd = [os.path.join(ctx.SCRIPTS, "stack-gates-turn"),
+           "--queue", GATES_TURN_DIR, "--branch", branch,
+           "--tree", _tree(branch) if tree is None else tree,
+           "--priority", "background" if background else "interactive", "--",
            os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
     if fix:
         cmd.append("--fix")
     return cmd
 
 
-def _spawn_gates(branch, fix=False):
-    """Spawn the detached stack-gates child (journal + sidecar job file). Shared by the
-    interactive /gates detach path and the ambient pregate loop — one spawn shape, so a
-    bounced server re-adopts either kind identically."""
-    cmd = _gates_cmd(branch, fix=fix)
-    path = os.path.join(
-        tempfile.gettempdir(),
-        f"stack-gates-{_repo_id()}-{quote(branch, safe='')}-{int(time.time())}.jsonl")
-    with open(path, "w") as f:
-        f.write(json.dumps({"event": "queued", "ts": time.time()}) + "\n")   # stack-gates truncates it on start
-    proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    job = {"path": path, "proc": proc, "t0": time.time(), "tree": _tree(branch)}
-    _GATE_JOBS[_jkey(branch)] = job
-    with open(_job_file(branch), "w") as f:
-        json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": job["tree"]}, f)
-    return job
+def _spawn_gates(branch, fix=False, background=False):
+    with _GATE_LOCK:
+        tree = _tree(branch)
+        old = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
+        if old and old["tree"] == tree and _job_running(old):
+            if not background:
+                gate_queue.promote(_queue_file(old))
+            return old
+        cmd = _gates_cmd(branch, fix=fix, background=background, tree=tree)
+        path = os.path.join(
+            tempfile.gettempdir(),
+            f"stack-gates-{_repo_id()}-{quote(branch, safe='')}-{time.time_ns()}.jsonl")
+        with open(path, "w") as f:
+            f.write(json.dumps({"event": "queued", "ts": time.time()}) + "\n")
+        proc = subprocess.Popen(cmd + ["--progress", path], cwd=ctx.repo_cwd(),
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                start_new_session=True)
+        job = {"path": path, "proc": proc, "t0": time.time(), "tree": tree}
+        _GATE_JOBS[_jkey(branch)] = job
+        with open(_job_file(branch), "w") as f:
+            json.dump({"path": path, "pid": proc.pid, "t0": job["t0"], "tree": tree}, f)
+        return job
 
 
 def gates_progress(req, u):
@@ -685,8 +700,10 @@ def push_origin(req, raw):
     # throttle. A commit landed from github.com (an accepted suggestion) leaves that ref stale,
     # the ward green, and the push rejected with a stderr the header can't show. Fetch the one
     # ref now and refuse in words before git does.
+    # A first push has no origin/<branch> to fetch or compare — the ward is only for re-pushes.
     ctx.run(["git", "fetch", "--quiet", "origin", branch])
-    if ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode != 0:
+    has_remote = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}"]).returncode == 0
+    if has_remote and ctx.run(["git", "merge-base", "--is-ancestor", f"origin/{branch}", branch]).returncode != 0:
         n = ctx.run(["git", "rev-list", "--count", f"{branch}..origin/{branch}"]).stdout.strip() or "?"
         return req._send(200, json.dumps({
             "ok": False, "verdict": v,
