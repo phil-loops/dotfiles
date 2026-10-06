@@ -1,0 +1,180 @@
+#!/usr/bin/env node
+// review-stats [owner/repo] [--no-open] — local page: PR reviews by member over the past N days.
+// Scope is closed PRs that had a human review requested. Data comes from `gh api graphql`,
+// cached in ~/.cache/review-stats/ for an hour; a stale cache refreshes incrementally (only PRs
+// updated since the last fetch). The page's ⌘K bar can clear the cache and refetch from scratch.
+const http = require("node:http");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { execFile } = require("node:child_process");
+
+const args = process.argv.slice(2);
+const repo = args.find((a) => !a.startsWith("--")) || "Loops-so/loops";
+const [owner, name] = repo.split("/");
+const PORT = Number(process.env.REVIEW_STATS_PORT || 4599);
+const TTL_MS = 60 * 60 * 1000;
+const HORIZON_DAYS = 90;
+const OVERLAP_MS = 10 * 60 * 1000;
+const PAGE_SIZE = 40;
+const cacheDir = path.join(os.homedir(), ".cache", "review-stats");
+const cacheFile = path.join(cacheDir, `${owner}-${name}.json`);
+const url = `http://localhost:${PORT}/`;
+
+const QUERY = `query($owner:String!,$name:String!,$n:Int!,$cursor:String){
+  repository(owner:$owner,name:$name){
+    pullRequests(states:[CLOSED,MERGED],first:$n,after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}){
+      pageInfo{hasNextPage endCursor}
+      nodes{
+        number title url state updatedAt createdAt closedAt additions deletions
+        author{__typename login}
+        reviews(first:60){nodes{author{__typename login} state submittedAt comments{totalCount}}}
+        timelineItems(itemTypes:[REVIEW_REQUESTED_EVENT],first:40){nodes{... on ReviewRequestedEvent{
+          createdAt requestedReviewer{__typename ... on User{login} ... on Bot{login} ... on Mannequin{login} ... on Team{slug}}
+        }}}
+      }
+    }
+  }
+}`;
+
+function gh(cursor) {
+  const argv = ["api", "graphql", "-f", `query=${QUERY}`, "-F", `owner=${owner}`, "-F", `name=${name}`, "-F", `n=${PAGE_SIZE}`];
+  if (cursor) argv.push("-f", `cursor=${cursor}`);
+  return new Promise((resolve, reject) => {
+    execFile("gh", argv, { maxBuffer: 64 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) return reject(new Error((stderr || err.message).trim()));
+      try {
+        resolve(JSON.parse(stdout).data.repository.pullRequests);
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+function compact(pr) {
+  return {
+    n: pr.number,
+    title: pr.title,
+    url: pr.url,
+    merged: pr.state === "MERGED",
+    author: pr.author?.login ?? "ghost",
+    authorBot: pr.author?.__typename === "Bot",
+    createdAt: pr.createdAt,
+    closedAt: pr.closedAt,
+    add: pr.additions,
+    del: pr.deletions,
+    requests: pr.timelineItems.nodes
+      .filter((e) => e.requestedReviewer)
+      .map((e) => ({
+        who: e.requestedReviewer.login ?? `team:${e.requestedReviewer.slug}`,
+        bot: e.requestedReviewer.__typename === "Bot",
+        at: e.createdAt,
+      })),
+    reviews: pr.reviews.nodes
+      .filter((r) => r.author && r.state !== "PENDING" && r.submittedAt)
+      .map((r) => ({ who: r.author.login, bot: r.author.__typename === "Bot", state: r.state, at: r.submittedAt, inline: r.comments.totalCount })),
+  };
+}
+
+function readCache() {
+  try {
+    return JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(cache) {
+  fs.mkdirSync(cacheDir, { recursive: true });
+  const tmp = `${cacheFile}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cache));
+  fs.renameSync(tmp, cacheFile);
+}
+
+const status = { fetching: false, mode: null, pages: 0, seen: 0, error: null };
+
+async function fetchInto(mode) {
+  if (status.fetching) return;
+  Object.assign(status, { fetching: true, mode, pages: 0, seen: 0, error: null });
+  try {
+    const startedAt = Date.now();
+    const horizon = startedAt - HORIZON_DAYS * 86400000;
+    const prior = mode === "incremental" ? readCache() : null;
+    const stopBefore = prior ? Math.max(horizon, prior.fetchedAt - OVERLAP_MS) : horizon;
+    const byNumber = new Map((prior?.prs ?? []).map((p) => [p.n, p]));
+    let cursor = null;
+    for (;;) {
+      const page = await gh(cursor);
+      status.pages++;
+      let reachedEnd = !page.pageInfo.hasNextPage;
+      for (const pr of page.nodes) {
+        if (Date.parse(pr.updatedAt) < stopBefore) {
+          reachedEnd = true;
+          break;
+        }
+        byNumber.set(pr.number, compact(pr));
+        status.seen++;
+      }
+      if (reachedEnd) break;
+      cursor = page.pageInfo.endCursor;
+    }
+    const prs = [...byNumber.values()].filter((p) => Date.parse(p.closedAt) >= horizon);
+    writeCache({ repo, fetchedAt: startedAt, fullFetchAt: prior?.fullFetchAt ?? startedAt, horizonDays: HORIZON_DAYS, prs });
+  } catch (e) {
+    status.error = e.message;
+  } finally {
+    status.fetching = false;
+  }
+}
+
+function ensureFresh() {
+  const cache = readCache();
+  if (!cache) void fetchInto("full");
+  else if (Date.now() - cache.fetchedAt > TTL_MS) void fetchInto("incremental");
+}
+
+function json(res, body, code = 200) {
+  res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+  res.end(JSON.stringify(body));
+}
+
+const server = http.createServer((req, res) => {
+  const route = `${req.method} ${req.url.split("?")[0]}`;
+  if (route === "GET /") {
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    return res.end(fs.readFileSync(path.join(__dirname, "review-stats.html")));
+  }
+  if (route === "GET /api/data") {
+    ensureFresh();
+    const cache = readCache();
+    return json(res, { repo, ttlMs: TTL_MS, horizonDays: HORIZON_DAYS, status, fetchedAt: cache?.fetchedAt ?? null, prs: cache?.prs ?? [] });
+  }
+  if (route === "GET /api/status") return json(res, status);
+  if (route === "POST /api/refresh") {
+    void fetchInto(readCache() ? "incremental" : "full");
+    return json(res, status);
+  }
+  if (route === "POST /api/clear") {
+    if (status.fetching) return json(res, { error: "a fetch is already running" }, 409);
+    fs.rmSync(cacheFile, { force: true });
+    void fetchInto("full");
+    return json(res, status);
+  }
+  json(res, { error: "not found" }, 404);
+});
+
+function openPage() {
+  if (!args.includes("--no-open")) execFile("open", [url]);
+}
+
+server.on("error", (e) => {
+  if (e.code !== "EADDRINUSE") throw e;
+  console.log(`review-stats already serving on ${url}`);
+  openPage();
+});
+server.listen(PORT, "127.0.0.1", () => {
+  console.log(`review-stats · ${repo} · ${url} · cache ${cacheFile}`);
+  ensureFresh();
+  openPage();
+});
