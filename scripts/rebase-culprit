@@ -39,20 +39,21 @@ if [[ -z "$overlap" ]]; then
 fi
 
 # walk merges newest-first; a squash merge whose own diff touches any contested file is a
-# culprit. PR number + title come straight from the subject "Title (#N)".
+# culprit. PR number + title come straight from the subject "Title (#N)". ONE git log for the
+# whole range, streamed: a diff-tree per trunk commit cost 37s on a branch a few thousand
+# commits behind, x170 conflicting branches = most of a 5-hour restack-dryrun pass (2026-10-07),
+# and a caller that only wants the newest (`| head -1`) now stops the walk at the first hit.
 emit=()
-while IFS=$'\t' read -r sha subj; do
-  [[ "$subj" =~ \(#([0-9]+)\)[[:space:]]*$ ]] || continue
-  n="${BASH_REMATCH[1]}"
-  # files this merge changed (squash = single commit; diff-tree vs its first parent)
-  cf="$(git diff-tree --no-commit-id --name-only -r "$sha" 2>/dev/null | sort -u)"
-  if printf '%s\n' "$cf" | comm -12 - <(printf '%s\n' "$overlap") | grep -q .; then
-    emit+=("$n	${subj%% (#$n)}")
-  fi
-done < <(git log "$mb..$target" --format='%H%x09%s')
+while IFS=$'\t' read -r n title; do
+  if (( json )); then emit+=("$n	$title"); else printf '%s\t%s\n' "$n" "$title"; fi
+done < <(git log "$mb..$target" --name-only --no-renames --format='%x01%s' | OVERLAP="$overlap" awk '
+  BEGIN { split(ENVIRON["OVERLAP"], files, "\n"); for (i in files) contested[files[i]] = 1 }
+  /^\001/ { subject = substr($0, 2); hit = 0; next }
+  !hit && ($0 in contested) && match(subject, /\(#[0-9]+\)[[:space:]]*$/) {
+    tail = substr(subject, RSTART); n = tail; gsub(/[^0-9]/, "", n)
+    print n "\t" substr(subject, 1, RSTART - 2); hit = 1
+  }')
 
 if (( json )); then
-  printf '%s\n' "${emit[@]}" | jq -R -s 'split("\n") | map(select(length>0) | split("\t")) | {prs: map({n:(.[0]|tonumber), title:.[1]})}'
-else
-  printf '%s\n' "${emit[@]}"
+  printf '%s\n' ${emit[@]+"${emit[@]}"} | jq -R -s 'split("\n") | map(select(length>0) | split("\t")) | {prs: map({n:(.[0]|tonumber), title:.[1]})}'
 fi
