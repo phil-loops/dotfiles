@@ -344,13 +344,136 @@ json.dump(new_lock, open(lp, "w"), indent=2)
 PYEOF
 }
 
+# A repointed package resolves its imports from the SCRATCH (TS and node both follow the
+# symlink to its realpath), so two things must hold or the repoint trades one wrong answer for
+# another (2026-09-29 resolvers↔react-hook-form, 2026-10-07 react-dropzone↔@types/react):
+#   1. whatever depends on a repointed package is repointed too — left on the donor it keeps
+#      resolving the donor's version of it, and the tree then holds two;
+#   2. everything else the tree can see, the scratch sees at the SAME path (deps_scratch_share).
+# An entry still pointing into another lockfile's scratch moves here for the same reason.
+deps_dependents(){ # $1 = tree, $2 = scratch, rest = drifted names; prints the extra names to repoint
+  local tree="$1" scratch="$2"; shift 2
+  python3 - "$tree" "$scratch" "$@" <<'PYEOF'
+import json, os, sys
+tree, scratch, names = sys.argv[1], os.path.realpath(sys.argv[2]), sys.argv[3:]
+pkgs = json.load(open(os.path.join(tree, "package-lock.json"))).get("packages") or {}
+
+def resolve(frm, dep):
+    base = frm
+    while True:
+        cand = (base + "/node_modules/" + dep) if base else ("node_modules/" + dep)
+        if cand in pkgs:
+            return cand
+        if not base:
+            return None
+        i = base.rfind("/node_modules/")
+        base = base[:i] if i != -1 else ""
+
+def top(key):
+    return key[len("node_modules/"):].split("/node_modules/")[0]
+
+def repointable(name):
+    meta = pkgs.get("node_modules/" + name) or {}
+    resolved = meta.get("resolved") or ""
+    return (meta.get("version") and not meta.get("link")
+            and (not resolved or resolved.startswith(("http://", "https://")))
+            and os.path.islink(os.path.join(tree, "node_modules", name)))
+
+moved = set(names)
+while True:
+    more = set()
+    for key, meta in pkgs.items():
+        if not key.startswith("node_modules/") or top(key) in moved:
+            continue
+        for field in ("dependencies", "optionalDependencies", "peerDependencies"):
+            for dep in (meta.get(field) or {}):
+                r = resolve(key, dep)
+                if r and r.count("node_modules/") == 1 and r[len("node_modules/"):] in moved:
+                    more.add(top(key))
+    more = {n for n in more if repointable(n)}
+    if not more:
+        break
+    moved |= more
+for key in pkgs:
+    if not key.startswith("node_modules/") or key.count("node_modules/") != 1:
+        continue
+    name = key[len("node_modules/"):]
+    if name in moved or not repointable(name):
+        continue
+    real = os.path.realpath(os.path.join(tree, "node_modules", name))
+    if "/seed-gen/deps/" in real and not real.startswith(scratch + os.sep):
+        moved.add(name)
+for name in sorted(moved - set(names)):
+    print(name)
+PYEOF
+}
+
+deps_scratch_share(){ # $1 = tree, $2 = scratch: every package the scratch does not pin resolves to the tree's own copy
+  python3 - "$1" "$2" <<'PYEOF'
+import json, os, shutil, sys
+tree, scratch = os.path.realpath(sys.argv[1]), os.path.realpath(sys.argv[2])
+pinned = set(json.load(open(os.path.join(scratch, "package.json"))).get("dependencies") or {})
+nm = os.path.join(tree, "node_modules")
+names = []
+for entry in sorted(os.listdir(nm)):
+    if entry.startswith("."):
+        continue
+    if entry.startswith("@"):
+        names += [entry + "/" + child for child in sorted(os.listdir(os.path.join(nm, entry)))
+                  if not child.startswith(".")]
+    else:
+        names.append(entry)
+for name in names:
+    if name in pinned:
+        continue
+    src = os.path.realpath(os.path.join(nm, name))
+    # a workspace package is this tree's alone and the scratch serves every tree on the lockfile
+    if not os.path.isdir(src) or src.startswith((scratch + os.sep, tree + os.sep)):
+        continue
+    dst = os.path.join(scratch, "node_modules", name)
+    if os.path.islink(dst):
+        if os.path.realpath(dst) == src:
+            continue
+        os.unlink(dst)
+    elif os.path.isdir(dst):
+        shutil.rmtree(dst)
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.symlink(src, dst)
+PYEOF
+}
+
+# A scratch outlives every tree that used it unless something collects it: 52 of them, 9.5 GB,
+# by 2026-10-07. One is dead when no worktree's lockfile hashes to it any more and it has sat
+# a week (a tree whose lock just moved still links into the old one until its next sync, which
+# re-explodes dead links first). Detached: a multi-GB rm must not hold the gate's env step.
+prune_dep_scratches(){ # $1 = tree
+  local root="$HOME/.cache/seed-gen/deps" live w d
+  live=$(git -C "$1" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10)}' \
+    | while IFS= read -r w; do [[ -f "$w/package-lock.json" ]] && md5 -q "$w/package-lock.json"; done | sort -u)
+  [[ -n "$live" ]] || return 0
+  find "$root" -mindepth 1 -maxdepth 1 -type d -mtime +7 2>/dev/null | while IFS= read -r d; do
+    grep -qx "$(basename "$d")" <<<"$live" || echo "$d"
+  done | ( xargs -I{} rm -rf {} >/dev/null 2>&1 & )
+  return 0
+}
+
 repoint_drifted_deps(){ # $1 = tree; echoes a note when it acted
-  local tree="$1" drift n stamp scratch name ver landed
+  local tree="$1" drift n stamp scratch name ver landed wanted
   [[ -f "$tree/package-lock.json" ]] || return 0
   exploded "$tree" || return 0
   drift=$(deps_drift "$tree" 2>/dev/null) || return 0
   [[ -n "$drift" ]] || return 0
-  n=$(grep -c . <<<"$drift")
+  stamp=$(md5 -q "$tree/package-lock.json" 2>/dev/null) || return 0
+  # Keyed by lockfile, so trees on the same lock share one install. OUTSIDE the worktree on
+  # purpose: npm takes its project root from the nearest package.json, so a scratch under the
+  # tree would reify into the tree itself — the same stomp the per-package explode exists to stop.
+  scratch="$HOME/.cache/seed-gen/deps/$stamp"
+  # a plain string, not an array: bash 3.2 expands an empty "${a[@]:-}" to one EMPTY argument,
+  # so the array form seeds the command with a bare "". Package names never contain spaces.
+  wanted=$(cut -f1 <<<"$drift" | tr '\n' ' ')
+  wanted="$wanted $(deps_dependents "$tree" "$scratch" $wanted 2>/dev/null | tr '\n' ' ')"
+  n=$(wc -w <<<"$wanted" | tr -d ' ')
+  (( n )) || return 0
   # A big delta means the donor is simply the wrong tree, not that a few packages slipped, and
   # installing 170 packages per worktree is not the answer to that — measured on this machine,
   # a branch a few weeks behind a parked main drifts 140-170 deps. Warn and move on: a gate that
@@ -361,19 +484,7 @@ repoint_drifted_deps(){ # $1 = tree; echoes a note when it acted
     echo "node_modules borrows $n deps at versions this branch does not pin — too many to repoint; npm install in the main checkout, or give this tree a real node_modules"
     return 0
   fi
-  stamp=$(md5 -q "$tree/package-lock.json" 2>/dev/null) || return 0
-  # Keyed by lockfile, so trees on the same lock share one install. OUTSIDE the worktree on
-  # purpose: npm takes its project root from the nearest package.json, so a scratch under the
-  # tree would reify into the tree itself — the same stomp the per-package explode exists to stop.
-  scratch="$HOME/.cache/seed-gen/deps/$stamp"
   mkdir -p "$scratch" || return 0
-  # a plain string, not an array: bash 3.2 expands an empty "${a[@]:-}" to one EMPTY argument,
-  # so the array form seeds the command with a bare "". Package names never contain spaces.
-  local wanted=""
-  while IFS=$'\t' read -r name ver; do
-    [[ -n "$name" ]] && wanted="$wanted $name"
-  done <<<"$drift"
-  [[ -n "$wanted" ]] || return 0
   deps_scratch_lock "$tree" "$scratch" $wanted
   case $? in
     0) if ! ( cd "$scratch" && npm ci --no-audit --no-fund ) >/dev/null 2>&1; then
@@ -384,15 +495,23 @@ repoint_drifted_deps(){ # $1 = tree; echoes a note when it acted
     *) echo "node_modules borrows $n dep(s) at the wrong version but this branch's lockfile does not pin them — leaving the donor's"
        return 0 ;;
   esac
+  deps_scratch_share "$tree" "$scratch" || {
+    echo "node_modules borrows $n dep(s) at the wrong version but the repoint scratch could not share this tree's other packages — leaving the donor's"
+    return 0
+  }
   landed=0
-  while IFS=$'\t' read -r name ver; do
-    [[ -n "$name" && -L "$tree/node_modules/$name" && -d "$scratch/node_modules/$name" ]] || continue
+  for name in $wanted; do
+    [[ -L "$tree/node_modules/$name" && -d "$scratch/node_modules/$name" ]] || continue
     if rm "$tree/node_modules/$name" && ln -sh "$scratch/node_modules/$name" "$tree/node_modules/$name"; then
       landed=$((landed + 1))
     fi
-  done <<<"$drift"
+  done
   if (( landed )); then
-    echo "node_modules borrowed $landed dep(s) at the main checkout's versions — repointed at this branch's: $(cut -f1 <<<"$drift" | tr '\n' ' ')"
+    # tsc's incremental cache keys on the link, not its target, and replays the old resolution
+    rm -f "$tree"/typescript/*.tsbuildinfo
+    touch "$scratch"
+    prune_dep_scratches "$tree"
+    echo "node_modules borrowed $landed dep(s) at the main checkout's versions — repointed at this branch's: $wanted"
   fi
   return 0
 }
