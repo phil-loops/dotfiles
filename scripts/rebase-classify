@@ -70,7 +70,9 @@ children_of() {
 trial_rebase() {
   local br=$1 tg=$2 wt rc=0
   wt=$(mktemp -d "${TMPDIR:-/tmp}/rebase-classify.XXXXXX")
-  git worktree add -q --detach "$wt" "$br" || { rmdir "$wt" 2>/dev/null || true; return 2; }
+  # no hooks: post-checkout dirtied the fresh tree (.helix/languages.toml), the rebase then
+  # refused to start, and every such branch read as a conflict (2026-10-07)
+  git -c core.hooksPath=/dev/null worktree add -q --detach "$wt" "$br" || { rmdir "$wt" 2>/dev/null || true; return 2; }
   if git -C "$wt" -c core.editor=true rebase -q "$tg" >/dev/null 2>&1; then
     git -C "$wt" rev-list --count "$tg"..HEAD
   else
@@ -79,6 +81,37 @@ trial_rebase() {
   fi
   git worktree remove --force "$wt" >/dev/null 2>&1 || true
   return $rc
+}
+
+# The same trial with no worktree: git replays the commits in memory and prints the ref update
+# it WOULD make, moving nothing. A checkout of the whole repo per at-risk branch was 4.4s and
+# fired the post-checkout hooks each time; this is ~0.1s. Same contract as trial_rebase; returns
+# 2 when replay cannot answer (a merge commit in the range, a detached <branch>) so the caller
+# falls back to the worktree.
+trial_replay() {
+  local br=$1 tg=$2 base out new rc=0
+  git rev-parse --verify -q "refs/heads/$br" >/dev/null || return 2
+  base=$(git merge-base "$br" "$tg") || return 2
+  # rebase SKIPS a commit whose patch is already upstream; replay would re-apply it and conflict
+  git cherry "$tg" "refs/heads/$br" 2>/dev/null | grep -q '^-' && return 2
+  out=$(git replay --onto "$tg" "$base..refs/heads/$br" 2>/dev/null) || rc=$?
+  (( rc == 1 )) && return 1
+  (( rc == 0 )) || return 2
+  new=$(awk -v ref="refs/heads/$br" '$1 == "update" && $2 == ref { print $3; exit }' <<<"$out")
+  [ -n "$new" ] || return 2
+  # rebase drops a commit that replays to nothing; replay keeps it, so count only real changes
+  local c n=0
+  for c in $(git rev-list "$tg..$new"); do
+    [ "$(git rev-parse "$c^{tree}")" = "$(git rev-parse "$c^^{tree}")" ] || n=$((n + 1))
+  done
+  echo "$n"
+}
+
+trial() {
+  local rc=0
+  trial_replay "$@" || rc=$?
+  (( rc == 2 )) || return $rc
+  trial_rebase "$@"
 }
 
 mb=$(git merge-base "$branch" "$target")
@@ -129,7 +162,7 @@ if [ -z "$overlap" ]; then
 fi
 
 if [ "$do_deep" = 1 ]; then
-  if replayed=$(trial_rebase "$branch" "$target"); then
+  if replayed=$(trial "$branch" "$target"); then
     if [ "${replayed:-0}" -eq 0 ]; then
       verdict already-merged \
 "● Trial rebase replayed 0 commits — $branch's work is already in $target.
