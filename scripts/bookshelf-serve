@@ -1,0 +1,232 @@
+#!/usr/bin/env python3
+# bookshelf-serve — read the bookshelf in a browser, tick readings off, take notes.
+#
+#   bookshelf-serve [port]       default 62556; prints the URL, Ctrl-C to stop
+#
+# Shelves are the markdown files in ~/.dotfiles/bookshelf (README.md is the index and is
+# skipped). The files stay the source of truth: a ticked box rewrites that `- [ ]` line,
+# and notes replace everything under the shelf's `## Notes` heading. Nothing is committed
+# — that stays a deliberate step in the dotfiles repo.
+#
+# Every write carries the mtime the page last saw. If the file changed since (an edit in
+# Helix, say) the write is refused with 409 and the page reloads, rather than clobbering.
+#
+# All rendering is in bookshelf.html; the server only hands out lines and applies edits.
+
+import json
+import os
+import re
+import socketserver
+import sys
+import tempfile
+from http.server import BaseHTTPRequestHandler
+from urllib.parse import urlparse
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PAGE = os.path.join(HERE, "bookshelf.html")
+SHELF_DIR = os.environ.get(
+    "BOOKSHELF_DIR", os.path.join(os.path.dirname(HERE), "bookshelf")
+)
+
+SLUG = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+TASK = re.compile(r"^(\s*- \[)([ xX])(\] )")
+NOTES_HEADING = "## Notes"
+
+
+class Problem(Exception):
+    def __init__(self, status, msg):
+        super().__init__(msg)
+        self.status = status
+
+
+def shelf_path(slug):
+    if not isinstance(slug, str) or not SLUG.match(slug):
+        raise Problem(400, "bad shelf name")
+    path = os.path.join(SHELF_DIR, slug + ".md")
+    if not os.path.isfile(path):
+        raise Problem(404, f"no shelf {slug}")
+    return path
+
+
+def read_shelf(slug):
+    path = shelf_path(slug)
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    mtime = os.stat(path).st_mtime_ns
+
+    title = next((ln[2:].strip() for ln in lines if ln.startswith("# ")), slug)
+    notes_at = next(
+        (i for i, ln in enumerate(lines) if ln.strip() == NOTES_HEADING), None
+    )
+    body_end = len(lines) if notes_at is None else notes_at
+    notes = "" if notes_at is None else "\n".join(lines[notes_at + 1 :]).strip("\n")
+
+    tasks = [m for m in (TASK.match(ln) for ln in lines[:body_end]) if m]
+    return {
+        "slug": slug,
+        "title": title,
+        "lines": lines[:body_end],
+        "notes": notes,
+        "hasNotes": notes_at is not None,
+        "done": sum(1 for m in tasks if m.group(2) != " "),
+        "total": len(tasks),
+        # A string: nanosecond mtimes overflow a JavaScript number.
+        "mtime": str(mtime),
+    }
+
+
+def list_shelves():
+    try:
+        names = sorted(os.listdir(SHELF_DIR))
+    except FileNotFoundError:
+        raise Problem(500, f"missing {SHELF_DIR}")
+    slugs = [n[:-3] for n in names if n.endswith(".md") and n != "README.md"]
+    return [read_shelf(s) for s in slugs if SLUG.match(s)]
+
+
+def write_shelf(slug, seen_mtime, edit):
+    path = shelf_path(slug)
+    if str(os.stat(path).st_mtime_ns) != seen_mtime:
+        raise Problem(409, "the file changed on disk")
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    lines = edit(lines)
+    fd, tmp = tempfile.mkstemp(dir=SHELF_DIR, prefix=".bookshelf-")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines))
+        os.chmod(tmp, os.stat(path).st_mode)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    return read_shelf(slug)
+
+
+def toggle(line_no, checked):
+    def edit(lines):
+        if not isinstance(line_no, int) or not 0 <= line_no < len(lines):
+            raise Problem(400, "no such line")
+        if not TASK.match(lines[line_no]):
+            raise Problem(400, "that line is not a checkbox")
+        mark = "x" if checked else " "
+        lines[line_no] = TASK.sub(lambda m: m.group(1) + mark + m.group(3), lines[line_no])
+        return lines
+
+    return edit
+
+
+def set_notes(text):
+    def edit(lines):
+        if not isinstance(text, str):
+            raise Problem(400, "notes must be text")
+        at = next(
+            (i for i, ln in enumerate(lines) if ln.strip() == NOTES_HEADING), None
+        )
+        if at is None:
+            while lines and lines[-1] == "":
+                lines.pop()
+            lines += ["", NOTES_HEADING]
+            at = len(lines) - 1
+        body = text.replace("\r\n", "\n").strip("\n")
+        return lines[: at + 1] + ["", body, ""] if body else lines[: at + 1] + [""]
+
+    return edit
+
+
+class Handler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def _send(self, body, ctype="application/json", status=200):
+        if isinstance(body, (dict, list)):
+            body = json.dumps(body).encode()
+        elif isinstance(body, str):
+            body = body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _fail(self, exc):
+        self._send({"err": str(exc)}, status=exc.status)
+
+    def _same_origin(self):
+        # Writes touch files, so refuse a POST another site's page could have sent.
+        host = self.headers.get("Host", "")
+        origin = self.headers.get("Origin")
+        local = host.split(":")[0] in ("127.0.0.1", "localhost")
+        return local and (origin is None or origin == f"http://{host}")
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if path == "/favicon.ico":
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if path in ("/", "/index.html"):
+            try:
+                with open(PAGE, encoding="utf-8") as fh:
+                    return self._send(fh.read(), "text/html; charset=utf-8")
+            except FileNotFoundError:
+                return self.send_error(500, f"missing {PAGE}")
+        if path == "/shelves":
+            try:
+                return self._send({"shelves": list_shelves(), "dir": SHELF_DIR})
+            except Problem as exc:
+                return self._fail(exc)
+        return self.send_error(404)
+
+    def do_POST(self):
+        if not self._same_origin():
+            return self.send_error(403)
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        try:
+            req = json.loads(self.rfile.read(n) if n else b"{}")
+            if not isinstance(req, dict):
+                raise ValueError
+        except ValueError:
+            return self._fail(Problem(400, "bad JSON"))
+        try:
+            if self.path == "/toggle":
+                edit = toggle(req.get("line"), bool(req.get("checked")))
+            elif self.path == "/notes":
+                edit = set_notes(req.get("text"))
+            else:
+                return self.send_error(404)
+            return self._send(write_shelf(req.get("slug"), req.get("mtime"), edit))
+        except Problem as exc:
+            return self._fail(exc)
+
+    def log_message(self, *args):
+        pass
+
+
+class Server(socketserver.ThreadingTCPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+def main():
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 62556
+    try:
+        shelves = list_shelves()
+    except Problem as exc:
+        print(f"bookshelf is broken: {exc}")
+        return 1
+    with Server(("127.0.0.1", port), Handler) as httpd:
+        print(f"bookshelf → http://localhost:{port}   ({len(shelves)} shelves)")
+        print(f"  files   ← {SHELF_DIR}")
+        print("Ctrl-C to stop")
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
