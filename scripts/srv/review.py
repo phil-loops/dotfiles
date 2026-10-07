@@ -434,22 +434,27 @@ def commit_diff(req, u):
     # one commit's changed files + patches (git show <sha>), in the same FileDiff shape the
     # node view renders — so the history list can expand a commit inline. Read-only: these are
     # historical commits, nothing to bless. Diffed against the commit's first parent.
+    # ?from=<older sha> widens it to a contiguous slice: the combined diff from..sha inclusive.
     sha = parse_qs(u.query).get("sha", [""])[0]
+    frm = parse_qs(u.query).get("from", [""])[0]
+    if frm and not re.fullmatch(r"[0-9a-f]{7,40}", frm):
+        return req._send(400, json.dumps({"err": "from must be a commit sha"}))
     hide_ws = _hide_ws(u)
-    key = (ctx.repo_cwd(), sha, hide_ws)
+    key = (ctx.repo_cwd(), sha, frm, hide_ws)
+    show = (lambda *flags: ["git", "diff", *flags, f"{frm}^", sha]) if frm else (lambda *flags: ["git", "show", *flags, "--format=", sha])
     hit = _CDIFF_CACHE.get(key) if len(sha) >= 7 else None
     if hit is not None:
         return req._send(200, hit)
     ws = ["-w"] if hide_ws else []
     counts = {}
-    for ln in ctx.run(["git", "show", "--numstat", "--format=", *ws, sha]).stdout.splitlines():
+    for ln in ctx.run(show("--numstat", *ws)).stdout.splitlines():
         p = ln.split("\t")
         if len(p) == 3:
             counts[p[2]] = (0 if p[0] == "-" else int(p[0]), 0 if p[1] == "-" else int(p[1]))
-    full = ctx.run(["git", "show", "-p", "--format=", *ws, sha]).stdout
+    full = ctx.run(show("-p", *ws)).stdout
     # a whitespace-only file drops out of the -w patch entirely; recover it from the raw one so
     # the card says something instead of rendering blank
-    raw = _chunks(ctx.run(["git", "show", "-p", "--format=", sha]).stdout) if hide_ws else {}
+    raw = _chunks(ctx.run(show("-p")).stdout) if hide_ws else {}
     shown = _chunks(full)
     files = []
     for path, ch in (raw | shown).items() if hide_ws else shown.items():

@@ -48,7 +48,7 @@ export interface DataProvider {
   model(branch: string): Promise<ForestModel>;
   node(branch: string, base?: string): Promise<NodeData>;
   commits(branch: string): Promise<Commit[]>;
-  commitDiff(sha: string): Promise<CommitDiff>;
+  commitDiff(sha: string, from?: string): Promise<CommitDiff>;
   purpose(branch: string): Promise<Purpose>;
   head(): Promise<Head>;
   sync(branch: string): Promise<SyncState>;
@@ -112,7 +112,8 @@ export class HttpProvider implements DataProvider {
   node = (branch: string, base?: string) =>
     fetchJSON<unknown>(withRepo("/node") + "?branch=" + q(branch) + (base ? "&base=" + base : "")).then((d) => parse(NodeData, d, "node"));
   commits = (branch: string) => fetchJSON<unknown>(withRepo("/commits") + "?branch=" + q(branch)).then((d) => parse(z.array(Commit), d, "commits"));
-  commitDiff = (sha: string) => fetchJSON<unknown>(withRepo("/commit-diff") + "?sha=" + q(sha)).then((d) => parse(CommitDiff, d, "commit-diff"));
+  commitDiff = (sha: string, from?: string) =>
+    fetchJSON<unknown>(withRepo("/commit-diff") + "?sha=" + q(sha) + (from ? "&from=" + q(from) : "")).then((d) => parse(CommitDiff, d, "commit-diff"));
   purpose = (branch: string) => fetchJSON<unknown>(withRepo("/purpose") + "?branch=" + q(branch)).then((d) => parse(Purpose, d, "purpose"));
   head = () => fetchJSON<unknown>("/head").then((d) => parse(Head, d, "head"));
   sync = (branch: string) => fetchJSON<unknown>(withRepo("/sync") + "?branch=" + q(branch)).then((d) => parse(SyncState, d, "sync"));

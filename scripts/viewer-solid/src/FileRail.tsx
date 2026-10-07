@@ -399,7 +399,7 @@ function CommitRow(props: {
   n?: number;
   branch: string;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (extend: boolean) => void;
   onReworded?: () => void;
 }) {
   // reword — GitHub Desktop's "amend" for any commit above the origin waterline: the message
@@ -476,7 +476,7 @@ function CommitRow(props: {
           props.selected ? "bg-gold-wash" : "hover:bg-[rgba(255,255,255,0.03)]"
         }`}
       >
-        <button class="flex flex-1 cursor-pointer items-baseline gap-[13px] text-left leading-[1.55]" onClick={() => props.onSelect()}>
+        <button class="flex flex-1 cursor-pointer items-baseline gap-[13px] text-left leading-[1.55]" title="click to read this commit · ⇧click to read a slice up to here" onClick={(e) => props.onSelect(e.shiftKey)}>
           <span class={`c-num w-[16px] flex-none text-right text-[11px] tabular-nums ${props.selected ? "text-gold-leaf" : "text-ink-faint"}`}>
             {props.n ?? ""}
           </span>
@@ -567,10 +567,13 @@ export function CommitsList(props: {
   branch: string;
   frozen?: boolean;
   selected: string;
-  onSelect: (sha: string) => void;
+  slice?: Commit[];
+  onSelect: (sha: string, extend?: boolean) => void;
+  onSelectOutgoing?: () => void;
   onReworded?: () => void;
 }) {
   const outline = () => outlineOf(props.q.data);
+  const isSelected = (sha: string) => props.selected === sha || !!props.slice?.some((c) => c.sha === sha);
   // warm every outline commit's diff (a handful by convention) so stepping is a render, not a fetch
   const qc = useQueryClient();
   createEffect(() => {
@@ -592,7 +595,8 @@ export function CommitsList(props: {
       ? "origin frozen — local carries the restacked truth; squash-merge reconciles, nothing to push"
       : outgoing() === 0
         ? "origin is current — a push sends nothing"
-        : `origin is here — ${outgoing()} commit${outgoing() === 1 ? "" : "s"} below go out on push · 4 = combined line diff`;
+        : `origin is here — ${outgoing()} commit${outgoing() === 1 ? "" : "s"} below go out on push`;
+  const canReadOutgoing = () => !!props.onSelectOutgoing && outgoing() > 1;
   return (
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
@@ -602,14 +606,24 @@ export function CommitsList(props: {
               {(c, i) => (
                 <>
                   <Show when={i() === waterline()}>
-                    <li class={DIVIDER}><span>{waterlineText()}</span></li>
+                    <li class={DIVIDER}>
+                      <Show when={canReadOutgoing()} fallback={<span>{waterlineText()}</span>}>
+                        <button
+                          class="since-push cursor-pointer uppercase tracking-[0.08em] text-ink-faint hover:text-ink-dim"
+                          title="read everything since the last push as one combined diff"
+                          onClick={() => props.onSelectOutgoing?.()}
+                        >
+                          {waterlineText()} · read them together
+                        </button>
+                      </Show>
+                    </li>
                   </Show>
                   <CommitRow
                     c={c}
                     n={outlineNumber(outline(), c.sha)}
                     branch={props.branch}
-                    selected={props.selected === c.sha}
-                    onSelect={() => props.onSelect(c.sha)}
+                    selected={isSelected(c.sha)}
+                    onSelect={(extend) => props.onSelect(c.sha, extend)}
                     onReworded={props.onReworded}
                   />
                 </>
@@ -650,7 +664,8 @@ export function EarlierHistory(props: { q: { data: Commit[] | undefined }; branc
 
 // The selected commit, read on its own: its message, then only the files it touched. Read-only
 // — a historical commit has nothing to bless.
-export function CommitDetail(props: { commit: Commit | undefined; label: string; diff: CommitDiff | undefined; branch: string }) {
+export function CommitDetail(props: { commit: Commit | undefined; slice?: Commit[]; label: string; diff: CommitDiff | undefined; branch: string }) {
+  const combined = () => (props.slice && props.slice.length > 1 ? props.slice : undefined);
   const noBless = { mutate: () => {} };
   return (
     <Show when={props.commit}>
@@ -658,9 +673,22 @@ export function CommitDetail(props: { commit: Commit | undefined; label: string;
         <section class="commit-detail mt-[26px] scroll-mt-[18px]">
           <header class="mb-[14px] border-x-0 border-t-0 border-b border-solid border-rule pb-[12px]">
             <div class="text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">{props.label}</div>
-            <h3 class="m-0 mt-[5px] font-display text-[17px] font-semibold text-ink">{c().subject}</h3>
-            <Show when={c().body}>
-              <p class="m-0 mt-[5px] text-[12px] leading-[1.55] whitespace-pre-wrap text-ink-dim">{c().body}</p>
+            <Show
+              when={combined()}
+              fallback={
+                <>
+                  <h3 class="m-0 mt-[5px] font-display text-[17px] font-semibold text-ink">{c().subject}</h3>
+                  <Show when={c().body}>
+                    <p class="m-0 mt-[5px] text-[12px] leading-[1.55] whitespace-pre-wrap text-ink-dim">{c().body}</p>
+                  </Show>
+                </>
+              }
+            >
+              {(many) => (
+                <ol class="slice-subjects m-0 mt-[5px] list-none p-0 text-[12.5px] leading-[1.6] text-ink">
+                  <For each={many()}>{(s) => <li><span class="mr-[10px] text-[11px] text-ink-faint tabular-nums">{s.sha}</span>{s.subject}</li>}</For>
+                </ol>
+              )}
             </Show>
           </header>
           <Show when={props.diff} fallback={<p class={LOADING}>loading…</p>}>

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { outlineOf, outlineNumber } from "./commitOutline.ts";
+import { outlineOf, outlineNumber, sliceOf, outgoingOf } from "./commitOutline.ts";
+import type { Commit } from "./types.ts";
 
 const commit = (sha: string, extra: { own?: boolean; carried?: boolean } = {}) => ({
   sha,
@@ -32,4 +33,24 @@ test("carried fan-in picks sit in the outline but take no number", () => {
 
 test("an ancestor has no outline number", () => {
   assert.equal(outlineNumber(outlineOf([commit("c1", { own: true })]), "a0"), undefined);
+});
+
+test("sliceOf returns the contiguous run between two commits, oldest first, in either click order", () => {
+  const outline = outlineOf([
+    { sha: "d", subject: "four", own: true },
+    { sha: "c", subject: "three", own: true },
+    { sha: "b", subject: "two", own: true },
+    { sha: "a", subject: "one", own: true },
+  ] as Commit[]);
+  assert.deepEqual(sliceOf(outline, "b", "d").map((c) => c.sha), ["b", "c", "d"]);
+  assert.deepEqual(sliceOf(outline, "d", "b").map((c) => c.sha), ["b", "c", "d"]);
+  assert.deepEqual(sliceOf(outline, "b", "b").map((c) => c.sha), ["b"]);
+  assert.deepEqual(sliceOf(outline, "b", "zz"), []);
+});
+
+test("outgoingOf is everything from the first unpushed commit, and nothing without a remote", () => {
+  const pushed = (sha: string, p?: boolean) => ({ sha, subject: sha, own: true, pushed: p }) as Commit;
+  assert.deepEqual(outgoingOf(outlineOf([pushed("c", false), pushed("b", false), pushed("a", true)])).map((c) => c.sha), ["b", "c"]);
+  assert.deepEqual(outgoingOf(outlineOf([pushed("b", true), pushed("a", true)])), []);
+  assert.deepEqual(outgoingOf(outlineOf([pushed("b"), pushed("a")])), []);
 });
