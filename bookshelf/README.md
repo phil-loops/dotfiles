@@ -9,3 +9,4 @@ Read it in the browser with `scripts/bookshelf-serve` (the 📚 row in the ✦ m
 | Shelf | The idea |
 | --- | --- |
 | [Timestamp cursors vs commit order](timestamp-cursors-vs-commit-order.md) | A row's timestamp is not the moment it became visible, so a cursor can pass it |
+| [SELECT FOR UPDATE vs FOR SHARE](select-for-update-vs-for-share.md) | Both lock the rows read; FOR UPDATE is exclusive, FOR SHARE lets other readers lock too |
