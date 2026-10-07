@@ -5,7 +5,7 @@ import { provider, canMutate, withRepo } from "./provider";
 import { leaf, isBlessed, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
 import { DirtyRail, FileEntry, CommitsList, CommitDetail, EarlierHistory } from "./FileRail";
-import { outlineOf, outlineNumber } from "./commitOutline";
+import { outlineOf, outlineNumber, sliceOf, outgoingOf } from "./commitOutline";
 import { FilePanel } from "./FilePanel";
 import { TestNotes } from "./TestNotes";
 import { useNodeMutations } from "./useNodeMutations";
@@ -61,6 +61,7 @@ export function NodeDetail() {
       setBase("");
       setView("diffs");
       setSelectedCommit("");
+      setSliceAnchor("");
       setActiveFile("");
       fileCycle.setCurrent("");
     }
@@ -112,28 +113,38 @@ export function NodeDetail() {
 
   // commits view = the branch read one commit at a time: the outline on top, the selected
   // commit's message + own diff below, [ / ] stepping through the outline (oldest first).
+  // ⇧click widens the selection to a contiguous slice (anchor … selected), read as one combined diff.
   const [selectedCommit, setSelectedCommit] = createSignal("");
+  const [sliceAnchor, setSliceAnchor] = createSignal("");
   const outline = createMemo(() => outlineOf(commits.data));
+  const slice = createMemo(() => (sliceAnchor() ? sliceOf(outline(), sliceAnchor(), selectedCommit()) : []));
+  const inSlice = () => slice().length > 1;
   const firstOwn = () => (outline().find((c) => !c.carried) ?? outline()[0])?.sha ?? "";
   const selected = () => (commits.data ?? []).find((c) => c.sha === selectedCommit());
   createEffect(() => {
     if (view() === "commits" && !selected()) setSelectedCommit(firstOwn());
   });
   const commitDiff = createQuery(() => ({
-    queryKey: ["commit-diff", selectedCommit()],
-    queryFn: () => provider.commitDiff(selectedCommit()),
+    queryKey: inSlice() ? ["commit-diff", slice().at(-1)!.sha, slice()[0].sha] : ["commit-diff", selectedCommit()],
+    queryFn: () => (inSlice() ? provider.commitDiff(slice().at(-1)!.sha, slice()[0].sha) : provider.commitDiff(selectedCommit())),
     enabled: view() === "commits" && !!selectedCommit(),
     staleTime: Infinity,
   }));
   const commitLabel = () => {
     const c = selected();
     if (!c) return "";
+    if (inSlice()) {
+      const pushing = outgoingOf(outline());
+      const isOutgoing = pushing.length === slice().length && pushing[0]?.sha === slice()[0].sha;
+      return `${slice().length} commits combined${isOutgoing ? " · since last push" : ""}`;
+    }
     if (c.own === false) return "earlier history";
     if (c.carried) return "carried from a fan-in dep";
     const total = outline().filter((o) => !o.carried).length;
     return `commit ${outlineNumber(outline(), c.sha)} of ${total}`;
   };
-  const selectCommit = (sha: string) => {
+  const selectCommit = (sha: string, extend = false) => {
+    setSliceAnchor(extend && selectedCommit() ? sliceAnchor() || selectedCommit() : "");
     setSelectedCommit(sha);
     setActiveFile("");
     fileCycle.setCurrent("");
@@ -343,7 +354,7 @@ export function NodeDetail() {
         project={project}
         nodeData={panelData}
         isGhost={isGhost}
-        caption={() => (view() === "commits" && commitDiff.data ? `${commitDiff.data.files.length} files in this commit` : undefined)}
+        caption={() => (view() === "commits" && commitDiff.data ? `${commitDiff.data.files.length} files in ${inSlice() ? `these ${slice().length} commits` : "this commit"}` : undefined)}
         blessedOf={(f) => view() === "diffs" && blessedOf(f)}
         activeFile={activeFile}
         fileFilter={fileFilter}
@@ -400,16 +411,24 @@ export function NodeDetail() {
                 branch={active()}
                 frozen={!!health.data?.[active()]?.frozenOrigin}
                 selected={selectedCommit()}
+                slice={slice()}
                 onSelect={selectCommit}
+                onSelectOutgoing={() => {
+                  const pushing = outgoingOf(outline());
+                  if (!pushing.length) return;
+                  selectCommit(pushing[0].sha);
+                  selectCommit(pushing.at(-1)!.sha, true);
+                }}
                 onReworded={() => {
                   // the shas moved (tree didn't): refresh the list, the push manifest, the model
                   setSelectedCommit("");
+                  setSliceAnchor("");
                   commits.refetch();
                   qc.invalidateQueries({ queryKey: ["push-preview"] });
                   qc.invalidateQueries({ queryKey: ["model"] });
                 }}
               />
-              <CommitDetail commit={selected()} label={commitLabel()} diff={commitDiff.data} branch={active()} />
+              <CommitDetail commit={selected()} slice={slice()} label={commitLabel()} diff={commitDiff.data} branch={active()} />
               <EarlierHistory q={commits} branch={active()} selected={selectedCommit()} onSelect={selectCommit} />
             </>
           }>
@@ -470,7 +489,7 @@ export function NodeDetail() {
             <dl class="m-0 grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2">
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>tab</span></dt><dd class={KBD_DD}>next file</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>c</span></dt><dd class={KBD_DD}>flip diffs ⇄ commits</dd></div>
-              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>[</span><span class={KBD_K}>]</span></dt><dd class={KBD_DD}>previous / next commit (commits view)</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>[</span><span class={KBD_K}>]</span></dt><dd class={KBD_DD}>previous / next commit (commits view) · ⇧click a row for a slice</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>1</span><span class={KBD_K}>2</span><span class={KBD_K}>3</span><span class={KBD_K}>4</span></dt><dd class={KBD_DD}>diff vs parent / main / last blessed / outgoing (what a push sends)</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>b</span></dt><dd class={KBD_DD}>show / hide the file panel</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⌘F</span></dt><dd class={KBD_DD}>filter files</dd></div>
