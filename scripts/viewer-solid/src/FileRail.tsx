@@ -332,7 +332,7 @@ export function FileEntry(props: {
       classList={{ blessed: blessed(), foil: foil() }}
     >
       <div
-        class="entry-head group sticky top-0 z-[3] flex cursor-pointer select-none items-center gap-[11px] overflow-hidden border-b border-rule bg-vellum-raise px-[14px] py-[11px] hover:bg-vellum-edge"
+        class="entry-head group sticky top-[var(--commits-picker-h,0px)] z-[3] flex cursor-pointer select-none items-center gap-[11px] overflow-hidden border-b border-rule bg-vellum-raise px-[14px] py-[11px] hover:bg-vellum-edge"
         title={collapsed() ? "show diff" : "hide diff"}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("button, .sp-anchor, .chat-badge")) return;
@@ -472,25 +472,28 @@ function CommitRow(props: {
       classList={{ own: props.c.own !== false, carried: !!props.c.carried, "commit-open": props.selected }}
     >
       <div
-        class={`commit-head flex w-full items-baseline gap-[13px] px-1 py-[9px] leading-[1.55] ${
+        class={`commit-head flex w-full items-baseline gap-[11px] px-1 py-[2px] text-[12.5px] leading-[1.45] ${
           props.selected ? "bg-gold-wash" : "hover:bg-[rgba(255,255,255,0.03)]"
         }`}
       >
-        <button class="flex flex-1 cursor-pointer items-baseline gap-[13px] text-left leading-[1.55]" title="click to read this commit · ⇧click to read a slice up to here" onClick={(e) => props.onSelect(e.shiftKey)}>
+        <button class="flex min-w-0 flex-1 cursor-pointer items-baseline gap-[11px] text-left leading-[1.45]" title={`${props.c.author} · ${props.c.date}${props.c.body ? "\n\n" + props.c.body : ""}`} onClick={(e) => props.onSelect(e.shiftKey)}>
           <span class={`c-num w-[16px] flex-none text-right text-[11px] tabular-nums ${props.selected ? "text-gold-leaf" : "text-ink-faint"}`}>
             {props.n ?? ""}
           </span>
           <span class="c-sha flex-none text-[11px] text-ink-faint tabular-nums">{props.c.sha}</span>
           {/* inherited ancestors and carried fan-in picks dim — they're not this branch's outline */}
-          <span class={`c-subject flex-1 ${mine() ? "text-ink" : "text-ink-faint"}`}>
+          <span class={`c-subject min-w-0 flex-1 truncate ${mine() ? "text-ink" : "text-ink-faint"}`}>
             {props.c.subject}
+            <Show when={mine() && props.c.body}>
+              <span class="c-why ml-[10px] text-[11.5px] text-ink-faint">{props.c.body!.split("\n")[0]}</span>
+            </Show>
             <Show when={props.c.carried}>
               <span class="c-carried ml-2 text-[10.5px] tracking-[0.04em] text-ink-faint" title="a cherry-pick of a fan-in dep (stack-requires) — reviewed on that branch">
                 carried
               </span>
             </Show>
           </span>
-          <span class="c-meta flex-none text-[10.5px] text-ink-faint">{props.c.author} · {props.c.date}</span>
+          <span class="c-meta flex-none text-[10.5px] text-ink-faint tabular-nums">{props.c.date.slice(5)}</span>
         </button>
         <Show when={rewordable() && !editing()}>
           <button
@@ -517,9 +520,6 @@ function CommitRow(props: {
           </button>
         </Show>
       </div>
-      <Show when={mine() && props.c.body && !editing() && !props.selected}>
-        <p class="c-body m-0 truncate pb-[7px] pl-[88px] pr-1 text-[11.5px] leading-[1.5] text-ink-faint" title={props.c.body}>{props.c.body!.split("\n")[0]}</p>
-      </Show>
       <Show when={revertErr()}>
         <p class="px-1 pb-2 text-[11px] text-del">{revertErr()}</p>
       </Show>
@@ -560,7 +560,7 @@ function CommitRow(props: {
 }
 
 const DIVIDER =
-  "commits-divider flex items-center gap-[10px] px-1 pt-[14px] pb-[6px] text-[10.5px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
+  "commits-divider flex items-center gap-[10px] px-1 pt-[6px] pb-[3px] text-[10px] uppercase tracking-[0.08em] text-ink-faint before:h-px before:flex-1 before:bg-rule before:content-[''] after:h-px after:flex-1 after:bg-rule after:content-['']";
 
 export function CommitsList(props: {
   q: { data: Commit[] | undefined };
@@ -600,7 +600,22 @@ export function CommitsList(props: {
   // The list is the picker: pinned above the diff it drives, capped so the diff keeps most of
   // the screen, and foldable to one line once the slice is chosen.
   const [folded, setFolded] = createSignal(false);
-  let pickerEl: HTMLDivElement | undefined;
+  const total = () => outline().filter((c) => !c.carried).length;
+  const summary = () => {
+    const many = props.slice && props.slice.length > 1 ? props.slice : undefined;
+    if (many) return `${outlineNumber(outline(), many[0].sha) ?? "·"}–${outlineNumber(outline(), many.at(-1)!.sha) ?? "·"} of ${total()} · ${many.length} commits combined`;
+    const c = outline().find((o) => o.sha === props.selected);
+    return c ? `${outlineNumber(outline(), c.sha) ?? "·"} of ${total()} · ${c.subject}` : `${outline().length} commits`;
+  };
+  // Only the one-line summary is pinned; the list itself scrolls away with the page, so the
+  // diff gets the whole screen and nothing reflows. Clicking the pinned summary brings the list back.
+  let sentinelEl: HTMLDivElement | undefined;
+  const onSummary = () => {
+    const top = sentinelEl ? sentinelEl.getBoundingClientRect().top : 0;
+    if (top < 0) window.scrollBy({ top, behavior: "instant" });
+    else setFolded((v) => !v);
+  };
+  let pickerEl: HTMLButtonElement | undefined;
   let listEl: HTMLOListElement | undefined;
   createEffect(() => {
     if (!pickerEl) return;
@@ -619,23 +634,25 @@ export function CommitsList(props: {
       const top = row.offsetTop - listEl.offsetTop;
       const hidden = top < listEl.scrollTop || top + row.offsetHeight > listEl.scrollTop + listEl.clientHeight;
       // leave a row's worth of headroom so the origin line above the first unpushed commit shows too
-      if (hidden) listEl.scrollTop = Math.max(0, top - 44);
+      if (hidden) listEl.scrollTop = Math.max(0, top - 28);
     });
   });
   return (
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
         <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
-          <div ref={pickerEl} class="commits-picker sticky top-0 z-[5] -mx-2 border-x-0 border-t-0 border-b border-solid border-rule bg-vellum-night px-2 pb-[2px]">
+          <div ref={sentinelEl} class="h-0" />
           <button
-            class="commits-fold flex w-full cursor-pointer items-baseline gap-[10px] px-1 py-[6px] text-left text-[10.5px] uppercase tracking-[0.08em] text-ink-faint hover:text-ink-dim"
-            title={folded() ? "show the commit list" : "fold the commit list to give the diff the screen"}
-            onClick={() => setFolded((v) => !v)}
+            ref={pickerEl}
+            class="commits-fold sticky top-0 z-[5] -mx-2 flex w-[calc(100%+16px)] cursor-pointer items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule bg-vellum-night px-3 py-[4px] text-left text-[11.5px] text-ink-dim hover:text-ink"
+            title="what you are reading — click to get back to the commit list"
+            onClick={onSummary}
           >
-            <span>{folded() ? "▸" : "▾"} {outline().length} commit{outline().length === 1 ? "" : "s"}</span>
-            <span class="normal-case tracking-normal">click one to read it · ⇧click another to read the slice between</span>
+            <span class="flex-none text-ink-faint">{folded() ? "▸" : "▾"}</span>
+            <span class="min-w-0 flex-1 truncate">{summary()}</span>
+            <span class="flex-none text-[10.5px] text-ink-faint">[ ] step · ⇧click for a slice</span>
           </button>
-          <ol ref={listEl} class="commits m-0 max-h-[42vh] list-none overflow-y-auto p-0" classList={{ hidden: folded() }}>
+          <ol ref={listEl} class="commits m-0 max-h-[50vh] list-none overflow-y-auto p-0" classList={{ hidden: folded() }}>
             <For each={outline()}>
               {(c, i) => (
                 <>
@@ -667,7 +684,6 @@ export function CommitsList(props: {
               <li class={DIVIDER}><span>{waterlineText()}</span></li>
             </Show>
           </ol>
-          </div>
         </Show>
       )}
     </Show>
@@ -705,8 +721,8 @@ export function CommitDetail(props: { commit: Commit | undefined; slice?: Commit
   return (
     <Show when={props.commit}>
       {(c) => (
-        <section class="commit-detail mt-[26px] scroll-mt-[calc(var(--commits-picker-h,0px)+18px)]">
-          <header class="mb-[14px] border-x-0 border-t-0 border-b border-solid border-rule pb-[12px]">
+        <section class="commit-detail mt-[10px] scroll-mt-[calc(var(--commits-picker-h,0px)+8px)]">
+          <header class="mb-[8px] border-x-0 border-t-0 border-b border-solid border-rule pb-[6px]">
             <div class="text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">{props.label}</div>
             <Show
               when={combined()}
@@ -720,9 +736,7 @@ export function CommitDetail(props: { commit: Commit | undefined; slice?: Commit
               }
             >
               {(many) => (
-                <ol class="slice-subjects m-0 mt-[5px] list-none p-0 text-[12.5px] leading-[1.6] text-ink">
-                  <For each={many()}>{(s) => <li><span class="mr-[10px] text-[11px] text-ink-faint tabular-nums">{s.sha}</span>{s.subject}</li>}</For>
-                </ol>
+                <p class="slice-subjects m-0 mt-[3px] truncate text-[12px] text-ink-dim">{many().map((s) => s.subject).join(" · ")}</p>
               )}
             </Show>
           </header>

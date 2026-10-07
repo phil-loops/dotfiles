@@ -159,7 +159,8 @@ export function NodeDetail() {
     const next = list[list.findIndex((c) => c.sha === selectedCommit()) + delta];
     if (!next) return;
     selectCommit(next.sha);
-    queueMicrotask(() => document.querySelector(".commit-detail")?.scrollIntoView({ behavior: "instant", block: "start" }));
+    // two frames: leaving a slice swaps the detail's header and diff, and a scroll issued before that settles is lost
+    requestAnimationFrame(() => requestAnimationFrame(() => document.querySelector(".commit-detail")?.scrollIntoView({ behavior: "instant", block: "start" })));
   };
   const panelData = () =>
     view() === "diffs"
