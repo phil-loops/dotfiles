@@ -92,6 +92,7 @@
     <button class="access" title="show 2xx/3xx request lines">requests</button>
     <button class="pause" title="stop following new lines">pause</button>
     <button class="clear" title="forget what has been shown so far">clear</button>
+    <a class="viewer" target="_blank" rel="noopener" title="this branch in the forest viewer" hidden>viewer ↗</a>
     <a class="grafana" target="_blank" rel="noopener" hidden>grafana ↗</a>
     <button class="x" title="close (Esc)">×</button>
   </div>
@@ -101,7 +102,7 @@
 
   const $ = (sel) => root.querySelector(sel);
   const pill = $(".pill"), panel = $(".panel"), lines = $(".lines"), jump = $(".jump");
-  const countEl = $(".count"), labelEl = $(".label"), nameEl = $(".name"), metaEl = $(".meta"), grafanaEl = $(".grafana");
+  const countEl = $(".count"), labelEl = $(".label"), nameEl = $(".name"), metaEl = $(".meta"), grafanaEl = $(".grafana"), viewerEl = $(".viewer");
   const filterEl = $(".filter"), noiseBtn = $(".noise"), accessBtn = $(".access"), pauseBtn = $(".pause");
 
   const entries = [];
@@ -249,6 +250,7 @@
     pill.classList.toggle("booting", !m.upstreamUp && !m.upstreamDied);
     pill.classList.toggle("down", !!m.upstreamDied);
     if (m.grafana) { grafanaEl.href = m.grafana; grafanaEl.hidden = false; } else grafanaEl.hidden = true;
+    if (m.viewer) { viewerEl.href = m.viewer; viewerEl.hidden = false; } else viewerEl.hidden = true;
     if (document.documentElement.dataset.previewBoot === "1" && m.upstreamUp) location.reload();
   };
   const pollMeta = async () => {

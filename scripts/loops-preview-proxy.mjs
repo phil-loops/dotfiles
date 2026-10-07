@@ -4,7 +4,7 @@
 // into HTML responses, and serves:
 //   /__preview/badge.js   the badge (scripts/loops-preview-badge.js, read per request)
 //   /__preview/log        SSE tail of the server log + setup log (?tail=N initial lines)
-//   /__preview/meta       {name, port, branch, upstreamUp, upstreamDied, grafana, log, setupLog}
+//   /__preview/meta       {name, port, branch, upstreamUp, upstreamDied, grafana, viewer, log, setupLog}
 // While next is still booting it answers HTML requests with a boot page that carries the
 // badge open, so the boot log is what you look at instead of a spinner. Started by
 // scripts/loops-preview; stopped with its tmux session.
@@ -25,22 +25,29 @@ const GRAFANA = `http://localhost:3900/d/loops-logs?var-port=${PORT}`;
 const git = (...a) => { try { return execFileSync("git", ["-C", DIR, ...a], { encoding: "utf8" }).trim(); } catch { return ""; } };
 const branch = args.branch || (() => { const b = git("rev-parse", "--abbrev-ref", "HEAD"); return b && b !== "HEAD" ? b : `detached@${git("rev-parse", "--short", "HEAD") || "?"}`; })();
 const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
+// The forest viewer's page for this branch. Only a branch registered to a project has one;
+// an unregistered branch gets no link rather than a guessed URL (the viewer answers 200 to anything).
+const VIEWER_PORT = (() => { try { return Number(execFileSync(path.join(path.dirname(BADGE), "stack-review-port"), [DIR], { encoding: "utf8" }).trim()) || 0; } catch { return 0; } })();
+const projectOf = () => git("config", "--get", `branch.${branch}.stack-project`);
 
 let upstreamUp = false, upstreamEverUp = false;
 let grafanaUp = false;
+let viewer = null, project = "", tick = 0;
 const probe = (port) => new Promise((res) => {
   const s = net.connect({ port, host: "127.0.0.1" });
   const done = (v) => { s.destroy(); res(v); };
   s.setTimeout(400, () => done(false));
   s.once("connect", () => done(true)); s.once("error", () => done(false));
 });
-const meta = () => ({ name: NAME, port: PORT, upstream: UPSTREAM, branch, dir: DIR, log: LOG, setupLog: SETUP_LOG, upstreamUp, upstreamDied: upstreamEverUp && !upstreamUp, grafana: grafanaUp ? GRAFANA : null });
+const meta = () => ({ name: NAME, port: PORT, upstream: UPSTREAM, branch, dir: DIR, log: LOG, setupLog: SETUP_LOG, upstreamUp, upstreamDied: upstreamEverUp && !upstreamUp, grafana: grafanaUp ? GRAFANA : null, viewer });
 const sseClients = new Set();
 const broadcast = (event, data) => { const msg = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`; for (const c of sseClients) c.write(msg); };
 const refreshState = async () => {
-  const [u, g] = await Promise.all([probe(UPSTREAM), probe(3900)]);
-  const changed = u !== upstreamUp || g !== grafanaUp;
-  upstreamUp = u; if (u) upstreamEverUp = true; grafanaUp = g;
+  const [u, g, v] = await Promise.all([probe(UPSTREAM), probe(3900), VIEWER_PORT ? probe(VIEWER_PORT) : false]);
+  if (tick++ % 10 === 0) project = projectOf();
+  const nextViewer = v && project ? `http://localhost:${VIEWER_PORT}/forests/${project}/${branch}` : null;
+  const changed = u !== upstreamUp || g !== grafanaUp || nextViewer !== viewer;
+  upstreamUp = u; if (u) upstreamEverUp = true; grafanaUp = g; viewer = nextViewer;
   if (changed) broadcast("meta", meta());
 };
 refreshState(); setInterval(refreshState, 1000);
