@@ -162,15 +162,29 @@ attribute_merges() {
 # A trunk move is also the signal that the LOCAL main ref went stale. Fast-forward it so
 # viewer diffs read against true main, not yesterday's (pure ref move — git itself refuses
 # if main is checked out in some worktree, in which case we log and leave it alone).
-refresh_donor() { # stack-donor: pin the borrowing trees' donor to the new trunk, in the background
+# The donor follows trunk on its OWN loop, never the main one: reclassify blocks the main loop
+# for as long as a dry run takes (4h52m over ~1000 branches on 2026-10-07, six trunk moves and
+# a 30-dep dependabot bump deep), and a donor behind trunk reds every gate on a current branch.
+# A failed refresh (registry timeout) retries next interval rather than waiting for a trunk move.
+donor_pid=""
+watch_donor() {
   (
-    if err="$(nice -n 10 "$here/stack-donor" --refresh "$(git rev-parse --show-toplevel)" 2>&1 >/dev/null)"; then
-      logline "donor refreshed to ${1:0:9}"
-    else
-      logline "donor refresh FAILED at ${1:0:9}: $(echo "$err" | tail -3 | tr '\n' ' ')"
-    fi
+    trap 'exit 0' TERM INT
+    top="$(git rev-parse --show-toplevel)"; seen=""
+    while :; do
+      git fetch -q origin "$MAIN" 2>/dev/null || true
+      tip="$(git rev-parse --verify --quiet "origin/$MAIN" || echo "")"
+      if [[ -n "$tip" && "$tip" != "$seen" ]]; then
+        if err="$(nice -n 10 "$here/stack-donor" --refresh "$top" 2>&1 >/dev/null)"; then
+          logline "donor refreshed to ${tip:0:9}"; seen="$tip"
+        else
+          logline "donor refresh FAILED at ${tip:0:9}: $(echo "$err" | tail -3 | tr '\n' ' ')"
+        fi
+      fi
+      sleep "$interval" & wait $!
+    done
   ) </dev/null >/dev/null 2>&1 &
-  disown 2>/dev/null || true
+  donor_pid=$!
 }
 refresh_local_main() {
   local tip="$1" cur
@@ -444,9 +458,10 @@ set -m
 # this clears the flag AND kills any in-flight --deep pass's process group so --stop lands
 # within ~1s, leaving no orphaned classify/git procs, not after a minutes-long classify pass.
 trap 'running=0; [[ -n "$child" ]] && kill -TERM -"$child" 2>/dev/null || true' TERM INT
-trap 'rm -f "$pidf"' EXIT
+trap 'rm -f "$pidf"; [[ -n "$donor_pid" ]] && { kill -TERM -"$donor_pid" 2>/dev/null || kill -TERM "$donor_pid" 2>/dev/null; } || true' EXIT
 
 logline "daemon start pid=$$ interval=${interval}s ($mode_desc)"
+watch_donor
 # attribution baseline survives restarts via the state file's trunk_tip; last_tip stays
 # empty so a fresh daemon still re-classifies once on startup.
 prev_tip="$(jq -r '.trunk_tip // empty' "$state" 2>/dev/null || true)"
@@ -459,7 +474,6 @@ while (( running )); do
     base="${last_tip:-$prev_tip}"
     [[ -n "$base" ]] && attribute_merges "$base" "$tip"
     refresh_local_main "$tip"
-    refresh_donor "$tip"
     if reclassify "$$" "$tip"; then
       last_tip="$tip"
       if (( apply )); then apply_if_safe "$$" "$tip"
