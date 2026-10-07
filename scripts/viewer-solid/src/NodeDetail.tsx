@@ -62,6 +62,7 @@ export function NodeDetail() {
       setView("diffs");
       setSelectedCommit("");
       setSliceAnchor("");
+      setFollowPush(false);
       setActiveFile("");
       fileCycle.setCurrent("");
     }
@@ -116,18 +117,27 @@ export function NodeDetail() {
   // ⇧click widens the selection to a contiguous slice (anchor … selected), read as one combined diff.
   const [selectedCommit, setSelectedCommit] = createSignal("");
   const [sliceAnchor, setSliceAnchor] = createSignal("");
+  // reading "since last push" is a standing question, not a fixed set of shas: while it holds,
+  // a commit landing on the branch widens the slice instead of leaving it on the old tip
+  const [followPush, setFollowPush] = createSignal(false);
   const outline = createMemo(() => outlineOf(commits.data));
   const slice = createMemo(() => (sliceAnchor() ? sliceOf(outline(), sliceAnchor(), selectedCommit()) : []));
   const inSlice = () => slice().length > 1;
   const firstOwn = () => (outline().find((c) => !c.carried) ?? outline()[0])?.sha ?? "";
   const selected = () => (commits.data ?? []).find((c) => c.sha === selectedCommit());
   // opens on what a push would send (the usual question); a branch with nothing outgoing opens on commit 1
-  createEffect(() => {
-    if (view() !== "commits" || selected()) return;
+  const readOutgoing = () => {
     const pushing = outgoingOf(outline());
-    if (!pushing.length) return void setSelectedCommit(firstOwn());
+    if (!pushing.length) return false;
     setSliceAnchor(pushing.length > 1 ? pushing[0].sha : "");
     setSelectedCommit(pushing.at(-1)!.sha);
+    setFollowPush(true);
+    return true;
+  };
+  createEffect(() => {
+    if (view() !== "commits") return;
+    if (followPush()) { if (!readOutgoing()) setFollowPush(false); }
+    else if (!selected() && !readOutgoing()) setSelectedCommit(firstOwn());
   });
   const commitDiff = createQuery(() => ({
     queryKey: inSlice() ? ["commit-diff", slice().at(-1)!.sha, slice()[0].sha] : ["commit-diff", selectedCommit()],
@@ -149,6 +159,7 @@ export function NodeDetail() {
     return `commit ${outlineNumber(outline(), c.sha)} of ${total}`;
   };
   const selectCommit = (sha: string, extend = false) => {
+    setFollowPush(false);
     setSliceAnchor(extend && selectedCommit() ? sliceAnchor() || selectedCommit() : "");
     setSelectedCommit(sha);
     setActiveFile("");
@@ -420,10 +431,9 @@ export function NodeDetail() {
                 slice={slice()}
                 onSelect={selectCommit}
                 onSelectOutgoing={() => {
-                  const pushing = outgoingOf(outline());
-                  if (!pushing.length) return;
-                  selectCommit(pushing[0].sha);
-                  selectCommit(pushing.at(-1)!.sha, true);
+                  if (!readOutgoing()) return;
+                  setActiveFile("");
+                  fileCycle.setCurrent("");
                 }}
                 onReworded={() => {
                   // the shas moved (tree didn't): refresh the list, the push manifest, the model
