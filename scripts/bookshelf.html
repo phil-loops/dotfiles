@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookshelf</title>
+<style>
+  :root {
+    --paper: #f6f1e7;
+    --card: #fffdf8;
+    --ink: #2a2520;
+    --muted: #7a6f62;
+    --rule: #e2d9c8;
+    --accent: #9a4a2f;
+    --done: #5d7a4a;
+    --warn-bg: #fbe9c8;
+    --code-bg: #ece4d4;
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    --sans: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #1c1916;
+      --card: #24201c;
+      --ink: #e9e1d4;
+      --muted: #9a8f80;
+      --rule: #3a342d;
+      --accent: #e0916f;
+      --done: #9dbb84;
+      --warn-bg: #4a3a17;
+      --code-bg: #322c25;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font: 17px/1.6 var(--serif);
+    display: grid;
+    grid-template-columns: 290px minmax(0, 1fr);
+  }
+  nav {
+    border-right: 1px solid var(--rule);
+    padding: 28px 16px;
+    overflow-y: auto;
+    height: 100vh;
+    position: sticky;
+    top: 0;
+  }
+  nav h1 {
+    font-size: 13px;
+    font-family: var(--sans);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 8px 16px;
+    font-weight: 600;
+  }
+  .spine {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: 0;
+    border-left: 4px solid var(--rule);
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    color: inherit;
+    font: inherit;
+    font-size: 15.5px;
+    line-height: 1.35;
+    cursor: pointer;
+    border-radius: 0 6px 6px 0;
+  }
+  .spine:hover { background: var(--card); }
+  .spine[aria-current="true"] { background: var(--card); border-left-color: var(--accent); }
+  .spine.finished { border-left-color: var(--done); }
+  .spine small {
+    display: block;
+    font-family: var(--sans);
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+  .where {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--muted);
+    margin: 20px 8px 0;
+    word-break: break-all;
+  }
+  main { padding: 44px 56px 96px; max-width: 860px; width: 100%; }
+  main h1 { font-size: 32px; line-height: 1.2; margin: 0 0 10px; font-weight: 600; }
+  main h2 {
+    font-family: var(--sans);
+    font-size: 13px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 40px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--rule);
+    font-weight: 600;
+  }
+  .progress { font-family: var(--sans); font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 10px; }
+  .bar { flex: 0 0 160px; height: 5px; background: var(--rule); border-radius: 3px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--done); }
+  p { margin: 14px 0; }
+  a { color: var(--accent); text-underline-offset: 3px; }
+  code { font: 0.84em var(--mono); background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  ol, ul { padding-left: 24px; }
+  ul.tasks { list-style: none; padding: 0; margin: 0; }
+  ul.tasks li {
+    display: grid;
+    grid-template-columns: 26px minmax(0, 1fr);
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+  }
+  ul.tasks input { width: 17px; height: 17px; margin: 5px 0 0; accent-color: var(--done); cursor: pointer; }
+  ul.tasks li.checked .text { color: var(--muted); }
+  ul.tasks .sub { color: var(--muted); font-size: 15.5px; margin-top: 4px; }
+  textarea {
+    width: 100%;
+    min-height: 260px;
+    resize: vertical;
+    background: var(--card);
+    color: var(--ink);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font: 14.5px/1.6 var(--mono);
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .saved { font-family: var(--sans); font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 18px; }
+  .banner {
+    background: var(--warn-bg);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-family: var(--sans);
+    font-size: 14px;
+    margin: 0 0 20px;
+  }
+  .banner button {
+    font: inherit;
+    margin-left: 8px;
+    padding: 2px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--muted);
+    background: var(--card);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  .empty { color: var(--muted); }
+  @media (max-width: 760px) {
+    body { grid-template-columns: 1fr; }
+    nav { height: auto; position: static; border-right: 0; border-bottom: 1px solid var(--rule); }
+    main { padding: 28px 20px 72px; }
+  }
+</style>
+</head>
+<body>
+<nav>
+  <h1>Bookshelf</h1>
+  <div id="spines"></div>
+  <div class="where" id="where"></div>
+</nav>
+<main id="main"><p class="empty">Loading…</p></main>
+
+<script>
+const state = { shelves: [], current: null, dirty: false, timer: null, banner: null };
+
+const esc = (s) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+function inline(text) {
+  const codes = [];
+  let out = esc(text).replace(/`([^`]+)`/g, (_, c) => {
+    codes.push(c);
+    return `\u0000${codes.length - 1}\u0000`;
+  });
+  out = out
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>");
+  return out.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+
+function renderBody(lines) {
+  const html = [];
+  let list = null;
+  let para = [];
+  let item = false;
+  const flushPara = () => {
+    if (para.length) html.push(`<p>${inline(para.join(" "))}</p>`);
+    para = [];
+  };
+  const closeItem = () => {
+    if (item) html.push("</div></li>");
+    item = false;
+  };
+  const closeList = () => {
+    closeItem();
+    if (list) html.push(list === "ol" ? "</ol>" : "</ul>");
+    list = null;
+  };
+  const openList = (kind) => {
+    flushPara();
+    closeItem();
+    if (list !== kind) {
+      closeList();
+      html.push(kind === "ol" ? "<ol>" : kind === "tasks" ? '<ul class="tasks">' : "<ul>");
+      list = kind;
+    }
+  };
+
+  lines.forEach((line, i) => {
+    const task = line.match(/^- \[([ xX])\] (.*)$/);
+    const ordered = line.match(/^\d+\. (.*)$/);
+    const bullet = line.match(/^- (.*)$/);
+    if (line.startsWith("# ")) return;
+    if (line.startsWith("## ")) {
+      flushPara();
+      closeList();
+      html.push(`<h2>${inline(line.slice(3))}</h2>`);
+    } else if (task) {
+      openList("tasks");
+      const on = task[1] !== " ";
+      html.push(
+        `<li class="${on ? "checked" : ""}"><input type="checkbox" data-line="${i}"${on ? " checked" : ""}>` +
+          `<div><div class="text">${inline(task[2])}</div>`
+      );
+      item = true;
+    } else if (item && /^\s+\S/.test(line)) {
+      html.push(`<div class="sub">${inline(line.trim())}</div>`);
+    } else if (ordered) {
+      openList("ol");
+      html.push(`<li>${inline(ordered[1])}</li>`);
+    } else if (bullet) {
+      openList("ul");
+      html.push(`<li>${inline(bullet[1])}</li>`);
+    } else if (line.trim() === "") {
+      flushPara();
+    } else {
+      closeList();
+      para.push(line.trim());
+    }
+  });
+  flushPara();
+  closeList();
+  return html.join("\n");
+}
+
+const current = () => state.shelves.find((s) => s.slug === state.current);
+
+function renderNav() {
+  document.getElementById("spines").innerHTML = state.shelves
+    .map(
+      (s) =>
+        `<button class="spine${s.total && s.done === s.total ? " finished" : ""}" data-slug="${s.slug}" aria-current="${s.slug === state.current}">` +
+        `${esc(s.title)}<small>${s.total ? `${s.done} of ${s.total} done` : "no checklist"}</small></button>`
+    )
+    .join("");
+}
+
+function renderMain({ keepNotes = false } = {}) {
+  const main = document.getElementById("main");
+  const shelf = current();
+  if (!shelf) {
+    main.innerHTML = '<p class="empty">No shelves yet. Add a markdown file to the bookshelf folder.</p>';
+    return;
+  }
+  const typed = keepNotes ? document.getElementById("notes")?.value : null;
+  const pct = shelf.total ? Math.round((shelf.done / shelf.total) * 100) : 0;
+  main.innerHTML =
+    (state.banner ? `<div class="banner">${state.banner}</div>` : "") +
+    `<h1>${esc(shelf.title)}</h1>` +
+    (shelf.total
+      ? `<div class="progress"><span class="bar"><i style="width:${pct}%"></i></span>${shelf.done} of ${shelf.total} done</div>`
+      : "") +
+    renderBody(shelf.lines) +
+    `<h2>Notes</h2><textarea id="notes" spellcheck="true" placeholder="In your own words…"></textarea>` +
+    `<div class="saved" id="saved"></div>`;
+  document.getElementById("notes").value = typed ?? shelf.notes;
+  setSaved(state.dirty ? "Unsaved" : "");
+}
+
+const setSaved = (text) => {
+  const el = document.getElementById("saved");
+  if (el) el.textContent = text;
+};
+
+function replaceShelf(shelf) {
+  state.shelves = state.shelves.map((s) => (s.slug === shelf.slug ? shelf : s));
+}
+
+async function load() {
+  const res = await fetch("/shelves");
+  const data = await res.json();
+  if (data.err) {
+    document.getElementById("main").innerHTML = `<p class="empty">${esc(data.err)}</p>`;
+    return;
+  }
+  state.shelves = data.shelves;
+  document.getElementById("where").textContent = data.dir;
+  const wanted = decodeURIComponent(location.hash.slice(1));
+  state.current = state.shelves.some((s) => s.slug === wanted) ? wanted : state.shelves[0]?.slug ?? null;
+  renderNav();
+  renderMain({ keepNotes: state.dirty });
+}
+
+async function post(path, body) {
+  const shelf = current();
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug: shelf.slug, mtime: shelf.mtime, ...body }),
+  });
+  return { status: res.status, data: await res.json().catch(() => ({ err: res.statusText })) };
+}
+
+async function toggle(box) {
+  const { status, data } = await post("/toggle", { line: Number(box.dataset.line), checked: box.checked });
+  if (status === 200) {
+    replaceShelf(data);
+    state.banner = null;
+  } else {
+    state.banner =
+      status === 409 ? "The file changed on disk, so that tick was not saved. Reloaded." : `Not saved: ${esc(data.err)}`;
+    await load();
+    return;
+  }
+  renderNav();
+  renderMain({ keepNotes: true });
+}
+
+async function saveNotes() {
+  clearTimeout(state.timer);
+  if (!state.dirty) return;
+  const text = document.getElementById("notes").value;
+  setSaved("Saving…");
+  const { status, data } = await post("/notes", { text });
+  if (status === 200) {
+    replaceShelf(data);
+    state.dirty = document.getElementById("notes").value !== text;
+    setSaved(state.dirty ? "Unsaved" : "Saved to the file · not committed");
+    renderNav();
+    if (state.dirty) state.timer = setTimeout(saveNotes, 700);
+  } else if (status === 409) {
+    state.banner =
+      "The file changed on disk. Your unsaved notes are still in the box below." +
+      '<button data-act="mine">Save mine over it</button><button data-act="disk">Use the disk version</button>';
+    const res = await fetch("/shelves");
+    state.shelves = (await res.json()).shelves;
+    renderNav();
+    renderMain({ keepNotes: true });
+  } else {
+    setSaved(`Not saved: ${data.err}`);
+  }
+}
+
+document.addEventListener("click", (e) => {
+  const spine = e.target.closest(".spine");
+  if (spine) {
+    if (state.dirty && !confirm("Discard unsaved notes on this shelf?")) return;
+    state.dirty = false;
+    state.banner = null;
+    state.current = spine.dataset.slug;
+    history.replaceState(null, "", "#" + state.current);
+    renderNav();
+    renderMain();
+    return;
+  }
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (act === "mine") {
+    state.banner = null;
+    saveNotes().then(() => renderMain({ keepNotes: true }));
+  } else if (act === "disk") {
+    state.banner = null;
+    state.dirty = false;
+    renderMain();
+  }
+});
+
+document.addEventListener("change", (e) => {
+  if (e.target.matches("ul.tasks input")) toggle(e.target);
+});
+
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "notes") return;
+  state.dirty = true;
+  setSaved("Unsaved");
+  clearTimeout(state.timer);
+  if (!state.banner) state.timer = setTimeout(saveNotes, 700);
+});
+
+document.addEventListener("focusout", (e) => {
+  if (e.target.id === "notes" && !state.banner) saveNotes();
+});
+
+document.addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+    e.preventDefault();
+    saveNotes();
+  }
+});
+
+window.addEventListener("focus", () => {
+  if (!state.dirty) load();
+});
+
+window.addEventListener("beforeunload", (e) => {
+  if (state.dirty) e.preventDefault();
+});
+
+load();
+</script>
+</body>
+</html>

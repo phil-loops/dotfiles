@@ -1,8 +1,8 @@
 #!/bin/zsh
 # SwiftBar plugin — blessed: menu-bar launcher for the blessing-ledger review viewer.
 # Verbs — Start (background, no browser), Start + open in Chrome, the loops API Postman
-# console (:7070), and the mail-map pipeline wiki (:62555). The badge ✦ is green when the
-# viewer is live, grey when down.
+# console (:7070), the mail-map pipeline wiki (:62555), and the bookshelf (:62556). The
+# badge ✦ is green when the viewer is live, grey when down.
 #
 # <bitbar.title>blessed viewer launcher</bitbar.title>
 # <bitbar.desc>Start/open the blessing-ledger viewer, or the loops API Postman console.</bitbar.desc>
@@ -26,6 +26,8 @@ spec="$repo/public/openapi.json"   # local spec → unreleased endpoints too
 pmport=7070; pmbase="http://127.0.0.1:${pmport}"
 mailmap="$HOME/.dotfiles/scripts/mail-map-serve"
 mmport=62555; mmbase="http://127.0.0.1:${mmport}"
+bookshelf="$HOME/.dotfiles/scripts/bookshelf-serve"
+bsport=62556; bsbase="http://127.0.0.1:${bsport}"
 logs="$HOME/.dotfiles/scripts/loops-logs"
 lgport=3900; lgbase="http://127.0.0.1:${lgport}"
 
@@ -62,6 +64,17 @@ case "${1:-}" in
         done ) &
     fi
     poke; exit 0 ;;
+  --bookshelf)   # the reading shelves. Same warm/cold dance as the mail map.
+    if curl -sf --max-time 1 "$bsbase/shelves" >/dev/null 2>&1; then
+      open "$bsbase/"
+    else
+      ( nohup "$bookshelf" "$bsport" >/dev/null 2>&1 </dev/null &
+        for _ in $(seq 1 30); do
+          curl -sf --max-time 1 "$bsbase/shelves" >/dev/null 2>&1 && { open "$bsbase/"; break; }
+          sleep 0.3
+        done ) &
+    fi
+    poke; exit 0 ;;
   --logs)        # Grafana over the dev logs. loops-logs starts the stack if needed, waits for
     # Grafana to answer, then opens it — detached, since a cold start takes a few seconds.
     ( nohup "$logs" "${2:-open}" >/dev/null 2>&1 </dev/null & )
@@ -71,6 +84,7 @@ esac
 # --- render the menu -----------------------------------------------------------------
 up=0; curl -sf --max-time 1 "$base/sig" >/dev/null 2>&1 && up=1
 mmup=0; curl -sf --max-time 1 "$mmbase/" >/dev/null 2>&1 && mmup=1
+bsup=0; curl -sf --max-time 1 "$bsbase/shelves" >/dev/null 2>&1 && bsup=1
 lgup=0; curl -sf --max-time 1 "$lgbase/api/health" >/dev/null 2>&1 && lgup=1
 
 # menu-bar badge: ✦ tinted green when the viewer is live, grey when it's down
@@ -93,6 +107,11 @@ if (( mmup )); then
   echo "📬 Mail map · :${mmport} — open | color=#3fb950 bash=\"$self\" param1=--mailmap terminal=false"
 else
   echo "📬 Mail map · :${mmport} | bash=\"$self\" param1=--mailmap terminal=false"
+fi
+if (( bsup )); then
+  echo "📚 Bookshelf · :${bsport} — open | color=#3fb950 bash=\"$self\" param1=--bookshelf terminal=false"
+else
+  echo "📚 Bookshelf · :${bsport} | bash=\"$self\" param1=--bookshelf terminal=false"
 fi
 if (( lgup )); then
   echo "📜 Logs · :${lgport} — open | color=#3fb950 bash=\"$self\" param1=--logs terminal=false"
