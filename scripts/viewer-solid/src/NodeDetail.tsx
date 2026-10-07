@@ -121,8 +121,13 @@ export function NodeDetail() {
   const inSlice = () => slice().length > 1;
   const firstOwn = () => (outline().find((c) => !c.carried) ?? outline()[0])?.sha ?? "";
   const selected = () => (commits.data ?? []).find((c) => c.sha === selectedCommit());
+  // opens on what a push would send (the usual question); a branch with nothing outgoing opens on commit 1
   createEffect(() => {
-    if (view() === "commits" && !selected()) setSelectedCommit(firstOwn());
+    if (view() !== "commits" || selected()) return;
+    const pushing = outgoingOf(outline());
+    if (!pushing.length) return void setSelectedCommit(firstOwn());
+    setSliceAnchor(pushing.length > 1 ? pushing[0].sha : "");
+    setSelectedCommit(pushing.at(-1)!.sha);
   });
   const commitDiff = createQuery(() => ({
     queryKey: inSlice() ? ["commit-diff", slice().at(-1)!.sha, slice()[0].sha] : ["commit-diff", selectedCommit()],
