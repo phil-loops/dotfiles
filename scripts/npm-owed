@@ -55,6 +55,7 @@ fi
 
 IFS=/ read -r a r c <<<"$verdict"
 if (( a == 0 && r == 0 && c == 0 )); then
+  (( install )) && exit 0   # already current IS the --install contract; 1 aborted stack-donor's refresh before its seed-gen
   exit 1
 fi
 echo "added $a removed $r changed $c"
