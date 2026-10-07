@@ -1,0 +1,9 @@
+#!/bin/sh
+# pre-rebase — drop helix-tsgo-stamp's local override before a rebase needs the file.
+# The stamp rewrites the tracked .helix/languages.toml and hides it with skip-worktree; git
+# still refuses to rebase across a commit that changes it ("local changes would be
+# overwritten"), which is every branch forked before #10330 (2026-09-02). The override is
+# regenerable: post-checkout re-stamps a tree that is still tsserver-pinned afterwards.
+git ls-files -v .helix/languages.toml 2>/dev/null | grep -q '^S' || exit 0
+git update-index --no-skip-worktree .helix/languages.toml && git checkout -q -- .helix/languages.toml
+exit 0
