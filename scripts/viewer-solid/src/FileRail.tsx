@@ -1,4 +1,4 @@
-import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
+import { createSignal, createMemo, createEffect, on, onCleanup, Show, For, type JSX } from "solid-js";
 import { useQueryClient } from "@tanstack/solid-query";
 import * as Diff2Html from "diff2html";
 import { ColorSchemeType } from "diff2html/lib/types";
@@ -518,7 +518,7 @@ function CommitRow(props: {
         </Show>
       </div>
       <Show when={mine() && props.c.body && !editing() && !props.selected}>
-        <p class="c-body m-0 pb-[9px] pl-[88px] pr-1 text-[11.5px] leading-[1.5] whitespace-pre-wrap text-ink-faint">{props.c.body}</p>
+        <p class="c-body m-0 truncate pb-[7px] pl-[88px] pr-1 text-[11.5px] leading-[1.5] text-ink-faint" title={props.c.body}>{props.c.body!.split("\n")[0]}</p>
       </Show>
       <Show when={revertErr()}>
         <p class="px-1 pb-2 text-[11px] text-del">{revertErr()}</p>
@@ -597,11 +597,45 @@ export function CommitsList(props: {
         ? "origin is current — a push sends nothing"
         : `origin is here — ${outgoing()} commit${outgoing() === 1 ? "" : "s"} below go out on push`;
   const canReadOutgoing = () => !!props.onSelectOutgoing && outgoing() > 1;
+  // The list is the picker: pinned above the diff it drives, capped so the diff keeps most of
+  // the screen, and foldable to one line once the slice is chosen.
+  const [folded, setFolded] = createSignal(false);
+  let pickerEl: HTMLDivElement | undefined;
+  let listEl: HTMLOListElement | undefined;
+  createEffect(() => {
+    if (!pickerEl) return;
+    const sync = () => document.documentElement.style.setProperty("--commits-picker-h", `${pickerEl!.offsetHeight}px`);
+    const ro = new ResizeObserver(sync);
+    ro.observe(pickerEl);
+    onCleanup(() => { ro.disconnect(); document.documentElement.style.removeProperty("--commits-picker-h"); });
+  });
+  // keep the selected row inside the capped list without moving the page
+  createEffect(() => {
+    void props.selected;
+    void props.slice;
+    queueMicrotask(() => {
+      const row = listEl?.querySelector<HTMLElement>(".commit-open");
+      if (!row || !listEl) return;
+      const top = row.offsetTop - listEl.offsetTop;
+      const hidden = top < listEl.scrollTop || top + row.offsetHeight > listEl.scrollTop + listEl.clientHeight;
+      // leave a row's worth of headroom so the origin line above the first unpushed commit shows too
+      if (hidden) listEl.scrollTop = Math.max(0, top - 44);
+    });
+  });
   return (
     <Show when={props.q.data} fallback={<p class={LOADING}>loading…</p>}>
       {(data) => (
         <Show when={data().length} fallback={<p class={LOADING}>no commits on this branch</p>}>
-          <ol class="commits mx-0 mt-2 mb-0 list-none p-0">
+          <div ref={pickerEl} class="commits-picker sticky top-0 z-[5] -mx-2 border-x-0 border-t-0 border-b border-solid border-rule bg-vellum-night px-2 pb-[2px]">
+          <button
+            class="commits-fold flex w-full cursor-pointer items-baseline gap-[10px] px-1 py-[6px] text-left text-[10.5px] uppercase tracking-[0.08em] text-ink-faint hover:text-ink-dim"
+            title={folded() ? "show the commit list" : "fold the commit list to give the diff the screen"}
+            onClick={() => setFolded((v) => !v)}
+          >
+            <span>{folded() ? "▸" : "▾"} {outline().length} commit{outline().length === 1 ? "" : "s"}</span>
+            <span class="normal-case tracking-normal">click one to read it · ⇧click another to read the slice between</span>
+          </button>
+          <ol ref={listEl} class="commits m-0 max-h-[42vh] list-none overflow-y-auto p-0" classList={{ hidden: folded() }}>
             <For each={outline()}>
               {(c, i) => (
                 <>
@@ -633,6 +667,7 @@ export function CommitsList(props: {
               <li class={DIVIDER}><span>{waterlineText()}</span></li>
             </Show>
           </ol>
+          </div>
         </Show>
       )}
     </Show>
@@ -670,7 +705,7 @@ export function CommitDetail(props: { commit: Commit | undefined; slice?: Commit
   return (
     <Show when={props.commit}>
       {(c) => (
-        <section class="commit-detail mt-[26px] scroll-mt-[18px]">
+        <section class="commit-detail mt-[26px] scroll-mt-[calc(var(--commits-picker-h,0px)+18px)]">
           <header class="mb-[14px] border-x-0 border-t-0 border-b border-solid border-rule pb-[12px]">
             <div class="text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">{props.label}</div>
             <Show
