@@ -1,11 +1,12 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
-import { createQuery } from "@tanstack/solid-query";
+import { createQuery, keepPreviousData } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { track } from "./track";
 import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
 import { setOverviewView } from "./overviewView";
 import { openStorySheet } from "./StorySheet";
+import { cachedModel } from "./modelCache";
 
 // CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
 // forest by name (type a branch → Enter → you're there); it also carries a few safe global
@@ -46,11 +47,20 @@ export default function CommandPalette() {
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
-  // forest nodes (when a forest is open) — shares App's ["model", project] cache, no extra fetch
+  // forest nodes (when a forest is open). The key MUST match ForestOverview/NodeDetail's
+  // ["model", repo, project] or this is a separate cache entry: the palette then fires its own
+  // cold /model on open (measured 1.1-5.7s, and a brand-new forest is 16-39s) while the global
+  // index below skips this forest on the assumption the model supplies it — so the forest you
+  // are standing in has ZERO entries for the whole fetch. That read as "no matches" for a
+  // project the API already served (2026-10-07). initialData paints the last map this browser
+  // saw, as the page does.
+  const repoKey = () => forestRepo(location()) ?? "loops";
   const model = createQuery(() => ({
-    queryKey: ["model", ctx().project],
+    queryKey: ["model", repoKey(), ctx().project],
     queryFn: () => provider.model(ctx().project),
     enabled: open() && !!ctx().project,
+    initialData: () => cachedModel(repoKey(), ctx().project),
+    placeholderData: keepPreviousData,
   }));
   // forests (on the home screen) — shares App's ["projects"] cache
   const projects = createQuery(() => ({
@@ -133,10 +143,13 @@ export default function CommandPalette() {
     }
 
     // global branch index: jump to ANY branch in ANY forest by name. Skip the open forest's
-    // own branches — those are already listed above from the live model, the source of truth.
-    const shown = c.project ? new Set(model.data?.nodes ? Object.keys(model.data.nodes) : []) : new Set<string>();
+    // own branches ONLY once the model has actually arrived — those are listed above from the
+    // live model, the source of truth. Skipping them while it is still in flight is what left
+    // the open forest with no entries at all, which is the one case the palette must never hit.
+    const haveModel = !!model.data?.nodes;
+    const shown = c.project && haveModel ? new Set(Object.keys(model.data!.nodes!)) : new Set<string>();
     for (const fb of forestBranches.data || []) {
-      if (fb.project === c.project || shown.has(fb.branch)) continue;
+      if ((haveModel && fb.project === c.project) || shown.has(fb.branch)) continue;
       cmds.push({
         label: `→ ${fb.branch}`,
         sub: fb.repo !== "loops" ? `${fb.repo}/${fb.project}` : fb.project,
