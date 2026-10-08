@@ -1,17 +1,20 @@
 ---
-title: The MVP and the projects
+title: Milestones
 section: Safety loops
 order: 140
 project: phishtank-v4
-lede: First prove the new system reproduces production exactly, live and on history. Then add facets, then candidates.
+lede: Five milestones, starting with a refactor that changes nothing customers see and gives every later step one clean seam.
 ---
+**Milestones.**
 
-**The MVP proves parity.** `phishtank-v4` holds the package, the legacy-tag facet and an exact copy of production's banned-word scan, plus `policyV0`, a replica of today's decision. It runs in the existing shadow evaluation with no model call: every live check records v0's decision beside production's, read from production's recorded output. A report shows agreement and every mismatch by cause. The target is 100%.
+1. **Refactor production's check without changing behaviour** (`safety-decision`). Characterisation tests pin every touchpoint; the decision becomes one pure function returning the email and sender outcomes; acting is separated from deciding; every decision is recorded with its inputs and the banned-word list hash; the admin ledger marks confirmed list saves. Exit: the tests pass at every touchpoint and every check is recorded.
+2. **Introduce the phishtank package** (`phishtank-v4`, `phishtank-facets`, `readings-shadow`). Exit: readings and code facets recorded for every publish-time check, within the cost budget.
+3. **First fitted candidate**, compared offline with production's real decision function. Exit: beats production on held-out mail.
+4. **Live window and promotion** for one touchpoint, with exit conditions written before it opens: no confirmed harmful email newly allowed, wrongly blocked mail within tolerance, no errors or latency problems.
+5. **Reviewer tools**: the inspector and the review desk.
 
-**The offline replay** (`parity-replay`) does the same over stored history, by date range. Use windows after the last change to the check code (late June 2026); start with a day, then a week. The banned-word list has no change log, so its history is rebuilt from the admin ledger and checked against the snapshots stored with banned-word hits. Models are never re-called: replay reads recordings.
+**Why refactor first.** With one seam (gather, decide, act, record), switching to a new policy is a setting, rollback is a setting, and every comparison is against production's real function rather than a copy.
 
-**Then, in order.** `phishtank-facets` (helpers, code facets, segmenter, model readings, fingerprints), then `readings-shadow` (the readings pipeline beside every live check), then candidates fitted offline.
-
-**Promotion.** A frozen candidate runs live in shadow for at least a week and until enough differences in each direction are reviewed. Exit conditions are written before it starts: no confirmed harmful email newly allowed, wrongly blocked mail within tolerance, no errors or latency problems.
+**History.** The offline replay (`parity-replay`) reads stored checks by date range, after the last change to the check code (late June 2026), and rebuilds the banned-word list's history from the admin ledger. Models are never re-called: replay reads recordings.
 
 **Shelved.** `shadow-observations` used the earlier quote-based design; kept for reference only.
