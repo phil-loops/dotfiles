@@ -10,8 +10,6 @@ lede: Real mail stays with Codex or production jobs. Invented mail, written by s
 
 **Invented corpora.** Codex writes abstract pattern cards from real mail; a headless generator turns cards into labelled emails without seeing real mail, with a JSON Schema so output cannot slip. Separate sets from Claude, Fable and Opus give cross-writer tests: a model trained on one writer and scored on another is the honest check. Labels follow the current rubric; each email records whether each label comes from the element's own words or its neighbours.
 
-**What the evidence says so far.** On invented mail, large models labelled credential requests at 88 to 97% precision with near-complete recall from a one-page rule. A fine-tuned small multilingual model reached about 79% and missed real lures when its training set lacked them. Real mail is far sparser: credential requests are under 1% of elements, so false-flag rates dominate and no single facet should decide.
+**What the evidence says so far.** Rule v3 gives each label one test question. On real mail the v3 student keeps credential recall but flags too much, and rare labels are too sparse to measure; seed noise swamps gains under 0.05. Teacher-labelled real mail is the next lever, not a bigger model. e5-base is the starting student.
 
-**Speed.** Fine-tuning with the vocabulary table frozen, pre-tokenised, length-bucketed half-precision batches takes minutes on a laptop. Serving runs in tens of milliseconds per email, cached by content.
-
-**Vocabulary.** Codex checked the rubric against real mail and proposed a revision; a slimmed version is planned for the readings facet.
+**Serving.** A stateless Python service in the Helm chart scores a content revision; Node gathers, calls it and writes observations, so packing and tokenising stay identical to training. In shadow only an async job calls it. After promotion, publish uses the revision's cached reading, else awaits about two seconds, else follows the policy's fallback; never allow because the observer was down. Per-send paths never wait.
