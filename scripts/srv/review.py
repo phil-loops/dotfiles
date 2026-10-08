@@ -26,7 +26,13 @@ from . import ctx, repostate, shellout, stackcfg, picker
 # tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
 # forest's model, and switching between forests stays warm instead of clear()-on-miss.
 _mcache = {}
-_MCACHE_MAX = 8
+# Capacity is a BYTE-AND-AGE budget, not a count. It was 8 entries against ~157 forests, so
+# visiting nine forests and coming back cost a full cold rebuild — measured 1.9s -> 20.9s
+# (2026-10-07). A forest model is ~10-20KB, so the whole repo's worth is a few MB; the real
+# bound here is staleness, not memory, and correctness never depends on either (every entry
+# revalidates against its own sig before it is served).
+_MCACHE_BYTES = 64 * 1024 * 1024
+_MCACHE_AGE = 6 * 3600
 _mcache_lock = threading.Lock()
 _SWR_GRACE = 1.0     # how long a request waits on the rebuild before answering from cache
 _mbuilding = {}      # key -> Event: the in-flight rebuild, so N requests cost one build
@@ -59,12 +65,36 @@ def _builder_sig():
     return ",".join(stamps)
 
 
+def _cfg_slice(snap):
+    """The config lines the model is built from, repo-wide. Shared by the validity sig and the
+    mid-build guard so the two can never drift apart."""
+    return "\n".join(f"{k}={v}" for k, vs in sorted(snap.cfg.items())
+                      for v in vs if _MODEL_CFG.match(f"{k}={v}"))
+
+
+def _guard_sig():
+    """What the mid-build guard watches: the model's config slice ONLY.
+
+    It used to be ctx.model_sig() — whole-file .git/config mtime plus all ~1,564 local ref
+    tips — so any gate verdict, bless, or `stack-open --prepare` write landing during a build
+    set sig="" and the entry could never validate. With cold builds at 16-39s that window is
+    almost always straddled, which is why four consecutive requests for one forest never
+    reached a true hit (38.7s, 2.66s, 1.60s, 1.06s; a hit is ~10ms).
+
+    This slice still catches what the guard exists for. The 2026-07-21 freeze was a /contract
+    dropping a node mid-build: that rewrites the project registry and the dropped branch's
+    stack-parent, both of which _MODEL_CFG matches, so the guard still voids. A plain commit
+    moving a ref does NOT void it — membership is unchanged, and the post-build sig differs
+    from the new state anyway, so the next request rebuilds on its own."""
+    return hashlib.sha1(_cfg_slice(repostate.snapshot()).encode()).hexdigest()
+
+
 def _forest_sig(branches):
     snap = repostate.snapshot()
     main = snap.main()
     names = [f"refs/heads/{b}" for b in branches] + [f"refs/heads/{main}", f"refs/remotes/origin/{main}"]
     refs = "".join(f"{r} {snap.sha.get(r, '')}\n" for r in names)
-    cfg = "\n".join(f"{k}={v}" for k, vs in sorted(snap.cfg.items()) for v in vs if _MODEL_CFG.match(f"{k}={v}"))
+    cfg = _cfg_slice(snap)
     ledgers = "".join(f"{k}{v}" for k, vs in snap.cfg.items() if k.startswith("#mtime:") for v in vs)
     return hashlib.sha1((refs + cfg + ledgers + _builder_sig()).encode()).hexdigest()
 
@@ -144,7 +174,7 @@ def _rebuild(repo, ck, branch, done, was):
 
 def _build(branch, ck):
     """(payload, error-json). Builds the forest model and caches it under ck."""
-    guard = ctx.model_sig()   # what the build is about to read, fingerprinted BEFORE it reads it
+    guard = _guard_sig()   # the membership-bearing config, fingerprinted BEFORE the build reads it
     r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), branch])
     if r.returncode != 0:
         return None, json.dumps({"error": r.stderr})
@@ -159,11 +189,14 @@ def _build(branch, ck):
         # good, since every later check re-measures the same settled state and matches. That
         # froze a contracted branch on the map until the server was bounced (2026-07-21). An
         # empty sig can never equal a fresh one, so the next request rebuilds instead.
-        sig = _forest_sig(branches) if ctx.model_sig() == guard else ""
+        sig = _forest_sig(branches) if _guard_sig() == guard else ""
+        now = time.time()
         with _mcache_lock:
             _mcache.pop(ck, None)
-            _mcache[ck] = {"sig": sig, "branches": branches, "out": out}
-            while len(_mcache) > _MCACHE_MAX:
+            _mcache[ck] = {"sig": sig, "branches": branches, "out": out, "at": now}
+            for key in [k for k, e in _mcache.items() if now - e.get("at", now) > _MCACHE_AGE]:
+                _mcache.pop(key, None)
+            while len(_mcache) > 1 and sum(len(e["out"]) for e in _mcache.values()) > _MCACHE_BYTES:
                 _mcache.pop(next(iter(_mcache)))
         return out, None
 
