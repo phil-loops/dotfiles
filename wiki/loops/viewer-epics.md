@@ -25,11 +25,7 @@ stack-epic.<id>.<mid>.exit   one assertion   (ordered multivar)
 stack-project.<p>.milestone  <mid>
 ```
 
-Verified against git: `stack-epic.<id>.<mid>.key` stores as section `stack-epic`, subsection
-`<id>.<mid>` — so **one `git config --get-regexp '^stack-epic\.'` reads a whole epic**, the
-only affordable shape against a 7,969-line config. Two constraints follow: **no dots in an
-epic or milestone id** (`stack-epic.a.b.title` is ambiguous between epic `a.b` and epic `a`
-milestone `b`), and ids stay lowercase, because subsections are case-sensitive.
+Key shapes and why ids are slugs: [[viewer-epics-ids]].
 
 Exit criteria are a multivar of one-liners, not a prose blob: append-friendly, each assertion
 readable on its own, and no newlines in git config.
