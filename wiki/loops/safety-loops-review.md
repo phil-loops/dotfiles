@@ -10,7 +10,7 @@ lede: One email, one question. Follow-ups appear only when the answer disagrees 
 
 **After answering.** It says what actually happened. A no asks why: harms recipients, mail we don't carry, or the audience didn't agree. A yes on something blocked asks what it got wrong. Policy decisions stay hidden until the reviewer answers, except on contested blocks.
 
-**Correcting a reading.** Clicking a note offers that reading's full answer set plus a free-text option. A changed answer becomes a corrected label; "that domain belongs to this team" becomes trusted information; recurring free text becomes a new value in the next rubric version.
+**Where answers go.** A no taps what it relied on, and that routes it. Parts already carrying readings mean the policy weighed them wrong: a refit point. Parts with no reading mean nothing observes the reason: grouped free text becomes a proposed facet. Facts outside the email become trusted information or sender facets; later knowledge is flagged as hindsight. Clicking a note offers that reading's full answer set plus free text; a changed answer becomes a corrected label.
 
 **What reaches review.** Every contested block, plus samples of uncontested blocks, allowed mail and checks where a candidate decides differently from production. Fingerprint groups mean one judgment covers many near-identical emails.
 
