@@ -3,36 +3,36 @@ title: The oracle and the read set
 section: Viewer
 order: 14
 project: viewer-derived-state
-lede: Four parts replace nine caches. The keystone is a read set over predicates, not keys — because a forest build reads two range queries, and a point-key read set would be no better than the stamp it replaces.
+lede: The keystone is a read set over predicates, not keys. But no read set over refs and config can validate a stack-forest payload at all, because the payload carries git-status output — so payload composition has to be fixed first.
 ---
 
-Invariants: [[viewer-derived-state-shape]]. Staging: [[viewer-derived-state-path]].
+Invariants: [[viewer-derived-state-shape]]. Domains: [[viewer-derived-state-domains]].
 
 **The oracle** — `repostate`, grown into the authority: all refs, the parsed config with both
-namespaces resolved, the worktree list, and **derived indexes computed once per epoch** —
-`parent → children`, `project → members`. The indexes are the part that was missing; they make
-membership a single cheap function and let every reader share one graph instead of rebuilding
-it. One background refresher polls while `ctx.watched()`, so cost is O(1) spawns per interval,
-not O(readers). Absorbs `ctx.model_sig()`, `_MAX_AGE`, and the ~15 `worktree list` callers.
+namespaces resolved, the worktree list, and **derived indexes once per epoch** —
+`parent → children`, `project → members`. The indexes are what make membership one cheap
+function and let readers share one graph. One refresher polls while `ctx.watched()`, so cost
+is O(1) spawns per interval, not O(readers).
+
+**Volatile fields must leave the payload.** `stack-forest:648` runs `git status --porcelain`
+in every worktree holding a forest branch and bakes the result into `nodes[b]["dirty"]`. That
+is filesystem state with no entry in refs or config, so **no read set can ever validate the
+payload that contains it** — and it is why `/node` was left with no memo at all. The fix is
+not a cleverer fingerprint: dirt becomes a short-TTL **overlay painted at serve time**,
+exactly the `_overlay_live` pattern `picker.py` already uses for the triage axes and gates
+verdicts. One volatile field was poisoning the cacheability of twenty stable ones.
 
 **Read sets over predicates.** `stack-forest:102` reads the *whole* config into
-parents/children/seeds, and `:218` reads *all* `refs/heads`. So recording point keys would
-record everything — exactly today's repo-wide stamp. An entry must instead record the
-**predicate and a digest of its match set**: the ref tips of the forest's closure, the config
-lines naming any member, and — the phantom guard — a digest of the children lists on the
-closure's frontier, so a branch created with `stack-parent` pointing at a member invalidates
-even though its key did not exist at build time. That phantom is the *primary* workload: an
-agent adding branches to a live forest every few minutes.
+parents/children/seeds; `:218` reads *all* `refs/heads`. Recording point keys would record
+everything — today's repo-wide stamp. An entry records the **predicate and a digest of its
+match set**: the closure's ref tips, config lines naming a member, and a **frontier guard** —
+a digest of the children lists at the closure's edge — so a branch created mid-build with
+`stack-parent` pointing at a member invalidates although its key did not exist to record.
+That phantom is the primary workload, not an edge case.
 
-Validity is then re-evaluating those predicates against the in-memory indexes: microseconds,
-versus the 34ms spawn it replaces. This retires the `sig = ""` escape hatch, the
-`_MODEL_CFG` allow-list, and the `_builder_sig` mtime fold-in.
-
-**The trap:** the epoch is a *label and a short-circuit* — "has anything moved at all", and
-the "as of" a payload carries. The moment it becomes a validity criterion it is
-`model_sig()` again, and the whole design has decayed back to what exists.
+**The trap:** the epoch is a label and a short-circuit, never a validity criterion. The moment
+it decides validity it is `model_sig()` again.
 
 **Membership, once:** registry ∪ per-branch tag, descended by parent edge, skipping a child
-whose own tag names another project, ancestors never filtered. The union is the point — a
-tagged-but-unregistered branch is real work, and reading the registry alone is what blinded
-the palette.
+tagged elsewhere, ancestors never filtered. The union is the point — reading the registry
+alone is what blinded the palette.
