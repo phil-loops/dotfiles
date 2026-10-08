@@ -12,7 +12,7 @@ A review is a judgment and, when something was wrong or missing, a diagnosis. Th
 
 **The pieces.**
 
-- An *email* is one revision of an EmailMessage, read as *elements* in LMX vocabulary.
+- An *email* is one revision of an EmailMessage, read as LMX *elements*.
 - A *facet* asks one narrow question. Code facets compute facts; the model-readings facet reads for meaning in one call per email.
 - An *observation* is what a facet found. *Trusted information* is what is on file as legitimate for a sender.
 - A *policy* weighs observations and decides. Policies are fitted to judgments, never hand-weighted.
@@ -20,6 +20,6 @@ A review is a judgment and, when something was wrong or missing, a diagnosis. Th
 
 **Two words that must not blur.** A *disagreement* is a reviewer's judgment differing from a policy's decision. A *difference* is two policies deciding the same check differently. Disagreements teach; differences pick what to review.
 
-**Three lanes.** The fast lane decides at publish and at send, with no model call once readings are cached. The slow lane records, reviews, fits and replays. Production is the only live policy; candidates run offline, then in shadow before promotion.
+**Three lanes.** The fast lane decides at publish and send, with no model call once readings are cached. The slow lane records, reviews, fits and replays. Production is the only live policy; candidates run offline, then in shadow before promotion.
 
 See [[safety-loops-facets]], [[safety-loops-flywheel]], [[safety-loops-review]], [[safety-loops-mvp]] and [[safety-loops-data]].
