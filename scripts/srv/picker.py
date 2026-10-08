@@ -465,7 +465,7 @@ def _projects_snapshot_file():
     return os.path.join(gd, "stack-projects-cache.json") if gd else ""
 
 
-_OVERLAY_SUFFIXES = (".interest", ".shelved", ".focus", ".tier", ".epic")
+_OVERLAY_SUFFIXES = (".interest", ".shelved", ".focus", ".tier", ".epic", ".milestone")
 
 
 def _is_overlay_line(line):
@@ -534,6 +534,7 @@ def _overlay_live(projs, cfg, green):
         tier = m.get("tier")
         p["tier"] = tier if tier in ("committed", "trying", "spike") else None
         p["epic"] = m.get("epic") or None
+        p["milestone"] = m.get("milestone") or None
         branches = members.get(p["name"]) or p.get("mergeable", [])
         p["green"] = sum(1 for b in branches if b in green)
         out.append(p)
@@ -958,3 +959,136 @@ def steer(req, raw):   # POST /steer — launch the Steer workspace (headless-cl
     r = ctx.run(args)
     req._send(200 if r.returncode == 0 else 500,
               json.dumps({"ok": r.returncode == 0, "out": r.stdout, "err": r.stderr}))
+
+
+# ── epics ──────────────────────────────────────────────────────────────────
+# An epic groups forest projects into ordered milestones. STRUCTURE ONLY lives here: the
+# per-project live state (branches, gates, PRs, merged) is already on the /projects rows the
+# client holds, so this endpoint is one config sweep and never a fan-out — an epic page that
+# opened its own build would just be another 16s endpoint (2026-10-07). It also means
+# "is this milestone done" is derived in ONE place, client-side, from rows that already exist.
+
+def _epic_rows():
+    """Every epic key, project tag and branch edge in ONE sweep. Per-key spawns are the whole
+    cost against a 7,969-line config, so this must stay a single get-regexp."""
+    out = ctx.run(["git", "config", "--get-regexp",
+                   r"^(stack-epic|stack-project|branch)\."]).stdout
+    rows = []
+    for line in out.splitlines():
+        key, _, val = line.partition(" ")
+        rows.append((key, val.strip()))
+    return rows
+
+
+def _project_edges(rows, owner):
+    """Project-level dependency edges, from branch edges that cross a project boundary.
+    `parent`/`requires` are CONTENT ("cannot build without"); `after` is deploy-order only and
+    carries no code dependency (forests.md) — kept separate because conflating them erases the
+    one distinction that matters when picking what to merge next."""
+    content, deploy = set(), set()
+    kinds = (("stack-parent", content), ("stack-requires", content), ("stack-after", deploy))
+    for key, val in rows:
+        if not key.startswith("branch.") or not val:
+            continue
+        body = key[len("branch."):]
+        for kind, bucket in kinds:
+            if not body.endswith("." + kind):
+                continue
+            src, dst = owner.get(val), owner.get(body[:-len("." + kind)])
+            if src and dst and src != dst:
+                bucket.add((src, dst))   # src lands before dst
+    return content, deploy
+
+
+def _topo(names, edges):
+    """Declared order, with a project pulled after anything it depends on. A cycle falls back
+    to declared order rather than dropping a member: a cross-project cycle is a forest-shape
+    bug to see, never a reason to hide work."""
+    need = {n: {s for s, d in edges if d == n and s in names} for n in names}
+    out, placed = [], set()
+    pending = list(names)
+    while pending:
+        ready = [n for n in pending if not (need[n] - placed)]
+        if not ready:                     # cycle — emit the rest in declared order
+            out.extend(pending)
+            break
+        for n in ready:
+            out.append(n)
+            placed.add(n)
+        pending = [n for n in pending if n not in placed]
+    return out
+
+
+def _epics(rows):
+    """[{id, title, description, focus, milestones:[...], loose:[...]}] — structure only."""
+    meta, mile_order, mile_meta, mile_exit = {}, {}, {}, {}
+    proj_epic, proj_mile, registry = {}, {}, {}
+    for key, val in rows:
+        if key.startswith("stack-project."):
+            body = key[len("stack-project."):]
+            if key.endswith(".epic") and val:
+                proj_epic[body[:-len(".epic")]] = val
+            elif key.endswith(".milestone") and val:
+                proj_mile[body[:-len(".milestone")]] = val
+            elif key.endswith(".branch") and val:
+                registry.setdefault(body[:-len(".branch")], []).append(val)
+            continue
+        if not key.startswith("stack-epic."):
+            continue
+        body = key[len("stack-epic."):]
+        head, _, leaf = body.rpartition(".")
+        if "." in head:                                  # stack-epic.<id>.<mid>.<leaf>
+            eid, mid = head.split(".", 1)
+            if leaf == "exit":
+                mile_exit.setdefault((eid, mid), []).append(val)
+            else:
+                mile_meta.setdefault((eid, mid), {})[leaf] = val
+        elif leaf == "milestone":                        # ordered multivar — order IS the plan
+            mile_order.setdefault(head, []).append(val)
+        else:
+            meta.setdefault(head, {})[leaf] = val
+
+    # a branch belongs to the project that registers or tags it — needed to cross edges
+    owner = {}
+    for proj, branches in registry.items():
+        for b in branches:
+            owner[b] = proj
+    for key, val in rows:
+        if key.startswith("branch.") and key.endswith(".stack-project") and val:
+            owner[key[len("branch."):-len(".stack-project")]] = val
+
+    ids = sorted(set(meta) | set(mile_order) | set(proj_epic.values()))
+    out = []
+    for eid in ids:
+        members = sorted(p for p, e in proj_epic.items() if e == eid)
+        content, deploy = _project_edges(rows, owner)
+        edges = content | deploy
+        milestones = []
+        assigned = set()
+        for mid in mile_order.get(eid, []):
+            mine = [p for p in members if proj_mile.get(p) == mid]
+            assigned.update(mine)
+            mm = mile_meta.get((eid, mid), {})
+            milestones.append({
+                "id": mid,
+                "title": mm.get("title") or mid,
+                "goal": mm.get("goal") or "",
+                "exit": mile_exit.get((eid, mid), []),
+                "projects": _topo(mine, edges),
+            })
+        em = meta.get(eid, {})
+        out.append({
+            "id": eid,
+            "title": em.get("title") or eid,
+            "description": em.get("description") or "",
+            "focus": int(em["focus"]) if em.get("focus", "").isdigit() else None,
+            "milestones": milestones,
+            "loose": _topo([p for p in members if p not in assigned], edges),
+            "crossProject": sorted(list(content)),
+            "deployOrder": sorted(list(deploy)),
+        })
+    return out
+
+
+def epics(req):
+    req._send(200, json.dumps(_epics(_epic_rows())))
