@@ -6,7 +6,7 @@ project: phishtank-facets
 lede: Pure functions over recorded input, returning plain named values, never verdicts.
 ---
 
-**The contract.** Each facet module exports `name`, `version`, `observe` and `explain(values)`. Input is gathered by the app; the facet only interprets it. Values are facts or `unknown`. A facet's version covers its code and any data or weights it uses; a golden file of invented cases fails the build when outputs change without a version bump.
+**The contract.** A facet is a question: a name plus a rubric version that fixes what its values mean. Implementations answer it, each with `observe` and `explain(values)`; values are facts or `unknown`. Several can run at once, each recording its own observations, and policies pin one. A code facet changes by PR, guarded by a golden file; a retrained model is a registry row, gated on metrics and frozen rubric cases. Corrections attach to the rubric, so one grades every implementation.
 
 **Code facets.** Link destinations (registrable domain, text naming another domain, shorteners, IP and punycode hosts), reply-to (different domain, free mailbox), look-alike characters on sender name, from address and link hosts, content and destination fingerprints. Sender-site is about the sender, gathered at domain setup, not per email.
 
@@ -14,4 +14,4 @@ lede: Pure functions over recorded input, returning plain named values, never ve
 
 **Legacy facets.** Legacy tag reads production's recorded model answer the way production does; banned words reproduces production's substring scan. They give parity with today and stay as inputs.
 
-**Fast versions.** Every model reading is recorded with its rubric version, so each is a training example for a local model that later replaces it, accepted only when it agrees with the model on unseen recent mail.
+**Fast versions.** An LLM and a small model answering the same rubric are one facet: every LLM reading is a training example for the small one, which takes over only when it agrees on unseen recent mail.
