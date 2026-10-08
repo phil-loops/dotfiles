@@ -1058,10 +1058,17 @@ def _epics(rows):
             owner[key[len("branch."):-len(".stack-project")]] = val
 
     ids = sorted(set(meta) | set(mile_order) | set(proj_epic.values()))
+    # edges are repo-wide and cost one pass — compute once, then report only the pairs BOTH of
+    # whose ends belong to the epic being described. Reporting the raw set put unrelated
+    # projects (api-error-codes -> api-idempotency) in phishtank's payload: _topo ignored them,
+    # so the ORDER was right while the field meant to draw the cross-project story was noise.
+    all_content, all_deploy = _project_edges(rows, owner)
     out = []
     for eid in ids:
         members = sorted(p for p, e in proj_epic.items() if e == eid)
-        content, deploy = _project_edges(rows, owner)
+        mine = set(members)
+        content = {(a, b) for a, b in all_content if a in mine and b in mine}
+        deploy = {(a, b) for a, b in all_deploy if a in mine and b in mine}
         edges = content | deploy
         milestones = []
         assigned = set()
