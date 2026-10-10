@@ -21,4 +21,4 @@ A review is a judgment and, when something was wrong or missing, a diagnosis. Th
 
 **Three lanes.** The fast lane decides at publish and send. The slow lane records, reviews, fits and replays. Production is the only live policy; candidates run offline, then in shadow before promotion.
 
-See [[safety-loops-facets]], [[safety-loops-flywheel]], [[safety-loops-review]], [[safety-loops-mvp]] and [[safety-loops-data]].
+See [[safety-loops-facets]], [[safety-loops-flywheel]], [[safety-loops-review]], [[safety-loops-mvp]], [[safety-loops-data]] and [[safety-loops-snowshoe]].
