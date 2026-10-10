@@ -8,7 +8,7 @@ lede: One actor spread across many young teams looks harmless one email at a tim
 
 **Two layers of evidence.** The *content fingerprint* is an email facet: a pure function of one email, stored once per distinct content as MinHash band keys and a link-destination key. The *content family* is a sender fact derived from those rows: how many other teams, and how many young ones, sent near-identical content or links to the same domains.
 
-**As of the check.** A family fact counts only fingerprints recorded before the check, and ages teams at the check's time, so replaying a past check never sees teams that appeared later. It is recorded with the decision like any other evidence. Fingerprint rows are append-only, so the count can always be recomputed.
+**As of the check.** A family fact counts only fingerprints recorded before the check, and ages teams at the check's time, so replaying a past check never sees teams that appeared later. `observeContentFamily` computes it; it is recorded with the decision like any other evidence. Fingerprint rows are append-only, so the count can always be recomputed.
 
 **Facets count, policies decide.** The fact reports counts over fixed windows; how many young teams make a family suspicious is fitted, not set by hand. Other teams' disables and flags count only when they happened before the check.
 
