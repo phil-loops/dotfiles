@@ -15,6 +15,6 @@ lede: Five milestones, starting with a refactor that changes nothing customers s
 
 **Why refactor first.** With one seam (gather, decide, act, record), switching to a new policy is a setting, rollback is a setting, and every comparison is against production's real function rather than a copy.
 
-**History.** The offline replay (`parity-replay`) reads stored checks by date range, after the last change to the check code (late June 2026), and rebuilds the banned-word list's history from the admin ledger. Models are never re-called: replay reads recordings.
+**History.** The offline replay (`parity-replay`) reads stored checks by date range, after the last change to the check code (late June 2026). Each check is replayed against the ban list of its own time: the list production recorded with a match, else the admin ledger's last save before the check; checks older than the ledger aren't compared. Only records written within minutes of a check count as its own. Eval rows don't record their touchpoint, so a replayed match with no record is a preview check or a miss, and is reported as either. Models are never re-called: replay reads recordings.
 
 **Shelved.** `shadow-observations` used the earlier quote-based design; kept for reference only.
