@@ -3,18 +3,16 @@ title: Audit trail
 section: Safety loops
 order: 145
 project: safety-trail
-lede: Three kinds of fact, each appended and never edited, each naming its cause. The team timeline is just those facts in order.
+lede: Every deliberate choice is a decision, appended once; every state change names the decision that caused it. The rest is derived.
 ---
-**Why today's trail fails.** Each gap is one of three kinds: a check or action writes no row (allows, previews, render scans), a row is overwritten (an override replaces the model's verdict; a domain ruling is updated in place), or rows don't point at their cause (the team feed sorts six sources by time and links none; flagged emails are dated by when the email was created).
+**Why today's trail fails.** A check or action writes no row, a row is overwritten (an override replaces the model's verdict), or rows don't point at their cause (the team feed sorts six sources by time and links none).
 
-**Three facts.**
+**One table of decisions.** A check by policy v0, an admin's ruling, the health cron, SES disabling a tenant and an owner deleting a team are all decisions: a decider (policy and version, person, or external source), a subject (an email, a domain, another decision), the state version it read, the evidence it saw, and a verdict. All are columns except the evidence, a snapshot typed by the decider's version. A ruling is a person's decision whose subject is another decision.
 
-- *Decision*: one per check, with inputs, reasons and policy version (`SafetyDecision`). Answers why an email was blocked or allowed.
-- *State change*: a safety field's new value and its cause, written by a database trigger so no code path can skip it (`SendingDomainStatusVersion`, then the team skip flag and the email override). Answers why a domain is off, and whether an admin action took effect: do changes cite its ledger entry?
-- *Ruling*: a person's judgment on a decision or a change, a new row each time. Answers how often each rule is overturned; "pending review" is a change with no ruling.
+**State changes cite one decision.** A database trigger versions each safety field (domain disabled, skip flag, override) and stamps the decision id the writing transaction declared; a change with none is visibly unattributed.
 
-**Causes.** A writer names its cause for the transaction: a decision, an admin ledger entry, a health alarm, an SES event or a deletion request. A change with none is recorded as unattributed, visibly.
+**Derived, not stored.** The timeline is decisions and versions in causal order. Pending review is a policy decision with effects and no person's decision on it. The overturn rate is person decisions over policy decisions. Whether an admin action took effect is whether a version cites it.
 
-**Retired by it.** `DisableDomainEvent` (disable becomes a change, its ruling a ruling), in-place review flags, overrides overwriting the classification, the prod columns on eval rows, and the team feed's ad-hoc sources.
+**Invariants doing the work.** A decision is a function of state as of the version it read, so its effect applies only at that version; otherwise it is recorded as superseded. That one rule stops a stale check undoing a ruling and a stale ruling undoing a newer disable. Order comes from versions and links, not clocks. A decision and its effect commit together, and a check's decision id is its check id, so retries never duplicate.
 
-**Order.** Decision record, then causes on domain changes, then rulings, then the timeline; each answers a question on its own.
+**Retired by it.** `DisableDomainEvent`, in-place review flags, overrides overwriting the classification, eval rows' prod columns, the feed's ad-hoc sources.
