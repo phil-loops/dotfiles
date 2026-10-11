@@ -3,20 +3,17 @@ title: Milestones
 section: Safety loops
 order: 140
 project: phishtank-v4
-lede: Five milestones, starting with production running on policy v0: a refactor that changes nothing customers see and gives every later step one clean seam.
+lede: Production first runs on policy v0, a refactor nothing customers see; every later step goes through that one seam.
 ---
-**Milestones.**
+**Stages.**
 
-1. **Production runs on policy v0** (`safety-extract`, `safety-record`, `safety-route-publish`, `safety-route-send`). Characterisation tests pin every touchpoint; production's decision becomes the phishtank package's policy v0, a drop-in replacement with no second copy; the app keeps only how to act (flag rows, alerts, domain actions), and reads sender history only when v0 acts on the sender; the banned-word scan is the package's facet; every decision is recorded with its inputs and the list hash. Exit: the pinned tests pass at every touchpoint and every check is recorded.
-2. **Introduce the phishtank package** (`phishtank-v4`, `phishtank-facets`, `readings-shadow`). Exit: readings and code facets recorded for every publish-time check, within the cost budget.
-3. **First fitted candidate**, compared offline with production's real decision function. Exit: beats production on held-out mail.
-4. **Live window and promotion** for one touchpoint, with exit conditions written before it opens: no confirmed harmful email newly allowed, wrongly blocked mail within tolerance, no errors or latency problems.
-5. **Reviewer tools**: the inspector and the review desk.
+1. **Spike** (`phishtank-v4`, `safety-spike`). Production imports the package and swaps two rules in place: the classifier tag rule and the banned-word match. Control flow unchanged.
+2. **Production runs on v0** (`safety-v0`). Characterisation tests pin every touchpoint; every touchpoint goes gather, v0 `decide`, act, record. The app keeps only how to act; sender history is read only when v0 acts on the sender; every decision is recorded with its inputs and the ban-list hash. Exit: the pinned tests pass at every touchpoint and every check is recorded.
+3. **Sender cleanup.** v0's new-sender rule (fewer than 5,000 delivered, or a domain under 7 days old) is the only copy of the cutoff, and the email-health cron asks it too; the count is asked directly ("has delivered at least 5,000") as of the check; disabling or alerting is one app action both callers use. The cutoff is arbitrary, so it stays a plain constant.
+4. **Record what a better policy needs** (`readings-shadow`, `phishtank-facets`, `content-fingerprints`). Exit: readings and code facets recorded for every publish-time check, within the cost budget.
+5. **Measure production offline** (`parity-replay`). v0 replayed over recorded checks gives the baseline.
+6. **First fitted candidate**, compared offline with v0 on held-out mail. Needs labelled outcomes. Exit: beats v0.
+7. **Live window and promotion** for one touchpoint, exit conditions written first: no confirmed harmful email newly allowed, wrongly blocked mail within tolerance, no errors or latency problems. Switching and rollback are settings.
+8. **Reviewer tools**: the inspector and the review desk.
 
-**Why v0 first.** With one seam (gather, decide, act, record) and v0 as production's own function, switching to a new policy is a setting, rollback is a setting, and every comparison is against what production actually runs.
-
-**Spike first.** Before any touchpoint is rerouted, production imports the package (`phishtank-v4/add-the-phishtank-package`) and swaps two rules in place, behaviour unchanged: the classifier tag rule and the banned-word match (`safety-spike`). Production's control flow stays as it is.
-
-**Sender stage, next.** Today's domain-disable rule (`handleDisableNewDomain`) fuses three things: a count capped by its query at 5,000, a clock read, and the disable itself, and the email-health cron shares it. It splits along that seam: v0's new-sender rule (fewer than 5,000 delivered, or a domain under 7 days old) is the only copy of the cutoff and the cron asks it too; the count is asked directly ("has delivered at least 5,000") as of the check; running the disable or alert stays one app action both callers use. The cutoff is arbitrary, so it stays a plain constant, not a versioned fact.
-
-**History.** The offline replay (`parity-replay`) reads stored checks by date range, after the last change to the check code (late June 2026). Each check is replayed against the ban list of its own time: the list production recorded with a match, else the admin ledger's last save before the check; checks older than the ledger aren't compared. Only records written within minutes of a check count as its own. Eval rows don't record their touchpoint, so a replayed match with no record is a preview check or a miss, and is reported as either. Models are never re-called: replay reads recordings.
+**History.** The offline replay reads stored checks by date range, after the last change to the check code (late June 2026). Each check is replayed against the ban list of its own time: the list production recorded with a match, else the admin ledger's last save before the check; checks older than the ledger aren't compared. Only records written within minutes of a check count as its own. Eval rows don't record their touchpoint, so a replayed match with no record is a preview check or a miss, and is reported as either. Models are never re-called: replay reads recordings.
