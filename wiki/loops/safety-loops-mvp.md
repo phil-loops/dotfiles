@@ -15,4 +15,8 @@ lede: Five milestones, starting with production running on policy v0: a refactor
 
 **Why v0 first.** With one seam (gather, decide, act, record) and v0 as production's own function, switching to a new policy is a setting, rollback is a setting, and every comparison is against what production actually runs.
 
+**Spike first.** Before any touchpoint is rerouted, production imports the package (`phishtank-v4/add-the-phishtank-package`) and swaps two rules in place, behaviour unchanged: the classifier tag rule and the banned-word match (`safety-spike`). Production's control flow stays as it is.
+
+**Sender stage, next.** Today's domain-disable rule (`handleDisableNewDomain`) fuses three things: a count capped by its query at 5,000, a clock read, and the disable itself, and the email-health cron shares it. It becomes a recorded sender fact, the sender's stage (new or established, asked directly with the cap explicit, as of the check), plus rows in v0's response table mapping verdict, touchpoint and stage to an action. Running the disable stays an app action both callers use.
+
 **History.** The offline replay (`parity-replay`) reads stored checks by date range, after the last change to the check code (late June 2026). Each check is replayed against the ban list of its own time: the list production recorded with a match, else the admin ledger's last save before the check; checks older than the ledger aren't compared. Only records written within minutes of a check count as its own. Eval rows don't record their touchpoint, so a replayed match with no record is a preview check or a miss, and is reported as either. Models are never re-called: replay reads recordings.
