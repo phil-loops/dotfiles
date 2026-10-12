@@ -18,6 +18,10 @@ Non-negotiable, in every repo, regardless of what a task seems to call for.
 - **Never create merge commits** — forest history stays linear; fan-in lives in `requires` metadata + carried cherry-picks.
 - **Never `git push --force` a branch another session may be live on** — leave a cosmetically-wrong commit message alone rather than rewrite shared history.
 
+**Production & cloud access**
+
+- **Never run `aws-vault`, `kubectl`, or any command that assumes an AWS role or reaches a live cluster (prod *or* staging)** — Claude reads infra facts from the repo (`k8s/`, `terraform/`) and, when only the live environment knows, hands Phil the `! <command>` to run himself. (2026-10-12: tried `kubectl get nodes` via aws-vault to look up node types.)
+
 **Dotfiles**
 
 - **Never `zsource` / `git add -A` in `~/.dotfiles`** — `-A` sweeps Phil's concurrent WIP into your commit. `git status` as its own step, then stage explicit paths (mechanics: dotfiles topic file).
