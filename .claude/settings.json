@@ -4,7 +4,15 @@
     "pr": ""
   },
   "permissions": {
-    "defaultMode": "auto"
+    "defaultMode": "auto",
+    "deny": [
+      "Bash(* aws-vault *)",
+      "Bash(* kubectl *)",
+      "Bash(aws-vault *)",
+      "Bash(aws-vault)",
+      "Bash(kubectl *)",
+      "Bash(kubectl)"
+    ]
   },
   "model": "claude-fable-5-1[1m]",
   "hooks": {
