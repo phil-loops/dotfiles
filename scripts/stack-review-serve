@@ -32,7 +32,12 @@ while [[ "${1:-}" == --* ]]; do
     --ensure) ensure=1; shift ;;
     --no-open) no_open=1; shift ;;
     --supervise) supervise=1; shift ;;
-    *) break ;;
+    --help|-h)
+      echo "usage: stack-review-serve [--ensure|--no-open|--supervise] [<project>|<branch>|--all]"
+      echo "  no target: open the project picker; --all: every forest in this repo"
+      exit 0 ;;
+    --all) break ;;
+    *) echo "stack-review-serve: unknown flag $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 
