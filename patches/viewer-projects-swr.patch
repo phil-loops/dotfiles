@@ -1,0 +1,120 @@
+diff --git a/scripts/srv/picker.py b/scripts/srv/picker.py
+index 5d86d61..50a3588 100644
+--- a/scripts/srv/picker.py
++++ b/scripts/srv/picker.py
+@@ -546,6 +546,16 @@ def _overlay_live(projs, cfg, green):
+ # queue on one build and re-check the cache inside the lock.
+ _pbuild_lock = threading.Lock()
+ _root_fresh_cache = {}   # (repo path, root tip sha, base tip sha) -> (behind, overlap, merged)
++# Stale-while-revalidate, mirroring /model (srv/review.py). A cold build is ~1,200 git spawns
++# (a rev-list, a merge-base and two or three diffs per mergeable root — 240 of them), 10s on a
++# quiet machine and 20s+ under load, measured 2026-10-12 — and its key carries every ref tip in
++# the repo plus origin/main, so with several sessions committing nearly every home / palette
++# load missed and BLOCKED on the fan-out. Now a miss answers the last build (memory, else the
++# disk snapshot a restart left) under a fresh overlay, rebuilds behind it once (single-flight),
++# and bumps the pulse when the settled build actually differs, so open tabs refetch.
++_pbuilding = {}   # repo-name -> Event for the one in-flight background rebuild
++_pswr_lock = threading.Lock()
++_PSWR_GRACE = 1.0   # a warm rebuild (memo hits only, ~0.7s) still answers fresh inside this
+ 
+ 
+ def _projects_for(name, path):
+@@ -557,13 +567,65 @@ def _projects_for(name, path):
+     cached = _pcache.get(name)
+     if cached and cached[0] == pck:
+         return _overlay_live(cached[1], cfg, green)
+-    with _pbuild_lock:
++    if cached is None:
++        cached = _snapshot_seed(name)   # whatever the last process built — stale is fine to start from
++    if cached:
++        with _pswr_lock:
++            done = _pbuilding.get(name)
++            kick = done is None
++            if kick:
++                done = _pbuilding[name] = threading.Event()
++        if kick:
++            threading.Thread(target=_rebuild, args=(name, path, pck, done, cached[1]), daemon=True).start()
++        done.wait(_PSWR_GRACE)
++        fresh = _pcache.get(name)
++        return _overlay_live((fresh or cached)[1], cfg, green)
++    with _pbuild_lock:   # nothing to serve stale: the first build ever for this repo blocks
+         cached = _pcache.get(name)   # a queued waiter finds the winner's build here
+         if cached and cached[0] == pck:
+             return _overlay_live(cached[1], cfg, green)
+         return _overlay_live(_projects_build(name, path, pck), cfg, green)
+ 
+ 
++def _snapshot_seed(name):
++    # The disk snapshot regardless of whether its key still matches — as the stale seed for a
++    # serve-now, rebuild-behind answer. Registered under its OWN key, so it reads as stale and
++    # never short-circuits the rebuild.
++    snap_file = _projects_snapshot_file()
++    if not snap_file or not os.path.exists(snap_file):
++        return None
++    try:
++        snap = json.load(open(snap_file))
++        if snap.get("v") != _PROJ_SNAP_V or not isinstance(snap.get("projs"), list):
++            return None
++        ent = (tuple(snap.get("pck") or ()), snap["projs"])
++    except Exception:
++        return None
++    _pcache.setdefault(name, ent)
++    return _pcache[name]
++
++
++def _rebuild(name, path, pck, done, was):
++    ctx.set_repo(path)
++    try:
++        with _pbuild_lock:
++            cur = _pcache.get(name)
++            if not (cur and cur[0] == pck):
++                _projects_build(name, path, pck)
++    except Exception as exc:
++        ctx.log(f"/projects background rebuild for {name} failed: {exc}")
++    finally:
++        with _pswr_lock:
++            _pbuilding.pop(name, None)
++        done.set()
++        ctx.clear_repo()
++    ent = _pcache.get(name)
++    # Pulse only when the settled build says something new — an identical list would wake
++    # every open tab's whole query fan-out to redraw what it is already showing.
++    if ent and ent[1] != was:
++        ctx.bump_pulse()
++
++
+ def _projects_build(name, path, pck):
+     # The in-memory cache dies with the process, and the server re-execs on every srv/*.py
+     # edit — so a restarted server's first /projects paid the full ~3s fan-out even when
+@@ -603,6 +665,22 @@ def _projects_build(name, path, pck):
+ 
+     trunks = _trunk_set()
+ 
++    # `git diff --name-only <merge-base>..<base>` is a function of the fork point and the base
++    # tip alone, and roots cut from the same main commit share it — so one diff per distinct
++    # fork point, not one per root (240 roots forked from a few dozen points, measured).
++    base_files_memo = {}
++    memo_lock = threading.Lock()
++
++    def _base_files(mb, base):
++        k = (mb, tips.get(base))
++        with memo_lock:
++            hit = base_files_memo.get(k)
++        if hit is None:
++            hit = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{base}"]).stdout.splitlines())
++            with memo_lock:
++                base_files_memo.setdefault(k, hit)
++        return hit
++
+     def _root_fresh(b):
+         base = _base_of(b, trunks)
+         key = (path, tips.get(b), tips.get(base))
+@@ -624,7 +702,7 @@ def _projects_build(name, path, pck):
+         if behind:
+             mb = ctx.run(["git", "merge-base", b, base]).stdout.strip()
+             if mb:
+-                base_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{base}"]).stdout.splitlines())
++                base_files = _base_files(mb, base)
+                 branch_files = set(ctx.run(["git", "diff", "--name-only", f"{mb}..{b}"]).stdout.splitlines())
+                 if base_files:
+                     overlap = bool(base_files & branch_files)

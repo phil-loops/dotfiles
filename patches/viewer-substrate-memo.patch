@@ -1,0 +1,59 @@
+diff --git a/scripts/srv/preview.py b/scripts/srv/preview.py
+index 9929571..cd98280 100644
+--- a/scripts/srv/preview.py
++++ b/scripts/srv/preview.py
+@@ -71,6 +71,45 @@ def _list_json(fresh=False):
+ 
+ def _list_invalidate():
+     _list_cache["at"] = 0.0
++    _substrate_cache["at"] = 0.0
++
++
++# The shared-stack card: docker ps + a psql and a clickhouse-client exec + `loops-doctor --json`
++# (3s alone) — ~4s per /previews, and the pulse refetches the drawer on every process tick, so
++# an open drawer paid it over and over (median 3.5s across 13 opens, 2026-10-12). Serve the
++# last scan while a fresh one runs behind it; mutations invalidate like the list above, and
++# the one live flag (a `docker compose up` in flight) is re-read on every answer.
++_substrate_cache = {"at": 0.0, "wt": None, "data": None, "building": None}
++_SUBSTRATE_TTL = 15.0
++_substrate_lock = threading.Lock()
++
++
++def _substrate_cached(main_wt):
++    with _substrate_lock:
++        c = _substrate_cache
++        hit = c["data"] if c["wt"] == main_wt and c["data"] is not None else None
++        fresh = hit is not None and time.monotonic() - c["at"] < _SUBSTRATE_TTL
++        kick = hit is not None and not fresh and c["building"] is None
++        if kick:
++            c["building"] = threading.Thread(target=_substrate_refresh, args=(main_wt,), daemon=True)
++    if kick:
++        _substrate_cache["building"].start()
++    if hit is None:
++        return _substrate_refresh(main_wt)
++    out = dict(hit)
++    out["starting"] = _stack_up is not None and _stack_up.poll() is None
++    return out
++
++
++def _substrate_refresh(main_wt):
++    try:
++        data = _substrate(main_wt)
++    finally:
++        with _substrate_lock:
++            _substrate_cache["building"] = None
++    with _substrate_lock:
++        _substrate_cache.update(at=time.monotonic(), wt=main_wt, data=data)
++    return data
+ 
+ 
+ def _meta_get(name, key):
+@@ -615,7 +654,7 @@ def previews(req):
+     # scan takes it as an argument.
+     main_wt = checkout._active_main_wt()
+     with ThreadPoolExecutor(max_workers=1) as sub_ex:
+-        f_sub = sub_ex.submit(_substrate, main_wt)
++        f_sub = sub_ex.submit(_substrate_cached, main_wt)
+         pvs = [dict(pv) for pv in _list_json()]   # rows get annotated — never mutate the shared snapshot
+         for pv in pvs:
+             pv["borrows"] = main_wt
