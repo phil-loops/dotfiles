@@ -68,6 +68,10 @@ stack() {
             # No arg: interactive → fzf-pick a project; non-interactive
             # (e.g. Claude / no TTY) → just list the local projects.
             local web_target="$1"
+            if [[ "$web_target" == --help || "$web_target" == -h ]]; then
+                echo "usage: stack web [<project>|<branch>|--all]    (no arg: pick a project)"
+                return 0
+            fi
             if [[ -z "$web_target" ]]; then
                 if [[ -t 1 ]]; then
                     web_target=$(~/.dotfiles/scripts/stack-list --pick) || return $?
