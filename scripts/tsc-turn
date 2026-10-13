@@ -1,13 +1,19 @@
 #!/bin/zsh
-# tsc-turn — cross-session compile queue. Wraps any heavy command (typecheck, build)
-# so at most N run machine-wide; extra callers wait their turn instead of stacking
-# seven concurrent tsc runs (the 2026-07-06 CPU pile-up).
+# tsc-turn — the typecheck spelling of heavy-turn, the machine-wide queue for heavy work.
+# Kept so every existing caller (the .zshrc tsc/npx wrappers, safe-restack) lands in the same
+# budget as gates, clones and preview setup instead of a typecheck-only one.
 #
 #   tsc-turn npx tsc --project tsconfig.node.json --noEmit
-#   TSC_TURN_SLOTS=1 tsc-turn npm run build
+#
+# TSC_TURN_DIR (with TSC_TURN_SLOTS) still names a private slot set: stack-donor uses it to
+# serialize donor refreshes with the gates queue's slot1. The command takes that private slot
+# first, then a heavy-turn slot.
 set -u
+here="${0:A:h}"
+[[ -n "${TSC_TURN_DIR:-}" ]] || exec "$here/heavy-turn" --class "${TSC_TURN_CLASS:-tsc}" -- "$@"
+
 slots=${TSC_TURN_SLOTS:-2}
-lockroot=${TSC_TURN_DIR:-/tmp/tsc-turn}
+lockroot=$TSC_TURN_DIR
 mkdir -p "$lockroot"
 waited=0
 while true; do
@@ -17,7 +23,7 @@ while true; do
       echo $$ > "$d/pid"
       trap 'rm -rf "$d"' EXIT INT TERM
       (( waited )) && echo "tsc-turn: slot free after ${waited}s — running" >&2
-      "$@"
+      "$here/heavy-turn" --class "${TSC_TURN_CLASS:-tsc}" -- "$@"
       exit $?
     fi
     pid=$(cat "$d/pid" 2>/dev/null)
