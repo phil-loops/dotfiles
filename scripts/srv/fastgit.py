@@ -386,6 +386,20 @@ def _store(key, r):
             _MEMO.popitem(last=False)
 
 
+def patch_id(args, text):
+    """`git patch-id …` on <text>: a pure function of its input, so memoised by content."""
+    import hashlib
+    key = ("stdin", tuple(args), hashlib.sha1(text.encode()).hexdigest())
+    hit = _lookup(key)
+    if hit is not None:
+        return _done(args, *hit)
+    r = subprocess.run(["git", *args], input=text, cwd=ctx.repo_cwd(), capture_output=True, text=True)
+    STATS["memo_miss"] += 1
+    if r.returncode == 0:
+        _store(key, r)
+    return r
+
+
 def _global_stamp():
     return tuple(os.stat(p).st_mtime_ns if os.path.exists(p) else 0
                  for p in (os.path.expanduser("~/.gitconfig"), os.path.expanduser("~/.config/git/config")))

@@ -52,11 +52,14 @@ class _Subprocess:
 
     def run(self, args, input=None, cwd=None, **kw):
         from . import fastgit
-        if args and args[0] == "git" and input is None and cwd is None:
+        if args and args[0] == "git" and cwd is None:
             ctx.set_repo(self.repo)
-            hit = fastgit.answer(args[1:])
-            if hit is not None:
-                return hit
+            if input is None:
+                hit = fastgit.answer(args[1:])
+                if hit is not None:
+                    return hit
+            elif args[1:] == ["patch-id", "--stable"]:
+                return fastgit.patch_id(args[1:], input)
         return subprocess.run(args, input=input, cwd=cwd or self.repo, **kw)
 
     def __getattr__(self, name):
