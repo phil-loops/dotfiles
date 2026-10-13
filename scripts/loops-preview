@@ -281,6 +281,20 @@ pool_take() {   # $1 = destination path, $2 = the lock stamp it wants; false whe
   return 1
 }
 pool_warm_bg() { nohup "$HOME/.dotfiles/scripts/loops-preview" --warm --main "$MAIN" >/dev/null 2>&1 & }
+# Setup's heavy steps (a full node_modules clone, workspace builds, npm reconcile, prisma generate)
+# take one slot of heavy-turn, the machine-wide queue gates and typechecks share — two previews
+# cloning while a gates run typechecks is what swapped the machine. Taken lazily, only when a
+# heavy step actually runs, so a warm restart never waits; held until setup ends (or we die).
+HEAVY_TURN="$(cd "$(dirname "$0")" && pwd)/heavy-turn"
+HEAVY_TICKET=""
+heavy_slot() {
+  [ -z "$HEAVY_TICKET" ] && [ -x "$HEAVY_TURN" ] || return 0
+  HEAVY_TICKET="$("$HEAVY_TURN" --acquire --class preview --owner $$)" || HEAVY_TICKET=""
+}
+heavy_release() {
+  [ -n "$HEAVY_TICKET" ] && "$HEAVY_TURN" --release "$HEAVY_TICKET"
+  HEAVY_TICKET=""
+}
 # a quarantine-flagged ancestor (e.g. Chrome-launched viewer) stamps EVERY file it clones, so one
 # canary tells whether the tree is tainted; Gatekeeper only blocks Mach-O dlopen/exec, so a tainted
 # clone needs its ~1.3k executables stripped, never a full xattr walk of the ~310k-file tree
@@ -327,7 +341,8 @@ if [ "$ACTION" = "warm" ]; then
   while [ "$n" -lt "$POOL_SIZE" ]; do
     e="$POOL/$(date +%s)-$$-$n"
     mkdir -p "$e"
-    if ! cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
+    # batch: a speculative refill yields its slot to anything a person is waiting on
+    if ! "$HEAVY_TURN" --class clone --batch -- cp -Rc "$MAIN/node_modules" "$e/node_modules" 2>/dev/null; then rm -rf "$e"; err "pool clone failed"; exit 1; fi
     nm_complete "$e/node_modules" || { rm -rf "$e"; err "clone caught MAIN mid-install — discarded"; exit 1; }
     strip_quarantine "$e/node_modules"
     echo "$stamp" > "$e/stamp"
@@ -399,6 +414,18 @@ exec > >(tee -a "$SETUP_LOG") 2> >(tee -a "$SETUP_LOG" >&2)
 trap 'rc=$?; err "stopped at line $LINENO (exit $rc): $BASH_COMMAND — setup log: $SETUP_LOG"' ERR
 META="$(meta_of "$NAME")"
 
+# Each preview is a next dev server (~0.5-1.5 GB) plus its compiles; past a few they swap the
+# machine and every other tool slows with them. Restarting one that is already up is always fine.
+PREVIEW_MAX="${LOOPS_PREVIEW_MAX:-3}"
+if ! tmux has-session -t "=$SESSION" 2>/dev/null; then
+  running="$(sessions)"
+  n="$(printf '%s\n' "$running" | grep -c . || true)"
+  if [ "$n" -ge "$PREVIEW_MAX" ]; then
+    err "$n previews already running (cap $PREVIEW_MAX) — stop one first (loops-preview <dir> --kill, or --kill-all), or raise the cap with LOOPS_PREVIEW_MAX=<n>. Running: $(printf '%s\n' "$running" | sed "s/^$PREFIX//" | tr '\n' ' ' | sed 's/ $//')"
+    exit 1
+  fi
+fi
+
 [ -f "$DIR/package.json" ] || { err "$DIR is not a loops checkout (no package.json)"; exit 1; }
 MAIN="$(cd "$MAIN" && pwd)"
 # previewing MAIN itself would rm -rf its real node_modules and then "clone" from the
@@ -458,6 +485,7 @@ else
       fi
     else
       cyan "cloning node_modules from $MAIN (no pool entry for lock ${want:0:8}; ~30s)"
+      heavy_slot
       cp -Rc "$MAIN/node_modules" "$staging" 2>/dev/null || rm -rf "$staging"
     fi
     if [ -d "$staging" ]; then
@@ -518,6 +546,7 @@ for cfg in "$DIR"/packages/*/tsconfig.json; do
 done
 if [ -n "$unbuilt" ]; then
   cyan "building unbuilt workspace package(s):$(printf '%s\n' $unbuilt | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
+  heavy_slot
   (cd "$DIR" && npx tsc -b --force $unbuilt) || err "workspace package build failed — pages importing them will 500"
 fi
 # A dist BORROWED above is MAIN's build of MAIN's sources, and `cp -Rc` preserves MAIN's mtimes —
@@ -533,6 +562,7 @@ if [ -n "$borrowed_cfgs" ]; then
   # No MAIN sha (or git says nothing) ⇒ can't prove they match ⇒ rebuild rather than serve a guess.
   if [ -z "$main_head" ] || ! git -C "$DIR" diff --quiet "$main_head" -- packages/ 2>/dev/null; then
     cyan "rebuilding borrowed workspace package(s) against this branch:$(printf '%s\n' $borrowed_cfgs | xargs -n1 dirname | xargs -n1 basename | tr '\n' ' ' | sed 's/ $//')"
+    heavy_slot
     (cd "$DIR" && npx tsc -b --force $borrowed_cfgs --pretty false) \
       || err "workspace package rebuild failed — this branch's packages/** changes are NOT compiled; the preview is serving MAIN's build"
   fi
@@ -544,6 +574,7 @@ fi
 if [ ! -L "$DIR/node_modules" ] && [ -d "$DIR/node_modules" ]; then
   if owed="$("$HOME/.dotfiles/scripts/npm-owed" "$DIR" 2>/dev/null)"; then
     cyan "clone is behind this branch's package-lock.json ($owed) — npm install in $DIR"
+    heavy_slot
     "$HOME/.dotfiles/scripts/npm-owed" --install "$DIR" >/dev/null \
       || err "npm install failed in $DIR — pages importing the missing packages will 500"
     (cd "$DIR" && git diff --quiet -- package-lock.json 2>/dev/null) \
@@ -563,6 +594,7 @@ done
 if [ ! -L "$DIR/node_modules" ] && [ -f "$DIR/packages/prisma/schema.prisma" ] \
   && ! cmp -s "$DIR/node_modules/.prisma/client/schema.prisma" "$DIR/packages/prisma/schema.prisma"; then
   cyan "Prisma client was generated from a different schema — prisma generate in $DIR"
+  heavy_slot
   (cd "$DIR" && npx prisma generate >>"$SETUP_LOG" 2>&1) \
     || err "prisma generate failed in $DIR — queries will run against a stale client"
 fi
@@ -584,6 +616,8 @@ if [ ! -L "$DIR/node_modules" ]; then
     sharp_loads || err "sharp still fails to load from $DIR/node_modules — rm -rf it to force a full re-clone on the next start"
   fi
 fi
+
+heavy_release
 
 # Auto-pick the first free port (3010-3060) unless one was given.
 if [ -z "$PORT" ]; then
