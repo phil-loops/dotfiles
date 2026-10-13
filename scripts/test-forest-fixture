@@ -553,7 +553,7 @@ def run_checks(repo, shas, only):
 
     if want("fastgit"):
         print("fastgit")
-        from srv import ctx, fastgit, watch
+        from srv import ctx, fastgit, inproc, watch
 
         def raw(*a):
             return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True)
@@ -596,6 +596,15 @@ def run_checks(repo, shas, only):
               ctx.run(["git", "rev-parse", "wip"]).stdout.strip() == shas["b"])
         ctx.run(["git", "branch", "-f", "wip", shas["w"]])
 
+        for a in (["fixture"], ["--node", "child"], ["--projects"], ["--node", "nope"]):
+            cli = subprocess.run([os.path.join(HERE, "stack-forest"), *a], cwd=repo,
+                                 capture_output=True, text=True)
+            ip = inproc.run(os.path.join(HERE, "stack-forest"), a)
+            # roots come out of a set, so their order is per-process hash luck even CLI to CLI
+            norm = lambda out: {**json.loads(out), "roots": sorted(json.loads(out).get("roots", []))} \
+                if out.startswith("{") else json.loads(out)
+            check(f"inproc: stack-forest {' '.join(a)} matches the CLI",
+                  ip.returncode == cli.returncode and norm(ip.stdout) == norm(cli.stdout), ip.stderr[:200])
         git(repo, "worktree", "unlock", wt + "-locked")
         git(repo, "worktree", "remove", "--force", wt + "-locked")
         git(repo, "worktree", "remove", "--force", wt)
