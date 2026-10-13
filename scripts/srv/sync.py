@@ -244,8 +244,26 @@ def state(branch, fresh_prs=False, with_patches=False):
             "deployCritical": _deploy_critical(branch) if behind > 0 else [], "why": why}
 
 
+def state_cached(branch, with_patches=False):
+    """state() for READ-ONLY callers, memoised on everything it reads: the branch's refs,
+    parent, trunk and config (branch_fingerprint, which carries open-PR membership), the gh
+    outage flag, and the dirt of the worktrees holding it. Mutators keep calling state()."""
+    if not branch:
+        return state(branch, with_patches=with_patches)
+    from . import memo, repostate, watch
+
+    def refs_key():
+        snap = repostate.snapshot()
+        return snap.branch_fingerprint(branch), _pr_sweep_failed()
+    rk = refs_key()
+    held = [p for p, attached in watch.holders(branch) if attached]
+    key = ("sync-state", ctx.repo_cwd(), branch, with_patches, rk, watch.dirt_stamp(held))
+    return memo.get(key, lambda: state(branch, with_patches=with_patches),
+                    keep=lambda v: refs_key() == rk)
+
+
 def get_one(req, u):
-    req._send(200, json.dumps(state(parse_qs(u.query).get("branch", [""])[0], with_patches=True)))
+    req._send(200, json.dumps(state_cached(parse_qs(u.query).get("branch", [""])[0], with_patches=True)))
 
 
 def get_many(req, u):
