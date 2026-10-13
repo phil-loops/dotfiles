@@ -1,0 +1,166 @@
+#!/usr/bin/env python3
+"""branch-archive — move dead local branches out of refs/heads, reversibly.
+
+Every reader of refs/heads (the viewer, stack-forest, git itself) pays for every branch in it.
+A branch is dead when it is merged (ancestor of origin/main, its PR merged at this exact tip,
+or every commit patch-equivalent upstream) or stale (no commit in --stale-days, default 30),
+AND it is not checked out anywhere, has no open PR, and is not in a live stack-project.
+
+Archiving moves refs/heads/<b> to refs/archive/<date>/<b> (commits stay reachable) and moves
+its branch.<b>.* / stack-branch.<b>.* config into .git/branch-archive/<date>.config.
+
+  branch-archive                 dry run: list what would move, and why
+  branch-archive --apply         move them
+  branch-archive --restore <b>   bring <b> (its newest archived copy) back, config and all
+  branch-archive --stale-days N  staleness window (0 = archive merged branches only)
+"""
+import argparse
+import datetime
+import json
+import os
+import subprocess
+import sys
+import time
+
+
+def git(*args, check=True, input=None):
+    r = subprocess.run(["git", *args], capture_output=True, text=True, input=input)
+    if check and r.returncode != 0:
+        sys.exit(f"branch-archive: git {' '.join(args)} failed: {r.stderr.strip()}")
+    return r.stdout
+
+
+def common_dir():
+    return git("rev-parse", "--path-format=absolute", "--git-common-dir").strip()
+
+
+def heads():
+    out = git("for-each-ref", "--format=%(refname:short)\t%(objectname)\t%(committerdate:unix)", "refs/heads")
+    return {b: (sha, int(ts)) for b, sha, ts in (ln.split("\t") for ln in out.splitlines())}
+
+
+def checked_out():
+    return {ln[len("branch refs/heads/"):] for ln in git("worktree", "list", "--porcelain").splitlines()
+            if ln.startswith("branch refs/heads/")}
+
+
+def live_project_branches():
+    cfg = git("config", "--get-regexp", r"^stack-project\.", check=False).splitlines()
+    archived = {k[len("stack-project."):-len(".archived")] for k, _, v in (ln.partition(" ") for ln in cfg)
+                if k.endswith(".archived") and v == "true"}
+    return {v for k, _, v in (ln.partition(" ") for ln in cfg)
+            if k.endswith(".branch") and k[len("stack-project."):-len(".branch")] not in archived}
+
+
+def prs(state, limit):
+    r = subprocess.run(["gh", "pr", "list", "--state", state, "--limit", str(limit),
+                        "--json", "headRefName,headRefOid"], capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(f"branch-archive: gh pr list --state {state} failed (fail closed): {r.stderr.strip()}")
+    return json.loads(r.stdout)
+
+
+def all_upstream(branch):
+    out = git("cherry", "origin/main", branch, check=False)
+    return bool(out) and all(ln.startswith("-") for ln in out.splitlines())
+
+
+def classify(stale_days):
+    tips = heads()
+    keep = checked_out() | live_project_branches() | {"main", "master"}
+    keep |= {p["headRefName"] for p in prs("open", 1000)}
+    merged_at = {(p["headRefName"], p["headRefOid"]) for p in prs("merged", 5000)}
+    ancestors = set(git("for-each-ref", "--merged", "origin/main", "--format=%(refname:short)",
+                        "refs/heads").split())
+    cutoff = time.time() - stale_days * 86400
+    out = []
+    for b, (sha, ts) in sorted(tips.items()):
+        if b in keep:
+            continue
+        if b in ancestors:
+            why = "merged"
+        elif (b, sha) in merged_at:
+            why = "pr-merged"
+        elif stale_days and ts < cutoff:
+            why = f"stale {int((time.time() - ts) // 86400)}d"
+        elif all_upstream(b):
+            why = "squash-merged"
+        else:
+            continue
+        out.append((b, sha, why))
+    return out
+
+
+def branch_config(b):
+    pat = "^(branch|stack-branch)\\." + "".join("\\" + c if c in ".^$*+?()[]{}|\\" else c for c in b) + "\\."
+    return [ln.split("\n", 1) for ln in git("config", "-z", "--get-regexp", pat, check=False).split("\0") if ln]
+
+
+def apply(cands):
+    stamp = datetime.date.today().isoformat()
+    cfg_file = os.path.join(common_dir(), "branch-archive", f"{stamp}.config")
+    os.makedirs(os.path.dirname(cfg_file), exist_ok=True)
+    busy = checked_out()
+    moved = 0
+    for b, sha, why in cands:
+        if b in busy:
+            continue
+        r = subprocess.run(["git", "update-ref", "--stdin"], text=True, capture_output=True,
+                           input=f"start\ncreate refs/archive/{stamp}/{b} {sha}\n"
+                                 f"delete refs/heads/{b} {sha}\nprepare\ncommit\n")
+        if r.returncode != 0:
+            print(f"  skipped {b}: {r.stderr.strip()}", file=sys.stderr)
+            continue
+        for key, val in branch_config(b):
+            git("config", "--file", cfg_file, "--add", key, val)
+        for section in (f"branch.{b}", f"stack-branch.{b}"):
+            git("config", "--remove-section", section, check=False)
+        moved += 1
+    print(f"branch-archive: moved {moved} branches to refs/archive/{stamp}/ (config: {cfg_file})")
+
+
+def restore(b):
+    refs = git("for-each-ref", "--sort=-refname", "--format=%(refname) %(objectname)", "refs/archive").splitlines()
+    hit = next((ln.split() for ln in refs if ln.split()[0].split("/", 3)[3:] == [b]), None)
+    if not hit:
+        sys.exit(f"branch-archive: no archived copy of {b}")
+    ref, sha = hit
+    stamp = ref.split("/")[2]
+    git("update-ref", "--stdin", input=f"start\ncreate refs/heads/{b} {sha}\ndelete {ref} {sha}\nprepare\ncommit\n")
+    cfg_file = os.path.join(common_dir(), "branch-archive", f"{stamp}.config")
+    restored = 0
+    if os.path.exists(cfg_file):
+        for key, val in branch_config_from(cfg_file, b):
+            git("config", "--add", key, val)
+            restored += 1
+    print(f"branch-archive: restored {b} at {sha[:10]} from {ref} ({restored} config keys)")
+
+
+def branch_config_from(cfg_file, b):
+    lines = git("config", "--file", cfg_file, "-z", "--list").split("\0")
+    prefixes = (f"branch.{b}.", f"stack-branch.{b}.")
+    return [ln.split("\n", 1) for ln in lines if ln and ln.split("\n", 1)[0].startswith(prefixes)]
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--apply", action="store_true")
+    ap.add_argument("--restore", metavar="BRANCH")
+    ap.add_argument("--stale-days", type=int, default=30)
+    a = ap.parse_args()
+    if a.restore:
+        return restore(a.restore)
+    cands = classify(a.stale_days)
+    if not a.apply:
+        for b, _, why in cands:
+            print(f"  {why:<14} {b}")
+        counts = {}
+        for _, _, why in cands:
+            counts[why.split()[0]] = counts.get(why.split()[0], 0) + 1
+        print(f"branch-archive: {len(cands)} of {len(heads())} branches would move  {counts}  (--apply to move)")
+        return
+    apply(cands)
+
+
+if __name__ == "__main__":
+    main()
