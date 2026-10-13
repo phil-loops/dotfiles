@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, unquote
 
 from srv import ctx
 from . import stackcfg
+from . import watch
 from srv import picker
 from srv import sync
 
@@ -554,6 +555,7 @@ def _rebase_onto(child, parent, cut):
             if update:
                 u = subprocess.run(["git", "update-ref", "--stdin"], input=update,
                                    cwd=ctx.repo_cwd(), capture_output=True, text=True)
+                watch.poke()   # moved a ref outside ctx.run — the next read must re-walk
                 if u.returncode == 0:
                     return True, ""
     try:

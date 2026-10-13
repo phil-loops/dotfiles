@@ -75,9 +75,10 @@ def watched():
 
 
 def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT, repos, log=None):
+    from . import fastgit
     g = globals()
     g["run"], g["ROOT"], g["SCRIPTS"], g["CWD"], g["MAIN_WT"], g["REPOS"] = (
-        run, ROOT, SCRIPTS, CWD, MAIN_WT, repos)
+        fastgit.wrap(run), ROOT, SCRIPTS, CWD, MAIN_WT, repos)
     if log is not None:
         g["log"] = log
 
