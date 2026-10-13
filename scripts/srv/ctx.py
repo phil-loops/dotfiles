@@ -82,7 +82,27 @@ def init(*, run, ROOT, SCRIPTS, CWD, MAIN_WT, repos, log=None):
         g["log"] = log
 
 
+_SIG_MEMO = {}       # repo -> (watch generation, computed at, sig)
+_SIG_SAFETY_AGE = 30.0
+
+
 def model_sig():
+    """model_sig, recomputed only when the stat watcher's generation moved (or every
+    _SIG_SAFETY_AGE seconds as a net) — the pulse asks ~1/s and the extension every 2s, and
+    on an unchanged repo neither needs the two spawns."""
+    import time
+    from . import watch
+    repo = repo_cwd()
+    gen = watch.generation(repo)
+    hit = _SIG_MEMO.get(repo)
+    if hit and hit[0] == gen and time.monotonic() - hit[1] < _SIG_SAFETY_AGE:
+        return hit[2]
+    sig = _model_sig_spawned()
+    _SIG_MEMO[repo] = (gen, time.monotonic(), sig)
+    return sig
+
+
+def _model_sig_spawned():
     # cheap fingerprint of everything the model depends on: ref tips + config +
     # blessing ledger. Changes on re-point, commit, re-parent, or bless. Shared by
     # /model (_mcache), /projects (_pcache), and /sig — hence it lives in ctx.

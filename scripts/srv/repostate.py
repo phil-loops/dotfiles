@@ -13,7 +13,7 @@ import os
 import threading
 import time
 
-from . import ctx
+from . import ctx, watch
 
 _LOCK = threading.Lock()
 _SHADOW_SEEN = set()
@@ -29,7 +29,9 @@ def _shadowed(branch, key, target, legacy):
             f"branch.{branch}.stack-{key}={target!r}, ignoring stack-branch.{branch}.{key}={legacy!r}. "
             "Something wrote the old spelling only; route it through srv/stackcfg.py.")
 _SNAP = {}   # repo cwd -> RepoState
-_MAX_AGE = 2.0   # seconds a snapshot may serve without re-checking its fingerprint (the pulse reads it ~1/s)
+# A snapshot serves as long as the stat watcher's generation hasn't moved; the spawned
+# fingerprint re-check is only the safety net for a change the stat walk can't see.
+_SAFETY_AGE = 30.0
 
 
 class RepoState:
@@ -37,6 +39,7 @@ class RepoState:
         self.fingerprint = hashlib.sha1((refs_raw + "\x1e" + cfg_raw).encode()).hexdigest()
         self.at = time.monotonic()
         self.checked = self.at
+        self.gen = None   # watch.generation() this snapshot was last verified against
         self.sha = {}        # refname -> objectname (refs/heads/x, refs/remotes/origin/x)
         self.upstream = {}   # short branch -> (upstream short, track e.g. "[gone]" / "[ahead 1]" / "")
         for ln in refs_raw.splitlines():
@@ -201,14 +204,16 @@ def _read():
 
 
 def snapshot(fresh_prs=False):
-    """The current RepoState for the request's repo. Re-reads the two inputs at most every
-    _MAX_AGE seconds; a changed fingerprint rebuilds, an unchanged one keeps the memoised
-    walks. Mutating callers pass fresh_prs=True so the open-PR set is live, never stale."""
+    """The current RepoState for the request's repo. Served without a spawn while the stat
+    watcher's generation is unchanged (and the snapshot is under _SAFETY_AGE); otherwise the
+    two inputs are re-read — a changed fingerprint rebuilds, an unchanged one keeps the
+    memoised walks. Mutating callers pass fresh_prs=True so the open-PR set is live."""
     repo = ctx.repo_cwd()
+    gen = watch.generation(repo)
     now = time.monotonic()
     with _LOCK:
         cur = _SNAP.get(repo)
-    if cur and now - cur.checked < _MAX_AGE:
+    if cur and cur.gen == gen and now - cur.checked < _SAFETY_AGE:
         if fresh_prs:
             cur.pr_heads(fresh=True)
         return cur
@@ -222,6 +227,7 @@ def snapshot(fresh_prs=False):
         else:
             snap = RepoState(refs, cfg)
             _SNAP[repo] = snap
+        snap.gen = gen
     if fresh_prs:
         snap.pr_heads(fresh=True)
     return snap
@@ -229,6 +235,7 @@ def snapshot(fresh_prs=False):
 
 def invalidate():
     """A mutation this server made (reword, squash, restack, config write) — drop the snapshot
-    so the next reader rebuilds instead of riding out _MAX_AGE."""
+    so the next reader rebuilds instead of waiting on the watcher's throttle."""
+    watch.poke()
     with _LOCK:
         _SNAP.pop(ctx.repo_cwd(), None)
