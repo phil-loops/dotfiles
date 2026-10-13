@@ -154,6 +154,31 @@ class RepoState:
         parts += [self.sha.get(r, "") for r in sorted(self.sha) if r.startswith("refs/remotes/") and r.endswith(f"/{branch}")]
         return hashlib.sha1("\x1f".join(parts).encode()).hexdigest()
 
+    def ref_any(self, name):
+        """Every tip <name> could resolve to — a local branch, a remote-tracking ref (bare or
+        origin/-prefixed), or a full refname — for keys that must move when any of them does."""
+        if not name:
+            return ()
+        return tuple(self.sha.get(r, "") for r in (f"refs/heads/{name}", f"refs/remotes/{name}",
+                                                    f"refs/remotes/origin/{name}", name))
+
+    def inputs_fingerprint(self, branches, *extra):
+        """Key material for a payload derived from these branches' refs + config blocks, the
+        trunk, and the blessing ledgers. No spawn."""
+        main = self.main()
+        parts = [main, self.ref_any(main), *extra]
+        for b in branches:
+            parts += [b, self.ref_any(b)]
+            parts += [f"{k}={v}" for k, vs in sorted(self.cfg.items())
+                      if k.startswith((f"stack-branch.{b}.", f"branch.{b}.")) for v in vs]
+        parts += [f"{k}={v}" for k, vs in self.cfg.items() if k.startswith("#mtime:") for v in vs]
+        return hashlib.sha1(repr(parts).encode()).hexdigest()
+
+    def remote_tips(self, remote="origin"):
+        """One hash over every refs/remotes/<remote>/* tip — for `--not --remotes=<remote>` walks."""
+        pre = f"refs/remotes/{remote}/"
+        return hashlib.sha1(repr(sorted((r, v) for r, v in self.sha.items() if r.startswith(pre))).encode()).hexdigest()
+
     # ── walks, memoised for the snapshot's life ──────────────────────────
     def count(self, rng, first_parent=False):
         key = ("count", rng, first_parent)

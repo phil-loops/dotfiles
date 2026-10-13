@@ -20,7 +20,7 @@ import hashlib
 import threading
 from urllib.parse import parse_qs
 
-from . import ctx, repostate, shellout, stackcfg, picker
+from . import ctx, memo, repostate, shellout, stackcfg, picker, watch
 
 # (repo, branch) -> {"sig", "branches", "out"} — validated per-FOREST (only its own ref
 # tips + config/ledger mtimes), so an unrelated worktree's commit no longer busts every
@@ -302,6 +302,28 @@ def node(req, u):
     q = parse_qs(u.query)
     branch = q.get("branch", [""])[0]
     base = q.get("base", [""])[0]
+    if branch.startswith("refs/stack/"):   # the ghost integration ref is rebuilt per select
+        return _node_uncached(req, branch, base)
+    # The payload is a pure function of the branch's, its parent's, its requires' and the base's
+    # tips, their config blocks, the blessing ledgers, and the dirt of the worktree holding it —
+    # so that is the key. A hit costs a stat walk plus one `status` per holding worktree.
+    def refs_key():
+        snap = repostate.snapshot()
+        names = [branch, snap.parent(branch), base, *snap.branch_key_all(branch, "requires")]
+        return snap.inputs_fingerprint([n for n in names if n])
+    rk = refs_key()
+    key = ("node", ctx.repo_cwd(), branch, base, rk, watch.dirt_stamp([p for p, _ in watch.holders(branch)]))
+    # a ref that moved mid-build would file the newer payload under the older key
+    code, body = memo.get(key, lambda: _node_build(branch, base),
+                          keep=lambda v: v[0] == 200 and refs_key() == rk)
+    req._send(code, body)
+
+
+def _node_uncached(req, branch, base):
+    req._send(*_node_build(branch, base))
+
+
+def _node_build(branch, base):
     # the ghost ✦<project> node diffs main..refs/stack/<project>-integration — an ephemeral octopus
     # of the project's leaves. Branches move, so rebuild it on select before diffing; stack-forest
     # --node handles the raw ref + --base main exactly like a real node's parent..branch.
@@ -318,8 +340,8 @@ def node(req, u):
     # a "review it all at once" surface — rather than a navigable blank.
     if r.returncode == 0 and not base and _is_convergence(branch, r.stdout):
         r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--node", branch, "--base", "main"])
-    req._send(200 if r.returncode == 0 else 500,
-              r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
+    return (200 if r.returncode == 0 else 500,
+            r.stdout if r.returncode == 0 else json.dumps({"branch": branch, "files": []}))
 
 
 def pr_body(req, u):

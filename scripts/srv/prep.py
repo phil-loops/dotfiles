@@ -8,7 +8,7 @@
 import json
 from urllib.parse import parse_qs
 
-from . import ctx
+from . import ctx, memo, repostate, watch
 from . import push
 from . import sync
 
@@ -41,77 +41,91 @@ def route(req, u):
     #   ready        — every outgoing subject voiced: one commit, or an outline of several
     #                  deliberate ones kept for the reviewer (needsBody flags an empty why)
     branch = (parse_qs(u.query).get("branch", [""]) or [""])[0]
-    if not branch or ctx.run(["git", "rev-parse", "--verify", "--quiet",
-                              f"refs/heads/{branch}"]).returncode != 0:
-        req._send(404, json.dumps({"ok": False, "err": f"no local branch {branch}"}))
+    if not branch:
+        req._send(404, json.dumps({"ok": False, "err": "no local branch "}))
         return
+    req._send(*_route_cached(branch))
+
+
+def _route_cached(branch):
+    # The verdict reads the branch's refs + config, its upstream's and the additive vehicle's
+    # refs, origin's tips (an unpushed branch's outgoing set is `--not --remotes=origin`), the
+    # open-PR set, and the holding worktree's dirt — the key is exactly those. Commit subjects
+    # and bodies are addressed by sha, so they can't change under it.
+    def refs_key():
+        snap = repostate.snapshot()
+        return (snap.branch_fingerprint(branch),
+                snap.inputs_fingerprint([b for b in (snap.track(branch)[0], f"{branch}-additive") if b]),
+                "" if snap.remote(branch) else snap.remote_tips(), sync._pr_sweep_failed())
+    rk = refs_key()
+    held = [p for p, attached in watch.holders(branch) if attached]
+    key = ("prep-route", ctx.repo_cwd(), branch, rk, watch.dirt_stamp(held))
+    return memo.get(key, lambda: _route(branch), keep=lambda v: refs_key() == rk)
+
+
+def _route(branch):
+    if ctx.run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"]).returncode != 0:
+        return 404, json.dumps({"ok": False, "err": f"no local branch {branch}"})
     # SWR open-PR set, not a blocking sweep: this GET only NAMES the next motion, and the
     # endpoints it delegates to (POST /prep, /sync, /diverged-additive) each re-check fresh
     # before rewriting anything. fresh=True here cost two serial `gh pr list` calls on every
     # pulse tick — the node page's long pole.
-    h = sync.state(branch)
+    h = sync.state_cached(branch)
     main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
     up = sync._upstream_state(branch, main)
 
     def send(route_name, why, next_call=None, **extra):
-        req._send(200, json.dumps({"ok": True, "branch": branch, "route": route_name,
-                                   "why": why, "next": next_call, **extra}))
+        return 200, json.dumps({"ok": True, "branch": branch, "route": route_name,
+                                "why": why, "next": next_call, **extra})
 
     # dirt outranks everything: every motion below (additive draft, rebase, squash) needs a
     # clean tree, and a "ready" verdict over uncommitted files lies to the push button.
     if h.get("dirty"):
         n = len(h["dirty"])
-        send("dirty",
+        return send("dirty",
              f"{n} uncommitted file{'s' if n != 1 else ''} in "
              f"{h.get('dirtyWorktree') or 'the holding worktree'} — fold into the outgoing "
              "commit or stash before this branch can be ready",
              {"method": "POST", "path": "/dirty-resolve",
               "body": {"branch": branch, "action": "include | stash"}},
              dirty=h["dirty"], dirtyWorktree=h.get("dirtyWorktree", ""))
-        return
 
     if up.get("diverged") and h.get("published"):
         if up.get("frozenOrigin"):
-            send("frozen-origin",
+            return send("frozen-origin",
                  "origin deliberately frozen — the open PR is the review artifact; "
                  "squash-merge reconciles it, nothing to push")
-            return
         vehicle = f"{branch}-additive"
         if ctx.run(["git", "rev-parse", "--verify", "--quiet",
                     f"refs/heads/{vehicle}"]).returncode == 0:
-            send("push-vehicle",
+            return send("push-vehicle",
                  f"the additive update is drafted on {vehicle} — pushing it fast-forwards the PR",
                  push_cmd=f"git push origin {vehicle}:{branch}", vehicle=vehicle)
-            return
-        send("additive",
+        return send("additive",
              "local diverged from the pushed PR head — draft one commit on top of it "
              "carrying local's content (history preserved, never a force-push)",
              {"method": "POST", "path": "/diverged-additive", "body": {"branch": branch}})
-        return
 
     if h.get("syncable"):
-        send("restack",
+        return send("restack",
              f"{h.get('behind', 0)} behind origin/{main} and safely rebasable "
              "(unpublished root) — restack first so the push carries a current base",
              {"method": "POST", "path": "/sync", "body": {"branch": branch}})
-        return
 
     outgoing = _outgoing(branch)
     if not outgoing:
-        send("nothing", "everything here is already shared with origin", outgoing=None)
-        return
+        return send("nothing", "everything here is already shared with origin", outgoing=None)
     tip = _commit(outgoing[0])
     subjects = [ctx.run(["git", "log", "-1", "--format=%s", sha]).stdout.strip() for sha in outgoing]
     placeholders = [s for s in subjects if push._WIP_SUBJECT.match(s)]
     if placeholders:
-        send("squash",
+        return send("squash",
              f"{len(placeholders)} of {len(outgoing)} unpushed subjects "
              f"{'is a' if len(placeholders) == 1 else 'are'} WIP/fixup placeholder"
              f"{'' if len(placeholders) == 1 else 's'} — collapse the unpushed tail to one voiced commit",
              {"method": "POST", "path": "/prep", "body": {"branch": branch}},
              outgoing={"count": len(outgoing), "tip": tip})
-        return
-    send("ready",
+    return send("ready",
          ("one voiced commit outgoing" if len(outgoing) == 1
           else f"{len(outgoing)} voiced commits outgoing — the branch's outline")
          + ("" if tip["body"] else " — no body (optional; add a why if it helps a reviewer)"),
