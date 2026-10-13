@@ -113,6 +113,33 @@ env PATH=/usr/bin:/bin STACK_OPEN_DIR="$s2" "$SO" --gc 1 >/dev/null 2>&1
 [[ -d "$s2/idle/.next" ]] && ok "no cwd probe means reclaim nothing (fails closed)" \
                           || no "reclaimed with a broken cwd probe (fails OPEN)"
 
+# The count cap: past it, the least-recently-opened go first — but never a tree opened within the
+# hour (one mid-creation is that fresh) and never one holding uncommitted tracked edits.
+s3="$T/cap"; mkdir -p "$s3"
+for w in a b c d e; do git worktree add --detach -q "$s3/$w" HEAD 2>/dev/null; done
+f=$(git -C "$s3/b" ls-files | head -1); print dirt >> "$s3/b/$f"
+touch -t "$(date -v-5H +%Y%m%d%H%M)" "$s3/a"; touch -t "$(date -v-4H +%Y%m%d%H%M)" "$s3/b"
+touch -t "$(date -v-3H +%Y%m%d%H%M)" "$s3/c"; touch -t "$(date -v-2H +%Y%m%d%H%M)" "$s3/d"
+STACK_OPEN_MAX_WORKTREES=3 STACK_OPEN_DIR="$s3" "$SO" --gc 1 --dry-run >/dev/null 2>&1
+yes "--dry-run removes nothing past the cap" "$([[ -d $s3/a && -d $s3/c ]] && print y)"
+STACK_OPEN_MAX_WORKTREES=3 STACK_OPEN_DIR="$s3" "$SO" --gc 1 >/dev/null 2>&1
+[[ -d "$s3/a" ]] && no "the least-recently-opened tree survived the cap" || ok "past the cap, the least-recently-opened tree goes"
+[[ -d "$s3/b" ]] && ok "the cap spares a tree with uncommitted edits" || no "the cap removed uncommitted edits"
+[[ -d "$s3/c" ]] && no "the cap stopped short of the limit" || ok "the cap removes down to the limit"
+yes "the cap keeps the recently opened" "$([[ -d $s3/d && -d $s3/e ]] && print y)"
+
+# Every creating path reaps, not only the editor open — the viewer and gates come through
+# --path/--prepare, and before this only the editor ran the ladder (190 trees past 3d, 2026-10-13).
+s4="$T/reap"; mkdir -p "$s4"
+git worktree add --detach -q "$s4/ancient" HEAD 2>/dev/null; touch -t 202001010000 "$s4/ancient"
+STACK_OPEN_DIR="$s4" STACK_OPEN_NO_GEN_SYNC=1 "$SO" --path "$BRANCH" >/dev/null 2>&1
+for _ in {1..40}; do [[ -d "$s4/ancient" ]] || break; sleep 0.25; done
+[[ -d "$s4/ancient" ]] && no "--path did not reap a years-idle tree" || ok "--path reaps in the background"
+git worktree add --detach -q "$s4/ancient2" HEAD 2>/dev/null; touch -t 202001010000 "$s4/ancient2"
+STACK_OPEN_DIR="$s4" STACK_OPEN_NO_GEN_SYNC=1 "$SO" --path "$BRANCH" >/dev/null 2>&1; sleep 3
+[[ -d "$s4/ancient2" ]] && ok "the reap is throttled (a second open within 30 min skips it)" \
+                       || no "the reap ran again inside the throttle window"
+
 print
 print -r -- ".gen seeding"
 

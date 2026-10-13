@@ -16,8 +16,11 @@
 #   stack-open --gc [<days>] [--dry-run] [--json]  the expiry ladder, with a size report: idle > days
 #                                       (default 1) loses its regenerable weight (a real
 #                                       node_modules goes back to a symlink, .next goes), idle
-#                                       > 3d loses the whole worktree. Runs on every open too,
-#                                       quietly; a dir any live process sits in is never touched.
+#                                       > 3d loses the whole worktree, and past the LRU cap
+#                                       (stack.open-max-worktrees, default 40) the least-recently
+#                                       opened go. Every invocation that can create a tree runs it
+#                                       too, detached and at most every 30 min; a dir any live
+#                                       process sits in is never touched.
 #
 #   stack-open --diff-path <branch>  print the diff-view checkout (see "diff view" below)
 #   stack-open --old-path <branch>   print the parent-side checkout (files = the diff base; read-only)
@@ -294,6 +297,57 @@ prune_old(){ [[ -d "$SCRATCH" ]] || return 0
     git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
   done
   git worktree prune 2>/dev/null || true
+}
+max_worktrees(){   # the LRU cap on this repo's scratch worktrees
+  local n="${STACK_OPEN_MAX_WORKTREES:-$(git config stack.open-max-worktrees 2>/dev/null || true)}"
+  [[ "$n" == <-> && "$n" -gt 0 ]] && print -r -- "$n" || print 40
+}
+cap_lru(){   # [--dry-run] — over the cap, remove least-recently-opened worktrees (ensure_worktree
+             # touches the dir on every open, so dir mtime IS last use). Same guards as prune_old,
+             # plus: never anything opened within the hour (a tree mid-creation is that fresh), never
+             # a tree holding uncommitted tracked edits — removal by count must not eat work.
+  [[ -d "$SCRATCH" ]] || return 0
+  local dry="${1:-}" cap d count=0 over
+  cap=$(max_worktrees)
+  local -a mine
+  mine=("$SCRATCH"/*(N/Om))   # oldest mtime first
+  local -a lru=()
+  for d in "${mine[@]}"; do
+    d="${d%/}"
+    [[ "$d" == *.zombie-* ]] && continue
+    ours "$d" || continue
+    lru+=("$d")
+  done
+  count=${#lru}
+  CAP_OVER=$(( count > cap ? count - cap : 0 )); CAP_REMOVED=0
+  (( count > cap )) || return 0
+  for d in "${lru[@]}"; do
+    (( count > cap )) || break
+    [[ -n "$(find "$d" -maxdepth 0 -mmin -60 2>/dev/null)" ]] && continue
+    in_use "$d" && continue
+    session_recent "$d" 3 && continue
+    [[ -z "$(git -C "$d" status --porcelain --untracked-files=no 2>/dev/null)" ]] || continue
+    if [[ -z "$dry" ]]; then
+      git worktree remove --force "$d" 2>/dev/null || rm -rf "$d"
+    fi
+    count=$(( count - 1 )); CAP_REMOVED=$(( CAP_REMOVED + 1 ))
+  done
+  [[ -n "$dry" ]] || git worktree prune 2>/dev/null || true
+  return 0
+}
+CAP_OVER=0; CAP_REMOVED=0
+reap_bg(){   # every path that can create a scratch tree pays for reaping them — detached, and at
+             # most once per STACK_OPEN_REAP_MINUTES (default 30) per repo, so the viewer's warms
+             # don't each spend lsof's 0.3s. Before 2026-10-13 only the editor open ran the ladder;
+             # the viewer and gates create through --prepare/--path, and 190 trees aged past 3d.
+  [[ -n "${STACK_OPEN_NO_REAP:-}" ]] && return 0
+  mkdir -p "$SCRATCH" 2>/dev/null || return 0
+  local stamp="$SCRATCH/.reaped-${${_common_dir:h}//\//_}"
+  [[ -n "$(find "$stamp" -mmin -"${STACK_OPEN_REAP_MINUTES:-30}" 2>/dev/null)" ]] && return 0
+  touch "$stamp" 2>/dev/null || return 0
+  ( strip_fat 1; prune_old 3; cap_lru
+    [[ -z "${STACK_OPEN_DIR:-}" ]] && SCRATCH=$LEGACY_SCRATCH prune_old 3
+  ) </dev/null >/dev/null 2>&1 &!
 }
 seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without it the tRPC client
               # type COLLAPSES to the "collides with a built-in method" sentinel in the editor.
@@ -835,6 +889,11 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
 }
 
 case "${1:-}" in
+  --prune|--gc|--heal-notify) ;;
+  *) reap_bg;;
+esac
+
+case "${1:-}" in
   --prune)   prune_old "${2:-3}"; echo "pruned scratch worktrees idle > ${2:-3}d"; exit 0;;
   --gc)      # the whole expiry ladder, out loud: shed weight at <days>, remove the long-idle
     gcdays="${2:-1}"; [[ "$gcdays" == --dry-run ]] && gcdays=1
@@ -846,10 +905,12 @@ case "${1:-}" in
     [[ "$gcdays" == --* ]] && gcdays=1
     strip_fat "$gcdays" "$gcdry"
     [[ -n "$gcdry" ]] || prune_old 3
+    cap_lru "$gcdry"
     if [[ -n "$gcjson" ]]; then
       gc_json "$gcdays" "$gcdry"
     else
       gc_report "$gcdays" "$gcdry"
+      (( CAP_OVER > 0 )) && echo "stack-open: $CAP_OVER over the $(max_worktrees)-worktree cap — ${CAP_REMOVED} ${gcdry:+would be }removed least-recently-opened first" >&2
       echo "scratch now $(du -sh "$SCRATCH" 2>/dev/null | cut -f1) in $(ls -d "$SCRATCH"/*/ 2>/dev/null | wc -l | tr -d ' ') worktrees"
     fi
     exit 0;;
@@ -941,9 +1002,6 @@ else
   branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
   rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
   pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
-  # lazy self-clean, two rungs: shed regenerable weight after a day idle, remove the worktree
-  # after three. Drops our pipes so it can't block a piped caller.
-  ( strip_fat 1; prune_old 3; [[ -z "${STACK_OPEN_DIR:-}" ]] && SCRATCH=$LEGACY_SCRATCH prune_old 3 ) >/dev/null 2>&1 &!
   dir=$(hx_worktree "$branch")
 fi
 file="$dir/$rel"
