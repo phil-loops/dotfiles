@@ -551,6 +551,56 @@ def run_checks(repo, shas, only):
         check("reword: refuses a commit origin already holds", r.returncode != 0, r.stdout.strip()[:160])
         check("reword: says why it refused", "pushed" in r.stderr.lower(), r.stderr.strip()[:160])
 
+    if want("fastgit"):
+        print("fastgit")
+        from srv import ctx, fastgit, watch
+
+        def raw(*a):
+            return subprocess.run(["git", *a], cwd=repo, capture_output=True, text=True)
+
+        def same(*a):
+            mine, real = ctx.run(["git", *a]), raw(*a)
+            return (mine.returncode, mine.stdout) == (real.returncode, real.stdout)
+
+        # a criss-cross: two equally good merge bases, where only git may pick the answer
+        tree = git(repo, "rev-parse", f"{shas['b']}^{{tree}}")
+        x1 = git(repo, "commit-tree", tree, "-p", shas["b"], "-m", "x1")
+        y1 = git(repo, "commit-tree", tree, "-p", shas["b"], "-m", "y1")
+        git(repo, "branch", "cc1", git(repo, "commit-tree", tree, "-p", x1, "-p", y1, "-m", "m1"))
+        git(repo, "branch", "cc2", git(repo, "commit-tree", tree, "-p", y1, "-p", x1, "-m", "m2"))
+        watch.poke()
+        names = ["main", "base", "child", "pub", "two", "pubtwo", "wip", "legacy", "cc1", "cc2",
+                 "origin/main", "origin/pub", shas["b"], shas["e"]]
+        bad = [q for x in names for y in names
+               for q in (("merge-base", x, y), ("merge-base", "--is-ancestor", x, y),
+                         ("rev-list", "--count", f"{x}..{y}"), ("rev-parse", "--verify", "-q", x),
+                         ("diff", "--name-only", f"{x}...{y}"), ("log", "-1", "--format=%P", x))
+               if not same(*q)]
+        check("fastgit: graph and pinned answers match git on every pair", not bad, str(bad[:3]))
+        check("fastgit: the graph answered without spawning", fastgit.STATS["graph"] > 0, str(fastgit.STATS))
+        check("fastgit: a criss-cross merge base is left to git", same("merge-base", "cc1", "cc2"))
+        check("fastgit: a missing full refname is a clean miss",
+              same("rev-parse", "--verify", "-q", "refs/heads/no-such-branch"))
+
+        wt = os.path.join(os.path.dirname(repo), "wt-fastgit")
+        git(repo, "worktree", "add", "-q", wt, "two")
+        git(repo, "worktree", "add", "-q", "--detach", wt + "-locked", "base")
+        git(repo, "worktree", "lock", "--reason", "held for a test", wt + "-locked")
+        watch.poke()
+        porcelain = raw("worktree", "list", "--porcelain").stdout
+        check("fastgit: worktree list matches git byte for byte",
+              fastgit.worktree_porcelain() == porcelain, porcelain[:200])
+
+        ctx.run(["git", "branch", "-f", "wip", shas["b"]])
+        check("fastgit: a write through ctx.run is visible to the very next read",
+              ctx.run(["git", "rev-parse", "wip"]).stdout.strip() == shas["b"])
+        ctx.run(["git", "branch", "-f", "wip", shas["w"]])
+
+        git(repo, "worktree", "unlock", wt + "-locked")
+        git(repo, "worktree", "remove", "--force", wt + "-locked")
+        git(repo, "worktree", "remove", "--force", wt)
+        git(repo, "branch", "-D", "cc1", "cc2")
+
     if want("hygiene"):
         print("worktree-hygiene")
         wt = os.path.join(os.path.dirname(repo), "wt-idle")
