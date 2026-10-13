@@ -1,0 +1,4 @@
+#!/usr/bin/env python3
+from srv.gate_queue import main
+
+raise SystemExit(main())
