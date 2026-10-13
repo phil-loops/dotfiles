@@ -36,6 +36,7 @@ _STABLE_SECTIONS = ("core", "diff", "log", "format", "pretty", "color", "i18n", 
 
 
 _NEST = threading.local()
+_INPROC = {"stack-forest", "stack-merge-rank"}   # read-only Python scripts the server runs in-process
 
 
 def wrap(run):
@@ -49,6 +50,10 @@ def wrap(run):
                 _NEST.on = False
             if hit is not None:
                 return hit
+        if args and os.path.dirname(args[0]) == ctx.SCRIPTS and os.path.basename(args[0]) in _INPROC \
+                and timeout is None and os.environ.get("STACK_INPROC", "1") != "0":
+            from . import inproc
+            return inproc.run(args[0], list(args[1:]))   # read-only scripts: no poke needed
         r = run(args, timeout=timeout)
         if not (is_git and _cacheable(args[1:])):
             watch.poke()   # it may have written: the next generation() re-walks instead of reusing
