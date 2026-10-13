@@ -1,0 +1,292 @@
+#!/usr/bin/env python3
+"""heavy-turn — the machine-wide admission queue for heavy work.
+
+One budget of slots (default 2) shared by everything that pegs the machine: typechecks,
+gates steps, node_modules clones, preview setup. Extra callers wait their turn instead of
+stacking — every slow-viewer episode on the 16GB box lined up with two or three of these
+running at once on top of a full swap.
+
+  heavy-turn [--class <name>] [--batch] -- <cmd...>   run <cmd> once a slot is free
+  heavy-turn --acquire [--class <name>] [--batch] --owner <pid>
+                                                     block until a slot is free, hold it
+                                                     for <pid>, print the ticket id
+  heavy-turn --release <ticket>                      give a held slot back
+  heavy-turn --status [--json]                       who holds, who waits
+
+Order: interactive callers (the default) before --batch ones, then first come first served.
+A batch caller never takes a slot while an interactive one is waiting. A class may carry its
+own cap (HEAVY_TURN_CAP_<CLASS>=n, defaults below) so one kind of work can't take the whole
+budget. A holder whose pid is gone is reaped on the next look, so a killed caller can't
+wedge the queue. A command run under a held slot exports HEAVY_TURN_HELD, and a nested
+heavy-turn inside it runs straight through — the outer slot already counts it.
+
+Env: HEAVY_TURN_SLOTS (2), HEAVY_TURN_DIR (/tmp/heavy-turn).
+"""
+import fcntl
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import uuid
+from contextlib import contextmanager
+from pathlib import Path
+
+ROOT = Path(os.environ.get("HEAVY_TURN_DIR", "/tmp/heavy-turn"))
+SLOTS = int(os.environ.get("HEAVY_TURN_SLOTS", "2"))
+CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1}
+POLL = 0.5
+
+
+def cap_of(cls):
+    env = os.environ.get(f"HEAVY_TURN_CAP_{cls.upper().replace('-', '_')}")
+    if env:
+        return int(env)
+    return CLASS_CAPS.get(cls, SLOTS)
+
+
+@contextmanager
+def locked():
+    ROOT.mkdir(parents=True, exist_ok=True)
+    with (ROOT / "lock").open("a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        yield
+
+
+def alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def tickets():
+    """Every live ticket; dead owners' tickets are deleted on sight (caller holds the lock)."""
+    out = []
+    for p in ROOT.glob("*.json"):
+        try:
+            t = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if not alive(t.get("pid")):
+            p.unlink(missing_ok=True)
+            continue
+        t["_path"] = p
+        out.append(t)
+    return out
+
+
+def save(t):
+    p = ROOT / f"{t['id']}.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps({k: v for k, v in t.items() if k != "_path"}))
+    os.replace(tmp, p)
+
+
+def order(t):
+    return (1 if t["batch"] else 0, t["created"])
+
+
+def try_claim(me):
+    """Under the lock: grant <me> a slot if the budget, its class cap, and the queue order allow."""
+    live = tickets()
+    running = [t for t in live if t["state"] == "running"]
+    if len(running) >= SLOTS:
+        return False
+    per_class = {}
+    for t in running:
+        per_class[t["cls"]] = per_class.get(t["cls"], 0) + 1
+    waiting = sorted((t for t in live if t["state"] == "waiting"), key=order)
+    interactive_waiting = any(not t["batch"] and per_class.get(t["cls"], 0) < cap_of(t["cls"])
+                              for t in waiting)
+    free = SLOTS - len(running)
+    # Walk the queue in order, handing out the free slots; a waiter whose class is at its cap
+    # is skipped rather than blocking everyone behind it.
+    for t in waiting:
+        if free <= 0:
+            return False
+        if t["batch"] and interactive_waiting:
+            return False
+        if per_class.get(t["cls"], 0) >= cap_of(t["cls"]):
+            continue
+        if t["id"] == me["id"]:
+            me["state"] = "running"
+            me["granted"] = time.time()
+            save(me)
+            return True
+        per_class[t["cls"]] = per_class.get(t["cls"], 0) + 1
+        free -= 1
+    return False
+
+
+def describe(t, now):
+    since = now - t.get("granted", t["created"] / 1e9)
+    cmd = " ".join(t.get("cmd") or [])[:90]
+    return f"{t['cls']}{' (batch)' if t['batch'] else ''} pid {t['pid']} {int(since)}s  {cmd}"
+
+
+def why_waiting(me):
+    with locked():
+        live = tickets()
+    now = time.time()
+    held = [t for t in live if t["state"] == "running"]
+    ahead = [t for t in live if t["state"] == "waiting" and order(t) < order(me)]
+    lines = [f"heavy-turn: waiting for a slot ({len(held)}/{SLOTS} held"
+             + (f", {len(ahead)} ahead" if ahead else "") + ")"]
+    lines += [f"  held: {describe(t, now)}" for t in held]
+    return "\n".join(lines)
+
+
+def enqueue(cls, batch, pid, cmd):
+    t = {"id": uuid.uuid4().hex[:12], "pid": pid, "cls": cls, "batch": batch,
+         "created": time.time_ns(), "state": "waiting", "cmd": cmd, "cwd": os.getcwd()}
+    with locked():
+        save(t)
+    return t
+
+
+def drop(tid):
+    with locked():
+        (ROOT / f"{tid}.json").unlink(missing_ok=True)
+
+
+def wait_for_slot(t, quiet=False):
+    t0 = time.monotonic()
+    said = -1.0
+    while True:
+        with locked():
+            if try_claim(t):
+                break
+        el = time.monotonic() - t0
+        if not quiet and (said < 0 or el - said >= 30):
+            print(why_waiting(t), file=sys.stderr, flush=True)
+            said = el
+        time.sleep(POLL)
+    el = time.monotonic() - t0
+    if not quiet and said >= 0:
+        print(f"heavy-turn: slot free after {int(el)}s — running", file=sys.stderr, flush=True)
+
+
+def run(cls, batch, cmd):
+    if os.environ.get("HEAVY_TURN_HELD"):
+        return subprocess.call(cmd)
+    t = enqueue(cls, batch, os.getpid(), cmd)
+    child = None
+
+    def stop(signum, _frame):
+        if child is not None and child.poll() is None:
+            child.send_signal(signum)
+        else:
+            drop(t["id"])
+            sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGHUP, stop)
+    try:
+        wait_for_slot(t)
+        env = dict(os.environ, HEAVY_TURN_HELD=t["id"])
+        child = subprocess.Popen(cmd, env=env)
+        while True:
+            try:
+                return child.wait()
+            except KeyboardInterrupt:
+                continue   # the child got the same ^C; wait for it to exit
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        drop(t["id"])
+
+
+def acquire(cls, batch, owner):
+    if os.environ.get("HEAVY_TURN_HELD"):
+        print("nested")
+        return 0
+    t = enqueue(cls, batch, owner, [f"(held by pid {owner})"])
+    try:
+        wait_for_slot(t)
+    except KeyboardInterrupt:
+        drop(t["id"])
+        return 130
+    print(t["id"])
+    return 0
+
+
+def release(tid):
+    if tid and tid != "nested":
+        drop(tid)
+    return 0
+
+
+def status(as_json):
+    with locked():
+        live = tickets()
+    now = time.time()
+    held = sorted((t for t in live if t["state"] == "running"), key=order)
+    waiting = sorted((t for t in live if t["state"] == "waiting"), key=order)
+    if as_json:
+        strip = lambda t: {k: v for k, v in t.items() if k != "_path"}
+        print(json.dumps({"slots": SLOTS, "held": [strip(t) for t in held],
+                          "waiting": [strip(t) for t in waiting]}))
+        return 0
+    print(f"heavy-turn: {len(held)}/{SLOTS} slots held, {len(waiting)} waiting")
+    for t in held:
+        print(f"  held     {describe(t, now)}")
+    for t in waiting:
+        print(f"  waiting  {describe(t, now)}")
+    return 0
+
+
+def main(argv):
+    cls, batch, owner, mode, arg, as_json = "default", False, None, "run", None, False
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--":
+            i += 1
+            break
+        if a == "--class":
+            cls = argv[i + 1]; i += 2
+        elif a == "--batch":
+            batch = True; i += 1
+        elif a == "--owner":
+            owner = int(argv[i + 1]); i += 2
+        elif a == "--acquire":
+            mode = "acquire"; i += 1
+        elif a == "--release":
+            mode, arg = "release", argv[i + 1]; i += 2
+        elif a == "--status":
+            mode = "status"; i += 1
+        elif a == "--json":
+            as_json = True; i += 1
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            return 0
+        elif a.startswith("-"):
+            print(f"heavy-turn: unknown flag {a}", file=sys.stderr)
+            return 2
+        else:
+            break
+    cmd = argv[i:]
+    if mode == "status":
+        return status(as_json)
+    if mode == "release":
+        return release(arg)
+    if mode == "acquire":
+        if owner is None:
+            print("heavy-turn: --acquire needs --owner <pid>", file=sys.stderr)
+            return 2
+        return acquire(cls, batch, owner)
+    if not cmd:
+        print("heavy-turn: no command (heavy-turn [--class c] [--batch] -- <cmd...>)", file=sys.stderr)
+        return 2
+    return run(cls, batch, cmd)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
