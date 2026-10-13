@@ -54,6 +54,21 @@ def run(cmd, cwd):
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
 
 
+# The gates that run full tsc programs (2-3 GB apiece) take a machine-wide heavy-turn slot, so a
+# gates run waits behind a preview's node_modules clone or a shell typecheck instead of stacking
+# on top of it. STACK_GATES_PRIORITY=background (the viewer's ambient pre-gating) queues as batch.
+HEAVY_GATES = {"typecheck", "tests"}
+
+
+def gate_argv(name, cmd):
+    argv = ["bash", "-lc", cmd]
+    turn = os.path.join(os.path.dirname(os.path.abspath(__file__)), "heavy-turn")
+    if name not in HEAVY_GATES or not os.path.exists(turn):
+        return argv
+    batch = ["--batch"] if os.environ.get("STACK_GATES_PRIORITY") == "background" else []
+    return [turn, "--class", "gates", *batch, "--", *argv]
+
+
 def worktree_of(branch, cwd):
     """Path of the worktree holding <branch>, or None if it isn't checked out anywhere."""
     if not branch:
@@ -407,13 +422,13 @@ def main():
     for name, cmd in gates:
         t0 = time.time()
         emit({"event": "start", "gate": name, "ts": t0})
-        r = run(["bash", "-lc", cmd], cwd)
+        r = run(gate_argv(name, cmd), cwd)
         ok = r.returncode == 0
         fixed = False
         # A red gate with a registered fix gets one remediation attempt, then a re-check.
         if not ok and name in fixes:
             run(["bash", "-lc", fixes[name]], cwd)
-            r = run(["bash", "-lc", cmd], cwd)
+            r = run(gate_argv(name, cmd), cwd)
             if r.returncode == 0:
                 ok = True
                 fixed = True
