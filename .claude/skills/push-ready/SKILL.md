@@ -44,6 +44,15 @@ git config --add branch.<b>.stack-review-flag '<file>:<line> — <one-line findi
 git config branch.<b>.stack-review-flags-tree "$(git rev-parse '<b>^{tree}')"
 ```
 
+**CI-parity pass** (loops repo, first push or a new review round): also run the CI review bot's
+own prompt locally, so `john-hankles` has nothing new to say once the PR opens. Read the prompt
+fresh from `git show origin/main:.github/workflows/code-review.yml` (the `pi --print` argument)
+every time — never copy it here, it drifts. Run it as a subagent against `<parent>...<branch>`
+instead of a PR number, honoring its review rules and STE voice but **swapping its OUTPUT,
+RESOLVING and REVIEW STATE sections for this section's**: verified findings fold or flag
+exactly like `code-review`'s, nothing goes to GitHub (spine: local-only). Deduplicate against
+the `code-review` findings before recording.
+
 Record flags AFTER any confirmed fixes land (the fixes move the tree). A clean review still
 writes `review-flags-tree` with zero `review-flag` entries — that's the "reviewed, nothing
 flagged" state. Never let a finding you didn't apply silently vanish: it's either a flag or a
