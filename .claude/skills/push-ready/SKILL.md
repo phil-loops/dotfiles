@@ -29,22 +29,19 @@ gate bounce.
 
 ### 3 · Review — findings folded in before the seal
 
-**Which passes run** — the per-run arg wins, else the project default, else `full`:
+**Which passes run follows from what the diff touches** — one band per branch (forests.md
+*ladder*) makes this clean. Derive it, state it with the reason, never store it:
 
-| mode | `code-review` | CI-parity pass |
-|---|---|---|
-| `full` | ✓ | ✓ (loops repo only) |
-| `code-review` | ✓ | — |
-| `ci-only` | — | ✓ |
-| `off` | — | — |
+| the `parent...branch` diff touches | mode | `code-review` | hankles-prompt pass |
+|---|---|---|---|
+| `queries/`, `models/`, a migration, auth/permission paths | `full` | high | ✓ |
+| wiring, endpoints, jobs, UI | `standard` | medium | ✓ |
+| docs/config only, or a pure move (per-file tree parity) | `light` | low | — |
 
-- Per run: `review=<mode>` ("no review" = `off`), plus `effort=<level>` for `code-review`
-  (medium default).
-- Per project: `git config stack-project.<proj>.review <mode>` (docs/chore forests → `off`,
-  model-heavy forests → `full`). Unset = `full`.
-- Report the mode and its source (arg / project / default) in §6. `off` still records nothing:
-  no `review-flags-tree` is written, so the viewer never shows a review that didn't run as
-  "reviewed, nothing flagged".
+`review=<full|standard|light|off>` overrides for one run only ("no review" = `off`) — nothing
+persists. Overriding the same way repeatedly means the table is wrong: fix the table. `off`
+writes no `review-flags-tree`, so a skipped review never reads as "reviewed, nothing flagged".
+Report the mode + reason (or "override") in §6.
 
 Run the `code-review` skill on the `parent...branch` diff. Findings from either pass split by
 verdict:
@@ -61,14 +58,12 @@ git config --add branch.<b>.stack-review-flag '<file>:<line> — <one-line findi
 git config branch.<b>.stack-review-flags-tree "$(git rev-parse '<b>^{tree}')"
 ```
 
-**CI-parity pass** (loops repo, first push or a new review round): also run the CI review bot's
-own prompt locally, so `john-hankles` has nothing new to say once the PR opens. Read the prompt
-fresh from `git show origin/main:.github/workflows/code-review.yml` (the `pi --print` argument)
-every time — never copy it here, it drifts. Run it as a subagent against `<parent>...<branch>`
-instead of a PR number, honoring its review rules and STE voice but **swapping its OUTPUT,
-RESOLVING and REVIEW STATE sections for this section's**: verified findings fold or flag
-exactly like `code-review`'s, nothing goes to GitHub (spine: local-only). Deduplicate against
-the `code-review` findings before recording.
+**Hankles-prompt pass**: a second lens, run as a subagent against `<parent>...<branch>`, using
+the review prompt the repo's `john-hankles` bot runs — read fresh from
+`git show origin/main:.github/workflows/code-review.yml` (the `pi --print` argument) each time,
+never copied here. Keep its review rules and STE voice; **replace its OUTPUT, RESOLVING and
+REVIEW STATE sections with this section's** — findings fold or flag like `code-review`'s,
+nothing goes to GitHub. Deduplicate across the two passes before recording.
 
 Record flags AFTER any confirmed fixes land (the fixes move the tree). A clean review still
 writes `review-flags-tree` with zero `review-flag` entries — that's the "reviewed, nothing
