@@ -24,6 +24,12 @@ workflow: read → propose → merge-story plan → sign-off → execute, ending
 > merely delete it. **Restates the next line** = delete. Length is not the test — the worst
 > offenders are one-liners, and a slab above an `import` or a `const` was never the JSDoc
 > exemption's to claim.
+> Companion sibling-parity check, per branch that adds a file under `queries/` or `models/`:
+> open its nearest sibling in the same directory and diff the *patterns* — per-mode/per-variant
+> types, error shapes, deps shape, test layout. Each divergence is mirrored, or its reason goes
+> in the implementation note. (2026-10-14, #10987: CI `john-hankles` caught one shared
+> `MetricDifference` across two modes where the sibling reconciliation model declares one type
+> per mode — the absolute mode could carry a `teamId` it never compares.)
 
 ## When to use
 
