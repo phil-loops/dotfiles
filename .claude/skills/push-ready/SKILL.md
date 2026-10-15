@@ -29,8 +29,25 @@ gate bounce.
 
 ### 3 · Review — findings folded in before the seal
 
-Run the `code-review` skill on the `parent...branch` diff, medium effort by default (the user can
-name a level, or say "no review" to skip). Findings split by verdict:
+**Which passes run** — the per-run arg wins, else the project default, else `full`:
+
+| mode | `code-review` | CI-parity pass |
+|---|---|---|
+| `full` | ✓ | ✓ (loops repo only) |
+| `code-review` | ✓ | — |
+| `ci-only` | — | ✓ |
+| `off` | — | — |
+
+- Per run: `review=<mode>` ("no review" = `off`), plus `effort=<level>` for `code-review`
+  (medium default).
+- Per project: `git config stack-project.<proj>.review <mode>` (docs/chore forests → `off`,
+  model-heavy forests → `full`). Unset = `full`.
+- Report the mode and its source (arg / project / default) in §6. `off` still records nothing:
+  no `review-flags-tree` is written, so the viewer never shows a review that didn't run as
+  "reviewed, nothing flagged".
+
+Run the `code-review` skill on the `parent...branch` diff. Findings from either pass split by
+verdict:
 
 - **CONFIRMED** → apply the fix as a NEW commit on the branch (never amend). A fix to code an
   outline commit introduced is `git commit --fixup=<that sha>` (folded in §4); a fix that is its
