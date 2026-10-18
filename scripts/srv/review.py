@@ -226,11 +226,12 @@ def _enrich(raw, branch):
     elif rank_err:
         # the graft is optional (the map still draws without ranks) but the break is not silent
         ctx.log(rank_err["err"])
-    tickets = repostate.snapshot().branch_keys("ticket")
+    snap = repostate.snapshot()
+    tickets = snap.branch_keys("ticket")
     for bid, meta in (data.get("nodes") or {}).items():
         if not isinstance(meta, dict):
             continue
-        desc = ctx.run(["git", "config", f"branch.{bid}.description"]).stdout.strip()
+        desc = snap.get(f"branch.{bid}.description").strip()
         if desc:
             meta["description"] = desc
         if bid in tickets:
