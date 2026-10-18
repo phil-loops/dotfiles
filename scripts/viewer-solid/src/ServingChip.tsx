@@ -59,7 +59,7 @@ export function ServingChip() {
     <Show when={pick()}>
       {(p) => (
         <button
-          class="fixed bottom-3 left-[34px] z-[70] cursor-pointer border-0 bg-transparent p-0 font-mono text-[11px] tracking-[0.02em]"
+          class="fixed bottom-[7px] left-[30px] z-[70] max-w-[calc(100vw-46px)] cursor-pointer truncate rounded-[6px] border border-solid border-rule bg-vellum-night px-[7px] py-[3px] font-mono text-[11px] tracking-[0.02em]"
           classList={{
             "text-del": lying(p()),
             "text-ember": !lying(p()) && clash(p()),

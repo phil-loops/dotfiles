@@ -12,7 +12,7 @@ const ITEM =
 const itemState = (active: boolean) =>
   active ? "border-l-gold-leaf bg-vellum-edge" : "border-l-transparent hover:bg-vellum-edge";
 const NAME =
-  "file-item-name min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] [&_.file-dir]:text-ink-faint";
+  "file-item-name flex min-w-0 flex-1 overflow-hidden whitespace-nowrap text-[12px] [&_.file-dir]:min-w-0 [&_.file-dir]:truncate [&_.file-dir]:text-ink-faint [&_b]:max-w-full [&_b]:flex-none [&_b]:truncate";
 
 // the branch's file list (GitHub-PR-style sidebar): filter box + review rows + a dirt divider.
 // A wide prop surface because it mirrors the review surface's state — clicking a row drives the
