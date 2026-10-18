@@ -212,7 +212,7 @@ export function WorkTab(props: {
           <For each={landedPRs()}>{(p) => workRow(p)}</For>
         </section>
       </Show>
-      <Show when={props.tab() === "work" && !workCount()}>
+      <Show when={props.tab() === "work" && props.prs() !== undefined && props.reviewReqs() !== undefined && !workCount()}>
         <p class="tab-empty px-1 py-[30px] italic text-ink-faint">Nothing waiting on you — no open PRs or review requests.</p>
       </Show>
     </>

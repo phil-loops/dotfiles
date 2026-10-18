@@ -388,22 +388,24 @@ export function Home() {
         </section>
       </Show>
 
-      <NextQueue
-        prs={() => prs.data}
-        projects={() => projects.data}
-        reviewReqs={() => reviewReqs.data}
-        tab={tab}
-        landedRecently={landedRecently}
-      />
+      <Show when={projects.data}>
+        <NextQueue
+          prs={() => prs.data}
+          projects={() => projects.data}
+          reviewReqs={() => reviewReqs.data}
+          tab={tab}
+          landedRecently={landedRecently}
+        />
 
-      <WorkTab
-        prs={() => prs.data}
-        reviewReqs={() => reviewReqs.data}
-        tab={tab}
-        importReview={importReview}
-        forestOf={forestOf}
-        landedRecently={landedRecently}
-      />
+        <WorkTab
+          prs={() => prs.data}
+          reviewReqs={() => reviewReqs.data}
+          tab={tab}
+          importReview={importReview}
+          forestOf={forestOf}
+          landedRecently={landedRecently}
+        />
+      </Show>
 
       <ForestsList
         tab={tab}
