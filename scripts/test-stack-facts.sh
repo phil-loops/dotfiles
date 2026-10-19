@@ -140,5 +140,39 @@ out=$(facts facts quoted 2>&1)
 has "renders an apostrophe rather than dying" "don't let a branch's name break it" "$out"
 
 print -- "
+AFTER EDGES — an open PR floats ahead of unpushed siblings, never ahead of a base it waits on"
+rm -f "$gd/stack-project-merges.json"
+git config --unset-all stack-project.proj.branch 2>/dev/null || true
+# the QUOTING case's `git add -A` swept the stub dir into `quoted`'s history; untrack it there so
+# the branch switches below neither abort on it nor sweep it from the working tree
+git rm -r -q --cached stub && git commit -qm "untrack the stub"
+for b in base other; do
+  git checkout -q main && git checkout -qb "$b"
+  echo "$b" > "$b.txt"; git add "$b.txt"; git commit -qm "feat($b): the $b step"
+  git config "branch.$b.stack-parent" main
+  git config "branch.$b.stack-project" proj
+  git config --add stack-project.proj.branch "$b"
+done
+git checkout -q main && git checkout -qb opened
+echo opened > opened.txt; git add opened.txt; git commit -qm "feat(o): the opened step"
+git config branch.opened.stack-parent main
+git config branch.opened.stack-project proj
+git config --add branch.opened.stack-after base      # deploy order: opened lands after base
+git config --add stack-project.proj.branch opened
+cat > "$stub/gh" <<'EOF'
+#!/bin/sh
+echo '[{"number":77,"state":"OPEN","headRefName":"opened"}]'
+EOF
+cat > "$stub/stack-merge-rank" <<'EOF'
+#!/bin/sh
+echo '{"order":["base","other","opened"]}'
+EOF
+chmod +x "$stub"/gh "$stub"/stack-merge-rank
+p=$(facts plan base)
+has "the base an open PR waits on stays first"          "1. [this branch]"   "$p"
+has "the open PR tells itself right after that base"    "2. #77"             "$p"
+has "an unrelated unpushed sibling still trails the PR" "3. the other step"  "$p"
+
+print -- "
 $pass passed, $fail failed"
 exit $(( fail > 0 ))

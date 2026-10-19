@@ -71,6 +71,24 @@ def requires_of(branch):
             or cfg_all(f"stack-branch.{branch}.requires"))
 
 
+def after_of(branch):
+    return (cfg_all(f"branch.{branch}.stack-after")
+            or cfg_all(f"stack-branch.{branch}.after"))
+
+
+def _waits_on(branch, members):
+    """Every member this branch must land after — its ancestry, its requires and its after
+    edges, followed transitively — so an open PR never tells itself ahead of a base it waits on."""
+    seen, todo = set(), [branch]
+    while todo:
+        b = todo.pop()
+        for d in [parent_of(b)] + requires_of(b) + after_of(b):
+            if d in members and d not in seen:
+                seen.add(d)
+                todo.append(d)
+    return seen
+
+
 def role_of(branch):
     """A branch's forest role. `proof` = a never-merge branch riding alongside its forest
     to prove it works (e2e/smoke artifacts). Set with `stack-proof`."""
@@ -215,10 +233,19 @@ def _plan(branch, project, prs):
             "me": b == branch,
         })
     # a PR already open for review merges before anything still unpushed — new work always
-    # tells itself after the open PRs, whatever the declared branch-list order says
+    # tells itself after the open PRs, whatever the declared branch-list order says — EXCEPT
+    # an unpushed base an open PR waits on (ancestry, requires, after): that base keeps its
+    # rank-order place ahead of the PR, or the plan would tell the hazardous order.
     done = sum(1 for s in plan if s["landed"])
     live = plan[done:]
-    plan = plan[:done] + [s for s in live if s.get("pr")] + [s for s in live if not s.get("pr")]
+    members = {s["branch"] for s in live}
+    held = set()
+    for s in live:
+        if s.get("pr"):
+            held |= _waits_on(s["branch"], members)
+    first = [s for s in live if s.get("pr") or s["branch"] in held]
+    rest = [s for s in live if not (s.get("pr") or s["branch"] in held)]
+    plan = plan[:done] + first + rest
     for i, step in enumerate(plan, 1):
         step["n"] = i
     return plan
