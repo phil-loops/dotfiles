@@ -20,7 +20,19 @@ budget. A holder whose pid is gone is reaped on the next look, so a killed calle
 wedge the queue. A command run under a held slot exports HEAVY_TURN_HELD, and a nested
 heavy-turn inside it runs straight through — the outer slot already counts it.
 
-Env: HEAVY_TURN_SLOTS (2), HEAVY_TURN_DIR (/tmp/heavy-turn).
+The budget shrinks to one slot while the box is under memory pressure (the kernel's
+kern.memorystatus_level, the number `memory_pressure` prints, below HEAVY_TURN_MEM_FLOOR,
+default 30%). The slots exist to keep heavy work out of swap, and two queued 5GB typechecks
+beside an unqueued 4.6GB job still drove it there (2026-10-19: an 18-minute tsc, load 300).
+Running work is never preempted; only admission waits, and one slot always stays open so an
+unqueued hog can't starve the queue forever.
+
+Every finished ticket appends a line to HEAVY_TURN_JOURNAL (~/.cache/heavy-turn/journal.tsv):
+granted, class, pid, wait s, run s, exit, mem %, cwd, cmd — so "who ran that, and how long did
+it take" outlives the process.
+
+Env: HEAVY_TURN_SLOTS (2), HEAVY_TURN_DIR (/tmp/heavy-turn), HEAVY_TURN_MEM_FLOOR (30),
+HEAVY_TURN_JOURNAL, HEAVY_TURN_MEM_LEVEL (forces the measured level; tests).
 """
 import fcntl
 import json
@@ -35,8 +47,48 @@ from pathlib import Path
 
 ROOT = Path(os.environ.get("HEAVY_TURN_DIR", "/tmp/heavy-turn"))
 SLOTS = int(os.environ.get("HEAVY_TURN_SLOTS", "2"))
+MEM_FLOOR = int(os.environ.get("HEAVY_TURN_MEM_FLOOR", "30"))
+JOURNAL = Path(os.environ.get("HEAVY_TURN_JOURNAL",
+                              os.path.expanduser("~/.cache/heavy-turn/journal.tsv")))
 CLASS_CAPS = {"gates": 1, "clone": 1, "preview": 1}
 POLL = 0.5
+
+
+def mem_level():
+    """Free-memory percentage per the kernel's memorystatus; None when it can't be read."""
+    forced = os.environ.get("HEAVY_TURN_MEM_LEVEL")
+    if forced:
+        return int(forced)
+    try:
+        out = subprocess.run(["sysctl", "-n", "kern.memorystatus_level"],
+                             capture_output=True, text=True, timeout=2)
+        return int(out.stdout.strip())
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def budget(level):
+    return 1 if level is not None and level < MEM_FLOOR else SLOTS
+
+
+def pressure_note(level):
+    return f", memory {level}% < {MEM_FLOOR}%: budget 1" if budget(level) < SLOTS else ""
+
+
+def journal(t, status):
+    now = time.time()
+    granted = t.get("granted")
+    created = t["created"] / 1e9
+    row = [time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(granted or now)),
+           t["cls"] + (" batch" if t["batch"] else ""), str(t["pid"]),
+           f"{(granted or now) - created:.0f}", f"{now - granted:.0f}" if granted else "0",
+           str(status), str(t.get("mem", "")), t.get("cwd", ""), " ".join(t.get("cmd") or [])]
+    try:
+        JOURNAL.parent.mkdir(parents=True, exist_ok=True)
+        with JOURNAL.open("a") as f:
+            f.write("\t".join(row) + "\n")
+    except OSError:
+        pass
 
 
 def cap_of(cls):
@@ -75,6 +127,7 @@ def tickets():
         except (OSError, ValueError):
             continue
         if not alive(t.get("pid")):
+            journal(t, "reaped")
             p.unlink(missing_ok=True)
             continue
         t["_path"] = p
@@ -97,7 +150,9 @@ def try_claim(me):
     """Under the lock: grant <me> a slot if the budget, its class cap, and the queue order allow."""
     live = tickets()
     running = [t for t in live if t["state"] == "running"]
-    if len(running) >= SLOTS:
+    level = mem_level()
+    slots = budget(level)
+    if len(running) >= slots:
         return False
     per_class = {}
     for t in running:
@@ -105,7 +160,7 @@ def try_claim(me):
     waiting = sorted((t for t in live if t["state"] == "waiting"), key=order)
     interactive_waiting = any(not t["batch"] and per_class.get(t["cls"], 0) < cap_of(t["cls"])
                               for t in waiting)
-    free = SLOTS - len(running)
+    free = slots - len(running)
     # Walk the queue in order, handing out the free slots; a waiter whose class is at its cap
     # is skipped rather than blocking everyone behind it.
     for t in waiting:
@@ -118,6 +173,7 @@ def try_claim(me):
         if t["id"] == me["id"]:
             me["state"] = "running"
             me["granted"] = time.time()
+            me["mem"] = level
             save(me)
             return True
         per_class[t["cls"]] = per_class.get(t["cls"], 0) + 1
@@ -135,10 +191,11 @@ def why_waiting(me):
     with locked():
         live = tickets()
     now = time.time()
+    level = mem_level()
     held = [t for t in live if t["state"] == "running"]
     ahead = [t for t in live if t["state"] == "waiting" and order(t) < order(me)]
-    lines = [f"heavy-turn: waiting for a slot ({len(held)}/{SLOTS} held"
-             + (f", {len(ahead)} ahead" if ahead else "") + ")"]
+    lines = [f"heavy-turn: waiting for a slot ({len(held)}/{budget(level)} held"
+             + (f", {len(ahead)} ahead" if ahead else "") + pressure_note(level) + ")"]
     lines += [f"  held: {describe(t, now)}" for t in held]
     return "\n".join(lines)
 
@@ -178,11 +235,13 @@ def run(cls, batch, cmd):
         return subprocess.call(cmd)
     t = enqueue(cls, batch, os.getpid(), cmd)
     child = None
+    rc = "signal"
 
     def stop(signum, _frame):
         if child is not None and child.poll() is None:
             child.send_signal(signum)
         else:
+            journal(t, 128 + signum)
             drop(t["id"])
             sys.exit(128 + signum)
 
@@ -194,12 +253,15 @@ def run(cls, batch, cmd):
         child = subprocess.Popen(cmd, env=env)
         while True:
             try:
-                return child.wait()
+                rc = child.wait()
+                return rc
             except KeyboardInterrupt:
                 continue   # the child got the same ^C; wait for it to exit
     except KeyboardInterrupt:
-        return 130
+        rc = 130
+        return rc
     finally:
+        journal(t, rc)
         drop(t["id"])
 
 
@@ -219,6 +281,10 @@ def acquire(cls, batch, owner):
 
 def release(tid):
     if tid and tid != "nested":
+        try:
+            journal(json.loads((ROOT / f"{tid}.json").read_text()), "released")
+        except (OSError, ValueError):
+            pass
         drop(tid)
     return 0
 
@@ -227,14 +293,17 @@ def status(as_json):
     with locked():
         live = tickets()
     now = time.time()
+    level = mem_level()
     held = sorted((t for t in live if t["state"] == "running"), key=order)
     waiting = sorted((t for t in live if t["state"] == "waiting"), key=order)
     if as_json:
         strip = lambda t: {k: v for k, v in t.items() if k != "_path"}
-        print(json.dumps({"slots": SLOTS, "held": [strip(t) for t in held],
+        print(json.dumps({"slots": budget(level), "configured": SLOTS, "mem": level,
+                          "held": [strip(t) for t in held],
                           "waiting": [strip(t) for t in waiting]}))
         return 0
-    print(f"heavy-turn: {len(held)}/{SLOTS} slots held, {len(waiting)} waiting")
+    print(f"heavy-turn: {len(held)}/{budget(level)} slots held, {len(waiting)} waiting"
+          + pressure_note(level))
     for t in held:
         print(f"  held     {describe(t, now)}")
     for t in waiting:

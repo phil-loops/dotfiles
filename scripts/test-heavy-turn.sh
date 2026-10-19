@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # test-heavy-turn.sh — harness for scripts/heavy-turn on a private queue dir.
 # Asserts: the slot budget caps concurrency, class caps hold, a killed holder is reaped,
-# interactive waiters go before batch ones, nested calls pass straight through, and
-# --acquire/--release hold a slot for another pid.
+# interactive waiters go before batch ones, nested calls pass straight through,
+# --acquire/--release hold a slot for another pid, memory pressure shrinks the budget to one,
+# and every finished ticket lands in the journal.
 set -uo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +13,8 @@ HT="$SCRIPTS_DIR/heavy-turn"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/heavy-turn-test.XXXXXX")"
 trap 'kill $(jobs -p) 2>/dev/null; rm -rf "$WORK"' EXIT
 export HEAVY_TURN_DIR="$WORK/q"
+export HEAVY_TURN_JOURNAL="$WORK/journal.tsv"
+export HEAVY_TURN_MEM_LEVEL=90
 unset HEAVY_TURN_HELD
 PASS=0; FAIL=0
 ok()   { PASS=$((PASS+1)); echo "PASS  $1"; }
@@ -115,6 +118,33 @@ wait
 HEAVY_TURN_SLOTS=1 "$HT" -- sh -c 'exit 7'; assert_eq "exit code passes through" 7 "$?"
 out=$("$SCRIPTS_DIR/tsc-turn" sh -c 'echo "$HEAVY_TURN_HELD" | wc -c | tr -d " "' 2>/dev/null)
 [[ "$out" -gt 1 ]] && ok "tsc-turn runs under a heavy-turn slot" || bad "tsc-turn runs under a heavy-turn slot" "$out"
+
+# 10. memory pressure shrinks the budget to one slot; a waiter is told why
+L="$WORK/mem"
+for i in 1 2 3 4; do HEAVY_TURN_SLOTS=2 HEAVY_TURN_MEM_LEVEL=10 "$HT" -- "$WORK/job" "$L" "m$i" 0.3 2>/dev/null & done
+wait
+assert_eq "memory pressure serializes the budget" 1 "$(cat "$L.peak")"
+assert_eq "all four still ran under pressure" 4 "$(wc -l < "$L.order" | tr -d ' ')"
+HEAVY_TURN_SLOTS=2 HEAVY_TURN_MEM_LEVEL=10 "$HT" -- sleep 1 2>/dev/null &
+sleep 0.3
+msg=$(HEAVY_TURN_SLOTS=2 HEAVY_TURN_MEM_LEVEL=10 "$HT" -- true 2>&1 >/dev/null)
+wait
+[[ "$msg" == *"(1/1 held, memory 10% < 30%: budget 1)"* ]] \
+  && ok "waiter names the memory pressure" || bad "waiter names the memory pressure" "$msg"
+st=$(HEAVY_TURN_SLOTS=2 HEAVY_TURN_MEM_LEVEL=10 "$HT" --status)
+[[ "$st" == *"0/1 slots held"*"budget 1"* ]] && ok "status shows the shrunk budget" || bad "status shows the shrunk budget" "$st"
+
+# 11. every finished ticket lands in the journal: class, wait, run, exit, command
+HEAVY_TURN_SLOTS=1 "$HT" --class probe -- sh -c 'sleep 0.2; exit 3' 2>/dev/null
+last=$(tail -1 "$HEAVY_TURN_JOURNAL")
+IFS=$'\t' read -r when cls pid waits runs status mem cwd cmd <<< "$last"
+assert_eq "journal: class" probe "$cls"
+assert_eq "journal: exit status" 3 "$status"
+assert_eq "journal: mem level at grant" 90 "$mem"
+assert_eq "journal: command" "sh -c sleep 0.2; exit 3" "$cmd"
+[[ "$cwd" == "$PWD" ]] && ok "journal: cwd" || bad "journal: cwd" "$cwd"
+n=$(wc -l < "$HEAVY_TURN_JOURNAL" | tr -d ' ')
+(( n >= 25 )) && ok "journal: every earlier ticket was recorded ($n lines)" || bad "journal: every earlier ticket was recorded" "$n lines"
 
 echo "---- $PASS passed, $FAIL failed"
 (( FAIL == 0 ))
