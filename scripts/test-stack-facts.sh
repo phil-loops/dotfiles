@@ -27,7 +27,7 @@ echo one > a.txt; git add -A; git commit -qm "base"
 
 mk() {  # mk <branch> <parent> <subject> <file>
   git checkout -q "$2" && git checkout -qb "$1"
-  echo "$1" > "$4"; git add -A; git commit -qm "$3"
+  echo "$1" > "$4"; git add "$4"; git commit -qm "$3"
   git config "stack-branch.$1.parent" "$2"
   git config "stack-branch.$1.project" proj
   git config --add stack-project.proj.branch "$1"
@@ -122,7 +122,7 @@ QUOTING — an apostrophe in a branch's job must not blow up the generator"
 rm -f "$gd/stack-project-merges.json"
 git config --unset-all stack-project.proj.branch 2>/dev/null || true
 git checkout -q main && git checkout -qb quoted
-echo q > q.txt; git add -A; git commit -qm "fix(q): don't let a branch's name break it"
+echo q > q.txt; git add q.txt; git commit -qm "fix(q): don't let a branch's name break it"
 git config stack-branch.quoted.parent main
 git config stack-branch.quoted.project proj
 # The PROJECT REGISTRY is what makes a branch a plan member — a .project tag on the branch alone
@@ -143,9 +143,6 @@ print -- "
 AFTER EDGES — an open PR floats ahead of unpushed siblings, never ahead of a base it waits on"
 rm -f "$gd/stack-project-merges.json"
 git config --unset-all stack-project.proj.branch 2>/dev/null || true
-# the QUOTING case's `git add -A` swept the stub dir into `quoted`'s history; untrack it there so
-# the branch switches below neither abort on it nor sweep it from the working tree
-git rm -r -q --cached stub && git commit -qm "untrack the stub"
 for b in base other; do
   git checkout -q main && git checkout -qb "$b"
   echo "$b" > "$b.txt"; git add "$b.txt"; git commit -qm "feat($b): the $b step"
