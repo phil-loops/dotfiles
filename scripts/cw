@@ -6,7 +6,7 @@
 #
 # Convention (matches the repo's existing worktrees): tree at <repo>-<name> beside
 # the main checkout, with node_modules + .env symlinked from main so it's instantly
-# runnable. The branch is registered in the forest (stack-branch.<name>.parent=main).
+# runnable. The branch is registered in the forest (branch.<name>.stack-parent=main).
 #
 #   cw <name> [claude args…]   new branch <name> off main, fresh worktree, launch claude
 #                              (launches with --dangerously-skip-permissions, like `hold my beer`)
@@ -38,7 +38,7 @@ elif git -C "$main_top" show-ref --verify --quiet "refs/heads/$name"; then
   git -C "$main_top" worktree add "$wt" "$name" || exit 1          # attach an existing branch
 else
   git -C "$main_top" worktree add "$wt" -b "$name" "$mainbranch" || exit 1   # new branch off main
-  git -C "$wt" config "stack-branch.$name.parent" "$mainbranch"    # register it in the forest
+  git -C "$wt" config "branch.$name.stack-parent" "$mainbranch"    # register it in the forest
 fi
 
 # make the worktree immediately runnable: symlink the heavy / git-ignored bits from
