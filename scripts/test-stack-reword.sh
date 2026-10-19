@@ -95,5 +95,27 @@ assert_eq "T7 reworded" "a4 renamed" "$(git log -1 --format=%s a)"
 assert_eq "T7 stale child untouched" "$OLD_B" "$(git rev-parse b)"
 [[ "$out" == *"b does not sit on a's tip"* ]] && ok "T7 warns" || bad "T7 warns" "$out"
 
+# T8: current config spelling (branch.<b>.stack-parent) — children and grandchildren reseat
+git checkout -qb c main
+echo c1 > c1; git add c1; git commit -qm "c1 subject"
+git config branch.c.stack-parent main
+git checkout -qb d
+echo d1 > d1; git add d1; git commit -qm "d1 subject"
+git config branch.d.stack-parent c
+git checkout -qb e
+echo e1 > e1; git add e1; git commit -qm "e1 subject"
+git config branch.e.stack-parent d
+git config branch.e.stack-base "$(git rev-parse d)"
+git checkout -q main
+D_TREE="$(git rev-parse 'd^{tree}')"; E_TREE="$(git rev-parse 'e^{tree}')"
+"$REWORD" --branch c c -m "c1 renamed" >/dev/null 2>&1; rc=$?
+assert_eq "T8 exit 0" 0 "$rc"
+assert_eq "T8 reworded" "c1 renamed" "$(git log -1 --format=%s c)"
+assert_eq "T8 d on new c tip" "$(git rev-parse c)" "$(git rev-parse d~1)"
+assert_eq "T8 e on new d tip" "$(git rev-parse d)" "$(git rev-parse e~1)"
+assert_eq "T8 d tree unchanged" "$D_TREE" "$(git rev-parse 'd^{tree}')"
+assert_eq "T8 e tree unchanged" "$E_TREE" "$(git rev-parse 'e^{tree}')"
+assert_eq "T8 e base re-pointed" "$(git rev-parse d)" "$(git config branch.e.stack-base)"
+
 echo; echo "pass=$PASS fail=$FAIL"
 [[ $FAIL -eq 0 ]]
