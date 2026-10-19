@@ -16,10 +16,12 @@ worktree's via a symlink (the established worktree-verify pattern). Exit code is
 test run's own (0 pass / non-zero fail); prints the runner's output through.
 """
 import os
+import signal
 import subprocess
 import sys
 
 MAIN = os.environ.get("MAIN_BRANCH", "main")
+TESTS_TIMEOUT_SECONDS = 600
 
 
 def git(args, cwd="."):
@@ -119,11 +121,18 @@ def main():
     tsconfig = "typescript/tsconfig.test.json"
     if not os.path.exists(os.path.join(repo, tsconfig)):
         tsconfig = "tsconfig.node.json"
-    r = subprocess.run(
+    proc = subprocess.Popen(
         [tsx, "--tsconfig", tsconfig, "--test", *tests],
         cwd=repo,
+        start_new_session=True,
     )
-    return r.returncode
+    try:
+        return proc.wait(timeout=TESTS_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        proc.wait()
+        print(f"tests still running after {TESTS_TIMEOUT_SECONDS}s — killed; a test or open handle never settled")
+        return 1
 
 
 if __name__ == "__main__":

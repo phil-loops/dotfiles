@@ -29,6 +29,8 @@ while true; do
     pid=$(cat "$d/pid" 2>/dev/null)
     if [[ -n "${pid:-}" ]] && ! kill -0 "$pid" 2>/dev/null; then
       rm -rf "$d"   # holder died without cleanup — reap so the queue can't wedge
+    elif [[ -z "${pid:-}" && -n "$(find "$d" -maxdepth 0 -mmin +1 2>/dev/null)" ]]; then
+      rm -rf "$d"   # pid never written for a minute — holder died between mkdir and echo
     fi
   done
   (( waited == 0 )) && echo "tsc-turn: all $slots slots busy — waiting" >&2

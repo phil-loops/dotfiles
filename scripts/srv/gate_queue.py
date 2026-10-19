@@ -20,11 +20,22 @@ def locked(root):
         yield
 
 
+ORPHANED_SLOT_GRACE_SECONDS = 30
+
+
 def alive(pid):
     try:
         os.kill(int(pid), 0)
         return True
     except (OSError, ValueError, TypeError):
+        return False
+
+
+def orphaned(slot):
+    """A slot with no pid file whose holder died between mkdir and writing it."""
+    try:
+        return time.time() - slot.stat().st_mtime > ORPHANED_SLOT_GRACE_SECONDS
+    except OSError:
         return False
 
 
@@ -65,8 +76,8 @@ def claim(root, request):
             try:
                 holder = (slot / "pid").read_text().strip()
             except OSError:
-                return None
-            if alive(holder):
+                holder = ""
+            if alive(holder) or (not holder and not orphaned(slot)):
                 return None
             (slot / "pid").unlink(missing_ok=True)
             try:
