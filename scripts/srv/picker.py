@@ -387,11 +387,10 @@ def set_trunk(req, raw):   # POST /trunk {branch, on} — mark/unmark a branch a
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
     on = d.get("on", True)
-    key = f"stack-branch.{branch}.trunk"
     if on:
-        ctx.run(["git", "config", key, "true"])
+        stackcfg.set_key(branch, "trunk", "true")
     else:
-        ctx.run(["git", "config", "--unset", key])
+        stackcfg.unset_key(branch, "trunk")
     req._send(200, json.dumps({"ok": True, "branch": branch, "trunk": bool(on),
                                "summary": f"“{branch}” is {'now the forest trunk — measured against itself, not main' if on else 'no longer the forest trunk'}."}))
 
