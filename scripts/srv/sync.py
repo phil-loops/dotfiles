@@ -1039,8 +1039,8 @@ def diverged_detail(req, u):
 
 
 def force_scope(branch, upstream):
-    """The scoped-force guard sheet: force-with-lease is offered ONLY while the PR is still
-    private review surface — a draft nobody has reviewed or commented on. Recomputed fresh
+    """The scoped-force guard sheet: force-with-lease is offered ONLY while origin's copy is
+    still private review surface — no PR at all, or a draft nobody has reviewed or commented on. Recomputed fresh
     here (one gh call; this endpoint is human-initiated, never polled) and AGAIN inside
     /force-origin — the push never trusts the panel's copy. `lease` is origin's head at
     inspection time; the push passes it to --force-with-lease so git itself refuses if
@@ -1067,12 +1067,16 @@ def force_scope(branch, upstream):
     author = (pr.get("author") or {}).get("login") if pr else None
     def by_others(items):
         return [i for i in items or [] if (i.get("author") or {}).get("login") != author]
+    gates_guard = {"k": "gates", "label": "gates green for this exact tree", "ok": gates_green}
+    if not pr:
+        guards = [{"k": "pr", "label": "no PR on origin — nobody has read it", "ok": True}, gates_guard]
+        return {"eligible": gates_green, "guards": guards, "lease": lease, "prNumber": None, "prUrl": None}
     guards = [
         {"k": "pr", "label": "open PR on origin", "ok": bool(pr)},
         {"k": "draft", "label": "still a draft", "ok": bool(pr and pr.get("isDraft"))},
         {"k": "reviews", "label": "no one else's reviews", "ok": bool(pr) and not by_others(pr.get("reviews"))},
         {"k": "comments", "label": "no one else's comments", "ok": bool(pr) and not by_others(pr.get("comments"))},
-        {"k": "gates", "label": "gates green for this exact tree", "ok": gates_green},
+        gates_guard,
     ]
     return {
         "eligible": all(g["ok"] for g in guards),

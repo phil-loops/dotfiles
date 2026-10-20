@@ -43,6 +43,8 @@ export function usePushDoor(d: {
             commit?: { sha: string; subject: string; body: string } | null;
             review?: { flags: string[] } | null;
             gatesWaived?: string[];
+            replaceable?: boolean;
+            originHead?: string;
           }>,
       ),
     enabled: !!d.branch() && !d.isReview(),
@@ -110,7 +112,18 @@ export function usePushDoor(d: {
     },
     onError: (e) => d.setDone(`✗ ${(e as Error).message || "couldn’t open"}`),
   }));
-  return { preview, pushOrigin, openPr, pushedWeb, outN, outLabel, landing, pushSummary };
+  // origin's copy has no PR and only the ff ward holds the door: replace it outright. The
+  // lease is the origin head this preview read, so git refuses if origin moved since.
+  const replaceOrigin = createMutation(() => ({
+    mutationFn: () =>
+      post<{ ok?: boolean; err?: string }>("/force-origin", { branch: d.branch(), lease: preview.data?.originHead ?? "" }),
+    onSuccess: (r) => {
+      d.refresh();
+      d.setDone(r.ok ? "✓ replaced — origin now carries exactly your local history" : `✗ ${r.err || "replace refused"}`);
+    },
+    onError: (e) => d.setDone(`✗ ${(e as Error).message || "replace failed"}`),
+  }));
+  return { preview, pushOrigin, openPr, replaceOrigin, pushedWeb, outN, outLabel, landing, pushSummary };
 }
 
 export type PushDoorState = ReturnType<typeof usePushDoor>;
@@ -127,7 +140,7 @@ export function PushDoor(props: {
   editorOpen: () => boolean;
   openEditor: (subject: string, body: string) => void;
 }) {
-  const { preview, pushOrigin, openPr, outN, outLabel, landing, pushSummary } = props.door;
+  const { preview, pushOrigin, openPr, replaceOrigin, outN, outLabel, landing, pushSummary } = props.door;
   const isReview = props.isReview;
   const busy = props.busy;
   const armed = props.armed;
@@ -142,7 +155,21 @@ export function PushDoor(props: {
           spine's slot: local motions and the shared-history door never share a control.
           Appears only when a commit is actually outgoing; arms only when the wards are
           green; the server re-verifies everything at push time regardless. */}
-      <Show when={!isReview() && (preview.data?.outgoing ?? 0) > 0}>
+      <Show when={!isReview() && preview.data?.replaceable}>
+        <button
+          class={`nh-fix nh-push-red ${PUSH_RED} ${armed() === "replaceOrigin" ? "armed bg-del text-vellum-night" : "bg-transparent text-del enabled:hover:bg-del-bg"}`}
+          disabled={busy() || replaceOrigin.isPending}
+          title={`origin/${props.branch()} has no PR, so nobody has read it — replace it with your local history (force-with-lease on ${(preview.data?.originHead ?? "").slice(0, 9)}; refuses if origin moved)`}
+          onClick={fire(() => trigger("replaceOrigin", () => replaceOrigin.mutate()))}
+        >
+          {replaceOrigin.isPending
+            ? "replacing…"
+            : armed() === "replaceOrigin"
+              ? `confirm: replace origin/${props.branch()}`
+              : "⚑ replace origin's copy"}
+        </button>
+      </Show>
+      <Show when={!isReview() && !preview.data?.replaceable && (preview.data?.outgoing ?? 0) > 0}>
         <button
           class={`nh-fix nh-push-red ${PUSH_RED} ${armed() === "pushOrigin" ? "armed bg-del text-vellum-night" : "bg-transparent text-del enabled:hover:bg-del-bg"}`}
           disabled={busy() || !preview.data?.ok}
