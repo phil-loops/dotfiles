@@ -543,6 +543,8 @@ def _origin_verdict(branch):
              "no branch description — a forest member without a purpose is an unfinished operation", advisory=True),
         ward("ff", "fast-forward", ff,
              "" if ff else
+             "origin's copy has no PR — ⚑ replace it with your local history (force-with-lease)"
+             if has_remote and not published else
              "restacked onto newer main — prep folds it into a catch-up merge of origin's head (plain push)"
              if has_remote and _is_restack(branch) else
              "diverged from origin — reconcile first; shared history is never overwritten"),
@@ -565,6 +567,10 @@ def _origin_verdict(branch):
              f"resolve them, or ack the ticket: git config --add branch.{branch}.stack-todo-ack '<TICKET> — <why this ships>'"),
     ]
     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
+    # an unpublished copy nobody can have read: the ff ward alone holding the door opens the
+    # replace route (/force-origin re-verifies the no-PR scope with a fresh gh call)
+    blocking = [w["k"] for w in wards if not w["ok"] and not w.get("advisory")]
+    replaceable = not hard and has_remote and not published and blocking == ["ff"]
     return {
         "branch": branch, "originExists": has_remote, "ff": ff, "outgoing": len(outgoing), "wip": len(wip),
         "commits": outgoing[:8], "moreCommits": max(0, n_out - 8), "ageDays": age_days,
@@ -577,6 +583,7 @@ def _origin_verdict(branch):
         "web": _origin_web(branch),
         "published": published,
         "wards": wards, "ok": not reasons, "reasons": reasons,
+        "replaceable": replaceable, "originHead": snap.remote(branch),
         "review": _review_flags(branch),
     }
 
@@ -653,7 +660,7 @@ def force_origin(req, raw):
     """POST /force-origin {branch, lease} — the ONE sanctioned exception to FF-only: replace a
     stacked draft's pushed history so its PR re-acquires base ancestry (squash-merge repos
     force this on every mid-stack edit). Scope is the whole safety story, re-verified here
-    with a fresh gh call — never the panel's copy: the PR must still be a DRAFT with ZERO
+    with a fresh gh call — never the panel's copy: no PR at all, or the PR must still be a DRAFT with ZERO
     reviews and ZERO comments (nobody's read-state gets invalidated), gates green for this
     exact tree, and the client's lease must still be origin's head — then the push itself is
     --force-with-lease, so git refuses if origin moves in the gap. Human finger only, same
