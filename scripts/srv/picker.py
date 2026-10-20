@@ -19,7 +19,7 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import parse_qs
 
-from . import ctx, stackcfg
+from . import ctx, stackcfg, focus
 
 _pcache = {}  # repo-name -> ((content-sig, origin-main-sha), [projects]) — the per-repo fan-out is expensive
 _PROJ_SNAP_V = 5  # projects card shape version — bump when a build adds a field, else the
@@ -530,6 +530,7 @@ def _overlay_live(projs, cfg, green):
         p["interest"] = pos_int(m.get("interest")) or 0
         p["shelved"] = m.get("shelved") == "true"
         p["focus"] = pos_int(m.get("focus"))
+        p["sync"] = focus.badge(p["name"]) if p["focus"] else None
         tier = m.get("tier")
         p["tier"] = tier if tier in ("committed", "trying", "spike") else None
         p["epic"] = m.get("epic") or None

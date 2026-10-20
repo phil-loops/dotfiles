@@ -24,6 +24,7 @@ from srv import stage   # own line: the big srv import above is contested across
 from srv import ship    # own line: same reason
 from srv import prep    # own line: same reason
 from srv import wiki    # own line: same reason
+from srv import focus   # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
@@ -781,5 +782,6 @@ if not os.environ.get("STACK_REVIEW_SUPERVISED"):
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
 threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees
+threading.Thread(target=focus.sync_forever, daemon=True).start()   # focus forests follow origin/main on their own
 threading.Thread(target=pregate.pregate_forever, daemon=True).start()   # current roots pre-gated → the push door is already unlocked (or the red is already parked) on arrival
 httpd.serve_forever()

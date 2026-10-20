@@ -149,6 +149,10 @@ export const Project = z.object({
   interest: z.number().optional(), // promote/demote level (stack-project.<name>.interest) → orders this forest on Home
   shelved: z.boolean().optional(), // deliberately paused (stack-project.<name>.shelved) — out of the active bands until unshelved
   focus: z.number().nullable().optional(), // 1-based focus-lane rank (stack-project.<name>.focus); null/absent = not pinned
+  sync: z
+    .object({ state: z.enum(["conflict", "stuck", "refused"]), why: z.string(), branch: z.string().optional() })
+    .nullable()
+    .optional(), // the server's background focus sync couldn't bring this forest onto main; null = nothing for you to do
   tier: z.enum(["committed", "trying", "spike"]).nullable().optional(), // conviction (stack-project.<name>.tier); null/absent = untriaged
 });
 export type Project = z.infer<typeof Project>;
