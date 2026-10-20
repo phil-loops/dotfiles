@@ -222,6 +222,13 @@ export function FocusLane(props: {
                     {p.repo && p.repo !== "loops" ? <span class="focus-repo mr-[6px] rounded-[2px] border border-solid border-rule px-1 py-px font-mono text-[10px] not-italic text-ink-faint">{p.repo}</span> : null}
                     {p.name}
                   </Link>
+                  <Show when={p.sync}>
+                    {(s) => (
+                      <span class="focus-sync whitespace-nowrap rounded-[3px] border border-solid border-del px-2 py-px font-mono text-[11.5px] text-del" title={s().why}>
+                        {s().state === "conflict" ? "⚠ conflicts with main" : "⚠ couldn't sync"}
+                      </span>
+                    )}
+                  </Show>
                   <Show when={step()}>
                     <span
                       class={`focus-next ml-auto whitespace-nowrap rounded-[3px] border border-solid px-2 py-px font-mono text-[11.5px] ${
