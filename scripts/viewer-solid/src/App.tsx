@@ -112,7 +112,7 @@ function Layout(props: { children?: JSX.Element }) {
   // the pulse's other fingerprint: agents, chat turns, restack drivers + reports, previews.
   // These panels used to run their own 2–15s timers; now one server-side check pushes here.
   const refreshProcs = () => {
-    for (const key of ["processes", "previews", "chat-jobs", "hearth-status", "restack-status", "home-restack-status", "restack-ambient", "restack-merges", "forestmap-restack"]) {
+    for (const key of ["processes", "previews", "chat-jobs", "hearth-status", "restack-status", "home-restack-status", "forestmap-restack"]) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };

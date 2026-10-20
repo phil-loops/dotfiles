@@ -26,7 +26,7 @@ import { PushDoor, usePushDoor } from "./PushDoor";
 import { MessageEditor, useMessageEditor } from "./MessageEditor";
 import RebaseStream from "./RebaseStream";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
-import { conflictWarning, nextStepOf, stationOf, type Station } from "./nodeStation";
+import { nextStepOf, stationOf, type Station } from "./nodeStation";
 import { patchHtml, patchLineCounts } from "./FileRail";
 import { contractionDone } from "./contractResult.ts";
 
@@ -99,7 +99,6 @@ export function NodeActions(props: {
   onReseat?: () => void; // rebase drifted children back onto the parent's tip (App owns the mutation)
   onDetach?: () => void; // unset a footgun tracking ref
   onInspect?: () => void; // toggle the diverged-inspect panel (lives in App below the header)
-  ambient?: { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | null;
   interest?: number; // the forest's Home-ordering interest — drives the ⋯ promote/demote items
   onBump?: (delta: number) => void;
 }) {
@@ -428,7 +427,6 @@ export function NodeActions(props: {
       qc.invalidateQueries({ queryKey: ["commits", props.branch] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
       qc.invalidateQueries({ queryKey: ["model"] });
-      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
       sync.refetch();
       preview.refetch();
     },
@@ -512,7 +510,6 @@ export function NodeActions(props: {
       qc.invalidateQueries({ queryKey: ["model"] });
       qc.invalidateQueries({ queryKey: ["node", props.branch] });
       qc.invalidateQueries({ queryKey: ["forest-health"] });
-      qc.invalidateQueries({ queryKey: ["restack-ambient"] });
     },
     onError: (e) => setDone(`✗ ${(e as Error).message || "contract failed"}`),
   }));
@@ -673,12 +670,10 @@ export function NodeActions(props: {
     }
     const contracting = step.kind === "contract" || step.kind === "contract-parent";
     const dropTarget = step.kind === "contract-parent" ? props.parentGhost! : props.branch;
-    // a predicted collision rides the button that would hit it, not a badge of its own
-    const warning = contracting ? "" : conflictWarning(props.ambient);
     return {
       label: step.label,
       kind: step.kind,
-      title: warning ? `${step.title}\n\n${warning}` : step.title,
+      title: step.title,
       pending: contracting ? contract.isPending : omniSync.isPending,
       onClick: fire(contracting ? () => contract.mutate(dropTarget) : startSync),
     };

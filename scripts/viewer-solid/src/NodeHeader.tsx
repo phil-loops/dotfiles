@@ -82,7 +82,6 @@ export function NodeHeader(props: {
   commitLabel: () => string;
   base: () => string;
   BASES: [string, string][];
-  nodeAmbient: (b: string) => { verdict?: string; behind?: number | null; conflict_pr?: number | null; conflict_title?: string | null } | undefined;
   nodeData: () => NodeData | undefined;
   blessedOf: (f: FileDiff) => boolean;
 }) {
@@ -207,7 +206,6 @@ export function NodeHeader(props: {
                 isReview={props.location().kind === "review"}
                 merged={props.nodeHealth(props.active())?.merged}
                 parentGhost={ghostParentOf(props.nodeHealth, props.active())}
-                ambient={props.nodeAmbient(props.active())}
                 blessing={props.nodeData() ? { total: props.nodeData()!.files.length, blessed: props.nodeData()!.files.filter(props.blessedOf).length } : undefined}
                 health={props.nodeHealth(props.active())}
                 onReseat={() => { const p = props.nodeHealth(props.active())?.parent; if (p) props.reseatChildren.mutate(p); }}

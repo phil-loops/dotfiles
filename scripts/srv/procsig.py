@@ -59,11 +59,6 @@ def sig():
     parts.append(_agents())
     parts.append(_drivers())
     try:
-        gd = restack._gitdir()
-        parts += [_mt(os.path.join(gd, "restack-ambient.json")), _mt(os.path.join(gd, "restack-merges.json"))]
-    except Exception:
-        parts.append("gitdir?")
-    try:
         parts.append(_mt(restack._state_path() or ""))
     except Exception:
         parts.append("state?")

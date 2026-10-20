@@ -1,7 +1,6 @@
 // probe: force the batch-9 cluster-2 gated states — the overview header's armed stage
 // button + stage/ship outcome messages, the fo-warm reading→read cycle, the empty-forest
-// landing (+ interest pips), the home amb-chips (conflict/link, clean + landed-mine,
-// stale + landed-other), the review-import pin + "on viewer ✓", the work-row hover
+// landing (+ interest pips), the review-import pin + "on viewer ✓", the work-row hover
 // action pill (default .action-btn), and the origin-btn hover — png + rects per state
 // so diff.mjs can gate before/after at threshold 0.
 import puppeteer from "puppeteer-core";
@@ -26,29 +25,6 @@ html { scrollbar-width: none !important; }
 mkdirSync(OUT, { recursive: true });
 
 const EMPTY_MODEL = { project: "__b9empty__", roots: [], nodes: {}, mergeOrder: [], interest: 2 };
-const AMBIENT = {
-  conflict: {
-    available: true, tier: "dry-run", age_s: 120,
-    report: {
-      branches: [{ branch: "goals-pg-live-window", parent: "main", behind: 3, verdict: "will-conflict", would_do: "conflict", conflict_pr: 9550, conflict_title: "goals: window store" }],
-      summary: { clean: 4, would_restack: 0, would_contract: 0, will_conflict: 1, skipped: 1 },
-    },
-  },
-  clean: {
-    available: true, tier: "apply", age_s: 60,
-    report: { branches: [], summary: { clean: 6, would_restack: 0, would_contract: 0, will_conflict: 0, skipped: 0 } },
-  },
-  stale: {
-    available: true, tier: "dry-run", age_s: 7200,
-    report: { branches: [], summary: { clean: 6, would_restack: 0, would_contract: 0, will_conflict: 0, skipped: 0 } },
-  },
-};
-const MERGES = {
-  other: { available: true, age_s: 300, prs: [{ number: 9581, title: "fix webhook url", branch: "webhook-url", author: "nalanj", mergedAt: null, mine: false }] },
-  mine: { available: true, age_s: 300, prs: [{ number: 9578, title: "membership queries", branch: "admin-user-membership-queries", author: "phil", mergedAt: null, mine: true }] },
-  none: { available: false },
-};
-const FOREST_BRANCHES = [{ branch: "goals-pg-live-window", project: "goals-pg", parent: "main" }];
 const REVIEW_REQS = [
   { number: 8633, title: "workflow trigger drift repair", author: "nalanj", url: "https://github.com/example/repo/pull/8633", imported: true },
   { number: 8790, title: "csv upload DLQ guard", author: "sam", url: "https://github.com/example/repo/pull/8790", imported: false },
@@ -75,9 +51,6 @@ page.on("request", (req) => {
   const u = new URL(url);
   const json = (body) => req.respond({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   if (u.pathname.endsWith("/model") && u.searchParams.get("branch") === "__b9empty__") return json(EMPTY_MODEL);
-  if (u.pathname.endsWith("/restack-ambient") && mode.ambient) return json(mode.ambient);
-  if (u.pathname.endsWith("/restack-merges") && mode.merges) return json(mode.merges);
-  if (u.pathname.endsWith("/forest-branches") && mode.forestBranches) return json(mode.forestBranches);
   if (u.pathname.endsWith("/review-requests") && mode.reviewReqs) return json(mode.reviewReqs);
   if (u.pathname.endsWith("/stage")) return json({ ok: true, tip: "admin-user-membership-panel", moved: ["a", "b"] });
   if (u.pathname.endsWith("/ship")) return json({ ok: false, err: "refused: dirty worktree on admin-user-membership-models" });
@@ -154,19 +127,6 @@ await freeze();
 await page.waitForSelector(".fo-empty", { timeout: 20000 });
 await settle(1200);
 await snap("c2-fo-empty");
-
-// ── home chips: three ambient variants × landed variants ──
-const chipState = async (name, ambient, merges, forestBranches) => {
-  mode = { ambient, merges, forestBranches };
-  await page.goto(BASE + "/forests", { waitUntil: "domcontentloaded", timeout: 20000 });
-  await freeze();
-  await page.waitForSelector(".amb-chip", { timeout: 20000 });
-  await settle(1500);
-  await snap(name);
-};
-await chipState("c2-chips-conflict", AMBIENT.conflict, MERGES.other, FOREST_BRANCHES); // amb-conflict + amb-link + landed-other
-await chipState("c2-chips-clean", AMBIENT.clean, MERGES.mine, undefined);              // amb-clean + landed-mine
-await chipState("c2-chips-stale", AMBIENT.stale, MERGES.none, undefined);              // amb-stale alone
 
 // ── work tab: review-import pin + "on viewer ✓", then the hover action pill ──
 mode = { reviewReqs: REVIEW_REQS };

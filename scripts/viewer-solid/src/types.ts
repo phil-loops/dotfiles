@@ -231,58 +231,6 @@ export const RestackStatus = z.object({
 });
 export type RestackStatus = z.infer<typeof RestackStatus>;
 
-// The ambient daemon's latest DRY-RUN report (scripts/restack-daemon). available=false
-// means the daemon hasn't run in this repo yet. The summary counts drive the status chip;
-// branches[] carries each verdict for the per-node detail.
-export const RestackAmbientBranch = z.object({
-  branch: z.string(),
-  parent: z.string(),
-  behind: z.number().nullable(),
-  verdict: z.string(), // clean | would-restack | would-contract | will-conflict | skip-* | error
-  would_do: z.string(),
-  conflict_pr: z.number().nullable().optional(), // will-conflict: the merged PR it collides with
-  conflict_title: z.string().nullable().optional(),
-});
-export const RestackAmbient = z.object({
-  available: z.boolean(),
-  tier: z.string().optional(), // the daemon's action tier: dry-run | contract | apply (scripts/restack-daemon)
-  at: z.number().optional(),
-  age_s: z.number().nullable().optional(),
-  trunk_tip: z.string().optional(),
-  report: z.object({
-    branches: z.array(RestackAmbientBranch),
-    summary: z.object({
-      clean: z.number(), would_restack: z.number(), would_contract: z.number(),
-      will_conflict: z.number(), skipped: z.number(),
-    }),
-  }).optional(),
-});
-export type RestackAmbient = z.infer<typeof RestackAmbient>;
-
-// restack-daemon's merge attribution: when the trunk tip moves, which PRs the new
-// commits came from and whether any are the user's own (drives the "just landed" chip).
-export const RestackMerges = z.object({
-  available: z.boolean(),
-  at: z.number().optional(),
-  age_s: z.number().nullable().optional(),
-  from: z.string().optional(),
-  to: z.string().optional(),
-  direct: z.number().optional(),
-  prs: z
-    .array(
-      z.object({
-        number: z.number(),
-        title: z.string().nullable(),
-        branch: z.string().nullable(),
-        author: z.string().nullable(),
-        mergedAt: z.string().nullable(),
-        mine: z.boolean().nullable(),
-      })
-    )
-    .optional(),
-});
-export type RestackMerges = z.infer<typeof RestackMerges>;
-
 export const SyncState = z.object({
   behind: z.number(), // commits on origin/main not yet in this branch
   syncable: z.boolean(), // safe to fast-forward-rebase (else stacked/published)

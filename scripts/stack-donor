@@ -11,8 +11,7 @@
 #   stack-donor --init [<dir>]     create it: a detached worktree at origin/main, seeded by
 #                                  APFS clones of the primary's node_modules and .gen
 #   stack-donor --refresh [<dir>]  move it to origin/main and settle node_modules + generated
-#                                  types; a no-op for a repo with no donor. restack-daemon runs
-#                                  this on every trunk move.
+#                                  types; a no-op for a repo with no donor.
 #
 # The donor is `git config stack.donor` (repo-scoped). Unset or broken → the primary worktree,
 # today's behavior. The primary always answers itself: it keeps its own real node_modules and

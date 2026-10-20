@@ -41,7 +41,7 @@ fi
 # walk merges newest-first; a squash merge whose own diff touches any contested file is a
 # culprit. PR number + title come straight from the subject "Title (#N)". ONE git log for the
 # whole range, streamed: a diff-tree per trunk commit cost 37s on a branch a few thousand
-# commits behind, x170 conflicting branches = most of a 5-hour restack-dryrun pass (2026-10-07),
+# commits behind, x170 conflicting branches = most of a 5-hour all-branch classify pass (2026-10-07),
 # and a caller that only wants the newest (`| head -1`) now stops the walk at the first hit.
 emit=()
 while IFS=$'\t' read -r n title; do
