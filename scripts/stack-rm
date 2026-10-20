@@ -14,6 +14,7 @@
 # worktrees unless --force; prints (does not delete) any stack-project.<n>.memory file.
 
 set -e
+source "${0:A:h}/stack-config-lib.zsh"
 
 DRY_RUN=0
 ASSUME_YES=0
