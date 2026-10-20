@@ -256,7 +256,7 @@ apply_if_safe() {
     logline "apply: $n actionable branch(es) but no stack-project mapping — skipped"; return 0
   fi
   scratch="$(dirname "$(git rev-parse --show-toplevel)")/.loops-restack-wt"
-  if ! git worktree list --porcelain | grep -qx "worktree $scratch"; then
+  if ! has_worktree "$scratch"; then
     git worktree add --detach "$scratch" HEAD >/dev/null 2>&1 \
       || { logline "apply: scratch worktree add failed ($scratch)"; return 0; }
   fi
@@ -376,18 +376,25 @@ contract_ghosts() {
 
 worktree_of() { # $1 = branch → path of the worktree that has it checked out, or empty
   git worktree list --porcelain | awk -v b="refs/heads/$1" '
-    /^worktree /{wt=substr($0,10)} $0=="branch "b{print wt; exit}'
+    /^worktree /{wt=substr($0,10)} $0=="branch "b && !hit{print wt; hit=1}' || true
 }
 
-# A worktree is "in use" when it has uncommitted changes or its index/HEAD moved within the
-# last FOCUS_IDLE_MIN minutes — some session is likely working there, and stack-restack
-# rebases a checked-out branch IN its worktree, which would move files under that session.
-FOCUS_IDLE_MIN="${FOCUS_IDLE_MIN:-60}"
+# A worktree is "in use" when it has uncommitted changes or any process (a claude session, an
+# editor, a shell, a dev server) sits in it — stack-restack rebases a checked-out branch IN its
+# worktree, which would move files under that process. Index/HEAD mtimes can't tell a session's
+# work from this daemon's own last rebase, so they aren't the signal.
+live_cwds=""
+scan_cwds() { live_cwds="$(lsof -a -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | sort -u || true)"; }
 worktree_in_use() { # $1 = worktree path
-  local wt="$1" gdir
+  local wt="$1" c
   [[ -n "$(git -C "$wt" status --porcelain --untracked-files=no 2>/dev/null)" ]] && return 0
-  gdir="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
-  [[ -n "$(find "$gdir/index" "$gdir/HEAD" -mmin "-$FOCUS_IDLE_MIN" 2>/dev/null)" ]]
+  while IFS= read -r c; do
+    [[ "$c" == "$wt" || "$c" == "$wt"/* ]] && return 0
+  done <<< "$live_cwds"
+  return 1
+}
+has_worktree() { # $1 = path; reads the whole list so no early-exit SIGPIPE trips pipefail
+  [[ "$(git worktree list --porcelain | grep -cxF "worktree $1" || true)" != "0" ]]
 }
 
 # GitHub is the authority for "merged": a local already-merged verdict alone has deleted a
@@ -399,16 +406,49 @@ gh_merged() { # $1 = branch
   [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 ))
 }
 
+# A focus forest that conflicted stays out of the ambient pass until one of its branches moves
+# (you resolved it, rebuilt it, or dropped it) — otherwise it re-parks on every merge.
+focus_parked="$gd/restack-focus-parked"
+project_sig() { # $1 = project → its branch tips, one line
+  local b; for b in $(git config --get-all "stack-project.$1.branch" 2>/dev/null || true); do
+    printf '%s=%s ' "$b" "$(git rev-parse -q --verify "refs/heads/$b" 2>/dev/null || echo -)"
+  done
+}
+is_parked() { [[ -f "$focus_parked" ]] && grep -qxF "$1 $(project_sig "$1")" "$focus_parked"; }
+unpark() { [[ -f "$focus_parked" ]] || return 0; grep -v "^$1 " "$focus_parked" > "$focus_parked.tmp" || true; mv "$focus_parked.tmp" "$focus_parked"; }
+
+# stack-restack leaves a conflict paused wherever the rebase ran (the scratch, or the worktree that
+# holds the branch). Ambient runs never leave one behind: abort it and report which branch it was.
+abort_paused() { # $1 = project, $2 = scratch → prints the conflicted branch, if any
+  local wt dir head hit=""
+  for wt in "$2" $(for b in $(git config --get-all "stack-project.$1.branch" 2>/dev/null || true); do worktree_of "$b"; done); do
+    [[ -n "$wt" && -d "$wt" ]] || continue
+    for dir in rebase-merge rebase-apply; do
+      head="$(git -C "$wt" rev-parse --git-path "$dir/head-name" 2>/dev/null || true)"
+      [[ -n "$head" && "$head" != /* ]] && head="$wt/$head"
+      if [[ -f "$head" ]]; then
+        hit="$(sed 's#^refs/heads/##' "$head")"
+        git -C "$wt" rebase --abort >/dev/null 2>&1 || true
+      fi
+    done
+  done
+  ( cd "$2" && "$here/stack-restack" "$1" --abort >/dev/null 2>&1 ) || true
+  git -C "$2" checkout -q --detach >/dev/null 2>&1 || true
+  printf '%s' "$hit"
+}
+
 # --focus: per focus project with an actionable root, check the wards, then run the proven
-# stack-restack (its pre-pass contracts the merged ghosts with correct key spelling).
+# stack-restack one project at a time (its pre-pass contracts the merged ghosts).
 focus_sync() {
   (( focus )) || return 0
   [[ -f "$state" ]] || return 0
-  local projects="" proj b v wt ok reason scratch
+  local projects="" proj b v wt ok reason scratch hit moved=0
   local slots; slots="$(git config --name-only --get-regexp '^stack-project\..*\.focus$' 2>/dev/null \
     | sed 's/^stack-project\.//; s/\.focus$//' || true)"
+  scan_cwds
   for proj in $slots; do
     ok=0; reason=""
+    if is_parked "$proj"; then continue; fi
     for b in $(git config --get-all "stack-project.$proj.branch" 2>/dev/null || true); do
       v="$(jq -r --arg b "$b" '.report.branches[]|select(.branch==$b)|.verdict' "$state" 2>/dev/null || true)"
       case "$v" in
@@ -420,7 +460,7 @@ focus_sync() {
       esac
       wt="$(worktree_of "$b")"
       if [[ -n "$wt" ]] && worktree_in_use "$wt"; then
-        reason="$b is checked out in $wt, which is dirty or active in the last ${FOCUS_IDLE_MIN}m"; break
+        reason="$b is checked out in $wt, which has local changes or a process working in it"; break
       fi
     done
     if [[ -n "$reason" ]]; then logline "focus: $proj left alone — $reason"; continue; fi
@@ -428,15 +468,27 @@ focus_sync() {
   done
   [[ -n "${projects// }" ]] || return 0
   scratch="$(dirname "$(git rev-parse --show-toplevel)")/.loops-restack-wt"
-  if ! git worktree list --porcelain | grep -qx "worktree $scratch"; then
+  if ! has_worktree "$scratch"; then
     git worktree add --detach "$scratch" HEAD >/dev/null 2>&1 \
       || { logline "focus: scratch worktree add failed ($scratch)"; return 0; }
   fi
-  logline "focus: stack-restack-all --no-claude$projects"
-  # shellcheck disable=SC2086  — intentional word-split of space-separated project names
-  ( cd "$scratch" && "$here/stack-restack-all" --no-claude $projects ) >> "$log" 2>&1 \
-    && logline "focus: done" || logline "focus: restack-all nonzero (a conflict parked → badge in the viewer)"
-  reclassify "$1" "$2"
+  if [[ -d "$(git -C "$scratch" rev-parse --absolute-git-dir)/rebase-merge" ]]; then
+    logline "focus: scratch $scratch has a rebase in progress (not ours) — skipped this pass"; return 0
+  fi
+  for proj in $projects; do
+    logline "focus: stack-restack $proj --no-claude"
+    if ( cd "$scratch" && "$here/stack-restack" "$proj" --no-claude ) >> "$log" 2>&1; then
+      unpark "$proj"; logline "focus: $proj synced"
+    else
+      hit="$(abort_paused "$proj" "$scratch")"
+      unpark "$proj"; echo "$proj $(project_sig "$proj")" >> "$focus_parked"
+      logline "focus: $proj conflicted${hit:+ on $hit} — aborted, parked until its branches change"
+      notify "Focus forest needs you: $proj" "${hit:-a branch} conflicts with main — resolve it, then the daemon picks it up again"
+    fi
+    moved=1
+  done
+  (( moved )) && reclassify "$1" "$2"
+  return 0
 }
 
 case "$mode" in

@@ -1,9 +1,12 @@
 #!/bin/sh
-# pre-rebase — drop helix-tsgo-stamp's local override before a rebase needs the file.
-# The stamp rewrites the tracked .helix/languages.toml and hides it with skip-worktree; git
-# still refuses to rebase across a commit that changes it ("local changes would be
-# overwritten"), which is every branch forked before #10330 (2026-09-02). The override is
-# regenerable: post-checkout re-stamps a tree that is still tsserver-pinned afterwards.
-git ls-files -v .helix/languages.toml 2>/dev/null | grep -q '^S' || exit 0
-git update-index --no-skip-worktree .helix/languages.toml && git checkout -q -- .helix/languages.toml
+# pre-rebase — drop the regenerable local overrides that git refuses to rebase across.
+# Both hide a tracked-file edit with skip-worktree, which does not protect it: git still
+# refuses any rebase that crosses a commit changing the file ("local changes would be
+# overwritten"), before replaying a single commit.
+#   .helix/languages.toml — helix-tsgo-stamp (post-checkout re-stamps a tsserver-pinned tree)
+#   next.config.js        — loops-provenance's X-Dev-Worktree header (re-stamped on the next dev start)
+for f in .helix/languages.toml next.config.js; do
+  git ls-files -v "$f" 2>/dev/null | grep -q '^S' || continue
+  git update-index --no-skip-worktree "$f" && git checkout -q -- "$f"
+done
 exit 0

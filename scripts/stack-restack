@@ -63,6 +63,7 @@ CONFLICT_FILE="${GIT_COMMON_DIR}/stack-restack-conflict.json"
 # so a rejected staged fix returns to the exact parked conflict. Cleared with the artifact.
 SNAPSHOT_FILE="${GIT_COMMON_DIR}/stack-restack-conflict-snapshot"
 SELF_DIR="${0:A:h}"   # script dir, captured at top level ($0 inside a zsh function is the function name, not the script)
+source "$SELF_DIR/stack-config-lib.zsh"
 
 usage() {
   cat >&2 <<EOF
