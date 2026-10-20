@@ -17,6 +17,10 @@ set -euo pipefail
 #                                  no rebase → nothing can conflict, no working tree touched),
 #                                  leaving the children's rebase-forward PARKED as would-restack
 #                                  for a human's ▸ ready button. The middle tier: dry-run < contract < apply.
+#   restack-daemon --focus         scope to focus-slotted projects only (stack-project.<p>.focus):
+#                                  a seconds-long classify, then contract GitHub-MERGED ghosts and
+#                                  rebase the clean forests (--no-claude, local refs, no prep/squash),
+#                                  skipping any forest a dirty or recently-active worktree holds
 #   restack-daemon --once          single pass (cron / manual refresh), then exit
 #   restack-daemon --interval N    seconds between trunk polls (default 60)
 #   restack-daemon --status        print the current state file and exit
@@ -47,6 +51,7 @@ MAIN="$(git config stack.main-branch 2>/dev/null || echo main)"
 interval=60
 mode="loop"
 apply=0   # opt-in: --apply auto-runs the (proven, local-only, conflict-parking) restack
+focus=0     # opt-in: --focus scopes classify + action to focus projects
 contract=0  # opt-in: --contract auto-drops merged ghosts only (metadata, no rebase); < --apply
 [[ -x "$dryrun" ]] || { echo "restack-daemon: restack-dryrun not found next to this script" >&2; exit 2; }
 
@@ -59,6 +64,7 @@ while (( $# )); do
     uninstall)  mode="uninstall"; shift ;;
     --apply)    apply=1; shift ;;
     --contract) contract=1; shift ;;
+    --focus)    focus=1; shift ;;
     --interval) interval="${2:-}"; shift 2 ;;
     -h|--help)  sed -n '3,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "restack-daemon: unknown arg $1" >&2; exit 2 ;;
@@ -73,7 +79,8 @@ pidf="$gd/restack-ambient.pid"
 
 # one human-readable tier label, reused by install / status / start-log. --apply is the
 # superset (it contracts too), so it wins the label even when --contract is also passed.
-if   (( apply ));    then tier="apply";    mode_desc="APPLY — auto-restacks clean cases, parks conflicts"
+if   (( focus ));    then tier="focus";    mode_desc="FOCUS — syncs focus forests: contracts GitHub-merged ghosts, rebases clean forests, parks conflicts"
+elif (( apply ));    then tier="apply";    mode_desc="APPLY — auto-restacks clean cases, parks conflicts"
 elif (( contract )); then tier="contract"; mode_desc="CONTRACT — auto-drops merged ghosts, parks rebases"
 else                      tier="dry-run";  mode_desc="DRY-RUN — moves nothing"
 fi
@@ -192,8 +199,14 @@ refresh_local_main() {
   [[ -n "$cur" && -n "$tip" && "$cur" != "$tip" ]] || return 0
   if git branch -f "$MAIN" "$tip" >/dev/null 2>&1; then
     logline "local $MAIN refreshed ${cur:0:9} → ${tip:0:9}"
+    return 0
+  fi
+  local wt; wt="$(worktree_of "$MAIN")"
+  if [[ -n "$wt" && -z "$(git -C "$wt" status --porcelain --untracked-files=no 2>/dev/null)" ]] \
+     && git -C "$wt" merge --ff-only -q "$tip" >/dev/null 2>&1; then
+    logline "local $MAIN fast-forwarded in $wt ${cur:0:9} → ${tip:0:9}"
   else
-    logline "local $MAIN stale (${cur:0:9} → ${tip:0:9}) but checked out — left alone"
+    logline "local $MAIN stale (${cur:0:9} → ${tip:0:9}) — checked out in ${wt:-?} with local changes, left alone"
   fi
 }
 
@@ -205,7 +218,8 @@ child=""   # pid of the in-flight restack-dryrun, so --stop can kill a slow --de
 # can't stop mid-pass is worse than no daemon — the TERM trap kills $child.
 reclassify() {
   local pid="$1" reportf="$state.report.$$" tmp rc
-  "$dryrun" --no-fetch --json > "$reportf" 2>/dev/null &
+  local scope=""; (( focus )) && scope="--focus"
+  "$dryrun" --no-fetch --json $scope > "$reportf" 2>/dev/null &
   child=$!
   set +e; wait "$child"; rc=$?; set -e
   child=""
@@ -360,6 +374,71 @@ contract_ghosts() {
   return 0
 }
 
+worktree_of() { # $1 = branch → path of the worktree that has it checked out, or empty
+  git worktree list --porcelain | awk -v b="refs/heads/$1" '
+    /^worktree /{wt=substr($0,10)} $0=="branch "b{print wt; exit}'
+}
+
+# A worktree is "in use" when it has uncommitted changes or its index/HEAD moved within the
+# last FOCUS_IDLE_MIN minutes — some session is likely working there, and stack-restack
+# rebases a checked-out branch IN its worktree, which would move files under that session.
+FOCUS_IDLE_MIN="${FOCUS_IDLE_MIN:-60}"
+worktree_in_use() { # $1 = worktree path
+  local wt="$1" gdir
+  [[ -n "$(git -C "$wt" status --porcelain --untracked-files=no 2>/dev/null)" ]] && return 0
+  gdir="$(git -C "$wt" rev-parse --absolute-git-dir 2>/dev/null)" || return 0
+  [[ -n "$(find "$gdir/index" "$gdir/HEAD" -mmin "-$FOCUS_IDLE_MIN" 2>/dev/null)" ]]
+}
+
+# GitHub is the authority for "merged": a local already-merged verdict alone has deleted a
+# branch with an open, approved PR before. Contract only when GitHub agrees.
+gh_merged() { # $1 = branch
+  local slug n
+  slug="$(git remote get-url origin 2>/dev/null | sed -E 's#^(git@github\.com:|https://github\.com/)##; s#\.git$##')"
+  n="$(gh pr list --repo "$slug" --state merged --head "$1" --json number --jq 'length' 2>/dev/null || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] && (( n > 0 ))
+}
+
+# --focus: per focus project with an actionable root, check the wards, then run the proven
+# stack-restack (its pre-pass contracts the merged ghosts with correct key spelling).
+focus_sync() {
+  (( focus )) || return 0
+  [[ -f "$state" ]] || return 0
+  local projects="" proj b v wt ok reason scratch
+  local slots; slots="$(git config --name-only --get-regexp '^stack-project\..*\.focus$' 2>/dev/null \
+    | sed 's/^stack-project\.//; s/\.focus$//' || true)"
+  for proj in $slots; do
+    ok=0; reason=""
+    for b in $(git config --get-all "stack-project.$proj.branch" 2>/dev/null || true); do
+      v="$(jq -r --arg b "$b" '.report.branches[]|select(.branch==$b)|.verdict' "$state" 2>/dev/null || true)"
+      case "$v" in
+        would-restack) ok=1 ;;
+        would-contract)
+          if gh_merged "$b"; then ok=1
+          else reason="$b reads already-merged locally but GitHub has no merged PR for it"; break; fi ;;
+        will-conflict) reason="$b will conflict — needs you"; break ;;
+      esac
+      wt="$(worktree_of "$b")"
+      if [[ -n "$wt" ]] && worktree_in_use "$wt"; then
+        reason="$b is checked out in $wt, which is dirty or active in the last ${FOCUS_IDLE_MIN}m"; break
+      fi
+    done
+    if [[ -n "$reason" ]]; then logline "focus: $proj left alone — $reason"; continue; fi
+    (( ok )) && projects="$projects $proj"
+  done
+  [[ -n "${projects// }" ]] || return 0
+  scratch="$(dirname "$(git rev-parse --show-toplevel)")/.loops-restack-wt"
+  if ! git worktree list --porcelain | grep -qx "worktree $scratch"; then
+    git worktree add --detach "$scratch" HEAD >/dev/null 2>&1 \
+      || { logline "focus: scratch worktree add failed ($scratch)"; return 0; }
+  fi
+  logline "focus: stack-restack-all --no-claude$projects"
+  # shellcheck disable=SC2086  — intentional word-split of space-separated project names
+  ( cd "$scratch" && "$here/stack-restack-all" --no-claude $projects ) >> "$log" 2>&1 \
+    && logline "focus: done" || logline "focus: restack-all nonzero (a conflict parked → badge in the viewer)"
+  reclassify "$1" "$2"
+}
+
 case "$mode" in
   status)
     [[ -f "$state" ]] && cat "$state" || { echo "restack-daemon: no state yet ($state)"; exit 1; }
@@ -378,12 +457,14 @@ case "$mode" in
     [[ -n "$prev_tip" && -n "$tip" ]] && attribute_merges "$prev_tip" "$tip"
     refresh_local_main "$tip"
     reclassify "" "$tip"
-    if (( apply )); then
+    if (( focus )); then
+      focus_sync "" "$tip"
+    elif (( apply )); then
       apply_if_safe "" "$tip"
     elif (( contract )); then
       contract_ghosts; (( contracted_n )) && reclassify "" "$tip"
     fi
-    echo "restack-daemon: single $( (( apply )) && echo apply || { (( contract )) && echo contract || echo dry-run; } ) pass written → $state"
+    echo "restack-daemon: single $( (( focus )) && echo focus || { (( apply )) && echo apply || { (( contract )) && echo contract || echo dry-run; }; } ) pass written → $state"
     exit 0 ;;
   install)
     # gate the deploy: launchd will run us under /bin/bash (3.2), where a bash-4 construct is a
@@ -397,6 +478,7 @@ case "$mode" in
     self="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     applyarg=""; (( apply )) && applyarg="<string>--apply</string>"
     contractarg=""; (( contract )) && contractarg="<string>--contract</string>"
+    focusarg=""; (( focus )) && focusarg="<string>--focus</string>"
     mkdir -p "$(dirname "$plist")"
     # KeepAlive restarts it if it dies; WorkingDirectory pins the watched repo (origin/main +
     # forest config are per-repo). Stop = uninstall (KeepAlive would relaunch a --stop'd one).
@@ -407,14 +489,12 @@ case "$mode" in
 <dict>
   <key>Label</key><string>$label</string>
   <key>ProgramArguments</key>
-  <array><string>/bin/bash</string><string>$self</string><string>--interval</string><string>$interval</string>$applyarg$contractarg</array>
+  <array><string>/bin/bash</string><string>$self</string><string>--interval</string><string>$interval</string>$applyarg$contractarg$focusarg</array>
   <key>WorkingDirectory</key><string>$repo</string>
   <key>EnvironmentVariables</key>
   <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>Nice</key><integer>10</integer>
-  <key>ProcessType</key><string>Background</string>
   <key>StandardOutPath</key><string>$gd/restack-ambient.agent.out.log</string>
   <key>StandardErrorPath</key><string>$gd/restack-ambient.agent.err.log</string>
 </dict>
@@ -476,7 +556,8 @@ while (( running )); do
     refresh_local_main "$tip"
     if reclassify "$$" "$tip"; then
       last_tip="$tip"
-      if (( apply )); then apply_if_safe "$$" "$tip"
+      if (( focus )); then focus_sync "$$" "$tip"
+      elif (( apply )); then apply_if_safe "$$" "$tip"
       elif (( contract )); then contract_ghosts; (( contracted_n )) && reclassify "$$" "$tip"; fi
     fi
   fi
