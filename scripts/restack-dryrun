@@ -11,6 +11,7 @@ set -euo pipefail
 #   restack-dryrun            fetch origin/main, classify every forest branch, report
 #   restack-dryrun --no-fetch use the local origin/main as-is (no network)
 #   restack-dryrun --json     emit a machine-readable report (for the daemon / viewer)
+#   restack-dryrun --focus    classify only branches of focus-slotted projects (stack-project.<p>.focus)
 #   restack-dryrun --deep-all trial-rebase EVERY branch (slow, fully definitive) instead of
 #                             the default two-tier (fast classify; --deep only the overlap ones)
 #
@@ -27,6 +28,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 classify="$here/rebase-classify"
 MAIN="$(git config stack.main-branch 2>/dev/null || echo main)"
 fetch=1
+focus=0
 json=0
 deep_all=0
 for a in "$@"; do
@@ -34,6 +36,7 @@ for a in "$@"; do
     --no-fetch) fetch=0 ;;
     --json)     json=1 ;;
     --deep-all) deep_all=1 ;;
+    --focus)    focus=1 ;;
     -h|--help)  sed -n '3,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "restack-dryrun: unknown arg $a" >&2; exit 2 ;;
   esac
@@ -62,6 +65,14 @@ branches="$(
     git config --get-regexp '^stack-project\..*\.branch$' 2>/dev/null | awk '{print $2}' || true
   } | sort -u
 )"
+if (( focus )); then
+  focus_branches="$(
+    git config --name-only --get-regexp '^stack-project\..*\.focus$' 2>/dev/null \
+      | sed 's/^stack-project\.//; s/\.focus$//' \
+      | while IFS= read -r p; do git config --get-all "stack-project.$p.branch" 2>/dev/null || true; done | sort -u
+  )"
+  branches="$(comm -12 <(printf '%s\n' "$branches") <(printf '%s\n' "$focus_branches") | sed '/^$/d')"
+fi
 if [[ -z "$branches" ]]; then
   if (( json )); then
     jq -n --arg trunk "$trunk" --arg tip "$trunk_tip" \
