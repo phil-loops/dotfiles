@@ -1041,7 +1041,7 @@ try_contracted_resolve() {
 
 # ---------- the rebase loop ----------
 
-# House rule (same as restack-dryrun's skip-open-pr): an open PR's history is published —
+# House rule: an open PR's history is published —
 # reviewers and CI are reading it, so rewriting it here diverges the pushed head and forces
 # a force-push. Routine restacks leave PR'd branches alone (pushed-but-no-PR stays free
 # game per the 2026-06-30 rule); rewriting one is deliberate via STACK_RESTACK_REWRITE_PUBLISHED=1.

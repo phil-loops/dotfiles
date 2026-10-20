@@ -221,29 +221,6 @@ async function runShip(project: string, qc: ReturnType<typeof useQueryClient>): 
   return r;
 }
 
-// What /ship would actually do here, off the daemon's ambient classification (shared cache with
-// Home's chip). null = the daemon can't say — callers treat that as "assume there's work", so a
-// verb never vanishes just because the classification is missing.
-function useShipPlan(project: () => string) {
-  const shipAmbient = createQuery(() => ({
-    queryKey: ["restack-ambient"], queryFn: () => provider.restackAmbient(),
-  }));
-  const shipForestBranches = createQuery(() => ({
-    queryKey: ["forest-branches"], queryFn: () => provider.forestBranches(),
-  }));
-  return () => {
-    const a = shipAmbient.data;
-    if (!a?.available || !a.report) return null;
-    const inProj = new Set((shipForestBranches.data || []).filter((fb) => fb.project === project()).map((fb) => fb.branch));
-    const b = a.report.branches.filter((x) => inProj.has(x.branch));
-    return {
-      contract: b.filter((x) => x.verdict === "would-contract").length,
-      rebase: b.filter((x) => x.verdict === "would-restack").length,
-      conflict: b.filter((x) => x.verdict === "will-conflict").length,
-    };
-  };
-}
-
 // The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
 // restacks every survivor onto fresh origin/main (trees included), and reports the push
 // order. Prep/push stay per-node so the outgoing commit message remains editable.
@@ -252,19 +229,6 @@ function ShipButton(props: { project: string }) {
   const [armed, setArmed] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   let disarm: ReturnType<typeof setTimeout>;
-  const shipPlan = useShipPlan(() => props.project);
-  // the confirm step previews exactly what it'll do (drop merged ghosts, rebase the rest)
-  // rather than firing blind.
-  const preview = () => {
-    const p = shipPlan();
-    return p && (p.contract || p.rebase || p.conflict) ? p : null;
-  };
-  const confirmLabel = () => {
-    const p = preview();
-    if (!p) return "confirm: contract + restack";
-    const parts = [p.contract && `drop ${p.contract}`, p.rebase && `rebase ${p.rebase}`].filter(Boolean);
-    return `confirm: ${parts.join(" · ") || "restack"}`;
-  };
   const fire = async () => {
     if (!armed()) {
       setArmed(true);
@@ -287,13 +251,8 @@ function ShipButton(props: { project: string }) {
         title="ready to ship — drop any member that already merged (rewiring its children), restack the whole forest onto fresh origin/main, then list what to push in order. Refuses if a member has an open PR or a dirty worktree; a conflict restores everything."
         onClick={fire}
       >
-        {busy() ? "readying…" : armed() ? confirmLabel() : "▸ ready"}
+        {busy() ? "readying…" : armed() ? "confirm: contract + restack" : "▸ ready"}
       </button>
-      <Show when={armed() && (preview()?.conflict ?? 0) > 0}>
-        <span class={`${FO_STAGE_MSG} bad text-del`} title="a conflicting rebase restores every branch to where it was — nothing is left half-done">
-          ⚠ {preview()!.conflict} may conflict
-        </span>
-      </Show>
       <Show when={shipMsg()}>
         <span class={`${FO_STAGE_MSG} ${shipMsg()!.bad ? "text-del" : "text-ink-dim"}`} classList={{ bad: !!shipMsg()!.bad }}>{shipMsg()!.text}</span>
       </Show>

@@ -228,13 +228,6 @@ export function NodeDetail() {
     refetchOnWindowFocus: true,
   }));
   const nodeHealth = (b: string) => health.data?.[b];
-  // the ambient daemon's per-branch dry-run verdict (shared cache with Home's chip) — surfaces
-  // "would restack" / "conflicts with #PR" on the node you're actually looking at.
-  const ambient = createQuery(() => ({
-    queryKey: ["restack-ambient"],
-    queryFn: () => provider.restackAmbient(),
-  }));
-  const nodeAmbient = (b: string) => ambient.data?.report?.branches.find((x) => x.branch === b);
 
   // the ⇄ diverged chip's inspect panel: what the divergence actually IS, in the PR's frame —
   // each side's commits with patch-id twins flagged (a rebase reads as "same change, rewritten"),
@@ -416,7 +409,6 @@ export function NodeDetail() {
           commitLabel={commitLabel}
           base={base}
           BASES={BASES}
-          nodeAmbient={nodeAmbient}
           nodeData={() => node.data}
           blessedOf={blessedOf}
         />

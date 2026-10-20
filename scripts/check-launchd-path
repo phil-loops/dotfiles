@@ -11,7 +11,7 @@ import sys
 
 NEEDED = ("/sbin", "/usr/sbin")
 PATH_LINE = re.compile(r"<key>PATH</key>\s*<string>([^<]*)</string>")
-WATCHED = re.compile(r"(launchd/.*\.plist|\.plist)$|scripts/(restack-daemon|gh-review-notify)$")
+WATCHED = re.compile(r"(launchd/.*\.plist|\.plist)$|scripts/gh-review-notify$")
 
 bad = []
 for path in sys.argv[1:]:

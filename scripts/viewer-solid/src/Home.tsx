@@ -9,7 +9,7 @@ import { FocusLane } from "./FocusLane";
 import { NextQueue } from "./NextQueue";
 import { ForestRow } from "./ForestRow";
 import { useRestack } from "./useRestack";
-import { ambientChip, landedChip, type NextStep } from "./homeModel";
+import { type NextStep } from "./homeModel";
 import { cachedProjects, rememberProjects } from "./projectsCache";
 import { WorkTab } from "./WorkTab";
 import { ForestsList } from "./ForestsList";
@@ -83,25 +83,6 @@ export function Home() {
       refetchProjects: () => projects.refetch(),
       refetchPrs: () => prs.refetch(),
     });
-
-  // the ambient daemon's dry-run forest verdict (scripts/restack-daemon) → one quiet chip
-  const ambient = createQuery(() => ({
-    queryKey: ["restack-ambient"],
-    queryFn: () => provider.restackAmbient(),
-  }));
-  // shared cache with the Cmd+K index — lets the ambient chip resolve which forest its
-  // actionable branches live in, so a click routes straight to that forest's ▸ ready button.
-  const forestBranches = createQuery(() => ({
-    queryKey: ["forest-branches"],
-    queryFn: () => provider.forestBranches(),
-  }));
-
-  // what just landed on main (the daemon's merge attribution) → a second quiet chip.
-  // Gold + PR numbers when any of it is YOURS; a dim count otherwise; gone after a day.
-  const merges = createQuery(() => ({
-    queryKey: ["restack-merges"],
-    queryFn: () => provider.restackMerges(),
-  }));
 
   const reviewReqs = createQuery(() => ({
     queryKey: ["review-requests"],
@@ -249,22 +230,6 @@ export function Home() {
   const prOf = (name: string): PR | undefined => (prs.data || []).find((p) => p.project === name);
 
   const restacking = (name: string) => () => running() === name || running() === "__all__";
-  // ambient-restack daemon chip: one quiet forest-wide verdict, sits next to the brand.
-  // mr-auto keeps it left-grouped with the brand while ↻ check origin stays right; the
-  // landed-* variants drop it (they sit right). Margin rides the variant, not the base —
-  // stacking mr-auto and mr-0 would leave the winner to generated order (rule 8).
-  const AMB =
-    "ml-[14px] rounded-[7px] border border-solid bg-vellum-raise px-[9px] py-[3px] text-[11px] tracking-[0.03em] whitespace-nowrap";
-  const AMB_LINK = "cursor-pointer no-underline hover:border-current hover:brightness-[1.12]";
-  const AMB_CLS: Record<string, string> = {
-    "amb-clean": "mr-auto border-gold-deep text-gold-leaf",
-    "amb-restack": "mr-auto border-rule text-patina",
-    "amb-contract": "mr-auto border-gold-deep text-patina",
-    "amb-conflict": "mr-auto border-del text-del",
-    "amb-stale": "mr-auto border-rule text-ink-faint",
-    "landed-mine": "mr-0 border-gold-deep text-gold-leaf",
-    "landed-other": "mr-0 border-rule text-ink-faint",
-  };
   const CHIP =
     "flex-none cursor-pointer rounded-[7px] border bg-transparent px-[11px] py-[3px] text-[11px] leading-[1.55] tracking-[0.03em] transition-[border-color,color,background] duration-[120ms]";
   const dropAction = (p: Project): Action => ({
@@ -338,16 +303,6 @@ export function Home() {
           >
             <span class="brand-mark text-[12px] not-italic text-gold-leaf">✦</span> canopy
           </div>
-          <Show when={landedChip(merges.data, projects.data)}>
-            {(c) => c().to
-              ? <Link class={`amb-chip amb-link ${c().cls} ${AMB} ${AMB_CLS[c().cls]} ${AMB_LINK}`} to={c().to!} title={c().title}>{c().text}</Link>
-              : <span class={`amb-chip ${c().cls} ${AMB} ${AMB_CLS[c().cls]} cursor-default`} title={c().title}>{c().text}</span>}
-          </Show>
-          <Show when={ambientChip(ambient.data, forestBranches.data)}>
-            {(c) => c().to
-              ? <Link class={`amb-chip amb-link ${c().cls} ${AMB} ${AMB_CLS[c().cls]} ${AMB_LINK}`} to={c().to!} title={c().title}>{c().text}</Link>
-              : <span class={`amb-chip ${c().cls} ${AMB} ${AMB_CLS[c().cls]} cursor-default`} title={c().title}>{c().text}</span>}
-          </Show>
           <Show when={canMutate}>
             <button
               class="origin-btn cursor-pointer rounded-[8px] border border-rule bg-vellum-raise px-[15px] py-[7px] text-[12px] leading-[1.55] tracking-[0.04em] text-ink-dim transition-[border-color,color] duration-[120ms] enabled:hover:border-gold-deep enabled:hover:text-gold-leaf disabled:cursor-default disabled:opacity-60"
