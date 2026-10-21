@@ -143,6 +143,21 @@ function segments(text: string): Seg[] {
   return out;
 }
 
+// The one line a folded rung shows: the question it asked (its last "?" sentence), else its opening.
+function askOf(text: string): string {
+  const prose = segments(text)
+    .filter((x) => x.kind === "prose")
+    .map((x) => (x as { text: string }).text)
+    .join(" ")
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/[*_`#>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const asks = prose.match(/[^.?!]*\?/g);
+  const line = (asks ? asks[asks.length - 1] : prose).trim();
+  return line.length > 160 ? line.slice(0, 157) + "…" : line || "(no text)";
+}
+
 function latestPin(msgs: Msg[]): Pin | null {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role !== "tutor") continue;
@@ -407,20 +422,41 @@ function TutorSession(props: { session: Session }) {
   let scroller: HTMLDivElement | undefined;
   let box: HTMLTextAreaElement | undefined;
 
+  const [historyOpen, setHistoryOpen] = createSignal(false);
+  const [expanded, setExpanded] = createSignal<number | null>(null);
+
+  // A rung is one tutor turn plus the answer that followed it. Only the newest is shown in full;
+  // the rest fold into a one-line-per-rung ladder, so a long climb never becomes a scroll wall.
+  const rungs = createMemo(() => {
+    const msgs = s().msgs;
+    const out: { n: number; tutorIdx: number; answer?: string }[] = [];
+    msgs.forEach((m, i) => {
+      if (m.role === "tutor") {
+        out.push({ n: out.length + 1, tutorIdx: i, answer: msgs[i + 1]?.role === "me" ? msgs[i + 1].text : undefined });
+      }
+    });
+    return out;
+  });
+  const current = () => rungs()[rungs().length - 1];
+  const history = () => rungs().slice(0, -1);
+  const prevAnswer = () => {
+    const at = current()?.tutorIdx ?? 0;
+    return s().msgs[at - 1]?.role === "me" ? s().msgs[at - 1].text : "";
+  };
+
   createEffect(() => setPin(latestPin(s().msgs)));
+  // a new rung starts reading at its TOP — never chase the bottom while it streams
   createEffect(() => {
-    s().msgs.length;
-    s().msgs[s().msgs.length - 1]?.text;
-    queueMicrotask(() => scroller?.scrollTo({ top: scroller.scrollHeight }));
+    current()?.tutorIdx;
+    queueMicrotask(() => scroller?.scrollTo({ top: 0 }));
   });
 
-  const rung = () => s().msgs.filter((m) => m.role === "me").length + 1;
   const send = (text: string) => {
     answer(s().id, text);
     setDraft("");
+    setExpanded(null);
     box?.focus();
   };
-  const lastTutor = () => s().msgs.length - 1;
 
   return (
     <div class="tutor grid h-screen grid-cols-[minmax(0,1.1fr)_minmax(380px,1fr)] max-[960px]:grid-cols-[1fr] max-[960px]:h-auto">
@@ -429,7 +465,7 @@ function TutorSession(props: { session: Session }) {
         <header class="flex items-baseline gap-3 border-b border-rule px-5 py-3">
           <button class="font-mono text-[11px] text-ink-faint hover:text-gold-leaf" onClick={() => setActiveId(null)} title="all sessions">← tutor</button>
           <span class="flex-1 min-w-0 truncate font-display text-[15px] text-ink" title={s().target}>{s().target}</span>
-          <span class="shrink-0 font-mono text-[11px] text-gold-leaf">rung {rung()}</span>
+          <span class="shrink-0 font-mono text-[11px] text-gold-leaf">rung {rungs().length}</span>
           <Show when={!s().saved}>
             <button
               class="shrink-0 font-mono text-[11px] text-ink-faint hover:text-ember disabled:opacity-40"
@@ -440,31 +476,75 @@ function TutorSession(props: { session: Session }) {
           </Show>
         </header>
 
-        <div ref={scroller} class="flex-1 min-h-0 overflow-y-auto px-5 py-5">
-          <Index each={s().msgs}>
-            {(m, i) => (
-              <Show
-                when={m().role === "tutor"}
-                fallback={
-                  <div class="mb-5 ml-10 whitespace-pre-wrap rounded-sm border border-rule bg-vellum-raise px-3 py-2 text-[14px] leading-relaxed text-ink">{m().text}</div>
-                }
+        <div ref={scroller} class="flex-1 min-h-0 overflow-y-auto">
+          <Show when={history().length}>
+            <div class="border-b border-rule">
+              <button
+                class="flex w-full items-baseline gap-2 px-5 py-2 text-left font-mono text-[11px] text-ink-faint hover:text-ink"
+                onClick={() => setHistoryOpen((o) => !o)}
               >
+                <span>{historyOpen() ? "▾" : "▸"}</span>
+                <span>{history().length} earlier {history().length === 1 ? "rung" : "rungs"}</span>
+              </button>
+              <Show when={historyOpen()}>
+                <ol class="m-0 list-none p-0 pb-2">
+                  <For each={history()}>
+                    {(r) => (
+                      <li>
+                        <button
+                          class="grid w-full grid-cols-[26px_minmax(0,1fr)] gap-x-2 px-5 py-1.5 text-left hover:bg-vellum-edge"
+                          classList={{ "bg-vellum-edge": expanded() === r.tutorIdx }}
+                          onClick={() => setExpanded((e) => (e === r.tutorIdx ? null : r.tutorIdx))}
+                        >
+                          <span class="pt-px text-right font-mono text-[11px] text-ink-faint">{r.n}</span>
+                          <span class="min-w-0">
+                            <span class="block truncate text-[13px] text-ink-dim">{askOf(s().msgs[r.tutorIdx].text)}</span>
+                            <Show when={r.answer}>
+                              <span class="block truncate text-[13px] text-ink">→ {r.answer}</span>
+                            </Show>
+                          </span>
+                        </button>
+                        <Show when={expanded() === r.tutorIdx}>
+                          <div class="mx-5 mt-1 mb-3 border-l-2 border-gold-deep pl-4">
+                            <TutorTurn text={s().msgs[r.tutorIdx].text} latest={false} session={s()} onPin={setPin} onPick={() => {}} />
+                            <Show when={r.answer}>
+                              <div class="mb-2 whitespace-pre-wrap text-[13px] text-ink-dim">you: {r.answer}</div>
+                            </Show>
+                          </div>
+                        </Show>
+                      </li>
+                    )}
+                  </For>
+                </ol>
+              </Show>
+            </div>
+          </Show>
+
+          <div class="px-5 py-5">
+            <Show when={prevAnswer()}>
+              <div class="mb-4 border-l-2 border-rule pl-3 text-[13px] leading-snug text-ink-faint">
+                <span class="font-mono text-[10px] uppercase tracking-[0.12em]">you said</span>
+                <div class="mt-0.5 whitespace-pre-wrap text-ink-dim">{prevAnswer()}</div>
+              </div>
+            </Show>
+            <Show when={current()}>
+              {(c) => (
                 <TutorTurn
-                  text={m().text}
-                  latest={i === lastTutor()}
+                  text={s().msgs[c().tutorIdx].text}
+                  latest={true}
                   session={s()}
                   onPin={setPin}
                   onPick={(o) => setDraft(o)}
                 />
-              </Show>
-            )}
-          </Index>
-          <Show when={streaming() && status()}>
-            <div class="font-mono text-[11px] text-ink-faint truncate">{status()}…</div>
-          </Show>
-          <Show when={s().error}>
-            <div class="mt-2 font-mono text-[12px] text-del">{s().error}</div>
-          </Show>
+              )}
+            </Show>
+            <Show when={streaming() && status()}>
+              <div class="font-mono text-[11px] text-ink-faint truncate">{status()}…</div>
+            </Show>
+            <Show when={s().error}>
+              <div class="mt-2 font-mono text-[12px] text-del">{s().error}</div>
+            </Show>
+          </div>
         </div>
 
         <form
