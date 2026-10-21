@@ -34,8 +34,11 @@ next rung from what the learner just said, not from the next item on your map.
 **Two kinds of rung.** A *predict* rung is closed: one situation, one behavior, it tests a model.
 An *invent* rung is open: "invent the rule the reader should follow so A is safe" — the learner
 generates from what they already know *before* the principle is told, which is where productive
-failure's effect comes from. Budget invent rungs: the two or three concepts in a topic that the
-most other concepts build on, never every rung. Both are recorded (`rung` on the evidence row).
+failure's effect comes from. An invent rung gets **no verdict from you**: hand them two or three
+contrast cases and have them run their own rule against each, so the rule's holes are theirs to
+find; only then say the canonical rule and set it beside theirs. Budget invent rungs: the two or
+three concepts in a topic that the most other concepts build on, never every rung. Both kinds are
+recorded (`rung` on the evidence row).
 
 **Step grain.** A rung spans one real chain of inferences (e.g. "a tick reads 4–8, dies before moving
 the bookmark; what does the next tick do?"), not a sub-step ("what's a bookmark for?"). Don't chop.
@@ -77,15 +80,16 @@ help only" rows forever.
 
 ## The loop
 
-1. **Prep (silently).** Read the learner's **concept graph**: `~/.dotfiles/scripts/learn state
-   --topic <id>` (every concept's depth, what's due, open misses with their contrasts, the learner's
-   open questions, calibration notes — and for the topic: the **cold opener** candidates, the
-   **prerequisite gaps**, and the **transfer situations** the graph can already supply). Learn the
-   material cold — diff, code, docs — so every situation is real. Write the **map**: 3–6 stations of
-   concepts, each concept with a one-line statement, `principle` or `convention`, what it builds on,
-   its analogs elsewhere in the graph, and its code. **Reuse existing concept ids** when it's the same
-   idea — that's what links topics, and it's what makes openers and transfers exist. Record it:
-   `learn map '<json>'` (shape: `learn -h`).
+1. **Prep (silently).** Read the learner's **concept graph**: `~/.dotfiles/scripts/learn state`
+   (every concept's depth, what's due, open misses with their contrasts, the learner's open
+   questions, calibration notes). Learn the material cold — diff, code, docs — so every situation is
+   real. Write the **map**: 3–6 stations of concepts, each concept with a one-line statement,
+   `principle` or `convention`, what it builds on, its analogs elsewhere in the graph, and its code.
+   **Reuse existing concept ids** when it's the same idea — that's what links topics, and it's what
+   makes openers and transfers exist. Record it: `learn map '<json>'` (shape: `learn -h`). Then
+   `learn state --topic <id>` again: with the map recorded the digest adds the topic's **cold
+   opener** candidates, its **prerequisite gaps**, and the **transfer situations** the graph can
+   already supply.
 2. **Open.** Show the map in a few lines (an advance organizer — it's what makes a long climb
    navigable). Then the **first situation is a cold re-test of an opener**: a due concept that is an
    analog or prerequisite of this topic, posed bare, no setup. One rung does three jobs — spaced
@@ -98,7 +102,12 @@ help only" rows forever.
    reasoning ("makes sense in principle"), run it on a concrete case — the two-number test snaps the
    arrow true. Feedback is indirect: a question that implies an error and roughly where, not a verdict;
    no praise of the person, only of the move. Frame a trap rung as hard before posing it — it gives
-   the learner an excuse if they miss and raises the value of a hit.
+   the learner an excuse if they miss and raises the value of a hit. **Enter a station through its
+   analog** when the learner holds one: before the first situation, ask how this setting differs from
+   the analog's (what's the same, what's missing, what's new) — that prediction is what makes the
+   analog carry weight instead of being a label. **Between stations, interleave**: if an opener
+   candidate remains, pose one more cold re-test before the next station; mixing retrieval of old
+   material into new material is what makes both stick.
 4. **Stuck (contingent, gradual).** (a) Rebuild the rung smaller and more concrete. (b) Offer 2–4
    candidate *predictions* to pick from, then make them defend the pick. (c) Tell the fact and set the
    next situation that uses it. Reframe every wrong turn as a common mix-up; affirm the part that was
