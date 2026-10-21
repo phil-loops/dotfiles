@@ -46,19 +46,22 @@ class Mastery(unittest.TestCase):
         m = learning.mastery(g, "lock-ttl", today="2026-10-05")
         self.assertEqual((m["level"], m["held_level"]), ("explain", "predict"))
 
-    def test_once_becomes_due_next_day(self):
+    def test_once_becomes_due_after_the_base_gap(self):
         g = graph()
-        ev(g, "lock-ttl", at="2026-10-01")
-        self.assertFalse(learning.mastery(g, "lock-ttl", today="2026-10-01")["due"])
-        m = learning.mastery(g, "lock-ttl", today="2026-10-02")
+        ev(g, "lock-ttl", level="explain", at="2026-10-01")
+        for day in ("2026-10-01", "2026-10-04"):
+            m = learning.mastery(g, "lock-ttl", today=day)
+            self.assertFalse(m["due"], day)
+            self.assertEqual(m["spacing"], learning.BASE_SPACING_DAYS)   # depth doesn't stretch a once-only gap
+        m = learning.mastery(g, "lock-ttl", today="2026-10-05")
         self.assertTrue(m["due"])
         self.assertIn("second day", m["reason"])
 
-    def test_held_follows_spacing(self):
+    def test_held_doubles_spacing(self):
         g = graph()
         ev(g, "lock-ttl", at="2026-10-01")
-        ev(g, "lock-ttl", at="2026-10-02")
-        m = learning.mastery(g, "lock-ttl", today="2026-10-05")
+        ev(g, "lock-ttl", at="2026-10-05")
+        m = learning.mastery(g, "lock-ttl", today="2026-10-12")
         self.assertFalse(m["due"])
         self.assertEqual(m["spacing"], 8)
         self.assertTrue(learning.mastery(g, "lock-ttl", today="2026-10-20")["due"])
