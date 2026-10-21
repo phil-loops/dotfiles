@@ -194,6 +194,38 @@ class RealGraph(unittest.TestCase):
         self.assertTrue(all("blocked_by" in c for c in st["concepts"].values()))
 
 
+class CLI(unittest.TestCase):
+    def test_learn_roundtrip_on_a_scratch_graph(self):
+        import subprocess
+        learn = os.path.join(os.path.dirname(os.path.realpath(__file__)), "learn")
+        with tempfile.TemporaryDirectory() as d:
+            env = {**os.environ, "LEARNING_GRAPH": os.path.join(d, "g.json"), "LEARNING_MEMORY": "0"}
+
+            def run(*args):
+                r = subprocess.run([sys.executable, learn, *args], env=env, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                return r.stdout
+
+            run("map", json.dumps({"topic": {"id": "t", "title": "T"}, "stages": [
+                {"name": "s", "concepts": [{"id": "a", "analogs": ["b"]}, {"id": "c", "builds_on": ["a"]}]}]}))
+            run("evidence", json.dumps({"concept": "b", "level": "explain", "at": "2026-01-01"}))
+            run("evidence", json.dumps({"concept": "a", "level": "predict", "outcome": "miss",
+                                        "confidence": "high", "contrast": "same, but X"}), "--topic", "t")
+            run("restate", "b", "b in my words")
+            self.assertEqual(json.loads(run("opener", "--topic", "t"))[0]["id"], "b")
+            self.assertEqual(json.loads(run("transfers", "--topic", "t")), [{"concept": "a", "via": "b", "setting": ""}])
+            self.assertEqual(json.loads(run("gaps", "--topic", "t")), [{"concept": "a", "blocks": "c"}])
+            c = json.loads(run("concept", "a"))
+            self.assertEqual((c["mastery"]["miss_confidence"], c["evidence"][0]["contrast"]), ("high", "same, but X"))
+            state = run("state", "--topic", "t")
+            self.assertIn("b in my words", state)
+            self.assertIn("OPEN MISS (high confidence)", state)
+            r = subprocess.run([sys.executable, learn, "evidence", '{"concept": "a", "level": "predict", "confidence": "sure"}'],
+                               env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("confidence", r.stderr)
+
+
 class Roundtrip(unittest.TestCase):
     def test_save_load(self):
         with tempfile.TemporaryDirectory() as d:
