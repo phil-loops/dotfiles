@@ -30,7 +30,7 @@ type Session = {
   saved?: boolean;
   cwd?: string; // a picked-up terminal session's worktree — its claude session only resumes there
   forkNext?: boolean; // the next turn forks the terminal session instead of resuming it in place
-  primed?: boolean; // the claude session has seen the tab's instructions (resume drops --append-system-prompt)
+  primed?: string | boolean; // the instructions version this claude session has seen (resume drops --append-system-prompt)
   lastActive?: number; // the last turn sent — orders the home page's "continue" card and the session list
   importedFrom?: string;
 };
@@ -38,14 +38,21 @@ type TerminalSession = { session: string; cwd: string; target: string; mtime: nu
 type ImportReply = { session: string; cwd: string; target: string; msgs: Msg[]; err?: string };
 type SrcReply = { path: string; ref: string; text: string; err?: string };
 
-type Mastery = { depth: number; assisted: number; level: string; evidence: number; last: string; due: boolean; reason: string; open_miss: string };
+type Mastery = {
+  depth: number; assisted: number; level: string; evidence: number; last: string; due: boolean; reason: string; open_miss: string;
+  held?: number; held_level?: string; miss_confidence?: string; contrast?: string; overconfident?: number;
+};
 type CodeRef = { path: string; ref?: string; lines?: number[] };
 type Concept = {
   id: string; name: string; statement: string; kind: "principle" | "convention";
   builds_on: string[]; built_on_by: string[]; analogs: string[]; code: CodeRef[]; topics: string[]; mastery: Mastery;
+  blocked_by?: string[]; statement_learner?: string; restated?: string;
 };
-type Topic = { id: string; title: string; source: string; stages: { name: string; concepts: string[] }[]; progress: { held: number; total: number } };
-type Evidence = { id: string; concept: string; level: string; credit: string; outcome: "hit" | "miss"; note: string; at: string; topic: string; session: string };
+type Topic = { id: string; title: string; source: string; stages: { name: string; concepts: string[] }[]; progress: { held: number; shown?: number; total: number } };
+type Evidence = {
+  id: string; concept: string; level: string; credit: string; outcome: "hit" | "miss"; note: string; at: string; topic: string; session: string;
+  confidence?: string; rung?: string; contrast?: string; via?: string;
+};
 type Question = { id: string; text: string; concept: string; topic: string; asked: string; status: "open" | "answered" };
 type LearnState = {
   concepts: Record<string, Concept>; topics: Record<string, Topic>; due: string[]; questions: Question[];
@@ -55,6 +62,7 @@ type LearnState = {
 const STORE_KEY = "tutor:sessions:v1";
 const LEVELS = ["predict", "explain", "transfer", "critique"];
 const CREDITS = ["unaided", "scaffolded", "handed"];
+const CONFIDENCES = ["low", "medium", "high"];
 const LEVEL_HINT: Record<string, string> = {
   predict: "said what happens in a situation",
   explain: "said why",
@@ -122,17 +130,19 @@ async function postJSON(path: string, body: unknown) {
 
 // ── parsing a tutor turn into prose + UI blocks ──────────────────────
 
-type EvidenceBlock = { concept: string; level: string; credit: string; outcome: string; note: string };
+type EvidenceBlock = { concept: string; level: string; credit: string; outcome: string; note: string; confidence: string; contrast: string; via: string };
 type Seg =
   | { kind: "prose"; text: string }
   | { kind: "pin"; pin: Pin }
   | { kind: "options"; options: string[] }
-  | { kind: "rung"; concept: string; level: string }
+  | { kind: "rung"; concept: string; level: string; rung: string; confidence: boolean; via: string; contrastOf: string }
   | { kind: "evidence"; items: EvidenceBlock[] }
   | { kind: "map"; title: string; count: number }
+  | { kind: "restate"; concept: string; text: string }
+  | { kind: "question"; concept: string; text: string }
   | { kind: "quiet" };
 
-const FENCE = /```tutor-(pin|options|rung|evidence|map|calibration|ledger)[ \t]*\r?\n([\s\S]*?)```/g;
+const FENCE = /```tutor-(pin|options|rung|evidence|map|calibration|restate|question|ledger)[ \t]*\r?\n([\s\S]*?)```/g;
 
 function asList(v: unknown): string[] {
   return Array.isArray(v) ? v.map((x) => String(x)).filter((x) => x.trim()) : [];
@@ -166,17 +176,28 @@ function segments(text: string): Seg[] {
     } else if (m[1] === "options") {
       out.push({ kind: "options", options: asList(data) });
     } else if (m[1] === "rung" && d.concept) {
-      out.push({ kind: "rung", concept: String(d.concept), level: String(d.level ?? "") });
+      out.push({
+        kind: "rung", concept: String(d.concept), level: String(d.level ?? ""), rung: String(d.rung ?? ""),
+        confidence: d.confidence === true, via: String(d.via ?? ""), contrastOf: String(d.contrast_of ?? ""),
+      });
     } else if (m[1] === "evidence") {
       const items = (Array.isArray(data) ? data : [data]).map((e) => {
         const x = (e ?? {}) as Record<string, unknown>;
-        return { concept: String(x.concept ?? ""), level: String(x.level ?? ""), credit: String(x.credit ?? "unaided"), outcome: String(x.outcome ?? "hit"), note: String(x.note ?? "") };
+        return {
+          concept: String(x.concept ?? ""), level: String(x.level ?? ""), credit: String(x.credit ?? "unaided"), outcome: String(x.outcome ?? "hit"),
+          note: String(x.note ?? ""), confidence: String(x.confidence ?? ""), contrast: String(x.contrast ?? ""), via: String(x.via ?? ""),
+        };
       }).filter((e) => e.concept);
       out.push({ kind: "evidence", items });
     } else if (m[1] === "map") {
       const t = (d.topic ?? {}) as Record<string, unknown>;
       const stages = Array.isArray(d.stages) ? (d.stages as { concepts?: unknown[] }[]) : [];
       out.push({ kind: "map", title: String(t.title ?? t.id ?? "topic"), count: stages.reduce((n, s) => n + (s.concepts?.length ?? 0), 0) });
+    } else if (m[1] === "restate" || m[1] === "question") {
+      for (const x of Array.isArray(data) ? data : [data]) {
+        const r = (typeof x === "string" ? { text: x } : x ?? {}) as Record<string, unknown>;
+        if (r.text) out.push({ kind: m[1], concept: String(r.concept ?? ""), text: String(r.text) });
+      }
     } else {
       out.push({ kind: "quiet" }); // calibration, and the retired ledger in old sessions
     }
@@ -236,7 +257,7 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
   if (s.topic) body.topic = s.topic;
   if (s.cwd) body.cwd = s.cwd;
   if (s.forkNext && body.resume) body.fork = "1";
-  if (s.primed) body.primed = "1";
+  if (typeof s.primed === "string") body.primed = s.primed;
   let tutorIdx = s.msgs.length - 1;
   let reset = reattach;
   try {
@@ -264,7 +285,6 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
         const p = JSON.parse(data);
         // the server holds the connection open after the last frame — the terminal event ends the read
         if (event === "done" || event === "error" || event === "gone") finished = true;
-        if (event === "done" && p.ok) setSessions(at(), "primed", true);
         if (event === "session" && p.session_id) {
           setSessions(at(), "sessionId", p.session_id);
           if (p.session_id !== sessions[at()].importedFrom) setSessions(at(), "forkNext", false);
@@ -281,6 +301,7 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
           if (p.s === "thinking") setStatus("thinking");
         } else if (event === "graph") {
           if (p.topic) setSessions(at(), "topic", p.topic);
+          if (p.protocol) setSessions(at(), "primed", p.protocol);
           if (p.errors?.length) setSessions(at(), "error", "graph: " + p.errors.join("; "));
           void refreshLearn();
         } else if (event === "gone") {
@@ -358,19 +379,31 @@ async function ask(text: string, concept?: Concept) {
 
 // ── small parts ───────────────────────────────────────────────────────
 
+function pipsTitle(m: Mastery): string {
+  const parts = [];
+  if (m.held) parts.push(`held at ${m.held_level} (two days)`);
+  if (m.depth && (m.held ?? 0) < m.depth) parts.push(`shown once at ${m.level}`);
+  if (!m.depth) parts.push("not yet shown unaided");
+  if (m.assisted > m.depth) parts.push(`${LEVELS[m.assisted - 1]} with help`);
+  if (m.open_miss) parts.push(`open miss${m.miss_confidence === "high" ? " (confident)" : ""}`);
+  if (m.due) parts.push(`due: ${m.reason}`);
+  return parts.join(" · ");
+}
+
 function Pips(props: { m?: Mastery; size?: "sm" | "md" }) {
   const box = () => (props.size === "md" ? "h-[9px] w-[9px]" : "h-[7px] w-[7px]");
   return (
     <span
       class="inline-flex shrink-0 items-center gap-[2px]"
-      title={props.m ? `${props.m.level || "not yet shown"}${props.m.assisted > props.m.depth ? ` · ${LEVELS[props.m.assisted - 1]} with help` : ""}${props.m.due ? ` · due: ${props.m.reason}` : ""}` : ""}
+      title={props.m ? pipsTitle(props.m) : ""}
     >
       <For each={LEVELS}>
         {(_, i) => (
           <span
             class={`${box()} rounded-[1px] border`}
             classList={{
-              "border-gold-leaf bg-gold-leaf": (props.m?.depth ?? 0) > i(),
+              "border-gold-leaf bg-gold-leaf": (props.m?.held ?? 0) > i(),
+              "border-gold-leaf bg-gold-leaf/25": (props.m?.held ?? 0) <= i() && (props.m?.depth ?? 0) > i(),
               "border-gold-deep bg-transparent": (props.m?.depth ?? 0) <= i() && (props.m?.assisted ?? 0) > i(),
               "border-rule bg-transparent": (props.m?.assisted ?? 0) <= i(),
             }}
@@ -378,7 +411,7 @@ function Pips(props: { m?: Mastery; size?: "sm" | "md" }) {
         )}
       </For>
       <Show when={props.m?.open_miss}>
-        <span class="ml-[3px] h-[5px] w-[5px] rounded-full bg-del" />
+        <span class="ml-[3px] h-[5px] w-[5px] rounded-full bg-del" classList={{ "ring-2 ring-del/40": props.m?.miss_confidence === "high" }} />
       </Show>
     </span>
   );
@@ -398,6 +431,9 @@ function ConceptChip(props: { id: string; here?: boolean; wrap?: boolean }) {
     >
       <Pips m={c()?.mastery} />
       <span classList={{ truncate: !props.wrap }}>{nameOf(props.id)}</span>
+      <Show when={c()?.blocked_by?.length}>
+        <span class="shrink-0 text-[11px] text-ink-faint" title={`needs first (never shown unaided): ${(c()?.blocked_by ?? []).map(nameOf).join(", ")}`}>⊘</span>
+      </Show>
     </button>
   );
 }
@@ -536,7 +572,10 @@ function TutorHome(props: { importErr: string }) {
                   <Pips m={conceptOf(id)?.mastery} />
                   <button class="min-w-0 flex-1 text-left" onClick={() => setDrawer(id)}>
                     <span class="block truncate text-[14px] text-ink hover:text-gold-leaf">{nameOf(id)}</span>
-                    <span class="block truncate text-[12px] text-ink-faint">{conceptOf(id)?.mastery.reason}</span>
+                    <span class="block truncate text-[12px] text-ink-faint">
+                      <Show when={conceptOf(id)?.mastery.miss_confidence === "high"}><span class="mr-1.5 text-del">confident miss ·</span></Show>
+                      {conceptOf(id)?.mastery.reason}
+                    </span>
                   </button>
                   <button
                     class="shrink-0 font-mono text-[11px] text-ember hover:text-gold-leaf"
@@ -561,14 +600,15 @@ function TutorHome(props: { importErr: string }) {
               <article class="mb-5 rounded-sm border border-rule p-4">
                 <header class="mb-3 flex items-baseline gap-3">
                   <h3 class="m-0 flex-1 min-w-0 truncate font-display text-[16px] text-ink">{t.title}</h3>
-                  <span class="shrink-0 font-mono text-[11px] text-ink-faint" title="concepts at explain or deeper">{t.progress.held}/{t.progress.total}</span>
+                  <span class="shrink-0 font-mono text-[11px] text-ink-faint" title="at explain or deeper — held: two separate days · shown: once">{t.progress.held} held · {t.progress.shown ?? t.progress.held} shown / {t.progress.total}</span>
                   <button
                     class="shrink-0 font-mono text-[11px] text-ember hover:text-gold-leaf"
                     onClick={() => startSession(`Continue ${t.title} [${t.id}] — start from what my graph says is weakest`, t.id)}
                   >continue</button>
                 </header>
-                <div class="mb-3 h-[3px] rounded-full bg-rule">
-                  <div class="h-full rounded-full bg-gold-deep" style={{ width: `${t.progress.total ? (100 * t.progress.held) / t.progress.total : 0}%` }} />
+                <div class="relative mb-3 h-[3px] rounded-full bg-rule">
+                  <div class="absolute inset-y-0 left-0 rounded-full bg-gold-deep" style={{ width: `${t.progress.total ? (100 * (t.progress.shown ?? t.progress.held)) / t.progress.total : 0}%` }} />
+                  <div class="absolute inset-y-0 left-0 rounded-full bg-gold-leaf" style={{ width: `${t.progress.total ? (100 * t.progress.held) / t.progress.total : 0}%` }} />
                 </div>
                 <For each={t.stages}>
                   {(st) => (
@@ -666,7 +706,7 @@ function SessionMap(props: { session: Session; here: string | null }) {
           <>
             <div class={`${SECTION} mb-1`}>map</div>
             <div class="font-display text-[15px] leading-snug text-ink mb-1">{t().title}</div>
-            <div class="mb-4 font-mono text-[10.5px] text-ink-faint">{t().progress.held}/{t().progress.total} at explain or deeper</div>
+            <div class="mb-4 font-mono text-[10.5px] text-ink-faint">{t().progress.held} held · {t().progress.shown ?? t().progress.held} shown / {t().progress.total}</div>
             <For each={t().stages}>
               {(st) => (
                 <div class="mb-4">
@@ -681,8 +721,8 @@ function SessionMap(props: { session: Session; here: string | null }) {
         )}
       </Show>
       <div class="mt-auto pt-4 font-mono text-[10px] leading-relaxed text-ink-faint">
-        <div class="flex items-center gap-1.5"><Pips m={{ depth: 2, assisted: 3, level: "", evidence: 0, last: "", due: false, reason: "", open_miss: "" }} /> depth</div>
-        <div>filled = shown unaided · outline = only with help · red = open misconception</div>
+        <div class="flex items-center gap-1.5"><Pips m={{ held: 1, depth: 2, assisted: 3, level: "", evidence: 0, last: "", due: false, reason: "", open_miss: "" }} /> predict · explain · transfer · critique</div>
+        <div>solid = held (two days) · faint = shown once · outline = only with help · red = open misconception · ⊘ = needs a prerequisite first</div>
       </div>
     </nav>
   );
@@ -730,8 +770,29 @@ function TutorSession(props: { session: Session }) {
     queueMicrotask(() => scroller?.scrollTo({ top: 0 }));
   });
 
-  const send = (text: string) => {
-    answer(s().id, text);
+  // A rung marked `confidence: true` wants a rating BEFORE the reveal. Enter without one flags the
+  // chips once; a second Enter sends without a rating rather than trapping the answer.
+  const [confidence, setConfidence] = createSignal<string | null>(null);
+  const [askedConfidence, setAskedConfidence] = createSignal(false);
+  const wantsConfidence = () => {
+    const c = current();
+    if (!c) return false;
+    const r = segments(s().msgs[c.tutorIdx].text).find((x) => x.kind === "rung") as Extract<Seg, { kind: "rung" }> | undefined;
+    return !!r?.confidence;
+  };
+  createEffect(() => {
+    current()?.tutorIdx;
+    setConfidence(null);
+    setAskedConfidence(false);
+  });
+
+  const send = (text: string, opts?: { plain?: boolean }) => {
+    if (!text.trim() || streaming()) return;
+    if (!opts?.plain && wantsConfidence() && !confidence() && !askedConfidence()) {
+      setAskedConfidence(true);
+      return;
+    }
+    answer(s().id, !opts?.plain && confidence() ? `${text} (confidence: ${confidence()})` : text);
     setDraft("");
     setExpanded(null);
     box?.focus();
@@ -765,7 +826,7 @@ function TutorSession(props: { session: Session }) {
             class="shrink-0 font-mono text-[11px] text-ink-faint hover:text-ember disabled:opacity-40"
             disabled={streaming()}
             title="ask for the consolidation: each principle said plainly"
-            onClick={() => send("Let's stop here. Consolidate: say each principle we reached plainly, and record evidence for my last answer.")}
+            onClick={() => send("Let's stop here. Consolidate: say each principle we reached plainly, and record evidence for my last answer.", { plain: true })}
           >wrap up</button>
         </header>
 
@@ -861,6 +922,26 @@ function TutorSession(props: { session: Session }) {
               }
             }}
           />
+          <Show when={wantsConfidence() && !streaming()}>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="font-mono text-[11px]" classList={{ "text-ember": askedConfidence() && !confidence(), "text-ink-faint": !askedConfidence() || !!confidence() }}>
+                {askedConfidence() && !confidence() ? "how sure are you? (enter again to skip)" : "how sure are you?"}
+              </span>
+              <For each={CONFIDENCES}>
+                {(c) => (
+                  <button
+                    type="button"
+                    class="rounded-sm border px-2.5 py-0.5 font-mono text-[11px]"
+                    classList={{
+                      "border-gold-leaf bg-gold-wash text-gold-leaf": confidence() === c,
+                      "border-rule text-ink-dim hover:border-gold-deep hover:text-ink": confidence() !== c,
+                    }}
+                    onClick={() => setConfidence((v) => (v === c ? null : c))}
+                  >{c}</button>
+                )}
+              </For>
+            </div>
+          </Show>
           <div class="mt-1.5 flex justify-between font-mono text-[10px] text-ink-faint">
             <span>enter sends · shift+enter for a new line</span>
             <Show when={streaming()}>
@@ -918,7 +999,13 @@ function TutorTurn(props: { text: string; latest: boolean; onPick: (o: string) =
               return (
                 <button class="mb-2 inline-flex items-center gap-2 font-mono text-[10.5px] text-ink-faint hover:text-gold-leaf" onClick={() => setDrawer(seg.concept)}>
                   <Pips m={conceptOf(seg.concept)?.mastery} />
-                  <span>testing {nameOf(seg.concept)} · {seg.level}</span>
+                  <span>
+                    testing {nameOf(seg.concept)} · {seg.level}
+                    {seg.rung === "invent" ? " · invent the rule" : ""}
+                    {seg.via ? ` · via ${nameOf(seg.via)}` : ""}
+                    {seg.contrastOf ? " · contrast re-test of a miss" : ""}
+                    {seg.confidence ? " · rate your confidence" : ""}
+                  </span>
                 </button>
               );
             case "evidence":
@@ -927,14 +1014,17 @@ function TutorTurn(props: { text: string; latest: boolean; onPick: (o: string) =
                   <For each={seg.items}>
                     {(e) => (
                       <button
-                        class="flex items-baseline gap-2 text-left font-mono text-[11px] hover:text-gold-leaf"
+                        class="flex items-baseline gap-2 text-left font-mono text-[11px] leading-snug hover:text-gold-leaf"
                         classList={{ "text-add": e.outcome !== "miss", "text-del": e.outcome === "miss" }}
                         title="recorded in your graph — open the concept to audit it"
                         onClick={() => setDrawer(e.concept)}
                       >
                         <span>{e.outcome === "miss" ? "✗" : "✓"}</span>
-                        <span class="shrink-0">{nameOf(e.concept)} · {e.level} · {e.credit}</span>
-                        <Show when={e.note}><span class="truncate text-ink-faint">— {e.note}</span></Show>
+                        <span class="min-w-0">
+                          <span>{nameOf(e.concept)} · {e.level} · {e.credit}{e.confidence ? ` · ${e.confidence} confidence` : ""}{e.via ? ` · via ${nameOf(e.via)}` : ""}</span>
+                          <Show when={e.note}><span class="text-ink-faint"> — {e.note}</span></Show>
+                          <Show when={e.contrast}><span class="block text-ink-faint">re-test with: {e.contrast}</span></Show>
+                        </span>
                       </button>
                     )}
                   </For>
@@ -942,6 +1032,19 @@ function TutorTurn(props: { text: string; latest: boolean; onPick: (o: string) =
               );
             case "map":
               return <div class="mb-2 font-mono text-[10.5px] text-ink-faint">map drawn · {seg.count} concepts in {seg.title}</div>;
+            case "restate":
+              return (
+                <button class="my-2 block text-left text-[13.5px] text-gold-leaf hover:underline" onClick={() => setDrawer(seg.concept)}>
+                  <span class="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">in your words · {nameOf(seg.concept)} </span>
+                  “{seg.text}”
+                </button>
+              );
+            case "question":
+              return (
+                <div class="my-2 font-mono text-[11px] text-ink-faint">
+                  ? your question, kept open{seg.concept ? ` on ${nameOf(seg.concept)}` : ""}: <span class="text-ink-dim">{seg.text}</span>
+                </div>
+              );
             case "quiet":
               return <></>;
           }
@@ -974,7 +1077,11 @@ function EvidenceRow(props: { e: Evidence; showConcept?: boolean }) {
         <select class={SELECT} value={props.e.credit} title="credit" onChange={(ev) => edit({ credit: ev.currentTarget.value })}>
           <For each={CREDITS}>{(c) => <option value={c}>{c}</option>}</For>
         </select>
-        <span class="font-mono text-[10.5px] text-ink-faint">{props.e.at}</span>
+        <select class={SELECT} value={props.e.confidence ?? ""} title="confidence, rated before the reveal" onChange={(ev) => edit({ confidence: ev.currentTarget.value })}>
+          <option value="">no rating</option>
+          <For each={CONFIDENCES}>{(c) => <option value={c}>{c}</option>}</For>
+        </select>
+        <span class="font-mono text-[10.5px] text-ink-faint">{props.e.at}{props.e.rung === "invent" ? " · invent" : ""}{props.e.via ? ` · via ${nameOf(props.e.via)}` : ""}</span>
         <span class="flex-1" />
         <button
           class="font-mono text-[11px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-del"
@@ -983,6 +1090,7 @@ function EvidenceRow(props: { e: Evidence; showConcept?: boolean }) {
         >✕</button>
       </div>
       <Show when={props.e.note}><div class="mt-0.5 text-[12.5px] leading-snug text-ink-dim">{props.e.note}</div></Show>
+      <Show when={props.e.contrast}><div class="mt-0.5 text-[12px] leading-snug text-ink-faint">re-test with: {props.e.contrast}</div></Show>
       <Show when={err()}><div class="font-mono text-[11px] text-del">{err()}</div></Show>
     </div>
   );
@@ -1013,18 +1121,34 @@ function ConceptDrawer(props: { id: string }) {
               <button class="font-mono text-[13px] text-ink-faint hover:text-ink" onClick={() => setDrawer(null)} title="close (esc)">✕</button>
             </div>
             <h2 class="m-0 mb-2 font-display text-[22px] leading-tight text-ink">{cc().name}</h2>
+            <Show when={cc().statement_learner}>
+              <div class="mb-2">
+                <div class={`${SECTION} mb-0.5`}>in your words{cc().restated ? ` · ${cc().restated}` : ""}</div>
+                <p class="m-0 text-[15px] leading-relaxed text-gold-leaf">“{cc().statement_learner}”</p>
+              </div>
+              <div class={`${SECTION} mb-0.5`}>the tutor's version</div>
+            </Show>
             <p class="mt-0 mb-4 text-[14.5px] leading-relaxed text-ink-dim">{cc().statement}</p>
 
             <div class="mb-4 rounded-sm border border-rule bg-vellum-night p-3">
               <div class="mb-2 flex items-center gap-3">
                 <Pips m={cc().mastery} size="md" />
-                <span class="text-[13px] text-ink">{cc().mastery.level ? `${cc().mastery.level}, unaided` : "not yet shown unaided"}</span>
+                <span class="text-[13px] text-ink">
+                  {cc().mastery.held
+                    ? `held at ${cc().mastery.held_level}${cc().mastery.depth > (cc().mastery.held ?? 0) ? ` · shown once at ${cc().mastery.level}` : ""}`
+                    : cc().mastery.level ? `shown once at ${cc().mastery.level} — a second day makes it held` : "not yet shown unaided"}
+                </span>
               </div>
               <div class="grid grid-cols-[72px_1fr] gap-x-2 gap-y-0.5 font-mono text-[10.5px] text-ink-faint">
                 <For each={LEVELS}>{(l) => <><span>{l}</span><span>{LEVEL_HINT[l]}</span></>}</For>
               </div>
               <Show when={cc().mastery.due}>
-                <div class="mt-2 text-[12.5px] text-ember">Due: {cc().mastery.reason}</div>
+                <div class="mt-2 text-[12.5px] text-ember">
+                  Due{cc().mastery.miss_confidence === "high" ? " (a confident miss — re-test first)" : ""}: {cc().mastery.reason}
+                </div>
+              </Show>
+              <Show when={cc().mastery.contrast}>
+                <div class="mt-1 text-[12.5px] text-ink-dim">Re-test with the contrast: {cc().mastery.contrast}</div>
               </Show>
             </div>
 
@@ -1035,7 +1159,8 @@ function ConceptDrawer(props: { id: string }) {
                 onClick={() => startSession(`Teach me ${cc().name} [${cc().id}]: ${cc().statement}`, cc().topics[0])}>teach me this</button>
             </div>
 
-            <Links label="builds on" ids={cc().builds_on} />
+            <Links label="needs first — never shown unaided" ids={cc().blocked_by ?? []} />
+            <Links label="builds on" ids={cc().builds_on.filter((b) => !(cc().blocked_by ?? []).includes(b))} />
             <Links label="what builds on it" ids={cc().built_on_by} />
             <Links label="same idea elsewhere" ids={cc().analogs} />
             <Show when={cc().topics.length}>
