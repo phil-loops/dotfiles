@@ -9,7 +9,8 @@
 #
 # `claude -p --resume` silently drops --append-system-prompt (verified 2026-10-21), so a resumed
 # session that hasn't seen the tab's instructions yet (a terminal pick-up) gets them inside its
-# first message instead — once; the conversation carries them after that (`primed`).
+# first message instead — once per version of the instructions: the client stores the version it
+# was primed with (`primed`), and a changed skill or protocol re-primes on the next turn.
 #   GET  /tutor-src         ?path=&ref=                          → a pinned file for the code pane
 #   GET  /tutor-terminal                                         → recent terminal /tutor sessions
 #   GET  /tutor-import      ?session=                            → one of them as tab turns
@@ -20,6 +21,7 @@
 # A picked-up terminal session continues as a FORK (--fork-session) in its own worktree, so the tab
 # keeps everything that session already read and the terminal session itself is never touched.
 import glob
+import hashlib
 import json
 import os
 import re
@@ -68,22 +70,51 @@ If this conversation has no tutor-map yet (a session picked up from the terminal
 top of your next turn, built from where the climb already is.
 
 ```tutor-rung
-{"concept": "commit-order-not-stamp-order", "level": "predict"}
+{"concept": "commit-order-not-stamp-order", "level": "predict", "rung": "predict", "confidence": true}
 ```
-With every situation you pose: the concept it tests and the level (predict / explain / transfer /
-critique). The map highlights it as "you are here".
+With every situation you pose: the concept it tests, the level (predict / explain / transfer /
+critique), the rung kind (`predict`: closed, one behavior · `invent`: open, "invent the rule" — budget
+these for the two or three concepts most others build on), and `confidence: true` when the learner
+should rate their prediction before your reveal (the page shows low / medium / high chips after they
+answer; the rating arrives appended to their answer as `(confidence: high)`). For a transfer rung add
+`"via": "<analog concept id>"`; for the re-test of a miss add `"contrast_of": "<evidence id>"`. The
+map highlights the concept as "you are here".
 
 ```tutor-evidence
-[{"concept": "cursor-redelivery", "level": "predict", "credit": "unaided", "outcome": "hit", "note": "said the next tick starts back at 4"}]
+[{"concept": "cursor-redelivery", "level": "predict", "credit": "unaided", "outcome": "hit",
+  "note": "said the next tick starts back at 4", "confidence": "high", "rung": "predict"}]
 ```
 At the top of the turn after each learner answer: your read of that answer, one entry per concept
 it showed. credit — unaided: before your framing narrowed it; scaffolded: your framing did part of
-the work; handed: you told it. When unsure, bump down; the learner audits every entry. A miss
-records the misconception in the learner's own words. Levels — predict: said what happens in a
-situation; explain: said why; transfer: handled it cold in a new setting; critique: spotted it, or
-its absence, in real code. Depth is derived from this evidence; there is no end-of-session ledger.
-The close (step 5) is the consolidation — say each principle plainly — plus evidence for the last
-answer.
+the work; handed: you told it. When unsure, bump down; the learner audits every entry. Levels —
+predict: said what happens in a situation; explain: said why; transfer: handled it cold in a new
+setting (`"via"`: the analog it went through — required for an unaided transfer hit); critique:
+spotted it, or its absence, in real code. Optional fields: `confidence` (low / medium / high — copy
+the learner's rating from their answer), `rung` (predict / invent), and on a miss `contrast`: the
+same situation with one variable changed so the wrong model and the right one diverge — the re-test
+of that miss is its contrast, never the original situation again. A miss's `note` is the
+misconception in the learner's own words. Depth is derived from this evidence; "held" means shown
+unaided on two separate days, so a once-shown concept comes due the next day on purpose. There is no
+end-of-session ledger.
+
+```tutor-restate
+{"concept": "counts-and-bookmark-atomic", "text": "move the counts and the bookmark in one go or not at all"}
+```
+At a station's summit, after you have said the principle plainly: the learner's own sentence for it,
+lightly edited. A later re-test shows their sentence before yours.
+
+```tutor-question
+{"text": "what if the clock skews between the two databases?", "concept": "safety-lag"}
+```
+A question the learner raised in prose (when they didn't use the page's question box): recorded open
+on the graph, on that concept. Follow it — it is a thread they chose.
+
+The digest below lists, for the active topic, **cold opener** candidates (due concepts that are
+analogs or prerequisites of this topic — the session's first situation, posed bare), **prerequisite
+gaps** (teach or re-test the prerequisite with a situation before the concept that needs it) and
+**transfer situations** (pose the concept in the analog's setting — the only way a transfer row is
+earned). The close (step 5) is the consolidation — say each principle plainly, take their sentence —
+plus evidence for the last answer.
 
 ```tutor-pin
 {"path": "scripts/srv/chat.py", "ref": "origin/main", "lines": [428, 470]}
@@ -121,6 +152,10 @@ def _skill_body():
     return re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S)
 
 
+def _protocol_version():
+    return hashlib.sha256((_skill_body() + PROTOCOL).encode()).hexdigest()[:12]
+
+
 def _system_prompt(topic):
     return _skill_body() + "\n" + PROTOCOL + "\n" + learning.digest(learning.load(), topic=topic or None)
 
@@ -134,6 +169,7 @@ class TutorJob(chat.Job):
         self.text = []
         self.tab = tab
         self.topic = topic
+        self.protocol = _protocol_version()
 
     def emit(self, event, obj):
         if event == "token":
@@ -144,7 +180,7 @@ class TutorJob(chat.Job):
                     topic, applied, errors = learning.apply_blocks(g, "".join(self.text), session=self.tab, topic=self.topic)
             except Exception as exc:   # the turn's text still stands; say why the graph didn't move
                 topic, applied, errors = self.topic, [], [str(exc)[:300]]
-            super().emit("graph", {"topic": topic, "applied": applied, "errors": errors})
+            super().emit("graph", {"topic": topic, "applied": applied, "errors": errors, "protocol": self.protocol})
         super().emit(event, obj)
 
 
@@ -180,9 +216,10 @@ def start(req, raw):
         return
 
     if job is None:
-        if resume and not d.get("primed"):
+        if resume and d.get("primed") != _protocol_version():
             prompt = ("<tutor-tab-instructions>\n" + _system_prompt(topic) + "\n</tutor-tab-instructions>\n\n"
-                      "These instructions now govern this conversation (from here on you are in the Tutor tab). "
+                      "These instructions now govern this conversation and replace any earlier tutor-tab-instructions "
+                      "(from here on you are in the Tutor tab). "
                       "The learner's message:\n\n" + answer)
         elif resume:
             prompt = answer
