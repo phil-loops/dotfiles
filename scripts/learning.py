@@ -12,9 +12,19 @@ Depth comes only from **evidence**, never from a verdict typed by hand:
     outcome  hit | miss
 
 A concept's depth is the highest level shown *unaided* (a higher level implies the lower ones).
-Assisted hits above that show as "with help". It is due for a re-test when a miss is still open,
-when it has only ever been shown with help, or when its last unaided hit is older than its spacing
-interval (which doubles with each further unaided hit).
+Assisted hits above that show as "with help". It is **held** once shown unaided on two separate
+days — one session's hit is not retention. It is due for a re-test when a miss is still open (a
+high-confidence miss first: corrected, it is the best-remembered thing in a session), when it has
+only ever been shown with help, when it was shown once and the base gap has passed, or when its
+last unaided hit is older than its spacing interval (which doubles with each further unaided hit
+once held).
+
+Evidence rows may carry `confidence` (asked before the reveal), `rung` (predict | invent), on a
+miss a `contrast` (the same situation with one variable changed — the re-test *is* the contrast),
+and on a transfer `via` (the analog it went through). A concept may hold the learner's own sentence
+(`statement_learner`). Per topic the graph derives an **opener** (due neighbors — the session's
+first situation, cold), **gaps** (prerequisites never shown unaided) and **transfers** (analogs
+held at explain or deeper, where a transfer situation can be posed).
 
 Stored at ~/.dotfiles/learning/graph.json (versioned). Every write regenerates the "Current state"
 section of the learner's memory track, so Claude sessions that only read memory still see it.
