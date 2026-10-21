@@ -330,14 +330,38 @@ def _pr_base(branch):
         b = parent
 
 
+def _pr_body_prefill(branch):
+    """The compare form's default body for a branch of a multi-branch project: the forest
+    furniture (purpose, commit outline, merge order by PR number — stack-pr-body, no model
+    call) above the repo's own PR template, which GitHub would otherwise supply and a
+    prefilled body replaces. Empty for a lone branch, so the form keeps the template alone.
+    Only the compare-and-create form is ever prefilled: once a PR exists the door opens the
+    PR itself, so a body the author has edited is never touched."""
+    project = repostate.snapshot().project(branch)
+    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split() if project else []
+    if len(members) < 2:
+        return ""
+    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-pr-body"), branch])
+    furniture = r.stdout.strip() if r.returncode == 0 else ""
+    if not furniture:
+        return ""
+    t = ctx.run(["git", "show", f"{branch}:.github/pull_request_template.md"])
+    template = t.stdout.strip() if t.returncode == 0 else ""
+    return furniture + (f"\n\n{template}\n" if template else "\n")
+
+
 def _origin_web(branch):
     """github.com compare link for the branch, opened straight to the 'Open a pull
-    request' form (?expand=1) with the base prefilled by _pr_base. Authoring still
-    happens on the website — this only opens the form; it never prefills a
-    title/body or calls gh pr create."""
+    request' form (?expand=1) with the base prefilled by _pr_base and, for a branch of a
+    multi-branch project, the body prefilled by _pr_body_prefill. Authoring still happens
+    on the website — this only opens the form; it never calls gh pr create."""
     url = repostate.snapshot().get("remote.origin.url")
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
-    return f"https://github.com/{m.group(1)}/compare/{_pr_base(branch)}...{branch}?expand=1" if m else ""
+    if not m:
+        return ""
+    body = _pr_body_prefill(branch)
+    return (f"https://github.com/{m.group(1)}/compare/{_pr_base(branch)}...{branch}?expand=1"
+            + (f"&body={quote(body, safe='')}" if body else ""))
 
 
 def _open_pr_url(branch):
