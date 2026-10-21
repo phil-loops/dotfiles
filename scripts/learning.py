@@ -294,13 +294,16 @@ def mastery(g, cid, today=None):
     for lvl in range(1, len(LEVELS) + 1):
         if len({d for d, l in unaided if l >= lvl}) >= 2:
             held = lvl
-    spacing = min(MAX_SPACING_DAYS, BASE_SPACING_DAYS * 2 ** max(0, len(unaided) - 1) * max(1, depth))
+    # the first re-test gap is the base spacing (about a tenth of a month-long retention target);
+    # doubling starts only once the concept is held
+    spacing = (min(MAX_SPACING_DAYS, BASE_SPACING_DAYS * 2 ** max(0, len(unaided) - 1) * max(1, depth))
+               if held else BASE_SPACING_DAYS)
     if open_miss:
         due, reason = True, f"missed: {open_miss['note'] or open_miss['level']}"
     elif depth == 0 and assisted:
         due, reason = True, "only shown with help"
-    elif depth and not held and _days(last_unaided, today) >= 1:
-        due, reason = True, "shown unaided once — a second day makes it held"
+    elif depth and not held and _days(last_unaided, today) >= spacing:
+        due, reason = True, f"shown unaided once, {_days(last_unaided, today)} days ago — a second day makes it held"
     elif depth and _days(last_unaided, today) > spacing:
         due, reason = True, f"last shown unaided {_days(last_unaided, today)} days ago"
     else:
