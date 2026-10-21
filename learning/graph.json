@@ -1,0 +1,1893 @@
+{
+ "version": 1,
+ "concepts": {
+  "one-runner-per-tick": {
+   "name": "One runner per tick",
+   "statement": "N copies of a scheduler share one schedule, so something must pick exactly one runner per tick.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "dead-holder-blocks-forever": {
+   "name": "A dead holder blocks forever",
+   "statement": "A lock with no expiry outlives a crashed holder and blocks everyone, forever.",
+   "kind": "principle",
+   "builds_on": [
+    "one-runner-per-tick"
+   ],
+   "analogs": [
+    "frozen-bookmark-pins-retention"
+   ],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "lock-ttl": {
+   "name": "TTL sets recovery time",
+   "statement": "A TTL bounds how long a dead holder can block; it is the crash-recovery time.",
+   "kind": "principle",
+   "builds_on": [
+    "dead-holder-blocks-forever"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "lease-renewal": {
+   "name": "Lease renewal",
+   "statement": "A long job keeps a short TTL by renewing while alive; renewing at TTL/2 leaves one retry of margin before expiry.",
+   "kind": "principle",
+   "builds_on": [
+    "lock-ttl"
+   ],
+   "analogs": [
+    "claim-lease-sweep"
+   ],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "ttl-vs-renewal-interval": {
+   "name": "TTL and renewal interval are separate knobs",
+   "statement": "TTL sets recovery time; the renewal interval trades safety margin against coordination overhead.",
+   "kind": "principle",
+   "builds_on": [
+    "lease-renewal"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "ownership-token": {
+   "name": "Ownership token",
+   "statement": "Renew or release only if the stored token is yours, so an expired holder can't free the next holder's lock.",
+   "kind": "principle",
+   "builds_on": [
+    "lease-renewal"
+   ],
+   "analogs": [
+    "optimistic-concurrency",
+    "correlation-tag"
+   ],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "zombie-release-cascade": {
+   "name": "Zombie release cascade",
+   "statement": "An expired holder that still releases frees a live holder's lock, letting more runners pile on.",
+   "kind": "principle",
+   "builds_on": [
+    "ownership-token"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "lock-guards-holders-not-execution": {
+   "name": "A lock guards holders, not execution",
+   "statement": "Deleting a lock key doesn't stop code already running; correctness needs idempotency or fencing, not the lock.",
+   "kind": "principle",
+   "builds_on": [
+    "ownership-token"
+   ],
+   "analogs": [
+    "cursor-redelivery"
+   ],
+   "code": [],
+   "topics": [
+    "croon-job-locks"
+   ],
+   "created": "2026-06-26"
+  },
+  "registry-over-switch": {
+   "name": "Registry over switch",
+   "statement": "A per-type registry keeps each type's logic together where a giant switch scatters it.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "loop-api-patchers"
+   ],
+   "created": "2026-06-27"
+  },
+  "mapped-type-exhaustiveness": {
+   "name": "Mapped-type exhaustiveness",
+   "statement": "A mapped type over the type union makes a missing registry entry a compile error.",
+   "kind": "principle",
+   "builds_on": [
+    "registry-over-switch"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "loop-api-patchers"
+   ],
+   "created": "2026-06-27"
+  },
+  "callback-injection-breaks-cycle": {
+   "name": "Injection breaks an import cycle",
+   "statement": "Receiving a function as an argument instead of importing it breaks a circular import.",
+   "kind": "principle",
+   "builds_on": [
+    "registry-over-switch"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "loop-api-patchers"
+   ],
+   "created": "2026-06-27"
+  },
+  "orphaned-position-record": {
+   "name": "Orphaned position record",
+   "statement": "Deleting a node leaves contacts' position records pointing at nothing.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-delete"
+   ],
+   "created": "2026-06-28"
+  },
+  "forwarding-redirect": {
+   "name": "Forwarding redirect",
+   "statement": "On delete, leave a redirect from the old node id to a live target.",
+   "kind": "principle",
+   "builds_on": [
+    "orphaned-position-record"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-delete"
+   ],
+   "created": "2026-06-28"
+  },
+  "redirect-chains": {
+   "name": "Redirects chain",
+   "statement": "Redirects stack (x→y→z), so resolving a position means following hops.",
+   "kind": "principle",
+   "builds_on": [
+    "forwarding-redirect"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-delete"
+   ],
+   "created": "2026-06-28"
+  },
+  "backward-enumeration": {
+   "name": "Enumerate backward",
+   "statement": "To find contacts affected by deleting Z, enumerate every source whose chain ends at Z, not just records equal to Z.",
+   "kind": "principle",
+   "builds_on": [
+    "redirect-chains"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-delete"
+   ],
+   "created": "2026-06-28"
+  },
+  "cascading-delete-set": {
+   "name": "Cascading delete set",
+   "statement": "A delete can take dependents with it (experiment → variants); affected-contact logic must compose over the whole set.",
+   "kind": "principle",
+   "builds_on": [
+    "backward-enumeration"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-delete"
+   ],
+   "created": "2026-06-28"
+  },
+  "caller-owned-transaction": {
+   "name": "The caller owns the transaction",
+   "statement": "A helper that writes related records takes the caller's tx and never opens its own, so all commit or none do.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "counts-and-bookmark-atomic"
+   ],
+   "code": [],
+   "topics": [
+    "workflow-node-create"
+   ],
+   "created": "2026-06-28"
+  },
+  "throw-rolls-back": {
+   "name": "Throwing is what rolls back",
+   "statement": "Throwing inside a transaction triggers rollback; returning an error result lets the partial writes commit.",
+   "kind": "principle",
+   "builds_on": [
+    "caller-owned-transaction"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-create"
+   ],
+   "created": "2026-06-28"
+  },
+  "throw-vs-return": {
+   "name": "Throw vs return",
+   "statement": "Expected, user-caused failures return a result; invariant violations and mid-transaction failures throw.",
+   "kind": "principle",
+   "builds_on": [
+    "throw-rolls-back"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-create"
+   ],
+   "created": "2026-06-28"
+  },
+  "registry-as-decoupling": {
+   "name": "A partial registry as decoupling",
+   "statement": "A deliberately partial registry can keep the pure graph model from importing the database layer.",
+   "kind": "principle",
+   "builds_on": [
+    "registry-over-switch"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-node-create"
+   ],
+   "created": "2026-06-28"
+  },
+  "lost-update": {
+   "name": "Lost update",
+   "statement": "Two read-modify-write saves of a whole document race; the second silently clobbers the first.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-occ-redirects"
+   ],
+   "created": "2026-06-28"
+  },
+  "optimistic-concurrency": {
+   "name": "Optimistic concurrency",
+   "statement": "Save only if the version is still the one you read (compare-and-swap); detect the collision at write time instead of locking.",
+   "kind": "principle",
+   "builds_on": [
+    "lost-update"
+   ],
+   "analogs": [
+    "ownership-token",
+    "atomic-check-and-spend"
+   ],
+   "code": [],
+   "topics": [
+    "workflow-occ-redirects"
+   ],
+   "created": "2026-06-28"
+  },
+  "claim-revision-up-front": {
+   "name": "Claim the revision up front",
+   "statement": "Claiming the revision first fails fast and takes the row lock, so a concurrent edit blocks, then fails.",
+   "kind": "principle",
+   "builds_on": [
+    "optimistic-concurrency"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-occ-redirects"
+   ],
+   "created": "2026-06-28"
+  },
+  "redirect-map-keeps-tx-short": {
+   "name": "One map entry keeps the edit short",
+   "statement": "A delete writes one O(1) redirect entry so the edit transaction stays short; the O(N) bookmark rewrite moves to an async job.",
+   "kind": "principle",
+   "builds_on": [
+    "forwarding-redirect",
+    "claim-revision-up-front"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-occ-redirects"
+   ],
+   "created": "2026-06-28"
+  },
+  "redirect-resolution-walk": {
+   "name": "The resolution walk",
+   "statement": "Resolve by hopping until a live node (success), a repeat (cycle), or nothing (dead end).",
+   "kind": "principle",
+   "builds_on": [
+    "redirect-chains"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "workflow-occ-redirects"
+   ],
+   "created": "2026-06-28"
+  },
+  "load-bearing-waypoint": {
+   "name": "Load-bearing waypoint",
+   "statement": "A middle redirect with no contacts of its own still carries chains through it; cleanup must keep whole chains.",
+   "kind": "principle",
+   "builds_on": [
+    "redirect-resolution-walk"
+   ],
+   "analogs": [
+    "retention-slowest-reader"
+   ],
+   "code": [],
+   "topics": [
+    "workflow-occ-redirects"
+   ],
+   "created": "2026-06-28"
+  },
+  "priority-cant-reclaim": {
+   "name": "Priority can't reclaim committed capacity",
+   "statement": "Reactive priority has a ceiling; protecting a class means holding slack in advance.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "aimd-asymmetry": {
+   "name": "AIMD asymmetry",
+   "statement": "Increase gently, cut sharply; the asymmetry keeps a controller out of the danger zone.",
+   "kind": "principle",
+   "builds_on": [
+    "priority-cant-reclaim"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "wait-time-signal": {
+   "name": "Control on wait time",
+   "statement": "Steer on wait time against the SLA (end-user impact), not queue length.",
+   "kind": "principle",
+   "builds_on": [
+    "aimd-asymmetry"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "atomic-check-and-spend": {
+   "name": "Atomic check-and-spend",
+   "statement": "Checking and spending a shared budget must be one atomic operation, or two spenders both see the last dollar.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "optimistic-concurrency",
+    "counts-and-bookmark-atomic"
+   ],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "bounded-turn-round-robin": {
+   "name": "Bounded-turn round robin",
+   "statement": "Round robin with bounded turns bounds a tenant's wait by tenant count, not by backlog.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "claim-lease-sweep": {
+   "name": "Claim, lease, sweep",
+   "statement": "Claiming moves work to an in-progress set stamped with an expiry; a sweeper requeues expired claims.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "lease-renewal"
+   ],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "orthogonal-throttles": {
+   "name": "Two orthogonal throttles",
+   "statement": "Class priority (token bucket) and tenant fairness (leases) are independent axes.",
+   "kind": "principle",
+   "builds_on": [
+    "bounded-turn-round-robin",
+    "aimd-asymmetry"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "mail-queue-scheduling"
+   ],
+   "created": "2026-07-01"
+  },
+  "common-case-top-level": {
+   "name": "Common case at the top level",
+   "statement": "Make the common case the top-level shape and put variation in optional additive fields, so growth never reshapes the contract.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "metrics-api-design"
+   ],
+   "created": "2026-07-02"
+  },
+  "per-resource-addressing": {
+   "name": "Address each sub-resource",
+   "statement": "Making each sub-thing its own resource keeps every response a single object; the cost is N+1 fan-out.",
+   "kind": "principle",
+   "builds_on": [
+    "common-case-top-level"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "metrics-api-design"
+   ],
+   "created": "2026-07-02"
+  },
+  "counts-not-rates": {
+   "name": "Ship counts, not rates",
+   "statement": "A raw metrics API ships counts; a rate encodes a denominator choice the caller should make.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "raw-ledger-replay"
+   ],
+   "code": [],
+   "topics": [
+    "metrics-api-design"
+   ],
+   "created": "2026-07-02"
+  },
+  "serve-vs-maintain": {
+   "name": "Expensive to serve vs to maintain",
+   "statement": "Costly to keep fresh is not costly to serve: a maintained cache serves instantly.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "metrics-api-design"
+   ],
+   "created": "2026-07-02"
+  },
+  "cache-shared-not-unique": {
+   "name": "Cache what's shared",
+   "statement": "Cache what many requests share; per-request-unique work (arbitrary filters) is what stays expensive to serve.",
+   "kind": "principle",
+   "builds_on": [
+    "serve-vs-maintain"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "metrics-api-design"
+   ],
+   "created": "2026-07-02"
+  },
+  "generator-call-runs-nothing": {
+   "name": "Calling a generator runs nothing",
+   "statement": "Calling a generator function runs none of its body; the first pull starts it, so a query inside fires on first pull.",
+   "kind": "convention",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "async-generators"
+   ],
+   "created": "2026-07-06"
+  },
+  "yield-freezes-the-frame": {
+   "name": "Yield freezes the frame",
+   "statement": "A yield mid-loop parks the whole frame, so the row in hand survives to the next pull.",
+   "kind": "principle",
+   "builds_on": [
+    "generator-call-runs-nothing"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "async-generators"
+   ],
+   "created": "2026-07-06"
+  },
+  "generator-pipeline-stages": {
+   "name": "Stages compose",
+   "statement": "Each stage takes an async iterable and returns one, so stages chain into a pipeline.",
+   "kind": "principle",
+   "builds_on": [
+    "yield-freezes-the-frame"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "async-generators"
+   ],
+   "created": "2026-07-06"
+  },
+  "fold-needs-grouped-input": {
+   "name": "A fold needs grouped input",
+   "statement": "A streaming fold assumes rows arrive grouped by key; unsorted input yields several transitions per key.",
+   "kind": "principle",
+   "builds_on": [
+    "generator-pipeline-stages"
+   ],
+   "analogs": [
+    "commit-order-not-stamp-order"
+   ],
+   "code": [],
+   "topics": [
+    "async-generators"
+   ],
+   "created": "2026-07-06"
+  },
+  "silent-wrongness-misattribution": {
+   "name": "Silent wrongness misdirects debugging",
+   "statement": "A silently wrong result sends you debugging the wrong layer.",
+   "kind": "principle",
+   "builds_on": [
+    "fold-needs-grouped-input"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "async-generators"
+   ],
+   "created": "2026-07-06"
+  },
+  "editor-ships-buffer": {
+   "name": "The editor ships the buffer",
+   "statement": "The editor owns the unsaved buffer, so it must send its contents to the server (didOpen / didChange).",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ts-language-server"
+   ],
+   "created": "2026-07-14"
+  },
+  "requests-point-at-positions": {
+   "name": "Requests point at positions",
+   "statement": "A hover or completion names a position; the server already holds the text.",
+   "kind": "principle",
+   "builds_on": [
+    "editor-ships-buffer"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ts-language-server"
+   ],
+   "created": "2026-07-14"
+  },
+  "line-column-edit-locality": {
+   "name": "Line + column survive edits",
+   "statement": "Line/column addresses stay valid when text changes elsewhere; flat offsets shift for everything after an edit.",
+   "kind": "principle",
+   "builds_on": [
+    "requests-point-at-positions"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ts-language-server"
+   ],
+   "created": "2026-07-14"
+  },
+  "one-checker-two-doors": {
+   "name": "One checker, two doors",
+   "statement": "Batch tsc and the language server run the same checker; LSP is a protocol door, not the brain.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ts-language-server"
+   ],
+   "created": "2026-07-14"
+  },
+  "translator-hop-cost": {
+   "name": "The translator hop was the cost",
+   "statement": "The old language server translated every keystroke's request; removing that hop is the speedup.",
+   "kind": "principle",
+   "builds_on": [
+    "one-checker-two-doors"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ts-language-server"
+   ],
+   "created": "2026-07-14"
+  },
+  "correlation-tag": {
+   "name": "Correlation tag",
+   "statement": "Stamp your own id onto the outgoing mail so SES echoes it back on every event.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "ownership-token"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "durable-row-before-send": {
+   "name": "Durable row before send",
+   "statement": "The row a tag points to must exist before the send, or a crash leaves the tag pointing at nothing.",
+   "kind": "principle",
+   "builds_on": [
+    "correlation-tag"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "raw-ledger-replay": {
+   "name": "Keep raw events to replay",
+   "statement": "Keeping the raw events lets you fix a counting bug and recompute; counters alone are their own only copy.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "counts-not-rates"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "readers-decoupled": {
+   "name": "Readers are decoupled",
+   "statement": "Each reader of the ledger is its own program, so adding or removing one never touches ingest and one failing doesn't half-finish the others.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "cursor-redelivery": {
+   "name": "A crashed tick re-reads",
+   "statement": "A reader that applies effects but dies before saving its bookmark re-reads the same events next tick.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "lock-guards-holders-not-execution"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "counts-and-bookmark-atomic": {
+   "name": "Effects and bookmark move together",
+   "statement": "Applying effects and moving the bookmark must commit in one transaction.",
+   "kind": "principle",
+   "builds_on": [
+    "cursor-redelivery"
+   ],
+   "analogs": [
+    "atomic-check-and-spend",
+    "caller-owned-transaction"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "bookmark-lives-with-effects": {
+   "name": "The bookmark lives with the effects",
+   "statement": "With no cross-database transaction, the bookmark lives in the database the reader writes to; reading twice is harmless.",
+   "kind": "principle",
+   "builds_on": [
+    "counts-and-bookmark-atomic"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "commit-order-not-stamp-order": {
+   "name": "Commit order isn't stamp order",
+   "statement": "Rows stamped when their insert begins can commit out of order, so a reader can skip past a slow insert forever.",
+   "kind": "principle",
+   "builds_on": [
+    "cursor-redelivery"
+   ],
+   "analogs": [
+    "fold-needs-grouped-input"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "safety-lag": {
+   "name": "Safety lag",
+   "statement": "Readers only take rows older than now minus X, and X is bounded by the insert's timeout.",
+   "kind": "principle",
+   "builds_on": [
+    "commit-order-not-stamp-order"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "retention-slowest-reader": {
+   "name": "The slowest reader sets retention",
+   "statement": "Cleanup keeps everything from the oldest reader bookmark onward.",
+   "kind": "principle",
+   "builds_on": [],
+   "analogs": [
+    "load-bearing-waypoint"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "frozen-bookmark-pins-retention": {
+   "name": "A frozen bookmark pins retention",
+   "statement": "A deleted reader's leftover bookmark pins the ledger forever.",
+   "kind": "principle",
+   "builds_on": [
+    "retention-slowest-reader"
+   ],
+   "analogs": [
+    "dead-holder-blocks-forever"
+   ],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "no-bookmark-row-means-unborn": {
+   "name": "No bookmark row means not born yet",
+   "statement": "A reader has no bookmark row until its first tick, so a missing row means the reader hasn't run yet.",
+   "kind": "convention",
+   "builds_on": [
+    "retention-slowest-reader"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  },
+  "bookmark-name-contract": {
+   "name": "The bookmark name is a contract",
+   "statement": "Retention looks readers up by exact name, so a future reader must write its bookmark under the pre-chosen name or the guard never engages.",
+   "kind": "principle",
+   "builds_on": [
+    "no-bookmark-row-means-unborn"
+   ],
+   "analogs": [],
+   "code": [],
+   "topics": [
+    "ses-metric-projection"
+   ],
+   "created": "2026-10-21"
+  }
+ },
+ "topics": {
+  "croon-job-locks": {
+   "title": "Distributed job locks (croon)",
+   "source": "croon PR #9273",
+   "stages": [
+    {
+     "name": "Why a lock",
+     "concepts": [
+      "one-runner-per-tick",
+      "dead-holder-blocks-forever"
+     ]
+    },
+    {
+     "name": "Leases",
+     "concepts": [
+      "lock-ttl",
+      "lease-renewal",
+      "ttl-vs-renewal-interval"
+     ]
+    },
+    {
+     "name": "Ownership",
+     "concepts": [
+      "ownership-token",
+      "zombie-release-cascade",
+      "lock-guards-holders-not-execution"
+     ]
+    }
+   ],
+   "created": "2026-06-26",
+   "updated": "2026-10-21"
+  },
+  "loop-api-patchers": {
+   "title": "Loop-API patcher registry",
+   "source": "LOO-5281 patcher series",
+   "stages": [
+    {
+     "name": "Structure",
+     "concepts": [
+      "registry-over-switch",
+      "mapped-type-exhaustiveness",
+      "callback-injection-breaks-cycle"
+     ]
+    }
+   ],
+   "created": "2026-06-27",
+   "updated": "2026-10-21"
+  },
+  "workflow-node-delete": {
+   "title": "Deleting workflow nodes",
+   "source": "loop-api delete-node/1 PR #9283",
+   "stages": [
+    {
+     "name": "Dangling pointers",
+     "concepts": [
+      "orphaned-position-record",
+      "forwarding-redirect",
+      "redirect-chains",
+      "backward-enumeration",
+      "cascading-delete-set"
+     ]
+    }
+   ],
+   "created": "2026-06-28",
+   "updated": "2026-10-21"
+  },
+  "workflow-node-create": {
+   "title": "Creating workflow nodes",
+   "source": "loop-api create-node/1 PR #9287",
+   "stages": [
+    {
+     "name": "Atomicity",
+     "concepts": [
+      "caller-owned-transaction",
+      "throw-rolls-back",
+      "throw-vs-return"
+     ]
+    },
+    {
+     "name": "Review",
+     "concepts": [
+      "registry-as-decoupling"
+     ]
+    }
+   ],
+   "created": "2026-06-28",
+   "updated": "2026-10-21"
+  },
+  "workflow-occ-redirects": {
+   "title": "Workflow edits: OCC and the redirect map",
+   "source": "create-node/2 PR #9288, delete-node #9284, deletedNodeRedirects.ts",
+   "stages": [
+    {
+     "name": "Concurrent edits",
+     "concepts": [
+      "lost-update",
+      "optimistic-concurrency",
+      "claim-revision-up-front"
+     ]
+    },
+    {
+     "name": "The redirect map",
+     "concepts": [
+      "redirect-map-keeps-tx-short",
+      "redirect-resolution-walk",
+      "load-bearing-waypoint"
+     ]
+    }
+   ],
+   "created": "2026-06-28",
+   "updated": "2026-10-21"
+  },
+  "mail-queue-scheduling": {
+   "title": "Mail queue: congestion control and fair scheduling",
+   "source": "mail-queue pipeline (AIMD token bucket + per-team leasing)",
+   "stages": [
+    {
+     "name": "Congestion control",
+     "concepts": [
+      "priority-cant-reclaim",
+      "aimd-asymmetry",
+      "wait-time-signal",
+      "atomic-check-and-spend"
+     ]
+    },
+    {
+     "name": "Fair scheduling",
+     "concepts": [
+      "bounded-turn-round-robin",
+      "claim-lease-sweep",
+      "orthogonal-throttles"
+     ]
+    }
+   ],
+   "created": "2026-07-01",
+   "updated": "2026-10-21"
+  },
+  "metrics-api-design": {
+   "title": "Metrics API response design",
+   "source": "his metrics-API design doc",
+   "stages": [
+    {
+     "name": "Response shape",
+     "concepts": [
+      "common-case-top-level",
+      "per-resource-addressing",
+      "counts-not-rates"
+     ]
+    },
+    {
+     "name": "Serving cost",
+     "concepts": [
+      "serve-vs-maintain",
+      "cache-shared-not-unique"
+     ]
+    }
+   ],
+   "created": "2026-07-02",
+   "updated": "2026-10-21"
+  },
+  "async-generators": {
+   "title": "Async generators and streaming folds",
+   "source": "foldContactVerdicts (goals/cdc-parity-fold)",
+   "stages": [
+    {
+     "name": "Generators",
+     "concepts": [
+      "generator-call-runs-nothing",
+      "yield-freezes-the-frame",
+      "generator-pipeline-stages"
+     ]
+    },
+    {
+     "name": "Streaming folds",
+     "concepts": [
+      "fold-needs-grouped-input",
+      "silent-wrongness-misattribution"
+     ]
+    }
+   ],
+   "created": "2026-07-06",
+   "updated": "2026-10-21"
+  },
+  "ts-language-server": {
+   "title": "TypeScript compiler, LSP and tsgo",
+   "source": "hands-on tsgo --lsp session",
+   "stages": [
+    {
+     "name": "The protocol",
+     "concepts": [
+      "editor-ships-buffer",
+      "requests-point-at-positions",
+      "line-column-edit-locality"
+     ]
+    },
+    {
+     "name": "The checker",
+     "concepts": [
+      "one-checker-two-doors",
+      "translator-hop-cost"
+     ]
+    }
+   ],
+   "created": "2026-07-14",
+   "updated": "2026-10-21"
+  },
+  "ses-metric-projection": {
+   "title": "Mail send → SES feedback → metric projection",
+   "source": "nalanj's PR #11092 (remove shadow projection)",
+   "stages": [
+    {
+     "name": "Correlate",
+     "concepts": [
+      "correlation-tag",
+      "durable-row-before-send"
+     ]
+    },
+    {
+     "name": "The ledger",
+     "concepts": [
+      "raw-ledger-replay",
+      "readers-decoupled"
+     ]
+    },
+    {
+     "name": "Readers and bookmarks",
+     "concepts": [
+      "cursor-redelivery",
+      "counts-and-bookmark-atomic",
+      "bookmark-lives-with-effects"
+     ]
+    },
+    {
+     "name": "Ordering",
+     "concepts": [
+      "commit-order-not-stamp-order",
+      "safety-lag"
+     ]
+    },
+    {
+     "name": "Retention",
+     "concepts": [
+      "retention-slowest-reader",
+      "frozen-bookmark-pins-retention",
+      "no-bookmark-row-means-unborn",
+      "bookmark-name-contract"
+     ]
+    }
+   ],
+   "created": "2026-10-21",
+   "updated": "2026-10-21"
+  }
+ },
+ "evidence": [
+  {
+   "id": "556fa11121",
+   "concept": "one-runner-per-tick",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "fast: N server copies, one schedule",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "b6bee53856",
+   "concept": "dead-holder-blocks-forever",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "crash → tombstone deadlock",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "4cb4de26c4",
+   "concept": "lock-ttl",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "the TTL fix and the short-vs-long dilemma",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "124f9edf33",
+   "concept": "lease-renewal",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "invented lease renewal himself; got the TTL/2 margin",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "6da0daec7c",
+   "concept": "ttl-vs-renewal-interval",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "attributed recovery time to how often you renew",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "0d155da409",
+   "concept": "ownership-token",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "invented the ownership token",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "2966e65241",
+   "concept": "zombie-release-cascade",
+   "level": "critique",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "spotted the runaway cascade on long tasks unprompted",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "0a1b448755",
+   "concept": "lock-guards-holders-not-execution",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "believed the lock prevents concurrent execution",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "c1125cc2a2",
+   "concept": "lock-guards-holders-not-execution",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "unlocked by 'does deleting a key halt running JS?'",
+   "at": "2026-06-26",
+   "topic": "croon-job-locks",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "7f4c3dec9c",
+   "concept": "registry-over-switch",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "session ran too easy — he noticed answers were handed",
+   "at": "2026-06-27",
+   "topic": "loop-api-patchers",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "0540dfd291",
+   "concept": "mapped-type-exhaustiveness",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-06-27",
+   "topic": "loop-api-patchers",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "0fe58478fb",
+   "concept": "callback-injection-breaks-cycle",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "named callback/constructor injection, but teed up",
+   "at": "2026-06-27",
+   "topic": "loop-api-patchers",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "46f146cc14",
+   "concept": "orphaned-position-record",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "reframed his own 'race' worry into a stranded pointer",
+   "at": "2026-06-28",
+   "topic": "workflow-node-delete",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "d84106a769",
+   "concept": "forwarding-redirect",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "invented the redirect system",
+   "at": "2026-06-28",
+   "topic": "workflow-node-delete",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "afe8ddcbdf",
+   "concept": "redirect-chains",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-06-28",
+   "topic": "workflow-node-delete",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "893e476790",
+   "concept": "backward-enumeration",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "nailed the backward enumeration cold",
+   "at": "2026-06-28",
+   "topic": "workflow-node-delete",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "1a8dc02a7f",
+   "concept": "backward-enumeration",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "said 'resolves to' (forward) for the job that fires the backward lookup",
+   "at": "2026-06-28",
+   "topic": "workflow-node-delete",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "708d2fb6e6",
+   "concept": "cascading-delete-set",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-06-28",
+   "topic": "workflow-node-delete",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "ee59cea4bd",
+   "concept": "caller-owned-transaction",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "one transaction or none; inverse of the delete dangling-pointer problem",
+   "at": "2026-06-28",
+   "topic": "workflow-node-create",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "73b537ddaf",
+   "concept": "throw-rolls-back",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "caught the throw-triggers-rollback gem",
+   "at": "2026-06-28",
+   "topic": "workflow-node-create",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "02e66db190",
+   "concept": "throw-vs-return",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "derived the rule himself",
+   "at": "2026-06-28",
+   "topic": "workflow-node-create",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "9b10959064",
+   "concept": "registry-as-decoupling",
+   "level": "critique",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "reviewer mode, unprompted; also flagged the throw-vs-internalServerError ambiguity",
+   "at": "2026-06-28",
+   "topic": "workflow-node-create",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "ac18b2512b",
+   "concept": "lost-update",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "'one of the work gets silently deleted'",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "dee55b9f11",
+   "concept": "optimistic-concurrency",
+   "level": "transfer",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "invented compare-and-swap; connected it to the croon token unprompted",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "8187d315f4",
+   "concept": "claim-revision-up-front",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "fail-fast unaided; row-lock blocking phrase stolen by autosuggest",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "4ec5854432",
+   "concept": "redirect-map-keeps-tx-short",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "3d04bd85ee",
+   "concept": "redirect-resolution-walk",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "named both failure modes himself",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "c5df6fbbec",
+   "concept": "load-bearing-waypoint",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "said the stranded contact was at b; it's the contact at a",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "287ea681c6",
+   "concept": "load-bearing-waypoint",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-06-28",
+   "topic": "workflow-occ-redirects",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "5d028b97c8",
+   "concept": "priority-cant-reclaim",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "c7b2001385",
+   "concept": "aimd-asymmetry",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "proved it with the flipped-world failure",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "28dd8e3a34",
+   "concept": "wait-time-signal",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "defended it on end-user impact unprompted",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "7668af4e82",
+   "concept": "atomic-check-and-spend",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "needed the 'kill the gap' reframe; didn't recall OCC by name",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "168418ac5f",
+   "concept": "bounded-turn-round-robin",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "playground-swing analogy",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "c68bfde39b",
+   "concept": "bounded-turn-round-robin",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "said biggest timestamp = longest waiting (it's smallest); fixed instantly with two numbers",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "e995a8fbac",
+   "concept": "claim-lease-sweep",
+   "level": "transfer",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "re-derived from croon",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "274f99b7ee",
+   "concept": "orthogonal-throttles",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-07-01",
+   "topic": "mail-queue-scheduling",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "3952872548",
+   "concept": "common-case-top-level",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "needed 'imagine all three share the top level'",
+   "at": "2026-07-02",
+   "topic": "metrics-api-design",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "ab81a7729e",
+   "concept": "per-resource-addressing",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "proposed it himself and reasoned the fan-out cost cold",
+   "at": "2026-07-02",
+   "topic": "metrics-api-design",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "130be84043",
+   "concept": "counts-not-rates",
+   "level": "critique",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "dissolved the denominator trap",
+   "at": "2026-07-02",
+   "topic": "metrics-api-design",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "dc884c49fc",
+   "concept": "serve-vs-maintain",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "over-reached to 'goal data has to be async'",
+   "at": "2026-07-02",
+   "topic": "metrics-api-design",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "9c1476c00a",
+   "concept": "serve-vs-maintain",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "self-corrected after the serve-vs-maintain reframe",
+   "at": "2026-07-02",
+   "topic": "metrics-api-design",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "ca6f97279f",
+   "concept": "cache-shared-not-unique",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "relocated his async instinct to arbitrary filters",
+   "at": "2026-07-02",
+   "topic": "metrics-api-design",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "a16f5a9d5b",
+   "concept": "generator-call-runs-nothing",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "twice reasoned 'call = body starts'",
+   "at": "2026-07-06",
+   "topic": "async-generators",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "a5bab22cdd",
+   "concept": "generator-call-runs-nothing",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "revealed",
+   "at": "2026-07-06",
+   "topic": "async-generators",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "7c115b046f",
+   "concept": "yield-freezes-the-frame",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "located the question himself; the answer was annotated into the excerpt",
+   "at": "2026-07-06",
+   "topic": "async-generators",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "16b7be6e3d",
+   "concept": "generator-pipeline-stages",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "'same species out as in' did the work",
+   "at": "2026-07-06",
+   "topic": "async-generators",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "4767caa7ef",
+   "concept": "fold-needs-grouped-input",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "grouped-chunks reframe and 'multiple transitions' were his",
+   "at": "2026-07-06",
+   "topic": "async-generators",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "9271762ed7",
+   "concept": "silent-wrongness-misattribution",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "the damage chain was written for him",
+   "at": "2026-07-06",
+   "topic": "async-generators",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "311d49fe40",
+   "concept": "editor-ships-buffer",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "invented why didOpen exists, cold",
+   "at": "2026-07-14",
+   "topic": "ts-language-server",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "15b395f525",
+   "concept": "requests-point-at-positions",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "",
+   "at": "2026-07-14",
+   "topic": "ts-language-server",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "566697f328",
+   "concept": "line-column-edit-locality",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "needed the 'type at line 1, watch line 5 renumber' scenario",
+   "at": "2026-07-14",
+   "topic": "ts-language-server",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "6ba96638ec",
+   "concept": "one-checker-two-doors",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "re-aimed via 'does terminal tsc do a handshake?'",
+   "at": "2026-07-14",
+   "topic": "ts-language-server",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "827ad31bee",
+   "concept": "translator-hop-cost",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "connected it to the 721→36ms win",
+   "at": "2026-07-14",
+   "topic": "ts-language-server",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "888597d6f3",
+   "concept": "correlation-tag",
+   "level": "explain",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "question aimed at 'not depend on AWS's reply'",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "a071274600",
+   "concept": "durable-row-before-send",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "after the 4-step crash list",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "75c63254dd",
+   "concept": "raw-ledger-replay",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "said 'rollback'; replay was named for him",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "1a9631cfa5",
+   "concept": "readers-decoupled",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "'legacy also buffers, the difference is the row is kept' was handed",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "b495f96fe1",
+   "concept": "cursor-redelivery",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "events 1–10, bookmark at 3",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "b662262fb2",
+   "concept": "counts-and-bookmark-atomic",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "'it's all happening in a transaction'",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "f27aecea44",
+   "concept": "bookmark-lives-with-effects",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "reading is harmless twice → explains the two checkpoint tables",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "bb170e83f4",
+   "concept": "commit-order-not-stamp-order",
+   "level": "predict",
+   "credit": "scaffolded",
+   "outcome": "hit",
+   "note": "waved it through 'in principle' until forced to run the numbers",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "46f5a24999",
+   "concept": "safety-lag",
+   "level": "explain",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "'timeouts'",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "e3e3c8a072",
+   "concept": "retention-slowest-reader",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "Oct 5 vs Oct 18 → 5, no direction flip",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "c6168d72fc",
+   "concept": "frozen-bookmark-pins-retention",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "hit",
+   "note": "'it grows indefinitely'",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "209bc855eb",
+   "concept": "no-bookmark-row-means-unborn",
+   "level": "predict",
+   "credit": "unaided",
+   "outcome": "miss",
+   "note": "said a missing row means fully caught up",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  },
+  {
+   "id": "2b660050b7",
+   "concept": "no-bookmark-row-means-unborn",
+   "level": "explain",
+   "credit": "handed",
+   "outcome": "hit",
+   "note": "a convention — funneled, then told",
+   "at": "2026-10-21",
+   "topic": "ses-metric-projection",
+   "session": "seed:learning-track"
+  }
+ ],
+ "questions": [
+  {
+   "id": "4a64b6a578",
+   "text": "How does the new path know an open is the *first* open for that send?",
+   "concept": "",
+   "topic": "ses-metric-projection",
+   "asked": "2026-10-21",
+   "status": "open"
+  },
+  {
+   "id": "1ebbb8f78d",
+   "text": "Why did the Go rewrite of TypeScript drop the old JS compiler API?",
+   "concept": "one-checker-two-doors",
+   "topic": "ts-language-server",
+   "asked": "2026-10-21",
+   "status": "open"
+  }
+ ],
+ "calibration": [
+  {
+   "note": "Direction/ordering flips recur (forward vs backward arrows, a vs b, biggest vs smallest timestamp). The fix that works and he can self-serve: plug in two concrete values.",
+   "at": "2026-10-21"
+  },
+  {
+   "note": "Question-finding is his strongest skill. Let him steer; follow his threads.",
+   "at": "2026-10-21"
+  },
+  {
+   "note": "When he asserts a conclusion ('makes sense in principle'), make him run it on the hardest concrete case.",
+   "at": "2026-10-21"
+  },
+  {
+   "note": "He audits the credit line by line. Under-claim.",
+   "at": "2026-10-21"
+  },
+  {
+   "note": "Strong analogs: locks/leases, OCC/tokens, transactions, scheduling. Weak: JS generators, the mail metrics pipeline — go worked-run first there.",
+   "at": "2026-10-21"
+  }
+ ]
+}
