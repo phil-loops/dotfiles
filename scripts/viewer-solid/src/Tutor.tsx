@@ -12,7 +12,8 @@
 import { createEffect, createMemo, createRoot, createResource, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { fetchJSON } from "./api";
-import { renderMarkdown } from "./markdown";
+import hljs from "highlight.js/lib/core";
+import { renderMarkdown } from "./markdown"; // also registers hljs languages on the shared core
 
 type Msg = { role: "tutor" | "me"; text: string };
 type Pin = { path: string; ref?: string; lines?: [number, number] };
@@ -1016,6 +1017,50 @@ function ConceptDrawer(props: { id: string }) {
   );
 }
 
+const LANG_BY_EXT: Record<string, string> = {
+  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
+  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
+  py: "python", json: "json", sh: "bash", zsh: "bash", bash: "bash", sql: "sql", css: "css",
+  html: "xml", xml: "xml", svg: "xml", yml: "yaml", yaml: "yaml", md: "markdown", diff: "diff", patch: "diff",
+};
+const HIGHLIGHT_MAX = 300_000;
+
+const escapeHtml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+// Highlight the WHOLE file (so a multi-line comment or string colors correctly), then cut the HTML
+// into lines, closing the spans still open at each newline and reopening them on the next line.
+function highlightLines(text: string, path: string): string[] {
+  const lang = LANG_BY_EXT[path.split(".").pop()?.toLowerCase() ?? ""];
+  let html: string;
+  if (text.length > HIGHLIGHT_MAX) {
+    html = escapeHtml(text);
+  } else if (lang && hljs.getLanguage(lang)) {
+    html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
+  } else {
+    html = hljs.highlightAuto(text).value;
+  }
+  const out: string[] = [];
+  const open: string[] = [];
+  let cur = "";
+  for (const m of html.matchAll(/<span[^>]*>|<\/span>|\n|[^<\n]+/g)) {
+    const t = m[0];
+    if (t === "\n") {
+      out.push(cur + "</span>".repeat(open.length));
+      cur = open.join("");
+    } else if (t.startsWith("<span")) {
+      open.push(t);
+      cur += t;
+    } else if (t === "</span>") {
+      open.pop();
+      cur += t;
+    } else {
+      cur += t;
+    }
+  }
+  out.push(cur + "</span>".repeat(open.length));
+  return out;
+}
+
 function CodePane(props: { pin: Pin | null }) {
   const key = () => (props.pin ? `${props.pin.ref ?? ""}:${props.pin.path}` : null);
   const [src] = createResource(key, () => {
@@ -1023,7 +1068,8 @@ function CodePane(props: { pin: Pin | null }) {
     return fetchJSON<SrcReply>(`/tutor-src?path=${encodeURIComponent(p.path)}&ref=${encodeURIComponent(p.ref ?? "")}`);
   });
   let pane: HTMLDivElement | undefined;
-  const lines = createMemo(() => (src()?.text ?? "").replace(/\n$/, "").split("\n"));
+  const lines = createMemo(() => highlightLines((src()?.text ?? "").replace(/\n$/, ""), props.pin?.path ?? ""));
+  const focused = () => !!props.pin?.lines;
   const lit = (n: number) => {
     const r = props.pin?.lines;
     return !!r && n >= r[0] && n <= r[1];
@@ -1065,7 +1111,12 @@ function CodePane(props: { pin: Pin | null }) {
                     class="w-[52px] shrink-0 select-none pr-3 text-right"
                     classList={{ "text-gold-leaf": lit(i() + 1), "text-ink-faint": !lit(i() + 1) }}
                   >{i() + 1}</span>
-                  <span class="whitespace-pre pr-4" classList={{ "text-diff-ink": lit(i() + 1), "text-ink-dim": !lit(i() + 1) }}>{ln || " "}</span>
+                  {/* innerHTML: hljs output — it escapes the file's text, and the file is local code */}
+                  <span
+                    class="whitespace-pre pr-4 text-ink"
+                    classList={{ "opacity-55": focused() && !lit(i() + 1) }}
+                    innerHTML={ln || " "}
+                  />
                 </div>
               )}
             </For>
