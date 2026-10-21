@@ -37,6 +37,8 @@ LEVELS = ["predict", "explain", "transfer", "critique"]
 CREDITS = ["unaided", "scaffolded", "handed"]
 OUTCOMES = ["hit", "miss"]
 KINDS = ["principle", "convention"]
+CONFIDENCES = ["low", "medium", "high"]
+RUNGS = ["predict", "invent"]
 BASE_SPACING_DAYS = 4
 MAX_SPACING_DAYS = 120
 
@@ -122,6 +124,9 @@ def upsert_concept(g, c, topic=None):
     for key in ("name", "statement"):
         if _clean(c.get(key)):
             cur[key] = _clean(c[key])
+    if _clean(c.get("statement_learner")):
+        cur["statement_learner"] = _clean(c["statement_learner"])
+        cur["restated"] = _today()
     if c.get("kind") in KINDS:
         cur["kind"] = c["kind"]
     cur["builds_on"] = _uniq(cur["builds_on"] + [slug(x) for x in c.get("builds_on") or [] if slug(x) != cid])
@@ -158,6 +163,31 @@ def upsert_topic(g, t):
     return tid
 
 
+def restate(g, cid, text):
+    """The learner's own sentence for a concept — written at a summit, shown before the tutor's on a re-test."""
+    cid = slug(cid)
+    if cid not in g["concepts"]:
+        raise Invalid(f"no concept {cid}")
+    text = _clean(text)
+    if not text:
+        raise Invalid("empty restatement")
+    g["concepts"][cid]["statement_learner"] = text
+    g["concepts"][cid]["restated"] = _today()
+    return cid
+
+
+def _extras(e):
+    """Optional evidence fields; absent keys stay absent so old rows and new rows read the same way."""
+    confidence, rung = e.get("confidence") or "", e.get("rung") or ""
+    if confidence not in CONFIDENCES + [""]:
+        raise Invalid(f"bad confidence {confidence!r} — one of {CONFIDENCES}")
+    if rung not in RUNGS + [""]:
+        raise Invalid(f"bad rung {rung!r} — one of {RUNGS}")
+    out = {"confidence": confidence, "rung": rung, "contrast": _clean(e.get("contrast")),
+           "via": slug(e["via"]) if e.get("via") else ""}
+    return {k: v for k, v in out.items() if v}
+
+
 def add_evidence(g, e, session="", topic=""):
     cid = slug(e.get("concept") or "")
     if not cid or cid == "concept":
@@ -165,11 +195,14 @@ def add_evidence(g, e, session="", topic=""):
     level, credit, outcome = e.get("level"), e.get("credit", "unaided"), e.get("outcome", "hit")
     if level not in LEVELS or credit not in CREDITS or outcome not in OUTCOMES:
         raise Invalid(f"bad evidence {level}/{credit}/{outcome} — levels {LEVELS}, credits {CREDITS}, outcomes {OUTCOMES}")
+    extras = _extras(e)
+    if level == "transfer" and outcome == "hit" and credit == "unaided" and not extras.get("via"):
+        raise Invalid("an unaided transfer hit names the analog it transferred through: via")
     if cid not in g["concepts"]:
         upsert_concept(g, {"id": cid, "name": e.get("name")}, topic=topic or None)
     row = {"id": uuid.uuid4().hex[:10], "concept": cid, "level": level, "credit": credit, "outcome": outcome,
            "note": _clean(e.get("note")), "at": e.get("at") or _today(),
-           "topic": slug(topic) if topic else "", "session": session}
+           "topic": slug(topic) if topic else "", "session": session, **extras}
     g["evidence"].append(row)
     return row["id"]
 
@@ -182,6 +215,10 @@ def edit_evidence(g, eid, fields):
                     row[k] = _clean(fields[k]) if k == "note" else fields[k]
             if row["level"] not in LEVELS or row["credit"] not in CREDITS or row["outcome"] not in OUTCOMES:
                 raise Invalid("bad evidence fields")
+            for k in ("confidence", "rung", "contrast", "via"):
+                if k in fields:
+                    row.pop(k, None)
+            row.update(_extras({k: fields[k] for k in ("confidence", "rung", "contrast", "via") if k in fields}))
             row["edited"] = _today()
             return row
     raise Invalid(f"no evidence {eid}")
@@ -225,46 +262,67 @@ def _days(a, b):
 
 
 def mastery(g, cid, today=None):
+    """Depth (max level shown unaided) and held (shown unaided on two separate days) — one session's
+    hit is not retention. An open miss keeps the concept due; a high-confidence miss outranks every
+    other due item, because a confidently wrong prediction, once corrected, is the best-remembered
+    thing in a session (hypercorrection) — as long as it is actually re-tested."""
     today = today or _today()
     rows = sorted((r for r in g["evidence"] if r["concept"] == cid), key=lambda r: r["at"])
     depth = assisted = 0
     last_unaided = ""
-    unaided_hits = 0
+    unaided = []           # (date, level) of every unaided hit
     open_miss = None
+    misses = corrected = overconfident = 0
     for r in rows:
         lvl = LEVELS.index(r["level"]) + 1
         if r["outcome"] == "miss":
             open_miss = r
+            misses += 1
+            if r.get("confidence") == "high":
+                overconfident += 1
             continue
         if r["credit"] == "unaided":
             depth = max(depth, lvl)
             last_unaided = r["at"]
-            unaided_hits += 1
+            unaided.append((r["at"], lvl))
             if open_miss and lvl >= LEVELS.index(open_miss["level"]) + 1:
                 open_miss = None
+                corrected += 1
         else:
             assisted = max(assisted, lvl)
-    spacing = min(MAX_SPACING_DAYS, BASE_SPACING_DAYS * 2 ** max(0, unaided_hits - 1) * max(1, depth))
+    held = 0
+    for lvl in range(1, len(LEVELS) + 1):
+        if len({d for d, l in unaided if l >= lvl}) >= 2:
+            held = lvl
+    spacing = min(MAX_SPACING_DAYS, BASE_SPACING_DAYS * 2 ** max(0, len(unaided) - 1) * max(1, depth))
     if open_miss:
         due, reason = True, f"missed: {open_miss['note'] or open_miss['level']}"
     elif depth == 0 and assisted:
         due, reason = True, "only shown with help"
+    elif depth and not held and _days(last_unaided, today) >= 1:
+        due, reason = True, "shown unaided once — a second day makes it held"
     elif depth and _days(last_unaided, today) > spacing:
         due, reason = True, f"last shown unaided {_days(last_unaided, today)} days ago"
     else:
         due, reason = False, ""
     return {"depth": depth, "assisted": max(assisted, depth), "level": LEVELS[depth - 1] if depth else "",
+            "held": held, "held_level": LEVELS[held - 1] if held else "",
             "evidence": len(rows), "last": rows[-1]["at"] if rows else "", "due": due, "reason": reason,
-            "open_miss": open_miss["note"] if open_miss else "", "spacing": spacing}
+            "open_miss": (open_miss["note"] or f"missed at {open_miss['level']}") if open_miss else "",
+            "miss_confidence": (open_miss or {}).get("confidence", ""),
+            "contrast": (open_miss or {}).get("contrast", ""),
+            "misses": misses, "corrected": corrected, "overconfident": overconfident, "spacing": spacing}
 
 
 def _priority(m):
-    # open misses first, then help-only, then the most overdue relative to its spacing
+    # confident misses, then any open miss, then help-only, then once-only, then the most overdue
     if m["open_miss"]:
-        return (0, 0)
+        return (0, 0 if m["miss_confidence"] == "high" else 1)
     if m["depth"] == 0:
         return (1, 0)
-    return (2, -1)
+    if not m["held"]:
+        return (2, 0)
+    return (3, -1)
 
 
 def state(g, today=None):
@@ -272,57 +330,144 @@ def state(g, today=None):
     concepts = {cid: {**c, "id": cid, "mastery": mastery(g, cid, today)} for cid, c in g["concepts"].items()}
     for c in concepts.values():
         c["built_on_by"] = sorted(o for o, oc in g["concepts"].items() if c["id"] in oc["builds_on"])
+        # a prerequisite never shown unaided — or named but never defined — blocks this concept
+        c["blocked_by"] = [b for b in c["builds_on"] if b not in concepts or concepts[b]["mastery"]["depth"] == 0]
     due = sorted((c for c in concepts.values() if c["mastery"]["due"]),
                  key=lambda c: (_priority(c["mastery"]), c["mastery"]["last"]))
     topics = {}
     for tid, t in g["topics"].items():
         ids = [i for st in t["stages"] for i in st["concepts"]]
-        held = sum(1 for i in ids if concepts.get(i, {}).get("mastery", {}).get("depth", 0) >= 2)
-        topics[tid] = {**t, "id": tid, "progress": {"held": held, "total": len(ids)}}
+        ms = [concepts[i]["mastery"] for i in ids if i in concepts]
+        topics[tid] = {**t, "id": tid, "progress": {
+            "held": sum(1 for m in ms if m["held"] >= 2),
+            "shown": sum(1 for m in ms if m["depth"] >= 2),
+            "total": len(ids)}}
     return {"concepts": concepts, "topics": topics, "due": [c["id"] for c in due],
             "questions": g["questions"], "calibration": g["calibration"], "evidence": g["evidence"],
-            "levels": LEVELS, "credits": CREDITS, "today": today}
+            "levels": LEVELS, "credits": CREDITS, "confidences": CONFIDENCES, "rungs": RUNGS, "today": today}
+
+
+def _topic_ids(g, topic):
+    t = g["topics"].get(topic) or {"stages": []}
+    return [i for st in t["stages"] for i in st["concepts"]]
+
+
+def opener(g, topic, today=None):
+    """Due concepts that neighbor the topic (an analog or a prerequisite of one of its concepts) —
+    the first situation of a session is one of these, cold: spaced retrieval and the analog check
+    in one unaided row, before any framing exists."""
+    st = state(g, today)
+    ids = set(_topic_ids(g, topic))
+    near = set()
+    for i in ids:
+        c = st["concepts"].get(i)
+        if c:
+            near.update(c["analogs"])
+            near.update(c["builds_on"])
+    near -= ids
+    return [{"id": i, "reason": st["concepts"][i]["mastery"]["reason"],
+             "neighbor_of": sorted(j for j in ids if i in st["concepts"][j]["analogs"] + st["concepts"][j]["builds_on"])}
+            for i in st["due"] if i in near]
+
+
+def transfers(g, topic, today=None):
+    """Transfer situations the graph can already supply: for each concept of the topic, an analog
+    held at explain or deeper — pose this concept's situation in the analog's setting. A transfer
+    row is written only this way."""
+    st = state(g, today)
+    out = []
+    for i in _topic_ids(g, topic):
+        c = st["concepts"].get(i)
+        if not c:
+            continue
+        for a in c["analogs"]:
+            ac = st["concepts"].get(a)
+            if ac and ac["mastery"]["depth"] >= 2:
+                out.append({"concept": i, "via": a, "setting": ac["topics"][0] if ac["topics"] else ""})
+    return out
+
+
+def gaps(g, topic, today=None):
+    """Prerequisites of the topic's concepts never shown unaided, in stage order."""
+    st = state(g, today)
+    seen, out = set(), []
+    for i in _topic_ids(g, topic):
+        for b in st["concepts"].get(i, {}).get("blocked_by", []):
+            if b not in seen:
+                seen.add(b)
+                out.append({"concept": b, "blocks": i})
+    return out
 
 
 def _depth_label(m):
     if m["depth"]:
-        s = m["level"]
+        s = m["level"] + (" held" if m["held"] >= m["depth"] else
+                          f" once (held at {m['held_level']})" if m["held"] else " once")
         if m["assisted"] > m["depth"]:
             s += f" (+{LEVELS[m['assisted'] - 1]} with help)"
+        if m["overconfident"]:
+            s += f" · overconfident miss ×{m['overconfident']}"
         return s
     return f"{LEVELS[m['assisted'] - 1]} with help only" if m["assisted"] else "not yet shown"
+
+
+def _concept_line(i, c):
+    m = c["mastery"]
+    an = ", ".join(c["analogs"])
+    s = f"- {i} · {_depth_label(m)} · {c['kind']} — {c['statement']}"
+    if c.get("statement_learner"):
+        s += f" · in their words: “{c['statement_learner']}”"
+    if an:
+        s += f" · analogs: {an}"
+    if c["blocked_by"]:
+        s += f" · BLOCKED BY (never shown): {', '.join(c['blocked_by'])}"
+    if m["open_miss"]:
+        s += f" · OPEN MISS{' (high confidence)' if m['miss_confidence'] == 'high' else ''}: {m['open_miss']}"
+        if m["contrast"]:
+            s += f" → re-test with the contrast: {m['contrast']}"
+    return s
 
 
 def digest(g, topic=None, today=None):
     """Compact text for a tutor's prompt: the whole graph at a glance, the active topic in full."""
     st = state(g, today)
     out = ["## The learner's concept graph (~/.dotfiles/learning/graph.json)",
-           "Depth = highest level shown UNAIDED: predict < explain < transfer < critique.", ""]
+           "Depth = highest level shown UNAIDED: predict < explain < transfer < critique. "
+           "“held” = shown unaided on two separate days; “once” = one session only, not yet retention.", ""]
     if topic and topic in st["topics"]:
         t = st["topics"][topic]
         out.append(f"### Active topic: {t['title']} [{topic}] — {t['source']}")
         for s in t["stages"]:
             out.append(f"- stage **{s['name']}**: " + ", ".join(
                 f"{i} ({_depth_label(st['concepts'][i]['mastery'])})" for i in s["concepts"] if i in st["concepts"]))
+        op = opener(g, topic, today)
+        if op:
+            out += ["", "**Open with one of these, cold** (due, and a neighbor of this topic — the first situation of the session):",
+                    *[f"- {o['id']} — {o['reason']} · neighbor of {', '.join(o['neighbor_of'])}" for o in op[:4]]]
+        gp = gaps(g, topic, today)
+        if gp:
+            out += ["", "**Prerequisite gaps** (never shown unaided; teach or re-test before the concept that needs it):",
+                    *[f"- {x['concept']} → needed by {x['blocks']}" for x in gp]]
+        tr = transfers(g, topic, today)
+        if tr:
+            out += ["", "**Transfer situations available** (pose the concept in the analog's setting; the only way a transfer row is earned):",
+                    *[f"- {x['concept']} via {x['via']}" + (f" ({x['setting']})" if x["setting"] else "") for x in tr]]
         out.append("")
     out.append("### All concepts (id · depth · kind — statement · analogs)")
     for tid, t in st["topics"].items():
-        out.append(f"**{t['title']}** [{tid}]")
+        out.append(f"**{t['title']}** [{tid}] — {t['progress']['held']} held / {t['progress']['shown']} shown / {t['progress']['total']}")
         for s in t["stages"]:
             for i in s["concepts"]:
                 c = st["concepts"].get(i)
-                if not c:
-                    continue
-                an = ", ".join(c["analogs"])
-                miss = f" · OPEN MISS: {c['mastery']['open_miss']}" if c["mastery"]["open_miss"] else ""
-                out.append(f"- {i} · {_depth_label(c['mastery'])} · {c['kind']} — {c['statement']}"
-                           + (f" · analogs: {an}" if an else "") + miss)
+                if c:
+                    out.append(_concept_line(i, c))
     loose = [c for c in st["concepts"].values() if not c["topics"]]
     if loose:
         out.append("**Not on any topic yet**")
     for c in loose:
-        out.append(f"- {c['id']} · {_depth_label(c['mastery'])} · {c['kind']} — {c['statement']}")
-    out += ["", "### Due for a re-test", *[f"- {i}: {st['concepts'][i]['mastery']['reason']}" for i in st["due"][:12]]]
+        out.append(_concept_line(c["id"], c))
+    out += ["", "### Due for a re-test (confident misses first, then misses, help-only, once-only, overdue)",
+            *[f"- {i}: {st['concepts'][i]['mastery']['reason']}" for i in st["due"][:12]]]
     qs = [q for q in st["questions"] if q["status"] == "open"]
     if qs:
         out += ["", "### The learner's open questions", *[f"- [{q['id']}] {q['text']}" + (f" (on {q['concept']})" if q["concept"] else "") for q in qs]]
@@ -352,7 +497,7 @@ def memory_state(g):
              "(viewer Tutor tab, or `learn`), not this section._", ""]
     for tid, t in st["topics"].items():
         p = t["progress"]
-        lines.append(f"- **{t['title']}** — {p['held']}/{p['total']} concepts at explain or deeper")
+        lines.append(f"- **{t['title']}** — {p['held']} held, {p['shown']} shown once, of {p['total']} (at explain or deeper)")
     lines += ["", "**Due for a re-test:**"]
     lines += [f"- {st['concepts'][i]['name']} — {st['concepts'][i]['mastery']['reason']}" for i in st["due"][:10]]
     if len(st["due"]) > 10:
@@ -382,11 +527,11 @@ def write_memory_state(g):
 
 # ── tutor blocks ──────────────────────────────────────────────────────
 
-BLOCK = re.compile(r"```tutor-(map|evidence|calibration)[ \t]*\r?\n([\s\S]*?)```")
+BLOCK = re.compile(r"```tutor-(map|evidence|calibration|restate|question)[ \t]*\r?\n([\s\S]*?)```")
 
 
 def apply_blocks(g, text, session="", topic=""):
-    """Apply a tutor turn's map / evidence / calibration blocks. Returns (topic, applied, errors)."""
+    """Apply a tutor turn's map / evidence / calibration / restate / question blocks. Returns (topic, applied, errors)."""
     applied, errors = [], []
     for kind, body in BLOCK.findall(text or ""):
         try:
@@ -408,6 +553,16 @@ def apply_blocks(g, text, session="", topic=""):
                 for note in data if isinstance(data, list) else [data]:
                     add_calibration(g, note)
                 applied.append("calibration")
+            elif kind == "restate":
+                for r in data if isinstance(data, list) else [data]:
+                    restate(g, r.get("concept"), r.get("text"))
+                    applied.append(f"restate {slug(r.get('concept'))}")
+            elif kind == "question":
+                for q in data if isinstance(data, list) else [data]:
+                    if isinstance(q, str):
+                        q = {"text": q}
+                    add_question(g, q.get("text"), concept=q.get("concept", ""), topic=topic)
+                    applied.append("question")
         except (Invalid, AttributeError, TypeError) as exc:
             errors.append(f"tutor-{kind}: {exc}")
     return topic, applied, errors
