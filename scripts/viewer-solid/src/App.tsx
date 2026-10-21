@@ -16,6 +16,7 @@ import { Wiki } from "./Wiki";
 import { ForestOverview } from "./ForestOverview";
 import { NavRail } from "./NavRail";
 import { MachinePage } from "./MachinePage";
+import { Tutor } from "./Tutor";
 import { trackRecent } from "./recents";
 
 
@@ -47,6 +48,9 @@ function Routes() {
       </Match>
       <Match when={location().kind === "machine"}>
         <MachinePage />
+      </Match>
+      <Match when={location().kind === "tutor"}>
+        <Tutor />
       </Match>
       <Match when={isForestOverview(location())}>
         <ForestOverview />
@@ -175,7 +179,7 @@ function Layout(props: { children?: JSX.Element }) {
   // home and the forest overview keep it.
   const showRail = () => {
     const l = loc();
-    return l.kind === "home" || l.kind === "wiki" || l.kind === "machine" || isForestOverview(l);
+    return l.kind === "home" || l.kind === "wiki" || l.kind === "machine" || l.kind === "tutor" || isForestOverview(l);
   };
   return (
     <>

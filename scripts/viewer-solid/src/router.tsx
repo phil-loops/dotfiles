@@ -13,6 +13,7 @@
 //   /review/<pr>                         → an imported review PR (single node)
 //   /wiki[/<slug>]                       → the repo wiki: durable prose, no node
 //   /machine                             → the workstation: dev servers + the shared substrate
+//   /tutor                               → a Socratic session, one rung at a time
 //
 // A forest project tag is a single segment; the active node (a branch) is the path tail, slashes
 // and all. Putting both in the path means the URL fully identifies the view — no ?node= query.
@@ -28,7 +29,8 @@ export type ViewerLocation =
   | { kind: "standalone"; branch: string; node?: string }
   | { kind: "review"; pr: number; node?: string }
   | { kind: "wiki"; slug?: string }
-  | { kind: "machine" };
+  | { kind: "machine" }
+  | { kind: "tutor" };
 
 const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(s);
 
@@ -72,6 +74,9 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   if (head === "machine") {
     return { kind: "machine" };
   }
+  if (head === "tutor") {
+    return { kind: "tutor" };
+  }
   if (head === "branch" && rest.length) {
     return { kind: "standalone", branch: rest.join("/") };
   }
@@ -100,6 +105,8 @@ export function buildPath(loc: ViewerLocation): string {
       return "/wiki" + (loc.slug ? "/" + loc.slug : "");
     case "machine":
       return "/machine";
+    case "tutor":
+      return "/tutor";
   }
 }
 
@@ -118,6 +125,7 @@ export function forestKey(loc: ViewerLocation): string {
       return "review/pr-" + loc.pr;
     case "wiki":
     case "machine":
+    case "tutor":
       return "";
   }
 }
@@ -129,6 +137,7 @@ export function nodeOf(loc: ViewerLocation): string | undefined {
     case "home":
     case "wiki":
     case "machine":
+    case "tutor":
       return undefined;
     case "forest":
     case "standalone":
@@ -140,7 +149,7 @@ export function nodeOf(loc: ViewerLocation): string | undefined {
 // Re-target the active node within the current location (the j/k spine walk, click-to-open).
 export function withNode(loc: ViewerLocation, node: string): ViewerLocation {
   // home and wiki have no node to re-target; adding one would build an unroutable path.
-  return loc.kind === "home" || loc.kind === "wiki" || loc.kind === "machine" ? loc : { ...loc, node };
+  return loc.kind === "home" || loc.kind === "wiki" || loc.kind === "machine" || loc.kind === "tutor" ? loc : { ...loc, node };
 }
 
 // The repo a location belongs to — only a forest can live in a non-loops repo; everything

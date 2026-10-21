@@ -32,7 +32,7 @@ const RECENT_LBL = `${THUMB_LBL_BASE} text-[12px] max-h-[140px] max-[640px]:max-
 // the tile a location belongs under: reviews are Work-tab things, everything branch-shaped
 // lives under Forests.
 const tileOf = (l: ViewerLocation): HomeTab | null =>
-  l.kind === "wiki" || l.kind === "machine" ? null
+  l.kind === "wiki" || l.kind === "machine" || l.kind === "tutor" ? null
     : l.kind === "home" ? l.tab
     : l.kind === "review" ? "work"
     : "forests";
@@ -105,6 +105,14 @@ export function NavRail() {
         onClick={() => navigate({ kind: "wiki" })}
       >
         <span class={THUMB_LBL}>Wiki</span>
+      </button>
+      <button
+        class={`${THUMB} ${location().kind === "tutor" ? THUMB_ON : THUMB_OFF}`}
+        classList={{ active: location().kind === "tutor" }}
+        title="tutor — work through a PR, branch, file or concept one rung at a time"
+        onClick={() => navigate({ kind: "tutor" })}
+      >
+        <span class={THUMB_LBL}>Tutor</span>
       </button>
       <button
         class={`${THUMB} ${location().kind === "machine" ? THUMB_ON : THUMB_OFF}`}
