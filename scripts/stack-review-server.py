@@ -425,6 +425,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
         elif u.path == "/tutor-track":    return tutor.track(self, u)  # the learner's re-test queue + topics
+        elif u.path == "/tutor-terminal": return tutor.terminal(self, u)   # terminal /tutor sessions to pick up
+        elif u.path == "/tutor-import":   return tutor.import_(self, u)    # one of them, as tab turns
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/notes":          return review.notes_get(self, u)   # per-branch test/repro notes

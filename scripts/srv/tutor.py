@@ -8,12 +8,19 @@
 #   GET  /tutor-src    ?path=&ref=                          → {path, ref, text} for the code pane
 #   GET  /tutor-track                                        → {retest[], entries, path}
 #   POST /tutor-ledger {topic, source, unaided[], …}         → append the approved close to the track
+#   GET  /tutor-terminal                                     → recent terminal /tutor sessions to pick up
+#   GET  /tutor-import ?session=                             → one terminal session's tutoring turns
+#
+# A picked-up terminal session continues as a FORK (--fork-session) in its own worktree, so the tab
+# keeps everything that session already read and the terminal session itself is never touched.
 #
 # The session never writes memory itself: the close arrives as a block, the learner edits and
 # approves it in the page, and only /tutor-ledger touches the track file.
+import glob
 import json
 import os
 import re
+import subprocess
 import threading
 import time
 from urllib.parse import parse_qs
@@ -24,6 +31,7 @@ SKILL_PATH = os.path.expanduser("~/.claude/skills/tutor/SKILL.md")
 TRACK_NAME = "phil-learning-track"
 TRACK_QUEUE = "## Re-test queue"
 MODEL = "opus"
+TAB_OPENER = "Start the session: prep silently, then open with step 2."   # also how /tutor-terminal skips the tab's own sessions
 SRC_MAX = 400_000
 
 TOOLS = ["Read", "Grep", "Glob", "Bash"]
@@ -118,8 +126,11 @@ def start(req, raw):
     target = (d.get("target") or "").strip()
     answer = (d.get("answer") or "").strip()
     resume = (d.get("resume") or "").strip()
+    cwd = (d.get("cwd") or "").strip() or ctx.repo_cwd()
     if not turn:
         return req._send(400, json.dumps({"ok": False, "err": "need a turn id"}))
+    if cwd not in _worktrees():
+        return req._send(400, json.dumps({"ok": False, "err": f"not a worktree of this repo: {cwd}"}))
 
     job = _JOBS.get(turn)
     if job is None and not (target or answer):
@@ -138,13 +149,15 @@ def start(req, raw):
         if resume:
             prompt = answer
         else:
-            prompt = f"/tutor {target}\n\nStart the session: prep silently, then open with step 2."
+            prompt = f"/tutor {target}\n\n{TAB_OPENER}"
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json", "--include-partial-messages", "--verbose",
                "--model", MODEL, "--permission-mode", "default",
                "--append-system-prompt", _system_prompt()]
         if resume:
             cmd += ["--resume", resume]
+            if d.get("fork"):
+                cmd += ["--fork-session"]
         cmd += ["--tools", *TOOLS, "--allowedTools", *ALLOWED]
         with _JOBS_LOCK:
             job = _JOBS.get(turn)
@@ -154,7 +167,7 @@ def start(req, raw):
                 now = time.time()
                 for t in [t for t, j in _JOBS.items() if j.done and now - j.created > chat.JOB_TTL]:
                     del _JOBS[t]
-                threading.Thread(target=chat._run_claude, args=(job, cmd, ctx.repo_cwd()), daemon=True).start()
+                threading.Thread(target=chat._run_claude, args=(job, cmd, cwd), daemon=True).start()
 
     chat._subscribe(req, job, 0)
 
@@ -268,3 +281,105 @@ def ledger(req, raw):
         fh.write(out)
     os.replace(tmp, path)
     req._send(200, json.dumps({"ok": True, "path": path}))
+
+
+def _worktrees():
+    r = ctx.run(["git", "worktree", "list", "--porcelain"])
+    return {ctx.repo_cwd()} | {ln[9:] for ln in r.stdout.splitlines() if ln.startswith("worktree ")}
+
+
+SESSION_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+TERMINAL_WINDOW = 3 * 86_400
+
+
+def _text(content):
+    if isinstance(content, str):
+        return content
+    return "\n".join(b.get("text", "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text")
+
+
+def _is_tutor_load(text):
+    return text.startswith("Base directory for this skill: ") and text.split("\n", 1)[0].rstrip().endswith("/skills/tutor")
+
+
+def _tutoring(path):
+    """The tutoring turns of a transcript — everything after its LAST tutor-skill load."""
+    cwd, target, rows, started = "", "", [], False
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            cwd = e.get("cwd") or cwd
+            kind = e.get("type")
+            if kind not in ("user", "assistant") or e.get("isSidechain"):
+                continue
+            text = _text(e.get("message", {}).get("content")).strip()
+            if not text:
+                continue
+            if _is_tutor_load(text):
+                started, rows = True, []
+                continue
+            if text.startswith("<"):
+                m = re.search(r"<command-name>/tutor</command-name>\s*<command-args>(.*?)</command-args>", text, re.S)
+                if m:
+                    target = " ".join(m.group(1).split())
+                continue
+            if not started:
+                continue
+            role = "tutor" if kind == "assistant" else "me"
+            if rows and rows[-1]["role"] == role:
+                rows[-1]["text"] += "\n\n" + text
+            else:
+                rows.append({"role": role, "text": text})
+    return cwd, target, rows
+
+
+def _transcript(session):
+    if not SESSION_ID.fullmatch(session):
+        return None
+    hits = glob.glob(os.path.expanduser(f"~/.claude/projects/*/{session}.jsonl"))
+    return hits[0] if hits else None
+
+
+def _grep(flag, needle, paths):
+    if not paths:
+        return set()
+    r = subprocess.run(["grep", flag, "-F", "--", needle, *paths], capture_output=True, text=True)
+    return set(r.stdout.splitlines())
+
+
+def terminal(req, u):
+    now = time.time()
+    recent = []
+    for path in glob.glob(os.path.expanduser("~/.claude/projects/*/*.jsonl")):
+        try:
+            if now - os.path.getmtime(path) <= TERMINAL_WINDOW:
+                recent.append(path)
+        except OSError:
+            continue
+    tutored = _grep("-l", "/skills/tutor", recent)
+    candidates = tutored - _grep("-l", TAB_OPENER, sorted(tutored))
+    out = []
+    for path in candidates:
+        mtime = os.path.getmtime(path)
+        cwd, target, rows = _tutoring(path)
+        if not rows or cwd not in _worktrees():
+            continue
+        last = next((r["text"] for r in reversed(rows) if r["role"] == "tutor"), "")
+        out.append({"session": os.path.basename(path)[:-6], "cwd": cwd, "target": target, "mtime": mtime,
+                    "answers": sum(r["role"] == "me" for r in rows), "last": last[-280:]})
+    out.sort(key=lambda r: -r["mtime"])
+    req._send(200, json.dumps(out[:8]))
+
+
+def import_(req, u):
+    session = parse_qs(u.query).get("session", [""])[0].strip()
+    path = _transcript(session)
+    if not path:
+        return req._send(404, json.dumps({"err": f"no transcript for {session}"}))
+    cwd, target, rows = _tutoring(path)
+    if not rows:
+        return req._send(200, json.dumps({"err": "that session never loaded the tutor skill"}))
+    req._send(200, json.dumps({"session": session, "cwd": cwd, "target": target, "msgs": rows}))

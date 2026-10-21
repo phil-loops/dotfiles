@@ -8,7 +8,9 @@
 //   tutor-ledger   {topic, unaided[], …}     → the close, edited + approved here, then saved
 //
 // Sessions live in localStorage (this browser only): the transcript and the claude session id
-// each follow-up resumes. A reload mid-turn re-attaches to the server-side job.
+// each follow-up resumes. A reload mid-turn re-attaches to the server-side job. A terminal /tutor
+// session can be picked up (`/tutor?import=<session id>` or the home list): its first answer here
+// resumes a fork of it, in its own worktree.
 import { createEffect, createMemo, createRoot, createResource, createSignal, For, Index, Show, onMount } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { fetchJSON } from "./api";
@@ -36,7 +38,12 @@ type Session = {
   pendingTurn?: string;
   error?: string;
   saved?: boolean;
+  cwd?: string; // a picked-up terminal session's worktree — its claude session only resumes there
+  forkNext?: boolean; // the next turn forks the terminal session instead of resuming it in place
+  importedFrom?: string;
 };
+type TerminalSession = { session: string; cwd: string; target: string; mtime: number; answers: number; last: string };
+type ImportReply = { session: string; cwd: string; target: string; msgs: Msg[]; err?: string };
 type TrackReply = { path?: string; retest: string[]; topics: string[]; err?: string };
 type SrcReply = { path: string; ref: string; text: string; err?: string };
 
@@ -154,6 +161,11 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
   setSessions(at(), "error", undefined);
   setStreaming(true);
   setStatus("thinking");
+  const cwd = sessions[at()].cwd;
+  if (cwd) body = { ...body, cwd };
+  if (sessions[at()].forkNext && body.resume) {
+    body = { ...body, fork: "1" };
+  }
   let tutorIdx = sessions[at()].msgs.length - 1;
   let reset = reattach;
   try {
@@ -183,6 +195,7 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
         if (event === "done" || event === "error" || event === "gone") finished = true;
         if (event === "session" && p.session_id) {
           setSessions(at(), "sessionId", p.session_id);
+          if (p.session_id !== sessions[at()].importedFrom) setSessions(at(), "forkNext", false);
         } else if (event === "token") {
           if (reset) {
             setSessions(at(), "msgs", tutorIdx, "text", "");
@@ -222,6 +235,26 @@ function startSession(target: string) {
   void runTurn(id, { turn: crypto.randomUUID(), target });
 }
 
+const worktreeName = (cwd: string) => cwd.split("/").pop() || cwd;
+
+async function importTerminal(session: string) {
+  const existing = sessions.find((s) => s.importedFrom === session && !s.saved);
+  if (existing) {
+    setActiveId(existing.id);
+    return;
+  }
+  const r = await fetchJSON<ImportReply>(`/tutor-import?session=${encodeURIComponent(session)}`);
+  if (r.err) throw new Error(r.err);
+  const id = crypto.randomUUID();
+  setSessions(produce((s) => {
+    s.unshift({
+      id, created: Date.now(), msgs: r.msgs, sessionId: r.session, cwd: r.cwd, forkNext: true, importedFrom: r.session,
+      target: r.target || `picked up from the terminal · ${worktreeName(r.cwd)}`,
+    });
+  }));
+  setActiveId(id);
+}
+
 function answer(id: string, text: string) {
   const s = sessions[indexOf(id)];
   if (!s || streaming() || !text.trim()) return;
@@ -232,22 +265,32 @@ function answer(id: string, text: string) {
 // ── components ────────────────────────────────────────────────────────
 
 export function Tutor() {
+  const [importErr, setImportErr] = createSignal("");
   onMount(() => {
     // a reload mid-turn: re-attach to the server-side job so the reply still lands
     for (const s of sessions) {
       if (s.pendingTurn) void runTurn(s.id, { turn: s.pendingTurn }, true);
     }
+    const wanted = new URLSearchParams(window.location.search).get("import");
+    if (wanted) {
+      history.replaceState(null, "", "/tutor");
+      importTerminal(wanted).catch((e) => setImportErr(String(e)));
+    }
   });
   const active = createMemo(() => sessions.find((s) => s.id === activeId()) ?? null);
   return (
-    <Show when={active()} fallback={<TutorHome />}>
+    <Show when={active()} fallback={<TutorHome importErr={importErr()} />}>
       {(s) => <TutorSession session={s()} />}
     </Show>
   );
 }
 
-function TutorHome() {
+function TutorHome(props: { importErr: string }) {
   const [track, { refetch }] = createResource(() => fetchJSON<TrackReply>("/tutor-track"));
+  const [terminal] = createResource(() => fetchJSON<TerminalSession[]>("/tutor-terminal").catch(() => []));
+  const ours = () => new Set(sessions.flatMap((s) => [s.sessionId, s.importedFrom ?? ""]));
+  const pickable = () => (terminal() ?? []).filter((t) => !ours().has(t.session));
+  const [pickErr, setPickErr] = createSignal("");
   const [target, setTarget] = createSignal("");
   onMount(() => void refetch());
   const go = () => {
@@ -270,6 +313,34 @@ function TutorHome() {
           start
         </button>
       </form>
+
+      <Show when={props.importErr || pickErr()}>
+        <div class="mb-6 font-mono text-[12px] text-del">{props.importErr || pickErr()}</div>
+      </Show>
+
+      <Show when={pickable().length}>
+        <section class="mb-10">
+          <h2 class="font-display text-[17px] text-ink mb-1">Pick up from the terminal</h2>
+          <p class="text-[13px] text-ink-faint mb-3 mt-0">A /tutor session running in Claude Code. It continues here as a copy; the terminal one is left alone.</p>
+          <ul class="m-0 p-0 list-none">
+            <For each={pickable()}>
+              {(t) => (
+                <li class="border-t border-rule py-3">
+                  <button class="block w-full text-left group" onClick={() => importTerminal(t.session).catch((e) => setPickErr(String(e)))}>
+                    <div class="flex items-baseline gap-3">
+                      <span class="flex-1 min-w-0 truncate text-[14px] text-ink group-hover:text-gold-leaf">{t.target || worktreeName(t.cwd)}</span>
+                      <span class="shrink-0 font-mono text-[11px] text-ink-faint">
+                        {worktreeName(t.cwd)} · {t.answers} answers · {new Date(t.mtime * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      </span>
+                    </div>
+                    <div class="mt-1 text-[13px] leading-snug text-ink-faint line-clamp-2">…{t.last}</div>
+                  </button>
+                </li>
+              )}
+            </For>
+          </ul>
+        </section>
+      </Show>
 
       <section class="mb-10">
         <h2 class="font-display text-[17px] text-ink mb-1">Re-test queue</h2>
@@ -437,7 +508,7 @@ function TutorTurn(props: {
       <For each={segs()}>
         {(seg) => {
           if (seg.kind === "prose") {
-            return <div class="wiki-prose text-[15px]" innerHTML={renderMarkdown(seg.text)} />;
+            return <div class="wiki-prose text-[15px] [&_a]:text-gold-leaf [&_a]:underline [&_a]:decoration-gold-deep" innerHTML={renderMarkdown(seg.text)} />;
           }
           if (seg.kind === "pin") {
             return (
