@@ -31,6 +31,7 @@ type Session = {
   cwd?: string; // a picked-up terminal session's worktree — its claude session only resumes there
   forkNext?: boolean; // the next turn forks the terminal session instead of resuming it in place
   primed?: boolean; // the claude session has seen the tab's instructions (resume drops --append-system-prompt)
+  lastActive?: number; // the last turn sent — orders the home page's "continue" card and the session list
   importedFrom?: string;
 };
 type TerminalSession = { session: string; cwd: string; target: string; mtime: number; answers: number; last: string };
@@ -201,6 +202,17 @@ function askOf(text: string): string {
   return line.length > 160 ? line.slice(0, 157) + "…" : line || "(no text)";
 }
 
+// The whole paragraph holding a turn's last question — the card shows the question as asked.
+function questionOf(text: string): string {
+  const paras = segments(text)
+    .filter((x) => x.kind === "prose")
+    .flatMap((x) => (x as { text: string }).text.split(/\n\s*\n/))
+    .map((p) => p.replace(/[*_`#>|]/g, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  const q = [...paras].reverse().find((p) => p.includes("?")) ?? paras[paras.length - 1] ?? "";
+  return q.length > 420 ? q.slice(0, 417) + "…" : q;
+}
+
 function latest<K extends Seg["kind"]>(msgs: Msg[], kind: K): Extract<Seg, { kind: K }> | null {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role !== "tutor") continue;
@@ -215,6 +227,7 @@ function latest<K extends Seg["kind"]>(msgs: Msg[], kind: K): Extract<Seg, { kin
 async function runTurn(id: string, body: Record<string, string>, reattach = false) {
   const at = () => indexOf(id);
   setSessions(at(), "pendingTurn", body.turn);
+  setSessions(at(), "lastActive", Date.now());
   setSessions(at(), "error", undefined);
   setStreaming(true);
   setStatus("thinking");
@@ -433,7 +446,53 @@ export function Tutor() {
   );
 }
 
+const touched = (s: Session) => s.lastActive ?? s.created;
+const sessionTitle = (s: Session) => (s.topic && learn()?.topics[s.topic]?.title) || s.target;
+const rungCount = (s: Session) => s.msgs.filter((m) => m.role === "tutor").length;
+
+function ago(ms: number): string {
+  const m = Math.round((Date.now() - ms) / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return new Date(ms).toLocaleDateString();
+}
+
+// The session you were last in, front and center: where in the climb, and the question waiting.
+function ContinueCard(props: { s: Session }) {
+  const question = () => {
+    const last = [...props.s.msgs].reverse().find((m) => m.role === "tutor" && m.text.trim());
+    return last ? questionOf(last.text) : "";
+  };
+  const here = () => latest(props.s.msgs, "rung")?.concept ?? null;
+  const waiting = () => props.s.msgs[props.s.msgs.length - 1]?.role === "tutor";
+  return (
+    <section class="mb-10 rounded-sm border border-gold-deep bg-gold-wash p-5">
+      <div class={`${SECTION} mb-2`}>continue where you left off</div>
+      <div class="mb-1 flex items-baseline gap-3">
+        <h2 class="m-0 min-w-0 flex-1 truncate font-display text-[20px] text-ink">{sessionTitle(props.s)}</h2>
+        <span class="shrink-0 font-mono text-[11px] text-ink-faint">rung {rungCount(props.s)} · {ago(touched(props.s))}</span>
+      </div>
+      <Show when={here()}>
+        {(id) => <div class="mb-3"><ConceptChip id={id()} here /></div>}
+      </Show>
+      <Show when={question()}>
+        <p class="mt-0 mb-4 text-[15px] leading-relaxed text-ink-dim">
+          <span class="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-faint">{waiting() ? "waiting on you · " : "last question · "}</span>
+          {question()}
+        </p>
+      </Show>
+      <button
+        class="rounded-sm border border-gold-deep bg-vellum-night px-4 py-1.5 font-display text-[15px] text-gold-leaf hover:bg-vellum-edge"
+        onClick={() => setActiveId(props.s.id)}
+      >continue</button>
+    </section>
+  );
+}
+
 function TutorHome(props: { importErr: string }) {
+  const recent = createMemo(() => [...sessions].sort((a, b) => touched(b) - touched(a)));
   const [terminal] = createResource(() => fetchJSON<TerminalSession[]>("/tutor-terminal").catch(() => []));
   const ours = () => new Set(sessions.flatMap((s) => [s.sessionId, s.importedFrom ?? ""]));
   const pickable = () => (terminal() ?? []).filter((t) => !ours().has(t.session));
@@ -447,6 +506,7 @@ function TutorHome(props: { importErr: string }) {
   return (
     <div class="tutor-home mx-auto grid max-w-[1180px] grid-cols-[minmax(0,1fr)_340px] gap-x-12 px-8 py-10 max-[1060px]:grid-cols-[1fr] max-[640px]:px-4">
       <div class="min-w-0">
+        <Show when={recent()[0]}>{(s) => <ContinueCard s={s()} />}</Show>
         <div class={`${SECTION} mb-2`}>tutor</div>
         <h1 class="font-display text-[28px] leading-tight text-ink mb-6">What do you want to dig into?</h1>
         <form class="flex gap-2 mb-10" onSubmit={(e) => { e.preventDefault(); if (target().trim()) startSession(target().trim()); }}>
@@ -571,13 +631,13 @@ function TutorHome(props: { importErr: string }) {
           <section>
             <h2 class="font-display text-[17px] text-ink mb-2">Sessions</h2>
             <ul class="m-0 p-0 list-none">
-              <For each={sessions}>
+              <For each={recent()}>
                 {(s) => (
                   <li class="group flex items-baseline gap-2 border-t border-rule py-2">
                     <button class="flex-1 min-w-0 truncate text-left text-[13px] text-ink-dim hover:text-ink" onClick={() => setActiveId(s.id)} title={s.target}>
-                      {s.target}
+                      {sessionTitle(s)}
                     </button>
-                    <span class="shrink-0 font-mono text-[10.5px] text-ink-faint">{new Date(s.created).toLocaleDateString()}</span>
+                    <span class="shrink-0 font-mono text-[10.5px] text-ink-faint">rung {rungCount(s)} · {ago(touched(s))}</span>
                     <button
                       class="shrink-0 font-mono text-[11px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-del"
                       title="forget this session (its evidence stays in the graph)"
