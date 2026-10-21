@@ -81,10 +81,13 @@ into three buckets:
 - **Scaffolded** — they got there, but your framing did part of the work (name which part).
 - **Handed** — you revealed it.
 
-When in doubt, bump down a bucket. Then **append to the track**: topic + source, the three buckets,
-any misconception (and what unlocked it), calibration notes, and scaffolded/handed items added to
-the **re-test cold** list. Keep it tight.
+When in doubt, bump down a bucket. Then **append to the track**, above its `## Re-test queue`:
+topic + source, the three buckets, any misconception (and what unlocked it), calibration notes.
+Scaffolded/handed items become `- [ ] <one bare question> (<topic>, <date>)` lines in the queue; a
+queue item that passed cold becomes `- [x]`. Keep it tight.
 
 ## Invocation
 `/tutor <PR# | branch | file | concept>` — or any trigger phrase. With no argument, ask what they
-want to dig into.
+want to dig into. The forest viewer's **Tutor** tab (`stack web` → Tutor) runs this same skill in
+the browser — pinned code, no autosuggest, a ledger the learner approves — so mention it when
+starting a terminal session.
