@@ -364,6 +364,8 @@ def memory_state(g):
 
 
 def write_memory_state(g):
+    if os.environ.get("LEARNING_MEMORY") == "0":
+        return
     path = track_path()
     if not path:
         return

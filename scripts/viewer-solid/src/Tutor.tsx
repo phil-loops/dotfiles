@@ -1,59 +1,62 @@
-// The Tutor tab — the `tutor` skill in the browser instead of the terminal. Two things the
-// terminal couldn't do: the answer box has no autosuggest ghost-typing the answer, and code
-// stays pinned beside the question instead of being re-pasted every rung.
+// The Tutor tab — the `tutor` skill in the browser, organized around the learner's concept graph
+// (scripts/learning.py) rather than a transcript.
 //
-// The tutor's turns are markdown plus three fenced blocks (srv/tutor.py teaches them):
-//   tutor-pin      {path, ref?, lines:[a,b]} → the code pane shows that file, lines lit
-//   tutor-options  ["…", "…"]                → answer chips
-//   tutor-ledger   {topic, unaided[], …}     → the close, edited + approved here, then saved
+//   home     what's due, the topics (paths through the graph, shaded by depth), open questions
+//   session  the topic map ("you are here") · the current rung (earlier ones fold) · pinned code
+//   drawer   one concept: its depth and the evidence behind it (auditable), links, questions
 //
-// Sessions live in localStorage (this browser only): the transcript and the claude session id
-// each follow-up resumes. A reload mid-turn re-attaches to the server-side job. A terminal /tutor
-// session can be picked up (`/tutor?import=<session id>` or the home list): its first answer here
-// resumes a fork of it, in its own worktree.
-import { createEffect, createMemo, createRoot, createResource, createSignal, For, Index, Show, onMount } from "solid-js";
+// The tutor's turns are markdown plus fenced blocks (srv/tutor.py teaches them): tutor-map,
+// tutor-rung, tutor-evidence, tutor-calibration are applied to the graph server-side when a turn
+// ends; tutor-pin and tutor-options are page UI. Sessions live in localStorage (this browser only);
+// a terminal /tutor session can be picked up as a fork (`/tutor?import=<id>[&say=…]`).
+import { createEffect, createMemo, createRoot, createResource, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { fetchJSON } from "./api";
 import { renderMarkdown } from "./markdown";
 
 type Msg = { role: "tutor" | "me"; text: string };
 type Pin = { path: string; ref?: string; lines?: [number, number] };
-type Ledger = {
-  topic: string;
-  source: string;
-  unaided: string[];
-  scaffolded: string[];
-  handed: string[];
-  misconceptions: string[];
-  calibration: string[];
-  retest: string[];
-  retested: string[];
-};
 type Session = {
   id: string;
   target: string;
   created: number;
   sessionId: string;
   msgs: Msg[];
+  topic?: string;
   pendingTurn?: string;
   error?: string;
   saved?: boolean;
   cwd?: string; // a picked-up terminal session's worktree — its claude session only resumes there
   forkNext?: boolean; // the next turn forks the terminal session instead of resuming it in place
+  primed?: boolean; // the claude session has seen the tab's instructions (resume drops --append-system-prompt)
   importedFrom?: string;
 };
 type TerminalSession = { session: string; cwd: string; target: string; mtime: number; answers: number; last: string };
 type ImportReply = { session: string; cwd: string; target: string; msgs: Msg[]; err?: string };
-type TrackReply = { path?: string; retest: string[]; topics: string[]; err?: string };
 type SrcReply = { path: string; ref: string; text: string; err?: string };
 
+type Mastery = { depth: number; assisted: number; level: string; evidence: number; last: string; due: boolean; reason: string; open_miss: string };
+type CodeRef = { path: string; ref?: string; lines?: number[] };
+type Concept = {
+  id: string; name: string; statement: string; kind: "principle" | "convention";
+  builds_on: string[]; built_on_by: string[]; analogs: string[]; code: CodeRef[]; topics: string[]; mastery: Mastery;
+};
+type Topic = { id: string; title: string; source: string; stages: { name: string; concepts: string[] }[]; progress: { held: number; total: number } };
+type Evidence = { id: string; concept: string; level: string; credit: string; outcome: "hit" | "miss"; note: string; at: string; topic: string; session: string };
+type Question = { id: string; text: string; concept: string; topic: string; asked: string; status: "open" | "answered" };
+type LearnState = {
+  concepts: Record<string, Concept>; topics: Record<string, Topic>; due: string[]; questions: Question[];
+  evidence: Evidence[]; levels: string[]; credits: string[];
+};
+
 const STORE_KEY = "tutor:sessions:v1";
-const BUCKETS = ["unaided", "scaffolded", "handed"] as const;
-type Bucket = (typeof BUCKETS)[number];
-const BUCKET_HINT: Record<Bucket, string> = {
-  unaided: "produced before any scaffold narrowed the field",
-  scaffolded: "got there, but the framing did part of the work",
-  handed: "revealed",
+const LEVELS = ["predict", "explain", "transfer", "critique"];
+const CREDITS = ["unaided", "scaffolded", "handed"];
+const LEVEL_HINT: Record<string, string> = {
+  predict: "said what happens in a situation",
+  explain: "said why",
+  transfer: "handled it cold in a new setting",
+  critique: "spotted it, or its absence, in real code",
 };
 
 function loadSessions(): Session[] {
@@ -76,22 +79,45 @@ createRoot(() => createEffect(() => {
 const [activeId, setActiveId] = createSignal<string | null>(null);
 const [status, setStatus] = createSignal<string | null>(null);
 const [streaming, setStreaming] = createSignal(false);
+const [learn, setLearn] = createSignal<LearnState | null>(null);
+const [learnErr, setLearnErr] = createSignal("");
+const [drawer, setDrawer] = createSignal<string | null>(null);
+const [pin, setPin] = createSignal<Pin | null>(null);
 
 const indexOf = (id: string) => sessions.findIndex((s) => s.id === id);
+const activeSession = () => sessions.find((s) => s.id === activeId()) ?? null;
+const conceptOf = (id: string) => learn()?.concepts[id];
+const nameOf = (id: string) => conceptOf(id)?.name ?? id.replace(/-/g, " ");
+
+async function refreshLearn() {
+  try {
+    setLearn(await fetchJSON<LearnState>("/learning-state"));
+    setLearnErr("");
+  } catch (e) {
+    setLearnErr(String(e));
+  }
+}
+
+async function postJSON(path: string, body: unknown) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || j.ok === false) throw new Error(j.err || `${path} → ${r.status}`);
+  return j;
+}
 
 // ── parsing a tutor turn into prose + UI blocks ──────────────────────
 
+type EvidenceBlock = { concept: string; level: string; credit: string; outcome: string; note: string };
 type Seg =
   | { kind: "prose"; text: string }
   | { kind: "pin"; pin: Pin }
   | { kind: "options"; options: string[] }
-  | { kind: "ledger"; ledger: Ledger };
+  | { kind: "rung"; concept: string; level: string }
+  | { kind: "evidence"; items: EvidenceBlock[] }
+  | { kind: "map"; title: string; count: number }
+  | { kind: "quiet" };
 
-const FENCE = /```tutor-(pin|options|ledger)[ \t]*\r?\n([\s\S]*?)```/g;
-
-function emptyLedger(): Ledger {
-  return { topic: "", source: "", unaided: [], scaffolded: [], handed: [], misconceptions: [], calibration: [], retest: [], retested: [] };
-}
+const FENCE = /```tutor-(pin|options|rung|evidence|map|calibration|ledger)[ \t]*\r?\n([\s\S]*?)```/g;
 
 function asList(v: unknown): string[] {
   return Array.isArray(v) ? v.map((x) => String(x)).filter((x) => x.trim()) : [];
@@ -117,24 +143,27 @@ function segments(text: string): Seg[] {
       out.push({ kind: "prose", text: m[0] });
       continue;
     }
-    if (m[1] === "pin" && data && typeof data === "object" && "path" in data) {
-      const p = data as { path: string; ref?: string; lines?: number[] };
-      const lines = Array.isArray(p.lines) && p.lines.length >= 1
-        ? ([p.lines[0], p.lines[1] ?? p.lines[0]] as [number, number]) : undefined;
-      out.push({ kind: "pin", pin: { path: String(p.path), ref: p.ref ? String(p.ref) : undefined, lines } });
+    const d = (data ?? {}) as Record<string, unknown>;
+    if (m[1] === "pin" && typeof d.path === "string") {
+      const lines = Array.isArray(d.lines) && d.lines.length >= 1
+        ? ([Number(d.lines[0]), Number(d.lines[1] ?? d.lines[0])] as [number, number]) : undefined;
+      out.push({ kind: "pin", pin: { path: d.path, ref: d.ref ? String(d.ref) : undefined, lines } });
     } else if (m[1] === "options") {
       out.push({ kind: "options", options: asList(data) });
-    } else if (m[1] === "ledger" && data && typeof data === "object") {
-      const d = data as Record<string, unknown>;
-      out.push({
-        kind: "ledger",
-        ledger: {
-          topic: String(d.topic ?? ""), source: String(d.source ?? ""),
-          unaided: asList(d.unaided), scaffolded: asList(d.scaffolded), handed: asList(d.handed),
-          misconceptions: asList(d.misconceptions), calibration: asList(d.calibration),
-          retest: asList(d.retest), retested: asList(d.retested),
-        },
-      });
+    } else if (m[1] === "rung" && d.concept) {
+      out.push({ kind: "rung", concept: String(d.concept), level: String(d.level ?? "") });
+    } else if (m[1] === "evidence") {
+      const items = (Array.isArray(data) ? data : [data]).map((e) => {
+        const x = (e ?? {}) as Record<string, unknown>;
+        return { concept: String(x.concept ?? ""), level: String(x.level ?? ""), credit: String(x.credit ?? "unaided"), outcome: String(x.outcome ?? "hit"), note: String(x.note ?? "") };
+      }).filter((e) => e.concept);
+      out.push({ kind: "evidence", items });
+    } else if (m[1] === "map") {
+      const t = (d.topic ?? {}) as Record<string, unknown>;
+      const stages = Array.isArray(d.stages) ? (d.stages as { concepts?: unknown[] }[]) : [];
+      out.push({ kind: "map", title: String(t.title ?? t.id ?? "topic"), count: stages.reduce((n, s) => n + (s.concepts?.length ?? 0), 0) });
+    } else {
+      out.push({ kind: "quiet" }); // calibration, and the retired ledger in old sessions
     }
   }
   if (last < text.length) {
@@ -158,11 +187,11 @@ function askOf(text: string): string {
   return line.length > 160 ? line.slice(0, 157) + "…" : line || "(no text)";
 }
 
-function latestPin(msgs: Msg[]): Pin | null {
+function latest<K extends Seg["kind"]>(msgs: Msg[], kind: K): Extract<Seg, { kind: K }> | null {
   for (let i = msgs.length - 1; i >= 0; i--) {
     if (msgs[i].role !== "tutor") continue;
-    const pins = segments(msgs[i].text).filter((s) => s.kind === "pin");
-    if (pins.length) return (pins[pins.length - 1] as { pin: Pin }).pin;
+    const hits = segments(msgs[i].text).filter((s) => s.kind === kind);
+    if (hits.length) return hits[hits.length - 1] as Extract<Seg, { kind: K }>;
   }
   return null;
 }
@@ -170,18 +199,18 @@ function latestPin(msgs: Msg[]): Pin | null {
 // ── the stream ────────────────────────────────────────────────────────
 
 async function runTurn(id: string, body: Record<string, string>, reattach = false) {
-  const turn = body.turn;
   const at = () => indexOf(id);
-  setSessions(at(), "pendingTurn", turn);
+  setSessions(at(), "pendingTurn", body.turn);
   setSessions(at(), "error", undefined);
   setStreaming(true);
   setStatus("thinking");
-  const cwd = sessions[at()].cwd;
-  if (cwd) body = { ...body, cwd };
-  if (sessions[at()].forkNext && body.resume) {
-    body = { ...body, fork: "1" };
-  }
-  let tutorIdx = sessions[at()].msgs.length - 1;
+  const s = sessions[at()];
+  body = { ...body, tab: id };
+  if (s.topic) body.topic = s.topic;
+  if (s.cwd) body.cwd = s.cwd;
+  if (s.forkNext && body.resume) body.fork = "1";
+  if (s.primed) body.primed = "1";
+  let tutorIdx = s.msgs.length - 1;
   let reset = reattach;
   try {
     const res = await fetch("/tutor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -208,6 +237,7 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
         const p = JSON.parse(data);
         // the server holds the connection open after the last frame — the terminal event ends the read
         if (event === "done" || event === "error" || event === "gone") finished = true;
+        if (event === "done" && p.ok) setSessions(at(), "primed", true);
         if (event === "session" && p.session_id) {
           setSessions(at(), "sessionId", p.session_id);
           if (p.session_id !== sessions[at()].importedFrom) setSessions(at(), "forkNext", false);
@@ -222,6 +252,10 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
           setStatus(`reading · ${p.arg || p.name}`);
         } else if (event === "status") {
           if (p.s === "thinking") setStatus("thinking");
+        } else if (event === "graph") {
+          if (p.topic) setSessions(at(), "topic", p.topic);
+          if (p.errors?.length) setSessions(at(), "error", "graph: " + p.errors.join("; "));
+          void refreshLearn();
         } else if (event === "gone") {
           setSessions(at(), "error", "that turn was lost (server restarted) — send your answer again");
           setSessions(at(), "msgs", produce((m) => { if (m[tutorIdx]?.role === "tutor" && !m[tutorIdx].text) m.splice(tutorIdx, 1); }));
@@ -241,12 +275,13 @@ async function runTurn(id: string, body: Record<string, string>, reattach = fals
   }
 }
 
-function startSession(target: string) {
+function startSession(target: string, topic?: string) {
   const id = crypto.randomUUID();
   setSessions(produce((s) => {
-    s.unshift({ id, target, created: Date.now(), sessionId: "", msgs: [{ role: "tutor", text: "" }] });
+    s.unshift({ id, target, topic, created: Date.now(), sessionId: "", msgs: [{ role: "tutor", text: "" }] });
   }));
   setActiveId(id);
+  setDrawer(null);
   void runTurn(id, { turn: crypto.randomUUID(), target });
 }
 
@@ -278,11 +313,76 @@ function answer(id: string, text: string) {
   void runTurn(id, { turn: crypto.randomUUID(), answer: text, resume: s.sessionId });
 }
 
+// A learner question: recorded open in the graph, then sent into the live session (or a new one).
+async function ask(text: string, concept?: Concept) {
+  const t = text.trim();
+  if (!t) return;
+  await postJSON("/learning-question", { op: "add", text: t, concept: concept?.id ?? "", topic: concept?.topics[0] ?? activeSession()?.topic ?? "" });
+  void refreshLearn();
+  const msg = concept ? `Question about ${concept.name} [${concept.id}]: ${t}` : t;
+  const s = activeSession();
+  if (s && !streaming()) {
+    setDrawer(null);
+    answer(s.id, msg);
+  } else {
+    startSession(msg, concept?.topics[0]);
+  }
+}
+
+// ── small parts ───────────────────────────────────────────────────────
+
+function Pips(props: { m?: Mastery; size?: "sm" | "md" }) {
+  const box = () => (props.size === "md" ? "h-[9px] w-[9px]" : "h-[7px] w-[7px]");
+  return (
+    <span
+      class="inline-flex shrink-0 items-center gap-[2px]"
+      title={props.m ? `${props.m.level || "not yet shown"}${props.m.assisted > props.m.depth ? ` · ${LEVELS[props.m.assisted - 1]} with help` : ""}${props.m.due ? ` · due: ${props.m.reason}` : ""}` : ""}
+    >
+      <For each={LEVELS}>
+        {(_, i) => (
+          <span
+            class={`${box()} rounded-[1px] border`}
+            classList={{
+              "border-gold-leaf bg-gold-leaf": (props.m?.depth ?? 0) > i(),
+              "border-gold-deep bg-transparent": (props.m?.depth ?? 0) <= i() && (props.m?.assisted ?? 0) > i(),
+              "border-rule bg-transparent": (props.m?.assisted ?? 0) <= i(),
+            }}
+          />
+        )}
+      </For>
+      <Show when={props.m?.open_miss}>
+        <span class="ml-[3px] h-[5px] w-[5px] rounded-full bg-del" />
+      </Show>
+    </span>
+  );
+}
+
+function ConceptChip(props: { id: string; here?: boolean; wrap?: boolean }) {
+  const c = () => conceptOf(props.id);
+  return (
+    <button
+      class="inline-flex max-w-full items-center gap-1.5 rounded-sm border px-2 py-1 text-left text-[12.5px] leading-tight hover:border-gold-deep"
+      classList={{
+        "border-gold-leaf bg-gold-wash text-ink": !!props.here,
+        "border-rule text-ink-dim hover:text-ink": !props.here,
+      }}
+      title={c()?.statement}
+      onClick={() => setDrawer(props.id)}
+    >
+      <Pips m={c()?.mastery} />
+      <span classList={{ truncate: !props.wrap }}>{nameOf(props.id)}</span>
+    </button>
+  );
+}
+
+const SECTION = "font-mono text-[10px] uppercase tracking-[0.14em] text-ink-faint";
+
 // ── components ────────────────────────────────────────────────────────
 
 export function Tutor() {
   const [importErr, setImportErr] = createSignal("");
   onMount(() => {
+    void refreshLearn();
     // a reload mid-turn: re-attach to the server-side job so the reply still lands
     for (const s of sessions) {
       if (s.pendingTurn) void runTurn(s.id, { turn: s.pendingTurn }, true);
@@ -297,133 +397,226 @@ export function Tutor() {
         .then((id) => { if (say) answer(id, say); })
         .catch((e) => setImportErr(String(e)));
     }
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
+    window.addEventListener("keydown", onKey);
+    onCleanup(() => window.removeEventListener("keydown", onKey));
   });
-  const active = createMemo(() => sessions.find((s) => s.id === activeId()) ?? null);
   return (
-    <Show when={active()} fallback={<TutorHome importErr={importErr()} />}>
-      {(s) => <TutorSession session={s()} />}
-    </Show>
+    <>
+      <Show when={activeSession()} fallback={<TutorHome importErr={importErr()} />}>
+        {(s) => <TutorSession session={s()} />}
+      </Show>
+      <Show when={drawer()}>
+        {(id) => <ConceptDrawer id={id()} />}
+      </Show>
+    </>
   );
 }
 
 function TutorHome(props: { importErr: string }) {
-  const [track, { refetch }] = createResource(() => fetchJSON<TrackReply>("/tutor-track"));
   const [terminal] = createResource(() => fetchJSON<TerminalSession[]>("/tutor-terminal").catch(() => []));
   const ours = () => new Set(sessions.flatMap((s) => [s.sessionId, s.importedFrom ?? ""]));
   const pickable = () => (terminal() ?? []).filter((t) => !ours().has(t.session));
   const [pickErr, setPickErr] = createSignal("");
   const [target, setTarget] = createSignal("");
-  onMount(() => void refetch());
-  const go = () => {
-    const t = target().trim();
-    if (t) startSession(t);
-  };
+  const [allDue, setAllDue] = createSignal(false);
+  const topics = createMemo(() => Object.values(learn()?.topics ?? {}).sort((a, b) => (b as { updated?: string }).updated?.localeCompare((a as { updated?: string }).updated ?? "") ?? 0));
+  const due = () => learn()?.due ?? [];
+  const openQs = () => (learn()?.questions ?? []).filter((q) => q.status === "open");
+
   return (
-    <div class="tutor-home mx-auto max-w-[760px] px-8 py-10 max-[640px]:px-4">
-      <div class="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-faint mb-2">tutor</div>
-      <h1 class="font-display text-[28px] leading-tight text-ink mb-6">What do you want to dig into?</h1>
-      <form class="flex gap-2 mb-10" onSubmit={(e) => { e.preventDefault(); go(); }}>
-        <input
-          class="flex-1 min-w-0 rounded-sm border border-rule bg-vellum-raise px-3 py-2 font-mono text-[14px] text-ink outline-none focus:border-gold-deep"
-          placeholder="a PR number, a branch, a file, or a concept"
-          autocomplete="off"
-          value={target()}
-          onInput={(e) => setTarget(e.currentTarget.value)}
-        />
-        <button class="rounded-sm border border-gold-deep bg-gold-wash px-4 font-display text-[15px] text-gold-leaf hover:bg-vellum-edge" type="submit">
-          start
-        </button>
-      </form>
+    <div class="tutor-home mx-auto grid max-w-[1180px] grid-cols-[minmax(0,1fr)_340px] gap-x-12 px-8 py-10 max-[1060px]:grid-cols-[1fr] max-[640px]:px-4">
+      <div class="min-w-0">
+        <div class={`${SECTION} mb-2`}>tutor</div>
+        <h1 class="font-display text-[28px] leading-tight text-ink mb-6">What do you want to dig into?</h1>
+        <form class="flex gap-2 mb-10" onSubmit={(e) => { e.preventDefault(); if (target().trim()) startSession(target().trim()); }}>
+          <input
+            class="flex-1 min-w-0 rounded-sm border border-rule bg-vellum-raise px-3 py-2 font-mono text-[14px] text-ink outline-none focus:border-gold-deep"
+            placeholder="a PR number, a branch, a file, or a concept"
+            autocomplete="off"
+            value={target()}
+            onInput={(e) => setTarget(e.currentTarget.value)}
+          />
+          <button class="rounded-sm border border-gold-deep bg-gold-wash px-4 font-display text-[15px] text-gold-leaf hover:bg-vellum-edge" type="submit">start</button>
+        </form>
+        <Show when={props.importErr || pickErr() || learnErr()}>
+          <div class="mb-6 font-mono text-[12px] text-del">{props.importErr || pickErr() || learnErr()}</div>
+        </Show>
 
-      <Show when={props.importErr || pickErr()}>
-        <div class="mb-6 font-mono text-[12px] text-del">{props.importErr || pickErr()}</div>
-      </Show>
-
-      <Show when={pickable().length}>
         <section class="mb-10">
-          <h2 class="font-display text-[17px] text-ink mb-1">Pick up from the terminal</h2>
-          <p class="text-[13px] text-ink-faint mb-3 mt-0">A /tutor session running in Claude Code. It continues here as a copy; the terminal one is left alone.</p>
+          <div class="flex items-baseline gap-3 mb-1">
+            <h2 class="font-display text-[19px] text-ink m-0">Due</h2>
+            <span class="font-mono text-[11px] text-ink-faint">{due().length} concepts</span>
+          </div>
+          <p class="text-[13px] text-ink-faint mt-0 mb-3">Open misconceptions first, then things you've only shown with help, then whatever's gone longest unchecked.</p>
           <ul class="m-0 p-0 list-none">
-            <For each={pickable()}>
-              {(t) => (
-                <li class="border-t border-rule py-3">
-                  <button class="block w-full text-left group" onClick={() => importTerminal(t.session).catch((e) => setPickErr(String(e)))}>
-                    <div class="flex items-baseline gap-3">
-                      <span class="flex-1 min-w-0 truncate text-[14px] text-ink group-hover:text-gold-leaf">{t.target || worktreeName(t.cwd)}</span>
-                      <span class="shrink-0 font-mono text-[11px] text-ink-faint">
-                        {worktreeName(t.cwd)} · {t.answers} answers · {new Date(t.mtime * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                      </span>
-                    </div>
-                    <div class="mt-1 text-[13px] leading-snug text-ink-faint line-clamp-2">…{t.last}</div>
+            <For each={allDue() ? due() : due().slice(0, 8)}>
+              {(id) => (
+                <li class="flex items-center gap-3 border-t border-rule py-2">
+                  <Pips m={conceptOf(id)?.mastery} />
+                  <button class="min-w-0 flex-1 text-left" onClick={() => setDrawer(id)}>
+                    <span class="block truncate text-[14px] text-ink hover:text-gold-leaf">{nameOf(id)}</span>
+                    <span class="block truncate text-[12px] text-ink-faint">{conceptOf(id)?.mastery.reason}</span>
                   </button>
+                  <button
+                    class="shrink-0 font-mono text-[11px] text-ember hover:text-gold-leaf"
+                    onClick={() => startSession(`Re-test me cold on ${nameOf(id)} [${id}]`, conceptOf(id)?.topics[0])}
+                  >re-test cold</button>
                 </li>
               )}
             </For>
           </ul>
+          <Show when={due().length > 8}>
+            <button class="mt-2 font-mono text-[11px] text-ink-faint hover:text-ink" onClick={() => setAllDue((v) => !v)}>
+              {allDue() ? "show fewer" : `show all ${due().length}`}
+            </button>
+          </Show>
         </section>
-      </Show>
 
-      <section class="mb-10">
-        <h2 class="font-display text-[17px] text-ink mb-1">Re-test queue</h2>
-        <p class="text-[13px] text-ink-faint mb-3 mt-0">Things you got with help. A cold re-test is one bare question, no scaffold.</p>
-        <Show when={track()?.err}>
-          <div class="font-mono text-[12px] text-del">{track()!.err}</div>
-        </Show>
-        <Show when={track() && !track()!.err && track()!.retest.length === 0}>
-          <div class="text-[13px] text-ink-dim">Empty — nothing waiting.</div>
-        </Show>
-        <ul class="m-0 p-0 list-none">
-          <For each={track()?.retest ?? []}>
-            {(item) => (
-              <li class="flex items-baseline gap-3 border-t border-rule py-2.5">
-                <span class="flex-1 text-[14px] leading-snug text-ink-dim">{item}</span>
-                <button
-                  class="shrink-0 font-mono text-[11px] text-ember hover:text-gold-leaf"
-                  onClick={() => startSession(`re-test cold, zero scaffold — one bare question first: ${item}`)}
-                >re-test me cold</button>
-              </li>
+        <section>
+          <h2 class="font-display text-[19px] text-ink mb-1">Topics</h2>
+          <p class="text-[13px] text-ink-faint mt-0 mb-4">Paths through one graph. The same idea met in two topics is one concept, linked as an analog.</p>
+          <For each={topics()}>
+            {(t) => (
+              <article class="mb-5 rounded-sm border border-rule p-4">
+                <header class="mb-3 flex items-baseline gap-3">
+                  <h3 class="m-0 flex-1 min-w-0 truncate font-display text-[16px] text-ink">{t.title}</h3>
+                  <span class="shrink-0 font-mono text-[11px] text-ink-faint" title="concepts at explain or deeper">{t.progress.held}/{t.progress.total}</span>
+                  <button
+                    class="shrink-0 font-mono text-[11px] text-ember hover:text-gold-leaf"
+                    onClick={() => startSession(`Continue ${t.title} [${t.id}] — start from what my graph says is weakest`, t.id)}
+                  >continue</button>
+                </header>
+                <div class="mb-3 h-[3px] rounded-full bg-rule">
+                  <div class="h-full rounded-full bg-gold-deep" style={{ width: `${t.progress.total ? (100 * t.progress.held) / t.progress.total : 0}%` }} />
+                </div>
+                <For each={t.stages}>
+                  {(st) => (
+                    <div class="mb-2 grid grid-cols-[140px_minmax(0,1fr)] gap-3 max-[640px]:grid-cols-[1fr]">
+                      <div class="pt-1 text-[12px] text-ink-faint">{st.name}</div>
+                      <div class="flex flex-wrap gap-1.5">
+                        <For each={st.concepts}>{(id) => <ConceptChip id={id} />}</For>
+                      </div>
+                    </div>
+                  )}
+                </For>
+                <Show when={t.source}><div class="mt-2 font-mono text-[10.5px] text-ink-faint">{t.source}</div></Show>
+              </article>
             )}
           </For>
-        </ul>
-      </section>
+        </section>
+      </div>
 
-      <Show when={sessions.length}>
-        <section>
-          <h2 class="font-display text-[17px] text-ink mb-3">Sessions</h2>
-          <ul class="m-0 p-0 list-none">
-            <For each={sessions}>
-              {(s) => (
-                <li class="group flex items-baseline gap-3 border-t border-rule py-2.5">
-                  <button class="flex-1 min-w-0 truncate text-left text-[14px] text-ink-dim hover:text-ink" onClick={() => setActiveId(s.id)}>
-                    {s.target}
-                  </button>
-                  <span class="shrink-0 font-mono text-[11px] text-ink-faint">
-                    {s.saved ? "saved · " : ""}{s.msgs.filter((m) => m.role === "me").length} answers · {new Date(s.created).toLocaleDateString()}
-                  </span>
-                  <button
-                    class="shrink-0 font-mono text-[11px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-del"
-                    title="forget this session"
-                    onClick={() => setSessions((all) => all.filter((x) => x.id !== s.id))}
-                  >✕</button>
-                </li>
+      <aside class="min-w-0 max-[1060px]:mt-6">
+        <section class="mb-8">
+          <h2 class="font-display text-[17px] text-ink mb-2">Your open questions</h2>
+          <Show when={openQs().length} fallback={<div class="text-[13px] text-ink-faint">None open. Ask one from any concept.</div>}>
+            <ul class="m-0 p-0 list-none">
+              <For each={openQs()}>
+                {(q) => (
+                  <li class="border-t border-rule py-2">
+                    <div class="text-[13.5px] leading-snug text-ink">{q.text}</div>
+                    <div class="mt-1 flex gap-3 font-mono text-[11px]">
+                      <Show when={q.concept}><button class="text-ink-faint hover:text-gold-leaf" onClick={() => setDrawer(q.concept)}>{nameOf(q.concept)}</button></Show>
+                      <button class="text-ember hover:text-gold-leaf" onClick={() => startSession(`My open question: ${q.text}`, q.topic || undefined)}>pursue</button>
+                      <button class="text-ink-faint hover:text-ink" onClick={() => postJSON("/learning-question", { op: "close", id: q.id }).then(refreshLearn)}>answered</button>
+                    </div>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
+        </section>
+
+        <Show when={pickable().length}>
+          <section class="mb-8">
+            <h2 class="font-display text-[17px] text-ink mb-1">Pick up from the terminal</h2>
+            <p class="text-[12px] text-ink-faint mb-2 mt-0">Continues here as a copy; the terminal session is left alone.</p>
+            <ul class="m-0 p-0 list-none">
+              <For each={pickable()}>
+                {(t) => (
+                  <li class="border-t border-rule py-2">
+                    <button class="block w-full text-left group" onClick={() => importTerminal(t.session).catch((e) => setPickErr(String(e)))}>
+                      <span class="block truncate text-[13.5px] text-ink group-hover:text-gold-leaf">{t.target || worktreeName(t.cwd)}</span>
+                      <span class="block font-mono text-[11px] text-ink-faint">{worktreeName(t.cwd)} · {t.answers} answers</span>
+                    </button>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </section>
+        </Show>
+
+        <Show when={sessions.length}>
+          <section>
+            <h2 class="font-display text-[17px] text-ink mb-2">Sessions</h2>
+            <ul class="m-0 p-0 list-none">
+              <For each={sessions}>
+                {(s) => (
+                  <li class="group flex items-baseline gap-2 border-t border-rule py-2">
+                    <button class="flex-1 min-w-0 truncate text-left text-[13px] text-ink-dim hover:text-ink" onClick={() => setActiveId(s.id)} title={s.target}>
+                      {s.target}
+                    </button>
+                    <span class="shrink-0 font-mono text-[10.5px] text-ink-faint">{new Date(s.created).toLocaleDateString()}</span>
+                    <button
+                      class="shrink-0 font-mono text-[11px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-del"
+                      title="forget this session (its evidence stays in the graph)"
+                      onClick={() => setSessions((all) => all.filter((x) => x.id !== s.id))}
+                    >✕</button>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </section>
+        </Show>
+      </aside>
+    </div>
+  );
+}
+
+function SessionMap(props: { session: Session; here: string | null }) {
+  const topic = () => (props.session.topic ? learn()?.topics[props.session.topic] : undefined);
+  return (
+    <nav class="flex min-h-0 flex-col overflow-y-auto border-r border-rule px-4 py-4">
+      <Show
+        when={topic()}
+        fallback={<div class="text-[12.5px] leading-snug text-ink-faint">No map yet. The tutor draws one once it has read the material.</div>}
+      >
+        {(t) => (
+          <>
+            <div class={`${SECTION} mb-1`}>map</div>
+            <div class="font-display text-[15px] leading-snug text-ink mb-1">{t().title}</div>
+            <div class="mb-4 font-mono text-[10.5px] text-ink-faint">{t().progress.held}/{t().progress.total} at explain or deeper</div>
+            <For each={t().stages}>
+              {(st) => (
+                <div class="mb-4">
+                  <div class="mb-1.5 text-[11.5px] text-ink-faint">{st.name}</div>
+                  <div class="flex flex-col gap-1">
+                    <For each={st.concepts}>{(id) => <ConceptChip id={id} here={props.here === id} wrap />}</For>
+                  </div>
+                </div>
               )}
             </For>
-          </ul>
-        </section>
+          </>
+        )}
       </Show>
-    </div>
+      <div class="mt-auto pt-4 font-mono text-[10px] leading-relaxed text-ink-faint">
+        <div class="flex items-center gap-1.5"><Pips m={{ depth: 2, assisted: 3, level: "", evidence: 0, last: "", due: false, reason: "", open_miss: "" }} /> depth</div>
+        <div>filled = shown unaided · outline = only with help · red = open misconception</div>
+      </div>
+    </nav>
   );
 }
 
 function TutorSession(props: { session: Session }) {
   const s = () => props.session;
   const [draft, setDraft] = createSignal("");
-  const [pin, setPin] = createSignal<Pin | null>(null);
-  let scroller: HTMLDivElement | undefined;
-  let box: HTMLTextAreaElement | undefined;
-
   const [historyOpen, setHistoryOpen] = createSignal(false);
   const [expanded, setExpanded] = createSignal<number | null>(null);
+  const [evidenceOpen, setEvidenceOpen] = createSignal(false);
+  const [mapOpen, setMapOpen] = createSignal(false);
+  let scroller: HTMLDivElement | undefined;
+  let box: HTMLTextAreaElement | undefined;
 
   // A rung is one tutor turn plus the answer that followed it. Only the newest is shown in full;
   // the rest fold into a one-line-per-rung ladder, so a long climb never becomes a scroll wall.
@@ -443,8 +636,14 @@ function TutorSession(props: { session: Session }) {
     const at = current()?.tutorIdx ?? 0;
     return s().msgs[at - 1]?.role === "me" ? s().msgs[at - 1].text : "";
   };
+  const here = createMemo(() => latest(s().msgs, "rung")?.concept ?? null);
+  const mine = createMemo(() => (learn()?.evidence ?? []).filter((e) => e.session === s().id));
 
-  createEffect(() => setPin(latestPin(s().msgs)));
+  // the session's newest pin wins when it changes; a pin chosen from the drawer stays until then
+  const newestPin = createMemo(() => latest(s().msgs, "pin")?.pin ?? null, null, {
+    equals: (a, b) => JSON.stringify(a) === JSON.stringify(b),
+  });
+  createEffect(() => setPin(newestPin()));
   // a new rung starts reading at its TOP — never chase the bottom while it streams
   createEffect(() => {
     current()?.tutorIdx;
@@ -459,22 +658,49 @@ function TutorSession(props: { session: Session }) {
   };
 
   return (
-    <div class="tutor grid h-screen grid-cols-[minmax(0,1.1fr)_minmax(380px,1fr)] max-[960px]:grid-cols-[1fr] max-[960px]:h-auto">
-      <CodePane pin={pin()} />
-      <div class="flex min-h-0 flex-col border-l border-rule max-[960px]:border-l-0 max-[960px]:border-t">
+    <div
+      class="tutor grid h-screen max-[900px]:grid-cols-[1fr] max-[900px]:h-auto"
+      classList={{
+        "grid-cols-[260px_minmax(0,1fr)_minmax(0,1fr)] max-[1200px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]": !!pin(),
+        "grid-cols-[260px_minmax(0,760px)] max-[1200px]:grid-cols-[minmax(0,1fr)]": !pin(),
+      }}
+    >
+      <div class="min-h-0 max-[1200px]:hidden flex">
+        <SessionMap session={s()} here={here()} />
+      </div>
+      <div class="flex min-h-0 flex-col border-r border-rule max-[900px]:border-r-0">
         <header class="flex items-baseline gap-3 border-b border-rule px-5 py-3">
-          <button class="font-mono text-[11px] text-ink-faint hover:text-gold-leaf" onClick={() => setActiveId(null)} title="all sessions">← tutor</button>
-          <span class="flex-1 min-w-0 truncate font-display text-[15px] text-ink" title={s().target}>{s().target}</span>
-          <span class="shrink-0 font-mono text-[11px] text-gold-leaf">rung {rungs().length}</span>
-          <Show when={!s().saved}>
-            <button
-              class="shrink-0 font-mono text-[11px] text-ink-faint hover:text-ember disabled:opacity-40"
-              disabled={streaming()}
-              title="ask for the close — the ledger you review before it's saved"
-              onClick={() => send("Let's stop here. Close out: write the tutor-ledger.")}
-            >wrap up</button>
-          </Show>
+          <button class="font-mono text-[11px] text-ink-faint hover:text-gold-leaf" onClick={() => setActiveId(null)} title="your graph">← tutor</button>
+          <span class="flex-1 min-w-0 truncate font-display text-[15px] text-ink" title={s().target}>
+            {(s().topic && learn()?.topics[s().topic!]?.title) || s().target}
+          </span>
+          <button class="hidden shrink-0 font-mono text-[11px] text-ink-faint hover:text-gold-leaf max-[1200px]:inline" onClick={() => setMapOpen((v) => !v)}>map</button>
+          <button
+            class="shrink-0 font-mono text-[11px] hover:text-gold-leaf"
+            classList={{ "text-gold-leaf": evidenceOpen(), "text-ink-faint": !evidenceOpen() }}
+            title="what this session has recorded about you — audit it"
+            onClick={() => setEvidenceOpen((v) => !v)}
+          >evidence · {mine().length}</button>
+          <button
+            class="shrink-0 font-mono text-[11px] text-ink-faint hover:text-ember disabled:opacity-40"
+            disabled={streaming()}
+            title="ask for the consolidation: each principle said plainly"
+            onClick={() => send("Let's stop here. Consolidate: say each principle we reached plainly, and record evidence for my last answer.")}
+          >wrap up</button>
         </header>
+
+        <Show when={mapOpen()}>
+          <div class="max-h-[50vh] overflow-y-auto border-b border-rule"><SessionMap session={s()} here={here()} /></div>
+        </Show>
+
+        <Show when={evidenceOpen()}>
+          <div class="max-h-[45vh] overflow-y-auto border-b border-rule bg-vellum-raise px-5 py-3">
+            <div class={`${SECTION} mb-2`}>recorded this session — edit or cut anything over-credited</div>
+            <Show when={mine().length} fallback={<div class="text-[12.5px] text-ink-faint">Nothing yet. Evidence lands after each answer.</div>}>
+              <For each={mine()}>{(e) => <EvidenceRow e={e} showConcept />}</For>
+            </Show>
+          </div>
+        </Show>
 
         <div ref={scroller} class="flex-1 min-h-0 overflow-y-auto">
           <Show when={history().length}>
@@ -506,7 +732,7 @@ function TutorSession(props: { session: Session }) {
                         </button>
                         <Show when={expanded() === r.tutorIdx}>
                           <div class="mx-5 mt-1 mb-3 border-l-2 border-gold-deep pl-4">
-                            <TutorTurn text={s().msgs[r.tutorIdx].text} latest={false} session={s()} onPin={setPin} onPick={() => {}} />
+                            <TutorTurn text={s().msgs[r.tutorIdx].text} latest={false} onPick={() => {}} />
                             <Show when={r.answer}>
                               <div class="mb-2 whitespace-pre-wrap text-[13px] text-ink-dim">you: {r.answer}</div>
                             </Show>
@@ -528,15 +754,7 @@ function TutorSession(props: { session: Session }) {
               </div>
             </Show>
             <Show when={current()}>
-              {(c) => (
-                <TutorTurn
-                  text={s().msgs[c().tutorIdx].text}
-                  latest={true}
-                  session={s()}
-                  onPin={setPin}
-                  onPick={(o) => setDraft(o)}
-                />
-              )}
+              {(c) => <TutorTurn text={s().msgs[c().tutorIdx].text} latest={true} onPick={(o) => setDraft(o)} />}
             </Show>
             <Show when={streaming() && status()}>
               <div class="font-mono text-[11px] text-ink-faint truncate">{status()}…</div>
@@ -547,15 +765,12 @@ function TutorSession(props: { session: Session }) {
           </div>
         </div>
 
-        <form
-          class="border-t border-rule p-4"
-          onSubmit={(e) => { e.preventDefault(); send(draft()); }}
-        >
+        <form class="border-t border-rule p-4" onSubmit={(e) => { e.preventDefault(); send(draft()); }}>
           <textarea
             ref={box}
             class="block w-full resize-none rounded-sm border border-rule bg-vellum-raise px-3 py-2 text-[14px] leading-relaxed text-ink outline-none focus:border-gold-deep"
             rows={3}
-            placeholder={streaming() ? "…" : "your answer — a guess is fine"}
+            placeholder={streaming() ? "…" : "your prediction, your why, or your own question"}
             autocomplete="off"
             value={draft()}
             onInput={(e) => setDraft(e.currentTarget.value)}
@@ -577,59 +792,227 @@ function TutorSession(props: { session: Session }) {
           </div>
         </form>
       </div>
+      <Show when={pin()}>
+        <CodePane pin={pin()} />
+      </Show>
     </div>
   );
 }
 
-function TutorTurn(props: {
-  text: string;
-  latest: boolean;
-  session: Session;
-  onPin: (p: Pin) => void;
-  onPick: (o: string) => void;
-}) {
+function TutorTurn(props: { text: string; latest: boolean; onPick: (o: string) => void }) {
   const segs = createMemo(() => segments(props.text));
   return (
     <div class="mb-5">
       <For each={segs()}>
-        {(seg) => {
-          if (seg.kind === "prose") {
-            return <div class="wiki-prose text-[15px] [&_a]:text-gold-leaf [&_a]:underline [&_a]:decoration-gold-deep" innerHTML={renderMarkdown(seg.text)} />;
+        {(seg): JSX.Element => {
+          switch (seg.kind) {
+            case "prose":
+              return <div class="wiki-prose text-[15px] [&_a]:text-gold-leaf [&_a]:underline [&_a]:decoration-gold-deep" innerHTML={renderMarkdown(seg.text)} />;
+            case "pin":
+              return (
+                <button
+                  class="my-1.5 inline-flex max-w-full items-baseline gap-2 rounded-sm border border-rule px-2 py-0.5 font-mono text-[11px] text-ink-dim hover:border-gold-deep hover:text-gold-leaf"
+                  onClick={() => setPin(seg.pin)}
+                  title="show in the code pane"
+                >
+                  <span class="truncate">{seg.pin.path}</span>
+                  <Show when={seg.pin.lines}><span class="shrink-0 text-ink-faint">L{seg.pin.lines![0]}–{seg.pin.lines![1]}</span></Show>
+                </button>
+              );
+            case "options":
+              return (
+                <div class="my-3 flex flex-wrap gap-2">
+                  <For each={seg.options}>
+                    {(o) => (
+                      <button
+                        class="rounded-sm border border-gold-deep bg-gold-wash px-3 py-1.5 text-left text-[14px] text-ink hover:bg-vellum-edge disabled:opacity-40"
+                        disabled={!props.latest}
+                        title="put this in the answer box — then say why"
+                        onClick={() => props.onPick(o)}
+                      >{o}</button>
+                    )}
+                  </For>
+                </div>
+              );
+            case "rung":
+              return (
+                <button class="mb-2 inline-flex items-center gap-2 font-mono text-[10.5px] text-ink-faint hover:text-gold-leaf" onClick={() => setDrawer(seg.concept)}>
+                  <Pips m={conceptOf(seg.concept)?.mastery} />
+                  <span>testing {nameOf(seg.concept)} · {seg.level}</span>
+                </button>
+              );
+            case "evidence":
+              return (
+                <div class="mb-3 flex flex-col gap-1">
+                  <For each={seg.items}>
+                    {(e) => (
+                      <button
+                        class="flex items-baseline gap-2 text-left font-mono text-[11px] hover:text-gold-leaf"
+                        classList={{ "text-add": e.outcome !== "miss", "text-del": e.outcome === "miss" }}
+                        title="recorded in your graph — open the concept to audit it"
+                        onClick={() => setDrawer(e.concept)}
+                      >
+                        <span>{e.outcome === "miss" ? "✗" : "✓"}</span>
+                        <span class="shrink-0">{nameOf(e.concept)} · {e.level} · {e.credit}</span>
+                        <Show when={e.note}><span class="truncate text-ink-faint">— {e.note}</span></Show>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              );
+            case "map":
+              return <div class="mb-2 font-mono text-[10.5px] text-ink-faint">map drawn · {seg.count} concepts in {seg.title}</div>;
+            case "quiet":
+              return <></>;
           }
-          if (seg.kind === "pin") {
-            return (
-              <button
-                class="my-1.5 inline-flex max-w-full items-baseline gap-2 rounded-sm border border-rule px-2 py-0.5 font-mono text-[11px] text-ink-dim hover:border-gold-deep hover:text-gold-leaf"
-                onClick={() => props.onPin(seg.pin)}
-                title="show in the code pane"
-              >
-                <span class="truncate">{seg.pin.path}</span>
-                <Show when={seg.pin.lines}>
-                  <span class="shrink-0 text-ink-faint">L{seg.pin.lines![0]}–{seg.pin.lines![1]}</span>
-                </Show>
-              </button>
-            );
-          }
-          if (seg.kind === "options") {
-            return (
-              <div class="my-3 flex flex-wrap gap-2">
-                <For each={seg.options}>
-                  {(o) => (
-                    <button
-                      class="rounded-sm border border-gold-deep bg-gold-wash px-3 py-1.5 text-left text-[14px] text-ink hover:bg-vellum-edge disabled:opacity-40"
-                      disabled={!props.latest}
-                      title="put this in the answer box — then say why"
-                      onClick={() => props.onPick(o)}
-                    >{o}</button>
-                  )}
-                </For>
-              </div>
-            );
-          }
-          return <LedgerEditor initial={seg.ledger} session={props.session} />;
         }}
       </For>
     </div>
+  );
+}
+
+function EvidenceRow(props: { e: Evidence; showConcept?: boolean }) {
+  const [err, setErr] = createSignal("");
+  const edit = (fields: Partial<Evidence>) =>
+    postJSON("/learning-evidence", { op: "edit", id: props.e.id, fields }).then(refreshLearn).catch((x) => setErr(String(x)));
+  const SELECT = "rounded-sm border border-rule bg-vellum-night px-1 py-0.5 font-mono text-[11px] text-ink-dim";
+  return (
+    <div class="group border-t border-rule py-2 first:border-t-0">
+      <div class="flex flex-wrap items-center gap-1.5">
+        <button
+          class="font-mono text-[12px]"
+          classList={{ "text-add": props.e.outcome === "hit", "text-del": props.e.outcome === "miss" }}
+          title="toggle hit / miss"
+          onClick={() => edit({ outcome: props.e.outcome === "hit" ? "miss" : "hit" })}
+        >{props.e.outcome === "miss" ? "✗" : "✓"}</button>
+        <Show when={props.showConcept}>
+          <button class="text-[12.5px] text-ink hover:text-gold-leaf" onClick={() => setDrawer(props.e.concept)}>{nameOf(props.e.concept)}</button>
+        </Show>
+        <select class={SELECT} value={props.e.level} title="level" onChange={(ev) => edit({ level: ev.currentTarget.value })}>
+          <For each={LEVELS}>{(l) => <option value={l}>{l}</option>}</For>
+        </select>
+        <select class={SELECT} value={props.e.credit} title="credit" onChange={(ev) => edit({ credit: ev.currentTarget.value })}>
+          <For each={CREDITS}>{(c) => <option value={c}>{c}</option>}</For>
+        </select>
+        <span class="font-mono text-[10.5px] text-ink-faint">{props.e.at}</span>
+        <span class="flex-1" />
+        <button
+          class="font-mono text-[11px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-del"
+          title="cut this evidence"
+          onClick={() => postJSON("/learning-evidence", { op: "delete", id: props.e.id }).then(refreshLearn).catch((x) => setErr(String(x)))}
+        >✕</button>
+      </div>
+      <Show when={props.e.note}><div class="mt-0.5 text-[12.5px] leading-snug text-ink-dim">{props.e.note}</div></Show>
+      <Show when={err()}><div class="font-mono text-[11px] text-del">{err()}</div></Show>
+    </div>
+  );
+}
+
+function ConceptDrawer(props: { id: string }) {
+  const c = () => conceptOf(props.id);
+  const [q, setQ] = createSignal("");
+  const [err, setErr] = createSignal("");
+  const evidence = createMemo(() => (learn()?.evidence ?? []).filter((e) => e.concept === props.id).slice().reverse());
+  const questions = createMemo(() => (learn()?.questions ?? []).filter((x) => x.concept === props.id));
+  const Links = (p: { label: string; ids: string[] }) => (
+    <Show when={p.ids.length}>
+      <div class="mb-3">
+        <div class={`${SECTION} mb-1.5`}>{p.label}</div>
+        <div class="flex flex-wrap gap-1.5"><For each={p.ids}>{(id) => <ConceptChip id={id} />}</For></div>
+      </div>
+    </Show>
+  );
+  return (
+    <aside class="fixed top-0 right-0 z-[60] flex h-screen w-[460px] max-w-full flex-col border-l border-gold-deep bg-vellum-raise shadow-[-12px_0_32px_rgba(0,0,0,0.45)]">
+      <Show when={c()} fallback={<div class="p-6 text-ink-faint">Unknown concept {props.id}</div>}>
+        {(cc) => (
+          <div class="flex-1 overflow-y-auto px-6 py-5">
+            <div class="mb-2 flex items-baseline gap-2">
+              <span class={SECTION}>{cc().kind === "convention" ? "convention · told, then tested" : "principle · derivable"}</span>
+              <span class="flex-1" />
+              <button class="font-mono text-[13px] text-ink-faint hover:text-ink" onClick={() => setDrawer(null)} title="close (esc)">✕</button>
+            </div>
+            <h2 class="m-0 mb-2 font-display text-[22px] leading-tight text-ink">{cc().name}</h2>
+            <p class="mt-0 mb-4 text-[14.5px] leading-relaxed text-ink-dim">{cc().statement}</p>
+
+            <div class="mb-4 rounded-sm border border-rule bg-vellum-night p-3">
+              <div class="mb-2 flex items-center gap-3">
+                <Pips m={cc().mastery} size="md" />
+                <span class="text-[13px] text-ink">{cc().mastery.level ? `${cc().mastery.level}, unaided` : "not yet shown unaided"}</span>
+              </div>
+              <div class="grid grid-cols-[72px_1fr] gap-x-2 gap-y-0.5 font-mono text-[10.5px] text-ink-faint">
+                <For each={LEVELS}>{(l) => <><span>{l}</span><span>{LEVEL_HINT[l]}</span></>}</For>
+              </div>
+              <Show when={cc().mastery.due}>
+                <div class="mt-2 text-[12.5px] text-ember">Due: {cc().mastery.reason}</div>
+              </Show>
+            </div>
+
+            <div class="mb-5 flex flex-wrap gap-2">
+              <button class="rounded-sm border border-gold-deep bg-gold-wash px-3 py-1 font-display text-[14px] text-gold-leaf hover:bg-vellum-edge"
+                onClick={() => startSession(`Re-test me cold on ${cc().name} [${cc().id}]`, cc().topics[0])}>re-test me cold</button>
+              <button class="rounded-sm border border-rule px-3 py-1 font-display text-[14px] text-ink-dim hover:text-ink"
+                onClick={() => startSession(`Teach me ${cc().name} [${cc().id}]: ${cc().statement}`, cc().topics[0])}>teach me this</button>
+            </div>
+
+            <Links label="builds on" ids={cc().builds_on} />
+            <Links label="what builds on it" ids={cc().built_on_by} />
+            <Links label="same idea elsewhere" ids={cc().analogs} />
+            <Show when={cc().topics.length}>
+              <div class="mb-4 font-mono text-[10.5px] text-ink-faint">in: {cc().topics.map((t) => learn()?.topics[t]?.title ?? t).join(" · ")}</div>
+            </Show>
+            <Show when={cc().code.length}>
+              <div class="mb-4">
+                <div class={`${SECTION} mb-1.5`}>code</div>
+                <For each={cc().code}>
+                  {(r) => (
+                    <button
+                      class="block max-w-full truncate font-mono text-[11px] text-ink-dim hover:text-gold-leaf disabled:hover:text-ink-dim"
+                      disabled={!activeSession()}
+                      title={activeSession() ? "show in the code pane" : "open a session to see code"}
+                      onClick={() => setPin({ path: r.path, ref: r.ref, lines: r.lines ? [r.lines[0], r.lines[1] ?? r.lines[0]] : undefined })}
+                    >{r.path}{r.lines ? ` L${r.lines[0]}–${r.lines[1] ?? r.lines[0]}` : ""}</button>
+                  )}
+                </For>
+              </div>
+            </Show>
+
+            <div class="mb-5">
+              <div class={`${SECTION} mb-1.5`}>your questions</div>
+              <For each={questions()}>
+                {(x) => (
+                  <div class="flex items-baseline gap-2 py-1 text-[13px]">
+                    <span class="flex-1" classList={{ "text-ink": x.status === "open", "text-ink-faint line-through": x.status !== "open" }}>{x.text}</span>
+                    <button class="font-mono text-[10.5px] text-ink-faint hover:text-ink"
+                      onClick={() => postJSON("/learning-question", { op: x.status === "open" ? "close" : "reopen", id: x.id }).then(refreshLearn)}>
+                      {x.status === "open" ? "answered" : "reopen"}
+                    </button>
+                  </div>
+                )}
+              </For>
+              <form class="mt-1.5 flex gap-2" onSubmit={(e) => { e.preventDefault(); ask(q(), cc()).then(() => setQ("")).catch((x) => setErr(String(x))); }}>
+                <input
+                  class="min-w-0 flex-1 rounded-sm border border-rule bg-vellum-night px-2 py-1 text-[13px] text-ink outline-none focus:border-gold-deep"
+                  placeholder={activeSession() ? "ask the tutor about this…" : "ask — starts a session on it"}
+                  value={q()}
+                  onInput={(e) => setQ(e.currentTarget.value)}
+                />
+                <button class="font-mono text-[11px] text-ember hover:text-gold-leaf" type="submit">ask</button>
+              </form>
+              <Show when={err()}><div class="mt-1 font-mono text-[11px] text-del">{err()}</div></Show>
+            </div>
+
+            <div>
+              <div class={`${SECTION} mb-1`}>evidence · newest first</div>
+              <div class="mb-2 text-[11.5px] text-ink-faint">Depth comes only from this. Toggle hit/miss, change level or credit, or cut a row.</div>
+              <Show when={evidence().length} fallback={<div class="text-[12.5px] text-ink-faint">None yet.</div>}>
+                <For each={evidence()}>{(e) => <EvidenceRow e={e} />}</For>
+              </Show>
+            </div>
+          </div>
+        )}
+      </Show>
+    </aside>
   );
 }
 
@@ -687,123 +1070,6 @@ function CodePane(props: { pin: Pin | null }) {
               )}
             </For>
           </pre>
-        </Show>
-      </div>
-    </div>
-  );
-}
-
-function LedgerEditor(props: { initial: Ledger; session: Session }) {
-  const [l, setL] = createStore<Ledger>({ ...emptyLedger(), ...structuredClone(props.initial) });
-  const [state, setState] = createSignal<"idle" | "saving" | "error">("idle");
-  const [err, setErr] = createSignal("");
-  const saved = () => !!props.session.saved;
-
-  const move = (from: Bucket, i: number, dir: -1 | 1) => {
-    const to = BUCKETS[BUCKETS.indexOf(from) + dir];
-    if (!to) return;
-    const item = l[from][i];
-    setL(produce((d) => { d[from].splice(i, 1); d[to].push(item); }));
-  };
-  const save = async () => {
-    setState("saving");
-    try {
-      const r = await fetch("/tutor-ledger", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(l) });
-      const j = await r.json();
-      if (!j.ok) throw new Error(j.err || "save failed");
-      setSessions(indexOf(props.session.id), "saved", true);
-      setState("idle");
-    } catch (e) {
-      setErr(String(e));
-      setState("error");
-    }
-  };
-
-  const ListField = (p: { name: keyof Ledger; label: string; hint?: string }) => (
-    <div class="mb-3">
-      <div class="font-mono text-[10px] tracking-[0.12em] uppercase text-ink-faint">{p.label}</div>
-      <Show when={p.hint}><div class="text-[11px] text-ink-faint mb-1">{p.hint}</div></Show>
-      <Index each={l[p.name] as string[]}>
-        {(item, i) => (
-          <div class="group flex items-start gap-1">
-            <textarea
-              class="flex-1 resize-none border-0 bg-transparent p-0 text-[13px] leading-snug text-ink-dim outline-none focus:text-ink [field-sizing:content]"
-              rows={1}
-              disabled={saved()}
-              value={item()}
-              onInput={(e) => setL(p.name as "retest", i, e.currentTarget.value)}
-            />
-            <Show when={!saved()}>
-              <button class="font-mono text-[11px] text-ink-faint opacity-0 group-hover:opacity-100 hover:text-del" title="cut it"
-                onClick={() => setL(produce((d) => { (d[p.name] as string[]).splice(i, 1); }))}>✕</button>
-            </Show>
-          </div>
-        )}
-      </Index>
-    </div>
-  );
-
-  return (
-    <div class="my-4 rounded-sm border border-gold-deep bg-vellum-raise p-4">
-      <div class="mb-1 font-display text-[17px] text-ink">The close</div>
-      <p class="mt-0 mb-4 text-[12px] text-ink-faint">
-        Audit it. Move anything that's over-credited down a column, cut what's wrong, then save — nothing reaches your track until you do.
-      </p>
-      <div class="mb-4 grid grid-cols-2 gap-3 max-[640px]:grid-cols-1">
-        <input class="rounded-sm border border-rule bg-vellum-night px-2 py-1 text-[13px] text-ink" placeholder="topic" disabled={saved()}
-          value={l.topic} onInput={(e) => setL("topic", e.currentTarget.value)} />
-        <input class="rounded-sm border border-rule bg-vellum-night px-2 py-1 text-[13px] text-ink" placeholder="source" disabled={saved()}
-          value={l.source} onInput={(e) => setL("source", e.currentTarget.value)} />
-      </div>
-      <div class="mb-4 grid grid-cols-3 gap-3 max-[760px]:grid-cols-1">
-        <For each={[...BUCKETS]}>
-          {(b) => (
-            <div class="min-w-0 rounded-sm border border-rule p-2.5">
-              <div class="font-mono text-[10px] tracking-[0.12em] uppercase text-gold-leaf">{b}</div>
-              <div class="mb-2 text-[11px] leading-snug text-ink-faint">{BUCKET_HINT[b]}</div>
-              <Index each={l[b]}>
-                {(item, i) => (
-                  <div class="group mb-1.5 rounded-sm bg-vellum-night px-2 py-1.5">
-                    <textarea
-                      class="block w-full resize-none border-0 bg-transparent p-0 text-[13px] leading-snug text-ink outline-none [field-sizing:content]"
-                      rows={1}
-                      disabled={saved()}
-                      value={item()}
-                      onInput={(e) => setL(b, i, e.currentTarget.value)}
-                    />
-                    <Show when={!saved()}>
-                      <div class="mt-1 flex gap-2 font-mono text-[11px] text-ink-faint">
-                        <Show when={b !== "unaided"}>
-                          <button class="hover:text-gold-leaf" title="more credit" onClick={() => move(b, i, -1)}>◀</button>
-                        </Show>
-                        <Show when={b !== "handed"}>
-                          <button class="hover:text-ember" title="less credit" onClick={() => move(b, i, 1)}>▶</button>
-                        </Show>
-                        <span class="flex-1" />
-                        <button class="hover:text-del" title="cut it" onClick={() => setL(produce((d) => { d[b].splice(i, 1); }))}>✕</button>
-                      </div>
-                    </Show>
-                  </div>
-                )}
-              </Index>
-            </div>
-          )}
-        </For>
-      </div>
-      <ListField name="misconceptions" label="misconceptions" />
-      <ListField name="calibration" label="calibration for next time" />
-      <ListField name="retest" label="add to the re-test queue" />
-      <ListField name="retested" label="passed cold — checks off the queue" />
-      <div class="flex items-center gap-3">
-        <Show when={!saved()} fallback={<span class="font-mono text-[12px] text-add">saved to your track ✓</span>}>
-          <button
-            class="rounded-sm border border-gold-deep bg-gold-wash px-4 py-1.5 font-display text-[15px] text-gold-leaf hover:bg-vellum-edge disabled:opacity-40"
-            disabled={state() === "saving"}
-            onClick={() => void save()}
-          >{state() === "saving" ? "saving…" : "save to my track"}</button>
-        </Show>
-        <Show when={state() === "error"}>
-          <span class="font-mono text-[12px] text-del">{err()}</span>
         </Show>
       </div>
     </div>
