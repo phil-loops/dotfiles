@@ -306,7 +306,7 @@ class H(BaseHTTPRequestHandler):
 
     def _dispatch_get(self, u):
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor")
-                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/"))):
+                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/"))):
             self._send_app_shell()
         elif u.path.startswith("/assets/"):
             # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the
