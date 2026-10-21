@@ -29,6 +29,7 @@ from srv import footprint   # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
 from srv import pregate   # own line: same reason
+from srv import tutor   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -304,7 +305,7 @@ class H(BaseHTTPRequestHandler):
         self._send(200, body, "text/html; charset=utf-8")
 
     def _dispatch_get(self, u):
-        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine")
+        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor")
                 or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/"))):
             self._send_app_shell()
         elif u.path.startswith("/assets/"):
@@ -422,6 +423,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/wiki-pages":     return wiki.pages(self, u)   # every page for this repo, nav-ordered
         elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
+        elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
+        elif u.path == "/tutor-track":    return tutor.track(self, u)  # the learner's re-test queue + topics
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/notes":          return review.notes_get(self, u)   # per-branch test/repro notes
@@ -619,6 +622,12 @@ class H(BaseHTTPRequestHandler):
             return assist.stream(self, raw)
         if self.path == "/chat":             # start OR reconnect a chat turn (server-side job) → SSE replay+live
             return chat.start(self, raw)
+        if self.path == "/tutor":            # a Socratic turn → headless read-only claude, streamed (SSE)
+            return tutor.start(self, raw)
+        if self.path == "/tutor-stop":
+            return tutor.stop(self, raw)
+        if self.path == "/tutor-ledger":     # the approved close → appended to the learning track
+            return tutor.ledger(self, raw)
         if self.path == "/chat-stop":        # ■ stop: kill this turn's headless claude for real
             return chat.stop(self, raw)
         if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
