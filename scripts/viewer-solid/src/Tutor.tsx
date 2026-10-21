@@ -237,11 +237,11 @@ function startSession(target: string) {
 
 const worktreeName = (cwd: string) => cwd.split("/").pop() || cwd;
 
-async function importTerminal(session: string) {
+async function importTerminal(session: string): Promise<string> {
   const existing = sessions.find((s) => s.importedFrom === session && !s.saved);
   if (existing) {
     setActiveId(existing.id);
-    return;
+    return existing.id;
   }
   const r = await fetchJSON<ImportReply>(`/tutor-import?session=${encodeURIComponent(session)}`);
   if (r.err) throw new Error(r.err);
@@ -253,6 +253,7 @@ async function importTerminal(session: string) {
     });
   }));
   setActiveId(id);
+  return id;
 }
 
 function answer(id: string, text: string) {
@@ -271,10 +272,15 @@ export function Tutor() {
     for (const s of sessions) {
       if (s.pendingTurn) void runTurn(s.id, { turn: s.pendingTurn }, true);
     }
-    const wanted = new URLSearchParams(window.location.search).get("import");
+    // /tutor?import=<id>[&say=<first message>] — say lets a link resume the climb, not just open it
+    const params = new URLSearchParams(window.location.search);
+    const wanted = params.get("import");
+    const say = params.get("say");
     if (wanted) {
       history.replaceState(null, "", "/tutor");
-      importTerminal(wanted).catch((e) => setImportErr(String(e)));
+      importTerminal(wanted)
+        .then((id) => { if (say) answer(id, say); })
+        .catch((e) => setImportErr(String(e)));
     }
   });
   const active = createMemo(() => sessions.find((s) => s.id === activeId()) ?? null);
