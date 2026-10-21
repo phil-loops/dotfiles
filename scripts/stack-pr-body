@@ -84,9 +84,9 @@ if not full:
             if s.get("me"):
                 out.append("  %d. [this branch]" % s["n"])
                 continue
-            ref = "#%s " % s["pr"] if s.get("pr") else ""
-            merged = " (merged)" if s.get("state") == "merged" else ""
-            out.append("  %d. %s%s%s" % (s["n"], ref, s["job"], merged))
+            # a PR number alone: GitHub renders the title and merged state on the link
+            label = "#%s" % s["pr"] if s.get("pr") else s["job"]
+            out.append("  %d. %s" % (s["n"], label))
         if f["requires"]:
             step_by_branch = {s.get("branch"): s["n"] for s in f["plan"]}
             def req_ref(r):
@@ -130,10 +130,8 @@ if f["project"]:
     out.append("\n### Merge order\n")
     for s in f["plan"]:
         mark = "  ← **this PR**" if s.get("me") else ""
-        ref = ""
-        if s.get("pr"):
-            ref = " #%s%s" % (s["pr"], " (merged)" if s.get("state") == "merged" else "")
-        out.append("%d.%s %s%s" % (s["n"], ref, s["job"], mark))
+        label = "#%s" % s["pr"] if s.get("pr") else s["job"]
+        out.append("%d. %s%s" % (s["n"], label, mark))
 
 print("\n".join(out))
 PY
