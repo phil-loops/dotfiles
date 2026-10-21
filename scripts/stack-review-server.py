@@ -424,7 +424,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
-        elif u.path == "/tutor-track":    return tutor.track(self, u)  # the learner's re-test queue + topics
+        elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived
         elif u.path == "/tutor-terminal": return tutor.terminal(self, u)   # terminal /tutor sessions to pick up
         elif u.path == "/tutor-import":   return tutor.import_(self, u)    # one of them, as tab turns
         elif u.path == "/node":           return review.node(self, u)
@@ -628,8 +628,10 @@ class H(BaseHTTPRequestHandler):
             return tutor.start(self, raw)
         if self.path == "/tutor-stop":
             return tutor.stop(self, raw)
-        if self.path == "/tutor-ledger":     # the approved close → appended to the learning track
-            return tutor.ledger(self, raw)
+        if self.path == "/learning-evidence":   # the learner audits a credit: edit or delete one evidence row
+            return tutor.learning_evidence(self, raw)
+        if self.path == "/learning-question":   # the learner's own questions, attached to concepts
+            return tutor.learning_question(self, raw)
         if self.path == "/chat-stop":        # ■ stop: kill this turn's headless claude for real
             return chat.stop(self, raw)
         if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude

@@ -1,35 +1,40 @@
 # srv/tutor.py — the Tutor tab: a Socratic session in the browser instead of the terminal.
 #
 # A turn is a headless, read-only `claude -p` (the chat's job runner + SSE stream, reused),
-# seeded with the `tutor` skill, the learner's track from memory, and a browser protocol: three
-# fenced blocks the page renders as UI instead of prose.
+# seeded with the `tutor` skill, the learner's concept graph (scripts/learning.py), and a browser
+# protocol of fenced blocks the page renders as UI instead of prose. When a turn ends, its map /
+# evidence / calibration blocks are applied to the graph and a `graph` event goes out before `done`.
 #
-#   POST /tutor        {turn, target? | answer + resume}  → text/event-stream (chat.py's events)
-#   GET  /tutor-src    ?path=&ref=                          → {path, ref, text} for the code pane
-#   GET  /tutor-track                                        → {retest[], entries, path}
-#   POST /tutor-ledger {topic, source, unaided[], …}         → append the approved close to the track
-#   GET  /tutor-terminal                                     → recent terminal /tutor sessions to pick up
-#   GET  /tutor-import ?session=                             → one terminal session's tutoring turns
+#   POST /tutor             {turn, tab, topic?, target? | answer + resume + primed?, cwd?, fork?} → SSE
+#
+# `claude -p --resume` silently drops --append-system-prompt (verified 2026-10-21), so a resumed
+# session that hasn't seen the tab's instructions yet (a terminal pick-up) gets them inside its
+# first message instead — once; the conversation carries them after that (`primed`).
+#   GET  /tutor-src         ?path=&ref=                          → a pinned file for the code pane
+#   GET  /tutor-terminal                                         → recent terminal /tutor sessions
+#   GET  /tutor-import      ?session=                            → one of them as tab turns
+#   GET  /learning-state                                         → the graph with derived depth + due
+#   POST /learning-evidence {op: edit|delete, id, fields?}       → the learner audits a credit
+#   POST /learning-question {op: add|close|reopen, text?, concept?, topic?, id?}
 #
 # A picked-up terminal session continues as a FORK (--fork-session) in its own worktree, so the tab
 # keeps everything that session already read and the terminal session itself is never touched.
-#
-# The session never writes memory itself: the close arrives as a block, the learner edits and
-# approves it in the page, and only /tutor-ledger touches the track file.
 import glob
 import json
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from urllib.parse import parse_qs
 
 from . import ctx, chat
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import learning  # noqa: E402
+
 SKILL_PATH = os.path.expanduser("~/.claude/skills/tutor/SKILL.md")
-TRACK_NAME = "phil-learning-track"
-TRACK_QUEUE = "## Re-test queue"
 MODEL = "opus"
 TAB_OPENER = "Start the session: prep silently, then open with step 2."   # also how /tutor-terminal skips the tab's own sessions
 SRC_MAX = 400_000
@@ -42,58 +47,65 @@ ALLOWED = ["Read", "Grep", "Glob",
 PROTOCOL = """
 ## You are running in the viewer's Tutor tab, not a terminal
 
-The learner reads your turns in a browser. Three fenced blocks render as UI instead of text;
-everything else is markdown prose. Use them exactly as shown — valid JSON, one block per fence.
+The learner reads your turns in a browser beside a map of the topic and a code pane. These fenced
+blocks render as UI instead of text; everything else is markdown prose. Valid JSON, one per fence.
+They are applied to the learner's concept graph when your turn ends — you never write files.
+
+```tutor-map
+{"topic": {"id": "ses-metric-projection", "title": "Mail send → SES feedback → metric projection", "source": "PR #11092"},
+ "stages": [{"name": "Readers and bookmarks", "concepts": [
+   {"id": "counts-and-bookmark-atomic", "name": "Effects and bookmark move together",
+    "statement": "Applying effects and moving the bookmark must commit in one transaction.",
+    "kind": "principle", "builds_on": ["cursor-redelivery"], "analogs": ["atomic-check-and-spend"],
+    "code": [{"path": "packages/x/projector.ts", "ref": "origin/main", "lines": [40, 72]}]}]}]}
+```
+The step-1 map, as data: emit it once you've prepped (before the open) and again whenever it
+changes. REUSE existing topic and concept ids from the graph below whenever it is the same idea —
+that is what links topics. Add `analogs` across topics deliberately: a solid analog means go
+problem-first; none means a worked run first. `kind`: principle (derivable) or convention (tell it).
+Stages are ordered; 3–6 stations, each a few concepts.
+If this conversation has no tutor-map yet (a session picked up from the terminal), emit one at the
+top of your next turn, built from where the climb already is.
+
+```tutor-rung
+{"concept": "commit-order-not-stamp-order", "level": "predict"}
+```
+With every situation you pose: the concept it tests and the level (predict / explain / transfer /
+critique). The map highlights it as "you are here".
+
+```tutor-evidence
+[{"concept": "cursor-redelivery", "level": "predict", "credit": "unaided", "outcome": "hit", "note": "said the next tick starts back at 4"}]
+```
+At the top of the turn after each learner answer: your read of that answer, one entry per concept
+it showed. credit — unaided: before your framing narrowed it; scaffolded: your framing did part of
+the work; handed: you told it. When unsure, bump down; the learner audits every entry. A miss
+records the misconception in the learner's own words. Levels — predict: said what happens in a
+situation; explain: said why; transfer: handled it cold in a new setting; critique: spotted it, or
+its absence, in real code. Depth is derived from this evidence; there is no end-of-session ledger.
+The close (step 5) is the consolidation — say each principle plainly — plus evidence for the last
+answer.
 
 ```tutor-pin
 {"path": "scripts/srv/chat.py", "ref": "origin/main", "lines": [428, 470]}
 ```
-Pins a file in the code pane beside the question and lights `lines`. `path` is repo-relative
-(or absolute); `ref` is any git ref/sha the file exists at — omit it for the working tree.
-This REPLACES re-pasting code: pin it every rung that needs code, and only quote a line or two
-inline when the rung is about that exact line. The pinned file is shown raw — no annotations
-are possible there, which is the point.
+Pins a file in the code pane and lights `lines` (repo-relative or absolute path; `ref` any git
+ref the file exists at, omit for the working tree). This replaces pasting code. The file shows raw.
 
 ```tutor-options
-["the lock stops the second job from running", "the lock stops a second job from starting", "neither"]
+["the next tick re-reads 4–8", "the next tick starts at 9", "the next tick stops"]
 ```
-Renders as clickable chips; a click sends that text as the learner's answer. No letters needed.
+Clickable candidate predictions (stuck protocol, step b). A click fills the answer box; the
+learner still says why.
 
-```tutor-ledger
-{"topic": "…", "source": "PR #1234 / branch / concept", "unaided": ["…"], "scaffolded": ["… (what my framing did)"],
- "handed": ["…"], "misconceptions": ["… → unlocked by …"], "calibration": ["…"], "retest": ["…"], "retested": ["…"]}
+```tutor-calibration
+["Strong analog for cursors: the croon lease sweeper."]
 ```
-Emit this ONCE, when the learner reaches the summit or wants to stop — it is the step-5 close.
-`retest` = new items for the re-test queue; `retested` = queue items this session re-tested cold
-AND they passed (copy their text exactly). The learner edits and approves it before anything is
-saved — do NOT write to memory yourself; you can't, and the ledger block is the only channel.
+Rarely: a note about how this learner learns, kept for every future session.
 
-The learner's answer box has no autosuggest, so short-answer rungs are no longer spoiled here —
-but they're still weaker than reasoning-shaped ones.
+The learner can send "Question about <concept name> [<id>]: …" — their own question, recorded open
+in the graph. Follow it; it is a thread they chose. "Re-test me cold on … [<id>]" means one bare
+situation with no setup, then evidence at level transfer. The answer box has no autosuggest.
 """
-
-
-def _memory_dir():
-    # Claude Code keys project memory by the main checkout's path with "/" and "." → "-".
-    repo = ctx.MAIN_WT or ctx.repo_cwd()
-    return os.path.expanduser("~/.claude/projects/" + re.sub(r"[/.]", "-", repo) + "/memory")
-
-
-def _track_path():
-    d = _memory_dir()
-    try:
-        names = sorted(os.listdir(d))
-    except OSError:
-        return None
-    for n in names:
-        if not n.endswith(".md"):
-            continue
-        p = os.path.join(d, n)
-        with open(p, encoding="utf-8") as fh:
-            head = fh.read(400)
-        if re.search(rf"^name:\s*{TRACK_NAME}\s*$", head, re.M):
-            return p
-    return None
 
 
 def _read(path):
@@ -109,11 +121,31 @@ def _skill_body():
     return re.sub(r"\A---\n.*?\n---\n", "", text, flags=re.S)
 
 
-def _system_prompt():
-    track = _read(_track_path() or "")
-    return (_skill_body() + "\n" + PROTOCOL
-            + "\n## The learner's track (memory `" + TRACK_NAME + "`)\n\n"
-            + (track or "(no track found — this is a first session)"))
+def _system_prompt(topic):
+    return _skill_body() + "\n" + PROTOCOL + "\n" + learning.digest(learning.load(), topic=topic or None)
+
+
+class TutorJob(chat.Job):
+    """A chat Job that applies the turn's graph blocks just before `done`, so a client that
+    refetches the graph on `done` always sees this turn's evidence."""
+
+    def __init__(self, meta, tab, topic):
+        super().__init__(meta)
+        self.text = []
+        self.tab = tab
+        self.topic = topic
+
+    def emit(self, event, obj):
+        if event == "token":
+            self.text.append(obj.get("t", ""))
+        if event == "done" and not self.done:
+            try:
+                with learning.editing() as g:
+                    topic, applied, errors = learning.apply_blocks(g, "".join(self.text), session=self.tab, topic=self.topic)
+            except Exception as exc:   # the turn's text still stands; say why the graph didn't move
+                topic, applied, errors = self.topic, [], [str(exc)[:300]]
+            super().emit("graph", {"topic": topic, "applied": applied, "errors": errors})
+        super().emit(event, obj)
 
 
 _JOBS = {}
@@ -126,6 +158,8 @@ def start(req, raw):
     target = (d.get("target") or "").strip()
     answer = (d.get("answer") or "").strip()
     resume = (d.get("resume") or "").strip()
+    tab = (d.get("tab") or "").strip()
+    topic = learning.slug(d.get("topic")) if d.get("topic") else ""
     cwd = (d.get("cwd") or "").strip() or ctx.repo_cwd()
     if not turn:
         return req._send(400, json.dumps({"ok": False, "err": "need a turn id"}))
@@ -146,14 +180,18 @@ def start(req, raw):
         return
 
     if job is None:
-        if resume:
+        if resume and not d.get("primed"):
+            prompt = ("<tutor-tab-instructions>\n" + _system_prompt(topic) + "\n</tutor-tab-instructions>\n\n"
+                      "These instructions now govern this conversation (from here on you are in the Tutor tab). "
+                      "The learner's message:\n\n" + answer)
+        elif resume:
             prompt = answer
         else:
             prompt = f"/tutor {target}\n\n{TAB_OPENER}"
         cmd = ["claude", "-p", prompt,
                "--output-format", "stream-json", "--include-partial-messages", "--verbose",
                "--model", MODEL, "--permission-mode", "default",
-               "--append-system-prompt", _system_prompt()]
+               "--append-system-prompt", _system_prompt(topic)]
         if resume:
             cmd += ["--resume", resume]
             if d.get("fork"):
@@ -162,7 +200,7 @@ def start(req, raw):
         with _JOBS_LOCK:
             job = _JOBS.get(turn)
             if job is None:
-                job = chat.Job({"target": target})
+                job = TutorJob({"target": target}, tab, topic)
                 _JOBS[turn] = job
                 now = time.time()
                 for t in [t for t, j in _JOBS.items() if j.done and now - j.created > chat.JOB_TTL]:
@@ -212,75 +250,6 @@ def src(req, u):
             return req._send(200, json.dumps({"err": f"no such file: {path}"}))
     req._send(200, json.dumps({"path": path, "ref": ref or "working tree", "text": text[:SRC_MAX]}))
 
-
-QUEUE_ITEM = re.compile(r"^- \[( |x)\] (.+)$")
-
-
-def _queue(text):
-    out, inside = [], False
-    for line in text.splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == TRACK_QUEUE
-            continue
-        m = QUEUE_ITEM.match(line) if inside else None
-        if m and m.group(1) == " ":
-            out.append(m.group(2).strip())
-    return out
-
-
-def track(req, u):
-    path = _track_path()
-    if not path:
-        return req._send(200, json.dumps({"err": f"no memory named {TRACK_NAME} in {_memory_dir()}"}))
-    text = _read(path)
-    topics = re.findall(r"^- (?:\*\*)?([A-Z][^—\n]{3,80}?) — via ", text, re.M)
-    req._send(200, json.dumps({"path": path, "retest": _queue(text), "topics": topics}))
-
-
-def _clean(items):
-    return [" ".join(str(x).split()) for x in (items or []) if str(x).strip()]
-
-
-def _entry(d):
-    head = " ".join(str(d.get("topic") or "Untitled").split())
-    src_ = " ".join(str(d.get("source") or "").split())
-    lines = [f"- {head} — via {src_ or 'the Tutor tab'}, {time.strftime('%Y-%m-%d')} (Tutor tab)."]
-    for key, label in (("unaided", "Unaided"), ("scaffolded", "Scaffolded"), ("handed", "Handed"),
-                       ("misconceptions", "⚠️ Misconception"), ("calibration", "Calibration")):
-        items = _clean(d.get(key))
-        if items:
-            lines.append(f"  - **{label}:** " + " · ".join(items))
-    return "\n".join(lines)
-
-
-def ledger(req, raw):
-    d = json.loads(raw or "{}")
-    path = _track_path()
-    if not path:
-        return req._send(400, json.dumps({"ok": False, "err": f"no memory named {TRACK_NAME}"}))
-    text = _read(path)
-    if TRACK_QUEUE not in text:
-        text = text.rstrip("\n") + f"\n\n{TRACK_QUEUE}\n"
-    before, after = text.split(TRACK_QUEUE, 1)
-    before = before.rstrip("\n") + "\n" + _entry(d) + "\n\n"
-
-    passed = set(_clean(d.get("retested")))
-    queue_lines = []
-    for line in after.splitlines():
-        m = QUEUE_ITEM.match(line)
-        if m and m.group(1) == " " and " ".join(m.group(2).split()) in passed:
-            line = f"- [x] {m.group(2)} — passed cold {time.strftime('%Y-%m-%d')}"
-        queue_lines.append(line)
-    topic = " ".join(str(d.get("topic") or "").split())
-    for item in _clean(d.get("retest")):
-        queue_lines.append(f"- [ ] {item}" + (f" ({topic})" if topic else ""))
-    out = before + TRACK_QUEUE + "\n".join(queue_lines).rstrip("\n") + "\n"
-
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(out)
-    os.replace(tmp, path)
-    req._send(200, json.dumps({"ok": True, "path": path}))
 
 
 def _worktrees():
@@ -383,3 +352,35 @@ def import_(req, u):
     if not rows:
         return req._send(200, json.dumps({"err": "that session never loaded the tutor skill"}))
     req._send(200, json.dumps({"session": session, "cwd": cwd, "target": target, "msgs": rows}))
+
+
+
+def learning_state(req, u):
+    req._send(200, json.dumps(learning.state(learning.load())))
+
+
+def learning_evidence(req, raw):
+    d = json.loads(raw or "{}")
+    try:
+        with learning.editing() as g:
+            if d.get("op") == "delete":
+                learning.delete_evidence(g, d.get("id", ""))
+            else:
+                learning.edit_evidence(g, d.get("id", ""), d.get("fields") or {})
+    except learning.Invalid as exc:
+        return req._send(400, json.dumps({"ok": False, "err": str(exc)}))
+    req._send(200, json.dumps({"ok": True}))
+
+
+def learning_question(req, raw):
+    d = json.loads(raw or "{}")
+    try:
+        with learning.editing() as g:
+            if d.get("op") in ("close", "reopen"):
+                learning.set_question(g, d.get("id", ""), "answered" if d["op"] == "close" else "open")
+                qid = d.get("id", "")
+            else:
+                qid = learning.add_question(g, d.get("text", ""), concept=d.get("concept", ""), topic=d.get("topic", ""))
+    except learning.Invalid as exc:
+        return req._send(400, json.dumps({"ok": False, "err": str(exc)}))
+    req._send(200, json.dumps({"ok": True, "id": qid}))
