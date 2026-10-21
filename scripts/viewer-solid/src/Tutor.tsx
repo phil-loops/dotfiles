@@ -12,6 +12,7 @@
 import { createEffect, createMemo, createRoot, createResource, createSignal, For, Show, onCleanup, onMount, type JSX } from "solid-js";
 import { createStore, produce } from "solid-js/store";
 import { fetchJSON } from "./api";
+import { useViewerLocation, type ViewerLocation } from "./router";
 import hljs from "highlight.js/lib/core";
 import { renderMarkdown } from "./markdown"; // also registers hljs languages on the shared core
 
@@ -77,12 +78,24 @@ createRoot(() => createEffect(() => {
     /* private window / quota — sessions just won't survive a reload */
   }
 }));
-const [activeId, setActiveId] = createSignal<string | null>(null);
+// Where you are lives in the URL (/tutor/<session>?concept=<id>), so a refresh or a shared link lands
+// there and back steps out of a drawer or a session. These mirror it; go() changes it.
+const [route, setRoute] = createSignal<{ session?: string; concept?: string }>({});
+let navigateRef: ((loc: ViewerLocation) => void) | null = null;
+function go(next: { session?: string; concept?: string }) {
+  setRoute(next);
+  navigateRef?.({ kind: "tutor", ...next });
+}
+const activeId = () => route().session ?? null;
+const setActiveId = (id: string | null) => go({ session: id ?? undefined });
 const [status, setStatus] = createSignal<string | null>(null);
 const [streaming, setStreaming] = createSignal(false);
 const [learn, setLearn] = createSignal<LearnState | null>(null);
 const [learnErr, setLearnErr] = createSignal("");
-const [drawer, setDrawer] = createSignal<string | null>(null);
+const drawer = () => route().concept ?? null;
+const setDrawer = (id: string | null) => {
+  if ((id ?? undefined) !== route().concept) go({ ...route(), concept: id ?? undefined });
+};
 const [pin, setPin] = createSignal<Pin | null>(null);
 
 const indexOf = (id: string) => sessions.findIndex((s) => s.id === id);
@@ -382,6 +395,12 @@ const SECTION = "font-mono text-[10px] uppercase tracking-[0.14em] text-ink-fain
 
 export function Tutor() {
   const [importErr, setImportErr] = createSignal("");
+  const { location, navigate } = useViewerLocation();
+  navigateRef = navigate;
+  createEffect(() => {
+    const l = location();
+    if (l.kind === "tutor") setRoute({ session: l.session, concept: l.concept });
+  });
   onMount(() => {
     void refreshLearn();
     // a reload mid-turn: re-attach to the server-side job so the reply still lands

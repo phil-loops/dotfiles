@@ -13,7 +13,7 @@
 //   /review/<pr>                         → an imported review PR (single node)
 //   /wiki[/<slug>]                       → the repo wiki: durable prose, no node
 //   /machine                             → the workstation: dev servers + the shared substrate
-//   /tutor                               → a Socratic session, one rung at a time
+//   /tutor[/<session>][?concept=<id>]    → the tutor: home, or one session; ?concept opens its drawer
 //
 // A forest project tag is a single segment; the active node (a branch) is the path tail, slashes
 // and all. Putting both in the path means the URL fully identifies the view — no ?node= query.
@@ -30,7 +30,7 @@ export type ViewerLocation =
   | { kind: "review"; pr: number; node?: string }
   | { kind: "wiki"; slug?: string }
   | { kind: "machine" }
-  | { kind: "tutor" };
+  | { kind: "tutor"; session?: string; concept?: string };
 
 const isHomeTab = (s: string): s is HomeTab => (HOME_TABS as string[]).includes(s);
 
@@ -75,7 +75,8 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
     return { kind: "machine" };
   }
   if (head === "tutor") {
-    return { kind: "tutor" };
+    const concept = new URLSearchParams(search).get("concept") || undefined;
+    return { kind: "tutor", session: rest[0] || undefined, concept };
   }
   if (head === "branch" && rest.length) {
     return { kind: "standalone", branch: rest.join("/") };
@@ -106,7 +107,7 @@ export function buildPath(loc: ViewerLocation): string {
     case "machine":
       return "/machine";
     case "tutor":
-      return "/tutor";
+      return "/tutor" + (loc.session ? "/" + loc.session : "") + (loc.concept ? "?concept=" + encodeURIComponent(loc.concept) : "");
   }
 }
 
