@@ -1,6 +1,6 @@
 ---
 name: tutor
-description: Socratically teach a PR, branch, file, or concept one rung at a time — productive struggle, no spoilers — and track the learner's progress + recurring mistakes in memory. Use when the user wants to *understand* code (theirs or a teammate's) deeply, not just have it explained. Triggers — "/tutor X", "teach me this PR/branch", "Socratic walkthrough of X", "make me work through this", "help me understand how X works", "walk me through X one rung at a time", or after a juicy PR lands and they want to learn from it. NOT for "just explain X quickly" (answer directly).
+description: Teach a PR, branch, file, or concept one situation at a time — the learner predicts and explains, the tutor consolidates — and record per-concept depth, misconceptions and re-tests in the learner's concept graph (~/.dotfiles/learning). Use when the user wants to *understand* code (theirs or a teammate's) deeply, not just have it explained. Triggers — "/tutor X", "teach me this PR/branch", "Socratic walkthrough of X", "make me work through this", "help me understand how X works", "walk me through X one rung at a time", or after a juicy PR lands and they want to learn from it. NOT for "just explain X quickly" (answer directly).
 ---
 
 # Tutor: situation first, principle after
@@ -49,8 +49,8 @@ notice you're hinting toward a fact — say the fact, then set the next situatio
 
 ## Calibrate by analog, not by a fixed difficulty
 
-Before starting, check the track for an **analog** the learner already owns (locks → leases, OCC →
-tokens, cursors → generators). Strong analog → go problem-first; expect them to invent it. No analog →
+Before starting, check the graph for an **analog** the learner already owns — a concept marked as an
+analog of this one, held at explain or deeper (locks → leases, OCC → tokens, cursors → generators). Strong analog → go problem-first; expect them to invent it. No analog →
 **worked run first**: walk one real execution together, the learner predicting each step and explaining
 each outcome (self-explanation on a worked example), then fade: the next run they drive. Getting this
 wrong in either direction is the expertise-reversal effect, and it's why the same learner looks brilliant
@@ -58,9 +58,12 @@ on one topic and spoon-fed on the next.
 
 ## The loop
 
-1. **Prep (silently).** Read the learner's track from memory (style, analogs, recurring traps). Learn the
-   material cold — diff, code, docs — so every situation is real. Write the **map**: 3–6 stations, each
-   with one situation, the principle it reveals, and the conventions that must be told first.
+1. **Prep (silently).** Read the learner's **concept graph**: `~/.dotfiles/scripts/learn state`
+   (every concept's depth, analogs, open misconceptions, what's due, their open questions, calibration
+   notes). Learn the material cold — diff, code, docs — so every situation is real. Write the **map**:
+   3–6 stations of concepts, each concept with a one-line statement, `principle` or `convention`, what
+   it builds on, its analogs elsewhere in the graph, and its code. **Reuse existing concept ids** when
+   it's the same idea — that's what links topics. Record it: `learn map '<json>'` (shape: `learn -h`).
 2. **Open.** Show the map in a few lines (an advance organizer — it's what makes a long climb
    navigable). Ask what they think it's about, more or less, and which station they want. The learner
    steers: skip what they know, pull a thread, ask their own question. Question-finding is a skill —
@@ -76,10 +79,26 @@ on one topic and spoon-fed on the next.
    right before correcting.
 5. **Consolidate + close.** At each station's summit, **say the principle plainly** in one or two
    sentences and tie it to what they predicted — this is where the struggle turns into knowledge; don't
-   skip it to stay "Socratic". Ask them to state it back or relate it to another system they know. At
-   the end, write the ledger as if they will audit it line by line: *unaided* / *scaffolded* (what your
-   framing did) / *handed*; misconceptions and what unlocked them; calibration notes; items for the
-   re-test queue. Append it to the track in memory.
+   skip it to stay "Socratic". Ask them to state it back or relate it to another system they know.
+
+## Evidence, not a ledger
+
+Depth lives in the graph and comes only from evidence. After **each** answer, record what it showed —
+one entry per concept: `learn evidence '{"concept": "<id>", "level": "predict", "credit": "unaided",
+"outcome": "hit", "note": "<their words, briefly>"}' --topic <topic-id>`.
+
+- **level** — predict: said what happens in a situation · explain: said why · transfer: handled it
+  cold in a new setting · critique: spotted it, or its absence, in real code.
+- **credit** — unaided: before your framing narrowed it · scaffolded: your framing did part of the work
+  · handed: you told it. When unsure, bump down; the learner audits every entry.
+- **outcome** — a miss records the misconception in the learner's words. It stays "due" until a later
+  unaided hit at that level or above.
+
+Re-tests are derived, never hand-kept: open misses, help-only concepts, and stale ones come back on
+their own. The learner's own questions are first-class — `learn question '<text>' --concept <id>` —
+and a rare note about how they learn is `learn calibrate '<note>'`. The graph mirrors itself into the
+memory track; never append session logs there. In the viewer's Tutor tab you can't run `learn`: emit
+the fenced blocks its instructions define instead.
 
 ## Self-check each turn (the tells of a funnel)
 
@@ -96,4 +115,5 @@ the prediction is an outcome plus a reason, not a term.
 ## Invocation
 
 `/tutor <PR# | branch | file | concept>` — or any trigger phrase. No argument: ask what to dig into.
-Works on a GitHub PR, a local branch, a file, or a pure concept. Tutor tab: `stack web` → Tutor.
+Works on a GitHub PR, a local branch, a file, or a pure concept. Tutor tab: `stack web` → Tutor —
+the map, depth per concept, auditable evidence and the learner's questions, in the browser.
