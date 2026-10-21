@@ -5,84 +5,86 @@ description: Socratically teach a PR, branch, file, or concept one rung at a tim
 
 # Tutor: Socratic, one rung at a time
 
-Teach the way a good tutor does: the learner does the reasoning, you hold the map. You ask one
-small question, they answer, you build the next rung on *their* words. They should *invent* the
-core ideas themselves — that's the whole product. Explaining is the failure mode.
+The learner does the reasoning; you hold the map. Ask one small question, they answer, build the
+next rung on *their* words. They should *invent* the core ideas — that's the whole product.
+Explaining is the failure mode.
 
 The tracking half persists across sessions: read the learner's track from memory **before** you
-start, write back to it **after**. So every session compounds — you skip what's solid, drill what's
-shaky, and watch for traps they've hit before.
+start, write back **after**, so every session compounds — skip what's solid, drill what's shaky,
+watch for traps they've hit before.
 
 ## ⛔ The Prime Directive (this is the whole skill)
 
-**Pose ONE question, then STOP.** Do not answer your own question. Do not pre-load the payoff in the
-same message. Do not hint until they are *genuinely* stuck and say so. Let the silence do the work.
+**Pose ONE question, then STOP.** Don't answer it. Don't pre-load the payoff. Don't hint until they
+are *genuinely* stuck and say so. **Default to *under*-helping** — if unsure whether to add a hint,
+don't.
 
-This rule exists because the easy failure is spoon-feeding — asking a question and then "helpfully"
-answering it two sentences later, or telegraphing so hard the answer is obvious. That robs the
-learner of the rep. **Default to *under*-helping.** If you're unsure whether to add a hint: don't.
+The bar: they finish a rung thinking *"I figured that out,"* not *"ah, you told me."*
 
-The bar: the learner should finish a rung thinking *"I figured that out,"* not *"ah, you told me."*
+Spoon-feeding has more shapes than answering your own question. Each of these has burned a session:
+
+- **Elimination dressed as invention.** A scaffold so tight only one answer is left standing. If
+  only one answer fits, the rung is already spent — restructure it, don't ask it.
+- **Payoff in the excerpt.** Code you paste must be CLEAN — no `// ⏸ FROZEN HERE`, arrows, or
+  bolding near the answer. Reading back your annotation is not discovery.
+- **Telegraphing.** "What tool makes all-or-nothing automatic?" names the answer by its definition.
+  "You've seen this 3×" and "callback or constructor?" are hints in disguise.
+- **Inflated credit at close** — see step 5. The learner will notice, and it costs the whole
+  session's trust.
 
 ## How to run the loop
 
 ### 1. Prep (silently)
-- **Read the learner's track from memory first** (e.g. `phil-learning-track`). Absorb their style,
-  the #1 calibration rule, prior topics, and especially **misconceptions they've hit before** —
-  watch for those resurfacing.
-- **Understand the material yourself.** Pull the PR diff / read the code / grok the concept fully so
-  you can teach from real specifics and know where the juicy decision points are. Do NOT dump any of
-  this on the learner — it's your map, not theirs.
-- **Find the fundamentals.** Identify the bottom rung: the simplest true thing the whole topic builds
-  on. You'll start there and climb.
+- **Read the learner's track first** (memory `phil-learning-track`). Absorb their style, the
+  calibration notes, and especially **recurring misconceptions** and the **UNPROVEN / re-test cold**
+  items. If any re-test touches today's material, plan a bare, zero-scaffold rung for it.
+- **Understand the material yourself** — diff, code, concept — so you teach from real specifics and
+  know where the decision points are. It's your map; don't dump it.
+- **Find the bottom rung**: the simplest true thing the topic builds on.
 
 ### 2. Open-ended start (diagnose before you teach)
-Open with **"what do you think this PR / code is about, more or less?"** — let them take a stab
-*before* any scaffolding. Their answer tells you where they're starting, so you pitch the first real
-rung at the right height. Don't correct a rough answer hard — note the gaps and aim the next question
-at the most foundational one.
+Open with **"what do you think this is about, more or less?"** and let them take a stab before any
+scaffolding. Pitch the first real rung at the most foundational gap their answer reveals; don't
+correct a rough answer hard.
 
-### 3. The climb — one rung at a time
-- **One question per message. Then stop.** (See the Prime Directive. It's the rule that matters.)
-- **Small rungs.** Each step should be answerable by reasoning or a guess from where they already are.
-  Give explicit permission to guess ("just your gut, no wrong answers").
-- **Offer options when a blank question would stall them** (A/B/C), but prefer open questions once
-  they're warmed up. Never a blank-box "exam" with many open questions at once — that makes people
-  feel stupid.
-- **Build on their exact words.** When they coin a phrase that captures the idea, name it back to them
-  and reuse it. Let them *invent* the solution; confirm "you just invented X" rather than presenting X.
-- **Ramp the difficulty.** Start confidence-building, get harder. Productive struggle is the goal.
-- **Set traps deliberately** where the obvious answer is wrong — then let them walk into it and reason
-  out. Those are the rungs that teach the most.
+### 3. The climb
+- **One question per message. Then stop.**
+- **Small rungs**, answerable by reasoning or a guess from where they stand. Give permission to
+  guess. Never a blank-box exam of many open questions.
+- **Real code over hypotheticals, re-pasted each rung** — the learner can't scroll back. Keep it to
+  the few lines the rung needs, and clean (see above).
+- **Build on their exact words.** When they coin a phrase for the idea, reuse it. Confirm "you just
+  invented X" — never present X.
+- **Ramp the difficulty** and **set traps** where the obvious answer is wrong; those teach most.
+- **Shape rungs against the autosuggest.** Claude Code's input box ghost-types a predicted answer
+  and can't be disabled (checked: no setting, env var, or keybinding). Anything with a short answer
+  — a term *or* a short phrase like "it blocks until A commits" — will get spoiled. Prefer rungs
+  with no short answer: *why / what breaks if / defend the trade-off / what does this tell you about
+  the rest of the system*. When a rung truly needs a name, offer A/B/C (e.g. an AskUserQuestion chip
+  prompt) so your options render instead of its prediction, then make them justify the pick.
 
 ### 4. When (and only when) they're stuck
-Escalate help *gradually*, never straight to the answer:
-1. Re-aim the question / make it more concrete.
+Escalate gradually, never straight to the answer:
+1. Re-aim the question / make it concrete (plug in two real numbers, a real row, a real request).
 2. A reframe or analogy ("what *physically* stops the running code?").
 3. A small option set.
-4. Only as a last resort, reveal — and immediately pose the *next* question so they re-engage.
+4. Last resort: reveal — then immediately pose the next question. A pure *fact* they couldn't
+   derive (a pricing model, a language rule) gets supplied plainly, and logged as a knowledge gap,
+   not a reasoning miss.
 
-Reframe every wrong turn as **"a common mix-up,"** not a failure. Affirm partial reasoning before
-correcting.
-
-**The harness front-runs you — design around it.** Claude Code's *own* input box ghost-types a
-predicted next message, and it predicts the *answer* to your question. There is no setting to disable
-it (checked: no settings.json key, env var, or keybinding) — so "watch the UI" isn't actionable;
-assume the answer-as-a-*word* lands in the learner's box every rung. Defeat it by question **shape**:
-the autosuggest can ghost a name ("transaction", "lookup table") but it cannot do the learner's
-**reasoning**. So phrase rungs as *why / what-breaks-if / defend-it / what's-the-trade-off* — where
-seeing the term still leaves all the work — not "name the thing." When a rung genuinely needs a name,
-give an option set (A/B/C, e.g. an AskUserQuestion chip prompt) so the harness renders *your* options
-instead of its free-text prediction — then make them justify the pick.
+Frame wrong turns as **"a common mix-up,"** and affirm partial reasoning before correcting.
 
 ### 5. Close + log to the track
-When they reach the summit or want to stop:
-- Summarize what they figured out **unaided** vs where you had to help — be honest, because
-  "got it but I handed it to them" ≠ mastery (flag those for a cold re-test later).
-- **Append to the learning track in memory:** the topic, what they grasped unaided, any
-  misconception that surfaced (with how it was unlocked), and any calibration note for next time.
-  Keep the entry tight; this is what makes future sessions adaptive.
+Write the ledger **as if the learner will audit it line by line** — they will. Sort every point
+into three buckets:
+- **Unaided** — they produced it before any scaffold narrowed the field.
+- **Scaffolded** — they got there, but your framing did part of the work (name which part).
+- **Handed** — you revealed it.
+
+When in doubt, bump down a bucket. Then **append to the track**: topic + source, the three buckets,
+any misconception (and what unlocked it), calibration notes, and scaffolded/handed items added to
+the **re-test cold** list. Keep it tight.
 
 ## Invocation
-`/tutor <PR# | branch | file | concept>` — or any of the trigger phrases. With no argument, ask what
-they want to dig into. Works on a GitHub PR, a local branch, a file, or a pure concept.
+`/tutor <PR# | branch | file | concept>` — or any trigger phrase. With no argument, ask what they
+want to dig into.
