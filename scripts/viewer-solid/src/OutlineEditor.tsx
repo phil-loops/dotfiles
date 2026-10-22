@@ -243,8 +243,11 @@ export function OutlineEditor(props: {
     else (e.currentTarget as HTMLElement).blur();
   };
 
+  // the row being edited shows its counts and hints; the rest stay quiet
+  const [focusRow, setFocusRow] = createSignal<string | null>(null);
+  const [titleFocus, setTitleFocus] = createSignal(false);
+  const [bodyOpen, setBodyOpen] = createSignal(false);
   const setRow = (r: Row, w: Partial<Words>) => setDraft("rows", r.sha, { ...rowVal(r), ...w });
-  const totalChurn = createMemo(() => rows().reduce((a, r) => ({ add: a.add + r.add, del: a.del + r.del }), { add: 0, del: 0 }));
 
   const Section = (p: { label: string; aside?: JSX.Element; children: JSX.Element }) => (
     <section class="ol-section border-x-0 border-t-0 border-b border-solid border-rule px-[18px] py-[14px]">
@@ -260,7 +263,6 @@ export function OutlineEditor(props: {
     >
       <header class="flex flex-none items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] pt-[18px] pb-[11px]">
         <span class="flex-none whitespace-nowrap font-display text-[19px] italic text-gold-leaf">✦ the words</span>
-        <span class="min-w-0 truncate text-[10.5px] text-ink-faint">what lands, and how it reads</span>
         <Show when={data()?.undo && !dirtyCount()}>
           <button
             class="ol-undo ml-auto flex-none cursor-pointer whitespace-nowrap rounded-[5px] border border-solid border-rule bg-transparent px-[8px] py-[2px] text-[11px] text-ink-dim hover:border-gold-deep hover:text-gold-leaf disabled:opacity-40"
@@ -324,7 +326,6 @@ export function OutlineEditor(props: {
 
             <Section
               label={`the outline · ${rows().filter((r) => !r.carried).length} commit${rows().filter((r) => !r.carried).length === 1 ? "" : "s"}`}
-              aside={<span class="text-[10px] text-ink-faint">{d().parent} ‥ <span class="text-add">+{totalChurn().add}</span> <span class="text-del">−{totalChurn().del}</span></span>}
             >
               <Show when={rows().length} fallback={<p class="m-0 text-[12px] italic text-ink-faint">no commits of its own yet</p>}>
                 <ol class="m-0 flex list-none flex-col gap-[3px] p-0">
@@ -339,6 +340,8 @@ export function OutlineEditor(props: {
                             isReading() ? "border-gold-deep bg-gold-wash" : rowDirty(r) ? "border-gold-deep/60 bg-[rgba(230,182,78,0.04)]" : "border-transparent hover:bg-[rgba(255,255,255,0.02)]"}`}
                           classList={{ locked: !!r.locked }}
                           data-sha={r.sha}
+                          onFocusIn={() => setFocusRow(r.sha)}
+                          onFocusOut={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocusRow((x) => (x === r.sha ? null : x)); }}
                         >
                           <div class="flex items-baseline gap-[9px]">
                             <span class={`w-[14px] flex-none text-right font-display text-[14px] italic ${r.sha === opening()?.sha ? "text-gold-leaf" : "text-ink-faint"}`}>
@@ -367,7 +370,9 @@ export function OutlineEditor(props: {
                                   escTo(e, rowDirty(r), () => setDraft("rows", r.sha, undefined!));
                                 }}
                               />
-                              <span class={`flex-none text-[10px] tabular-nums ${len() > SUBJECT_LIMIT ? "text-ember" : "text-ink-faint/60"}`}>{len()}</span>
+                              <Show when={focusRow() === r.sha}>
+                                <span class={`flex-none text-[10px] tabular-nums ${len() > SUBJECT_LIMIT ? "text-ember" : "text-ink-faint/60"}`}>{len()}</span>
+                              </Show>
                             </Show>
                           </div>
                           <div class="pl-[23px]">
@@ -376,7 +381,7 @@ export function OutlineEditor(props: {
                               fallback={<Show when={r.body}><p class="m-0 mt-[2px] whitespace-pre-wrap text-[11.5px] leading-[1.5] text-ink-faint">{r.body}</p></Show>}
                             >
                               <textarea
-                                class={`ol-body ${FIELD} mt-[1px] text-[11.5px] leading-[1.55] ${rowDirty(r) ? "text-ink-dim" : "text-ink-faint"} focus:text-ink-dim`}
+                                class={`ol-body ${FIELD} mt-[1px] text-[11.5px] leading-[1.55] ${rowDirty(r) ? "text-ink-dim" : "text-ink-faint"} focus:text-ink-dim ${rowVal(r).body.trim() || focusRow() === r.sha ? "" : "hidden"}`}
                                 rows={1}
                                 value={rowVal(r).body}
                                 spellcheck={false}
@@ -386,8 +391,10 @@ export function OutlineEditor(props: {
                                 onKeyDown={(e) => escTo(e, rowDirty(r), () => setDraft("rows", r.sha, undefined!))}
                               />
                             </Show>
-                            <Hints hints={hintsOf(r)} onFix={(h) => setRow(r, h.fix!.apply(rowVal(r)))} />
-                            <div class="mt-[4px] flex flex-wrap items-center gap-x-[9px] text-[10px] text-ink-faint">
+                            <Show when={focusRow() === r.sha || rowDirty(r)}>
+                              <Hints hints={hintsOf(r)} onFix={(h) => setRow(r, h.fix!.apply(rowVal(r)))} />
+                            </Show>
+                            <div class={`mt-[3px] flex-wrap items-center gap-x-[9px] text-[10px] text-ink-faint ${r.locked || isReading() || focusRow() === r.sha ? "flex" : "hidden group-hover:flex"}`}>
                               <span class="tabular-nums">{r.short.slice(0, 8)}</span>
                               <button
                                 tabIndex={-1}
@@ -415,13 +422,6 @@ export function OutlineEditor(props: {
               aside={<Show when={d().pr.exists}><a class="text-[10.5px] text-gold-leaf no-underline hover:text-ink" href={d().pr.url} target="_blank" rel="noreferrer">edit on GitHub ↗</a></Show>}
             >
               <div class="ol-landing relative rounded-[8px] border border-solid border-rule bg-vellum-night/70 py-[10px] pr-[12px] pl-[16px] before:absolute before:top-[10px] before:bottom-[10px] before:left-[6px] before:w-[2px] before:rounded-full before:bg-gold-deep before:content-['']">
-                <div class="mb-[6px] flex items-baseline gap-[6px] text-[10px] text-ink-faint">
-                  <span class="text-gold-leaf">●</span>
-                  <span>squash commit on main</span>
-                  <Show when={d().pr.exists}>
-                    <span class="ml-auto">#{d().pr.number} · {(d().pr.state ?? "").toLowerCase()}{d().pr.draft ? " · draft" : ""}</span>
-                  </Show>
-                </div>
                 <Show
                   when={!d().pr.exists}
                   fallback={
@@ -432,7 +432,6 @@ export function OutlineEditor(props: {
                       <Show when={d().pr.body}>
                         <p class="ol-pr-body m-0 mt-[8px] max-h-[220px] overflow-y-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-ink-dim">{d().pr.body}</p>
                       </Show>
-                      <p class="m-0 mt-[8px] text-[10px] italic text-ink-faint">the PR is open — its title and body live on GitHub now</p>
                     </Show>
                   }
                 >
@@ -445,6 +444,8 @@ export function OutlineEditor(props: {
                       readOnly={!canMutate}
                       aria-label="PR title"
                       onInput={(e) => setDraft("prTitle", e.currentTarget.value.replace(/\n/g, " "))}
+                      onFocus={() => setTitleFocus(true)}
+                      onBlur={() => setTitleFocus(false)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault();
                         escTo(e, titleDirty(), () => setDraft("prTitle", undefined));
@@ -452,14 +453,16 @@ export function OutlineEditor(props: {
                     />
                     <span class="flex-none text-[12px] text-ink-faint">(#…)</span>
                   </div>
-                  <div class="mt-[3px] flex items-baseline gap-[8px] text-[10px] text-ink-faint">
-                    <Show when={titleFollows()} fallback={
-                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint underline underline-offset-2 hover:text-ink-dim" onClick={() => setDraft("prTitle", null)}>↺ follow commit 1</button>
-                    }>
-                      <span>follows commit 1 until you edit it</span>
-                    </Show>
-                  </div>
-                  <Hints hints={titleHints()} onFix={(h) => setDraft("prTitle", h.fix!.apply({ subject: titleVal(), body: "" }).subject)} />
+                  <Show when={!titleFollows()}>
+                    <button class="mt-[3px] cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint underline underline-offset-2 hover:text-ink-dim" onClick={() => setDraft("prTitle", null)}>↺ follow commit 1</button>
+                  </Show>
+                  <Show when={titleFocus() || titleDirty()}>
+                    <Hints hints={titleHints()} onFix={(h) => setDraft("prTitle", h.fix!.apply({ subject: titleVal(), body: "" }).subject)} />
+                  </Show>
+                  <Show when={!(bodyOpen() || bodyDirty())}>
+                    <button class="mt-[8px] cursor-pointer border-0 bg-transparent p-0 text-[10.5px] text-ink-faint hover:text-ink-dim" onClick={() => setBodyOpen(true)}>▸ PR body</button>
+                  </Show>
+                  <Show when={bodyOpen() || bodyDirty()}>
                   <textarea
                     class={`ol-prbody ${FIELD} mt-[10px] min-h-[5lh] border-x-0 border-b-0 border-t border-dashed border-rule pt-[8px] text-[11px] leading-[1.6] ${bodyDirty() ? "text-ink" : "text-ink-dim"}`}
                     rows={4}
@@ -471,13 +474,15 @@ export function OutlineEditor(props: {
                     onInput={(e) => setDraft("prBody", e.currentTarget.value)}
                     onKeyDown={(e) => escTo(e, bodyDirty(), () => setDraft("prBody", undefined))}
                   />
-                  <div class="mt-[3px] flex items-baseline gap-[8px] text-[10px] text-ink-faint">
-                    <Show when={bodyFollows()} fallback={
+                  <div class="mt-[3px] flex items-baseline gap-[10px] text-[10px] text-ink-faint">
+                    <Show when={!bodyFollows()}>
                       <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint underline underline-offset-2 hover:text-ink-dim" onClick={() => setDraft("prBody", null)}>↺ re-draft from the forest</button>
-                    }>
-                      <span>drafted from the description, outline and merge order</span>
+                    </Show>
+                    <Show when={!bodyDirty()}>
+                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint hover:text-ink-dim" onClick={() => setBodyOpen(false)}>▾ fold</button>
                     </Show>
                   </div>
+                  </Show>
                 </Show>
               </div>
             </Section>
@@ -485,7 +490,7 @@ export function OutlineEditor(props: {
         )}
       </Show>
 
-      <Show when={canMutate && data()}>
+      <Show when={canMutate && data() && (dirtyCount() || shownJob())}>
         <footer class="ol-bar flex flex-none flex-col gap-[6px] border-x-0 border-b-0 border-t border-solid border-rule bg-vellum-night px-[18px] py-[10px]">
           <Show when={shownJob()}>
             {(j) => (
@@ -506,9 +511,7 @@ export function OutlineEditor(props: {
             )}
           </Show>
           <div class="flex items-center gap-[10px]">
-            <span class="text-[10.5px] text-ink-faint">
-              {dirtyCount() ? `${dirtyCount()} unsaved · esc reverts a field` : "e to edit · tab between rows"}
-            </span>
+            <span class="text-[10.5px] text-ink-faint">{dirtyCount() ? `${dirtyCount()} unsaved` : ""}</span>
             <button
               class="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[11px] text-ink-faint hover:text-ink disabled:cursor-default disabled:opacity-40"
               disabled={!dirtyCount() || saving()}
