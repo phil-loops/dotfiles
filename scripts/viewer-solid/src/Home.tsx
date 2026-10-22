@@ -141,6 +141,14 @@ export function Home() {
   const [stateNote, setStateNote] = createSignal<string | null>(null);
   let noteTimer: number | undefined;
   const moveProject = (repo: string, project: string, state: ProjectState) => {
+    // move the row now; the server catches up behind it (a refusal puts it back via the refetch)
+    const key = (p: Project) => (p.repo || "loops") === (repo || "loops") && p.name === project;
+    qc.setQueryData<Project[]>(["projects"], (cur) => {
+      if (!cur) return cur;
+      if (state === "archive") return cur.filter((p) => !key(p));
+      const maxRank = Math.max(0, ...cur.filter((p) => p.focus != null).map((p) => p.focus ?? 0));
+      return cur.map((p) => (key(p) ? { ...p, focus: state === "focus" ? (p.focus ?? maxRank + 1) : undefined } : p));
+    });
     void setProjectState(repo, project, state).then((r) => {
       setStateNote(r.ok
         ? state === "archive" ? `archived ${project} — restore it from the archive at the bottom`
