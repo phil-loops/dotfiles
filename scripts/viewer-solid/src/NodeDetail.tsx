@@ -365,6 +365,7 @@ export function NodeDetail() {
       : null,
     pointing: () => !!hover(),
     blocked: showHelp,
+    openInNvim,
   });
   return (
     // collapsed → one column, so main (the only in-flow grid child once the spine hides)
