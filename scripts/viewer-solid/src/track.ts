@@ -4,6 +4,20 @@ import { canMutate } from "./provider";
 // telemetry POST below never re-enters the wrapper (and keeps working if other code wraps fetch).
 const realFetch = window.fetch.bind(window);
 
+// Who this tab is, sent as headers on every same-origin call so the server's request log and
+// usage log can tell this page from a Claude curl or the extension. navigator.webdriver is set
+// under Puppeteer/Playwright — a headless run must never read as Phil.
+export const ACTOR = navigator.webdriver ? "headless" : "browser";
+// One id per page load: two tabs on one page (the audit's 442 exact-duplicate events) and a
+// reload become separable, and every event joins its page's nav chain.
+export const PAGE_LOAD = Math.random().toString(36).slice(2, 8);
+const sameOrigin = (url: URL) => url.origin === location.origin;
+const withIdentity = (headers?: HeadersInit): Headers => {
+  const h = new Headers(headers);
+  h.set("X-Stack-Actor", ACTOR);
+  return h;
+};
+
 // Fire-and-forget local usage telemetry → POST /track (the server appends one JSONL line
 // to .git/stack-usage.jsonl). Single-user, never leaves the machine, never committed.
 // Live mode only — a static snapshot has no server to post to. NEVER awaited and NEVER
@@ -13,8 +27,8 @@ export function track(type: string, data: Record<string, unknown> = {}): void {
   try {
     void realFetch("/track", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type, ...data }),
+      headers: withIdentity({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ type, ...data, pl: PAGE_LOAD }),
       keepalive: true, // survive a nav/unload that fires right after the event
     }).catch(() => {});
   } catch {
@@ -51,17 +65,22 @@ export function installFetchTracking(): void {
   window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     let path = "";
     let isPost = false;
+    let own = false;
     try {
       const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
       isPost = method === "POST";
       const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-      path = new URL(raw, location.origin).pathname;
+      const url = new URL(raw, location.origin);
+      path = url.pathname;
+      own = sameOrigin(url);
     } catch {
       /* unparseable target — pass through untracked */
     }
     const t0 = performance.now();
-    const p = realFetch(input, init);
-    if (isPost && path && !SKIP_TRACK.has(path)) {
+    const p = own
+      ? realFetch(input, { ...init, headers: withIdentity(init?.headers ?? (input instanceof Request ? input.headers : undefined)) })
+      : realFetch(input, init);
+    if (isPost && own && !SKIP_TRACK.has(path)) {
       const on = targetOf(init?.body);
       const done = (status: number) =>
         track("action", { url: path, ...(on ? { on } : {}), status, ms: Math.round(performance.now() - t0) });

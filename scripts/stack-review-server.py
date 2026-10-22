@@ -28,7 +28,8 @@ from srv import focus   # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
-from srv import reqlog   # own line: same reason
+from srv import actor, reqlog   # own line: same reason
+os.environ["STACK_VIA"] = "viewer"   # git hooks under this server attribute to it, not to whoever launched it
 from srv import pregate   # own line: same reason
 from srv import tutor   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
@@ -97,7 +98,8 @@ def run(args, timeout=None):
     # ordinary failed CompletedProcess (124, the shell's timeout code), so callers keep their
     # `returncode != 0` shape without knowing this exists.
     try:
-        return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(args, cwd=srvctx.repo_cwd(), capture_output=True, text=True, timeout=timeout,
+                              env=actor.child_env())
     except subprocess.TimeoutExpired:
         _log(f"run: timed out after {timeout}s — {' '.join(args)}")
         return subprocess.CompletedProcess(args, 124, "", f"timed out after {timeout}s")
@@ -233,16 +235,24 @@ class H(BaseHTTPRequestHandler):
         if not LOG:
             return BaseHTTPRequestHandler.handle_one_request(self)
         self._status, self.raw_requestline = "-", b""   # cleared, or a dead keep-alive read re-logs the last request
+        self._actor, self._sid = None, None
         t0 = time.perf_counter()
         try:
             BaseHTTPRequestHandler.handle_one_request(self)
         finally:
+            actor.clear_current()
             req = (getattr(self, "raw_requestline", b"") or b"").decode("latin-1").split()
             if req:
                 ms = (time.perf_counter() - t0) * 1000
-                line = reqlog.request_line(req[0], req[1] if len(req) > 1 else "?", self._status, ms)
+                line = reqlog.request_line(req[0], req[1] if len(req) > 1 else "?", self._status, ms,
+                                           self._actor, self._sid)
                 if line:
                     _log(line)
+
+    def _identify(self, path):
+        # who's calling, before the handler runs: the peer process is only walkable while connected
+        self._actor, self._sid = actor.classify(self.headers, path, EXT_ORIGINS, self.client_address[1])
+        actor.set_current(self._actor, self._sid)
 
     def _send(self, code, body, ctype="application/json"):
         b = body.encode() if isinstance(body, str) else body
@@ -269,6 +279,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         last[0] = time.time()
         u = self._enter_repo(urlparse(self.path))
+        self._identify(u.path)
         try:
             self._dispatch_get(u)
         finally:
@@ -460,6 +471,7 @@ class H(BaseHTTPRequestHandler):
         raw = self.rfile.read(n).decode() if n else "{}"
         u = self._enter_repo(urlparse(self.path))
         self.path = u.path   # repo prefix stripped, so the exact-match dispatch below is unchanged
+        self._identify(u.path)
         try:
             self._dispatch_post(raw)
         finally:
