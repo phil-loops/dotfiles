@@ -49,20 +49,6 @@ function GhostActions(props: { project: () => string }) {
 // The node review header: forest strip (back to the map) + branch identity/health + the tier-2
 // action bar (NodeActions + whole-branch chat). A wide prop surface because it mirrors the review
 // surface's state and fires its mutations.
-// A parent that has landed but not yet been contracted: this node is sitting on a base that
-// is about to vanish, so the spine offers the drop from here instead of making you walk up.
-function ghostParentOf(
-  health: (b: string) => { merged?: boolean; contractable?: boolean; parent?: string } | undefined,
-  branch: string
-): string | undefined {
-  const parent = health(branch)?.parent;
-  if (!parent) {
-    return undefined;
-  }
-  const up = health(parent);
-  return up?.merged && up?.contractable ? parent : undefined;
-}
-
 export function NodeHeader(props: {
   location: () => ViewerLocation;
   project: () => string;
@@ -210,7 +196,6 @@ export function NodeHeader(props: {
                 branch={props.active()}
                 isReview={props.location().kind === "review"}
                 merged={props.nodeHealth(props.active())?.merged}
-                parentGhost={ghostParentOf(props.nodeHealth, props.active())}
                 blessing={props.nodeData() ? { total: props.nodeData()!.files.length, blessed: props.nodeData()!.files.filter(props.blessedOf).length } : undefined}
                 health={props.nodeHealth(props.active())}
                 onReseat={() => { const p = props.nodeHealth(props.active())?.parent; if (p) props.reseatChildren.mutate(p); }}

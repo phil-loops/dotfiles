@@ -17,7 +17,7 @@ import type { Station } from "./nodeStation";
 
 export interface SpineEdge {
   label: string; // the step, named as the step: "⟲ sync", "drop ghost & rewire →"
-  kind: "prep" | "contract" | "contract-parent";
+  kind: "prep";
   pending: boolean;
   title: string;
   onClick: () => void;

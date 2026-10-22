@@ -2,65 +2,34 @@
 // the waymark spine (one station chip + one slot for the single local next step), the push
 // door, and a ⋯ menu holding the rare or conditional mutations. The slot is the whole local
 // motion: ⟲ sync chains reseat → rebase forward → route to one voiced commit → gates →
-// delta tests → message editor, and the same slot becomes a contraction offer when this
-// branch, or its parent, has already landed. The shared world only ever moves from the push
-// door. This component owns its wiring + state, so it drops in with a single mount line.
+// delta tests → message editor. The shared world only ever moves from the push door. This
+// component owns its wiring + state, so it drops in with a single mount line.
 //
-//   <NodeActions branch={active()} parentGhost={…} />
+//   <NodeActions branch={active()} />
 //
 // Endpoints (Python review server):
-//   POST /checkout  {branch, force?, dirt?, evictLive?} → {ok} | 409 {ok:false, worktree}
-//                                     when another worktree holds the branch
 //   POST /sync      {branch}         → {ok, rebased?, ejected?, conflict?, contract?, restack?}
 //   POST /restack   {project}        → {ok, queued?, behind?} when the chain is the restacker's
 //   POST /prep-push {branch}         → {ok, routed?, commit?} | {reconcile} (seals the tail)
 //   POST /gates     {branch, ...}    → detached; poll GET /gates-progress, whose journal
 //                                     carries a "queued" event while another run holds the slot
-//   POST /contract  {branch}         → drop a landed ghost and rewire its children onto main
 //   POST /delta-tests, /dirty-resolve, /reseat-children, /fix-upstream
 import { createSignal, For, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
-import { useArm, post, postStatus } from "./actions";
+import { useArm, post } from "./actions";
 import { PushDoor, usePushDoor } from "./PushDoor";
 import { MessageEditor, useMessageEditor } from "./MessageEditor";
 import RebaseStream from "./RebaseStream";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
 import { nextStepOf, stationOf, type Station } from "./nodeStation";
 import { patchHtml, patchLineCounts } from "./FileRail";
-import { contractionDone } from "./contractResult.ts";
-
-interface CheckoutResult {
-  ok?: boolean;
-  err?: string;
-  worktree?: string; // set on 409: the worktree currently holding the branch
-  freed?: string; // set on ok: a clean, session-less worktree the server auto-freed en route
-  dirty?: number; // set on 409: uncommitted paths in the holding worktree
-  session?: { pane?: string; idleSeconds?: number } | null; // set on 409: live Claude session in it
-  liveBlocked?: boolean; // set on 409: the hold is a live session — force won't free it, only evictLive
-  dirt?: string[]; // set on a dirty-MAIN-tree refusal: the paths blocking the checkout
-  dirtWt?: string; // the worktree that dirt lives in (the main checkout)
-  dirtNote?: string; // set on ok after a dirt retry: what got stashed/dropped and how to recover it
-}
-
-const shortWt = (p: string) => p.split("/").pop() || p;
 
 const FIX_SHAPE = "cursor-pointer rounded-[5px] border bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] opacity-90 enabled:hover:opacity-100 disabled:cursor-default disabled:opacity-50";
 const FIX = `${FIX_SHAPE} border-del text-del`;
 const ITEM = "flex w-full cursor-pointer items-center gap-[10px] rounded-[6px] border border-transparent bg-transparent px-[10px] py-[7px] text-left text-[12px] leading-[1.55] text-patina enabled:hover:border-patina enabled:hover:bg-vellum-edge disabled:cursor-default disabled:opacity-45";
 const IC = "w-[14px] flex-none text-center opacity-85";
 const DONE = "text-[12px] transition-opacity duration-[240ms] ease-[ease] starting:opacity-0";
-
-function holdReason(r: CheckoutResult): string {
-  const parts: string[] = [];
-  if (r.session) {
-    parts.push(`⚠ live Claude session${r.session.idleSeconds != null ? ` (idle ${r.session.idleSeconds}s)` : ""}`);
-  }
-  if (r.dirty) {
-    parts.push(`± ${r.dirty} uncommitted`);
-  }
-  return parts.join(" · ");
-}
 
 interface SyncResult {
   ok?: boolean;
@@ -69,7 +38,7 @@ interface SyncResult {
   ejected?: boolean; // couldn't rebase in place → handed to a headless claude, streamed
   stream?: string; // the rebase job key to tail over /rebase-stream (set with ejected)
   conflict?: boolean; // hit a conflict → Claude resolving in a worktree
-  contract?: boolean; // branch already merged into origin/main → drop & rewire instead
+  contract?: boolean; // branch already merged into origin/main → nothing left to rebase
   restack?: boolean; // stacked chain behind main → the restack machine owns this rebase
   project?: string; // the project to hand to POST /restack (set with restack)
 }
@@ -87,8 +56,7 @@ interface DeltaTestResult {
 export function NodeActions(props: {
   branch: string;
   isReview: boolean;
-  merged?: boolean; // forest-health flagged this branch a merged ghost → offer contraction on load
-  parentGhost?: string; // this node's PARENT is a droppable merged ghost — contract it from here
+  merged?: boolean; // forest-health flagged this branch a merged ghost
   blessing?: { total: number; blessed: number }; // the node's review progress — the spine's review station + gold mark
   // the old header health badges, folded into the spine's reasons + ⋯ overrides
   health?: {
@@ -100,19 +68,8 @@ export function NodeActions(props: {
   onDetach?: () => void; // unset a footgun tracking ref
   onInspect?: () => void; // toggle the diverged-inspect panel (lives in App below the header)
 }) {
-  if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
+  if (!canMutate) return null; // static snapshot: no rebase/squash actions
   const qc = useQueryClient();
-  // 409 stash: the worktree holding the branch, awaiting a force-confirm.
-  const [heldAt, setHeldAt] = createSignal<string | null>(null);
-  // dirty-MAIN-tree refusal: the paths blocking a checkout, awaiting a stash/drop decision.
-  const [coDirt, setCoDirt] = createSignal<{ files: string[]; wt: string } | null>(null);
-  const [dropArmed, setDropArmed] = createSignal(false);
-  // why the server refused to auto-free it — a clean, session-less hold never gets here
-  // (the server frees those itself); this names the dirt or the live session instead.
-  const [heldWhy, setHeldWhy] = createSignal<string>("");
-  // the hold is a live session: the server ignores force for those (only evictLive overrides),
-  // so the free button must escalate — and say so.
-  const [heldLive, setHeldLive] = createSignal(false);
   // squashing rewrites history → two-click arm (shared useArm) before it fires.
   const { armed, trigger, disarm } = useArm(4000);
   // transient result line ("✓ …" / "✗ …"), cleared on the next action.
@@ -140,31 +97,6 @@ export function NodeActions(props: {
     document.removeEventListener("mousedown", onDocDown);
     document.removeEventListener("keydown", onKey);
   });
-
-  const checkout = createMutation(() => ({
-    mutationFn: (opts: { force?: boolean; dirt?: "stash" | "discard" }) =>
-      post<CheckoutResult>("/checkout", { branch: props.branch, ...opts, evictLive: opts.force && heldLive() }),
-    onSuccess: (r) => {
-      if (r.ok) {
-        setHeldAt(null);
-        setHeldLive(false);
-        setCoDirt(null);
-        setOpen(false);
-        setDone(`✓ checked out in ${r.worktree || "your main checkout"}${r.freed ? ` (freed ${shortWt(r.freed)} — clean, no live session)` : ""}${r.dirtNote ? ` · ${r.dirtNote}` : ""}`);
-        qc.invalidateQueries({ queryKey: ["head"] });
-      } else if (r.worktree) {
-        setHeldWhy(holdReason(r));
-        setHeldLive(!!r.liveBlocked);
-        setHeldAt(r.worktree); // held elsewhere → offer to free it
-      } else if (r.dirt?.length) {
-        setDropArmed(false);
-        setCoDirt({ files: r.dirt, wt: r.dirtWt || "the main checkout" }); // → stash/drop decision
-      } else {
-        setDone(`✗ ${r.err || "checkout failed"}`);
-      }
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "checkout failed"}`),
-  }));
 
   // ▷ preview — open the warming page (/preview-wait, served by THIS always-alive server) in a
   // new tab. The page starts the side-port `next dev` (or attaches to a running one), narrates
@@ -323,7 +255,7 @@ export function NodeActions(props: {
           return { phase: "blocked" as const };
         }
         if (sy.ok && sy.contract) {
-          stepSet("rebase", "fail", "already merged into origin/main — drop & rewire (the spine's edge offers it)");
+          stepSet("rebase", "fail", "already merged into origin/main — the restack walk drops it");
           return { phase: "blocked" as const };
         }
         if (sy.ok && !sy.rebased) {
@@ -405,7 +337,6 @@ export function NodeActions(props: {
         reconcile.mutate(); // divergence with no mechanical route — Claude in the middle
         return;
       }
-      setHeldAt(null);
       if (r.commit) {
         setRoutedNotes(r.routed ?? []);
         setMsgSubject(r.commit.subject);
@@ -444,7 +375,6 @@ export function NodeActions(props: {
   // choices. Nothing automatic: the incident file was foreign WIP on the wrong branch.
   const startSync = () => {
     setSyncSteps(null);
-    setHeldAt(null); // a held banner from an earlier run names a holder that may have moved
     setStashedRun(false);
     if ((sync.data?.dirty?.length ?? 0) > 0) {
       beginSteps();
@@ -473,12 +403,6 @@ export function NodeActions(props: {
     omniSync.mutate();
   };
 
-  // free the worktree that 409'd the plain checkout, then retry it.
-  const freeAndContinue = () => {
-    setOpen(false);
-    checkout.mutate({ force: true });
-  };
-
   // fork-state vs origin/main — read-only, drives the "behind / push blocked" badge.
   const sync = createQuery(() => ({
     queryKey: ["sync", props.branch],
@@ -491,26 +415,6 @@ export function NodeActions(props: {
   const blocked = () => critical().length > 0;
   const shared = () => sync.data?.shared;
   const aheadOfOrigin = () => sync.data?.aheadOfOrigin ?? 0;
-
-  // Confirm of the already-merged offer above: drop the empty branch and rewire its children
-  // onto main (forest contraction). Destructive + Phil-driven — never auto-fired by /sync.
-  const contract = createMutation(() => ({
-    mutationFn: (branch: string) =>
-      postStatus<{ ok?: boolean; err?: string; summary?: string }>("/contract", { branch }),
-    // The branch already being gone (a stale node still on screen after the map's auto-drop) IS
-    // contraction's outcome, so it reads as done, never as ✗.
-    onSuccess: ({ status, body }) => {
-      if (!contractionDone({ status, ...body })) {
-        setDone(`✗ ${body.err || "contract failed"}`);
-        return;
-      }
-      setDone(status === 404 ? "✓ already dropped" : `✓ ${body.summary || "contracted"}`);
-      qc.invalidateQueries({ queryKey: ["model"] });
-      qc.invalidateQueries({ queryKey: ["node", props.branch] });
-      qc.invalidateQueries({ queryKey: ["forest-health"] });
-    },
-    onError: (e) => setDone(`✗ ${(e as Error).message || "contract failed"}`),
-  }));
 
   const isReview = () => props.isReview;
 
@@ -568,7 +472,7 @@ export function NodeActions(props: {
     onError: (e) => setDone(`✗ ${(e as Error).message || "reconcile failed"}`),
   }));
 
-  const busy = () => checkout.isPending || omniSync.isPending || contract.isPending || pushOrigin.isPending;
+  const busy = () => omniSync.isPending || pushOrigin.isPending;
 
   // ── the waymark spine: one chip (station), one slot (edge) ──────────────────
   // Station = where the branch stands on its real path — the DOMINANT position, not a
@@ -626,7 +530,6 @@ export function NodeActions(props: {
     const step = nextStepOf({
       merged: props.merged,
       contractable: props.health?.contractable,
-      parentGhost: props.parentGhost,
       drifted: props.health?.drifted,
       behind: behind(),
       syncable: sync.data?.syncable,
@@ -636,14 +539,12 @@ export function NodeActions(props: {
     if (!step) {
       return null;
     }
-    const contracting = step.kind === "contract" || step.kind === "contract-parent";
-    const dropTarget = step.kind === "contract-parent" ? props.parentGhost! : props.branch;
     return {
       label: step.label,
       kind: step.kind,
       title: step.title,
-      pending: contracting ? contract.isPending : omniSync.isPending,
-      onClick: fire(contracting ? () => contract.mutate(dropTarget) : startSync),
+      pending: omniSync.isPending,
+      onClick: fire(startSync),
     };
   };
   const fire = (fn: () => void) => () => {
@@ -656,7 +557,7 @@ export function NodeActions(props: {
       {/* the waymark spine — one chip (where the branch stands: edit → review → ready →
           shared → merged, each station lit in its own material) and one slot (the single
           next step, hidden at rest). What used to be the shared chip, the push-blocked
-          badge, the prep/push button pair, and the contract button is now: station,
+          badge, the prep/push button pair, and the old contract button is now: station,
           reasons (tooltip), edge. */}
       <Show when={!isReview()}>
         <NodeSpine
@@ -685,46 +586,14 @@ export function NodeActions(props: {
         }}
       />
 
-      {/* held-elsewhere banner: checkout 409'd because another worktree holds the
-          branch. Offer to free it and retry. */}
-      <Show when={heldAt()}>
-        <span class="nh-held inline-flex items-center gap-[8px] text-[12px] text-ink-faint">
-          held in {heldAt()}{heldWhy() ? ` — ${heldWhy()}` : ""}
-          <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={freeAndContinue}>
-            {heldLive() ? "evict live session" : "free"} &amp; checkout
-          </button>
-          <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" onClick={() => setHeldAt(null)}>cancel</button>
-        </span>
-      </Show>
-
-      {/* dirty-main-tree refusal: the checkout would overwrite uncommitted changes sitting in
-          the main checkout. Two explicit outs, nothing automatic — stash parks JUST the
-          blocking files (pop brings them back); drop discards them via a dropped stash whose
-          sha the receipt prints (recoverable until gc). */}
-      <Show when={coDirt()}>
-        {(cd) => (
-          <span class="nh-codirt inline-flex flex-wrap items-center gap-[8px] text-[12px] text-ink-faint">
-            blocked by uncommitted changes in {shortWt(cd().wt)}:
-            <For each={cd().files}>{(f) => <code class="text-[11px]">{f}</code>}</For>
-            <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={() => checkout.mutate({ dirt: "stash" })} title="stash the blocking files (incl. untracked), then check out — git stash pop brings them back">
-              stash &amp; checkout
-            </button>
-            <button class="nh-held-btn cursor-pointer rounded-[5px] border border-del bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-del disabled:cursor-default disabled:opacity-50" disabled={busy()} onClick={() => (dropArmed() ? checkout.mutate({ dirt: "discard" }) : setDropArmed(true))} title="discard the blocking changes, then check out — recoverable only via the stash sha the receipt prints, until git gc">
-              {dropArmed() ? "really drop them?" : "drop & checkout"}
-            </button>
-            <button class="nh-held-btn cursor-pointer rounded-[5px] border border-rule bg-transparent px-[7px] py-[2px] text-[11px] leading-[1.55] text-ink-dim disabled:cursor-default disabled:opacity-50" onClick={() => { setCoDirt(null); setDropArmed(false); }}>cancel</button>
-          </span>
-        )}
-      </Show>
-
-      {/* ⋯ menu — plain checkout, conditional repairs, interest, chats. */}
+      {/* ⋯ menu — preview and the conditional repairs. */}
       <button
         class={`icon-btn cursor-pointer rounded-[6px] border px-[9px] py-1 text-[15px] leading-none hover:border-rule hover:bg-vellum-edge hover:text-ink ${open() ? "border-rule bg-vellum-edge text-ink" : "border-transparent bg-transparent text-ink-faint"}`}
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}
         data-track="node.actions"
-        title="branch actions — checkout, conditional repairs, interest, chats"
+        title="branch actions — preview, conditional repairs"
         onClick={() => setOpen((o) => !o)}
       >
         ⋯
@@ -732,19 +601,6 @@ export function NodeActions(props: {
 
       <Show when={open()}>
         <div class="nh-menu absolute top-[calc(100%+7px)] right-0 z-20 flex min-w-[196px] flex-col gap-[2px] rounded-[9px] border border-rule bg-vellum-raise p-[6px] shadow-[0_12px_34px_-14px_rgba(0,0,0,0.75)]" role="menu">
-          {/* checkout — move the primary working tree onto this branch without squashing (view it) */}
-          <button
-            class={`nh-item ${ITEM}`}
-            role="menuitem"
-            disabled={busy()}
-            data-track="node.checkout"
-            title="move this repo's main checkout onto this branch (no squash — just switch to it)"
-            onClick={fire(() => checkout.mutate({}))}
-          >
-            <span class={`nh-item-ic ${IC}`}>⤓</span>
-            {checkout.isPending ? "checking out…" : "checkout here"}
-          </button>
-
           {/* preview — open the warming tab: it spins a dev server for this branch on a side
               port (or attaches to the running one) WITHOUT moving your main checkout off :3000,
               and shows the boot until the server can answer. Stop it from the Machine page. */}

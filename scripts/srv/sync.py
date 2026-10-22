@@ -526,7 +526,7 @@ def _node_health(branch, pr=None):
     # contractable = droppable RIGHT NOW: every remaining commit is patch-identical to trunk
     # (rebase-classify exit 20), or the branch is wholly contained in trunk (_landed — the
     # already-restacked case exit 20 misses). A merged PR with a real follow-on commit is
-    # neither, so it reads merged=True and NOT contractable — /contract refuses it, and the
+    # neither, so it reads merged=True and NOT contractable — the restack walk keeps it, and the
     # badge keys its verb off this, not merged. A merged node whose local branch is GONE
     # (dangling stack-branch.* keys keep it rendering) has no commits to lose — contract is
     # pure config cleanup, so it's always droppable.
@@ -867,45 +867,6 @@ def post_sync(req, raw):
         {"ok": ok, "ejected": ok, "conflict": status == "conflict",
          "stream": key if ok else "",
          "err": "" if ok else (key or "could not launch rebase session")}))
-
-
-def post_contract(req, raw):
-    branch = json.loads(raw or "{}").get("branch", "")
-    if not branch:
-        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-        return
-    ctx.run(["git", "fetch", "origin", "main"])
-    exists = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode == 0
-    listed = any(
-        line.partition(" ")[2].strip() == branch
-        for line in ctx.run(["git", "config", "--get-regexp",
-                             r"^stack-project\..+\.branch$"]).stdout.splitlines())
-    if not exists and not listed and not ctx.run(
-            ["git", "config", "--get-regexp", rf"^branch\.{re.escape(branch)}\.stack-"]).stdout.strip() and not ctx.run(
-            ["git", "config", "--get-regexp", rf"^stack-branch\.{re.escape(branch)}\."]).stdout.strip():
-        req._send(404, json.dumps({"ok": False, "err": f"no branch or stack config named {branch!r}"}))
-        return
-    # A branch that no longer exists locally is pure config rot (dangling stack-branch.* keys
-    # keep it rendering as a phantom node) — nothing to lose, so skip the merged gate entirely.
-    # What the gate actually protects is "no work that isn't in origin/main"; _landed proves that
-    # outright (the branch IS contained in main), so it clears the same bar exit 20 does.
-    if exists and not _already_merged(branch) and not _landed(branch):
-        req._send(409, json.dumps(
-            {"ok": False, "err": "not already-merged — refusing to drop a branch with unmerged work"}))
-        return
-    err, kids, deps, parent = _contract(branch)
-    if err:
-        req._send(409, json.dumps({"ok": False, "err": err}))
-        return
-    parts = []
-    if kids:
-        parts.append(f"moved {len(kids)} child{'' if len(kids) == 1 else 'ren'} onto {parent}")
-    if deps:
-        parts.append(f"dropped the requires edge on {len(deps)} integrator{'' if len(deps) == 1 else 's'}")
-    summary = f"dropped {branch}" + (f"; {', '.join(parts)}" if parts else " (no dependents)")
-    req._send(200, json.dumps(
-        {"ok": True, "contracted": True, "branch": branch, "children": kids,
-         "deps": deps, "parent": parent, "summary": summary}))
 
 
 def post_reconcile(req, raw):

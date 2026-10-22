@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { contractNodes, headsOf, upstreamOf, downstreamOf, computeDams, indexById } from "./forestGraph.ts";
+import { headsOf, upstreamOf, downstreamOf, computeDams, indexById } from "./forestGraph.ts";
 import type { SpineNode } from "./types.ts";
 
 // A forest is a shape, so the fixtures are shapes: node(id, parent, requires) and let the
@@ -16,41 +16,6 @@ const forest = (): SpineNode[] => [
   node("side"),
   node("fan", "side", ["mid"]),
 ];
-
-test("contractNodes: a dropped node's children inherit its parent", () => {
-  const out = contractNodes(forest(), new Set(["mid"]));
-  assert.deepEqual(out.map((n) => n.id), ["base", "tip", "side", "fan"]);
-  assert.equal(out.find((n) => n.id === "tip")!.parent, "base");
-});
-
-test("contractNodes: a requires edge naming a dropped node is severed, not dangled", () => {
-  const out = contractNodes(forest(), new Set(["mid"]));
-  assert.deepEqual(out.find((n) => n.id === "fan")!.requires, []);
-});
-
-test("contractNodes: a whole dropped chain reparents to the nearest survivor", () => {
-  const out = contractNodes(forest(), new Set(["base", "mid"]));
-  assert.equal(out.find((n) => n.id === "tip")!.parent, undefined);
-});
-
-// The map asks `depth === 0` for "is this a root" (the main-hover spotlight). Dropping a merged
-// base — the auto-contract case — promotes its children, so their depth has to come down with it.
-test("contractNodes: children promoted to roots re-read as depth 0", () => {
-  const seeded = forest().map((n) => ({ ...n, depth: n.parent ? 1 : 0 }));
-  const out = contractNodes(seeded, new Set(["base"]));
-  assert.equal(out.find((n) => n.id === "mid")!.depth, 0);
-  assert.equal(out.find((n) => n.id === "tip")!.depth, 1);
-});
-
-test("contractNodes: a parent cycle terminates instead of hanging the map", () => {
-  const cyclic = [node("a", "b"), node("b", "a"), node("c", "a")];
-  assert.doesNotThrow(() => contractNodes(cyclic, new Set(["a"])));
-});
-
-test("contractNodes: an empty drop set returns the list untouched", () => {
-  const list = forest();
-  assert.equal(contractNodes(list, new Set()), list);
-});
 
 test("headsOf: only branches nothing builds on are tips", () => {
   assert.deepEqual([...headsOf(forest())].sort(), ["fan", "tip"]);
