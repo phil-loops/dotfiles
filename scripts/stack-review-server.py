@@ -34,6 +34,7 @@ from srv import tutor   # own line: same reason
 from srv import outbox   # own line: same reason
 from srv import outline   # own line: same reason
 from srv import lsp   # own line: same reason
+from srv import packet   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -452,6 +453,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/node":           return review.node(self, u)
         elif u.path == "/outline":        return outline.get(self, u)            # a branch's words: description, outline, landing text
         elif u.path == "/outline-reseat": return outline.reseat_status(self, u)  # an outline save's background descendant reseat
+        elif u.path == "/packet":         return packet.get(self, u)             # the review packet: the PR body as a checkable contract
+        elif u.path == "/packet-compare": return packet.compare(self, u)         # 302 → GitHub's compare form, packet prefilled
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/notes":          return review.notes_get(self, u)   # per-branch test/repro notes
         elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template
@@ -565,6 +568,8 @@ class H(BaseHTTPRequestHandler):
             return outline.save(self, raw)
         if self.path == "/outline-undo":   # restore the last outline save, if still unpushed and unmoved
             return outline.undo(self, raw)
+        if self.path == "/packet-guide":   # (re)draft the packet's reading guide with headless claude
+            return packet.guide(self, raw)
         if self.path == "/dirty-resolve":   # sync's routed decision on a dirty tree: include / stash / pop
             return push.dirty_resolve(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)
@@ -591,6 +596,8 @@ class H(BaseHTTPRequestHandler):
             return outbox.hold(self, raw)
         if self.path == "/outbox-title":  # the landing PR title: branch.<b>.stack-pr-title
             return outbox.title(self, raw)
+        if self.path == "/outbox-label":  # the compare link's review label on/off: branch.<b>.stack-pr-label
+            return outbox.label(self, raw)
         if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser
             return push.open_pr(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
@@ -718,7 +725,8 @@ def watcher():
     def stamp():
         # re-globbed every pass: a module ADDED after boot was invisible to a one-shot glob,
         # so a new srv/*.py needed a hand-bounce to take effect (three of them today)
-        return max(os.path.getmtime(f) for f in [src] + glob.glob(srvdir))
+        # review_packet.py is imported by srv/packet.py, so it reloads with them
+        return max(os.path.getmtime(f) for f in [src, os.path.join(os.path.dirname(src), "review_packet.py")] + glob.glob(srvdir))
     m0 = stamp()
     while True:
         time.sleep(1.0)

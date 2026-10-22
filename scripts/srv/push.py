@@ -330,26 +330,6 @@ def _pr_base(branch):
         b = parent
 
 
-def _pr_body_prefill(branch):
-    """The compare form's default body for a branch of a multi-branch project: the forest
-    furniture (purpose, commit outline, merge order by PR number — stack-pr-body, no model
-    call) above the repo's own PR template, which GitHub would otherwise supply and a
-    prefilled body replaces. Empty for a lone branch, so the form keeps the template alone.
-    Only the compare-and-create form is ever prefilled: once a PR exists the door opens the
-    PR itself, so a body the author has edited is never touched."""
-    project = repostate.snapshot().project(branch)
-    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.split() if project else []
-    if len(members) < 2:
-        return ""
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-pr-body"), branch])
-    furniture = r.stdout.strip() if r.returncode == 0 else ""
-    if not furniture:
-        return ""
-    t = ctx.run(["git", "show", f"{branch}:.github/pull_request_template.md"])
-    template = t.stdout.strip() if t.returncode == 0 else ""
-    return furniture + (f"\n\n{template}\n" if template else "\n")
-
-
 def landing_title(branch):
     """The PR title the squash-merge lands on main: the drafted branch.<b>.stack-pr-title,
     else the branch's opening commit subject."""
@@ -361,24 +341,27 @@ def landing_title(branch):
 
 
 def landing_body(branch):
-    """The drafted branch.<b>.stack-pr-body, else the forest furniture prefill."""
-    saved = ctx.run(["git", "config", f"branch.{branch}.stack-pr-body"]).stdout.strip()
-    return saved or _pr_body_prefill(branch)
+    """A hand-written branch.<b>.stack-pr-body verbatim, else the review packet (srv/packet.py)
+    above the repo's PR template — for a lone branch too: Intent and Verified need no forest."""
+    from . import packet
+    return packet.body(branch)
 
 
 def compare_url(branch, base=None):
     """github.com compare link for the branch, opened straight to the 'Open a pull
-    request' form (?expand=1) with the landing title and body prefilled, against base
+    request' form (?expand=1) with the landing title, body and review label prefilled, against base
     (default _pr_base: the nearest stacked ancestor with an open PR, else main). Authoring
     still happens on the website — this only opens the form; it never calls gh pr create."""
     url = repostate.snapshot().get("remote.origin.url")
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
     if not m:
         return ""
+    from . import packet
     title, body = landing_title(branch), landing_body(branch)
     return (f"https://github.com/{m.group(1)}/compare/{base or _pr_base(branch)}...{branch}?expand=1"
             + (f"&title={quote(title, safe='')}" if title else "")
-            + (f"&body={quote(body, safe='')}" if body else ""))
+            + (f"&body={quote(body, safe='')}" if body else "")
+            + (f"&labels={packet.rp.LABEL}" if packet.label_on(branch) else ""))
 
 
 def _origin_web(branch):
