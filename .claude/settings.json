@@ -4,7 +4,6 @@
     "pr": ""
   },
   "permissions": {
-    "defaultMode": "auto",
     "deny": [
       "Bash(* aws-vault *)",
       "Bash(* kubectl *)",
@@ -12,9 +11,10 @@
       "Bash(aws-vault)",
       "Bash(kubectl *)",
       "Bash(kubectl)"
-    ]
+    ],
+    "defaultMode": "auto"
   },
-  "model": "claude-fable-5-1[1m]",
+  "model": "opus[1m]",
   "hooks": {
     "PreToolUse": [
       {
@@ -61,6 +61,8 @@
   "askUserQuestionTimeout": "10m",
   "tui": "fullscreen",
   "skipDangerousModePermissionPrompt": true,
+  "theme": "dark",
+  "switchModelsOnFlag": false,
   "fileCheckpointingEnabled": false,
   "remoteControlAtStartup": false,
   "skipAutoPermissionPrompt": true
