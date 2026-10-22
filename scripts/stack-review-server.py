@@ -784,9 +784,13 @@ def warm():
         pass
 
 
-threading.Thread(target=warm, daemon=True).start()
-threading.Thread(target=reviews.warm_requests_forever, daemon=True).start()   # review-requested PRs → worktree ready before the first jump
-threading.Thread(target=pack_watcher, daemon=True).start()   # ext source → packed, so the installed copy has something newer to fetch
+# STACK_REVIEW_SANDBOX=1 (scripts/viewer-sandbox): a test server over a throwaway repo runs none of
+# the jobs that reach beyond it — gh prewarm, the extension packer, focus restacks, pregates.
+SANDBOX = os.environ.get("STACK_REVIEW_SANDBOX") == "1"
+if not SANDBOX:
+    threading.Thread(target=warm, daemon=True).start()
+    threading.Thread(target=reviews.warm_requests_forever, daemon=True).start()   # review-requested PRs → worktree ready before the first jump
+    threading.Thread(target=pack_watcher, daemon=True).start()   # ext source → packed, so the installed copy has something newer to fetch
 # The reaper exists because an unsupervised server nobody owns must not linger. Under
 # launchd (KeepAlive) it would instead be a restart loop on a 15-minute clock — and now
 # that idle costs 0.3% of a core there is nothing to shed. The supervised runner sets this.
@@ -795,6 +799,7 @@ if not os.environ.get("STACK_REVIEW_SUPERVISED"):
 threading.Thread(target=watcher, daemon=True).start()
 threading.Thread(target=pulse, daemon=True).start()
 threading.Thread(target=restack.drain_forever, daemon=True).start()   # queued restacks run the moment the driver seat frees
-threading.Thread(target=focus.sync_forever, daemon=True).start()   # focus forests follow origin/main on their own
-threading.Thread(target=pregate.pregate_forever, daemon=True).start()   # current roots pre-gated → the push door is already unlocked (or the red is already parked) on arrival
+if not SANDBOX:
+    threading.Thread(target=focus.sync_forever, daemon=True).start()   # focus forests follow origin/main on their own
+    threading.Thread(target=pregate.pregate_forever, daemon=True).start()   # current roots pre-gated → the push door is already unlocked (or the red is already parked) on arrival
 httpd.serve_forever()
