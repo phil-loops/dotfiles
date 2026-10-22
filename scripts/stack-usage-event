@@ -9,6 +9,7 @@
 # Kill switch: STACK_USAGE=0.
 #
 #   stack-usage-event commit [<sha> [<branch>]]   # one event per commit (post-commit hook)
+#   stack-usage-event push <remote> [<url>]        # one event per pushed ref, refs on stdin (pre-push hook)
 #   stack-usage-event who <sha>  # which session made <sha> — read-only, for handoff notes
 #
 # The post-commit hook runs this backgrounded, so by the time it reads HEAD a rebase may have
@@ -126,6 +127,54 @@ def commit_event(path, sha_arg, branch_arg):
     return ev
 
 
+def push_events(remote, refs):
+    main_branch = git("config", "stack.main-branch") or "main"
+    out = []
+    for line in refs.splitlines():
+        parts = line.split()
+        if len(parts) != 4:
+            continue
+        lref, lsha, rref, rsha = parts
+        dst = rref[len("refs/heads/"):] if rref.startswith("refs/heads/") else rref
+        src = lref[len("refs/heads/"):] if lref.startswith("refs/heads/") else lref
+        ev = {"type": "push", "branch": src if src != "(delete)" else dst, "remote": remote, "dst": dst}
+        if set(lsha) == {"0"}:
+            ev["delete"] = True
+            out.append(ev)
+            continue
+        ev["sha"] = lsha[:10]
+        new = set(rsha) == {"0"}
+        ev["new"] = new
+        base = main_branch if new else rsha
+        if not new and git("cat-file", "-t", rsha) == "commit":
+            ev["force"] = subprocess.run(["git", "merge-base", "--is-ancestor", rsha, lsha]).returncode != 0
+        n = git("rev-list", "--count", f"{base}..{lsha}")
+        ev["commits"] = int(n) if n.isdigit() else None
+        ahead = git("rev-list", "--count", f"{main_branch}..{lsha}")
+        ev["ahead"] = int(ahead) if ahead.isdigit() else None
+        ev["subjects"] = git("log", "--format=%s", f"{main_branch}..{lsha}").splitlines()[:50]
+        out.append(ev)
+    return out
+
+
+def await_landing(remote, events, limit=90):
+    # pre-push runs BEFORE the push: an event written then can't say whether it landed. Watch the
+    # remote-tracking ref git updates on success instead; a rejected or killed push never moves it.
+    if not git("config", f"remote.{remote}.url"):
+        return  # pushed to a bare URL: no tracking ref to watch, so the outcome stays unknown
+    t0 = time.time()
+    pending = [e for e in events if not e.get("delete") and e.get("sha")]
+    while pending and time.time() - t0 < limit:
+        time.sleep(1)
+        for e in list(pending):
+            got = git("rev-parse", "-q", "--verify", f"refs/remotes/{remote}/{e['dst']}")
+            if got.startswith(e["sha"]):
+                e["landed"], e["landMs"] = True, int((time.time() - t0) * 1000)
+                pending.remove(e)
+    for e in pending:
+        e["landed"] = False
+
+
 def who(want):
     path = log_file()
     if not want:
@@ -174,6 +223,13 @@ def main():
         if ev:
             ahead = git("rev-list", "--count", f"{main_branch}..{ev['sha']}")
             ev["ahead"] = int(ahead) if ahead.isdigit() else None
+    elif kind == "push":
+        try:
+            os.setsid()   # outlive the pusher's process group: the landing watch runs ~90s past it
+        except OSError:
+            pass
+        remote = sys.argv[2] if len(sys.argv) > 2 else "origin"
+        events = push_events(remote, sys.stdin.read())
     else:
         return
     if not events:
@@ -184,6 +240,9 @@ def main():
         ev["project"] = git("config", f"branch.{b}.stack-project") or git("config", f"stack-branch.{b}.project") or None
         ev.update(who_)
         ev["ts"] = ts
+    if kind == "push":
+        # written once the outcome is known, so the line lands up to ~90s after `ts` says
+        await_landing(sys.argv[2] if len(sys.argv) > 2 else "origin", events)
     with open(path, "a") as f:
         for ev in events:
             f.write(json.dumps(ev) + "\n")
