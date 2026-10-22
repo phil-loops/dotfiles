@@ -6,6 +6,7 @@
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme" layer(theme);
 @import "tailwindcss/utilities" layer(utilities);
+@import "./fonts.css";
 
 @layer base {
   button {
@@ -43,8 +44,8 @@
   --color-del-bg: rgba(200, 122, 85, 0.09);
   --color-diff-ink: #ecd35a;
   --color-diff-bg: #0a0a0d;
-  --font-display: "Fraunces", Georgia, serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --font-display: "Fraunces", "Fraunces Fallback", Georgia, serif;
+  --font-mono: "IBM Plex Mono", "IBM Plex Mono Fallback", ui-monospace, Menlo, monospace;
   --animate-breathe: breathe 1.5s ease-in-out infinite;
   @keyframes breathe {
     0%, 100% { opacity: 1; }
@@ -182,7 +183,7 @@
   --chip-del-text: #fbf7ee;
   --stripe-add: #1fb300;
   --stripe-del: #cc2a18;
-  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --mono: "IBM Plex Mono", "IBM Plex Mono Fallback", ui-monospace, Menlo, monospace;
 }
 
 * { box-sizing: border-box; }
