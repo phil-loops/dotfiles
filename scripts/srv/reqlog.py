@@ -2,10 +2,10 @@
 #
 # Line shape (space-separated; the leading four fields are the pre-2026-10-21 format, so old
 # readers still parse it):
-#   2026-10-21 17:02:11 POST /push-origin 200 812ms actor=browser sid=8689da45
+#   2026-10-21 17:02:11 POST /push-origin 200 812ms actor=browser refused=not-fast-forward
 #   2026-10-21 17:15:00 GET /ext-mtime 200 1ms actor=extension n=412
-# On a poll path `n=` counts this hit plus the identical ones folded since that path+actor's
-# previous line.
+# `refused=` marks an HTTP-200 {ok:false} answer; on a poll path `n=` counts this hit plus the
+# identical ones folded since that path+actor's previous line.
 #
 # Retention: the old single 5 MB generation held seven days, 83% of it the extension's
 # /ext-mtime poll. Polls now coalesce to one line per path+actor per window, the live file
@@ -82,13 +82,15 @@ def append(path, msg):
             pass   # a full disk or permissions hiccup must never take a request down
 
 
-def request_line(method, path, status, ms, actor=None, sid=None):
+def request_line(method, path, status, ms, actor=None, refused=None, sid=None):
     """The line to log for one request, or None when it folds into a coalesced poll line."""
     tail = f" actor={actor}" if actor else ""
     if sid:
         tail += f" sid={sid}"
+    if refused:
+        tail += f" refused={refused}"
     route = path.split("?", 1)[0]
-    if route in POLLS and str(status).startswith("2"):
+    if route in POLLS and str(status).startswith("2") and not refused:
         key = (method, route, actor)
         now = time.time()
         with _lock:
@@ -101,3 +103,25 @@ def request_line(method, path, status, ms, actor=None, sid=None):
         return f"{method} {route} {status} {ms:.0f}ms{tail} n={n}"
     return f"{method} {path} {status} {ms:.0f}ms{tail}"
 
+
+_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
+_QUOTED = re.compile(r"(['\"`]).*?\1")
+_PATHLIKE = re.compile(r"(\S*/\S+)")
+_NUM = re.compile(r"\d+")
+
+
+def error_class(err):
+    """A short, stable bucket for a refusal message — never the message itself.
+
+    "branch 'x' has 3 unpushed commits on top of abc1234 (stash first)" → "branch-has-unpushed-commits-on-top-of"
+    """
+    if not isinstance(err, str) or not err.strip():
+        return "refused"
+    s = err.strip().splitlines()[0]
+    s = re.split(r"\s[—–-]\s|[:;(\[]|\.\s", s, maxsplit=1)[0]
+    s = _QUOTED.sub(" ", s)
+    s = _SHA.sub(" ", s)
+    s = _PATHLIKE.sub(" ", s)
+    s = _NUM.sub(" ", s)
+    words = re.findall(r"[a-z][a-z'-]*", s.lower())
+    return "-".join(words[:6])[:48] or "refused"

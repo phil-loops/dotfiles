@@ -235,7 +235,7 @@ class H(BaseHTTPRequestHandler):
         if not LOG:
             return BaseHTTPRequestHandler.handle_one_request(self)
         self._status, self.raw_requestline = "-", b""   # cleared, or a dead keep-alive read re-logs the last request
-        self._actor, self._sid = None, None
+        self._actor, self._sid, self._refused = None, None, None
         t0 = time.perf_counter()
         try:
             BaseHTTPRequestHandler.handle_one_request(self)
@@ -245,18 +245,31 @@ class H(BaseHTTPRequestHandler):
             if req:
                 ms = (time.perf_counter() - t0) * 1000
                 line = reqlog.request_line(req[0], req[1] if len(req) > 1 else "?", self._status, ms,
-                                           self._actor, self._sid)
+                                           self._actor, self._refused, self._sid)
                 if line:
                     _log(line)
 
     def _identify(self, path):
         # who's calling, before the handler runs: the peer process is only walkable while connected
         self._actor, self._sid = actor.classify(self.headers, path, EXT_ORIGINS, self.client_address[1])
+        self._refused = None
         actor.set_current(self._actor, self._sid)
 
     def _send(self, code, body, ctype="application/json"):
         b = body.encode() if isinstance(body, str) else body
+        # the one choke point every handler answers through: an action answered {ok:false} is a
+        # refusal even at 200 — name it for the request log and hand the client a short class.
+        # POST only: a read whose payload says ok:false (a push verdict) refused nothing.
+        if self.command == "POST" and ctype == "application/json" and b[:1] == b"{" and len(b) < 65536 and re.search(rb'"ok":\s*false', b):
+            try:
+                d = json.loads(b)
+                if d.get("ok") is False:
+                    self._refused = reqlog.error_class(d.get("err") or d.get("error"))
+            except Exception:
+                pass
         self.send_response(code)
+        if getattr(self, "_refused", None):
+            self.send_header("X-Stack-Refused", self._refused)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(b)))
         self.send_header("Cache-Control", "no-store")  # always serve the freshly-assembled page/diffs
