@@ -10,7 +10,7 @@ import { commands, getCommand, type Via, type Write } from "./registry";
 import { addOps, dropOps, onChange } from "./store";
 import { post, type Sent } from "./sync";
 import { emit, nextPaint } from "./telemetry";
-import { model } from "./model";
+import { targetFor } from "./model";
 import { setMenuOpen } from "./ui";
 
 const [note, setNote] = createSignal<string | null>(null);
@@ -24,7 +24,7 @@ function say(text: string): void {
 
 let seq = 0;
 let queue: Promise<unknown> = Promise.resolve();
-const undo: { id: string; target: string }[] = [];
+const undo: { id: string; target: string; arg?: unknown }[] = [];
 const SETTLE_WAIT = 5000;
 
 // a write whose POST is answered but whose patch hasn't arrived keeps its overlay until it does
@@ -36,6 +36,8 @@ onChange(() => {
 export interface RunOpts {
   target?: string;
   event?: Event;
+  /** what a drag or an undo carries beyond the target (a destination, the branches to let go) */
+  arg?: unknown;
   /** set when `u` runs an inverse, so it doesn't stack an inverse of its own */
   undoing?: boolean;
 }
@@ -45,15 +47,20 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
   const cmd = getCommand(id);
   if (!cmd) return;
   if (via === "menu" || via === "palette") setMenuOpen(false);
+  if (cmd.route) {
+    const next = cmd.route(opts.target ?? targetFor(cmd.scope));
+    if (next && next !== id) dispatch(next, via, opts);
+    return;
+  }
   const t0 = opts.event?.timeStamp ?? performance.now();
-  const target = opts.target ?? (cmd.scope === "project" ? model.selected() : undefined);
+  const target = opts.target ?? targetFor(cmd.scope);
   if (cmd.available && !cmd.available(target)) return;
   const base = { type: "cmd", id, budget: cmd.budget, via, ...(target ? { target } : {}) };
   const feedback = nextPaint(t0);
 
   if (cmd.local) {
     try {
-      cmd.local(target, opts.event);
+      cmd.local(target, opts.event, opts.arg);
       void feedback.then((feedbackMs) => emit({ ...base, outcome: "ok", feedbackMs, settledMs: null }));
     } catch (e) {
       // a local command throws to refuse ("nothing to undo"); the message is the quiet line
@@ -63,7 +70,7 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
     }
     return;
   }
-  const w: Write | null = target && cmd.write ? cmd.write(target) : null;
+  const w: Write | null = target && cmd.write ? cmd.write(target, opts.arg) : null;
   if (!w) return;
   const s = ++seq;
   addOps(w.ops.map((o) => ({ ...o, seq: s })));
@@ -77,7 +84,9 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
       reconcile(s, w);
     } else {
       dropOps(s);
-      say(`${w.failed}${r.err && r.err !== "refused" ? ` — ${r.err.replaceAll("-", " ")}` : ""}`);
+      // the server's own sentence says what to do next; the short class is the fallback
+      const why = typeof r.body?.err === "string" && r.body.err.length <= 140 ? r.body.err : r.err && r.err !== "refused" ? r.err.replaceAll("-", " ") : "";
+      say(`${w.failed}${why ? ` — ${why}` : ""}`);
     }
     const feedbackMs = await feedback;
     emit({ ...base, outcome: r.outcome, ...(r.err ? { err: r.err } : {}), feedbackMs, settledMs, rid: r.rid });
@@ -99,7 +108,7 @@ function reconcile(s: number, w: Write): void {
 export function undoLast(): boolean {
   const inv = undo.pop();
   if (!inv) return false;
-  dispatch(inv.id, "key", { target: inv.target, undoing: true });
+  dispatch(inv.id, "key", { target: inv.target, arg: inv.arg, undoing: true });
   return true;
 }
 

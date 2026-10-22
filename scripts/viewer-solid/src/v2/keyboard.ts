@@ -1,6 +1,6 @@
 // The key dispatcher: one keydown listener turns keys into registered commands, run by the runner.
 import { createKeymap, keyName } from "./keys";
-import { model } from "./model";
+import { liveScopes } from "./model";
 import { commands } from "./registry";
 import { dispatch } from "./runner";
 import { menuOpen, setPendingKeys } from "./ui";
@@ -14,8 +14,7 @@ export function installKeys(): void {
     if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
     const key = keyName(e);
     if (!key) return;
-    const scopes = model.selected() ? ["project", "global"] : ["global"];
-    const fed = keymap.feed(key, scopes);
+    const fed = keymap.feed(key, liveScopes());
     clearTimeout(pendingTimer);
     if (fed.kind === "pending") {
       setPendingKeys(fed.prefix);

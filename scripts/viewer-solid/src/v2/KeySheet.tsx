@@ -6,7 +6,11 @@ import { sheetOpen } from "./ui";
 
 const SCOPES = [
   { id: "global", title: "Everywhere" },
+  { id: "forests", title: "On Forests" },
+  { id: "row", title: "On a forest or branch" },
   { id: "project", title: "On a forest" },
+  { id: "branch", title: "On a branch" },
+  { id: "dashboard", title: "On the dashboard" },
 ];
 
 export default function KeySheet() {
@@ -14,7 +18,7 @@ export default function KeySheet() {
     <Show when={sheetOpen()}>
       <div class="fixed inset-0 z-20 flex items-center justify-center">
         <div class="absolute inset-0 bg-vellum-night/70" onClick={bind("overlay.close")} />
-        <div class="relative w-[min(560px,92vw)] border border-rule bg-vellum-raise px-6 py-5">
+        <div class="relative max-h-[86vh] w-[min(620px,92vw)] overflow-auto border border-rule bg-vellum-raise px-6 py-5">
           <h2 class="m-0 mb-3 font-display text-[20px] font-normal text-ink">Keys</h2>
           <For each={SCOPES}>
             {(s) => (
