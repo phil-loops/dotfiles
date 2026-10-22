@@ -25,9 +25,9 @@ Each phase ends with a read of the dashboard and a short note on what it changed
 
 **Ground rules.** v1 stays fully working until each switch. The server only gains endpoints; it never breaks v1's. Every phase is tested on `viewer-sandbox`, then read-only against the live repo.
 
-**Open questions for Phil:**
+**Decided (Phil, 2026-10-22):**
 
-1. Fold the outbox into Forests as a "ready" filter, or keep it as its own page?
-2. Move Work, Wiki, Tutor and Machine off the rail and into the palette?
-3. Keep Solid.js (recommended: it fits a live store), or move to React for familiarity?
-4. Is a keyboard-first design with Helix-style keys right everywhere, or only on branch pages?
+1. The outbox folds into Forests as a "ready" filter.
+2. Work, Wiki, Tutor and Machine move into the palette; the rail holds only Forests.
+3. Solid.js stays.
+4. Helix-style keys everywhere; `space` opens the command menu on every surface.
