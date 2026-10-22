@@ -36,7 +36,6 @@ if [[ -n "$loops_repo" ]]; then
     "$hooks_dir/post-rewrite"        hooks/loops-seed-gen
     "$hooks_dir/pre-rebase"          hooks/loops-pre-rebase
     "$hooks_dir/pre-push"            hooks/loops-pre-push
-    "$hooks_dir/prepare-commit-msg"  hooks/loops-prepare-commit-msg
   )
 else
 LINKS=(
