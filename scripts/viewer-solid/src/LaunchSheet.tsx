@@ -7,7 +7,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { canMutate } from "./provider";
 import { fetchOutbox, type OutboxActions } from "./outboxActions";
 import { launchSteps, type OutboxNode, type Step, type PushWindowFacts } from "./outboxModel";
-import { GatesChip, LandingTitle, PrChip } from "./OutboxParts";
+import { GatesChip, LandingTitle, PacketChips, PrChip } from "./OutboxParts";
 
 const STEP: Record<Step, string> = {
   done: "border-gold-deep bg-gold-deep/40 text-gold-leaf",
@@ -145,6 +145,7 @@ export function LaunchSheet(props: {
                             <span>{n.commits} commit{n.commits === 1 ? "" : "s"}</span>
                             <Show when={!n.pr}><GatesChip n={n} /></Show>
                             <PrChip n={n} />
+                            <PacketChips n={n} />
                           </div>
                           <div class="mt-[8px] flex flex-wrap items-center gap-[8px]">
                             {stepPill("push", st().push, n.pushed === "ahead" ? `↑${n.ahead}` : "")}
@@ -162,13 +163,20 @@ export function LaunchSheet(props: {
                                   {props.actions.busy() === "push:" + n.branch ? "pushing…" : armed() === n.branch ? "push to origin?" : "↑ push"}
                                 </button>
                               </Show>
+                              <Show when={!n.pr && n.compareUrl && canMutate}>
+                                <button
+                                  class={`${BTN} border-transparent ${n.label ? "text-patina" : "text-ink-faint"} hover:border-rule`}
+                                  title={n.label ? "the PR opens labelled ai-code-review: the bot reviews once, checking the diff against the packet's Intent — click to drop it" : "no review label — click to ask the bot to check this PR's claims"}
+                                  onClick={(e) => { e.stopPropagation(); void props.actions.setLabel(forest()!.repo, n.branch, !n.label).then(() => q.refetch()); }}
+                                >{n.label ? "◉" : "○"} ai review</button>
+                              </Show>
                               <Show when={!n.pr && n.compareUrl}>
                                 <a
                                   class={`${BTN} ${st().open === "now" ? "border-gold-leaf text-gold-leaf hover:bg-gold-wash" : "pointer-events-none border-rule text-ink-faint opacity-50"}`}
                                   href={n.compareUrl}
                                   target="_blank"
                                   rel="noopener"
-                                  title={`compare ${n.base}...${n.branch}, title + body prefilled (o)`}
+                                  title={`compare ${n.base}...${n.branch}, title + review packet${n.label ? " + ai-code-review label" : ""} prefilled (o)`}
                                   onClick={(e) => { e.stopPropagation(); markOpened(n.branch); }}
                                 >
                                   open PR ↗

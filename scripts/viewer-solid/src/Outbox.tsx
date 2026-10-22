@@ -7,7 +7,7 @@ import { createQuery } from "@tanstack/solid-query";
 import { useViewerLocation } from "./router";
 import { canMutate } from "./provider";
 import { fetchOutbox, useOutboxActions, type OutboxActions } from "./outboxActions";
-import { GatesChip, LandingTitle, PrChip } from "./OutboxParts";
+import { GatesChip, LandingTitle, PacketChips, PrChip } from "./OutboxParts";
 import { LaunchSheet } from "./LaunchSheet";
 import { PushWindow } from "./PushWindow";
 import {
@@ -41,7 +41,7 @@ function NodeRow(props: {
   const canPush = () => canMutate && n().gates === "green" && n().pushed !== "synced" && n().status !== "landed";
   const canOpen = () => !n().pr && n().pushed === "synced" && !!n().compareUrl;
   // a meta line only when it says something the lane doesn't: a gate that isn't green, a PR, a hold
-  const hasMeta = () => (n().gates !== "green" && (!n().pr || !!n().ahead)) || !!n().pr || held();
+  const hasMeta = () => (n().gates !== "green" && (!n().pr || !!n().ahead)) || !!n().pr || held() || !!n().packet?.stale;
   return (
     <div
       title={n().branch}
@@ -64,6 +64,7 @@ function NodeRow(props: {
           <span class="text-ink-faint">{n().branch}</span>
           <Show when={n().gates !== "green" && (!n().pr || n().ahead)}><GatesChip n={n()} /></Show>
           <Show when={n().pr && n().status !== "approved"}><PrChip n={n()} /></Show>
+          <PacketChips n={n()} onCopied={(ok) => props.actions.say(ok ? "✓ copied the updated PR body — paste it over the body on GitHub" : "✗ the clipboard refused", ok)} />
           <Show when={held()}>
             <span class={due() ? "text-gold-leaf" : "text-ink-faint"} title={n().holdUntil}>
               {due() ? "☀ due now" : `☾ ${fmtDayPT(Date.parse(n().holdUntil))}`}

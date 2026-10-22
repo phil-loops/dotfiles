@@ -1,6 +1,7 @@
 // The outbox's shared row parts — gates and PR chips, and the landing title edited in place —
 // used by the lanes and the launch sheet alike.
-import { createEffect, Match, Show, Switch } from "solid-js";
+import { createEffect, createSignal, Match, Show, Switch } from "solid-js";
+import { staleLabel, verdictLabel } from "./packetModel";
 import { canMutate } from "./provider";
 import type { OutboxActions } from "./outboxActions";
 import type { OutboxNode } from "./outboxModel";
@@ -28,6 +29,52 @@ export function GatesChip(props: { n: OutboxNode }) {
         <span class={`${CHIP} border-rule text-ink-faint`} title="never gated — /push-ready runs them">○ ungated</span>
       </Match>
     </Switch>
+  );
+}
+
+// An open PR's packet, in two chips: the forest moved past its "Where this sits" (copy the
+// spliced body, paste it on GitHub — nothing here writes there), and the bot's verdict on Intent.
+export function PacketChips(props: { n: OutboxNode; onCopied?: (ok: boolean) => void }) {
+  const r = () => props.n.packet;
+  const [copied, setCopied] = createSignal(false);
+  const copy = async (e: MouseEvent) => {
+    e.stopPropagation();
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(r()!.updatedBody);
+      ok = true;
+    } catch { /* clipboard refused */ }
+    setCopied(ok);
+    props.onCopied?.(ok);
+  };
+  return (
+    <Show when={r()}>
+      {(rv) => (
+        <>
+          <Show when={rv().stale}>
+            <span class={`${CHIP} ob-stale border-gold-deep text-gold-leaf`} title="the forest moved since this PR body was published — its “Where this sits” is out of date">
+              packet stale — {staleLabel(rv())}
+              <button class="cursor-pointer border-0 bg-transparent p-0 font-mono text-[10.5px] text-gold-leaf underline decoration-gold-deep underline-offset-2 hover:text-ink" title="the published body with only “Where this sits” brought up to date" onClick={(e) => void copy(e)}>
+                {copied() ? "✓ copied" : "copy updated body"}
+              </button>
+              <a class="text-ink-dim no-underline hover:text-ink" href={rv().url} target="_blank" rel="noopener" onClick={(e) => e.stopPropagation()} title="edit the PR body on GitHub">edit ↗</a>
+            </span>
+          </Show>
+          <Show when={verdictLabel(rv())}>
+            <a
+              class={`${CHIP} ob-verdict no-underline ${rv().findings.length ? "border-ember/40 text-ember" : "border-[#3c4a30] text-add"} hover:border-gold-leaf`}
+              href={rv().url + (rv().findings.length ? "/files" : "")}
+              target="_blank"
+              rel="noopener"
+              onClick={(e) => e.stopPropagation()}
+              title={rv().findings.length ? rv().findings.map((f) => `${f.claim != null ? `claim ${f.claim + 1}: ` : ""}${f.body}`).join("\n\n") : "the john-hankles bot checked the diff against Intent and left no open findings"}
+            >
+              {rv().findings.length ? "✗ " : "✓ "}{verdictLabel(rv())}
+            </a>
+          </Show>
+        </>
+      )}
+    </Show>
   );
 }
 
