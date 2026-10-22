@@ -35,6 +35,11 @@ export interface Branch {
   ahead: number;
   gates: "green" | "red" | "running" | "stale" | "none";
   redGates: string[];
+  /** position in its forest's merge order, 1-based */
+  order: number;
+  holdUntil: string | null;
+  /** client-only: an optimistic write in flight ("pushing") */
+  pending?: string;
 }
 
 export interface Pr {
@@ -49,6 +54,10 @@ export interface Pr {
   draft: boolean;
   base: string | null;
   approvals: number | null;
+  mergeState: string | null;
+  mergeable: string | null;
+  approvedAt: string | null;
+  title: string | null;
 }
 
 export interface Landed {
