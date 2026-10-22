@@ -32,6 +32,7 @@ os.environ["STACK_VIA"] = "viewer"   # git hooks under this server attribute to 
 from srv import pregate   # own line: same reason
 from srv import tutor   # own line: same reason
 from srv import outbox   # own line: same reason
+from srv import outline   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -446,6 +447,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/tutor-terminal": return tutor.terminal(self, u)   # terminal /tutor sessions to pick up
         elif u.path == "/tutor-import":   return tutor.import_(self, u)    # one of them, as tab turns
         elif u.path == "/node":           return review.node(self, u)
+        elif u.path == "/outline":        return outline.get(self, u)            # a branch's words: description, outline, landing text
+        elif u.path == "/outline-reseat": return outline.reseat_status(self, u)  # an outline save's background descendant reseat
         elif u.path == "/purpose":        return review.purpose_get(self, u)
         elif u.path == "/notes":          return review.notes_get(self, u)   # per-branch test/repro notes
         elif u.path == "/plan-template":  return review.plan_template_get(self, u)   # per-project body template
@@ -555,6 +558,10 @@ class H(BaseHTTPRequestHandler):
             return sync.diverged_additive(self, raw)
         if self.path == "/prep-push":   # ONE state-routed prep: additive / restack / squash → one outgoing commit
             return push.prep_push(self, raw)
+        if self.path == "/outline":   # rewrite the outline's changed unpushed messages in one pass (+ description, landing text)
+            return outline.save(self, raw)
+        if self.path == "/outline-undo":   # restore the last outline save, if still unpushed and unmoved
+            return outline.undo(self, raw)
         if self.path == "/prep-message":   # edit the ONE unpushed commit's subject+body (tree untouched)
             return push.prep_message(self, raw)
         if self.path == "/reword-message":   # reword ANY unpushed commit (stack-reword: tree kept, children carried)
