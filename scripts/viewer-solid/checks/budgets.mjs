@@ -2,8 +2,10 @@
 //
 // 1. The v2 initial bundle — every script and stylesheet dist/v2/index.html loads, transitively
 //    through its imports — must stay under 250 KB gzipped (fonts are reported, not counted).
-// 2. With --base (a running viewer; use viewer-sandbox, the check archives and restores a forest):
-//    Forests paint and `x` feedback, measured in the page itself, against the latency budgets.
+// 2. With --base (a running viewer; use viewer-sandbox — the check archives, reorders and holds
+//    forests and undoes each): Forests paint and every local key's feedback, measured in the page
+//    itself, and each config write's feedback and settle time as the app's own `cmd` events report
+//    them (read off its /track batches), against the latency budgets.
 // Exits non-zero on any miss.
 import { readFileSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -16,6 +18,7 @@ const DIST = join(ROOT, "dist");
 const BUNDLE_KB = 250;
 const FEEDBACK_MS = 16.7; // one 60 Hz frame — the budgets.ts feedback budget
 const PAINT_MS = 100;
+const SETTLED_MS = { "config-write": 300 }; // budgets.ts settledMs for the classes this check exercises
 let failed = false;
 const line = (ok, what) => {
   console.log(`${ok ? "✓" : "✕"} ${what}`);
@@ -57,7 +60,16 @@ if (base) {
     headless: true,
   });
   const p = await b.newPage();
+  await p.setExtraHTTPHeaders({ "X-Stack-Actor": "headless" });
   await p.setViewport({ width: 1280, height: 860 });
+  const cmds = [];
+  p.on("request", (r) => {
+    if (!r.url().endsWith("/track") || r.method() !== "POST") return;
+    try {
+      const body = JSON.parse(r.postData() || "{}");
+      for (const e of body.events ?? [body]) if (e.type === "cmd") cmds.push(e);
+    } catch {}
+  });
   const errors = [];
   p.on("pageerror", (e) => errors.push(String(e)));
   const pct = (xs, q) => [...xs].sort((a, c) => a - c)[Math.min(xs.length - 1, Math.floor(q * xs.length))];
@@ -93,6 +105,49 @@ if (base) {
       ),
     );
   }
+  // every local key on Forests: keydown → the frame that paints its change
+  const press = (k, mods = {}) =>
+    p.evaluate(
+      (k, mods) =>
+        new Promise((resolve) => {
+          const t0 = performance.now();
+          const obs = new MutationObserver(() => {
+            obs.disconnect();
+            requestAnimationFrame(() => resolve(performance.now() - t0));
+          });
+          obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+          document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...mods }));
+          setTimeout(() => (obs.disconnect(), resolve(null)), 1000);
+        }),
+      k,
+      mods,
+    );
+  await p.goto(`${base}/v2`);
+  await p.waitForSelector('[data-paint="forests"]');
+  const local = {};
+  const LOCAL = [["j"], ["l"], ["j"], ["k"], ["h"], ["r"], ["r"], ["a"], ["a"], ["?"], ["Escape"], [" "]];
+  for (let round = 0; round < 6; round++) {
+    for (const [k, mods] of LOCAL) {
+      const ms = await press(k, mods);
+      if (k === " ") await p.keyboard.press("Escape");
+      if (ms != null) (local[k] ??= []).push(ms);
+      await new Promise((r) => setTimeout(r, 60));
+    }
+  }
+  // config writes beyond x: reorder the focus lane, hold a forest — each undone
+  const sel = (n) => p.evaluate((n) => document.querySelectorAll('[data-row^="p:"]')[n]?.dispatchEvent(new MouseEvent("click", { bubbles: true })), n);
+  for (let i = 0; i < 6; i++) {
+    await sel(0);
+    await press("j", { ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 400));
+    await press("u");
+    await new Promise((r) => setTimeout(r, 400));
+    await press("z");
+    await new Promise((r) => setTimeout(r, 400));
+    await press("u");
+    await new Promise((r) => setTimeout(r, 400));
+  }
+
   // `x` on the selected workbench forest → its row leaves; `u` puts it back between runs
   await p.goto(`${base}/v2`);
   await p.waitForSelector('[data-paint="forests"]');
@@ -122,11 +177,24 @@ if (base) {
     await p.evaluate(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "u", bubbles: true })));
     await new Promise((r) => setTimeout(r, 400));
   }
+  await p.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await p.goto("about:blank");
+  await new Promise((r) => setTimeout(r, 300));
   await b.close();
   // the first load is cold (server-side snapshot, uncached assets) — p50 holds the budget, p95 is shown
   line(pct(entry, 0.5) <= PAINT_MS, `Forests entry paint (page load: html + js + /state) ${fmt(entry)}, p50 ≤ ${PAINT_MS} ms`);
   line(pct(nav, 0.95) <= PAINT_MS, `Forests navigation paint (g f) ${fmt(nav)} ≤ ${PAINT_MS} ms`);
   line(pct(fb, 0.95) <= FEEDBACK_MS, `x feedback (keydown → frame without the row) ${fmt(fb)} ≤ ${FEEDBACK_MS} ms`);
+  for (const [k, xs] of Object.entries(local)) line(pct(xs, 0.95) <= FEEDBACK_MS, `"${k === " " ? "space" : k}" feedback ${fmt(xs)} ≤ ${FEEDBACK_MS} ms`);
+  const byId = {};
+  for (const e of cmds) (byId[e.id] ??= []).push(e);
+  for (const [id, es] of Object.entries(byId)) {
+    const fb = es.map((e) => e.feedbackMs).filter((v) => v != null);
+    if (fb.length) line(pct(fb, 0.95) <= FEEDBACK_MS, `${id} feedback (the app's own cmd events) ${fmt(fb)} ≤ ${FEEDBACK_MS} ms`);
+    const budget = SETTLED_MS[es[0].budget];
+    const st = es.map((e) => e.settledMs).filter((v) => v != null);
+    if (budget && st.length) line(pct(st, 0.95) <= budget, `${id} settled ${fmt(st)} ≤ ${budget} ms`);
+  }
   line(!errors.length, `no page errors${errors.length ? `: ${errors.join(" | ")}` : ""}`);
 }
 process.exit(failed ? 1 : 0);
