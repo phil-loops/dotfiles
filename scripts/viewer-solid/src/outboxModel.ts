@@ -1,3 +1,5 @@
+import type { Review } from "./packetModel";
+
 // The outbox's data and the pure decisions over it: which lane a node sits in, and where the clock
 // stands against the 15:00 PT cliff. Kept free of Solid so node --test can pin the rules.
 
@@ -49,6 +51,8 @@ export interface OutboxNode {
   waitingOn?: Waiting[];
   waitingH?: number | null;
   compareUrl?: string;
+  label?: boolean;
+  packet?: Review | null;
 }
 
 export type ForestSummary = "ready-to-launch" | "launch-blocked" | "blocked" | "ready" | "approved-chain" | "in-review";

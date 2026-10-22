@@ -74,7 +74,13 @@ export function useOutboxActions() {
     settle();
   };
 
-  return { push, hold, setTitle, busy, flash, setFlash, say };
+  const setLabel = async (repo: string, branch: string, on: boolean) => {
+    const r = await postJSON<{ ok?: boolean; err?: string }>(atRepo(repo, "/outbox-label"), { branch, on });
+    if (!r.ok) say(`✗ ${r.err || "label not saved"}`, false);
+    settle();
+  };
+
+  return { push, hold, setTitle, setLabel, busy, flash, setFlash, say };
 }
 
 export type OutboxActions = ReturnType<typeof useOutboxActions>;

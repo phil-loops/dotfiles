@@ -12,6 +12,8 @@ import { createQuery, useQueryClient, keepPreviousData } from "@tanstack/solid-q
 import { withRepo, canMutate } from "./provider";
 import { postStatus } from "./actions";
 import { hintsFor, SUBJECT_LIMIT, type Hint, type Words } from "./outlineHints";
+import { PacketEditor, PacketReview, usePacket } from "./ReviewPacket";
+import { EMPTY_HAND, handJson, sameHand, type Hand } from "./packetModel";
 
 type Row = {
   sha: string; short: string; subject: string; body: string; pushed: boolean; merge: boolean;
@@ -34,7 +36,7 @@ type SaveResult = {
   reseat?: string | null; restored?: string[]; commits?: number;
 };
 // undefined = untouched; null = back to the derived value (follow the opening commit / the forest)
-type Draft = { desc?: string; rows: Record<string, Words>; prTitle?: string | null; prBody?: string | null };
+type Draft = { desc?: string; rows: Record<string, Words>; prTitle?: string | null; prBody?: string | null; packet?: Hand; prLabel?: boolean };
 
 // sync's last step lands here instead of in a message box: it hands over what it routed and
 // asks the column to take focus
@@ -124,8 +126,17 @@ export function OutlineEditor(props: {
   const bodyFollows = () => draft.prBody === null || (draft.prBody === undefined && !data()?.draft.bodySaved);
   const bodyDirty = () =>
     draft.prBody === null ? !!data()?.draft.bodySaved : draft.prBody !== undefined && !same(draft.prBody, data()?.draft.body ?? "");
+  // the review packet: only its hand parts are drafted here; the server renders the rest
+  const pk = usePacket(props.branch, { guide: () => !!data() && !data()!.pr.exists, enabled: () => wordsOpen() && !!data() });
+  const packet = () => (pk.data?.ok && pk.data.branch === props.branch() ? pk.data : undefined);
+  const savedHand = () => packet()?.hand ?? EMPTY_HAND;
+  const handVal = () => draft.packet ?? savedHand();
+  const packetDirty = () => draft.packet !== undefined && !sameHand(draft.packet, savedHand());
+  const labelVal = () => draft.prLabel ?? packet()?.label ?? true;
+  const labelDirty = () => draft.prLabel !== undefined && draft.prLabel !== (packet()?.label ?? true);
   const dirtyRows = () => rows().filter(rowDirty);
-  const dirtyCount = () => dirtyRows().length + (descDirty() ? 1 : 0) + (titleDirty() ? 1 : 0) + (bodyDirty() ? 1 : 0);
+  const dirtyCount = () => dirtyRows().length + (descDirty() ? 1 : 0) + (titleDirty() ? 1 : 0) + (bodyDirty() ? 1 : 0)
+    + (packetDirty() ? 1 : 0) + (labelDirty() ? 1 : 0);
 
   // the head the drafts were written against: adopted silently while clean, held while dirty so
   // a writer that moves the branch underneath shows up here before the save refuses it
@@ -148,7 +159,7 @@ export function OutlineEditor(props: {
   const titleHints = () => hintsFor({ subject: titleVal(), body: "" }, { opening: true, ticket: data()?.ticket || undefined, kind: "title" });
 
   const invalidate = () => {
-    for (const key of ["outline", "commits", "node", "model", "push-preview", "prep-route", "forest-health"]) {
+    for (const key of ["outline", "packet", "commits", "node", "model", "push-preview", "prep-route", "forest-health", "outbox"]) {
       void qc.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -184,6 +195,8 @@ export function OutlineEditor(props: {
       if (descDirty()) body.description = draft.desc;
       if (titleDirty()) body.prTitle = titleFollows() ? "" : titleVal();
       if (bodyDirty()) body.prBody = bodyFollows() ? "" : bodyVal();
+      if (packetDirty()) body.packet = handJson(handVal());
+      if (labelDirty()) body.prLabel = labelVal() ? "" : "off";
       const { body: r } = await postStatus<SaveResult>("/outline", body);
       if (!r.ok) {
         setBanner({ tone: r.moved ? "moved" : "err", text: r.err || "save refused" });
@@ -192,7 +205,7 @@ export function OutlineEditor(props: {
       }
       const parts = [
         r.changed ? `${r.changed} message${r.changed === 1 ? "" : "s"}` : "",
-        ...(r.fields ?? []).map((f) => ({ description: "description", prTitle: "PR title", prBody: "PR body" })[f] ?? f),
+        ...(r.fields ?? []).map((f) => ({ description: "description", prTitle: "PR title", prBody: "PR body", packet: "review packet", prLabel: "review label" })[f] ?? f),
       ].filter(Boolean);
       await finish(r, `✓ saved ${parts.join(" · ") || "nothing new"}`);
     } catch (e) {
@@ -448,6 +461,9 @@ export function OutlineEditor(props: {
                       <Show when={d().pr.body}>
                         <p class="ol-pr-body m-0 mt-[8px] max-h-[220px] overflow-y-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-ink-dim">{d().pr.body}</p>
                       </Show>
+                      <Show when={packet()?.review}>
+                        {(rv) => <div class="mt-[10px] border-x-0 border-b-0 border-t border-dashed border-rule pt-[8px]"><PacketReview review={rv()} /></div>}
+                      </Show>
                     </Show>
                   }
                 >
@@ -475,10 +491,37 @@ export function OutlineEditor(props: {
                   <Show when={titleFocus() || titleDirty()}>
                     <Hints hints={titleHints()} onFix={(h) => setDraft("prTitle", h.fix!.apply({ subject: titleVal(), body: "" }).subject)} />
                   </Show>
-                  <Show when={!(bodyOpen() || bodyDirty())}>
-                    <button class="mt-[8px] cursor-pointer border-0 bg-transparent p-0 text-[10.5px] text-ink-faint hover:text-ink-dim" onClick={() => setBodyOpen(true)}>▸ PR body</button>
-                  </Show>
-                  <Show when={bodyOpen() || bodyDirty()}>
+                  <Show
+                    when={d().draft.bodySaved || bodyDirty()}
+                    fallback={
+                      <Show when={bodyOpen() || packetDirty() || labelDirty()} fallback={
+                        <button
+                          class="ol-packet-fold mt-[8px] block cursor-pointer border-0 bg-transparent p-0 text-left font-mono text-[10.5px] text-ink-faint hover:text-ink-dim"
+                          title="the PR body: checkable claims, scope, place in the forest, reading order, what's verified"
+                          onClick={() => setBodyOpen(true)}
+                        >
+                          ▸ review packet
+                          <Show when={packet()}>
+                            {(p) => <span class="text-ink-faint/80"> · {(handVal().intent ?? p().sections.intentSeed).length} claims{p().sections.notDerived.length + handVal().not.length ? ` · ${p().sections.notDerived.length + handVal().not.length} out of scope` : ""} · {labelVal() ? "◉" : "○"} {p().labelName}</span>}
+                          </Show>
+                        </button>
+                      }>
+                        <PacketEditor
+                          branch={props.branch}
+                          title={titleVal}
+                          hand={handVal}
+                          setHand={(h) => setDraft("packet", h)}
+                          label={labelVal}
+                          setLabel={(on) => setDraft("prLabel", on)}
+                          packet={packet}
+                          refetch={() => void pk.refetch()}
+                        />
+                        <Show when={!packetDirty() && !labelDirty()}>
+                          <button class="mt-[6px] cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint hover:text-ink-dim" onClick={() => setBodyOpen(false)}>▾ fold</button>
+                        </Show>
+                      </Show>
+                    }
+                  >
                   <textarea
                     class={`ol-prbody ${FIELD} mt-[10px] min-h-[5lh] border-x-0 border-b-0 border-t border-dashed border-rule pt-[8px] text-[11px] leading-[1.6] ${bodyDirty() ? "text-ink" : "text-ink-dim"}`}
                     rows={4}
@@ -491,11 +534,9 @@ export function OutlineEditor(props: {
                     onKeyDown={(e) => escTo(e, bodyDirty(), () => setDraft("prBody", undefined))}
                   />
                   <div class="mt-[3px] flex items-baseline gap-[10px] text-[10px] text-ink-faint">
+                    <span class="text-ink-faint">a hand-written body — it wins over the review packet</span>
                     <Show when={!bodyFollows()}>
-                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint underline underline-offset-2 hover:text-ink-dim" onClick={() => setDraft("prBody", null)}>↺ re-draft from the forest</button>
-                    </Show>
-                    <Show when={!bodyDirty()}>
-                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint hover:text-ink-dim" onClick={() => setBodyOpen(false)}>▾ fold</button>
+                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-gold-leaf underline underline-offset-2 hover:text-ink" onClick={() => setDraft("prBody", null)}>↺ use the review packet</button>
                     </Show>
                   </div>
                   </Show>
@@ -560,9 +601,13 @@ export function WordsHeader(props: { branch: () => string }) {
   }));
   const d = () => (q.data?.ok && q.data.branch === props.branch() ? q.data : undefined);
   const own = () => (d()?.commits ?? []).filter((c) => !c.carried);
+  // an open PR's packet: stale since publishing? what did the bot dispute? (cached server-side)
+  const pk = usePacket(props.branch, { enabled: () => !!d()?.pr.exists && d()!.pr.state === "OPEN" });
+  const review = () => (pk.data?.ok && pk.data.branch === props.branch() ? pk.data.review : null);
   return (
     <Show when={d()}>
       {(o) => (
+        <>
         <button
           class="words-header group mb-[18px] block w-full cursor-pointer rounded-[9px] border border-solid border-transparent bg-transparent px-[2px] py-[4px] text-left hover:border-rule"
           title="edit the words — description, commits, PR title (e)"
@@ -578,6 +623,10 @@ export function WordsHeader(props: { branch: () => string }) {
           </Show>
           <span class="mt-[3px] block font-mono text-[10px] text-ink-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">✎ edit the words · e</span>
         </button>
+        <Show when={review() && (review()!.stale || review()!.findings.length || review()!.botRan)}>
+          <div class="words-packet -mt-[12px] mb-[18px] px-[2px]"><PacketReview review={review()!} compact /></div>
+        </Show>
+        </>
       )}
     </Show>
   );
