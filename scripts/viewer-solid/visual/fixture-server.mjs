@@ -28,6 +28,7 @@ const API = new Set([
   "/commit-diff", "/diverged-detail", "/forest-health", "/forest-branches", "/forest-purposes",
   "/gates-progress", "/plan-steps", "/plan-section", "/plan-preview", "/prep-route", "/prep-push",
   "/preview-wait", "/push-preview",
+  "/outline", "/outline-reseat",
 ]);
 const MIME = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",

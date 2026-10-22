@@ -26,6 +26,7 @@ const ROUTES = [
   "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",
   "/fix-upstream", "/integrate-here", "/reseat-children",
   "/prep-route", "/prep-push", "/preview-wait", "/push-preview", "/processes",
+  "/outline", "/outline-undo", "/outline-reseat",
   "/chat-popout",
 ];
 
