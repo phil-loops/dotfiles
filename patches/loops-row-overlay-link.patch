@@ -1,0 +1,129 @@
+From 7844376a803af83fca46461cd9f0f5bdcd46f561 Mon Sep 17 00:00:00 2001
+From: Phil Brockman <phil@loops.so>
+Date: Mon, 21 Sep 2026 23:15:55 -0700
+Subject: [PATCH] use one row overlay link instead of one link per cell
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Per-cell anchors put up to ~7500 next/link on the audience page at pageSize 100
+x 75 columns — a table this file already calls sluggish — and handed a screen
+reader 75 identical unnamed links per row, while turning any drag-to-select of
+a cell value into a link drag.
+
+One absolutely positioned anchor per row replaces them. It has to be a direct
+child of the <td>, because an absolutely positioned box cannot escape the padded
+wrapper's overflow, and the <tr> is its containing block (hence the opt-in
+[&_tbody_tr]:relative on this table's container rather than a change to the
+shared TableInstance, which four other tables render through).
+
+It is aria-hidden and tabIndex -1: the email cell keeps the real named link, so
+assistive tech sees one link per row instead of 75. The actions column gets z-10
+to stay above the overlay — without it a click near the menu opens the contact.
+Column pinning is a URL setting, so nothing is pinned by default and the email
+column is the first candidate host; it renders through its own branch, so
+hosting there would have dropped the overlay entirely.
+---
+ hooks/useAudienceTable.tsx | 65 +++++++++++++++++++++++++++-----------
+ 1 file changed, 46 insertions(+), 19 deletions(-)
+
+diff --git a/hooks/useAudienceTable.tsx b/hooks/useAudienceTable.tsx
+index 88d4f92827..f4cec7c614 100644
+--- a/hooks/useAudienceTable.tsx
++++ b/hooks/useAudienceTable.tsx
+@@ -574,6 +574,25 @@ export function useAudienceTable({
+ 
+   const router = useRouter();
+ 
++  // ONE overlay link per row instead of one per cell. At pageSize 100 x 75 columns the per-cell
++  // version put ~7500 next/link on a page this file already calls sluggish (see maxDisplayedCols),
++  // and handed a screen reader 75 identical unnamed links per row. It must be a direct child of
++  // the <td>: an absolutely positioned box cannot escape the padded wrapper's overflow. Its
++  // containing block is the <tr>, so it covers every cell that is not sticky — the pinned email
++  // cell paints above it and keeps its own named link, which is the one assistive tech reads.
++  // Column pinning is a user setting carried in the URL, so by default NOTHING is pinned and the
++  // first candidate is the email column — which renders through its own branch and would leave
++  // the overlay unrendered, silently dropping cmd-click from every other cell. Both it and the
++  // menu column are excluded: each already owns its own click target.
++  const rowLinkColumnId = instance
++    .getVisibleLeafColumns()
++    .find(
++      (column) =>
++        column.id !== "edit" &&
++        column.id !== "email" &&
++        column.getIsPinned() === false
++    )?.id;
++
+   const renderCell = (
+     cell: any,
+     isLastColumn: boolean,
+@@ -582,7 +601,7 @@ export function useAudienceTable({
+   ) => {
+     return cell.column.id === "edit" ? (
+       <td
+-        className={`group/cell relative whitespace-nowrap border-subtle p-0 ${
++        className={`group/cell relative z-10 whitespace-nowrap border-subtle p-0 ${
+           cell.column.getIsPinned() !== false
+             ? `left-0 z-20 bg-surface md:sticky`
+             : ""
+@@ -632,23 +651,31 @@ export function useAudienceTable({
+             )}
+           </div>
+         ) : (
+-          <Link
+-            href={contactHref({
+-              asPath: router.asPath,
+-              recordIdKey,
+-              recordIdValue,
+-              contactId: cell.row.original.id,
+-            })}
+-            className={`block max-w-md truncate px-6 py-4 ${
+-              cell.column.getIsPinned() !== false
+-                ? "group-hover:bg-element"
+-                : ""
+-            }`}
+-            prefetch={false}
+-            tabIndex={-1}
+-          >
+-            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+-          </Link>
++          <>
++            {cell.column.id === rowLinkColumnId && (
++              <Link
++                href={contactHref({
++                  asPath: router.asPath,
++                  recordIdKey,
++                  recordIdValue,
++                  contactId: cell.row.original.id,
++                })}
++                className="absolute inset-0"
++                prefetch={false}
++                tabIndex={-1}
++                aria-hidden="true"
++              />
++            )}
++            <div
++              className={`max-w-md truncate px-6 py-4 ${
++                cell.column.getIsPinned() !== false
++                  ? "group-hover:bg-element"
++                  : ""
++              }`}
++            >
++              {flexRender(cell.column.columnDef.cell, cell.getContext())}
++            </div>
++          </>
+         )}
+       </td>
+     );
+@@ -677,7 +704,7 @@ export function useAudienceTable({
+     ) : (
+       <TableInstance
+         instance={instance}
+-        containerClassName="audience-table w-full overflow-x-auto rounded border border-subtle shadow-sm [&_:is(th,td,tr,tbody)]:border-subtle"
++        containerClassName="audience-table w-full overflow-x-auto rounded border border-subtle shadow-sm [&_:is(th,td,tr,tbody)]:border-subtle [&_tbody_tr]:relative"
+         renderCell={renderCell}
+         showEmptyState={dataSize === 0 && !data?.contacts.length}
+         noMatchMessage={NO_MATCHING_RESULTS.AUDIENCE}
+-- 
+2.50.1 (Apple Git-155)
+

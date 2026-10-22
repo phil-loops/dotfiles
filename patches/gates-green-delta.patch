@@ -1,0 +1,155 @@
+diff --git a/scripts/srv/picker.py b/scripts/srv/picker.py
+index fc3678e..082ad8e 100644
+--- a/scripts/srv/picker.py
++++ b/scripts/srv/picker.py
+@@ -445,7 +445,12 @@ def _green_set():
+         return set()
+     trees = dict(l.partition(" ")[::2] for l in ctx.run(
+         ["git", "for-each-ref", "--format=%(refname:short) %(tree)", "refs/heads"]).stdout.splitlines())
+-    return {b for b, tree in recorded.items() if trees.get(b) == tree}
++    green = {b for b, tree in recorded.items() if trees.get(b) == tree}
++    from . import push
++    for b in recorded:
++        if b not in green and b in trees and push._verdict_stands(b) == "delta":
++            green.add(b)
++    return green
+ 
+ 
+ _gd_cache = {}   # repo path -> git-common-dir; never changes for a live repo, so spawn once
+@@ -474,7 +479,7 @@ def _is_overlay_line(line):
+     key = line.partition(" ")[0]
+     if key.startswith("stack-project.") and key.endswith(_OVERLAY_SUFFIXES):
+         return True
+-    return key.endswith(".gates-green-tree")
++    return key.endswith((".gates-green-tree", ".gates-green-delta"))
+ 
+ 
+ def _projects_state(path):
+diff --git a/scripts/srv/pregate.py b/scripts/srv/pregate.py
+index bd13adf..ccef2ed 100644
+--- a/scripts/srv/pregate.py
++++ b/scripts/srv/pregate.py
+@@ -53,7 +53,7 @@ def _candidate():
+         if b not in current or not snap.exists(b) or _archived(snap, b):
+             continue
+         tree = snap.tree(b)
+-        if not tree or push._green_tree(b) == tree:
++        if not tree or push._verdict_stands(b):
+             continue
+         job = push._GATE_JOBS.get(push._jkey(b)) or push._adopt_job(b)
+         if job and job["tree"] == tree:
+diff --git a/scripts/srv/push.py b/scripts/srv/push.py
+index 860be31..d8e20d2 100644
+--- a/scripts/srv/push.py
++++ b/scripts/srv/push.py
+@@ -127,7 +127,7 @@ def gates(req, raw):
+     branch = d.get("branch", "")
+     # useCache: the sync strip re-runs on every motion — when this tree already passed,
+     # answer green instantly instead of re-paying the typecheck.
+-    if d.get("useCache") and branch and _green_tree(branch) == _tree(branch):
++    if d.get("useCache") and branch and _verdict_stands(branch):
+         return req._send(200, json.dumps({"ok": True, "cached": True, "gates": []}))
+     # --fix is OPT-IN (fix:true): a red gate with a remediation (fresh → rebase, format →
+     # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
+@@ -222,8 +222,56 @@ def _green_tree(branch):
+     return repostate.snapshot().branch_key(branch, "gates-green-tree")
+ 
+ 
++# The verdict also seals the DELTA (gates-green-delta): a forward rebase or catch-up merge
++# moves the tree while the branch's own hunks stay byte-identical, and re-paying a typecheck
++# for that relocked push on every main merge (2026-09-14). Recorded only when the verdict is
++# for the current tip — a harvested older tree gets no delta.
++def _green_delta(branch):
++    return repostate.snapshot().branch_key(branch, "gates-green-delta")
++
++
+ def _record_green(branch, tree):
+     stackcfg.set_key(branch, "gates-green-tree", tree)
++    if tree == _tree(branch):
++        stackcfg.set_key(branch, "gates-green-delta", _delta_id(branch))
++
++
++_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@", re.MULTILINE)
++
++
++def _delta_id(branch):
++    """sha256 of the branch's own diff against its stack base (parent, else origin/main) with
++    index lines and hunk offsets stripped — git patch-id's idea, computed here so it needs no
++    stdin pipe. Context lines stay in: main landing INSIDE a hunk's context changes the id,
++    which is exactly when a carried verdict should lapse."""
++    snap = repostate.snapshot()
++    base = snap.parent(branch)
++    if base == snap.main() and snap.remote(base):
++        base = f"origin/{base}"
++
++    def compute():
++        diff = ctx.run(["git", "diff", "--no-color", f"{base}...{branch}"]).stdout
++        kept = [ln for ln in diff.splitlines() if not ln.startswith("index ")]
++        return hashlib.sha256(_HUNK_HEADER.sub("@@", "\n".join(kept)).encode("utf-8", "replace")).hexdigest()
++
++    return snap.once(("delta-id", branch, snap.local(branch), base), compute)
++
++
++def _verdict_stands(branch):
++    """How the gates verdict for <branch> holds: "tree" when the recorded tree is the tip's,
++    "delta" when the tip moved but its own hunks did not (forward rebase, catch-up merge),
++    "" when it lapsed."""
++    snap = repostate.snapshot()
++    tip = snap.local(branch)
++    if not tip:
++        return ""
++    green = _green_tree(branch)
++    if green and green == snap.tree(tip):
++        return "tree"
++    delta = _green_delta(branch)
++    if delta and delta == _delta_id(branch):
++        return "delta"
++    return ""
+ 
+ 
+ _WIP_SUBJECT = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
+@@ -450,7 +498,8 @@ def _origin_verdict(branch):
+     one_or_followup = n_out == 1 or (followup and n_out > 1)
+     wip = [c for c in outgoing if not c["voiced"]]
+     tip = snap.local(branch)
+-    gates_green = _green_tree(branch) == snap.tree(tip)
++    gates_how = _verdict_stands(branch)
++    gates_green = bool(gates_how)
+     chain_broken = _chain_break(branch)
+ 
+     def ward(k, label, ok, why, advisory=False):
+@@ -483,7 +532,7 @@ def _origin_verdict(branch):
+         # "rebase forward" without rewriting shared history.
+         ward("watch", "deploy watch clear", not deploy_critical or (has_remote and ff and bool(outgoing)),
+              f"main changed {len(deploy_critical)} deploy-watched file{'s' if len(deploy_critical) != 1 else ''} this branch lacks — rebase forward"),
+-        ward("gates", "gates green", gates_green,
++        ward("gates", "gates green (delta carried)" if gates_how == "delta" else "gates green", gates_green,
+              "not green for this exact commit — ⟲ sync runs the gates"),
+     ]
+     reasons = hard + [w["why"] for w in wards if not w["ok"] and w["why"] and not w.get("advisory")]
+@@ -494,7 +543,8 @@ def _origin_verdict(branch):
+         "fork": {"sha": fork, "date": fork_date}, "mainSince": main_since,
+         "deployCritical": deploy_critical,
+         "files": files[:20], "moreFiles": max(0, len(files) - 20),
+-        "commit": commit, "gatesGreen": gates_green, "web": _origin_web(branch),
++        "commit": commit, "gatesGreen": gates_green, "gatesCarried": gates_how == "delta",
++        "web": _origin_web(branch),
+         "published": published,
+         "wards": wards, "ok": not reasons, "reasons": reasons,
+         "review": _review_flags(branch),
+diff --git a/scripts/srv/sync.py b/scripts/srv/sync.py
+index 79171d5..7150a57 100644
+--- a/scripts/srv/sync.py
++++ b/scripts/srv/sync.py
+@@ -1013,9 +1013,8 @@ def force_scope(branch, upstream):
+     inspection time; the push passes it to --force-with-lease so git itself refuses if
+     origin moves after Phil read this sheet."""
+     lease = ctx.run(["git", "rev-parse", f"refs/remotes/{upstream}"]).stdout.strip()
+-    tip_tree = ctx.run(["git", "rev-parse", f"{branch}^{{tree}}"]).stdout.strip()
+-    from . import repostate
+-    gates_green = bool(tip_tree) and tip_tree == repostate.snapshot().branch_key(branch, "gates-green-tree")
++    from . import push
++    gates_green = bool(push._verdict_stands(branch))
+     pr = None
+     try:
+         url = ctx.run(["git", "remote", "get-url", "origin"]).stdout.strip()
