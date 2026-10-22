@@ -97,12 +97,26 @@ def _detail_map():
         return ent["data"] if ent else {}
 
 
+def _pr_states():
+    """sync's PR state map without its one blocking cold fill: the outbox is the home page, so a
+    cold cache (just after a restart) answers None at once and fills in the background."""
+    repo = ctx.repo_cwd()
+    with sync._PR_STATE_LOCK:
+        cold = sync._pr_state_ent(repo)["data"] is None
+        if cold and repo not in sync._PR_STATE_REFRESHING:
+            sync._PR_STATE_REFRESHING.add(repo)
+            threading.Thread(target=sync._refresh_pr_state, args=(repo,), daemon=True).start()
+    return None if cold else (sync._pr_state_map() or {})
+
+
 def _pr_map():
     """{branch: pr} — the fixture verbatim, else sync's state map overlaid with open-PR detail."""
     fx = _fixture()
     if fx is not None:
         return fx, "fixture"
-    states = sync._pr_state_map() or {}
+    states = _pr_states()
+    if states is None:
+        return {}, "warming"
     detail = _detail_map()
     return {b: {**p, **detail.get(b, {})} for b, p in states.items()}, "gh"
 
@@ -266,14 +280,8 @@ def _slug(snap):
 
 def _compare_url(slug, branch, base, title, body):
     """github.com compare-and-create form, stacked base + landing title + body prefilled. Opens a
-    form for Phil's hand; nothing here creates the PR. Defers to push.compare_url when the
-    OUTLINE branch's shared helper is present."""
-    shared = getattr(push, "compare_url", None)
-    if shared:
-        try:
-            return shared(branch, base=base)
-        except Exception:
-            pass
+    form for Phil's hand; nothing here creates the PR. Built from facts in hand — never
+    push.compare_url, whose body falls back to a stack-pr-body spawn (~1.6 s a node)."""
     if not slug:
         return ""
     return (f"https://github.com/{slug}/compare/{quote(base, safe='')}...{quote(branch, safe='')}?expand=1"
@@ -418,8 +426,9 @@ def get(req, u):
             continue
         ctx.set_repo(path)
         try:
-            fs, source = _repo_forests(name, only)
+            fs, src = _repo_forests(name, only)
             forests += fs
+            source = "warming" if "warming" in (source, src) else src
         except Exception as e:
             ctx.log(f"outbox: {name} failed: {e!r}")
         finally:

@@ -75,7 +75,7 @@ export interface PushWindowFacts {
 export interface OutboxData {
   forests: OutboxForest[];
   window: PushWindowFacts;
-  prSource: "gh" | "fixture";
+  prSource: "gh" | "fixture" | "warming";
   generatedAt: string;
   ms: number;
 }

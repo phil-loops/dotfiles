@@ -198,7 +198,8 @@ export function Outbox() {
   const outbox = createQuery(() => ({
     queryKey: ["outbox", ""],
     queryFn: () => fetchOutbox(),
-    refetchInterval: 30_000,
+    // PR state is still filling just after a server restart: look again soon
+    refetchInterval: (q) => (q.state.data?.prSource === "warming" ? 3_000 : 30_000),
   }));
   const items = createMemo(() => laneItems(outbox.data));
   const laneOf = (lane: Lane) => items().filter((i) => i.lane === lane);
@@ -367,6 +368,7 @@ export function Outbox() {
           <p class="mt-[40px] font-mono text-[10.5px] text-ink-faint">
             j/k move · ↵ open · p push · h hold · e edit title · o open PR · l launch sheet
             <Show when={outbox.data?.prSource === "fixture"}> · PR state from fixture</Show>
+            <Show when={outbox.data?.prSource === "warming"}> · PR state warming…</Show>
           </p>
         </Show>
 
