@@ -72,7 +72,7 @@ export function LandingTitle(props: { n: OutboxNode; repo: string; actions: Outb
   return (
     <Show when={props.editing && editable()} fallback={
       <span
-        class={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap ${editable() ? "cursor-text decoration-gold-deep decoration-dotted underline-offset-4 hover:underline" : ""} ${props.class ?? ""}`}
+        class={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap max-[640px]:whitespace-normal ${editable() ? "cursor-text decoration-gold-deep decoration-dotted underline-offset-4 hover:underline" : ""} ${props.class ?? ""}`}
         title={editable() ? `the PR title that will land — click (or e) to edit${props.n.titleSource === "saved" ? "" : " · from the opening commit"}` : props.n.title}
         onClick={(e) => { if (editable()) { e.stopPropagation(); props.setEditing(true); } }}
       >
