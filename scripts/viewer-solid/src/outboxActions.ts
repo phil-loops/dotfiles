@@ -57,8 +57,8 @@ export function useOutboxActions() {
     }
   };
 
-  const hold = async (repo: string, target: { branch?: string; project?: string }, until: string) => {
-    setBusy("hold:" + (target.branch ?? target.project));
+  const hold = async (repo: string, target: { branch?: string; branches?: string[]; project?: string }, until: string) => {
+    setBusy("hold:" + (target.branch ?? target.project ?? "*"));
     try {
       const r = await postJSON<{ ok?: boolean; err?: string }>(atRepo(repo, "/outbox-hold"), { ...target, until });
       if (!r.ok) say(`✗ ${r.err || "hold refused"}`, false);

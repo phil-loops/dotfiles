@@ -3,7 +3,7 @@
 # that will land, the PR and what an approved one is waiting on, a hold-for-morning stamp).
 #
 #   GET  /outbox[?project=<p>]           the desk; ?project narrows to one forest (the launch sheet polls it)
-#   POST /<repo>/outbox-hold {branch|project, until}   stamp branch.<b>.stack-hold-until (""/null clears)
+#   POST /<repo>/outbox-hold {branch|branches|project, until}   stamp branch.<b>.stack-hold-until (""/null clears)
 #   POST /<repo>/outbox-title {branch, title}          stamp branch.<b>.stack-pr-title (""/null clears)
 #
 # Never pushes, never opens a PR, never calls gh on the request path: PR facts come from
@@ -406,6 +406,8 @@ def get(req, u):
 
 
 def _members(snap, d):
+    if d.get("branches"):
+        return [b for b in d["branches"] if snap.exists(b)]
     if d.get("branch"):
         return [d["branch"]] if snap.exists(d["branch"]) else []
     project = d.get("project", "")
@@ -413,8 +415,8 @@ def _members(snap, d):
 
 
 def hold(req, raw):
-    """POST {branch|project, until} — hold for morning: stamp (or clear) the hold on one branch or
-    every branch of a forest. A stamp only moves the row; nothing is pushed when it comes due."""
+    """POST {branch|branches|project, until} — hold for morning: stamp (or clear) the hold on one
+    branch, a list, or every branch of a forest. A stamp only moves the row; nothing is pushed when it comes due."""
     d = json.loads(raw or "{}")
     snap = repostate.snapshot()
     targets = _members(snap, d)
