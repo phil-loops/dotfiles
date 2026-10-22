@@ -1,11 +1,16 @@
 import { render } from "solid-js/web";
 import "./v2.css";
+import "./commands/app";
 import App from "./App";
-import { startRouter } from "./router";
+import { installKeys } from "./keyboard";
+import { startRouter, SURFACES } from "./router";
+import { announce } from "./runner";
 import { connect } from "./sync";
 import { installPageTelemetry } from "./telemetry";
 
 installPageTelemetry();
 connect();
+installKeys();
 render(() => <App />, document.getElementById("root")!);
 startRouter();
+announce(SURFACES.map((s) => ({ id: s.id, ...(s.v1 ? { v1: s.v1 } : {}) })));

@@ -1,7 +1,9 @@
-// Phase 0's Forests: a plain list straight from the store, kept live by the server's patches.
-// Phase 1 designs the real page.
+// Phase 0's Forests: a plain list straight from the store, kept live by the server's patches;
+// a click selects through the runner like a key does. Phase 1 designs the
+// real page.
 import { For, Show } from "solid-js";
 import { model } from "./model";
+import { bind } from "./runner";
 import { world } from "./store";
 import type { Project } from "./types";
 import { showArchive } from "./ui";
@@ -13,6 +15,7 @@ function Row(props: { p: Project }) {
       data-row={props.p.id}
       class="group flex cursor-default items-baseline gap-4 border-l-2 px-4 py-2 transition-colors duration-150"
       classList={{ "border-gold-leaf bg-gold-wash": on(), "border-transparent hover:bg-vellum-raise": !on() }}
+      onClick={bind("cursor.set", props.p.id)}
     >
       <span class="min-w-[12ch] text-ink" classList={{ "text-gold-leaf": on() }}>
         {props.p.name}
@@ -50,7 +53,9 @@ export default function Forests() {
         <Show
           when={showArchive()}
           fallback={
-            <p class="px-4 text-ink-faint">archive · {p().archive.length}</p>
+            <button class="px-4 text-ink-faint hover:text-ink-dim" onClick={bind("archive.toggle")}>
+              archive · {p().archive.length} — a to open
+            </button>
           }
         >
           <Section title="Archive" rows={p().archive} empty="the archive is empty" />
