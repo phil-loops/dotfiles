@@ -5,6 +5,7 @@
 #   GET  /outbox[?project=<p>]           the desk; ?project narrows to one forest (the launch sheet polls it)
 #   POST /<repo>/outbox-hold {branch|branches|project, until}   stamp branch.<b>.stack-hold-until (""/null clears)
 #   POST /<repo>/outbox-title {branch, title}          stamp branch.<b>.stack-pr-title (""/null clears)
+#   POST /<repo>/outbox-label {branch, on}             branch.<b>.stack-pr-label: off drops the review label from the compare link
 #
 # Never pushes, never opens a PR, never calls gh on the request path: PR facts come from
 # sync's SWR state map plus an open-PR detail cache refreshed in the background here, and
@@ -19,9 +20,10 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, quote
+from urllib.parse import parse_qs
 
 from . import ctx, push, repostate, stackcfg, sync
+from . import packet   # own line: packet imports this module back
 
 FIXTURE_ENV = "STACK_OUTBOX_PR_FIXTURE"
 TRUNKS = ("main", "master", "origin/main")
@@ -278,38 +280,6 @@ def _slug(snap):
     return m.group(1) if m else ""
 
 
-def _compare_url(slug, branch, base, title, body):
-    """github.com compare-and-create form, stacked base + landing title + body prefilled. Opens a
-    form for Phil's hand; nothing here creates the PR. Built from facts in hand — never
-    push.compare_url, whose body falls back to a stack-pr-body spawn (~1.6 s a node)."""
-    if not slug:
-        return ""
-    return (f"https://github.com/{slug}/compare/{quote(base, safe='')}...{quote(branch, safe='')}?expand=1"
-            + (f"&title={quote(title, safe='')}" if title else "")
-            + (f"&body={quote(body, safe='')}" if body else ""))
-
-
-def _pr_body(snap, node, nodes, ticket):
-    """Furniture in stack-pr-body's shape (purpose, Stacked on, merge order with #N for opened
-    steps), built from facts in hand — no gh, no spawn. A saved stack-pr-body wins verbatim."""
-    saved = snap.branch_key(node["branch"], "pr-body")
-    if saved:
-        return saved
-    lines = [node["description"] or node["title"]]
-    if len(node["subjects"]) > 1:
-        lines += [""] + [f"- {s}" for s in reversed(node["subjects"][:4])]
-    so = node["stackedOn"]
-    if so:
-        lines += ["", f"Stacked on: #{so['pr']}" if so.get("pr") else f"Stacked on: `{so['branch']}` (its PR opens first)"]
-    if len(nodes) > 1:
-        lines += ["", "Part of a stack, in merge order:"]
-        for i, n in enumerate(nodes, 1):
-            ref = "[this branch]" if n is node else f"#{n['pr']['number']}" if n.get("pr") else (n["description"] or n["leaf"])
-            lines.append(f"  {i}. {ref}")
-    template = _template(snap) if len(nodes) > 1 else ""
-    return "\n".join(lines) + (f"\n\n{template}\n" if template else "\n")
-
-
 def _forest(snap, project, prs, slug, graph):
     rank = _rank(project, snap)
     order = [b for b in rank.get("order", []) if snap.exists(b)]
@@ -327,7 +297,8 @@ def _forest(snap, project, prs, slug, graph):
         node = {"branch": b, "leaf": b.split("/")[-1], "position": pos, "rank": rank["rank"].get(b, 0),
                 "parent": parent, "tip": tip, "description": snap.description(b),
                 "requires": snap.branch_key_all(b, "requires"), "after": snap.branch_key_all(b, "after"),
-                "pr": pr, "holdUntil": snap.branch_key(b, "hold-until")}
+                "pr": pr, "holdUntil": snap.branch_key(b, "hold-until"),
+                "label": snap.branch_key(b, "pr-label") != "off"}
         if pr and pr.get("state") == "MERGED":
             node.update(status="landed", subjects=[], commits=0, pushed="synced", ahead=0, gates="green", redGates=[],
                         title=pr.get("title") or node["description"] or b, titleSource="pr")
@@ -367,8 +338,13 @@ def _forest(snap, project, prs, slug, graph):
             n["waitingOn"] = _waiting_on(n, by_branch)
             n["waitingH"] = _hours_since(n["pr"].get("approvedAt") or n["pr"].get("createdAt") or "")
         if n["status"] in ("ready", "work"):
-            n["compareUrl"] = _compare_url(slug, n["branch"], n["base"], n["title"], _pr_body(snap, n, nodes, ticket))
+            n["compareUrl"] = packet.compare_path(n["branch"], n["base"]) if slug else ""
         del n["tip"]
+    if any(n["status"] in ("review", "approved") for n in nodes):
+        remote = packet.remote_map(snap, prs)
+        for n in nodes:
+            if n["status"] in ("review", "approved"):
+                n["packet"] = packet.review_state(project, nodes, n, remote)
     unopened = [n for n in live if n["status"] in ("ready", "work")]
     if len(unopened) >= 2:
         summary = "ready-to-launch" if all(n["gates"] == "green" for n in unopened) else "launch-blocked"
@@ -469,6 +445,19 @@ def hold(req, raw):
         else:
             stackcfg.unset_key(b, "hold-until")
     req._send(200, json.dumps({"ok": True, "branches": targets, "until": until}))
+
+
+def label(req, raw):
+    """POST {branch, on} — whether the compare link asks for the ai-code-review label."""
+    d = json.loads(raw or "{}")
+    branch = d.get("branch", "")
+    if not branch or not repostate.snapshot().exists(branch):
+        return req._send(400, json.dumps({"ok": False, "err": "no such branch"}))
+    if d.get("on", True):
+        stackcfg.unset_key(branch, "pr-label")
+    else:
+        stackcfg.set_key(branch, "pr-label", "off")
+    req._send(200, json.dumps({"ok": True, "branch": branch, "on": bool(d.get("on", True))}))
 
 
 def title(req, raw):

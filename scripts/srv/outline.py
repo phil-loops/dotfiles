@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 from . import ctx, repostate, sync, watch
 
 _WIP = re.compile(r"^(wip\b|fixup!|squash!|amend!)", re.IGNORECASE)
-_PR_KEYS = {"prTitle": "stack-pr-title", "prBody": "stack-pr-body"}
+_PR_KEYS = {"prTitle": "stack-pr-title", "prBody": "stack-pr-body", "packet": "stack-packet", "prLabel": "stack-pr-label"}
 
 
 def _git(*args):
@@ -179,18 +179,24 @@ def _pr_text(url):
 
 
 def _pr(branch):
-    p = sync._pr_state_map().get(branch) or {}
+    from . import outbox
+    fx = outbox._fixture()   # the sandbox's PR facts, so every packet state renders without gh
+    p = (fx if fx is not None else sync._pr_state_map()).get(branch) or {}
     if not p.get("number"):
         return {"exists": False}
-    text, pending = _swr(("pr", ctx.repo_cwd(), p["url"]), p.get("state"), lambda: _pr_text(p["url"]))
+    if fx is not None:
+        text, pending = {"title": p.get("title", ""), "body": p.get("body", "")}, False
+    else:
+        text, pending = _swr(("pr", ctx.repo_cwd(), p["url"]), p.get("state"), lambda: _pr_text(p["url"]))
     return {"exists": True, "number": p["number"], "url": p.get("url", ""), "state": p.get("state", ""),
             "draft": bool(p.get("draft")), "title": (text or {}).get("title"),
             "body": (text or {}).get("body"), "pending": pending and text is None}
 
 
 def _drafted_body(branch):
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-pr-body"), branch], timeout=30)
-    return r.stdout.strip() if r.returncode == 0 else ""
+    from . import packet
+    f = packet.facts(branch)
+    return packet.rp.render(packet.rp.build(f), f["template"]).strip()
 
 
 def _draft(branch, rows):
@@ -267,7 +273,7 @@ def _undo_offer(branch):
     if moved and _out("rev-parse", branch) != e["newTip"]:
         return None
     return {"id": e["id"], "ts": e["ts"], "commits": len(e.get("commits", [])),
-            "fields": [k for k in ("description", "prTitle", "prBody") if k in e]}
+            "fields": [k for k in ("description", *_PR_KEYS) if k in e]}
 
 
 # ── rewriting ──────────────────────────────────────────────────────────────
@@ -438,11 +444,28 @@ def _apply_fields(branch, d, entry):
     for field, key in _PR_KEYS.items():
         if d.get(field) is None:
             continue
-        new = str(d[field]).strip()
+        new = _packet_value(d[field]) if field == "packet" else str(d[field]).strip()
         before = _cfg(f"branch.{branch}.{key}")
         if new != before:
             _set_cfg(f"branch.{branch}.{key}", new)
             entry[field] = {"before": before, "after": new}
+
+
+def _packet_value(v):
+    """The packet's hand parts as compact JSON — only what was written by hand; "" clears it."""
+    try:
+        d = json.loads(v) if isinstance(v, str) else v
+    except ValueError:
+        return ""
+    if not isinstance(d, dict):
+        return ""
+    keep = {}
+    if str(d.get("lead") or "").strip():
+        keep["lead"] = str(d["lead"]).strip()
+    for k in ("intent", "not", "read"):
+        if isinstance(d.get(k), list):
+            keep[k] = [" ".join(str(x).split()) for x in d[k] if str(x).strip()]
+    return json.dumps(keep, ensure_ascii=False, separators=(",", ":")) if keep else ""
 
 
 def save(req, raw):
