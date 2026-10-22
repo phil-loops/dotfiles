@@ -440,9 +440,6 @@ export function NodeDetail() {
               <EarlierHistory q={commits} branch={active()} selected={selectedCommit()} onSelect={selectCommit} />
             </>
           }>
-          <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
-            <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>m</b> map · <b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
-          </div>
           <Show when={node.data} fallback={<p class={LOADING}>loading…</p>}>
             {(data) => (
               <Show

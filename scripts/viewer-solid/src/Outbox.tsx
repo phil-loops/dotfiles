@@ -16,7 +16,6 @@ import {
 } from "./outboxModel";
 
 const EYEBROW = "eyebrow text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint";
-const ASK = "ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim";
 const BTN = "flex-none cursor-pointer rounded-[7px] border px-[11px] py-[3px] font-mono text-[11px] leading-[1.55] tracking-[0.02em] transition-[border-color,color,background] duration-[120ms] disabled:cursor-default disabled:opacity-45";
 const BTN_GOLD = `${BTN} border-gold-deep text-gold-leaf hover:bg-gold-wash enabled:hover:border-gold-leaf`;
 const BTN_QUIET = `${BTN} border-rule text-ink-dim hover:border-gold-deep hover:text-gold-leaf`;
@@ -41,39 +40,39 @@ function NodeRow(props: {
   const f = () => props.item.forest;
   const canPush = () => canMutate && n().gates === "green" && n().pushed !== "synced" && n().status !== "landed";
   const canOpen = () => !n().pr && n().pushed === "synced" && !!n().compareUrl;
+  // a meta line only when it says something the lane doesn't: a gate that isn't green, a PR, a hold
+  const hasMeta = () => (n().gates !== "green" && (!n().pr || !!n().ahead)) || !!n().pr || held();
   return (
     <div
-      class={`ob-row group relative grid cursor-pointer grid-cols-[22px_1fr_auto] items-start gap-x-[10px] rounded-[9px] border px-[12px] py-[9px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-deep bg-vellum-edge" : "border-transparent hover:bg-vellum-raise"} ${due() ? "shadow-[inset_2px_0_0_var(--color-gold-leaf)]" : held() ? "opacity-75" : ""}`}
+      title={n().branch}
+      class={`ob-row group relative grid cursor-pointer grid-cols-[22px_1fr_auto] items-center gap-x-[10px] rounded-[9px] border px-[12px] py-[6px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-deep bg-vellum-edge" : "border-transparent hover:bg-vellum-raise"} ${due() ? "shadow-[inset_2px_0_0_var(--color-gold-leaf)]" : held() ? "opacity-75" : ""}`}
       data-key={itemKey(props.item)}
       onClick={props.onSelect}
       onDblClick={props.onOpen}
     >
       <span class={`pt-[3px] text-right font-mono text-[10px] ${props.selected ? "text-gold-leaf" : "text-ink-faint"}`} title={`merge order ${n().position} of ${f().size}`}>
-        {f().size > 1 ? `${n().position}/${f().size}` : "·"}
+        {f().size > 1 ? `${n().position}/${f().size}` : ""}
       </span>
       <div class="min-w-0">
         <div class="flex min-w-0 items-baseline gap-[8px]">
           <LandingTitle n={n()} repo={f().repo} actions={props.actions} editing={props.editing} setEditing={props.setEditing}
             class="font-display text-[15.5px] leading-[1.35] text-ink" />
         </div>
-        <div class="mt-[3px] flex flex-wrap items-center gap-x-[8px] gap-y-[3px] font-mono text-[11px] text-ink-faint">
-          <span class="text-ink-dim">{n().branch}</span>
-          <Show when={n().base !== "main"}><span title="stacked base for the PR">→ {n().stackedOn?.pr ? `#${n().stackedOn?.pr}` : n().base}</span></Show>
-          <span>{n().commits} commit{n().commits === 1 ? "" : "s"}</span>
-          <Show when={!n().pr || n().ahead}><GatesChip n={n()} /></Show>
-          <PrChip n={n()} />
-          <Show when={n().status === "review" && n().pr?.createdAt}>
-            <span title={n().pr?.createdAt}>opened {fmtAge(n().pr?.createdAt)} ago</span>
-          </Show>
+        <div
+          class={`mt-[2px] flex-wrap items-center gap-x-[8px] gap-y-[3px] font-mono text-[11px] text-ink-faint ${props.selected || hasMeta() ? "flex" : "hidden"}`}
+        >
+          <span class="text-ink-faint">{n().branch}</span>
+          <Show when={n().gates !== "green" && (!n().pr || n().ahead)}><GatesChip n={n()} /></Show>
+          <Show when={n().pr && n().status !== "approved"}><PrChip n={n()} /></Show>
           <Show when={held()}>
             <span class={due() ? "text-gold-leaf" : "text-ink-faint"} title={n().holdUntil}>
-              {due() ? "☀ due now" : `☾ held until ${fmtDayPT(Date.parse(n().holdUntil))}`}
+              {due() ? "☀ due now" : `☾ ${fmtDayPT(Date.parse(n().holdUntil))}`}
             </span>
           </Show>
+          <Show when={n().status === "approved" && n().waitingOn?.length}>
+            <ApprovedWait n={n()} />
+          </Show>
         </div>
-        <Show when={n().status === "approved" && n().waitingOn?.length}>
-          <ApprovedWait n={n()} />
-        </Show>
       </div>
       <div class="flex items-center gap-[6px] pt-[1px]" onClick={(e) => e.stopPropagation()}>
         <Show when={canMutate && !n().pr}>
@@ -88,7 +87,7 @@ function NodeRow(props: {
         </Show>
         <Show when={canPush()}>
           <button
-            class={props.armed ? BTN_ARMED : BTN_GOLD}
+            class={props.armed ? BTN_ARMED : props.selected ? BTN_GOLD : `${BTN} border-transparent text-ink-faint group-hover:border-gold-deep group-hover:text-gold-leaf`}
             disabled={props.actions.busy() === "push:" + n().branch}
             title="push to origin (p) — asks once more before it goes"
             onClick={props.onPush}
@@ -97,19 +96,12 @@ function NodeRow(props: {
           </button>
         </Show>
         <Show when={canOpen()}>
-          <a class={`${BTN_GOLD} no-underline`} href={n().compareUrl} target="_blank" rel="noopener" title={`open the PR form against ${n().base} (o)`}>open PR ↗</a>
+          <a class={`${props.selected ? BTN_GOLD : `${BTN} border-transparent text-ink-faint group-hover:border-gold-deep group-hover:text-gold-leaf`} no-underline`} href={n().compareUrl} target="_blank" rel="noopener" title={`open the PR form against ${n().base} (o)`}>open PR ↗</a>
         </Show>
       </div>
     </div>
   );
 }
-
-const fmtAge = (iso?: string): string => {
-  const t = iso ? Date.parse(iso) : NaN;
-  if (!Number.isFinite(t)) return "?";
-  const h = Math.max(0, (Date.now() - t) / 3_600_000);
-  return h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
-};
 
 const WAIT_TONE: Record<Waiting["kind"], string> = {
   merge: "border-[#3c4a30] text-add",
@@ -127,12 +119,8 @@ const WAIT_TONE: Record<Waiting["kind"], string> = {
 function ApprovedWait(props: { n: OutboxNode }) {
   const pr = () => props.n.pr!;
   return (
-    <div class="mt-[6px] flex flex-wrap items-center gap-[6px] font-mono text-[11px]">
-      <span class="text-ink-faint" title={pr().approvedAt || ""}>
-        approved {props.n.waitingH != null ? `${Math.round(props.n.waitingH)}h` : "?"} ago
-        {pr().approvals ? ` · ${pr().approvals} approval${pr().approvals === 1 ? "" : "s"}` : ""} · waiting on
-      </span>
-      <For each={props.n.waitingOn}>
+    <span class="inline-flex flex-wrap items-center gap-[6px]" title={`approved ${props.n.waitingH != null ? `${Math.round(props.n.waitingH)}h` : "?"} ago${pr().approvals ? ` · ${pr().approvals} approval${pr().approvals === 1 ? "" : "s"}` : ""}`}>
+      <For each={(props.n.waitingOn ?? []).slice(0, 1)}>
         {(w, i) => (
           <a
             class={`${CHIP_W} no-underline ${WAIT_TONE[w.kind]} ${i() === 0 ? "shadow-[0_0_0_1px_rgba(230,182,78,0.15)]" : "opacity-80"} hover:opacity-100`}
@@ -146,7 +134,7 @@ function ApprovedWait(props: { n: OutboxNode }) {
           </a>
         )}
       </For>
-    </div>
+    </span>
   );
 }
 
@@ -157,18 +145,18 @@ function LaunchCard(props: { item: Item & { kind: "forest" }; selected: boolean;
   const held = () => f().nodes.some((n) => isHeld(n));
   return (
     <div
-      class={`ob-launch relative cursor-pointer rounded-[11px] border px-[14px] py-[11px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-leaf bg-vellum-edge" : "border-gold-deep bg-vellum-raise hover:border-gold-leaf"}`}
+      class={`ob-launch group relative cursor-pointer rounded-[11px] border px-[14px] py-[9px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-deep bg-vellum-edge" : "border-rule hover:border-gold-deep"}`}
       data-key={itemKey(props.item)}
       onClick={props.onSelect}
       onDblClick={props.onLaunch}
     >
       <div class="flex items-baseline gap-[10px]">
-        <span class="font-display text-[19px] italic text-ink">{f().project}</span>
-        <Show when={f().ticket}><span class="font-mono text-[10.5px] text-ink-faint">{f().ticket}</span></Show>
-        <span class={`font-mono text-[10.5px] ${f().summary === "ready-to-launch" ? "text-add" : "text-gold-leaf"}`}>{summaryLabel[f().summary]}</span>
-        <span class="ml-auto font-mono text-[10.5px] text-ink-faint">{f().unopened} of {f().size} not on GitHub</span>
+        <span class="font-display text-[17px] italic text-ink">{f().project}</span>
+        <span class="font-mono text-[10.5px] text-ink-faint">{f().size} PRs</span>
+        <Show when={f().summary !== "ready-to-launch"}><span class="font-mono text-[10.5px] text-gold-leaf">{summaryLabel[f().summary]}</span></Show>
+        <span class="ml-auto" />
         <Show when={canMutate}>
-          <button class={`${BTN} border-transparent text-ink-faint hover:border-rule hover:text-ink-dim`} title={held() ? "release the forest's hold (h)" : "hold the whole forest for the morning launch (h)"}
+          <button class={`${BTN} border-transparent text-ink-faint opacity-0 group-hover:opacity-100 hover:border-rule hover:text-ink-dim ${props.selected || held() ? "opacity-100" : ""}`} title={held() ? "release the forest's hold (h)" : "hold the whole forest for the morning launch (h)"}
             onClick={(e) => { e.stopPropagation(); props.onHold(); }}>
             {held() ? "☀ release" : "☾ hold forest"}
           </button>
@@ -177,17 +165,19 @@ function LaunchCard(props: { item: Item & { kind: "forest" }; selected: boolean;
           launch ⇢
         </button>
       </div>
+      <Show when={props.selected}>
       <ol class="mt-[8px] mb-0 list-none p-0">
         <For each={f().nodes.filter((n) => n.status !== "empty")}>
           {(n) => (
             <li class="grid grid-cols-[22px_1fr_auto] items-baseline gap-x-[10px] py-[2px]">
               <span class="text-right font-mono text-[10px] text-ink-faint">{n.position}</span>
               <span class={`overflow-hidden text-ellipsis whitespace-nowrap font-display text-[14px] ${n.status === "landed" ? "text-ink-faint line-through decoration-gold-deep" : "text-ink-dim"}`} title={n.branch}>{n.title}</span>
-              <span class="flex gap-[6px]"><Show when={!n.pr}><GatesChip n={n} /></Show><PrChip n={n} /></span>
+              <span class="flex gap-[6px]"><Show when={!n.pr && n.gates !== "green"}><GatesChip n={n} /></Show><Show when={n.pr}><PrChip n={n} /></Show></span>
             </li>
           )}
         </For>
       </ol>
+      </Show>
     </div>
   );
 }
@@ -225,11 +215,6 @@ export function Outbox() {
       void actions.hold(it.forest.repo, { branch: it.node.branch }, isHeld(it.node) ? "" : morningIso());
     }
   };
-  // bet 3's own measure: approved-but-unmerged hours, summed — the p90 tail is 78h
-  const approvedAsk = createMemo(() => {
-    const hrs = laneOf("approved").reduce((a, it) => a + (it.kind === "node" ? it.node.waitingH ?? 0 : 0), 0);
-    return `${Math.round(hrs)}h approved-but-unmerged between them; the next human action for each`;
-  });
   const firstLane = createMemo(() => {
     const held = laneOf("first");
     const anyDue = held.some((it) => it.kind === "node" ? isDue(it.node, now()) : it.forest.nodes.some((n) => isDue(n, now())));
@@ -310,6 +295,11 @@ export function Outbox() {
     ].filter(Boolean).join(" · ");
   });
 
+  // the lanes that wait on someone else, or on /push-ready, fold to one line until asked
+  const [opened, setOpened] = createSignal<Set<Lane>>(new Set());
+  const folds = (l: Lane) => (l === "review" || l === "work") && !opened().has(l);
+  const toggleLane = (l: Lane) => setOpened((s) => { const n = new Set(s); n.has(l) ? n.delete(l) : n.add(l); return n; });
+
   const laneBody = (lane: Lane): JSX.Element => (
     <For each={laneOf(lane)}>
       {(it) => (
@@ -355,18 +345,23 @@ export function Outbox() {
             <For each={LANES.filter((l) => laneOf(l.id).length)}>
               {(l) => (
                 <section class={`ob-lane mb-[22px] ob-lane-${l.id}`}>
-                  <h2 class={`${EYEBROW} mt-[26px] mb-[8px] ${l.id === "first" && due() ? "text-gold-leaf" : ""}`}>
+                  <h2
+                    class={`${EYEBROW} mt-[24px] mb-[6px] ${l.id === "first" && due() ? "text-gold-leaf" : ""} ${l.id === "review" || l.id === "work" ? "cursor-pointer hover:text-ink-dim" : ""}`}
+                    onClick={() => (l.id === "review" || l.id === "work") && toggleLane(l.id)}
+                  >
                     {l.id === "first" ? firstLane().title : l.title}
-                    <span class={ASK}>— {l.id === "first" ? firstLane().ask : l.id === "approved" ? approvedAsk() : l.ask}</span>
+                    <span class="ml-[8px] tracking-normal">{laneOf(l.id).length}</span>
+                    <Show when={l.id === "review" || l.id === "work"}><span class="ml-[6px] tracking-normal">{folds(l.id) ? "▸" : "▾"}</span></Show>
                   </h2>
-                  <div class="mb-[6px] h-px bg-rule" />
-                  <div class="flex flex-col gap-[4px]">{laneBody(l.id)}</div>
+                  <Show when={!folds(l.id)}>
+                    <div class="flex flex-col gap-[2px]">{laneBody(l.id)}</div>
+                  </Show>
                 </section>
               )}
             </For>
           </Show>
           <p class="mt-[40px] font-mono text-[10.5px] text-ink-faint">
-            j/k move · ↵ open · p push · h hold · e edit title · o open PR · l launch sheet
+            j/k · ↵ open · p push · l launch · h hold · e title
             <Show when={outbox.data?.prSource === "fixture"}> · PR state from fixture</Show>
             <Show when={outbox.data?.prSource === "warming"}> · PR state warming…</Show>
           </p>
