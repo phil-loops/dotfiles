@@ -1,8 +1,5 @@
 import { Show, Switch, Match } from "solid-js";
 import { Link } from "./router";
-import { deleteMode } from "./deleteMode";
-import { canMutate } from "./provider";
-import { ActionBar, type Action } from "./actions";
 import { leaf, mergedAgo, interestPips } from "./shared";
 import type { NextStep } from "./homeModel";
 import type { Project, Parked, PR } from "./types";
@@ -20,7 +17,6 @@ export function ForestRow(props: {
   hideFtip: () => void;
   onContext: (e: MouseEvent, p: Project) => void;
   prOf: (name: string) => PR | undefined;
-  dropAction: (p: Project) => Action;
   resolve: (name: string) => void;
   abort: (name: string) => void;
   next?: { step: NextStep; start: boolean };
@@ -62,7 +58,7 @@ export function ForestRow(props: {
         <span class="forest-pips mr-2 flex-none text-[10px] tracking-[0.14em] text-ink-faint">{interestPips(props.p.interest!)}</span>
       </Show>
       {/* ONE status cell, by precedence (Phil, strike 5: "a row = name + one signal") —
-          drop-mode > parked repair > merged fold > behind count > open PR. Pips sit dim
+          parked repair > merged fold > behind count > open PR. Pips sit dim
           after the name, node count on the overview; no signal at all = fresh. */}
       <span class="fcell trail ml-auto flex flex-none items-center justify-end text-right text-[11px] text-ink-faint">
         <Switch
@@ -80,9 +76,6 @@ export function ForestRow(props: {
             </Show>
           }
         >
-          <Match when={deleteMode() && canMutate}>
-            <ActionBar actions={[props.dropAction(props.p)]} />
-          </Match>
           <Match when={stuck()}>
             <div class="forest-parked relative flex-none">
               <button

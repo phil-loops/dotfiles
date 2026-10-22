@@ -1,6 +1,5 @@
 import { createSignal, createMemo, onCleanup, Show, For, type JSX } from "solid-js";
 import { useQueryClient } from "@tanstack/solid-query";
-import { deleteMode, setDeleteMode } from "./deleteMode";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
@@ -215,12 +214,6 @@ export function ForestsList(props: {
       <section>
         <div class="eyebrow-row flex items-center justify-between">
           <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">forests</h2>
-          <Show when={deleteMode()}>
-            <span class="delete-mode-tag ml-3 inline-flex items-center gap-2 text-[11px] tracking-[0.03em] text-del">
-              delete mode
-              <button class="delete-mode-exit cursor-pointer rounded-[6px] border border-del bg-transparent px-2 py-[2px] text-[11px] leading-[1.55] text-del transition-[background] duration-[120ms] hover:bg-del-bg" onClick={() => setDeleteMode(false)}>exit</button>
-            </span>
-          </Show>
           <Show when={props.restackErr()}>
             <span class="restack-err ml-auto pr-[10px] text-[11px] tracking-[0.02em] text-del">{props.restackErr()}</span>
           </Show>
