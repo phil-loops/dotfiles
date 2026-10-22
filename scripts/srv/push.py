@@ -350,18 +350,39 @@ def _pr_body_prefill(branch):
     return furniture + (f"\n\n{template}\n" if template else "\n")
 
 
-def _origin_web(branch):
+def landing_title(branch):
+    """The PR title the squash-merge lands on main: the drafted branch.<b>.stack-pr-title,
+    else the branch's opening commit subject."""
+    saved = ctx.run(["git", "config", f"branch.{branch}.stack-pr-title"]).stdout.strip()
+    if saved:
+        return saved
+    from . import outline
+    return outline.opening_subject(branch)
+
+
+def landing_body(branch):
+    """The drafted branch.<b>.stack-pr-body, else the forest furniture prefill."""
+    saved = ctx.run(["git", "config", f"branch.{branch}.stack-pr-body"]).stdout.strip()
+    return saved or _pr_body_prefill(branch)
+
+
+def compare_url(branch, base=None):
     """github.com compare link for the branch, opened straight to the 'Open a pull
-    request' form (?expand=1) with the base prefilled by _pr_base and, for a branch of a
-    multi-branch project, the body prefilled by _pr_body_prefill. Authoring still happens
-    on the website — this only opens the form; it never calls gh pr create."""
+    request' form (?expand=1) with the landing title and body prefilled, against base
+    (default _pr_base: the nearest stacked ancestor with an open PR, else main). Authoring
+    still happens on the website — this only opens the form; it never calls gh pr create."""
     url = repostate.snapshot().get("remote.origin.url")
     m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", url)
     if not m:
         return ""
-    body = _pr_body_prefill(branch)
-    return (f"https://github.com/{m.group(1)}/compare/{_pr_base(branch)}...{branch}?expand=1"
+    title, body = landing_title(branch), landing_body(branch)
+    return (f"https://github.com/{m.group(1)}/compare/{base or _pr_base(branch)}...{branch}?expand=1"
+            + (f"&title={quote(title, safe='')}" if title else "")
             + (f"&body={quote(body, safe='')}" if body else ""))
+
+
+def _origin_web(branch):
+    return compare_url(branch)
 
 
 def _open_pr_url(branch):
