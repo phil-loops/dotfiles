@@ -21,7 +21,7 @@ At branch creation, in one motion: `git config branch.<n>.description "<thesis>"
 
 Per-branch keys live under `branch.<n>.stack-*` (keystone ran 2026-09-13): git deletes them with the branch and carries them through `git branch -m`. **Never write the old `stack-branch.<n>.*` spelling** — `stack-config-move --check` flags it. Rename checklist: `git branch -m`, fix the `stack-project.<proj>.branch` registry entry, re-point children's `.stack-parent` (and any `.stack-requires`/`.stack-after` naming it). Health-scan: `stack-doctor [<project>]`; sweep dead config: `stack-doctor --prune` (`--dry-run` previews).
 
-Commit bodies' forest section bakes at prep-time only — never regenerate mid-flight (rewriting tips orphans children); descriptions DO refresh freely (config, not history).
+Commit bodies carry no generated forest text — the merge-order block lives only in the PR body (`stack-pr-body`, drafted as `branch.<b>.stack-pr-body` and edited in the viewer's words column), the only text that reaches main. The description is the branch's one human line (stories fold into it) and refreshes freely (config, not history).
 
 ## Creating
 
