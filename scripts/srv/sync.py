@@ -709,20 +709,6 @@ def _landed(branch, trunk="origin/main"):
     return ctx.run(["git", "merge-base", "--is-ancestor", branch, trunk]).returncode == 0
 
 
-def _requirers_of(branch):
-    reqs, new = {}, {}
-    out = ctx.run(["git", "config", "--get-regexp", r"^stack-branch\..*\.requires$"]).stdout
-    for line in out.splitlines():
-        key, _, val = line.partition(" ")
-        reqs.setdefault(key[len("stack-branch."):-len(".requires")], []).append(val.strip())
-    out = ctx.run(["git", "config", "--get-regexp", r"^branch\..*\.stack-requires$"]).stdout
-    for line in out.splitlines():
-        key, _, val = line.partition(" ")
-        new.setdefault(key[len("branch."):-len(".stack-requires")], []).append(val.strip())
-    reqs.update(new)
-    return [b for b, vals in reqs.items() if branch in vals]
-
-
 def _rebase_onto(branch, onto, cut):
     """Replay BRANCH's own commits (cut..BRANCH) onto ONTO — in the branch's own clean
     worktree, or borrowed into the scratch worktree when it isn't checked out anywhere.
@@ -775,67 +761,6 @@ def _rebase_tree(branch, onto, cut):
             return err
         stackcfg.set_key(c, "base", ctx.run(["git", "rev-parse", branch]).stdout.strip())
     return ""
-
-
-def _contract(branch):
-    """Drop an already-merged branch and rewire its dependents onto its parent (== main for a
-    syncable root). Each child REBASES off the dropped tip before its config moves — rewiring
-    config alone leaves the child's history forked off the dead tip, still carrying the merged
-    commit as a ghost the review diff re-shows (bit us 2026-07-20). Per-child transactional: a
-    child either fully moves (history + config) or is left untouched, and any failure stops the
-    contraction with the node still standing, so the drop is safe to re-press once fixed.
-    Returns (err, children, deps, parent); err is "" on success. `children` are branches
-    parented on it (line moves up); `deps` fan it in via `requires` and now inherit its work
-    from main, so that edge is dropped. Caller MUST have confirmed _already_merged first —
-    this never re-checks."""
-    parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
-              or ctx.run(["git", "config", f"stack-branch.{branch}.parent"]).stdout.strip() or "main")
-    onto = "origin/main" if parent == "main" else parent
-    base = ctx.run(["git", "rev-parse", onto]).stdout.strip()
-    esc = "^" + branch.replace(".", r"\.") + "$"
-    kids = _children_of(branch)
-    tip = ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).stdout.strip()
-    for k in kids:
-        cut = ctx.run(["git", "merge-base", tip, k]).stdout.strip() if tip else ""
-        # cut already inside the new base = no ghost history to shed → config-only move
-        if cut and ctx.run(["git", "merge-base", "--is-ancestor", cut, onto]).returncode != 0:
-            err = _rebase_tree(k, onto, cut)
-            if err:
-                return f"{err}; {branch} left standing", kids, [], parent
-        stackcfg.set_key(k, "parent", parent)
-        stackcfg.set_key(k, "base", base)
-    # Fan-in dependents: the required base landed in main, so the edge is now redundant — drop it,
-    # else the integrator carries a `requires` pointing at a branch that no longer exists.
-    deps = _requirers_of(branch)
-    for d in deps:
-        stackcfg.unset_key(d, "requires", esc)
-    wt = _worktree_of(branch)
-    if wt:
-        ctx.run(["git", "-C", wt, "checkout", "--detach"])   # release so branch -D can run
-    ctx.run(["git", "branch", "-D", branch])
-    proj = (ctx.run(["git", "config", f"branch.{branch}.stack-project"]).stdout.strip()
-            or ctx.run(["git", "config", f"stack-branch.{branch}.project"]).stdout.strip())
-    # the whole section, not named keys — a straggler like gates-green-tree otherwise outlives
-    # the branch (stack-branch.* sits outside the branch.<n>.* namespace git GCs on branch -D)
-    stackcfg.remove_stack_section(branch)
-    # Sweep EVERY project's branch list, not just .project's — a dangling entry under some
-    # other project is exactly the phantom-forest rot contraction exists to clean.
-    projs = {proj} if proj else set()
-    out = ctx.run(["git", "config", "--get-regexp", r"^stack-project\..+\.branch$"]).stdout
-    for line in out.splitlines():
-        key, _, val = line.partition(" ")
-        if val.strip() == branch:
-            projs.add(key[len("stack-project."):-len(".branch")])
-    for p in projs:
-        ctx.run(["git", "config", "--unset", f"stack-project.{p}.branch", esc])
-        # Last node contracted → the forest itself is done: drop the whole section
-        # (interest/epic included) so no empty forest card lingers.
-        if not ctx.run(["git", "config", "--get-all", f"stack-project.{p}.branch"]).stdout.strip():
-            ctx.run(["git", "config", "--remove-section", f"stack-project.{p}"])
-    # commit bodies are NOT refreshed here: the plan section bakes at prep time only
-    # (/prep folds it into the editor body, /prep-message writes it) — refreshing on every
-    # reshape rewrote tips mid-flight, and each rewrite forced a reseat cascade of its own
-    return "", kids, deps, parent
 
 
 def post_sync(req, raw):

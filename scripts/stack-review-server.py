@@ -21,7 +21,6 @@ from srv import ctx as srvctx, restack, sync, checkout, picker, review, chat, in
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
-from srv import ship    # own line: same reason
 from srv import prep    # own line: same reason
 from srv import wiki    # own line: same reason
 from srv import focus   # own line: same reason
@@ -592,10 +591,6 @@ class H(BaseHTTPRequestHandler):
             return push.open_pr(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)
             return restack.restack(self, raw)
-        if self.path == "/stage":            # restack chain forward + move MAIN checkout onto the tip (dryRun supported)
-            return stage.stage(self, raw)
-        if self.path == "/ship":             # ready-to-ship: contract ghosts + restack forest + push order (dryRun supported)
-            return ship.ship(self, raw)
         if self.path == "/restack-resolve":  # parked conflict → hand to Claude, then resume
             return restack.resolve(self, raw)
         if self.path == "/restack-abort":    # parked conflict → give up: abort rebase + clear state

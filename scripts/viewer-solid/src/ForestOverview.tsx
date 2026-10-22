@@ -20,10 +20,6 @@ import type { Purpose } from "./types";
 const FO_BTN = "cursor-pointer rounded-[6px] px-[10px] py-[3px] text-[11px] leading-[1.55]";
 const FO_VIEW_OFF = "border-transparent bg-transparent text-ink-faint hover:text-ink-dim";
 const FO_VIEW_ON = "border-rule bg-[#1b1815] text-[#e0ad4e]";
-const FO_STAGE = `fo-stage ${FO_BTN} ml-[6px] border enabled:hover:border-patina enabled:hover:text-ink disabled:cursor-default disabled:opacity-50`;
-const FO_STAGE_QUIET = "border-rule bg-transparent text-patina";
-const FO_STAGE_ARMED = "border-patina bg-patina text-vellum-night";
-const FO_STAGE_MSG = "fo-stage-msg ml-[6px] text-[11px] whitespace-nowrap";
 // Warming — the kiln heating before it can read the pieces (cold /forest-health, ~5s vs
 // GitHub). Ember, never the blessed gold; a delay guard keeps it off sub-second loads.
 const FO_WARM = "fo-warm inline-flex items-center gap-2 text-[11px] tracking-[0.05em] whitespace-nowrap max-[600px]:whitespace-normal";
@@ -97,10 +93,6 @@ function WarmingRibbon(props: {
 }
 
 
-// "stage for testing" — restack this forest's chain forward onto fresh origin/main, then
-// move the MAIN working tree onto the tip so the :3000 dev server serves the whole feature.
-// Two-click armed (it moves Phil's checkout); every guard re-verified server-side, and a
-// mid-chain conflict restores all branches to their pre-stage snapshots.
 // Pin/unpin this forest to the focus lane from its own page — the same stack-project.<p>.focus
 // rank Home's context menu writes, so no trip back to Home to mark what you're pushing now.
 function FocusPin(props: { project: string; repo?: string; focused: boolean }) {
@@ -126,136 +118,6 @@ function FocusPin(props: { project: string; repo?: string; focused: boolean }) {
       title={props.focused ? "unpin from the focus lane" : "pin to the focus lane — the hand-ordered 'pushing now' strip at the top of Home"}
       onClick={toggle}
     >{props.focused ? "★" : "☆"}</button>
-  );
-}
-
-function StageButton(props: { project: string }) {
-  const [armed, setArmed] = createSignal(false);
-  const [busy, setBusy] = createSignal(false);
-  const [msg, setMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
-  let disarm: ReturnType<typeof setTimeout>;
-  const fire = async () => {
-    if (!armed()) {
-      setArmed(true);
-      clearTimeout(disarm);
-      disarm = setTimeout(() => setArmed(false), 6000);
-      return;
-    }
-    clearTimeout(disarm);
-    setArmed(false);
-    setBusy(true);
-    setMsg(null);
-    const r = await fetch(withRepo("/stage"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ project: props.project }),
-    })
-      .then((x) => x.json() as Promise<{ ok?: boolean; err?: string; tip?: string; moved?: string[]; alreadyStaged?: boolean }>)
-      .catch((e) => ({ ok: false, err: String(e) }));
-    setBusy(false);
-    if (r.ok) {
-      const re = r as { tip?: string; moved?: string[]; alreadyStaged?: boolean };
-      setMsg({
-        text: re.alreadyStaged
-          ? `✓ already staged — checkout is on ${re.tip}`
-          : `✓ ${re.tip} on your checkout${re.moved?.length ? ` · ${re.moved.length} rebased` : ""}`,
-      });
-    } else {
-      setMsg({ text: `✗ ${r.err || "stage failed"}`, bad: true });
-    }
-  };
-  return (
-    <>
-      <button
-        class={`${FO_STAGE} ${armed() ? FO_STAGE_ARMED : FO_STAGE_QUIET}`}
-        classList={{ armed: armed() }}
-        disabled={busy()}
-        title="stage for testing — restack this chain onto fresh origin/main, then move your main checkout onto the tip so the dev server serves it. Refuses on a dirty checkout, an open PR in the chain, or anything but a single main-rooted line."
-        onClick={fire}
-      >
-        {busy() ? "staging…" : armed() ? "confirm: move my checkout" : "⇪ stage"}
-      </button>
-      <Show when={msg()}>
-        <span class={`${FO_STAGE_MSG} ${msg()!.bad ? "text-del" : "text-ink-dim"}`} classList={{ bad: !!msg()!.bad }}>{msg()!.text}</span>
-      </Show>
-    </>
-  );
-}
-
-type ShipResult = {
-  ok?: boolean; err?: string; alreadyReady?: boolean; moved?: string[]; conflict?: string;
-  unseatable?: string[]; contracted?: { branch: string }[]; order?: { branch: string; unpushed: boolean }[];
-};
-
-// One ship verb, one outcome slot. The header button and the map's merged-ghost pill both POST
-// /ship, so they share this signal — a pill that fired and dropped the answer read as a dead
-// button while the server was refusing (an off-parent node, a conflicting rebase) in full detail.
-const [shipMsg, setShipMsg] = createSignal<{ text: string; bad?: boolean } | null>(null);
-
-async function runShip(project: string, qc: ReturnType<typeof useQueryClient>): Promise<ShipResult> {
-  setShipMsg(null);
-  const r: ShipResult = await fetch(withRepo("/ship"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ project }),
-  })
-    .then((x) => x.json() as Promise<ShipResult>)
-    .catch((e) => ({ ok: false, err: String(e) }));
-  if (!r.ok) {
-    setShipMsg({ text: `✗ ${r.err || "ship failed"}`, bad: true });
-    return r;
-  }
-  const pushList = (r.order ?? []).filter((o) => o.unpushed).map((o) => leaf(o.branch));
-  const did = [
-    r.contracted?.length ? `${r.contracted.length} merged dropped` : "",
-    r.moved?.length ? `${r.moved.length} rebased` : "",
-  ].filter(Boolean).join(" · ");
-  setShipMsg({
-    text: (r.alreadyReady ? "✓ already ready" : `✓ ready — ${did}`)
-      + (pushList.length ? ` · push: ${pushList.join(" → ")}` : " · nothing to push"),
-  });
-  qc.invalidateQueries({ queryKey: ["model"] });
-  qc.invalidateQueries({ queryKey: ["forest-health"] });
-  qc.invalidateQueries({ queryKey: ["projects"] });
-  return r;
-}
-
-// The forest's "get this ready to go" verb: POST /ship contracts already-merged members,
-// restacks every survivor onto fresh origin/main (trees included), and reports the push
-// order. Prep/push stay per-node so the outgoing commit message remains editable.
-function ShipButton(props: { project: string }) {
-  const qc = useQueryClient();
-  const [armed, setArmed] = createSignal(false);
-  const [busy, setBusy] = createSignal(false);
-  let disarm: ReturnType<typeof setTimeout>;
-  const fire = async () => {
-    if (!armed()) {
-      setArmed(true);
-      clearTimeout(disarm);
-      disarm = setTimeout(() => setArmed(false), 6000);
-      return;
-    }
-    clearTimeout(disarm);
-    setArmed(false);
-    setBusy(true);
-    await runShip(props.project, qc);
-    setBusy(false);
-  };
-  return (
-    <>
-      <button
-        class={`${FO_STAGE} ${armed() ? FO_STAGE_ARMED : FO_STAGE_QUIET}`}
-        classList={{ armed: armed() }}
-        disabled={busy()}
-        title="ready to ship — drop any member that already merged (rewiring its children), restack the whole forest onto fresh origin/main, then list what to push in order. Refuses if a member has an open PR or a dirty worktree; a conflict restores everything."
-        onClick={fire}
-      >
-        {busy() ? "readying…" : armed() ? "confirm: contract + restack" : "▸ ready"}
-      </button>
-      <Show when={shipMsg()}>
-        <span class={`${FO_STAGE_MSG} ${shipMsg()!.bad ? "text-del" : "text-ink-dim"}`} classList={{ bad: !!shipMsg()!.bad }}>{shipMsg()!.text}</span>
-      </Show>
-    </>
   );
 }
 
@@ -353,10 +215,6 @@ export function ForestOverview() {
             <button class={`fo-view-story ${FO_BTN} border ${ovView() === "story" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the titles that land on main, in merge order">≣ landing</button>
             <button class={`fo-view-stories ${FO_BTN} border ${ovView() === "stories" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "stories" }} onClick={() => setOvView("stories")} title="one plain-English line per branch, edited in place">✎ stories</button>
           </div>
-          <Show when={canMutate}>
-            <ShipButton project={project()} />
-            <StageButton project={project()} />
-          </Show>
         </Show>
       </header>
       <Show
