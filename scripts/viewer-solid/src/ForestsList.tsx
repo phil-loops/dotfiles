@@ -27,7 +27,6 @@ export function ForestsList(props: {
   forestRow: (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => JSX.Element;
   parked: () => Parked | null;
   prOf: (name: string) => PR | undefined;
-  setTier: (repo: string, project: string, tier: string) => void;
 }) {
   const qc = useQueryClient();
   // Forests recency — "most recently alive": the latest of local commit, PR opened, and
@@ -83,7 +82,7 @@ export function ForestsList(props: {
   const epicClusters = createMemo(() => {
     const byEpic = new Map<string, Project[]>();
     for (const p of forests()) {
-      if (!p.epic || recentlyMerged(p) || p.shelved || p.tier !== "committed" || p.focus != null) continue;
+      if (!p.epic || recentlyMerged(p) || p.focus != null) continue;
       (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
     }
     return [...byEpic.entries()]
@@ -103,7 +102,7 @@ export function ForestsList(props: {
   const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
   const bands = createMemo(() => {
     const clustered = clusteredKeys();
-    const active = forests().filter((p) => !recentlyMerged(p) && !p.shelved && p.tier === "committed" && p.focus == null && !clustered.has(pkey(p)));
+    const active = forests().filter((p) => !recentlyMerged(p) && p.focus == null && !clustered.has(pkey(p)));
     return BANDS.map((band, i) => ({
       ...band,
       clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
@@ -121,37 +120,12 @@ export function ForestsList(props: {
     return first ? pkey(first) : null;
   });
   const stepInfo = (p: Project, folded: boolean) => {
-    if (folded || p.shelved || !isPrBand(bandIdx(p))) return undefined;
+    if (folded || !isPrBand(bandIdx(p))) return undefined;
     const step = stepOf(p);
     return step ? { step, start: pkey(p) === startKey() } : undefined;
   };
   const merged = createMemo(() =>
     forests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
-  // deliberately paused — Phil's explicit mark (right-click → shelve); a shelf, not a band
-  const shelvedList = createMemo(() =>
-    forests().filter((p) => p.shelved && !recentlyMerged(p)).sort((a, b) => forestTs(b) - forestTs(a)));
-
-  // ── conviction tiers (orthogonal to the bands) ──────────────────────────
-  // committed → the lifecycle bands above; trying/spike/untriaged get their own sections. A pool of
-  // everything still in play (not merged, not shelved) — and NOT already pinned to the focus lane:
-  // pinning IS a decision, so a focused forest leaves the triage pile (and every band) for the lane.
-  const tierPool = createMemo(() =>
-    forests().filter((p) => !recentlyMerged(p) && !p.shelved && p.focus == null));
-  // any interaction counts as triaged: a forest you've rated (interest>0) keeps its triage-zone
-  // spot but no longer nags for a tier — the nag count reflects only the still-untouched ones.
-  const triaged = (p: Project) => (p.interest ?? 0) > 0;
-  const triageList = createMemo(() =>
-    tierPool().filter((p) => p.tier == null).sort((a, b) => forestTs(b) - forestTs(a)));
-  const triageNag = createMemo(() => triageList().filter((p) => !triaged(p)).length);
-  const tryingList = createMemo(() =>
-    tierPool().filter((p) => p.tier === "trying").sort((a, b) => forestTs(b) - forestTs(a)));
-  const spikeList = createMemo(() =>
-    tierPool().filter((p) => p.tier === "spike").sort((a, b) => forestTs(b) - forestTs(a)));
-  // the "committed" super-header only earns its place once tiers are actually in use — otherwise
-  // the bands stand on their own exactly as before.
-  const showTierHeads = createMemo(() =>
-    tierPool().some((p) => p.tier === "committed") &&
-    (triageList().length > 0 || tryingList().length > 0 || spikeList().length > 0));
   const multiRepo = createMemo(() => new Set(forests().map((p) => p.repo || "loops")).size > 1);
 
   // ── the gutter ☆: click pins to the end of the focus lane; drag places it precisely ────
@@ -233,25 +207,9 @@ export function ForestsList(props: {
     ) : (
       props.forestRow(p, folded, stepInfo(p, folded))
     ));
-  // dormant + shelved + recently-merged folds closed until clicked — context, not to-dos.
+  // dormant + recently-merged folds closed until clicked — context, not to-dos.
   const [dormantOpen, setDormantOpen] = createSignal(false);
-  const [shelvedOpen, setShelvedOpen] = createSignal(false);
   const [mergedOpen, setMergedOpen] = createSignal(false);
-  const [spikeOpen, setSpikeOpen] = createSignal(false);
-  // triage row: a forest with no tier yet → one-click set into a tier. The forcing function.
-  const TRIAGE_SET = "cursor-pointer rounded-[3px] border border-rule px-[9px] py-[2px] font-mono text-[11px] text-ink-dim";
-  const triageRow = (p: Project) => (
-    <div class="triage-item flex flex-col">
-      {row(p, false)}
-      <Show when={!triaged(p)}>
-        <div class="triage-actions mt-[2px] mb-2 ml-[10px] flex gap-[6px]">
-          <button class={`triage-set committed ${TRIAGE_SET} hover:border-gold-deep hover:text-gold-leaf`} title="I'm shipping this" onClick={() => props.setTier(p.repo || "loops", p.name, "committed")}>● committed</button>
-          <button class={`triage-set trying ${TRIAGE_SET} hover:border-patina hover:text-patina`} title="leaning in, undecided" onClick={() => props.setTier(p.repo || "loops", p.name, "trying")}>◐ trying</button>
-          <button class={`triage-set spike ${TRIAGE_SET} hover:border-ink-faint hover:text-ink-faint`} title="throwaway experiment" onClick={() => props.setTier(p.repo || "loops", p.name, "spike")}>○ spike</button>
-        </div>
-      </Show>
-    </div>
-  );
   return (
       <Show when={props.tab() === "forests"}>
       <section>
@@ -276,15 +234,6 @@ export function ForestsList(props: {
             <p class="loading px-1 py-[14px] italic text-ink-faint">no forests configured</p>
           }
         >
-          <Show when={triageList().length}>
-            <div class={`forest-band-head triage-head ${BAND_HEAD} flex items-center gap-[6px] text-ember`} title="new forests with no conviction tier yet — decide: committed (ships, keeps its bands), trying, or a throwaway spike">
-              ◆ triage <span class="triage-count rounded-[8px] bg-ember px-[6px] font-mono text-[11px] text-vellum-night">{triageNag()}</span>
-            </div>
-            <For each={triageList()}>{(p) => triageRow(p)}</For>
-          </Show>
-          <Show when={showTierHeads()}>
-            <div class="tier-head mt-[18px] mb-1 border-0 border-b border-solid border-gold-deep pb-[3px] font-mono text-[11px] uppercase tracking-[0.14em] text-gold-leaf" title="the forests you're serious about — full lifecycle bands below">committed</div>
-          </Show>
           <For each={bands()}>
             {(band) => (
               <Show
@@ -324,28 +273,6 @@ export function ForestsList(props: {
               </Show>
             )}
           </For>
-          <Show when={tryingList().length}>
-            <div class={`forest-band-head tier-head-trying ${BAND_HEAD} text-patina`} title="leaning in, undecided — promote to committed or drop to spike as it proves out">
-              ◐ trying
-            </div>
-            <For each={tryingList()}>{(p) => row(p, false)}</For>
-          </Show>
-          <Show when={spikeList().length}>
-            <button class={MFOLD} onClick={() => setSpikeOpen(!spikeOpen())} title="throwaway experiments — right-click a forest → conviction to promote one">
-              {spikeOpen() ? "▾" : "▸"} {spikeList().length} spike{spikeList().length === 1 ? "" : "s"}
-            </button>
-            <Show when={spikeOpen()}>
-              <For each={spikeList()}>{(p) => row(p, false)}</For>
-            </Show>
-          </Show>
-          <Show when={shelvedList().length}>
-            <button class={MFOLD} onClick={() => setShelvedOpen(!shelvedOpen())} title="deliberately paused (right-click a forest → shelve); unshelve the same way">
-              {shelvedOpen() ? "▾" : "▸"} {shelvedList().length} shelved
-            </button>
-            <Show when={shelvedOpen()}>
-              <For each={shelvedList()}>{(p) => row(p, false)}</For>
-            </Show>
-          </Show>
           <Show when={merged().length}>
             <button class={MFOLD} onClick={() => setMergedOpen(!mergedOpen())}>
               {mergedOpen() ? "▾" : "▸"} {merged().length} recently merged

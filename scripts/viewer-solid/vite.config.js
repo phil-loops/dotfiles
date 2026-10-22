@@ -20,7 +20,7 @@ const ROUTES = [
   "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
   "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
   "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
-  "/ticket", "/story", "/interest", "/focus", "/contract", "/ship", "/stage", "/merge-subjects",
+  "/ticket", "/story", "/focus", "/contract", "/ship", "/stage", "/merge-subjects",
   "/plan-steps", "/plan-section", "/plan-template", "/plan-preview",
   "/commit-diff", "/commit-dirty", "/dirty-resolve", "/diverged-detail",
   "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",

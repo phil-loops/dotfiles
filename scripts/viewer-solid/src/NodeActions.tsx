@@ -17,7 +17,7 @@
 //   POST /gates     {branch, ...}    → detached; poll GET /gates-progress, whose journal
 //                                     carries a "queued" event while another run holds the slot
 //   POST /contract  {branch}         → drop a landed ghost and rewire its children onto main
-//   POST /delta-tests, /dirty-resolve, /reseat-children, /fix-upstream, /interest
+//   POST /delta-tests, /dirty-resolve, /reseat-children, /fix-upstream
 import { createSignal, For, Show, onCleanup } from "solid-js";
 import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@tanstack/solid-query";
 import { provider, canMutate, withRepo } from "./provider";
@@ -99,8 +99,6 @@ export function NodeActions(props: {
   onReseat?: () => void; // rebase drifted children back onto the parent's tip (App owns the mutation)
   onDetach?: () => void; // unset a footgun tracking ref
   onInspect?: () => void; // toggle the diverged-inspect panel (lives in App below the header)
-  interest?: number; // the forest's Home-ordering interest — drives the ⋯ promote/demote items
-  onBump?: (delta: number) => void;
 }) {
   if (!canMutate) return null; // static snapshot: no rebase/checkout/squash actions
   const qc = useQueryClient();
@@ -799,18 +797,6 @@ export function NodeActions(props: {
                 onClick={() => { setOpen(false); props.onInspect!(); }}
               >
                 <span class={`nh-item-ic ${IC}`}>⇄</span> inspect divergence
-              </button>
-            </Show>
-          </Show>
-
-          {/* interest + all-threads — demoted off the header bar (strike-6 trim) */}
-          <Show when={props.onBump}>
-            <button class={`nh-item ${ITEM}`} role="menuitem" onClick={() => props.onBump!(1)}>
-              <span class={`nh-item-ic ${IC}`}>▲</span> promote forest on Home{(props.interest ?? 0) > 0 ? ` (now ${props.interest})` : ""}
-            </button>
-            <Show when={(props.interest ?? 0) > 0}>
-              <button class={`nh-item ${ITEM}`} role="menuitem" onClick={() => props.onBump!(-1)}>
-                <span class={`nh-item-ic ${IC}`}>▼</span> demote
               </button>
             </Show>
           </Show>

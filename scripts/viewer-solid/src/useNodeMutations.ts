@@ -2,7 +2,7 @@ import { createMutation, type QueryClient } from "@tanstack/solid-query";
 import { withRepo } from "./provider";
 
 // The per-node mutations: bless/unbless (optimistic via the caller's override map, snap back on
-// error), interest bump, upstream detach, and scoped child reseat. Fed the active branch, the
+// error), upstream detach, and scoped child reseat. Fed the active branch, the
 // bless-override accessors, the query client, and a health refetch.
 export function useNodeMutations(deps: {
   active: () => string;
@@ -45,20 +45,6 @@ export function useNodeMutations(deps: {
     onError: (_e, _file, ctx) => { if (ctx) { deps.setOverride(ctx.file, ctx.prev); } },
   }));
 
-  // promote/demote this forest's manual interest level — orders it on the Forests home.
-  const bumpInterest = createMutation(() => ({
-    mutationFn: (arg: { project: string; delta: number }) =>
-      fetch(withRepo("/interest"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(arg),
-      }).then((r) => r.json()),
-    onSuccess: () => {
-      deps.qc.invalidateQueries({ queryKey: ["model"] });
-      deps.qc.invalidateQueries({ queryKey: ["projects"] });
-    },
-  }));
-
   // neutralize a footgun tracking ref (renamed/foreign remote or origin/main) by unsetting
   // it — config-only, keeps every commit; GitHub Desktop then offers Publish, not a Pull.
   const detachUpstream = createMutation(() => ({
@@ -86,5 +72,5 @@ export function useNodeMutations(deps: {
       deps.qc.invalidateQueries({ queryKey: ["model"] }); // children's SHAs moved — diffs are stale
     },
   }));
-  return { bless, unbless, bumpInterest, detachUpstream, reseatChildren };
+  return { bless, unbless, detachUpstream, reseatChildren };
 }

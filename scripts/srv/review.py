@@ -739,26 +739,6 @@ def story_set(req, raw):
     req._send(200, json.dumps({"ok": True, "branch": branch, "story": text, "prev": before}))
 
 
-def interest_bump(req, raw):
-    # Promote/demote a forest's manual interest level (stack-project.<p>.interest). Body carries
-    # {project, delta} (+1 promote / -1 demote) or {project, value} (absolute); {branch} resolves
-    # to its project. Clamped ≥0; 0 unsets. Orders the Forests home; purely Phil's signal.
-    d = json.loads(raw or "{}")
-    proj = d.get("project", "") or (picker._project_of(d["branch"]) if d.get("branch") else "")
-    if not proj:
-        return req._send(400, json.dumps({"ok": False, "error": "no project for interest"}))
-    key = f"stack-project.{proj}.interest"
-    cur = ctx.run(["git", "config", key]).stdout.strip()
-    cur = int(cur) if cur.lstrip("-").isdigit() else 0
-    nxt = int(d["value"]) if "value" in d else cur + int(d.get("delta", 0))
-    nxt = max(0, nxt)
-    if nxt > 0:
-        ctx.run(["git", "config", key, str(nxt)])
-    else:
-        ctx.run(["git", "config", "--unset", key])
-    req._send(200, json.dumps({"ok": True, "project": proj, "interest": nxt}))
-
-
 def ticket_set(req, raw):
     # Tie a forest — or one node of it — to its Linear ticket. Commit scopes and the merge
     # story then read type(loo-####): instead of the project name. Body carries
@@ -789,23 +769,6 @@ def ticket_set(req, raw):
     else:
         ctx.run(["git", "config", "--unset", key])
     req._send(200, json.dumps({"ok": True, "project": proj, "ticket": ticket.lower()}))
-
-
-def shelve(req, raw):
-    # Mark/unmark a forest deliberately paused (stack-project.<p>.shelved true). Phil's own
-    # signal — a shelved forest leaves the active bands for the shelved fold until unshelved,
-    # no matter its PR/merge state.
-    d = json.loads(raw or "{}")
-    proj = d.get("project", "")
-    if not proj:
-        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
-    key = f"stack-project.{proj}.shelved"
-    on = bool(d.get("on", True))
-    if on:
-        ctx.run(["git", "config", key, "true"])
-    else:
-        ctx.run(["git", "config", "--unset", key])
-    req._send(200, json.dumps({"ok": True, "project": proj, "shelved": on}))
 
 
 def _focus_git(repo, *args):
@@ -840,23 +803,6 @@ def focus_set(req, raw):
         return req._send(200, json.dumps({"ok": True, "project": proj, "focus": True}))
     _focus_git(repo, "config", "--unset", key)
     req._send(200, json.dumps({"ok": True, "project": proj, "focus": False}))
-
-
-def tier_set(req, raw):
-    # Set a forest's conviction tier (stack-project.<p>.tier ∈ committed|trying|spike); an empty/
-    # absent tier unsets → untriaged (the triage zone). Repo-scoped like interest.
-    d = json.loads(raw or "{}")
-    proj = d.get("project", "")
-    if not proj:
-        return req._send(400, json.dumps({"ok": False, "error": "no project"}))
-    key = f"stack-project.{proj}.tier"
-    tier = d.get("tier", "")
-    if tier in ("committed", "trying", "spike"):
-        ctx.run(["git", "config", key, tier])
-    else:
-        ctx.run(["git", "config", "--unset", key])
-        tier = None
-    req._send(200, json.dumps({"ok": True, "project": proj, "tier": tier}))
 
 
 def _scratch_worktree_for(branch):
