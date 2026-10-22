@@ -4,18 +4,13 @@ import { forestRepo } from "./router";
 import { chatTarget } from "./chatDrawer";
 import { mapOpen, openMap } from "./mapState";
 import { storySheetOpen } from "./StorySheet";
-import type { SpineNode } from "./types";
 
-// The node review keyboard: j/k walk the spine, 1–4 pick the diff base, c flips diffs⇄commits
-// ([ / ] step commits there),
-// b toggles the file panel, ⇧B/⇧U bless/unbless the focused file, o opens the hovered line in
-// nvim, Esc opens the forest map overlay (m does too, from anywhere — MapOverlay), ? toggles help. Installed on mount, torn down on cleanup.
+// The node review keyboard: c flips diffs⇄commits ([ / ] step commits there), b toggles the file
+// panel, ⇧B/⇧U bless/unbless the focused file, o opens the hovered line in nvim, Esc opens the
+// forest map overlay (m does too, from anywhere — MapOverlay), ? toggles help. Installed on
+// mount, torn down on cleanup.
 export function useNodeKeyboard(deps: {
   focusFilter: () => void;
-  spine: () => SpineNode[];
-  active: () => string;
-  goto: (b: string) => void;
-  setBase: (v: string) => void;
   hover: () => { path: string; line: number } | null;
   openInNvim: (path: string, line: number | null) => void;
   setView: (fn: (v: "diffs" | "commits") => "diffs" | "commits") => void;
@@ -38,19 +33,11 @@ export function useNodeKeyboard(deps: {
     // already typing (incl. the filter box) → let everything bubble: a 2nd ⌘F reaches native find
     if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
     // a sheet over the page owns the keyboard: Esc there closes the sheet rather than also
-    // popping up to the forest, and m/j/k don't navigate out from under an open editor
+    // popping up to the forest map
     if (storySheetOpen() || mapOpen()) return;
     if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); deps.focusFilter(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return; // leave OS/browser chords alone
-    const list = deps.spine();
-    const i = list.findIndex((n) => n.id === deps.active());
-    if (e.key === "j" && i < list.length - 1) { e.preventDefault(); deps.goto(list[i + 1].id); }
-    else if (e.key === "k" && i > 0) { e.preventDefault(); deps.goto(list[i - 1].id); }
-    else if (e.key === "1") deps.setBase("");
-    else if (e.key === "2") deps.setBase("main");
-    else if (e.key === "3") deps.setBase("blessed");
-    else if (e.key === "4") deps.setBase("@origin");
-    else if (e.key === "o" && deps.hover()) { e.preventDefault(); const h = deps.hover()!; deps.openInNvim(h.path, h.line); }
+    if (e.key === "o" && deps.hover()) { e.preventDefault(); const h = deps.hover()!; deps.openInNvim(h.path, h.line); }
     else if (e.key === "c") deps.setView((v) => (v === "commits" ? "diffs" : "commits"));
     else if ((e.key === "[" || e.key === "]") && deps.view() === "commits") { e.preventDefault(); deps.stepCommit(e.key === "]" ? 1 : -1); }
     else if (e.key === "b") { e.preventDefault(); deps.togglePanel(); } // show / hide the file panel
