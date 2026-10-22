@@ -520,18 +520,12 @@ class H(BaseHTTPRequestHandler):
             return review.story_set(self, raw)
         if self.path == "/plan-template":   # save the per-project body template (edit once, carries forward)
             return review.plan_template_set(self, raw)
-        if self.path == "/interest":   # promote/demote a branch's manual interest (stack-project.<p>.interest)
-            return review.interest_bump(self, raw)
         if self.path == "/ticket":     # tie a forest to its Linear ticket (stack-project.<p>.ticket)
             return review.ticket_set(self, raw)
-        if self.path == "/shelve":     # mark/unmark a forest deliberately paused (stack-project.<p>.shelved)
-            return review.shelve(self, raw)
         if self.path == "/frozen-origin":  # mark/unmark deliberate origin divergence (stack-branch.<b>.frozen-origin)
             return review.frozen_origin_set(self, raw)
         if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
             return review.focus_set(self, raw)
-        if self.path == "/tier":       # set a forest's conviction tier (stack-project.<p>.tier)
-            return review.tier_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background

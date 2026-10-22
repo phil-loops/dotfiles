@@ -177,7 +177,7 @@ export function NodeDetail() {
       ? node.data
       : commitDiff.data && { branch: active(), files: commitDiff.data.files, dirty: [] };
 
-  const { bless, unbless, bumpInterest, detachUpstream, reseatChildren } = useNodeMutations({
+  const { bless, unbless, detachUpstream, reseatChildren } = useNodeMutations({
     active,
     blessTarget: nodeRef,
     blessOverride,
@@ -394,7 +394,6 @@ export function NodeDetail() {
           forestTicket={forestTicket}
           reseatChildren={reseatChildren}
           detachUpstream={detachUpstream}
-          bumpInterest={bumpInterest}
           divergedOpen={divergedOpen}
           setDivergedOpen={setDivergedOpen}
           nodeHealth={nodeHealth}

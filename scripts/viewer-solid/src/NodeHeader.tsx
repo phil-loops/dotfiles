@@ -74,7 +74,6 @@ export function NodeHeader(props: {
   forestTicket: () => string | undefined;
   reseatChildren: { isPending: boolean; data?: { ok: boolean; conflicts: { branch: string; err: string }[] } | null; mutate: (p: string) => void };
   detachUpstream: { isPending: boolean; mutate: (b: string) => void };
-  bumpInterest: { mutate: (arg: { project: string; delta: number }) => void };
   divergedOpen: () => boolean;
   setDivergedOpen: (v: boolean) => void;
   nodeHealth: (b: string) => HealthEntry | undefined;
@@ -217,8 +216,6 @@ export function NodeHeader(props: {
                 onReseat={() => { const p = props.nodeHealth(props.active())?.parent; if (p) props.reseatChildren.mutate(p); }}
                 onDetach={() => props.detachUpstream.mutate(props.active())}
                 onInspect={() => props.setDivergedOpen(!props.divergedOpen())}
-                interest={canMutate ? props.interestOf() : undefined}
-                onBump={canMutate ? (delta) => props.bumpInterest.mutate({ project: props.project(), delta }) : undefined}
               />
             </Show>
           </div>

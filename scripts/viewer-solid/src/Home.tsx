@@ -59,16 +59,15 @@ export function Home() {
     queryFn: () => provider.reviewRequests(),
     refetchOnWindowFocus: true,
   }));
-  // right-click a forest card → set its importance (stack-project.<name>.interest) — what
-  // floats the forest up the Home list.
+  // right-click a forest card → pin it to the focus lane, or drop the grouping.
   const [ctxMenu, setCtxMenu] = createSignal<
-    { x: number; y: number; repo: string; project: string; current: number; shelved: boolean; focused: boolean; tier: string | null } | null
+    { x: number; y: number; repo: string; project: string; focused: boolean } | null
   >(null);
   // drop is destructive (forgets the forest grouping) — a two-click arm so a misclick can't do it.
   const [dropArmed, setDropArmed] = createSignal(false);
   const closeCtx = () => { setCtxMenu(null); setDropArmed(false); };
   // keep the menu fully on-screen: a click near the bottom would otherwise open it past the
-  // viewport with its lower items (shelve, drop) unreachable. Clamp after measuring; the CSS
+  // viewport with its lower items (drop) unreachable. Clamp after measuring; the CSS
   // max-height caps a tall menu and it scrolls internally.
   const clampMenu = (el: HTMLElement, x: number, y: number) => {
     requestAnimationFrame(() => {
@@ -77,24 +76,6 @@ export function Home() {
       el.style.top = `${Math.max(pad, Math.min(y, window.innerHeight - el.offsetHeight - pad))}px`;
     });
   };
-  const setInterest = createMutation(() => ({
-    mutationFn: (arg: { repo: string; project: string; value: number }) =>
-      fetch(`/${arg.repo}/interest`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: arg.project, value: arg.value }),
-      }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
-  }));
-  const setShelved = createMutation(() => ({
-    mutationFn: (arg: { repo: string; project: string; on: boolean }) =>
-      fetch(`/${arg.repo}/shelve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: arg.project, on: arg.on }),
-      }).then((r) => r.json()),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects"] }),
-  }));
   // pin/unpin a forest to the focus lane (stack-project.<name>.focus) — cross-repo, so /focus is
   // not repo-prefixed; the body carries the repo the rank is written into.
   const setFocus = createMutation(() => ({
@@ -112,21 +93,6 @@ export function Home() {
       return cur.map((p) => p.name === arg.project && (p.repo || "loops") === (arg.repo || "loops")
         ? { ...p, focus: arg.on ? maxRank + 1 : null } : p);
     }),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["projects"] }),
-  }));
-  // set a forest's conviction tier (stack-project.<name>.tier); "" unsets → untriaged.
-  const setTier = createMutation(() => ({
-    mutationFn: (arg: { repo: string; project: string; tier: string }) =>
-      fetch(`/${arg.repo}/tier`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ project: arg.project, tier: arg.tier }),
-      }).then((r) => r.json()),
-    // optimistic: the triage decision lands in the cache immediately so the forest leaves the triage
-    // pile (or moves tiers) on click, not on the refetch that follows. "" → untriaged (null).
-    onMutate: (arg) => qc.setQueryData<Project[]>(["projects"], (cur) =>
-      cur?.map((p) => p.name === arg.project && (p.repo || "loops") === (arg.repo || "loops")
-        ? { ...p, tier: (arg.tier || null) as Project["tier"] } : p)),
     onSettled: () => qc.invalidateQueries({ queryKey: ["projects"] }),
   }));
 
@@ -228,7 +194,7 @@ export function Home() {
     e.preventDefault();
     hideFtip();
     setDropArmed(false);
-    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, current: p.interest ?? 0, shelved: !!p.shelved, focused: p.focus != null, tier: p.tier ?? null });
+    setCtxMenu({ x: e.clientX, y: e.clientY, repo: p.repo, project: p.name, focused: p.focus != null });
   };
   const forestRow = (p: Project, folded: boolean, next?: { step: NextStep; start: boolean }) => (
     <ForestRow
@@ -304,7 +270,6 @@ export function Home() {
         forestRow={forestRow}
         parked={parked}
         prOf={prOf}
-        setTier={(repo, project, tier) => setTier.mutate({ repo, project, tier })}
       />
 
 
@@ -350,27 +315,6 @@ export function Home() {
               onContextMenu={(e) => { e.preventDefault(); closeCtx(); }}
             />
             <div class={`ctx-menu ${CTX_MENU}`} ref={(el) => clampMenu(el, m().x, m().y)} style={{ left: `${m().x}px`, top: `${m().y}px` }}>
-              <div class={`ctx-head ${CTX_HEAD}`}>conviction</div>
-              <For each={[
-                { key: "committed", lbl: "committed", mark: "●", title: "I'm shipping this — keeps its full lifecycle bands" },
-                { key: "trying", lbl: "trying", mark: "◐", title: "leaning in, undecided — its own light section" },
-                { key: "spike", lbl: "spike", mark: "○", title: "throwaway experiment — folds away quietly" },
-                { key: "", lbl: "untriaged", mark: "—", title: "no tier — sits in the triage zone to be decided" },
-              ]}>
-                {(t) => (
-                  <button
-                    class={`ctx-item ctx-tier ${CTX_ITEM} py-[5px] ${(m().tier ?? "") === t.key ? CTX_ON : CTX_OFF}`}
-                    title={t.title}
-                    onClick={() => {
-                      setTier.mutate({ repo: m().repo, project: m().project, tier: t.key });
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{t.mark}</span>
-                    <span class={`ctx-lbl ${(m().tier ?? "") === t.key ? "text-inherit" : CTX_LBL}`}>{t.lbl}</span>
-                  </button>
-                )}
-              </For>
               <button
                 class={`ctx-item ctx-focus ${CTX_ITEM} py-[5px] ${m().focused ? CTX_ON : CTX_OFF}`}
                 title={m().focused ? "remove from the focus lane" : "pin to the focus lane — your hand-ordered 'pushing now' strip at the top"}
@@ -381,32 +325,6 @@ export function Home() {
               >
                 <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{m().focused ? "★" : "☆"}</span>
                 <span class={`ctx-lbl ${m().focused ? "text-inherit" : CTX_LBL}`}>{m().focused ? "unpin from focus" : "pin to focus"}</span>
-              </button>
-              <div class={`ctx-head ${CTX_HEAD}`}>importance</div>
-              <For each={[5, 4, 3, 2, 1, 0]}>
-                {(lvl) => (
-                  <button
-                    class={`ctx-item ${CTX_ITEM} py-[5px] ${m().current === lvl ? CTX_ON : CTX_OFF}`}
-                    onClick={() => {
-                      setInterest.mutate({ repo: m().repo, project: m().project, value: lvl });
-                      setCtxMenu(null);
-                    }}
-                  >
-                    <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{lvl === 0 ? "—" : "▲".repeat(lvl)}</span>
-                    <span class={`ctx-lbl ${m().current === lvl ? "text-inherit" : CTX_LBL}`}>{lvl === 0 ? "none" : `level ${lvl}`}</span>
-                  </button>
-                )}
-              </For>
-              <button
-                class={`ctx-item ctx-shelve ${CTX_ITEM} mt-[4px] border-t border-vellum-edge pt-[7px] pb-[5px] ${CTX_OFF}`}
-                title={m().shelved ? "bring this forest back into the active bands" : "deliberately pause this forest — it moves to the shelved fold no matter its PR state"}
-                onClick={() => {
-                  setShelved.mutate({ repo: m().repo, project: m().project, on: !m().shelved });
-                  setCtxMenu(null);
-                }}
-              >
-                <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{m().shelved ? "▶" : "⏸"}</span>
-                <span class={`ctx-lbl ${CTX_LBL}`}>{m().shelved ? "unshelve" : "shelve"}</span>
               </button>
               <div class="ctx-sep mx-[6px] my-[5px] h-px bg-rule" />
               <button
