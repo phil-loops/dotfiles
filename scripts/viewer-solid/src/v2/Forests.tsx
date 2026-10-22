@@ -1,5 +1,5 @@
-// Phase 0's Forests: a plain list straight from the store, kept live by the server's patches;
-// a click selects through the runner like a key does. Phase 1 designs the
+// Phase 0's Forests: a plain list straight from the store, proving the loop — state from /state,
+// f/w/x applied in the same frame, the server's patch reconciling behind it. Phase 1 designs the
 // real page.
 import { For, Show } from "solid-js";
 import { model } from "./model";
@@ -24,6 +24,13 @@ function Row(props: { p: Project }) {
       <span class="text-ink-faint">
         {props.p.size} {props.p.size === 1 ? "branch" : "branches"}
       </span>
+      <Show when={on()}>
+        <span class="flex gap-3 text-ink-faint">
+          <button class="hover:text-gold-leaf" onClick={bind("project.focus", props.p.id)}>f focus</button>
+          <button class="hover:text-gold-leaf" onClick={bind("project.workbench", props.p.id)}>w bench</button>
+          <button class="hover:text-gold-leaf" onClick={bind("project.archive", props.p.id)}>x archive</button>
+        </span>
+      </Show>
     </li>
   );
 }
