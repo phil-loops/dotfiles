@@ -8,7 +8,7 @@ import type { NextStep } from "./homeModel";
 import type { Project, Parked, PR } from "./types";
 
 // one forest row, shared by the priority tiers and the recently-merged fold. Metadata sits in
-// fixed-width cells (name · chat · status) so the columns line up; `folded` rows swap the
+// fixed-width cells (name · status) so the columns line up; `folded` rows swap the
 // behind/restack trail for a static ✨-merged badge.
 export function ForestRow(props: {
   p: Project;
@@ -19,7 +19,6 @@ export function ForestRow(props: {
   showFtip: (project: string, el: HTMLElement, repo?: string, landed?: Project["landed"]) => void;
   hideFtip: () => void;
   onContext: (e: MouseEvent, p: Project) => void;
-  hasLiveChat: (p: Project) => boolean;
   prOf: (name: string) => PR | undefined;
   dropAction: (p: Project) => Action;
   resolve: (name: string) => void;
@@ -61,9 +60,6 @@ export function ForestRow(props: {
       {/* interest pips demoted to passive metadata — lifecycle bands order the page now */}
       <Show when={(props.p.interest ?? 0) > 0}>
         <span class="forest-pips mr-2 flex-none text-[10px] tracking-[0.14em] text-ink-faint">{interestPips(props.p.interest!)}</span>
-      </Show>
-      <Show when={props.hasLiveChat(props.p)}>
-        <span class="forest-chat flex-none text-gold-leaf animate-chat-pulse-slow motion-reduce:animate-none" title="a chat is running on this forest">✦</span>
       </Show>
       {/* ONE status cell, by precedence (Phil, strike 5: "a row = name + one signal") —
           drop-mode > parked repair > merged fold > behind count > open PR. Pips sit dim

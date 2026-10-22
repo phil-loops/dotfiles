@@ -2,9 +2,6 @@ import { createEffect, createSignal, Show, Switch, Match, onCleanup, type JSX } 
 import { useQueryClient } from "@tanstack/solid-query";
 import { RouterProvider, useViewerLocation, forestKey, type ViewerLocation } from "./router";
 import { canMutate } from "./provider";
-import ChatPanel from "./ChatPanel";
-import { chatTarget, closeChat } from "./chatDrawer";
-import { reconcile as reconcileChats } from "./chatRunner";
 import CommandPalette from "./CommandPalette";
 import { StorySheet } from "./StorySheet";
 import { track, installFetchTracking, installUiTracking } from "./track";
@@ -121,7 +118,7 @@ function Layout(props: { children?: JSX.Element }) {
   // the pulse's other fingerprint: agents, chat turns, restack drivers + reports, previews.
   // These panels used to run their own 2–15s timers; now one server-side check pushes here.
   const refreshProcs = () => {
-    for (const key of ["processes", "previews", "chat-jobs", "hearth-status", "restack-status", "home-restack-status", "forestmap-restack"]) {
+    for (const key of ["processes", "previews", "hearth-status", "restack-status", "home-restack-status", "forestmap-restack"]) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -171,7 +168,6 @@ function Layout(props: { children?: JSX.Element }) {
     refresh();
   };
   if (!document.hidden) openStream();
-  reconcileChats(); // re-attach any chat turn left in flight by a reload, so its badge resolves
   document.addEventListener("visibilitychange", onVisibility);
   window.addEventListener("focus", onFocus);
   onCleanup(() => {
@@ -194,7 +190,6 @@ function Layout(props: { children?: JSX.Element }) {
         </Show>
         <div class="app-page min-w-0">{props.children}</div>
       </div>
-      <ChatDrawerHost />
       <MapOverlay />
       <CommandPalette />
       <StorySheet />
@@ -209,28 +204,5 @@ function Layout(props: { children?: JSX.Element }) {
         </span>
       </Show>
     </>
-  );
-}
-
-// The chat drawer lives HERE, above the routed views, so it persists across navigation (and, via
-// chatDrawer's localStorage mirror, across reload). `viewingBranch` is the branch on screen right
-// now — when it differs from the chat's pinned branch, the drawer offers a one-click way back.
-function ChatDrawerHost() {
-  const { location, navigate } = useViewerLocation();
-  const viewingBranch = () => {
-    const l = location();
-    return l.kind === "forest" ? (l.node ?? "") : l.kind === "standalone" ? l.branch : "";
-  };
-  return (
-    <Show when={canMutate && chatTarget()}>
-      <ChatPanel
-        file={chatTarget()?.file ?? null}
-        branch={chatTarget()?.branch ?? ""}
-        project={chatTarget()?.project}
-        viewingBranch={viewingBranch()}
-        onGoToBranch={() => { const t = chatTarget(); if (t) { navigate(t.origin); } }}
-        onClose={() => closeChat()}
-      />
-    </Show>
   );
 }

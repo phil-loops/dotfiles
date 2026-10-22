@@ -1,6 +1,6 @@
-import { createSignal, createMemo, createEffect, Show, For } from "solid-js";
+import { createSignal, createEffect, Show, For } from "solid-js";
 import { useQueryClient, createQuery, createMutation } from "@tanstack/solid-query";
-import { Link, useViewerLocation, type HomeTab, type ViewerLocation } from "./router";
+import { useViewerLocation, type HomeTab } from "./router";
 import { provider, canMutate } from "./provider";
 import { deleteMode, setDeleteMode } from "./deleteMode";
 import { type Action } from "./actions";
@@ -39,30 +39,6 @@ export function Home() {
     initialDataUpdatedAt: 0, // treat the cached paint as stale so it always revalidates on open
   }));
   createEffect(() => rememberProjects(projects.data));
-  // live chat presence — server truth (srv/chat.py's job registry), not this browser's
-  // localStorage, so chats started in another tab (or surviving a closed one) still show.
-  type ChatJob = {
-    turn: string; branch: string; path: string; question: string; repo: string; project: string;
-    status: string; chars: number; done: boolean; ok: boolean | null; created: number;
-  };
-  const chatJobs = createQuery(() => ({
-    queryKey: ["chat-jobs"],
-    queryFn: () => fetch("/chat-jobs").then((r) => r.json() as Promise<ChatJob[]>),
-  }));
-  const liveChats = createMemo(() => (chatJobs.data || []).filter((j) => !j.done));
-  // a finished chat lingers in the strip briefly as "done ✓" so an answer that landed while you
-  // were elsewhere gets seen; the server's own TTL bounds it, this just tightens the window.
-  const stripChats = createMemo(() =>
-    (chatJobs.data || []).filter((j) => !j.done || Date.now() - j.created * 1000 < 15 * 60_000));
-  const chatTarget = (j: ChatJob): ViewerLocation =>
-    j.project
-      ? { kind: "forest", name: j.project, repo: j.repo || undefined, node: j.branch }
-      : { kind: "forest", name: j.branch, repo: j.repo || undefined };
-  const fmtChars = (n: number) => (n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n));
-  const chatAgo = (createdSec: number) => {
-    const s = Math.max(0, Math.floor(Date.now() / 1000 - createdSec));
-    return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : `${Math.floor(s / 3600)}h`;
-  };
   const checkOrigin = createMutation(() => ({
     mutationFn: () => fetch("/check-origin", { method: "POST", body: "{}" }).then((r) => r.json()),
     onSuccess: () => {
@@ -262,8 +238,6 @@ export function Home() {
   });
 
 
-  const hasLiveChat = (p: Project) =>
-    liveChats().some((j) => (j.project || j.branch) === p.name && (!j.repo || j.repo === p.repo));
   const onContext = (e: MouseEvent, p: Project) => {
     if (!canMutate) return;
     e.preventDefault();
@@ -282,7 +256,6 @@ export function Home() {
       showFtip={showFtip}
       hideFtip={hideFtip}
       onContext={onContext}
-      hasLiveChat={hasLiveChat}
       prOf={prOf}
       dropAction={dropAction}
       resolve={resolve}
@@ -319,29 +292,6 @@ export function Home() {
         {/* the focus lane IS the home surface (Phil, ninth strike) — it leads the page on
             every tab; the bands below are the archive it was hoisted out of. */}
         <FocusLane projects={() => projects.data} prOf={prOf} />
-
-      <Show when={stripChats().length}>
-        <section class="work-sec chat-live mb-[30px]">
-          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">chats <span class="eyebrow-ask ml-2 font-display text-[14px] normal-case italic tracking-normal text-ink-dim">— headless claudes on your branches</span></h2>
-          <div class="work-rule mb-[6px] h-px bg-rule" />
-          <For each={stripChats()}>
-            {(j) => (
-              <Link
-                class={`chat-row flex items-baseline gap-[10px] rounded-lg px-[9px] py-[6px] text-[13px] text-ink no-underline hover:bg-vellum-edge ${j.done ? "done opacity-55" : ""}`}
-                to={chatTarget(j)}
-                title={j.question}
-              >
-                <span class={`chat-mark flex-none ${j.done ? (j.ok === false ? "err text-del" : "ok text-add") : "live text-gold-leaf animate-chat-pulse-slow motion-reduce:animate-none"}`}>✦</span>
-                <span class="chat-branch flex-none font-semibold">{leaf(j.branch)}</span>
-                <span class="chat-file overflow-hidden text-ellipsis whitespace-nowrap text-ink-dim">{j.path ? leaf(j.path) : "whole branch"}</span>
-                <span class="chat-progress ml-auto flex-none text-[12px] text-ink-faint">
-                  {j.done ? (j.ok === false ? "✗ failed" : "done ✓") : `${j.status}…`} · {fmtChars(j.chars)} · {chatAgo(j.created)}
-                </span>
-              </Link>
-            )}
-          </For>
-        </section>
-      </Show>
 
       <Show when={projects.data}>
         <NextQueue

@@ -18,7 +18,7 @@ const ROUTES = [
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/events", "/restack-status", "/branches", "/standalone",
   "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
-  "/claude", "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
+  "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
   "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
   "/ticket", "/story", "/interest", "/focus", "/contract", "/ship", "/stage", "/merge-subjects",
   "/plan-steps", "/plan-section", "/plan-template", "/plan-preview",
@@ -26,7 +26,7 @@ const ROUTES = [
   "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",
   "/fix-upstream", "/integrate-here", "/reseat-children",
   "/prep-route", "/prep-push", "/preview-wait", "/push-preview", "/processes",
-  "/chat-attach", "/chat-jobs", "/chat-popout", "/chat-stop", "/chat-tmux", "/claude-sessions", "/tmux-targets",
+  "/chat-popout",
 ];
 
 // Dev-only keep-alive: the Python backend self-reaps after 15min without an /events

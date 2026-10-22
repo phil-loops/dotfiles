@@ -19,27 +19,11 @@
 # the group so no headless session lingers.
 import os
 import json
-import base64
-import signal
 import subprocess
-import tempfile
 import threading
 import time
-import uuid
 
 from . import ctx, prompts
-
-
-def tmux_targets(req):   # GET /tmux-targets — existing windows the pop-out can drop a chat into
-    r = ctx.run(["tmux", "list-windows", "-a", "-F",
-                 "#{session_name}:#{window_index}\t#{window_name}\t#{window_panes}"])
-    targets = []
-    for line in r.stdout.splitlines():
-        parts = line.split("\t")
-        if len(parts) == 3:
-            targets.append({"target": parts[0], "name": parts[1],
-                            "panes": int(parts[2]) if parts[2].isdigit() else 1})
-    req._send(200, json.dumps(targets))
 
 
 def popout(req, raw):   # POST /chat-popout — resume a chat's headless session in an interactive tmux claude
@@ -61,59 +45,6 @@ def popout(req, raw):   # POST /chat-popout — resume a chat's headless session
               json.dumps({"ok": r.returncode == 0, "out": r.stdout.strip(), "err": r.stderr.strip()}))
 
 READ_ONLY_TOOLS = ["Read", "Grep", "Glob"]
-# Dropped/pasted chat images land here as temp files claude Reads. Outside the repo so they
-# never show up in `git status`; pruned by age on each upload.
-ATTACH_DIR = os.path.join(tempfile.gettempdir(), "stack-chat-attach")
-ATTACH_EXT = {"png", "jpg", "jpeg", "gif", "webp"}
-ATTACH_MAX = 12 * 1024 * 1024   # 12MB/image
-ATTACH_TTL = 86_400             # reap files older than a day
-
-
-def _prune_attachments():
-    try:
-        now = time.time()
-        for fn in os.listdir(ATTACH_DIR):
-            fp = os.path.join(ATTACH_DIR, fn)
-            if now - os.path.getmtime(fp) > ATTACH_TTL:
-                os.remove(fp)
-    except OSError:
-        pass
-
-
-def attach(req, raw):   # POST /chat-attach {name, dataB64} → save a dropped image, return its path
-    d = json.loads(raw or "{}")
-    name = (d.get("name") or "image.png").strip()
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else "png"
-    if ext not in ATTACH_EXT:
-        req._send(400, json.dumps({"ok": False, "err": "images only (png/jpg/gif/webp)"}))
-        return
-    try:
-        data = base64.b64decode(d.get("dataB64") or "", validate=True)
-    except (ValueError, base64.binascii.Error):
-        req._send(400, json.dumps({"ok": False, "err": "bad image data"}))
-        return
-    if not data or len(data) > ATTACH_MAX:
-        req._send(400, json.dumps({"ok": False, "err": "image empty or over 12MB"}))
-        return
-    os.makedirs(ATTACH_DIR, exist_ok=True)
-    _prune_attachments()
-    fpath = os.path.join(ATTACH_DIR, f"{uuid.uuid4().hex}.{ext}")
-    with open(fpath, "wb") as f:
-        f.write(data)
-    req._send(200, json.dumps({"ok": True, "path": fpath, "name": name}))
-
-
-def _valid_attachments(raw_list):
-    # Only paths we minted under ATTACH_DIR — so a crafted request can't turn the attachment
-    # channel into "Read any file on disk" (claude already has read-only Read, but keep it tight).
-    base = os.path.realpath(ATTACH_DIR) + os.sep
-    out = []
-    for a in raw_list or []:
-        if isinstance(a, str) and a and os.path.realpath(a).startswith(base) and os.path.exists(a):
-            out.append(a)
-    return out
-
-
 def _node_diff(branch):
     # capped parent…branch diff so the model can read a real implementation detail per node
     parent = (ctx.run(["git", "config", f"branch.{branch}.stack-parent"]).stdout.strip()
@@ -371,7 +302,7 @@ def _run_claude(job, cmd, cwd):
         if not job.done:
             job.emit("error", {"err": str(e)[:400]})
     finally:
-        # natural end OR explicit /chat-stop (proc SIGKILLed) → guarantee one terminal frame so
+        # natural end OR a killed proc → guarantee one terminal frame so
         # every subscriber unblocks and the turn reads as finished.
         if not job.done:
             job.emit("done", {"ok": True, "session_id": job.session_id})
@@ -401,28 +332,6 @@ def _subscribe(req, job, from_idx=0):
                 break
     except (OSError, BrokenPipeError):
         pass   # THIS subscriber dropped (tab closed) — the job keeps running for a reconnect
-
-
-def jobs(req):   # GET /chat-jobs — every live/recent turn across repos, for the Home presence strip
-    with _JOBS_LOCK:
-        snap = list(_JOBS.items())
-    rows = [{"turn": turn, **j.meta, "status": j.status, "chars": j.chars,
-             "done": j.done, "ok": j.ok, "created": j.created}
-            for turn, j in snap if j.meta.get("branch")]
-    rows.sort(key=lambda r: (r["done"], -r["created"]))   # running first, then newest
-    req._send(200, json.dumps(rows))
-
-
-def stop(req, raw):   # POST /chat-stop {turn} — the ■ button: kill this turn's claude for real
-    d = json.loads(raw or "{}")
-    turn = (d.get("turn") or "").strip()
-    job = _JOBS.get(turn)
-    if job and job.proc and job.proc.poll() is None:
-        try:
-            os.killpg(os.getpgid(job.proc.pid), signal.SIGKILL)
-        except (ProcessLookupError, OSError):
-            pass
-    req._send(200, json.dumps({"ok": True}))
 
 
 def start(req, raw):
@@ -468,7 +377,6 @@ def start(req, raw):
             prompt = prompts.file_chat(branch, path, d.get("patch", ""), question)
         else:
             prompt = prompts.branch_chat(branch, d.get("patch") or _branch_diff(branch), question)
-        prompt = prompts.with_attachments(prompt, _valid_attachments(d.get("attachments")))
         # a project chat runs in the integrator's worktree (it carries every base via requires)
         cwd = _worktree_for(branch or _project_integrator(project)) or ctx.CWD
         repo_dir = ctx.repo_cwd()

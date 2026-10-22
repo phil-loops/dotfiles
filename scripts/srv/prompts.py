@@ -166,33 +166,6 @@ def project_chat(project, seed, question, interactive=False):
     return "\n".join(parts)
 
 
-# Dropped/pasted screenshots ride in as saved temp files — headless claude can't take image
-# input directly, but Read renders an image visually, so we just point it at the paths.
-def with_attachments(prompt, paths):
-    if not paths:
-        return prompt
-    return "\n".join([
-        prompt,
-        "",
-        f"I attached {len(paths)} image(s) — Read each path to see it:",
-        *[f"- {p}" for p in paths],
-    ])
-
-
-# The select-to-Claude chip fires a FULL (editing) claude in the worktree, so it gets the
-# house style as an editing bar — no read-only clause.
-def select_assist(branch, selection_lines, instruction):
-    lines = [
-        f"You're in a worktree of branch `{branch}`. I selected these spots in its diff:",
-        *selection_lines,
-        "",
-        HOUSE_STYLE,
-        "",
-        instruction.strip() or "Review these and tell me what you'd improve.",
-    ]
-    return "\n".join(lines)
-
-
 # The "reconcile" eject: a branch whose local history diverged from its pushed PR head
 # (rewritten on one side — almost always a local rebase the pushed head hasn't caught). The
 # session figures out the source of truth and reconciles WITHOUT force-pushing or blind-pulling.

@@ -10,8 +10,6 @@ import { overviewView, setOverviewView } from "./overviewView";
 import { ForestMap } from "./ForestMap";
 import { ForestLanding } from "./ForestLanding";
 import { StoriesEditor } from "./StoriesEditor";
-import { chatToTmux } from "./chatDrawer";
-import { SessionPicker } from "./SessionPicker";
 import { TicketChip } from "./TicketChip";
 import type { Purpose } from "./types";
 
@@ -332,7 +330,6 @@ export function ForestOverview() {
     setTip({ branch, text: p.thesis });
   };
   const hideTip = () => { tipBranch = null; setTip(null); };
-  const [chatPick, setChatPick] = createSignal(false);
 
   return (
     <div class="forest-overview min-h-screen bg-vellum-night">
@@ -358,19 +355,6 @@ export function ForestOverview() {
             <button class={`fo-view-stories ${FO_BTN} border ${ovView() === "stories" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "stories" }} onClick={() => setOvView("stories")} title="one plain-English line per branch, edited in place">✎ stories</button>
           </div>
           <Show when={canMutate}>
-            <span class="sp-anchor relative inline-flex">
-              <button
-                class={`fo-chat ${FO_BTN} ml-[6px] border border-gold-deep bg-transparent text-ember hover:border-gold-leaf hover:text-gold-leaf`}
-                title="chat about this whole forest — what it does end to end, where the gaps are, what's left"
-                onClick={() => setChatPick((v) => !v)}
-              >✦ chat</button>
-              <Show when={chatPick()}>
-                <SessionPicker
-                  onClose={() => setChatPick(false)}
-                  onPick={(session) => { setChatPick(false); chatToTmux({ project: project(), session }); }}
-                />
-              </Show>
-            </span>
             <ShipButton project={project()} />
             <StageButton project={project()} />
           </Show>
