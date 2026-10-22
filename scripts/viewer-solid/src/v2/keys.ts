@@ -8,7 +8,7 @@ export interface Binding {
 
 /** A KeyboardEvent as a key name: "x", "G", "?", "space", "esc", "ret", "down", "C-k". */
 export function keyName(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }): string | null {
-  const named: Record<string, string> = { " ": "space", Escape: "esc", Enter: "ret", ArrowDown: "down", ArrowUp: "up", Tab: "tab" };
+  const named: Record<string, string> = { " ": "space", Escape: "esc", Enter: "ret", ArrowDown: "down", ArrowUp: "up", ArrowLeft: "left", ArrowRight: "right", Tab: "tab" };
   const k = named[e.key] ?? (e.key.length === 1 ? e.key : null);
   if (!k) return null;
   if (e.metaKey) return null;

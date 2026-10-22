@@ -4,8 +4,10 @@
 import type { BudgetClass } from "./budgets";
 import type { Op } from "./store";
 
-export type Scope = "global" | "project";
-export type Via = "key" | "click" | "palette" | "menu";
+/** Where a command applies, narrowest last: everywhere, on a surface, on the selected row (forest
+ *  or branch), on its forest, on a branch. A key binds once per scope; the narrowest live one wins. */
+export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch";
+export type Via = "key" | "click" | "palette" | "menu" | "drag";
 
 /** An optimistic server write: shown at once, posted in the background, kept until settled. */
 export interface Write {
@@ -18,7 +20,7 @@ export interface Write {
   said?: string;
   failed: string;
   /** the command that puts it back, for `u` */
-  inverse?: { id: string; target: string };
+  inverse?: { id: string; target: string; arg?: unknown };
 }
 
 export interface Command {
@@ -32,8 +34,11 @@ export interface Command {
   /** left out of the space menu (cursor motion, the menu itself) */
   quiet?: boolean;
   available?: (target: string | undefined) => boolean;
-  local?: (target: string | undefined, e?: Event) => void;
-  write?: (target: string) => Write | null;
+  /** a key that means "the right thing here" (↵): names the command that actually runs, which is
+   *  the one recorded — so telemetry counts pushes, not presses of ↵ */
+  route?: (target: string | undefined) => string | null;
+  local?: (target: string | undefined, e?: Event, arg?: unknown) => void;
+  write?: (target: string, arg?: unknown) => Write | null;
 }
 
 const registry = new Map<string, Command>();

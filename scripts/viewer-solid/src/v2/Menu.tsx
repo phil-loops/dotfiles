@@ -1,6 +1,6 @@
 // `space`: every command in reach, filterable. Enter runs the highlighted one.
 import { createMemo, createSignal, For, onMount, Show } from "solid-js";
-import { model } from "./model";
+import { liveScopes, targetFor } from "./model";
 import { commands } from "./registry";
 import { bind, dispatch } from "./runner";
 import { menuOpen, setMenuOpen } from "./ui";
@@ -19,9 +19,15 @@ function MenuBody() {
   let input!: HTMLInputElement;
   onMount(() => input.focus());
   const items = createMemo(() => {
-    const scopes = model.selected() ? ["project", "global"] : ["global"];
+    const scopes = liveScopes();
     const needle = q().toLowerCase();
-    return commands().filter((c) => !c.quiet && scopes.includes(c.scope) && (c.title + " " + c.id).toLowerCase().includes(needle));
+    return commands().filter(
+      (c) =>
+        !c.quiet &&
+        scopes.includes(c.scope) &&
+        (!c.available || c.available(targetFor(c.scope))) &&
+        (c.title + " " + c.id).toLowerCase().includes(needle),
+    ).sort((a, b) => scopes.indexOf(a.scope) - scopes.indexOf(b.scope)); // what the selection can do comes first
   });
   const via = () => (q() ? "palette" : "menu");
   const run = (id: string, e: Event) => dispatch(id, via(), { event: e });

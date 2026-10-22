@@ -99,7 +99,7 @@ export default function Dashboard() {
       <div class="mb-6 flex items-baseline gap-4">
         <h1 class="m-0 font-display text-[26px] font-normal text-ink">Where to focus</h1>
         <button class="text-ink-faint hover:text-gold-leaf" onClick={bind("dashboard.range")}>
-          last {dashDays()} days · r to change
+          last {dashDays()} days · t to change
         </button>
       </div>
       <Show when={data()} fallback={<p class="text-ink-faint">{data.error ? "couldn't read the telemetry" : "reading the telemetry…"}</p>}>

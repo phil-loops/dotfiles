@@ -23,3 +23,15 @@
     *, *::before, *::after { transition: none !important; animation: none !important; }
   }
 }
+
+/* a forest whose last PR just landed: a slow gold light passes over it before it folds away */
+@keyframes v2-canopy-close {
+  0% { background-position: 120% 0; }
+  70% { background-position: -20% 0; opacity: 1; }
+  100% { background-position: -20% 0; opacity: 0.55; }
+}
+.v2-closing {
+  background-image: linear-gradient(100deg, transparent 30%, rgba(230, 182, 78, 0.22) 50%, transparent 70%);
+  background-size: 250% 100%;
+  animation: v2-canopy-close 2.4s cubic-bezier(.2, .8, .2, 1) forwards;
+}
