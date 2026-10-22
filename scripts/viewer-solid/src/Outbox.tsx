@@ -39,7 +39,7 @@ function NodeRow(props: {
   const held = () => isHeld(n());
   const due = () => isDue(n(), props.now);
   const f = () => props.item.forest;
-  const canPush = () => canMutate && !n().pr && n().gates === "green" && n().pushed !== "synced";
+  const canPush = () => canMutate && n().gates === "green" && n().pushed !== "synced" && n().status !== "landed";
   const canOpen = () => !n().pr && n().pushed === "synced" && !!n().compareUrl;
   return (
     <div
@@ -93,7 +93,7 @@ function NodeRow(props: {
             title="push to origin (p) — asks once more before it goes"
             onClick={props.onPush}
           >
-            {props.actions.busy() === "push:" + n().branch ? "pushing…" : props.armed ? "push to origin?" : "↑ push"}
+            {props.actions.busy() === "push:" + n().branch ? "pushing…" : props.armed ? "push to origin?" : n().pr ? `↑ push ${n().ahead} follow-up${n().ahead === 1 ? "" : "s"}` : "↑ push"}
           </button>
         </Show>
         <Show when={canOpen()}>
@@ -264,7 +264,7 @@ export function Outbox() {
   const pushItem = (it: Item) => {
     if (it.kind !== "node") return;
     const n = it.node;
-    if (!canMutate || n.pr || n.gates !== "green" || n.pushed === "synced") return;
+    if (!canMutate || n.gates !== "green" || n.pushed === "synced") return;
     const key = itemKey(it);
     if (armed() !== key) {
       setArmed(key);
