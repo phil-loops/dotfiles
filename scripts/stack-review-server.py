@@ -36,6 +36,7 @@ from srv import outline   # own line: same reason
 from srv import lsp   # own line: same reason
 from srv import packet   # own line: same reason
 from srv import state   # own line: same reason
+from srv import telemetry   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -438,6 +439,7 @@ class H(BaseHTTPRequestHandler):
             return
         elif u.path == "/state":          return state.get(self, u)   # the v2 store's snapshot: normalized entities + domain versions
         elif u.path == "/v2/events":      return state.events(self, u, keepalive=lambda: last.__setitem__(0, time.time()))   # SSE: entity patches per domain
+        elif u.path == "/telemetry/summary": return telemetry.summary(self, u)   # command/surface latency vs budgets, from daily rollups
         elif u.path == "/prs":            return picker.prs(self)
         elif u.path == "/myprs":          return picker.myprs(self)
         elif u.path == "/projects":       return picker.projects(self)
