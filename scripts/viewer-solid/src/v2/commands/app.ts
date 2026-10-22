@@ -1,9 +1,9 @@
 // Commands every surface has: the menu, the key sheet, navigation, the cursor, undo.
 import { model } from "../model";
 import { command } from "../registry";
-import { navigate, SURFACES } from "../router";
+import { navigate, surface, SURFACES } from "../router";
 import { undoLast } from "../runner";
-import { menuOpen, setCursor, setCursorIdx, setMenuOpen, setSheetOpen, setShowArchive, sheetOpen } from "../ui";
+import { menuOpen, setCursor, setCursorIdx, setDashDays, setMenuOpen, setSheetOpen, setShowArchive, sheetOpen } from "../ui";
 
 command({ id: "menu.open", title: "Command menu", scope: "global", budget: "local", keys: ["space"], quiet: true, local: () => setMenuOpen(true) });
 command({ id: "help.keys", title: "Keys", scope: "global", budget: "local", keys: ["?"], local: () => setSheetOpen((v) => !v) });
@@ -63,4 +63,15 @@ command({
   local: () => {
     if (!undoLast()) throw new Error("nothing to undo");
   },
+});
+
+const RANGES = [7, 30, 90];
+command({
+  id: "dashboard.range",
+  title: "Change the dashboard's window",
+  scope: "global",
+  budget: "local",
+  keys: ["r"],
+  available: () => surface().id === "dashboard",
+  local: () => setDashDays((d) => RANGES[(RANGES.indexOf(d) + 1) % RANGES.length]),
 });

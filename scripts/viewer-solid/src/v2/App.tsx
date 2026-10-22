@@ -1,4 +1,5 @@
 import { Match, Show, Switch } from "solid-js";
+import Dashboard from "./Dashboard";
 import Forests from "./Forests";
 import KeySheet from "./KeySheet";
 import Menu from "./Menu";
@@ -25,6 +26,9 @@ export default function App() {
         <Switch>
           <Match when={surface().id === "forests"}>
             <Forests />
+          </Match>
+          <Match when={surface().id === "dashboard"}>
+            <Dashboard />
           </Match>
         </Switch>
       </main>

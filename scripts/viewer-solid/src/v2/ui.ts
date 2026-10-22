@@ -7,3 +7,4 @@ export const [menuOpen, setMenuOpen] = createSignal(false);
 export const [sheetOpen, setSheetOpen] = createSignal(false);
 export const [showArchive, setShowArchive] = createSignal(false);
 export const [pendingKeys, setPendingKeys] = createSignal("");
+export const [dashDays, setDashDays] = createSignal(30);
