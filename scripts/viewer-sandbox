@@ -34,6 +34,12 @@ commit() {   # commit <subject> [body] — writes a file named after the subject
   if [[ -n ${2:-} ]]; then git -C "$repo" commit -q -m "$1" -m "$2"; else git -C "$repo" commit -q -m "$1"; fi
 }
 
+put() {   # put <path> < content — stage a real source file; the next commit carries it beside its own
+  mkdir -p "$(dirname "$repo/$1")"
+  cat > "$repo/$1"
+  git -C "$repo" add "$1"
+}
+
 branch() {   # branch <name> <parent> <project> <description>
   git -C "$repo" checkout -q -b "$1" "$2"
   git -C "$repo" config "branch.$1.stack-parent" "$2"
@@ -50,11 +56,44 @@ if [[ ! -d $repo/.git ]]; then
   git -C "$repo" remote add origin "$dir/origin.git"
   printf '# sandbox\n' > "$repo/README.md"
   git -C "$repo" add README.md && git -C "$repo" commit -q -m "chore: start the sandbox"
+  # A small typed module graph threaded through the demo forest — an interface with JSDoc, an
+  # import chain across files, a tsconfig — so the branch page's hover / go-to-definition
+  # (srv/lsp.py) has real types to show. Each file rides an existing commit; the shape is unchanged.
+  put tsconfig.json <<'TS'
+{ "compilerOptions": { "target": "es2022", "module": "esnext", "moduleResolution": "bundler", "strict": true, "noEmit": true }, "include": ["src"] }
+TS
+  put src/widget.ts <<'TS'
+/** A thing the dashboard can show. */
+export interface Widget {
+  id: string;
+  name: string;
+  /** Price in cents. */
+  price: number;
+}
+
+/** Formats a widget as one dashboard line, e.g. `Lamp — $12.00`. */
+export function formatWidget(w: Widget): string {
+  return `${w.name} — $${(w.price / 100).toFixed(2)}`;
+}
+TS
   commit "feat: add the app shell"
   git -C "$repo" push -q origin main
 
   git -C "$repo" config stack-project.demo.ticket LOO-9999
   branch demo/queries main demo "adds the widget queries"
+  put src/queries/widgets.ts <<'TS'
+import type { Widget } from "../widget";
+
+const WIDGETS: Widget[] = [
+  { id: "w1", name: "Lamp", price: 1200 },
+  { id: "w2", name: "Desk", price: 18900 },
+];
+
+/** Every widget, cheapest first. */
+export function listWidgets(): Widget[] {
+  return [...WIDGETS].sort((a, b) => a.price - b.price);
+}
+TS
   commit "feat(loo-9999): add the widget queries" "Part of a stack (demo):
 
 1. demo/queries — adds the widget queries  ← this branch
@@ -64,9 +103,41 @@ if [[ ! -d $repo/.git ]]; then
 The query layer stays thin: one Prisma call per function, no business logic, so the model above it can be tested with fakes."
   commit "test: cover the widget queries"
   branch demo/model demo/queries demo "moves widget rules into a model"
+  put src/models/widget-rules.ts <<'TS'
+import type { Widget } from "../widget";
+import { listWidgets } from "../queries/widgets";
+
+/** Widgets cheap enough for the dashboard, at most `max` cents each. */
+export function affordableWidgets(max: number): Widget[] {
+	return listWidgets().filter((w) => w.price <= max);
+}
+TS
   commit "feat(loo-9999): move widget rules into a model"
   branch demo/ui demo/model demo "shows widgets on the dashboard"
+  put src/ui/dashboard.ts <<'TS'
+import { affordableWidgets } from "../models/widget-rules";
+import { formatWidget } from "../widget";
+
+/** The dashboard's lines for a budget in cents. */
+export function dashboardLines(budget: number): string[] {
+  return affordableWidgets(budget).map(formatWidget);
+}
+TS
   commit "feat(loo-9999): show widgets on the dashboard"
+  put src/models/widget-rules.ts <<'TS'
+import type { Widget } from "../widget";
+import { listWidgets } from "../queries/widgets";
+
+const DEFAULT_LIMIT = 10;
+
+/** Widgets cheap enough for the dashboard, at most `max` cents each. */
+export function affordableWidgets(max: number, limit = DEFAULT_LIMIT): Widget[] {
+	return listWidgets().filter((w) => w.price <= max).slice(0, limit);
+}
+
+/** A card label — the emoji is two UTF-16 units, so positions after it test the offset math. */
+export const cardLabel = (w: Widget) => "💡 " + w.name;
+TS
   commit "refactor: extract the widget card"
   commit "fix: keep the empty state when there are no widgets"
   branch demo/docs main demo "documents the widget api"
@@ -83,6 +154,8 @@ fi
 
 if [[ -n $port ]]; then
   mkdir -p "$dir/serve"
+  # stack-open's scratch worktrees and the viewer's tsgo stay inside the sandbox too
+  export STACK_OPEN_DIR="$dir/stack-study" STACK_LSP_STATE_DIR="$dir/lsp"
   echo "viewer-sandbox: serving $repo on http://127.0.0.1:$port (scripts: $scripts)"
   STACK_REVIEW_SANDBOX=1 exec python3 "$scripts/stack-review-server.py" "$dir/serve" "$scripts" "$repo" "$port"
 fi
