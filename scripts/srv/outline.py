@@ -158,8 +158,10 @@ def _swr(key, sig, build, ttl=120.0):
                 try:
                     ctx.set_repo(repo)
                     value = build()
+                    # a failed read (gh down) is retried in ~15s rather than held for the full ttl
+                    at = time.monotonic() - (ttl - 15 if value is None else 0)
                     with _SWR_LOCK:
-                        _SWR[key] = {"at": time.monotonic(), "sig": sig, "value": value}
+                        _SWR[key] = {"at": at, "sig": sig, "value": value}
                     ctx.bump_pulse()
                 finally:
                     _SWR_BUSY.discard(key)
