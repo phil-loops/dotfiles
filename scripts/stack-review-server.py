@@ -439,6 +439,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/forest-branches": return picker.forest_branches(self)
         elif u.path == "/epics":          return picker.epics(self)
         # Hyphenated, not /wiki/… — /wiki/<slug> is a client route served index.html above.
+        elif u.path == "/archived":       return review.archived_list(self, u)   # the archive: projects off focus and the workbench
         elif u.path == "/wiki-pages":     return wiki.pages(self, u)   # every page for this repo, nav-ordered
         elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
@@ -526,6 +527,8 @@ class H(BaseHTTPRequestHandler):
             return review.ticket_set(self, raw)
         if self.path == "/frozen-origin":  # mark/unmark deliberate origin divergence (stack-branch.<b>.frozen-origin)
             return review.frozen_origin_set(self, raw)
+        if self.path == "/project-state":   # move a project between focus, the workbench and the archive
+            return review.project_state(self, raw)
         if self.path == "/focus":      # pin/unpin or reorder the focus lane (stack-project.<p>.focus N)
             return review.focus_set(self, raw)
         if self.path == "/open":   # open the file on that branch in the warm review-nvim

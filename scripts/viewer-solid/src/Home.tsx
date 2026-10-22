@@ -1,4 +1,4 @@
-import { createSignal, createEffect, Show, For } from "solid-js";
+import { createSignal, createEffect, onCleanup, Show, For } from "solid-js";
 import { useQueryClient, createQuery, createMutation } from "@tanstack/solid-query";
 import { useViewerLocation, type HomeTab } from "./router";
 import { provider, canMutate } from "./provider";
@@ -14,6 +14,7 @@ import { WorkTab } from "./WorkTab";
 import { ForestsList } from "./ForestsList";
 import { leaf, mergedAgo } from "./shared";
 import type { Project, PR } from "./types";
+import { setProjectState, type ProjectState } from "./projectState";
 
 // ── home: the ledger summary ─────────────────────────────────────────
 
@@ -135,6 +136,43 @@ export function Home() {
   };
   const hideFtip = () => { clearTimeout(ftipTimer); ftipFor = null; setFtip(null); };
 
+  // focus · workbench · archive, from the keyboard: f / w / x act on the forest under the pointer
+  const [hovered, setHovered] = createSignal<{ repo: string; project: string } | null>(null);
+  const [stateNote, setStateNote] = createSignal<string | null>(null);
+  let noteTimer: number | undefined;
+  const moveProject = (repo: string, project: string, state: ProjectState) => {
+    void setProjectState(repo, project, state).then((r) => {
+      setStateNote(r.ok
+        ? state === "archive" ? `archived ${project} — restore it from the archive at the bottom`
+          : state === "focus" ? `${project} is in focus` : `${project} is on the workbench`
+        : r.error ?? "couldn't move it");
+      clearTimeout(noteTimer);
+      noteTimer = window.setTimeout(() => setStateNote(null), 3500);
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      qc.invalidateQueries({ queryKey: ["archived"] });
+      qc.invalidateQueries({ queryKey: ["archived-count"] });
+    });
+  };
+  const onStateKey = (e: KeyboardEvent) => {
+    if (!canMutate || tab() !== "forests" || e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+    const h = hovered();
+    const state: ProjectState | null = e.key === "f" ? "focus" : e.key === "w" ? "workbench" : e.key === "x" ? "archive" : null;
+    if (!h || !state) return;
+    e.preventDefault();
+    moveProject(h.repo, h.project, state);
+  };
+  window.addEventListener("keydown", onStateKey);
+  onCleanup(() => window.removeEventListener("keydown", onStateKey));
+  const trackHover = (e: MouseEvent) => {
+    const el = (e.target as HTMLElement | null)?.closest<HTMLElement>("[data-forest]");
+    if (el) {
+      const [repo, project] = (el.dataset.forest ?? "").split("\t");
+      setHovered({ repo, project });
+    }
+  };
+
   // declared before the work-tab memos below: createMemo runs eagerly, so a warm prs cache makes
   // them call forestOf during render — a later `const` would hit its temporal dead zone and throw.
   const forestOf = (name: string): Project | undefined => (projects.data || []).find((p) => p.name === name);
@@ -192,8 +230,8 @@ export function Home() {
       parked={parked}
       menu={menu}
       setMenu={setMenu}
-      showFtip={showFtip}
-      hideFtip={hideFtip}
+      showFtip={(project, el, repo, landed) => { setHovered({ repo: repo || "loops", project }); showFtip(project, el, repo, landed); }}
+      hideFtip={() => { setHovered(null); hideFtip(); }}
       onContext={onContext}
       prOf={prOf}
       resolve={resolve}
@@ -203,7 +241,7 @@ export function Home() {
 
   return (
     <div class="ledger min-h-screen">
-      <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[30px] pb-[100px]">
+      <main class="ledger-page mx-auto w-full max-w-[720px] px-[28px] pt-[30px] pb-[100px]" onMouseOver={trackHover}>
         <header class="home-head mb-[16px] flex items-center justify-between">
           {/* the logo IS a refresh — 47 clicks on the inert brand in 21d, six followed by a
               hand cmd+r (telemetry, 2026-08-19): Phil already believes the convention, honor it */}
@@ -260,6 +298,9 @@ export function Home() {
       />
 
 
+        <Show when={stateNote()}>
+          <div class="fixed bottom-[26px] left-1/2 z-[250] max-w-[min(90vw,640px)] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-center text-[12px] text-ink shadow-[0_14px_40px_#0009]">{stateNote()}</div>
+        </Show>
         <Show when={flash()}>
           <div class="flash fixed bottom-[26px] left-1/2 z-[250] max-w-[min(90vw,640px)] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-center text-[12px] text-ink [overflow-wrap:anywhere] shadow-[0_14px_40px_#0009]">{flash()}</div>
         </Show>
@@ -312,6 +353,14 @@ export function Home() {
               >
                 <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>{m().focused ? "★" : "☆"}</span>
                 <span class={`ctx-lbl ${m().focused ? "text-inherit" : CTX_LBL}`}>{m().focused ? "unpin from focus" : "pin to focus"}</span>
+              </button>
+              <button
+                class={`ctx-item ${CTX_ITEM} py-[5px] ${CTX_OFF}`}
+                title="off focus and the workbench — hidden everywhere, nothing deleted; restore it from the archive (x)"
+                onClick={() => { moveProject(m().repo, m().project, "archive"); setCtxMenu(null); }}
+              >
+                <span class={`ctx-pips ${CTX_PIPS} text-ink-faint`}>▿</span>
+                <span class={`ctx-lbl ${CTX_LBL}`}>archive</span>
               </button>
               <div class="ctx-sep mx-[6px] my-[5px] h-px bg-rule" />
               <button

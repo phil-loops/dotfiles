@@ -754,6 +754,60 @@ def focus_set(req, raw):
     req._send(200, json.dumps({"ok": True, "project": proj, "focus": False}))
 
 
+
+# A project lives in one of three places: focus (committed — the hand-ordered lane, auto-synced),
+# the workbench (rough, taking shape — any project with neither flag, so a new forest lands here
+# on its own), or the archive (stack-project.<p>.archived=true: hidden from the forests page, the
+# outbox and pregates; nothing is deleted, and restoring is unsetting the flag).
+def project_state(req, raw):
+    # POST /project-state {project, repo?, state: focus|workbench|archive}
+    d = json.loads(raw or "{}")
+    proj, repo, state = d.get("project", ""), d.get("repo", ""), d.get("state", "")
+    if not proj or state not in ("focus", "workbench", "archive"):
+        return req._send(400, json.dumps({"ok": False, "error": "need {project, state: focus|workbench|archive}"}))
+    focus_key, arch_key = f"stack-project.{proj}.focus", f"stack-project.{proj}.archived"
+    if state == "focus":
+        _focus_git(repo, "config", "--unset", arch_key)
+        if not _focus_git(repo, "config", focus_key).stdout.strip():
+            lines = _focus_git(repo, "config", "--get-regexp", r"^stack-project\..*\.focus$").stdout.splitlines()
+            ranks = [int(v) for v in (ln.rpartition(" ")[2] for ln in lines) if v.strip().isdigit()]
+            _focus_git(repo, "config", focus_key, str(max(ranks, default=0) + 1))
+    else:
+        _focus_git(repo, "config", "--unset", focus_key)
+        if state == "archive":
+            _focus_git(repo, "config", arch_key, "true")
+        else:
+            _focus_git(repo, "config", "--unset", arch_key)
+    ctx.bump_pulse()
+    req._send(200, json.dumps({"ok": True, "project": proj, "state": state}))
+
+
+def archived_list(req, u):
+    # GET /archived — every archived project across the registry, newest activity first
+    out = []
+    for repo, path in (ctx.REPOS or {"": ctx.CWD}).items():
+        cfg = ctx.run(["git", "-C", path, "config", "--get-regexp", r"^stack-project\..*\.(archived|branch)$"]).stdout.splitlines()
+        archived, members = set(), {}
+        for ln in cfg:
+            k, _, v = ln.partition(" ")
+            name = k[len("stack-project."):k.rfind(".")]
+            if k.endswith(".archived") and v == "true":
+                archived.add(name)
+            elif k.endswith(".branch"):
+                members.setdefault(name, []).append(v)
+        if not archived:
+            continue
+        heads = {}
+        for ln in ctx.run(["git", "-C", path, "for-each-ref", "--format=%(refname:short) %(committerdate:unix)", "refs/heads"]).stdout.splitlines():
+            b, _, t = ln.rpartition(" ")
+            heads[b] = int(t) if t.isdigit() else 0
+        for name in archived:
+            bs = [b for b in members.get(name, []) if b in heads]
+            out.append({"project": name, "repo": repo, "branches": len(bs),
+                        "lastCommit": max((heads[b] for b in bs), default=0)})
+    out.sort(key=lambda r: -r["lastCommit"])
+    req._send(200, json.dumps(out))
+
 def _scratch_worktree_for(branch):
     # stack-open's scratch worktrees are DETACHED and record their branch in a stack-open-branch
     # marker; match it so open-in-nvim edits can be committed/discarded from the uncommitted rail.

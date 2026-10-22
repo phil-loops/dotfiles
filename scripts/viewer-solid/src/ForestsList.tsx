@@ -3,21 +3,19 @@ import { useQueryClient } from "@tanstack/solid-query";
 import { canMutate } from "./provider";
 import { ActionBar, type Action } from "./actions";
 import { mergedAgo } from "./shared";
-import { nextStep, type NextStep } from "./homeModel";
+import type { NextStep } from "./homeModel";
 import { rowDrag, setRowDrag, dropOnLane } from "./focusDrag";
 import type { Project, Parked, PR } from "./types";
+import { ArchiveFold } from "./ArchiveFold";
 
 const SUBROW = "epic-subrow mb-[6px] flex items-center gap-[9px]";
 const BADGE = "epic-repo-badge w-[62px] flex-none text-right text-[10px] uppercase tracking-[0.06em] text-ink-faint";
-const BAND_HEAD = "mx-1 mt-4 mb-[7px] first:mt-[2px] text-[11px] uppercase tracking-[0.09em] opacity-[0.85]";
 const MFOLD = "forest-mfold mt-2 block w-full cursor-pointer px-1 pt-[9px] pb-[5px] text-left text-[11px] leading-[1.55] tracking-[0.03em] text-ink-dim hover:text-gold-leaf";
 
-// The Forests tab: the complete forest index grouped by LIFECYCLE BAND — what state the work
-// is in, most urgent first — with cross-repo epic clusters folded into their band and quiet
-// folds for dormant + recently-merged. One opinionated order (Phil, 2026-07-11): the manual
-// interest pips no longer rank the page (they demoted to passive row metadata); the PR bands
-// order by next-step urgency, other bands by recency. Owns its own fold state; the
-// row itself comes in as a prop (Home wires its hover/ctx/parked handlers).
+// The Forests tab below the focus lane: the workbench (every forest not in focus, rough and
+// taking shape), a fold for fully landed forests, and the archive (forests dropped from both,
+// hidden everywhere else, restorable). The row itself comes in as a prop (Home wires its
+// hover/ctx/parked handlers).
 export function ForestsList(props: {
   tab: () => string;
   projects: () => Project[] | undefined;
@@ -45,84 +43,14 @@ export function ForestsList(props: {
   const recentlyMerged = (p: Project): boolean =>
     !!(p.merged && mergedAgo(p.merged.at)) && !p.mergeable?.length;
 
-  // ── lifecycle bands, most urgent first ──────────────────────────────────
-  //   needs a hand — parked on a rebase conflict: blocked until someone resolves it
-  //   shipping     — landed a PR this month (gh-backed p.shipped) with work remaining:
-  //                  the proven class (Phil, 2026-07-12: "once a project has a PR merged,
-  //                  that's a class of projects on itself")
-  //   first PR out — an open PR but nothing merged yet: the second, lower class
-  //   building     — alive in the last two weeks, no PR activity
-  //   dormant      — no life in two weeks (folded: it's context, not a to-do)
-  // Deliberately NOT bands: behind-main (when origin/main advances everything is behind at
-  // once — ambient restack weather, owned by the row dot + restack-all) and mergeable roots
-  // (nearly every built forest has one — a signal that's always on ranks nothing).
-  const BANDS = [
-    { key: "hand", label: "needs a hand", hint: "a rebase parked on a conflict — blocked until it's resolved or aborted" },
-    { key: "shipping", label: "shipping", hint: "landed PRs this month, more to ship — the proven class" },
-    { key: "opening", label: "first PR out", hint: "an open PR, nothing merged yet" },
-    { key: "building", label: "building", hint: "commits in the last two weeks; no PR activity" },
-    { key: "dormant", label: "dormant", hint: "no movement in two weeks" },
-  ] as const;
-  const DORMANT_AFTER_MS = 14 * 24 * 3600 * 1000;
-  const bandIdx = (p: Project): number => {
-    if (props.parked()?.project === p.name) return 0;
-    const open = !!(p.prOpened || props.prOf(p.name));
-    if ((p.shipped?.count ?? 0) > 0 && (open || p.mergeable?.length)) return 1;
-    if (open) return 2;
-    return forestTs(p) > Date.now() - DORMANT_AFTER_MS ? 3 : 4;
-  };
-  const isPrBand = (i: number) => i === 1 || i === 2;
-
-  // A project's identity is (repo, name) — the same forest name can exist in two repos.
   const pkey = (p: Project) => (p.repo || "loops") + " " + p.name;
-  // "Epic" clusters: the same stack-project.<name>.epic tag on ≥2 forests (one repo or several)
-  // folds them into one headed card, placed in the band of its most urgent member. A lone tagged
-  // forest stays in its normal band — a one-row "cluster" would only fragment the list.
-  const epicClusters = createMemo(() => {
-    const byEpic = new Map<string, Project[]>();
-    for (const p of forests()) {
-      if (!p.epic || recentlyMerged(p) || p.focus != null) continue;
-      (byEpic.get(p.epic) ?? byEpic.set(p.epic, []).get(p.epic)!).push(p);
-    }
-    return [...byEpic.entries()]
-      .filter(([, items]) => items.length >= 2)
-      .map(([epic, items]) => ({
-        epic,
-        crossRepo: new Set(items.map((p) => p.repo || "loops")).size >= 2,
-        band: Math.min(...items.map(bandIdx)),
-        ts: Math.max(...items.map(forestTs)),
-        items: items.sort((a, b) => forestTs(b) - forestTs(a)),
-      }));
-  });
-  const clusteredKeys = createMemo(() => new Set(epicClusters().flatMap((c) => c.items.map(pkey))));
-  // rows in the two PR bands carry their concrete next step (nextStep, homeModel); each
-  // band sorts your-move steps above waiting-on-others so its top IS the priority order.
-  // Other bands keep the plain recency sort.
-  const stepOf = (p: Project): NextStep | null => nextStep(p, props.prOf(p.name));
-  const bands = createMemo(() => {
-    const clustered = clusteredKeys();
-    const active = forests().filter((p) => !recentlyMerged(p) && p.focus == null && !clustered.has(pkey(p)));
-    return BANDS.map((band, i) => ({
-      ...band,
-      clusters: epicClusters().filter((c) => c.band === i).sort((a, b) => b.ts - a.ts),
-      items: active.filter((p) => bandIdx(p) === i).sort((a, b) =>
-        (isPrBand(i) ? (stepOf(a)?.rank ?? 9) - (stepOf(b)?.rank ?? 9) : 0) || forestTs(b) - forestTs(a)),
-    })).filter((b) => b.items.length || b.clusters.length);
-  });
-  // "if I don't know what to do next, start here" — exactly one row wears the start tag:
-  // the first your-move step in render order across shipping then first-PR-out.
-  const startKey = createMemo(() => {
-    const ordered = bands()
-      .filter((b) => b.key === "shipping" || b.key === "opening")
-      .flatMap((b) => [...b.clusters.flatMap((c) => c.items), ...b.items]);
-    const first = ordered.find((p) => isPrBand(bandIdx(p)) && stepOf(p)?.yourMove);
-    return first ? pkey(first) : null;
-  });
-  const stepInfo = (p: Project, folded: boolean) => {
-    if (folded || !isPrBand(bandIdx(p))) return undefined;
-    const step = stepOf(p);
-    return step ? { step, start: pkey(p) === startKey() } : undefined;
-  };
+  // The workbench: every forest that isn't in focus and isn't fully landed — rough, taking shape.
+  // One list, a parked rebase conflict first, then most recently alive. Dropping a row (x) archives it.
+  const workbench = createMemo(() =>
+    forests()
+      .filter((p) => !recentlyMerged(p) && p.focus == null)
+      .sort((a, b) =>
+        Number(props.parked()?.project === b.name) - Number(props.parked()?.project === a.name) || forestTs(b) - forestTs(a)));
   const merged = createMemo(() =>
     forests().filter(recentlyMerged).sort((a, b) => forestTs(b) - forestTs(a)));
   const multiRepo = createMemo(() => new Set(forests().map((p) => p.repo || "loops")).size > 1);
@@ -201,19 +129,17 @@ export function ForestsList(props: {
     dragWrap(p, multiRepo() && (p.repo || "loops") !== "loops" ? (
       <div class={SUBROW}>
         <span class={BADGE}>{p.repo}</span>
-        {props.forestRow(p, folded, stepInfo(p, folded))}
+        {props.forestRow(p, folded)}
       </div>
     ) : (
-      props.forestRow(p, folded, stepInfo(p, folded))
+      props.forestRow(p, folded)
     ));
-  // dormant + recently-merged folds closed until clicked — context, not to-dos.
-  const [dormantOpen, setDormantOpen] = createSignal(false);
   const [mergedOpen, setMergedOpen] = createSignal(false);
   return (
       <Show when={props.tab() === "forests"}>
       <section>
         <div class="eyebrow-row flex items-center justify-between">
-          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint">forests</h2>
+          <h2 class="eyebrow mt-[34px] mb-[12px] text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint" title="taking shape — rough work you haven't committed to. f focuses a row, x archives it">workbench · {workbench().length}</h2>
           <Show when={props.restackErr()}>
             <span class="restack-err ml-auto pr-[10px] text-[11px] tracking-[0.02em] text-del">{props.restackErr()}</span>
           </Show>
@@ -222,59 +148,20 @@ export function ForestsList(props: {
           </Show>
         </div>
         <Show
-          when={forests().length}
-          fallback={
-            <p class="loading px-1 py-[14px] italic text-ink-faint">no forests configured</p>
-          }
+          when={workbench().length}
+          fallback={<p class="px-1 py-[14px] font-display text-[15px] italic text-ink-faint">the workbench is clear</p>}
         >
-          <For each={bands()}>
-            {(band) => (
-              <Show
-                when={band.key !== "dormant"}
-                fallback={
-                  <>
-                    <button class={MFOLD} onClick={() => setDormantOpen(!dormantOpen())}>
-                      {dormantOpen() ? "▾" : "▸"} {band.items.length + band.clusters.reduce((n, c) => n + c.items.length, 0)} dormant
-                    </button>
-                    <Show when={dormantOpen()}>
-                      {/* a fully-dormant epic cluster flattens to plain rows here — the fold is
-                          an archive shelf, not a place to preserve cluster framing */}
-                      <For each={[...band.clusters.flatMap((c) => c.items), ...band.items]}>{(p) => row(p, false)}</For>
-                    </Show>
-                  </>
-                }
-              >
-                <div class={`forest-band-head ${BAND_HEAD} text-gold-deep`} title={band.hint}>{band.label}</div>
-                <For each={band.clusters}>
-                  {(cluster) => (
-                    <div class="epic-cluster mx-0 mt-[2px] mb-[16px] rounded-[12px] border border-gold-deep bg-[color-mix(in_srgb,var(--color-gold-leaf)_5%,var(--color-vellum-raise))] px-[11px] pt-[9px] pb-[4px]">
-                      <h3 class="epic-head mx-[2px] mt-[2px] mb-[8px] text-[11px] uppercase tracking-[0.08em] text-gold-deep" title="one effort spanning forests, linked by epic tag (advisory — each forest still merges on its own)">
-                        ⇌ {cluster.epic}
-                      </h3>
-                      <For each={cluster.items}>
-                        {(p) => dragWrap(p, (
-                          <div class={SUBROW}>
-                            <Show when={cluster.crossRepo}><span class={BADGE}>{p.repo || "loops"}</span></Show>
-                            {props.forestRow(p, false, stepInfo(p, false))}
-                          </div>
-                        ))}
-                      </For>
-                    </div>
-                  )}
-                </For>
-                <For each={band.items}>{(p) => row(p, false)}</For>
-              </Show>
-            )}
-          </For>
-          <Show when={merged().length}>
-            <button class={MFOLD} onClick={() => setMergedOpen(!mergedOpen())}>
-              {mergedOpen() ? "▾" : "▸"} {merged().length} recently merged
-            </button>
-            <Show when={mergedOpen()}>
-              <For each={merged()}>{(p) => row(p, true)}</For>
-            </Show>
+          <For each={workbench()}>{(p) => row(p, false)}</For>
+        </Show>
+        <Show when={merged().length}>
+          <button class={MFOLD} onClick={() => setMergedOpen(!mergedOpen())}>
+            {mergedOpen() ? "▾" : "▸"} {merged().length} landed
+          </button>
+          <Show when={mergedOpen()}>
+            <For each={merged()}>{(p) => row(p, true)}</For>
           </Show>
         </Show>
+        <ArchiveFold />
         <Show when={rowDrag()}>
           {(d) => (
             <div class="drag-ghost pointer-events-none fixed z-40 translate-x-3 -translate-y-1/2 whitespace-nowrap rounded-[4px] border border-solid border-gold-deep bg-vellum-raise px-3 py-1 font-display text-[14px] italic text-ink shadow-[0_6px_18px_rgba(0,0,0,0.4)]" style={{ left: `${d().x}px`, top: `${d().y}px` }}>
