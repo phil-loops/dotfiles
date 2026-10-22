@@ -1,7 +1,11 @@
-import { Match, Switch } from "solid-js";
+import { Match, Show, Switch } from "solid-js";
 import Forests from "./Forests";
+import KeySheet from "./KeySheet";
+import Menu from "./Menu";
 import { surface } from "./router";
+import { note } from "./runner";
 import { world } from "./store";
+import { pendingKeys } from "./ui";
 
 export default function App() {
   return (
@@ -10,6 +14,7 @@ export default function App() {
         <span class="font-display text-[22px] text-gold-leaf">canopy</span>
         <span class="text-ink-faint">{surface().title.toLowerCase()}</span>
         <span class="flex-1" />
+        <span class="text-ink-faint">space · commands &nbsp; ? · keys</span>
         <span
           class="inline-block h-[7px] w-[7px] rounded-full"
           classList={{ "bg-patina": world.conn === "live", "bg-ink-faint": world.conn === "connecting", "bg-ember": world.conn === "down" }}
@@ -23,6 +28,17 @@ export default function App() {
           </Match>
         </Switch>
       </main>
+      <footer class="fixed inset-x-0 bottom-0 flex gap-4 border-t border-vellum-edge bg-vellum-night px-4 py-2 text-ink-dim">
+        <Show when={note()}>
+          <span role="status">{note()}</span>
+        </Show>
+        <span class="flex-1" />
+        <Show when={pendingKeys()}>
+          <kbd class="font-mono text-gold-leaf">{pendingKeys()} …</kbd>
+        </Show>
+      </footer>
+      <Menu />
+      <KeySheet />
     </div>
   );
 }
