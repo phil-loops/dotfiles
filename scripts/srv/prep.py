@@ -1,8 +1,7 @@
 # srv/prep.py — the "prep to push" state ROUTER. The node header's one prep button asks
 # what motion this branch needs next and delegates to the endpoint that already does it —
 # the verdict machinery lives here, not in a row of peer buttons. (Message editing lives in
-# the viewer session's POST /prep-message, which owns the reseat-after-rewrite; an earlier
-# /outgoing-commit editor here was retired as its duplicate.)
+# srv/outline.py's POST /outline, which owns the reseat-after-rewrite.)
 #
 #   GET /prep-route?branch=X    what prep would do next: {route, why, next?, outgoing}
 import json

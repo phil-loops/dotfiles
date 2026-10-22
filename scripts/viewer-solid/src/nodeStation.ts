@@ -79,7 +79,7 @@ export function nextStepOf(input: {
   if (r && r !== "nothing" && r !== "ready") {
     steps.push(input.prepWhy ?? "route to one outgoing commit");
   }
-  steps.push("open the message editor");
+  steps.push("hand the words to the outline column");
   return {
     kind: "prep",
     label: "⟲ sync",
