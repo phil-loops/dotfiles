@@ -11,6 +11,7 @@ import { TestNotes } from "./TestNotes";
 import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
+import { OutlineEditor } from "./OutlineEditor";
 import { useScrollSpy } from "./useScrollSpy";
 import { useOpenInNvim } from "./useOpenInNvim";
 import { useFileCycle } from "./useFileCycle";
@@ -186,6 +187,9 @@ export function NodeDetail() {
     refetchHealth: () => health.refetch(),
   });
 
+  // the words column: every real branch you can write to — not the integration ghost, not a
+  // teammate's imported PR, not the static snapshot
+  const showOutline = () => canMutate && !isGhost() && location().kind !== "review" && !!active();
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"], ["@origin", "outgoing"]];
   // The forest map is a destination (the /forests/<project> overview), never docked into
   // the review surface — the diff gets the full width. "back to the forest map" lives in the
@@ -343,7 +347,10 @@ export function NodeDetail() {
   return (
     // collapsed → one column, so main (the only in-flow grid child once the spine hides)
     // fills it instead of landing in a 0-width track
-    <div class={`shell grid min-h-screen ${panelOpen() ? "grid-cols-[264px_1fr]" : "panel-collapsed grid-cols-[1fr]"}`}>
+    <div
+      class={`shell grid min-h-screen ${panelOpen() ? "grid-cols-[264px_1fr]" : "panel-collapsed grid-cols-[1fr]"} ${
+        showOutline() ? (panelOpen() ? "min-[1200px]:grid-cols-[264px_minmax(0,1fr)_minmax(400px,30vw)]" : "min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(400px,30vw)]") : ""}`}
+    >
       <Show when={!panelOpen()}>
         <button
           class="panel-reopen fixed top-4 left-0 z-[5] cursor-pointer rounded-r-lg border border-l-0 border-rule bg-vellum-edge px-[9px] py-[7px] font-mono text-[15px] leading-none text-ink-dim hover:border-gold-deep hover:text-gold-leaf"
@@ -483,12 +490,28 @@ export function NodeDetail() {
           </Show>
         </Show>
       </main>
+      <Show when={showOutline()}>
+        <div class="outline-dock min-w-0 max-[1199px]:col-span-full max-[1199px]:border-t max-[1199px]:border-solid max-[1199px]:border-rule min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:flex min-[1200px]:h-screen min-[1200px]:flex-col">
+          <OutlineEditor
+            branch={active}
+            reading={() => (view() === "commits" && !inSlice() ? selectedCommit() : "")}
+            onRead={(sha) => {
+              if (!sha) { setView("diffs"); return; }
+              const c = (commits.data ?? []).find((x) => sha.startsWith(x.sha));
+              setView("commits");
+              selectCommit(c?.sha ?? sha);
+              window.scrollTo({ top: 0 });
+            }}
+          />
+        </div>
+      </Show>
       <Show when={showHelp()}>
         <div class="kbd-help-scrim fixed inset-0 z-[70] flex items-center justify-center bg-[rgba(8,7,6,0.55)]" onClick={() => setShowHelp(false)}>
           <div class="kbd-help min-w-[320px] max-w-[92vw] rounded-[12px] border border-solid border-rule bg-[#1b1815] px-5 py-[18px] font-mono text-ink shadow-[0_24px_64px_rgba(0,0,0,0.5)]" onClick={(e) => e.stopPropagation()}>
             <div class="kbd-help-head mb-[14px] text-[11px] uppercase tracking-[0.08em] text-ink-faint">keyboard · reviewing a branch</div>
             <dl class="m-0 grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-2">
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>tab</span></dt><dd class={KBD_DD}>next file</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>e</span></dt><dd class={KBD_DD}>edit the words — description, outline, landing text (⌘↵ saves, esc reverts)</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>c</span></dt><dd class={KBD_DD}>flip diffs ⇄ commits</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>[</span><span class={KBD_K}>]</span></dt><dd class={KBD_DD}>previous / next commit (commits view) · ⇧click a row for a slice</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>b</span></dt><dd class={KBD_DD}>show / hide the file panel</dd></div>

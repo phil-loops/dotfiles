@@ -1,0 +1,53 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { bare, hasPlan, hintsFor, prefixOf, stripPlan, withScope } from "./outlineHints.ts";
+
+const ids = (h: { id: string }[]) => h.map((x) => x.id);
+
+test("prefixOf reads type, scope and bang", () => {
+  assert.deepEqual(prefixOf("feat(LOO-1)!: add it"), { type: "feat", scope: "LOO-1", bang: "!", rest: "add it" });
+  assert.equal(prefixOf("complaints -> spamReports"), undefined);
+  assert.equal(prefixOf("note: not a type"), undefined);
+});
+
+test("withScope normalizes the scope to the ticket and adds a prefix when missing", () => {
+  assert.equal(withScope("feat(LOO-6222): find messages", "loo-6222"), "feat(loo-6222): find messages");
+  assert.equal(withScope("fix: stop flicker", "loo-1"), "fix(loo-1): stop flicker");
+  assert.equal(withScope("stop flicker", "loo-1"), "feat(loo-1): stop flicker");
+});
+
+test("a clean opening commit has no hints", () => {
+  assert.deepEqual(hintsFor({ subject: "feat(loo-9): add widget queries", body: "" }, { opening: true, ticket: "loo-9" }), []);
+});
+
+test("the opening commit wants the ticket scope, lowercase", () => {
+  const h = hintsFor({ subject: "feat(LOO-9): add widget queries", body: "" }, { opening: true, ticket: "loo-9" });
+  assert.deepEqual(ids(h), ["scope"]);
+  assert.equal(h[0].fix!.apply({ subject: "feat(LOO-9): add widget queries", body: "" }).subject, "feat(loo-9): add widget queries");
+});
+
+test("follow-ups read bare", () => {
+  const h = hintsFor({ subject: "refactor: extract the widget card", body: "" }, { opening: false, ticket: "loo-9" });
+  assert.deepEqual(ids(h), ["bare"]);
+  assert.equal(bare("refactor(x): extract the widget card"), "extract the widget card");
+});
+
+test("long subjects and placeholders are flagged", () => {
+  const h = hintsFor({ subject: "wip " + "x".repeat(60), body: "" }, { opening: false });
+  assert.deepEqual(ids(h), ["wip", "long"]);
+});
+
+test("a baked forest block is detected and stripped, prose kept", () => {
+  const body = "Part of a stack (demo):\n\n1. demo/queries — adds the widget queries  ← this branch\n2. demo/model — moves rules\n\nThe query layer stays thin.";
+  assert.ok(hasPlan(body));
+  assert.equal(stripPlan(body), "The query layer stays thin.");
+  assert.equal(stripPlan("why it matters\n\nPart of a stack, in merge order:\n  1. [this branch]\n  2. #123"), "why it matters");
+  assert.equal(stripPlan("prose\n-- forest --\nPart of x, 1 of 2."), "prose");
+  const h = hintsFor({ subject: "feat(loo-9): add", body }, { opening: true, ticket: "loo-9" });
+  assert.deepEqual(ids(h), ["plan"]);
+});
+
+test("the PR title follows the opening rule but ignores bodies", () => {
+  const h = hintsFor({ subject: "show widgets", body: "Part of a stack" }, { opening: true, ticket: "loo-9", kind: "title" });
+  assert.deepEqual(ids(h), ["scope"]);
+});
