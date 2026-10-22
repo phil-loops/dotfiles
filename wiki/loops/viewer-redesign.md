@@ -3,7 +3,7 @@ title: Viewer redesign — a shipping desk
 section: Viewer redesign
 order: 40
 project: viewer-redesign
-lede: Four months of telemetry say the viewer is a place to fix the words and push. GitHub says the time goes before the push, in forests that drain one PR at a time. Design for both.
+lede: Built 2026-10-21 (dotfiles a03a767 → 7255352) — the outbox home, the words column, the map overlay, the cuts and the instrumentation. The three bets are live as human-driven tools; `viewer-usage-report` measures them.
 ---
 
 **What the viewer is, measured.** 73% of 305 viewer pushes follow a message save on the same branch within 30 minutes. Prep, gates and sync moved into `/push-ready` on 08-19 and now run from Claude, not the browser (171 of 175 gate runs last week). Reading happens on node pages; forest and home pages are 3-second pass-throughs; navigation is one loop, node → `m` → map → node (1,348 presses). Nineteen wired endpoints have never been used.
