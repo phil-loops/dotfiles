@@ -15,9 +15,9 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import parse_qs, quote
 
@@ -127,29 +127,62 @@ def _rank(project, snap):
     return snap.once(("outbox-rank", project), lambda: _rank_mod().compute(project, conf))
 
 
-# ── per-branch walks, memoised by the shas they read so a ref move recomputes only its branch ──
-_WALKS = {}   # (repo, tip, base) -> [subjects, newest first]
-_AHEAD = {}   # (repo, tip, origin tip) -> int
+# ── walks: ONE `git log` over every unlanded commit per snapshot, walked in Python ──
+_GRAPHS = {}   # repo -> (snapshot fingerprint, Graph)
 _TREES = {}   # repo -> (refs fingerprint, {branch: tree})
-_TEMPLATE = {}   # (repo, tip) -> PR template text at that tip
+_TEMPLATE = {}   # (repo, trunk sha) -> the PR template GitHub would otherwise supply
 
 
-def _own_subjects(repo, tip, base):
-    key = (repo, tip, base)
-    if key not in _WALKS:
-        out = ctx.run(["git", "log", "--first-parent", "--format=%s", f"{base}..{tip}"]).stdout
-        _WALKS[key] = [ln for ln in out.splitlines() if ln.strip()]
-        if len(_WALKS) > 4000:
-            _WALKS.pop(next(iter(_WALKS)))
-    return _WALKS[key]
+class Graph:
+    """Every commit reachable from a stack branch (or its origin copy) but not from trunk, as
+    {sha: (parents, subject)}. A per-branch `git log` was ~285 spawns on a cold desk; this is one.
+    Anything missing from the map is on trunk."""
+
+    def __init__(self, raw):
+        self.commits = {}
+        for ln in raw.splitlines():
+            sha, _, rest = ln.partition("\x1f")
+            parents, _, subject = rest.partition("\x1f")
+            self.commits[sha] = (parents.split(), subject)
+        self._anc = {}
+
+    def ancestors(self, sha):
+        if sha not in self._anc:
+            seen, stack = set(), [sha]
+            while stack:
+                c = stack.pop()
+                if c in seen or c not in self.commits:
+                    continue
+                seen.add(c)
+                stack.extend(self.commits[c][0])
+            self._anc[sha] = seen
+        return self._anc[sha]
+
+    def own(self, tip, base_tip):
+        """Subjects newest first along tip's first-parent chain, stopping at anything the base
+        (a parent branch's tip, or "" for trunk) already has — `git log --first-parent base..tip`,
+        minus trunk commits a stale parent would otherwise drag in."""
+        stop = self.ancestors(base_tip) if base_tip else set()
+        out, c = [], tip
+        while c in self.commits and c not in stop:
+            parents, subject = self.commits[c]
+            out.append(subject)
+            c = parents[0] if parents else ""
+        return out
 
 
-def _ahead(repo, tip, origin_tip):
-    key = (repo, tip, origin_tip)
-    if key not in _AHEAD:
-        raw = ctx.run(["git", "rev-list", "--count", "--first-parent", f"{origin_tip}..{tip}"]).stdout.strip()
-        _AHEAD[key] = int(raw) if raw.isdigit() else 0
-    return _AHEAD[key]
+def _graph(snap, trunk):
+    repo = ctx.repo_cwd()
+    hit = _GRAPHS.get(repo)
+    if hit and hit[0] == snap.fingerprint:
+        return hit[1]
+    tips = sorted({sha for ref, sha in snap.sha.items()
+                   if ref.startswith("refs/heads/") or ref.startswith("refs/remotes/origin/")} - {snap.remote(snap.main()), snap.local(snap.main())})
+    r = subprocess.run(["git", "log", "--format=%H%x1f%P%x1f%s", "--stdin", "--not", trunk],
+                       cwd=repo, input="\n".join(tips) + "\n", capture_output=True, text=True)
+    g = Graph(r.stdout if r.returncode == 0 else "")
+    _GRAPHS[repo] = (snap.fingerprint, g)
+    return g
 
 
 def _trees(snap):
@@ -165,10 +198,11 @@ def _trees(snap):
     return trees
 
 
-def _template(tip):
-    key = (ctx.repo_cwd(), tip)
+def _template(snap):
+    trunk = snap.remote(snap.main()) or snap.local(snap.main())
+    key = (ctx.repo_cwd(), trunk)
     if key not in _TEMPLATE:
-        t = ctx.run(["git", "show", f"{tip}:.github/pull_request_template.md"])
+        t = ctx.run(["git", "show", f"{trunk}:.github/pull_request_template.md"])
         _TEMPLATE[key] = t.stdout.strip() if t.returncode == 0 else ""
     return _TEMPLATE[key]
 
@@ -264,18 +298,16 @@ def _pr_body(snap, node, nodes, ticket):
         for i, n in enumerate(nodes, 1):
             ref = "[this branch]" if n is node else f"#{n['pr']['number']}" if n.get("pr") else (n["description"] or n["leaf"])
             lines.append(f"  {i}. {ref}")
-    template = _template(node["tip"]) if len(nodes) > 1 else ""
+    template = _template(snap) if len(nodes) > 1 else ""
     return "\n".join(lines) + (f"\n\n{template}\n" if template else "\n")
 
 
-def _forest(snap, project, prs, slug):
+def _forest(snap, project, prs, slug, graph):
     rank = _rank(project, snap)
     order = [b for b in rank.get("order", []) if snap.exists(b)]
     if not order:
         return None
-    repo = ctx.repo_cwd()
     trees = _trees(snap)
-    trunk = "origin/main" if snap.remote(snap.main()) else snap.main()
     ticket = snap.get(f"stack-project.{project}.ticket")
     nodes = []
     for pos, b in enumerate(order, 1):
@@ -293,10 +325,10 @@ def _forest(snap, project, prs, slug):
                         title=pr.get("title") or node["description"] or b, titleSource="pr")
             nodes.append(node)
             continue
-        base = trunk if parent in TRUNKS or not snap.exists(parent) else parent
-        subjects = _own_subjects(repo, tip, snap.local(base) or base) if tip else []
+        base_tip = "" if parent in TRUNKS or not snap.exists(parent) else snap.local(parent)
+        subjects = graph.own(tip, base_tip) if tip else []
         remote = snap.remote(b)
-        ahead = _ahead(repo, tip, remote) if remote and tip else 0
+        ahead = len(graph.own(tip, remote)) if remote and tip else 0
         gates, red = _gates(snap, b, trees.get(b, ""))
         saved_title = snap.branch_key(b, "pr-title")
         node.update(subjects=subjects[:6], commits=len(subjects), ahead=ahead,
@@ -362,21 +394,15 @@ def _repo_forests(name, only):
     prs, source = _pr_map()
     slug = _slug(snap)
     _rank_mod()
-    projects = [only] if only else _projects(snap)
-    # warm the per-branch walks in parallel on a cold server; every later call is memo hits
-    repo = ctx.repo_cwd()
-
-    def one(p):
-        ctx.set_repo(repo)
-        try:
-            f = _forest(snap, p, prs, slug)
-            if f:
-                f["repo"] = name
-            return f
-        finally:
-            ctx.clear_repo()
-    with ThreadPoolExecutor(max_workers=6) as ex:
-        forests = [f for f in ex.map(one, projects) if f]
+    _trees(snap)
+    trunk = "origin/main" if snap.remote(snap.main()) else snap.main()
+    graph = _graph(snap, trunk)
+    forests = []
+    for p in [only] if only else _projects(snap):
+        f = _forest(snap, p, prs, slug, graph)
+        if f:
+            f["repo"] = name
+            forests.append(f)
     return forests, source
 
 
