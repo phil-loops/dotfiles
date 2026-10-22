@@ -33,7 +33,8 @@ type SaveResult = {
   ok: boolean; err?: string; moved?: boolean; newTip?: string; changed?: number; fields?: string[];
   reseat?: string | null; restored?: string[]; commits?: number;
 };
-type Draft = { desc?: string; rows: Record<string, Words> };
+// undefined = untouched; null = back to the derived value (follow the opening commit / the forest)
+type Draft = { desc?: string; rows: Record<string, Words>; prTitle?: string | null; prBody?: string | null };
 
 // sync's last step lands here instead of in a message box: it hands over what it routed and
 // asks the column to take focus
@@ -112,8 +113,19 @@ export function OutlineEditor(props: {
   const rowDirty = (r: Row) => { const d = draft.rows[r.sha]; return !!d && (!same(d.subject, r.subject) || !same(d.body, r.body)); };
   const descVal = () => draft.desc ?? data()?.description ?? "";
   const descDirty = () => draft.desc !== undefined && !same(draft.desc, data()?.description ?? "");
+  const followTitle = () => (opening() ? rowVal(opening()!).subject : "");
+  const titleVal = () =>
+    draft.prTitle === null ? followTitle() : (draft.prTitle ?? (data()?.draft.titleSaved ? data()!.draft.title : followTitle()));
+  const titleFollows = () => draft.prTitle === null || (draft.prTitle === undefined && !data()?.draft.titleSaved);
+  const titleDirty = () =>
+    draft.prTitle === null ? !!data()?.draft.titleSaved : draft.prTitle !== undefined && !same(draft.prTitle, data()?.draft.titleSaved ? data()!.draft.title : followTitle());
+  const derivedBody = () => data()?.draft.derivedBody ?? "";
+  const bodyVal = () => (draft.prBody === null ? derivedBody() : (draft.prBody ?? data()?.draft.body ?? ""));
+  const bodyFollows = () => draft.prBody === null || (draft.prBody === undefined && !data()?.draft.bodySaved);
+  const bodyDirty = () =>
+    draft.prBody === null ? !!data()?.draft.bodySaved : draft.prBody !== undefined && !same(draft.prBody, data()?.draft.body ?? "");
   const dirtyRows = () => rows().filter(rowDirty);
-  const dirtyCount = () => dirtyRows().length + (descDirty() ? 1 : 0);
+  const dirtyCount = () => dirtyRows().length + (descDirty() ? 1 : 0) + (titleDirty() ? 1 : 0) + (bodyDirty() ? 1 : 0);
 
   // the head the drafts were written against: adopted silently while clean, held while dirty so
   // a writer that moves the branch underneath shows up here before the save refuses it
@@ -133,6 +145,7 @@ export function OutlineEditor(props: {
   };
 
   const hintsOf = (r: Row) => (r.locked ? [] : hintsFor(rowVal(r), { opening: r.sha === opening()?.sha, ticket: data()?.ticket || undefined }));
+  const titleHints = () => hintsFor({ subject: titleVal(), body: "" }, { opening: true, ticket: data()?.ticket || undefined, kind: "title" });
 
   const invalidate = () => {
     for (const key of ["outline", "commits", "node", "model", "push-preview", "prep-route", "forest-health"]) {
@@ -169,6 +182,8 @@ export function OutlineEditor(props: {
         edits: dirtyRows().map((r) => ({ sha: r.sha, subject: rowVal(r).subject.trim(), body: rowVal(r).body.trim() })),
       };
       if (descDirty()) body.description = draft.desc;
+      if (titleDirty()) body.prTitle = titleFollows() ? "" : titleVal();
+      if (bodyDirty()) body.prBody = bodyFollows() ? "" : bodyVal();
       const { body: r } = await postStatus<SaveResult>("/outline", body);
       if (!r.ok) {
         setBanner({ tone: r.moved ? "moved" : "err", text: r.err || "save refused" });
@@ -398,6 +413,79 @@ export function OutlineEditor(props: {
               </Show>
             </Section>
 
+            <Section
+              label="lands on main as"
+              aside={<Show when={d().pr.exists}><a class="text-[10.5px] text-gold-leaf no-underline hover:text-ink" href={d().pr.url} target="_blank" rel="noreferrer">edit on GitHub ↗</a></Show>}
+            >
+              <div class="ol-landing relative rounded-[8px] border border-solid border-rule bg-vellum-night/70 py-[10px] pr-[12px] pl-[16px] before:absolute before:top-[10px] before:bottom-[10px] before:left-[6px] before:w-[2px] before:rounded-full before:bg-gold-deep before:content-['']">
+                <div class="mb-[6px] flex items-baseline gap-[6px] text-[10px] text-ink-faint">
+                  <span class="text-gold-leaf">●</span>
+                  <span>squash commit on main</span>
+                  <Show when={d().pr.exists}>
+                    <span class="ml-auto">#{d().pr.number} · {(d().pr.state ?? "").toLowerCase()}{d().pr.draft ? " · draft" : ""}</span>
+                  </Show>
+                </div>
+                <Show
+                  when={!d().pr.exists}
+                  fallback={
+                    <Show when={!d().pr.pending} fallback={<p class="m-0 text-[11.5px] italic text-ink-faint">reading the PR from GitHub…</p>}>
+                      <p class="m-0 text-[13px] leading-[1.45] text-ink">
+                        {d().pr.title ?? <span class="italic text-ink-faint">couldn't read the title from GitHub</span>} <span class="text-ink-faint">(#{d().pr.number})</span>
+                      </p>
+                      <Show when={d().pr.body}>
+                        <p class="ol-pr-body m-0 mt-[8px] max-h-[220px] overflow-y-auto whitespace-pre-wrap text-[11px] leading-[1.55] text-ink-dim">{d().pr.body}</p>
+                      </Show>
+                      <p class="m-0 mt-[8px] text-[10px] italic text-ink-faint">the PR is open — its title and body live on GitHub now</p>
+                    </Show>
+                  }
+                >
+                  <div class="flex items-baseline gap-[6px]">
+                    <textarea
+                      class={`ol-title ${FIELD} min-w-0 flex-1 text-[13px] leading-[1.45] ${titleDirty() ? "text-gold-leaf" : "text-ink"}`}
+                      rows={1}
+                      value={titleVal()}
+                      spellcheck={false}
+                      readOnly={!canMutate}
+                      aria-label="PR title"
+                      ref={(el) => createEffect(() => { titleVal(); queueMicrotask(() => autoGrow(el)); })}
+                      onInput={(e) => { setDraft("prTitle", e.currentTarget.value.replace(/\n/g, " ")); autoGrow(e.currentTarget); }}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault();
+                        escTo(e, titleDirty(), () => setDraft("prTitle", undefined));
+                      }}
+                    />
+                    <span class="flex-none text-[12px] text-ink-faint">(#…)</span>
+                  </div>
+                  <div class="mt-[3px] flex items-baseline gap-[8px] text-[10px] text-ink-faint">
+                    <Show when={titleFollows()} fallback={
+                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint underline underline-offset-2 hover:text-ink-dim" onClick={() => setDraft("prTitle", null)}>↺ follow commit 1</button>
+                    }>
+                      <span>follows commit 1 until you edit it</span>
+                    </Show>
+                  </div>
+                  <Hints hints={titleHints()} onFix={(h) => setDraft("prTitle", h.fix!.apply({ subject: titleVal(), body: "" }).subject)} />
+                  <textarea
+                    class={`ol-prbody ${FIELD} mt-[10px] border-x-0 border-b-0 border-t border-dashed border-rule pt-[8px] text-[11px] leading-[1.6] ${bodyDirty() ? "text-ink" : "text-ink-dim"}`}
+                    rows={4}
+                    value={bodyVal()}
+                    spellcheck={false}
+                    readOnly={!canMutate}
+                    placeholder={d().draft.bodyPending ? "drafting from the forest…" : "the PR body — your words on top, the forest furniture below"}
+                    aria-label="PR body"
+                    ref={(el) => createEffect(() => { bodyVal(); queueMicrotask(() => autoGrow(el)); })}
+                    onInput={(e) => { setDraft("prBody", e.currentTarget.value); autoGrow(e.currentTarget); }}
+                    onKeyDown={(e) => escTo(e, bodyDirty(), () => setDraft("prBody", undefined))}
+                  />
+                  <div class="mt-[3px] flex items-baseline gap-[8px] text-[10px] text-ink-faint">
+                    <Show when={bodyFollows()} fallback={
+                      <button class="cursor-pointer border-0 bg-transparent p-0 text-[10px] text-ink-faint underline underline-offset-2 hover:text-ink-dim" onClick={() => setDraft("prBody", null)}>↺ re-draft from the forest</button>
+                    }>
+                      <span>drafted from the description, outline and merge order</span>
+                    </Show>
+                  </div>
+                </Show>
+              </div>
+            </Section>
           </div>
         )}
       </Show>
