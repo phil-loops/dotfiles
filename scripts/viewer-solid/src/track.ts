@@ -1,4 +1,5 @@
 import { canMutate } from "./provider";
+import { parseLocation } from "./router";
 
 // The original fetch, captured before installFetchTracking() wraps window.fetch — so the
 // telemetry POST below never re-enters the wrapper (and keeps working if other code wraps fetch).
@@ -12,9 +13,12 @@ export const ACTOR = navigator.webdriver ? "headless" : "browser";
 // reload become separable, and every event joins its page's nav chain.
 export const PAGE_LOAD = Math.random().toString(36).slice(2, 8);
 const sameOrigin = (url: URL) => url.origin === location.origin;
-const withIdentity = (headers?: HeadersInit): Headers => {
+let ridSeq = 0;
+// X-Request-Id lands in the server's request log, so a client timing joins the server's line.
+const withIdentity = (headers: HeadersInit | undefined, rid?: string): Headers => {
   const h = new Headers(headers);
   h.set("X-Stack-Actor", ACTOR);
+  if (rid) h.set("X-Request-Id", rid);
   return h;
 };
 
@@ -80,10 +84,12 @@ export function installFetchTracking(): void {
       /* unparseable target — pass through untracked */
     }
     const t0 = performance.now();
+    const rid = `${PAGE_LOAD}-${++ridSeq}`;
     const p = own
-      ? realFetch(input, { ...init, headers: withIdentity(init?.headers ?? (input instanceof Request ? input.headers : undefined)) })
+      ? realFetch(input, { ...init, headers: withIdentity(init?.headers ?? (input instanceof Request ? input.headers : undefined), rid) })
       : realFetch(input, init);
     if (isPost && own && !SKIP_TRACK.has(path)) {
+      timedPost(path, rid, p);
       const on = targetOf(init?.body);
       const done = (status: number, refused: string | null) =>
         track("action", {
@@ -93,6 +99,7 @@ export function installFetchTracking(): void {
           ok: !refused && status >= 200 && status < 400,
           ...(refused ? { err: refused } : status >= 400 || status === 0 ? { err: status ? `http-${status}` : "network" } : {}),
           ms: Math.round(performance.now() - t0),
+          rid,
         });
       p.then((r) => done(r.status, r.headers.get("X-Stack-Refused")), () => done(0, null));
     }
@@ -181,4 +188,149 @@ export function installUiTracking(): void {
     },
     { capture: true },
   );
+}
+
+// ── the v1 baseline: how long v1 FEELS, measured generically so v2 has a number to beat ──────
+// For every keyboard shortcut and control click: input → the frame that paints the first DOM
+// change (feedbackMs) and input → the end of any mutating POST it fired (settledMs). For every
+// route change: navigation → the last paint before the page settles (paintMs; see measureNav).
+// Schema-2 `timing` events, keyed by data-track id / `key:<k>` / label and by route kind — the
+// v2 registry names the v1 ids each command replaces, so the dashboard pairs them.
+const CONFIG_POSTS = new Set(["/project-state", "/focus", "/purpose", "/ticket", "/notes", "/trunk", "/frozen-origin",
+  "/plan-template", "/drop-project", "/outbox-hold", "/outbox-title", "/outbox-label"]);
+const INPUT_WINDOW = 300;
+const SETTLE_CAP = 30_000;
+
+interface Input {
+  id: string;
+  via: "key" | "click";
+  t0: number;
+  posts: { path: string; rid: string; done: Promise<{ end: number; status: number; refused: string | null }> }[];
+}
+let lastInput: Input | null = null;
+
+function timedPost(path: string, rid: string, p: Promise<Response>): void {
+  const inp = lastInput;
+  if (!inp || performance.now() - inp.t0 > INPUT_WINDOW) return;
+  inp.posts.push({
+    path,
+    rid,
+    done: p.then(
+      (r) => ({ end: performance.now(), status: r.status, refused: r.headers.get("X-Stack-Refused") }),
+      () => ({ end: performance.now(), status: 0, refused: null }),
+    ),
+  });
+}
+
+function firstPaint(t0: number): Promise<number | null> {
+  return new Promise((resolve) => {
+    const obs = new MutationObserver(() => {
+      obs.disconnect();
+      clearTimeout(t);
+      requestAnimationFrame(() => resolve(Math.round((performance.now() - t0) * 10) / 10));
+    });
+    obs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+    const t = window.setTimeout(() => {
+      obs.disconnect();
+      resolve(null);
+    }, 1000);
+  });
+}
+
+const timing = (data: Record<string, unknown>) => track("timing", { schema: 2, app: "v1", ...data });
+
+function onInput(id: string, via: "key" | "click", t0: number): void {
+  const inp: Input = { id, via, t0, posts: [] };
+  lastInput = inp;
+  const feedback = firstPaint(t0);
+  window.setTimeout(async () => {
+    const feedbackMs = await feedback;
+    if (feedbackMs == null && !inp.posts.length) return; // nothing happened: a stray key, not a command
+    const cap = new Promise<null>((r) => window.setTimeout(() => r(null), SETTLE_CAP));
+    const done = await Promise.race([Promise.all(inp.posts.map((x) => x.done)), cap]);
+    const last = done?.length ? done.reduce((a, b) => (a.end > b.end ? a : b)) : null;
+    const bad = done?.find((d) => d.refused || d.status >= 400 || d.status === 0);
+    const post = inp.posts[0]?.path;
+    timing({
+      kind: "input",
+      id,
+      via,
+      budget: post ? (CONFIG_POSTS.has(post) ? "config-write" : "git-write") : "local",
+      feedbackMs,
+      settledMs: last ? Math.round((last.end - t0) * 10) / 10 : null,
+      outcome: inp.posts.length && !done ? "failed" : !bad ? "ok" : bad.refused || (bad.status && bad.status < 500) ? "refused" : "failed",
+      ...(bad ? { err: bad.refused || (bad.status ? `http-${bad.status}` : "network") } : {}),
+      ...(post ? { post, rid: inp.posts[0].rid } : {}),
+    });
+  }, INPUT_WINDOW);
+}
+
+function surfaceOf(pathname: string): string {
+  const l = parseLocation(pathname, "");
+  return l.kind === "forest" && l.node ? "node" : l.kind === "standalone" || l.kind === "review" ? "node" : l.kind;
+}
+
+// v1 assembles a page from several requests, each painting as it lands, so its "content" is the
+// last DOM change before the page goes quiet for QUIET ms with no `.loading` placeholder left.
+const QUIET = 300;
+
+function measureNav(from: string, to: string, t0: number): void {
+  let painted: number | null = null;
+  const obs = new MutationObserver(() => requestAnimationFrame(() => (painted = performance.now())));
+  obs.observe(document.body, { subtree: true, childList: true, characterData: true });
+  const started = performance.now();
+  const tick = () => {
+    const now = performance.now();
+    if (painted != null && now - painted >= QUIET && !document.querySelector(".loading")) {
+      obs.disconnect();
+      timing({ kind: "nav", from, to, paintMs: Math.round((painted - t0) * 10) / 10 });
+    } else if (now - started > 15_000) {
+      obs.disconnect();
+      timing({ kind: "nav", from, to, paintMs: null });
+    } else requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+
+let timingInstalled = false;
+
+export function installTiming(): void {
+  if (timingInstalled || !canMutate) return;
+  timingInstalled = true;
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")) return;
+      if (e.key.length !== 1 || e.metaKey || e.ctrlKey || e.altKey) return;
+      onInput(`key:${e.key.toLowerCase()}`, "key", e.timeStamp);
+    },
+    { capture: true },
+  );
+  document.addEventListener(
+    "click",
+    (e) => {
+      const el = clickedControl(e.target as Element | null);
+      if (!el) return;
+      const label = (el.getAttribute("aria-label") || el.getAttribute("title") || (el.textContent || "").trim()).replace(/\s+/g, " ").slice(0, 32);
+      const id = el.getAttribute("data-track") || SHAPE_IDS[shapeOf(el)] || (label ? `click:${label}` : shapeOf(el));
+      onInput(id, "click", e.timeStamp);
+    },
+    { capture: true },
+  );
+  let path = location.pathname;
+  measureNav("", surfaceOf(path), 0);
+  const moved = () => {
+    if (location.pathname === path) return;
+    const from = surfaceOf(path);
+    path = location.pathname;
+    const recent = lastInput && performance.now() - lastInput.t0 < 500 ? lastInput.t0 : performance.now();
+    measureNav(from, surfaceOf(path), recent);
+  };
+  const push = history.pushState.bind(history);
+  history.pushState = (...args: Parameters<History["pushState"]>) => {
+    push(...args);
+    moved();
+  };
+  window.addEventListener("popstate", moved);
 }
