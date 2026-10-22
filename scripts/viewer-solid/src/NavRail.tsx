@@ -76,6 +76,7 @@ export function NavRail() {
     <nav class="thumb-index sticky top-0 flex h-screen flex-col gap-1 self-start overflow-y-auto border-r border-rule bg-[linear-gradient(180deg,var(--color-vellum-raise),var(--color-vellum-night))] pt-[22px] pb-[40px] max-[640px]:static max-[640px]:h-auto max-[640px]:flex-row max-[640px]:border-r-0 max-[640px]:border-b max-[640px]:pt-[10px] max-[640px]:pb-[10px] max-[640px]:px-[10px]">
       <button
         class="thumb-brand mb-[26px] cursor-pointer border-0 bg-transparent text-center text-[19px] text-gold-leaf max-[640px]:hidden"
+        data-track="nav.home"
         title="canopy — home"
         onClick={() => navigate({ kind: "home", tab: "work" })}
       >
@@ -88,6 +89,7 @@ export function NavRail() {
         {(t) => (
           <button
             class={`${THUMB} ${active() === t.id ? THUMB_ON : THUMB_OFF}`}
+            data-track={`nav.tab-${t.id}`}
             classList={{ active: active() === t.id }}
             onClick={() => navigate({ kind: "home", tab: t.id })}
           >
@@ -101,6 +103,7 @@ export function NavRail() {
       <button
         class={`${THUMB} ${location().kind === "wiki" ? THUMB_ON : THUMB_OFF}`}
         classList={{ active: location().kind === "wiki" }}
+        data-track="nav.wiki"
         title="wiki — how this repo works, and what we plan to build"
         onClick={() => navigate({ kind: "wiki" })}
       >
@@ -109,6 +112,7 @@ export function NavRail() {
       <button
         class={`${THUMB} ${location().kind === "tutor" ? THUMB_ON : THUMB_OFF}`}
         classList={{ active: location().kind === "tutor" }}
+        data-track="nav.tutor"
         title="tutor — work through a PR, branch, file or concept one rung at a time"
         onClick={() => navigate({ kind: "tutor" })}
       >
@@ -117,6 +121,7 @@ export function NavRail() {
       <button
         class={`${THUMB} ${location().kind === "machine" ? THUMB_ON : THUMB_OFF}`}
         classList={{ active: location().kind === "machine" }}
+        data-track="nav.machine"
         title="machine — dev servers, the shared substrate, and the levers; here even when nothing runs"
         onClick={() => navigate({ kind: "machine" })}
       >
@@ -135,6 +140,7 @@ export function NavRail() {
         {(c) => (
           <button
             class={`thumb-context ${THUMB} ${THUMB_ON}`}
+            data-track="nav.up"
             classList={{ active: true }}
             title={`${c().label} — up to the overview`}
             onClick={() => navigate(c().to)}
@@ -147,6 +153,7 @@ export function NavRail() {
         {(c) => (
           <button
             class={`thumb-recent group ${THUMB_SM} ${THUMB_OFF}`}
+            data-track="nav.recent"
             title={`back to ${c.label}`}
             onClick={() => navigate(c.to)}
           >

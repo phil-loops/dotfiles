@@ -299,7 +299,7 @@ export function MachinePage() {
                         </Show>
                       </Show>
                       {/* kill stands apart — the one destructive act on the card, in the ledger's del voice */}
-                      <button class={BTN_DANGER} disabled={busy() === p().dir + p().port} onClick={() => act(p(), "/preview-kill")}>kill</button>
+                      <button data-track="machine.kill" class={BTN_DANGER} disabled={busy() === p().dir + p().port} onClick={() => act(p(), "/preview-kill")}>kill</button>
                     </div>
                     <Show when={logFor() === p().dir}>
                       {/* two streams, one pane — the toggle only exists when a worker actually wrote a log */}

@@ -773,6 +773,7 @@ export function NodeActions(props: {
         classList={{ on: open() }}
         aria-haspopup="true"
         aria-expanded={open()}
+        data-track="node.actions"
         title="branch actions — checkout, conditional repairs, interest, chats"
         onClick={() => setOpen((o) => !o)}
       >
@@ -786,6 +787,7 @@ export function NodeActions(props: {
             class={`nh-item ${ITEM}`}
             role="menuitem"
             disabled={busy()}
+            data-track="node.checkout"
             title="move this repo's main checkout onto this branch (no squash — just switch to it)"
             onClick={fire(() => checkout.mutate({}))}
           >
@@ -800,6 +802,7 @@ export function NodeActions(props: {
             class={`nh-item ${ITEM}`}
             role="menuitem"
             disabled={busy()}
+            data-track="node.preview"
             title="spin up a dev server for this branch on a side port (3010+) and open it once it answers — leaves :3000 and your checkout alone"
             onClick={fire(openPreview)}
           >

@@ -122,6 +122,7 @@ function FocusPin(props: { project: string; repo?: string; focused: boolean }) {
   return (
     <button
       class={`fo-focus cursor-pointer border-0 bg-transparent p-0 text-[13px] leading-none ${props.focused ? "text-gold-leaf hover:text-ink-dim" : "text-ink-faint hover:text-gold-leaf"}`}
+      data-track="forest.focus-pin"
       classList={{ on: props.focused }}
       disabled={busy()}
       title={props.focused ? "unpin from the focus lane" : "pin to the focus lane — the hand-ordered 'pushing now' strip at the top of Home"}

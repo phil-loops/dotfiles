@@ -114,6 +114,7 @@ export function MessageEditor(props: {
           <div class="nh-editor-row flex items-center gap-[10px]">
             <button
               class={`nh-fix nh-editor-save ${FIX_SHAPE} border-gold-deep text-gold-leaf`}
+              data-track="message.save"
               disabled={ed.saveMsg.isPending || !ed.subject().trim()}
               onClick={() => ed.saveMsg.mutate()}
             >
@@ -122,6 +123,7 @@ export function MessageEditor(props: {
             <button
               class={`nh-editor-close ${EDITOR_CLOSE}`}
               disabled={ed.planFill.isPending}
+              data-track="message.plan"
               title="recompute this branch's forest-plan block from the stack config (free — no model call)"
               onClick={() => ed.planFill.mutate()}
             >
