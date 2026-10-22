@@ -11,7 +11,7 @@ import { TestNotes } from "./TestNotes";
 import { useNodeMutations } from "./useNodeMutations";
 import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
-import { OutlineEditor } from "./OutlineEditor";
+import { OutlineEditor, WordsHeader, wordsOpen, setWordsOpen } from "./OutlineEditor";
 import { useScrollSpy } from "./useScrollSpy";
 import { useOpenInNvim } from "./useOpenInNvim";
 import { useFileCycle } from "./useFileCycle";
@@ -299,6 +299,17 @@ export function NodeDetail() {
   });
 
   const [panelOpen, setPanelOpen] = createSignal(true);
+  // A branch small enough to read top to bottom doesn't need its file list beside the diff: fold
+  // the rail once per branch at ≤3 files, unless you open it again yourself.
+  let railDecided = "";
+  createEffect(() => {
+    const b = active(), files = node.data?.files;
+    if (!b || !files || railDecided === b) return;
+    railDecided = b;
+    setPanelOpen(files.length > 3);
+  });
+  // reading is the default: a new branch opens with the words column closed
+  createEffect(on(active, () => setWordsOpen(false), { defer: true }));
   const [fileFilter, setFileFilter] = createSignal("");
   const [showHelp, setShowHelp] = createSignal(false);
   let filterEl: HTMLInputElement | undefined;
@@ -349,7 +360,7 @@ export function NodeDetail() {
     // fills it instead of landing in a 0-width track
     <div
       class={`shell grid min-h-screen ${panelOpen() ? "grid-cols-[264px_1fr]" : "panel-collapsed grid-cols-[1fr]"} ${
-        showOutline() ? (panelOpen() ? "min-[1200px]:grid-cols-[264px_minmax(0,1fr)_minmax(400px,30vw)]" : "min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(400px,30vw)]") : ""}`}
+        showOutline() && wordsOpen() ? (panelOpen() ? "min-[1200px]:grid-cols-[264px_minmax(0,1fr)_minmax(400px,30vw)]" : "min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(400px,30vw)]") : ""}`}
     >
       <Show when={!panelOpen()}>
         <button
@@ -412,6 +423,9 @@ export function NodeDetail() {
           nodeData={() => node.data}
           blessedOf={blessedOf}
         />
+        <Show when={showOutline() && !wordsOpen()}>
+          <WordsHeader branch={active} />
+        </Show>
         <TestNotes branch={active} />
         <Show when={view() === "diffs"} fallback={
             <>
@@ -488,7 +502,7 @@ export function NodeDetail() {
         </Show>
       </main>
       <Show when={showOutline()}>
-        <div class={`outline-dock min-w-0 ${panelOpen() ? "max-[1199px]:col-start-2" : "max-[1199px]:col-span-full"} max-[1199px]:border-t max-[1199px]:border-solid max-[1199px]:border-rule min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:flex min-[1200px]:h-screen min-[1200px]:flex-col`}>
+        <div class={wordsOpen() ? `outline-dock min-w-0 ${panelOpen() ? "max-[1199px]:col-start-2" : "max-[1199px]:col-span-full"} max-[1199px]:border-t max-[1199px]:border-solid max-[1199px]:border-rule min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:flex min-[1200px]:h-screen min-[1200px]:flex-col` : "outline-dock hidden"}>
           <OutlineEditor
             branch={active}
             reading={() => (view() === "commits" && !inSlice() ? selectedCommit() : "")}

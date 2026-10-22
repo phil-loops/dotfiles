@@ -40,7 +40,12 @@ type Draft = { desc?: string; rows: Record<string, Words>; prTitle?: string | nu
 // asks the column to take focus
 const [syncNote, setSyncNote] = createSignal<string[]>([]);
 const [focusTick, setFocusTick] = createSignal(0);
-export const focusOutline = (notes: string[] = []) => { setSyncNote(notes); setFocusTick((n) => n + 1); };
+// Reading and writing are different jobs: the column opens for writing (e, a click on the words
+// header, or sync handing over) and closes again with esc, so the diff reads at full width.
+const [wordsOpen, setWordsOpen] = createSignal(false);
+export { wordsOpen, setWordsOpen };
+export const focusOutline = (notes: string[] = []) => { setSyncNote(notes); setWordsOpen(true); setFocusTick((n) => n + 1); };
+export const openWords = () => focusOutline([]);
 
 const same = (a: string, b: string) => a.trim() === b.trim();
 const LABEL = "text-[10px] uppercase tracking-[0.11em] text-ink-faint";
@@ -226,8 +231,13 @@ export function OutlineEditor(props: {
       void save();
       return;
     }
+    if (e.key === "Escape" && wordsOpen() && !typing && !dirtyCount()) {
+      setWordsOpen(false);
+      return;
+    }
     if (e.key !== "e" || e.metaKey || e.ctrlKey || e.altKey || typing) return;
     e.preventDefault();
+    if (!wordsOpen()) { openWords(); return; }
     firstField()?.focus();
   };
   window.addEventListener("keydown", onGlobalKey);
@@ -263,9 +273,15 @@ export function OutlineEditor(props: {
     >
       <header class="flex flex-none items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] pt-[18px] pb-[11px]">
         <span class="flex-none whitespace-nowrap font-display text-[19px] italic text-gold-leaf">✦ the words</span>
+        <button
+          class="ml-auto flex-none cursor-pointer border-0 bg-transparent p-0 font-mono text-[11px] text-ink-faint hover:text-ink"
+          title={dirtyCount() ? "save or revert first — closing would hide unsaved words" : "back to reading (esc)"}
+          disabled={!!dirtyCount()}
+          onClick={() => setWordsOpen(false)}
+        >esc ✕</button>
         <Show when={data()?.undo && !dirtyCount()}>
           <button
-            class="ol-undo ml-auto flex-none cursor-pointer whitespace-nowrap rounded-[5px] border border-solid border-rule bg-transparent px-[8px] py-[2px] text-[11px] text-ink-dim hover:border-gold-deep hover:text-gold-leaf disabled:opacity-40"
+            class="ol-undo flex-none cursor-pointer whitespace-nowrap rounded-[5px] border border-solid border-rule bg-transparent px-[8px] py-[2px] text-[11px] text-ink-dim hover:border-gold-deep hover:text-gold-leaf disabled:opacity-40"
             disabled={saving() || !canMutate}
             title="restore the messages and fields from before the last save — only while they are unpushed and nothing moved the branch since"
             onClick={() => void undo()}
@@ -529,5 +545,40 @@ export function OutlineEditor(props: {
         </footer>
       </Show>
     </aside>
+  );
+}
+
+
+// What the branch says, quietly above the diff while you read it: the description and the commit
+// subjects, from the same cached /outline the column edits. One click (or e) opens the column.
+export function WordsHeader(props: { branch: () => string }) {
+  const q = createQuery(() => ({
+    queryKey: ["outline", props.branch()],
+    queryFn: () => fetch(withRepo("/outline?branch=" + encodeURIComponent(props.branch()))).then((r) => r.json() as Promise<Outline>),
+    enabled: !!props.branch(),
+    placeholderData: keepPreviousData,
+  }));
+  const d = () => (q.data?.ok && q.data.branch === props.branch() ? q.data : undefined);
+  const own = () => (d()?.commits ?? []).filter((c) => !c.carried);
+  return (
+    <Show when={d()}>
+      {(o) => (
+        <button
+          class="words-header group mb-[18px] block w-full cursor-pointer rounded-[9px] border border-solid border-transparent bg-transparent px-[2px] py-[4px] text-left hover:border-rule"
+          title="edit the words — description, commits, PR title (e)"
+          onClick={() => openWords()}
+        >
+          <span class="block font-display text-[17px] italic leading-[1.4] text-ink-dim group-hover:text-ink">
+            {o().description || <span class="text-ink-faint">no description yet</span>}
+          </span>
+          <Show when={own().length}>
+            <span class="mt-[4px] block font-mono text-[11.5px] leading-[1.6] text-ink-faint">
+              <For each={own()}>{(c, i) => <span class="block truncate">{i() + 1}. {c.subject}</span>}</For>
+            </span>
+          </Show>
+          <span class="mt-[3px] block font-mono text-[10px] text-ink-faint opacity-0 transition-opacity duration-150 group-hover:opacity-100">✎ edit the words · e</span>
+        </button>
+      )}
+    </Show>
   );
 }
