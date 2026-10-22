@@ -11,8 +11,8 @@ Design: [[canopy-v2-architecture]]. Code: `srv/state.py`.
 **`GET /state`** returns `{epoch, versions, entities}`. Entities are keyed by type, then id:
 
 - `repo`; `project` (state focus/workbench/archive, rank, ticket, summary);
-- `branch` (parent, description, own commits, tip, tree, pushed, gates for this tree);
-- `pr` (number, url, state, review, base, approvals), from the caches only, never gh;
+- `branch` (parent, description, own commits, tip, tree, pushed, gates for this tree, its merge-order position, its hold-for-morning stamp);
+- `pr` (number, url, state, review, base, approvals, merge state — what an approved PR waits on), from the caches only, never gh;
 - `landed`, the merge ledger's shipped steps.
 
 Ids are `<repo>:<name>`. Archived projects are listed, but their branches and PRs only come with `?archived=1`.

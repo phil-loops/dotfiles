@@ -7,6 +7,10 @@
 #     event: patch   {domain, version, upserts: {type: {id: obj}}, deletes: {type: [id]}}
 #     event: resync  {epoch, versions}                         refetch /state, then reconnect
 #
+# A branch carries its merge-order position in its forest (`order`, stack-merge-rank's) and its
+# hold-for-morning stamp; a PR carries what an approved one waits on (mergeState, mergeable) — the
+# outbox's facts, so the Forests page derives ship state and the ready filter from the store alone.
+#
 # Ids: repo "<repo>", project/branch/pr "<repo>:<name>" (a pr is keyed by its head branch),
 # landed "<repo>:<project>#<pr>". Archived projects are always listed (state "archive"); their
 # branches and PRs only with archived=1 — on a stream without it, archiving a project turns into
@@ -180,6 +184,10 @@ def _git_entities(name, snap, jobs):
     ents = {"repo": {name: {"id": name, "name": name, "main": main, "trunk": snap.sha.get(f"refs/remotes/{trunk}", snap.local(main))}},
             "project": {}, "branch": {}}
     sizes = collections.Counter(member.values())
+    order = {}
+    for p in set(member.values()):
+        for i, b in enumerate(outbox._rank(p, snap).get("order", []), 1):
+            order[b] = i
     for b, p in member.items():
         parent = snap.parent(b)
         tip = snap.local(b)
@@ -196,6 +204,7 @@ def _git_entities(name, snap, jobs):
             "commits": len(own), "tip": tip, "tree": tree,
             "pushed": "synced" if remote and not ahead else "ahead" if remote else "local", "ahead": ahead,
             "gates": gates, "redGates": red,
+            "order": order.get(b, 999), "holdUntil": snap.branch_key(b, "hold-until") or None,
         }
     for p in names:
         members = [b for b, q in member.items() if q == p]
@@ -228,6 +237,8 @@ def _remote_entities(name, git_ents):
             "number": pr.get("number"), "url": pr.get("url") or "", "state": pr.get("state") or "",
             "review": pr.get("review") or None, "draft": bool(pr.get("draft")),
             "base": pr.get("baseRef") or None, "approvals": pr.get("approvals"),
+            "mergeState": pr.get("mergeState") or None, "mergeable": pr.get("mergeable") or None,
+            "approvedAt": pr.get("approvedAt") or None, "title": pr.get("title") or None,
         }
     try:
         with open(os.path.join(watch.common_dir(), "stack-project-merges.json")) as f:
