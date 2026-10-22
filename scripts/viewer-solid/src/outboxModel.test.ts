@@ -24,7 +24,7 @@ test("hold for morning lands on the next weekday 9:00 PT", () => {
 });
 
 const node = (branch: string, extra: Partial<OutboxNode> = {}): OutboxNode => ({
-  branch, leaf: branch, position: 1, rank: 1, parent: "main", base: "main", stackedOn: null, description: "",
+  branch, leaf: branch, position: 1, rank: 1, parent: "main", base: "main", stackedOn: null, requires: [], after: [], description: "",
   title: branch, titleSource: "commit", subjects: [branch], commits: 1, pushed: "local", ahead: 0, gates: "green",
   redGates: [], pr: null, status: "ready", holdUntil: "", ...extra,
 });
