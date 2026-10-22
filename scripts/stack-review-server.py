@@ -33,6 +33,7 @@ from srv import pregate   # own line: same reason
 from srv import tutor   # own line: same reason
 from srv import outbox   # own line: same reason
 from srv import outline   # own line: same reason
+from srv import lsp   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -442,6 +443,8 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/wiki-src":       return wiki.src(self, u)     # resolve one citation to its source lines
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
+        elif u.path == "/lsp/status":     return lsp.status(self, u)   # the viewer's one tsgo: state, branch, load progress
+        elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, read from that tsgo's tree
         elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived
         elif u.path == "/tutor-terminal": return tutor.terminal(self, u)   # terminal /tutor sessions to pick up
         elif u.path == "/tutor-import":   return tutor.import_(self, u)    # one of them, as tab turns
@@ -616,6 +619,10 @@ class H(BaseHTTPRequestHandler):
             return chat.start(self, raw)
         if self.path == "/tutor":            # a Socratic turn → headless read-only claude, streamed (SSE)
             return tutor.start(self, raw)
+        if self.path == "/lsp/hover":        # on-demand types for a diff token (read-only, starts tsgo on first ask)
+            return lsp.hover(self, raw)
+        if self.path == "/lsp/definition":
+            return lsp.definition(self, raw)
         if self.path == "/tutor-stop":
             return tutor.stop(self, raw)
         if self.path == "/learning-evidence":   # the learner audits a credit: edit or delete one evidence row
@@ -655,6 +662,7 @@ def reaper():
     while True:
         time.sleep(5)
         if time.time() - last[0] > IDLE:
+            lsp.stop_all("server idle")   # os._exit skips every cleanup — tsgo's process group goes first
             os._exit(0)
 
 
@@ -717,6 +725,7 @@ def watcher():
                 fd = httpd.socket.fileno()
                 os.set_inheritable(fd, True)
                 os.environ["STACK_REVIEW_FD"] = str(fd)
+                lsp.stop_all("server reload")
                 os.execv(sys.executable, [sys.executable, src, ROOT, SCRIPTS, CWD, str(PORT)])
         except OSError:
             pass
