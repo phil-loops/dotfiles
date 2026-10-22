@@ -491,7 +491,7 @@ export function NodeDetail() {
         </Show>
       </main>
       <Show when={showOutline()}>
-        <div class="outline-dock min-w-0 max-[1199px]:col-span-full max-[1199px]:border-t max-[1199px]:border-solid max-[1199px]:border-rule min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:flex min-[1200px]:h-screen min-[1200px]:flex-col">
+        <div class={`outline-dock min-w-0 ${panelOpen() ? "max-[1199px]:col-start-2" : "max-[1199px]:col-span-full"} max-[1199px]:border-t max-[1199px]:border-solid max-[1199px]:border-rule min-[1200px]:sticky min-[1200px]:top-0 min-[1200px]:flex min-[1200px]:h-screen min-[1200px]:flex-col`}>
           <OutlineEditor
             branch={active}
             reading={() => (view() === "commits" && !inSlice() ? selectedCommit() : "")}
