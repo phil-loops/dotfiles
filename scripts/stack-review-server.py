@@ -62,7 +62,7 @@ _pulse = {"sig": "", "asset": "", "world": "", "procs": ""}  # model+asset+remot
 _pulse_subs = srvctx.PULSE_SUBS    # open /events streams — pulse() only runs while this is > 0
 _pulse_subs_lock = threading.Lock()
 _pulse_wake = threading.Event()
-_index_cache = {"asset": None, "html": None}  # assembled index.html, keyed by asset_sig
+_index_cache = {}  # page -> (asset_sig, assembled html): v1's index.html, v2's v2/index.html
 LOG = os.environ.get("STACK_REVIEW_LOG", "1") not in ("", "0")   # default-on; STACK_REVIEW_LOG=0 silences
 _log_lock = threading.Lock()
 # Durable sink beside stderr: the servedir log dies with the server (mktemp, reaped on bounce),
@@ -304,7 +304,7 @@ class H(BaseHTTPRequestHandler):
         finally:
             srvctx.clear_repo()
 
-    def _send_app_shell(self):
+    def _send_app_shell(self, page="index.html"):
         # The built Solid app (scripts/viewer-solid/dist/index.html), served for the shell AND
         # every client route: path-based routing (History API) means a deep-link/refresh to
         # /forests/x hits the server, which must return index.html (SPA fallback) so the client
@@ -315,21 +315,23 @@ class H(BaseHTTPRequestHandler):
         # relative fetches — no dev proxy.
         sig = asset_sig()
         with _render_lock:
-            if _index_cache["html"] is None or _index_cache["asset"] != sig:
+            hit = _index_cache.get(page)
+            if hit is None or hit[0] != sig:
                 try:
-                    html = open(os.path.join(DIST, "index.html"), "rb").read()
+                    html = open(os.path.join(DIST, page), "rb").read()
                 except OSError:
                     self._send(503, "viewer not built — run `npm run build` in scripts/viewer-solid", "text/plain")
                     return
                 # Inject the registry repo names so the client router can tell a <repo> path
                 # segment from a <project> one (/forests/<repo>/<project> vs /forests/<project>).
                 inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))}</script>".encode()
-                _index_cache["html"] = html.replace(b"<head>", b"<head>" + inject, 1)
-                _index_cache["asset"] = sig
-            body = _index_cache["html"]
+                hit = _index_cache[page] = (sig, html.replace(b"<head>", b"<head>" + inject, 1))
+            body = hit[1]
         self._send(200, body, "text/html; charset=utf-8")
 
     def _dispatch_get(self, u):
+        if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
+            return self._send_app_shell("v2/index.html")   # canopy v2, built beside v1 until it replaces it
         if u.path == "/outbox" and "text/html" not in self.headers.get("Accept", ""):
             return outbox.get(self, u)   # the shipping desk's data; a browser navigation gets the page
         if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")

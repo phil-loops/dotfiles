@@ -28,6 +28,7 @@ const ROUTES = [
   "/prep-route", "/prep-push", "/preview-wait", "/push-preview", "/processes",
   "/outline", "/outline-undo", "/outline-reseat",
   "/chat-popout",
+  "/state", "/v2/events", "/track", "/telemetry/summary", "/project-state",
 ];
 
 // Dev-only keep-alive: the Python backend self-reaps after 15min without an /events
@@ -67,10 +68,14 @@ export default defineConfig({
   plugins: [solid(), tailwindcss(), keepBackendAlive()],
   build: {
     rollupOptions: {
+      // two apps, one dist: v1 at /, v2 at /v2 (dist/v2/index.html), sharing dist/assets
+      input: { index: "index.html", v2: "v2/index.html" },
       output: {
         // vendor in its own hashed chunk: app edits stop re-downloading the ~400kB of
-        // solid/tanstack/deps (the single 511kB index chunk churned its hash every build)
-        manualChunks: (id) => (id.includes("node_modules") ? "vendor" : undefined),
+        // solid/tanstack/deps (the single 511kB index chunk churned its hash every build).
+        // Solid is its own chunk so v2, which needs nothing else, never loads v1's vendor.
+        manualChunks: (id) =>
+          id.includes("node_modules/solid-js") ? "solid" : id.includes("node_modules") ? "vendor" : undefined,
       },
     },
   },
