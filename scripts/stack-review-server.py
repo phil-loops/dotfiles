@@ -32,6 +32,7 @@ from srv import actor, reqlog   # own line: same reason
 os.environ["STACK_VIA"] = "viewer"   # git hooks under this server attribute to it, not to whoever launched it
 from srv import pregate   # own line: same reason
 from srv import tutor   # own line: same reason
+from srv import outbox   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -324,8 +325,10 @@ class H(BaseHTTPRequestHandler):
         self._send(200, body, "text/html; charset=utf-8")
 
     def _dispatch_get(self, u):
-        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor")
-                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/"))):
+        if u.path == "/outbox" and "text/html" not in self.headers.get("Accept", ""):
+            return outbox.get(self, u)   # the shipping desk's data; a browser navigation gets the page
+        if (u.path in ("/", "/index.html", "/work", "/forests", "/watching", "/wiki", "/machine", "/tutor", "/outbox")
+                or u.path.startswith(("/forests/", "/branch/", "/review/", "/push/", "/wiki/", "/tutor/", "/outbox/"))):
             self._send_app_shell()
         elif u.path.startswith("/assets/"):
             # hashed, immutable build assets (JS/CSS). basename-only + a fixed dir, so the
@@ -607,6 +610,10 @@ class H(BaseHTTPRequestHandler):
             return push.push_origin(self, raw)
         if self.path == "/force-origin":  # the ONE force exception: no PR, or a draft with zero reviews/comments; lease-guarded
             return push.force_origin(self, raw)
+        if self.path == "/outbox-hold":   # hold for morning: stamp/clear branch.<b>.stack-hold-until (branch or forest)
+            return outbox.hold(self, raw)
+        if self.path == "/outbox-title":  # the landing PR title: branch.<b>.stack-pr-title
+            return outbox.title(self, raw)
         if self.path == "/open-pr":  # push-less exit: open the PR (view) or compare form (author) in a browser
             return push.open_pr(self, raw)
         if self.path == "/restack":          # restack one project (background, scratch worktree)

@@ -749,7 +749,8 @@ def push_origin(req, raw):
     ok = r.returncode == 0
     # An open PR already exists → jump to it; otherwise the compare-and-create form.
     target = (_open_pr_url(branch) or v["web"]) if ok else v["web"]
-    opened = _open_web(target) if ok else False
+    # stay: the outbox's push, whose next step is its own open-PR link — no tab pops mid-sheet
+    opened = _open_web(target) if ok and not d.get("stay") else False
     req._send(200, json.dumps({
         "ok": ok,
         "remote": "origin",
