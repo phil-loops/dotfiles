@@ -15,6 +15,7 @@ import { OutlineEditor, WordsHeader, wordsOpen, setWordsOpen } from "./OutlineEd
 import { useScrollSpy } from "./useScrollSpy";
 import { useOpenInNvim } from "./useOpenInNvim";
 import { useFileCycle } from "./useFileCycle";
+import { useLsp } from "./useLsp";
 import type { FileDiff } from "./types";
 
 const LOADING = "loading px-1 py-[14px] italic text-ink-faint";
@@ -355,6 +356,16 @@ export function NodeDetail() {
     navigate,
     location,
   });
+  const lsp = useLsp({
+    branch: active,
+    unavailable: () =>
+      !canMutate ? "no language server behind a static snapshot"
+      : isGhost() ? "the integration preview has no tree to type"
+      : view() === "commits" ? "types follow the branch tip — read it in diffs (c)"
+      : null,
+    pointing: () => !!hover(),
+    blocked: showHelp,
+  });
   return (
     // collapsed → one column, so main (the only in-flow grid child once the spine hides)
     // fills it instead of landing in a 0-width track
@@ -536,6 +547,7 @@ export function NodeDetail() {
           </div>
         </div>
       </Show>
+      <lsp.Layer />
       <Show when={flash()}>
         <div class="flash fixed bottom-[26px] left-1/2 z-[250] max-w-[min(90vw,640px)] -translate-x-1/2 rounded-[9px] border border-solid border-rule bg-vellum-raise px-4 py-[9px] text-center text-[12px] text-ink [overflow-wrap:anywhere] shadow-[0_14px_40px_#0009]">{flash()}</div>
       </Show>
