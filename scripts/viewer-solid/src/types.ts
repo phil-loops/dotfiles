@@ -170,21 +170,6 @@ export const ReviewRequest = z.object({
 });
 export type ReviewRequest = z.infer<typeof ReviewRequest>;
 
-export const ReviewRemote = z.object({
-  available: z.boolean(), // the PR's remote head differs from the local review branch (they pushed)
-  remote: z.string().optional(),
-  local: z.string().optional(),
-});
-export type ReviewRemote = z.infer<typeof ReviewRemote>;
-
-export const Standalone = z.object({
-  branch: z.string(),
-  commits: z.number(),
-  add: z.number(),
-  del: z.number(),
-});
-export type Standalone = z.infer<typeof Standalone>;
-
 export const Purpose = z.object({
   thesis: z.string(),
   enables: z.string().optional(),

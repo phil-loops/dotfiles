@@ -23,7 +23,7 @@ const UPSTREAM = arg("upstream", "http://127.0.0.1:62497");
 // API routes the SPA calls (mirror of vite.config.js ROUTES) — everything else is a page path.
 const API = new Set([
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
-  "/head", "/sync", "/syncs", "/restack-status", "/branches", "/standalone",
+  "/head", "/sync", "/syncs", "/restack-status",
   "/check-origin", "/purpose", "/heartbeat", "/previews", "/preview-log", "/processes",
   "/commit-diff", "/diverged-detail", "/forest-health", "/forest-branches", "/forest-purposes",
   "/gates-progress", "/plan-steps", "/plan-section", "/plan-preview", "/prep-route", "/prep-push",

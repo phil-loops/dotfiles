@@ -22,9 +22,7 @@ import {
   Project,
   Purpose,
   RestackStatus,
-  ReviewRemote,
   ReviewRequest,
-  Standalone,
   SyncState,
 } from "./types";
 
@@ -38,10 +36,7 @@ export interface DataProvider {
   myPrs(): Promise<PR[]>;
   branchPrs(): Promise<Record<string, BranchPR>>;
   reviewRequests(): Promise<ReviewRequest[]>;
-  reviewRemote(branch: string): Promise<ReviewRemote>;
   projects(): Promise<Project[]>;
-  standalone(): Promise<Standalone[]>;
-  branches(): Promise<string[]>;
   forestBranches(): Promise<ForestBranch[]>;
   model(branch: string): Promise<ForestModel>;
   node(branch: string, base?: string): Promise<NodeData>;
@@ -98,11 +93,7 @@ export class HttpProvider implements DataProvider {
   myPrs = () => fetchJSON<unknown>("/myprs").then((d) => parse(z.array(PR), d, "myprs"));
   branchPrs = () => fetchJSON<unknown>("/prs").then((d) => parse(BranchPRMap, d, "prs"));
   reviewRequests = () => fetchJSON<unknown>("/review-requests").then((d) => parse(z.array(ReviewRequest), d, "review-requests"));
-  reviewRemote = (branch: string) =>
-    fetchJSON<unknown>("/review-remote?branch=" + q(branch)).then((d) => parse(ReviewRemote, d, "review-remote"));
   projects = () => fetchJSON<unknown>("/projects").then((d) => parse(z.array(Project), d, "projects"));
-  standalone = () => fetchJSON<unknown>("/standalone").then((d) => parse(z.array(Standalone), d, "standalone"));
-  branches = () => fetchJSON<unknown>("/branches").then((d) => parse(z.array(z.string()), d, "branches"));
   forestBranches = () => fetchJSON<unknown>("/forest-branches").then((d) => parse(z.array(ForestBranch), d, "forest-branches"));
   model = (branch: string) => fetchJSON<unknown>(withRepo("/model") + "?branch=" + q(branch)).then((d) => parse(ForestModel, d, "model"));
   node = (branch: string, base?: string) =>
@@ -133,10 +124,7 @@ export class StaticProvider implements DataProvider {
   branchPrs = () => this.get("prs.json", BranchPRMap, "prs").catch(() => ({}));
   // a baked snapshot has no live GitHub connection to query review requests against
   reviewRequests = () => Promise.resolve<ReviewRequest[]>([]);
-  reviewRemote = () => Promise.resolve<ReviewRemote>({ available: false });
   projects = () => this.get("projects.json", z.array(Project), "projects");
-  standalone = () => this.get("standalone.json", z.array(Standalone), "standalone");
-  branches = () => this.get("branches.json", z.array(z.string()), "branches");
   forestBranches = () => this.get("forest-branches.json", z.array(ForestBranch), "forest-branches");
   model = (branch: string) => this.get(`model/${slug(branch)}.json`, ForestModel, "model");
   // base variants (main/blessed) aren't baked — static shows the default parent diff.
