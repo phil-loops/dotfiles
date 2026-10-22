@@ -1,7 +1,8 @@
-// Commands every surface has: the menu, the key sheet, navigation, the cursor.
+// Commands every surface has: the menu, the key sheet, navigation, the cursor, undo.
 import { model } from "../model";
 import { command } from "../registry";
 import { navigate, SURFACES } from "../router";
+import { undoLast } from "../runner";
 import { menuOpen, setCursor, setCursorIdx, setMenuOpen, setSheetOpen, setShowArchive, sheetOpen } from "../ui";
 
 command({ id: "menu.open", title: "Command menu", scope: "global", budget: "local", keys: ["space"], quiet: true, local: () => setMenuOpen(true) });
@@ -53,3 +54,13 @@ command({
 });
 
 command({ id: "archive.toggle", title: "Show or hide the archive", scope: "global", budget: "local", keys: ["a"], local: () => setShowArchive((v) => !v) });
+command({
+  id: "undo",
+  title: "Undo the last change",
+  scope: "global",
+  budget: "local",
+  keys: ["u"],
+  local: () => {
+    if (!undoLast()) throw new Error("nothing to undo");
+  },
+});
