@@ -89,6 +89,8 @@ const DOCK =
   "fm-dock sticky top-0 col-[3] flex h-screen items-start justify-center overflow-auto border-l border-rule pt-[30px] px-[8px] pb-[14px]";
 const PAGE =
   "fm-page flex [align-items:safe_center] justify-center min-h-[calc(100vh-62px)] overflow-auto pt-[30px] px-[22px] pb-[48px]";
+const FILL =
+  "fm-fill flex [align-items:safe_center] justify-center h-full min-h-0 overflow-auto pt-[18px] px-[22px] pb-[36px]";
 
 const EDGE_STROKE: Record<string, string> = {
   blessed: "stroke-gold-deep",
@@ -126,6 +128,8 @@ export function ForestMap(props: {
   // page = the forest's landing hero (full-bleed, no backdrop, no close): the map IS the view
   // at /forests/<project>, not a rail beside a diff. docked = right-rail navigator in detail.
   page?: boolean;
+  // fill = sized to its parent, scrolling inside it (the m overlay), zoomed up like page
+  fill?: boolean;
   onHoverNode?: (branch: string) => void;
   onLeaveNode?: () => void;
   // the merged-ghost badge's contextual next step: drop this branch + rewire its children
@@ -614,7 +618,7 @@ export function ForestMap(props: {
     const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
     setBox({
       w: host.clientWidth - padX,
-      h: window.innerHeight - host.getBoundingClientRect().top - padY,
+      h: (props.fill ? host.clientHeight : window.innerHeight - host.getBoundingClientRect().top) - padY,
     });
   };
   onMount(() => {
@@ -625,7 +629,7 @@ export function ForestMap(props: {
   const MAX_ZOOM = 1.7;
   const zoom = createMemo(() => {
     const { w, h } = box();
-    if (!props.page || !w || !h) return 1;
+    if (!(props.page || props.fill) || !w || !h) return 1;
     const l = layout();
     return Math.min(MAX_ZOOM, Math.max(1, Math.min(w / l.W, h / l.H)));
   });
@@ -633,8 +637,8 @@ export function ForestMap(props: {
   return (
     <div
       ref={host}
-      class={props.page ? PAGE : props.docked ? DOCK : OVERLAY}
-      onClick={props.docked || props.page ? undefined : () => props.onClose()}
+      class={props.page ? PAGE : props.fill ? FILL : props.docked ? DOCK : OVERLAY}
+      onClick={props.docked || props.page || props.fill ? undefined : () => props.onClose()}
     >
       <Show when={props.docked}>
         <button
@@ -649,7 +653,7 @@ export function ForestMap(props: {
         class={`fm-svg block ${
           props.docked
             ? "mx-auto my-0 h-auto max-w-full max-h-[calc(100vh-44px)]"
-            : props.page
+            : props.page || props.fill
               ? "mx-auto my-0 h-auto max-w-full max-h-none"
               : "m-auto h-auto max-w-[94vw] max-h-[90vh]"
         }`}

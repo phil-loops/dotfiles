@@ -441,7 +441,7 @@ export function NodeDetail() {
             </>
           }>
           <div class="diff-hint mt-[-8px] mb-[16px] flex justify-end">
-            <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
+            <span class="kbd-hint ml-auto text-[10px] tracking-[0.04em] text-ink-faint [&_b]:font-semibold [&_b]:text-ink-dim"><b>m</b> map · <b>tab</b> next file · <b>b</b> files · <b>⌘F</b> filter · <b>?</b> shortcuts</span>
           </div>
           <Show when={node.data} fallback={<p class={LOADING}>loading…</p>}>
             {(data) => (
@@ -504,7 +504,7 @@ export function NodeDetail() {
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧B</span></dt><dd class={KBD_DD}>bless file &amp; advance</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧U</span></dt><dd class={KBD_DD}>unbless file</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>o</span></dt><dd class={KBD_DD}>open hovered line in nvim</dd></div>
-              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>m</span><span class={KBD_K}>esc</span></dt><dd class={KBD_DD}>up to the forest</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>m</span><span class={KBD_K}>esc</span></dt><dd class={KBD_DD}>forest map — arrows move, ↵ opens</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>?</span></dt><dd class={KBD_DD}>this help</dd></div>
             </dl>
           </div>

@@ -187,6 +187,10 @@ export function NavRail() {
           </button>
         )}
       </For>
+      <span
+        class="rail-map-hint mt-auto pt-[18px] text-center font-mono text-[10px] tracking-[0.06em] text-ink-faint max-[640px]:hidden"
+        title="press m anywhere for the forest map"
+      ><b class="font-semibold text-ink-dim">m</b> map</span>
     </nav>
   );
 }

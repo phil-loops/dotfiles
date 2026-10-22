@@ -2,13 +2,14 @@ import { onCleanup } from "solid-js";
 import type { ViewerLocation } from "./router";
 import { forestRepo } from "./router";
 import { chatTarget } from "./chatDrawer";
+import { mapOpen, openMap } from "./mapState";
 import { storySheetOpen } from "./StorySheet";
 import type { SpineNode } from "./types";
 
 // The node review keyboard: j/k walk the spine, 1–4 pick the diff base, c flips diffs⇄commits
 // ([ / ] step commits there),
 // b toggles the file panel, ⇧B/⇧U bless/unbless the focused file, o opens the hovered line in
-// nvim, m/Esc go up to the forest, ? toggles help. Installed on mount, torn down on cleanup.
+// nvim, Esc opens the forest map overlay (m does too, from anywhere — MapOverlay), ? toggles help. Installed on mount, torn down on cleanup.
 export function useNodeKeyboard(deps: {
   focusFilter: () => void;
   spine: () => SpineNode[];
@@ -38,7 +39,7 @@ export function useNodeKeyboard(deps: {
     if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
     // a sheet over the page owns the keyboard: Esc there closes the sheet rather than also
     // popping up to the forest, and m/j/k don't navigate out from under an open editor
-    if (storySheetOpen()) return;
+    if (storySheetOpen() || mapOpen()) return;
     if ((e.metaKey || e.ctrlKey) && e.key === "f") { e.preventDefault(); deps.focusFilter(); return; }
     if (e.metaKey || e.ctrlKey || e.altKey) return; // leave OS/browser chords alone
     const list = deps.spine();
@@ -60,16 +61,10 @@ export function useNodeKeyboard(deps: {
     else if (e.key === "B" && deps.activeFile() && deps.base() === "") { e.preventDefault(); deps.onBless(deps.activeFile()); requestAnimationFrame(() => deps.onFileCycleNext()); }
     else if (e.key === "U" && deps.activeFile() && deps.base() === "") { e.preventDefault(); deps.onUnbless(deps.activeFile()); }
     else if (e.key === "?") { e.preventDefault(); deps.setShowHelp((v) => !v); }
-    else if (e.key === "m") {
-      // m → up to the forest view. The key reached for by muscle memory (Esc does it too).
-      e.preventDefault();
-      const p = deps.project();
-      if (p) deps.navigate({ kind: "forest", name: p, repo: forestRepo(deps.location()) });
-    }
     else if (e.key === "Escape") {
       // up a level: help → close it; else (when the chat drawer isn't grabbing Esc) → the forest map
       if (deps.showHelp()) { deps.setShowHelpTo(false); }
-      else if (!chatTarget()) { const p = deps.project(); if (p) { deps.navigate({ kind: "forest", name: p, repo: forestRepo(deps.location()) }); } }
+      else if (!chatTarget()) { const p = deps.project(); if (p) { openMap({ name: p, repo: forestRepo(deps.location()) }); } }
     }
   };
   window.addEventListener("keydown", onKey);

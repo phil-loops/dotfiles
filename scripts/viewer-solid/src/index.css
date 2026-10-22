@@ -407,3 +407,10 @@ td.d2h-del:not(.d2h-code-side-linenumber) { border-left-color: var(--stripe-del)
 }
 .machine-tap.tap-off::after { border-color: var(--color-ink-faint); opacity: 0.7; }
 .machine-terminus { position: relative; }
+
+/* the m overlay should read as already there: the map's staggered entrance collapses to a blink */
+.map-overlay .fm-svg .fm-node,
+.map-overlay .fm-svg .fm-edge {
+  animation-delay: 0s !important;
+  animation-duration: 0.12s !important;
+}
