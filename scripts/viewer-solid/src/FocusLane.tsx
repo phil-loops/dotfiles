@@ -261,7 +261,7 @@ export function FocusLane(props: {
               <button class={`ctx-item ${CTX_ITEM} py-[5px] ${CTX_OFF}`} disabled={m().idx === pinned().length - 1} onClick={() => { moveByIndex(m().idx, m().idx + 1); setMenu(null); }}>
                 <span class={`ctx-pips ${CTX_PIPS} text-gold-leaf`}>↓</span><span class={`ctx-lbl ${CTX_LBL}`}>move down</span>
               </button>
-              <button class={`ctx-item ctx-unpin ${CTX_ITEM} mt-[4px] border-t border-rule py-[5px] pt-[7px] text-ink-dim hover:bg-vellum-edge hover:text-del`}
+              <button data-track="focus.drop" class={`ctx-item ctx-unpin ${CTX_ITEM} mt-[4px] border-t border-rule py-[5px] pt-[7px] text-ink-dim hover:bg-vellum-edge hover:text-del`}
                 onClick={() => { unpin(pinned()[m().idx]); setMenu(null); }}>
                 <span class={`ctx-pips ${CTX_PIPS} text-del`}>✕</span><span class={`ctx-lbl ${CTX_LBL}`}>drop from focus</span>
               </button>

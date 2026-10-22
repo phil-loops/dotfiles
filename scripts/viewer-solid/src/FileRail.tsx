@@ -367,6 +367,7 @@ export function FileEntry(props: {
         </Show>
         <button
           class={`${FILE_ACT} ${FILE_ACT_QUIET}`}
+          data-track="file.copy-ref"
           title="copy a paste-ready file + branch reference for a Claude conversation"
           onClick={copyRef}
         >
@@ -376,6 +377,7 @@ export function FileEntry(props: {
           <Show when={!props.readOnly}>
             <button
               class="bless-btn ml-auto flex-none cursor-pointer rounded-[7px] border border-gold-deep bg-transparent px-3 py-1 text-[11px] leading-[1.55] tracking-[0.04em] text-gold-leaf transition-[background,border-color,color] duration-[120ms] enabled:hover:border-gold-leaf enabled:hover:bg-gold-wash disabled:cursor-default disabled:border-transparent disabled:text-[10px] disabled:uppercase disabled:tracking-[0.14em] disabled:opacity-85"
+              data-track="file.bless"
               disabled={blessed()}
               onClick={doBless}
             >
@@ -498,6 +500,7 @@ function CommitRow(props: {
         <Show when={rewordable() && !editing()}>
           <button
             class="c-reword flex-none cursor-pointer text-[12px] text-ink-faint hover:text-gold-leaf"
+            data-track="commit.reword"
             title="reword this commit's subject + body — unpushed, so the tree stays and nothing is force-pushed"
             onClick={startReword}
           >
