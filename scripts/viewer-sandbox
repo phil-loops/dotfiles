@@ -26,9 +26,9 @@ mkdir -p "$dir"
 dir=$(cd "$dir" && pwd)
 repo="$dir/repo"
 
-commit() {   # commit <subject> [body] — writes a file named after the subject so every commit has a diff
-  local file="src/$(echo "$1" | tr -cs 'a-z0-9' '-' | cut -c1-40).ts"
-  mkdir -p "$repo/src"
+commit() {   # [FILE=<path>] commit <subject> [body] — writes a file (named after the subject unless FILE says) so every commit has a diff
+  local file="${FILE:-src/$(echo "$1" | tr -cs 'a-z0-9' '-' | cut -c1-40).ts}"
+  mkdir -p "$repo/$(dirname "$file")"
   printf 'export const v = %s;\n' "$RANDOM" > "$repo/$file"
   git -C "$repo" add "$file"
   if [[ -n ${2:-} ]]; then git -C "$repo" commit -q -m "$1" -m "$2"; else git -C "$repo" commit -q -m "$1"; fi
@@ -78,6 +78,9 @@ export function formatWidget(w: Widget): string {
 }
 TS
   commit "feat: add the app shell"
+  mkdir -p "$repo/.github"
+  printf -- '---\n👮 Traffic Cop\n\n- [ ] Tested in staging\n- [ ] This PR contains migrations\n' > "$repo/.github/pull_request_template.md"
+  git -C "$repo" add .github && git -C "$repo" commit -q -m "chore: add the PR template"
   git -C "$repo" push -q origin main
 
   git -C "$repo" config stack-project.demo.ticket LOO-9999
@@ -95,14 +98,14 @@ export function listWidgets(): Widget[] {
   return [...WIDGETS].sort((a, b) => a.price - b.price);
 }
 TS
-  commit "feat(loo-9999): add the widget queries" "Part of a stack (demo):
+  FILE=queries/widget.ts commit "feat(loo-9999): add the widget queries" "Part of a stack (demo):
 
 1. demo/queries — adds the widget queries  ← this branch
 2. demo/model — moves widget rules into a model
 3. demo/ui — shows widgets on the dashboard
 
 The query layer stays thin: one Prisma call per function, no business logic, so the model above it can be tested with fakes."
-  commit "test: cover the widget queries"
+  FILE=queries/widget.test.ts commit "test: cover the widget queries"
   branch demo/model demo/queries demo "moves widget rules into a model"
   put src/models/widget-rules.ts <<'TS'
 import type { Widget } from "../widget";
@@ -113,7 +116,7 @@ export function affordableWidgets(max: number): Widget[] {
 	return listWidgets().filter((w) => w.price <= max);
 }
 TS
-  commit "feat(loo-9999): move widget rules into a model"
+  FILE=models/widget.ts commit "feat(loo-9999): move widget rules into a model"
   branch demo/ui demo/model demo "shows widgets on the dashboard"
   put src/ui/dashboard.ts <<'TS'
 import { affordableWidgets } from "../models/widget-rules";
@@ -124,7 +127,7 @@ export function dashboardLines(budget: number): string[] {
   return affordableWidgets(budget).map(formatWidget);
 }
 TS
-  commit "feat(loo-9999): show widgets on the dashboard"
+  FILE=components/Dashboard.tsx commit "feat(loo-9999): show widgets on the dashboard"
   put src/models/widget-rules.ts <<'TS'
 import type { Widget } from "../widget";
 import { listWidgets } from "../queries/widgets";
@@ -139,7 +142,7 @@ export function affordableWidgets(max: number, limit = DEFAULT_LIMIT): Widget[] 
 /** A card label — the emoji is two UTF-16 units, so positions after it test the offset math. */
 export const cardLabel = (w: Widget) => "💡 " + w.name;
 TS
-  commit "refactor: extract the widget card"
+  FILE=components/WidgetCard.tsx commit "refactor: extract the widget card"
   put src/queries/widgets.ts <<'TS'
 import type { Widget } from "../widget";
 
@@ -156,13 +159,17 @@ export function listWidgets(): Widget[] {
   return [...WIDGETS].sort((a, b) => a.price - b.price);
 }
 TS
-  commit "fix: keep the empty state when there are no widgets"
+  FILE=components/WidgetEmpty.tsx commit "fix: keep the empty state when there are no widgets"
   branch demo/docs main demo "documents the widget api"
   commit "docs(loo-9999): document the widget api"
   git -C "$repo" push -q origin demo/docs
 
   branch solo/fix main solo "stops the login banner flickering"
   commit "fix: stop the login banner flickering"
+
+  # a step that already landed and was contracted away lives on only in the merge ledger
+  printf '{"merges": {"demo": [{"pr": 41, "title": "feat(loo-9999): add the widget table", "branch": "demo/schema", "at": "2026-10-20T10:00:00-07:00"}]}}\n' \
+    > "$repo/.git/stack-project-merges.json"
 
   git -C "$repo" checkout -q main
   git -C "$repo" config stack.viewer-repos "$repo"
