@@ -248,8 +248,10 @@ class H(BaseHTTPRequestHandler):
             req = (getattr(self, "raw_requestline", b"") or b"").decode("latin-1").split()
             if req:
                 ms = (time.perf_counter() - t0) * 1000
+                hdrs = getattr(self, "headers", None)
                 line = reqlog.request_line(req[0], req[1] if len(req) > 1 else "?", self._status, ms,
-                                           self._actor, self._refused, self._sid)
+                                           self._actor, self._refused, self._sid,
+                                           rid=hdrs.get("X-Request-Id") if hdrs else None)
                 if line:
                     _log(line)
 
@@ -432,6 +434,7 @@ class H(BaseHTTPRequestHandler):
                     _pulse_subs[0] -= 1
             return
         elif u.path == "/state":          return state.get(self, u)   # the v2 store's snapshot: normalized entities + domain versions
+        elif u.path == "/v2/events":      return state.events(self, u, keepalive=lambda: last.__setitem__(0, time.time()))   # SSE: entity patches per domain
         elif u.path == "/prs":            return picker.prs(self)
         elif u.path == "/myprs":          return picker.myprs(self)
         elif u.path == "/projects":       return picker.projects(self)
@@ -498,6 +501,7 @@ class H(BaseHTTPRequestHandler):
             # any POST may have moved a ref or written config: drop the shared snapshot so the
             # very next reader rebuilds instead of riding out its freshness window
             repostate.invalidate()
+            state.poke()   # the v2 stream's patch for this write goes out now, not on the next tick
             srvctx.clear_repo()
 
     def _dispatch_post(self, raw):

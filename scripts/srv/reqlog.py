@@ -4,6 +4,8 @@
 # readers still parse it):
 #   2026-10-21 17:02:11 POST /push-origin 200 812ms actor=browser refused=not-fast-forward
 #   2026-10-21 17:15:00 GET /ext-mtime 200 1ms actor=extension n=412
+#   2026-10-22 14:00:03 POST /project-state 200 31ms actor=browser rid=k3x9qa-7
+# `rid=` is the client's X-Request-Id (since 2026-10-22), joining a client timing to this line;
 # `refused=` marks an HTTP-200 {ok:false} answer; on a poll path `n=` counts this hit plus the
 # identical ones folded since that path+actor's previous line.
 #
@@ -82,13 +84,19 @@ def append(path, msg):
             pass   # a full disk or permissions hiccup must never take a request down
 
 
-def request_line(method, path, status, ms, actor=None, refused=None, sid=None):
-    """The line to log for one request, or None when it folds into a coalesced poll line."""
+_RID = re.compile(r"^[A-Za-z0-9._-]{1,48}$")
+
+
+def request_line(method, path, status, ms, actor=None, refused=None, sid=None, rid=None):
+    """The line to log for one request, or None when it folds into a coalesced poll line.
+    rid is the client's X-Request-Id, so a client-side timing joins this line."""
     tail = f" actor={actor}" if actor else ""
     if sid:
         tail += f" sid={sid}"
     if refused:
         tail += f" refused={refused}"
+    if rid and _RID.match(rid):
+        tail += f" rid={rid}"
     route = path.split("?", 1)[0]
     if route in POLLS and str(status).startswith("2") and not refused:
         key = (method, route, actor)
