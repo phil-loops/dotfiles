@@ -35,6 +35,7 @@ from srv import outbox   # own line: same reason
 from srv import outline   # own line: same reason
 from srv import lsp   # own line: same reason
 from srv import packet   # own line: same reason
+from srv import state   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -430,6 +431,7 @@ class H(BaseHTTPRequestHandler):
                 with _pulse_subs_lock:
                     _pulse_subs[0] -= 1
             return
+        elif u.path == "/state":          return state.get(self, u)   # the v2 store's snapshot: normalized entities + domain versions
         elif u.path == "/prs":            return picker.prs(self)
         elif u.path == "/myprs":          return picker.myprs(self)
         elif u.path == "/projects":       return picker.projects(self)
