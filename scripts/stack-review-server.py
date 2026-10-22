@@ -344,11 +344,12 @@ class H(BaseHTTPRequestHandler):
                 return self._send(404, "{}")
             ctype = ("text/css" if name.endswith(".css")
                      else "application/javascript" if name.endswith(".js")
+                     else "font/woff2" if name.endswith(".woff2")
                      else "application/octet-stream")
             with open(fp, "rb") as fh:
                 data = fh.read()
             self.send_response(200)
-            self.send_header("Content-Type", ctype + "; charset=utf-8")
+            self.send_header("Content-Type", ctype if ctype.startswith("font/") else ctype + "; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
             self.end_headers()
