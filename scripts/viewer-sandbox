@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# viewer-sandbox — a throwaway repo with real forests, and a viewer server over it.
+#
+#   viewer-sandbox <dir>                          build <dir>/repo (+ <dir>/origin.git, a local bare remote)
+#   viewer-sandbox <dir> --serve <port> [--scripts <scripts-dir>]
+#                                                 …and run the viewer over it (foreground)
+#
+# Everything — pushes included — stays inside <dir>: origin is a bare repo next to it, and the
+# server runs with STACK_REVIEW_SANDBOX=1 (no gh prewarm, focus restacks or pregates). Use it to
+# exercise mutating viewer endpoints for real without touching a live branch. --scripts points
+# the server at a worktree's scripts/ so you can test unlanded code.
+set -euo pipefail
+
+dir=${1:?usage: viewer-sandbox <dir> [--serve <port>] [--scripts <scripts-dir>]}
+shift
+port="" scripts="$HOME/.dotfiles/scripts"
+while (($#)); do
+  case $1 in
+    --serve) port=$2; shift 2 ;;
+    --scripts) scripts=$2; shift 2 ;;
+    *) echo "viewer-sandbox: unknown arg $1" >&2; exit 2 ;;
+  esac
+done
+
+mkdir -p "$dir"
+dir=$(cd "$dir" && pwd)
+repo="$dir/repo"
+
+commit() {   # commit <subject> [body] — writes a file named after the subject so every commit has a diff
+  local file="src/$(echo "$1" | tr -cs 'a-z0-9' '-' | cut -c1-40).ts"
+  mkdir -p "$repo/src"
+  printf 'export const v = %s;\n' "$RANDOM" > "$repo/$file"
+  git -C "$repo" add "$file"
+  if [[ -n ${2:-} ]]; then git -C "$repo" commit -q -m "$1" -m "$2"; else git -C "$repo" commit -q -m "$1"; fi
+}
+
+branch() {   # branch <name> <parent> <project> <description>
+  git -C "$repo" checkout -q -b "$1" "$2"
+  git -C "$repo" config "branch.$1.stack-parent" "$2"
+  git -C "$repo" config "branch.$1.stack-project" "$3"
+  git -C "$repo" config "branch.$1.description" "$4"
+  git -C "$repo" config --add "stack-project.$3.branch" "$1"
+}
+
+if [[ ! -d $repo/.git ]]; then
+  git init -q --bare "$dir/origin.git"
+  git init -q -b main "$repo"
+  git -C "$repo" config user.name "Sandbox"
+  git -C "$repo" config user.email "sandbox@example.com"
+  git -C "$repo" remote add origin "$dir/origin.git"
+  printf '# sandbox\n' > "$repo/README.md"
+  git -C "$repo" add README.md && git -C "$repo" commit -q -m "chore: start the sandbox"
+  commit "feat: add the app shell"
+  git -C "$repo" push -q origin main
+
+  git -C "$repo" config stack-project.demo.ticket LOO-9999
+  branch demo/queries main demo "adds the widget queries"
+  commit "feat(loo-9999): add the widget queries" "Part of a stack (demo):
+
+1. demo/queries — adds the widget queries  ← this branch
+2. demo/model — moves widget rules into a model
+3. demo/ui — shows widgets on the dashboard
+
+The query layer stays thin: one Prisma call per function, no business logic, so the model above it can be tested with fakes."
+  commit "test: cover the widget queries"
+  branch demo/model demo/queries demo "moves widget rules into a model"
+  commit "feat(loo-9999): move widget rules into a model"
+  branch demo/ui demo/model demo "shows widgets on the dashboard"
+  commit "feat(loo-9999): show widgets on the dashboard"
+  commit "refactor: extract the widget card"
+  commit "fix: keep the empty state when there are no widgets"
+  branch demo/docs main demo "documents the widget api"
+  commit "docs(loo-9999): document the widget api"
+  git -C "$repo" push -q origin demo/docs
+
+  branch solo/fix main solo "stops the login banner flickering"
+  commit "fix: stop the login banner flickering"
+
+  git -C "$repo" checkout -q main
+  git -C "$repo" config stack.viewer-repos "$repo"
+  echo "viewer-sandbox: built $repo (forests: demo ×4, solo ×1; origin = $dir/origin.git)"
+fi
+
+if [[ -n $port ]]; then
+  mkdir -p "$dir/serve"
+  echo "viewer-sandbox: serving $repo on http://127.0.0.1:$port (scripts: $scripts)"
+  STACK_REVIEW_SANDBOX=1 exec python3 "$scripts/stack-review-server.py" "$dir/serve" "$scripts" "$repo" "$port"
+fi
