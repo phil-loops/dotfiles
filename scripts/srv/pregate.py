@@ -81,6 +81,6 @@ def pregate_forever():
                 continue   # one gates run machine-wide: never stack a tsc under Phil's click
             b = _candidate()
             if b:
-                push._spawn_gates(b, fix=False)
+                push._spawn_gates(b, fix=False, background=True)
         except Exception:
             pass   # an ambient nicety must never take the server down
