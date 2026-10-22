@@ -49,8 +49,8 @@ export function PushWindow(props: {
           <div class="absolute inset-y-0 right-0 rounded-r-full bg-ember-wash" style={{ left: pct(props.facts.cliffHourPT) }} />
           <div class="absolute top-[-4px] bottom-[-4px] w-px bg-ember" style={{ left: pct(props.facts.cliffHourPT) }} />
           <span class="absolute top-[12px] -translate-x-1/2 font-mono text-[9.5px] text-ember" style={{ left: pct(props.facts.cliffHourPT) }}>3pm</span>
-          <span class="absolute top-[12px] left-0 font-mono text-[9.5px] text-ink-faint">6am · {props.facts.fastH}h to merge</span>
-          <span class="absolute top-[12px] right-0 font-mono text-[9.5px] text-ink-faint">{props.facts.slowH}h to merge · 9pm</span>
+          <span class="absolute top-[12px] left-0 font-mono max-[640px]:hidden text-[9.5px] text-ink-faint">6am · {props.facts.fastH}h to merge</span>
+          <span class="absolute top-[12px] right-0 font-mono max-[640px]:hidden text-[9.5px] text-ink-faint">{props.facts.slowH}h to merge · 9pm</span>
           <Show when={w().phase !== "weekend"}>
             <span
               class={`absolute top-1/2 h-[14px] w-[14px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-vellum-night ${late() ? "bg-ember" : "bg-gold-leaf"} shadow-[0_0_0_3px_rgba(230,182,78,0.18)]`}
