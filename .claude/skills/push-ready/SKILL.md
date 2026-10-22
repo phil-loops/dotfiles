@@ -102,9 +102,13 @@ voiced (no wip/fixup). Sealing them costs the reviewer the "changes since" view.
 
 ```bash
 curl -s -X POST http://localhost:$(stack-review-port)/gates \
-  -H 'Content-Type: application/json' -d '{"branch":"<b>","detach":true}'
+  -H 'Content-Type: application/json' -H 'X-Stack-Actor: claude' \
+  -H "X-Stack-Session: ${CLAUDE_CODE_SESSION_ID:-}" -d '{"branch":"<b>","detach":true}'
 # then poll http://localhost:$(stack-review-port)/gates-progress until done
 ```
+
+(The `X-Stack-*` headers attribute the call to this session in the viewer's request and usage
+logs; send them on every curl to the viewer.)
 
 (No live server → `stack web <project>` starts one.) Triage failures: **fresh** → restack +
 re-run; **format** → `stack-gates <branch> --fix`, commit as a new commit; **typecheck/tests** →

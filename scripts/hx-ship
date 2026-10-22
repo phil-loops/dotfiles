@@ -112,7 +112,7 @@ if ! up; then
 fi
 if up; then
   if curl -fsS --max-time 8 -X POST "http://127.0.0.1:${port}/gates" \
-       -H 'Content-Type: application/json' \
+       -H 'Content-Type: application/json' -H 'X-Stack-Actor: helix' \
        -d "{\"branch\":\"${branch}\",\"detach\":true,\"fix\":false,\"useCache\":true}" \
        >/dev/null 2>&1; then
     gates="  ⚙ gates running"
