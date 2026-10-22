@@ -15,13 +15,17 @@
 #                                      summary, merge order, mermaid map)
 #   stack-pr-body <branch> --link    → also link the fork's assembled integration (opt-in: that
 #                                      link is the one fact the forest cannot vouch for itself)
+#   stack-pr-body <branch> --packet  → the review packet (review_packet.py) — what the viewer's
+#                                      compare links publish: Intent, scope, merge order, reading
+#                                      order, verified facts, then the repo's PR template
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PATH"
 
 here="${0:A:h}"
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--full] [--link]" >&2; exit 2; }
+[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--full] [--link] [--packet]" >&2; exit 2; }
 shift
+[[ " $* " == *" --packet "* ]] && exec python3 "$here/review_packet.py" "$branch"
 
 full=0 link=0
 for arg in "$@"; do

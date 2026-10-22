@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""test-review-packet — the review packet's pure rules: seeding, reading order, merge order,
+staleness and placing bot findings under claims. Run: ./test-review-packet"""
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import review_packet as rp  # noqa: E402
+
+
+class Seed(unittest.TestCase):
+    def test_description_splits_at_so(self):
+        self.assertEqual(rp.seed_intent("Forward a click to the row link, so cmd-click opens a new tab", []),
+                         ["Forwards a click to the row link.", "Cmd-click opens a new tab."])
+
+    def test_later_subjects_add_claims_and_followups_drop(self):
+        got = rp.seed_intent("add the queries", ["feat(x): add the queries", "test: cover the queries", "lint"])
+        self.assertEqual(got, ["Adds the queries.", "Covers the queries."])
+
+    def test_third_person(self):
+        self.assertEqual(rp._third_person("copy rows"), "copies rows")
+        self.assertEqual(rp._third_person("fix it"), "fixes it")
+        self.assertEqual(rp._third_person("moves it"), "moves it")
+
+
+class Read(unittest.TestCase):
+    def test_layers_then_core_and_moves(self):
+        files = [{"path": "components/A.tsx", "status": "M", "add": 3, "del": 1},
+                 {"path": "queries/a.test.ts", "status": "A", "add": 40, "del": 0},
+                 {"path": "models/a.ts", "status": "M", "add": 50, "del": 2},
+                 {"path": "queries/a.ts", "status": "R", "old": "lib/a.ts", "add": 0, "del": 0}]
+        order = rp.reading_order(files)
+        self.assertEqual([x["path"] for x in order], ["queries/a.ts", "models/a.ts", "components/A.tsx", "queries/a.test.ts"])
+        self.assertIn("moved verbatim", order[0]["note"])
+        self.assertTrue(order[1]["note"].startswith("the core of it"))
+        self.assertEqual(order[3]["note"], "new tests")
+
+
+class Where(unittest.TestCase):
+    plan = [{"pr": 41, "title": "feat(x): add table", "state": "merged"},
+            {"pr": 42, "title": "add queries", "state": "open", "ancestor": True},
+            {"title": "the model", "me": True},
+            {"title": "the ui"}]
+
+    def test_groups(self):
+        lines = rp.where_lines(self.plan, {"pr": 42, "branch": "q"})
+        self.assertEqual(lines, ["Stacked on: #42", "", "✓ #41 add table",
+                                 "○ #42 add queries — in review; this PR builds on it", "→ **this PR**", "○ the ui — up next"])
+
+    def test_not_in_this_pr_skips_ancestors(self):
+        self.assertEqual(rp.not_lines(self.plan, ["hand one"]), ["The ui — up next", "hand one"])
+
+    def test_staleness_and_splice(self):
+        old = rp.render({"intent": ["A claim here."], "where": ["→ **this PR**", "○ #43 docs — in review"]}, "---\ntemplate")
+        new = ["✓ #43 docs", "→ **this PR**"]
+        st = rp.staleness(old, new)
+        self.assertEqual(st["mergedSince"], [43])
+        self.assertIn("✓ #43 docs", st["updatedBody"])
+        self.assertIn("A claim here.", st["updatedBody"])
+        self.assertIn("template", st["updatedBody"])
+        self.assertIsNone(rp.staleness("no packet here", new))
+        self.assertFalse(rp.staleness(old, ["→ **this PR**", "○ #43 docs — in review"])["stale"])
+
+
+class Findings(unittest.TestCase):
+    claims = ["Each widget query is one Prisma call with no business logic.", "Adds the widget card."]
+
+    def test_placement(self):
+        t = lambda body, **kw: {"author": "john-hankles", "body": body, **kw}
+        got = rp.match_findings(self.claims, [
+            t("Claim 2 is wrong: no card."),
+            t("listWidgets filters widget rows in JavaScript: business logic in a widget query, not one Prisma call."),
+            t("Unrelated: test leaks a client.\n```suggestion\nprisma widget query call business\n```"),
+            t("resolved", resolved=True),
+            {"author": "nalanj", "body": "nit"},
+        ])
+        self.assertEqual([f["claim"] for f in got], [1, 0, None])
+
+    def test_claims_of(self):
+        self.assertEqual(rp.claims_of("## Intent\n\n- One.\n2. Two.\n\n## Verified\n- x"), ["One.", "Two."])
+
+
+if __name__ == "__main__":
+    unittest.main()
