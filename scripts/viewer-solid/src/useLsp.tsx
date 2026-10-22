@@ -2,12 +2,13 @@ import { createSignal, onCleanup, Show, For, type JSX } from "solid-js";
 import { Portal } from "solid-js/web";
 import { withRepo } from "./provider";
 import { renderMarkdown } from "./markdown";
+import { CodeLines } from "./CodeLines";
 import { chord, sideOf, wordAt, type Leader, type LspAction } from "./lspKeys";
 import { mapOpen } from "./mapState";
 import { storySheetOpen } from "./StorySheet";
 
 // Types on demand, the Helix way: K (or space·k) shows the type under the pointer, g·d jumps to
-// its definition when the diff shows it. The
+// its definition — in the diff when it's there, else in a read-only pane on the right. The
 // server's one tsgo (srv/lsp.py) starts on the first ask, never before. Only the NEW side of a
 // diff exists at the branch tip, so a removed line answers with a note instead of a request.
 
@@ -20,6 +21,7 @@ type Pop =
   | { kind: "hover"; at: At; md: string }
   | { kind: "note"; at: At | null; text: string; warn?: boolean }
   | { kind: "picks"; at: At; locs: Loc[]; sel: number };
+type Pane = { path: string; lit: [number, number]; text?: string; err?: string };
 
 const CHORD_MS = 600;
 const NOTE_MS = 1800;
@@ -106,15 +108,17 @@ function rowFor(path: string, line: number): HTMLElement | null {
 const leafOf = (p: string) => p.slice(p.lastIndexOf("/") + 1);
 const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/") + 1);
 
-/** The K / space·k / g·d keys and their popover. Mount once on the branch page. */
+/** The K / space·k / g·d keys, their popover and the definition pane. Mount once on the branch page. */
 export function useLsp(deps: {
   branch: () => string;
   /** why types can't be asked for right now (commits view, the integration ghost), else null */
   unavailable: () => string | null;
   pointing: () => boolean;
   blocked: () => boolean;
+  openInNvim: (path: string, line: number | null) => void;
 }) {
   const [pop, setPop] = createSignal<Pop | null>(null);
+  const [pane, setPane] = createSignal<Pane | null>(null);
   const [status, setStatus] = createSignal<Status | null>(null);
   const [now, setNow] = createSignal(Date.now());
   let pointer: { x: number; y: number } | null = null;
@@ -159,7 +163,12 @@ export function useLsp(deps: {
       setTimeout(() => row.classList.remove("lsp-flash"), 1700);
       return;
     }
-    note(`${loc.path}:${loc.line} — outside this diff`, null, 3200);
+    setPop(null);
+    setPane({ path: loc.path, lit: [loc.line, Math.max(loc.line, loc.endLine)] });
+    fetch(withRepo(`/lsp/src?path=${encodeURIComponent(loc.path)}`))
+      .then((r) => r.json() as Promise<{ text?: string; err?: string }>)
+      .then((j) => setPane((p) => (p && p.path === loc.path ? { ...p, text: j.err ? undefined : j.text, err: j.err } : p)))
+      .catch(() => setPane((p) => (p ? { ...p, err: "server unreachable" } : p)));
   };
 
   const ask = async (action: LspAction, t: Target) => {
@@ -224,10 +233,9 @@ export function useLsp(deps: {
     if (storySheetOpen() || mapOpen() || deps.blocked()) return;
     if (e.metaKey || e.ctrlKey || e.altKey) { leader = ""; return; }
     const p = pop();
-    if (e.key === "Escape" && (inflight || p)) {
+    if (e.key === "Escape" && (inflight || p || pane())) {
       swallow(e);
-      cancel();
-      setPop(null);
+      if (inflight || p) { cancel(); setPop(null); } else setPane(null);
       return;
     }
     if (p?.kind === "picks") {
@@ -239,6 +247,8 @@ export function useLsp(deps: {
       const digit = Number(e.key);
       if (digit >= 1 && digit <= n) { swallow(e); jump(p.locs[digit - 1]); return; }
     }
+    const pn = pane();
+    if (e.key === "o" && pn && !pn.path.startsWith("/")) { swallow(e); deps.openInNvim(pn.path, pn.lit[0]); return; }
     // space is the page's scroll key until the pointer rests on code
     if (e.key === " " && !leader && !deps.pointing()) return;
     const was = leader;
@@ -340,6 +350,27 @@ export function useLsp(deps: {
           }}
         </Show>
       </Portal>
+      <Show when={pane()}>
+        {(pn) => (
+          <aside class="lsp-pane fixed top-0 right-0 bottom-0 z-[230] flex w-[min(46vw,780px)] flex-col border-l border-solid border-rule bg-diff-bg shadow-[-24px_0_60px_#0008] max-[900px]:w-[92vw]">
+            <div class="flex items-baseline justify-between gap-3 border-b border-solid border-rule bg-vellum-raise px-4 py-[9px] font-mono text-[11px]">
+              <span class="truncate text-ink-dim">
+                <span class="text-ink-faint">{dirOf(pn().path)}</span><b class="font-semibold text-ink">{leafOf(pn().path)}</b>
+                <span class="text-gold-leaf">:{pn().lit[0]}</span>
+              </span>
+              <span class="shrink-0 text-ink-faint">{pn().path.startsWith("/") ? "" : "o helix · "}esc</span>
+            </div>
+            <CodeLines text={pn().text} path={pn().path} lit={pn().lit}>
+              <Show when={pn().err}>
+                <div class="px-4 font-mono text-[12px] text-del">{pn().err}</div>
+              </Show>
+              <Show when={pn().text === undefined && !pn().err}>
+                <div class="px-4 font-mono text-[12px] italic text-ink-faint">reading…</div>
+              </Show>
+            </CodeLines>
+          </aside>
+        )}
+      </Show>
     </>
   );
 

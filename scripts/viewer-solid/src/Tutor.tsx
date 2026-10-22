@@ -13,7 +13,7 @@ import { createEffect, createMemo, createRoot, createResource, createSignal, For
 import { createStore, produce } from "solid-js/store";
 import { fetchJSON } from "./api";
 import { useViewerLocation, type ViewerLocation } from "./router";
-import hljs from "highlight.js/lib/core";
+import { CodeLines } from "./CodeLines";
 import { renderMarkdown } from "./markdown"; // also registers hljs languages on the shared core
 
 type Msg = { role: "tutor" | "me"; text: string };
@@ -1221,71 +1221,11 @@ function ConceptDrawer(props: { id: string }) {
   );
 }
 
-const LANG_BY_EXT: Record<string, string> = {
-  ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
-  js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",
-  py: "python", json: "json", sh: "bash", zsh: "bash", bash: "bash", sql: "sql", css: "css",
-  html: "xml", xml: "xml", svg: "xml", yml: "yaml", yaml: "yaml", md: "markdown", diff: "diff", patch: "diff",
-};
-const HIGHLIGHT_MAX = 300_000;
-
-const escapeHtml = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-// Highlight the WHOLE file (so a multi-line comment or string colors correctly), then cut the HTML
-// into lines, closing the spans still open at each newline and reopening them on the next line.
-function highlightLines(text: string, path: string): string[] {
-  const lang = LANG_BY_EXT[path.split(".").pop()?.toLowerCase() ?? ""];
-  let html: string;
-  if (text.length > HIGHLIGHT_MAX) {
-    html = escapeHtml(text);
-  } else if (lang && hljs.getLanguage(lang)) {
-    html = hljs.highlight(text, { language: lang, ignoreIllegals: true }).value;
-  } else {
-    html = hljs.highlightAuto(text).value;
-  }
-  const out: string[] = [];
-  const open: string[] = [];
-  let cur = "";
-  for (const m of html.matchAll(/<span[^>]*>|<\/span>|\n|[^<\n]+/g)) {
-    const t = m[0];
-    if (t === "\n") {
-      out.push(cur + "</span>".repeat(open.length));
-      cur = open.join("");
-    } else if (t.startsWith("<span")) {
-      open.push(t);
-      cur += t;
-    } else if (t === "</span>") {
-      open.pop();
-      cur += t;
-    } else {
-      cur += t;
-    }
-  }
-  out.push(cur + "</span>".repeat(open.length));
-  return out;
-}
-
 function CodePane(props: { pin: Pin | null }) {
   const key = () => (props.pin ? `${props.pin.ref ?? ""}:${props.pin.path}` : null);
   const [src] = createResource(key, () => {
     const p = props.pin!;
     return fetchJSON<SrcReply>(`/tutor-src?path=${encodeURIComponent(p.path)}&ref=${encodeURIComponent(p.ref ?? "")}`);
-  });
-  let pane: HTMLDivElement | undefined;
-  const lines = createMemo(() => highlightLines((src()?.text ?? "").replace(/\n$/, ""), props.pin?.path ?? ""));
-  const focused = () => !!props.pin?.lines;
-  const lit = (n: number) => {
-    const r = props.pin?.lines;
-    return !!r && n >= r[0] && n <= r[1];
-  };
-  createEffect(() => {
-    lines();
-    const start = props.pin?.lines?.[0];
-    if (!start) return;
-    queueMicrotask(() => {
-      const el = pane?.querySelector(`[data-ln="${start}"]`) as HTMLElement | null;
-      if (el && pane) pane.scrollTo({ top: Math.max(0, el.offsetTop - 80), behavior: "smooth" });
-    });
   });
   return (
     <div class="flex min-h-0 flex-col bg-diff-bg max-[960px]:max-h-[50vh]">
@@ -1295,38 +1235,14 @@ function CodePane(props: { pin: Pin | null }) {
           {props.pin?.lines ? `L${props.pin.lines[0]}–${props.pin.lines[1]} · ` : ""}{src()?.ref ?? ""}
         </span>
       </div>
-      <div ref={pane} class="relative flex-1 min-h-0 overflow-auto py-2">
+      <CodeLines text={src() && !src()!.err ? src()!.text : undefined} path={props.pin?.path ?? ""} lit={props.pin?.lines}>
         <Show when={src()?.err}>
           <div class="px-4 font-mono text-[12px] text-del">{src()!.err}</div>
         </Show>
         <Show when={!props.pin}>
           <div class="px-4 py-6 text-[13px] text-ink-faint">Code the tutor pins shows up here and stays put while you answer.</div>
         </Show>
-        <Show when={src() && !src()!.err}>
-          <pre class="m-0 font-mono text-[12.5px] leading-[1.55]">
-            <For each={lines()}>
-              {(ln, i) => (
-                <div
-                  data-ln={i() + 1}
-                  class="flex"
-                  classList={{ "bg-gold-wash": lit(i() + 1) }}
-                >
-                  <span
-                    class="w-[52px] shrink-0 select-none pr-3 text-right"
-                    classList={{ "text-gold-leaf": lit(i() + 1), "text-ink-faint": !lit(i() + 1) }}
-                  >{i() + 1}</span>
-                  {/* innerHTML: hljs output — it escapes the file's text, and the file is local code */}
-                  <span
-                    class="whitespace-pre pr-4 text-ink"
-                    classList={{ "opacity-55": focused() && !lit(i() + 1) }}
-                    innerHTML={ln || " "}
-                  />
-                </div>
-              )}
-            </For>
-          </pre>
-        </Show>
-      </div>
+      </CodeLines>
     </div>
   );
 }
