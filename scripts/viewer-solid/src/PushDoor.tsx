@@ -40,7 +40,6 @@ export function usePushDoor(d: {
             moreCommits?: number;
             files?: { path: string; add: number; del: number }[];
             moreFiles?: number;
-            commit?: { sha: string; subject: string; body: string } | null;
             review?: { flags: string[] } | null;
             gatesWaived?: string[];
             replaceable?: boolean;
@@ -137,8 +136,6 @@ export function PushDoor(props: {
   trigger: (id: string, run: () => void, holdMs?: number) => void;
   disarm: () => void;
   fire: (fn: () => void) => () => void;
-  editorOpen: () => boolean;
-  openEditor: (subject: string, body: string) => void;
 }) {
   const { preview, pushOrigin, openPr, replaceOrigin, outN, outLabel, landing, pushSummary } = props.door;
   const isReview = props.isReview;
@@ -147,7 +144,6 @@ export function PushDoor(props: {
   const trigger = props.trigger;
   const disarm = props.disarm;
   const fire = props.fire;
-  const editorOpen = props.editorOpen;
   return (
     <>
       {/* THE red button — the only way anything here reaches origin (Phil: "whatever is
@@ -268,25 +264,6 @@ export function PushDoor(props: {
             </span>
           )
         }
-      </Show>
-
-      {/* open the ONE outgoing commit's message on demand — play with it (or ✦ voice it) and
-          push, without running the whole sync motion first. Pre-filled from the push-preview
-          verdict; the editor it opens is the same one prep ends at. Hidden while it's already
-          open so a re-click can't clobber unsaved edits. */}
-      <Show when={!isReview() && preview.data?.commit && !editorOpen()}>
-        <button
-          class={`nh-fix nh-open-pr ${FIX}`}
-          disabled={busy()}
-          data-track="node.message-edit"
-          title="edit this commit's message (subject + body) before pushing — no sync needed"
-          onClick={() => {
-            const c = preview.data!.commit!;
-            props.openEditor(c.subject, c.body);
-          }}
-        >
-          ✎ message
-        </button>
       </Show>
 
       {/* the branch IS on origin: the PR page is one click away regardless of outgoing state.

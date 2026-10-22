@@ -2,8 +2,8 @@
 // the waymark spine (one station chip + one slot for the single local next step), the push
 // door, and a ⋯ menu holding the rare or conditional mutations. The slot is the whole local
 // motion: ⟲ sync chains reseat → rebase forward → route to one voiced commit → gates →
-// delta tests → message editor. The shared world only ever moves from the push door. This
-// component owns its wiring + state, so it drops in with a single mount line.
+// delta tests → the outline column. The shared world only ever moves from the push
+// door. This component owns its wiring + state, so it drops in with a single mount line.
 //
 //   <NodeActions branch={active()} />
 //
@@ -19,7 +19,7 @@ import { createMutation, createQuery, keepPreviousData, useQueryClient } from "@
 import { provider, canMutate, withRepo } from "./provider";
 import { useArm, post } from "./actions";
 import { PushDoor, usePushDoor } from "./PushDoor";
-import { MessageEditor, useMessageEditor } from "./MessageEditor";
+import { focusOutline } from "./OutlineEditor";
 import RebaseStream from "./RebaseStream";
 import NodeSpine, { type SpineEdge } from "./NodeSpine";
 import { nextStepOf, stationOf, type Station } from "./nodeStation";
@@ -122,7 +122,7 @@ export function NodeActions(props: {
   // fine." One button that makes this branch RIGHT and YOURS: reseat if drifted → rebase
   // forward if behind (streams on eject) → route to one outgoing commit (additive for a
   // diverged PR, squash for a messy tail) → advisory tests + the push gates (detached —
-  // their green is what unlocks the red button) → the message editor. Every step runs
+  // their green is what unlocks the red button) → the outline column. Every step runs
   // against the worktree already holding the branch — the motion never moves the main
   // checkout (that step was GH-Desktop-era; the red button pushes from the branch's own
   // tree, so a dirty main checkout can't block a sync — Phil, 2026-07-28).
@@ -161,7 +161,7 @@ export function NodeActions(props: {
       { id: "route", label: "commit shape", state: "idle" },
       { id: "tests", label: "tests", state: "idle" },
       { id: "gates", label: "push gates", state: "idle" },
-      { id: "editor", label: "editor", state: "idle" },
+      { id: "editor", label: "words", state: "idle" },
     );
     setSyncSteps(steps);
   };
@@ -265,7 +265,7 @@ export function NodeActions(props: {
         stepSet("rebase", sy.ok ? "ok" : "skip", sy.ok ? undefined : `refused (${sy.err || "stacked / open PR"}) — routing handles it`);
       }
       stepSet("route", "run");
-      const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; vehiclePending?: boolean; routed?: string[]; commit?: { sha: string; subject: string; body: string } | null }>(
+      const pr = await post<{ ok?: boolean; err?: string; reconcile?: boolean; vehiclePending?: boolean; routed?: string[] }>(
         "/prep-push", { branch: props.branch });
       if (!pr.ok) {
         if (pr.reconcile) {
@@ -279,20 +279,20 @@ export function NodeActions(props: {
           stepSet("tests", "skip");
           stepSet("gates", "skip");
           stepSet("editor", "skip", "vehicle push-pending");
-          return { phase: "done" as const, routed: ["additive vehicle push-pending"], commit: null };
+          return { phase: "done" as const, routed: ["additive vehicle push-pending"], words: false };
         }
         if ((pr.err ?? "").startsWith("nothing to push")) {
           stepSet("route", "ok", "nothing to push — origin already has this");
           stepSet("tests", "skip");
           stepSet("gates", "skip");
           stepSet("editor", "skip", "no outgoing commit");
-          return { phase: "done" as const, routed: ["nothing to push — origin already has this"], commit: null };
+          return { phase: "done" as const, routed: ["nothing to push — origin already has this"], words: false };
         }
         stepSet("route", "fail", pr.err || "prep failed");
         return { phase: "error" as const };
       }
       stepSet("route", "ok", (pr.routed ?? []).join(" · ") || undefined);
-      runPushGates(); // detached — the editor opens without waiting on a typecheck
+      runPushGates(); // detached — the words take focus without waiting on a typecheck
       stepSet("tests", "run");
       let tests: DeltaTestResult | null = null;
       try {
@@ -311,7 +311,7 @@ export function NodeActions(props: {
               : "couldn't run"
           : "couldn't run",
       );
-      return { phase: "done" as const, routed: pr.routed ?? [], commit: pr.commit ?? null, tests };
+      return { phase: "done" as const, routed: pr.routed ?? [], words: true, tests };
     },
     onSuccess: (r) => {
       setOpen(false);
@@ -337,12 +337,9 @@ export function NodeActions(props: {
         reconcile.mutate(); // divergence with no mechanical route — Claude in the middle
         return;
       }
-      if (r.commit) {
-        setRoutedNotes(r.routed ?? []);
-        setMsgSubject(r.commit.subject);
-        setMsgBody(r.commit.body);
-        setEditorOpen(true);
-        stepSet("editor", "ok");
+      if (r.words) {
+        focusOutline(r.routed ?? []);
+        stepSet("editor", "ok", "→ the outline column");
       }
       if (stashedRun()) {
         // the dirt decision was stash-and-continue — bring it back now that the motion is done
@@ -418,9 +415,6 @@ export function NodeActions(props: {
 
   const isReview = () => props.isReview;
 
-  // ── the editor — where every sync lands: the one outgoing commit, editable pre-push ──
-  const [editorOpen, setEditorOpen] = createSignal(false);
-  const [routedNotes, setRoutedNotes] = createSignal<string[]>([]);
   const refreshAfterPrep = () => {
     qc.invalidateQueries({ queryKey: ["node", props.branch] });
     qc.invalidateQueries({ queryKey: ["commits", props.branch] });
@@ -428,16 +422,6 @@ export function NodeActions(props: {
     sync.refetch();
     preview.refetch();
   };
-  // the message editor — its three mutations and the box live in MessageEditor; the header
-  // keeps only "is it open" and hands the draft back through the hook
-  const ed = useMessageEditor({
-    branch: () => props.branch,
-    setDone,
-    refresh: refreshAfterPrep,
-    close: () => setEditorOpen(false),
-  });
-  const setMsgSubject = ed.setSubject;
-  const setMsgBody = ed.setBody;
 
   // what prep WOULD do — the read-only routed verdict, so the button teaches before it acts
   const prepRoute = createQuery(() => ({
@@ -578,12 +562,6 @@ export function NodeActions(props: {
         trigger={trigger}
         disarm={disarm}
         fire={fire}
-        editorOpen={editorOpen}
-        openEditor={(subject, body) => {
-          setMsgSubject(subject);
-          setMsgBody(body);
-          setEditorOpen(true);
-        }}
       />
 
       {/* ⋯ menu — preview and the conditional repairs. */}
@@ -758,15 +736,6 @@ export function NodeActions(props: {
         </a>
       </Show>
 
-      <Show when={editorOpen()}>
-        <MessageEditor
-          ed={ed}
-          branch={() => props.branch}
-          routedNotes={routedNotes}
-          onClose={() => setEditorOpen(false)}
-          onPlanSaved={() => {}}
-        />
-      </Show>
 
       <Show when={rebaseStreaming()}>
         <RebaseStream
@@ -775,7 +744,7 @@ export function NodeActions(props: {
           onSettled={(outcome) => {
             if (outcome === "done") {
               // the headless rebase landed cleanly — the branch now contains origin/main, so
-              // pick the motion back up where it ejected (one commit → gates → editor)
+              // pick the motion back up where it ejected (one commit → gates → words)
               // instead of stranding a ticking spinner that waits on a manual re-click.
               stepSet("rebase", "ok", "landed — merging it in");
               setRebaseStreaming(false);

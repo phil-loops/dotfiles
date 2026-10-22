@@ -427,8 +427,8 @@ export function NodeDetail() {
                   setActiveFile("");
                   fileCycle.setCurrent("");
                 }}
-                onReworded={() => {
-                  // the shas moved (tree didn't): refresh the list, the push manifest, the model
+                onChanged={() => {
+                  // a dropped or reverted commit moved the shas: refresh the list, the push manifest, the model
                   setSelectedCommit("");
                   setSliceAnchor("");
                   commits.refetch();

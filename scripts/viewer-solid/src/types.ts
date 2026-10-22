@@ -182,7 +182,7 @@ export const Commit = z.object({
   subject: z.string(),
   author: z.string(),
   date: z.string(),
-  body: z.string().optional(), // full message body — the reword editor's prefill
+  body: z.string().optional(), // full message body — the outline's why line
   own: z.boolean().optional(), // true = on this branch (parent..branch); false = inherited ancestor
   carried: z.boolean().optional(), // own, but a fan-in cherry-pick of a `requires` dep — the dep's outline
   pushed: z.boolean().optional(), // origin already has it (upstream / origin/<branch>); absent = no remote ref

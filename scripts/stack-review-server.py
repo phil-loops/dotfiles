@@ -559,12 +559,6 @@ class H(BaseHTTPRequestHandler):
             return outline.save(self, raw)
         if self.path == "/outline-undo":   # restore the last outline save, if still unpushed and unmoved
             return outline.undo(self, raw)
-        if self.path == "/prep-message":   # edit the ONE unpushed commit's subject+body (tree untouched)
-            return push.prep_message(self, raw)
-        if self.path == "/reword-message":   # reword ANY unpushed commit (stack-reword: tree kept, children carried)
-            return push.reword_message(self, raw)
-        if self.path == "/draft-message":   # opt-in claude draft of the outgoing commit's message
-            return push.draft_message(self, raw)
         if self.path == "/dirty-resolve":   # sync's routed decision on a dirty tree: include / stash / pop
             return push.dirty_resolve(self, raw)
         if self.path == "/reconcile":   # diverged-from-PR-head branch → eject Claude to reconcile (no force-push)

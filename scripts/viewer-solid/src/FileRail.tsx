@@ -402,17 +402,8 @@ function CommitRow(props: {
   branch: string;
   selected: boolean;
   onSelect: (extend: boolean) => void;
-  onReworded?: () => void;
+  onChanged?: () => void;
 }) {
-  // reword — GitHub Desktop's "amend" for any commit above the origin waterline: the message
-  // changes, the tree does not (stack-reword rebuilds sha..tip and carries stacked children).
-  // Pushed commits get no pencil: rewording them would be a force-push.
-  const rewordable = () => canMutate && props.c.own !== false && props.c.pushed === false;
-  const [editing, setEditing] = createSignal(false);
-  const [subj, setSubj] = createSignal("");
-  const [body, setBody] = createSignal("");
-  const [saving, setSaving] = createSignal(false);
-  const [rewordErr, setRewordErr] = createSignal("");
   // revert — an unpushed commit is dropped outright; a pushed one gets an additive revert commit
   const revertable = () => canMutate && props.c.own !== false;
   const { armed: revertArmed, trigger: armRevert } = useArm();
@@ -432,39 +423,11 @@ function CommitRow(props: {
         setRevertErr(j.err ?? "revert failed");
         return;
       }
-      props.onReworded?.();
+      props.onChanged?.();
     } catch (e) {
       setRevertErr(String(e));
     } finally {
       setReverting(false);
-    }
-  };
-  const startReword = () => {
-    setSubj(props.c.subject);
-    setBody(props.c.body ?? "");
-    setRewordErr("");
-    setEditing(true);
-  };
-  const saveReword = async () => {
-    setSaving(true);
-    setRewordErr("");
-    try {
-      const r = await fetch(withRepo("/reword-message"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ branch: props.branch, sha: props.c.sha, subject: subj(), body: body() }),
-      });
-      const j = (await r.json()) as { ok?: boolean; err?: string; warnings?: string[] };
-      if (!j.ok) {
-        setRewordErr(j.err ?? "reword failed");
-        return;
-      }
-      setEditing(false);
-      props.onReworded?.();
-    } catch (e) {
-      setRewordErr(String(e));
-    } finally {
-      setSaving(false);
     }
   };
   const mine = () => props.c.own !== false && !props.c.carried;
@@ -497,17 +460,7 @@ function CommitRow(props: {
           </span>
           <span class="c-meta flex-none text-[10.5px] text-ink-faint tabular-nums">{props.c.date.slice(5)}</span>
         </button>
-        <Show when={rewordable() && !editing()}>
-          <button
-            class="c-reword flex-none cursor-pointer text-[12px] text-ink-faint hover:text-gold-leaf"
-            data-track="commit.reword"
-            title="reword this commit's subject + body — unpushed, so the tree stays and nothing is force-pushed"
-            onClick={startReword}
-          >
-            ✎
-          </button>
-        </Show>
-        <Show when={revertable() && !editing()}>
+        <Show when={revertable()}>
           <button
             class="c-revert flex-none cursor-pointer text-[12px] text-ink-faint hover:text-del disabled:cursor-default disabled:opacity-35"
             classList={{ "text-del": revertArmed() === props.c.sha }}
@@ -526,38 +479,6 @@ function CommitRow(props: {
       <Show when={revertErr()}>
         <p class="px-1 pb-2 text-[11px] text-del">{revertErr()}</p>
       </Show>
-      <Show when={editing()}>
-        <div class="mx-1 mb-3 flex flex-col gap-[7px] rounded-[9px] border border-solid border-gold-deep bg-gold-wash px-[14px] py-3">
-          <input
-            class="border-x-0 border-t-0 border-b border-rule bg-transparent px-[1px] py-[3px] font-display text-[17px] font-semibold italic text-ink outline-none focus:border-b-gold-leaf"
-            value={subj()}
-            placeholder="subject — the one line the team reads in history"
-            onInput={(e) => setSubj(e.currentTarget.value)}
-          />
-          <textarea
-            class="resize-y border-0 bg-transparent p-[1px] font-mono text-[12px] leading-[1.55] text-ink-dim outline-none"
-            value={body()}
-            placeholder="body — what ships and why"
-            rows={5}
-            onInput={(e) => setBody(e.currentTarget.value)}
-          />
-          <div class="flex items-center gap-[10px]">
-            <button
-              class="cursor-pointer rounded-[5px] border border-solid border-gold-deep bg-transparent px-[9px] py-[3px] text-[12px] leading-[1.55] text-gold-leaf disabled:cursor-default disabled:opacity-35"
-              disabled={saving() || !subj().trim()}
-              onClick={() => void saveReword()}
-            >
-              {saving() ? "rewording…" : "reword"}
-            </button>
-            <button class="cursor-pointer text-[11px] leading-[1.55] text-ink-faint" onClick={() => setEditing(false)}>
-              cancel
-            </button>
-            <Show when={rewordErr()}>
-              <span class="text-[11px] text-del">{rewordErr()}</span>
-            </Show>
-          </div>
-        </div>
-      </Show>
     </li>
   );
 }
@@ -573,7 +494,7 @@ export function CommitsList(props: {
   slice?: Commit[];
   onSelect: (sha: string, extend?: boolean) => void;
   onSelectOutgoing?: () => void;
-  onReworded?: () => void;
+  onChanged?: () => void;
 }) {
   const outline = () => outlineOf(props.q.data);
   const isSelected = (sha: string) => props.selected === sha || !!props.slice?.some((c) => c.sha === sha);
@@ -678,7 +599,7 @@ export function CommitsList(props: {
                     branch={props.branch}
                     selected={isSelected(c.sha)}
                     onSelect={(extend) => props.onSelect(c.sha, extend)}
-                    onReworded={props.onReworded}
+                    onChanged={props.onChanged}
                   />
                 </>
               )}

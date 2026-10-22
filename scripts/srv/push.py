@@ -786,8 +786,7 @@ def push_origin(req, raw):
 
 def _squash_unpushed(branch, message=""):
     """stack-squash --unpushed --format --no-voice: collapse the unpushed tail to one commit
-    with the mechanical message — the claude voicing is opt-in via /draft-message, so prep
-    never blocks on a model call."""
+    with the mechanical message, so prep never blocks on a model call."""
     cmd = [os.path.join(ctx.SCRIPTS, "stack-squash"), "--unpushed", "--format", "--no-voice"]
     if message:
         cmd.append(f"--message={message}")
@@ -804,7 +803,7 @@ def prep_push(req, raw):
       behind + unpublished  → forward-rebase onto origin/main first (skipped on conflict)
       unpushed tail > 1     → stack-squash --unpushed --format (voiced draft)
       already one / nothing → no-op, report
-    Always returns the outgoing commit (sha/subject/body) so the editor can open on it."""
+    The words are edited afterwards in the outline column (srv/outline.py)."""
     d = json.loads(raw or "{}")
     branch = d.get("branch", "")
     v = _origin_verdict(branch)
@@ -954,130 +953,6 @@ def prep_push(req, raw):
     return req._send(200, json.dumps({
         "ok": True, "routed": routed, "outgoing": v["outgoing"],
         "commit": v["commit"], "wardsOk": v["ok"], "reasons": v["reasons"],
-    }))
-
-
-def reword_message(req, raw):
-    """POST /reword-message {branch, sha, subject, body} — reword ANY unpushed commit on the
-    branch, not only the tip: tree untouched, author kept, stacked children carried along.
-    Shells to stack-reword, which refuses a commit any remote ref already holds (that would
-    be a force-push) or one at/below the branch's base (it belongs to the parent)."""
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    sha = (d.get("sha") or "").strip()
-    subject = (d.get("subject") or "").strip()
-    body = (d.get("body") or "").strip()
-    if not branch or not sha:
-        return req._send(400, json.dumps({"ok": False, "err": "branch and sha required"}))
-    if ctx.run(["git", "rev-parse", "--verify", "-q", f"refs/heads/{branch}"]).returncode != 0:
-        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
-    if not subject or _WIP_SUBJECT.match(subject):
-        return req._send(200, json.dumps({"ok": False, "err": "subject must be a real voiced line, not a placeholder"}))
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", prefix="reword-", delete=False) as fh:
-        fh.write(subject + (f"\n\n{body}" if body else "") + "\n")
-        path = fh.name
-    try:
-        r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-reword"), "--branch", branch, sha, "-F", path])
-    finally:
-        os.unlink(path)
-    out = (r.stdout or "").strip()
-    err = (r.stderr or "").strip().replace("stack-reword: ", "")
-    if r.returncode != 0:
-        return req._send(200, json.dumps({"ok": False, "err": err or "reword failed"}))
-    m = re.search(r"reworded \S+ → (\S+)", out)
-    req._send(200, json.dumps({
-        "ok": True, "unchanged": "unchanged" in out, "sha": m.group(1) if m else None,
-        "moves": [ln for ln in out.splitlines() if "→" in ln and not ln.startswith("reworded")],
-        "warnings": [ln for ln in err.splitlines() if ln],
-    }))
-
-
-def draft_message(req, raw):
-    """POST /draft-message {branch} — the opt-in claude pass: draft the ONE outgoing
-    commit's message in the author's voice (stack-squash --dry drafts, nothing moves).
-    Nothing is applied until the editor saves it through /prep-message."""
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    v = _origin_verdict(branch)
-    if v is None:
-        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
-    if v["outgoing"] != 1 or not v["commit"]:
-        return req._send(200, json.dumps({"ok": False, "err": "drafting needs exactly one unpushed commit — run prep first"}))
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-squash"), "--dry", "--unpushed", branch])
-    try:
-        sq = json.loads(r.stdout)
-    except Exception:
-        return req._send(200, json.dumps({"ok": False, "err": (r.stderr or r.stdout or "draft failed").strip()[:300]}))
-    if not sq.get("ok") or not sq.get("voiced"):
-        return req._send(200, json.dumps({"ok": False, "err": sq.get("err") or "claude unavailable — keep the mechanical message or write your own"}))
-    lines = (sq.get("message") or "").splitlines()
-    return req._send(200, json.dumps({
-        "ok": True,
-        "subject": lines[0].strip() if lines else "",
-        "body": "\n".join(lines[1:]).strip(),
-    }))
-
-
-def prep_message(req, raw):
-    """POST /prep-message {branch, subject, body} — rewrite the message of the ONE unpushed
-    tip commit, tree untouched (commit-tree + atomic update-ref, author preserved). Refuses
-    unless the outgoing set is exactly that commit, so pushed history can't be reworded."""
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    subject = (d.get("subject") or "").strip()
-    body = (d.get("body") or "").strip()
-    if not subject or _WIP_SUBJECT.match(subject):
-        return req._send(200, json.dumps({"ok": False, "err": "subject must be a real voiced line, not a placeholder"}))
-    v = _origin_verdict(branch)
-    if v is None:
-        return req._send(404, json.dumps({"ok": False, "err": "no such branch"}))
-    if v["outgoing"] != 1 or not v["commit"]:
-        return req._send(200, json.dumps({"ok": False, "err": "message editing needs exactly one unpushed commit — run prep first"}))
-    tip = v["commit"]["sha"]
-    if ctx.run(["git", "rev-parse", branch]).stdout.strip() != tip:
-        return req._send(200, json.dumps({"ok": False, "err": "the outgoing commit isn't the branch tip — run prep first"}))
-    meta = ctx.run(["git", "log", "-1", "--format=%an%x1f%ae%x1f%aD", tip]).stdout.strip().split("\x1f")
-    env = dict(os.environ)
-    if len(meta) == 3:
-        env.update({"GIT_AUTHOR_NAME": meta[0], "GIT_AUTHOR_EMAIL": meta[1], "GIT_AUTHOR_DATE": meta[2]})
-    # save the body verbatim — the forest section was already folded in when the
-    # editor opened (see the prep return), so the author's edits to it are authoritative
-    # here rather than regenerated out from under them.
-    msg = subject + (f"\n\n{body}" if body else "")
-    # A reword the author didn't ask for still moves the tip, and a moved tip reseats every
-    # child. Now that prepare-commit-msg seeds the plan at commit time, the message usually
-    # already matches — so say so and leave the sha alone.
-    if msg.strip() == ctx.run(["git", "log", "-1", "--format=%B", tip]).stdout.strip():
-        return req._send(200, json.dumps({
-            "ok": True, "unchanged": True,
-            "commit": {"sha": tip, "subject": subject, "body": body},
-            "reseated": [],
-        }))
-    # every parent, in order — rewording a catch-up merge must not linearize it
-    parents = ctx.run(["git", "log", "-1", "--format=%P", tip]).stdout.split()
-    cmd = ["git", "commit-tree", f"{tip}^{{tree}}"]
-    for p in parents:
-        cmd += ["-p", p]
-    cmd += ["-m", msg]
-    if ctx.run(["git", "config", "--get", "commit.gpgsign"]).stdout.strip() == "true":
-        cmd.insert(2, "-S")   # plumbing ignores commit.gpgsign — unsigned reword pushes as Unverified
-    r = subprocess.run(cmd, cwd=ctx.repo_cwd(), env=env, capture_output=True, text=True)
-    new = r.stdout.strip()
-    if r.returncode != 0 or not new:
-        return req._send(500, json.dumps({"ok": False, "err": (r.stderr or "commit-tree failed").strip()[:300]}))
-    # atomic old-value check; the tree is unchanged, so this is safe under any checkout
-    r = ctx.run(["git", "update-ref", f"refs/heads/{branch}", new, tip])
-    if r.returncode != 0:
-        return req._send(200, json.dumps({"ok": False, "err": "branch moved while editing — reload and retry"}))
-    # (no gates bookkeeping: gates-green is tree-keyed and a reword keeps the tree)
-    # the tip sha moved — reseat any stacked children so they don't hang off the old commit
-    # (same tree, so these rebases are trivially clean)
-    from srv import reviews
-    reseated = []
-    reviews._reseat_walk(branch, reseated)
-    return req._send(200, json.dumps({
-        "ok": True, "commit": {"sha": new, "subject": subject, "body": body},
-        "reseated": [x for x in reseated if x.get("status") == "reseated"],
     }))
 
 
