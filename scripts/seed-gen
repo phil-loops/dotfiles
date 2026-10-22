@@ -19,14 +19,13 @@
 # the main checkout are native-compiler-only: the tree's own tsc on TS7, tsgo on pre-TS7.
 #
 #   default (hooks; async, never blocks):
-#     main checkout        rebuild whenever HEAD moved off what .gen was built for
+#     main checkout        rebuild when generation inputs or emitted artifacts change
 #     scratch review tree  symlink main's .gen — a read surface, nothing there writes it
 #     any other worktree   copy main's .gen — `task dev` there must not write through
 #
 #   --sync (stack-gates; foreground): make THIS tree's .gen describe THIS tree's HEAD —
 #     reseed from main if absent, trade a symlink for a private copy rather than write
-#     through it, emit in-tree, stamp .gen/.seed-gen-sha with the HEAD it now
-#     describes. Prints one line per action taken; silent no-op when already accurate.
+#     through it, emit in-tree, and stamp the compiler input fingerprint plus provenance HEAD. Prints one line per action taken; silent no-op when already accurate.
 #
 # NB: .gen does NOT reduce tsc memory — purely correctness.
 set -u
@@ -342,6 +341,32 @@ trpc_types_project(){ # $1 = tree; echoes the tsconfig path or nothing
   [[ -f "$1/$proj" ]] && echo "$proj"
 }
 
+generation_key(){ "$(dirname "$0")/seed-gen-fingerprint" "$1" 2>/dev/null; }
+generation_snapshot(){ "$(dirname "$0")/seed-gen-fingerprint" "$1" --snapshot 2>/dev/null; }
+generation_current(){
+  local key
+  key=$(generation_key "$1") || return 1
+  [[ -n "$key" && "$key" == "$(cat "$1/.gen/.seed-gen-inputs" 2>/dev/null)" ]]
+}
+prepare_generation(){
+  local output
+  output=$("$(dirname "$0")/seed-gen-fingerprint" "$1" --outputs 2>/dev/null) || output=""
+  if [[ -z "$output" || "$output" != "$(cat "$1/.gen/.seed-gen-output" 2>/dev/null)" ]]; then
+    rm -f "$1/.gen/trpc-types.tsbuildinfo"
+  fi
+}
+stamp_generation(){
+  local tree="$1" expected_head="$2" before="$3" key after
+  [[ ! -L "$tree/.gen" && -n "$before" ]] || return 1
+  [[ "$(git -C "$tree" rev-parse HEAD 2>/dev/null)" == "$expected_head" ]] || return 1
+  after=$(generation_snapshot "$tree") || return 1
+  [[ "$before" == "$after" ]] || return 1
+  key=$(generation_key "$tree") || return 1
+  "$(dirname "$0")/seed-gen-fingerprint" "$tree" --outputs > "$tree/.gen/.seed-gen-output" || return 1
+  printf '%s\n' "$key" > "$tree/.gen/.seed-gen-inputs"
+  printf '%s\n' "$expected_head" > "$tree/.gen/.seed-gen-sha"
+}
+
 # --check <worktree>: are the generated types AND the borrowed dependencies this tree reads
 # trustworthy FOR THE BRANCH IT IS ON?
 # The marker is read from THIS tree's .gen (through a symlink that is main's marker; a
@@ -360,6 +385,10 @@ if [[ "${1:-}" == --check ]]; then
     echo "this tree borrows $(grep -c . <<<"$drift") dependency(ies) from the main checkout at versions this branch does not pin: $(cut -f1 <<<"$drift" | head -5 | tr '\n' ' ')"
     echo "  errors above in files your diff never touched may be those deps, not your code"
     echo "  repair: $fix"; exit 1
+  fi
+  if generation_current "$dir"; then exit 0; fi
+  if [[ -f "$dir/.gen/.seed-gen-inputs" ]]; then
+    echo "generated tRPC inputs or artifacts changed — rebuild for this tree: $fix"; exit 1
   fi
   if [[ -z "$sha" ]]; then
     echo "generated tRPC types have no provenance marker — cannot tell what they describe"
@@ -424,17 +453,11 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     marker="$dir/.gen/.seed-gen-sha"
     # trust the marker only in a private .gen — through a symlink it is MAIN's marker, and a
     # concurrent stamp-through-the-link can make it claim this branch's HEAD (2026-08-03)
-    [[ ! -L "$dir/.gen" && -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0
+    if generation_current "$dir"; then
+      [[ ! -L "$dir/.gen" ]] && printf '%s\n' "$head" > "$marker"
+      exit 0
+    fi
     if [[ -L "$dir/.gen" ]]; then
-      # main's .gen through a link — keep it only if it already describes this HEAD.
-      # The diff must cover everything root.d.ts inlines through, not trpc/ alone: router
-      # inputs come from lib/ zod schemas and outputs from models/ + queries/ (a branch
-      # adding a lib/types/UserPreferences key kept main's stale link, 2026-08-03).
-      sha=$(cat "$dir/.gen/.seed-gen-sha" 2>/dev/null)
-      if [[ -n "$sha" ]] && git -C "$dir" merge-base --is-ancestor "$sha" "$head" 2>/dev/null \
-         && git -C "$dir" diff --quiet "$sha" "$head" -- trpc lib models queries packages ':(exclude)packages/prisma/migrations' 2>/dev/null; then
-        exit 0
-      fi
       rm -f "$dir/.gen"
       echo "traded main's .gen link for a private copy (seed does not describe this branch)"
     fi
@@ -476,10 +499,15 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
       fi
     done
     take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
+    before=$(generation_snapshot "$dir") || before=""
+    prepare_generation "$dir"
     if out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
       # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
       # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
-      [[ ! -L "$dir/.gen" && "$(git -C "$dir" rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
+      if ! stamp_generation "$dir" "$head" "$before"; then
+        drop_lock "$dir/.gen"
+        echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
+      fi
       drop_lock "$dir/.gen"
       echo "rebuilt tRPC types for ${head:0:10} in this tree"
     else
@@ -522,11 +550,10 @@ marker="$dir/.gen/.seed-gen-sha"
 # Ahead of the marker early-exit: the marker vouches for .gen, not for node_modules, and every
 # other tree resolves @loops/* and its deps through this checkout's node_modules.
 if (( sync )); then install_if_owed "$dir" || exit 1; fi
-[[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]] && exit 0   # already built for this HEAD
-# Gate on HEAD alone, never on `git diff main...HEAD -- <inputs>`: that gate is empty when the
-# checkout comes back TO main, so .gen kept whatever shape the last feature branch left it —
-# which is how the seed every other worktree copies got poisoned.
-
+if generation_current "$dir"; then
+  printf '%s\n' "$head" > "$marker"
+  exit 0
+fi
 proj=$(trpc_types_project "$dir") || exit 0
 
 tsc="$dir/node_modules/typescript/bin/tsc"
@@ -538,7 +565,8 @@ if ! take_lock "$dir/.gen"; then
   (( sync )) && { echo "a types rebuild has held the main checkout for over 10 minutes"; exit 1; }
   exit 0
 fi
-if [[ -f "$marker" && "$(cat "$marker" 2>/dev/null)" == "$head" ]]; then
+if generation_current "$dir"; then
+  printf '%s\n' "$head" > "$marker"
   drop_lock "$dir/.gen"; (( sync )) && echo "joined a types rebuild that just finished for ${head:0:10}"; exit 0
 fi
 
@@ -557,15 +585,16 @@ build_main(){
   # tsgo) to match the canonical `task build:packages`, so the shared dist/*.tsbuildinfo never
   # thrashes between two compilers.
   build_packages "$dir" >/dev/null 2>&1
-  # A HEAD that moved during the build would make this stamp claim a shape .gen doesn't have.
+  before=$(generation_snapshot "$dir") || before=""
+  prepare_generation "$dir"
   "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
-    && [[ "$(git rev-parse HEAD 2>/dev/null)" == "$head" ]] && echo "$head" > "$marker"
+    && stamp_generation "$dir" "$head" "$before"
   drop_lock "$dir/.gen"
 }
 
 if (( sync )); then
   build_main
-  if [[ "$(cat "$marker" 2>/dev/null)" == "$head" ]]; then
+  if generation_current "$dir"; then
     echo "rebuilt main checkout types (+packages dist) for ${head:0:10}"
   else
     echo "main checkout types rebuild FAILED (or HEAD moved during the build)"; exit 1

@@ -1,0 +1,76 @@
+#!/usr/bin/env python3
+"""Fingerprint tRPC generation inputs, resolution candidates, and emitted artifacts."""
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+SOURCE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".json")
+
+
+def output_key(tree):
+    output = Path(tree) / ".gen/trpc-types"
+    if not (output / "trpc/root.d.ts").is_file():
+        raise ValueError("missing generated root")
+    digest = hashlib.sha256()
+    for path in sorted(output.rglob("*")):
+        if path.is_file():
+            digest.update(os.fsencode(str(path.relative_to(output))) + b"\0")
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def fingerprint(tree, snapshot=False):
+    tree = Path(tree).absolute()
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+        cwd=tree, check=True, capture_output=True)
+    names = sorted(set(os.fsdecode(n) for n in result.stdout.split(b"\0") if n))
+    sources = [n for n in names if n.endswith(SOURCE_SUFFIXES)]
+    digest = hashlib.sha256(b"seed-gen-inputs-v1\0")
+
+    def add(label, path):
+        digest.update(os.fsencode(label) + b"\0")
+        digest.update(Path(path).read_bytes())
+        digest.update(b"\0")
+
+    for name in sources:
+        digest.update(os.fsencode(name) + b"\0")
+    if snapshot:
+        for name in sources:
+            if (tree / name).is_file():
+                add(name, tree / name)
+        return digest.hexdigest()
+
+    info = tree / ".gen/trpc-types.tsbuildinfo"
+    graph = json.loads(info.read_text())
+    graph = graph.get("program", graph)
+    if not graph.get("fileNames"):
+        raise ValueError("no compiler input graph")
+    add("compiler", tree / "node_modules/typescript/package.json")
+    for name in sorted(graph["fileNames"]):
+        # Native TypeScript embeds its lib.*.d.ts files in the versioned compiler.
+        if name.startswith("lib.") and "/" not in name and name.endswith(".d.ts"):
+            continue
+        add("input:" + name, os.path.normpath(info.parent / name))
+    for name in sources:
+        base = Path(name).name
+        if base in ("package.json", "package-lock.json") or base.startswith(("tsconfig", "tsbase")):
+            if (tree / name).is_file():
+                add("config:" + name, tree / name)
+    digest.update(output_key(tree).encode())
+    return digest.hexdigest()
+
+
+if __name__ == "__main__":
+    try:
+        if "--outputs" in sys.argv[2:]:
+            print(output_key(sys.argv[1]))
+        else:
+            print(fingerprint(sys.argv[1], snapshot="--snapshot" in sys.argv[2:]))
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError):
+        sys.exit(1)
