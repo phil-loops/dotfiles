@@ -9,8 +9,9 @@ import { canMutate } from "./provider";
 import { fetchOutbox, useOutboxActions, type OutboxActions } from "./outboxActions";
 import { GatesChip, LandingTitle, PrChip } from "./OutboxParts";
 import { LaunchSheet } from "./LaunchSheet";
+import { PushWindow } from "./PushWindow";
 import {
-  LANES, laneItems, itemKey, summaryLabel,
+  LANES, laneItems, itemKey, summaryLabel, clockNow, isDue, isHeld, nextMorning, fmtDayPT, pushWindow,
   type Item, type Lane, type OutboxForest, type OutboxNode,
 } from "./outboxModel";
 
@@ -31,14 +32,18 @@ function NodeRow(props: {
   onSelect: () => void;
   onOpen: () => void;
   onPush: () => void;
+  onHold: () => void;
+  now: number;
 }) {
   const n = () => props.item.node;
+  const held = () => isHeld(n());
+  const due = () => isDue(n(), props.now);
   const f = () => props.item.forest;
   const canPush = () => canMutate && !n().pr && n().gates === "green" && n().pushed !== "synced";
   const canOpen = () => !n().pr && n().pushed === "synced" && !!n().compareUrl;
   return (
     <div
-      class={`ob-row group relative grid cursor-pointer grid-cols-[22px_1fr_auto] items-start gap-x-[10px] rounded-[9px] border px-[12px] py-[9px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-deep bg-vellum-edge" : "border-transparent hover:bg-vellum-raise"}`}
+      class={`ob-row group relative grid cursor-pointer grid-cols-[22px_1fr_auto] items-start gap-x-[10px] rounded-[9px] border px-[12px] py-[9px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-deep bg-vellum-edge" : "border-transparent hover:bg-vellum-raise"} ${due() ? "shadow-[inset_2px_0_0_var(--color-gold-leaf)]" : held() ? "opacity-75" : ""}`}
       data-key={itemKey(props.item)}
       onClick={props.onSelect}
       onDblClick={props.onOpen}
@@ -57,9 +62,24 @@ function NodeRow(props: {
           <span>{n().commits} commit{n().commits === 1 ? "" : "s"}</span>
           <Show when={!n().pr || n().ahead}><GatesChip n={n()} /></Show>
           <PrChip n={n()} />
+          <Show when={held()}>
+            <span class={due() ? "text-gold-leaf" : "text-ink-faint"} title={n().holdUntil}>
+              {due() ? "☀ due now" : `☾ held until ${fmtDayPT(Date.parse(n().holdUntil))}`}
+            </span>
+          </Show>
         </div>
       </div>
       <div class="flex items-center gap-[6px] pt-[1px]" onClick={(e) => e.stopPropagation()}>
+        <Show when={canMutate && !n().pr}>
+          <button
+            class={`${BTN} border-transparent text-ink-faint opacity-0 group-hover:opacity-100 hover:border-rule hover:text-ink-dim ${props.selected || held() ? "opacity-100" : ""}`}
+            disabled={props.actions.busy() === "hold:" + n().branch}
+            title={held() ? "release the hold (h)" : "hold for the morning push (h) — moves it to the first-thing lane; nothing pushes by itself"}
+            onClick={props.onHold}
+          >
+            {held() ? "☀ release" : "☾ hold"}
+          </button>
+        </Show>
         <Show when={canPush()}>
           <button
             class={props.armed ? BTN_ARMED : BTN_GOLD}
@@ -78,8 +98,9 @@ function NodeRow(props: {
   );
 }
 
-function LaunchCard(props: { item: Item & { kind: "forest" }; selected: boolean; onSelect: () => void; onLaunch: () => void }) {
+function LaunchCard(props: { item: Item & { kind: "forest" }; selected: boolean; onSelect: () => void; onLaunch: () => void; onHold: () => void }) {
   const f = () => props.item.forest;
+  const held = () => f().nodes.some((n) => isHeld(n));
   return (
     <div
       class={`ob-launch relative cursor-pointer rounded-[11px] border px-[14px] py-[11px] transition-[background,border-color] duration-[120ms] ${props.selected ? "border-gold-leaf bg-vellum-edge" : "border-gold-deep bg-vellum-raise hover:border-gold-leaf"}`}
@@ -92,6 +113,12 @@ function LaunchCard(props: { item: Item & { kind: "forest" }; selected: boolean;
         <Show when={f().ticket}><span class="font-mono text-[10.5px] text-ink-faint">{f().ticket}</span></Show>
         <span class={`font-mono text-[10.5px] ${f().summary === "ready-to-launch" ? "text-add" : "text-gold-leaf"}`}>{summaryLabel[f().summary]}</span>
         <span class="ml-auto font-mono text-[10.5px] text-ink-faint">{f().unopened} of {f().size} not on GitHub</span>
+        <Show when={canMutate}>
+          <button class={`${BTN} border-transparent text-ink-faint hover:border-rule hover:text-ink-dim`} title={held() ? "release the forest's hold (h)" : "hold the whole forest for the morning launch (h)"}
+            onClick={(e) => { e.stopPropagation(); props.onHold(); }}>
+            {held() ? "☀ release" : "☾ hold forest"}
+          </button>
+        </Show>
         <button class={BTN_GOLD} title="the launch sheet — push and open every node, top to bottom (l)" onClick={(e) => { e.stopPropagation(); props.onLaunch(); }}>
           launch ⇢
         </button>
@@ -120,6 +147,37 @@ export function Outbox() {
     refetchInterval: 30_000,
   }));
   const items = createMemo(() => laneItems(outbox.data));
+  const laneOf = (lane: Lane) => items().filter((i) => i.lane === lane);
+  const [now, setNow] = createSignal(clockNow());
+  const tick = setInterval(() => setNow(clockNow()), 30_000);
+  onCleanup(() => clearInterval(tick));
+  const morningIso = () => new Date(nextMorning(now(), outbox.data?.window.morningHourPT ?? 9)).toISOString();
+  const allNodes = createMemo(() => (outbox.data?.forests ?? []).flatMap((f) => f.nodes.map((n) => ({ f, n }))));
+  const due = createMemo(() => allNodes().filter(({ n }) => isDue(n, now())).length);
+  const holdable = createMemo(() => allNodes().filter(({ n }) => n.status === "ready" && !n.holdUntil));
+  const holdAll = () => {
+    const until = morningIso();
+    const byRepo = new Map<string, string[]>();
+    for (const { f, n } of holdable()) byRepo.set(f.repo, [...(byRepo.get(f.repo) ?? []), n.branch]);
+    for (const [repo, branches] of byRepo) void actions.hold(repo, { branches }, until);
+  };
+  const toggleHold = (it: Item) => {
+    if (!canMutate) return;
+    if (it.kind === "forest") {
+      const on = it.forest.nodes.some((n) => isHeld(n));
+      void actions.hold(it.forest.repo, { project: it.forest.project }, on ? "" : morningIso());
+    } else if (!it.node.pr) {
+      void actions.hold(it.forest.repo, { branch: it.node.branch }, isHeld(it.node) ? "" : morningIso());
+    }
+  };
+  const firstLane = createMemo(() => {
+    const held = laneOf("first");
+    const anyDue = held.some((it) => it.kind === "node" ? isDue(it.node, now()) : it.forest.nodes.some((n) => isDue(n, now())));
+    const until = held.map((it) => it.kind === "node" ? it.node.holdUntil : it.forest.nodes.find((n) => n.holdUntil)?.holdUntil ?? "").find(Boolean);
+    return anyDue
+      ? { title: "first thing — it's morning", ask: "held overnight, due now: push these while the window's open" }
+      : { title: "first thing tomorrow", ask: until ? `held until ${fmtDayPT(Date.parse(until))} — nothing pushes by itself` : "held for the morning push" };
+  });
   const sheet = createMemo(() => {
     const l = location();
     return l.kind === "outbox" && l.launch ? { project: l.launch, repo: l.repo } : null;
@@ -128,7 +186,6 @@ export function Outbox() {
   const [armed, setArmed] = createSignal<string | null>(null);
   const [editing, setEditing] = createSignal<string | null>(null);
   const current = createMemo(() => items().find((i) => itemKey(i) === cursor()) ?? items()[0]);
-  const laneOf = (lane: Lane) => items().filter((i) => i.lane === lane);
 
   const select = (it: Item) => {
     setCursor(itemKey(it));
@@ -176,6 +233,7 @@ export function Outbox() {
     }
     else if (e.key === "p") { e.preventDefault(); pushItem(it); }
     else if (e.key === "l") { e.preventDefault(); launch(it.forest); }
+    else if (e.key === "h") { e.preventDefault(); toggleHold(it); }
     else if (e.key === "e" && it.kind === "node") { e.preventDefault(); setEditing(itemKey(it)); }
     else if (e.key === "o" && it.kind === "node" && it.node.compareUrl && it.node.pushed === "synced") window.open(it.node.compareUrl, "_blank", "noopener");
   };
@@ -196,7 +254,7 @@ export function Outbox() {
     <For each={laneOf(lane)}>
       {(it) => (
         <Show when={it.kind === "node" ? it : null} fallback={
-          <LaunchCard item={it as Item & { kind: "forest" }} selected={itemKey(current()!) === itemKey(it)} onSelect={() => select(it)} onLaunch={() => launch(it.forest)} />
+          <LaunchCard item={it as Item & { kind: "forest" }} selected={itemKey(current()!) === itemKey(it)} onSelect={() => select(it)} onLaunch={() => launch(it.forest)} onHold={() => toggleHold(it)} />
         }>
           {(nit) => (
             <NodeRow
@@ -209,6 +267,8 @@ export function Outbox() {
               onSelect={() => select(it)}
               onOpen={() => openNode(it.forest, nit().node)}
               onPush={() => { select(it); pushItem(it); }}
+              onHold={() => toggleHold(it)}
+              now={now()}
             />
           )}
         </Show>
@@ -226,14 +286,18 @@ export function Outbox() {
           <span class="font-mono text-[11px] text-ink-faint">{counts()}</span>
         </header>
 
+        <Show when={outbox.data}>
+          {(d) => <PushWindow facts={d().window} now={now()} holdable={holdable().length} due={due()} onHoldAll={canMutate ? holdAll : undefined} />}
+        </Show>
+
         <Show when={outbox.data} fallback={<p class="font-display italic text-ink-dim">{outbox.isError ? "the outbox didn't load — is the server up?" : "reading every forest…"}</p>}>
           <Show when={items().length} fallback={<p class="mt-[40px] font-display text-[18px] italic text-ink-dim">Nothing unlanded. The outbox is empty.</p>}>
             <For each={LANES.filter((l) => laneOf(l.id).length)}>
               {(l) => (
                 <section class={`ob-lane mb-[22px] ob-lane-${l.id}`}>
-                  <h2 class={`${EYEBROW} mt-[26px] mb-[8px]`}>
-                    {l.title}
-                    <span class={ASK}>— {l.ask}</span>
+                  <h2 class={`${EYEBROW} mt-[26px] mb-[8px] ${l.id === "first" && due() ? "text-gold-leaf" : ""}`}>
+                    {l.id === "first" ? firstLane().title : l.title}
+                    <span class={ASK}>— {l.id === "first" ? firstLane().ask : l.ask}</span>
                   </h2>
                   <div class="mb-[6px] h-px bg-rule" />
                   <div class="flex flex-col gap-[4px]">{laneBody(l.id)}</div>
@@ -242,7 +306,7 @@ export function Outbox() {
             </For>
           </Show>
           <p class="mt-[40px] font-mono text-[10.5px] text-ink-faint">
-            j/k move · ↵ open · p push · e edit title · o open PR · l launch sheet
+            j/k move · ↵ open · p push · h hold · e edit title · o open PR · l launch sheet
             <Show when={outbox.data?.prSource === "fixture"}> · PR state from fixture</Show>
           </p>
         </Show>
@@ -254,6 +318,18 @@ export function Outbox() {
               repo={sh().repo}
               actions={actions}
               window={outbox.data?.window}
+              banner={() => {
+                const d = outbox.data;
+                if (!d) return null;
+                const ph = pushWindow(now(), d.window).phase;
+                return ph === "late" || ph === "weekend" || ph === "closing"
+                  ? <div class="mt-[14px]"><PushWindow facts={d.window} now={now()} holdable={0} due={0} compact /></div>
+                  : null;
+              }}
+              onHold={() => {
+                const f = outbox.data?.forests.find((x) => x.project === sh().project && (!sh().repo || x.repo === sh().repo));
+                if (f) toggleHold({ kind: "forest", lane: "launch", forest: f });
+              }}
               onClose={() => navigate({ kind: "outbox" })}
               onOpenNode={(n) => navigate({ kind: "forest", name: sh().project, node: n.branch, repo: sh().repo })}
             />

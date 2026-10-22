@@ -2,7 +2,7 @@
 // order, each with two steps — push (Phil's click, through /push-origin) and open the PR (a link
 // to the compare form, base and title and body prefilled). Nothing here opens a PR or pushes on
 // its own; the sheet only makes each step one click and ticks it off as the cached PR state sees it.
-import { createMemo, createSignal, For, onCleanup, Show } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, Show, type JSX } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { canMutate } from "./provider";
 import { fetchOutbox, type OutboxActions } from "./outboxActions";
@@ -22,6 +22,8 @@ export function LaunchSheet(props: {
   repo?: string;
   actions: OutboxActions;
   window?: PushWindowFacts;
+  banner?: () => JSX.Element;
+  onHold?: () => void;
   onClose: () => void;
   onOpenNode: (n: OutboxNode) => void;
 }) {
@@ -70,6 +72,7 @@ export function LaunchSheet(props: {
     else if (e.key === "Enter" && armed() === n.branch) { e.preventDefault(); push(n); }
     else if (e.key === "o") { e.preventDefault(); open(n); }
     else if (e.key === "e") { e.preventDefault(); setEditing(n.branch); }
+    else if (e.key === "h") { e.preventDefault(); props.onHold?.(); }
     else if (e.key === "Enter") { e.preventDefault(); props.onOpenNode(n); }
   };
   window.addEventListener("keydown", onKey, true);
@@ -108,7 +111,13 @@ export function LaunchSheet(props: {
                     <div class="h-full rounded-full bg-gold-leaf transition-[width] duration-500" style={{ width: `${(100 * onGitHub()) / Math.max(1, nodes().length)}%` }} />
                   </div>
                   <span class="font-mono text-[11px] text-ink-dim">{onGitHub()} of {nodes().length} on GitHub</span>
+                  <Show when={canMutate && props.onHold && onGitHub() < nodes().length}>
+                    <button class={`${BTN} border-rule text-ink-dim hover:border-gold-deep hover:text-gold-leaf`} title="hold the forest for the morning launch (h)" onClick={() => props.onHold?.()}>
+                      {nodes().some((n) => n.holdUntil && !n.pr) ? "☀ release hold" : "☾ hold for morning"}
+                    </button>
+                  </Show>
                 </div>
+                {props.banner?.()}
               </header>
 
               <ol class="m-0 list-none px-[14px] py-[10px]">
@@ -174,7 +183,7 @@ export function LaunchSheet(props: {
                 </For>
               </ol>
               <footer class="flex items-baseline justify-between border-t border-rule px-[26px] py-[12px] font-mono text-[10.5px] text-ink-faint">
-                <span>j/k move · p push · o open PR · e edit title · ↵ open node · esc close</span>
+                <span>j/k move · p push · o open PR · e edit title · h hold · ↵ open node · esc close</span>
                 <Show when={onGitHub() === nodes().length && nodes().length}>
                   <span class="font-display text-[14px] italic text-gold-leaf">✦ the whole forest is on GitHub</span>
                 </Show>
