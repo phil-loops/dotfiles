@@ -19,7 +19,10 @@ import re
 import threading
 import time
 
-ROLLUP_V = 1
+ROLLUP_V = 2
+# Only Phil's own browser counts: Claude's curls, the extension and headless checks would skew
+# the timings this dashboard exists to steer by.
+HUMAN_ACTORS = {"browser", None}
 LIVE_MAX = 8 * 1024 * 1024
 DEFAULT_BUDGETS = {
     "local": {"feedbackMs": 16.7, "settledMs": None},
@@ -105,6 +108,8 @@ def fold(days, reg, e):
     t, app = e.get("type"), e.get("app") or "?"
     if t == "registry":
         return e if e.get("ts", 0) >= (reg or {}).get("ts", 0) else reg
+    if e.get("actor") not in HUMAN_ACTORS:
+        return reg
     d = days.setdefault(_day(e.get("ts", 0)), {"cmd": {}, "nav": {}, "page": {}})
     if t == "cmd" or (t == "timing" and e.get("kind") == "input"):
         k = f"{app}|{e.get('id') or '?'}"
