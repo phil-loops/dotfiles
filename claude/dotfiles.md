@@ -21,6 +21,8 @@ A file is "live" if it's dirty in `git status`, has a recent mtime, or changed b
 
 Apply when the file goes quiet, or hand the `.patch` to the session that owns the file. Standard for any contested file.
 
-## Messaging another session: `claude-say <who> "<note>"` — SEND, don't draft
+## Messaging between sessions
 
-Submits by default (types into the target pane + Enter) — right for session-to-session notes; a drafted note in an unattended pane is silently lost. `--draft` is only for text a human must finish (e.g. the viewer's ✦ seeded prompt stubs). The tool guards the risky cases itself: refuses non-Claude panes, auto-downgrades to draft if the target composer holds text.
+`claude-say <who> "<note>"` sends to another Claude tmux session by default. Use `--draft` only for text a human must finish; the helper refuses non-Claude panes and leaves a draft when the target composer already holds text.
+
+For Codex replies, use `/codex-reply` or `~/.dotfiles/scripts/codex-pane-say`: Phil runs Codex in the CLI, and the helper submits a signed note into the one tmux pane titled for the chat, refusing if its composer holds text. Phil authorized attributed Opus research replies to the chat titled **Review override cases**; tests go only to a throwaway Codex pane Phil names. (The GUI IPC bridge `codex-say` was retired 2026-10-22 after a desktop update broke its build pin.)
