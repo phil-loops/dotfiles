@@ -4,6 +4,8 @@ import { useViewerLocation, buildPath, type HomeTab, type ViewerLocation } from 
 import { provider } from "./provider";
 import { cachedProjects } from "./projectsCache";
 import { recents, contextOf, dismissRecent } from "./recents";
+import { fetchJSON } from "./api";
+import { laneItems, type OutboxData } from "./outboxModel";
 
 // ── the left rail: nav chrome for home + forest overview ─────────────
 //
@@ -32,7 +34,7 @@ const RECENT_LBL = `${THUMB_LBL_BASE} text-[12px] max-h-[140px] max-[640px]:max-
 // the tile a location belongs under: reviews are Work-tab things, everything branch-shaped
 // lives under Forests.
 const tileOf = (l: ViewerLocation): HomeTab | null =>
-  l.kind === "wiki" || l.kind === "machine" || l.kind === "tutor" ? null
+  l.kind === "outbox" || l.kind === "wiki" || l.kind === "machine" || l.kind === "tutor" ? null
     : l.kind === "home" ? l.tab
     : l.kind === "review" ? "work"
     : "forests";
@@ -64,6 +66,14 @@ export function NavRail() {
   const serversUp = createMemo(
     () => (processes.data ?? []).filter((p) => p.kind === "preview" && p.status === "up").length
   );
+  // the rail's outbox count: what's actionable now — ready or due to push, approved and waiting
+  const outbox = createQuery(() => ({
+    queryKey: ["outbox", ""],
+    queryFn: () => fetchJSON<OutboxData>("/outbox"),
+    refetchOnWindowFocus: false,
+  }));
+  const outboxCount = createMemo(() =>
+    laneItems(outbox.data).filter((i) => i.lane === "ready" || i.lane === "launch" || i.lane === "approved").length);
   const active = createMemo(() => tileOf(location()));
   // where you're standing, when it's deeper than home — one gold tile, climbs to the overview.
   const context = createMemo(() => contextOf(location()));
@@ -78,9 +88,20 @@ export function NavRail() {
         class="thumb-brand mb-[26px] cursor-pointer border-0 bg-transparent text-center text-[19px] text-gold-leaf max-[640px]:hidden"
         data-track="nav.home"
         title="canopy — home"
-        onClick={() => navigate({ kind: "home", tab: "work" })}
+        onClick={() => navigate({ kind: "outbox" })}
       >
         <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span>
+      </button>
+      <button
+        class={`${THUMB} ${location().kind === "outbox" ? THUMB_ON : THUMB_OFF}`}
+        classList={{ active: location().kind === "outbox" }}
+        title="outbox — everything unlanded, lane by lane: push, launch a forest, chase an approval"
+        onClick={() => navigate({ kind: "outbox" })}
+      >
+        <span class={THUMB_LBL}>Outbox</span>
+        <Show when={outboxCount()}>
+          <span class={`${COUNT} ${location().kind === "outbox" ? "border-gold-deep text-gold-leaf" : "border-rule text-ink-faint"}`}>{outboxCount()}</span>
+        </Show>
       </button>
       <For each={[
         { id: "work" as const, label: "Work", count: (prs.data || []).length + (reviewReqs.data || []).length },

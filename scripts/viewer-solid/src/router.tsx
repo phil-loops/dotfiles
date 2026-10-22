@@ -7,6 +7,8 @@
 // name to know what it's looking at. Real History-API paths (not hash) — clean URLs; the
 // server serves index.html for any app route (SPA fallback) so deep-links + refresh resolve.
 //
+//   / /outbox                           → the outbox: every unlanded branch, lane by lane (the landing page)
+//   /outbox/launch/[<repo>/]<project>    → …with that forest's launch sheet open
 //   /work  /forests                     → home, a named tab
 //   /forests/<project>[/<branch...>]     → a forest: project + active node (a branch), both in path
 //   /branch/<branch...>                  → a pinned standalone (single node)
@@ -24,6 +26,7 @@ export type HomeTab = "work" | "forests";
 export const HOME_TABS: HomeTab[] = ["work", "forests"];
 
 export type ViewerLocation =
+  | { kind: "outbox"; launch?: string; repo?: string }
   | { kind: "home"; tab: HomeTab }
   | { kind: "forest"; name: string; node?: string; repo?: string }
   | { kind: "standalone"; branch: string; node?: string }
@@ -46,7 +49,14 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   const [head, ...rest] = pathname.split("/").filter(Boolean);
 
   if (!head) {
-    return { kind: "home", tab: "work" };
+    return { kind: "outbox" };
+  }
+  if (head === "outbox") {
+    if (rest[0] !== "launch" || !rest[1]) {
+      return { kind: "outbox" };
+    }
+    const [first, second] = rest.slice(1);
+    return second && knownRepos().has(first) ? { kind: "outbox", repo: first, launch: second } : { kind: "outbox", launch: first };
   }
   // /forests is the home tab; /forests/<project>[/<branch...>] is a forest — project is one
   // segment, the active node (a branch, slashes and all) is the tail.
@@ -87,12 +97,14 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
       return { kind: "review", pr };
     }
   }
-  return { kind: "home", tab: "work" };
+  return { kind: "outbox" };
 }
 
 // typed location → path (leading "/"), for both href and navigate.
 export function buildPath(loc: ViewerLocation): string {
   switch (loc.kind) {
+    case "outbox":
+      return loc.launch ? "/outbox/launch/" + (loc.repo ? loc.repo + "/" : "") + loc.launch : "/outbox";
     case "home":
       return "/" + loc.tab;
     case "forest":
@@ -116,6 +128,8 @@ export function buildPath(loc: ViewerLocation): string {
 // local branch IS "review/pr-<N>". Home has no node target, so "".
 export function forestKey(loc: ViewerLocation): string {
   switch (loc.kind) {
+    case "outbox":
+      return loc.launch ?? "";
     case "home":
       return "";
     case "forest":
@@ -135,6 +149,7 @@ export function forestKey(loc: ViewerLocation): string {
 // so adding a destination is a compile error here instead of a wrong read at two call sites.
 export function nodeOf(loc: ViewerLocation): string | undefined {
   switch (loc.kind) {
+    case "outbox":
     case "home":
     case "wiki":
     case "machine":
@@ -150,7 +165,7 @@ export function nodeOf(loc: ViewerLocation): string | undefined {
 // Re-target the active node within the current location (the j/k spine walk, click-to-open).
 export function withNode(loc: ViewerLocation, node: string): ViewerLocation {
   // home and wiki have no node to re-target; adding one would build an unroutable path.
-  return loc.kind === "home" || loc.kind === "wiki" || loc.kind === "machine" || loc.kind === "tutor" ? loc : { ...loc, node };
+  return loc.kind === "outbox" || loc.kind === "home" || loc.kind === "wiki" || loc.kind === "machine" || loc.kind === "tutor" ? loc : { ...loc, node };
 }
 
 // The repo a location belongs to — only a forest can live in a non-loops repo; everything

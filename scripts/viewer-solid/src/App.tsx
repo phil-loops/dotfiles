@@ -12,6 +12,7 @@ import { ServerStatus } from "./ServerStatus";
 import { ServingChip } from "./ServingChip";
 import { NodeDetail } from "./NodeDetail";
 import { Home } from "./Home";
+import { Outbox } from "./Outbox";
 import { Wiki } from "./Wiki";
 import { ForestOverview } from "./ForestOverview";
 import { NavRail } from "./NavRail";
@@ -40,6 +41,9 @@ function Routes() {
   const { location } = useViewerLocation();
   return (
     <Switch>
+      <Match when={location().kind === "outbox"}>
+        <Outbox />
+      </Match>
       <Match when={location().kind === "home"}>
         <Home />
       </Match>
@@ -109,7 +113,7 @@ function Layout(props: { children?: JSX.Element }) {
   // sit stale on a terminal commit until the next click. Each is served from a snapshot-keyed
   // memo server-side, so the fan-out costs only what actually changed.
   const refresh = () => {
-    for (const key of ["node", "model", "projects", "forest-health", "branch-prs", "sync", "push-preview", "commits", "prep-route", "forest-branches", "review-requests"]) {
+    for (const key of ["node", "model", "projects", "forest-health", "branch-prs", "sync", "push-preview", "commits", "prep-route", "forest-branches", "review-requests", "outbox"]) {
       qc.invalidateQueries({ queryKey: [key] });
     }
   };
@@ -179,7 +183,7 @@ function Layout(props: { children?: JSX.Element }) {
   // home and the forest overview keep it.
   const showRail = () => {
     const l = loc();
-    return l.kind === "home" || l.kind === "wiki" || l.kind === "machine" || l.kind === "tutor" || isForestOverview(l);
+    return l.kind === "outbox" || l.kind === "home" || l.kind === "wiki" || l.kind === "machine" || l.kind === "tutor" || isForestOverview(l);
   };
   return (
     <>
