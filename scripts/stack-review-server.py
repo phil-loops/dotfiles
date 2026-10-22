@@ -331,7 +331,8 @@ class H(BaseHTTPRequestHandler):
         self._send(200, body, "text/html; charset=utf-8")
 
     def _dispatch_get(self, u):
-        if u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events"):
+        if (u.path == "/v2" or (u.path.startswith("/v2/") and u.path != "/v2/events")
+                or (u.path in ("/", "/index.html") and state.v2_home())):
             return self._send_app_shell("v2/index.html")   # canopy v2, built beside v1 until it replaces it
         if u.path == "/outbox" and "text/html" not in self.headers.get("Accept", ""):
             return outbox.get(self, u)   # the shipping desk's data; a browser navigation gets the page

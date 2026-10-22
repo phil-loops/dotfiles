@@ -404,6 +404,19 @@ def _refresher():
 threading.Thread(target=_refresher, daemon=True).start()
 
 
+_HOME = {"at": 0.0, "on": False}
+
+
+def v2_home():
+    """`git config stack.viewer-v2-home true` (in the server's repo, or globally) makes `/` serve
+    v2's Forests; off by default, flipped by hand once the dashboard says v2 beats v1."""
+    now = time.monotonic()
+    if now - _HOME["at"] > 2:
+        r = ctx.run(["git", "-C", ctx.CWD, "config", "--type=bool", "--get", "stack.viewer-v2-home"])
+        _HOME.update(at=now, on=r.stdout.strip() == "true")
+    return _HOME["on"]
+
+
 # ── handlers ─────────────────────────────────────────────────────────────
 
 def get(req, u):
