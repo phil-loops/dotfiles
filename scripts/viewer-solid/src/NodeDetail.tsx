@@ -1,6 +1,6 @@
 import { createSignal, createMemo, createEffect, on, Show, For, type JSX } from "solid-js";
 import { useQueryClient, createQuery, keepPreviousData } from "@tanstack/solid-query";
-import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
+import { useViewerLocation, forestKey, nodeOf, forestRepo } from "./router";
 import { provider, canMutate, withRepo } from "./provider";
 import { leaf, isBlessed, flattenForest } from "./shared";
 import { setCameFrom } from "./cameFrom";
@@ -187,7 +187,6 @@ export function NodeDetail() {
     refetchHealth: () => health.refetch(),
   });
 
-  const goto = (b: string) => navigate(withNode(location(), b));
   const BASES: [string, string][] = [["", "parent"], ["main", "main"], ["blessed", "last blessed"], ["@origin", "outgoing"]];
   // The forest map is a destination (the /forests/<project> overview), never docked into
   // the review surface — the diff gets the full width. "back to the forest map" lives in the
@@ -324,10 +323,6 @@ export function NodeDetail() {
   };
   useNodeKeyboard({
     focusFilter,
-    spine,
-    active,
-    goto,
-    setBase,
     hover,
     openInNvim,
     setView,
@@ -498,7 +493,6 @@ export function NodeDetail() {
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>tab</span></dt><dd class={KBD_DD}>next file</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>c</span></dt><dd class={KBD_DD}>flip diffs ⇄ commits</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>[</span><span class={KBD_K}>]</span></dt><dd class={KBD_DD}>previous / next commit (commits view) · ⇧click a row for a slice</dd></div>
-              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>1</span><span class={KBD_K}>2</span><span class={KBD_K}>3</span><span class={KBD_K}>4</span></dt><dd class={KBD_DD}>diff vs parent / main / last blessed / outgoing (what a push sends)</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>b</span></dt><dd class={KBD_DD}>show / hide the file panel</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⌘F</span></dt><dd class={KBD_DD}>filter files</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧B</span></dt><dd class={KBD_DD}>bless file &amp; advance</dd></div>
