@@ -57,8 +57,11 @@ const targetOf = (body: BodyInit | null | undefined): string => {
 };
 
 // Instrument the ONE layer every request passes through, so EVERY action POST is tracked —
-// with its outcome (status) and latency (ms) — no matter which component fires it, present or
-// future. This is what makes "are all actions tracked?" answerable with yes, by construction.
+// with its outcome and latency (ms) — no matter which component fires it, present or future.
+// This is what makes "are all actions tracked?" answerable with yes, by construction.
+// Outcome is `ok` + `err`, not just status: ~30 server paths refuse with 200 {ok:false}, which a
+// status alone logged as success. The server names the refusal in X-Stack-Refused (a short
+// class, never the message), so this reads a header instead of cloning every body.
 export function installFetchTracking(): void {
   if (installed || !canMutate) return;
   installed = true;
@@ -82,9 +85,16 @@ export function installFetchTracking(): void {
       : realFetch(input, init);
     if (isPost && own && !SKIP_TRACK.has(path)) {
       const on = targetOf(init?.body);
-      const done = (status: number) =>
-        track("action", { url: path, ...(on ? { on } : {}), status, ms: Math.round(performance.now() - t0) });
-      p.then((r) => done(r.status), () => done(0));
+      const done = (status: number, refused: string | null) =>
+        track("action", {
+          url: path,
+          ...(on ? { on } : {}),
+          status,
+          ok: !refused && status >= 200 && status < 400,
+          ...(refused ? { err: refused } : status >= 400 || status === 0 ? { err: status ? `http-${status}` : "network" } : {}),
+          ms: Math.round(performance.now() - t0),
+        });
+      p.then((r) => done(r.status, r.headers.get("X-Stack-Refused")), () => done(0, null));
     }
     return p;
   };
