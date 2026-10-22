@@ -4,6 +4,7 @@
   viewer-usage-report                 the current repo's logs, all time
   viewer-usage-report --days 30       only the last 30 days
   viewer-usage-report --repo ~/coding/loops
+  viewer-usage-report --latency       only the latency summary (what /v2/dashboard shows)
 
 Read-only. Reads both logs in the repo's git-common-dir:
   stack-usage.jsonl   one JSON event per line (the viewer's /track + the git hooks)
@@ -38,8 +39,35 @@ Every event: type, ts (unix s, stamped by the writer).
             delete, commits, ahead, subjects, landed + landMs (watched via the tracking ref; the
             line is written when known, so file order ≠ ts order), actor, via, client, session
 
+── schema 2 (since 2026-10-22): latency + command events ───────────────────────────────────────
+Every schema-2 event carries schema: 2, app (v1|v2) and pl, plus the server's ts/actor/session.
+Readers MUST tolerate events without `schema` (everything above) and ignore types they don't know.
+v2 emits only from its three choke points (runner, router, sync), batched; v1 from track.ts.
+
+  cmd       v2, one per command run (the runner): id (registry id), budget (local|config-write|
+            git-write|slow-io), via (key|click|palette|menu), target?, outcome (ok|refused|failed),
+            err?, feedbackMs (input → the frame painting the change; null = no change within 1s),
+            settledMs (input → the server's answer; null for local commands), rid? (= the request
+            log's rid=). Not the legacy palette `cmd` above, which has q/label and no schema.
+  nav       v2, one per navigation (the router): from ("" on entry), to (surface id), paintMs
+            (input — or navigation start on entry — → the frame painting [data-paint=<surface>])
+  registry  v2, once per page load: commands [{id, title, scope, budget, keys, v1?}], surfaces
+            [{id, v1?}], budgets {class: {feedbackMs, settledMs}}, paintMs. The newest one defines
+            "never used" and the budgets; v1 lists the v1 ids a command/surface replaces.
+  page      v2, per page load (flushed when the tab hides): route, longtasks {n, totalMs, maxMs},
+            cls, counters {state, patch, resync, reconnect, post, …}, timings {name: {n, p50, max}}
+  timing    v1 baseline (track.ts): kind "input" — id (data-track id | key:<k> | click:<label>),
+            via, budget (from the POST it fired), feedbackMs, settledMs, outcome, err?, post?, rid?;
+            kind "nav" — from, to (route kind: home|forest|node|outbox|wiki|…), paintMs (the last
+            paint before 300ms of quiet with no .loading placeholder)
+
+Rollups: srv/telemetry.py folds schema-2 events into daily rollups cached at
+<git-common-dir>/stack-telemetry-rollup.json (incremental by byte offset); the log rotates at
+8 MB into stack-usage.jsonl.N.gz segments, never pruned. Both readers here read the segments.
+
 ── stack-review.log line ─────────────────────────────────────────────────────────────────────
-  YYYY-MM-DD HH:MM:SS METHOD PATH STATUS MSms [actor=…] [sid=…] [refused=<class>] [n=<hits>]
+  YYYY-MM-DD HH:MM:SS METHOD PATH STATUS MSms [actor=…] [sid=…] [refused=<class>] [rid=<id>] [n=<hits>]
+  rid (since 10-22) is the client's X-Request-Id: joins a cmd/timing event's rid to this line.
   actor/refused/n since 10-21; n = this hit plus the identical polls folded since the last line
   for that path+actor (/ext-mtime, /gates-progress, /sig, /heartbeat, /processes, /pulse).
   Before 10-21: 5 MB single rotation (~7 days, 83% /ext-mtime); after: 4 MB gzip segments, 90 days.
@@ -54,6 +82,8 @@ import subprocess
 import sys
 
 ACTOR_CUTOVER = dt.datetime(2026, 10, 21).timestamp()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from srv import telemetry  # noqa: E402  pure functions; no server needed
 
 
 def git_common_dir(repo):
@@ -63,19 +93,7 @@ def git_common_dir(repo):
 
 
 def load_usage(path, since):
-    out = []
-    try:
-        with open(path) as f:
-            for line in f:
-                try:
-                    e = json.loads(line)
-                except ValueError:
-                    continue
-                if isinstance(e, dict) and e.get("ts", 0) >= since:
-                    out.append(e)
-    except FileNotFoundError:
-        pass
-    return sorted(out, key=lambda e: e.get("ts", 0))
+    return sorted(telemetry.read_events(path, since), key=lambda e: e.get("ts", 0))
 
 
 _REQ = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (GET|POST|HEAD|OPTIONS|PUT|DELETE) (\S+) (\S+) (\d+)ms(.*)$")
@@ -152,12 +170,15 @@ def main():
     args = sys.argv[1:]
     repo = os.getcwd()
     days = None
+    latency = False
     while args:
         a = args.pop(0)
         if a == "--repo":
             repo = os.path.expanduser(args.pop(0))
         elif a == "--days":
             days = int(args.pop(0))
+        elif a == "--latency":
+            latency = True
         elif a in ("-h", "--help"):
             print(__doc__)
             return
@@ -166,6 +187,9 @@ def main():
     gd = git_common_dir(repo)
     if not gd:
         sys.exit(f"viewer-usage-report: {repo} is not a git repo")
+    if latency:
+        print_latency(telemetry.summarize(telemetry.rollups(gd), days or 30))
+        return
     since = (dt.datetime.now() - dt.timedelta(days=days)).timestamp() if days else 0
     E = load_usage(os.path.join(gd, "stack-usage.jsonl"), since)
     R = load_requests(os.path.join(gd, "stack-review.log"), since)
@@ -258,6 +282,8 @@ def main():
     au = collections.Counter(actor_of(e) for e in C if not e.get("replay"))
     print("  authored commits by actor: " + ", ".join(f"{a} {n}" for a, n in au.most_common()))
 
+    print_latency(telemetry.summarize(telemetry.rollups(gd), days or 30))
+
     if R:
         h("request log: requests by actor (n-weighted)")
         ra = collections.Counter()
@@ -276,6 +302,38 @@ def main():
                 row(n, f"{p:<26} {c}")
         polls = sum(r["n"] for r in R if r["n"] > 1 or r["path"] in ("/ext-mtime", "/gates-progress"))
         print(f"\n  polling share of requests: {pct(polls, sum(r['n'] for r in R))}")
+
+
+def _ms(v):
+    return "—" if v is None else f"{v / 1000:.1f}s" if v >= 1000 else f"{v:.0f}ms"
+
+
+def print_latency(S):
+    """The /v2/dashboard summary as text (schema-2 events only)."""
+    h(f"latency: commands vs budgets, worst first (last {S['days']} days)")
+    if not S["commands"] and not S["surfaces"]:
+        print("  no schema-2 events yet")
+        return
+    print(f"  {'command':<28} {'app':<3} {'class':<12} {'runs':>5}  {'feedback p50/p95':>17}  {'settled p50/p95':>16}  {'over':>5}  refused")
+    for c in S["commands"][:20]:
+        print(f"  {c['id'][:28]:<28} {c['app']:<3} {c['budget']:<12} {c['n']:>5}  "
+              f"{_ms(c['feedback']['p50']):>8}/{_ms(c['feedback']['p95']):<8}  {_ms(c['settled']['p50']):>7}/{_ms(c['settled']['p95']):<8}  "
+              f"{(str(c['over']) + '×') if c['over'] else '—':>5}  {pct(c['refusedRate'] * c['n'], c['n'])}")
+    h(f"latency: surfaces, navigation → meaningful paint (budget {_ms(S['paintMs'])})")
+    for v in S["surfaces"]:
+        print(f"  {v['id']:<28} {v['app']:<3} {v['n']:>5} visits  p50 {_ms(v['paint']['p50']):>7}  p95 {_ms(v['paint']['p95']):>7}")
+    if S["pairs"]:
+        h("latency: v1 beside v2")
+        for p in S["pairs"]:
+            def p95(x):
+                if not x or "id" not in x:
+                    return "—"
+                return _ms(x["paint"]["p95"]) if p["kind"] == "nav" else f"{_ms(x['feedback']['p95'])}·{_ms(x['settled']['p95'])}"
+            print(f"  {p['id']:<22} v1 {','.join(p['v1ids']):<14} {(p['v1'] or {}).get('n', 0):>4}× {p95(p['v1']):>14}   v2 {(p['v2'] or {}).get('n', 0):>4}× {p95(p['v2']):>14}")
+    if S["neverUsed"]:
+        print(f"\n  never used (v2): {', '.join(S['neverUsed'])}")
+    for app, p in S["pages"].items():
+        print(f"  page health {app}: {p['loads']} loads, {p['longtasks']} long tasks, CLS p95 {p['clsP95']}")
 
 
 if __name__ == "__main__":

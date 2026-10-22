@@ -15,6 +15,7 @@ export interface Surface {
 export const BASE = "/v2";
 export const SURFACES: Surface[] = [
   { id: "forests", path: BASE, title: "Forests", v1: ["home"] },
+  { id: "dashboard", path: `${BASE}/dashboard`, title: "Dashboard" },
 ];
 
 const match = (pathname: string): Surface =>
