@@ -102,10 +102,44 @@ export function installFetchTracking(): void {
 
 let uiInstalled = false;
 
-// The client-interaction layer the fetch seam can't see: button clicks (even ones that never
-// hit the network, like the DIFF-VS toggles) and keyboard shortcuts (so an accidentally-hit or
+const SEMANTIC = "[data-track], button, [role=button], a[href]";
+
+// Solid delegates onClick: the handler lives on the element as `$$click`. That is how a bare
+// `<g onClick>` (every ForestMap node — 71% of forest→node navigation went unlogged) or a
+// `div onClick` is found without annotating it.
+const hasClickHandler = (el: Element) => typeof (el as unknown as Record<string, unknown>).$$click === "function";
+
+// The nearest thing that was clicked AS a control: a semantic one, or an element with a handler.
+export function clickedControl(target: Element | null): Element | null {
+  for (let el = target; el && el !== document.documentElement; el = el.parentElement) {
+    if (el.matches(SEMANTIC) || hasClickHandler(el)) return el;
+  }
+  return null;
+}
+
+// tag.first-class — a structural name for an unlabelled control ("g.fm-node"), stable across copy edits.
+const shapeOf = (el: Element) => {
+  const cls = (el.getAttribute("class") || "").trim().split(/\s+/)[0];
+  return el.tagName.toLowerCase() + (cls ? "." + cls : "");
+};
+
+// Durable ids for the unlabelled controls that matter most, keyed by shape so the components
+// that draw them carry no tracking markup: the forest map's node, PR badge and ghost pills.
+const SHAPE_IDS: Record<string, string> = {
+  "g.fm-node": "map.node",
+  "text.fm-pr": "map.pr",
+  "g.fm-ghost-pill": "map.ghost-pill",
+};
+
+// The client-interaction layer the fetch seam can't see: clicks (even ones that never hit the
+// network, like the DIFF-VS toggles) and keyboard shortcuts (so an accidentally-hit or
 // never-used key shows up by frequency). One delegated listener each — total coverage, no
-// per-control annotation. A control names itself via data-track, else its aria-label/title/text.
+// per-control annotation required.
+//
+// Naming convention: `data-track="<area>.<control>"` (e.g. "node.push", "map.node") is the
+// control's durable id and lands in `track`; `control` stays the human label (aria-label, title,
+// else text) as before, so history before data-track keeps classifying. Tooltips double as labels,
+// so a copy edit splits one control into many classes — anything read by frequency wants an id.
 export function installUiTracking(): void {
   if (uiInstalled || !canMutate) return;
   uiInstalled = true;
@@ -113,14 +147,19 @@ export function installUiTracking(): void {
   document.addEventListener(
     "click",
     (e) => {
-      const el = (e.target as Element | null)?.closest?.("[data-track], button, [role=button], a[href]");
+      const el = clickedControl(e.target as Element | null);
       if (!el) return;
-      const label =
-        el.getAttribute("data-track") ||
-        el.getAttribute("aria-label") ||
-        el.getAttribute("title") ||
-        (el.textContent || "").trim().slice(0, 40);
-      if (label) track("ui", { control: label });
+      const id = el.getAttribute("data-track") || SHAPE_IDS[shapeOf(el)] || "";
+      const labelled = el.getAttribute("aria-label") || el.getAttribute("title");
+      const text = (el.textContent || "").trim().replace(/\s+/g, " ").slice(0, 40);
+      if (el.matches(SEMANTIC)) {
+        const control = labelled || text || id;
+        if (control) track("ui", { control, ...(id ? { track: id } : {}) });
+      } else {
+        // a handler on a non-control element: its text is live data (a branch name, a count),
+        // so the stable name is its shape; the text rides along as the target
+        track("ui", { control: labelled || shapeOf(el), el: shapeOf(el), ...(id ? { track: id } : {}), ...(text ? { text } : {}) });
+      }
     },
     { capture: true },
   );
