@@ -205,6 +205,7 @@ export function FocusLane(props: {
               return (
                 <div
                   class={`${ROW} ${rowState()}`}
+                  data-forest={`${p.repo || "loops"}\t${p.name}`}
                   classList={{ dragging: dragFrom() === i(), unpinning: dragFrom() === i() && dragOut() }}
                   style={{ transform: `translate(${rowSlide(i())}px, ${rowShift(i())}px)` }}
                   onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, idx: i() }); }}

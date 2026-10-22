@@ -49,7 +49,7 @@ export function parseLocation(pathname: string, search: string): ViewerLocation 
   const [head, ...rest] = pathname.split("/").filter(Boolean);
 
   if (!head) {
-    return { kind: "outbox" };
+    return { kind: "home", tab: "forests" };
   }
   if (head === "outbox") {
     if (rest[0] !== "launch" || !rest[1]) {

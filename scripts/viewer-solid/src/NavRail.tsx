@@ -88,9 +88,21 @@ export function NavRail() {
         class="thumb-brand mb-[26px] cursor-pointer border-0 bg-transparent text-center text-[19px] text-gold-leaf max-[640px]:hidden"
         data-track="nav.home"
         title="canopy — home"
-        onClick={() => navigate({ kind: "outbox" })}
+        onClick={() => navigate({ kind: "home", tab: "forests" })}
       >
         <span class="brand-mark text-[18px] not-italic text-gold-leaf">✦</span>
+      </button>
+      <button
+        class={`${THUMB} ${active() === "forests" ? THUMB_ON : THUMB_OFF}`}
+        data-track="nav.tab-forests"
+        classList={{ active: active() === "forests" }}
+        title="forests — focus, then the workbench; the root of your work"
+        onClick={() => navigate({ kind: "home", tab: "forests" })}
+      >
+        <span class={THUMB_LBL}>Forests</span>
+        <Show when={(projects.data || []).length}>
+          <span class={`${COUNT} ${active() === "forests" ? "border-gold-deep text-gold-leaf" : "border-rule text-ink-faint"}`}>{(projects.data || []).length}</span>
+        </Show>
       </button>
       <button
         class={`${THUMB} ${location().kind === "outbox" ? THUMB_ON : THUMB_OFF}`}
@@ -105,7 +117,6 @@ export function NavRail() {
       </button>
       <For each={[
         { id: "work" as const, label: "Work", count: (prs.data || []).length + (reviewReqs.data || []).length },
-        { id: "forests" as const, label: "Forests", count: (projects.data || []).length },
       ]}>
         {(t) => (
           <button
