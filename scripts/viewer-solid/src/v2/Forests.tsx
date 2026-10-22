@@ -50,7 +50,6 @@ function actionHint(v: BranchView): string {
 function shipWord(v: BranchView): string {
   if (v.b.pending === "pushing") return "pushing…";
   if (v.st.ship === "pushed" && opened().has(v.b.id)) return "waiting for GitHub…";
-  if (v.st.ship === "approved") return `approved, waiting on ${v.st.waiting[0]?.label ?? "you"}`;
   return SHIP[v.st.ship].word;
 }
 
@@ -58,7 +57,9 @@ function BranchRow(props: { id: string; summary: string }) {
   const v = () => model.branchView(props.id)!;
   const key = () => bkey(v().b.id);
   const on = () => model.selected() === key();
-  const live = () => v().st.ready || !!v().b.pending || armed() === v().b.id;
+  // gold means "you're acting here": the selected row and anything in flight. A row that is merely
+  // ready reads brighter, not gold, so the ready filter doesn't turn the page gold.
+  const live = () => !!v().b.pending || armed() === v().b.id;
   const meta = createMemo(() => {
     const b = v().b;
     const out: string[] = [];
@@ -66,6 +67,7 @@ function BranchRow(props: { id: string; summary: string }) {
     if (b.pushed === "ahead") out.push(`${b.ahead} ahead of origin`);
     if (!v().pr && b.gates !== "green" && b.commits) out.push(b.gates === "red" ? `red: ${b.redGates.join(", ") || "gates"}` : b.gates === "running" ? "gates running" : b.gates === "stale" ? "gates stale" : "not gated");
     if (b.holdUntil && !v().pr) out.push(`held for ${fmtMorning(Date.parse(b.holdUntil))}`);
+    if (v().st.ship === "approved" && v().st.waiting[0]) out.push(`waiting on ${v().st.waiting[0].label}`);
     return out.join(" · ");
   });
   return (
@@ -85,7 +87,7 @@ function BranchRow(props: { id: string; summary: string }) {
         <span
           ref={settle}
           class="shrink-0 whitespace-nowrap text-right"
-          classList={{ "text-gold-leaf": live(), "text-ink-faint": !live(), "animate-breathe": !!v().b.pending || shipWord(v()).endsWith("…") }}
+          classList={{ "text-gold-leaf": live(), "text-ink": !live() && v().st.ready, "text-ink-faint": !live() && !v().st.ready, "animate-breathe": !!v().b.pending || shipWord(v()).endsWith("…") }}
         >
           {SHIP[v().st.ship].glyph} {shipWord(v())}
         </span>
@@ -115,7 +117,6 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
     if (p().state === "archive" || !f.branches.length) return "";
     const parts = [`${f.branches.length} branch${f.branches.length === 1 ? "" : "es"}`];
     if (f.ready.length) parts.push(`${f.ready.length} ready`);
-    if (f.onGitHub) parts.push(`${f.onGitHub} on GitHub`);
     if (f.unopened.length > 1) parts.push(`L launches ${f.unopened.length}`);
     if (p().ticket) parts.push(p().ticket!);
     return parts.join(" · ");
