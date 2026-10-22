@@ -32,6 +32,8 @@ export interface OutboxNode {
   parent: string;
   base: string;
   stackedOn: { branch: string; pr?: number | null } | null;
+  requires: string[];
+  after: string[];
   description: string;
   title: string;
   titleSource: "saved" | "commit" | "pr";

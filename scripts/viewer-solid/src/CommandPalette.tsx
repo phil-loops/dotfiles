@@ -87,8 +87,8 @@ export default function CommandPalette() {
     }
     if (c.project) {
       cmds.push({
-        label: `≣ merge story — ${leaf(c.project)}`,
-        sub: "the feature as ordered commits, in merge order",
+        label: `≣ landing order — ${leaf(c.project)}`,
+        sub: "the titles that land on main, in merge order",
         run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
       });
       // on a node, the sheet opens over the page you're on; from the forest overview there is
@@ -104,8 +104,8 @@ export default function CommandPalette() {
       });
     } else {
       cmds.push({
-        label: "≣ merge story view",
-        sub: "open forests as ordered commits",
+        label: "≣ landing order view",
+        sub: "open forests as the titles that land, in merge order",
         run: () => setOverviewView("story"),
       });
     }

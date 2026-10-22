@@ -8,7 +8,7 @@ import { cachedModel, rememberModel } from "./modelCache";
 import { ContinuesStrip } from "./ContinuesStrip";
 import { overviewView, setOverviewView } from "./overviewView";
 import { ForestMap } from "./ForestMap";
-import MergeStory from "./MergeStory";
+import { ForestLanding } from "./ForestLanding";
 import { StoriesEditor } from "./StoriesEditor";
 import { chatToTmux } from "./chatDrawer";
 import { SessionPicker } from "./SessionPicker";
@@ -354,7 +354,7 @@ export function ForestOverview() {
           <WarmingRibbon loading={health.isFetching} hasData={!!health.data} needsAttention={needsAttention()} />
           <div class="fo-views ml-auto inline-flex gap-[2px]" role="group" aria-label="overview view">
             <button class={`${FO_BTN} border ${ovView() === "map" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "map" }} onClick={() => setOvView("map")} title="spatial forest map">⊞ map</button>
-            <button class={`fo-view-story ${FO_BTN} border ${ovView() === "story" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the feature as ordered semantic commits">≣ story</button>
+            <button class={`fo-view-story ${FO_BTN} border ${ovView() === "story" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "story" }} onClick={() => setOvView("story")} title="the titles that land on main, in merge order">≣ landing</button>
             <button class={`fo-view-stories ${FO_BTN} border ${ovView() === "stories" ? FO_VIEW_ON : FO_VIEW_OFF}`} classList={{ on: ovView() === "stories" }} onClick={() => setOvView("stories")} title="one plain-English line per branch, edited in place">✎ stories</button>
           </div>
           <Show when={canMutate}>
@@ -409,7 +409,7 @@ export function ForestOverview() {
             />
           </>}
         >
-          <Show when={ovView() === "stories"} fallback={<MergeStory model={model.data} project={project()} onPick={open} />}>
+          <Show when={ovView() === "stories"} fallback={<ForestLanding project={project()} repo={forestRepo(location())} onPick={open} />}>
             <div class="fo-stories h-[calc(100dvh-62px)] min-h-0">
               <StoriesEditor project={project()} branch={spine()[0].id} onPick={open} />
             </div>
