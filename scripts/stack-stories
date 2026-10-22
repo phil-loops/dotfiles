@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""stack-stories — write a whole forest's stories in one $EDITOR buffer.
+"""stack-stories — write a whole forest's one-line descriptions in one $EDITOR buffer.
 
-A story is the one plain-English line that says what a branch DOES
-(`branch.<b>.stack-story`): it renders on every branch's plan block, feeds the PR body, and
-outlives the branch you edit it from. The viewer has two surfaces for them; this is the same
-job in the editor, `git rebase -i`-shaped — one block per branch in merge order, its evidence
-as comments, one editable line underneath.
+A branch's description (`branch.<b>.description`) is its one human line: what it DOES, as a
+sentence a teammate reads without the diff. It names the branch on the map, the plan, the merge
+story and the PR body's purpose line. The viewer edits it at the top of each node's outline
+column; this is the same job for a whole forest, `git rebase -i`-shaped — one block per branch
+in merge order, its evidence as comments, one editable line underneath.
 
   stack-stories                  the forest of the checked-out branch
   stack-stories <project>        that forest
@@ -13,21 +13,16 @@ as comments, one editable line underneath.
   stack-stories --print          write the buffer to stdout, edit nothing
   stack-stories --apply <file>   parse a filled-in buffer and write it — no editor
 
-Every box starts BLANK: it holds the hand-written story and nothing else, with the line the
-plan currently falls back to (description, else commit subject) shown above it as a comment.
-A pre-filled line gets nudged instead of written, which is the whole reason the viewer's
-boxes start blank too.
+Each line starts from the branch's current description. Stories and descriptions used to do the
+same job; a legacy `stack-story` is shown as a comment to copy from, and is never deleted.
 
 The buffer round-trips by branch NAME, not by position: a missing line leaves that branch
-alone, an empty value clears its story, and a name that isn't in the forest aborts the whole
-write rather than guessing. Stories that changed elsewhere (the viewer, another session)
+alone, an empty value clears its description, and a name that isn't in the forest aborts the
+whole write rather than guessing. Lines that changed elsewhere (the viewer, another session)
 while the buffer was open are refused by name and reported — never overwritten.
 
-Writes land under BOTH spellings (`branch.<b>.stack-story` and legacy
-`stack-branch.<b>.story`), matching srv/stackcfg.py: readers prefer the target, so a
-legacy-only write is silently shadowed. Every change is journalled to
-<git-common-dir>/stack-story-log.jsonl first — git config keeps no history and a story is
-hand-written prose, so an overwrite has to stay recoverable.
+Every change is journalled to <git-common-dir>/stack-story-log.jsonl first — git config keeps
+no history and the line is hand-written prose, so an overwrite has to stay recoverable.
 """
 import hashlib
 import json
@@ -47,7 +42,7 @@ SIG_LINE = re.compile(r"^#\s*sig:\s*(?P<digest>[0-9a-f]{10})\b")
 
 
 def digest(text):
-    """The story a line was rendered FROM, carried in the buffer so a write can tell "I changed
+    """The description a line was rendered FROM, carried in the buffer so a write can tell "I changed
     this" from "somebody else changed it while I was editing" — the buffer outlives the process
     that made it (--apply a file from an hour ago), so the before-state cannot live in memory."""
     return hashlib.sha1((text or "").encode()).hexdigest()[:10]
@@ -62,10 +57,8 @@ def die(msg, code=2):
     sys.exit(code)
 
 
-def story_of(branch):
-    """Target spelling first, exactly as stack_facts.job_of ranks them."""
-    return (git("config", f"branch.{branch}.stack-story")
-            or git("config", f"stack-branch.{branch}.story"))
+def line_of(branch):
+    return git("config", f"branch.{branch}.description")
 
 
 def base_of(parent):
@@ -111,9 +104,9 @@ def plan_of(project, branch):
 def source_of(step):
     if step.get("landed"):
         return "merged"
-    if step.get("story"):
-        return "story"
-    return "description" if step.get("description") else "subject"
+    if step.get("description"):
+        return "description"
+    return "story" if step.get("story") else "subject"
 
 
 def render(project, plan, here):
@@ -121,10 +114,10 @@ def render(project, plan, here):
         f"# stack-stories · {project} → main",
         "#",
         "# One line per branch, in merge order: what it DOES, as a sentence a teammate reads",
-        "# without the diff. The text after `<branch>:` is that branch's own durable story —",
-        "# it renders on every branch's plan block and outlives the branch you edit it from.",
+        "# without the diff. The text after `<branch>:` is that branch's description — the",
+        "# line the map, the plan and the PR body all name it by.",
         "#",
-        "#   · a blank value clears the story: the plan falls back to the `fallback:` line",
+        "#   · a blank value clears the description: the plan falls back to the `fallback:` line",
         "#   · delete a whole line to leave that branch exactly as it is",
         "#   · `#` lines are ignored — save and quit to write, empty the file to abort",
         "",
@@ -151,17 +144,19 @@ def render(project, plan, here):
             out.append(f"#     {path}")
         if len(ev["files"]) > 12:
             out.append(f"#     … +{len(ev['files']) - 12} more")
-        if not s.get("story"):
+        if not s.get("description"):
             out.append(f"#   fallback: {source_of(s)} · {s['job']}")
-        out.append(f"# sig: {digest(s.get('story'))}  (leave this — it's how a save knows nobody else moved the line)")
-        out += [f"{b}: {s.get('story') or ''}".rstrip(), ""]
+        elif s.get("story") and s["story"] != s["description"]:
+            out.append(f"#   story: {s['story']}")
+        out.append(f"# sig: {digest(s.get('description'))}  (leave this — it's how a save knows nobody else moved the line)")
+        out += [f"{b}: {s.get('description') or ''}".rstrip(), ""]
     return "\n".join(out) + "\n"
 
 
 def parse(text, live):
-    """({branch: new story}, {branch: base digest}) for every line present, or die on anything
+    """({branch: new line}, {branch: base digest}) for every line present, or die on anything
     ambiguous. A line the buffer omits is absent from the result, which is what leaves that
-    branch alone. A `# sig:` marker applies to the next story line; a hand-written buffer with
+    branch alone. A `# sig:` marker applies to the next branch line; a hand-written buffer with
     no markers writes unguarded, which is what makes --apply scriptable."""
     wanted, bases = {}, {}
     body = False
@@ -178,7 +173,7 @@ def parse(text, live):
         body = True
         m = KEY_LINE.match(line)
         if not m:
-            die(f"line {n}: a story is one line, `<branch>: text` — got {line!r}")
+            die(f"line {n}: a description is one line, `<branch>: text` — got {line!r}")
         b = m.group("branch").strip()
         if b not in live:
             die(f"line {n}: {b} isn't an unmerged branch of this forest")
@@ -206,27 +201,27 @@ def journal(branch, before, after):
         pass
 
 
-def write_story(branch, text):
-    journal(branch, story_of(branch), text)
-    for key in (f"branch.{branch}.stack-story", f"stack-branch.{branch}.story"):
-        if text:
-            subprocess.run(["git", "config", key, text], capture_output=True)
-        else:
-            subprocess.run(["git", "config", "--unset", key], capture_output=True)
+def write_line(branch, text):
+    journal(branch, line_of(branch), text)
+    key = f"branch.{branch}.description"
+    if text:
+        subprocess.run(["git", "config", key, text], capture_output=True)
+    else:
+        subprocess.run(["git", "config", "--unset", key], capture_output=True)
 
 
 def apply(wanted, bases):
-    """Write what actually changed. A branch whose story moved since the buffer was rendered is
+    """Write what actually changed. A branch whose line moved since the buffer was rendered is
     reported and left alone — this tool never resolves that race by picking."""
     wrote, cleared, stomped = [], [], []
     for b, text in wanted.items():
-        now = story_of(b)
+        now = line_of(b)
         if text == now:
             continue
         if b in bases and bases[b] != digest(now):
             stomped.append((b, now))
             continue
-        write_story(b, text)
+        write_line(b, text)
         (wrote if text else cleared).append(b)
     return wrote, cleared, stomped
 
@@ -260,7 +255,7 @@ def main():
     plan, through = plan_of(project, branch)
     live = {s["branch"] for s in plan if not s.get("landed")}
     if not live:
-        die(f"{project} has no unmerged branches — every story is its PR title now", code=0)
+        die(f"{project} has no unmerged branches — every line is its PR title now", code=0)
     buf = render(project, plan, here if here in live else through)
 
     if printing:
@@ -291,7 +286,7 @@ def main():
     for b in wrote:
         print(f"✓ {b}: {wanted[b]}")
     for b in cleared:
-        print(f"✓ {b}: cleared — falls back to its description or subject")
+        print(f"✓ {b}: cleared — falls back to its story or subject")
     for b, now in stomped:
         print(f"⚠ {b}: changed elsewhere while you were editing (now {now!r}) — left alone", file=sys.stderr)
     if not wrote and not cleared and not stomped:

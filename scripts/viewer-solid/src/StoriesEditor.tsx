@@ -5,22 +5,22 @@ import { patchHtml } from "./FileRail";
 // Writing a forest's stories: the branch list on the left, the selected branch's actual change
 // on the right, each pane scrolling on its own.
 //
-// Why two panes. A story says what a branch DOES, so you have to read the change to write it —
+// Why two panes. The line says what a branch DOES, so you have to read the change to write it —
 // but with the diff folded INTO the row, the box you type in slid down the page the moment the
 // code appeared, and reaching the next branch meant scrolling past a diff. Now the column you
 // type in never moves, the reading pane scrolls independently, and ↵ walks the list: read the
 // change, say what it does, ↵, next branch.
 //
-// Saving writes that branch's own `stack-branch.<b>.story`, so the wording renders on every
-// branch's plan block and outlives the branch you happened to edit from. Every box starts BLANK
-// — it holds the hand-written story and nothing else, with the line the plan currently falls
-// back to (description, else commit subject) underneath: a pre-filled line gets nudged instead
-// of written.
+// Each box is that branch's description — its one human line, the same one the node page's
+// outline column edits — so saving renames it on the map, the plan and the PR body at once.
+// A branch with no description shows what the plan falls back to (a legacy story, else the
+// commit subject) underneath; a legacy story that disagrees with the description is offered
+// as a one-click replacement. Stories are never deleted, only outranked.
 type Step = {
   n: number; branch: string; job: string; story: string; description: string; subject: string;
   pr: number | null; landed: boolean;
 };
-type Source = "story" | "description" | "subject" | "merged";
+type Source = "description" | "story" | "subject" | "merged";
 type Evidence = { subjects: string[]; fileCount: number; adds: number; dels: number };
 type Changed = { path: string; add: string; del: string; patch?: string };
 
@@ -28,29 +28,29 @@ type Changed = { path: string; add: string; del: string; patch?: string };
 // they arrive folded, so landing on a big branch doesn't dump a thousand lines at you.
 const READ_IT_ALL = 400;
 
-const sourceOf = (s: Step): Source => (s.landed ? "merged" : s.story ? "story" : s.description ? "description" : "subject");
+const sourceOf = (s: Step): Source => (s.landed ? "merged" : s.description ? "description" : s.story ? "story" : "subject");
 const leafOf = (b: string): string => b.split("/").pop() || b;
 const linesOf = (files: Changed[]) => files.reduce((n, f) => n + Number(f.add || 0) + Number(f.del || 0), 0);
 
 const BADGE: Record<Source, string> = {
-  story: "text-gold-leaf border-gold-deep",
-  description: "text-patina border-patina/60",
+  description: "text-gold-leaf border-gold-deep",
+  story: "text-patina border-patina/60",
   subject: "text-ink-faint border-rule",
   merged: "text-ink-faint border-transparent",
 };
 const BADGE_TITLE: Record<Source, string> = {
-  story: "a hand-written story — beats the description and the commit subject",
-  description: "no story yet — the plan falls back to the branch description (git config branch.<b>.description)",
-  subject: "no story, no description — the plan falls back to the newest commit's subject",
+  description: "the branch's description — its one line on the map, the plan and the PR body",
+  story: "no description yet — the plan falls back to a legacy story line",
+  subject: "no description — the plan falls back to the newest commit's subject",
   merged: "already merged — its line is its PR title, from the merge ledger",
 };
 
-const postStory = (branch: string, text: string): Promise<{ ok: boolean; prev: string }> =>
-  fetch(withRepo("/story"), {
+const postDescription = (branch: string, text: string): Promise<boolean> =>
+  fetch(withRepo("/outline"), {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ branch, text }),
-  }).then(async (r) => ({ ok: r.ok, prev: r.ok ? ((await r.json()) as { prev?: string }).prev ?? "" : "" }))
-    .catch(() => ({ ok: false, prev: "" }));
+    body: JSON.stringify({ branch, description: text }),
+  }).then(async (r) => r.ok && !!((await r.json()) as { ok?: boolean }).ok)
+    .catch(() => false);
 
 const fetchEvidence = (branch: string): Promise<Evidence | null> =>
   fetch(withRepo("/step-evidence") + "?branch=" + encodeURIComponent(branch))
@@ -80,8 +80,8 @@ export function StoriesEditor(props: {
   );
   const [drafts, setDrafts] = createSignal<Record<string, string>>({});
   const [saving, setSaving] = createSignal<Record<string, "saving" | "saved" | "failed">>({});
-  // the story this row just overwrote, offered back for a few seconds — a story is hand-written
-  // prose and git config keeps no history, so a wrong save must be one click from undone
+  // the line this row just overwrote, offered back for a few seconds — it is hand-written prose,
+  // so a wrong save must be one click from undone
   const [undoable, setUndoable] = createSignal<Record<string, string>>({});
   // the branch whose change fills the reading pane — follows whichever row you're in
   const [selected, setSelected] = createSignal<string>("");
@@ -92,8 +92,8 @@ export function StoriesEditor(props: {
 
   const steps = (): Step[] => data()?.steps ?? [];
   const live = (): Step[] => steps().filter((s) => !s.landed);
-  const draftOf = (s: Step): string => drafts()[s.branch] ?? s.story;
-  const dirty = (s: Step): boolean => draftOf(s).trim() !== s.story.trim();
+  const draftOf = (s: Step): string => drafts()[s.branch] ?? s.description;
+  const dirty = (s: Step): boolean => draftOf(s).trim() !== s.description.trim();
   const mark = (branch: string, v: "saving" | "saved" | "failed" | null) =>
     setSaving((m) => {
       const next = { ...m };
@@ -124,18 +124,15 @@ export function StoriesEditor(props: {
     }
   };
 
-  // Typing the description back verbatim clears the override rather than storing a copy of it —
-  // the description stays the single source, and the badge flips back to "description".
-  const save = async (s: Step, text: string, verbatim = false) => {
+  const save = async (s: Step, text: string) => {
     const t = text.trim();
-    const stored = !verbatim && t === s.description.trim() ? "" : t;
-    if (stored === s.story.trim()) {
+    const prev = s.description.trim();
+    if (t === prev) {
       setDrafts((d) => { const n = { ...d }; delete n[s.branch]; return n; });
       return;
     }
     mark(s.branch, "saving");
-    const r = await postStory(s.branch, stored);
-    if (!r.ok) {
+    if (!(await postDescription(s.branch, t))) {
       mark(s.branch, "failed");
       return;
     }
@@ -143,8 +140,8 @@ export function StoriesEditor(props: {
     setDrafts((d) => { const n = { ...d }; delete n[s.branch]; return n; });
     mark(s.branch, "saved");
     setTimeout(() => mark(s.branch, null), 1800);
-    if (r.prev && r.prev !== stored) {
-      setUndoable((u) => ({ ...u, [s.branch]: r.prev }));
+    if (prev) {
+      setUndoable((u) => ({ ...u, [s.branch]: prev }));
       setTimeout(() => setUndoable((u) => { const n = { ...u }; delete n[s.branch]; return n; }), 15000);
     }
   };
@@ -180,7 +177,7 @@ export function StoriesEditor(props: {
           <span class="stories-cap text-[10px] uppercase tracking-[0.08em] text-ink-faint">in merge order</span>
         </div>
         <p class="stories-hint mx-[2px] mt-0 mb-[10px] text-[10.5px] leading-[1.5] text-ink-dim">
-          what each branch does, in a sentence a teammate reads without the diff. every box starts blank; its change is on the right. ↵ or ↑↓ saves and moves on, esc reverts, empty falls back to the line underneath.
+          what each branch does, in a sentence a teammate reads without the diff — its description, the one line every view names it by. its change is on the right. ↵ or ↑↓ saves and moves on, esc reverts, empty falls back to the line underneath.
         </p>
         <Show when={data()} fallback={<p class="stories-empty italic text-ink-faint">loading…</p>}>
           <ol class="stories-list m-0 flex list-none flex-col gap-[2px] p-0">
@@ -188,7 +185,7 @@ export function StoriesEditor(props: {
               {(s) => {
                 const src = () => sourceOf(s);
                 const state = () => saving()[s.branch];
-                const shadowed = () => (src() === "story" && s.description ? s.description : "");
+                const shadowed = () => (s.story && s.description && s.story.trim() !== draftOf(s).trim() ? s.story : "");
                 const blank = () => !draftOf(s).trim();
                 const here = () => props.here === s.branch;
                 const on = () => selected() === s.branch;
@@ -262,7 +259,7 @@ export function StoriesEditor(props: {
                             tabIndex={-1}
                             class="stories-undo flex-none cursor-pointer border-0 bg-transparent p-0 text-gold-leaf underline decoration-dotted hover:text-ink"
                             title={`put back: ${prev()}`}
-                            onClick={(e) => { e.stopPropagation(); setUndoable((u) => { const n = { ...u }; delete n[s.branch]; return n; }); void save(s, prev(), true); }}
+                            onClick={(e) => { e.stopPropagation(); setUndoable((u) => { const n = { ...u }; delete n[s.branch]; return n; }); void save(s, prev()); }}
                           >undo</button>
                         )}
                       </Show>
@@ -285,15 +282,15 @@ export function StoriesEditor(props: {
                     <Show when={shadowed()}>
                       <div class="stories-under flex items-baseline gap-[7px] pl-[21px] text-[10px] leading-[1.45] text-ink-faint">
                         <span class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap" title={shadowed()}>
-                          <span class="text-patina">description</span> {shadowed()}
+                          <span class="text-patina">story</span> {shadowed()}
                         </span>
                         <Show when={canMutate}>
                           <button
                             tabIndex={-1}
                             class="flex-none cursor-pointer border-0 bg-transparent p-0 underline decoration-dotted hover:text-ink"
-                            title="drop the story override — the description shows again"
-                            onClick={(e) => { e.stopPropagation(); void save(s, s.description); }}
-                          >use description</button>
+                            title="stories and descriptions did the same job — make this the description (the story stays stored)"
+                            onClick={(e) => { e.stopPropagation(); setDrafts((d) => ({ ...d, [s.branch]: s.story })); areas[s.branch]?.focus(); }}
+                          >use story as description</button>
                         </Show>
                       </div>
                     </Show>

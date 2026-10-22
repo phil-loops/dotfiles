@@ -114,29 +114,29 @@ def _subject_of(branch):
 
 
 def sources_of(branch):
-    """Every candidate for a branch's one-line story, in the order job_of ranks them — so an
-    editor can show which one won and what it is shadowing, instead of a silent override."""
+    """Every candidate for a branch's one line, in the order job_of ranks them — so an editor
+    can show which one won and what it is shadowing, instead of a silent override."""
     return {
+        "description": cfg(f"branch.{branch}.description"),
         "story": (cfg(f"branch.{branch}.stack-story")
                   or cfg(f"stack-branch.{branch}.story")),
-        "description": cfg(f"branch.{branch}.description"),
         "subject": _subject_of(branch),
     }
 
 
 def job_of(branch):
-    """What this branch DOES, in one voiced line. A hand-authored `stack-branch.<b>.story` wins —
-    it's the durable per-step merge story, editable from any branch's plan and re-read on every
-    branch (so a story survives after this branch merges). Then the branch description: it is the
-    branch's stated purpose and is maintained deliberately, so it outranks the commit subject,
-    which is only an auto-derived gloss of the newest commit. Subject last, then the name."""
+    """What this branch DOES, in one voiced line: its description — the one human line per
+    branch, edited in the viewer's outline column and by stack-stories. A legacy
+    `branch.<b>.stack-story` only speaks for a branch that has no description yet (stories and
+    descriptions did the same job; the description won). Then the newest commit subject, then
+    the name."""
+    description = cfg(f"branch.{branch}.description")
+    if description:
+        return description
     story = (cfg(f"branch.{branch}.stack-story")
              or cfg(f"stack-branch.{branch}.story"))
     if story:
         return story
-    description = cfg(f"branch.{branch}.description")
-    if description:
-        return description
     return _subject_of(branch) or branch
 
 
