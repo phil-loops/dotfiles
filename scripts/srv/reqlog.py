@@ -2,8 +2,10 @@
 #
 # Line shape (space-separated; the leading four fields are the pre-2026-10-21 format, so old
 # readers still parse it):
-#   2026-10-21 17:15:00 GET /ext-mtime 200 1ms n=412
-# On a poll path `n=` counts this hit plus the identical ones folded since that path's previous line.
+#   2026-10-21 17:02:11 POST /push-origin 200 812ms actor=browser sid=8689da45
+#   2026-10-21 17:15:00 GET /ext-mtime 200 1ms actor=extension n=412
+# On a poll path `n=` counts this hit plus the identical ones folded since that path+actor's
+# previous line.
 #
 # Retention: the old single 5 MB generation held seven days, 83% of it the extension's
 # /ext-mtime poll. Polls now coalesce to one line per path+actor per window, the live file
@@ -24,7 +26,7 @@ POLL_WINDOW = 15 * 60
 POLLS = ("/ext-mtime", "/gates-progress", "/sig", "/heartbeat", "/processes", "/pulse")
 
 _lock = threading.Lock()
-_polls = {}   # (method, path) -> [first_at, count]
+_polls = {}   # (method, path, actor) -> [first_at, count]
 
 
 def segments(path):
@@ -80,11 +82,14 @@ def append(path, msg):
             pass   # a full disk or permissions hiccup must never take a request down
 
 
-def request_line(method, path, status, ms):
+def request_line(method, path, status, ms, actor=None, sid=None):
     """The line to log for one request, or None when it folds into a coalesced poll line."""
+    tail = f" actor={actor}" if actor else ""
+    if sid:
+        tail += f" sid={sid}"
     route = path.split("?", 1)[0]
     if route in POLLS and str(status).startswith("2"):
-        key = (method, route)
+        key = (method, route, actor)
         now = time.time()
         with _lock:
             slot = _polls.get(key)
@@ -93,6 +98,6 @@ def request_line(method, path, status, ms):
                 return None
             n = (slot[1] if slot else 0) + 1
             _polls[key] = [now, 0]
-        return f"{method} {route} {status} {ms:.0f}ms n={n}"
-    return f"{method} {path} {status} {ms:.0f}ms"
+        return f"{method} {route} {status} {ms:.0f}ms{tail} n={n}"
+    return f"{method} {path} {status} {ms:.0f}ms{tail}"
 

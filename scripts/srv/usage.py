@@ -23,6 +23,11 @@ def track(req, raw):
             path = _usage_file()
             if path and isinstance(ev, dict) and ev.get("type"):
                 ev["ts"] = int(time.time())
+                # stamped from the request, never trusted from the body: a headless run posting
+                # /track must not read as Phil
+                ev["actor"] = getattr(req, "_actor", None) or "unknown"
+                if getattr(req, "_sid", None):
+                    ev["session"] = req._sid
                 with open(path, "a") as f:
                     f.write(json.dumps(ev) + "\n")
     except Exception:
