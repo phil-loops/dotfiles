@@ -517,8 +517,6 @@ class H(BaseHTTPRequestHandler):
             return review.purpose_set(self, raw)
         if self.path == "/notes":   # save a branch's test/repro notes (stack-notes sidecar)
             return review.notes_set(self, raw)
-        if self.path == "/story":   # save a branch's durable per-step merge story (job_of prefers it)
-            return review.story_set(self, raw)
         if self.path == "/plan-template":   # save the per-project body template (edit once, carries forward)
             return review.plan_template_set(self, raw)
         if self.path == "/ticket":     # tie a forest to its Linear ticket (stack-project.<p>.ticket)

@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # test-stack-stories.sh — throwaway-repo harness for scripts/stack-stories.
-# Builds main → q → m (a two-branch forest) plus a ledger-less merged step, then asserts:
-# blank boxes render with their fallback, a filled line writes BOTH config spellings (the
-# post-sweep target one included, so job_of actually reads it back), an empty value clears,
-# an omitted line leaves a branch alone, a bad name aborts the whole write, a concurrent
-# change is refused rather than stomped, and every change lands in the story journal.
+# Builds main → q → m (a two-branch forest), then asserts: each line starts from the branch's
+# description, a branch with only a legacy story shows it as the fallback, a filled line writes
+# the description (and job_of reads it back), an empty value clears, an omitted line leaves a
+# branch alone, a bad name aborts the whole write, a concurrent change is refused rather than
+# stomped, legacy stories are never deleted, and every change lands in the journal.
 set -uo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,66 +44,66 @@ git config branch.q.description "add the queries the repair needs"
 # the post-sweep state for m: its story lives under the TARGET spelling only
 git config branch.m.stack-story "an older line about repairing"
 
-# T1: the buffer starts blank where there is no story, and names the fallback
+# T1: q starts from its description; m (story only, no description) falls back to the story
 buf="$("$STORIES" --print)"
 assert_has "T1 forest named"         "stack-stories · p → main" "$buf"
-assert_has "T1 blank box for q"      $'\nq:\n'                   "$buf$(printf '\n')"
-assert_has "T1 q fallback line"      "fallback: description · add the queries the repair needs" "$buf"
+assert_has "T1 q starts from its description" "q: add the queries the repair needs" "$buf"
+assert_eq "T1 blank box for m"       "m:"                        "$(printf '%s\n' "$buf" | tail -1)"
+assert_has "T1 m fallback is its story" "fallback: story · an older line about repairing" "$buf"
 assert_has "T1 q evidence commit"    "queries: add the thing lookups" "$buf"
 assert_has "T1 q evidence files"     "queries/thing.ts"          "$buf"
-assert_has "T1 m keeps its story"    "m: an older line about repairing" "$buf"
 assert_has "T1 this-branch marked"   "← THIS BRANCH"             "$buf"
 
-# T2: a filled line writes BOTH spellings and job_of reads the new line back
+# T2: a filled line writes the description and job_of reads the new line back
 printf 'q: read the thing without trusting the caller\n' > "$ROOT/fill1"
 out="$("$STORIES" --apply "$ROOT/fill1" 2>&1)"; rc=$?
 assert_eq "T2 exit 0" 0 "$rc"
 assert_has "T2 reports the write" "✓ q: read the thing without trusting the caller" "$out"
-assert_eq "T2 target spelling written" "read the thing without trusting the caller" "$(git config branch.q.stack-story)"
-assert_eq "T2 legacy spelling written" "read the thing without trusting the caller" "$(git config stack-branch.q.story)"
+assert_eq "T2 description written" "read the thing without trusting the caller" "$(git config branch.q.description)"
+assert_eq "T2 no story written"    "" "$(git config branch.q.stack-story)"
 assert_eq "T2 job_of reads it back"    "read the thing without trusting the caller" "$(job_of q q)"
 assert_eq "T2 m untouched (omitted)"   "an older line about repairing" "$(job_of q m)"
 
-# T3: rewriting a story that only exists under the TARGET spelling is NOT shadowed
+# T3: a description outranks a legacy story, and the story is kept, offered as a comment
 printf 'm: repair a thing without trusting the caller\n' > "$ROOT/fill2"
 "$STORIES" --apply "$ROOT/fill2" >/dev/null 2>&1
-assert_eq "T3 target updated" "repair a thing without trusting the caller" "$(git config branch.m.stack-story)"
-assert_eq "T3 job_of not shadowed" "repair a thing without trusting the caller" "$(job_of q m)"
+assert_eq "T3 description written" "repair a thing without trusting the caller" "$(git config branch.m.description)"
+assert_eq "T3 job_of reads the description" "repair a thing without trusting the caller" "$(job_of q m)"
+assert_eq "T3 story kept" "an older line about repairing" "$(git config branch.m.stack-story)"
+assert_has "T3 story offered" "#   story: an older line about repairing" "$("$STORIES" --print)"
 
-# T4: an empty value clears the story, both spellings, and the fallback returns
+# T4: an empty value clears the description and the fallback returns
 printf 'q:\n' > "$ROOT/fill3"
 out="$("$STORIES" --apply "$ROOT/fill3" 2>&1)"
 assert_has "T4 reports the clear" "cleared" "$out"
-assert_eq "T4 target gone" "" "$(git config branch.q.stack-story)"
-assert_eq "T4 legacy gone" "" "$(git config stack-branch.q.story)"
-assert_eq "T4 falls back to description" "add the queries the repair needs" "$(job_of q q)"
+assert_eq "T4 description gone" "" "$(git config branch.q.description)"
+assert_eq "T4 falls back to the subject gloss" "add the thing lookups" "$(job_of q q)"
 
 # T5: an unknown branch name aborts the WHOLE write — the good line does not land either
 printf 'q: a line that should not land\nnot-a-branch: whoops\n' > "$ROOT/fill4"
 out="$("$STORIES" --apply "$ROOT/fill4" 2>&1)"; rc=$?
 assert_eq "T5 exits nonzero" 2 "$rc"
 assert_has "T5 names the offender" "not-a-branch" "$out"
-assert_eq "T5 nothing written" "" "$(git config branch.q.stack-story)"
+assert_eq "T5 nothing written" "" "$(git config branch.q.description)"
 
 # T6: a duplicate branch line is refused rather than last-wins
 printf 'q: one\nq: two\n' > "$ROOT/fill5"
 out="$("$STORIES" --apply "$ROOT/fill5" 2>&1)"; rc=$?
 assert_eq "T6 exits nonzero" 2 "$rc"
 assert_has "T6 says twice" "appears twice" "$out"
-assert_eq "T6 nothing written" "" "$(git config branch.q.stack-story)"
+assert_eq "T6 nothing written" "" "$(git config branch.q.description)"
 
 # T7: a concurrent change is refused, not stomped — and its neighbour still lands.
-# The real flow: render the buffer, somebody else moves a story, THEN the buffer is applied.
-git config branch.q.stack-story "written in the viewer just now"
-git config stack-branch.q.story "written in the viewer just now"
+# The real flow: render the buffer, somebody else moves a line, THEN the buffer is applied.
+git config branch.q.description "written in the viewer just now"
 "$STORIES" --print > "$ROOT/buf7"          # buffer rendered from THIS state
-git config branch.q.stack-story "someone else moved it after the buffer opened"
+git config branch.q.description "someone else moved it after the buffer opened"
 sed -e 's|^q: .*$|q: my editor version|' -e 's|^m: .*$|m: my m version|' "$ROOT/buf7" > "$ROOT/fill7"
 out="$("$STORIES" --apply "$ROOT/fill7" 2>&1)"; rc=$?
 assert_eq "T7 exits 1 on refusal" 1 "$rc"
 assert_has "T7 reports the refusal" "changed elsewhere" "$out"
-assert_eq "T7 q left alone" "someone else moved it after the buffer opened" "$(git config branch.q.stack-story)"
-assert_eq "T7 m still landed" "my m version" "$(git config branch.m.stack-story)"
+assert_eq "T7 q left alone" "someone else moved it after the buffer opened" "$(git config branch.q.description)"
+assert_eq "T7 m still landed" "my m version" "$(git config branch.m.description)"
 
 # T8: a comments-only buffer aborts, an unparseable line aborts
 printf '# everything gone\n' > "$ROOT/fill8"
@@ -130,10 +130,10 @@ ED
 chmod +x "$ROOT/ed"
 out="$(GIT_EDITOR="$ROOT/ed" "$STORIES" p 2>&1)"; rc=$?
 assert_eq "T10 exit 0" 0 "$rc"
-assert_eq "T10 editor save landed" "written through the editor" "$(git config branch.m.stack-story)"
+assert_eq "T10 editor save landed" "written through the editor" "$(git config branch.m.description)"
 out="$(GIT_EDITOR="false" "$STORIES" p 2>&1)"; rc=$?
 assert_eq "T10 editor failure aborts" 2 "$rc"
-assert_eq "T10 nothing changed on abort" "written through the editor" "$(git config branch.m.stack-story)"
+assert_eq "T10 nothing changed on abort" "written through the editor" "$(git config branch.m.description)"
 
 echo
 echo "$PASS passed, $FAIL failed"

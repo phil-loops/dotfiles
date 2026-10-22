@@ -51,7 +51,7 @@ export function StorySheet() {
           >
             <header class="flex flex-none items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] py-[12px] font-mono">
               <span class="text-[13px] text-ink">✎ stories</span>
-              <span class="text-[10.5px] text-ink-faint">each line is that branch's own — durable past its merge</span>
+              <span class="text-[10.5px] text-ink-faint">each line is that branch's description — the one line every view names it by</span>
               <button
                 class="ml-auto cursor-pointer border-0 bg-transparent p-0 text-[11px] text-ink-faint hover:text-ink"
                 title="close (esc)"
