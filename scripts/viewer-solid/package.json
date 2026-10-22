@@ -10,6 +10,7 @@
     "typecheck": "tsgo --noEmit",
     "test": "node --test src/*.test.ts src/v2/*.test.ts",
     "bake": "node bake.mjs",
+    "budgets": "node checks/budgets.mjs",
     "build:static": "VITE_STATIC=1 vite build && node bake.mjs",
     "visual:serve": "node visual/fixture-server.mjs --dist dist --fixtures visual/fixtures --port 7333",
     "visual:shot": "node visual/shot-all.mjs --base http://127.0.0.1:7333 --out /tmp/viewer-shots",
