@@ -28,6 +28,7 @@ from srv import focus   # own line: same reason
 from srv import footprint   # own line: same reason
 from srv import repostate   # own line: same reason
 from srv import procsig   # own line: same reason
+from srv import reqlog   # own line: same reason
 from srv import pregate   # own line: same reason
 from srv import tutor   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
@@ -61,8 +62,7 @@ LOG = os.environ.get("STACK_REVIEW_LOG", "1") not in ("", "0")   # default-on; S
 _log_lock = threading.Lock()
 # Durable sink beside stderr: the servedir log dies with the server (mktemp, reaped on bounce),
 # which is why the 2026-08-19 absorb incident is unattributable — attribution must outlive the
-# process. One rotation generation keeps the cap simple; the .1 file is the history.
-_LOG_MAX = 5 * 1024 * 1024
+# process. Rotation, retention and poll coalescing live in srv/reqlog.py.
 
 
 def _durable_log_path():
@@ -83,14 +83,7 @@ def _log(line):
         msg = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {line}\n"
         sys.stderr.write(msg)
         sys.stderr.flush()
-        if _LOG_FILE:
-            try:
-                if os.path.exists(_LOG_FILE) and os.path.getsize(_LOG_FILE) > _LOG_MAX:
-                    os.replace(_LOG_FILE, _LOG_FILE + ".1")
-                with open(_LOG_FILE, "a") as f:
-                    f.write(msg)
-            except Exception:
-                pass   # a full disk or permissions hiccup must never take a request down
+    reqlog.append(_LOG_FILE, msg)
 
 
 def run(args, timeout=None):
@@ -247,7 +240,9 @@ class H(BaseHTTPRequestHandler):
             req = (getattr(self, "raw_requestline", b"") or b"").decode("latin-1").split()
             if req:
                 ms = (time.perf_counter() - t0) * 1000
-                _log(f"{req[0]} {req[1] if len(req) > 1 else '?'} {self._status} {ms:.0f}ms")
+                line = reqlog.request_line(req[0], req[1] if len(req) > 1 else "?", self._status, ms)
+                if line:
+                    _log(line)
 
     def _send(self, code, body, ctype="application/json"):
         b = body.encode() if isinstance(body, str) else body
