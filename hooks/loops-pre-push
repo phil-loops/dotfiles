@@ -24,4 +24,9 @@ push_ref=$(printf '%s\n' "$refs" | awk '$2 !~ /^0+$/ { print $1; exit }')
 # Block TODOs from reaching the shared repo (forks still push freely).
 PUSH_SHA="$push_sha" PUSH_REF="$push_ref" "$HOME/.dotfiles/scripts/prepush-todo-guard" "$@" || exit 1
 
+# usage telemetry: one `push` event per ref, written once the remote-tracking ref shows whether
+# it landed. Detached + best-effort — it never blocks or fails the push. (The 08-19 slim-down
+# dropped this line with the checks around it, which left every push unrecorded until 10-21.)
+( printf '%s\n' "$refs" | "$HOME/.dotfiles/scripts/stack-usage-event" push "$1" "$2" >/dev/null 2>&1 & )
+
 exit 0
