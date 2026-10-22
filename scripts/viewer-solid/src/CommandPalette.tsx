@@ -18,12 +18,15 @@ import { cachedModel } from "./modelCache";
 
 type Cmd = { label: string; sub?: string; run: () => void };
 
+// module scope so the map overlay can yield the keyboard while the palette sits over it
+const [open, setOpen] = createSignal(false);
+export const paletteOpen = open;
+
 const leaf = (s: string) => (s || "").split("/").pop() ?? "";
 const post = (url: string, body: unknown) =>
   fetch(withRepo(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
 export default function CommandPalette() {
-  const [open, setOpen] = createSignal(false);
   const [q, setQ] = createSignal("");
   const [sel, setSel] = createSignal(0);
   const { location, navigate } = useViewerLocation();

@@ -1,6 +1,7 @@
 import { Show, createSignal, createEffect, on } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
-import { Link, forestRepo, type ViewerLocation } from "./router";
+import { buildPath, forestRepo, type ViewerLocation } from "./router";
+import { openMap } from "./mapState";
 import { leaf, interestPips } from "./shared";
 import { canMutate, withRepo } from "./provider";
 import { DivergedDetailPanel, type DivergedDetail } from "./DivergedDetailPanel";
@@ -117,13 +118,18 @@ export function NodeHeader(props: {
                 </span>
               }
             >
-              <Link
+              <a
                 class="nh-forest-back text-[11px] uppercase tracking-[0.07em] text-ink-faint no-underline transition-[color] duration-[120ms] hover:text-ink-dim"
-                to={{ kind: "forest", name: props.project(), repo: forestRepo(props.location()) }}
-                title="back to the forest map — your current node stays highlighted there"
+                href={buildPath({ kind: "forest", name: props.project(), repo: forestRepo(props.location()) })}
+                title="the forest map (m) — ⌘-click opens the forest page"
+                onClick={(e) => {
+                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                  e.preventDefault();
+                  openMap({ name: props.project(), repo: forestRepo(props.location()) });
+                }}
               >
                 ⊞ {props.project()}
-              </Link>
+              </a>
             </Show>
             <div class="nh-spacer flex-1" />
           </div>

@@ -19,6 +19,7 @@ import { NavRail } from "./NavRail";
 import { MachinePage } from "./MachinePage";
 import { Tutor } from "./Tutor";
 import { trackRecent } from "./recents";
+import { MapOverlay } from "./MapOverlay";
 
 
 // ── router ───────────────────────────────────────────────────────────
@@ -194,6 +195,7 @@ function Layout(props: { children?: JSX.Element }) {
         <div class="app-page min-w-0">{props.children}</div>
       </div>
       <ChatDrawerHost />
+      <MapOverlay />
       <CommandPalette />
       <StorySheet />
       <ServerStatus />
