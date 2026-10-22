@@ -14,7 +14,7 @@ import { cachedProjects, rememberProjects } from "./projectsCache";
 import { WorkTab } from "./WorkTab";
 import { ForestsList } from "./ForestsList";
 import { leaf, mergedAgo } from "./shared";
-import type { Project, PR, ReviewRequest } from "./types";
+import type { Project, PR } from "./types";
 
 // ── home: the ledger summary ─────────────────────────────────────────
 
@@ -47,12 +47,6 @@ export function Home() {
     },
   }));
 
-  const post = (url: string, body: unknown): Promise<{ ok?: boolean; err?: string }> =>
-    fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).then((r) => r.json());
   const { running, parked, restackErr, flash, menu, setMenu, dropping, start, abort, resolve, dropProject, mergedNames, progress } =
     useRestack({
       projectsData: () => projects.data,
@@ -64,15 +58,6 @@ export function Home() {
     queryKey: ["review-requests"],
     queryFn: () => provider.reviewRequests(),
     refetchOnWindowFocus: true,
-  }));
-  const importReview = createMutation(() => ({
-    mutationFn: (number: number) => post("/review-import", { number }),
-    // flip the row to imported in-place; without this the button drops back to
-    // "import" for the frame between the mutation settling and the refetch landing.
-    onSuccess: (_res, number) => {
-      qc.setQueryData<ReviewRequest[]>(["review-requests"], (cur) =>
-        cur?.map((r) => (r.number === number ? { ...r, imported: true } : r)));
-    },
   }));
   // right-click a forest card → set its importance (stack-project.<name>.interest) — what
   // floats the forest up the Home list.
@@ -306,7 +291,6 @@ export function Home() {
           prs={() => prs.data}
           reviewReqs={() => reviewReqs.data}
           tab={tab}
-          importReview={importReview}
           forestOf={forestOf}
           landedRecently={landedRecently}
         />

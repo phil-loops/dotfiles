@@ -1,18 +1,16 @@
 import { createMemo, Show, For } from "solid-js";
 import { Link } from "./router";
 import { ActionBar, type Action } from "./actions";
-import { canMutate } from "./provider";
 import { leaf, mergedAgo } from "./shared";
 import type { PR, Project, ReviewRequest } from "./types";
 
 // The Work tab: what needs you (changes requested) → what's in flight (open, by forest) →
 // what just landed (merged < 1d). Fed the PR/review data plus the shared forestOf/landedRecently
-// derivations (shared with NextQueue) and the review-import mutation.
+// derivations (shared with NextQueue).
 export function WorkTab(props: {
   prs: () => PR[] | undefined;
   reviewReqs: () => ReviewRequest[] | undefined;
   tab: () => string;
-  importReview: { isPending: boolean; variables?: number; mutate: (n: number) => void };
   forestOf: (name: string) => Project | undefined;
   landedRecently: (p: PR) => boolean;
 }) {
@@ -149,7 +147,6 @@ export function WorkTab(props: {
           <div class={HRULE} />
           <For each={props.reviewReqs()}>
             {(r) => {
-              const importing = () => props.importReview.isPending && props.importReview.variables === r.number;
               const body = (
                 <>
                   <span class={PR_NUM}>#{r.number}</span>
@@ -164,16 +161,7 @@ export function WorkTab(props: {
                   ) : (
                     <a class={LINK} href={r.url} target="_blank">{body}</a>
                   )}
-                  {/* import is the primary act here + "on viewer ✓" is at-a-glance status, so both
-                      stay visible (not folded into the hover-recessive work-acts the PR rows use). */}
-                  <Show
-                    when={canMutate && !r.imported}
-                    fallback={<Show when={r.imported}><span class="review-on mr-[14px] flex-none text-[11px] tracking-[0.04em] text-patina">on viewer ✓</span></Show>}
-                  >
-                    <button class="watch-pin review-import my-[6px] mr-[10px] ml-0 h-[30px] flex-none cursor-pointer rounded-[9px] border border-gold-leaf bg-gold-leaf px-[14px] text-[12px] leading-[1.55] text-vellum-night disabled:cursor-default disabled:opacity-40" disabled={importing()} onClick={() => props.importReview.mutate(r.number)}>
-                      {importing() ? "importing…" : "import"}
-                    </button>
-                  </Show>
+                  <Show when={r.imported}><span class="review-on mr-[14px] flex-none text-[11px] tracking-[0.04em] text-patina">on viewer ✓</span></Show>
                 </div>
               );
             }}

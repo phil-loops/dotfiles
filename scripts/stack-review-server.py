@@ -433,12 +433,9 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/myprs":          return picker.myprs(self)
         elif u.path == "/projects":       return picker.projects(self)
         elif u.path == "/project-opened": return picker.project_opened(self)
-        elif u.path == "/standalone":     return picker.standalone_list(self)
         elif u.path == "/branch-url":     return picker.branch_url(self, u)
         elif u.path == "/review-requests": return reviews.requests(self)
-        elif u.path == "/review-remote":   return reviews.remote(self, u)
         elif u.path == "/ext-mtime":       return reviews.ext_mtime(self)
-        elif u.path == "/branches":       return picker.branches(self)
         elif u.path == "/forest-branches": return picker.forest_branches(self)
         elif u.path == "/epics":          return picker.epics(self)
         # Hyphenated, not /wiki/… — /wiki/<slug> is a client route served index.html above.
@@ -499,20 +496,12 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/bless":
             return review.bless(self, raw)
-        if self.path == "/standalone":   # pin/unpin a branch in the opt-in watch list
-            return picker.pin(self, raw)
         if self.path == "/next":   # read-only: next mergeable branch(es) in this branch's forest
             return picker.whats_next(self, raw)
         if self.path == "/trunk":   # mark/unmark a branch as its forest's trunk anchor (frozen base)
             return picker.set_trunk(self, raw)
-        if self.path == "/promote":   # graduate a watched branch into its own forest project
-            return picker.promote(self, raw)
-        if self.path == "/review-import":   # fetch a GitHub review-request PR → local node
-            return reviews.import_pr(self, raw)
         if self.path == "/open-url":   # Chrome ext (URL-only): parse a raw GitHub URL → nvim or viewer route
             return reviews.open_url(self, raw)
-        if self.path == "/review-pull":   # re-fetch a force-pushed PR head; blessings survive
-            return reviews.pull(self, raw)
         if self.path == "/pr-forest":   # Chrome ext: forest membership + child seating for a PR
             return reviews.pr_forest(self, raw)
         if self.path == "/pr-reseat-children":   # Chrome ext: rebase orphaned children onto an approved PR branch

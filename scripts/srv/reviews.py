@@ -2,10 +2,9 @@
 #
 #   GET  /review-requests   open PRs awaiting your review (gh search), each flagged
 #                           `imported` if its review/pr-<N> branch already exists
-#   POST /review-import      fetch a PR head → local node off its base, pin it
 #
-# An imported PR is an ordinary standalone watch node — base...head diffs,
-# open-in-nvim, chat, bless, even checkout — because it's a real local branch.
+# The Chrome extension's /open-url imports a PR head (stack-review-import) as a review/pr-<N>
+# branch — an ordinary local branch, so base...head diffs, open-in-nvim and bless all work.
 import hashlib
 import json
 import os
@@ -97,20 +96,6 @@ def requests(req):
     with _cache_lock:
         _cache[repo_path] = {"at": time.time(), "json": payload}
     req._send(200, payload)
-
-
-def import_pr(req, raw):
-    d = json.loads(raw or "{}")
-    num = str(d.get("number", "")).strip().lstrip("#")
-    if not num.isdigit():
-        req._send(400, json.dumps({"ok": False, "err": "no pr number"}))
-        return
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num])
-    if r.returncode != 0:
-        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "import failed").strip()[:500]}))
-        return
-    _cache.pop(ctx.repo_cwd(), None)   # force the next /review-requests to re-flag this PR as imported
-    req._send(200, json.dumps({"ok": True, "branch": r.stdout.strip()}))
 
 
 _WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
@@ -409,54 +394,6 @@ def ext_mtime(req):   # GET /ext-mtime — newest source mtime (ms) so the ext c
     except OSError:
         pass
     req._send(200, json.dumps({"mtime": int(latest * 1000)}))
-
-
-# Cheap "did they push?" check for the node-load hint: ls-remote the PR head and compare to
-# the local branch tip. Network, so cache per branch briefly — a node can re-render often.
-_remote_cache = {}   # branch -> (at, payload)
-_REMOTE_TTL = 20
-
-
-def remote(req, u):
-    branch = (parse_qs(u.query).get("branch", [""])[0]).strip()
-    m = re.match(r"^review/pr-(\d+)$", branch)
-    if not m:
-        req._send(400, json.dumps({"ok": False, "err": "not a review branch"}))
-        return
-    now = time.time()
-    hit = _remote_cache.get(branch)
-    if hit and now - hit[0] < _REMOTE_TTL:
-        req._send(200, hit[1])
-        return
-    local = ctx.run(["git", "rev-parse", branch]).stdout.strip()
-    r = ctx.run(["git", "ls-remote", "origin", f"pull/{m.group(1)}/head"])
-    remote_sha = r.stdout.split()[0] if r.returncode == 0 and r.stdout.split() else ""
-    payload = json.dumps({
-        "available": bool(remote_sha) and remote_sha != local,
-        "remote": remote_sha[:9], "local": local[:9],
-    })
-    _remote_cache[branch] = (now, payload)
-    req._send(200, payload)
-
-
-# Re-fetch a force-pushed PR head into the local review branch. The bless ledger is keyed
-# by branch+file → blob/patch-id (NOT the tip SHA), so we leave it untouched: files whose
-# content is unchanged stay blessed, and genuinely-changed files fall to "stale" on their own.
-def pull(req, raw):
-    d = json.loads(raw or "{}")
-    branch = (d.get("branch") or "").strip()
-    m = re.match(r"^review/pr-(\d+)$", branch)
-    if not m:
-        req._send(400, json.dumps({"ok": False, "err": "not a review branch"}))
-        return
-    before = ctx.run(["git", "rev-parse", branch]).stdout.strip()
-    r = ctx.run(["git", "fetch", "--force", "origin", f"pull/{m.group(1)}/head:{branch}"])
-    if r.returncode != 0:
-        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "fetch failed").strip()[:500]}))
-        return
-    after = ctx.run(["git", "rev-parse", branch]).stdout.strip()
-    _remote_cache.pop(branch, None)   # local now matches remote → next hint check recomputes
-    req._send(200, json.dumps({"ok": True, "before": before[:9], "after": after[:9], "changed": before != after}))
 
 
 # ── PR → forest: which forest is this PR part of, and are its children still seated on it? ──

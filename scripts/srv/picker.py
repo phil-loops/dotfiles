@@ -1,12 +1,9 @@
-# srv/picker.py — the landing/picker: project cards, PR maps, the standalone watch
-# list, branch typeahead, recency ordering, and the open-in-nvim action.
+# srv/picker.py — the landing/picker: project cards, PR maps, recency ordering, and the
+# open-in-nvim action.
 #   GET  /projects        project cards w/ ready/candidate PRs + behind/overlap freshness
 #   GET  /prs             branch → open-PR map (stack-prs, disk-cached)
 #   GET  /myprs           my open PRs annotated with .project (homepage list)
 #   GET  /project-opened  project → last file-open epoch (orders the no-PR cards)
-#   GET  /standalone      the pinned watch list
-#   GET  /branches        typeahead candidates for pinning
-#   POST /standalone      pin/unpin a branch
 #   POST /open            open a file on a branch in the warm review-nvim (+ recency stamp)
 import os
 import re
@@ -790,40 +787,6 @@ def project_opened(req):
     req._send(200, json.dumps(_opened_load()))
 
 
-_standalone_cache = {}   # repo -> (model_sig, json) — stack-forest --standalone is ~1s of git fan-out
-
-
-def standalone_list(req):
-    repo = ctx.repo_cwd()
-    sig = ctx.model_sig()
-    hit = _standalone_cache.get(repo)
-    if hit and hit[0] == sig:
-        req._send(200, hit[1])
-        return
-    raw = ctx.run([os.path.join(ctx.SCRIPTS, "stack-forest"), "--standalone"]).stdout
-    try:
-        items = json.loads(raw or "[]")
-    except json.JSONDecodeError:
-        req._send(200, raw or "[]")
-        return
-    kept = []
-    for it in items:
-        b = it.get("branch", "")
-        empty = it.get("commits", 0) == 0 and it.get("add", 0) == 0 and it.get("del", 0) == 0
-        # a watched review PR with nothing left to review (empty diff vs main) has merged — auto-
-        # drop it so the watch list self-cleans. Scoped to review/pr-* so a freshly-pinned branch
-        # (also momentarily 0/0/0) isn't yanked out from under you.
-        if b.startswith("review/pr-") and empty:
-            ctx.run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", b])
-            continue
-        kept.append(it)
-    payload = json.dumps(kept)
-    # an unpin above touched config → sig already moved; storing the pre-unpin sig just
-    # means one extra rebuild next call, then it settles.
-    _standalone_cache[repo] = (sig, payload)
-    req._send(200, payload)
-
-
 def _repo_web_url(remote):   # git@github.com:o/r.git | https://github.com/o/r.git → https web url
     raw = ctx.run(["git", "remote", "get-url", remote]).stdout.strip()
     m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", raw) if raw else None
@@ -850,15 +813,6 @@ def branch_url(req, u):   # GET /branch-url?branch= — the branch's open-PR url
     req._send(200, json.dumps({"url": url}))
 
 
-def branches(req):
-    # typeahead for pinning: all local heads, most-recent-first, minus main + the pinned.
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    pinned = set(ctx.run(["git", "config", "--get-all", "stack.standalone"]).stdout.splitlines())
-    heads = ctx.run(["git", "for-each-ref", "--sort=-committerdate", "refs/heads",
-                     "--format=%(refname:short)"]).stdout.splitlines()
-    req._send(200, json.dumps([b for b in heads if b and b != main and b not in pinned]))
-
-
 def forest_branches(req):
     # Every (branch, project, repo) the forest config names across ALL registry repos — the
     # Cmd+K global jump index. Pure config read per repo (no model rebuild, no fan-out), so it's
@@ -882,47 +836,6 @@ def forest_branches(req):
 
 
 # --- POST handlers ---
-
-def pin(req, raw):   # POST /standalone — pin/unpin a branch in the watch list
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "").strip()
-    if not branch:
-        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-        return
-    if d.get("op") == "remove":
-        # --fixed-value (git ≥2.30) treats the value as literal, not a regex — MUST
-        # precede --unset-all. Handles branch names with regex-special chars.
-        ctx.run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", branch])
-        req._send(200, json.dumps({"ok": True}))
-        return
-    if ctx.run(["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + branch]).returncode != 0:
-        req._send(404, json.dumps({"ok": False, "err": "no such local branch"}))
-        return
-    if branch not in ctx.run(["git", "config", "--get-all", "stack.standalone"]).stdout.splitlines():
-        ctx.run(["git", "config", "--add", "stack.standalone", branch])
-    req._send(200, json.dumps({"ok": True}))
-
-
-def promote(req, raw):   # POST /promote — graduate a watched branch into its own forest project
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "").strip()
-    if not branch:
-        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-        return
-    if ctx.run(["git", "rev-parse", "--verify", "--quiet", "refs/heads/" + branch]).returncode != 0:
-        req._send(404, json.dumps({"ok": False, "err": "no such local branch"}))
-        return
-    project = branch.rsplit("/", 1)[-1]   # the branch leaf becomes the forest tag
-    main = ctx.run(["git", "config", "stack.main-branch"]).stdout.strip() or "main"
-    stackcfg.set_key(branch, "parent", main)   # forks off main → a root
-    stackcfg.set_key(branch, "project", project)
-    members = ctx.run(["git", "config", "--get-all", f"stack-project.{project}.branch"]).stdout.splitlines()
-    if branch not in members:
-        ctx.run(["git", "config", "--add", f"stack-project.{project}.branch", branch])
-    # it's a forest now, not a loose watched branch — drop it from the watch list.
-    ctx.run(["git", "config", "--fixed-value", "--unset-all", "stack.standalone", branch])
-    req._send(200, json.dumps({"ok": True, "project": project}))
-
 
 def open_on_branch(branch, path, pos=None):   # open <path> on <branch> in the warm review-nvim
     # pos is an opaque locator forwarded verbatim — stack-open owns the grammar ("<line>" or "<line>:<col>").
