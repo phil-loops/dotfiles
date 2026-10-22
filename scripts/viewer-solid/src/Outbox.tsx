@@ -12,7 +12,7 @@ import { LaunchSheet } from "./LaunchSheet";
 import { PushWindow } from "./PushWindow";
 import {
   LANES, laneItems, itemKey, summaryLabel, clockNow, isDue, isHeld, nextMorning, fmtDayPT, pushWindow,
-  type Item, type Lane, type OutboxForest, type OutboxNode,
+  type Item, type Lane, type OutboxForest, type OutboxNode, type Waiting,
 } from "./outboxModel";
 
 const EYEBROW = "eyebrow text-[10px] font-medium tracking-[0.22em] uppercase text-ink-faint";
@@ -62,12 +62,18 @@ function NodeRow(props: {
           <span>{n().commits} commit{n().commits === 1 ? "" : "s"}</span>
           <Show when={!n().pr || n().ahead}><GatesChip n={n()} /></Show>
           <PrChip n={n()} />
+          <Show when={n().status === "review" && n().pr?.createdAt}>
+            <span title={n().pr?.createdAt}>opened {fmtAge(n().pr?.createdAt)} ago</span>
+          </Show>
           <Show when={held()}>
             <span class={due() ? "text-gold-leaf" : "text-ink-faint"} title={n().holdUntil}>
               {due() ? "☀ due now" : `☾ held until ${fmtDayPT(Date.parse(n().holdUntil))}`}
             </span>
           </Show>
         </div>
+        <Show when={n().status === "approved" && n().waitingOn?.length}>
+          <ApprovedWait n={n()} />
+        </Show>
       </div>
       <div class="flex items-center gap-[6px] pt-[1px]" onClick={(e) => e.stopPropagation()}>
         <Show when={canMutate && !n().pr}>
@@ -97,6 +103,54 @@ function NodeRow(props: {
     </div>
   );
 }
+
+const fmtAge = (iso?: string): string => {
+  const t = iso ? Date.parse(iso) : NaN;
+  if (!Number.isFinite(t)) return "?";
+  const h = Math.max(0, (Date.now() - t) / 3_600_000);
+  return h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
+};
+
+const WAIT_TONE: Record<Waiting["kind"], string> = {
+  merge: "border-[#3c4a30] text-add",
+  parent: "border-gold-deep text-gold-leaf",
+  ci: "border-[#5a3424] text-del",
+  conflicts: "border-[#5a3424] text-del",
+  behind: "border-gold-deep text-gold-leaf",
+  checks: "border-rule text-ink-dim",
+  draft: "border-rule text-ink-dim",
+};
+
+// An approved PR's tail: how long it's sat approved, and each thing it waits on as a link to the
+// one human action that clears it — the parent's PR, the failing checks, the conflict. The first
+// is the next move; nothing here merges.
+function ApprovedWait(props: { n: OutboxNode }) {
+  const pr = () => props.n.pr!;
+  return (
+    <div class="mt-[6px] flex flex-wrap items-center gap-[6px] font-mono text-[11px]">
+      <span class="text-ink-faint" title={pr().approvedAt || ""}>
+        approved {props.n.waitingH != null ? `${Math.round(props.n.waitingH)}h` : "?"} ago
+        {pr().approvals ? ` · ${pr().approvals} approval${pr().approvals === 1 ? "" : "s"}` : ""} · waiting on
+      </span>
+      <For each={props.n.waitingOn}>
+        {(w, i) => (
+          <a
+            class={`${CHIP_W} no-underline ${WAIT_TONE[w.kind]} ${i() === 0 ? "shadow-[0_0_0_1px_rgba(230,182,78,0.15)]" : "opacity-80"} hover:opacity-100`}
+            href={w.url || undefined}
+            target="_blank"
+            rel="noopener"
+            title={i() === 0 ? "the next human action" : ""}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {i() === 0 ? "→ " : ""}{w.label}{w.url ? " ↗" : ""}
+          </a>
+        )}
+      </For>
+    </div>
+  );
+}
+
+const CHIP_W = "inline-flex items-center rounded-[6px] border px-[7px] py-px leading-[1.6] whitespace-nowrap";
 
 function LaunchCard(props: { item: Item & { kind: "forest" }; selected: boolean; onSelect: () => void; onLaunch: () => void; onHold: () => void }) {
   const f = () => props.item.forest;
@@ -170,6 +224,11 @@ export function Outbox() {
       void actions.hold(it.forest.repo, { branch: it.node.branch }, isHeld(it.node) ? "" : morningIso());
     }
   };
+  // bet 3's own measure: approved-but-unmerged hours, summed — the p90 tail is 78h
+  const approvedAsk = createMemo(() => {
+    const hrs = laneOf("approved").reduce((a, it) => a + (it.kind === "node" ? it.node.waitingH ?? 0 : 0), 0);
+    return `${Math.round(hrs)}h approved-but-unmerged between them; the next human action for each`;
+  });
   const firstLane = createMemo(() => {
     const held = laneOf("first");
     const anyDue = held.some((it) => it.kind === "node" ? isDue(it.node, now()) : it.forest.nodes.some((n) => isDue(n, now())));
@@ -297,7 +356,7 @@ export function Outbox() {
                 <section class={`ob-lane mb-[22px] ob-lane-${l.id}`}>
                   <h2 class={`${EYEBROW} mt-[26px] mb-[8px] ${l.id === "first" && due() ? "text-gold-leaf" : ""}`}>
                     {l.id === "first" ? firstLane().title : l.title}
-                    <span class={ASK}>— {l.id === "first" ? firstLane().ask : l.ask}</span>
+                    <span class={ASK}>— {l.id === "first" ? firstLane().ask : l.id === "approved" ? approvedAsk() : l.ask}</span>
                   </h2>
                   <div class="mb-[6px] h-px bg-rule" />
                   <div class="flex flex-col gap-[4px]">{laneBody(l.id)}</div>
