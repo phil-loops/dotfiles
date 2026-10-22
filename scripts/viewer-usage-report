@@ -1,0 +1,282 @@
+#!/usr/bin/env python3
+"""viewer-usage-report — the forest viewer's headline usage metrics, split by who acted.
+
+  viewer-usage-report                 the current repo's logs, all time
+  viewer-usage-report --days 30       only the last 30 days
+  viewer-usage-report --repo ~/coding/loops
+
+Read-only. Reads both logs in the repo's git-common-dir:
+  stack-usage.jsonl   one JSON event per line (the viewer's /track + the git hooks)
+  stack-review.log    the server's request log (+ .1 legacy, .N.gz segments)
+Re-derives the 2026-10-21 redesign audit's numbers (~/sweeps/viewer-redesign-2026-10-21/)
+so the next read is one command.
+
+── stack-usage.jsonl event schema ───────────────────────────────────────────────────────────
+Every event: type, ts (unix s, stamped by the writer).
+  Since 2026-10-21 server-written events also carry actor (browser|headless|claude|extension|
+  cli|helix|unknown — from the request, never the body) and, for the viewer, pl (page-load id:
+  one per tab load, separates two tabs and reloads). Events before that carry neither.
+
+  nav       kind (home|forest|wiki|machine|tutor|…), project?, node?, tab?,
+            dwell (ms on the page being left; since 08-19, absent on a page load)      06-24
+  ui        control (aria-label/title/text — copy drifts; since 06-24),
+            track (stable data-track id, e.g. node.push, map.node; 10-21),
+            el + text (an unlabelled click handler's shape, e.g. g.fm-node, and its text; 10-21)
+  key       key (e.g. "m", "cmd+k"; modifier-only presses filtered since 08-19)             06-24
+  action    url (POST path), on (target branch/project; since 07-22), status, ms
+            (latency; ts is COMPLETION time), ok + err (refusal class, incl. HTTP-200
+            {ok:false}; since 10-21 — before that a refusal read as status 200)             06-24
+  cmd       q, label, sub (sub since 06-26); cmd_miss: q                               06-25/08-23
+  commit    branch, project, sha (since 07-22), ahead, subjectLen, bodyLines,
+            session (claude session prefix or null; 07-22), pid (patch-id; 10-21),
+            replay (rebase|cherry-pick|patch-id, + of=first sha; 10-21 — before that replays
+            were indistinguishable, and a backgrounded hook could log a later HEAD),
+            actor (claude|cli|browser|server…; 10-21), via ("viewer" when a viewer request ran
+            it; 10-21), client (gh-desktop|helix; 10-21)
+  push      06-24 → 08-19 (one per push, HEAD-based: branch, project, ahead, subjects, session),
+            DEAD 08-19 → 10-21, then one per pushed ref: branch, dst, remote, sha, new, force,
+            delete, commits, ahead, subjects, landed + landMs (watched via the tracking ref; the
+            line is written when known, so file order ≠ ts order), actor, via, client, session
+
+── stack-review.log line ─────────────────────────────────────────────────────────────────────
+  YYYY-MM-DD HH:MM:SS METHOD PATH STATUS MSms [actor=…] [sid=…] [refused=<class>] [n=<hits>]
+  actor/refused/n since 10-21; n = this hit plus the identical polls folded since the last line
+  for that path+actor (/ext-mtime, /gates-progress, /sig, /heartbeat, /processes, /pulse).
+  Before 10-21: 5 MB single rotation (~7 days, 83% /ext-mtime); after: 4 MB gzip segments, 90 days.
+"""
+import collections
+import datetime as dt
+import gzip
+import json
+import os
+import re
+import subprocess
+import sys
+
+ACTOR_CUTOVER = dt.datetime(2026, 10, 21).timestamp()
+
+
+def git_common_dir(repo):
+    r = subprocess.run(["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                       capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
+def load_usage(path, since):
+    out = []
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(e, dict) and e.get("ts", 0) >= since:
+                    out.append(e)
+    except FileNotFoundError:
+        pass
+    return sorted(out, key=lambda e: e.get("ts", 0))
+
+
+_REQ = re.compile(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) (GET|POST|HEAD|OPTIONS|PUT|DELETE) (\S+) (\S+) (\d+)ms(.*)$")
+
+
+def load_requests(path, since):
+    base = os.path.basename(path)
+    d = os.path.dirname(path)
+    segs = []
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    for n in names:
+        m = re.fullmatch(re.escape(base) + r"\.(\d+)\.gz", n)
+        if m:
+            segs.append((-int(m.group(1)), os.path.join(d, n)))
+    files = [p for _, p in sorted(segs)] + [p for p in (path + ".1", path) if os.path.exists(p)]
+    out = []
+    for p in files:
+        opener = gzip.open if p.endswith(".gz") else open
+        try:
+            with opener(p, "rt", errors="replace") as f:
+                for line in f:
+                    m = _REQ.match(line.rstrip("\n"))
+                    if not m:
+                        continue
+                    ts = dt.datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S").timestamp()
+                    if ts < since:
+                        continue
+                    kv = dict(t.split("=", 1) for t in m.group(6).split() if "=" in t)
+                    out.append({"ts": ts, "method": m.group(2), "path": m.group(3).split("?")[0],
+                                "status": m.group(4), "ms": int(m.group(5)), "actor": kv.get("actor"),
+                                "refused": kv.get("refused"), "n": int(kv.get("n", 1))})
+        except OSError:
+            continue
+    return out
+
+
+def day(ts):
+    return dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+
+
+def week(ts):
+    y, w, _ = dt.datetime.fromtimestamp(ts).isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def pct(a, b):
+    return f"{100 * a / b:.0f}%" if b else "—"
+
+
+def h(title):
+    print(f"\n── {title} " + "─" * max(0, 76 - len(title)))
+
+
+def row(n, label, indent="  "):
+    print(f"{indent}{n:>7}  {label}")
+
+
+def actor_of(e):
+    if e.get("actor"):
+        return e["actor"]
+    if e.get("type") in ("commit", "push"):
+        return "claude" if e.get("session") else "(no session, pre-10-21)"
+    return "(pre-10-21)"
+
+
+def is_map_click(e):
+    return e.get("type") == "ui" and (e.get("track") == "map.node" or e.get("el") == "g.fm-node")
+
+
+def main():
+    args = sys.argv[1:]
+    repo = os.getcwd()
+    days = None
+    while args:
+        a = args.pop(0)
+        if a == "--repo":
+            repo = os.path.expanduser(args.pop(0))
+        elif a == "--days":
+            days = int(args.pop(0))
+        elif a in ("-h", "--help"):
+            print(__doc__)
+            return
+        else:
+            sys.exit(f"viewer-usage-report: unknown arg {a}")
+    gd = git_common_dir(repo)
+    if not gd:
+        sys.exit(f"viewer-usage-report: {repo} is not a git repo")
+    since = (dt.datetime.now() - dt.timedelta(days=days)).timestamp() if days else 0
+    E = load_usage(os.path.join(gd, "stack-usage.jsonl"), since)
+    R = load_requests(os.path.join(gd, "stack-review.log"), since)
+    if not E and not R:
+        print(f"no usage or request log under {gd}")
+        return
+
+    viewer = [e for e in E if e.get("type") in ("nav", "ui", "key", "action", "cmd", "cmd_miss")]
+    h("span")
+    if E:
+        active = {day(e["ts"]) for e in viewer}
+        print(f"  usage log  {len(E)} events, {day(E[0]['ts'])} → {day(E[-1]['ts'])}, {len(active)} days with viewer events")
+    if R:
+        print(f"  request log {sum(r['n'] for r in R)} requests in {len(R)} lines, {day(R[0]['ts'])} → {day(R[-1]['ts'])}")
+
+    h("events by type × actor")
+    by = collections.Counter((e.get("type"), actor_of(e)) for e in E)
+    for (t, a), n in sorted(by.items(), key=lambda kv: (-kv[1])):
+        row(n, f"{t:<9} {a}")
+
+    h("weekly (viewer events · pushes · authored commits · replayed commits)")
+    wk = collections.defaultdict(lambda: [0, 0, 0, 0])
+    for e in E:
+        w = wk[week(e["ts"])]
+        t = e.get("type")
+        if t in ("nav", "ui", "key", "action", "cmd", "cmd_miss"):
+            w[0] += 1
+        elif t == "push" and not e.get("delete"):
+            w[1] += 1
+        elif t == "commit":
+            w[3 if e.get("replay") else 2] += 1
+    for w in sorted(wk)[-12:]:
+        v, p, c, r = wk[w]
+        print(f"  {w}  {v:>6}  {p:>4}  {c:>5}  {r:>5}")
+
+    A = [e for e in E if e.get("type") == "action"]
+    h("the core loop: message save → push")
+    saves = [e for e in A if e.get("url") == "/prep-message" and e.get("ok", True)]
+    pushes = [e for e in A if e.get("url") == "/push-origin" and e.get("ok", e.get("status") == 200)]
+    after = sum(1 for p in pushes if any(s.get("on") == p.get("on") and 0 <= p["ts"] - s["ts"] <= 1800 for s in saves))
+    print(f"  {len(pushes)} viewer pushes; {after} ({pct(after, len(pushes))}) had a same-branch message save in the prior 30 min")
+    hook = [e for e in E if e.get("type") == "push" and not e.get("delete") and "landed" in e]
+    if hook:
+        print("  every push (git hook, since 10-21), by actor/client · landed:")
+        for (a, c, l), n in collections.Counter(
+                (e.get("actor"), e.get("client") or e.get("via") or "terminal", e.get("landed")) for e in hook).most_common():
+            row(n, f"{a:<8} via {c:<10} landed={l}", "    ")
+
+    h("navigation")
+    nav = [e for e in E if e.get("type") == "nav"]
+    keys = collections.Counter(e.get("key") for e in E if e.get("type") == "key")
+    print(f"  {len(nav)} navs · `m` pressed {keys.get('m', 0)}× · map-node clicks logged {sum(1 for e in E if is_map_click(e))}")
+    V = sorted(viewer, key=lambda e: e["ts"])
+    tot = silent = 0
+    for i, e in enumerate(V):
+        if e.get("type") != "nav" or not e.get("node"):
+            continue
+        prev = next((x for x in reversed(V[max(0, i - 8):i]) if x.get("type") == "nav"), None)
+        if prev and prev.get("kind") == "forest" and not prev.get("node") and prev.get("project") == e.get("project"):
+            tot += 1
+            if not any(x.get("type") == "ui" and prev["ts"] <= x["ts"] <= e["ts"] for x in V[max(0, i - 8):i]):
+                silent += 1
+    print(f"  forest → node transitions: {tot}; with no click logged: {silent} ({pct(silent, tot)}) — ~0% once map clicks are tracked")
+    dwell = sorted(e["dwell"] for e in nav if isinstance(e.get("dwell"), (int, float)))
+    if dwell:
+        print(f"  dwell p50 {dwell[len(dwell) // 2] / 1000:.0f}s · p90 {dwell[int(len(dwell) * .9)] / 1000:.0f}s")
+
+    h("top controls (stable id when present, else label)")
+    ui = collections.Counter(e.get("track") or (e.get("control") or "").split("\n")[0][:60] for e in E if e.get("type") == "ui")
+    for k, n in ui.most_common(15):
+        row(n, k)
+
+    h("actions: count · refused/failed · top refusal")
+    per = collections.defaultdict(list)
+    for e in A:
+        per[e.get("url")].append(e)
+    for url, es in sorted(per.items(), key=lambda kv: -len(kv[1]))[:20]:
+        bad = [e for e in es if e.get("ok") is False or (e.get("ok") is None and (e.get("status") or 0) >= 400)]
+        errs = collections.Counter(e.get("err") for e in bad if e.get("err"))
+        top = errs.most_common(1)[0][0] if errs else ""
+        print(f"  {len(es):>6}  {pct(len(bad), len(es)):>4} refused  {url:<26} {top}")
+
+    h("commits: authored vs replayed")
+    C = [e for e in E if e.get("type") == "commit"]
+    rep = collections.Counter(e.get("replay") or "authored" for e in C)
+    for k, n in rep.most_common():
+        row(n, k)
+    dups = sum(n - 1 for n in collections.Counter(e.get("sha") for e in C if e.get("sha")).values() if n > 1)
+    print(f"  duplicate-sha events: {dups}")
+    au = collections.Counter(actor_of(e) for e in C if not e.get("replay"))
+    print("  authored commits by actor: " + ", ".join(f"{a} {n}" for a, n in au.most_common()))
+
+    if R:
+        h("request log: requests by actor (n-weighted)")
+        ra = collections.Counter()
+        for r in R:
+            ra[r["actor"] or "(pre-10-21)"] += r["n"]
+        for a, n in ra.most_common():
+            row(n, a)
+        h("request log: POSTs by route × actor (non-browser POSTs never reach the usage log)")
+        pa = collections.Counter((r["path"], r["actor"] or "?") for r in R if r["method"] == "POST" and r["path"] != "/track")
+        for (p, a), n in pa.most_common(15):
+            row(n, f"{p:<26} {a}")
+        rf = collections.Counter((r["path"], r["refused"]) for r in R if r["refused"])
+        if rf:
+            h("request log: refusals")
+            for (p, c), n in rf.most_common(10):
+                row(n, f"{p:<26} {c}")
+        polls = sum(r["n"] for r in R if r["n"] > 1 or r["path"] in ("/ext-mtime", "/gates-progress"))
+        print(f"\n  polling share of requests: {pct(polls, sum(r['n'] for r in R))}")
+
+
+if __name__ == "__main__":
+    main()
