@@ -1,7 +1,6 @@
 import { onCleanup } from "solid-js";
 import type { ViewerLocation } from "./router";
 import { forestRepo } from "./router";
-import { chatTarget } from "./chatDrawer";
 import { mapOpen, openMap } from "./mapState";
 import { storySheetOpen } from "./StorySheet";
 
@@ -49,9 +48,9 @@ export function useNodeKeyboard(deps: {
     else if (e.key === "U" && deps.activeFile() && deps.base() === "") { e.preventDefault(); deps.onUnbless(deps.activeFile()); }
     else if (e.key === "?") { e.preventDefault(); deps.setShowHelp((v) => !v); }
     else if (e.key === "Escape") {
-      // up a level: help → close it; else (when the chat drawer isn't grabbing Esc) → the forest map
+      // up a level: help → close it; else → the forest map
       if (deps.showHelp()) { deps.setShowHelpTo(false); }
-      else if (!chatTarget()) { const p = deps.project(); if (p) { openMap({ name: p, repo: forestRepo(deps.location()) }); } }
+      else { const p = deps.project(); if (p) { openMap({ name: p, repo: forestRepo(deps.location()) }); } }
     }
   };
   window.addEventListener("keydown", onKey);

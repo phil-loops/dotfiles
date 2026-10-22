@@ -13,7 +13,6 @@ import { useNodeKeyboard } from "./useNodeKeyboard";
 import { NodeHeader } from "./NodeHeader";
 import { useScrollSpy } from "./useScrollSpy";
 import { useOpenInNvim } from "./useOpenInNvim";
-import { chatToTmux } from "./chatDrawer";
 import { useFileCycle } from "./useFileCycle";
 import type { FileDiff } from "./types";
 

@@ -27,7 +27,7 @@ const API = new Set([
   "/check-origin", "/purpose", "/heartbeat", "/previews", "/preview-log", "/processes",
   "/commit-diff", "/diverged-detail", "/forest-health", "/forest-branches", "/forest-purposes",
   "/gates-progress", "/plan-steps", "/plan-section", "/plan-preview", "/prep-route", "/prep-push",
-  "/preview-wait", "/push-preview", "/chat-jobs", "/claude-sessions", "/tmux-targets",
+  "/preview-wait", "/push-preview",
 ]);
 const MIME = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".json": "application/json",

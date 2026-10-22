@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # resolve the srv/ package regardless of cwd
-from srv import ctx as srvctx, restack, sync, checkout, picker, review, assist, chat, integrate, reviews, push, usage, rebase, processes, preview
+from srv import ctx as srvctx, restack, sync, checkout, picker, review, chat, integrate, reviews, push, usage, rebase, processes, preview
 
 ROOT, SCRIPTS, CWD = sys.argv[1], sys.argv[2], sys.argv[3]
 from srv import stage   # own line: the big srv import above is contested across sessions
@@ -460,9 +460,6 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/file":           return review.file(self, u)
         elif u.path == "/commits":        return review.commits(self, u)
         elif u.path == "/commit-diff":    return review.commit_diff(self, u)
-        elif u.path == "/tmux-targets":   return chat.tmux_targets(self)
-        elif u.path == "/claude-sessions": return assist.claude_sessions(self)   # live sessions for the ✦ picker
-        elif u.path == "/chat-jobs":      return chat.jobs(self)   # live-chat presence for Home
         elif u.path == "/processes":      return processes.list_all(self)   # unified background-process monitor
         elif u.path == "/footprint":      return footprint.get(self, u)      # machine / repo sprawl / this server's own footprint
         elif u.path == "/previews":       return preview.previews(self)   # health-probed dev servers + shared stack
@@ -645,10 +642,6 @@ class H(BaseHTTPRequestHandler):
             return
         if self.path == "/restack-all":      # restack several projects back-to-back
             return restack.restack_all(self, raw)
-        if self.path == "/claude":           # select diff lines → start a fresh claude on them
-            return assist.start(self, raw)
-        if self.path == "/claude-stream":    # chat-drawer edit action → headless claude, streamed (SSE)
-            return assist.stream(self, raw)
         if self.path == "/chat":             # start OR reconnect a chat turn (server-side job) → SSE replay+live
             return chat.start(self, raw)
         if self.path == "/tutor":            # a Socratic turn → headless read-only claude, streamed (SSE)
@@ -659,14 +652,8 @@ class H(BaseHTTPRequestHandler):
             return tutor.learning_evidence(self, raw)
         if self.path == "/learning-question":   # the learner's own questions, attached to concepts
             return tutor.learning_question(self, raw)
-        if self.path == "/chat-stop":        # ■ stop: kill this turn's headless claude for real
-            return chat.stop(self, raw)
         if self.path == "/chat-popout":      # pop a chat out → resume its session in an interactive tmux claude
             return chat.popout(self, raw)
-        if self.path == "/chat-tmux":        # ✦ buttons: seeded chat straight into tmux (join + even-horizontal)
-            return assist.chat_tmux(self, raw)
-        if self.path == "/chat-attach":      # save a dropped/pasted image → temp file claude can Read
-            return chat.attach(self, raw)
         if self.path == "/rebase-stream":    # tail the ejected forward-rebase (headless claude) → SSE replay+live
             return rebase.stream(self, raw)
         if self.path == "/rebase-stop":      # ■ stop: kill the branch's ejected rebase job for real
