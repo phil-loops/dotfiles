@@ -87,9 +87,15 @@ install_followup_hook(){   # idempotently install the detached-HEAD → branch-f
 #!/bin/sh
 # usage telemetry: log this commit's shape (branch/project/ahead/subject) before the
 # scratch-worktree handling below early-exits on an attached HEAD. Detached + backgrounded
-# so it adds zero latency and can never fail the commit. Lives in this canonical hook (not a
-# hand-edit) so install_followup_hook's rewrite can't clobber it.
-( "$HOME/.dotfiles/scripts/stack-usage-event" commit >/dev/null 2>&1 & )
+# so it can never fail the commit. Lives in this canonical hook (not a hand-edit) so
+# install_followup_hook's rewrite can't clobber it. The sha, branch and replay state are read
+# HERE, synchronously: by the time the backgrounded writer runs, a rebase has moved HEAD on.
+ugd=$(git rev-parse --git-dir)
+ubranch=$(git symbolic-ref -q HEAD || cat "$ugd/rebase-merge/head-name" "$ugd/rebase-apply/head-name" 2>/dev/null | head -1)
+ureplay=""
+if [ -d "$ugd/rebase-merge" ] || [ -d "$ugd/rebase-apply" ]; then ureplay=rebase
+elif [ -f "$ugd/CHERRY_PICK_HEAD" ]; then ureplay=cherry-pick; fi
+( STACK_REPLAY="$ureplay" "$HOME/.dotfiles/scripts/stack-usage-event" commit "$(git rev-parse HEAD)" "$ubranch" >/dev/null 2>&1 & )
 
 # stack-open: advance a detached scratch review worktree's branch ref to follow
 # commits, so `:wc` / `git commit` here don't strand on a detached HEAD.

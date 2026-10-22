@@ -8,9 +8,23 @@
 # exits 0 and swallows every error: a telemetry hiccup must never block a commit or push.
 # Kill switch: STACK_USAGE=0.
 #
-#   stack-usage-event commit   # one event per commit: branch, project, subject shape, ahead-count
-#   stack-usage-event push     # one event at push: branch, project, ahead-count, subjects sent
+#   stack-usage-event commit [<sha> [<branch>]]   # one event per commit (post-commit hook)
 #   stack-usage-event who <sha>  # which session made <sha> — read-only, for handoff notes
+#
+# The post-commit hook runs this backgrounded, so by the time it reads HEAD a rebase may have
+# moved on — which is how one tip got logged once per replayed commit. The hook therefore
+# captures the sha, the branch (a rebase's head-name while HEAD is detached) and STACK_REPLAY
+# (rebase / cherry-pick, read from the git dir) synchronously and hands them over.
+#
+# Replays are recorded, not dropped: `replay: "rebase" | "cherry-pick" | "patch-id"` (the last:
+# a commit whose patch-id this log already holds — a restack, a carried cherry-pick, a
+# message-only amend). Readers wanting authored work filter on its absence.
+#
+# Who: `actor` is "claude" (a session ancestor), "cli" (no claude ancestor — Phil at a terminal
+# or GH Desktop; `client` says which), or, under the viewer server (STACK_VIA=viewer), the
+# request's actor — "browser" for Phil's click, "claude" for a session's curl, "server" for the
+# server's own background work (focus auto-sync). A server-run git op never walks ancestry: the
+# server inherits whichever session launched it, which once stamped Phil's clicks as Claude's.
 import sys, os, json, time, glob, subprocess
 
 
@@ -46,6 +60,70 @@ def session():
         if pane and d.get("tmux_pane") == pane:
             by_pane = sid
     return by_pane
+
+
+def attribution():
+    if os.environ.get("STACK_VIA") == "viewer":
+        return {"actor": os.environ.get("STACK_ACTOR") or "server", "via": "viewer",
+                "session": os.environ.get("STACK_SESSION") or None}
+    sid = session()
+    ev = {"actor": "claude" if sid else "cli", "session": sid}
+    if os.environ.get("DESKTOP_TRAMPOLINE_TOKEN") or "GitHub Desktop" in os.environ.get("GIT_ASKPASS", ""):
+        ev["client"] = "gh-desktop"
+    elif os.environ.get("HELIX_RUNTIME") or os.environ.get("STACK_CLIENT") == "helix":
+        ev["client"] = "helix"
+    return ev
+
+
+def patch_id(sha):
+    out = subprocess.run(["git", "show", "--format=", sha], capture_output=True)
+    if not out.stdout:
+        return None
+    pid = subprocess.run(["git", "patch-id", "--stable"], input=out.stdout, capture_output=True).stdout.split()
+    return pid[0].decode()[:12] if pid else None
+
+
+def seen_patch(path, pid):
+    try:
+        with open(path) as f:
+            for line in f:
+                if pid in line:
+                    try:
+                        ev = json.loads(line)
+                    except Exception:
+                        continue
+                    if ev.get("type") == "commit" and ev.get("pid") == pid:
+                        return ev.get("sha")
+    except FileNotFoundError:
+        pass
+    return None
+
+
+def commit_event(path, sha_arg, branch_arg):
+    sha = git("rev-parse", "--verify", "-q", f"{sha_arg or 'HEAD'}^{{commit}}")
+    branch = branch_arg or git("symbolic-ref", "-q", "--short", "HEAD")
+    if branch.startswith("refs/heads/"):
+        branch = branch[len("refs/heads/"):]
+    if not sha or not branch:
+        return None  # detached outside a rebase (a scratch worktree) — not a workflow commit
+    ev = {"type": "commit", "branch": branch, "sha": sha[:10]}
+    subject = git("log", "-1", "--format=%s", sha)
+    body = git("log", "-1", "--format=%b", sha)
+    ev["subjectLen"] = len(subject)
+    ev["bodyLines"] = len([ln for ln in body.splitlines() if ln.strip()])
+    pid = patch_id(sha)
+    if pid:
+        ev["pid"] = pid
+    replay = os.environ.get("STACK_REPLAY") or ""
+    if not replay and pid:
+        first = seen_patch(path, pid)
+        if first and first != ev["sha"]:
+            replay, ev["of"] = "patch-id", first
+        elif first == ev["sha"]:
+            return None  # the very same commit twice (two hooks, one commit) — nothing new happened
+    if replay:
+        ev["replay"] = replay
+    return ev
 
 
 def who(want):
@@ -85,29 +163,29 @@ def main():
         return who(sys.argv[2] if len(sys.argv) > 2 else "")
     if os.environ.get("STACK_USAGE") == "0":
         return
-    branch = git("rev-parse", "--abbrev-ref", "HEAD")
-    if not branch or branch == "HEAD":
-        return  # detached (scratch worktree) — not a real workflow commit
-    main_branch = git("config", "stack.main-branch") or "main"
-    project = git("config", f"branch.{branch}.stack-project") or git("config", f"stack-branch.{branch}.project") or None
-    ahead = git("rev-list", "--count", f"{main_branch}..HEAD")
-    ev = {"type": kind, "branch": branch, "project": project,
-          "ahead": int(ahead) if ahead.isdigit() else None, "session": session()}
-
-    if kind == "commit":
-        ev["sha"] = git("rev-parse", "--short=10", "HEAD")
-        subject = git("log", "-1", "--format=%s")
-        body = git("log", "-1", "--format=%b")
-        ev["subjectLen"] = len(subject)
-        ev["bodyLines"] = len([ln for ln in body.splitlines() if ln.strip()])
-    elif kind == "push":
-        subjects = git("log", "--format=%s", f"{main_branch}..HEAD").splitlines()
-        ev["subjects"] = subjects[:50]
-
-    ev["ts"] = int(time.time())
     path = log_file()
-    if path:
-        with open(path, "a") as f:
+    if not path:
+        return
+    ts = int(time.time())
+    main_branch = git("config", "stack.main-branch") or "main"
+    if kind == "commit":
+        ev = commit_event(path, *(sys.argv[2:4] + ["", ""])[:2])
+        events = [ev] if ev else []
+        if ev:
+            ahead = git("rev-list", "--count", f"{main_branch}..{ev['sha']}")
+            ev["ahead"] = int(ahead) if ahead.isdigit() else None
+    else:
+        return
+    if not events:
+        return
+    who_ = attribution()
+    for ev in events:
+        b = ev.get("branch") or ""
+        ev["project"] = git("config", f"branch.{b}.stack-project") or git("config", f"stack-branch.{b}.project") or None
+        ev.update(who_)
+        ev["ts"] = ts
+    with open(path, "a") as f:
+        for ev in events:
             f.write(json.dumps(ev) + "\n")
 
 
