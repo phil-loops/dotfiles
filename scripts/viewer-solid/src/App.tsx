@@ -4,7 +4,7 @@ import { RouterProvider, useViewerLocation, forestKey, type ViewerLocation } fro
 import { canMutate } from "./provider";
 import CommandPalette from "./CommandPalette";
 import { StorySheet } from "./StorySheet";
-import { track, installFetchTracking, installUiTracking } from "./track";
+import { track, installFetchTracking, installUiTracking, installTiming } from "./track";
 import { ServerStatus } from "./ServerStatus";
 import { ServingChip } from "./ServingChip";
 import { NodeDetail } from "./NodeDetail";
@@ -70,6 +70,7 @@ function Layout(props: { children?: JSX.Element }) {
   const qc = useQueryClient();
   installFetchTracking(); // every action POST is tracked at the fetch seam — see track.ts
   installUiTracking(); // + button clicks and keyboard shortcuts (the client-only layer)
+  installTiming(); // + how long each of those takes to show and to settle — the v2 baseline
   // usage telemetry: one event per route change (what you open, in what order), carrying
   // `dwell` = VISIBLE ms spent on the page being left — wall-clock gaps lie (a tab hidden
   // overnight reads as 14h on one node), so the clock pauses while the tab is hidden.
