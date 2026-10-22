@@ -17,3 +17,7 @@ scripts/gh-to-nvim/dist/
 __pycache__/
 *.pyc
 scripts/gh-to-nvim-key.pem
+
+# claude.ai skill-sync buckets and their trash — machine-written, re-synced on every launch
+.claude/skills/synced/
+.claude/skills/.trash/
