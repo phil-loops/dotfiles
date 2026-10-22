@@ -1,7 +1,6 @@
-import { createSignal, createEffect, onCleanup } from "solid-js";
+import { createSignal, createEffect } from "solid-js";
 import { createQuery } from "@tanstack/solid-query";
 import { provider } from "./provider";
-import { setDeleteMode } from "./deleteMode";
 import type { Parked, Project } from "./types";
 
 // The Forests-home restack state machine: two-click arm → run in the background → poll status →
@@ -81,7 +80,6 @@ export function useRestack(deps: {
       }
     });
   };
-  onCleanup(() => setDeleteMode(false)); // leaving home always exits delete mode
   const status = createQuery(() => ({
     queryKey: ["restack-status", running()],
     queryFn: () =>

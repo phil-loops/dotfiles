@@ -2,7 +2,6 @@ import { createSignal, createEffect, Show, For } from "solid-js";
 import { useQueryClient, createQuery, createMutation } from "@tanstack/solid-query";
 import { useViewerLocation, type HomeTab } from "./router";
 import { provider, canMutate } from "./provider";
-import { deleteMode, setDeleteMode } from "./deleteMode";
 import { type Action } from "./actions";
 import { Hearth } from "./Hearth";
 import { FocusLane } from "./FocusLane";
@@ -159,17 +158,6 @@ export function Home() {
   const restacking = (name: string) => () => running() === name || running() === "__all__";
   const CHIP =
     "flex-none cursor-pointer rounded-[7px] border bg-transparent px-[11px] py-[3px] text-[11px] leading-[1.55] tracking-[0.03em] transition-[border-color,color,background] duration-[120ms]";
-  const dropAction = (p: Project): Action => ({
-    id: "drop:" + p.name,
-    class: `forest-drop ${CHIP} border-transparent text-del hover:border-del hover:bg-del-bg`,
-    armedClass: `forest-drop ${CHIP} border-del bg-del text-[#1a1411]`,
-    runningClass: `forest-drop ${CHIP} border-transparent text-del opacity-70 hover:bg-del-bg`,
-    arm: true,
-    busy: () => dropping() === p.name,
-    label: () => (dropping() === p.name ? "⌫ dropping…" : "✕ drop"),
-    armLabel: () => "drop forest?",
-    run: () => dropProject(p.name),
-  });
   const restackAllAction = (): Action => ({
     id: "restack:__all__",
     class: `restack-all ${CHIP} mt-[30px] border-patina text-patina opacity-80 hover:opacity-100`,
@@ -208,7 +196,6 @@ export function Home() {
       hideFtip={hideFtip}
       onContext={onContext}
       prOf={prOf}
-      dropAction={dropAction}
       resolve={resolve}
       abort={abort}
     />

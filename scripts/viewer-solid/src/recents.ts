@@ -38,7 +38,27 @@ export const contextOf = (l: ViewerLocation): RecentCtx | null => {
   return null;
 };
 
+// the branches you've opened, newest first — the palette lists them before anything else
+export type RecentNode = { branch: string; project: string; repo?: string };
+const NODES_KEY = "viewerRecentNodes";
+const readNodes = (): RecentNode[] => {
+  try {
+    return JSON.parse(localStorage.getItem(NODES_KEY) || "[]") as RecentNode[];
+  } catch {
+    return [];
+  }
+};
+export const [recentNodes, setRecentNodes] = createSignal<RecentNode[]>(readNodes());
+
 export const trackRecent = (l: ViewerLocation): void => {
+  if (l.kind === "forest" && l.node && l.node !== "~integration") {
+    const n: RecentNode = { branch: l.node, project: l.name, repo: l.repo };
+    setRecentNodes((r) => {
+      const next = [n, ...r.filter((x) => x.branch !== n.branch || (x.repo ?? "") !== (n.repo ?? ""))].slice(0, 12);
+      try { localStorage.setItem(NODES_KEY, JSON.stringify(next)); } catch { /* quota/private mode — skip */ }
+      return next;
+    });
+  }
   const c = contextOf(l);
   if (!c) return;
   const key = buildPath(c.to);

@@ -1,39 +1,40 @@
 import { createSignal, createMemo, createEffect, onCleanup, Show, For } from "solid-js";
 import { createQuery, keepPreviousData } from "@tanstack/solid-query";
-import { provider, canMutate, withRepo } from "./provider";
-import { deleteMode, setDeleteMode } from "./deleteMode";
+import { provider } from "./provider";
+import { fetchJSON } from "./api";
 import { track } from "./track";
 import { useViewerLocation, forestKey, nodeOf, withNode, forestRepo } from "./router";
-import { setOverviewView } from "./overviewView";
-import { openStorySheet } from "./StorySheet";
 import { cachedModel } from "./modelCache";
+import { cachedProjects } from "./projectsCache";
+import { recentNodes, recents } from "./recents";
+import { openMap } from "./mapState";
+import { isGhostId } from "./forestLayout";
 
-// CommandPalette — Cmd/Ctrl+K fuzzy command bar. Its highest-value job is jumping around the
-// forest by name (type a branch → Enter → you're there); it also carries a few safe global
-// commands. Deliberately NO "bless" command — blessing is earned per-file in the diff view
-// (bulk-bless is banned house-wide). Standalone, self-styled; mount once in App.
-//
-// Context comes from the router: the splat path is the forest, ?node= the node.
-// With a forest open it lists that forest's nodes; on the home screen it lists the forests.
+// CommandPalette — Cmd/Ctrl+K: a fuzzy finder for branches, forests and the concepts and wiki
+// pages around them. 95% of four months' selections were jumps, so jumping is all it does:
+// recently opened branches first, then the forest you're in, then everything. A forest opens as
+// the map overlay rather than a page. Deliberately NO "bless" entry — blessing is earned per-file
+// in the diff view. Standalone, self-styled; mount once in App.
 
-type Cmd = { label: string; sub?: string; run: () => void };
+type Entry = { key: string; label: string; sub?: string; recent?: boolean; run: () => void };
+
+const leaf = (s: string) => (s || "").split("/").pop() ?? "";
+const repoOf = (r?: string) => (r && r !== "loops" ? r : undefined);
 
 // module scope so the map overlay can yield the keyboard while the palette sits over it
 const [open, setOpen] = createSignal(false);
 export const paletteOpen = open;
 
-const leaf = (s: string) => (s || "").split("/").pop() ?? "";
-const post = (url: string, body: unknown) =>
-  fetch(withRepo(url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+type WikiPages = { pages: { slug: string; title: string; section: string }[] };
+type Concepts = { concepts: Record<string, { name: string; statement?: string }> };
 
 export default function CommandPalette() {
   const [q, setQ] = createSignal("");
   const [sel, setSel] = createSignal(0);
   const { location, navigate } = useViewerLocation();
-  // forestKey = the server's branch/project name for the current location; node = active branch.
   const ctx = createMemo(() => {
     const l = location();
-    return { project: forestKey(l), node: nodeOf(l) || "" };
+    return { project: l.kind === "forest" ? forestKey(l) : "", node: nodeOf(l) || "" };
   });
   let inputRef: HTMLInputElement | undefined;
 
@@ -50,13 +51,9 @@ export default function CommandPalette() {
   window.addEventListener("keydown", onKey);
   onCleanup(() => window.removeEventListener("keydown", onKey));
 
-  // forest nodes (when a forest is open). The key MUST match ForestOverview/NodeDetail's
-  // ["model", repo, project] or this is a separate cache entry: the palette then fires its own
-  // cold /model on open (measured 1.1-5.7s, and a brand-new forest is 16-39s) while the global
-  // index below skips this forest on the assumption the model supplies it — so the forest you
-  // are standing in has ZERO entries for the whole fetch. That read as "no matches" for a
-  // project the API already served (2026-10-07). initialData paints the last map this browser
-  // saw, as the page does.
+  // The key MUST match ForestOverview/NodeDetail's ["model", repo, project] or this is a separate
+  // cache entry: the palette then fires its own cold /model on open (1.1-5.7s, a brand-new forest
+  // 16-39s) and the forest you are standing in has ZERO entries for the whole fetch (2026-10-07).
   const repoKey = () => forestRepo(location()) ?? "loops";
   const model = createQuery(() => ({
     queryKey: ["model", repoKey(), ctx().project],
@@ -65,101 +62,83 @@ export default function CommandPalette() {
     initialData: () => cachedModel(repoKey(), ctx().project),
     placeholderData: keepPreviousData,
   }));
-  // forests (on the home screen) — shares App's ["projects"] cache
   const projects = createQuery(() => ({
     queryKey: ["projects"],
     queryFn: () => provider.projects(),
-    enabled: open() && !ctx().project,
+    initialData: cachedProjects,
+    initialDataUpdatedAt: 0,
+    enabled: open(),
   }));
-  // every (branch, forest) pair across all projects — the global jump index, always on so
-  // you can search any branch by name from anywhere (home or a different forest).
   const forestBranches = createQuery(() => ({
     queryKey: ["forest-branches"],
     queryFn: () => provider.forestBranches(),
     enabled: open(),
   }));
+  const wiki = createQuery(() => ({
+    queryKey: ["palette-wiki"],
+    queryFn: () => fetchJSON<WikiPages>("/wiki-pages"),
+    enabled: open(),
+    staleTime: 5 * 60_000,
+  }));
+  const concepts = createQuery(() => ({
+    queryKey: ["palette-concepts"],
+    queryFn: () => fetchJSON<Concepts>("/learning-state"),
+    enabled: open(),
+    staleTime: 5 * 60_000,
+  }));
 
-  const commands = createMemo<Cmd[]>(() => {
+  const entries = createMemo<Entry[]>(() => {
     const c = ctx();
-    const cmds: Cmd[] = [];
-    if (c.project && canMutate) {
-      cmds.push({
-        label: `⟳ restack ${leaf(c.project)} onto fresh main`,
-        run: () => void post("/restack", { project: c.project }),
-      });
-    }
-    if (c.project) {
-      cmds.push({
-        label: `≣ landing order — ${leaf(c.project)}`,
-        sub: "the titles that land on main, in merge order",
-        run: () => { setOverviewView("story"); navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) }); },
-      });
-      // on a node, the sheet opens over the page you're on; from the forest overview there is
-      // no page to cover, so it switches to the stories face instead
-      cmds.push({
-        label: `✎ stories — ${leaf(c.project)}`,
-        sub: c.node ? "blank boxes over this page, with each branch's commits" : "one plain-English line per branch, edited in place",
-        run: () => {
-          if (c.node) return openStorySheet(c.node);
-          setOverviewView("stories");
-          navigate({ kind: "forest", name: c.project, repo: forestRepo(location()) });
-        },
-      });
-    } else {
-      cmds.push({
-        label: "≣ landing order view",
-        sub: "open forests as the titles that land, in merge order",
-        run: () => setOverviewView("story"),
-      });
-    }
-    cmds.push({
-      label: "↪ jump to checkout (HEAD)",
-      run: async () => {
-        try {
-          const h = await provider.head();
-          if (!h.branch) return;
-          const l = location();
-          navigate(l.kind === "home" ? { kind: "forest", name: h.branch } : withNode(l, h.branch));
-        } catch {
-          /* head unavailable — no-op */
-        }
-      },
-    });
-    cmds.push({ label: "⌂ home — all forests", run: () => navigate({ kind: "home", tab: "forests" }) });
-    // Home only: flip the forest list into drop mode (each row grows a ✕ drop button).
-    if (!c.project && canMutate) {
-      cmds.push({
-        label: deleteMode() ? "⌫ exit delete mode" : "⌫ delete mode — drop old forests",
-        run: () => setDeleteMode((v) => !v),
-      });
-    }
+    const out: Entry[] = [];
+    const seen = new Set<string>();
+    const add = (e: Entry) => {
+      if (seen.has(e.key)) return;
+      seen.add(e.key);
+      out.push(e);
+    };
+    const toNode = (branch: string, project: string, repo?: string) => () =>
+      navigate(c.project === project && repoOf(repo) === forestRepo(location())
+        ? withNode(location(), branch)
+        : { kind: "forest", name: project, node: branch, repo: repoOf(repo) });
 
-    if (c.project) {
-      const nodes = model.data?.nodes ? Object.keys(model.data.nodes) : [];
-      for (const b of nodes) {
-        cmds.push({ label: `→ ${leaf(b)}`, sub: b, run: () => navigate(withNode(location(), b)) });
-      }
-    } else {
-      for (const p of projects.data || []) {
-        cmds.push({ label: `→ ${p.name}`, sub: p.repo !== "loops" ? p.repo : "forest", run: () => navigate({ kind: "forest", name: p.name, repo: p.repo, node: p.repo !== "loops" ? p.mergeable?.[0] : undefined }) });
-      }
+    for (const n of recentNodes()) {
+      if (n.branch === c.node) continue;
+      add({ key: `b:${n.repo ?? ""}:${n.branch}`, label: `↺ ${leaf(n.branch)}`, sub: n.branch, recent: true, run: toNode(n.branch, n.project, n.repo) });
     }
-
-    // global branch index: jump to ANY branch in ANY forest by name. Skip the open forest's
-    // own branches ONLY once the model has actually arrived — those are listed above from the
-    // live model, the source of truth. Skipping them while it is still in flight is what left
-    // the open forest with no entries at all, which is the one case the palette must never hit.
-    const haveModel = !!model.data?.nodes;
-    const shown = c.project && haveModel ? new Set(Object.keys(model.data!.nodes!)) : new Set<string>();
-    for (const fb of forestBranches.data || []) {
-      if ((haveModel && fb.project === c.project) || shown.has(fb.branch)) continue;
-      cmds.push({
-        label: `→ ${fb.branch}`,
-        sub: fb.repo !== "loops" ? `${fb.repo}/${fb.project}` : fb.project,
-        run: () => navigate({ kind: "forest", name: fb.project, node: fb.branch, repo: fb.repo }),
+    for (const b of Object.keys(model.data?.nodes ?? {})) {
+      if (b === c.node) continue;
+      const ghost = isGhostId(b);
+      add({
+        key: `b:${repoOf(forestRepo(location())) ?? ""}:${b}`,
+        label: `→ ${ghost ? b : leaf(b)}`,
+        sub: ghost ? "the whole forest, integrated" : b,
+        run: toNode(ghost ? "~integration" : b, c.project, forestRepo(location())),
       });
     }
-    return cmds;
+    const recentForests = new Set(recents().map((r) => (r.to.kind === "forest" ? `${repoOf(r.to.repo) ?? ""}:${r.to.name}` : "")));
+    const forests = [...(projects.data ?? [])].sort((a, b) =>
+      Number(recentForests.has(`${repoOf(b.repo) ?? ""}:${b.name}`)) - Number(recentForests.has(`${repoOf(a.repo) ?? ""}:${a.name}`))
+      || (b.lastCommit ?? 0) - (a.lastCommit ?? 0));
+    for (const p of forests) {
+      add({
+        key: `f:${repoOf(p.repo) ?? ""}:${p.name}`,
+        label: `⊞ ${p.name}`,
+        sub: `forest · ${p.branches} ${p.branches === 1 ? "node" : "nodes"}${repoOf(p.repo) ? ` · ${p.repo}` : ""}`,
+        recent: recentForests.has(`${repoOf(p.repo) ?? ""}:${p.name}`),
+        run: () => openMap({ name: p.name, repo: repoOf(p.repo) }),
+      });
+    }
+    for (const fb of forestBranches.data ?? []) {
+      if (fb.branch === c.node) continue;
+      add({ key: `b:${repoOf(fb.repo) ?? ""}:${fb.branch}`, label: `→ ${fb.branch}`, sub: repoOf(fb.repo) ? `${fb.repo}/${fb.project}` : fb.project, run: toNode(fb.branch, fb.project, fb.repo) });
+    }
+    for (const [id, k] of Object.entries(concepts.data?.concepts ?? {})) {
+      add({ key: `c:${id}`, label: `◇ ${k.name}`, sub: "concept", run: () => navigate({ kind: "tutor", concept: id }) });
+    }
+    for (const p of wiki.data?.pages ?? []) {
+      add({ key: `w:${p.slug}`, label: `¶ ${p.title}`, sub: p.section ? `wiki · ${p.section}` : "wiki", run: () => navigate({ kind: "wiki", slug: p.slug }) });
+    }
+    return out;
   });
 
   // substring outranks subsequence; consecutive runs and word-start hits rank tighter
@@ -178,14 +157,17 @@ export default function CommandPalette() {
     return score - hay.length * 0.01;
   };
 
-  const filtered = createMemo<Cmd[]>(() => {
+  // a place you were recently wins a near-tie, never a clearly better match
+  const RECENT_BONUS = 40;
+  const filtered = createMemo<Entry[]>(() => {
     const needle = q().toLowerCase().replace(/\s+/g, "");
-    const list = commands();
-    if (!needle) return list;
+    const list = entries();
+    if (!needle) return list.slice(0, 200);
     return list
-      .map((c, i) => ({ c, i, s: fuzzyScore(needle, (c.label + " " + (c.sub || "")).toLowerCase()) }))
+      .map((c, i) => ({ c, i, s: fuzzyScore(needle, (c.label.slice(2) + " " + (c.sub || "")).toLowerCase()) + (c.recent ? RECENT_BONUS : 0) }))
       .filter((x) => x.s > -Infinity)
       .sort((a, b) => b.s - a.s || a.i - b.i)
+      .slice(0, 200)
       .map((x) => x.c);
   });
 
@@ -197,7 +179,7 @@ export default function CommandPalette() {
     if (open()) queueMicrotask(() => inputRef?.focus());
   });
 
-  const run = (c?: Cmd) => {
+  const run = (c?: Entry) => {
     setOpen(false);
     // a query typed but Enter hit with no match = "I wanted something that isn't here" —
     // the highest-signal friction event in the whole log.
@@ -229,7 +211,7 @@ export default function CommandPalette() {
             <input
               ref={inputRef}
               class="cmdk-input w-full border-0 border-b border-[#3a332b] bg-transparent px-4 py-[13px] text-[14px] leading-[1.55] text-ink outline-none [font-family:inherit]"
-              placeholder="jump to a branch, or a command…"
+              placeholder="jump to a branch, forest, concept…"
               value={q()}
               onInput={(e) => { setQ(e.currentTarget.value); setSel(0); }}
               onKeyDown={onInputKey}
@@ -241,19 +223,20 @@ export default function CommandPalette() {
                     <li
                       class="cmdk-item flex cursor-pointer items-baseline gap-2.5 rounded-[7px] px-2.5 py-[7px] text-[12.5px] text-ink"
                       classList={{ "on bg-[#221e1a]": i() === sel() }}
+                      ref={(el) => createEffect(() => { if (i() === sel()) el.scrollIntoView({ block: "nearest" }); })}
                       onMouseEnter={() => setSel(i())}
                       onMouseDown={(e) => { e.preventDefault(); run(c); }}
                     >
-                      <span class="cmdk-label flex-none">{c.label}</span>
+                      <span class="cmdk-label min-w-0 flex-none overflow-hidden text-ellipsis whitespace-nowrap">{c.label}</span>
                       <Show when={c.sub}>
-                        <span class="cmdk-sub ml-auto text-[11px] text-[#6f675a]">{c.sub}</span>
+                        <span class="cmdk-sub ml-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-[#6f675a]">{c.sub}</span>
                       </Show>
                     </li>
                   )}
                 </For>
               </Show>
             </ul>
-            <div class="cmdk-hint border-t border-[#3a332b] px-3.5 py-2 text-[11px] text-[#6f675a]">↑↓ move · ↵ run · esc close</div>
+            <div class="cmdk-hint border-t border-[#3a332b] px-3.5 py-2 text-[11px] text-[#6f675a]">↺ recent · ⊞ forest map · ◇ concept · ¶ wiki — ↑↓ move · ↵ go · esc close</div>
           </div>
         </div>
       </Show>
