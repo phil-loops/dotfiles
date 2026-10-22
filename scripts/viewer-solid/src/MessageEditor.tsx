@@ -7,7 +7,6 @@
 import { createSignal } from "solid-js";
 import { Show } from "solid-js";
 import { createMutation } from "@tanstack/solid-query";
-import { withRepo } from "./provider";
 import { post } from "./actions";
 import { PlanStepsEditor } from "./PlanStepsEditor";
 
@@ -57,27 +56,7 @@ export function useMessageEditor(d: {
     onError: (e) => d.setDone(`✗ ${(e as Error).message || "couldn't draft the message"}`),
   }));
 
-  // recompute this branch's forest-plan block from stack config and fold it into the body,
-  // replacing any stale plan already there. Free — no model call, just where-it-fits facts.
-  const planFill = createMutation(() => ({
-    mutationFn: () =>
-      fetch(withRepo("/plan-section") + "?branch=" + encodeURIComponent(d.branch())).then((r) =>
-        r.text(),
-      ),
-    onSuccess: (section) => {
-      const s = section.trim();
-      if (!s) {
-        d.setDone("✗ no plan — this branch isn't in a project");
-        return;
-      }
-      const lines = body().split("\n");
-      const cut = lines.findIndex((l) => l.startsWith("Part of "));
-      const prose = (cut === -1 ? body() : lines.slice(0, cut).join("\n")).replace(/\s+$/, "");
-      setBody(prose ? `${prose}\n\n${s}` : s);
-    },
-    onError: (e) => d.setDone(`✗ ${(e as Error).message || "couldn't recompute the plan"}`),
-  }));
-  return { subject, setSubject, body, setBody, saveMsg, draftMsg, planFill };
+  return { subject, setSubject, body, setBody, saveMsg, draftMsg };
 }
 
 export type MessageEditorState = ReturnType<typeof useMessageEditor>;
@@ -119,15 +98,6 @@ export function MessageEditor(props: {
               onClick={() => ed.saveMsg.mutate()}
             >
               {ed.saveMsg.isPending ? "saving…" : "save message"}
-            </button>
-            <button
-              class={`nh-editor-close ${EDITOR_CLOSE}`}
-              disabled={ed.planFill.isPending}
-              data-track="message.plan"
-              title="recompute this branch's forest-plan block from the stack config (free — no model call)"
-              onClick={() => ed.planFill.mutate()}
-            >
-              {ed.planFill.isPending ? "…" : "↻ plan"}
             </button>
             <button
               class={`nh-editor-close ${EDITOR_CLOSE}`}

@@ -58,7 +58,7 @@ preferences. Hammerspoon: grant Accessibility when it asks.
 
 ```bash
 git clone git@github.com:Loops-so/loops.git ~/coding/loops
-dotfiles-link --loops ~/coding/loops         # pre-push, prepare-commit-msg, post-checkout, seed-gen hooks from hooks/
+dotfiles-link --loops ~/coding/loops         # pre-push, pre-rebase, post-checkout, seed-gen hooks from hooks/
 stack-install-precommit-hook ~/coding/loops  # oxfmt pre-commit hook
 ```
 

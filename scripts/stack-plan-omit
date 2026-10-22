@@ -1,6 +1,6 @@
 #!/bin/zsh
-# stack-plan-omit — keep a branch out of every rendered story: commit-body plan blocks,
-# PR bodies (steps + unblocks), and the mermaid map. For integration and test/proof
+# stack-plan-omit — keep a branch out of every rendered story: PR bodies (steps +
+# unblocks) and the mermaid map. For integration and test/proof
 # branches that never ship as a PR. Metadata only — the branch stays a full forest
 # member (viewer, restack, gates all still see it).
 #

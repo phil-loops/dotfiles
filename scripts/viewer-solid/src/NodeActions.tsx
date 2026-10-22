@@ -764,7 +764,7 @@ export function NodeActions(props: {
           branch={() => props.branch}
           routedNotes={routedNotes}
           onClose={() => setEditorOpen(false)}
-          onPlanSaved={() => ed.planFill.mutate()}
+          onPlanSaved={() => {}}
         />
       </Show>
 

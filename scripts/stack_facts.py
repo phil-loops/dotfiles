@@ -3,8 +3,8 @@
 
 Everything the forest knows about a branch is derived HERE, once: its job, its purpose, its stored
 summary, the project's whole plan in merge order (steps that already landed, steps still in flight),
-each step's PR, and the graph edges. `stack-commit-body`, `stack-forest-mermaid` and `stack-pr-body`
-are now RENDERERS over this — three views of one truth, so they cannot disagree.
+each step's PR, and the graph edges. `stack-forest-mermaid` and `stack-pr-body`
+are now RENDERERS over this — views of one truth, so they cannot disagree.
 
 They used to each derive it, and they had already drifted: a PR body named a branch by its
 description while the map right below it named the same branch by its commit subject.
@@ -14,7 +14,7 @@ shell quote.
 
   stack_facts.py facts   <branch>   → JSON
   stack_facts.py steps   <branch>   → JSON, plan only — no gh call; the viewer's steps editor
-  stack_facts.py plan    <branch>   → the plan block for a commit body
+  stack_facts.py plan    <branch>   → the merge-order plan block (the PR body's furniture)
   stack_facts.py mermaid <branch> [--fence]
 """
 import importlib.machinery
@@ -319,8 +319,7 @@ def facts(branch):
 #   stack-project.<project>.plan-template  the outer block. Tokens {project}, {steps}.
 #   stack-project.<project>.plan-step      one step's line.  Tokens {n} {ref} {job} {pr} {me}.
 # Both default to the historical hardcoded format, so an untemplated project is byte-for-byte
-# unchanged. NOTE: the outer template's first line must start with "Part of " — that literal is the
-# fence stack-commit-body uses to replace the block idempotently.
+# unchanged.
 PLAN_TEMPLATE_DEFAULT = "Part of a stack, in merge order:\n{steps}"
 PLAN_STEP_DEFAULT = "  {n}. {ref}"
 

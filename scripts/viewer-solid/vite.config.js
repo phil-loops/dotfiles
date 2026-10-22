@@ -21,7 +21,7 @@ const ROUTES = [
   "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
   "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
   "/ticket", "/story", "/focus", "/merge-subjects",
-  "/plan-steps", "/plan-section", "/plan-template", "/plan-preview",
+  "/plan-steps", "/plan-template", "/plan-preview",
   "/commit-diff", "/commit-dirty", "/dirty-resolve", "/diverged-detail",
   "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",
   "/fix-upstream", "/integrate-here", "/reseat-children",

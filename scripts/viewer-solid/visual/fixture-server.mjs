@@ -26,7 +26,7 @@ const API = new Set([
   "/head", "/sync", "/syncs", "/restack-status",
   "/check-origin", "/purpose", "/heartbeat", "/previews", "/preview-log", "/processes",
   "/commit-diff", "/diverged-detail", "/forest-health", "/forest-branches", "/forest-purposes",
-  "/gates-progress", "/plan-steps", "/plan-section", "/plan-preview", "/prep-route", "/prep-push",
+  "/gates-progress", "/plan-steps", "/plan-preview", "/prep-route", "/prep-push",
   "/preview-wait", "/push-preview",
   "/outline", "/outline-reseat",
 ]);
