@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""codex-pane-say --source-session ID (--message TEXT | --message-file PATH) [--title T | --pane P]
+
+Submit a signed Claude Code note into a Codex CLI session running in a tmux pane.
+The pane is found by its title (Codex sets it to the chat title; default "Review
+override cases", the detector-research chat) and must match exactly one pane.
+
+Refuses unless the pane's composer is empty (the "Ask Codex to do anything"
+placeholder is showing), so it never splices into text Phil is typing. Pastes with
+bracketed paste so newlines stay in one message, then presses Enter. A note sent
+while Codex is mid-turn is queued by Codex, not dropped.
+"""
+import argparse, subprocess, sys, time
+
+PLACEHOLDER = "Ask Codex to do anything"
+
+
+def tmux(*a, check=True):
+    return subprocess.run(["tmux", *a], capture_output=True, text=True, check=check).stdout
+
+
+def find_pane(title):
+    rows = tmux("list-panes", "-a", "-F", "#{session_name}:#{window_index}.#{pane_index}\t#{pane_title}")
+    hits = [r.split("\t", 1)[0] for r in rows.splitlines() if title in r.split("\t", 1)[-1]]
+    if len(hits) != 1:
+        sys.exit(f"codex-pane-say: {len(hits)} panes titled {title!r} (need exactly 1): {hits}")
+    return hits[0]
+
+
+def composer_empty(pane):
+    lines = [l for l in tmux("capture-pane", "-p", "-t", pane).splitlines() if l.strip()]
+    prompt = [l for l in lines[-4:] if l.lstrip().startswith("›")]
+    return bool(prompt) and PLACEHOLDER in prompt[-1]
+
+
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument("--source-session", required=True)
+    p.add_argument("--title", default="Review override cases")
+    p.add_argument("--pane")
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--message")
+    g.add_argument("--message-file")
+    a = p.parse_args()
+
+    body = a.message if a.message is not None else open(a.message_file, encoding="utf-8").read()
+    pane = a.pane or find_pane(a.title)
+    if not composer_empty(pane):
+        sys.exit(f"codex-pane-say: {pane} composer is not empty (or not a Codex pane); not sending")
+
+    note = f"[Claude Code / Opus · session {a.source_session[:8]}] {body.strip()}"
+    buf = f"codex-pane-say-{a.source_session[:8]}"
+    subprocess.run(["tmux", "load-buffer", "-b", buf, "-"], input=note, text=True, check=True)
+    tmux("paste-buffer", "-p", "-d", "-b", buf, "-t", pane)
+    time.sleep(1)
+    tmux("send-keys", "-t", pane, "Enter")
+    time.sleep(2)
+    print(f"sent to {pane}" if composer_empty(pane) else f"pasted into {pane}; composer not yet clear, check the pane")
+
+
+if __name__ == "__main__":
+    main()
