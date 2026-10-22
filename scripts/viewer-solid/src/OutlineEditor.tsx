@@ -44,17 +44,12 @@ export const focusOutline = (notes: string[] = []) => { setSyncNote(notes); setF
 
 const same = (a: string, b: string) => a.trim() === b.trim();
 const LABEL = "text-[10px] uppercase tracking-[0.11em] text-ink-faint";
-const FIELD = "w-full resize-none border-0 bg-transparent p-0 font-mono outline-none placeholder:text-ink-faint/70";
+const FIELD = "w-full resize-none border-0 bg-transparent p-0 font-mono outline-none [field-sizing:content] placeholder:text-ink-faint/70";
 const TONE: Record<Hint["tone"], string> = {
   error: "text-del border-del/50",
   warn: "text-ember border-ember/40",
   note: "text-ink-faint border-rule",
 };
-
-function autoGrow(el: HTMLTextAreaElement) {
-  el.style.height = "auto";
-  el.style.height = `${el.scrollHeight}px`;
-}
 
 const Lock = () => (
   <svg class="inline-block h-[11px] w-[9px] flex-none" viewBox="0 0 9 11" aria-hidden="true">
@@ -221,12 +216,17 @@ export function OutlineEditor(props: {
   // ── keyboard: ⌘↵ saves everything, esc reverts the field (then lets go of it), e jumps in ──
   let colEl: HTMLElement | undefined;
   const firstField = () => colEl?.querySelector<HTMLElement>(".ol-row:not(.locked) .ol-subject") ?? colEl?.querySelector<HTMLElement>(".ol-desc");
-  const onColKey = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); void save(); }
-  };
+  // ⌘↵ saves from anywhere on the page except another editor (the chat composer owns its own)
   const onGlobalKey = (e: KeyboardEvent) => {
-    if (e.key !== "e" || e.metaKey || e.ctrlKey || e.altKey) return;
-    if ((e.target as Element).matches("input, textarea, [contenteditable]")) return;
+    const t = e.target as Element;
+    const typing = t.matches("input, textarea, [contenteditable]");
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      if (typing && !colEl?.contains(t)) return;
+      e.preventDefault();
+      void save();
+      return;
+    }
+    if (e.key !== "e" || e.metaKey || e.ctrlKey || e.altKey || typing) return;
     e.preventDefault();
     firstField()?.focus();
   };
@@ -257,7 +257,6 @@ export function OutlineEditor(props: {
     <aside
       ref={colEl}
       class="outline-col flex min-h-0 flex-1 flex-col border-y-0 border-r-0 border-l border-solid border-rule bg-[linear-gradient(180deg,rgba(230,182,78,0.035),transparent_220px)] font-mono"
-      onKeyDown={onColKey}
     >
       <header class="flex flex-none items-baseline gap-[10px] border-x-0 border-t-0 border-b border-solid border-rule px-[18px] pt-[18px] pb-[11px]">
         <span class="flex-none whitespace-nowrap font-display text-[19px] italic text-gold-leaf">✦ the words</span>
@@ -305,8 +304,7 @@ export function OutlineEditor(props: {
                 value={descVal()}
                 placeholder="one verb-first line — what this branch does"
                 readOnly={!canMutate}
-                ref={(el) => createEffect(() => { descVal(); queueMicrotask(() => autoGrow(el)); })}
-                onInput={(e) => { setDraft("desc", e.currentTarget.value.replace(/\n/g, " ")); autoGrow(e.currentTarget); }}
+                onInput={(e) => setDraft("desc", e.currentTarget.value.replace(/\n/g, " "))}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) { e.preventDefault(); colEl?.querySelector<HTMLElement>(".ol-row:not(.locked) .ol-subject")?.focus(); }
                   escTo(e, descDirty(), () => setDraft("desc", undefined));
@@ -360,8 +358,7 @@ export function OutlineEditor(props: {
                                 value={rowVal(r).subject}
                                 spellcheck={false}
                                 aria-label={`subject of commit ${n()}`}
-                                ref={(el) => createEffect(() => { rowVal(r).subject; queueMicrotask(() => autoGrow(el)); })}
-                                onInput={(e) => { setRow(r, { subject: e.currentTarget.value.replace(/\n/g, " ") }); autoGrow(e.currentTarget); }}
+                                onInput={(e) => setRow(r, { subject: e.currentTarget.value.replace(/\n/g, " ") })}
                                 onKeyDown={(e) => {
                                   if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
                                     e.preventDefault();
@@ -385,8 +382,7 @@ export function OutlineEditor(props: {
                                 spellcheck={false}
                                 placeholder="why — only if it isn't obvious"
                                 aria-label={`why of commit ${n()}`}
-                                ref={(el) => createEffect(() => { rowVal(r).body; queueMicrotask(() => autoGrow(el)); })}
-                                onInput={(e) => { setRow(r, { body: e.currentTarget.value }); autoGrow(e.currentTarget); }}
+                                onInput={(e) => setRow(r, { body: e.currentTarget.value })}
                                 onKeyDown={(e) => escTo(e, rowDirty(r), () => setDraft("rows", r.sha, undefined!))}
                               />
                             </Show>
@@ -394,6 +390,7 @@ export function OutlineEditor(props: {
                             <div class="mt-[4px] flex flex-wrap items-center gap-x-[9px] text-[10px] text-ink-faint">
                               <span class="tabular-nums">{r.short.slice(0, 8)}</span>
                               <button
+                                tabIndex={-1}
                                 class={`ol-read cursor-pointer border-0 bg-transparent p-0 text-[10px] ${isReading() ? "text-gold-leaf" : "text-ink-faint hover:text-ink-dim"}`}
                                 title={isReading() ? "back to the whole branch's diff" : "read this commit's own diff in the main column"}
                                 onClick={() => props.onRead(isReading() ? null : r.sha)}
@@ -447,8 +444,7 @@ export function OutlineEditor(props: {
                       spellcheck={false}
                       readOnly={!canMutate}
                       aria-label="PR title"
-                      ref={(el) => createEffect(() => { titleVal(); queueMicrotask(() => autoGrow(el)); })}
-                      onInput={(e) => { setDraft("prTitle", e.currentTarget.value.replace(/\n/g, " ")); autoGrow(e.currentTarget); }}
+                      onInput={(e) => setDraft("prTitle", e.currentTarget.value.replace(/\n/g, " "))}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault();
                         escTo(e, titleDirty(), () => setDraft("prTitle", undefined));
@@ -465,15 +461,14 @@ export function OutlineEditor(props: {
                   </div>
                   <Hints hints={titleHints()} onFix={(h) => setDraft("prTitle", h.fix!.apply({ subject: titleVal(), body: "" }).subject)} />
                   <textarea
-                    class={`ol-prbody ${FIELD} mt-[10px] border-x-0 border-b-0 border-t border-dashed border-rule pt-[8px] text-[11px] leading-[1.6] ${bodyDirty() ? "text-ink" : "text-ink-dim"}`}
+                    class={`ol-prbody ${FIELD} mt-[10px] min-h-[5lh] border-x-0 border-b-0 border-t border-dashed border-rule pt-[8px] text-[11px] leading-[1.6] ${bodyDirty() ? "text-ink" : "text-ink-dim"}`}
                     rows={4}
                     value={bodyVal()}
                     spellcheck={false}
                     readOnly={!canMutate}
                     placeholder={d().draft.bodyPending ? "drafting from the forest…" : "the PR body — your words on top, the forest furniture below"}
                     aria-label="PR body"
-                    ref={(el) => createEffect(() => { bodyVal(); queueMicrotask(() => autoGrow(el)); })}
-                    onInput={(e) => { setDraft("prBody", e.currentTarget.value); autoGrow(e.currentTarget); }}
+                    onInput={(e) => setDraft("prBody", e.currentTarget.value)}
                     onKeyDown={(e) => escTo(e, bodyDirty(), () => setDraft("prBody", undefined))}
                   />
                   <div class="mt-[3px] flex items-baseline gap-[8px] text-[10px] text-ink-faint">
