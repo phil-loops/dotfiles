@@ -1,17 +1,10 @@
-# srv/checkout.py — move the user's primary checkout onto a branch + worktree prep.
+# srv/checkout.py — the primary checkout and worktree prep.
 #   GET  /head      the branch the main checkout currently points at (jump-to-checkout)
 #   POST /prepare   prefetch: build a branch's worktree in the background
-#   POST /checkout  move the main worktree onto a branch (frees another worktree on --force)
-#   POST /worktree  reveal a branch's worktree in Finder (materialise a scratch one if none)
-import glob
 import os
 import json
-import re
-import time
 
 from . import ctx
-
-_PRESENCE_DIR = os.path.expanduser("~/.claude/session-presence")
 
 # repo -> primary worktree path. A repo's PRIMARY worktree can't move while the server
 # lives, but `git worktree list` walks every linked tree to answer (~200ms at 227
@@ -35,60 +28,6 @@ def _active_main_wt():
     return ctx.MAIN_WT
 
 
-def _worktree_of(branch):   # path of the worktree currently holding `branch`, or ""
-    if not branch:
-        return ""
-    path = ""
-    for line in ctx.run(["git", "worktree", "list", "--porcelain"]).stdout.splitlines():
-        if line.startswith("worktree "):
-            path = line[len("worktree "):]
-        elif line == "branch refs/heads/" + branch:
-            return path
-    return ""
-
-
-def _dirty_count(wt):
-    r = ctx.run(["git", "-C", wt, "status", "--porcelain"])
-    if r.returncode != 0:
-        return -1   # unreadable tree reads as unsafe, never as clean
-    return len([ln for ln in r.stdout.splitlines() if ln.strip()])
-
-
-def _live_session_in(wt):
-    # A live Claude session whose cwd is this worktree still owns its checkout — detaching
-    # under it yanks the branch name out from under live work (the incident the 409 exists
-    # to prevent). Presence records are hook-written; a dead pid means the record is stale.
-    tgt = os.path.realpath(wt)
-    for f in glob.glob(os.path.join(_PRESENCE_DIR, "*.json")):
-        try:
-            with open(f) as fh:
-                d = json.load(fh)
-            if os.path.realpath(d.get("cwd") or "") != tgt:
-                continue
-            os.kill(int(d["pid"]), 0)
-        except (OSError, ValueError, KeyError, json.JSONDecodeError):
-            continue
-        return {
-            "pane": d.get("tmux_pane") or "",
-            "idleSeconds": max(0, int(time.time()) - int(d.get("last_active") or 0)),
-        }
-    return None
-
-
-def _overwrite_paths(msg):
-    """The blocking paths out of git's 'would be overwritten by checkout' refusal
-    (both the local-changes and untracked variants list them tab-indented)."""
-    files, take = [], False
-    for ln in (msg or "").splitlines():
-        if ln.endswith("would be overwritten by checkout:"):
-            take = True
-        elif take and ln.startswith(("\t", "    ")):
-            files.append(ln.strip())
-        else:
-            take = False
-    return files
-
-
 def head(req):
     req._send(200, json.dumps(
         {"branch": ctx.run(["git", "-C", _active_main_wt(), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()}))
@@ -98,91 +37,3 @@ def prepare(req, raw):
     d = json.loads(raw or "{}")
     ctx.fire([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", d.get("branch", "")], cwd=ctx.CWD)
     req._send(200, '{"ok":true}')
-
-
-def worktree(req, raw):
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    if not branch:
-        req._send(400, json.dumps({"ok": False, "err": "no branch"}))
-        return
-    # --path resolves the branch's real worktree, or materialises (and prints) a scratch one —
-    # so a watched/PR branch checked out nowhere still gets a tree to open. Synchronous.
-    r = ctx.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--path", branch])
-    path = (r.stdout or "").strip()
-    if r.returncode != 0 or not path:
-        req._send(500, json.dumps({"ok": False, "err": (r.stderr or "could not resolve a worktree").strip()}))
-        return
-    ctx.fire(["open", path])  # reveal in Finder (macOS)
-    req._send(200, json.dumps({"ok": True, "path": path}))
-
-
-def move(req, raw):
-    d = json.loads(raw or "{}")
-    branch = d.get("branch", "")
-    main_wt = _active_main_wt()
-    wt = _worktree_of(branch)
-    freed = ""
-    if wt and os.path.realpath(wt) != os.path.realpath(main_wt):
-        # git can't move the main tree onto a branch another worktree already holds.
-        # A LIVE session mid-work owns its checkout — force frees a dirty/held tree, but it must
-        # NEVER silently evict a live coding session (the incident that reaped a live worktree).
-        # This check sits ABOVE the force branch: only a deliberate evictLive overrides it.
-        session = _live_session_in(wt)
-        if session and not d.get("evictLive"):
-            req._send(409, json.dumps({
-                "ok": False, "err": "a live session is working in worktree at " + wt,
-                "worktree": wt, "dirty": max(_dirty_count(wt), 0),
-                "session": session, "liveBlocked": True,
-            }))
-            return
-        if not d.get("force"):
-            dirty = _dirty_count(wt)
-            if dirty != 0:
-                # tell the client where it lives AND why it's held, so the force-confirm is informed
-                req._send(409, json.dumps({
-                    "ok": False, "err": "already open in worktree at " + wt,
-                    "worktree": wt, "dirty": max(dirty, 0), "session": None,
-                }))
-                return
-            # provably safe — clean tree, no live session — so freeing it IS the checkout,
-            # not a decision worth a roundtrip. This was 1-in-4 checkouts (telemetry, 07-06+).
-            freed = wt
-        rd = ctx.run(["git", "-C", wt, "checkout", "--detach"])
-        if rd.returncode != 0:
-            req._send(500, json.dumps({"ok": False, "err": "could not free worktree: " + (rd.stderr or rd.stdout)}))
-            return
-    r = ctx.run(["git", "-C", main_wt, "checkout", branch])
-    if r.returncode == 0:
-        req._send(200, json.dumps({"ok": True, "worktree": main_wt, "out": r.stdout, "freed": freed}))
-        return
-    msg = (r.stderr or r.stdout or "checkout failed").strip()
-    files = _overwrite_paths(msg)
-    if files and d.get("dirt") in ("stash", "discard"):
-        # stash ONLY the blocking paths — other dirt provably doesn't block this checkout, and
-        # a whole-tree stash would sweep a concurrent session's unrelated WIP into it. Discard
-        # rides the same stash then drops it: the printed sha stays recoverable until gc.
-        st = ctx.run(["git", "-C", main_wt, "stash", "push", "-u",
-                      "-m", f"viewer: parked {len(files)} file(s) to check out {branch}", "--", *files])
-        if st.returncode != 0:
-            req._send(500, json.dumps({"ok": False, "err": "stash failed: " + (st.stderr or st.stdout).strip()}))
-            return
-        note = f"stashed {len(files)} blocking file(s) — git stash pop brings them back"
-        if d.get("dirt") == "discard":
-            dr = ctx.run(["git", "-C", main_wt, "stash", "drop"])
-            m = re.search(r"\(([0-9a-f]{7,40})\)", dr.stdout or "")
-            note = f"dropped {len(files)} blocking file(s)" + (f" — recover: git stash apply {m.group(1)}" if m else "")
-        r = ctx.run(["git", "-C", main_wt, "checkout", branch])
-        if r.returncode == 0:
-            req._send(200, json.dumps({"ok": True, "worktree": main_wt, "out": r.stdout, "freed": freed, "dirtNote": note}))
-            return
-        msg = (r.stderr or r.stdout or "checkout failed").strip()
-        files = _overwrite_paths(msg)
-    if files:
-        # dirty MAIN tree — the client renders the blocking paths with stash/discard retries.
-        # Deliberately not the `worktree` key: that reads as "held in another tree, free it".
-        req._send(200, json.dumps({"ok": False, "err": msg, "dirt": files, "dirtWt": main_wt}))
-        return
-    # no `worktree` on failure: the client reads that key as "held in another tree, offer to
-    # free it", so echoing main_wt here masks a dirty-tree refusal as a held state (silent loop).
-    req._send(500, json.dumps({"ok": False, "err": msg}))

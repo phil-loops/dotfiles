@@ -17,10 +17,10 @@ const API = `http://127.0.0.1:${PORT}`;
 const ROUTES = [
   "/model", "/node", "/projects", "/prs", "/myprs", "/commits", "/file", "/sig",
   "/head", "/sync", "/syncs", "/events", "/restack-status",
-  "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/checkout", "/open",
+  "/bless", "/restack", "/restack-all", "/check-origin", "/prepare", "/open",
   "/chat", "/integrate", "/purpose", "/squash", "/prep", "/restack-resolve", "/restack-abort", "/heartbeat",
   "/preview", "/preview-kill", "/preview-restart", "/preview-reap", "/previews", "/preview-log",
-  "/ticket", "/story", "/focus", "/contract", "/ship", "/stage", "/merge-subjects",
+  "/ticket", "/story", "/focus", "/ship", "/stage", "/merge-subjects",
   "/plan-steps", "/plan-section", "/plan-template", "/plan-preview",
   "/commit-diff", "/commit-dirty", "/dirty-resolve", "/diverged-detail",
   "/forest-health", "/forest-branches", "/forest-purposes", "/gates-progress",

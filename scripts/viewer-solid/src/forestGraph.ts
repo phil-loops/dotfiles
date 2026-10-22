@@ -4,9 +4,8 @@ import type { SpineNode } from "./types";
 import { isGhostId } from "./forestLayout.ts";
 
 // Pure graph reads over the spine — the DAG questions the map asks before it draws anything:
-// who's a tip, what must land first, what does this drag down with it, and what the shape
-// becomes once a node contracts. Kept solid-free (and out of the component) so each one is
-// checkable in `node --test` against a hand-built list; ForestMap wraps them in memos.
+// who's a tip, what must land first, and what does this drag down with it. Kept solid-free
+// (and out of the component) so each one is checkable in `node --test` against a hand-built list; ForestMap wraps them in memos.
 
 export type Spine = { list: SpineNode[]; byId: Record<string, SpineNode> };
 
@@ -15,28 +14,6 @@ export const indexById = (list: SpineNode[]): Spine => {
   list.forEach((n) => (byId[n.id] = n));
   return { list, byId };
 };
-
-// Mirror a server-side contraction: the node goes, its children inherit its nearest surviving
-// ancestor, and any `requires` naming it loses that edge — the same rewire /contract performs.
-// depth re-derives from the new parent line: dropping a base promotes its children to roots,
-// and a root that still carries the old depth stops answering to `depth === 0`.
-export function contractNodes(list: SpineNode[], gone: ReadonlySet<string>): SpineNode[] {
-  if (!gone.size) return list;
-  const parentOf = new Map(list.map((n) => [n.id, n.parent]));
-  const heir = (p: string | undefined, guard = 0): string | undefined =>
-    p && gone.has(p) && guard < 64 ? heir(parentOf.get(p), guard + 1) : p;
-  const kept = list.filter((n) => !gone.has(n.id)).map((n) => ({
-    ...n,
-    parent: heir(n.parent),
-    ...(n.requires ? { requires: n.requires.filter((r) => !gone.has(r)) } : {}),
-  }));
-  const keptById = new Map(kept.map((n) => [n.id, n]));
-  const depthOf = (n: (typeof kept)[number], guard = 0): number => {
-    const p = n.parent ? keptById.get(n.parent) : undefined;
-    return p && guard < 64 ? depthOf(p, guard + 1) + 1 : 0;
-  };
-  return kept.map((n) => ({ ...n, depth: depthOf(n) }));
-}
 
 // heads: the TIP of each substack — a branch nothing else builds on (nobody's parent,
 // nobody's `requires`). These are the leaves you'd actually check out; everything else

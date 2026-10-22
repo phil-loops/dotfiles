@@ -19,7 +19,6 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, For, Show } from "solid-js";
 import { computeForestLayout, lumen, NODE_H, leafOf, isGhostId, nodeW } from "./forestLayout";
 import * as Graph from "./forestGraph.ts";
-import { contractionDone } from "./contractResult.ts";
 import { stationOf, type Station } from "./nodeStation";
 
 // Why the branch stands there — the map's badge carries the same reason the spine's chip does.
@@ -28,7 +27,7 @@ const STATION_WHY: Record<Station, string> = {
   review: "unblessed files left to read",
   ready: "one voiced commit, waiting on the push",
   shared: "every local commit is on origin — the team sees exactly this",
-  merged: "its work already landed on main (a ghost — drop & rewire)",
+  merged: "its work already landed on main (a ghost — the restack walk drops it)",
 };
 import { createQuery } from "@tanstack/solid-query";
 import { canMutate, provider } from "./provider";
@@ -98,22 +97,10 @@ const EDGE_STROKE: Record<string, string> = {
   unblessed: "stroke-ink-faint",
 };
 
+const GHOST_LABEL = "✦ merged ghost";
 const PILL_TEXT = "font-mono text-[11.5px] font-medium tracking-[0.02em] [text-anchor:middle]";
 // the here pill never re-pinned mono the way play did, so the ghost's display face bleeds in
 const HERE_TEXT = "font-display text-[13.5px] font-medium tracking-[0.02em] [text-anchor:middle]";
-
-// Contraction outcomes live at MODULE scope: per-mount state meant every navigation back to a
-// forest re-ran the auto-drop against cached health — re-dropping already-gone branches (200→404
-// pairs) and auto-retrying deterministic 409 refusals on each visit, 43% of /contract calls
-// failing in the 2026-08 telemetry window. Gone nodes stay gone and a parked refusal blocks the
-// auto-fire for the page's lifetime; a manual pill click still retries.
-const [contractGone, setContractGone] = createSignal<ReadonlySet<string>>(new Set());
-const [contractParked, setContractParked] = createSignal<Record<string, string>>({});
-// the two deterministic refusal families get a pill-sized name; the full err stays in the title
-const shortContractErr = (err: string): string =>
-  /unmerged/i.test(err) ? "unmerged work — no drop"
-  : /left standing|rebase|conflict/i.test(err) ? "rewire conflict"
-  : "drop failed";
 
 export function ForestMap(props: {
   spine: () => SpineNode[];
@@ -132,9 +119,6 @@ export function ForestMap(props: {
   fill?: boolean;
   onHoverNode?: (branch: string) => void;
   onLeaveNode?: () => void;
-  // the merged-ghost badge's contextual next step: drop this branch + rewire its children
-  // (POST /contract — server re-verifies merged-ness). Absent → badge is read-only.
-  onContract?: (branch: string) => Promise<{ status: number; ok?: boolean; err?: string }>;
 }) {
   const nhealth = (id: string) => props.health?.()?.[id];
   // landed = this node's CURRENT work is fully in main: merged PR AND contractable. A merged
@@ -184,38 +168,7 @@ export function ForestMap(props: {
     });
   const prOf = (id: string): BranchPR | undefined => props.prs?.()?.[id];
   const [hov, setHov] = createSignal<string | null>(null);
-  const [contracting, setContracting] = createSignal<string | null>(null);
-  // the merged-ghost next step, keyed off LANDED (merged + contractable), never merged alone
-  // — a merged PR with a follow-on commit is a live node, not a ghost, and gets no pill:
-  //   drop    — we can mutate → ⊘ drop & rewire (POST /contract)
-  //   merged  — read-only → passive ghost, no action
-  const ghostMode = (id: string): "drop" | "merged" | null => {
-    if (!landed(id)) return null;
-    return props.onContract ? "drop" : "merged";
-  };
-  const ghostLabel = (id: string): string => {
-    if (contracting() === id) return "⊘ dropping & rewiring…";
-    const err = contractParked()[id];
-    if (err) return `⊘ ${shortContractErr(err)} ↻`;
-    return ghostMode(id) === "drop" ? "⊘ drop & rewire →" : "✦ merged ghost";
-  };
   const pillW = (s: string): number => [...s].length * 6.9 + 18;
-  const fireContract = (id: string) => {
-    setContracting(id);
-    setContractParked(({ [id]: _, ...rest }) => rest);
-    Promise.resolve(props.onContract!(id))
-      // The branch already being gone IS the outcome contraction was asking for — reporting it as
-      // "⊘ drop failed" taught Phil to distrust the auto-drop (2026-07-21). Every other refusal
-      // (409 unmerged work, 500) still parks on the pill.
-      .then((r) => {
-        if (contractionDone(r)) setContractGone((s) => new Set(s).add(id));
-        else setContractParked((m) => ({ ...m, [id]: r.err || "contract failed" }));
-      })
-      // a throw (server bounced mid-request, non-JSON body) used to leave the pill back on its
-      // idle label with nothing said — the one failure that looks exactly like never having run
-      .catch((e: unknown) => setContractParked((m) => ({ ...m, [id]: (e as Error)?.message || "contract failed" })))
-      .finally(() => setContracting(null));
-  };
 
   // The ghost ✦ node's one action: integrate-preview. POST /integrate {project} octopus-merges
   // the project's leaves on main in an ephemeral ref (read-only, never pushed) — does the whole
@@ -365,7 +318,7 @@ export function ForestMap(props: {
     return "checks the whole feature out into a scratch worktree you can run and edit — refreshed on each open, your edits there are never clobbered; copies the cd command";
   };
 
-  const model = createMemo(() => Graph.indexById(Graph.contractNodes(props.spine(), contractGone())));
+  const model = createMemo(() => Graph.indexById(props.spine()));
 
   const heads = createMemo(() => Graph.headsOf(model().list));
   const upstreamOf = (id: string): Set<string> => Graph.upstreamOf(model().byId, id);
@@ -420,20 +373,6 @@ export function ForestMap(props: {
   };
 
   const layout = createMemo(() => computeForestLayout(model()));
-  // auto-contract (Phil, 2026-07-20): a merged, fully-contractable node has exactly one correct
-  // resolution, so fire the drop on sight instead of waiting for the pill click — narrower than
-  // ambient auto-rebase, which stays rejected. One node at a time; a failure parks on the pill
-  // (reason named, click to retry) and is never auto-retried — the parked map is module-scoped,
-  // so a remount can't re-fire what already refused.
-  const autoTried = new Set<string>();
-  createEffect(() => {
-    if (!props.onContract || contracting()) return;
-    const ghost = layout().list.find((n) =>
-      !autoTried.has(n.id) && !contractParked()[n.id] && ghostMode(n.id) === "drop");
-    if (!ghost) return;
-    autoTried.add(ghost.id);
-    fireContract(ghost.id);
-  });
   const litEdge = (from: string, to: string) => {
     const s = spot();
     return !!s && s.lit.has(from) && s.lit.has(to);
@@ -807,46 +746,17 @@ export function ForestMap(props: {
                         </text>
                       }
                     >
-                      <g
-                        class="fm-ghost-pill group/pill cursor-pointer"
-                        classList={{ drop: ghostMode(n.id) === "drop" }}
-                        transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (contracting() === n.id) return;
-                          if (ghostMode(n.id) === "drop") {
-                            fireContract(n.id);
-                          }
-                        }}
-                      >
-                        <title>
-                          {contractParked()[n.id]
-                            ? `${contractParked()[n.id]} — click to retry`
-                            : ghostMode(n.id) === "drop"
-                            ? "already merged AND fully contractable — drops this branch, rebases + rewires its children onto its parent (server re-verifies; ▸ ready does the whole forest)"
-                            : "merged into main (ghost)"}
-                        </title>
+                      <g class="fm-ghost-pill" transform={`translate(${w / 2}, ${NODE_H / 2 + 17})`}>
+                        <title>merged into main (ghost) — the restack walk drops it and rewires its children</title>
                         <rect
-                          class={`fill-vellum-night stroke-[1.2] ${
-                            ghostMode(n.id) === "drop"
-                              ? "stroke-ember group-hover/pill:fill-ember"
-                              : "stroke-rule"
-                          }`}
-                          x={-pillW(ghostLabel(n.id)) / 2}
+                          class="fill-vellum-night stroke-rule stroke-[1.2]"
+                          x={-pillW(GHOST_LABEL) / 2}
                           y={-11}
                           rx={9}
-                          width={pillW(ghostLabel(n.id))}
+                          width={pillW(GHOST_LABEL)}
                           height={22}
                         />
-                        <text
-                          class={`${PILL_TEXT} ${
-                            ghostMode(n.id) === "drop"
-                              ? "fill-ember group-hover/pill:fill-vellum-night"
-                              : "fill-ink-dim"
-                          }`}
-                          x={0}
-                          y={4}
-                        >{ghostLabel(n.id)}</text>
+                        <text class={`${PILL_TEXT} fill-ink-dim`} x={0} y={4}>{GHOST_LABEL}</text>
                       </g>
                     </Show>
                   </Show>

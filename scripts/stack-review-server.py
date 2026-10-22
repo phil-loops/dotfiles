@@ -530,10 +530,6 @@ class H(BaseHTTPRequestHandler):
             return picker.open_file(self, raw)
         if self.path == "/prepare":   # prefetch: build the branch's worktree in the background
             return checkout.prepare(self, raw)
-        if self.path == "/checkout":  # move the working tree onto this branch (git refuses if dirty)
-            return checkout.move(self, raw)
-        if self.path == "/worktree":  # reveal the branch's worktree in Finder (scratch one if none)
-            return checkout.worktree(self, raw)
         if self.path == "/preview":   # spin a side-port `next dev` for this branch (no touch to :3000)
             return preview.start(self, raw)
         if self.path == "/preview-integration":   # …for the ✦<project> ghost, via its playground worktree
@@ -552,8 +548,6 @@ class H(BaseHTTPRequestHandler):
             return preview.stack_up(self, raw)
         if self.path == "/sync":   # rebase an unpublished root branch onto fresh origin/main
             return sync.post_sync(self, raw)
-        if self.path == "/contract":   # drop an already-merged branch + rewire its children onto main
-            return sync.post_contract(self, raw)
         if self.path == "/pr-poke":   # merge-watcher nudge: fetch trunk + refresh PR state NOW
             return sync.pr_poke(self, raw)
         if self.path == "/fix-upstream":   # neutralize a footgun tracking ref (unset upstream)
