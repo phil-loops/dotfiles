@@ -55,7 +55,8 @@ if [[ ! -d $repo/.git ]]; then
   git -C "$repo" config user.email "sandbox@example.com"
   git -C "$repo" remote add origin "$dir/origin.git"
   printf '# sandbox\n' > "$repo/README.md"
-  git -C "$repo" add README.md && git -C "$repo" commit -q -m "chore: start the sandbox"
+  printf 'node_modules\n.gen\n' > "$repo/.gitignore"   # stack-open links both into its scratch trees
+  git -C "$repo" add README.md .gitignore && git -C "$repo" commit -q -m "chore: start the sandbox"
   # A small typed module graph threaded through the demo forest — an interface with JSDoc, an
   # import chain across files, a tsconfig — so the branch page's hover / go-to-definition
   # (srv/lsp.py) has real types to show. Each file rides an existing commit; the shape is unchanged.
@@ -139,6 +140,22 @@ export function affordableWidgets(max: number, limit = DEFAULT_LIMIT): Widget[] 
 export const cardLabel = (w: Widget) => "💡 " + w.name;
 TS
   commit "refactor: extract the widget card"
+  put src/queries/widgets.ts <<'TS'
+import type { Widget } from "../widget";
+
+/** What the dashboard says when nothing fits the budget. */
+export const EMPTY_LABEL = "no widgets";
+
+const WIDGETS: Widget[] = [
+  { id: "w1", name: "Lamp", price: 1200 },
+  { id: "w2", name: "Desk", price: 18900 },
+];
+
+/** Every widget, cheapest first. */
+export function listWidgets(): Widget[] {
+  return [...WIDGETS].sort((a, b) => a.price - b.price);
+}
+TS
   commit "fix: keep the empty state when there are no widgets"
   branch demo/docs main demo "documents the widget api"
   commit "docs(loo-9999): document the widget api"
