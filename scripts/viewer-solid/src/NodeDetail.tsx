@@ -542,6 +542,8 @@ export function NodeDetail() {
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧B</span></dt><dd class={KBD_DD}>bless file &amp; advance</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>⇧U</span></dt><dd class={KBD_DD}>unbless file</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>o</span></dt><dd class={KBD_DD}>open hovered line in nvim</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>K</span><span class={KBD_K}>space k</span></dt><dd class={KBD_DD}>type under the pointer — starts the branch's tsgo on first ask</dd></div>
+              <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>g d</span></dt><dd class={KBD_DD}>go to definition — in the diff, else a side pane (o opens it in Helix, esc closes)</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>m</span><span class={KBD_K}>esc</span></dt><dd class={KBD_DD}>forest map — arrows move, ↵ opens</dd></div>
               <div class="contents"><dt class={KBD_DT}><span class={KBD_K}>?</span></dt><dd class={KBD_DD}>this help</dd></div>
             </dl>
