@@ -530,7 +530,11 @@ class Server:
         if "id" in msg:   # a server→client request (configuration, watcher registration, progress): answer every one
             result = None
             if method == "workspace/configuration":
-                result = [None] * len((msg.get("params") or {}).get("items") or [])
+                # Automatic Type Acquisition off: it installs @types into ~/Library/Caches/typescript
+                # in the background, so a loose file's types depended on whether it had finished
+                # (a phishtank test resolved node:assert/strict only after it had, 2026-10-23)
+                result = [{"tsserver": {"automaticTypeAcquisition": {"enabled": False}}} if i.get("section") == "js/ts" else None
+                          for i in (msg.get("params") or {}).get("items") or []]
             try:
                 self._send({"jsonrpc": "2.0", "id": msg["id"], "result": result})
             except (BrokenPipeError, OSError, ValueError):
@@ -596,8 +600,7 @@ class Server:
         """One answer, canonical: what a fresh tsgo gives for this file at this commit, whatever
         was asked before. Two things in tsgo would otherwise leak earlier asks into it:
           - a file no tsconfig includes joins the session's ONE inferred program, whose roots are
-            every such file open — another commit's test file pulled @types/node globals into
-            a phishtank test's hover (2026-10-22). So a loose file is asked alone.
+            every such file open. So a loose file is asked alone (and ATA is off: see _on_message).
           - hover text depends on the checker's history: a union's synthesized `?: undefined`
             members print in the order types were created (cold: domain-last; after six other
             hovers in the file: domain-first). An identical-content didChange makes tsgo clone the
