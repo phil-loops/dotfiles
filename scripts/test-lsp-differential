@@ -342,7 +342,9 @@ def main():
         base = diff_base(repo, b)
         c = candidates(repo, base, tip)
         seed = int(hashlib.md5(b.encode()).hexdigest()[:8], 16)
-        plan[b] = {"tip": tip, "base": base, "new": pick(c["new"], per_side, seed), "old": pick(c["old"], per_side, seed + 1)}
+        old = pick(c["old"], per_side, seed + 1)
+        # a branch of new files has no old half: its new side takes the old side's share
+        plan[b] = {"tip": tip, "base": base, "new": pick(c["new"], 2 * per_side - len(old), seed), "old": old}
         print(f"{b}: tip {tip[:9]} base {base[:9]} — {len(plan[b]['new'])} new + {len(plan[b]['old'])} old positions")
     need = {}
     for b, p in plan.items():
