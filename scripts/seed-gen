@@ -94,51 +94,74 @@ exploded(){ # $1 = tree: real node_modules whose @loops resolves tree-locally
     && [[ "$(realpath_of "$1/node_modules/@loops/prisma")" == "$(realpath_of "$1/packages/prisma")" ]]
 }
 
+# The names an explode reads: the home's entries, the view's own, and the tree's packages. The
+# loops below only prune links gone dangling and add names missing, so while all three listings
+# are unchanged they change nothing — and they cost 3-20 s of bash over ~2,000 entries per sync on a
+# loaded box (2026-10-22), which every --sync of an exploded tree used to pay.
+view_stamp(){ # $1 = tree, $2 = home node_modules
+  { echo "$2"; ls -A "$2"; for s in "$2"/@*/; do echo "$s"; ls -A "$s"; done
+    ls -A "$1/node_modules" | grep -v '^\.seed-gen-'
+    for s in "$1"/node_modules/@*/; do echo "${s#"$1"}"; ls -A "$s"; done
+    ls -d "$1"/packages/*/package.json 2>/dev/null; } 2>/dev/null | md5 -q
+}
+
 explode_node_modules(){ # $1 = tree, $2 = its deps home; idempotent: prunes dead links, tops up new ones
   local nm="$1/node_modules" src_nm="$2/node_modules"
   [[ -d "$src_nm" ]] || return 1
   [[ -L "$nm" ]] && rm "$nm"
   mkdir -p "$nm/@loops"
-  local e b s sb
+  local b
+  if [[ "$(cat "$nm/.seed-gen-home" 2>/dev/null)" == "$src_nm" && -f "$nm/.seed-gen-view" ]] \
+     && [[ "$(view_stamp "$1" "$src_nm")" == "$(cat "$nm/.seed-gen-view")" ]]; then
+    return 0
+  fi
   # A view built from another home (the donor before this branch's lockfile moved, a retired
   # repoint) is rebuilt whole: links, the tree-local prisma copies generated against the old
   # packages, and tsc's incremental cache, which keys on a link and not on where it points.
+  local rebuild=0
   if [[ "$(cat "$nm/.seed-gen-home" 2>/dev/null)" != "$src_nm" ]]; then
-    ( shopt -s dotglob nullglob
-      for e in "$nm"/* "$nm"/@*/*; do
-        [[ -L "$e" && "$e" != "$nm"/@loops/* ]] && rm "$e"
-      done )
-    rm -rf "$nm/.prisma" "$nm/@prisma" "$nm/.seed-gen-home"
+    rebuild=1
+    rm -rf "$nm/.prisma" "$nm/@prisma" "$nm/.seed-gen-home" "$nm/.seed-gen-view"
     rm -f "$1"/typescript/*.tsbuildinfo
   fi
-  # Prune BEFORE topping up: a package the donor retired leaves a link resolving to nothing,
-  # which is worse than an absent one (a resolver finds it, then fails), and the top-up below
-  # skips any name that already exists — dangling included — so a stale link would never heal.
-  # Only symlinks are considered: seed_prisma_client turns .prisma/@prisma into real copies.
-  ( shopt -s dotglob nullglob
-    for e in "$nm"/* "$nm"/@*/*; do
-      [[ -L "$e" && ! -e "$e" ]] && rm "$e"
-    done )
-  ( shopt -s dotglob nullglob
-    for e in "$src_nm"/*; do
-      b=$(basename "$e")
-      [[ "$b" == "@loops" ]] && continue
-      # scope dirs get a REAL dir with per-package links, never a whole-scope symlink:
-      # npm reify in the tree resolves paths THROUGH a scope symlink and deletes/stages
-      # inside the DONOR (gutted @esbuild/@typescript + stranded .staging dirs, 2026-08-24).
-      # A per-package symlink caps the blast radius — rm unlinks it, the donor survives.
-      if [[ "$b" == @* && -d "$e" && ! -L "$e" ]]; then
-        # convert a legacy whole-scope symlink left by an older explode
-        [[ -L "$nm/$b" ]] && rm "$nm/$b"
-        mkdir -p "$nm/$b"
-        for s in "$e"/*; do
-          sb=$(basename "$s")
-          [[ -e "$nm/$b/$sb" || -L "$nm/$b/$sb" ]] || ln -sh "$s" "$nm/$b/$sb"
-        done
+  # One process for the ~2,000 entries: a fork per `ln`/`rm` cost 10-15 s per rebuilt view
+  # (2026-10-22). In order: on a rebuild, drop every link but @loops/*; prune links gone
+  # dangling — BEFORE topping up, since a package the donor retired leaves a link resolving to
+  # nothing (worse than an absent one: a resolver finds it, then fails) and the top-up skips any
+  # name that exists, dangling included; then link each missing name. Only symlinks are touched:
+  # seed_prisma_client turns .prisma/@prisma into real copies. Scope dirs get a REAL dir of
+  # per-package links, never a whole-scope symlink: npm reify in the tree resolves paths THROUGH
+  # a scope symlink and deletes/stages inside the DONOR (gutted @esbuild/@typescript + stranded
+  # .staging dirs, 2026-08-24) — a per-package link caps the blast radius.
+  python3 - "$nm" "$src_nm" "$rebuild" <<'PYEOF' || return 1
+import os, sys
+nm, src, rebuild = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+def entries(d):
+    out = []
+    for e in sorted(os.listdir(d)):
+        p = os.path.join(d, e)
+        out.append(p)
+        if e.startswith("@") and os.path.isdir(p) and not os.path.islink(p):
+            out.extend(os.path.join(p, s) for s in sorted(os.listdir(p)))
+    return out
+for p in entries(nm):
+    if os.path.islink(p) and ((rebuild and not p.startswith(os.path.join(nm, "@loops") + "/")) or not os.path.exists(p)):
+        os.unlink(p)
+for b in sorted(os.listdir(src)):
+    if b == "@loops":
         continue
-      fi
-      [[ -e "$nm/$b" || -L "$nm/$b" ]] || ln -sh "$e" "$nm/$b"
-    done )
+    e, dest = os.path.join(src, b), os.path.join(nm, b)
+    if b.startswith("@") and os.path.isdir(e) and not os.path.islink(e):
+        if os.path.islink(dest):        # a legacy whole-scope symlink from an older explode
+            os.unlink(dest)
+        os.makedirs(dest, exist_ok=True)
+        for sb in sorted(os.listdir(e)):
+            if not os.path.lexists(os.path.join(dest, sb)):
+                os.symlink(os.path.join(e, sb), os.path.join(dest, sb))
+        continue
+    if not os.path.lexists(dest):
+        os.symlink(e, dest)
+PYEOF
   local p
   # -h + the -L guard: a dangling @loops link passes ! -e, and plain ln descends into a
   # symlinked-dir destination — minting a packages/<p>/<p> self-link (2026-08-04 push block)
@@ -149,6 +172,7 @@ explode_node_modules(){ # $1 = tree, $2 = its deps home; idempotent: prunes dead
       && ln -sh "../../packages/$b" "$nm/@loops/$b"
   done
   echo "$src_nm" > "$nm/.seed-gen-home"
+  view_stamp "$1" "$src_nm" > "$nm/.seed-gen-view"
   return 0
 }
 
