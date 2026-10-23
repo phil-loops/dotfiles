@@ -1,0 +1,477 @@
+#!/usr/bin/env python3
+"""test-lsp-differential — the viewer type service (srv/lsp.py) against fresh cold references.
+
+For each branch: positions on both halves of its diff (identifiers on added/removed/context lines,
+import names and module specifiers, #trpc imports, calls, members). The service answers them
+after a sequence of incremental tree moves in several orders (forward, reverse, back-and-forth,
+shuffled), old and new sides interleaved through its one tsgo. Every answer must be
+byte-identical to a reference: a brand-new tsgo started cold on a fresh worktree at that commit,
+fully healed by seed-gen --sync. The one normalization: each tree's absolute root → <ROOT>.
+The generated tRPC types (.gen/trpc-types) are compared too — as each file's sorted lines (a
+map: minus its `mappings`), because TS7's declaration emit is itself nondeterministic: two
+builds of one commit in one tree differ in the order of synthesized `?: undefined` members
+(4-7 of ~2,600 files, 2026-10-22; --singleThreaded and stableTypeOrdering don't fix it).
+An answer mismatch whose lines are only reordered is reported as "order-only" — still a
+mismatch against the byte bar, explained by that emit order rather than by the service.
+
+  test-lsp-differential [--fast] [--repo DIR] [--work DIR] [--branches a,b,…] [--per-side N]
+                        [--orders forward,reverse,zigzag,shuffle] [--trees 1|2] [--refs-only] [--json OUT]
+
+--trees N sizes the service's tree pool (default 4); --trees 1 measures the time-shared
+alternative, one tree flipped between tip and base.
+
+--fast: 5 branches, 10 positions a side, forward+zigzag, references reused from --work's cache.
+Read-only toward branches: every tree is the test's own detached worktree, removed at the end
+(the service's trees live in --work/state and are removed too unless --keep).
+Memory: one tsgo at a time — all references first, then the service; waits while
+kern.memorystatus_level < 35. Kills only process groups it spawned.
+"""
+import argparse
+import atexit
+import hashlib
+import json
+import os
+import random
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+SCRIPTS = os.path.dirname(os.path.realpath(__file__))
+DEFAULT_BRANCHES = [
+    # record-every-domain-disable (14 behind main): siblings, one changes a tRPC router
+    "add-a-recorded-domain-reenable", "record-team-domain-disables", "reenable-domains-through-the-model",
+    "remove-set-disabled-by-team-id",
+    # readings-shadow (184 behind): small siblings + a packages/ change
+    "readings-shadow/let-a-pipeline-build-its-user-prompt", "readings-shadow/pass-the-judged-text-to-decide",
+    "readings-shadow/add-observations-to-eval-results",
+    # safety-v0: a lockfile change between base and tip
+    "safety-v0/inject-the-safety-checks-collaborators", "safety-v0/act-on-a-safety-decision",
+    # phishtank-facets: lockfile + packages
+    "phishtank-facets/add-a-registrable-domain-helper", "phishtank-facets/add-the-sender-display-facet",
+    # capability-grants (261 behind): a prisma schema change
+    "capability-grants/add-can", "capability-grants/toggle-member-capability",
+    # mjml-zip-bounds / url-safety (316 behind)
+    "mjml-zip-bounds/bound-direct-image-uploads", "fix/encode-url-values",
+    # oauth (397 behind), content-fingerprints (lockfile), server-boundary (466 moved files)
+    "oauth/use-connect-flow-for-polar", "content-fingerprints/add-the-fingerprint-report-queries",
+    "move-db-and-prisma-under-lib-server",
+]
+FAST_BRANCHES = ["add-a-recorded-domain-reenable", "reenable-domains-through-the-model",
+                 "record-team-domain-disables", "readings-shadow/pass-the-judged-text-to-decide",
+                 "capability-grants/add-can"]
+KEYWORDS = set("""abstract any as async await boolean break case catch class const continue debugger declare
+default delete do else enum export extends false finally for from function get if implements import in
+infer instanceof interface is keyof let module namespace never new null number object of package private
+protected public readonly return satisfies set static string super switch symbol this throw true try type
+typeof undefined unique unknown var void while with yield""".split())
+IDENT = re.compile(r"[A-Za-z_$][\w$]*")
+EXTS = (".ts", ".tsx", ".mts", ".cts")
+METHODS = ("textDocument/hover", "textDocument/definition")
+MEM_MIN = 35
+
+
+def git(repo, *a, check=True):
+    r = subprocess.run(["git", "-C", repo, "-c", "core.hooksPath=/dev/null", *a], capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError(f"git {' '.join(a)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def mem_level():
+    r = subprocess.run(["sysctl", "-n", "kern.memorystatus_level"], capture_output=True, text=True)
+    return int(r.stdout.strip() or 0)
+
+
+def wait_for_memory(what):
+    waited = 0
+    while (lvl := mem_level()) < MEM_MIN:
+        if waited == 0:
+            print(f"  memory level {lvl} < {MEM_MIN} — waiting before {what}", flush=True)
+        if waited > 900:
+            raise SystemExit(f"memory stayed below {MEM_MIN} for 15 minutes — giving up")
+        time.sleep(10)
+        waited += 10
+
+
+def utf16_len(s):
+    return len(s.encode("utf-16-le")) // 2
+
+
+# ── positions ────────────────────────────────────────────────────────
+
+def diff_base(repo, branch):
+    """The old side /node shows by default: merge-base(parent — origin/main for a root, branch)."""
+    parent = git(repo, "config", f"branch.{branch}.stack-parent", check=False).strip() or "main"
+    if parent == "main" and git(repo, "rev-parse", "--verify", "-q", "origin/main", check=False).strip():
+        parent = "origin/main"
+    if not git(repo, "rev-parse", "--verify", "-q", parent, check=False).strip():
+        parent = "origin/main"
+    return git(repo, "merge-base", parent, branch).strip()
+
+
+def candidates(repo, base, tip):
+    """{side: [(category, rel, line1, utf16 char, token)]} from the diff's hunks."""
+    out = {"new": [], "old": []}
+    patch = git(repo, "diff", "-U3", "--no-color", "--no-renames", base, tip, "--", *[f"*{e}" for e in EXTS])
+    rel_old = rel_new = None
+    o = n = 0
+    for ln in patch.splitlines():
+        if ln.startswith("--- "):
+            rel_old = ln[6:] if ln.startswith("--- a/") else None
+            continue
+        if ln.startswith("+++ "):
+            rel_new = ln[6:] if ln.startswith("+++ b/") else None
+            continue
+        m = re.match(r"@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", ln)
+        if m:
+            o, n = int(m.group(1)), int(m.group(2))
+            continue
+        if not ln or ln[0] not in " +-":
+            continue
+        tag, text = ln[0], ln[1:]
+        sides = {" ": [("old", rel_old, o), ("new", rel_new, n)], "+": [("new", rel_new, n)], "-": [("old", rel_old, o)]}[tag]
+        for side, rel, num in sides:
+            if rel and rel.endswith(EXTS):
+                out[side].extend(tokens(rel, num, text, changed=tag != " "))
+        if tag in " -":
+            o += 1
+        if tag in " +":
+            n += 1
+    return out
+
+
+def tokens(rel, line, text, changed):
+    s = text.strip()
+    if not s or s.startswith(("//", "*", "/*")):
+        return []
+    res = []
+    is_import = re.match(r"\s*(import|export)\b.*\bfrom\b", text) or re.match(r"\s*import\s+['\"]", text)
+    if is_import:
+        m = re.search(r"from\s+(['\"])([^'\"]+)\1", text) or re.search(r"import\s+(['\"])([^'\"]+)\1", text)
+        if m:
+            cat = "trpc-import" if m.group(2).startswith("#trpc") else ("pkg-spec" if not m.group(2).startswith((".", "#", "@/")) else "import-spec")
+            res.append((cat, rel, line, utf16_len(text[: m.start(2) + 1]), m.group(2)))
+    for m in IDENT.finditer(text):
+        tok = m.group(0)
+        if tok in KEYWORDS or len(tok) < 2:
+            continue
+        before, after = text[: m.start()], text[m.end():]
+        if before.count('"') % 2 or before.count("'") % 2 or before.count("`") % 2:
+            continue
+        if is_import:
+            cat = "import-name"
+        elif before.endswith("."):
+            cat = "member"
+        elif after.lstrip().startswith("("):
+            cat = "call"
+        elif before.rstrip().endswith(":") or re.match(r"\s*[<>|&,=]", after) and tok[0].isupper():
+            cat = "type"
+        else:
+            cat = "changed-ident" if changed else "context-ident"
+        res.append((cat, rel, line, utf16_len(before), tok))
+    return res
+
+
+def pick(cands, n, seed):
+    """Up to n positions, round-robin across categories, spread across files, deterministic."""
+    rng = random.Random(seed)
+    by = {}
+    for c in cands:
+        by.setdefault(c[0], []).append(c)
+    for v in by.values():
+        rng.shuffle(v)
+    order = ["trpc-import", "import-name", "pkg-spec", "import-spec", "member", "call", "type", "changed-ident", "context-ident"]
+    seen, out = set(), []
+    while len(out) < n and any(by.get(k) for k in order):
+        for k in order:
+            if by.get(k) and len(out) < n:
+                c = by[k].pop()
+                key = c[1:4]
+                if key not in seen:
+                    seen.add(key)
+                    out.append({"cat": c[0], "path": c[1], "line": c[2], "character": c[3], "token": c[4]})
+    return out
+
+
+# ── references ───────────────────────────────────────────────────────
+
+def norm(obj, root):
+    return json.dumps(obj, sort_keys=True).replace(root, "<ROOT>")
+
+
+def gen_canon(tree):
+    import hashlib as h
+    out = os.path.join(tree, ".gen", "trpc-types")
+    if not os.path.isdir(out):
+        return ""
+    d = h.sha256()
+    for dp, _dns, fns in sorted(os.walk(out)):
+        for f in sorted(fns):
+            p = os.path.join(dp, f)
+            d.update(os.path.relpath(p, out).encode() + b"\0")
+            raw = open(p, "rb").read()
+            if f.endswith(".map"):
+                try:
+                    j = json.loads(raw)
+                    j.pop("mappings", None)
+                    raw = json.dumps(j, sort_keys=True).encode()
+                except ValueError:
+                    pass
+            else:
+                raw = b"\n".join(sorted(raw.split(b"\n")))
+            d.update(raw + b"\0")
+    return d.hexdigest()
+
+
+def order_only(a, b):
+    return sorted(a.replace("\\n", "\n").split("\n")) == sorted(b.replace("\\n", "\n").split("\n"))
+
+
+def tsgo_footprint_mb(server):
+    pids = sorted(server.pids(), key=lambda p: -p[1])
+    if not pids:
+        return None
+    r = subprocess.run(["footprint", "-p", str(pids[0][0]), "-f", "bytes"], capture_output=True, text=True)
+    m = re.search(r"Footprint:\s*(\d+)\s*B", r.stdout)
+    return round(int(m.group(1)) / 2**20) if m else None
+
+
+class Peak:
+    """Samples the tsgo process group's RSS every 0.5s: the peak between resets."""
+
+    def __init__(self):
+        self.server, self.peak, self._stop = None, 0, False
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self):
+        while not self._stop:
+            s = self.server
+            if s and s.alive():
+                try:
+                    self.peak = max(self.peak, s.rss_mb() or 0)
+                except Exception:
+                    pass
+            time.sleep(0.5)
+
+    def take(self):
+        p, self.peak = self.peak, 0
+        return p
+
+
+def build_reference(lsp, repo, sha, positions, work, peak):
+    tree = os.path.join(work, "ref-tree")
+    if os.path.lexists(tree):
+        git(repo, "worktree", "remove", "--force", tree, check=False)
+        shutil.rmtree(tree, ignore_errors=True)
+    git(repo, "worktree", "prune")
+    t0 = time.time()
+    git(repo, "worktree", "add", "--detach", tree, sha)
+    tree = os.path.realpath(tree)
+    os.makedirs(os.path.join(tree, "node_modules"))
+    t1 = time.time()
+    r = subprocess.run([os.path.join(SCRIPTS, "seed-gen"), "--sync", tree], capture_output=True, text=True, timeout=1800)
+    t2 = time.time()
+    gen_key = gen_canon(tree)
+    wait_for_memory("a reference tsgo")
+    server = lsp.Server(tree, pidfile=False)
+    peak.server = server
+    answers, first = {}, None
+    try:
+        for p in positions:
+            full = os.path.join(tree, p["path"])
+            for m in METHODS:
+                pend = server.ask(m, full, p["line"] - 1, p["character"])
+                if not pend.event.wait(600):
+                    raise RuntimeError("reference tsgo didn't answer in 600s")
+                if first is None:
+                    first = time.time() - t2
+                answers[f"{m} {p['path']}:{p['line']}:{p['character']}"] = \
+                    norm({"error": pend.error} if pend.error else pend.result, tree)
+        rss = tsgo_footprint_mb(server)
+    finally:
+        server.kill()
+        peak.server = None
+    git(repo, "worktree", "remove", "--force", tree, check=False)
+    shutil.rmtree(tree, ignore_errors=True)
+    return {"answers": answers, "genCanon": gen_key, "seedgenRc": r.returncode,
+            "timing": {"worktree": round(t1 - t0, 2), "gen": round(t2 - t1, 2), "tsgoFirstAnswer": round(first or 0, 2)},
+            "footprintMB": rss, "peakRssMB": peak.take()}
+
+
+# ── main ─────────────────────────────────────────────────────────────
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo", default=os.path.expanduser("~/coding/loops"))
+    ap.add_argument("--work", default=os.path.join(os.environ.get("TMPDIR", "/tmp"), "test-lsp-differential"))
+    ap.add_argument("--branches")
+    ap.add_argument("--per-side", type=int)
+    ap.add_argument("--orders")
+    ap.add_argument("--fast", action="store_true")
+    ap.add_argument("--refs-only", action="store_true")
+    ap.add_argument("--fresh-refs", action="store_true", help="rebuild cached references")
+    ap.add_argument("--keep", action="store_true", help="keep the service's trees")
+    ap.add_argument("--trees", default="4")
+    ap.add_argument("--json")
+    a = ap.parse_args()
+    repo = os.path.realpath(a.repo)
+    work = os.path.realpath(os.makedirs(a.work, exist_ok=True) or a.work)
+    branches = a.branches.split(",") if a.branches else (FAST_BRANCHES if a.fast else DEFAULT_BRANCHES)
+    per_side = a.per_side or (10 if a.fast else 16)
+    orders = (a.orders or ("forward,zigzag" if a.fast else "forward,reverse,zigzag,shuffle")).split(",")
+
+    state = os.path.join(work, "state")
+    if not a.keep and os.path.isdir(state):
+        shutil.rmtree(state)
+    os.environ["STACK_LSP_STATE_DIR"] = state
+    os.environ["STACK_LSP_ANSWER_CACHE"] = "0"
+    os.environ["STACK_LSP_TREES"] = a.trees
+    os.makedirs(state, exist_ok=True)
+    sys.path.insert(0, SCRIPTS)
+    from srv import ctx, lsp
+    ctx.SCRIPTS = SCRIPTS
+    ctx.log = lambda line: None
+
+    # positions
+    plan = {}
+    for b in branches:
+        tip = git(repo, "rev-parse", f"refs/heads/{b}").strip()
+        base = diff_base(repo, b)
+        c = candidates(repo, base, tip)
+        seed = int(hashlib.md5(b.encode()).hexdigest()[:8], 16)
+        plan[b] = {"tip": tip, "base": base, "new": pick(c["new"], per_side, seed), "old": pick(c["old"], per_side, seed + 1)}
+        print(f"{b}: tip {tip[:9]} base {base[:9]} — {len(plan[b]['new'])} new + {len(plan[b]['old'])} old positions")
+    need = {}
+    for b, p in plan.items():
+        need.setdefault(p["tip"], []).extend(p["new"])
+        need.setdefault(p["base"], []).extend(p["old"])
+    for sha in need:
+        uniq = {(q["path"], q["line"], q["character"]): q for q in need[sha]}
+        need[sha] = sorted(uniq.values(), key=lambda q: (q["path"], q["line"], q["character"]))
+
+    peak = Peak()
+    refdir = os.path.join(work, "refs")
+    os.makedirs(refdir, exist_ok=True)
+    refs = {}
+    print(f"\n== references: {len(need)} commits (fresh worktree + seed-gen --sync + cold tsgo each)")
+    for i, (sha, pos) in enumerate(need.items(), 1):
+        cache = os.path.join(refdir, sha + ".json")
+        cached = None if a.fresh_refs else (json.load(open(cache)) if os.path.exists(cache) else None)
+        wanted = {f"{m} {p['path']}:{p['line']}:{p['character']}" for p in pos for m in METHODS}
+        if cached and wanted <= set(cached["answers"]):
+            refs[sha] = cached
+            continue
+        t = time.time()
+        refs[sha] = build_reference(lsp, repo, sha, pos, work, peak)
+        json.dump(refs[sha], open(cache, "w"))
+        tm = refs[sha]["timing"]
+        print(f"  [{i}/{len(need)}] {sha[:9]}: worktree {tm['worktree']}s gen {tm['gen']}s first answer {tm['tsgoFirstAnswer']}s "
+              f"footprint {refs[sha]['footprintMB']}MB peak rss {refs[sha]['peakRssMB']}MB ({time.time() - t:.0f}s)", flush=True)
+    if a.refs_only:
+        return 0
+
+    # service
+    def visits(order):
+        if order == "forward":
+            return list(branches)
+        if order == "reverse":
+            return list(reversed(branches))
+        if order == "zigzag":   # back and forth: A B A C B D C …
+            out = []
+            for i, b in enumerate(branches):
+                out.append(b)
+                if i >= 1:
+                    out.append(branches[i - 1])
+            return out
+        if order == "shuffle":
+            v = list(branches) * 2
+            random.Random(7).shuffle(v)
+            return v
+        raise SystemExit(f"unknown order {order}")
+
+    e = lsp._engine
+    atexit.register(lambda: e.stop("test exit"))
+    report = {"visits": [], "mismatches": [], "gen_mismatches": []}
+    total = 0
+    print(f"\n== service: orders {', '.join(orders)} (answer cache off)")
+    for order in orders:
+        for b in visits(order):
+            p = plan[b]
+            asks = []
+            for i in range(max(len(p["new"]), len(p["old"]))):   # interleave the halves through one tsgo
+                for side in ("new", "old"):
+                    if i < len(p[side]):
+                        asks.append((side, p[side][i]))
+            row = {"order": order, "branch": b, "moves": {}, "first": None, "n": 0, "bad": 0, "prepare": {}}
+            # the page-open prefetch, then K: moves are timed apart from the answers
+            for side, sha in (("new", p["tip"]), ("old", p["base"])):
+                tp = time.time()
+                e.prepare(repo, side, sha)
+                row["prepare"][side] = round(time.time() - tp, 2)
+                if e.last_move.get(side, {}).get("sha") == sha:
+                    row["moves"][side] = dict(e.last_move[side])
+            t0 = time.time()
+            for k, (side, q) in enumerate(asks):
+                sha = p["tip"] if side == "new" else p["base"]
+                for m in METHODS:
+                    if e.server is None or not e.server.alive():
+                        wait_for_memory("the service tsgo")
+                    ta = time.time()
+                    try:
+                        res, root = e.answer(repo, side, sha, m, q["path"], q["line"], q["character"])
+                        got = norm(res, root)
+                    except RuntimeError as ex:
+                        got = json.dumps({"error": str(ex)})
+                    peak.server = e.server
+                    if row["first"] is None:
+                        row["first"] = round(time.time() - t0, 2)
+                        row["firstAsk"] = round(time.time() - ta, 2)
+                    if side == "old" and "firstOld" not in row:
+                        row["firstOld"] = round(time.time() - ta, 2)
+                    key = f"{m} {q['path']}:{q['line']}:{q['character']}"
+                    want = refs[sha]["answers"][key]
+                    row["n"] += 1
+                    total += 1
+                    if got != want:
+                        row["bad"] += 1
+                        report["mismatches"].append({"order": order, "branch": b, "side": side, "sha": sha, "ask": key,
+                                                     "orderOnly": order_only(got, want),
+                                                     "cat": q["cat"], "token": q["token"], "got": got[:600], "want": want[:600]})
+            for side, sha in (("new", p["tip"]), ("old", p["base"])):
+                t = e.tree(repo, side)
+                if t and t.sha == sha and refs[sha].get("genCanon"):
+                    if gen_canon(t.path) != refs[sha]["genCanon"]:
+                        report["gen_mismatches"].append({"order": order, "branch": b, "side": side, "sha": sha})
+            row["total"] = round(time.time() - t0, 2)
+            row["footprintMB"] = tsgo_footprint_mb(e.server) if e.server and e.server.alive() else None
+            row["peakRssMB"] = peak.take()
+            report["visits"].append(row)
+            mv = " ".join(f"{s}:{m.get('tree')}:{m.get('events')}ev{'/restart' if m.get('restart') else ''} "
+                          f"co {m.get('checkout', m.get('worktree', 0))}s gen {m.get('gen', 0)}s" for s, m in row["moves"].items())
+            print(f"  {order:8} {b[:52]:52} {row['n'] - row['bad']}/{row['n']} identical · prepare {row['prepare']['new']}s+{row['prepare']['old']}s · first K {row['first']}s (old {row.get('firstOld')}s) · "
+                  f"{mv or 'no move'} · footprint {row['footprintMB']}MB peak {row['peakRssMB']}MB", flush=True)
+    e.stop("test done")
+    if not a.keep:
+        for r, pool in list(e.pools.items()):
+            for t in pool:
+                git(r, "worktree", "remove", "--force", t.path, check=False)
+        shutil.rmtree(state, ignore_errors=True)
+        git(repo, "worktree", "prune")
+    n_bad = len(report["mismatches"])
+    n_order = sum(1 for m in report["mismatches"] if m["orderOnly"])
+    print(f"\n{total - n_bad}/{total} answers byte-identical; {n_bad} mismatches ({n_order} order-only); "
+          f"{len(report['gen_mismatches'])} .gen mismatches (canonical)")
+    for mm in report["mismatches"][:20]:
+        print(f"  ✗ {mm['order']} {mm['branch']} {mm['side']} {mm['ask']} ({mm['cat']} {mm['token']})\n"
+              f"      got  {mm['got'][:300]}\n      want {mm['want'][:300]}")
+    if a.json:
+        json.dump({"plan": plan, "refs": {s: {k: v for k, v in r.items() if k != "answers"} for s, r in refs.items()}, **report},
+                  open(a.json, "w"), indent=1)
+    return 1 if n_bad or report["gen_mismatches"] else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
