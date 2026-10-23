@@ -311,6 +311,12 @@ export function NodeDetail() {
   });
   // reading is the default: a new branch opens with the words column closed
   createEffect(on(active, () => setWordsOpen(false), { defer: true }));
+  // warm the branch's review worktree (+ its generated tRPC types) while you read, so the first K
+  // only pays the type server's own load — CPU in the background, no language server started
+  createEffect(on(active, (b) => {
+    if (!b || !canMutate || isGhost() || location().kind === "review") return;
+    void fetch("/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branch: b }) }).catch(() => {});
+  }));
   const [fileFilter, setFileFilter] = createSignal("");
   const [showHelp, setShowHelp] = createSignal(false);
   let filterEl: HTMLInputElement | undefined;

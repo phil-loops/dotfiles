@@ -142,6 +142,7 @@ class Session:
         self._inflight = {}        # (method, path, line, character) → _Pending
         self._opened = set()
         self._stopping = False
+        self.healing = False       # the .gen heal is running beside tsgo
 
     # ── lifecycle ────────────────────────────────────────────────────
     def alive(self):
@@ -156,8 +157,11 @@ class Session:
             self._fail(str(e) if isinstance(e, RuntimeError) else f"language server failed to start: {e}")
 
     def tree(self):
-        """stack-open's review checkout for the branch, resynced to its tip with .gen healed (foreground)."""
-        env = actor.child_env() or dict(os.environ)
+        """stack-open's review checkout for the branch, resynced to its tip. The .gen heal is NOT done
+        here: it ran ~14 s in series before tsgo on a fresh tree (2026-10-22), so _heal runs it beside
+        tsgo instead."""
+        env = dict(actor.child_env() or os.environ)
+        env["STACK_OPEN_NO_GEN_SYNC"] = "1"
         r = subprocess.run([os.path.join(ctx.SCRIPTS, "stack-open"), "--path", self.branch],
                            cwd=self.repo, capture_output=True, text=True, timeout=900, env=env)
         lines = [ln for ln in (r.stdout or "").splitlines() if ln.strip()]
@@ -174,7 +178,7 @@ class Session:
         if self._stopping:
             return
         self.root = root
-        self.state, self.message = "starting", f"starting tsgo in {os.path.basename(root)}"
+        self.state, self.message = "starting", f"starting the type server for {self.branch}"
         os.makedirs(STATE_DIR, exist_ok=True)
         _reap_recorded(only_orphans=False)   # one per machine: a rival server's tsgo goes too
         log = open(os.path.join(STATE_DIR, "tsgo.log"), "ab")
@@ -207,6 +211,31 @@ class Session:
         self._notify("initialized", {})
         self.state, self.message = "loading", f"loading types for {self.branch}"
         self._ready.set()
+        threading.Thread(target=self._heal, daemon=True).start()
+
+    def _heal(self):
+        """Rebuild the tree's generated tRPC types beside tsgo. If anything changed, hand over to a
+        fresh session at once (its own heal is then a no-op), so types come from the healed tree."""
+        marker = os.path.join(self.root, ".gen", ".seed-gen-sha")
+        before = _read_text(marker)
+        self.healing = True
+        try:
+            subprocess.run([os.path.join(ctx.SCRIPTS, "seed-gen"), "--sync", self.root], capture_output=True,
+                           text=True, timeout=900, env=actor.child_env() or dict(os.environ))
+        except (OSError, subprocess.TimeoutExpired) as e:
+            ctx.log(f"lsp: .gen heal for {self.branch} failed: {e}")
+        finally:
+            self.healing = False
+        if _read_text(marker) == before or self._stopping:
+            return
+        with _lock:
+            if _cur[0] is not self:
+                return
+            fresh = Session(self.repo, self.branch, self.tip)
+            fresh.message = f"refreshing types for {self.branch} — tRPC types were rebuilt"
+            _cur[0] = fresh
+        self.stop("tRPC types rebuilt")
+        threading.Thread(target=fresh.boot, daemon=True).start()
 
     def _fail(self, message):
         self.state, self.message = "error", message
@@ -397,6 +426,14 @@ def _tip(repo, branch):
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _read_text(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
 def _refused(message):
     return {"ok": False, "state": "refused", "message": message}
 
@@ -429,6 +466,8 @@ def _session(repo, branch):
 
 
 def _loading(s, extra=""):
+    if s.healing and s.state in ("starting", "loading"):
+        extra += " · rebuilding tRPC types beside it"
     return {"ok": False, "state": "loading", "message": (s.message + extra),
             "elapsedS": round(time.time() - s.started_at, 1), "progress": _progress(s)}
 
