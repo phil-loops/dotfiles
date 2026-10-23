@@ -43,7 +43,8 @@
 # STACK_LSP_ANSWER_CACHE (0 disables the per-commit answer cache; the differential test),
 # STACK_LSP_TREES (the tree pool, 4 ≈ 1 GB of disk; 1 flips one tree between tip and base),
 # STACK_LSP_PREWARM ("trees": a branch page moves the trees; "server": and loads tsgo too),
-# STACK_LSP_GOMEMLIMIT (tsgo's soft heap limit, 2000MiB).
+# STACK_LSP_GOMEMLIMIT (tsgo's soft heap limit, 2000MiB), STACK_LSP_FRESH_CHECKER (0 trades the
+# canonical hover text for warm-checker speed; see Server.ask).
 import collections
 import hashlib
 import json
@@ -67,7 +68,8 @@ _VOLTA_TSGO = os.path.expanduser("~/.volta/bin/tsgo")
 TSGO = os.environ.get("STACK_LSP_TSGO") or (_VOLTA_TSGO if os.path.exists(_VOLTA_TSGO) else "tsgo")
 ANSWER_CACHE = os.environ.get("STACK_LSP_ANSWER_CACHE", "1") != "0"
 POOL = max(1, int(os.environ.get("STACK_LSP_TREES", "4")))
-PREWARM = os.environ.get("STACK_LSP_PREWARM", "trees")   # "server": also load tsgo when a branch page opens
+PREWARM = os.environ.get("STACK_LSP_PREWARM", "trees")
+FRESH_CHECKER = os.environ.get("STACK_LSP_FRESH_CHECKER", "1") != "0"   # Server.ask: canonical hover text   # "server": also load tsgo when a branch page opens
 SRC_MAX = 400_000
 LANGS = {".ts": "typescript", ".mts": "typescript", ".cts": "typescript", ".tsx": "typescriptreact",
          ".js": "javascript", ".mjs": "javascript", ".cjs": "javascript", ".jsx": "javascriptreact"}
@@ -403,6 +405,7 @@ class Server:
         self.started_at = time.time()
         self.progress = {}
         self.opened = {}   # abs path → version
+        self.kind = {}     # abs path → "configured" | "inferred" (custom/projectInfo)
         self._lock = threading.Lock()
         self._write = threading.Lock()
         self._next = 1
@@ -577,6 +580,7 @@ class Server:
         for p, t in events:
             if p not in self.opened:
                 continue
+            self.kind.pop(p, None)   # a moved tree may hand the file to another project
             if t == DELETED or not os.path.isfile(p):
                 self.notify("textDocument/didClose", {"textDocument": {"uri": "file://" + p}})
                 del self.opened[p]
@@ -588,9 +592,35 @@ class Server:
                                                        "contentChanges": [{"text": text}]})
 
     def ask(self, method, full, line0, character):
+        """One answer, canonical: what a fresh tsgo gives for this file at this commit, whatever
+        was asked before. Two things in tsgo would otherwise leak earlier asks into it:
+          - a file no tsconfig includes joins the session's ONE inferred program, whose roots are
+            every such file open — another commit's test file pulled @types/node globals into
+            a phishtank test's hover (2026-10-22). So a loose file is asked alone.
+          - hover text depends on the checker's history: a union's synthesized `?: undefined`
+            members print in the order types were created (cold: domain-last; after six other
+            hovers in the file: domain-first). An identical-content didChange makes tsgo clone the
+            program with a fresh checker pool — 0.2-0.5 s, against 0.03 s from a warm checker."""
         self.open(full)
+        if full not in self.kind:
+            info = self.request("custom/projectInfo", {"textDocument": {"uri": "file://" + full}})
+            info.event.wait(600)
+            self.kind[full] = "configured" if (info.result or {}).get("configFilePath") else "inferred"
+        if self.kind[full] == "inferred":
+            for other in [p for p, k in self.kind.items() if k == "inferred" and p != full and p in self.opened]:
+                self.notify("textDocument/didClose", {"textDocument": {"uri": "file://" + other}})
+                del self.opened[other]
+        if method == "textDocument/hover" and FRESH_CHECKER:
+            self._touch(full)
         return self.request(method, {"textDocument": {"uri": "file://" + full},
                                      "position": {"line": line0, "character": character}})
+
+    def _touch(self, full):
+        with open(full, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        self.opened[full] += 1
+        self.notify("textDocument/didChange", {"textDocument": {"uri": "file://" + full, "version": self.opened[full]},
+                                               "contentChanges": [{"text": text}]})
 
     def pids(self):
         r = subprocess.run(["ps", "-axo", "pid=,pgid=,rss="], capture_output=True, text=True)
