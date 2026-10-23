@@ -43,7 +43,7 @@
 # STACK_LSP_ANSWER_CACHE (0 disables the per-commit answer cache; the differential test),
 # STACK_LSP_TREES (the tree pool, 4 ≈ 1 GB of disk; 1 flips one tree between tip and base),
 # STACK_LSP_PREWARM ("trees": a branch page moves the trees; "server": and loads tsgo too),
-# STACK_LSP_GOMEMLIMIT (tsgo's soft heap limit, 2000MiB), STACK_LSP_FRESH_CHECKER (0 trades the
+# STACK_LSP_GOMEMLIMIT (tsgo's soft heap limit, 3000MiB), STACK_LSP_FRESH_CHECKER (0 trades the
 # canonical hover text for warm-checker speed; see Server.ask).
 import collections
 import hashlib
@@ -413,8 +413,9 @@ class Server:
         self.exited = False
         log = open(os.path.join(STATE_DIR, "tsgo.log"), "ab")
         # a soft heap limit: Go otherwise keeps every superseded program's memory — a footprint of
-        # 2.2 → 3.9 GB over four incremental moves, flat at 2.2 GB with the limit (2026-10-22)
-        env = dict(os.environ, GOMEMLIMIT=os.environ.get("STACK_LSP_GOMEMLIMIT", "2000MiB"))
+        # 4.0-4.5 GB with a fresh checker per hover, flat at 2.9 GB with 3000MiB; 2000MiB sits below
+        # the live heap of two projects and GC-thrashes at 800% CPU (2026-10-23)
+        env = dict(os.environ, GOMEMLIMIT=os.environ.get("STACK_LSP_GOMEMLIMIT", "3000MiB"))
         self.proc = subprocess.Popen([TSGO, "--lsp", "--stdio"], cwd=root, stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=log, start_new_session=True, env=env)
         log.close()
