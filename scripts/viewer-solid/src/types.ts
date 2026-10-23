@@ -83,6 +83,8 @@ export const NodeData = z.object({
   // branch the checkout holds
   dirty: z.array(z.object({ path: z.string(), code: z.string(), patch: z.string() })).optional(),
   worktree: z.string().optional(),
+  // the diff's old side: merge-base of the shown base and the branch ("" for since-blessed)
+  baseSha: z.string().optional(),
 });
 export type NodeData = z.infer<typeof NodeData>;
 

@@ -42,7 +42,7 @@ export function track(type: string, data: Record<string, unknown> = {}): void {
 
 // POSTs that aren't deliberate user actions: the telemetry sink itself, the keepalive, and
 // the hover-prefetch (fires on mouseover, not on an action). Everything else POSTed is an action.
-const SKIP_TRACK = new Set(["/track", "/heartbeat", "/prepare"]);
+const SKIP_TRACK = new Set(["/track", "/heartbeat", "/prepare", "/lsp/prepare"]);
 let installed = false;
 
 // WHAT the action was aimed at, lifted from the request body every mutating POST already sends.

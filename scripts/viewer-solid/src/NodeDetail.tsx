@@ -311,11 +311,11 @@ export function NodeDetail() {
   });
   // reading is the default: a new branch opens with the words column closed
   createEffect(on(active, () => setWordsOpen(false), { defer: true }));
-  // warm the branch's review worktree (+ its generated tRPC types) while you read, so the first K
-  // only pays the type server's own load — CPU in the background, no language server started
-  createEffect(on(active, (b) => {
+  // move the type service's trees to this branch's tip and base while you read, so the first K
+  // only pays tsgo's own update — git + generated types in the background, no language server
+  createEffect(on([active, () => node.data?.baseSha], ([b, base]) => {
     if (!b || !canMutate || isGhost() || location().kind === "review") return;
-    void fetch("/prepare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branch: b }) }).catch(() => {});
+    void fetch(withRepo("/lsp/prepare"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ branch: b, base: base || undefined }) }).catch(() => {});
   }));
   const [fileFilter, setFileFilter] = createSignal("");
   const [showHelp, setShowHelp] = createSignal(false);
@@ -364,6 +364,7 @@ export function NodeDetail() {
   });
   const lsp = useLsp({
     branch: active,
+    base: () => node.data?.baseSha || null,
     unavailable: () =>
       !canMutate ? "no language server behind a static snapshot"
       : isGhost() ? "the integration preview has no tree to type"

@@ -9,19 +9,21 @@ import { storySheetOpen } from "./StorySheet";
 
 // Types on demand, the Helix way: K (or space·k) shows the type under the pointer, g·d jumps to
 // its definition — in the diff when it's there, else in a read-only pane on the right. The
-// server's one tsgo (srv/lsp.py) starts on the first ask, never before. Only the NEW side of a
-// diff exists at the branch tip, so a removed line answers with a note instead of a request.
+// server's one tsgo (srv/lsp.py) starts on the first ask, never before. Both halves have types:
+// a removed line (or the old half of side-by-side) asks at the diff's base commit, anything else
+// at the branch tip.
 
 type At = { top: number; bottom: number; left: number }; // document coordinates
-type Target = { path: string; line: number; character: number; at: At };
-type Loc = { path: string; line: number; character: number; endLine: number };
+type Side = "new" | "old";
+type Target = { path: string; line: number; character: number; side: Side; at: At };
+type Loc = { path: string; line: number; character: number; endLine: number; side: Side; sha: string };
 type Status = { state: string; message?: string; progress?: { title?: string; message?: string; percentage?: number } | null };
 type Pop =
-  | { kind: "wait"; at: At; since: number }
+  | { kind: "wait"; at: At; since: number; side: Side }
   | { kind: "hover"; at: At; md: string }
   | { kind: "note"; at: At | null; text: string; warn?: boolean }
   | { kind: "picks"; at: At; locs: Loc[]; sel: number };
-type Pane = { path: string; lit: [number, number]; text?: string; err?: string };
+type Pane = { path: string; side: Side; lit: [number, number]; text?: string; err?: string };
 
 const CHORD_MS = 600;
 const NOTE_MS = 1800;
@@ -60,7 +62,7 @@ function docRect(r: Range | Element): At {
   return { top: b.top + window.scrollY, bottom: b.bottom + window.scrollY, left: b.left + window.scrollX };
 }
 
-type Resolved = { kind: "new"; t: Target } | { kind: "old" | "skip"; at: At; why: string } | null;
+type Resolved = { kind: "pos"; t: Target } | { kind: "skip"; at: At; why: string } | null;
 
 // a caret in a diff → the tip file position it names, or why there isn't one
 function resolve(node: Node, offset: number): Resolved {
@@ -78,29 +80,27 @@ function resolve(node: Node, offset: number): Resolved {
   if (entry.closest(".uncommitted-rail")) return { kind: "skip", at, why: "uncommitted — types follow the committed tip" };
   const half = tr.closest(".d2h-file-side-diff");
   const halves = half ? [...half.parentElement!.children].filter((c) => c.classList.contains("d2h-file-side-diff")) : [];
-  const side = sideOf([...td.classList], half ? halves.indexOf(half) : null);
-  if (side === "none") return null;
-  if (side === "old") return { kind: "old", at, why: "removed code — no types" };
-  let numbered: Element | undefined = tr;
-  if (side === "twin") {
-    const i = [...half!.querySelectorAll("tbody > tr")].indexOf(tr);
-    numbered = halves[1]?.querySelectorAll("tbody > tr")[i];
-  }
-  const ln = numbered?.querySelector(".line-num2") ?? numbered?.querySelector(".d2h-code-side-linenumber");
+  const cell = sideOf([...td.classList], half ? halves.indexOf(half) : null);
+  if (cell === "none") return null;
+  // a kept line on the old side-by-side half is read at the base, like the removed lines beside it
+  const side: Side = cell === "new" ? "new" : "old";
+  const ln = half
+    ? tr.querySelector(".d2h-code-side-linenumber")
+    : tr.querySelector(side === "old" ? ".line-num1" : ".line-num2");
   const line = parseInt(ln?.textContent?.trim() ?? "", 10);
   if (!Number.isFinite(line)) return null;
-  return { kind: "new", t: { path: entry.dataset.path ?? "", line, character: word?.start ?? caret, at } };
+  return { kind: "pos", t: { path: entry.dataset.path ?? "", line, character: word?.start ?? caret, side, at } };
 }
 
-// the diff row showing <path>:<line> on its new side, if this page renders it
-function rowFor(path: string, line: number): HTMLElement | null {
+// the diff row showing <path>:<line> on the given side, if this page renders it
+function rowFor(path: string, line: number, side: Side): HTMLElement | null {
   const entry = [...document.querySelectorAll<HTMLElement>(`.entry[data-path="${CSS.escape(path)}"]`)]
     .find((e) => !e.closest(".uncommitted-rail"));
   if (!entry) return null;
   const halves = entry.querySelectorAll(".d2h-file-side-diff");
   const cells = halves.length
-    ? halves[1].querySelectorAll(".d2h-code-side-linenumber")
-    : entry.querySelectorAll(".line-num2");
+    ? halves[side === "old" ? 0 : 1].querySelectorAll(".d2h-code-side-linenumber")
+    : entry.querySelectorAll(side === "old" ? ".line-num1" : ".line-num2");
   const hit = [...cells].find((c) => c.textContent?.trim() === String(line));
   return hit?.closest("tr") ?? null;
 }
@@ -111,6 +111,8 @@ const dirOf = (p: string) => p.slice(0, p.lastIndexOf("/") + 1);
 /** The K / space·k / g·d keys, their popover and the definition pane. Mount once on the branch page. */
 export function useLsp(deps: {
   branch: () => string;
+  /** the diff's old-side commit (its merge-base), or null when the view has none (since-blessed) */
+  base: () => string | null;
   /** why types can't be asked for right now (commits view, the integration ghost), else null */
   unavailable: () => string | null;
   pointing: () => boolean;
@@ -153,7 +155,7 @@ export function useLsp(deps: {
   };
 
   const jump = (loc: Loc) => {
-    const row = rowFor(loc.path, loc.line);
+    const row = loc.path.startsWith("/") ? null : rowFor(loc.path, loc.line, loc.side);
     if (row) {
       setPop(null);
       row.scrollIntoView({ block: "center", behavior: "smooth" });
@@ -164,8 +166,8 @@ export function useLsp(deps: {
       return;
     }
     setPop(null);
-    setPane({ path: loc.path, lit: [loc.line, Math.max(loc.line, loc.endLine)] });
-    fetch(withRepo(`/lsp/src?path=${encodeURIComponent(loc.path)}`))
+    setPane({ path: loc.path, side: loc.side, lit: [loc.line, Math.max(loc.line, loc.endLine)] });
+    fetch(withRepo(`/lsp/src?path=${encodeURIComponent(loc.path)}&sha=${loc.sha}`))
       .then((r) => r.json() as Promise<{ text?: string; err?: string }>)
       .then((j) => setPane((p) => (p && p.path === loc.path ? { ...p, text: j.err ? undefined : j.text, err: j.err } : p)))
       .catch(() => setPane((p) => (p ? { ...p, err: "server unreachable" } : p)));
@@ -182,14 +184,14 @@ export function useLsp(deps: {
       fetch(withRepo("/lsp/status")).then((r) => r.json()).then((s: Status) => !ctrl.signal.aborted && setStatus(s)).catch(() => {});
     };
     // a warm answer lands in ~30ms: only a slow one earns the waiting chip
-    const showWait = setTimeout(() => { if (!ctrl.signal.aborted) { refresh(); setPop({ kind: "wait", at: t.at, since }); } }, 250);
+    const showWait = setTimeout(() => { if (!ctrl.signal.aborted) { refresh(); setPop({ kind: "wait", at: t.at, since, side: t.side }); } }, 250);
     const poll = setInterval(refresh, 1000);
     try {
       for (;;) {
         const r = await fetch(withRepo(`/lsp/${action}`), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ branch: deps.branch(), path: t.path, line: t.line, character: t.character }),
+          body: JSON.stringify({ branch: deps.branch(), path: t.path, line: t.line, character: t.character, side: t.side, base: t.side === "old" ? deps.base() : undefined }),
           signal: ctrl.signal,
         }).then((x) => x.json());
         if (ctrl.signal.aborted) return;
@@ -201,7 +203,7 @@ export function useLsp(deps: {
           else note("no type information here", t.at);
           return;
         }
-        const locs: Loc[] = r.locations ?? [];
+        const locs: Loc[] = (r.locations ?? []).map((l: Omit<Loc, "side" | "sha">) => ({ ...l, side: r.side ?? t.side, sha: r.sha ?? "" }));
         if (!locs.length) note("no definition found", t.at);
         else if (locs.length === 1) jump(locs[0]);
         else setPop({ kind: "picks", at: t.at, locs, sel: 0 });
@@ -221,7 +223,8 @@ export function useLsp(deps: {
     if (why) { note(why, null, 3200); return; }
     const r = target();
     if (!r) { note("point at a symbol in the diff first", null); return; }
-    if (r.kind !== "new") { note(r.why, r.at); return; }
+    if (r.kind === "skip") { note(r.why, r.at); return; }
+    if (r.t.side === "old" && !deps.base()) { note("this view has no single base commit — removed lines have types against parent, main or outgoing", r.t.at, 3600); return; }
     void ask(action, r.t);
   };
 
@@ -248,7 +251,7 @@ export function useLsp(deps: {
       if (digit >= 1 && digit <= n) { swallow(e); jump(p.locs[digit - 1]); return; }
     }
     const pn = pane();
-    if (e.key === "o" && pn && !pn.path.startsWith("/")) { swallow(e); deps.openInNvim(pn.path, pn.lit[0]); return; }
+    if (e.key === "o" && pn && pn.side === "new" && !pn.path.startsWith("/")) { swallow(e); deps.openInNvim(pn.path, pn.lit[0]); return; }
     // space is the page's scroll key until the pointer rests on code
     if (e.key === " " && !leader && !deps.pointing()) return;
     const was = leader;
@@ -282,12 +285,13 @@ export function useLsp(deps: {
     document.removeEventListener("mousedown", onDown);
   });
 
-  const waitLabel = (since: number) => {
+  const waitLabel = (since: number, side: Side) => {
     const s = status();
     const secs = Math.max(0, Math.round((now() - since) / 1000));
-    const what = s?.state === "preparing" ? `preparing ${deps.branch()}’s worktree`
+    const of = side === "old" ? `${deps.branch()}’s base` : deps.branch();
+    const what = s?.state === "preparing" ? `moving the types tree to ${of}`
       : s?.state === "starting" ? "starting tsgo"
-      : `loading types for ${deps.branch()}`;
+      : `loading types for ${of}`;
     const pr = s?.progress;
     const detail = pr ? ` · ${[pr.title, pr.message, pr.percentage != null ? `${pr.percentage}%` : ""].filter(Boolean).join(" ")}` : "";
     return `${what}… ${secs}s${detail}`;
@@ -308,7 +312,7 @@ export function useLsp(deps: {
               return (
                 <div class={`${CHIP} lsp-wait flex items-center gap-[8px]`} style={place(v.at)}>
                   <span class="inline-block h-[6px] w-[6px] animate-breathe rounded-full bg-gold-leaf" />
-                  <span>{waitLabel(v.since)}</span>
+                  <span>{waitLabel(v.since, v.side)}</span>
                   <span class="text-ink-faint">esc</span>
                 </div>
               );
@@ -357,8 +361,9 @@ export function useLsp(deps: {
               <span class="truncate text-ink-dim">
                 <span class="text-ink-faint">{dirOf(pn().path)}</span><b class="font-semibold text-ink">{leafOf(pn().path)}</b>
                 <span class="text-gold-leaf">:{pn().lit[0]}</span>
+                <Show when={pn().side === "old"}><span class="text-ink-faint"> · at the base</span></Show>
               </span>
-              <span class="shrink-0 text-ink-faint">{pn().path.startsWith("/") ? "" : "o helix · "}esc</span>
+              <span class="shrink-0 text-ink-faint">{pn().path.startsWith("/") || pn().side === "old" ? "" : "o helix · "}esc</span>
             </div>
             <CodeLines text={pn().text} path={pn().path} lit={pn().lit}>
               <Show when={pn().err}>
