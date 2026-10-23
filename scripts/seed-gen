@@ -379,6 +379,8 @@ prepare_generation(){
     rm -f "$1/.gen/trpc-types.tsbuildinfo"
   fi
 }
+# an incremental emit never deletes: outputs of sources that left the graph are pruned before stamping
+prune_generation(){ [[ ! -L "$1/.gen" ]] && "$(dirname "$0")/seed-gen-fingerprint" "$1" --prune >/dev/null; }
 stamp_generation(){
   local tree="$1" expected_head="$2" before="$3" key after
   [[ ! -L "$tree/.gen" && -n "$before" ]] || return 1
@@ -528,7 +530,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     if out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
       # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
       # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
-      if ! stamp_generation "$dir" "$head" "$before"; then
+      if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
         drop_lock "$dir/.gen"
         echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
       fi
@@ -612,7 +614,7 @@ build_main(){
   before=$(generation_snapshot "$dir") || before=""
   prepare_generation "$dir"
   "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
-    && stamp_generation "$dir" "$head" "$before"
+    && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before"
   drop_lock "$dir/.gen"
 }
 

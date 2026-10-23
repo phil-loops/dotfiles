@@ -24,6 +24,48 @@ def output_key(tree):
     return digest.hexdigest()
 
 
+DECL = ((".tsx", ".d.ts"), (".ts", ".d.ts"), (".mts", ".d.mts"), (".cts", ".d.cts"))
+
+
+def prune_outputs(tree):
+    """Delete emitted declarations whose source left the graph. An incremental emit rewrites what
+    changed and never deletes, so a tree that held another commit kept that commit's extra
+    outputs — a fresh build of the same commit has none (2026-10-22). Expected outputs are each
+    in-tree TypeScript source's .d.ts (+ .map) under the outDir, mirroring rootDir = the tree.
+    Compared case-folded: the tsbuildinfo records many names as the compiler's canonical (lowercased)
+    path on this case-insensitive filesystem."""
+    tree = Path(tree).absolute()
+    info = tree / ".gen/trpc-types.tsbuildinfo"
+    graph = json.loads(info.read_text())
+    graph = graph.get("program", graph)
+    names = graph.get("fileNames") or []
+    low = str(tree).lower() + "/"
+    if not names:
+        raise ValueError("no compiler input graph")
+    expected = set()
+    for name in names:
+        path = os.path.normpath(info.parent / name).lower()
+        if not path.startswith(low):
+            continue
+        rel = path[len(low):]
+        if rel.startswith("node_modules/") or rel.endswith((".d.ts", ".d.mts", ".d.cts")):
+            continue
+        for src, dst in DECL:
+            if rel.endswith(src):
+                expected.update((rel[: -len(src)] + dst, rel[: -len(src)] + dst + ".map"))
+                break
+    out = tree / ".gen/trpc-types"
+    gone = 0
+    for path in sorted(out.rglob("*"), reverse=True):
+        rel = str(path.relative_to(out))
+        if path.is_file() and rel.lower() not in expected:
+            path.unlink()
+            gone += 1
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    return gone
+
+
 def fingerprint(tree, snapshot=False):
     tree = Path(tree).absolute()
     result = subprocess.run(
@@ -68,7 +110,9 @@ def fingerprint(tree, snapshot=False):
 
 if __name__ == "__main__":
     try:
-        if "--outputs" in sys.argv[2:]:
+        if "--prune" in sys.argv[2:]:
+            print(prune_outputs(sys.argv[1]))
+        elif "--outputs" in sys.argv[2:]:
             print(output_key(sys.argv[1]))
         else:
             print(fingerprint(sys.argv[1], snapshot="--snapshot" in sys.argv[2:]))
