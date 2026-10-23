@@ -31,8 +31,8 @@ export function wordAt(text: string, offset: number): { start: number; end: numb
 /**
  * Which side of the diff a code cell shows. diff2html marks a removed line `d2h-del`, a kept one
  * `d2h-cntx`, an added one `d2h-ins`; side-by-side splits them into an old (0) and a new (1) table.
- * "new" lines exist at the branch tip; "old" ones only in the parent; "twin" is a kept line read
- * on the old side-by-side half, whose tip line number sits on the same row of the new half;
+ * "new" lines are typed at the branch tip; "old" ones at the diff's base; "twin" is a kept line read
+ * on the old side-by-side half — typed at the base too, by the old half's own line number;
  * "none" is a hunk header or the blank filler beside a one-sided change.
  */
 export function sideOf(cellClasses: string[], sbsIndex: number | null): "new" | "old" | "twin" | "none" {
