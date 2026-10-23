@@ -457,7 +457,7 @@ class H(BaseHTTPRequestHandler):
         elif u.path == "/wiki-lint":      return wiki.lint(self, u)    # deterministic checks, kind-aware
         elif u.path == "/tutor-src":      return tutor.src(self, u)    # a pinned file for the code pane
         elif u.path == "/lsp/status":     return lsp.status(self, u)   # the viewer's one tsgo: state, branch, load progress
-        elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, read from that tsgo's tree
+        elif u.path == "/lsp/src":        return lsp.src(self, u)      # a definition target, at the commit its answer came from
         elif u.path == "/learning-state": return tutor.learning_state(self, u)   # the concept graph, depth + due derived
         elif u.path == "/tutor-terminal": return tutor.terminal(self, u)   # terminal /tutor sessions to pick up
         elif u.path == "/tutor-import":   return tutor.import_(self, u)    # one of them, as tab turns
@@ -645,6 +645,8 @@ class H(BaseHTTPRequestHandler):
             return lsp.hover(self, raw)
         if self.path == "/lsp/definition":
             return lsp.definition(self, raw)
+        if self.path == "/lsp/prepare":      # move the type trees to a branch page's tip + base (no tsgo)
+            return lsp.prepare(self, raw)
         if self.path == "/tutor-stop":
             return tutor.stop(self, raw)
         if self.path == "/learning-evidence":   # the learner audits a credit: edit or delete one evidence row
