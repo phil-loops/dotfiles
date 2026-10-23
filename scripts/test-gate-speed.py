@@ -36,6 +36,7 @@ def repo_at(repo):
     write(repo, ".gitignore", "node_modules/\n.gen/\n")
     write(repo, "trpc/root.ts", "export { used } from '../lib/used';\n")
     write(repo, "lib/used.ts", "export const used = 1;\n")
+    write(repo, "trpc/extra.ts", "export const extra = 1;\n")
     write(repo, "pages/unused.tsx", "export const page = 1;\n")
     write(repo, "typescript/tsconfig.trpc-types.json", "{}\n")
     write(repo, "package-lock.json", '{"packages":{}}\n')
@@ -115,7 +116,7 @@ fs.appendFileSync(process.env.GATE_TEST_LOG, 'compile\n');
 fs.mkdirSync('.gen/trpc-types/trpc', {recursive:true});
 fs.writeFileSync('.gen/trpc-types/trpc/root.d.ts', fs.readFileSync('lib/used.ts'));
 fs.writeFileSync('.gen/trpc-types/trpc/extra.d.ts', 'extra');
-fs.writeFileSync('.gen/trpc-types.tsbuildinfo', JSON.stringify({fileNames:['../trpc/root.ts','../lib/used.ts']}));
+fs.writeFileSync('.gen/trpc-types.tsbuildinfo', JSON.stringify({fileNames:['../trpc/root.ts','../lib/used.ts','../trpc/extra.ts']}));
 ''')
 
     def sync(self, repo=None):
@@ -145,6 +146,16 @@ fs.writeFileSync('.gen/trpc-types.tsbuildinfo', JSON.stringify({fileNames:['../t
         self.sync()
         self.assertEqual(self.count(), 3)
         self.assertTrue((self.repo / ".gen/trpc-types/trpc/extra.d.ts").exists())
+
+    def test_sync_prunes_outputs_whose_source_left_the_graph(self):
+        self.sync()
+        write(self.repo, ".gen/trpc-types/lib/gone.d.ts", "from another commit")
+        write(self.repo, ".gen/trpc-types/lib/gone.d.ts.map", "{}")
+        write(self.repo, "lib/used.ts", "export const used = 2;\n")
+        self.sync()
+        self.assertFalse((self.repo / ".gen/trpc-types/lib").exists())
+        self.assertTrue((self.repo / ".gen/trpc-types/trpc/extra.d.ts").exists())
+        self.assertEqual(self.sync(), "")
 
     def test_borrowed_types_reuse_and_divergence_stays_private(self):
         self.sync()
