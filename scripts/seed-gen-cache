@@ -21,13 +21,13 @@ any entry for the same key (a mismatch evicts the entry and leaves a report in p
 gates run this way. The store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
 bounded by SEED_GEN_CACHE_MB (default 1536) and SEED_GEN_CACHE_DAYS unused (default 14).
 
-The key is everything the emit reads, as the compiler itself recorded it (the tsbuildinfo of a
-previous build — ccache's "direct mode"): each input file's content, each package.json it read and
-each one it probed and found missing, the physical side of the tree each file lives on, the npm
-identity of each package it reached, the tree's resolution candidates (every source file name, the
-packages' dist listings, node_modules/@types), the configs, the compiler's own files and seed-gen's.
-A stored entry carries the graph it was built from; a tree hits only when that graph's every file
-hashes identically in it — so it would read the very same files, and emit the same declarations.
+The key is everything the emit reads, as the compiler itself recorded it (the tsbuildinfo and the
+resolution trace of a previous build — ccache's "direct mode"): each input file's content, each
+package.json it read and each it found missing, every path it probed while resolving and the answer,
+where each file physically lives, the npm identity of each package it reached, where the tree's
+node_modules links lead, the configs, the compiler's own files and seed-gen's. A stored entry carries
+the graph it was built from; a tree hits only when that graph's every file hashes identically in it
+and every probe answers the same — so it would read the very same files, and emit the same.
 Design, the counterexample per key part, and measurements: wiki loops/canopy-v2-gen-cache.
 """
 import ctypes
