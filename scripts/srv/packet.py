@@ -18,7 +18,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, ghreview, outbox, repostate, sync
+from . import ctx, ghreview, outbox, repostate, second_reader, sync
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import review_packet as rp  # noqa: E402
@@ -228,6 +228,7 @@ def _fetch_remote(slug, numbers):
                 continue
             full = ghreview.parse_pr(pr)
             ghreview.absorb(ctx.repo_cwd(), full, login)
+            second_reader.on_pr(ctx.repo_cwd(), full)
             out[full["headRef"]] = _legacy(full)
     return out
 
