@@ -3,6 +3,7 @@ import "./v2.css";
 import "./commands/app";
 import "./commands/project";
 import "./commands/branch";
+import "./commands/review";
 import App from "./App";
 import { installKeys } from "./keyboard";
 import { startRouter, SURFACES } from "./router";

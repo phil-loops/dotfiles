@@ -6,6 +6,7 @@ import { list, view, world } from "./store";
 import type { Branch, Pr, Project } from "./types";
 import type { Scope } from "./registry";
 import { cursor, cursorIdx, expanded, now, readyOnly, showArchive } from "./ui";
+import { page } from "./review/page";
 
 export interface BranchView {
   b: Branch;
@@ -132,6 +133,14 @@ export function targetFor(scope: Scope): string | undefined {
       return model.selectedBranch();
     case "row":
       return model.selected();
+    case "review":
+      return page.id() || undefined;
+    case "line":
+    case "thread":
+    case "pending": {
+      const h = page.here();
+      return h && h.kind === scope ? (h.kind === "line" ? h.key : h.id) : undefined;
+    }
     default:
       return undefined;
   }
@@ -145,6 +154,10 @@ export function liveScopes(): string[] {
     if (model.selectedProject()) out.push("project");
     if (model.selected()) out.push("row");
   }
+  if (surface().id === "review" && page.tab() === "files" && !page.overlay()) {
+    const h = page.here();
+    if (h && h.kind !== "file") out.push(h.kind);
+  }
   out.push(surface().id, "global");
   return out;
 }
@@ -156,7 +169,7 @@ export const atRepo = (repo: string, path: string) => (repos().includes(repo) ? 
 export const compareUrl = (v: BranchView) =>
   atRepo(v.b.repo, `/packet-compare?branch=${encodeURIComponent(v.b.name)}&base=${encodeURIComponent(v.base)}`);
 
-/** v1's branch page, until Phase 2 builds v2's. */
+/** v1's branch page (the v2 review page is reviewPath in router.ts). */
 export const branchPage = (b: Branch) => {
   const project = view("project", b.project)?.name ?? "";
   const repo = repos().includes(b.repo) && b.repo !== "loops" ? `${b.repo}/` : "";

@@ -11,6 +11,10 @@ const SCOPES = [
   { id: "project", title: "On a forest" },
   { id: "branch", title: "On a branch" },
   { id: "dashboard", title: "On the dashboard" },
+  { id: "review", title: "Reviewing a branch" },
+  { id: "line", title: "On a diff line" },
+  { id: "thread", title: "On a conversation" },
+  { id: "pending", title: "On a pending comment" },
 ];
 
 export default function KeySheet() {
@@ -24,11 +28,11 @@ export default function KeySheet() {
             {(s) => (
               <section class="mb-3">
                 <h3 class="m-0 mb-1 text-[11px] font-normal uppercase tracking-[0.12em] text-ink-faint">{s.title}</h3>
-                <For each={commands().filter((c) => c.scope === s.id && c.keys?.length)}>
+                <For each={commands().filter((c) => c.scope === s.id && (c.keys?.length || c.hint?.length))}>
                   {(c) => (
                     <div class="flex justify-between py-0.5">
                       <span class="text-ink-dim">{c.title}</span>
-                      <kbd class="font-mono text-gold-leaf">{c.keys!.join(" · ")}</kbd>
+                      <kbd class="font-mono text-gold-leaf">{(c.keys ?? c.hint)!.join(" · ")}</kbd>
                     </div>
                   )}
                 </For>
