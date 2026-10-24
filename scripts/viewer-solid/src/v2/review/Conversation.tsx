@@ -1,13 +1,13 @@
 // The Conversation tab: the PR's body, then its timeline — reviews, top-level comments and the
-// conversations on the diff — oldest first, the second reader's "nobody flagged" list, and the box
-// for a comment of your own.
+// conversations on the diff — oldest first, the second reader's "nobody flagged" list, and the way
+// to GitHub, where Phil submits his pending review.
 import { createMemo, For, Match, Show, Switch } from "solid-js";
 import { bind } from "../runner";
 import { world } from "../store";
 import type { Comment, Review, Thread } from "../types";
 import { renderMarkdown, plain } from "./markdown";
 import { page as pg } from "./page";
-import { ago, ComposerView } from "./Thread";
+import { ago } from "./Thread";
 
 type Item = { at: string; kind: "review"; r: Review } | { at: string; kind: "comment"; c: Comment } | { at: string; kind: "thread"; t: Thread };
 
@@ -49,7 +49,7 @@ export default function Conversation() {
                     <div class="rv-c-head">
                       <span class="rv-author">{x().r.author}</span>
                       <span class={x().r.state === "APPROVED" ? "text-patina" : x().r.state === "CHANGES_REQUESTED" ? "text-ember" : "text-ink-dim"}>
-                        {x().r.sending ? "submitting…" : STATE[x().r.state] ?? x().r.state.toLowerCase()}
+                        {STATE[x().r.state] ?? x().r.state.toLowerCase()}
                       </span>
                       <span class="text-ink-faint">{ago(x().r.at)}</span>
                     </div>
@@ -64,7 +64,7 @@ export default function Conversation() {
                   <article class="rv-card">
                     <div class="rv-c-head">
                       <span class="rv-author">{x().c.author}</span>
-                      <span class="text-ink-faint">{x().c.sending ? "posting…" : ago(x().c.at)}</span>
+                      <span class="text-ink-faint">{ago(x().c.at)}</span>
                     </div>
                     <div class="md" innerHTML={renderMarkdown(x().c.body)} />
                   </article>
@@ -108,15 +108,14 @@ export default function Conversation() {
             </For>
           </article>
         </Show>
-        <Show when={pg.draft()?.comments.length}>
-          <div class="rv-pending-bar">
-            {pg.draft()!.comments.length} pending comment{pg.draft()!.comments.length === 1 ? "" : "s"} in your review —
-            <button class="rv-btn rv-btn-gold" onClick={bind("review.finish")}>Finish your review <kbd>S</kbd></button>
-          </div>
-        </Show>
-        <Show when={pg.composer()?.kind === "say"} fallback={<button class="rv-say" onClick={bind("review.say.open")}>Add a comment… <kbd>c</kbd></button>}>
-          <ComposerView />
-        </Show>
+        <div class="rv-pending-bar">
+          <Show when={c()!.pending?.count} fallback={<span class="text-ink-faint">comment on a line in Files changed — it goes into your pending review, which you submit on GitHub</span>}>
+            {c()!.pending!.count} comment{c()!.pending!.count === 1 ? "" : "s"} in your pending review —
+          </Show>
+          <button class="rv-btn rv-btn-gold" onClick={bind("review.finish")}>
+            Open on GitHub to submit <kbd>S</kbd>
+          </button>
+        </div>
       </Show>
     </div>
   );

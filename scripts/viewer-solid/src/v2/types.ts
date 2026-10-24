@@ -78,11 +78,11 @@ export interface Comment {
   body: string;
   at: string;
   url: string;
+  /** PENDING while it sits in its author's unsubmitted review */
+  state?: string;
   commit?: string;
   hunk?: string;
   reactions?: Record<string, number>;
-  /** client-only: an optimistic reply still on its way ("posting") or waiting on a push ("waits") */
-  sending?: "posting" | "waits";
 }
 
 export interface Note {
@@ -129,8 +129,6 @@ export interface Review {
   body: string;
   at: string;
   url: string;
-  /** client-only: a review on its way */
-  sending?: boolean;
 }
 
 export interface Conv {
@@ -157,44 +155,30 @@ export interface Conv {
   at: number;
 }
 
-export interface DraftComment {
-  id: string;
-  path: string;
-  side: "RIGHT" | "LEFT";
-  line: number;
-  startLine: number | null;
+/** One thing Phil wrote, in the ledger (srv/reviewdesk.py): a comment on a line (or range), or a
+ *  reply. `pending` / `submitted` are read off GitHub: in his pending review, or submitted by him. */
+export interface Item {
+  key: string;
+  kind: "comment" | "reply";
+  path?: string;
+  side?: "RIGHT" | "LEFT";
+  line?: number;
+  startLine?: number | null;
+  thread?: string;
+  threadId?: string | null;
   body: string;
+  state: "draft" | "waiting" | "sending" | "pending" | "submitted" | "gone";
+  waitsFor: string[];
+  err: string | null;
+  send: boolean;
   at: string;
-  /** client-only: posting as a single comment */
-  single?: boolean;
 }
 
 export interface Draft {
   id: string;
   repo: string;
   branch: string;
-  comments: DraftComment[];
-  body: string;
-  /** client-only: the review is being submitted as this */
-  submitting?: string;
-  /** client-only: single comments on their way */
-  sending?: DraftComment[];
-}
-
-export interface Queued {
-  id: string;
-  repo: string;
-  branch: string;
-  number: number;
-  thread: string;
-  threadId: string;
-  body: string;
-  waitsFor: string[];
-  state: "waiting" | "posting" | "failed";
-  err: string | null;
-  at: string;
-  /** client-only */
-  cancelled?: boolean;
+  items: Item[];
 }
 
 export interface Entities {
@@ -206,7 +190,6 @@ export interface Entities {
   conv: Record<string, Conv>;
   thread: Record<string, Thread>;
   draft: Record<string, Draft>;
-  queued: Record<string, Queued>;
 }
 
 export type EntityType = keyof Entities;

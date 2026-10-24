@@ -1,9 +1,9 @@
 // A conversation at its line (folded like GitHub's when resolved or outdated), the second reader's
-// note under it, a pending comment of the review being written, and the comment box.
+// note under it, a draft from the ledger (a comment or a reply not on GitHub yet), and the comment box.
 import { createMemo, For, onMount, Show } from "solid-js";
 import { bind, dispatch } from "../runner";
 import { view } from "../store";
-import type { Comment, DraftComment, Thread } from "../types";
+import type { Comment, Item, Thread } from "../types";
 import { now } from "../ui";
 import { renderMarkdown, plain } from "./markdown";
 import { page as pg, rowsOf, short } from "./page";
@@ -19,7 +19,8 @@ export function ago(at: string): string {
 
 /** The lines a thread sits on at the local tip, as the diff shows them — what a suggestion replaces. */
 function linesOf(t: Thread): string[] {
-  if (!t.local) return [];
+  // once a local commit changed them, the tip's lines aren't what the suggestion replaced
+  if (!t.local || t.local.addressedBy) return [];
   const f = pg.files().find((x) => x.path === t.path);
   if (!f) return [];
   const from = t.local.startLine ?? t.local.line;
@@ -35,7 +36,7 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
   const key = `t|${props.id}`;
   const open = () => pg.isOpen(t());
   const first = () => t().comments[0];
-  const queued = createMemo(() => pg.queued().filter((q) => q.threadId === props.id));
+  const replies = createMemo(() => pg.repliesTo(props.id));
   const replying = () => {
     const c = pg.composer();
     return c?.kind === "reply" && c.threadId === props.id;
@@ -78,7 +79,7 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
           </Show>
           <span class="flex-1" />
           <Show when={props.selected(key)}>
-            <span class="rv-hint">{hints(t(), queued().length > 0)}</span>
+            <span class="rv-hint">{hints(t())}</span>
           </Show>
         </div>
         <Show when={open()}>
@@ -86,19 +87,7 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
             <pre class="rv-oldhunk">{first()!.hunk!.split("\n").slice(-4).join("\n")}</pre>
           </Show>
           <For each={t().comments}>{(c) => <CommentView c={c} replaces={linesOf(t())} />}</For>
-          <For each={queued()}>
-            {(q) => (
-              <div class="rv-comment rv-comment-waiting">
-                <div class="rv-c-head">
-                  <span class="rv-author">{pg.conv()?.viewer || "you"}</span>
-                  <span class="rv-chip rv-chip-gold">
-                    {q.state === "posting" ? "posting now…" : q.state === "failed" ? `didn't post — ${q.err}` : `waits for ${q.waitsFor.map(short).join(", ")} to reach origin · d lets go`}
-                  </span>
-                </div>
-                <div class="md" innerHTML={renderMarkdown(q.body)} />
-              </div>
-            )}
-          </For>
+          <For each={replies()}>{(r) => <PendingView item={r} selected={props.selected} />}</For>
           <Show when={replying()}>
             <ComposerView />
           </Show>
@@ -111,23 +100,25 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
   );
 }
 
-function hints(t: Thread, waiting: boolean): string {
+function hints(t: Thread): string {
   const out = ["↵ fold", "r reply"];
-  if (t.resolved ? t.canUnresolve : t.canResolve) out.push(t.resolved ? "R unresolve" : "R resolve");
+  if (t.canResolve || t.canUnresolve) out.push(t.resolved ? "R reopen on GitHub" : "R resolve on GitHub");
   if (!t.outdated && !t.local?.addressedBy && t.comments.some((c) => c.body.includes("```suggestion"))) out.push("a apply");
   if (t.note?.draftReply) out.push("i its draft");
   if (t.note) out.push("z note");
-  if (waiting) out.push("d let go");
   return out.join(" · ");
 }
 
 function CommentView(props: { c: Comment; replaces: string[] }) {
   const reactions = () => Object.entries(props.c.reactions ?? {});
   return (
-    <div class="rv-comment" classList={{ "rv-comment-sending": !!props.c.sending }}>
+    <div class="rv-comment">
       <div class="rv-c-head">
         <span class="rv-author">{props.c.author}</span>
-        <span class="text-ink-faint">{props.c.sending === "waits" ? "waits for a push" : props.c.sending ? "posting…" : ago(props.c.at)}</span>
+        <span class="text-ink-faint">{ago(props.c.at)}</span>
+        <Show when={props.c.state === "PENDING"}>
+          <span class="rv-chip rv-chip-gold" title="in your pending review — only you see it until you submit on GitHub">pending</span>
+        </Show>
       </div>
       <div class="md" innerHTML={renderMarkdown(props.c.body, { replaces: props.replaces })} />
       <Show when={reactions().length}>
@@ -193,24 +184,45 @@ function NoteView(props: { t: Thread }) {
   );
 }
 
-export function PendingView(props: { comment: DraftComment; selected: (k: string | undefined) => boolean }) {
-  const key = `p|${props.comment.id}`;
-  const submitting = () => pg.draft()?.submitting;
+const SAYS: Record<Item["state"], string> = {
+  draft: "draft · only here",
+  waiting: "waits for a push",
+  sending: "sending to your pending review…",
+  pending: "pending",
+  submitted: "submitted",
+  gone: "not on GitHub any more",
+};
+
+/** A ledger item GitHub doesn't show yet: a draft, one waiting on a push, one being sent. */
+export function PendingView(props: { item: Item; selected: (k: string | undefined) => boolean }) {
+  const key = `p|${props.item.key}`;
+  const it = () => props.item;
+  const hint = () => {
+    const out: string[] = [];
+    if (it().state === "draft") out.push("p sends to your pending review");
+    if (it().state !== "sending") out.push("d deletes");
+    return out.join(" · ");
+  };
   return (
-    <div class="rv-thread rv-pending" data-stop={key} classList={{ "rv-on": props.selected(key) }} onClick={bind("review.cursor.set", key)}>
+    <div class="rv-thread rv-pending" data-stop={key} classList={{ "rv-on": props.selected(key), "rv-reply-draft": it().kind === "reply" }} onClick={bind("review.cursor.set", key)}>
       <div class="rv-th-head">
         <span class="rv-author">{pg.conv()?.viewer || "you"}</span>
-        <span class="rv-chip rv-chip-gold">{props.comment.single ? "posting…" : submitting() ? "submitting…" : "pending"}</span>
-        <Show when={props.comment.startLine}>
-          <span class="rv-where">lines {props.comment.startLine}–{props.comment.line}</span>
+        <span class="rv-chip rv-chip-gold">
+          {it().state === "waiting" ? `waits for ${it().waitsFor.map(short).join(", ")} to reach origin` : SAYS[it().state]}
+        </span>
+        <Show when={it().kind === "comment" && it().startLine}>
+          <span class="rv-where">lines {it().startLine}–{it().line}</span>
+        </Show>
+        <Show when={it().err}>
+          <span class="text-ember">{it().err}</span>
         </Show>
         <span class="flex-1" />
-        <Show when={props.selected(key) && !props.comment.single}>
-          <span class="rv-hint">d delete · S finish the review</span>
+        <Show when={props.selected(key)}>
+          <span class="rv-hint">{hint()}</span>
         </Show>
       </div>
       <div class="rv-comment">
-        <div class="md" innerHTML={renderMarkdown(props.comment.body)} />
+        <div class="md" innerHTML={renderMarkdown(it().body)} />
       </div>
     </div>
   );
@@ -229,8 +241,7 @@ export function ComposerView() {
     ta.setSelectionRange(ta.value.length, ta.value.length);
   });
   const text = () => (pg.composer() ? pg.text(c().key) : "");
-  const reviewing = () => (pg.draft()?.comments.length ?? 0) > 0;
-  const primary = () => (c().kind === "line" ? "review.compose.review" : c().kind === "reply" ? "review.compose.reply" : "review.compose.say");
+  const reviewing = () => (pg.conv()?.pending?.count ?? 0) > 0;
   const waits = createMemo(() => (c()?.kind === "reply" ? unpushedIn(text()) : []));
   const onKey = (e: KeyboardEvent) => {
     const mod = e.metaKey || e.ctrlKey;
@@ -239,7 +250,7 @@ export function ComposerView() {
       dispatch("review.compose.cancel", "key", { event: e });
     } else if (mod && e.key === "Enter") {
       e.preventDefault();
-      dispatch(e.shiftKey && c().kind === "line" ? "review.compose.single" : primary(), "key", { event: e });
+      dispatch(e.shiftKey ? "review.compose.draft" : "review.compose.send", "key", { event: e });
     } else if (e.ctrlKey && (e.key === "g" || e.key === "G")) {
       e.preventDefault();
       dispatch("review.compose.suggest", "key", { event: e });
@@ -266,19 +277,15 @@ export function ComposerView() {
           onKeyDown={onKey}
         />
         <div class="rv-c-actions">
-          <Show when={c().kind !== "say"}>
-            <button class="rv-quietbtn" onClick={bind("review.compose.suggest")}>suggestion ^G</button>
-          </Show>
+          <button class="rv-quietbtn" onClick={bind("review.compose.suggest")}>suggestion ^G</button>
           <Show when={waits().length}>
-            <span class="text-gold-leaf">names {waits().map(short).join(", ")} — it posts once that's pushed</span>
+            <span class="text-gold-leaf">names {waits().map(short).join(", ")} — it stays a draft until that's on origin</span>
           </Show>
           <span class="flex-1" />
           <button class="rv-quietbtn" onClick={bind("review.compose.cancel")}>Cancel esc</button>
-          <Show when={c().kind === "line"}>
-            <button class="rv-btn" onClick={bind("review.compose.single")}>Add single comment <kbd>⌘⇧↵</kbd></button>
-          </Show>
-          <button class="rv-btn rv-btn-gold" onClick={bind(primary())}>
-            {c().kind === "line" ? (reviewing() ? "Add review comment" : "Start a review") : c().kind === "reply" ? "Reply" : "Comment"} <kbd>⌘↵</kbd>
+          <button class="rv-btn" onClick={bind("review.compose.draft")}>Save draft <kbd>⌘⇧↵</kbd></button>
+          <button class="rv-btn rv-btn-gold" onClick={bind("review.compose.send")} title="into your pending review on GitHub — private until you submit it there">
+            {c().kind === "reply" ? "Reply in your review" : reviewing() ? "Add review comment" : "Start a review"} <kbd>⌘↵</kbd>
           </button>
         </div>
       </div>
