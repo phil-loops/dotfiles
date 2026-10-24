@@ -375,12 +375,13 @@ generation_current(){
   key=$(generation_key "$1") || return 1
   [[ -n "$key" && "$key" == "$(cat "$1/.gen/.seed-gen-inputs" 2>/dev/null)" ]]
 }
-prepare_generation(){
-  local output
-  output=$("$(dirname "$0")/seed-gen-fingerprint" "$1" --outputs 2>/dev/null) || output=""
-  if [[ -z "$output" || "$output" != "$(cat "$1/.gen/.seed-gen-output" 2>/dev/null)" ]]; then
-    rm -f "$1/.gen/trpc-types.tsbuildinfo"
-  fi
+# Every emit is a full one, staged in .gen/.emit and adopted file by file — TS7's incremental emit
+# under noCheck leaves stale the declarations inferred from a changed file (adopt_emit has the case).
+emit_full(){ # $1 = tree, $2 = tsconfig, rest = the compiler command; prints the compiler's output
+  local tree="$1" proj="$2"; shift 2
+  rm -rf "$tree/.gen/.emit" "$tree/.gen/trpc-types.tsbuildinfo"
+  (cd "$tree" && "$@" --project "$proj" --pretty false --outDir .gen/.emit 2>&1) || return 1
+  "$(dirname "$0")/seed-gen-fingerprint" "$tree" --adopt >/dev/null
 }
 # an incremental emit never deletes: outputs of sources that left the graph are pruned before stamping
 prune_generation(){ [[ ! -L "$1/.gen" ]] && "$(dirname "$0")/seed-gen-fingerprint" "$1" --prune >/dev/null; }
@@ -549,7 +550,6 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     done
     take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
     before=$(generation_snapshot "$dir") || before=""
-    prepare_generation "$dir"
     if hit=$(cache restore "$dir" "$tsc"); then
       mark_restored "$dir" "$hit"
       if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
@@ -559,7 +559,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
       drop_lock "$dir/.gen"
       echo "restored tRPC types for ${head:0:10} from the cache (${hit#* } files changed)"
     elif started=$(build_started "$dir") \
-         && out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
+         && out=$(emit_full "$dir" "$proj" "$HOME/.volta/bin/node" "$tsc"); then
       # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
       # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
       if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
@@ -646,13 +646,12 @@ build_main(){
   # thrashes between two compilers.
   build_packages "$dir" >/dev/null 2>&1
   before=$(generation_snapshot "$dir") || before=""
-  prepare_generation "$dir"
   if hit=$(cache restore "$dir" "$compiler"); then
     mark_restored "$dir" "$hit"
     prune_generation "$dir" && stamp_generation "$dir" "$head" "$before"
   else
     started=$(build_started "$dir")
-    "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
+    emit_full "$dir" "$proj" "${build[@]}" >/dev/null 2>&1 \
       && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before" \
       && cache insert "$dir" "$compiler" "$started"
   fi

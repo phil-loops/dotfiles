@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -70,6 +71,74 @@ def prune_outputs(tree):
     return gone
 
 
+STAGE = ".emit"   # beside trpc-types, at its depth: the maps' relative `sources` come out the same
+
+
+def sync_dir(src, dst):
+    """Make `dst` hold exactly `src`'s files, moving them in: a file already byte-identical stays
+    untouched (its mtime and inode too, so a watcher hears only real changes), the rest are
+    renamed over, extras deleted. Returns how many files changed."""
+    src, dst = Path(src), Path(dst)
+    files = [p.relative_to(src) for p in src.rglob("*") if p.is_file()]
+    keep = {str(r).lower() for r in files}
+    changed = 0
+    for rel in files:
+        s, t = src / rel, dst / rel
+        try:
+            if t.stat().st_size == s.stat().st_size and t.read_bytes() == s.read_bytes():
+                continue
+        except OSError:
+            pass
+        t.parent.mkdir(parents=True, exist_ok=True)
+        if t.is_dir() and not t.is_symlink():
+            shutil.rmtree(t)
+        os.chmod(s, 0o644)
+        os.replace(s, t)
+        changed += 1
+    for path in sorted(dst.rglob("*"), reverse=True):
+        if path.is_file() and str(path.relative_to(dst)).lower() not in keep:
+            path.unlink()
+            changed += 1
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    return changed
+
+
+def adopt_emit(tree):
+    """Take a full emit from .gen/.emit into .gen/trpc-types (sync_dir), and point the tsbuildinfo
+    the compiler wrote back at trpc-types. seed-gen emits in full every time: TS7's incremental
+    emit under noCheck re-emits a changed file but not the files whose declarations are inferred
+    from it (2026-10-23: lib/app-env/rate-limiting.ts gained a getter, index.d.ts kept the old
+    shape), and a full emit in place would rewrite every output, which the type service hears as
+    a change to each of ~1,500 files."""
+    tree = Path(tree)
+    stage, out = tree / ".gen" / STAGE, tree / ".gen/trpc-types"
+    if not (stage / "trpc/root.d.ts").is_file():
+        raise ValueError("no staged emit")
+    out.mkdir(parents=True, exist_ok=True)
+    changed = sync_dir(stage, out)
+    info_path = tree / ".gen/trpc-types.tsbuildinfo"
+    info = json.loads(info_path.read_text())
+    prefix = "./" + STAGE
+
+    def fix(v):
+        if isinstance(v, str) and (v == prefix or v.startswith(prefix + "/")):
+            return "./trpc-types" + v[len(prefix):]
+        return v
+    for k, v in list(info.items()):
+        if k in ("fileNames", "packageJsons", "missingPackageJsons"):
+            continue
+        if isinstance(v, dict):
+            info[k] = {kk: fix(vv) for kk, vv in v.items()}
+        else:
+            info[k] = fix(v)
+    tmp = info_path.with_name(info_path.name + ".tmp")
+    tmp.write_text(json.dumps(info, separators=(",", ":")))
+    os.replace(tmp, info_path)
+    shutil.rmtree(stage, ignore_errors=True)
+    return changed
+
+
 def fingerprint(tree, snapshot=False):
     tree = Path(tree).absolute()
     result = subprocess.run(
@@ -116,6 +185,8 @@ if __name__ == "__main__":
     try:
         if "--prune" in sys.argv[2:]:
             print(prune_outputs(sys.argv[1]))
+        elif "--adopt" in sys.argv[2:]:
+            print(adopt_emit(sys.argv[1]))
         elif "--outputs" in sys.argv[2:]:
             print(output_key(sys.argv[1]))
         else:
