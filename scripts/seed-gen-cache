@@ -7,6 +7,8 @@
                                              store the tree's fresh emit (a build that began at the
                                              mtime of file <started>); a no-op unless every input
                                              is older than that
+  seed-gen-cache key <tree> [<compiler>]     the exact key of the emit the tree holds, with its
+                                             outputs: seed-gen's "is .gen current" marker
   seed-gen-cache --stats | --gc [--json]
 
 seed-gen calls restore before its emit and insert after a stamped build, so every consumer (gates,
@@ -633,7 +635,7 @@ def apply(root, stage, manifest):
     """Make .gen/trpc-types the entry's files (sync_dir: identical files untouched, so watchers and
     mtimes see only real changes). The stamp markers go first, so an interrupted apply reads as
     unstamped and the next sync rebuilds."""
-    for m in (".seed-gen-output", ".seed-gen-inputs"):
+    for m in (".seed-gen-output", ".seed-gen-inputs", ".seed-gen-sources"):
         try:
             os.unlink(os.path.join(root, ".gen", m))
         except OSError:
@@ -856,7 +858,26 @@ def stats(as_json=False):
     return 0
 
 
+def tree_key(root, compiler):
+    """The exact key of the emit .gen holds now — its own graph, keyed as an entry would be — plus
+    the emitted files: seed-gen's .seed-gen-inputs, so "current" and "cached" mean the same inputs."""
+    info = json.load(open(os.path.join(root, INFO)))
+    info = info.get("program", info)
+    graph = anchored_graph(Where(root), info)
+    k = Keyer(root, compiler).key(graph) if graph is not None else None
+    if k is None:
+        raise ValueError("graph does not hold in this tree")
+    return sha((k + "\0" + fp.output_key(root)).encode())
+
+
 def main(argv):
+    if argv[:1] == ["key"] and len(argv) in (2, 3):
+        root = os.path.realpath(argv[1])
+        try:
+            print(tree_key(root, argv[2] if len(argv) == 3 and argv[2] else os.path.join(root, "node_modules/typescript/bin/tsc")))
+            return 0
+        except (LookupError, OSError, ValueError, KeyError, subprocess.CalledProcessError):
+            return 1
     if argv[:1] == ["--stats"]:
         return stats("--json" in argv)
     if argv[:1] == ["--gc"]:

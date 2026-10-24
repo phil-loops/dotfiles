@@ -368,12 +368,27 @@ trpc_types_project(){ # $1 = tree; echoes the tsconfig path or nothing
   [[ -f "$1/$proj" ]] && echo "$proj"
 }
 
-generation_key(){ "$(dirname "$0")/seed-gen-fingerprint" "$1" 2>/dev/null; }
+# The inputs marker is seed-gen-cache's exact key of the emit .gen holds (its own graph: contents,
+# package.jsons read and probed, links, names, configs, compiler, tool) — "current" and "cached" mean
+# the same inputs. The compiler that stamped it is recorded beside it. A graph that won't anchor
+# (an unusual layout) falls back to the older content fingerprint, so a tree still stamps.
+generation_key(){
+  local compiler; compiler=$(cat "$1/.gen/.seed-gen-compiler" 2>/dev/null)
+  "$(dirname "$0")/seed-gen-cache" key "$1" "$compiler" 2>/dev/null \
+    || "$(dirname "$0")/seed-gen-fingerprint" "$1" 2>/dev/null
+}
+# Through a link, .gen is the donor's emit, never this tree's: the question is only whether it
+# describes this tree's sources (layout is moot when nothing emits here) — the content fingerprint.
+generation_sources(){ "$(dirname "$0")/seed-gen-fingerprint" "$1" 2>/dev/null; }
 generation_snapshot(){ "$(dirname "$0")/seed-gen-fingerprint" "$1" --snapshot 2>/dev/null; }
 generation_current(){
-  local key
-  key=$(generation_key "$1") || return 1
-  [[ -n "$key" && "$key" == "$(cat "$1/.gen/.seed-gen-inputs" 2>/dev/null)" ]]
+  local key marker=.seed-gen-inputs
+  if [[ -L "$1/.gen" ]]; then
+    key=$(generation_sources "$1") || return 1; marker=.seed-gen-sources
+  else
+    key=$(generation_key "$1") || return 1
+  fi
+  [[ -n "$key" && "$key" == "$(cat "$1/.gen/$marker" 2>/dev/null)" ]]
 }
 # Every emit is a full one, staged in .gen/.emit and adopted file by file — TS7's incremental emit
 # under noCheck leaves stale the declarations inferred from a changed file (adopt_emit has the case).
@@ -385,15 +400,18 @@ emit_full(){ # $1 = tree, $2 = tsconfig, rest = the compiler command; prints the
 }
 # an incremental emit never deletes: outputs of sources that left the graph are pruned before stamping
 prune_generation(){ [[ ! -L "$1/.gen" ]] && "$(dirname "$0")/seed-gen-fingerprint" "$1" --prune >/dev/null; }
-stamp_generation(){
-  local tree="$1" expected_head="$2" before="$3" key after
+stamp_generation(){ # $4 = the compiler that emitted
+  local tree="$1" expected_head="$2" before="$3" key sources after
   [[ ! -L "$tree/.gen" && -n "$before" ]] || return 1
+  printf '%s\n' "$4" > "$tree/.gen/.seed-gen-compiler"
   [[ "$(git -C "$tree" rev-parse HEAD 2>/dev/null)" == "$expected_head" ]] || return 1
   after=$(generation_snapshot "$tree") || return 1
   [[ "$before" == "$after" ]] || return 1
   key=$(generation_key "$tree") || return 1
+  sources=$(generation_sources "$tree") || return 1
   "$(dirname "$0")/seed-gen-fingerprint" "$tree" --outputs > "$tree/.gen/.seed-gen-output" || return 1
   printf '%s\n' "$key" > "$tree/.gen/.seed-gen-inputs"
+  printf '%s\n' "$sources" > "$tree/.gen/.seed-gen-sources"
   printf '%s\n' "$expected_head" > "$tree/.gen/.seed-gen-sha"
 }
 
@@ -552,7 +570,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     before=$(generation_snapshot "$dir") || before=""
     if hit=$(cache restore "$dir" "$tsc"); then
       mark_restored "$dir" "$hit"
-      if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
+      if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before" "$tsc"; then
         drop_lock "$dir/.gen"
         echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
       fi
@@ -562,7 +580,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
          && out=$(emit_full "$dir" "$proj" "$HOME/.volta/bin/node" "$tsc"); then
       # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
       # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
-      if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
+      if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before" "$tsc"; then
         drop_lock "$dir/.gen"
         echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
       fi
@@ -648,11 +666,11 @@ build_main(){
   before=$(generation_snapshot "$dir") || before=""
   if hit=$(cache restore "$dir" "$compiler"); then
     mark_restored "$dir" "$hit"
-    prune_generation "$dir" && stamp_generation "$dir" "$head" "$before"
+    prune_generation "$dir" && stamp_generation "$dir" "$head" "$before" "$compiler"
   else
     started=$(build_started "$dir")
     emit_full "$dir" "$proj" "${build[@]}" >/dev/null 2>&1 \
-      && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before" \
+      && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before" "$compiler" \
       && cache insert "$dir" "$compiler" "$started"
   fi
   drop_lock "$dir/.gen"

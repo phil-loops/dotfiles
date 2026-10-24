@@ -40,7 +40,7 @@ def repo_at(repo):
     write(repo, "pages/unused.tsx", "export const page = 1;\n")
     write(repo, "typescript/tsconfig.trpc-types.json", "{}\n")
     write(repo, "package-lock.json", '{"packages":{}}\n')
-    write(repo, "node_modules/typescript/package.json", '{"version":"7.0.2"}')
+    write(repo, "node_modules/typescript/package.json", '{"name":"typescript","version":"7.0.2"}')
     write(repo, ".gen/trpc-types/trpc/root.d.ts", "old output\n")
     git(repo, "add", ".")
     git(repo, "commit", "-qm", "initial")
@@ -109,14 +109,19 @@ class SeedTests(unittest.TestCase):
         self.repo = Path(self.temp.name) / "repo"
         repo_at(self.repo)
         self.log = Path(self.temp.name) / "compiler.log"
-        self.env = dict(os.environ, GATE_TEST_LOG=str(self.log))
+        # SEED_GEN_CACHE=0: these count compiles; test-seed-gen-cache covers the cache on real trees
+        self.env = dict(os.environ, GATE_TEST_LOG=str(self.log), SEED_GEN_CACHE="0",
+                        SEED_GEN_CACHE_DIR=str(Path(self.temp.name) / "gen-cache"))
         write(self.repo, "node_modules/typescript/bin/tsc", r'''
 const fs = require('node:fs');
 fs.appendFileSync(process.env.GATE_TEST_LOG, 'compile\n');
-fs.mkdirSync('.gen/trpc-types/trpc', {recursive:true});
-fs.writeFileSync('.gen/trpc-types/trpc/root.d.ts', fs.readFileSync('lib/used.ts'));
-fs.writeFileSync('.gen/trpc-types/trpc/extra.d.ts', 'extra');
-fs.writeFileSync('.gen/trpc-types.tsbuildinfo', JSON.stringify({fileNames:['../trpc/root.ts','../lib/used.ts','../trpc/extra.ts']}));
+const at = process.argv.indexOf('--outDir');
+const out = at > 0 ? process.argv[at + 1] : '.gen/trpc-types';
+fs.mkdirSync(out + '/trpc', {recursive:true});
+fs.writeFileSync(out + '/trpc/root.d.ts', fs.readFileSync('lib/used.ts'));
+fs.writeFileSync(out + '/trpc/extra.d.ts', 'extra');
+fs.writeFileSync('.gen/trpc-types.tsbuildinfo', JSON.stringify({fileNames:['../trpc/root.ts','../lib/used.ts','../trpc/extra.ts'],
+  options:{outDir:'./' + require('node:path').relative('.gen', out)}}));
 ''')
 
     def sync(self, repo=None):
