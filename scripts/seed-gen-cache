@@ -357,7 +357,11 @@ def record_probes(root):
             m = PROBE_LINE.match(line)
             if not m:
                 continue
-            a = probe_anchor(w, os.path.normpath(m.group(2)))
+            path = os.path.normpath(m.group(2))
+            if os.path.basename(path).lower() == "package.json":
+                continue    # printed or not depending on which resolver thread got there first; the
+                            # tsbuildinfo's packageJsons + missingPackageJsons record them all
+            a = probe_anchor(w, path)
             if a is not None:
                 seen[(a[0], a[1], "d" if m.group(1) == "Directory" else "f")] = m.group(3) == "exists"
     probes = sorted([k, r, t, e] for (k, r, t), e in seen.items())
