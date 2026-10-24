@@ -1,0 +1,540 @@
+#!/usr/bin/env python3
+"""test-seed-gen-cache — seed-gen's content-addressed .gen cache against real trees.
+
+  test-seed-gen-cache [--repo DIR] [--work DIR] [--commit REV] [--only a,b] [--keep]
+
+Every case runs in the test's own detached worktrees of --repo (removed at the end) against a
+private store (SEED_GEN_CACHE_DIR under --work); nothing touches another tree or the real store.
+
+  hit         a fresh tree at another depth restores the first tree's emit: canonically equal to the
+              build, the tsbuildinfo as the compiler itself writes it there (a no-op incremental
+              build re-emits nothing), and seed-gen --check passes
+  part:<p>    for each key part a counterexample: a change to the tree that only that part sees,
+              which a key without the part would wrongly hit — the real key misses, and a rebuild
+              emits differently (or records a different graph). Revert → restored from the cache.
+  corrupt     a flipped byte / truncated manifest in an entry: restore refuses and evicts it
+  compiler    a lookup with another compiler misses an entry stored under the tree's own
+  same-mtime  an input edited at the same size with its mtime put back: still a miss
+  moved       an input touched after the build began: insert refuses the emit
+  race        eight concurrent inserts of one emit: one entry, complete, no temp left behind
+  evict       an entry evicted after restore cloned it: the restore still completes
+  gc          a small budget keeps the most recently used entries
+  off         SEED_GEN_CACHE=0: no lookup, no insert, a build
+
+Compiles run one at a time through heavy-turn. Exit 1 on any failure.
+"""
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+import time
+
+SCRIPTS = os.path.dirname(os.path.realpath(__file__))
+WORK = os.path.realpath(next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--work=")),
+                             sys.argv[sys.argv.index("--work") + 1] if "--work" in sys.argv
+                             else os.path.join(os.environ.get("TMPDIR", "/tmp"), "test-seed-gen-cache")))
+os.environ["SEED_GEN_CACHE_DIR"] = os.path.join(WORK, "store")   # before the module reads it
+SEED_GEN = os.path.join(SCRIPTS, "seed-gen")
+CACHE_TOOL = os.path.join(SCRIPTS, "seed-gen-cache")
+results = []
+
+
+def load(name, path):
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader(name, path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+C = load("seed_gen_cache", CACHE_TOOL)
+gen_canon = load("tld", os.path.join(SCRIPTS, "test-lsp-differential")).gen_canon
+
+
+def gen_canon_dir(out):
+    return C.canon_digest(out) if os.path.isdir(out) else ""
+
+
+def check(name, ok, detail=""):
+    results.append((name, bool(ok), detail))
+    print(f"  {'✓' if ok else '✗'} {name}{(' — ' + detail) if detail else ''}", flush=True)
+    return ok
+
+
+def git(repo, *a, check=True):
+    r = subprocess.run(["git", "-C", repo, "-c", "core.hooksPath=/dev/null", *a], capture_output=True, text=True)
+    if check and r.returncode:
+        raise RuntimeError(f"git {' '.join(a)}: {r.stderr.strip()}")
+    return r.stdout
+
+
+def sync(tree, **env):
+    e = dict(os.environ, **env)
+    r = subprocess.run([os.path.join(SCRIPTS, "heavy-turn"), "--class", "test-seed-gen-cache", "--", SEED_GEN, "--sync", tree],
+                       capture_output=True, text=True, env=e, timeout=1800)
+    return r.returncode, r.stdout.strip()
+
+
+def emit(tree, compiler=None):
+    """The tRPC types emit, run directly (no seed-gen: no repair of what a case perturbed)."""
+    cmd = [os.path.expanduser("~/.volta/bin/node"), os.path.join(tree, "node_modules/typescript/bin/tsc")] if not compiler else [compiler]
+    proj = "typescript/tsconfig.trpc-types.json"
+    r = subprocess.run([os.path.join(SCRIPTS, "heavy-turn"), "--class", "test-seed-gen-cache", "--", *cmd, "--project", proj, "--pretty", "false"],
+                       cwd=tree, capture_output=True, text=True, timeout=1800)
+    return r.returncode, r.stdout
+
+
+def graph_of(tree):
+    info = json.load(open(os.path.join(tree, ".gen", "trpc-types.tsbuildinfo")))
+    return C.anchored_graph(C.Where(tree), info)
+
+
+def tsc_of(tree):
+    return os.path.join(tree, "node_modules/typescript/bin/tsc")
+
+
+def key(tree, graph, omit=()):
+    return C.Keyer(tree, tsc_of(tree), omit=frozenset(omit)).key(graph)
+
+
+def store_log(store):
+    try:
+        return open(os.path.join(store, "log")).read().splitlines()
+    except OSError:
+        return []
+
+
+def entries(store):
+    d = os.path.join(store, "entries")
+    return sorted(n for n in os.listdir(d) if not n.startswith(".")) if os.path.isdir(d) else []
+
+
+def new_tree(repo, work, name, rev):
+    path = os.path.join(work, name)
+    if os.path.lexists(path):
+        git(repo, "worktree", "remove", "--force", path, check=False)
+        shutil.rmtree(path, ignore_errors=True)
+    git(repo, "worktree", "prune")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    git(repo, "worktree", "add", "--detach", path, rev)
+    path = os.path.realpath(path)
+    os.makedirs(os.path.join(path, "node_modules"), exist_ok=True)
+    return path
+
+
+class Perturb:
+    """A reversible change to one tree: files written or replaced, restored on undo."""
+
+    def __init__(self):
+        self.saved = []
+
+    def write(self, path, data, mode="w"):
+        old = open(path, "rb").read() if os.path.exists(path) else None
+        self.saved.append((path, old, os.path.islink(path) and os.readlink(path)))
+        if os.path.islink(path):
+            os.unlink(path)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, mode) as f:
+            f.write(data)
+
+    def link(self, path, target):
+        self.saved.append((path, None, os.readlink(path) if os.path.islink(path) else ("<dir>" if os.path.isdir(path) else None)))
+        if os.path.isdir(path) and not os.path.islink(path):
+            shutil.move(path, path + ".perturb-saved")
+        elif os.path.lexists(path):
+            os.unlink(path)
+        os.symlink(target, path)
+
+    def undo(self):
+        for path, old, link in reversed(self.saved):
+            if os.path.islink(path) or os.path.isfile(path):
+                os.unlink(path)
+            if link == "<dir>":
+                shutil.move(path + ".perturb-saved", path)
+            elif link:
+                os.symlink(link, path)
+            elif old is not None:
+                with open(path, "wb") as f:
+                    f.write(old)
+        self.saved = []
+
+
+# ── counterexamples, one per key part ─────────────────────────────────────────────────────────
+
+def dir_import(tree, graph):
+    """An in-tree import `./x` that resolves to x/index.ts — adding x.ts beside it re-resolves it."""
+    files = {r for k, r, _lo, _re in graph["fileNames"] if k == "t"}
+    low = {f.lower() for f in files}
+    for f in sorted(files):
+        if not f.endswith((".ts", ".tsx")):
+            continue
+        try:
+            text = open(os.path.join(tree, f)).read()
+        except OSError:
+            continue
+        for spec in re.findall(r"""from\s+["'](\.{1,2}/[^"']+)["']""", text):
+            target = os.path.normpath(os.path.join(os.path.dirname(f), spec))
+            for idx in ("index.ts", "index.tsx"):
+                if (target + "/" + idx).lower() in low and not any(
+                        os.path.exists(os.path.join(tree, target + e)) for e in (".ts", ".tsx", ".d.ts")):
+                    return f, spec, target
+    return None
+
+
+def dist_shadow(tree, graph):
+    """A dist declaration another dist file imports relatively — `x.ts` beside `x.d.ts` wins."""
+    files = sorted(r for k, r, _lo, _re in graph["fileNames"] if k == "t" and r.startswith("packages/") and "/dist/" in r)
+    have = {f.lower() for f in files}
+    for f in files:
+        for spec in re.findall(r"""from\s+["'](\./[^"']+)["']""", open(os.path.join(tree, f)).read()):
+            stem = os.path.normpath(os.path.join(os.path.dirname(f), spec))
+            if (stem + ".d.ts").lower() in have and not os.path.exists(os.path.join(tree, stem + ".ts")):
+                return stem + ".ts"
+    return None
+
+
+def graph_state(tree):
+    info = json.load(open(os.path.join(tree, ".gen/trpc-types.tsbuildinfo")))
+    return [info.get(k) for k in ("fileNames", "packageJsons", "missingPackageJsons")] + \
+        [[fi.get("impliedNodeFormat") if isinstance(fi, dict) else None for fi in info.get("fileInfos") or []]]
+
+
+def part_cases(tree, graph):
+    """[(part, description, apply(p))] — apply makes the change through Perturb p."""
+    cases = []
+
+    def contents(p):
+        p.write(os.path.join(tree, "trpc/root.ts"), "\nexport type CacheProbe = { probe: true };\n", "a")
+    cases.append(("contents", "an input file's text (trpc/root.ts gains an export)", contents))
+
+    hit = dir_import(tree, graph)
+    if hit:
+        f, spec, target = hit
+
+        def names(p, target=target):
+            p.write(os.path.join(tree, target + ".ts"), "export const cacheProbe = 1;\n")
+        cases.append(("names", f"a new file shadows a directory import ({f}: '{spec}' → {target}.ts, not {target}/index.ts)", names))
+
+    def configs(p):
+        cfg = os.path.join(tree, "typescript/tsconfig.trpc-types.json")
+        p.write(cfg, open(cfg).read().replace('"declarationMap": true', '"declarationMap": false'))
+    cases.append(("configs", "a compiler option (declarationMap off in tsconfig.trpc-types.json)", configs))
+
+    pj = os.path.join(tree, "node_modules/@prisma/client/package.json")
+    if os.path.isfile(pj) and not os.path.islink(pj):
+        def pkgjson(p):
+            d = open(pj).read().replace('"./default.d.ts"', '"./cache-probe.d.ts"').replace('"default.d.ts"', '"cache-probe.d.ts"')
+            p.write(os.path.join(tree, "node_modules/@prisma/client/cache-probe.d.ts"), "export {};\n")
+            p.write(pj, d)
+        cases.append(("pkgjson", "a read package.json's resolution fields (the tree-local @prisma/client types → a stub)", pkgjson))
+
+    # a probe below a package's own directory: view() lists node_modules entries, not their insides
+    missing = [r for k, r, _lo, re_ in graph["missingPackageJsons"] if k == "tnm" and re_ and r.count("/") >= 3
+               and os.path.isdir(os.path.join(tree, "node_modules", os.path.dirname(r)))]
+    if missing:
+        target = os.path.join(tree, "node_modules", missing[0])
+
+        def miss(p):
+            p.write(target, json.dumps({"type": "module"}) + "\n")
+        cases.append(("missing", f"a package.json the compiler probed for and found absent appears (node_modules/{missing[0]})", miss))
+
+    shadow = dist_shadow(tree, graph)
+    if shadow:
+        def listings(p, shadow=shadow):
+            p.write(os.path.join(tree, shadow), "export const cacheProbe = 1;\n")
+        cases.append(("listings", f"a gitignored packages dist file shadows a declaration ({shadow} beside its .d.ts)", listings))
+
+
+    loops = os.path.join(tree, "node_modules/@loops")
+    in_graph = {r.split("/")[1] for k, r, _lo, _re in graph["fileNames"] if k == "t" and r.startswith("packages/")}
+    pkgs = sorted(p for p in in_graph if os.path.islink(os.path.join(loops, p)))
+    if len(pkgs) >= 2:
+        def view(p, a=pkgs[0], b=pkgs[1]):
+            p.link(os.path.join(loops, a), f"../../packages/{b}")
+        cases.append(("view", f"a node_modules link retargeted (@loops/{pkgs[0]} → packages/{pkgs[1]}), every file unchanged", view))
+
+    client = os.path.join(tree, "node_modules/.prisma/client")
+    home = C.Where(tree).home
+    if home and os.path.isdir(client) and not os.path.islink(client):
+        def side(p):
+            p.link(client, os.path.join(home, ".prisma/client"))
+        cases.append(("side", "the same prisma client files, reached through a link into the home instead of a copy in the tree", side))
+    return cases
+
+
+def run_parts(tree, store, only):
+    rc, out = sync(tree)
+    graph = graph_of(tree)
+    base_canon = gen_canon(tree)
+    base_full = key(tree, graph)
+    base_info = graph_state(tree)
+    for part, desc, apply in part_cases(tree, graph):
+        if only and f"part:{part}" not in only:
+            continue
+        print(f"\n part:{part} — {desc}")
+        omitted_before = key(tree, graph, omit=[part])
+        p = Perturb()
+        try:
+            apply(p)
+            omitted_after = key(tree, graph, omit=[part])
+            full_after = key(tree, graph)
+            check(f"part:{part} without it the key would hit", omitted_after == omitted_before and omitted_after is not None)
+            check(f"part:{part} with it the key misses", full_after != base_full)
+            if part == "side":
+                prc, pout = emit(tree)    # seed-gen would re-localize prisma before emitting; emit as laid out
+                after_canon = gen_canon(tree)
+                note = "emit failed: " + (pout.strip().splitlines() or [""])[0][:160] if prc else ""
+            else:
+                srcs = sync(tree)
+                after_canon = gen_canon(tree)
+                note = srcs[1].splitlines()[-1] if srcs[1] else ""
+                check(f"part:{part} seed-gen rebuilt instead of restoring", "restored" not in srcs[1], note)
+            info_after = graph_state(tree)
+            differs = after_canon != base_canon
+            graph_differs = info_after != base_info
+            check(f"part:{part} a wrong hit would serve a different emit" + ("" if differs else " (graph)"),
+                  differs or graph_differs or (part == "side" and note),
+                  ("emit differs" if differs else "emit equal") + ("; graph differs" if graph_differs else "")
+                  + (f"; {note}" if part == "side" and note else ""))
+        finally:
+            p.undo()
+        rc, out = sync(tree)
+        check(f"part:{part} reverted → restored from the cache", "restored" in out and gen_canon(tree) == base_canon, out.splitlines()[-1] if out else "")
+    for part in ("compiler", "tool", "lock"):
+        if not only or f"part:{part}" in only:
+            print(f"\n part:{part} — covered by its own case below or argued in the wiki" if part != "lock"
+                  else "\n part:lock — no constructible pair (same files ⇒ same npm identity here); argued in the wiki")
+
+
+# ── adversarial ───────────────────────────────────────────────────────────────────────────────
+
+def first_entry(store):
+    es = entries(store)
+    return os.path.join(store, "entries", es[0]) if es else None
+
+
+def run_adversarial(tree, other, store, only):
+    def want(name):
+        return not only or name in only
+
+    sync(tree)
+    graph = graph_of(tree)
+    base_canon = gen_canon(tree)
+    base_entry = os.path.join(store, "entries", key(tree, graph))
+
+    if want("corrupt"):
+        print("\n corrupt")
+        e = base_entry
+        man = json.load(open(os.path.join(e, "manifest.json")))
+        victim = os.path.join(e, "out", sorted(man["files"])[0])
+        os.chmod(victim, 0o644)
+        b = bytearray(open(victim, "rb").read())
+        b[len(b) // 2] ^= 0x20
+        open(victim, "wb").write(bytes(b))
+        os.unlink(os.path.join(other, ".gen/.seed-gen-inputs")) if os.path.exists(os.path.join(other, ".gen/.seed-gen-inputs")) else None
+        rc, out = sync(other)
+        log = store_log(store)
+        check("corrupt: a flipped byte is refused and the entry evicted", any("evicted" in ln and "differs" in ln for ln in log[-6:]), out.splitlines()[-1] if out else "")
+        check("corrupt: the tree is still correct (rebuilt)", gen_canon(other) == base_canon and "rebuilt" in out)
+        e = base_entry
+        os.chmod(os.path.join(e, "manifest.json"), 0o644)
+        with open(os.path.join(e, "manifest.json"), "r+") as f:
+            f.truncate(100)
+        os.unlink(os.path.join(other, ".gen/.seed-gen-inputs"))
+        rc, out = sync(other)
+        check("corrupt: a truncated manifest is refused and evicted",
+              any("evicted" in ln and "unreadable" in ln for ln in store_log(store)[-6:]) and gen_canon(other) == base_canon,
+              out.splitlines()[-1] if out else "")
+
+    if want("compiler"):
+        print("\n compiler")
+        alts, older = [], []
+        for d in glob.glob(os.path.expanduser("~/.cache/seed-gen/nm/*/node_modules/typescript/bin/tsc")):
+            v = json.load(open(os.path.join(os.path.dirname(os.path.dirname(d)), "package.json")))["version"]
+            if not v.startswith("7."):
+                older.append((tuple(int(x) for x in re.findall(r"\d+", v)[:3]), v, d))
+        for _, v, d in sorted(older, reverse=True)[:1]:   # the newest pre-7: TS6, which parses these configs
+            alts.append((f"typescript {v}", [os.path.expanduser("~/.volta/bin/node"), d], d))
+        alts += [(subprocess.run([c, "--version"], capture_output=True, text=True).stdout.strip(), [os.path.realpath(c)], os.path.realpath(c))
+                 for c in subprocess.run(["which", "-a", "tsgo"], capture_output=True, text=True).stdout.split()
+                 if C.compiler_id(tree, os.path.realpath(c))][:1]
+        k_tree = C.Keyer(tree, tsc_of(tree)).key(graph)
+        for label, cmd, ident in alts:
+            k_alt = C.Keyer(tree, ident).key(graph)
+            check(f"compiler: {label}'s key differs from the tree's tsc for the same inputs", k_tree != k_alt and k_alt is not None)
+            aside = os.path.join(tree, ".gen/.alt-emit")
+            shutil.rmtree(aside, ignore_errors=True)
+            r = subprocess.run([os.path.join(SCRIPTS, "heavy-turn"), "--class", "test-seed-gen-cache", "--", *cmd, "--project",
+                                "typescript/tsconfig.trpc-types.json", "--pretty", "false", "--outDir", ".gen/.alt-emit",
+                                "--tsBuildInfoFile", ".gen/.alt-emit.tsbuildinfo"], cwd=tree, capture_output=True, text=True, timeout=3600)
+            alt_canon = gen_canon_dir(aside)
+            mine = gen_canon_dir(os.path.join(tree, ".gen/trpc-types"))
+            check(f"compiler: {label} emits differently (a hit across compilers would be wrong)" if alt_canon != mine
+                  else f"compiler: {label} emits the same here (the key still separates them)", True,
+                  f"exit {r.returncode}; " + ((r.stdout.strip().splitlines() or [""])[0][:120]))
+            shutil.rmtree(aside, ignore_errors=True)
+            try:
+                os.unlink(aside + ".tsbuildinfo")
+            except OSError:
+                pass
+
+    if want("same-mtime"):
+        print("\n same-mtime")
+        f = os.path.join(tree, "trpc/root.ts")
+        st = os.stat(f)
+        text = open(f, "rb").read()
+        i = max(i for i, c in enumerate(text) if chr(c).isalpha())
+        mutated = text[:i] + bytes([text[i] ^ 0x20]) + text[i + 1:]
+        open(f, "wb").write(mutated)
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        st2 = os.stat(f)
+        k_before = C.Keyer(tree, tsc_of(tree)).key(graph)
+        open(f, "wb").write(text)
+        os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        k_orig = C.Keyer(tree, tsc_of(tree)).key(graph)
+        check("same-mtime: same size + mtime, different bytes → a different key",
+              st2.st_size == st.st_size and st2.st_mtime_ns == st.st_mtime_ns and k_before != k_orig)
+
+    if want("moved"):
+        print("\n moved")
+        s2 = store + ".moved"
+        shutil.rmtree(s2, ignore_errors=True)
+        started = os.path.join(tree, ".gen/.seed-gen-started")
+        open(started, "w").close()
+        time.sleep(0.05)
+        f = os.path.join(tree, "trpc/root.ts")
+        os.utime(f)
+        r = subprocess.run([CACHE_TOOL, "insert", tree, tsc_of(tree), started], capture_output=True, text=True,
+                           env=dict(os.environ, SEED_GEN_CACHE_DIR=s2))
+        check("moved: an input touched after the build began → insert refuses", not entries(s2)
+              and any("changed during the build" in ln for ln in store_log(s2)), (store_log(s2) or [""])[-1][20:140])
+        shutil.rmtree(s2, ignore_errors=True)
+
+    if want("race"):
+        print("\n race")
+        s2 = store + ".race"
+        shutil.rmtree(s2, ignore_errors=True)
+        started = os.path.join(tree, ".gen/.seed-gen-started")
+        os.utime(started, ns=(time.time_ns(), time.time_ns()))
+        procs = [subprocess.Popen([CACHE_TOOL, "insert", tree, tsc_of(tree), started],
+                                  env=dict(os.environ, SEED_GEN_CACHE_DIR=s2)) for _ in range(8)]
+        for p in procs:
+            p.wait()
+        es = entries(s2)
+        temps = [n for n in os.listdir(os.path.join(s2, "entries")) if n.startswith(".")] if os.path.isdir(os.path.join(s2, "entries")) else []
+        ok = len(es) == 1
+        if ok:
+            man = json.load(open(os.path.join(s2, "entries", es[0], "manifest.json")))
+            ok = C.verify(os.path.join(s2, "entries", es[0]), man) is None
+        check("race: 8 concurrent inserts → one complete entry, no temp dirs", ok and not temps, f"{len(es)} entries, {len(temps)} temps")
+        subprocess.run(["chmod", "-R", "u+w", s2])
+        shutil.rmtree(s2, ignore_errors=True)
+
+    if want("evict"):
+        print("\n evict")
+        e = first_entry(store)
+        if e is None:
+            sync(other)
+            e = first_entry(store)
+        stage = os.path.join(store, "probe-stage")
+        shutil.rmtree(stage, ignore_errors=True)
+        C.clone(e, stage)
+        subprocess.run(["chmod", "-R", "u+w", e])
+        shutil.rmtree(e)
+        man = json.load(open(os.path.join(stage, "manifest.json")))
+        check("evict: an entry evicted after the clone leaves the staged copy whole", C.verify(stage, man) is None)
+        subprocess.run(["chmod", "-R", "u+w", stage])
+        shutil.rmtree(stage)
+        os.unlink(os.path.join(other, ".gen/.seed-gen-inputs"))
+        sync(other)
+
+    if want("gc"):
+        print("\n gc")
+        es = entries(store)
+        newest = es[0]
+        os.utime(os.path.join(store, "entries", newest, "manifest.json"))
+        size = json.load(open(os.path.join(store, "entries", newest, "manifest.json")))["bytes"]
+        r = subprocess.run([CACHE_TOOL, "--gc"], capture_output=True, text=True,
+                           env=dict(os.environ, SEED_GEN_CACHE_DIR=store, SEED_GEN_CACHE_MB=str((size >> 20) + 1)))
+        check("gc: a one-entry budget keeps the most recently used", entries(store) == [newest],
+              f"{len(es)} → {len(entries(store))}: {r.stdout.strip()}")
+        r = subprocess.run([CACHE_TOOL, "--gc"], capture_output=True, text=True,
+                           env=dict(os.environ, SEED_GEN_CACHE_DIR=store, SEED_GEN_CACHE_MB="0"))
+        check("gc: a zero budget evicts everything", entries(store) == [], r.stdout.strip())
+
+    if want("off"):
+        print("\n off")
+        n = len(store_log(store))
+        os.unlink(os.path.join(other, ".gen/.seed-gen-inputs"))
+        rc, out = sync(other, SEED_GEN_CACHE="0")
+        check("off: SEED_GEN_CACHE=0 builds and leaves the store alone", "rebuilt" in out and len(store_log(store)) == n, out.splitlines()[-1] if out else "")
+
+
+def run_hit(repo, work, tree, store):
+    print("\n hit")
+    rc, out = sync(tree)
+    check("hit: first tree builds and stores", rc == 0 and len(entries(store)) >= 1, out.splitlines()[-1] if out else "")
+    other = new_tree(repo, work, "deeper/still/other", git(tree, "rev-parse", "HEAD").strip())
+    t = time.time()
+    rc, out = sync(other)
+    check("hit: a fresh tree at another depth restores", "restored" in out, f"{out.splitlines()[-1] if out else ''} ({time.time() - t:.1f}s with the node_modules view)")
+    check("hit: canonically equal to the build", gen_canon(other) == gen_canon(tree))
+    r = subprocess.run([SEED_GEN, "--check", other], capture_output=True, text=True)
+    check("hit: seed-gen --check passes", r.returncode == 0, r.stdout.strip())
+    before = json.load(open(os.path.join(other, ".gen/trpc-types.tsbuildinfo")))
+    marker = os.path.join(other, ".gen/.probe-mark")
+    open(marker, "w").close()
+    emit(other)
+    after = json.load(open(os.path.join(other, ".gen/trpc-types.tsbuildinfo")))
+    newer = [p for p in subprocess.run(["find", os.path.join(other, ".gen/trpc-types"), "-type", "f", "-newer", marker],
+                                       capture_output=True, text=True).stdout.split("\n") if p]
+    check("hit: the relocated tsbuildinfo is the compiler's own (no-op build re-emits 0 files)",
+          not newer and before["fileNames"] == after["fileNames"] and before["fileInfos"] == after["fileInfos"],
+          f"{len(newer)} re-emitted")
+    return other
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo", default=os.path.expanduser("~/coding/loops"))
+    ap.add_argument("--work", default=os.path.join(os.environ.get("TMPDIR", "/tmp"), "test-seed-gen-cache"))
+    ap.add_argument("--commit", default="origin/main")
+    ap.add_argument("--only")
+    ap.add_argument("--keep", action="store_true")
+    a = ap.parse_args()
+    repo = os.path.realpath(a.repo)
+    work = os.path.realpath(os.makedirs(a.work, exist_ok=True) or a.work)
+    store = os.path.join(work, "store")
+    if os.path.isdir(store):
+        subprocess.run(["chmod", "-R", "u+w", store])
+        shutil.rmtree(store)
+    os.environ["SEED_GEN_CACHE_DIR"] = store
+    os.environ.pop("SEED_GEN_CACHE", None)
+    only = set(a.only.split(",")) if a.only else None
+    rev = git(repo, "rev-parse", a.commit).strip()
+    tree = new_tree(repo, work, "first", rev)
+    trees = [tree]
+    try:
+        other = run_hit(repo, work, tree, store)
+        trees.append(other)
+        run_parts(tree, store, only)
+        run_adversarial(tree, other, store, only)
+    finally:
+        if not a.keep:
+            for t in trees:
+                git(repo, "worktree", "remove", "--force", t, check=False)
+                shutil.rmtree(t, ignore_errors=True)
+            git(repo, "worktree", "prune")
+    bad = [r for r in results if not r[1]]
+    print(f"\n{len(results) - len(bad)}/{len(results)} checks passed")
+    return 1 if bad else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
