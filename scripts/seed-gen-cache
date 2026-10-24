@@ -211,7 +211,8 @@ def relocate(w, info, graph):
 
 def compiler_id(root, compiler):
     """Every file of the compiler as invoked: the typescript package (launcher + version) and the
-    platform package holding the native binary and its lib.*.d.ts. None when it isn't a package."""
+    platform package holding the native binary and its lib.*.d.ts. None when it isn't a package.
+    Memoized by the files' stat signatures — ctime included, which no rewrite can put back."""
     real = os.path.realpath(compiler)
     pkg = os.path.dirname(real)
     while pkg != "/" and not os.path.isfile(os.path.join(pkg, "package.json")):
@@ -225,16 +226,31 @@ def compiler_id(root, compiler):
     nm = os.path.dirname(os.path.dirname(pkg)) if name.startswith("@") else os.path.dirname(pkg)
     base = name.split("/")[-1]
     plat = os.path.join(nm, "@typescript", f"{base}-darwin-arm64" if sys.platform == "darwin" else f"{base}-linux-x64")
-    d = hashlib.sha256(b"compiler\0" + name.encode() + b"\0")
+    files = []
     for top in (pkg, plat):
-        if not os.path.isdir(top):
-            continue
         for dp, dns, fns in os.walk(top):
             dns[:] = sorted(x for x in dns if x != "node_modules")
-            for f in sorted(fns):
-                p = os.path.join(dp, f)
-                d.update(os.fsencode(os.path.relpath(p, top)) + b"\0" + file_sha(p).encode())
-    return d.hexdigest()
+            files.extend((top, os.path.join(dp, f)) for f in sorted(fns))
+    sig = hashlib.sha256(name.encode())
+    for _top, p in files:
+        st = os.stat(p)
+        sig.update(f"{p}\0{st.st_size}\0{st.st_mtime_ns}\0{st.st_ctime_ns}\0{st.st_ino}\0".encode())
+    sig = sig.hexdigest()
+    memo = store("compilers", sig)
+    try:
+        return open(memo).read().strip()
+    except OSError:
+        pass
+    d = hashlib.sha256(b"compiler\0" + name.encode() + b"\0")
+    for top, p in files:
+        d.update(os.fsencode(os.path.relpath(p, top)) + b"\0" + file_sha(p).encode())
+    cid = d.hexdigest()
+    try:
+        os.makedirs(store("compilers"), exist_ok=True)
+        write_atomic(memo, cid.encode())
+    except OSError:
+        pass
+    return cid
 
 
 def tool_id():
@@ -699,6 +715,10 @@ def gc(quiet=False):
             p = os.path.join(d, n)
             if (sub == "trash" or n.startswith(".tmp.")) and now - _mtime(p) > 3600:
                 shutil.rmtree(p, ignore_errors=True)
+    d = store("compilers")
+    for n in os.listdir(d) if os.path.isdir(d) else []:
+        if now - _mtime(os.path.join(d, n)) > MAX_AGE:
+            os.unlink(os.path.join(d, n))
     live = {e["graph"] for e in keep}
     d = store("graphs")
     for n in os.listdir(d) if os.path.isdir(d) else []:
