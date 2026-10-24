@@ -19,7 +19,7 @@ the viewer's type trees, review scratch trees, worktrees, the donor) shares one 
 SEED_GEN_CACHE=0; SEED_GEN_CACHE=audit never restores, builds, and checks what it built against
 any entry for the same key (a mismatch evicts the entry and leaves a report in poison/) — the push
 gates run this way. The store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
-bounded by SEED_GEN_CACHE_MB (default 1536) and SEED_GEN_CACHE_DAYS unused (default 14).
+bounded by SEED_GEN_CACHE_MB (default 3072) and SEED_GEN_CACHE_DAYS unused (default 14).
 
 The key is everything the emit reads, as the compiler itself recorded it (the tsbuildinfo and the
 resolution trace of a previous build — ccache's "direct mode"): each input file's content, each
@@ -46,7 +46,7 @@ import importlib.util
 HERE = os.path.dirname(os.path.realpath(__file__))
 SCHEMA = b"seed-gen-cache-v1\0"
 CACHE = os.environ.get("SEED_GEN_CACHE_DIR") or os.path.expanduser("~/Library/Caches/seed-gen/gen")
-BUDGET = int(os.environ.get("SEED_GEN_CACHE_MB", "1536")) << 20
+BUDGET = int(os.environ.get("SEED_GEN_CACHE_MB", "3072")) << 20
 MAX_AGE = float(os.environ.get("SEED_GEN_CACHE_DAYS", "14")) * 86400
 MAX_GRAPHS = 96
 OUT = os.path.join(".gen", "trpc-types")
