@@ -11,7 +11,9 @@
 
 seed-gen calls restore before its emit and insert after a stamped build, so every consumer (gates,
 the viewer's type trees, review scratch trees, worktrees, the donor) shares one store. Off with
-SEED_GEN_CACHE=0; the store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
+SEED_GEN_CACHE=0; SEED_GEN_CACHE=audit never restores, builds, and checks what it built against
+any entry for the same key (a mismatch evicts the entry and leaves a report in poison/) — the push
+gates run this way. The store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
 bounded by SEED_GEN_CACHE_MB (default 1536) and SEED_GEN_CACHE_DAYS unused (default 14).
 
 The key is everything the emit reads, as the compiler itself recorded it (the tsbuildinfo of a
@@ -74,6 +76,29 @@ def _sha_or_dash(path):
         return file_sha(path)
     except OSError:
         return "-"
+
+
+def canon_digest(out):
+    """The emit up to TS7's own nondeterminism: two builds of one tree differ in the order of
+    synthesized `?: undefined` members (4-7 of ~2,600 files), so each declaration counts as its
+    sorted lines and each map without its `mappings` — the bar test-lsp-differential holds .gen to."""
+    d = hashlib.sha256()
+    for dp, _dns, fns in sorted(os.walk(out)):
+        for f in sorted(fns):
+            p = os.path.join(dp, f)
+            d.update(os.path.relpath(p, out).encode() + b"\0")
+            raw = open(p, "rb").read()
+            if f.endswith(".map"):
+                try:
+                    j = json.loads(raw)
+                    j.pop("mappings", None)
+                    raw = json.dumps(j, sort_keys=True).encode()
+                except ValueError:
+                    pass
+            else:
+                raw = b"\n".join(sorted(raw.split(b"\n")))
+            d.update(raw + b"\0")
+    return d.hexdigest()
 
 
 def sha(data):
@@ -561,9 +586,7 @@ def insert(root, compiler, started):
     gpath = store("graphs", gid + ".json")
     entry = store("entries", k)
     if os.path.isdir(entry):
-        _touch(gpath)
-        _touch(os.path.join(entry, "manifest.json"))
-        return 0
+        return audit(root, entry, k, keyer, graph, since, gpath)
     os.makedirs(store("entries"), exist_ok=True)
     os.makedirs(store("graphs"), exist_ok=True)
     tmp = store("entries", f".tmp.{os.getpid()}.{time.time_ns()}")
@@ -581,6 +604,7 @@ def insert(root, compiler, started):
             shutil.rmtree(tmp, ignore_errors=True)
             log(f"skip {root}: {why} changed during the build")
             return 2
+        canon = canon_digest(os.path.join(tmp, "out"))
         files, size = {}, 0
         for dp, _dns, fns in os.walk(os.path.join(tmp, "out")):
             for f in fns:
@@ -590,7 +614,7 @@ def insert(root, compiler, started):
                 os.chmod(p, 0o444)
         if not os.path.isfile(gpath):
             write_atomic(gpath, json.dumps(graph, sort_keys=True).encode())
-        manifest = {"key": k, "graph": gid, "files": files, "tsbuildinfo": sha(blob), "bytes": size + len(blob),
+        manifest = {"key": k, "graph": gid, "files": files, "canon": canon, "tsbuildinfo": sha(blob), "bytes": size + len(blob),
                     "created": time.time(), "head": _head(root), "tree": root}
         write_atomic(os.path.join(tmp, "manifest.json"), json.dumps(manifest).encode())
         # an entry appears whole or not at all; a concurrent writer of the same key loses the rename
@@ -603,6 +627,34 @@ def insert(root, compiler, started):
     _touch(gpath)
     log(f"insert {k[:12]} {root} ({len(files)} files, {size >> 10} KiB)")
     gc(quiet=True)
+    return 0
+
+
+def audit(root, entry, k, keyer, graph, since, gpath):
+    """A tree built what the store already holds: compare. Equal up to the emit's own nondeterminism
+    is the expected case; anything else means the key missed something, and the entry is poison —
+    evicted, and reported under poison/ so it is seen rather than silently rebuilt around."""
+    why = changed_since(root, graph, keyer, since)
+    if why is not None:
+        return 2
+    try:
+        man = json.load(open(os.path.join(entry, "manifest.json")))
+    except (OSError, ValueError):
+        evict(entry, "unreadable manifest")
+        return 0
+    mine = canon_digest(os.path.join(root, OUT))
+    if man.get("canon") == mine:
+        _touch(gpath)
+        _touch(os.path.join(entry, "manifest.json"))
+        log(f"audit {k[:12]} {root}: equal")
+        return 0
+    os.makedirs(store("poison"), exist_ok=True)
+    report = {"key": k, "entryHead": man.get("head"), "entryTree": man.get("tree"), "entryCreated": man.get("created"),
+              "tree": root, "head": _head(root), "at": time.time()}
+    write_atomic(store("poison", f"{k[:16]}.{int(time.time())}.json"), json.dumps(report, indent=1).encode())
+    log(f"POISON {k[:12]}: stored from {str(man.get('head'))[:10]} in {man.get('tree')}, rebuilt differently from "
+        f"{report['head'][:10]} in {root}")
+    evict(entry, "poison")
     return 0
 
 
@@ -659,7 +711,7 @@ def gc(quiet=False):
 
 def stats(as_json=False):
     es = entries()
-    hits = misses = inserts = 0
+    hits = misses = inserts = audits = 0
     try:
         for line in open(store("log")):
             w = line.split()
@@ -667,18 +719,23 @@ def stats(as_json=False):
                 hits += w[1] == "hit"
                 misses += w[1] == "miss"
                 inserts += w[1] == "insert"
+                audits += w[1] == "audit"
     except OSError:
         pass
+    poison = sorted(os.listdir(store("poison"))) if os.path.isdir(store("poison")) else []
     graphs = len([n for n in os.listdir(store("graphs")) if n.endswith(".json")]) if os.path.isdir(store("graphs")) else 0
     s = {"dir": CACHE, "entries": len(es), "bytes": sum(e["bytes"] for e in es), "graphs": graphs,
-         "budgetBytes": BUDGET, "hits": hits, "misses": misses, "inserts": inserts,
+         "budgetBytes": BUDGET, "hits": hits, "misses": misses, "inserts": inserts, "audits": audits, "poison": len(poison),
          "enabled": os.environ.get("SEED_GEN_CACHE", "1") != "0"}
     if as_json:
         print(json.dumps(s))
     else:
         rate = f"{100 * hits / (hits + misses):.0f}%" if hits + misses else "—"
         print(f"{CACHE}: {s['entries']} entries, {s['bytes'] >> 20} MiB of {BUDGET >> 20} MiB, {graphs} graphs; "
-              f"{hits} hits / {misses} misses ({rate}), {inserts} inserts{'' if s['enabled'] else ' — OFF (SEED_GEN_CACHE=0)'}")
+              f"{hits} hits / {misses} misses ({rate}), {inserts} inserts, {audits} audits"
+              f"{'' if s['enabled'] else ' — OFF (SEED_GEN_CACHE=0)'}")
+        for n in poison:
+            print(f"  POISON: {store('poison', n)} — an entry rebuilt differently; the key misses an input")
     return 0
 
 
@@ -687,9 +744,12 @@ def main(argv):
         return stats("--json" in argv)
     if argv[:1] == ["--gc"]:
         return gc()
-    if os.environ.get("SEED_GEN_CACHE", "1") == "0":
+    mode = os.environ.get("SEED_GEN_CACHE", "1")
+    if mode == "0":
         return 2
     try:
+        if argv[:1] == ["restore"] and len(argv) == 3 and mode == "audit":
+            return 2
         if argv[:1] == ["restore"] and len(argv) == 3:
             return restore(os.path.realpath(argv[1]), argv[2])
         if argv[:1] == ["insert"] and len(argv) == 4:
