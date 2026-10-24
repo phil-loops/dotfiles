@@ -415,7 +415,8 @@ def main():
         print(f"\n== warming the cache: {len(need)} commits in one throwaway tree")
         for sha in need:
             git(warm, "checkout", "-q", "-f", "--detach", sha)
-            r = subprocess.run([os.path.join(SCRIPTS, "seed-gen"), "--sync", warm], capture_output=True, text=True, timeout=1800)
+            r = subprocess.run([os.path.join(SCRIPTS, "seed-gen"), "--sync", warm], capture_output=True, text=True, timeout=1800,
+                               env=dict(os.environ, SEED_GEN_CACHE_INSERT="wait"))
             print(f"  {sha[:9]}: {(r.stdout.strip().splitlines() or ['current'])[-1]}", flush=True)
         git(repo, "worktree", "remove", "--force", warm, check=False)
         shutil.rmtree(warm, ignore_errors=True)

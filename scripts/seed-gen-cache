@@ -782,7 +782,18 @@ def insert(root, compiler, started):
     """Store this tree's emit. The key is computed and the emit captured first, and only then is
     every input checked to predate the build's start: an input changed at any point from the
     compiler's first read to our last one means the capture may not describe what it read."""
-    since = os.stat(started).st_mtime_ns
+    try:
+        since = os.stat(started).st_mtime_ns
+        return _insert(root, compiler, since)
+    finally:
+        if os.path.basename(started).startswith(".seed-gen-started."):
+            try:
+                os.unlink(started)
+            except OSError:
+                pass
+
+
+def _insert(root, compiler, since):
     info = json.load(open(os.path.join(root, INFO)))
     info = info.get("program", info)
     graph = full_graph(root, info)

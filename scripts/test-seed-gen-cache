@@ -39,6 +39,7 @@ WORK = os.path.realpath(next((a.split("=", 1)[1] for a in sys.argv if a.startswi
                              sys.argv[sys.argv.index("--work") + 1] if "--work" in sys.argv
                              else os.path.join(os.environ.get("TMPDIR", "/tmp"), "test-seed-gen-cache")))
 os.environ["SEED_GEN_CACHE_DIR"] = os.path.join(WORK, "store")   # before the module reads it
+os.environ["SEED_GEN_CACHE_INSERT"] = "wait"   # the checks read the store right after each sync
 SEED_GEN = os.path.join(SCRIPTS, "seed-gen")
 CACHE_TOOL = os.path.join(SCRIPTS, "seed-gen-cache")
 results = []

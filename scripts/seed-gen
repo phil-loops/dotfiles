@@ -457,7 +457,19 @@ stamp_generation(){ # $4 = the compiler that emitted
 # The content-addressed store (seed-gen-cache): a tree whose emit inputs were built before, in any
 # tree, takes that emit instead of compiling. restore prints "<key> <files changed>" on a hit.
 cache(){ "$(dirname "$0")/seed-gen-cache" "$@" 2>/dev/null; }
-build_started(){ rm -f "$1/.gen/.seed-gen-restored"; touch "$1/.gen/.seed-gen-started"; echo "$1/.gen/.seed-gen-started"; }
+# Each build gets its own start marker: the insert runs after seed-gen returns, and the next sync of
+# this tree must not move the time it checks every input against.
+build_started(){
+  rm -f "$1/.gen/.seed-gen-restored" "$1/.gen/.seed-gen-started"
+  find "$1/.gen" -maxdepth 1 -name '.seed-gen-started.*' -mmin +60 -delete 2>/dev/null
+  mktemp "$1/.gen/.seed-gen-started.XXXXXX"
+}
+# Storing an emit (~1.5 s: key, capture, manifest) is off the critical path; it refuses on its own if
+# the tree moves first. SEED_GEN_CACHE_INSERT=wait keeps it in the foreground (tests).
+cache_insert(){
+  if [[ "${SEED_GEN_CACHE_INSERT:-}" == wait ]]; then cache insert "$@"
+  else ( cache insert "$@" </dev/null >/dev/null 2>&1 & ); fi
+}
 mark_restored(){ printf '%s\n' "${2%% *}" > "$1/.gen/.seed-gen-restored"; }
 # A gate (SEED_GEN_CACHE=audit) takes no types from the cache — not even ones an earlier sync of this
 # tree restored, which would otherwise read as current. It rebuilds those from scratch: without the
@@ -623,7 +635,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
         drop_lock "$dir/.gen"
         echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
       fi
-      cache insert "$dir" "$tsc" "$started"
+      cache_insert "$dir" "$tsc" "$started"
       drop_lock "$dir/.gen"
       echo "rebuilt tRPC types for ${head:0:10} in this tree"
     else
@@ -710,7 +722,7 @@ build_main(){
     started=$(build_started "$dir")
     emit_full "$dir" "$proj" "${build[@]}" >/dev/null 2>&1 \
       && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before" "$compiler" \
-      && cache insert "$dir" "$compiler" "$started"
+      && cache_insert "$dir" "$compiler" "$started"
   fi
   drop_lock "$dir/.gen"
 }
