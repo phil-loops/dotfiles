@@ -9,6 +9,7 @@
                                              is older than that
   seed-gen-cache key <tree> [<compiler>]     the exact key of the emit the tree holds, with its
                                              outputs: seed-gen's "is .gen current" marker
+  seed-gen-cache stamp <tree> [<compiler>]   seed-gen's four stamp values in one pass (see stamp_values)
   seed-gen-cache --stats | --gc [--json]
 
 seed-gen calls restore before its emit and insert after a stamped build, so every consumer (gates,
@@ -76,7 +77,7 @@ def clone(src, dst):
 
 def _sha_or_dash(path):
     try:
-        return file_sha(path)
+        return sha(fp.read(path))
     except OSError:
         return "-"
 
@@ -403,16 +404,14 @@ class Keyer:
         """Hash in parallel what isn't hashed yet: reads and sha256 release the GIL, and four
         threads take a 5,000-file graph from 0.84 s to 0.22 s (2026-10-23)."""
         todo = list(dict.fromkeys(p for p in paths if p and p not in self.memo))
+        fp.prefetch(todo)
         with ThreadPoolExecutor(4) as ex:
             for p, h in zip(todo, ex.map(_sha_or_dash, todo)):
                 self.memo[p] = h
 
     def digest(self, path):
         if path not in self.memo:
-            try:
-                self.memo[path] = file_sha(path)
-            except OSError:
-                self.memo[path] = "-"
+            self.memo[path] = _sha_or_dash(path)
         return self.memo[path]
 
     def lock_entry(self, kind, rel):
@@ -870,7 +869,28 @@ def tree_key(root, compiler):
     return sha((k + "\0" + fp.output_key(root)).encode())
 
 
+def stamp_values(root, compiler):
+    """What seed-gen stamps after an emit, in one process reading each file once: the sources
+    snapshot, the exact key (the content fingerprint if the graph won't anchor), the content
+    fingerprint a linked .gen is trusted by, and the outputs digest."""
+    with fp.reading():
+        snapshot = fp.fingerprint(root, snapshot=True)
+        sources = fp.fingerprint(root)
+        try:
+            key = tree_key(root, compiler)
+        except (LookupError, OSError, ValueError, KeyError):
+            key = sources
+        return snapshot, key, sources, fp.output_key(root)
+
+
 def main(argv):
+    if argv[:1] == ["stamp"] and len(argv) in (2, 3):
+        root = os.path.realpath(argv[1])
+        try:
+            print("\n".join(stamp_values(root, argv[2] if len(argv) == 3 and argv[2] else os.path.join(root, "node_modules/typescript/bin/tsc"))))
+            return 0
+        except (OSError, ValueError, KeyError, subprocess.CalledProcessError):
+            return 1
     if argv[:1] == ["key"] and len(argv) in (2, 3):
         root = os.path.realpath(argv[1])
         try:
