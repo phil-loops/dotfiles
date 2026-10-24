@@ -29,6 +29,7 @@ import ctypes
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -283,6 +284,41 @@ def tree_names(root):
 PARTS = ("compiler", "tool", "names", "listings", "configs", "contents", "pkgjson", "missing", "lock", "side")
 
 
+EXTENDS = re.compile(r'"extends"\s*:\s*("(?:[^"\\\\]|\\\\.)*"|\[[^\]]*\])')
+
+
+def extended_configs(root, cfg, seen=None):
+    """Configs a tsconfig extends from outside the tree (a package's tsconfig base), followed down
+    their own chains — the in-tree ones are already among the hashed configs."""
+    seen = set() if seen is None else seen
+    try:
+        m = EXTENDS.search(open(cfg).read())
+    except OSError:
+        return []
+    if not m:
+        return []
+    specs = json.loads(m.group(1))
+    out = []
+    for spec in [specs] if isinstance(specs, str) else specs:
+        if spec.startswith((".", "/")):
+            cands = [os.path.normpath(os.path.join(os.path.dirname(cfg), spec))]
+        else:
+            cands = [os.path.join(root, "node_modules", spec)]
+        cands = [c for base in cands for c in (base, base + ".json", os.path.join(base, "tsconfig.json"))]
+        hit = next((c for c in cands if os.path.isfile(c)), None)
+        if hit is None:
+            out.append(cands[0])                     # unresolvable: its absence is part of the key
+            continue
+        real = os.path.realpath(hit)
+        if real in seen:
+            continue
+        seen.add(real)
+        if not real.lower().startswith(root.lower() + "/") or "/node_modules/" in real:
+            out.append(hit)
+        out.extend(extended_configs(root, hit, seen))
+    return out
+
+
 class Keyer:
     """Hashes one tree's view of a graph; file digests are shared across the graphs it tries."""
 
@@ -307,6 +343,9 @@ class Keyer:
             b = os.path.basename(n)
             if b == "package.json" or b.startswith(("tsconfig", "tsbase")):
                 d.update(b"config\0" + os.fsencode(n) + b"\0" + self.digest(os.path.join(root, n)).encode())
+                if b != "package.json":
+                    for ext in extended_configs(root, os.path.join(root, n)):
+                        d.update(b"extends\0" + os.fsencode(ext) + b"\0" + self.digest(ext).encode())
         self.base = d.hexdigest()
         self.locks = {}
 
