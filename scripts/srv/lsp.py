@@ -252,15 +252,27 @@ def gen_inputs(root):
     return sorted(out)
 
 
-def needs_regen(changes, inputs):
+def gen_probes(root):
+    """The in-tree paths the last emit's module resolution probed (seed-gen-cache's record of its
+    --traceResolution), case-folded, or None when the emit recorded none."""
+    probes = _read_json(os.path.join(root, ".gen", "trpc-types.probes.json"))
+    if not isinstance(probes, list):
+        return None
+    return sorted({p[1].lower() for p in probes if p[0] == "t"})
+
+
+def needs_regen(changes, inputs, probed=None):
     """Whether a tree move can change what seed-gen --sync produces. `changes` are (status, rel)
-    from git diff. Exact by construction: the emit's graph is `inputs` + configs + manifests +
-    packages/** + resolution; an ADDED file only changes resolution when an import could now land
-    on it — its stem (or its directory, for an index) is already an input's stem."""
+    from git diff. The emit's graph is `inputs` + configs + manifests + packages/** + resolution.
+    With the emit's probes, resolution is exact: a file added or deleted matters only where the
+    compiler looked — at that path, or at a directory above it it found missing (a new lib/x.ts
+    shadows lib/x/index.ts; the stem rule below misses that one). Without them, an ADDED file
+    counts when its stem (or its directory, for an index) is already an input's stem."""
     if inputs is None:
         return True
     ins = set(inputs)
     stems = {_stem(i) for i in inputs}
+    looked = set(probed) if probed is not None else None
     for st, rel in changes:
         rel = rel.lower()   # inputs are case-folded (gen_inputs)
         base = os.path.basename(rel)
@@ -269,11 +281,21 @@ def needs_regen(changes, inputs):
             return True
         if rel.startswith("packages/") and not rel.startswith("packages/prisma/migrations/"):
             return True
+        if looked is not None:
+            if st != "M" and any(p in looked for p in _self_and_parents(rel)):
+                return True
+            continue
         if st == "A" and rel.endswith(SOURCE_SUFFIXES):
             s = _stem(rel)
             if s in stems or (os.path.basename(s) == "index" and os.path.dirname(s) in stems):
                 return True
     return False
+
+
+def _self_and_parents(rel):
+    while rel:
+        yield rel
+        rel = os.path.dirname(rel)
 
 
 class Move:
@@ -336,6 +358,7 @@ class Tree:
         out = (r.stdout or "").strip()
         self.warning = "" if r.returncode == 0 else ("tRPC types may be stale: " + (out.splitlines() or ["seed-gen failed"])[-1])
         self.meta["inputs"] = gen_inputs(self.path) if r.returncode == 0 else None
+        self.meta["probed"] = gen_probes(self.path) if r.returncode == 0 else None
         if out:
             ctx.log(f"lsp: seed-gen {self.slot} @{self.meta['sha'][:9]}: {out.replace(chr(10), ' | ')}")
 
@@ -369,7 +392,7 @@ class Tree:
         mv = Move([(os.path.join(self.path, rel), kind.get(st, CHANGED)) for st, rel in changes])
         if self.meta.get("donor") != dkey:
             mv.restart, mv.why = True, "the donor's install changed"
-        if stale_gen or needs_regen(changes, self.meta.get("inputs")):
+        if stale_gen or needs_regen(changes, self.meta.get("inputs"), self.meta.get("probed")):
             before = snapshot(self.path)
             self._sync()
             ev, links_changed = snapshot_events(before, snapshot(self.path))

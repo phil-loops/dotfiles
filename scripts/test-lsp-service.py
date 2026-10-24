@@ -39,6 +39,16 @@ check("an added unrelated file", lsp.needs_regen([("A", "models/brand-new.ts")],
 check("a deleted non-input", lsp.needs_regen([("D", "components/Old.tsx")], inputs), False)
 check("a deleted input", lsp.needs_regen([("D", "lib/zod/team.ts")], inputs), True)
 
+probed = ["lib/x.ts", "lib/x.tsx", "lib/x/index.ts", "models/team.ts", "models/team.tsx", "lib/gone"]
+check("probes: an added file where the compiler looked (shadows lib/x/index.ts)",
+      lsp.needs_regen([("A", "lib/x.ts")], inputs, probed), True)
+check("probes: the same shadow the stem rule misses", lsp.needs_regen([("A", "lib/x.ts")], inputs), False)
+check("probes: an added file nowhere it looked", lsp.needs_regen([("A", "models/team-helpers.ts")], inputs, probed), False)
+check("probes: a file inside a directory it found missing", lsp.needs_regen([("A", "lib/gone/index.ts")], inputs, probed), True)
+check("probes: a deleted input", lsp.needs_regen([("D", "models/team.ts")], inputs, probed), True)
+check("probes: a modified non-input it probed", lsp.needs_regen([("M", "lib/x.tsx")], inputs, probed), False)
+check("probes: manifests still count", lsp.needs_regen([("M", "apps/x/package.json")], inputs, probed), True)
+
 f0 = {"/t/a": (1, 1, 1), "/t/b": (1, 1, 2), "/t/c": (1, 1, 3)}
 f1 = {"/t/a": (1, 1, 1), "/t/b": (2, 5, 2), "/t/d": (1, 1, 4)}
 ev, links = lsp.snapshot_events((f0, {"l": "x"}), (f1, {"l": "x"}))
