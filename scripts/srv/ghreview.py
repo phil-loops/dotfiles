@@ -344,6 +344,18 @@ def refusal(req):
     return None
 
 
+def scope_refusal(kind, thread):
+    """Why this draft may not go to GitHub under the rollout scope, or None. Until
+    `git config stack.viewer-github-scope all`, only replies on threads the review bot opened go."""
+    scope = ctx.run(["git", "config", "--get", "stack.viewer-github-scope"]).stdout.strip() or "bot"
+    if scope == "all":
+        return None
+    first = ((thread or {}).get("comments") or [{}])[0]
+    if kind == "reply" and first.get("author") == BOT:
+        return None
+    return f"only replies to {BOT}'s threads go to GitHub for now"
+
+
 def mutate(op, inp, req=None, released=False):
     """Send one of the ALLOWED mutations. req is the HTTP request that asked (its gesture is
     checked); a draft released after a push passes released=True — its gesture was checked when

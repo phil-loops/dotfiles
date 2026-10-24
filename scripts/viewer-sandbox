@@ -208,6 +208,7 @@ TS
   git -C "$repo" config branch.review/pr-77.stack-parent origin/main
   git -C "$repo" config branch.review/pr-77.description "#77 retry the banner fetch — @nalanj"
   git -C "$repo" config --add stack.standalone review/pr-77
+  git -C "$repo" config stack.viewer-github-scope all
   git -C "$repo" checkout -q main
   python3 - "$dir" "$repo" <<'PY'
 import json, os, subprocess, sys
