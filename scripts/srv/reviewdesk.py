@@ -1,32 +1,36 @@
 # srv/reviewdesk.py — the branch page's review, local side: what GitHub's review data looks like
-# against the local tip, and the writes the page makes.
+# against the local tip, the ledger of what Phil writes, and the local suggestion commit.
 #
 # The `review` domain of /state (srv/state.py builds it every tick from memory + a few stats):
 #   conv    <repo>:<branch>          the PR: title, body, reviews, top-level comments, head, the
-#                                    viewer, the local tip and its unpushed commits, the second
-#                                    reader's "nobody flagged" list
+#                                    viewer and his pending review, the local tip and its unpushed
+#                                    commits, the second reader's "nobody flagged" list
 #   thread  <repo>:<branch>#<node>   a review thread: full comment chain, GitHub's anchor (line on
 #                                    the PR head) and `local` — that anchor followed to the local tip
 #                                    (srv/linemap.py), with the commit that changed it, if one did;
 #                                    `note` is the second reader's, when it left one
-#   draft   <repo>:<branch>          the review being written: pending comments + summary, kept in
-#                                    <common>/stack-review-drafts.json so a reload loses nothing
-#   queued  <repo>:q:<id>            a reply naming an unpushed commit, waiting for that commit to
-#                                    reach origin (<common>/stack-review-queue.json)
+#   draft   <repo>:<branch>          the ledger's items for this branch (below), each with its state
 #
-#   POST /review-draft   {branch, op: add|edit|remove|discard, comment?}   the pending review, locally
-#   POST /review-submit  {branch, event: COMMENT|APPROVE|REQUEST_CHANGES, body}   finish the review
-#   POST /review-comment {branch, path, side, line, startLine?, body}   add a single comment
-#   POST /review-reply   {branch, thread, body}       reply (queued when it names an unpushed commit)
-#   POST /review-resolve {branch, thread, resolved}   resolve / unresolve the conversation
-#   POST /review-say     {branch, body}               a top-level conversation comment
-#   POST /review-queue   {id, op: cancel}             let go of a queued reply
-#   POST /review-apply   {branch, thread}             apply a suggestion as a LOCAL commit
+# The ledger (<common>/stack-review-ledger.json) holds every comment and reply Phil writes here,
+# durable across reloads. Each item has an idempotency key and moves
+#     draft ──(Phil's keypress)──▶ sending ──▶ pending   (in his pending review on GitHub)
+#                                                └──▶ submitted   (he pressed Submit on GitHub)
+# `pending` and `submitted` are never assumed: they're read off GitHub, by finding the key each
+# sent body carries. A failed send stays a draft with its error, retried with a keypress. A draft
+# naming a commit that isn't on origin yet waits (`waiting`) and goes into the pending review once
+# a push puts it there. The viewer never submits, resolves, or posts outside that pending review
+# (srv/ghreview.py holds the only three mutations).
 #
-# Every GitHub write goes through ghreview.mutate (its guards, its fake). Applying a suggestion is
-# git only: a commit built in memory on the branch tip, landed the way /revert-commit lands one —
-# `reset --keep` in the worktree holding the branch (refused when its file has edits there, or a
-# gates run owns that worktree), else a compare-and-swap update-ref. Never a push.
+#   POST /review-draft  {branch, op: add, item, send?}   a comment {kind: comment, path, side, line,
+#                                                         startLine?} or reply {kind: reply, thread};
+#                                                         send: true goes on to the pending review
+#                       {branch, op: send, keys?}        send these drafts (all, without keys)
+#                       {branch, op: edit|remove, key, body?}   a draft not yet sent
+#   POST /review-apply  {branch, thread}                 apply a suggestion as a LOCAL commit — git
+#                                                         only, landed the way /revert-commit lands
+#                                                         one (reset --keep in the branch's worktree,
+#                                                         refused over edits there or a gates run;
+#                                                         else a compare-and-swap update-ref). Never a push.
 #
 # Second-reader notes (another agent writes them): <common>/stack-review-notes/<pr>/<thread-node>.json
 # {verdict, evidence, elsewhere, cause, draftReply, model, at} and <pr>/_unflagged.json {items}.
@@ -41,8 +45,7 @@ import uuid
 
 from . import ctx, ghreview, linemap, outbox, packet, repostate, watch
 
-_DRAFTS = "stack-review-drafts.json"
-_QUEUE = "stack-review-queue.json"
+_LEDGER = "stack-review-ledger.json"
 _NOTES = "stack-review-notes"
 _FLOCK = threading.Lock()
 
@@ -82,12 +85,17 @@ def _write(name, data):
     os.replace(tmp, path)
 
 
-def _drafts():
-    return _read(_DRAFTS, dict)
+def _items():
+    return _read(_LEDGER, lambda: {"items": []}).get("items") or []
 
 
-def _queue():
-    return _read(_QUEUE, lambda: {"items": []})
+def _save_items(items):
+    _write(_LEDGER, {"items": items})
+
+
+def _update(key, **fields):
+    with _FLOCK:
+        _save_items([dict(i, **fields) if i["key"] == key else i for i in _items()])
 
 
 # ── second-reader notes ──────────────────────────────────────────────────
@@ -171,10 +179,34 @@ def _has(sha):
     return ctx.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"]).returncode == 0
 
 
+def on_github(pr):
+    """{ledger key: (comment id, comment state, thread node)} for the bodies GitHub holds."""
+    out = {}
+    for t in pr["threads"]:
+        for c in t["comments"]:
+            k = ghreview.key_of(c["body"])
+            if k:
+                out[k] = (c["id"], c.get("state") or "SUBMITTED", t["node"])
+    return out
+
+
+def shown(item, pr, seen, waiting):
+    """An item's state as GitHub and the refs say it is now."""
+    hit = seen.get(item["key"])
+    if hit:
+        return "pending" if hit[1] == "PENDING" else "submitted"
+    st = item.get("state") or "draft"
+    if st == "sent":
+        return "gone" if (pr.get("at") or 0) > (item.get("sentAt") or 0) + 2 else "sending"
+    if st == "sending":
+        return "sending"
+    return "waiting" if waiting else "draft"
+
+
 def entities(name):
     snap = repostate.snapshot()
-    out = {"conv": {}, "thread": {}, "draft": {}, "queued": {}}
-    drafts = _drafts()
+    out = {"conv": {}, "thread": {}, "draft": {}}
+    items = _items()
     me = ghreview.viewer()
     for b, pr in reviewed(snap).items():
         cid = f"{name}:{b}"
@@ -193,7 +225,15 @@ def entities(name):
             tid = f"{cid}#{t['node']}"
             out["thread"][tid] = {"id": tid, "repo": name, "branch": b, "pr": pr["number"], **t,
                                   "local": local, "note": by_node.get(t["node"])}
-        d = drafts.get(b) or {}
+        seen = on_github(pr)
+        mine = []
+        for it in items:
+            if it["branch"] != b:
+                continue
+            waits = [w for w in it.get("waitsFor") or [] if not on_origin(snap, pr, w)]
+            mine.append({**{k: it.get(k) for k in ("key", "kind", "path", "side", "line", "startLine", "thread", "body", "err", "at")},
+                         "threadId": f"{cid}#{it['thread']}" if it.get("thread") else None,
+                         "state": shown(it, pr, seen, waits), "waitsFor": waits, "send": bool(it.get("send"))})
         out["conv"][cid] = {
             "id": cid, "repo": name, "branch": b, "number": pr["number"], "title": pr["title"], "body": pr["body"],
             "url": pr["url"], "author": pr["author"], "state": pr["state"], "headRef": pr["headRef"],
@@ -202,30 +242,67 @@ def entities(name):
             "reviews": pr["reviews"], "comments": pr["comments"], "pending": pr.get("pending"),
             "unflagged": unflagged, "at": pr.get("at") or 0,
         }
-        out["draft"][cid] = {"id": cid, "repo": name, "branch": b, "comments": d.get("comments") or [],
-                             "body": d.get("body") or ""}
-    for it in _queue().get("items") or []:
-        qid = f"{name}:q:{it['id']}"
-        out["queued"][qid] = {"id": qid, "repo": name, **{k: it.get(k) for k in
-                              ("branch", "number", "thread", "body", "waitsFor", "state", "err", "at")}}
-        out["queued"][qid]["threadId"] = f"{name}:{it['branch']}#{it['thread']}"
+        out["draft"][cid] = {"id": cid, "repo": name, "branch": b, "items": mine}
     return out
 
 
-# ── the reply queue's release ────────────────────────────────────────────
+def on_origin(snap, pr, sha):
+    return any(snap.is_ancestor(sha, ref) for ref in (snap.remote(pr["headRef"]), pr["head"]) if ref)
+
+
+# ── sending into Phil's pending review ───────────────────────────────────
+
+class Waiting(Exception):
+    pass
+
+
+def send_one(item, req=None, released=False):
+    """One draft into the pending review: idempotent by its key (a body GitHub already holds is
+    recognised, not sent again). Raises ghreview.Refused / Waiting; records the outcome."""
+    snap = repostate.snapshot()
+    pr = ghreview.refetch(item["number"]) or _pr_for(item["branch"])
+    if any(not on_origin(snap, pr, w) for w in item.get("waitsFor") or []):
+        raise Waiting(item["key"])
+    if item["key"] in on_github(pr):
+        _update(item["key"], state="sent", err=None, send=False, sentAt=time.time())
+        return
+    _update(item["key"], state="sending", err=None)
+    try:
+        review = (pr.get("pending") or {}).get("id")
+        if not review:
+            got = ghreview.mutate("addPullRequestReview", {"pullRequestId": pr["id"], "commitOID": pr["head"]}, req, released)
+            review = got["pullRequestReview"]["id"]
+        body = item["body"] + ghreview.marker(item["key"])
+        if item["kind"] == "reply":
+            ghreview.mutate("addPullRequestReviewThreadReply",
+                            {"pullRequestReviewThreadId": item["thread"], "pullRequestReviewId": review, "body": body}, req, released)
+        else:
+            start, line = _to_head(item["branch"], pr, item["path"], item.get("startLine") or item["line"], item["line"])
+            side = "LEFT" if item.get("side") == "LEFT" else "RIGHT"
+            inp = {"pullRequestReviewId": review, "path": item["path"], "line": line, "side": side,
+                   "subjectType": "LINE", "body": body}
+            if item.get("startLine") and start != line:
+                inp.update(startLine=start, startSide=side)
+            ghreview.mutate("addPullRequestReviewThread", inp, req, released)
+    except Exception as e:   # noqa: BLE001 — every failure stays on the draft, retryable
+        _update(item["key"], state="draft", err=str(e)[:200], send=False)
+        raise ghreview.Refused(str(e)[:200]) from e
+    _update(item["key"], state="sent", err=None, send=False, sentAt=time.time() + 0.001, review=review)
+    ghreview.refetch(item["number"])
+
 
 _RELEASE = {"seen": None, "busy": False}
 
 
 def pushed():
-    """A push just went to origin (push.py): look at the queue on the next tick, not after it."""
+    """A push just went to origin (push.py): look at waiting drafts on the next tick."""
     _RELEASE["seen"] = None
 
 
 def release_due():
-    """Post each queued reply whose commits are all on GitHub now. Cheap when nothing moved:
-    only a change in origin's refs (or a push) re-checks, and posting runs off the tick."""
-    items = [i for i in _queue().get("items") or [] if i.get("state") == "waiting"]
+    """Send each draft Phil already sent that was waiting on a push, once its commits are on origin.
+    Cheap when nothing moved: only a change in origin's refs re-checks; sending runs off the tick."""
+    items = [i for i in _items() if i.get("state") == "draft" and i.get("send") and i.get("waitsFor")]
     if not items or _RELEASE["busy"]:
         return
     snap = repostate.snapshot()
@@ -234,44 +311,24 @@ def release_due():
         return
     _RELEASE["seen"] = sig
     prs = reviewed(snap)
-    due = []
-    for it in items:
-        pr = prs.get(it["branch"])
-        if not pr:
-            continue
-        on = [x for x in (snap.remote(pr["headRef"]), pr["head"]) if x]
-        if all(any(snap.is_ancestor(sha, ref) for ref in on) for sha in it["waitsFor"]):
-            due.append(it["id"])
+    due = [i["key"] for i in items if prs.get(i["branch"]) and all(on_origin(snap, prs[i["branch"]], w) for w in i["waitsFor"])]
     if due:
         _RELEASE["busy"] = True
-        threading.Thread(target=_post_queued, args=(ctx.repo_cwd(), due), daemon=True).start()
+        threading.Thread(target=_release, args=(ctx.repo_cwd(), due), daemon=True).start()
 
 
-def _set_item(qid, **fields):
-    with _FLOCK:
-        q = _queue()
-        items = [dict(i, **fields) if i["id"] == qid else i for i in q.get("items") or []]
-        if fields.get("_drop"):
-            items = [i for i in items if i["id"] != qid]
-        _write(_QUEUE, {"items": [{k: v for k, v in i.items() if k != "_drop"} for i in items]})
-
-
-def _post_queued(repo, ids):
+def _release(repo, keys):
     from . import state
     ctx.set_repo(repo)
     try:
-        for qid in ids:
-            it = next((i for i in _queue().get("items") or [] if i["id"] == qid), None)
+        for k in keys:
+            it = next((i for i in _items() if i["key"] == k), None)
             if not it:
                 continue
-            _set_item(qid, state="posting")
-            state.poke()
             try:
-                ghreview.mutate("reply", {"thread": it["thread"], "body": it["body"]}, queued=True)
-                _set_item(qid, _drop=True)
-                ghreview.refetch(it["number"])
-            except Exception as e:   # noqa: BLE001 — any failure stays visible on the item
-                _set_item(qid, state="failed", err=str(e)[:200])
+                send_one(it, released=True)
+            except (ghreview.Refused, Waiting):
+                pass
             state.poke()
     finally:
         _RELEASE["busy"] = False
@@ -311,25 +368,6 @@ def _to_head(branch, pr, path, start, end):
     return at["startLine"] or at["line"], at["line"]
 
 
-def _thread_input(branch, pr, c):
-    line = int(c["line"])
-    start = int(c["startLine"]) if c.get("startLine") else None
-    side = "LEFT" if c.get("side") == "LEFT" else "RIGHT"
-    if side == "RIGHT":
-        s, line = _to_head(branch, pr, c["path"], start or line, line)
-        start = s if start else None
-    body = (c.get("body") or "").strip()
-    if not body:
-        raise ghreview.Refused("an empty comment")
-    return {"path": c["path"], "line": line, "side": side, "body": body,
-            **({"startLine": start} if start and start != line else {})}
-
-
-def _settle(req, number, extra=None):
-    ghreview.refetch(number)
-    _send(req, 200, {"ok": True, **(extra or {})})
-
-
 def _guarded(fn):
     def run(req, raw):
         try:
@@ -339,132 +377,90 @@ def _guarded(fn):
     return run
 
 
-@_guarded
-def draft(req, d):
-    branch, op = d.get("branch") or "", d.get("op") or ""
-    c = d.get("comment") or {}
-    with _FLOCK:
-        all_ = dict(_drafts())
-        cur = dict(all_.get(branch) or {"comments": [], "body": ""})
-        comments = list(cur.get("comments") or [])
-        if op == "add":
-            if not c.get("path") or not c.get("line") or not (c.get("body") or "").strip():
-                raise ghreview.Refused("a draft comment needs a path, a line and words")
-            comments.append({"id": c.get("id") or uuid.uuid4().hex[:10], "path": c["path"],
-                             "side": "LEFT" if c.get("side") == "LEFT" else "RIGHT", "line": int(c["line"]),
-                             "startLine": int(c["startLine"]) if c.get("startLine") else None,
-                             "body": c["body"].strip(), "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())})
-        elif op == "edit":
-            comments = [dict(x, body=c.get("body", x["body"])) if x["id"] == c.get("id") else x for x in comments]
-        elif op == "remove":
-            comments = [x for x in comments if x["id"] != c.get("id")]
-        elif op == "body":
-            cur["body"] = d.get("body") or ""
-        elif op == "discard":
-            comments, cur["body"] = [], ""
-        else:
-            raise ghreview.Refused(f"unknown draft op {op!r}")
-        cur["comments"] = comments
-        if comments or cur.get("body"):
-            all_[branch] = cur
-        else:
-            all_.pop(branch, None)
-        _write(_DRAFTS, all_)
-    _send(req, 200, {"ok": True})
-
-
-_EVENTS = ("COMMENT", "APPROVE", "REQUEST_CHANGES")
-
-
-@_guarded
-def submit(req, d):
-    branch, event = d.get("branch") or "", d.get("event") or ""
-    if event not in _EVENTS:
-        raise ghreview.Refused(f"finish a review as one of {', '.join(_EVENTS)}")
-    pr = _pr_for(branch)
-    cur = _drafts().get(branch) or {}
-    body = (d.get("body") if d.get("body") is not None else cur.get("body") or "").strip()
-    threads = [_thread_input(branch, pr, c) for c in cur.get("comments") or []]
-    if event != "APPROVE" and not threads and not body:
-        raise ghreview.Refused("say something, or add a comment, before finishing")
-    ghreview.mutate("review", {"pr": pr["number"], "event": event, "body": body, "threads": threads}, req)
-    with _FLOCK:
-        all_ = dict(_drafts())
-        all_.pop(branch, None)
-        _write(_DRAFTS, all_)
-    _settle(req, pr["number"])
-
-
-@_guarded
-def comment(req, d):
-    branch = d.get("branch") or ""
-    pr = _pr_for(branch)
-    th = _thread_input(branch, pr, d)
-    ghreview.mutate("review", {"pr": pr["number"], "event": "COMMENT", "body": "", "threads": [th]}, req)
-    _settle(req, pr["number"])
-
-
 _SHA_WORD = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 
 def waits_for(branch, pr, body):
-    """The unpushed commits a reply names (full shas), so it can wait for them."""
+    """The unpushed commits a body names (full shas): its draft waits for them to reach origin."""
     snap = repostate.snapshot()
     pending = unpushed(snap.local(branch), pr["head"], snap.remote(pr["headRef"]))
     return sorted({full for w in _SHA_WORD.findall(body) for full in pending if full.startswith(w)})
 
 
-@_guarded
-def reply(req, d):
-    branch, node, body = d.get("branch") or "", d.get("thread") or "", (d.get("body") or "").strip()
-    if not body:
-        raise ghreview.Refused("an empty reply")
-    pr = _pr_for(branch)
-    if not any(t["node"] == node for t in pr["threads"]):
-        raise ghreview.Refused("that thread isn't on this PR")
-    waits = waits_for(branch, pr, body)
-    if waits:
-        if ghreview.fake_prs() is None:   # the gesture is checked now: the post happens later, off a tick
-            why = ghreview.refusal(req)
-            if why:
-                raise ghreview.Refused(why)
-        qid = uuid.uuid4().hex[:10]
-        with _FLOCK:
-            q = _queue()
-            _write(_QUEUE, {"items": [*(q.get("items") or []), {
-                "id": qid, "branch": branch, "number": pr["number"], "thread": node, "body": body,
-                "waitsFor": waits, "state": "waiting", "err": None, "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }]})
-        pushed()
-        return _send(req, 200, {"ok": True, "queued": qid, "waitsFor": waits})
-    ghreview.mutate("reply", {"thread": node, "body": body}, req)
-    _settle(req, pr["number"])
-
-
-@_guarded
-def resolve(req, d):
-    branch, node = d.get("branch") or "", d.get("thread") or ""
-    pr = _pr_for(branch)
-    ghreview.mutate("resolve" if d.get("resolved", True) else "unresolve", {"thread": node}, req)
-    _settle(req, pr["number"])
-
-
-@_guarded
-def say(req, d):
-    pr = _pr_for(d.get("branch") or "")
-    body = (d.get("body") or "").strip()
+def _new_item(branch, pr, it):
+    body = (it.get("body") or "").strip()
     if not body:
         raise ghreview.Refused("an empty comment")
-    ghreview.mutate("comment", {"pr": pr["number"], "body": body}, req)
-    _settle(req, pr["number"])
+    kind = "reply" if it.get("kind") == "reply" else "comment"
+    out = {"key": str(it.get("key") or uuid.uuid4().hex[:12]), "branch": branch, "number": pr["number"], "kind": kind,
+           "body": body, "state": "draft", "send": False, "err": None, "waitsFor": waits_for(branch, pr, body),
+           "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    if kind == "reply":
+        if not any(t["node"] == it.get("thread") for t in pr["threads"]):
+            raise ghreview.Refused("that thread isn't on this PR")
+        out["thread"] = it["thread"]
+    else:
+        if not it.get("path") or not it.get("line"):
+            raise ghreview.Refused("a comment needs a path and a line")
+        out.update(path=it["path"], side="LEFT" if it.get("side") == "LEFT" else "RIGHT", line=int(it["line"]),
+                   startLine=int(it["startLine"]) if it.get("startLine") else None)
+    return out
+
+
+def _send_keys(req, branch, keys):
+    """Send these drafts; the first refusal answers (the drafts stay, with their error)."""
+    errs, waiting = [], []
+    for k in keys:
+        it = next((i for i in _items() if i["key"] == k and i["branch"] == branch), None)
+        if not it or it.get("state") not in ("draft", None):
+            continue
+        _update(k, send=True)
+        try:
+            send_one({**it, "send": True}, req)
+        except Waiting:
+            waiting.append(k)
+        except ghreview.Refused as e:
+            errs.append(str(e))
+    if errs:
+        return _send(req, 200, {"ok": False, "err": f"kept as a draft — {errs[0]}"})
+    _send(req, 200, {"ok": True, "waiting": waiting})
 
 
 @_guarded
-def queue(req, d):
-    qid = d.get("id") or ""
-    if d.get("op") != "cancel":
-        raise ghreview.Refused("the queue only lets go")
-    _set_item(qid.rsplit(":", 1)[-1], _drop=True)
+def draft(req, d):
+    branch, op = d.get("branch") or "", d.get("op") or ""
+    if op == "add":
+        pr = _pr_for(branch)
+        item = _new_item(branch, pr, d.get("item") or {})
+        with _FLOCK:
+            items = [i for i in _items() if i["key"] != item["key"]]
+            # submitted items are GitHub's now; the ledger keeps a week of them
+            cutoff = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 7 * 86400))
+            items = [i for i in items if not (i.get("state") == "sent" and (i.get("at") or "") < cutoff)]
+            _save_items([*items, item])
+        if d.get("send"):
+            return _send_keys(req, branch, [item["key"]])
+        return _send(req, 200, {"ok": True})
+    if op == "send":
+        keys = d.get("keys") or [i["key"] for i in _items() if i["branch"] == branch and i.get("state") in ("draft", None)]
+        return _send_keys(req, branch, keys)
+    key = d.get("key") or ""
+    it = next((i for i in _items() if i["key"] == key and i["branch"] == branch), None)
+    if not it:
+        raise ghreview.Refused("no such draft")
+    if it.get("state") not in ("draft", None):
+        raise ghreview.Refused("it's on GitHub already — change it there")
+    with _FLOCK:
+        if op == "remove":
+            _save_items([i for i in _items() if i["key"] != key])
+        elif op == "edit":
+            body = (d.get("body") or "").strip()
+            if not body:
+                raise ghreview.Refused("an empty comment")
+            pr = _pr_for(branch)
+            _save_items([dict(i, body=body, waitsFor=waits_for(branch, pr, body)) if i["key"] == key else i for i in _items()])
+        else:
+            raise ghreview.Refused(f"unknown draft op {op!r}")
     _send(req, 200, {"ok": True})
 
 

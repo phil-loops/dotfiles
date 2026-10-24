@@ -93,11 +93,7 @@ def _log(line):
     reqlog.append(_LOG_FILE, msg)
 
 
-_REVIEW_POSTS = {
-    "/review-draft": reviewdesk.draft, "/review-submit": reviewdesk.submit, "/review-comment": reviewdesk.comment,
-    "/review-reply": reviewdesk.reply, "/review-resolve": reviewdesk.resolve, "/review-say": reviewdesk.say,
-    "/review-queue": reviewdesk.queue, "/review-apply": reviewdesk.apply,
-}
+_REVIEW_POSTS = {"/review-draft": reviewdesk.draft, "/review-apply": reviewdesk.apply}
 
 
 def run(args, timeout=None):
@@ -612,7 +608,7 @@ class H(BaseHTTPRequestHandler):
             return push.push_origin(self, raw)
         if self.path == "/force-origin":  # the ONE force exception: no PR, or a draft with zero reviews/comments; lease-guarded
             return push.force_origin(self, raw)
-        if self.path in _REVIEW_POSTS:   # the branch page's review: drafts locally, GitHub writes via srv/ghreview's guards
+        if self.path in _REVIEW_POSTS:   # the branch page's review: the ledger (and Phil's pending review), local suggestion commits
             return _REVIEW_POSTS[self.path](self, raw)
         if self.path == "/outbox-hold":   # hold for morning: stamp/clear branch.<b>.stack-hold-until (branch or forest)
             return outbox.hold(self, raw)

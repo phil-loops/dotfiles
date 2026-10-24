@@ -104,14 +104,22 @@ def _req(actor="browser", via="key", site="same-origin"):
 class Guard(unittest.TestCase):
     def setUp(self):
         self.env = {k: os.environ.pop(k, None) for k in ("STACK_REVIEW_SANDBOX", ghreview.FAKE_ENV)}
+        self.run = ctx.run
+        self.switch = "true"
+        ctx.run = lambda args, timeout=None: types.SimpleNamespace(stdout=self.switch if "stack.viewer-github-pending" in args else "", returncode=0)
 
     def tearDown(self):
+        ctx.run = self.run
         for k, v in self.env.items():
             if v is not None:
                 os.environ[k] = v
 
-    def test_phils_keypress_passes(self):
+    def test_phils_keypress_passes_once_the_switch_is_on(self):
         self.assertIsNone(ghreview.refusal(_req()))
+
+    def test_the_switch_is_off_by_default(self):
+        self.switch = ""
+        self.assertIn("off", ghreview.refusal(_req()))
 
     def test_claude_and_headless_and_curl_are_refused(self):
         for who in ("claude", "headless", "cli", None):
@@ -125,10 +133,16 @@ class Guard(unittest.TestCase):
 
     def test_the_sandbox_never_reaches_github(self):
         os.environ["STACK_REVIEW_SANDBOX"] = "1"
-        with self.assertRaises(ghreview.Refused):
-            ghreview.mutate("reply", {"thread": "x", "body": "y"}, _req())
-        with self.assertRaises(ghreview.Refused):
-            ghreview.mutate("reply", {"thread": "x", "body": "y"}, queued=True)
+        for released in (False, True):
+            with self.assertRaises(ghreview.Refused):
+                ghreview.mutate("addPullRequestReviewThreadReply", {"pullRequestReviewThreadId": "x", "pullRequestReviewId": "r", "body": "y"},
+                                _req(), released=released)
+
+    def test_only_the_pending_review_mutations_exist(self):
+        for op, inp in (("submitPullRequestReview", {}), ("resolveReviewThread", {}), ("addComment", {}),
+                        ("addPullRequestReview", {"pullRequestId": "p", "event": "APPROVE"})):
+            with self.assertRaises(ghreview.Refused):
+                ghreview.mutate(op, inp, _req())
 
     def test_a_refused_request_never_runs_gh(self):
         called = []
@@ -136,10 +150,42 @@ class Guard(unittest.TestCase):
         ghreview._gh_mutate = lambda *a: called.append(a)
         try:
             with self.assertRaises(ghreview.Refused):
-                ghreview.mutate("resolve", {"thread": "x"}, _req(actor="claude"))
+                ghreview.mutate("addPullRequestReview", {"pullRequestId": "p", "commitOID": "c"}, _req(actor="claude"))
         finally:
             ghreview._gh_mutate = orig
         self.assertEqual(called, [])
+
+
+class Structure(unittest.TestCase):
+    """GitHub writes have one door, and it opens onto Phil's pending review only."""
+    SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "srv")
+
+    def sources(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        files = [os.path.join(self.SRC, n) for n in os.listdir(self.SRC) if n.endswith(".py")]
+        return [(f, open(f).read()) for f in files + [os.path.join(here, "stack-review-server.py")]]
+
+    def test_only_ghreview_holds_a_graphql_mutation(self):
+        for f, text in self.sources():
+            if f.endswith("ghreview.py"):
+                continue
+            self.assertNotRegex(text, r"\bmutation\s*[({]", f"{f} writes to GitHub — go through srv/ghreview.py")
+
+    def test_the_mutations_are_exactly_the_allowed_three(self):
+        import re
+        names = {re.search(r"\{\s*(\w+)\(input", q).group(1) for q in ghreview._MUTATIONS.values()}
+        self.assertEqual(names, set(ghreview.ALLOWED))
+        self.assertEqual(set(ghreview._MUTATIONS), set(ghreview.ALLOWED))
+        self.assertEqual(set(ghreview.ALLOWED), {"addPullRequestReview", "addPullRequestReviewThread", "addPullRequestReviewThreadReply"})
+
+    def test_nothing_submits_resolves_or_comments(self):
+        bad = ("submitPullRequestReview", "resolveReviewThread", "unresolveReviewThread", "addComment(",
+               "dismissPullRequestReview", "deletePullRequestReview", "gh pr review", "gh pr comment")
+        for f, text in self.sources():
+            for b in bad:
+                self.assertNotIn(b, text, f"{f} mentions {b}")
+            if f.endswith(("ghreview.py", "reviewdesk.py")):   # a review input never carries an event
+                self.assertNotIn('"event":', text, f"{f} sets a review event")
 
 
 class Fake(unittest.TestCase):
@@ -147,32 +193,60 @@ class Fake(unittest.TestCase):
         self.dir = tempfile.mkdtemp()
         self.path = os.path.join(self.dir, "github.json")
         pr = ghreview.parse_pr(REAL)
+        pr["pending"] = None
         with open(self.path, "w") as f:
             json.dump({"viewer": "me", "prs": {"11132": pr}, "seq": 0, "log": []}, f)
         subprocess.run(["git", "init", "-q", self.dir], check=True)
-        ctx.run = ctx.run or (lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True))
+        self.run = ctx.run
+        ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True)
         ctx.set_repo(self.dir)   # no origin refs here: heads stay put
         self.gh = ghreview.FakeGitHub(self.path)
 
     def tearDown(self):
+        ctx.run = self.run
         ctx.clear_repo()
 
-    def test_review_reply_resolve(self):
-        self.gh.mutate("review", {"pr": 11132, "event": "REQUEST_CHANGES", "body": "no",
-                                  "threads": [{"path": "q.ts", "line": 3, "side": "RIGHT", "body": "why", "startLine": 2}]})
-        new = self.gh.read()[11132]["threads"][-1]
-        self.gh.mutate("reply", {"thread": new["node"], "body": "because"})
-        self.gh.mutate("resolve", {"thread": new["node"]})
+    def test_a_reply_to_an_existing_thread_joins_the_pending_review(self):
+        rv = self.gh.mutate("addPullRequestReview", {"pullRequestId": "PR_x", "commitOID": "e73338b0"})["pullRequestReview"]["id"]
+        self.gh.mutate("addPullRequestReviewThreadReply", {"pullRequestReviewThreadId": "PRRT_1", "pullRequestReviewId": rv,
+                                                          "body": "yes" + ghreview.marker("k1")})
+        self.gh.mutate("addPullRequestReviewThread", {"pullRequestReviewId": rv, "path": "q.ts", "line": 3, "side": "RIGHT",
+                                                     "startLine": 2, "startSide": "RIGHT", "subjectType": "LINE", "body": "why"})
         pr = self.gh.read()[11132]
-        t = pr["threads"][-1]
-        self.assertEqual((t["line"], t["startLine"], t["resolved"]), (3, 2, True))
-        self.assertEqual([c["body"] for c in t["comments"]], ["why", "because"])
-        self.assertEqual(pr["reviews"][-1]["state"], "CHANGES_REQUESTED")
-        self.assertEqual([e["op"] for e in self.gh.load()["log"]], ["review", "reply", "resolve"])
+        self.assertEqual(pr["pending"], {"id": rv, "count": 2})
+        old = pr["threads"][0]
+        self.assertEqual([(c["author"], c["state"]) for c in old["comments"]], [("nalanj", "SUBMITTED"), ("me", "PENDING")])
+        self.assertEqual(ghreview.key_of(old["comments"][-1]["body"]), "k1")
+        new = pr["threads"][-1]
+        self.assertEqual((new["line"], new["startLine"], new["comments"][0]["state"]), (3, 2, "PENDING"))
+        self.assertEqual(pr["reviews"], ghreview.parse_pr(REAL)["reviews"], "nothing submitted")
 
-    def test_unknown_thread_refuses(self):
+    def test_one_pending_review_per_pr(self):
+        self.gh.mutate("addPullRequestReview", {"pullRequestId": "PR_x", "commitOID": "c"})
         with self.assertRaises(ghreview.Refused):
-            self.gh.mutate("reply", {"thread": "nope", "body": "x"})
+            self.gh.mutate("addPullRequestReview", {"pullRequestId": "PR_x", "commitOID": "c"})
+
+    def test_reply_into_an_unknown_review_refuses(self):
+        with self.assertRaises(ghreview.Refused):
+            self.gh.mutate("addPullRequestReviewThreadReply", {"pullRequestReviewThreadId": "PRRT_1", "pullRequestReviewId": "nope", "body": "x"})
+
+
+class Ledger(unittest.TestCase):
+    PR = {"at": 100.0, "threads": [{"node": "T", "comments": [{"id": "c", "state": "PENDING", "body": "x" + ghreview.marker("k")}]}]}
+
+    def test_states_are_read_off_github(self):
+        self.assertEqual(reviewdesk.shown({"key": "k", "state": "sent"}, self.PR, reviewdesk.on_github(self.PR), []), "pending")
+        sub = {**self.PR, "threads": [{"node": "T", "comments": [{**self.PR["threads"][0]["comments"][0], "state": "SUBMITTED"}]}]}
+        self.assertEqual(reviewdesk.shown({"key": "k", "state": "sent"}, sub, reviewdesk.on_github(sub), []), "submitted")
+
+    def test_a_draft_waits_and_a_lost_send_says_so(self):
+        self.assertEqual(reviewdesk.shown({"key": "z", "state": "draft"}, self.PR, {}, ["abc"]), "waiting")
+        self.assertEqual(reviewdesk.shown({"key": "z", "state": "sent", "sentAt": 10.0}, self.PR, {}, []), "gone")
+        self.assertEqual(reviewdesk.shown({"key": "z", "state": "sent", "sentAt": 99.5}, self.PR, {}, []), "sending")
+
+    def test_key_of(self):
+        self.assertEqual(ghreview.key_of("hi" + ghreview.marker("abc123")), "abc123")
+        self.assertIsNone(ghreview.key_of("hi"))
 
 
 if __name__ == "__main__":
