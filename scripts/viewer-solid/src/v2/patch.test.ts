@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { applyPatchTo, checkVersion, emptyEntities } from "./patch.ts";
 
 test("versions advance by exactly one per domain", () => {
-  const v = { git: 3, remote: 7 };
+  const v = { git: 3, remote: 7, review: 0 };
   assert.equal(checkVersion(v, { domain: "git", version: 4, upserts: {}, deletes: {} }), "ok");
   assert.equal(checkVersion(v, { domain: "git", version: 3, upserts: {}, deletes: {} }), "stale");
   assert.equal(checkVersion(v, { domain: "git", version: 6, upserts: {}, deletes: {} }), "gap");
