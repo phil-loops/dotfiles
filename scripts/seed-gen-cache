@@ -767,6 +767,12 @@ def gc(quiet=False):
     for n in os.listdir(d) if os.path.isdir(d) else []:
         if n.endswith(".json") and n[:-5] not in live and now - _mtime(os.path.join(d, n)) > 3600:
             os.unlink(os.path.join(d, n))
+    try:
+        lines = open(store("log")).read().splitlines()
+        if len(lines) > 20000:
+            write_atomic(store("log"), ("\n".join(lines[-10000:]) + "\n").encode())
+    except OSError:
+        pass
     if not quiet:
         print(f"kept {len(keep)} entries ({total >> 20} MiB of {BUDGET >> 20}), dropped {dropped}")
     return 0
