@@ -176,12 +176,25 @@ class FakeGitHub:
     def __init__(self, path):
         self.path = path
 
+    _cache = {}   # path -> ((mtime, size), data)
+
     def load(self):
         try:
+            st = os.stat(self.path)
+        except OSError:
+            return {"viewer": "you", "prs": {}, "seq": 0, "log": []}
+        key = (st.st_mtime_ns, st.st_size)
+        hit = self._cache.get(self.path)
+        if hit and hit[0] == key:
+            return json.loads(hit[1])
+        try:
             with open(self.path) as f:
-                return json.load(f)
+                raw = f.read()
+            json.loads(raw)
         except (OSError, ValueError):
             return {"viewer": "you", "prs": {}, "seq": 0, "log": []}
+        self._cache[self.path] = (key, raw)
+        return json.loads(raw)
 
     def _save(self, d):
         tmp = self.path + ".tmp"
@@ -190,12 +203,13 @@ class FakeGitHub:
         os.replace(tmp, self.path)
 
     def read(self):
+        from . import repostate
+        snap = repostate.snapshot()
         with self._lock:
             d = self.load()
             moved = False
             for pr in d["prs"].values():
-                head = subprocess.run(["git", "rev-parse", "-q", "--verify", f"refs/remotes/origin/{pr['headRef']}"],
-                                      cwd=ctx.repo_cwd(), capture_output=True, text=True).stdout.strip()
+                head = snap.remote(pr["headRef"])
                 if head and head != pr["head"]:
                     self._push(pr, head)
                     moved = True
