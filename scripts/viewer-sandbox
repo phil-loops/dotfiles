@@ -4,6 +4,12 @@
 #   viewer-sandbox <dir>                          build <dir>/repo (+ <dir>/origin.git, a local bare remote)
 #   viewer-sandbox <dir> --serve <port> [--scripts <scripts-dir>]
 #                                                 …and run the viewer over it (foreground)
+#   viewer-sandbox <dir> --github [--serve …]     …with a fake GitHub: demo/queries + demo/model pushed
+#                                                 as PRs #42/#43 with review threads (bot findings with
+#                                                 suggestions, a teammate question, resolved, outdated),
+#                                                 a teammate's PR imported as review/pr-77, and second-
+#                                                 reader notes. <dir>/github.json IS that GitHub
+#                                                 (STACK_REVIEW_GH_FAKE): review writes land there.
 #
 # Everything — pushes included — stays inside <dir>: origin is a bare repo next to it, and the
 # server runs with STACK_REVIEW_SANDBOX=1 (no gh prewarm, focus restacks or pregates). Use it to
@@ -11,11 +17,12 @@
 # the server at a worktree's scripts/ so you can test unlanded code.
 set -euo pipefail
 
-dir=${1:?usage: viewer-sandbox <dir> [--serve <port>] [--scripts <scripts-dir>]}
+dir=${1:?usage: viewer-sandbox <dir> [--github] [--serve <port>] [--scripts <scripts-dir>]}
 shift
-port="" scripts="$HOME/.dotfiles/scripts"
+port="" scripts="$HOME/.dotfiles/scripts" github=""
 while (($#)); do
   case $1 in
+    --github) github=1; shift ;;
     --serve) port=$2; shift 2 ;;
     --scripts) scripts=$2; shift 2 ;;
     *) echo "viewer-sandbox: unknown arg $1" >&2; exit 2 ;;
@@ -176,7 +183,105 @@ TS
   echo "viewer-sandbox: built $repo (forests: demo ×4, solo ×1; origin = $dir/origin.git)"
 fi
 
+
+if [[ -n $github && ! -f $dir/github.json ]]; then
+  git -C "$repo" push -q origin demo/queries demo/model
+  # a teammate's PR, imported the way stack-review-import does it
+  git -C "$repo" checkout -q -b review/pr-77 main
+  put src/ui/banner.ts <<'TS'
+/** Loads the login banner, retrying a failed fetch before showing the error. */
+export async function loadBanner(fetchBanner: () => Promise<string>): Promise<string> {
+  let last: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await fetchBanner();
+    } catch (e) {
+      last = e;
+    }
+  }
+  console.error("banner failed", last);
+  return "";
+}
+TS
+  git -C "$repo" -c user.name=Nalanj -c user.email=nalanj@example.com commit -q -m "fix: retry the banner fetch before giving up"
+  git -C "$repo" push -q origin review/pr-77:nalanj/retry-banner
+  git -C "$repo" config branch.review/pr-77.stack-parent origin/main
+  git -C "$repo" config branch.review/pr-77.description "#77 retry the banner fetch — @nalanj"
+  git -C "$repo" config --add stack.standalone review/pr-77
+  git -C "$repo" checkout -q main
+  python3 - "$dir" "$repo" <<'PY'
+import json, os, subprocess, sys
+d, repo = sys.argv[1], sys.argv[2]
+sha = lambda r: subprocess.run(["git", "-C", repo, "rev-parse", r], capture_output=True, text=True).stdout.strip()
+h42, h43, h77 = sha("demo/queries"), sha("demo/model"), sha("review/pr-77")
+AT = "2026-10-22T16:%02d:00Z"
+n = [0]
+def c(author, body, commit, hunk=None, minute=0):
+    n[0] += 1
+    out = {"id": f"PRRC_sb{n[0]}", "db": n[0], "author": author, "body": body, "at": AT % minute,
+           "url": f"https://github.com/sandbox/repo/pull/43#discussion_r{n[0]}", "commit": commit, "originalCommit": commit}
+    if hunk is not None:
+        out["hunk"] = hunk
+    return out
+def t(node, path, line, comments, start=None, resolved=False, outdated=False, original=None):
+    return {"node": node, "path": path, "line": None if outdated else line, "startLine": start,
+            "originalLine": original or line, "originalStartLine": start, "side": "RIGHT", "subject": "LINE",
+            "outdated": outdated, "resolved": resolved, "canResolve": not resolved, "canUnresolve": resolved,
+            "canReply": True, "comments": comments}
+R = "src/models/widget-rules.ts"
+bot, me, mate = "john-hankles", "sandbox-phil", "nalanj"
+threads43 = [
+    t("PRRT_sb1", R, 6, [c(bot, "`affordableWidgets` keeps placeholder widgets: one with `price: 0` passes `w.price <= max`, so the dashboard lists free placeholders as affordable.\n\n```suggestion\n\treturn listWidgets().filter((w) => w.price > 0 && w.price <= max);\n```", h43, "@@ -0,0 +1,7 @@\n+import type { Widget } from \"../widget\";", 4)]),
+    t("PRRT_sb2", R, 5, [c(bot, "The doc comment drops the order the dashboard relies on: `listWidgets` sorts cheapest first, and `affordableWidgets` keeps that order.\n\n```suggestion\n/** Widgets the dashboard can afford — at most `max` cents each, cheapest first. */\nexport function affordableWidgets(max: number): Widget[] {\n```", h43, "", 5)], start=4),
+    t("PRRT_sb3", R, 2, [c(mate, "Should this import the queries as a namespace (`import * as WidgetQueries from \"../queries/widgets\"`)? AGENTS.md asks for full namespace names.", h43, "", 9)]),
+    t("PRRT_sb4", R, 1, [c(bot, "`Widget` is only used as a type here — `import type` keeps it out of the runtime graph.", h43, "", 3),
+                          c(me, "Addressed in 4d6c4be: it's already `import type`.", h43, None, 12)], resolved=True),
+    t("PRRT_sb5", "models/widget.ts", None, [c(bot, "A bare `v` export says nothing to a reader of the model layer; name what it holds.", h43, "@@ -0,0 +1 @@\n+export const v = 1;", 2)], outdated=True, original=1),
+]
+threads42 = [t("PRRT_sb6", "src/queries/widgets.ts", 9, [c(bot, "`listWidgets` copies before sorting — good; the doc comment could say so.", h42, "", 1),
+                                                        c(me, "Addressed in 9f1e2d3: kept as is, the copy is the point.", h42, None, 6)], resolved=True)]
+prs = {
+    "42": {"id": "PR_sb42", "number": 42, "headRef": "demo/queries", "head": h42, "base": "main", "title": "feat(loo-9999): add the widget queries",
+           "body": "## Intent\n- Adds the widget queries: one call per function, no business logic.\n\n## Where this sits\n→ **this PR**\n○ demo/model", "url": "https://github.com/sandbox/repo/pull/42",
+           "state": "OPEN", "author": me, "botRan": True, "threads": threads42,
+           "reviews": [{"id": "PRR_sb1", "author": bot, "state": "COMMENTED", "body": "", "at": AT % 1, "url": ""}], "comments": [], "pending": None},
+    "43": {"id": "PR_sb43", "number": 43, "headRef": "demo/model", "head": h43, "base": "demo/queries", "title": "feat(loo-9999): move widget rules into a model",
+           "body": "## Intent\n- Moves the widget rules out of the dashboard into `models/widget-rules.ts`.\n- The dashboard shows only widgets within budget.\n\n## Not in this PR\n- Showing widgets on the dashboard — up next\n\n## Where this sits\nStacked on: #42\n✓ #41 add the widget table\n○ #42 add the widget queries\n→ **this PR**",
+           "url": "https://github.com/sandbox/repo/pull/43", "state": "OPEN", "author": me, "botRan": True, "threads": threads43,
+           "reviews": [{"id": "PRR_sb2", "author": bot, "state": "COMMENTED", "body": "", "at": AT % 5, "url": ""},
+                       {"id": "PRR_sb3", "author": mate, "state": "COMMENTED", "body": "One question inline.", "at": AT % 9, "url": ""}],
+           "comments": [{"id": "IC_sb1", "author": bot, "body": "**Review** — 3 findings on this diff, 1 already resolved. Claims 1–2 hold.", "at": AT % 6, "url": ""}],
+           "pending": None},
+    "77": {"id": "PR_sb77", "number": 77, "headRef": "nalanj/retry-banner", "head": h77, "base": "main", "title": "fix: retry the banner fetch before giving up",
+           "body": "Retries a failed banner fetch twice before showing the error, so a flaky edge doesn't blank the login page.", "url": "https://github.com/sandbox/repo/pull/77",
+           "state": "OPEN", "author": mate, "botRan": False, "threads": [], "reviews": [], "comments": [], "pending": None},
+}
+json.dump({"viewer": me, "prs": prs, "seq": 100, "log": []}, open(os.path.join(d, "github.json"), "w"), indent=1)
+json.dump({"demo/queries": {"number": 42, "state": "OPEN", "url": prs["42"]["url"], "title": prs["42"]["title"], "review": "REVIEW_REQUIRED", "baseRef": "main"},
+           "demo/model": {"number": 43, "state": "OPEN", "url": prs["43"]["url"], "title": prs["43"]["title"], "review": "REVIEW_REQUIRED", "baseRef": "demo/queries"}},
+          open(os.path.join(d, "pr-fixture.json"), "w"), indent=1)
+notes = os.path.join(repo, ".git", "stack-review-notes", "43")
+os.makedirs(notes, exist_ok=True)
+json.dump({"verdict": "right", "evidence": [{"path": R, "line": 6, "why": "the filter admits price 0"}],
+           "elsewhere": [{"path": "src/ui/dashboard.ts", "line": 6, "branch": "demo/ui", "why": "maps the same unfiltered list"},
+                         {"path": "src/queries/widgets.ts", "line": 9, "branch": "demo/queries", "why": "sorts placeholders first"}],
+           "cause": "listWidgets has no notion of a placeholder, so each caller filters on its own.",
+           "draftReply": "Agreed — zero-priced placeholders are filtered out here now. The query still returns them; demo/ui inherits the fix through this model.",
+           "model": "opus", "at": "2026-10-22T17:00:00Z"}, open(os.path.join(notes, "PRRT_sb1.json"), "w"), indent=1)
+json.dump({"verdict": "partly", "evidence": [{"path": R, "line": 2, "why": "a bare named import of one function"}], "elsewhere": [],
+           "cause": None, "draftReply": "Yes — switching to `import * as WidgetQueries` here.", "model": "opus", "at": "2026-10-22T17:00:00Z"},
+          open(os.path.join(notes, "PRRT_sb3.json"), "w"), indent=1)
+json.dump({"items": [{"path": R, "line": 5, "why": "`max` is never checked — a negative budget silently returns nothing"}], "model": "opus", "at": "2026-10-22T17:00:00Z"},
+          open(os.path.join(notes, "_unflagged.json"), "w"), indent=1)
+PY
+  echo "viewer-sandbox: fake GitHub at $dir/github.json (PRs #42 #43 on demo/*, #77 as review/pr-77)"
+fi
+
 if [[ -n $port ]]; then
+  if [[ -f $dir/github.json ]]; then
+    export STACK_REVIEW_GH_FAKE="$dir/github.json"
+    export STACK_OUTBOX_PR_FIXTURE="${STACK_OUTBOX_PR_FIXTURE:-$dir/pr-fixture.json}"
+  fi
   mkdir -p "$dir/serve"
   # stack-open's scratch worktrees and the viewer's tsgo stay inside the sandbox too
   export STACK_OPEN_DIR="$dir/stack-study" STACK_LSP_STATE_DIR="$dir/lsp"
