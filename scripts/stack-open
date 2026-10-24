@@ -938,7 +938,7 @@ case "${1:-}" in
     hdir="${2:?dir}"; hlog="${3:?log}"
     if grep -q FAILED "$hlog" 2>/dev/null; then
       notify "types heal FAILED: ${hdir:t} — see $hlog"
-    elif grep -q rebuilt "$hlog" 2>/dev/null; then
+    elif grep -qE 'rebuilt|restored' "$hlog" 2>/dev/null; then   # restored = from seed-gen's cache: new types all the same
       hx_heal_restart || notify "types rebuilt for ${hdir:t} — :lsp-restart to pick them up"
     fi
     exit 0;;
