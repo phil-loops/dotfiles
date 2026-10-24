@@ -374,7 +374,7 @@ class Keyer:
         if cid is None:
             raise LookupError("compiler is not an npm package")
         names, extra = tree_names(root)
-        self.names = names
+        self.names, self.extra = names, extra
         d = hashlib.sha256(SCHEMA)
         if "compiler" not in omit:
             d.update(b"compiler\0" + cid.encode() + b"\0")
@@ -547,12 +547,12 @@ def lookup(root, compiler):
     files, and a sidecar of its in-tree files skips, unread, every graph naming a file this tree
     lacks (a graph from a branch that added one) — the common miss then hashes nothing."""
     keyer = Keyer(root, compiler)
-    have = {n.lower() for n in keyer.names}
+    have = {n.lower() for n in keyer.names + keyer.extra}
     for gpath in candidate_graphs():
         try:
             with open(gpath[:-5] + ".t") as f:
                 need = f.read().split("\n")
-            if not all(n in have for n in need if n):
+            if not all(n in have or os.path.exists(os.path.join(root, n)) for n in need if n):
                 continue
         except OSError:
             pass
