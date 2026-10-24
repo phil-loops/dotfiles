@@ -27,6 +27,9 @@
 #     reseed from main if absent, trade a symlink for a private copy rather than write
 #     through it, emit in-tree, and stamp the compiler input fingerprint plus provenance HEAD. Prints one line per action taken; silent no-op when already accurate.
 #
+#   Every emit (both paths) first asks seed-gen-cache for a stored emit of the exact same inputs and
+#   stores what it builds: `seed-gen --cache-stats`, `--cache-gc`; SEED_GEN_CACHE=0 turns it off.
+#
 # NB: .gen does NOT reduce tsc memory — purely correctness.
 set -u
 
@@ -393,11 +396,21 @@ stamp_generation(){
   printf '%s\n' "$expected_head" > "$tree/.gen/.seed-gen-sha"
 }
 
+# The content-addressed store (seed-gen-cache): a tree whose emit inputs were built before, in any
+# tree, takes that emit instead of compiling. restore prints "<key> <files changed>" on a hit.
+cache(){ "$(dirname "$0")/seed-gen-cache" "$@" 2>/dev/null; }
+build_started(){ touch "$1/.gen/.seed-gen-started"; echo "$1/.gen/.seed-gen-started"; }
+
 # --check <worktree>: are the generated types AND the borrowed dependencies this tree reads
 # trustworthy FOR THE BRANCH IT IS ON?
 # The marker is read from THIS tree's .gen (through a symlink that is main's marker; a
 # self-built copy carries its own) — a copy with no marker has no provenance at all.
 # Exit 0 = trustworthy. Exit 1 = say so out loud instead of reporting a confident red.
+case "${1:-}" in
+  --cache-stats) exec "$(dirname "$0")/seed-gen-cache" --stats "${@:2}" ;;
+  --cache-gc) exec "$(dirname "$0")/seed-gen-cache" --gc ;;
+esac
+
 if [[ "${1:-}" == --check ]]; then
   dir="${2:?usage: seed-gen --check <worktree-dir>}"
   [[ -d "$dir/.gen" || -L "$dir/.gen" ]] || { echo "no generated tRPC types in this tree"; exit 1; }
@@ -527,13 +540,22 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     take_lock "$dir/.gen" || { echo "a types rebuild is already in flight in this tree"; exit 1; }
     before=$(generation_snapshot "$dir") || before=""
     prepare_generation "$dir"
-    if out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
+    if hit=$(cache restore "$dir" "$tsc"); then
+      if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
+        drop_lock "$dir/.gen"
+        echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
+      fi
+      drop_lock "$dir/.gen"
+      echo "restored tRPC types for ${head:0:10} from the cache (${hit#* } files changed)"
+    elif started=$(build_started "$dir") \
+         && out=$(cd "$dir" && "$HOME/.volta/bin/node" "$tsc" --project "$proj" --pretty false 2>&1); then
       # never stamp through a symlink: the async scratch path can re-link .gen to main's mid-
       # rebuild, and writing then poisons MAIN's marker with this branch's HEAD (2026-08-03)
       if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
         drop_lock "$dir/.gen"
         echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
       fi
+      cache insert "$dir" "$tsc" "$started"
       drop_lock "$dir/.gen"
       echo "rebuilt tRPC types for ${head:0:10} in this tree"
     else
@@ -597,11 +619,11 @@ if generation_current "$dir"; then
 fi
 
 if [[ -e "$tsc" && "${ts_major:-0}" -ge 7 ]]; then
-  build=("$HOME/.volta/bin/node" "$tsc")     # TS7 tsc IS the native compiler
+  build=("$HOME/.volta/bin/node" "$tsc"); compiler="$tsc"   # TS7 tsc IS the native compiler
 elif [[ -n "$tsgo" ]]; then
-  build=("$tsgo")                            # pre-TS7 tsc: TS2883 partial emit (header)
+  build=("$tsgo"); compiler="$tsgo"                         # pre-TS7 tsc: TS2883 partial emit (header)
 else
-  build=("$HOME/.volta/bin/node" "$tsc")
+  build=("$HOME/.volta/bin/node" "$tsc"); compiler="$tsc"
 fi
 
 build_main(){
@@ -613,8 +635,14 @@ build_main(){
   build_packages "$dir" >/dev/null 2>&1
   before=$(generation_snapshot "$dir") || before=""
   prepare_generation "$dir"
-  "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
-    && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before"
+  if cache restore "$dir" "$compiler" >/dev/null; then
+    prune_generation "$dir" && stamp_generation "$dir" "$head" "$before"
+  else
+    started=$(build_started "$dir")
+    "${build[@]}" --project "$proj" --pretty false >/dev/null 2>&1 \
+      && prune_generation "$dir" && stamp_generation "$dir" "$head" "$before" \
+      && cache insert "$dir" "$compiler" "$started"
+  fi
   drop_lock "$dir/.gen"
 }
 
