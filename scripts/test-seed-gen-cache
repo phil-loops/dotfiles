@@ -92,7 +92,7 @@ def emit(tree, compiler=None):
 
 def graph_of(tree):
     info = json.load(open(os.path.join(tree, ".gen", "trpc-types.tsbuildinfo")))
-    return C.anchored_graph(C.Where(tree), info)
+    return C.full_graph(tree, info.get("program", info))
 
 
 def tsc_of(tree):
@@ -133,12 +133,17 @@ class Perturb:
 
     def __init__(self):
         self.saved = []
+        self.made = []
 
     def write(self, path, data, mode="w"):
         old = open(path, "rb").read() if os.path.exists(path) else None
         self.saved.append((path, old, os.path.islink(path) and os.readlink(path)))
         if os.path.islink(path):
             os.unlink(path)
+        d = os.path.dirname(path)
+        while not os.path.isdir(d):
+            self.made.append(d)
+            d = os.path.dirname(d)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, mode) as f:
             f.write(data)
@@ -162,7 +167,12 @@ class Perturb:
             elif old is not None:
                 with open(path, "wb") as f:
                     f.write(old)
-        self.saved = []
+        for d in sorted(self.made, key=len, reverse=True):
+            try:
+                os.rmdir(d)
+            except OSError:
+                pass
+        self.saved, self.made = [], []
 
 
 # ── counterexamples, one per key part ─────────────────────────────────────────────────────────
@@ -203,6 +213,9 @@ def graph_state(tree):
     info = json.load(open(os.path.join(tree, ".gen/trpc-types.tsbuildinfo")))
     return [info.get(k) for k in ("fileNames", "packageJsons", "missingPackageJsons")] + \
         [[fi.get("impliedNodeFormat") if isinstance(fi, dict) else None for fi in info.get("fileInfos") or []]]
+
+
+FALLBACK_PARTS = ("names", "listings", "missing")
 
 
 def part_cases(tree, graph):
@@ -254,10 +267,21 @@ def part_cases(tree, graph):
     loops = os.path.join(tree, "node_modules/@loops")
     in_graph = {r.split("/")[1] for k, r, _lo, _re in graph["fileNames"] if k == "t" and r.startswith("packages/")}
     pkgs = sorted(p for p in in_graph if os.path.islink(os.path.join(loops, p)))
-    if len(pkgs) >= 2:
-        def view(p, a=pkgs[0], b=pkgs[1]):
-            p.link(os.path.join(loops, a), f"../../packages/{b}")
-        cases.append(("view", f"a node_modules link retargeted (@loops/{pkgs[0]} → packages/{pkgs[1]}), every file unchanged", view))
+    # a link retargeted at a copy with the very same file names: every probe answers the same and
+    # every recorded file is untouched — only where the link leads differs
+    pk = "settings" if "settings" in pkgs else (pkgs[0] if pkgs else None)
+    if pk:
+        def view(p, pk=pk):
+            src, copy = os.path.join(tree, "packages", pk), os.path.join(tree, ".gen", ".view-probe", pk)
+            for dp, _dns, fns in os.walk(src):
+                if "node_modules" in dp:
+                    continue
+                for f in fns:
+                    rel = os.path.relpath(os.path.join(dp, f), src)
+                    data = open(os.path.join(dp, f)).read() if not f.endswith(".tsbuildinfo") else ""
+                    p.write(os.path.join(copy, rel), "export {};\n" if rel == os.path.join("dist", "index.d.ts") else data)
+            p.link(os.path.join(loops, pk), copy)
+        cases.append(("view", f"node_modules/@loops/{pk} linked to a copy of packages/{pk} whose dist/index.d.ts is empty", view))
 
     client = os.path.join(tree, "node_modules/.prisma/client")
     home = C.Where(tree).home
@@ -265,6 +289,14 @@ def part_cases(tree, graph):
         def side(p):
             p.link(client, os.path.join(home, ".prisma/client"))
         cases.append(("side", "the same prisma client files, reached through a link into the home instead of a copy in the tree", side))
+
+    if "probes" in graph:
+        above = os.path.join(os.path.dirname(tree), "node_modules", "crypto")
+
+        def ancestors(p):
+            p.write(os.path.join(above, "package.json"), json.dumps({"name": "crypto", "types": "index.d.ts"}) + "\n")
+            p.write(os.path.join(above, "index.d.ts"), "export declare function randomUUID(): `probe-${number}`;\n")
+        cases.append(("ancestors", f"a node_modules above the tree ({os.path.dirname(above)}): node builtins walk past the root", ancestors))
     return cases
 
 
@@ -274,18 +306,29 @@ def run_parts(tree, store, only):
     base_canon = gen_canon(tree)
     base_full = key(tree, graph)
     base_info = graph_state(tree)
+    fallback = {k: v for k, v in graph.items() if k != "probes"}
     for part, desc, apply in part_cases(tree, graph):
         if only and f"part:{part}" not in only:
             continue
-        print(f"\n part:{part} — {desc}")
-        omitted_before = key(tree, graph, omit=[part])
+        # names, listings and missing key the graphs recorded without probes (an emit whose trace was
+        # lost); a probed graph answers those same changes through `probes` — both are shown
+        g = fallback if part in FALLBACK_PARTS else graph
+        print(f"\n part:{part} — {desc}" + (" [graph without probes]" if g is fallback else ""))
+        omitted_before = key(tree, g, omit=[part])
+        base_part = key(tree, g)
+        unprobed_before = key(tree, graph, omit=["probes"]) if part in ("names", "listings") else None
         p = Perturb()
         try:
             apply(p)
-            omitted_after = key(tree, graph, omit=[part])
-            full_after = key(tree, graph)
+            omitted_after = key(tree, g, omit=[part])
+            full_after = key(tree, g)
+            if g is fallback:
+                check(f"part:{part} the probed graph's key misses too", key(tree, graph) != base_full)
+            if unprobed_before is not None:
+                check(f"part:probes ({part}'s change) without them the probed graph's key would hit",
+                      key(tree, graph, omit=["probes"]) == unprobed_before)
             check(f"part:{part} without it the key would hit", omitted_after == omitted_before and omitted_after is not None)
-            check(f"part:{part} with it the key misses", full_after != base_full)
+            check(f"part:{part} with it the key misses", full_after != base_part)
             if part == "side":
                 prc, pout = emit(tree)    # seed-gen would re-localize prisma before emitting; emit as laid out
                 after_canon = gen_canon(tree)
