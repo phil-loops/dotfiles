@@ -270,6 +270,11 @@ def send_one(item, req=None, released=False):
     if item["key"] in on_github(pr):
         _update(item["key"], state="sent", err=None, send=False, sentAt=time.time())
         return
+    thread = next((t for t in pr.get("threads") or [] if t["node"] == item.get("thread")), None)
+    why = ghreview.scope_refusal(item["kind"], thread)
+    if why:
+        _update(item["key"], state="draft", err=why, send=False)
+        raise ghreview.Refused(why)
     _update(item["key"], state="sending", err=None)
     try:
         review = (pr.get("pending") or {}).get("id")

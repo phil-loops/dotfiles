@@ -156,6 +156,32 @@ class Guard(unittest.TestCase):
         self.assertEqual(called, [])
 
 
+class Scope(unittest.TestCase):
+    BOT_T = {"node": "T1", "comments": [{"author": ghreview.BOT}, {"author": "me"}]}
+    HUMAN_T = {"node": "T2", "comments": [{"author": "nalanj"}]}
+
+    def setUp(self):
+        self.run = ctx.run
+        self.scope = ""
+        ctx.run = lambda args, timeout=None: types.SimpleNamespace(stdout=self.scope if "stack.viewer-github-scope" in args else "", returncode=0)
+
+    def tearDown(self):
+        ctx.run = self.run
+
+    def test_replies_to_the_bot_go_by_default(self):
+        self.assertIsNone(ghreview.scope_refusal("reply", self.BOT_T))
+
+    def test_replies_to_people_and_new_threads_stay_drafts(self):
+        self.assertIn("for now", ghreview.scope_refusal("reply", self.HUMAN_T))
+        self.assertIn("for now", ghreview.scope_refusal("comment", None))
+        self.assertIn("for now", ghreview.scope_refusal("reply", None))
+
+    def test_scope_all_opens_everything(self):
+        self.scope = "all"
+        self.assertIsNone(ghreview.scope_refusal("reply", self.HUMAN_T))
+        self.assertIsNone(ghreview.scope_refusal("comment", None))
+
+
 class Structure(unittest.TestCase):
     """GitHub writes have one door, and it opens onto Phil's pending review only."""
     SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "srv")
