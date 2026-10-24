@@ -1,8 +1,9 @@
 # srv/state.py — the v2 client's world as normalized entities: one snapshot, then entity patches.
 #
 #   GET /state[?archived=1]
-#     {epoch, versions: {git, remote}, entities: {repo, project, branch, pr, landed: {id: obj}}, ms}
-#   GET /v2/events?epoch=E&git=N&remote=M[&archived=1]          (SSE)
+#     {epoch, versions: {git, remote, review}, entities: {repo, project, branch, pr, landed, conv,
+#      thread, draft, queued: {id: obj}}, ms}
+#   GET /v2/events?epoch=E&git=N&remote=M&review=R[&archived=1]   (SSE)
 #     event: hello   {epoch, versions}                         first, always
 #     event: patch   {domain, version, upserts: {type: {id: obj}}, deletes: {type: [id]}}
 #     event: resync  {epoch, versions}                         refetch /state, then reconnect
@@ -21,6 +22,10 @@
 #                                  fingerprint or a gate job moves, so a quiet repo costs no spawn
 #   remote  pr, landed             sync's PR state cache (+ open-PR detail / the sandbox fixture) and
 #                                  the merge ledger; in-memory reads, rebuilt every tick
+#   review  conv, thread, draft,   open PRs' review threads (packet's background GraphQL read, or
+#           queued                 the fake GitHub) mapped onto the local tips, the second reader's
+#                                  notes, the pending review and the reply queue (srv/reviewdesk.py);
+#                                  rebuilt every tick from memory + stats
 # A version is per domain, monotonic within an epoch (one server process), and a patch's version is
 # the previous one + 1 — so a client that sees a gap, or connects with a version older than the
 # ring holds or from another epoch, gets `resync`. A client connecting without versions is assumed
@@ -36,11 +41,12 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, push, repostate, sync, watch
+from . import ctx, outbox, push, repostate, reviewdesk, sync, watch
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
-DOMAINS = ("git", "remote")
+DOMAINS = ("git", "remote", "review")
 RING = 128
+REVIEW_TYPES = ("conv", "thread", "draft", "queued")
 TICK = 0.5
 _TRUNKS = ("main", "master")
 
@@ -326,6 +332,9 @@ def refresh():
         git = _D["git"].ents
         remote = _each_repo(lambda n: _remote_entities(n, git))
         _commit("remote", _merge(remote.values(), ("pr", "landed")), None)
+        review = _each_repo(reviewdesk.entities)
+        _commit("review", _merge(review.values(), REVIEW_TYPES), None)
+        _each_repo(lambda n: reviewdesk.release_due())
 
 
 def _hidden():
@@ -393,6 +402,10 @@ def _refresher():
         _WAKE.wait(TICK)
         _WAKE.clear()
         if _SUBS[0] <= 0:
+            try:   # a reply waiting on a push goes out after it even with no v2 tab open (a stat when the queue is empty)
+                _each_repo(lambda n: reviewdesk.release_due())
+            except Exception as e:
+                ctx.log(f"state: reply release failed: {e!r}")
             continue
         try:
             sync.pulse_freshen()   # the remote world converges while a v2 tab is open, as v1's pulse does

@@ -37,6 +37,7 @@ from srv import lsp   # own line: same reason
 from srv import packet   # own line: same reason
 from srv import state   # own line: same reason
 from srv import telemetry   # own line: same reason
+from srv import reviewdesk   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -90,6 +91,13 @@ def _log(line):
         sys.stderr.write(msg)
         sys.stderr.flush()
     reqlog.append(_LOG_FILE, msg)
+
+
+_REVIEW_POSTS = {
+    "/review-draft": reviewdesk.draft, "/review-submit": reviewdesk.submit, "/review-comment": reviewdesk.comment,
+    "/review-reply": reviewdesk.reply, "/review-resolve": reviewdesk.resolve, "/review-say": reviewdesk.say,
+    "/review-queue": reviewdesk.queue, "/review-apply": reviewdesk.apply,
+}
 
 
 def run(args, timeout=None):
@@ -604,6 +612,8 @@ class H(BaseHTTPRequestHandler):
             return push.push_origin(self, raw)
         if self.path == "/force-origin":  # the ONE force exception: no PR, or a draft with zero reviews/comments; lease-guarded
             return push.force_origin(self, raw)
+        if self.path in _REVIEW_POSTS:   # the branch page's review: drafts locally, GitHub writes via srv/ghreview's guards
+            return _REVIEW_POSTS[self.path](self, raw)
         if self.path == "/outbox-hold":   # hold for morning: stamp/clear branch.<b>.stack-hold-until (branch or forest)
             return outbox.hold(self, raw)
         if self.path == "/outbox-title":  # the landing PR title: branch.<b>.stack-pr-title
