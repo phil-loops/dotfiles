@@ -5,7 +5,7 @@ import { createEffect, createMemo, createRoot, createSignal, on } from "solid-js
 import { routeArg, surface } from "../router";
 import { list, view, world } from "../store";
 import { ask, getJSON } from "../sync";
-import type { Conv, Draft, DraftComment, Queued, Thread } from "../types";
+import type { Conv, Draft, Item, Thread } from "../types";
 import { parsePatch, rowAnchors, splitRows, unifiedRows, type FileDiff, type Row } from "./diff";
 
 const store = {
@@ -41,14 +41,17 @@ interface NodePayload {
 
 export type Composer =
   | { kind: "line"; key: string; path: string; side: "RIGHT" | "LEFT"; line: number; startLine: number | null }
-  | { kind: "reply"; key: string; threadId: string }
-  | { kind: "say"; key: string };
+  | { kind: "reply"; key: string; threadId: string };
+
+/** A ledger item GitHub doesn't show yet (drafts, waiting, sending, lost): the page draws these; a
+ *  pending or submitted one is drawn from GitHub's own copy in the thread. */
+export const local = (i: Item) => i.state !== "pending" && i.state !== "submitted";
 
 export interface FileView {
   file: FileDiff;
   rows: Row[];
   threadsAt: Map<string, Thread[]>;
-  pendingAt: Map<string, DraftComment[]>;
+  pendingAt: Map<string, Item[]>;
   /** threads whose line isn't a row here (outdated, or moved out of the diff) */
   aside: Thread[];
   open: number;
@@ -97,8 +100,6 @@ export const page = createRoot(() => {
   const [unfold, setUnfold] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const [composer, setComposer] = createSignal<Composer | null>(null);
   const [texts, setTexts] = createSignal<ReadonlyMap<string, string>>(new Map());
-  const [finishing, setFinishing] = createSignal(false);
-  const [event, setEvent] = createSignal<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [overlay, setOverlay] = createSignal<"map" | "words" | null>(null);
   const [viewedOverride, setViewedOverride] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const [filter, setFilter] = createSignal("");
@@ -133,7 +134,6 @@ export const page = createRoot(() => {
         setCursor(undefined);
         setMark(undefined);
         setComposer(null);
-        setFinishing(false);
         setViewedOverride(new Map());
         setTab("files");
       }
@@ -159,7 +159,9 @@ export const page = createRoot(() => {
   const base = () => payload()?.data.baseSha ?? "";
 
   const threads = createMemo(() => list("thread").filter((t) => t.branch === target()?.name && t.repo === target()?.repo));
-  const queued = createMemo(() => list("queued").filter((q) => q.branch === target()?.name && q.repo === target()?.repo && !q.cancelled) as Queued[]);
+  const items = createMemo(() => (draft()?.items ?? []).filter(local));
+  /** replies not on GitHub yet, by thread id */
+  const repliesTo = (threadId: string) => items().filter((i) => i.kind === "reply" && i.threadId === threadId);
 
   const isViewed = (path: string) => viewedOverride().get(path) ?? statusOf().get(path) === "blessed";
 
@@ -167,8 +169,8 @@ export const page = createRoot(() => {
     const sp = split();
     const byPath = new Map<string, Thread[]>();
     for (const t of threads()) (byPath.get(t.path) ?? byPath.set(t.path, []).get(t.path)!).push(t);
-    const pend = new Map<string, DraftComment[]>();
-    for (const c of [...(draft()?.comments ?? []), ...(draft()?.sending ?? [])]) (pend.get(c.path) ?? pend.set(c.path, []).get(c.path)!).push(c);
+    const pend = new Map<string, Item[]>();
+    for (const c of items()) if (c.kind === "comment" && c.path) (pend.get(c.path) ?? pend.set(c.path, []).get(c.path)!).push(c);
     return files().map((file) => {
       const rows = rowsOf(file, sp);
       const anchors = new Set(rows.flatMap(rowAnchors));
@@ -179,7 +181,7 @@ export const page = createRoot(() => {
         if (a && anchors.has(a)) (threadsAt.get(a) ?? threadsAt.set(a, []).get(a)!).push(t);
         else aside.push(t);
       }
-      const pendingAt = new Map<string, DraftComment[]>();
+      const pendingAt = new Map<string, Item[]>();
       for (const c of pend.get(file.path) ?? []) {
         const a = `${c.side === "LEFT" ? "L" : "R"}:${c.line}`;
         (pendingAt.get(a) ?? pendingAt.set(a, []).get(a)!).push(c);
@@ -209,12 +211,16 @@ export const page = createRoot(() => {
       const path = fv.file.path;
       out.push({ key: `f|${path}`, kind: "file", path });
       if (fv.viewed) continue;
-      for (const t of fv.aside) if (!t.outdated || showOutdated()) out.push({ key: `t|${t.id}`, kind: "thread", path, id: t.id });
+      const thread = (t: Thread) => {
+        out.push({ key: `t|${t.id}`, kind: "thread", path, id: t.id });
+        if (isOpen(t)) for (const r of repliesTo(t.id)) out.push({ key: `p|${r.key}`, kind: "pending", path, id: r.key });
+      };
+      for (const t of fv.aside) if (!t.outdated || showOutdated()) thread(t);
       for (const r of fv.rows) {
         out.push({ key: `l|${path}|${r.key}`, kind: "line", path, row: r });
         const at = atRow(fv, r);
-        for (const t of at.threads) out.push({ key: `t|${t.id}`, kind: "thread", path, id: t.id });
-        for (const c of at.pending) out.push({ key: `p|${c.id}`, kind: "pending", path, id: c.id });
+        for (const t of at.threads) thread(t);
+        for (const c of at.pending) out.push({ key: `p|${c.key}`, kind: "pending", path, id: c.key });
       }
     }
     return out;
@@ -251,10 +257,10 @@ export const page = createRoot(() => {
   };
 
   return {
-    target, id, conv, draft, branch, tip, base, files, views, threads, queued, elsewhere, stops, stopIndex, here, range,
+    target, id, conv, draft, branch, tip, base, files, views, threads, items, repliesTo, elsewhere, stops, stopIndex, here, range,
     fileOf, isOpen, atRow, isViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
-    unfold, setUnfold, composer, setComposer, text, setText, finishing, setFinishing, event, setEvent,
+    unfold, setUnfold, composer, setComposer, text, setText,
     overlay, setOverlay, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,
   };
 });

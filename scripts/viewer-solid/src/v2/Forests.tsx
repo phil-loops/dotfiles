@@ -7,9 +7,19 @@ import { bkey, model, pkey, type BranchView, type ForestView } from "./model";
 import { boot, catchIt, flip, settle } from "./motion";
 import { bind } from "./runner";
 import { fmtMorning, leaf, nextMorning, phaseAt, SHIP, windowLine } from "./ship";
-import { world } from "./store";
+import { view, world } from "./store";
+import { page } from "./review/page";
 import type { Project } from "./types";
 import { armed, drag, expanded, launching, now, opened, readyOnly, setExpanded, setLaunching, showArchive, toggleIn } from "./ui";
+
+/** Prefetch on intent: the cursor landing on a branch warms its review page's diff. */
+function warmSelected(): void {
+  createEffect(() => {
+    const id = model.selectedBranch();
+    const b = id ? view("branch", id) : undefined;
+    if (b) page.warm(b.repo, b.name, b.tip);
+  });
+}
 
 /** Forests whose last PR just landed, for the "canopy closed" moment before they fold away. */
 const [closing, setClosing] = createSignal<ReadonlySet<string>>(new Set());
@@ -257,6 +267,7 @@ export default function Forests() {
   const readyCount = () => [...model.forests().values()].filter((f) => f.p.state !== "archive").reduce((n, f) => n + f.ready.length, 0);
   flip(() => root, () => model.rows());
   watchClosings();
+  warmSelected();
   boot();
   return (
     <Show when={world.ready} fallback={<p class="px-4 pl-11 text-ink-faint">reading the forests…</p>}>

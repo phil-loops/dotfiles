@@ -10,7 +10,7 @@ import { highlight, langOf } from "./highlight";
 import { page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
 import Conversation from "./Conversation";
-import { FinishSheet, MapOverlay, Words } from "./Overlays";
+import { MapOverlay, Words } from "./Overlays";
 import TypesPop from "./TypesPop";
 import { notePointer } from "./types";
 
@@ -50,9 +50,6 @@ export default function Review() {
           </Match>
         </Switch>
       </Show>
-      <Show when={pg.finishing()}>
-        <FinishSheet />
-      </Show>
       <Show when={pg.overlay() === "words"}>
         <Words />
       </Show>
@@ -68,7 +65,9 @@ function Header() {
   const c = () => pg.conv();
   const t = () => pg.target();
   const viewedCount = createMemo(() => pg.views().filter((v) => v.viewed).length);
-  const pending = () => pg.draft()?.comments.length ?? 0;
+  const pending = () => c()?.pending?.count ?? 0;
+  const drafts = () => pg.items().filter((i) => i.state === "draft").length;
+  const waiting = () => pg.items().filter((i) => i.state === "waiting").length;
   const latest = createMemo(() => {
     const by = new Map<string, string>();
     for (const r of c()?.reviews ?? []) if (r.state !== "COMMENTED") by.set(r.author, r.state);
@@ -84,8 +83,13 @@ function Header() {
         </Show>
         <span class="flex-1" />
         <Show when={c()}>
-          <button class="rv-finish" classList={{ "rv-finish-on": pending() > 0 }} onClick={bind("review.finish")}>
-            {pending() ? `Finish your review · ${pending()} pending` : "Review changes"} <kbd>S</kbd>
+          <Show when={drafts()}>
+            <button class="rv-quietbtn mr-3" onClick={bind("review.send.all")}>
+              {drafts()} draft{drafts() === 1 ? "" : "s"} only here · <kbd>P</kbd> sends
+            </button>
+          </Show>
+          <button class="rv-finish" classList={{ "rv-finish-on": pending() > 0 }} onClick={bind("review.finish")} title="your pending review is private until you submit it on GitHub">
+            {pending() ? `${pending()} pending · open on GitHub to submit` : "Open on GitHub"} <kbd>S</kbd>
           </button>
         </Show>
       </div>
@@ -98,8 +102,8 @@ function Header() {
           <Show when={c()!.unpushed.length}>
             <span class="text-gold-leaf">{c()!.unpushed.length} local commit{c()!.unpushed.length === 1 ? "" : "s"} not on GitHub</span>
           </Show>
-          <Show when={pg.queued().length}>
-            <span class="text-gold-leaf">{pg.queued().length} repl{pg.queued().length === 1 ? "y waits" : "ies wait"} for a push</span>
+          <Show when={waiting()}>
+            <span class="text-gold-leaf">{waiting()} draft{waiting() === 1 ? " waits" : "s wait"} for a push</span>
           </Show>
         </Show>
         <Show when={!c() && world.ready}>
@@ -327,7 +331,7 @@ function RowExtras(props: { file: FileDiff; row: Row; selected: (k: string | und
     <Show when={at().threads.length || at().pending.length || composing()}>
       <div class="rv-extras">
         <For each={at().threads}>{(t) => <ThreadView id={t.id} selected={props.selected} />}</For>
-        <For each={at().pending}>{(c) => <PendingView comment={c} selected={props.selected} />}</For>
+        <For each={at().pending}>{(c) => <PendingView item={c} selected={props.selected} />}</For>
         <Show when={composing()}>
           <ComposerView />
         </Show>

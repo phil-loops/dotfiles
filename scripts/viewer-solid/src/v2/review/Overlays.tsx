@@ -1,5 +1,5 @@
-// The review page's overlays: Finish your review (GitHub's dropdown), the words (`e`), and the forest
-// map (`m`). Each closes on esc; keys inside them go through the runner like everywhere else.
+// The review page's overlays: the words (`e`) and the forest map (`m`). Each closes on esc; keys
+// inside them go through the runner like everywhere else.
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { model } from "../model";
 import { bind, dispatch } from "../runner";
@@ -7,73 +7,6 @@ import { leaf, SHIP } from "../ship";
 import { list, view } from "../store";
 import { getJSON } from "../sync";
 import { atRepoPath, page as pg, short } from "./page";
-
-const EVENTS = [
-  { id: "COMMENT", title: "Comment", says: "Submit general feedback without explicit approval." },
-  { id: "APPROVE", title: "Approve", says: "Give feedback and approve merging these changes." },
-  { id: "REQUEST_CHANGES", title: "Request changes", says: "Submit feedback that must be addressed before merging." },
-] as const;
-
-export function FinishSheet() {
-  let ta!: HTMLTextAreaElement;
-  onMount(() => ta.focus());
-  const own = () => !!pg.conv() && pg.conv()!.author === pg.conv()!.viewer;
-  const pending = () => pg.draft()?.comments.length ?? 0;
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      dispatch("review.back", "key", { event: e });
-    } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-      e.preventDefault();
-      dispatch("review.submit", "key", { event: e });
-    } else if (e.altKey && ["Digit1", "Digit2", "Digit3"].includes(e.code)) {
-      e.preventDefault();
-      const ev = EVENTS[+e.code.slice(5) - 1];
-      if (!own() || ev.id === "COMMENT") dispatch(`review.event.${ev.id}`, "key", { event: e });
-    }
-  };
-  return (
-    <div class="rv-sheet" role="dialog" aria-label="Finish your review">
-      <div class="rv-sheet-head">
-        Finish your review
-        <span class="text-ink-faint">{pending() ? ` · ${pending()} pending comment${pending() === 1 ? "" : "s"} go with it` : ""}</span>
-      </div>
-      <textarea
-        ref={ta}
-        class="rv-textarea"
-        rows={5}
-        placeholder="Leave a comment"
-        value={pg.text("finish")}
-        onInput={(e) => pg.setText("finish", e.currentTarget.value)}
-        onKeyDown={onKey}
-      />
-      <For each={EVENTS}>
-        {(ev, i) => (
-          <button
-            class="rv-radio"
-            classList={{ "rv-radio-on": pg.event() === ev.id, "rv-radio-off": own() && ev.id !== "COMMENT" }}
-            disabled={own() && ev.id !== "COMMENT"}
-            onClick={bind(`review.event.${ev.id}`)}
-          >
-            <span class="rv-radio-dot">{pg.event() === ev.id ? "◉" : "○"}</span>
-            <span>
-              <b>{ev.title}</b> <kbd>⌥{i() + 1}</kbd>
-              <br />
-              <span class="text-ink-faint">{own() && ev.id !== "COMMENT" ? "You can't do this on your own pull request." : ev.says}</span>
-            </span>
-          </button>
-        )}
-      </For>
-      <div class="rv-c-actions">
-        <span class="flex-1" />
-        <button class="rv-quietbtn" onClick={bind("review.back")}>Cancel esc</button>
-        <button class="rv-btn rv-btn-gold" onClick={bind("review.submit")}>
-          Submit review <kbd>⌘↵</kbd>
-        </button>
-      </div>
-    </div>
-  );
-}
 
 interface Outline {
   description: string;
@@ -145,7 +78,8 @@ export function MapOverlay() {
   });
   const [i, setI] = createSignal(Math.max(0, rows().findIndex((r) => r.id === here())));
   let box!: HTMLDivElement;
-  onMount(() => box.focus());
+  // focusing forces a layout of the whole diff behind the scrim: let the overlay paint first
+  onMount(() => requestAnimationFrame(() => box.focus({ preventScroll: true })));
   const onKey = (e: KeyboardEvent) => {
     e.stopPropagation();
     if (e.key === "j" || e.key === "ArrowDown") setI((n) => Math.min(rows().length - 1, n + 1));
