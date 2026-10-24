@@ -25,14 +25,33 @@ export interface Sent {
   body?: Record<string, unknown>;
 }
 
-/** POST a write. A 200 {ok:false} is a refusal (the server's reason rides in X-Stack-Refused). */
-export async function post(path: string, body: unknown): Promise<Sent> {
+/** GET a text body (a file at a commit), or null. */
+export async function getText(path: string): Promise<string | null> {
+  const r = await fetch(path, { headers: headers(nextRid()) });
+  return r.ok ? r.text() : null;
+}
+
+/** A read the server takes as a POST (types: /lsp/hover, /lsp/definition). Never a write. */
+export async function ask<T>(path: string, body: unknown): Promise<T | null> {
+  const t0 = performance.now();
+  try {
+    const r = await fetch(path, { method: "POST", headers: headers(nextRid(), { "Content-Type": "application/json" }), body: JSON.stringify(body) });
+    count("ask", performance.now() - t0);
+    return r.ok ? ((await r.json()) as T) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** POST a write. A 200 {ok:false} is a refusal (the server's reason rides in X-Stack-Refused).
+ *  `via` is the gesture that sent it: GitHub writes are refused without a key or a click. */
+export async function post(path: string, body: unknown, via?: string): Promise<Sent> {
   const rid = nextRid();
   const t0 = performance.now();
   try {
     const r = await fetch(path, {
       method: "POST",
-      headers: headers(rid, { "Content-Type": "application/json" }),
+      headers: headers(rid, { "Content-Type": "application/json", ...(via ? { "X-Stack-Via": via } : {}) }),
       body: JSON.stringify(body),
     });
     const data = (await r.json().catch(() => ({}))) as Record<string, unknown>;
@@ -60,7 +79,7 @@ async function load(): Promise<void> {
 
 function open(): void {
   const v = world.versions;
-  es = new EventSource(`/v2/events?epoch=${encodeURIComponent(world.epoch)}&git=${v.git}&remote=${v.remote}`);
+  es = new EventSource(`/v2/events?epoch=${encodeURIComponent(world.epoch)}&git=${v.git}&remote=${v.remote}&review=${v.review}`);
   es.addEventListener("hello", () => {
     backoff = 500;
     setConn("live");
