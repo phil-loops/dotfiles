@@ -201,6 +201,11 @@ PYEOF
     [[ -f "$p/package.json" && ! -e "$nm/@loops/$b" && ! -L "$nm/@loops/$b" ]] \
       && ln -sh "../../packages/$b" "$nm/@loops/$b"
   done
+  # a package another commit had leaves packages/<p> behind holding only gitignored build output, so
+  # its link never dangles: keep links only to what is a workspace package at this commit
+  for p in "$nm"/@loops/*; do
+    [[ -L "$p" && ! -f "$p/package.json" ]] && rm "$p"
+  done
   echo "$src_nm" > "$nm/.seed-gen-home"
   view_stamp "$1" "$src_nm" > "$nm/.seed-gen-view"
   return 0
