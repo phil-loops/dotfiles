@@ -12,7 +12,11 @@ SOURCE_SUFFIXES = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
 
 
 def output_key(tree):
-    output = Path(tree) / ".gen/trpc-types"
+    return outputs_digest(Path(tree) / ".gen/trpc-types")
+
+
+def outputs_digest(output):
+    output = Path(output)
     if not (output / "trpc/root.d.ts").is_file():
         raise ValueError("missing generated root")
     digest = hashlib.sha256()
