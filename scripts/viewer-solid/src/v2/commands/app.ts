@@ -37,13 +37,15 @@ command({
   },
 });
 
-for (const s of SURFACES) {
+// `g d` is Helix's go-to-definition on the review page, so the dashboard is `g D`
+const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g D" };
+for (const s of SURFACES.filter((x) => !x.arg)) {
   command({
     id: `nav.${s.id}`,
     title: `Go to ${s.title}`,
     scope: "global",
     budget: "local",
-    keys: [`g ${s.id[0]}`],
+    keys: [NAV_KEY[s.id] ?? `g ${s.id[0]}`],
     local: (_t, e) => navigate(s.path, e),
   });
 }
