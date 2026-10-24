@@ -595,8 +595,10 @@ def insert(root, compiler, started):
         write_atomic(os.path.join(tmp, "manifest.json"), json.dumps(manifest).encode())
         # an entry appears whole or not at all; a concurrent writer of the same key loses the rename
         os.rename(tmp, entry)
-    except (OSError, ValueError):
+    except (OSError, ValueError) as e:
         shutil.rmtree(tmp, ignore_errors=True)
+        if not os.path.isdir(entry):
+            log(f"skip {root}: {type(e).__name__}: {e}")
         return 0
     _touch(gpath)
     log(f"insert {k[:12]} {root} ({len(files)} files, {size >> 10} KiB)")
