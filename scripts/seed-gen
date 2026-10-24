@@ -392,11 +392,18 @@ generation_current(){
 }
 # Every emit is a full one, staged in .gen/.emit and adopted file by file — TS7's incremental emit
 # under noCheck leaves stale the declarations inferred from a changed file (adopt_emit has the case).
-emit_full(){ # $1 = tree, $2 = tsconfig, rest = the compiler command; prints the compiler's output
+# The emit also records its module resolution (--traceResolution, +0.5 s): every path the compiler
+# probed and the answer, which seed-gen-cache keys on instead of every file name in the tree.
+emit_full(){ # $1 = tree, $2 = tsconfig, rest = the compiler command; prints the compiler's errors
   local tree="$1" proj="$2"; shift 2
-  rm -rf "$tree/.gen/.emit" "$tree/.gen/trpc-types.tsbuildinfo"
-  (cd "$tree" && "$@" --project "$proj" --pretty false --outDir .gen/.emit 2>&1) || return 1
-  "$(dirname "$0")/seed-gen-fingerprint" "$tree" --adopt >/dev/null
+  rm -rf "$tree/.gen/.emit" "$tree/.gen/trpc-types.tsbuildinfo" "$tree/.gen/trpc-types.probes.json"
+  if ! (cd "$tree" && "$@" --project "$proj" --pretty false --outDir .gen/.emit --traceResolution >.gen/.emit-trace 2>&1); then
+    { grep -E 'error TS[0-9]+' "$tree/.gen/.emit-trace" || tail -3 "$tree/.gen/.emit-trace"; } 2>/dev/null | head -5
+    rm -f "$tree/.gen/.emit-trace"; return 1
+  fi
+  "$(dirname "$0")/seed-gen-fingerprint" "$tree" --adopt >/dev/null || return 1
+  "$(dirname "$0")/seed-gen-cache" probes "$tree" >/dev/null 2>&1 || rm -f "$tree/.gen/.emit-trace"
+  return 0
 }
 # an incremental emit never deletes: outputs of sources that left the graph are pruned before stamping
 prune_generation(){ [[ ! -L "$1/.gen" ]] && "$(dirname "$0")/seed-gen-fingerprint" "$1" --prune >/dev/null; }
