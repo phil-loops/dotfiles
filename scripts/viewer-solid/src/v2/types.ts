@@ -145,7 +145,9 @@ export interface Conv {
   base: string;
   head: string;
   tip: string;
-  mapping: "same" | "walk" | "rewritten" | "unknown";
+  mapping: "same" | "walk" | "rewritten" | "behind" | "unknown";
+  /** commits on the PR head the local branch doesn't have (made on GitHub) */
+  behind: number;
   unpushed: string[];
   viewer: string;
   reviews: Review[];

@@ -220,6 +220,10 @@ def entities(name):
             if not t["outdated"] and t["line"] is not None:
                 if t["side"] == "RIGHT":
                     local = linemap.locate(mapping["walk"], t["path"], t["startLine"] or t["line"], t["line"])
+                    if mapping["mode"] == "behind" and local["addressedBy"] is not None:
+                        local = None   # its lines aren't on the (older) local tip: shown beside the file
+                    elif mapping["mode"] == "behind":
+                        local["addressedBy"] = None
                 else:
                     local = {"line": t["line"], "startLine": t["startLine"], "addressedBy": None}
             tid = f"{cid}#{t['node']}"
@@ -237,7 +241,7 @@ def entities(name):
         out["conv"][cid] = {
             "id": cid, "repo": name, "branch": b, "number": pr["number"], "title": pr["title"], "body": pr["body"],
             "url": pr["url"], "author": pr["author"], "state": pr["state"], "headRef": pr["headRef"],
-            "base": pr["base"], "head": pr["head"], "tip": tip, "mapping": mapping["mode"],
+            "base": pr["base"], "head": pr["head"], "tip": tip, "mapping": mapping["mode"], "behind": mapping.get("behind", 0),
             "unpushed": unpushed(tip, pr["head"], origin), "viewer": me,
             "reviews": pr["reviews"], "comments": pr["comments"], "pending": pr.get("pending"),
             "unflagged": unflagged, "at": pr.get("at") or 0,
