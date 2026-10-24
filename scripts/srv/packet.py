@@ -18,7 +18,7 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, repostate, sync
+from . import ctx, ghreview, outbox, repostate, sync
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import review_packet as rp  # noqa: E402
@@ -201,44 +201,48 @@ _REMOTE = {}
 _REMOTE_LOCK = threading.Lock()
 _REMOTE_BUSY = set()
 
-_PR_FIELDS = """number headRefName title body url
-  reviewThreads(first: 60) { nodes { isResolved isOutdated path line
-    comments(first: 1) { nodes { author { login } body url } } } }
-  commits(last: 10) { nodes { commit { checkSuites(first: 20) { nodes { conclusion
-    workflowRun { workflow { name } } } } } } }"""
+_CHUNK = 10   # full review threads per PR make each query heavier than the old first-comment read
 
 
 def _fetch_remote(slug, numbers):
+    """The open PRs' bodies + review threads, one GraphQL read per chunk. Every PR also lands whole
+    (full comment chains, reviews) in ghreview's cache, which the branch page's threads read."""
     owner, _, name = slug.partition("/")
     out = {}
-    for i in range(0, len(numbers), 25):
-        chunk = numbers[i:i + 25]
-        q = "query { repository(owner: %s, name: %s) { %s } }" % (
+    for i in range(0, len(numbers), _CHUNK):
+        chunk = numbers[i:i + _CHUNK]
+        q = "query { viewer { login } repository(owner: %s, name: %s) { %s } }" % (
             json.dumps(owner), json.dumps(name),
-            " ".join(f"p{n}: pullRequest(number: {n}) {{ {_PR_FIELDS} }}" for n in chunk))
+            " ".join(f"p{n}: pullRequest(number: {n}) {{ {ghreview.PR_FIELDS} }}" for n in chunk))
         r = ctx.run(["gh", "api", "graphql", "-f", f"query={q}"], timeout=40)
         if r.returncode != 0:
             ctx.log(f"packet: graphql read failed: {(r.stderr or '')[:200]}")
             return None
         try:
-            repo = (json.loads(r.stdout or "{}").get("data") or {}).get("repository") or {}
+            data = json.loads(r.stdout or "{}").get("data") or {}
         except ValueError:
             return None
-        for pr in repo.values():
+        login = (data.get("viewer") or {}).get("login")
+        for pr in (data.get("repository") or {}).values():
             if not pr:
                 continue
-            threads = []
-            for t in (pr.get("reviewThreads") or {}).get("nodes") or []:
-                c = ((t.get("comments") or {}).get("nodes") or [{}])[0]
-                threads.append({"author": ((c.get("author") or {}).get("login") or ""), "body": c.get("body") or "",
-                                "url": c.get("url") or "", "path": t.get("path") or "", "line": t.get("line"),
-                                "resolved": bool(t.get("isResolved")), "outdated": bool(t.get("isOutdated"))})
-            ran = any(s.get("conclusion") == "SUCCESS" and ((s.get("workflowRun") or {}).get("workflow") or {}).get("name") == "code-review"
-                      for cm in (pr.get("commits") or {}).get("nodes") or []
-                      for s in ((cm.get("commit") or {}).get("checkSuites") or {}).get("nodes") or [])
-            out[pr["headRefName"]] = {"number": pr["number"], "title": pr.get("title") or "", "body": pr.get("body") or "",
-                                      "url": pr.get("url") or "", "threads": threads, "botRan": ran}
+            full = ghreview.parse_pr(pr)
+            ghreview.absorb(ctx.repo_cwd(), full, login)
+            out[full["headRef"]] = _legacy(full)
     return out
+
+
+def _legacy(full):
+    return {"number": full["number"], "title": full["title"], "body": full["body"], "url": full["url"],
+            "threads": ghreview.legacy_threads(full), "botRan": full["botRan"]}
+
+
+def absorb_one(full):
+    """A single PR re-read after a write: fold it into this repo's packet cache too."""
+    with _REMOTE_LOCK:
+        ent = _REMOTE.get(ctx.repo_cwd())
+        if ent:
+            ent["data"][full["headRef"]] = _legacy(full)
 
 
 def _refresh_remote(repo, slug, numbers):
@@ -254,16 +258,19 @@ def _refresh_remote(repo, slug, numbers):
 
 
 def remote_map(snap, prs):
-    """{branch: {number, title, body, url, threads, botRan}} for the open PRs of stack branches —
-    the fixture's own entries when $STACK_OUTBOX_PR_FIXTURE is set, else the background cache."""
+    """{branch: {number, title, body, url, threads, botRan}} for the open PRs of stack branches and
+    imported review/pr-N branches — the fake GitHub's or the fixture's own entries when one is set,
+    else the background cache."""
+    fake = ghreview.fake_prs()
+    if fake is not None:
+        return {p["headRef"]: _legacy(p) for p in fake.values() if p.get("state") == "OPEN"}
     fx = outbox._fixture()
     if fx is not None:
         return {b: {"number": p.get("number"), "title": p.get("title", ""), "body": p.get("body", ""),
                     "url": p.get("url", ""), "threads": p.get("threads") or [], "botRan": bool(p.get("botRan"))}
                 for b, p in fx.items() if isinstance(p, dict) and p.get("state") == "OPEN"}
     repo = ctx.repo_cwd()
-    numbers = sorted(p["number"] for b, p in (prs or {}).items()
-                     if p.get("state") == "OPEN" and p.get("number") and snap.project(b))
+    numbers = sorted(wanted(snap, prs))
     with _REMOTE_LOCK:
         ent = _REMOTE.get(repo)
         stale = not ent or time.time() - ent["at"] >= _REMOTE_TTL or ent.get("numbers") != tuple(numbers)
@@ -273,6 +280,22 @@ def remote_map(snap, prs):
                 _REMOTE_BUSY.add(repo)
                 threading.Thread(target=_refresh_remote, args=(repo, slug, numbers), daemon=True).start()
         return ent["data"] if ent else {}
+
+
+def wanted(snap, prs):
+    """{number: local branch} whose review data the poller keeps: open PRs of stack branches, and
+    open PRs imported as review/pr-N branches."""
+    out = {}
+    for b, p in (prs or {}).items():
+        if p.get("state") == "OPEN" and p.get("number") and snap.project(b):
+            out[p["number"]] = b
+    open_numbers = {p.get("number") for p in (prs or {}).values() if p.get("state") == "OPEN"}
+    for ref in snap.sha:
+        if ref.startswith("refs/heads/review/pr-"):
+            n = ref[len("refs/heads/review/pr-"):]
+            if n.isdigit() and int(n) in open_numbers and int(n) not in out:
+                out[int(n)] = ref[len("refs/heads/"):]
+    return out
 
 
 def review_state(project, nodes, node, remote):
