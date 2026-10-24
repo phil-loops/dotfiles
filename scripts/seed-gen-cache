@@ -226,6 +226,8 @@ def compiler_id(root, compiler):
         return None
     nm = os.path.dirname(os.path.dirname(pkg)) if name.startswith("@") else os.path.dirname(pkg)
     base = name.split("/")[-1]
+    if name != "typescript" and not name.startswith("@typescript/"):
+        return None                   # a shim (volta's) or a wrapper: not a compiler we can identify
     plat = os.path.join(nm, "@typescript", f"{base}-darwin-arm64" if sys.platform == "darwin" else f"{base}-linux-x64")
     files = []
     for top in (pkg, plat):
