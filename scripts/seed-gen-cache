@@ -486,9 +486,13 @@ def restore(root, compiler):
         return 1
     entry = store("entries", k)
     gen = os.path.join(root, ".gen")
+    if os.path.islink(gen):
+        return 2                      # another tree's .gen, seen through a link: never write it
     os.makedirs(gen, exist_ok=True)
+    for n in os.listdir(gen):         # seed-gen holds the tree's lock: any other stage is a crash's
+        if n.startswith(".cache-stage."):
+            shutil.rmtree(os.path.join(gen, n), ignore_errors=True)
     stage = os.path.join(gen, f".cache-stage.{os.getpid()}")
-    shutil.rmtree(stage, ignore_errors=True)
     try:
         clone(entry, stage)   # from here on the entry may be evicted; this copy is ours
     except OSError:
