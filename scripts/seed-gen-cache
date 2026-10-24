@@ -43,7 +43,7 @@ SCHEMA = b"seed-gen-cache-v1\0"
 CACHE = os.environ.get("SEED_GEN_CACHE_DIR") or os.path.expanduser("~/Library/Caches/seed-gen/gen")
 BUDGET = int(os.environ.get("SEED_GEN_CACHE_MB", "1536")) << 20
 MAX_AGE = float(os.environ.get("SEED_GEN_CACHE_DAYS", "14")) * 86400
-MAX_LISTS = 24
+MAX_GRAPHS = 96
 OUT = os.path.join(".gen", "trpc-types")
 INFO = os.path.join(".gen", "trpc-types.tsbuildinfo")
 PATH_FIELDS = ("fileNames", "packageJsons", "missingPackageJsons")
@@ -440,7 +440,19 @@ def candidate_graphs():
         return []
     paths = [os.path.join(d, n) for n in names if n.endswith(".json")]
     paths.sort(key=lambda p: -_mtime(p))
-    return paths[:MAX_LISTS]
+    return paths[:MAX_GRAPHS]
+
+
+def tree_files(graph):
+    """The graph's in-tree inputs, lowercased: it can only apply to a tree that has every one."""
+    return sorted({r.lower() for k, r, _lo, _re in graph["fileNames"] if k == "t"})
+
+
+def write_graph(gpath, graph):
+    if not os.path.isfile(gpath[:-5] + ".t"):
+        write_atomic(gpath[:-5] + ".t", "\n".join(tree_files(graph)).encode())
+    if not os.path.isfile(gpath):
+        write_atomic(gpath, json.dumps(graph, sort_keys=True).encode())
 
 
 def _mtime(p):
@@ -485,8 +497,19 @@ def log(line):
 
 
 def lookup(root, compiler):
+    """Try the most recently used graphs; each costs ~8 ms once the first has hashed the shared
+    files, and a sidecar of its in-tree files skips, unread, every graph naming a file this tree
+    lacks (a graph from a branch that added one) — the common miss then hashes nothing."""
     keyer = Keyer(root, compiler)
+    have = {n.lower() for n in keyer.names}
     for gpath in candidate_graphs():
+        try:
+            with open(gpath[:-5] + ".t") as f:
+                need = f.read().split("\n")
+            if not all(n in have for n in need if n):
+                continue
+        except OSError:
+            pass
         try:
             graph = json.load(open(gpath))
         except (OSError, ValueError):
@@ -665,15 +688,15 @@ def insert(root, compiler, started):
             return 2
         canon = canon_digest(os.path.join(tmp, "out"))
         files, size = {}, 0
-        for dp, _dns, fns in os.walk(os.path.join(tmp, "out")):
+        for dp, _dns, fns in os.walk(tmp):
             for f in fns:
                 p = os.path.join(dp, f)
-                files[os.path.relpath(p, os.path.join(tmp, "out"))] = file_sha(p)
-                size += os.path.getsize(p)
-                os.chmod(p, 0o444)
-        if not os.path.isfile(gpath):
-            write_atomic(gpath, json.dumps(graph, sort_keys=True).encode())
-        manifest = {"key": k, "graph": gid, "files": files, "canon": canon, "tsbuildinfo": sha(blob), "bytes": size + len(blob),
+                size += os.stat(p).st_blocks * 512      # the budget counts disk, small files' blocks and all
+                if dp.startswith(os.path.join(tmp, "out")):
+                    files[os.path.relpath(p, os.path.join(tmp, "out"))] = file_sha(p)
+                    os.chmod(p, 0o444)
+        write_graph(gpath, graph)
+        manifest = {"key": k, "graph": gid, "files": files, "canon": canon, "tsbuildinfo": sha(blob), "bytes": size + (256 << 10),
                     "created": time.time(), "head": _head(root), "tree": root}
         write_atomic(os.path.join(tmp, "manifest.json"), json.dumps(manifest).encode())
         # an entry appears whole or not at all; a concurrent writer of the same key loses the rename
@@ -765,7 +788,8 @@ def gc(quiet=False):
     live = {e["graph"] for e in keep}
     d = store("graphs")
     for n in os.listdir(d) if os.path.isdir(d) else []:
-        if n.endswith(".json") and n[:-5] not in live and now - _mtime(os.path.join(d, n)) > 3600:
+        stem = n.rsplit(".", 1)[0]
+        if n.endswith((".json", ".t")) and stem not in live and now - _mtime(os.path.join(d, n)) > 3600:
             os.unlink(os.path.join(d, n))
     try:
         lines = open(store("log")).read().splitlines()
