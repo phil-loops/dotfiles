@@ -2,7 +2,7 @@
 #
 #   GET /state[?archived=1]
 #     {epoch, versions: {git, remote, review}, entities: {repo, project, branch, pr, landed, conv,
-#      thread, draft, queued: {id: obj}}, ms}
+#      thread, draft: {id: obj}}, ms}
 #   GET /v2/events?epoch=E&git=N&remote=M&review=R[&archived=1]   (SSE)
 #     event: hello   {epoch, versions}                         first, always
 #     event: patch   {domain, version, upserts: {type: {id: obj}}, deletes: {type: [id]}}
@@ -22,9 +22,9 @@
 #                                  fingerprint or a gate job moves, so a quiet repo costs no spawn
 #   remote  pr, landed             sync's PR state cache (+ open-PR detail / the sandbox fixture) and
 #                                  the merge ledger; in-memory reads, rebuilt every tick
-#   review  conv, thread, draft,   open PRs' review threads (packet's background GraphQL read, or
-#           queued                 the fake GitHub) mapped onto the local tips, the second reader's
-#                                  notes, the pending review and the reply queue (srv/reviewdesk.py);
+#   review  conv, thread, draft    open PRs' review threads (packet's background GraphQL read, or
+#                                  the fake GitHub) mapped onto the local tips, the second reader's
+#                                  notes, and the ledger of what Phil writes (srv/reviewdesk.py);
 #                                  rebuilt every tick from memory + stats
 # A version is per domain, monotonic within an epoch (one server process), and a patch's version is
 # the previous one + 1 — so a client that sees a gap, or connects with a version older than the
@@ -46,7 +46,7 @@ from . import ctx, outbox, push, repostate, reviewdesk, sync, watch
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review")
 RING = 128
-REVIEW_TYPES = ("conv", "thread", "draft", "queued")
+REVIEW_TYPES = ("conv", "thread", "draft")
 TICK = 0.5
 _TRUNKS = ("main", "master")
 

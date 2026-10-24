@@ -1,19 +1,28 @@
 # srv/ghreview.py — the ONE place the viewer talks to GitHub about reviews: the shape of a PR's
 # review data (threads with full comment chains, reviews, top-level comments, the viewer's own
-# pending review), and every review mutation the branch page can make.
+# pending review), and the only GitHub writes the viewer can make.
 #
 # Reads ride packet.py's background GraphQL read (one poller per repo, PR_FIELDS below), which
-# hands each PR to absorb(); a write refetches just its PR right after, so the page settles on
-# GitHub's own answer instead of waiting out the poll.
+# hands each PR to absorb(); a write refetches just its PR right after.
 #
-# Writes go through mutate(), which picks the backend:
-#   $STACK_REVIEW_GH_FAKE=<file>   a JSON fake GitHub (viewer-sandbox --github, every test): reads and
-#                                  writes that file, never the network
-#   otherwise                      `gh api graphql` — refused outright under STACK_REVIEW_SANDBOX=1,
-#                                  and unless the request is Phil's browser acting on a keypress or
-#                                  click (actor "browser", X-Stack-Via, same-origin fetch)
-# A queued reply (one that names an unpushed commit) was typed and sent by that same gesture; the
-# server only releases it once its commits are on origin.
+# Writes build Phil's PENDING review and nothing else. A pending review is private to him until he
+# presses Submit on GitHub; the viewer never submits, approves, requests changes, resolves, or posts
+# a standalone comment. The three mutations, with the exact inputs sent (ALLOWED, enforced by
+# test-review-threads' structure check):
+#   addPullRequestReview            {pullRequestId, commitOID}             — no `event`: it stays PENDING
+#   addPullRequestReviewThread      {pullRequestReviewId, path, line, side, [startLine, startSide],
+#                                    subjectType: LINE, body}             — a new thread in that review
+#   addPullRequestReviewThreadReply {pullRequestReviewThreadId, pullRequestReviewId, body}
+#                                                                          — a reply joining that review
+# Every body ends with an invisible `<!-- canopy:<key> -->`: the ledger's idempotency key, so a
+# send that died halfway is recognised in the next read instead of being sent twice.
+#
+# Backends:
+#   $STACK_REVIEW_GH_FAKE=<file>   a JSON fake GitHub (viewer-sandbox --github, every test)
+#   otherwise                      `gh api graphql`, refused unless ALL hold: not the sandbox,
+#                                  `git config stack.viewer-github-pending true` (off by default),
+#                                  and the request is Phil's browser on a keypress/click
+#                                  (actor "browser", X-Stack-Via, same-origin fetch)
 import json
 import os
 import subprocess
@@ -28,7 +37,7 @@ BOT = "john-hankles"
 PR_FIELDS = """id number headRefName headRefOid baseRefName title body url state author { login }
   reviewThreads(first: 100) { nodes { id isResolved isOutdated path line originalLine startLine originalStartLine
     diffSide subjectType viewerCanResolve viewerCanUnresolve viewerCanReply
-    comments(first: 50) { nodes { id databaseId author { login } body createdAt url commit { oid } originalCommit { oid }
+    comments(first: 50) { nodes { id databaseId state author { login } body createdAt url commit { oid } originalCommit { oid }
       diffHunk reactionGroups { content reactors { totalCount } } } } } }
   reviews(last: 50) { nodes { id state author { login } body submittedAt url } }
   pending: reviews(states: PENDING, first: 1) { nodes { id comments { totalCount } } }
@@ -49,6 +58,7 @@ def parse_pr(pr):
             reactions = {g["content"]: g["reactors"]["totalCount"] for g in c.get("reactionGroups") or []
                          if (g.get("reactors") or {}).get("totalCount")}
             comments.append({"id": c.get("id") or "", "db": c.get("databaseId"), "author": _login(c),
+                             "state": c.get("state") or "SUBMITTED",
                              "body": c.get("body") or "", "at": c.get("createdAt") or "", "url": c.get("url") or "",
                              "commit": (c.get("commit") or {}).get("oid") or "",
                              "originalCommit": (c.get("originalCommit") or {}).get("oid") or "",
@@ -231,102 +241,77 @@ class FakeGitHub:
                 t.update(line=at["line"], startLine=at["startLine"])
         pr["head"] = head
 
-    def mutate(self, op, args):
+    def mutate(self, op, inp):
+        """The three allowed mutations, as GitHub would apply them to a pending review."""
         with self._lock:
             d = self.load()
             d["seq"] = d.get("seq", 0) + 1
             n, who, now = d["seq"], d.get("viewer") or "you", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
-            def comment(body, extra=None):
-                return {"id": f"PRRC_fake{n}", "db": n, "author": who, "body": body, "at": now,
-                        "url": f"https://github.com/fake/pull/c{n}", "commit": "", "originalCommit": "", **(extra or {})}
-
-            def pr_of(number):
-                pr = d["prs"].get(str(number))
+            def pr_by_id(pid):
+                pr = next((p for p in d["prs"].values() if p.get("id") == pid), None)
                 if not pr:
-                    raise Refused(f"no PR #{number}")
+                    raise Refused("Could not resolve to a PullRequest")
                 return pr
 
-            def thread_of(node):
+            def pending(rid):
                 for pr in d["prs"].values():
-                    for t in pr["threads"]:
-                        if t["node"] == node:
-                            return t
-                raise Refused("no such thread")
+                    if (pr.get("pending") or {}).get("id") == rid:
+                        return pr
+                raise Refused("Could not resolve to a pending PullRequestReview")
 
-            out = {}
-            if op == "review":
-                pr = pr_of(args["pr"])
-                for i, th in enumerate(args.get("threads") or []):
-                    pr["threads"].append({
-                        "node": f"PRRT_fake{n}_{i}", "path": th["path"], "line": th["line"],
-                        "startLine": th.get("startLine"), "originalLine": th["line"],
-                        "originalStartLine": th.get("startLine"), "side": th.get("side") or "RIGHT", "subject": "LINE",
-                        "outdated": False, "resolved": False, "canResolve": True, "canUnresolve": False,
-                        "canReply": True, "comments": [comment(th["body"], {"commit": pr["head"], "originalCommit": pr["head"]})],
-                    })
-                pr["reviews"].append({"id": f"PRR_fake{n}", "author": who, "state": {"COMMENT": "COMMENTED",
-                                      "APPROVE": "APPROVED", "REQUEST_CHANGES": "CHANGES_REQUESTED"}[args["event"]],
-                                      "body": args.get("body") or "", "at": now, "url": ""})
-                out = {"review": f"PRR_fake{n}"}
-            elif op == "reply":
-                t = thread_of(args["thread"])
-                t["comments"].append(comment(args["body"]))
-                out = {"comment": f"PRRC_fake{n}"}
-            elif op in ("resolve", "unresolve"):
-                t = thread_of(args["thread"])
-                t.update(resolved=op == "resolve", canResolve=op != "resolve", canUnresolve=op == "resolve")
-            elif op == "comment":
-                pr_of(args["pr"])["comments"].append({k: v for k, v in comment(args["body"]).items()
-                                                      if k in ("id", "author", "body", "at", "url")})
+            def comment(body, commit):
+                return {"id": f"PRRC_fake{n}", "db": n, "author": who, "state": "PENDING", "body": body, "at": now,
+                        "url": f"https://github.com/fake/pull/c{n}", "commit": commit, "originalCommit": commit}
+
+            if op == "addPullRequestReview":
+                if "event" in inp:
+                    raise Refused("the fake only knows pending reviews")
+                pr = pr_by_id(inp["pullRequestId"])
+                if pr.get("pending"):
+                    raise Refused("User can only have one pending review per pull request")
+                pr["pending"] = {"id": f"PRR_fake{n}", "count": 0}
+                out = {"pullRequestReview": {"id": pr["pending"]["id"], "state": "PENDING"}}
+            elif op == "addPullRequestReviewThread":
+                pr = pending(inp["pullRequestReviewId"])
+                pr["threads"].append({
+                    "node": f"PRRT_fake{n}", "path": inp["path"], "line": inp["line"],
+                    "startLine": inp.get("startLine"), "originalLine": inp["line"], "originalStartLine": inp.get("startLine"),
+                    "side": inp.get("side") or "RIGHT", "subject": "LINE", "outdated": False, "resolved": False,
+                    "canResolve": True, "canUnresolve": False, "canReply": True,
+                    "comments": [{**comment(inp["body"], pr["head"]), "hunk": ""}],
+                })
+                pr["pending"]["count"] += 1
+                out = {"thread": {"id": f"PRRT_fake{n}", "comments": {"nodes": [{"id": f"PRRC_fake{n}"}]}}}
+            elif op == "addPullRequestReviewThreadReply":
+                pr = pending(inp["pullRequestReviewId"])
+                t = next((t for t in pr["threads"] if t["node"] == inp["pullRequestReviewThreadId"]), None)
+                if not t:
+                    raise Refused("Could not resolve to a PullRequestReviewThread")
+                t["comments"].append(comment(inp["body"], pr["head"]))
+                pr["pending"]["count"] += 1
+                out = {"comment": {"id": f"PRRC_fake{n}"}}
             else:
-                raise Refused(f"unknown op {op}")
-            d.setdefault("log", []).append({"op": op, "args": args, "at": now})
+                raise Refused(f"not a mutation the viewer makes: {op}")
+            d.setdefault("log", []).append({"op": op, "input": inp, "at": now})
             self._save(d)
             return out
 
 
+# The only mutations the viewer sends (test-review-threads fails if another appears in srv/).
+ALLOWED = ("addPullRequestReview", "addPullRequestReviewThread", "addPullRequestReviewThreadReply")
 _MUTATIONS = {
-    "review": ("mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) "
-               "{ pullRequestReview { id } } }", "addPullRequestReview"),
-    "reply": ("mutation($input: AddPullRequestReviewThreadReplyInput!) { addPullRequestReviewThreadReply(input: $input) "
-              "{ comment { id } } }", "addPullRequestReviewThreadReply"),
-    "resolve": ("mutation($input: ResolveReviewThreadInput!) { resolveReviewThread(input: $input) { thread { id } } }",
-                "resolveReviewThread"),
-    "unresolve": ("mutation($input: UnresolveReviewThreadInput!) { unresolveReviewThread(input: $input) { thread { id } } }",
-                  "unresolveReviewThread"),
-    "comment": ("mutation($input: AddCommentInput!) { addComment(input: $input) { commentEdge { node { id } } } }",
-                "addComment"),
+    "addPullRequestReview": "mutation($input: AddPullRequestReviewInput!) { addPullRequestReview(input: $input) "
+                            "{ pullRequestReview { id state } } }",
+    "addPullRequestReviewThread": "mutation($input: AddPullRequestReviewThreadInput!) { addPullRequestReviewThread(input: $input) "
+                                  "{ thread { id comments(first: 1) { nodes { id } } } } }",
+    "addPullRequestReviewThreadReply": "mutation($input: AddPullRequestReviewThreadReplyInput!) "
+                                       "{ addPullRequestReviewThreadReply(input: $input) { comment { id } } }",
 }
 
 
-def _gh_input(op, args, pr):
-    if op == "review":
-        threads = []
-        for t in args.get("threads") or []:
-            th = {"path": t["path"], "line": t["line"], "side": t.get("side") or "RIGHT", "body": t["body"]}
-            if t.get("startLine"):
-                th.update(startLine=t["startLine"], startSide=t.get("side") or "RIGHT")
-            threads.append(th)
-        return {"pullRequestId": pr["id"], "event": args["event"], "body": args.get("body") or "",
-                "commitOID": pr["head"], "threads": threads}
-    if op == "reply":
-        return {"pullRequestReviewThreadId": args["thread"], "body": args["body"]}
-    if op in ("resolve", "unresolve"):
-        return {"threadId": args["thread"]}
-    if op == "comment":
-        return {"subjectId": pr["id"], "body": args["body"]}
-    raise Refused(f"unknown op {op}")
-
-
-def _gh_mutate(op, args):
-    pr = None
-    if "pr" in args:
-        pr = cached({args["pr"]}).get(args["pr"])
-        if not pr or not pr.get("id"):
-            raise Refused(f"PR #{args['pr']} isn't read yet")
-    query, field = _MUTATIONS[op]
-    body = json.dumps({"query": query, "variables": {"input": _gh_input(op, args, pr)}})
+def _gh_mutate(op, inp):
+    body = json.dumps({"query": _MUTATIONS[op], "variables": {"input": inp}})
     r = subprocess.run(["gh", "api", "graphql", "--input", "-"], input=body, cwd=ctx.repo_cwd(),
                        capture_output=True, text=True, timeout=40)
     try:
@@ -334,16 +319,21 @@ def _gh_mutate(op, args):
     except ValueError:
         resp = {}
     errs = resp.get("errors") or []
-    if r.returncode != 0 or errs or not (resp.get("data") or {}).get(field):
+    if r.returncode != 0 or errs or not (resp.get("data") or {}).get(op):
         msg = (errs[0].get("message") if errs else "") or (r.stderr or "").strip() or "GitHub refused"
         raise Refused(msg[:200])
-    return resp["data"][field]
+    return resp["data"][op]
 
 
 def refusal(req):
     """Why this request may not write to the real GitHub, or None. The fake never asks."""
     if os.environ.get("STACK_REVIEW_SANDBOX") == "1":
         return "the sandbox never writes to GitHub — set STACK_REVIEW_GH_FAKE"
+    on = ctx.run(["git", "config", "--type=bool", "--get", "stack.viewer-github-pending"]).stdout.strip() == "true"
+    if not on:
+        return "sending to GitHub is off (git config stack.viewer-github-pending true turns it on) — kept as a draft"
+    if req is None:
+        return None
     who = getattr(req, "_actor", None)
     if who != "browser":
         return f"GitHub writes come from your browser, not {who or 'an unknown caller'}"
@@ -354,17 +344,27 @@ def refusal(req):
     return None
 
 
-def mutate(op, args, req=None, queued=False):
-    """Run one review mutation. req is the HTTP request that asked (its gesture is checked); a
-    queued reply passes queued=True — its gesture was checked when it was queued."""
+def mutate(op, inp, req=None, released=False):
+    """Send one of the ALLOWED mutations. req is the HTTP request that asked (its gesture is
+    checked); a draft released after a push passes released=True — its gesture was checked when
+    Phil sent it, and only the sandbox / switch checks apply."""
+    if op not in ALLOWED or (op == "addPullRequestReview" and "event" in inp):
+        raise Refused(f"the viewer never sends {op}{' with an event' if 'event' in inp else ''}")
     fake = _fake()
     if fake:
-        return fake.mutate(op, args)
-    if os.environ.get("STACK_REVIEW_SANDBOX") == "1":
-        raise Refused("the sandbox never writes to GitHub")
-    if not queued:
-        why = refusal(req)
-        if why:
-            raise Refused(why)
-    ctx.log(f"ghreview: {op} {json.dumps({k: v for k, v in args.items() if k != 'body'})[:200]}")
-    return _gh_mutate(op, args)
+        return fake.mutate(op, inp)
+    why = refusal(None if released else req)
+    if why:
+        raise Refused(why)
+    ctx.log(f"ghreview: {op} {json.dumps({k: v for k, v in inp.items() if k != 'body'})[:200]}")
+    return _gh_mutate(op, inp)
+
+
+def marker(key):
+    return f"\n\n<!-- canopy:{key} -->"
+
+
+def key_of(body):
+    """The ledger key a comment body carries, or None."""
+    i = (body or "").rfind("<!-- canopy:")
+    return body[i + 12:body.index(" -->", i)] if i >= 0 and " -->" in body[i:] else None
