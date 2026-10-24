@@ -399,7 +399,16 @@ stamp_generation(){
 # The content-addressed store (seed-gen-cache): a tree whose emit inputs were built before, in any
 # tree, takes that emit instead of compiling. restore prints "<key> <files changed>" on a hit.
 cache(){ "$(dirname "$0")/seed-gen-cache" "$@" 2>/dev/null; }
-build_started(){ touch "$1/.gen/.seed-gen-started"; echo "$1/.gen/.seed-gen-started"; }
+build_started(){ rm -f "$1/.gen/.seed-gen-restored"; touch "$1/.gen/.seed-gen-started"; echo "$1/.gen/.seed-gen-started"; }
+mark_restored(){ printf '%s\n' "${2%% *}" > "$1/.gen/.seed-gen-restored"; }
+# A gate (SEED_GEN_CACHE=audit) takes no types from the cache — not even ones an earlier sync of this
+# tree restored, which would otherwise read as current. It rebuilds those from scratch: without the
+# tsbuildinfo, since an incremental emit over restored outputs re-emits nothing and proves nothing.
+distrust_restored(){
+  [[ "${SEED_GEN_CACHE:-}" == audit && -f "$1/.gen/.seed-gen-restored" && ! -L "$1/.gen" ]] \
+    && rm -f "$1/.gen/.seed-gen-inputs" "$1/.gen/trpc-types.tsbuildinfo" "$1/.gen/.seed-gen-restored"
+  return 0
+}
 
 # --check <worktree>: are the generated types AND the borrowed dependencies this tree reads
 # trustworthy FOR THE BRANCH IT IS ON?
@@ -490,6 +499,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     fi
     seed_prisma_client "$dir" "$deps" || exit 1
     marker="$dir/.gen/.seed-gen-sha"
+    distrust_restored "$dir"
     # trust the marker only in a private .gen — through a symlink it is MAIN's marker, and a
     # concurrent stamp-through-the-link can make it claim this branch's HEAD (2026-08-03)
     if generation_current "$dir"; then
@@ -541,6 +551,7 @@ if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
     before=$(generation_snapshot "$dir") || before=""
     prepare_generation "$dir"
     if hit=$(cache restore "$dir" "$tsc"); then
+      mark_restored "$dir" "$hit"
       if ! prune_generation "$dir" || ! stamp_generation "$dir" "$head" "$before"; then
         drop_lock "$dir/.gen"
         echo "tRPC inputs moved during generation or its input graph is unavailable — re-run"; exit 1
@@ -598,6 +609,7 @@ marker="$dir/.gen/.seed-gen-sha"
 # Ahead of the marker early-exit: the marker vouches for .gen, not for node_modules, and every
 # other tree resolves @loops/* and its deps through this checkout's node_modules.
 if (( sync )); then install_if_owed "$dir" || exit 1; fi
+distrust_restored "$dir"
 if generation_current "$dir"; then
   printf '%s\n' "$head" > "$marker"
   exit 0
@@ -635,7 +647,8 @@ build_main(){
   build_packages "$dir" >/dev/null 2>&1
   before=$(generation_snapshot "$dir") || before=""
   prepare_generation "$dir"
-  if cache restore "$dir" "$compiler" >/dev/null; then
+  if hit=$(cache restore "$dir" "$compiler"); then
+    mark_restored "$dir" "$hit"
     prune_generation "$dir" && stamp_generation "$dir" "$head" "$before"
   else
     started=$(build_started "$dir")

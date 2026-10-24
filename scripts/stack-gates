@@ -315,8 +315,10 @@ def env_repair(cwd):
         for tree in dict.fromkeys([main, cwd]):
             label = "" if tree == cwd else "main checkout: "
             try:
-                r = subprocess.run([seed_gen, "--sync", tree],
-                                   capture_output=True, text=True, timeout=600)
+                # audit, never restore: a gate's verdict is the one thing a poisoned cache entry
+                # must not reach, and its own fresh build checks the entry for free
+                r = subprocess.run([seed_gen, "--sync", tree], capture_output=True, text=True, timeout=600,
+                                   env=dict(os.environ, SEED_GEN_CACHE=os.environ.get("SEED_GEN_CACHE", "audit")))
                 msg = (r.stdout or "").strip()
                 if msg:
                     notes.append(label + msg)
