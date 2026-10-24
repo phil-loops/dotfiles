@@ -9,6 +9,8 @@
                                              is older than that
   seed-gen-cache key <tree> [<compiler>]     the exact key of the emit the tree holds, with its
                                              outputs: seed-gen's "is .gen current" marker
+  seed-gen-cache probes <tree>               anchor the emit's resolution trace (.gen/.emit-trace) into
+                                             .gen/trpc-types.probes.json — what the key checks
   seed-gen-cache stamp <tree> [<compiler>]   seed-gen's four stamp values in one pass (see stamp_values)
   seed-gen-cache --stats | --gc [--json]
 
@@ -50,6 +52,9 @@ MAX_GRAPHS = 96
 OUT = os.path.join(".gen", "trpc-types")
 INFO = os.path.join(".gen", "trpc-types.tsbuildinfo")
 PATH_FIELDS = ("fileNames", "packageJsons", "missingPackageJsons")
+PROBES = os.path.join(".gen", "trpc-types.probes.json")
+TRACE = os.path.join(".gen", ".emit-trace")
+PROBE_LINE = re.compile(r"^(File|Directory) '(.+?)' (does not exist|exists)")
 
 
 def _load_fingerprint():
@@ -201,6 +206,17 @@ def anchored_graph(w, info):
     return out
 
 
+def full_graph(root, info):
+    """The anchored tsbuildinfo plus, when the emit recorded them, its resolution probes."""
+    graph = anchored_graph(Where(root), info)
+    if graph is not None:
+        try:
+            graph["probes"] = json.load(open(os.path.join(root, PROBES)))
+        except (OSError, ValueError):
+            pass
+    return graph
+
+
 def relocate(w, info, graph):
     info = dict(info)   # the stored skeleton keeps each path field's place, as null
     for field in PATH_FIELDS:
@@ -287,7 +303,8 @@ def tree_names(root):
 
 # The key's parts. `omit` exists for test-seed-gen-cache, which shows for each one a pair of trees
 # that differ only in that part and emit differently — a cache keyed without it would cross them.
-PARTS = ("compiler", "tool", "names", "listings", "configs", "contents", "pkgjson", "missing", "lock", "side", "view")
+PARTS = ("compiler", "tool", "names", "listings", "configs", "contents", "pkgjson", "missing", "lock", "side", "view",
+         "probes", "ancestors")
 
 
 EXTENDS = re.compile(r'"extends"\s*:\s*("(?:[^"\\\\]|\\\\.)*"|\[[^\]]*\])')
@@ -323,6 +340,68 @@ def extended_configs(root, cfg, seen=None):
             out.append(hit)
         out.extend(extended_configs(root, hit, seen))
     return out
+
+
+def record_probes(root):
+    """Anchor the emit's --traceResolution: every file and directory the compiler asked about while
+    resolving, and the answer — the exact set of resolution candidates, where the source-name list
+    is a superset (any new file anywhere) and still misses the gitignored ones. Probes beyond the
+    tree and its home are the walk past their roots (node builtins from home files reach /); those
+    are summed up by ancestors_clear() instead. Writes .gen/trpc-types.probes.json; the trace goes."""
+    w = Where(root)
+    seen = {}
+    with open(os.path.join(root, TRACE), errors="replace") as f:
+        for line in f:
+            if not line.startswith(("File '", "Directory '")):
+                continue
+            m = PROBE_LINE.match(line)
+            if not m:
+                continue
+            a = probe_anchor(w, os.path.normpath(m.group(2)))
+            if a is not None:
+                seen[(a[0], a[1], "d" if m.group(1) == "Directory" else "f")] = m.group(3) == "exists"
+    probes = sorted([k, r, t, e] for (k, r, t), e in seen.items())
+    write_atomic(os.path.join(root, PROBES), json.dumps(probes, separators=(",", ":")).encode())
+    os.unlink(os.path.join(root, TRACE))
+    return len(probes)
+
+
+def probe_anchor(w, path):
+    low = path.lower()
+    for kind, base in (("t", w.root), ("hnm", w.home)):
+        if base and (low == base.lower() or low.startswith(base.lower() + "/")):
+            rel = path[len(base) + 1:]
+            if kind == "t" and (rel.lower() == "node_modules" or rel.lower().startswith("node_modules/")):
+                return ("tnm", rel[len("node_modules/"):])
+            return (kind, rel)
+    return None
+
+
+def probe_holds(w, kind, rel, typ, exists):
+    if kind == "t":
+        p = os.path.join(w.root, rel)
+    elif kind == "tnm":
+        p = os.path.join(w.root, "node_modules", rel)
+    elif w.home:
+        p = os.path.join(w.home, rel)
+    else:
+        return False
+    return (os.path.isdir(p) if typ == "d" else os.path.isfile(p)) == exists
+
+
+def ancestors_clear(w):
+    """No node_modules or package.json above the tree or its home: then the compiler's walk past
+    their roots (unresolved node builtins walk to /) finds nothing anywhere, wherever the tree sits.
+    A tree with one is keyed as uncacheable rather than by location."""
+    starts = [os.path.dirname(w.root)] + ([os.path.dirname(os.path.dirname(w.home))] if w.home else [])
+    for d in starts:
+        while True:
+            if os.path.isdir(os.path.join(d, "node_modules")) or os.path.isfile(os.path.join(d, "package.json")):
+                return False
+            if d == os.path.dirname(d):
+                break
+            d = os.path.dirname(d)
+    return True
 
 
 def view(root, home):
@@ -386,8 +465,12 @@ class Keyer:
             d.update(b"compiler\0" + cid.encode() + b"\0")
         if "tool" not in omit:
             d.update(b"tool\0" + tool_id().encode() + b"\0")
+        # a graph recorded with its resolution probes is keyed by those; one without (an emit whose
+        # trace was lost) falls back to every source name and dist file — a superset, so never wrong
+        nd = hashlib.sha256(b"names\0")
         for n in (names if "names" not in omit else []) + (extra if "listings" not in omit else []):
-            d.update(os.fsencode(n) + b"\0")
+            nd.update(os.fsencode(n) + b"\0")
+        self.names_part = nd.hexdigest()
         if "view" not in omit:
             for entry in view(root, self.where.home):
                 d.update(b"view\0" + os.fsencode(entry) + b"\0")
@@ -446,6 +529,16 @@ class Keyer:
         self.prefetch(locate(self.where, k, r, re and side) for f in ("fileNames", "packageJsons")
                       for k, r, _lo, re in graph[f] if k != "lib")
         d = hashlib.sha256(self.base.encode())
+        probes = graph.get("probes")
+        if probes is None:
+            d.update(b"names\0" + self.names_part.encode())
+        else:
+            if "ancestors" not in self.omit and not ancestors_clear(self.where):
+                return None
+            if "probes" not in self.omit:
+                if not all(probe_holds(self.where, *p) for p in probes):
+                    return None
+                d.update(b"probes\0" + sha(json.dumps(probes).encode()).encode())
         pkgs = set()
         for field in PATH_FIELDS:
             d.update(field.encode() + b"\0")
@@ -625,6 +718,13 @@ def restore(root, compiler):
     _touch(os.path.join(entry, "manifest.json"))
     changed = apply(root, stage, manifest)
     write_atomic(os.path.join(root, INFO), json.dumps(info, separators=(",", ":")).encode())
+    if graph.get("probes") is not None:
+        write_atomic(os.path.join(root, PROBES), json.dumps(graph["probes"], separators=(",", ":")).encode())
+    else:
+        try:
+            os.unlink(os.path.join(root, PROBES))
+        except OSError:
+            pass
     shutil.rmtree(stage, ignore_errors=True)
     log(f"hit {k[:12]} {root} lookup {t1 - t0:.2f}s apply {time.time() - t1:.2f}s ({changed} files changed)")
     print(f"{k[:12]} {changed}")
@@ -681,9 +781,12 @@ def insert(root, compiler, started):
     since = os.stat(started).st_mtime_ns
     info = json.load(open(os.path.join(root, INFO)))
     info = info.get("program", info)
-    graph = anchored_graph(Where(root), info)
+    graph = full_graph(root, info)
     if graph is None:
         log(f"skip {root}: tsbuildinfo paths don't relocate")
+        return 2
+    if "probes" in graph and not ancestors_clear(Where(root)):
+        log(f"skip {root}: a node_modules or package.json above the tree or its home")
         return 2
     keyer = Keyer(root, compiler)
     k = keyer.key(graph)
@@ -863,7 +966,7 @@ def tree_key(root, compiler):
     the emitted files: seed-gen's .seed-gen-inputs, so "current" and "cached" mean the same inputs."""
     info = json.load(open(os.path.join(root, INFO)))
     info = info.get("program", info)
-    graph = anchored_graph(Where(root), info)
+    graph = full_graph(root, info)
     k = Keyer(root, compiler).key(graph) if graph is not None else None
     if k is None:
         raise ValueError("graph does not hold in this tree")
@@ -885,6 +988,16 @@ def stamp_values(root, compiler):
 
 
 def main(argv):
+    if argv[:1] == ["probes"] and len(argv) == 2:
+        root = os.path.realpath(argv[1])
+        try:
+            if "======== Resolving module" not in open(os.path.join(root, TRACE), errors="replace").read(1 << 20):
+                os.unlink(os.path.join(root, TRACE))     # a compiler that didn't trace: probes unknown
+                return 1
+            print(record_probes(root))
+            return 0
+        except OSError:
+            return 1
     if argv[:1] == ["stamp"] and len(argv) in (2, 3):
         root = os.path.realpath(argv[1])
         try:
