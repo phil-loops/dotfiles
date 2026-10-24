@@ -3,6 +3,7 @@ import Dashboard from "./Dashboard";
 import Forests from "./Forests";
 import KeySheet from "./KeySheet";
 import Menu from "./Menu";
+import Review from "./review/Review";
 import { surface } from "./router";
 import { note } from "./runner";
 import { world } from "./store";
@@ -29,6 +30,9 @@ export default function App() {
           </Match>
           <Match when={surface().id === "dashboard"}>
             <Dashboard />
+          </Match>
+          <Match when={surface().id === "review"}>
+            <Review />
           </Match>
         </Switch>
       </main>
