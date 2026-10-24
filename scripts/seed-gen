@@ -185,6 +185,12 @@ for b in sorted(os.listdir(src)):
         continue
     if not os.path.lexists(dest):
         os.symlink(e, dest)
+# a scope whose every link the prune took (a home that had it, before this one) leaves an empty dir:
+# nothing for a resolver, but a fresh tree on this home has no such entry, so the views would differ
+for b in os.listdir(nm):
+    d = os.path.join(nm, b)
+    if b.startswith("@") and b != "@loops" and os.path.isdir(d) and not os.path.islink(d) and not os.listdir(d):
+        os.rmdir(d)
 PYEOF
   local p
   # -h + the -L guard: a dangling @loops link passes ! -e, and plain ln descends into a
