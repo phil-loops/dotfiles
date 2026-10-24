@@ -264,7 +264,9 @@ def tool_id():
 
 
 def tree_names(root):
-    """The tree's resolution candidates: every source-like file name the compiler could probe."""
+    """The tree's resolution candidates: every source-like file name the compiler could probe, and
+    the packages' dist files, which git ignores (a dist/shared.ts would shadow shared.d.ts). The
+    @types entries are in view()."""
     r = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
                        cwd=root, check=True, capture_output=True)
     names = sorted({os.fsdecode(n) for n in r.stdout.split(b"\0") if n})
@@ -276,8 +278,6 @@ def tree_names(root):
         for dp, dns, fns in os.walk(dist):
             dns.sort()
             extra.extend(os.path.relpath(os.path.join(dp, f), root) for f in sorted(fns))
-    types = os.path.join(root, "node_modules", "@types")
-    extra.extend("node_modules/@types/" + t for t in (sorted(os.listdir(types)) if os.path.isdir(types) else []))
     return names, extra
 
 
