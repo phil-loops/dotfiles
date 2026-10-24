@@ -751,6 +751,9 @@ def push_origin(req, raw):
     wt = _branch_worktree(branch)
     r = ctx.run((["git", "-C", wt] if wt else ["git"]) + ["push", "origin", branch])
     ok = r.returncode == 0
+    if ok:
+        from . import reviewdesk
+        reviewdesk.pushed()   # replies waiting on these commits go out on the next tick
     # An open PR already exists → jump to it; otherwise the compare-and-create form.
     target = (_open_pr_url(branch) or v["web"]) if ok else v["web"]
     # stay: the outbox's push, whose next step is its own open-PR link — no tab pops mid-sheet
