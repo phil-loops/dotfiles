@@ -65,6 +65,11 @@ class Clean(unittest.TestCase):
         self.assertIsNone(n["cause"])
         self.assertEqual(set(n), {"verdict", "evidence", "elsewhere", "cause", "draftReply", "model", "at"})
 
+    def test_draft_names_only_commits_it_was_shown(self):
+        raw = {"verdict": "right", "draftReply": "Addressed in fa0cc3e3d1. Also see abc1234."}
+        n = sr.clean_note(raw, self.repo, self.head, [], "opus", known_shas=["abc1234deadbeef"])
+        self.assertEqual(n["draftReply"], "Addressed in <sha>. Also see abc1234.")
+
     def test_unflagged_shape(self):
         u = sr.clean_unflagged({"items": [{"path": "queries/a.ts", "line": 1, "why": "w"}, {"path": "nope", "line": 1}]},
                                self.repo, self.head, "opus")

@@ -338,7 +338,7 @@ CALIBRATION = """What this repo's review history says (Loops-so/loops, 2026-08-1
 VOICE = """Reply voice in this repo (match it; never invent a commit sha):
 - Fixed: "Fixed in <sha>. <one or two sentences on what changed and how it is covered>" or "Addressed in <sha>: …". Use the literal placeholder <sha> — the author fills it in. Name the test if one should be added.
 - Declined: a reasoned answer, first word the decision ("Keeping this as-is: …", "Intentional: …", "Deferring: …"), then the concrete reason (the invariant, the caller, the rule) with a file:line or identifier. No apology, no "great catch".
-- Short, plain, lowercase-tolerant; one paragraph. A question gets a direct answer."""
+- Short and plain: one to three sentences, no restating the comment, no file:line lists (the note's evidence carries those). A question gets a direct answer."""
 
 THREAD_PROMPT = """You are a second reader for a pull-request review thread in {repo_name}. You never post, push or edit; you read and judge. You are in a read-only checkout of the code at the PR head ({head_short}). Use Read/Grep/Glob, and `git show <rev>:<path>`, `git grep <pattern> <rev>`, `git log`, `git diff`, `git blame` to look at other revisions and branches.
 
@@ -368,13 +368,14 @@ Comments, oldest first:
 {comments}
 
 ## How to judge
-1. Read the code at the anchored line and everything it depends on: callers, callees, schemas, tests. Check the claim against the code, not against plausibility. If the comment says something can happen, find the path where it happens, or find what prevents it.
-2. verdict: "right" (the problem is real and worth fixing here), "wrong" (it cannot happen, or the code already handles it, or it contradicts a deliberate and sound choice in the PR), "partly" (a real point but overstated, or a valid point that belongs in another PR), "unclear" (you cannot decide from the code; say what would decide it). Evidence: 1–4 entries, each a `path` + `line` at the PR head that proves your verdict and a one-sentence `why`.
+1. Read the code at the anchored line and everything it depends on: callers, callees, schemas, tests. Check the claim against the code, not against plausibility. If the comment says something can happen, find the path where it happens, or find what prevents it. Before you agree, make the case for the code as written: look for the reason it may be deliberate (the PR body, a code comment, the commit that wrote the line, a nullable or legacy data shape, a guarantee a caller or schema already gives). Missing that reason is the most common way a reviewer is wrong here.
+2. verdict: "right" (the problem is real and worth fixing here — a real defect with a small fix is "right" even when it is rare; authors here fix those), "wrong" (it cannot happen, or the code already handles it, or it contradicts a deliberate and sound choice in the PR), "partly" (a real point but overstated, or a valid point that belongs in another PR), "unclear" (you cannot decide from the code; say what would decide it). Evidence: 1–4 entries, each a `path` + `line` at the PR head that proves your verdict and a one-sentence `why`.
 3. elsewhere: the same defect in other places — this branch's other files, and the forest's other branches listed above (a fix here can break a child; a parent may carry the same pattern). Search for it (Grep, `git grep <pattern> <branch>`). Only list places you checked and that really have the same defect; give `branch` as the branch name (or "{head_ref}" for this branch). Empty is a good answer.
 4. cause: one sentence naming the root cause when the comment points at a symptom (e.g. a reviewer confused by a name → the name is the cause, rename; a missing check repeated in three callers → the helper should own it). null when the comment already names the cause.
-5. draftReply: what the PR author would reply, in the voice below. If the verdict is right, a "Fixed in <sha>." reply describing the fix you would make. If wrong, the reasoned decline. If the author has already replied and nothing new needs saying, null.
+5. draftReply: what the PR author would reply. Write it as they would: match the length and tone of their own replies below. If the verdict is right, an "Addressed in <sha>" reply naming the fix in one sentence (the evidence already holds the detail). If wrong, the decline with its one decisive reason. If the author has already replied and nothing new needs saying, null.
 {local_note}
 {voice}
+{author_voice}
 
 Answer with ONLY one JSON object, no prose after it:
 {{"verdict": "right|wrong|partly|unclear", "evidence": [{{"path": "...", "line": 0, "why": "..."}}], "elsewhere": [{{"path": "...", "line": 0, "branch": "...", "why": "..."}}], "cause": null, "draftReply": "..."}}"""
@@ -401,7 +402,13 @@ Find what NOBODY flagged: real problems in this PR's diff that none of the exist
 ```
 
 ## What to report
-Only issues a senior reviewer on this team would raise and the author would act on: wrong behavior, a broken claim, a name that will mislead, a missing or wrong test for the core change, an existing helper the PR duplicates, a layering violation (queries hold one Prisma call and no branching; models hold logic; wiring calls models), deploy-order or migration risk, a change that breaks a child branch in the forest. No style nits, no "consider adding a comment", nothing an existing thread already covers. Verify each in the code before you list it. Zero items is a good answer; at most 5.
+Issues a reviewer on this team would raise and the author would act on. Walk this list; it is what this team's human reviewers raise and the bot misses:
+1. Claims: each claim in the PR body (title included) against the diff — a promise the diff does not keep, a file or layer the body names that the diff does not use, a behavior change the body does not mention.
+2. Names and terms: a new identifier, API field, column, log or doc string that misreads ("uniqueClicks" that counts sends), or that does not match the term the product, the app UI or the neighboring code already uses ("sends" vs "emails", "spamReports" vs "complaints"). Check the neighbors before you list one.
+3. Team conventions (AGENTS.md and the code around it): env read through AppEnv not raw `process.env`; DB-touching logic in models/ not lib/; model tests with fake deps, not the DB; queries with one Prisma call and no branching; a tx passed as an argument; an existing helper or test suite the PR duplicates.
+4. Tests that stop short: the test checks a return value but not the row or state it wrote; it covers one side of a symmetric case (disable but not re-enable, one event kind of two); the core change has no test.
+5. Behavior: wrong results, deploy-order or migration risk, a change that breaks a child branch in the forest.
+Not: formatting, "consider a comment", speculative hardening, anything an existing thread already covers. Verify each in the code. Zero items is a fine answer; at most 6, most important first.
 
 Answer with ONLY one JSON object, no prose after it:
 {{"items": [{{"path": "...", "line": 0, "why": "<one or two sentences>"}}]}}"""
@@ -443,12 +450,46 @@ def _ctx(repo, pr, wt, forest, base_override=None):
             "forest": _forest_text(forest, pr["headRef"]), "calibration": CALIBRATION, "voice": VOICE}
 
 
+VOICE_STORE = os.environ.get("STACK_SECOND_READER_VOICE") or os.path.join(CACHE, "voice.json")
+
+
+def voice_samples(pr, t, cutoff=None, k=3):
+    """Up to k earlier replies by the PR author — this PR's other threads first, then the
+    per-author store the runner keeps — so the draft sounds like them."""
+    mine = [c for o in pr["threads"] if o["id"] != t["id"] for c in o["comments"][1:]
+            if c["author"] == pr["author"] and (not cutoff or (c["at"] or "") < cutoff)]
+    store = [x for x in load_json(VOICE_STORE, {}).get(pr["author"], [])
+             if (not cutoff or x["at"] < cutoff) and x.get("pr") != pr["number"]]
+    picks = [c["body"] for c in sorted(mine, key=lambda c: c["at"] or "")[-k:]]
+    picks += [x["body"] for x in store[-(k - len(picks)):]] if len(picks) < k else []
+    return [" ".join(b.split())[:500] for b in picks]
+
+
+def remember_voice(pr):
+    """Add the PR author's replies to the store (last 12 per author)."""
+    store = load_json(VOICE_STORE, {})
+    have = store.setdefault(pr["author"], [])
+    seen = {x["id"] for x in have}
+    for o in pr["threads"]:
+        for c in o["comments"][1:]:
+            if c["author"] == pr["author"] and c["id"] not in seen and len(c["body"].strip()) > 3:
+                have.append({"id": c["id"], "at": c["at"] or "", "pr": pr["number"], "body": c["body"][:800]})
+    have.sort(key=lambda x: x["at"])
+    store[pr["author"]] = have[-12:]
+    write_atomic(VOICE_STORE, store)
+
+
 def thread_prompt(c, pr, t, local, cutoff=None):
     first = t["comments"][0]
+    samples = voice_samples(pr, t, cutoff)
+    author_voice = ("The PR author's own earlier replies (match this voice and length):\n"
+                    + "\n".join(f"- {x}" for x in samples) + "\n") if samples else ""
     tip_txt, tip_note = "", ""
     if local and local.get("tip") and local["tip"] != pr["head"]:
+        rel = ("rebased since the PR head was pushed (so the diff below also carries whatever it was rebased onto); "
+               "its commits:" if local.get("rebased") else "ahead of the PR head:")
         tip_txt = (f"## Local commits not yet on the PR\nThe author's local branch `{local['branch']}` is at "
-                   f"{local['tip'][:10]}, ahead of the PR head:\n{local['log']}\n"
+                   f"{local['tip'][:10]}, {rel}\n{local['log']}\n"
                    f"Changes to `{t['path']}` in them:\n```diff\n{local['pathdiff'][:6000] or '(none)'}\n```\n")
         tip_note = ("6. If a local commit above already addresses the comment, say so in evidence (path:line at "
                     f"the local tip, read with `git show {local['tip'][:10]}:<path>`) and draft the \"Addressed in "
@@ -458,7 +499,7 @@ def thread_prompt(c, pr, t, local, cutoff=None):
         original_line=t["originalLine"], orig_short=(first["commit"] or "")[:10], side=t["side"],
         outdated=" — the line has changed since the comment (outdated)" if t["outdated"] else "",
         hunk=first["hunk"][-3000:], comments=_fmt_comments(t["comments"], cutoff),
-        local_tip=tip_txt, local_note=tip_note)
+        local_tip=tip_txt, local_note=tip_note, author_voice=author_voice)
 
 
 def unflagged_prompt(c, pr, wt, threads):
@@ -483,7 +524,15 @@ def _exists(repo, rev, path):
     return bool(path) and git(repo, "cat-file", "-e", f"{rev}:{path}").returncode == 0
 
 
-def clean_note(raw, repo, head, forest, model):
+_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
+
+
+def _placeholder_shas(text, known):
+    """A draft may only name a commit it was shown (a local commit); any other sha is invented."""
+    return _SHA.sub(lambda m: m.group(0) if any(k.startswith(m.group(0)) for k in known) else "<sha>", text)
+
+
+def clean_note(raw, repo, head, forest, model, known_shas=()):
     raw = raw or {}
     verdict = raw.get("verdict") if raw.get("verdict") in VERDICTS else "unclear"
     tips = {n["branch"]: n["tip"] for n in forest}
@@ -503,7 +552,8 @@ def clean_note(raw, repo, head, forest, model):
     reply = raw.get("draftReply")
     return {"verdict": verdict, "evidence": ev, "elsewhere": el[:8],
             "cause": str(cause)[:500] if cause else None,
-            "draftReply": str(reply)[:2000] if reply else None, "model": model, "at": now_iso()}
+            "draftReply": _placeholder_shas(str(reply), known_shas)[:2000] if reply else None,
+            "model": model, "at": now_iso()}
 
 
 def clean_unflagged(raw, repo, head, model):
@@ -545,11 +595,15 @@ def local_info(repo, pr):
     if not b:
         return None
     tip = git(repo, "rev-parse", f"refs/heads/{b}").stdout.strip()
-    info = {"branch": b, "tip": tip, "log": "", "pathdiff": ""}
-    if tip != pr["head"] and git(repo, "merge-base", "--is-ancestor", pr["head"], tip).returncode == 0:
+    info = {"branch": b, "tip": tip, "log": "", "pathdiff": "", "rebased": False}
+    if tip == pr["head"] or git(repo, "cat-file", "-e", f"{pr['head']}^{{commit}}").returncode != 0:
+        return info
+    if git(repo, "merge-base", "--is-ancestor", pr["head"], tip).returncode == 0:
         info["log"] = git(repo, "log", "--oneline", f"{pr['head']}..{tip}").stdout.strip()[:3000]
-    elif tip != pr["head"]:
-        info["tip"] = pr["head"]   # diverged (rebased) — the PR head is the only honest anchor
+    else:   # restacked locally: no shared history, so compare trees, file by file
+        info["rebased"] = True
+        mb = git(repo, "merge-base", pr["head"], tip).stdout.strip()
+        info["log"] = git(repo, "log", "--oneline", "-20", f"{mb}..{tip}").stdout.strip()[:3000] if mb else ""
     return info
 
 
@@ -561,7 +615,10 @@ def process(repo, number, out_root, model="opus", only=(), force=False, unflagge
             pr=None, at=None, cutoff=None, forest=None, local=None, base_override=None, git_tools=True, threads=True):
     """Write notes for one PR. `pr` / `at` / `cutoff` / `forest` let the backtest replay history:
     the PR as it stood, the commit to read, comments after `cutoff` hidden."""
-    pr = pr or fetch_pr(repo, number)
+    if pr is None:
+        pr = fetch_pr(repo, number)
+        with contextlib.suppress(OSError):
+            remember_voice(pr)
     if at:
         pr = {**pr, "head": at}
     pdir = os.path.join(out_root, str(pr["number"]))
@@ -588,11 +645,13 @@ def process(repo, number, out_root, model="opus", only=(), force=False, unflagge
         c = _ctx(repo, pr, wt, forest, base_override)
 
         def one_thread(t):
-            if local and local.get("log"):
-                local["pathdiff"] = git(repo, "diff", f"{pr['head']}..{local['tip']}", "--", t["path"]).stdout
-            prompt = thread_prompt(c, pr, t, local, cutoff) + ("" if git_tools else NO_GIT)
+            loc = None
+            if local and local["tip"] != pr["head"]:
+                loc = {**local, "pathdiff": git(repo, "diff", pr["head"], local["tip"], "--", t["path"]).stdout}
+            prompt = thread_prompt(c, pr, t, loc, cutoff) + ("" if git_tools else NO_GIT)
             text, _ = run_claude(prompt, wt, model, git_tools, meta={"pr": pr["number"], "thread": t["id"], "head": pr["head"][:10], "kind": "thread"})
-            note = clean_note(last_json_object(text), repo, pr["head"], forest, model)
+            known = git(repo, "rev-list", "--max-count=50", f"{pr['head']}..{loc['tip']}").stdout.split() if loc else []
+            note = clean_note(last_json_object(text), repo, pr["head"], forest, model, known)
             write_atomic(os.path.join(pdir, f"{t['id']}.json"), note)
             with lock:
                 state["threads"][t["id"]] = _thread_key(pr, t)
