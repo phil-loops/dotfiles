@@ -6,7 +6,7 @@
 // the change) and settledMs (input → the server's answer) for free, by being registered.
 import { createSignal } from "solid-js";
 import { BUDGETS, PAINT_MS } from "./budgets";
-import { commands, getCommand, type Via, type Write } from "./registry";
+import { commands, getCommand, type Inverse, type Via, type Write } from "./registry";
 import { addOps, dropOps, onChange } from "./store";
 import { post, type Sent } from "./sync";
 import { emit, nextPaint } from "./telemetry";
@@ -24,7 +24,7 @@ function say(text: string): void {
 
 let seq = 0;
 let queue: Promise<unknown> = Promise.resolve();
-const undo: { id: string; target: string; arg?: unknown }[] = [];
+const undo: Inverse[] = [];
 const SETTLE_WAIT = 5000;
 
 // a write whose POST is answered but whose patch hasn't arrived keeps its overlay until it does
@@ -70,20 +70,31 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
     }
     return;
   }
-  const w: Write | null = target && cmd.write ? cmd.write(target, opts.arg) : null;
+  let w: Write | null = null;
+  try {
+    w = target && cmd.write ? cmd.write(target, opts.arg) : null;
+  } catch (e) {
+    // a write throws to refuse before it sends ("write something first"), like a local command
+    const err = e instanceof Error ? e.message : String(e);
+    say(err);
+    void feedback.then((feedbackMs) => emit({ ...base, outcome: "refused", err: err.slice(0, 48), feedbackMs, settledMs: null }));
+    return;
+  }
   if (!w) return;
   const s = ++seq;
   addOps(w.ops.map((o) => ({ ...o, seq: s })));
-  const sent: Promise<Sent> = queue.then(() => post(w.path, w.body));
+  const sent: Promise<Sent> = queue.then(() => post(w.path, w.body, via));
   queue = sent;
   void sent.then(async (r) => {
     const settledMs = Math.round((performance.now() - t0) * 10) / 10;
     if (r.ok) {
-      if (w.inverse && !opts.undoing) undo.push(w.inverse);
+      const inv = typeof w.inverse === "function" ? w.inverse(r.body ?? {}) : w.inverse;
+      if (inv && !opts.undoing) undo.push(inv);
       if (w.said) say(w.said);
       reconcile(s, w);
     } else {
       dropOps(s);
+      w.rollback?.();
       // the server's own sentence says what to do next; the short class is the fallback
       const why = typeof r.body?.err === "string" && r.body.err.length <= 140 ? r.body.err : r.err && r.err !== "refused" ? r.err.replaceAll("-", " ") : "";
       say(`${w.failed}${why ? ` — ${why}` : ""}`);

@@ -5,9 +5,12 @@ import type { BudgetClass } from "./budgets";
 import type { Op } from "./store";
 
 /** Where a command applies, narrowest last: everywhere, on a surface, on the selected row (forest
- *  or branch), on its forest, on a branch. A key binds once per scope; the narrowest live one wins. */
-export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch";
+ *  or branch), on its forest, on a branch; on the review page, the page itself, the cursor's diff
+ *  line, the thread or the pending comment under it. A key binds once per scope; the narrowest live one wins. */
+export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch" | "review" | "line" | "thread" | "pending";
 export type Via = "key" | "click" | "palette" | "menu" | "drag";
+
+export type Inverse = { id: string; target: string; arg?: unknown };
 
 /** An optimistic server write: shown at once, posted in the background, kept until settled. */
 export interface Write {
@@ -19,8 +22,11 @@ export interface Write {
   /** one quiet line after it lands (undo hint), and the line if it's refused */
   said?: string;
   failed: string;
-  /** the command that puts it back, for `u` */
-  inverse?: { id: string; target: string; arg?: unknown };
+  /** the command that puts it back, for `u` — or a function of the server's answer when only the
+   *  answer knows (the commit a suggestion made) */
+  inverse?: Inverse | ((answer: Record<string, unknown>) => Inverse | undefined);
+  /** undo a local (non-store) part of the optimistic change when the server refuses */
+  rollback?: () => void;
 }
 
 export interface Command {
@@ -29,6 +35,8 @@ export interface Command {
   scope: Scope;
   budget: BudgetClass;
   keys?: string[];
+  /** keys a component handles itself (the comment box's ⌘↵): shown in the ? sheet, never bound */
+  hint?: string[];
   /** v1 telemetry ids this replaces, so the dashboard can put the two side by side */
   v1?: string[];
   /** left out of the space menu (cursor motion, the menu itself) */
