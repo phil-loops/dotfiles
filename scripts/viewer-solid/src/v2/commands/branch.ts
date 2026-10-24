@@ -1,9 +1,9 @@
 // A branch's way to main: push it (POST /push-origin — two keypresses, never by itself), open its
 // PR (the compare form, prefilled by /packet-compare, in Phil's browser), open its page, and hold
 // work for the morning (POST /outbox-hold). Nothing here pushes, opens or merges on its own.
-import { atRepo, bkey, branchPage, compareUrl, model, type BranchView } from "../model";
+import { atRepo, bkey, compareUrl, model, type BranchView } from "../model";
 import { command, type Write } from "../registry";
-import { leave } from "../router";
+import { navigate, reviewPath } from "../router";
 import { fmtMorning, leaf, nextMorning } from "../ship";
 import { view, world } from "../store";
 import { armed, launching, now, setArmed, setCursor, setOpened, toggleIn } from "../ui";
@@ -87,7 +87,7 @@ command({
   budget: "local",
   keys: ["l", "right"],
   available: (id) => !!bv(id),
-  local: (id) => leave(branchPage(bv(id)!.b)),
+  local: (id, e) => navigate(reviewPath(bv(id)!.b.repo, bv(id)!.b.name), e),
 });
 
 // ── holding work for the morning ──

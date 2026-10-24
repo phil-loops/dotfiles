@@ -10,19 +10,28 @@ export interface Surface {
   title: string;
   /** v1 surfaces this replaces, for the dashboard's side-by-side */
   v1?: string[];
+  /** the path is a prefix: what follows it is the surface's argument (the review page's branch) */
+  arg?: boolean;
 }
 
 export const BASE = "/v2";
 export const SURFACES: Surface[] = [
   { id: "forests", path: BASE, title: "Forests", v1: ["home"] },
   { id: "dashboard", path: `${BASE}/dashboard`, title: "Dashboard" },
+  { id: "review", path: `${BASE}/b`, title: "Review", v1: ["branch"], arg: true },
 ];
 
-const match = (pathname: string): Surface =>
-  SURFACES.find((s) => s.path === pathname.replace(/\/+$/, "")) ?? SURFACES[0];
+const match = (pathname: string): Surface => {
+  const p = pathname.replace(/\/+$/, "");
+  return SURFACES.find((s) => (s.arg ? p.startsWith(s.path + "/") : s.path === p)) ?? SURFACES[0];
+};
+const argOf = (pathname: string, s: Surface): string =>
+  s.arg ? decodeURIComponent(pathname.replace(/\/+$/, "").slice(s.path.length + 1)) : "";
 
 const [surface, setSurface] = createSignal<Surface>(match(location.pathname));
-export { surface };
+/** the surface's argument: on the review page, "<repo>/<branch>" */
+const [routeArg, setRouteArg] = createSignal(argOf(location.pathname, surface()));
+export { surface, routeArg };
 
 function measure(from: string, to: string, t0: number): void {
   void contentPaint(to, t0).then((paintMs) => emit({ type: "nav", from, to, paintMs }));
@@ -30,13 +39,18 @@ function measure(from: string, to: string, t0: number): void {
 
 export function navigate(path: string, e?: Event): void {
   const next = match(path);
+  const arg = argOf(path, next);
   const from = surface().id;
-  if (next.id === from) return;
+  if (next.id === from && arg === routeArg()) return;
   const t0 = e?.timeStamp ?? performance.now();
-  history.pushState(null, "", next.path);
+  history.pushState(null, "", next.arg ? path : next.path);
   setSurface(next);
+  setRouteArg(arg);
   measure(from, next.id, t0);
 }
+
+/** The review page of a branch. */
+export const reviewPath = (repo: string, branch: string) => `${BASE}/b/${encodeURIComponent(repo)}/${branch.split("/").map(encodeURIComponent).join("/")}`;
 
 /** Leave v2 for a page it doesn't have yet (v1's branch page, Work, Wiki…): recorded as a
  *  navigation to "v1:<path>" — the page unloads, so there is no paint to time. */
@@ -50,8 +64,10 @@ export function startRouter(): void {
   measure("", surface().id, 0);
   window.addEventListener("popstate", () => {
     const from = surface().id;
+    const was = routeArg();
     const next = match(location.pathname);
     setSurface(next);
-    if (next.id !== from) measure(from, next.id, performance.now());
+    setRouteArg(argOf(location.pathname, next));
+    if (next.id !== from || routeArg() !== was) measure(from, next.id, performance.now());
   });
 }
