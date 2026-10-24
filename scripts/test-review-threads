@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""test-review-threads — the branch page's review rules: following a thread's line from the PR head
+to the local tip, suggestion blocks, GitHub's PR shape, the fake GitHub, and the write guards.
+Run: ./test-review-threads"""
+import json
+import os
+import sys
+import tempfile
+import types
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from srv import ctx, ghreview, linemap, reviewdesk  # noqa: E402
+
+
+class Shift(unittest.TestCase):
+    def test_a_hunk_above_moves_the_line(self):
+        self.assertEqual(linemap.shift(10, 10, [(2, 1, 2, 3)]), (12, 12, False))
+
+    def test_an_insertion_above_moves_it(self):
+        self.assertEqual(linemap.shift(10, 10, [(4, 0, 5, 2)]), (12, 12, False))
+
+    def test_a_hunk_below_leaves_it(self):
+        self.assertEqual(linemap.shift(10, 10, [(20, 2, 20, 0)]), (10, 10, False))
+
+    def test_a_hunk_on_the_line_changes_it(self):
+        self.assertEqual(linemap.shift(10, 10, [(10, 1, 10, 1)]), (10, 10, True))
+
+    def test_a_range_touched_at_its_end_changes(self):
+        self.assertEqual(linemap.shift(4, 5, [(5, 1, 5, 1)]), (5, 5, True))
+
+    def test_an_insertion_inside_a_range_changes_it(self):
+        self.assertEqual(linemap.shift(4, 6, [(4, 0, 5, 1)])[2], True)
+
+    def test_an_insertion_right_after_a_range_leaves_it(self):
+        self.assertEqual(linemap.shift(4, 6, [(6, 0, 7, 1)]), (4, 6, False))
+
+    def test_follow_names_the_first_commit_that_changed_it(self):
+        walk = [("a", [(1, 0, 2, 1)]), ("b", [(11, 1, 11, 1)]), ("c", [(11, 1, 11, 2)])]
+        self.assertEqual(linemap.follow(10, 10, walk), (11, 11, "b"))
+
+    def test_parse_hunks_reads_a_log_walk(self):
+        text = ("\x00aaa\n\ndiff --git a/x.ts b/x.ts\n--- a/x.ts\n+++ b/x.ts\n@@ -3 +3,2 @@\n-a\n+b\n+c\n"
+                "\x00bbb\n\ndiff --git a/y.ts b/y.ts\ndeleted file mode 100644\n--- a/y.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n")
+        self.assertEqual(linemap.parse_hunks(text), [("aaa", {"x.ts": [(3, 1, 3, 2)]}), ("bbb", {"y.ts": [(1, 10 ** 9, 0, 0)]})])
+
+    def test_locate_reports_a_range(self):
+        self.assertEqual(linemap.locate([("a", {"x": [(1, 0, 2, 3)]})], "x", 4, 5), {"line": 8, "startLine": 7, "addressedBy": None})
+
+
+class Suggestion(unittest.TestCase):
+    def test_reads_the_first_block(self):
+        body = "Use the guard.\n\n```suggestion\n  if (!x) return;\n  go(x);\n```\nmore"
+        self.assertEqual(reviewdesk.suggestion_of(body), ["  if (!x) return;", "  go(x);"])
+
+    def test_an_empty_suggestion_deletes(self):
+        self.assertEqual(reviewdesk.suggestion_of("```suggestion\n```"), [])
+
+    def test_no_block(self):
+        self.assertIsNone(reviewdesk.suggestion_of("```ts\nx\n```"))
+
+    def test_replace_keeps_the_trailing_newline(self):
+        self.assertEqual(reviewdesk.replace_lines("a\nb\nc\n", 2, 3, ["B"]), "a\nB\n")
+
+    def test_replace_out_of_range_refuses(self):
+        with self.assertRaises(ghreview.Refused):
+            reviewdesk.replace_lines("a\n", 2, 2, ["x"])
+
+
+REAL = {  # one thread as GitHub's GraphQL returned it for a Loops PR (2026-10-23), trimmed
+    "id": "PR_x", "number": 11132, "headRefName": "add-domain-reenable-queries", "headRefOid": "e73338b0",
+    "baseRefName": "main", "title": "t", "body": "b", "url": "u", "state": "OPEN", "author": {"login": "phil-loops"},
+    "reviewThreads": {"nodes": [{"id": "PRRT_1", "isResolved": False, "isOutdated": False, "path": "q.ts", "line": 599,
+                                 "originalLine": 599, "startLine": 599, "originalStartLine": 599, "diffSide": "RIGHT",
+                                 "subjectType": "LINE", "viewerCanResolve": True, "viewerCanUnresolve": False, "viewerCanReply": True,
+                                 "comments": {"nodes": [{"id": "C1", "databaseId": 1, "author": {"login": "nalanj"}, "body": "Should this…",
+                                                         "createdAt": "2026-10-23T00:00:00Z", "url": "cu", "commit": {"oid": "e73338b0"},
+                                                         "originalCommit": {"oid": "e73338b0"}, "diffHunk": "@@", "reactionGroups": []}]}}]},
+    "reviews": {"nodes": [{"id": "R1", "state": "APPROVED", "author": {"login": "nalanj"}, "body": "", "submittedAt": "s", "url": ""},
+                          {"id": "R2", "state": "PENDING", "author": {"login": "phil-loops"}, "body": "", "submittedAt": None, "url": ""}]},
+    "pending": {"nodes": [{"id": "R2", "comments": {"totalCount": 2}}]},
+    "comments": {"nodes": []}, "commits": {"nodes": []},
+}
+
+
+class Shape(unittest.TestCase):
+    def test_parse_pr(self):
+        pr = ghreview.parse_pr(REAL)
+        t = pr["threads"][0]
+        self.assertEqual((t["node"], t["line"], t["startLine"], t["side"]), ("PRRT_1", 599, None, "RIGHT"))
+        self.assertEqual(t["comments"][0]["author"], "nalanj")
+        self.assertEqual([r["state"] for r in pr["reviews"]], ["APPROVED"])
+        self.assertEqual(pr["pending"], {"id": "R2", "count": 2})
+
+    def test_legacy_threads_keep_the_packet_shape(self):
+        self.assertEqual(ghreview.legacy_threads(ghreview.parse_pr(REAL))[0]["author"], "nalanj")
+
+
+def _req(actor="browser", via="key", site="same-origin"):
+    return types.SimpleNamespace(_actor=actor, headers={"X-Stack-Via": via, "Sec-Fetch-Site": site})
+
+
+class Guard(unittest.TestCase):
+    def setUp(self):
+        self.env = {k: os.environ.pop(k, None) for k in ("STACK_REVIEW_SANDBOX", ghreview.FAKE_ENV)}
+
+    def tearDown(self):
+        for k, v in self.env.items():
+            if v is not None:
+                os.environ[k] = v
+
+    def test_phils_keypress_passes(self):
+        self.assertIsNone(ghreview.refusal(_req()))
+
+    def test_claude_and_headless_and_curl_are_refused(self):
+        for who in ("claude", "headless", "cli", None):
+            self.assertIn("browser", ghreview.refusal(_req(actor=who)))
+
+    def test_no_gesture_is_refused(self):
+        self.assertIn("keypress", ghreview.refusal(_req(via="")))
+
+    def test_cross_site_is_refused(self):
+        self.assertIn("own page", ghreview.refusal(_req(site="cross-site")))
+
+    def test_the_sandbox_never_reaches_github(self):
+        os.environ["STACK_REVIEW_SANDBOX"] = "1"
+        with self.assertRaises(ghreview.Refused):
+            ghreview.mutate("reply", {"thread": "x", "body": "y"}, _req())
+        with self.assertRaises(ghreview.Refused):
+            ghreview.mutate("reply", {"thread": "x", "body": "y"}, queued=True)
+
+    def test_a_refused_request_never_runs_gh(self):
+        called = []
+        orig = ghreview._gh_mutate
+        ghreview._gh_mutate = lambda *a: called.append(a)
+        try:
+            with self.assertRaises(ghreview.Refused):
+                ghreview.mutate("resolve", {"thread": "x"}, _req(actor="claude"))
+        finally:
+            ghreview._gh_mutate = orig
+        self.assertEqual(called, [])
+
+
+class Fake(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, "github.json")
+        pr = ghreview.parse_pr(REAL)
+        with open(self.path, "w") as f:
+            json.dump({"viewer": "me", "prs": {"11132": pr}, "seq": 0, "log": []}, f)
+        ctx.set_repo(self.dir)   # no origin refs here: heads stay put
+        self.gh = ghreview.FakeGitHub(self.path)
+
+    def tearDown(self):
+        ctx.clear_repo()
+
+    def test_review_reply_resolve(self):
+        self.gh.mutate("review", {"pr": 11132, "event": "REQUEST_CHANGES", "body": "no",
+                                  "threads": [{"path": "q.ts", "line": 3, "side": "RIGHT", "body": "why", "startLine": 2}]})
+        new = self.gh.read()[11132]["threads"][-1]
+        self.gh.mutate("reply", {"thread": new["node"], "body": "because"})
+        self.gh.mutate("resolve", {"thread": new["node"]})
+        pr = self.gh.read()[11132]
+        t = pr["threads"][-1]
+        self.assertEqual((t["line"], t["startLine"], t["resolved"]), (3, 2, True))
+        self.assertEqual([c["body"] for c in t["comments"]], ["why", "because"])
+        self.assertEqual(pr["reviews"][-1]["state"], "CHANGES_REQUESTED")
+        self.assertEqual([e["op"] for e in self.gh.load()["log"]], ["review", "reply", "resolve"])
+
+    def test_unknown_thread_refuses(self):
+        with self.assertRaises(ghreview.Refused):
+            self.gh.mutate("reply", {"thread": "nope", "body": "x"})
+
+
+if __name__ == "__main__":
+    unittest.main()
