@@ -432,7 +432,7 @@ def view(root, home):
     except OSError:
         return []
     for e in top:
-        if e.startswith(".seed-gen-") or e.startswith(".cache-probe"):
+        if e.startswith(".seed-gen-"):
             continue
         one(e)
         p = os.path.join(nm, e)
