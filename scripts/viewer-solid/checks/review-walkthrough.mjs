@@ -3,11 +3,13 @@
 // The review page end to end on a `viewer-sandbox <dir> --github` server, keys only, against its
 // fake GitHub (<dir>/github.json — never the real one): threads inline, show outdated, types on K,
 // a second-reader note and its draft, apply suggestion (a local commit), a reply naming that
-// unpushed commit waits, a sandbox push releases it, reply + resolve on a teammate's question, a
-// review on a teammate's PR (two pending comments, one a range) that survives a reload and is
-// finished as Request changes. Screenshots of each step land in --out. Exits non-zero on a miss.
+// unpushed commit stays a draft until a sandbox push, then joins Phil's pending review; a reply to a
+// teammate's question joins the same pending review and R only opens GitHub; on a teammate's PR a
+// draft and a range comment survive a reload, P sends the draft, S opens GitHub, and "submitted" is
+// learned only once (the fake) GitHub says so. Every mutation is one of the three pending-review
+// ones, none with an event. Screenshots of each step land in --out. Exits non-zero on a miss.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -42,6 +44,10 @@ const b = await puppeteer.launch({
   headless: true,
 });
 const p = await b.newPage();
+await p.evaluateOnNewDocument(() => {
+  window.__opened = [];
+  window.open = (u) => (window.__opened.push(String(u)), null);
+});
 await p.setExtraHTTPHeaders({ "X-Stack-Actor": "headless" });
 await p.setViewport({ width: 1400, height: 940 });
 const errors = [];
@@ -154,71 +160,89 @@ check(git("rev-parse", "refs/remotes/origin/demo/model") === before, "nothing wa
 check(by && after.startsWith(by), "the thread says it's addressed by that commit");
 await snap("suggestion-applied");
 
-// 6. a reply naming the unpushed commit waits for the push
+// 6. a reply naming the unpushed commit stays a draft until it's on origin
+const ops = () => gh().log.map((l) => l.op);
 await key("r");
 const pre = await p.evaluate(() => document.querySelector(".rv-composer textarea")?.value ?? "");
 check(pre.startsWith(`Addressed in ${after.slice(0, 7)}`), `r prefills the reply: "${pre}"`);
 await type("placeholders are filtered out.");
 await key("Enter", ["Control"]);
-check(!!(await until(() => document.querySelector('[data-stop$="PRRT_sb1"] .rv-comment-waiting'), "the waiting reply")), "the reply waits for the push");
-check(!gh().log.some((l) => l.op === "reply"), "and GitHub hasn't seen it");
+check(!!(await until(() => /waits for/.test(document.querySelector('[data-stop$="PRRT_sb1"] .rv-reply-draft')?.textContent ?? "") || null, "the waiting draft")), "the reply stays a draft, waiting for the push");
+check(!ops().length, "and GitHub hasn't seen anything");
 await snap("reply-waits-for-push");
 
-// 7. a push to the sandbox's origin releases it
+// 7. a push to the sandbox's origin sends it into Phil's pending review
 git("push", "-q", "origin", "demo/model");
-const posted = await until(() => !document.querySelector(".rv-comment-waiting") || null, "the release", 10000);
-check(!!posted && gh().log.some((l) => l.op === "reply" && l.args.thread === "PRRT_sb1"), "after the push the reply posts");
+await until(() => !document.querySelector(".rv-reply-draft") || null, "the release", 10000);
+const rel = gh().log;
+check(rel[0]?.op === "addPullRequestReview" && !("event" in rel[0].input), "after the push: a pending review is created, with no event");
+const joined = rel.find((l) => l.op === "addPullRequestReviewThreadReply");
+check(joined?.input.pullRequestReviewThreadId === "PRRT_sb1" && joined.input.pullRequestReviewId === gh().prs["43"].pending?.id, "and the reply joins that pending review");
 await key("O");
 await goto(`${M}PRRT_sb1`, "N");
-await snap("reply-released-after-push");
+check(await p.evaluate(() => [...document.querySelectorAll('[data-stop$="PRRT_sb1"] .rv-comment')].some((c) => /placeholders are filtered/.test(c.textContent) && /pending/.test(c.textContent))), "the thread shows it as pending");
+await snap("reply-pending-after-push");
 await key("O");
 
-// 8. reply to the teammate's question, then resolve it
+// 8. reply to the teammate's question — same pending review; R only opens GitHub
 check(await goto(`${M}PRRT_sb3`, "N") || (await goto(`${M}PRRT_sb3`, "n")), "reach the teammate's question");
 await key("r");
 await type("Yes — switching to the namespace import.");
 await key("Enter", ["Control"]);
-await until(() => [...document.querySelectorAll('[data-stop$="PRRT_sb3"] .rv-comment')].some((c) => /namespace import/.test(c.textContent) && !c.classList.contains("rv-comment-sending")), "the posted reply");
+await until(() => [...document.querySelectorAll('[data-stop$="PRRT_sb3"] .rv-comment')].some((c) => /namespace import/.test(c.textContent) && /pending/.test(c.textContent)) || null, "the pending reply");
+const r2 = gh().log.filter((l) => l.op === "addPullRequestReviewThreadReply").pop();
+check(r2?.input.pullRequestReviewThreadId === "PRRT_sb3" && r2.input.pullRequestReviewId === joined?.input.pullRequestReviewId, "the second reply joins the same pending review");
 await key("R");
-await until(() => !!document.querySelector('[data-stop$="PRRT_sb3"] .rv-chip-ok'), "resolved");
-const log = gh().log;
-check(log.some((l) => l.op === "reply" && l.args.thread === "PRRT_sb3") && log.some((l) => l.op === "resolve" && l.args.thread === "PRRT_sb3"), "reply + resolve reached the (fake) GitHub");
-await snap("replied-and-resolved");
+const opened1 = await p.evaluate(() => window.__opened.slice(-1)[0]);
+check(/discussion_r/.test(opened1 ?? "") && !ops().some((o) => /resolve/i.test(o)), `R opens the conversation on GitHub (${opened1}) and resolves nothing`);
+await snap("replies-in-pending-review");
 
-// 9. a review on a teammate's PR: two pending comments, one on a range
+// 9. a teammate's PR: one draft kept here, one range comment into the pending review
 await open("/v2/b/repo/review/pr-77");
 await goto("l|src/ui/banner.ts|R:4", "j");
 await key("c");
 await type("Why three attempts? A constant would say.");
-await key("Enter", ["Control"]);
-await until(() => document.querySelectorAll(".rv-pending").length === 1, "the first pending comment");
+await key("Enter", ["Control", "Shift"]);
+await until(() => /draft/.test(document.querySelector(".rv-pending")?.textContent ?? "") || null, "the draft");
 await goto("l|src/ui/banner.ts|R:10", "j");
 await key("x");
 await key("x");
 await key("c");
 await type("Log through the logger, not console.");
 await key("Enter", ["Control"]);
-await until(() => document.querySelectorAll(".rv-pending").length === 2, "the second pending comment");
-check(!gh().log.some((l) => l.op === "review"), "pending comments stay local");
-await snap("review-two-pending");
+await until(() => [...document.querySelectorAll(".rv-comment")].some((c) => /logger/.test(c.textContent) && /pending/.test(c.textContent)) || null, "the pending range comment");
+const th = gh().log.filter((l) => l.op === "addPullRequestReviewThread").pop();
+check(th?.input.startLine === 10 && th.input.line === 11 && th.input.subjectType === "LINE", "the range comment is a new thread on lines 10–11 of the pending review");
+await snap("draft-and-pending");
 
 // 10. reload: nothing lost
 await open("/v2/b/repo/review/pr-77");
-check((await until(() => document.querySelectorAll(".rv-pending").length === 2 || null, "pending after reload")) === true, "both pending comments survive a reload");
-await snap("pending-after-reload");
+check(!!(await until(() => (/draft/.test(document.querySelector(".rv-pending")?.textContent ?? "") && [...document.querySelectorAll(".rv-comment")].some((c) => /logger/.test(c.textContent))) || null, "after reload")), "the draft and the pending comment survive a reload");
+await snap("after-reload");
 
-// 11. finish as Request changes
+// 11. P sends the draft; S opens GitHub; "submitted" only once GitHub says so
+await key("P");
+await until(() => !document.querySelector(".rv-pending") || null, "the draft sent");
+check(gh().prs["77"].pending?.count === 2, "both comments sit in the pending review");
 await key("S");
-await type("Two small things before this lands.");
-await key("Digit3", ["Alt"]);
-await snap("finish-your-review");
-await key("Enter", ["Control"]);
-await until(() => document.querySelectorAll(".rv-pending").length === 0 && document.querySelectorAll(".rv-thread").length === 2 || null, "the submitted review's threads");
-const rv = gh().log.filter((l) => l.op === "review").pop();
-check(rv?.args.event === "REQUEST_CHANGES" && rv.args.threads.length === 2 && rv.args.threads.some((t) => t.startLine === 10 && t.line === 11), "submitted as Request changes with both comments (one on lines 10–11)");
-await snap("review-submitted");
+const opened2 = await p.evaluate(() => window.__opened.slice(-1)[0]);
+check(opened2 === "https://github.com/sandbox/repo/pull/77/files", `S opens GitHub's files view to submit (${opened2})`);
+await snap("open-on-github-to-submit");
+const g = gh();
+for (const t of g.prs["77"].threads) for (const c of t.comments) c.state = "SUBMITTED";
+g.prs["77"].reviews.push({ id: "PRR_phil", author: g.viewer, state: "CHANGES_REQUESTED", body: "Two small things.", at: new Date().toISOString(), url: "" });
+g.prs["77"].pending = null;
+writeFileSync(join(sandbox, "github.json"), JSON.stringify(g, null, 1));
+await until(() => !/pending/.test([...document.querySelectorAll(".rv-comment .rv-chip")].map((c) => c.textContent).join(" ")) && /requested changes/.test(document.querySelector(".rv-sub")?.textContent ?? "") || null, "the submitted review", 10000);
+const ledger = JSON.parse(readFileSync(join(repo, ".git/stack-review-ledger.json"), "utf8")).items;
+check(ledger.length >= 4 && ledger.every((i) => i.key && i.state === "sent"), "every ledger item carries a key and was sent");
+await snap("submitted-on-github");
 await key("Tab");
 await snap("conversation");
+
+// 12. the only GitHub writes were the three pending-review mutations, never with an event
+const all = gh().log;
+check(all.every((l) => ["addPullRequestReview", "addPullRequestReviewThread", "addPullRequestReviewThreadReply"].includes(l.op)) && !all.some((l) => "event" in l.input), `GitHub saw only pending-review writes: ${[...new Set(all.map((l) => l.op))].join(", ")}`);
 
 check(!errors.length, `no page errors${errors.length ? `: ${errors.join(" | ")}` : ""}`);
 await b.close();
