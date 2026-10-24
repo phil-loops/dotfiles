@@ -5,7 +5,8 @@
 # Pure parsing + translation, plus one spawn per (head, tip, paths): `git log -p -U0` over
 # head..tip gives every commit's hunks, oldest first. When head isn't an ancestor of the tip (a
 # local restack rewrote the commits), one `git diff -U0 head tip` stands in for the walk, and a
-# changed line has no single commit to name.
+# changed line has no single commit to name. When the tip is BEHIND the head (commits made on
+# GitHub, not pulled), the same diff only says where a line sits locally — nothing was addressed.
 import re
 import subprocess
 import threading
@@ -100,6 +101,11 @@ def commits_between(head, tip, paths):
         res = {"walk": [], "mode": "same"}
     elif _git(["cat-file", "-e", f"{head}^{{commit}}"]).returncode != 0:
         res = {"walk": [], "mode": "unknown"}   # the PR head isn't here (never fetched): no mapping
+    elif _git(["merge-base", "--is-ancestor", tip, head]).returncode == 0:
+        # the local branch is BEHIND the PR (commits made on GitHub): nothing here addressed anything
+        r = _git(["diff", "-U0", "--no-renames", head, tip, "--", *key[3]])
+        res = {"walk": [("", files) for _sha, files in parse_hunks(r.stdout)], "mode": "behind",
+               "behind": int(_git(["rev-list", "--count", f"{tip}..{head}"]).stdout.strip() or 0)}
     elif _git(["merge-base", "--is-ancestor", head, tip]).returncode == 0:
         r = _git(["log", "-p", "-U0", "--no-renames", "--reverse", "--first-parent", "--format=%x00%H",
                   f"{head}..{tip}", "--", *key[3]])

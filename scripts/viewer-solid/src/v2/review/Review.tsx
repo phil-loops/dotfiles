@@ -102,6 +102,11 @@ function Header() {
           <Show when={c()!.unpushed.length}>
             <span class="text-gold-leaf">{c()!.unpushed.length} local commit{c()!.unpushed.length === 1 ? "" : "s"} not on GitHub</span>
           </Show>
+          <Show when={c()!.mapping === "behind"}>
+            <span class="text-ember" title="threads sit at their lines on the local tip; ones whose lines it doesn't have yet show beside their file">
+              {c()!.behind} commit{c()!.behind === 1 ? "" : "s"} on GitHub not here — pull to review what's there
+            </span>
+          </Show>
           <Show when={waiting()}>
             <span class="text-gold-leaf">{waiting()} draft{waiting() === 1 ? " waits" : "s wait"} for a push</span>
           </Show>
