@@ -4,6 +4,7 @@ to the local tip, suggestion blocks, GitHub's PR shape, the fake GitHub, and the
 Run: ./test-review-threads"""
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -148,6 +149,8 @@ class Fake(unittest.TestCase):
         pr = ghreview.parse_pr(REAL)
         with open(self.path, "w") as f:
             json.dump({"viewer": "me", "prs": {"11132": pr}, "seq": 0, "log": []}, f)
+        subprocess.run(["git", "init", "-q", self.dir], check=True)
+        ctx.run = ctx.run or (lambda args, timeout=None: subprocess.run(args, cwd=ctx.repo_cwd(), capture_output=True, text=True))
         ctx.set_repo(self.dir)   # no origin refs here: heads stay put
         self.gh = ghreview.FakeGitHub(self.path)
 
