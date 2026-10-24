@@ -1,0 +1,692 @@
+#!/usr/bin/env python3
+"""seed-gen-cache — a content-addressed store of generated tRPC types (.gen/trpc-types).
+
+  seed-gen-cache restore <tree> <compiler>   materialize a stored emit for this tree's exact inputs:
+                                             exit 0 restored, 1 no entry (build), 2 cache off/unusable
+  seed-gen-cache insert  <tree> <compiler> <started>
+                                             store the tree's fresh emit (a build that began at the
+                                             mtime of file <started>); a no-op unless every input
+                                             is older than that
+  seed-gen-cache --stats | --gc [--json]
+
+seed-gen calls restore before its emit and insert after a stamped build, so every consumer (gates,
+the viewer's type trees, review scratch trees, worktrees, the donor) shares one store. Off with
+SEED_GEN_CACHE=0; the store lives in SEED_GEN_CACHE_DIR (default ~/Library/Caches/seed-gen/gen),
+bounded by SEED_GEN_CACHE_MB (default 1536) and SEED_GEN_CACHE_DAYS unused (default 14).
+
+The key is everything the emit reads, as the compiler itself recorded it (the tsbuildinfo of a
+previous build — ccache's "direct mode"): each input file's content, each package.json it read and
+each one it probed and found missing, the physical side of the tree each file lives on, the npm
+identity of each package it reached, the tree's resolution candidates (every source file name, the
+packages' dist listings, node_modules/@types), the configs, the compiler's own files and seed-gen's.
+A stored entry carries the graph it was built from; a tree hits only when that graph's every file
+hashes identically in it — so it would read the very same files, and emit the same declarations.
+Design, the counterexample per key part, and measurements: wiki loops/canopy-v2-gen-cache.
+"""
+import ctypes
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+import importlib.machinery
+import importlib.util
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+SCHEMA = b"seed-gen-cache-v1\0"
+CACHE = os.environ.get("SEED_GEN_CACHE_DIR") or os.path.expanduser("~/Library/Caches/seed-gen/gen")
+BUDGET = int(os.environ.get("SEED_GEN_CACHE_MB", "1536")) << 20
+MAX_AGE = float(os.environ.get("SEED_GEN_CACHE_DAYS", "14")) * 86400
+MAX_LISTS = 24
+OUT = os.path.join(".gen", "trpc-types")
+INFO = os.path.join(".gen", "trpc-types.tsbuildinfo")
+PATH_FIELDS = ("fileNames", "packageJsons", "missingPackageJsons")
+
+
+def _load_fingerprint():
+    path = os.path.join(HERE, "seed-gen-fingerprint")
+    loader = importlib.machinery.SourceFileLoader("seed_gen_fingerprint", path)
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(mod)
+    return mod
+
+
+fp = _load_fingerprint()
+
+_libc = ctypes.CDLL("libc.dylib", use_errno=True) if sys.platform == "darwin" else None
+
+
+def clone(src, dst):
+    """APFS clonefile: copy-on-write, a directory hierarchy in one call. Falls back to a copy."""
+    if _libc is not None and _libc.clonefile(os.fsencode(src), os.fsencode(dst), 0) == 0:
+        return
+    if os.path.isdir(src):
+        shutil.copytree(src, dst, symlinks=True)
+    else:
+        shutil.copy2(src, dst)
+
+
+def _sha_or_dash(path):
+    try:
+        return file_sha(path)
+    except OSError:
+        return "-"
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def file_sha(path):
+    with open(path, "rb") as f:
+        return sha(f.read())
+
+
+# ── anchors: where a compiler-recorded path lives, independent of where the tree sits ──────────
+#
+# The tsbuildinfo records realpaths relative to .gen: in-tree files as ../lib/x.ts, but a borrowed
+# package (an exploded view's per-entry link into the donor or a deps home) as the climb to its
+# realpath, ../../../../Users/…/loops-donor/node_modules/zod/… — different for every tree depth and
+# every home. An anchor names the file by what it is instead:
+#   t    in the tree, outside node_modules
+#   tnm  physically in the tree's own node_modules (the donor's; a tree-local prisma client)
+#   hnm  physically in the home the tree borrows from (node_modules/.seed-gen-home), under there —
+#        reached through the tree's links, or from inside the home itself (a home package's own
+#        @prisma/client import lands on the home's copy, not the tree's)
+#   abs  anything else, verbatim
+# tnm and hnm stay distinct: the side of the tree a declaration's source sits on changes the emit
+# (a symlinked .prisma emitted `user?: Prisma`, 2026-08-04).
+
+class Where:
+    def __init__(self, root):
+        self.root = root
+        self.gen = os.path.join(root, ".gen")
+        try:
+            home = open(os.path.join(root, "node_modules", ".seed-gen-home")).read().strip()
+            self.home = os.path.realpath(home) if home else None
+        except OSError:
+            self.home = None
+
+
+def anchor(w, name):
+    if name.startswith("lib.") and "/" not in name:
+        return ("lib", name)
+    p = os.path.normpath(os.path.join(w.gen, name))
+    low = p.lower()
+    if low.startswith(w.root.lower() + "/"):
+        rel = p[len(w.root) + 1:]
+        if rel.lower().startswith("node_modules/"):
+            return ("tnm", rel[len("node_modules/"):])
+        return ("t", rel)
+    if w.home and low.startswith(w.home.lower() + "/"):
+        return ("hnm", p[len(w.home) + 1:])
+    return ("abs", p)
+
+
+def locate(w, kind, rel, real=True):
+    """The path an anchor names in this tree, or None when the tree can't hold it on that side.
+    `real`: the compiler recorded the file's realpath (anything it read) rather than the path it
+    probed (a missing package.json), so a tnm file must physically be in the tree."""
+    if kind == "t":
+        return os.path.join(w.root, rel)
+    if kind == "abs":
+        return rel
+    if kind == "hnm":
+        return os.path.join(w.home, rel) if w.home else None
+    p = os.path.join(w.root, "node_modules", rel)
+    if real and not os.path.realpath(p).lower().startswith(w.root.lower() + "/"):
+        return None
+    return p
+
+
+def spell(w, kind, rel, lower, real):
+    """How this tree's compiler would record the anchor, relative to .gen."""
+    if kind == "lib":
+        return rel
+    p = locate(w, kind, rel, real)
+    if p is None:
+        return None
+    s = os.path.relpath(os.path.realpath(p) if real else p, w.gen)
+    return s.lower() if lower else s
+
+
+def anchored_graph(w, info):
+    """The tsbuildinfo with every recorded path replaced by its anchor ([kind, rel, lowercased]).
+    None if any path can't be re-spelled exactly in this same tree — then it can't be relocated."""
+    out = {}
+    for field in PATH_FIELDS:
+        items = []
+        for name in info.get(field) or []:
+            kind, rel = anchor(w, name)
+            for real in (True, False):
+                lower = name == name.lower() and spell(w, kind, rel, False, real) != name
+                if spell(w, kind, rel, lower, real) == name:
+                    items.append([kind, rel, lower, real])
+                    break
+            else:
+                return None
+        out[field] = items
+    return out
+
+
+def relocate(w, info, graph):
+    info = dict(info)   # the stored skeleton keeps each path field's place, as null
+    for field in PATH_FIELDS:
+        names = [spell(w, k, r, lo, real) for k, r, lo, real in graph[field]]
+        if any(n is None for n in names):
+            return None
+        info[field] = names
+    return info
+
+
+# ── the key ───────────────────────────────────────────────────────────────────────────────────
+
+def compiler_id(root, compiler):
+    """Every file of the compiler as invoked: the typescript package (launcher + version) and the
+    platform package holding the native binary and its lib.*.d.ts. None when it isn't a package."""
+    real = os.path.realpath(compiler)
+    pkg = os.path.dirname(real)
+    while pkg != "/" and not os.path.isfile(os.path.join(pkg, "package.json")):
+        pkg = os.path.dirname(pkg)
+    if pkg == "/":
+        return None
+    try:
+        name = json.load(open(os.path.join(pkg, "package.json")))["name"]
+    except (OSError, ValueError, KeyError):
+        return None
+    nm = os.path.dirname(os.path.dirname(pkg)) if name.startswith("@") else os.path.dirname(pkg)
+    base = name.split("/")[-1]
+    plat = os.path.join(nm, "@typescript", f"{base}-darwin-arm64" if sys.platform == "darwin" else f"{base}-linux-x64")
+    d = hashlib.sha256(b"compiler\0" + name.encode() + b"\0")
+    for top in (pkg, plat):
+        if not os.path.isdir(top):
+            continue
+        for dp, dns, fns in os.walk(top):
+            dns[:] = sorted(x for x in dns if x != "node_modules")
+            for f in sorted(fns):
+                p = os.path.join(dp, f)
+                d.update(os.fsencode(os.path.relpath(p, top)) + b"\0" + file_sha(p).encode())
+    return d.hexdigest()
+
+
+def tool_id():
+    d = hashlib.sha256(b"tool\0")
+    for f in ("seed-gen", "seed-gen-fingerprint", "seed-gen-cache"):
+        d.update(f.encode() + b"\0" + file_sha(os.path.join(HERE, f)).encode())
+    return d.hexdigest()
+
+
+def tree_names(root):
+    """The tree's resolution candidates: every source-like file name the compiler could probe."""
+    r = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                       cwd=root, check=True, capture_output=True)
+    names = sorted({os.fsdecode(n) for n in r.stdout.split(b"\0") if n})
+    names = [n for n in names if n.endswith(fp.SOURCE_SUFFIXES) and os.path.lexists(os.path.join(root, n))]
+    extra = []
+    pk = os.path.join(root, "packages")
+    for p in sorted(os.listdir(pk)) if os.path.isdir(pk) else []:
+        dist = os.path.join(pk, p, "dist")
+        for dp, dns, fns in os.walk(dist):
+            dns.sort()
+            extra.extend(os.path.relpath(os.path.join(dp, f), root) for f in sorted(fns))
+    types = os.path.join(root, "node_modules", "@types")
+    extra.extend("node_modules/@types/" + t for t in (sorted(os.listdir(types)) if os.path.isdir(types) else []))
+    return names, extra
+
+
+class Keyer:
+    """Hashes one tree's view of a graph; file digests are shared across the graphs it tries."""
+
+    def __init__(self, root, compiler):
+        self.root = root
+        self.where = Where(root)
+        self.memo = {}
+        cid = compiler_id(root, compiler)
+        if cid is None:
+            raise LookupError("compiler is not an npm package")
+        names, extra = tree_names(root)
+        self.names = names
+        d = hashlib.sha256(SCHEMA)
+        d.update(cid.encode() + b"\0" + tool_id().encode() + b"\0")
+        for n in names + extra:
+            d.update(os.fsencode(n) + b"\0")
+        for n in names:
+            b = os.path.basename(n)
+            if b == "package.json" or b.startswith(("tsconfig", "tsbase")):
+                d.update(b"config\0" + os.fsencode(n) + b"\0" + self.digest(os.path.join(root, n)).encode())
+        self.base = d.hexdigest()
+        self.locks = {}
+
+    def prefetch(self, paths):
+        """Hash in parallel what isn't hashed yet: reads and sha256 release the GIL, and four
+        threads take a 5,000-file graph from 0.84 s to 0.22 s (2026-10-23)."""
+        todo = list(dict.fromkeys(p for p in paths if p and p not in self.memo))
+        with ThreadPoolExecutor(4) as ex:
+            for p, h in zip(todo, ex.map(_sha_or_dash, todo)):
+                self.memo[p] = h
+
+    def digest(self, path):
+        if path not in self.memo:
+            try:
+                self.memo[path] = file_sha(path)
+            except OSError:
+                self.memo[path] = "-"
+        return self.memo[path]
+
+    def lock_entry(self, kind, rel):
+        """npm's record (version, resolved, integrity) of the package a node_modules file is in."""
+        parts = rel.split("/")
+        i, pkg = 0, []
+        while i < len(parts) - 1:
+            n = 2 if parts[i].startswith("@") else 1
+            pkg += parts[i:i + n]
+            i += n
+            if i < len(parts) - 1 and parts[i] == "node_modules":
+                pkg.append("node_modules")
+                i += 1
+            else:
+                break
+        key = "node_modules/" + "/".join(pkg)
+        lock = self.locks.get(kind)
+        if lock is None:
+            nm = self.where.home if kind == "hnm" else os.path.join(self.root, "node_modules")
+            try:
+                lock = json.load(open(os.path.join(nm, ".package-lock.json"))).get("packages") or {}
+            except (OSError, ValueError):
+                lock = {}
+            self.locks[kind] = lock
+        e = lock.get(key) or {}
+        return key, json.dumps([e.get("version"), e.get("resolved"), e.get("integrity"), e.get("link")])
+
+    def key(self, graph):
+        """The entry key for `graph` (anchored) as this tree holds it; None if it can't apply."""
+        self.prefetch(locate(self.where, k, r, re) for f in ("fileNames", "packageJsons")
+                      for k, r, _lo, re in graph[f] if k != "lib")
+        d = hashlib.sha256(self.base.encode())
+        pkgs = set()
+        for field in PATH_FIELDS:
+            d.update(field.encode() + b"\0")
+            for kind, rel, _lower, real in sorted(graph[field], key=lambda x: (x[0], x[1].lower(), x[3])):
+                d.update(f"{kind}\0{rel.lower()}\0{int(real)}\0".encode())
+                if kind == "lib":
+                    continue
+                p = locate(self.where, kind, rel, real)
+                if p is None:
+                    return None
+                if field == "missingPackageJsons":
+                    if os.path.exists(p):
+                        return None
+                    continue
+                h = self.digest(p)
+                if h == "-":
+                    return None
+                d.update(h.encode() + b"\0")
+                if kind in ("tnm", "hnm"):
+                    pkgs.add((kind,) + self.lock_entry(kind, rel))
+        for kind, k, v in sorted(pkgs):
+            d.update(f"npm\0{kind}\0{k}\0{v}\0".encode())
+        return d.hexdigest()
+
+
+# ── the store ─────────────────────────────────────────────────────────────────────────────────
+
+def store(*parts):
+    return os.path.join(CACHE, *parts)
+
+
+def graph_id(graph):
+    return sha(json.dumps(graph, sort_keys=True).encode())[:32]
+
+
+def candidate_graphs():
+    d = store("graphs")
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return []
+    paths = [os.path.join(d, n) for n in names if n.endswith(".json")]
+    paths.sort(key=lambda p: -_mtime(p))
+    return paths[:MAX_LISTS]
+
+
+def _mtime(p):
+    try:
+        return os.stat(p).st_mtime
+    except OSError:
+        return 0
+
+
+def _touch(p):
+    try:
+        os.utime(p)
+    except OSError:
+        pass
+
+
+def write_atomic(path, data):
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, path)
+
+
+def evict(entry, why):
+    trash = store("trash", f"{os.path.basename(entry)}.{os.getpid()}.{time.time_ns()}")
+    os.makedirs(store("trash"), exist_ok=True)
+    try:
+        os.rename(entry, trash)
+    except OSError:
+        return
+    log(f"evicted {os.path.basename(entry)[:12]}: {why}")
+    shutil.rmtree(trash, ignore_errors=True)
+
+
+def log(line):
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        with open(store("log"), "a") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%S ") + line + "\n")
+    except OSError:
+        pass
+
+
+def lookup(root, compiler):
+    keyer = Keyer(root, compiler)
+    for gpath in candidate_graphs():
+        try:
+            graph = json.load(open(gpath))
+        except (OSError, ValueError):
+            continue
+        k = keyer.key(graph)
+        if k and os.path.isdir(store("entries", k)):
+            _touch(gpath)
+            return k, graph
+    return None, None
+
+
+def verify(stage, manifest):
+    """Every file the entry claims, byte for byte, and nothing else."""
+    out = os.path.join(stage, "out")
+    seen = 0
+    for dp, _dns, fns in os.walk(out):
+        for f in fns:
+            p = os.path.join(dp, f)
+            rel = os.path.relpath(p, out)
+            if manifest["files"].get(rel) != file_sha(p):
+                return f"{rel} differs from its manifest"
+            seen += 1
+    if seen != len(manifest["files"]):
+        return f"{len(manifest['files']) - seen} files missing"
+    if file_sha(os.path.join(stage, "tsbuildinfo.json")) != manifest["tsbuildinfo"]:
+        return "tsbuildinfo differs from its manifest"
+    return None
+
+
+def restore(root, compiler):
+    t0 = time.time()
+    k, graph = lookup(root, compiler)
+    t1 = time.time()
+    if not k:
+        log(f"miss {root} ({t1 - t0:.2f}s)")
+        return 1
+    entry = store("entries", k)
+    gen = os.path.join(root, ".gen")
+    os.makedirs(gen, exist_ok=True)
+    stage = os.path.join(gen, f".cache-stage.{os.getpid()}")
+    shutil.rmtree(stage, ignore_errors=True)
+    try:
+        clone(entry, stage)   # from here on the entry may be evicted; this copy is ours
+    except OSError:
+        return 1
+    try:
+        manifest = json.load(open(os.path.join(stage, "manifest.json")))
+        bad = verify(stage, manifest) if manifest.get("key") == k else "manifest names another key"
+    except (OSError, ValueError) as e:
+        bad = f"unreadable: {e}"
+    if bad:
+        shutil.rmtree(stage, ignore_errors=True)
+        evict(entry, bad)
+        return 1
+    info = relocate(Where(root), json.load(open(os.path.join(stage, "tsbuildinfo.json"))), graph)
+    if info is None:
+        shutil.rmtree(stage, ignore_errors=True)
+        return 1
+    _touch(os.path.join(entry, "manifest.json"))
+    changed = apply(root, stage, manifest)
+    write_atomic(os.path.join(root, INFO), json.dumps(info, separators=(",", ":")).encode())
+    shutil.rmtree(stage, ignore_errors=True)
+    log(f"hit {k[:12]} {root} lookup {t1 - t0:.2f}s apply {time.time() - t1:.2f}s ({changed} files changed)")
+    print(f"{k[:12]} {changed}")
+    return 0
+
+
+def apply(root, stage, manifest):
+    """Make .gen/trpc-types the entry's files: untouched where already identical (so watchers and
+    mtimes only see real changes), renamed in from the staged clone where not, extras removed. The
+    stamp markers go first, so an interrupted apply reads as unstamped and the next sync rebuilds."""
+    for m in (".seed-gen-output", ".seed-gen-inputs"):
+        try:
+            os.unlink(os.path.join(root, ".gen", m))
+        except OSError:
+            pass
+    out, src = os.path.join(root, OUT), os.path.join(stage, "out")
+    changed = 0
+    for rel, h in manifest["files"].items():
+        dst = os.path.join(out, rel)
+        try:
+            if os.path.getsize(dst) == os.path.getsize(os.path.join(src, rel)) and file_sha(dst) == h:
+                continue
+        except OSError:
+            pass
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        if os.path.isdir(dst) and not os.path.islink(dst):
+            shutil.rmtree(dst)
+        os.chmod(os.path.join(src, rel), 0o644)
+        os.replace(os.path.join(src, rel), dst)
+        changed += 1
+    want = {r.lower() for r in manifest["files"]}
+    for dp, dns, fns in os.walk(out, topdown=False):
+        for f in fns:
+            p = os.path.join(dp, f)
+            if os.path.relpath(p, out).lower() not in want:
+                os.unlink(p)
+                changed += 1
+        if dp != out and not os.listdir(dp):
+            os.rmdir(dp)
+    return changed
+
+
+def changed_since(root, graph, keyer, since):
+    """The first input touched at or after `since`, or None. Covers what the key reads: input
+    files and package.jsons (content), the source names and the listed dirs (resolution), and npm's
+    hidden lockfile (rewritten by every install into the borrowed node_modules)."""
+    def newer(p, follow=True):
+        try:
+            st = os.stat(p) if follow else os.lstat(p)
+        except OSError:
+            return True
+        return max(st.st_mtime_ns, st.st_ctime_ns) >= since
+    for field in ("fileNames", "packageJsons"):
+        for kind, rel, _lower, real in graph[field]:
+            if kind != "lib" and newer(locate(keyer.where, kind, rel, real) or "/nonexistent"):
+                return rel
+    for n in keyer.names:
+        if newer(os.path.join(root, n), follow=False):
+            return n
+    dirs = [os.path.join(root, "node_modules", "@types")]
+    pk = os.path.join(root, "packages")
+    for p in os.listdir(pk) if os.path.isdir(pk) else []:
+        for dp, _dns, _fns in os.walk(os.path.join(pk, p, "dist")):
+            dirs.append(dp)
+    for d in dirs:
+        if os.path.isdir(d) and newer(d):
+            return d
+    lock = os.path.join(root, "node_modules", ".package-lock.json")
+    if os.path.exists(lock) and newer(lock):
+        return lock
+    return None
+
+
+def insert(root, compiler, started):
+    """Store this tree's emit. The key is computed and the emit captured first, and only then is
+    every input checked to predate the build's start: an input changed at any point from the
+    compiler's first read to our last one means the capture may not describe what it read."""
+    since = os.stat(started).st_mtime_ns
+    info = json.load(open(os.path.join(root, INFO)))
+    info = info.get("program", info)
+    graph = anchored_graph(Where(root), info)
+    if graph is None:
+        log(f"skip {root}: tsbuildinfo paths don't relocate")
+        return 2
+    keyer = Keyer(root, compiler)
+    k = keyer.key(graph)
+    if k is None:
+        log(f"skip {root}: graph doesn't hold in its own tree")
+        return 2
+    gid = graph_id(graph)
+    gpath = store("graphs", gid + ".json")
+    entry = store("entries", k)
+    if os.path.isdir(entry):
+        _touch(gpath)
+        _touch(os.path.join(entry, "manifest.json"))
+        return 0
+    os.makedirs(store("entries"), exist_ok=True)
+    os.makedirs(store("graphs"), exist_ok=True)
+    tmp = store("entries", f".tmp.{os.getpid()}.{time.time_ns()}")
+    try:
+        os.makedirs(tmp)
+        clone(os.path.join(root, OUT), os.path.join(tmp, "out"))
+        skeleton = {f: (None if f in PATH_FIELDS else v) for f, v in info.items()}
+        blob = json.dumps(skeleton, separators=(",", ":")).encode()
+        write_atomic(os.path.join(tmp, "tsbuildinfo.json"), blob)
+        stamped = open(os.path.join(root, ".gen", ".seed-gen-output")).read().strip()
+        why = changed_since(root, graph, keyer, since)
+        if why is None and fp.outputs_digest(os.path.join(tmp, "out")) != stamped:
+            why = "the emit moved after its stamp"
+        if why is not None:
+            shutil.rmtree(tmp, ignore_errors=True)
+            log(f"skip {root}: {why} changed during the build")
+            return 2
+        files, size = {}, 0
+        for dp, _dns, fns in os.walk(os.path.join(tmp, "out")):
+            for f in fns:
+                p = os.path.join(dp, f)
+                files[os.path.relpath(p, os.path.join(tmp, "out"))] = file_sha(p)
+                size += os.path.getsize(p)
+                os.chmod(p, 0o444)
+        if not os.path.isfile(gpath):
+            write_atomic(gpath, json.dumps(graph, sort_keys=True).encode())
+        manifest = {"key": k, "graph": gid, "files": files, "tsbuildinfo": sha(blob), "bytes": size + len(blob),
+                    "created": time.time(), "head": _head(root), "tree": root}
+        write_atomic(os.path.join(tmp, "manifest.json"), json.dumps(manifest).encode())
+        # an entry appears whole or not at all; a concurrent writer of the same key loses the rename
+        os.rename(tmp, entry)
+    except (OSError, ValueError):
+        shutil.rmtree(tmp, ignore_errors=True)
+        return 0
+    _touch(gpath)
+    log(f"insert {k[:12]} {root} ({len(files)} files, {size >> 10} KiB)")
+    gc(quiet=True)
+    return 0
+
+
+def _head(root):
+    r = subprocess.run(["git", "-C", root, "rev-parse", "HEAD"], capture_output=True, text=True)
+    return r.stdout.strip()
+
+
+def entries():
+    d = store("entries")
+    out = []
+    for k in os.listdir(d) if os.path.isdir(d) else []:
+        if k.startswith("."):
+            continue
+        m = os.path.join(d, k, "manifest.json")
+        try:
+            man = json.load(open(m))
+            out.append({"key": k, "bytes": man.get("bytes", 0), "used": _mtime(m), "graph": man.get("graph"),
+                        "created": man.get("created", 0), "head": man.get("head")})
+        except (OSError, ValueError):
+            out.append({"key": k, "bytes": 0, "used": 0, "graph": None, "created": 0, "broken": True})
+    return out
+
+
+def gc(quiet=False):
+    """LRU down to the budget, drop entries unused past the age cap, broken ones, stranded temps,
+    and graphs no entry uses. Restores clone an entry before reading it, so evicting never pulls
+    files from under a tree."""
+    now = time.time()
+    es = sorted(entries(), key=lambda e: -e["used"])
+    keep, total, dropped = [], 0, 0
+    for e in es:
+        if e.get("broken") or now - e["used"] > MAX_AGE or total + e["bytes"] > BUDGET:
+            evict(store("entries", e["key"]), "gc")
+            dropped += 1
+            continue
+        keep.append(e)
+        total += e["bytes"]
+    for sub in ("entries", "trash"):
+        d = store(sub)
+        for n in os.listdir(d) if os.path.isdir(d) else []:
+            p = os.path.join(d, n)
+            if (sub == "trash" or n.startswith(".tmp.")) and now - _mtime(p) > 3600:
+                shutil.rmtree(p, ignore_errors=True)
+    live = {e["graph"] for e in keep}
+    d = store("graphs")
+    for n in os.listdir(d) if os.path.isdir(d) else []:
+        if n.endswith(".json") and n[:-5] not in live and now - _mtime(os.path.join(d, n)) > 3600:
+            os.unlink(os.path.join(d, n))
+    if not quiet:
+        print(f"kept {len(keep)} entries ({total >> 20} MiB of {BUDGET >> 20}), dropped {dropped}")
+    return 0
+
+
+def stats(as_json=False):
+    es = entries()
+    hits = misses = inserts = 0
+    try:
+        for line in open(store("log")):
+            w = line.split()
+            if len(w) > 1:
+                hits += w[1] == "hit"
+                misses += w[1] == "miss"
+                inserts += w[1] == "insert"
+    except OSError:
+        pass
+    graphs = len([n for n in os.listdir(store("graphs")) if n.endswith(".json")]) if os.path.isdir(store("graphs")) else 0
+    s = {"dir": CACHE, "entries": len(es), "bytes": sum(e["bytes"] for e in es), "graphs": graphs,
+         "budgetBytes": BUDGET, "hits": hits, "misses": misses, "inserts": inserts,
+         "enabled": os.environ.get("SEED_GEN_CACHE", "1") != "0"}
+    if as_json:
+        print(json.dumps(s))
+    else:
+        rate = f"{100 * hits / (hits + misses):.0f}%" if hits + misses else "—"
+        print(f"{CACHE}: {s['entries']} entries, {s['bytes'] >> 20} MiB of {BUDGET >> 20} MiB, {graphs} graphs; "
+              f"{hits} hits / {misses} misses ({rate}), {inserts} inserts{'' if s['enabled'] else ' — OFF (SEED_GEN_CACHE=0)'}")
+    return 0
+
+
+def main(argv):
+    if argv[:1] == ["--stats"]:
+        return stats("--json" in argv)
+    if argv[:1] == ["--gc"]:
+        return gc()
+    if os.environ.get("SEED_GEN_CACHE", "1") == "0":
+        return 2
+    try:
+        if argv[:1] == ["restore"] and len(argv) == 3:
+            return restore(os.path.realpath(argv[1]), argv[2])
+        if argv[:1] == ["insert"] and len(argv) == 4:
+            return insert(os.path.realpath(argv[1]), argv[2], argv[3])
+    except (LookupError, OSError, ValueError, KeyError, subprocess.CalledProcessError) as e:
+        log(f"error {argv[0]} {argv[1] if len(argv) > 1 else ''}: {type(e).__name__}: {e}")
+        return 2
+    print(__doc__.split("\n\n")[1], file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
