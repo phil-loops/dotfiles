@@ -101,11 +101,32 @@ exploded(){ # $1 = tree: real node_modules whose @loops resolves tree-locally
 # loops below only prune links gone dangling and add names missing, so while all three listings
 # are unchanged they change nothing — and they cost 3-20 s of bash over ~2,000 entries per sync on a
 # loaded box (2026-10-22), which every --sync of an exploded tree used to pay.
-view_stamp(){ # $1 = tree, $2 = home node_modules
-  { echo "$2"; ls -A "$2"; for s in "$2"/@*/; do echo "$s"; ls -A "$s"; done
-    ls -A "$1/node_modules" | grep -v '^\.seed-gen-'
-    for s in "$1"/node_modules/@*/; do echo "${s#"$1"}"; ls -A "$s"; done
-    ls -d "$1"/packages/*/package.json 2>/dev/null; } 2>/dev/null | md5 -q
+view_stamp(){ # $1 = tree, $2 = home node_modules — one process: an `ls` per scope dir was ~200 forks, 4 s loaded
+  python3 - "$1" "$2" <<'PYEOF'
+import hashlib, os, sys
+tree, home = sys.argv[1], sys.argv[2]
+out = []
+def listing(d, skip=()):
+    try:
+        names = sorted(n for n in os.listdir(d) if not n.startswith(skip))
+    except OSError:
+        return
+    out.append(d)
+    out.extend(names)
+    for n in names:
+        p = os.path.join(d, n)
+        if n.startswith("@") and os.path.isdir(p):
+            out.append(p)
+            try:
+                out.extend(sorted(os.listdir(p)))
+            except OSError:
+                pass
+listing(home)
+listing(os.path.join(tree, "node_modules"), skip=(".seed-gen-",))
+pk = os.path.join(tree, "packages")
+out.extend(sorted(p for p in os.listdir(pk) if os.path.isfile(os.path.join(pk, p, "package.json"))) if os.path.isdir(pk) else [])
+print(hashlib.md5("\n".join(out).encode()).hexdigest())
+PYEOF
 }
 
 explode_node_modules(){ # $1 = tree, $2 = its deps home; idempotent: prunes dead links, tops up new ones
