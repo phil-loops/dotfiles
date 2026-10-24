@@ -628,39 +628,15 @@ def restore(root, compiler):
 
 
 def apply(root, stage, manifest):
-    """Make .gen/trpc-types the entry's files: untouched where already identical (so watchers and
-    mtimes only see real changes), renamed in from the staged clone where not, extras removed. The
-    stamp markers go first, so an interrupted apply reads as unstamped and the next sync rebuilds."""
+    """Make .gen/trpc-types the entry's files (sync_dir: identical files untouched, so watchers and
+    mtimes see only real changes). The stamp markers go first, so an interrupted apply reads as
+    unstamped and the next sync rebuilds."""
     for m in (".seed-gen-output", ".seed-gen-inputs"):
         try:
             os.unlink(os.path.join(root, ".gen", m))
         except OSError:
             pass
-    out, src = os.path.join(root, OUT), os.path.join(stage, "out")
-    changed = 0
-    for rel, h in manifest["files"].items():
-        dst = os.path.join(out, rel)
-        try:
-            if os.path.getsize(dst) == os.path.getsize(os.path.join(src, rel)) and file_sha(dst) == h:
-                continue
-        except OSError:
-            pass
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.isdir(dst) and not os.path.islink(dst):
-            shutil.rmtree(dst)
-        os.chmod(os.path.join(src, rel), 0o644)
-        os.replace(os.path.join(src, rel), dst)
-        changed += 1
-    want = {r.lower() for r in manifest["files"]}
-    for dp, dns, fns in os.walk(out, topdown=False):
-        for f in fns:
-            p = os.path.join(dp, f)
-            if os.path.relpath(p, out).lower() not in want:
-                os.unlink(p)
-                changed += 1
-        if dp != out and not os.listdir(dp):
-            os.rmdir(dp)
-    return changed
+    return fp.sync_dir(os.path.join(stage, "out"), os.path.join(root, OUT))
 
 
 def changed_since(root, graph, keyer, since):
