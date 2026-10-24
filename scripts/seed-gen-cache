@@ -237,12 +237,18 @@ def tree_names(root):
     return names, extra
 
 
+# The key's parts. `omit` exists for test-seed-gen-cache, which shows for each one a pair of trees
+# that differ only in that part and emit differently — a cache keyed without it would cross them.
+PARTS = ("compiler", "tool", "names", "listings", "configs", "contents", "pkgjson", "missing", "lock", "side")
+
+
 class Keyer:
     """Hashes one tree's view of a graph; file digests are shared across the graphs it tries."""
 
-    def __init__(self, root, compiler):
+    def __init__(self, root, compiler, omit=frozenset()):
         self.root = root
         self.where = Where(root)
+        self.omit = omit
         self.memo = {}
         cid = compiler_id(root, compiler)
         if cid is None:
@@ -250,10 +256,13 @@ class Keyer:
         names, extra = tree_names(root)
         self.names = names
         d = hashlib.sha256(SCHEMA)
-        d.update(cid.encode() + b"\0" + tool_id().encode() + b"\0")
-        for n in names + extra:
+        if "compiler" not in omit:
+            d.update(b"compiler\0" + cid.encode() + b"\0")
+        if "tool" not in omit:
+            d.update(b"tool\0" + tool_id().encode() + b"\0")
+        for n in (names if "names" not in omit else []) + (extra if "listings" not in omit else []):
             d.update(os.fsencode(n) + b"\0")
-        for n in names:
+        for n in names if "configs" not in omit else []:
             b = os.path.basename(n)
             if b == "package.json" or b.startswith(("tsconfig", "tsbase")):
                 d.update(b"config\0" + os.fsencode(n) + b"\0" + self.digest(os.path.join(root, n)).encode())
@@ -303,7 +312,8 @@ class Keyer:
 
     def key(self, graph):
         """The entry key for `graph` (anchored) as this tree holds it; None if it can't apply."""
-        self.prefetch(locate(self.where, k, r, re) for f in ("fileNames", "packageJsons")
+        side = "side" not in self.omit
+        self.prefetch(locate(self.where, k, r, re and side) for f in ("fileNames", "packageJsons")
                       for k, r, _lo, re in graph[f] if k != "lib")
         d = hashlib.sha256(self.base.encode())
         pkgs = set()
@@ -313,18 +323,19 @@ class Keyer:
                 d.update(f"{kind}\0{rel.lower()}\0{int(real)}\0".encode())
                 if kind == "lib":
                     continue
-                p = locate(self.where, kind, rel, real)
+                p = locate(self.where, kind, rel, real and side)
                 if p is None:
                     return None
                 if field == "missingPackageJsons":
-                    if os.path.exists(p):
+                    if os.path.exists(p) and "missing" not in self.omit:
                         return None
                     continue
                 h = self.digest(p)
                 if h == "-":
                     return None
-                d.update(h.encode() + b"\0")
-                if kind in ("tnm", "hnm"):
+                if ("contents" if field == "fileNames" else "pkgjson") not in self.omit:
+                    d.update(h.encode() + b"\0")
+                if kind in ("tnm", "hnm") and "lock" not in self.omit:
                     pkgs.add((kind,) + self.lock_entry(kind, rel))
         for kind, k, v in sorted(pkgs):
             d.update(f"npm\0{kind}\0{k}\0{v}\0".encode())
