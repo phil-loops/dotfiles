@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""test-second-reader — the second reader's pure parts and its server hook, no claude and no
+GitHub: answer parsing, note cleaning, the idempotency key, and when the hook queues a run.
+Run: ./test-second-reader"""
+import importlib.machinery
+import importlib.util
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+_loader = importlib.machinery.SourceFileLoader("second_reader_cli", os.path.join(HERE, "stack-second-reader"))
+_spec = importlib.util.spec_from_loader("second_reader_cli", _loader)
+sr = importlib.util.module_from_spec(_spec)
+_loader.exec_module(sr)
+
+from srv import ctx  # noqa: E402
+from srv import second_reader as hook  # noqa: E402
+
+
+def _git_repo():
+    d = tempfile.mkdtemp(prefix="sr-test-")
+    for args in (["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "t"]):
+        subprocess.run(["git", "-C", d, *args], check=True)
+    os.makedirs(os.path.join(d, "queries"))
+    with open(os.path.join(d, "queries", "a.ts"), "w") as fh:
+        fh.write("export const a = 1\n")
+    subprocess.run(["git", "-C", d, "add", "."], check=True)
+    subprocess.run(["git", "-C", d, "commit", "-qm", "init"], check=True)
+    return d, subprocess.run(["git", "-C", d, "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+
+
+class Answer(unittest.TestCase):
+    def test_takes_the_last_object_after_prose(self):
+        text = 'I looked at {the thing}. Then:\n{"verdict": "right", "evidence": []}'
+        self.assertEqual(sr.last_json_object(text)["verdict"], "right")
+
+    def test_prefers_a_fenced_block(self):
+        text = '```json\n{"verdict": "wrong"}\n```\ntrailing {"x": 1}'
+        self.assertEqual(sr.last_json_object(text)["verdict"], "wrong")
+
+    def test_garbage_is_none(self):
+        self.assertIsNone(sr.last_json_object("no json here"))
+
+
+class Clean(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.repo, cls.head = _git_repo()
+
+    def test_drops_paths_the_tree_does_not_have_and_unknown_verdicts(self):
+        raw = {"verdict": "maybe", "evidence": [{"path": "queries/a.ts", "line": "1", "why": "x"},
+                                                  {"path": "made/up.ts", "line": 3, "why": "y"}],
+               "elsewhere": [{"path": "queries/a.ts", "line": 1, "branch": "gone", "why": "z"}],
+               "cause": "", "draftReply": "Fixed in <sha>."}
+        n = sr.clean_note(raw, self.repo, self.head, [], "opus")
+        self.assertEqual(n["verdict"], "unclear")
+        self.assertEqual(n["evidence"], [{"path": "queries/a.ts", "line": 1, "why": "x"}])
+        self.assertEqual(len(n["elsewhere"]), 1)   # unknown branch falls back to the head's tree
+        self.assertIsNone(n["cause"])
+        self.assertEqual(set(n), {"verdict", "evidence", "elsewhere", "cause", "draftReply", "model", "at"})
+
+    def test_unflagged_shape(self):
+        u = sr.clean_unflagged({"items": [{"path": "queries/a.ts", "line": 1, "why": "w"}, {"path": "nope", "line": 1}]},
+                               self.repo, self.head, "opus")
+        self.assertEqual(set(u), {"items", "model", "at"})
+        self.assertEqual(len(u["items"]), 1)
+
+    def test_write_is_atomic_and_leaves_no_temp(self):
+        d = tempfile.mkdtemp()
+        sr.write_atomic(os.path.join(d, "7", "T.json"), {"a": 1})
+        self.assertEqual(os.listdir(os.path.join(d, "7")), ["T.json"])
+
+
+class Idempotent(unittest.TestCase):
+    def test_unchanged_head_and_thread_is_a_no_op(self):
+        repo, head = _git_repo()
+        out = tempfile.mkdtemp()
+        thread = {"id": "T1", "resolved": False, "outdated": False, "path": "queries/a.ts", "line": 1, "originalLine": 1,
+                  "startLine": None, "side": "RIGHT",
+                  "comments": [{"id": "C1", "author": "john-hankles", "body": "b", "at": "t", "commit": head, "hunk": "", "review": "R1"}]}
+        pr = {"number": 7, "title": "t", "body": "", "url": "", "state": "OPEN", "head": head, "headRef": "x",
+              "baseRef": "main", "author": "a", "threads": [thread], "reviews": [{"id": "R1", "state": "COMMENTED"}]}
+        self.assertEqual(sr.process(repo, 7, out, pr=pr, dry_run=True), {"threads": 1, "unflagged": True})
+        sr.write_atomic(os.path.join(out, "7", ".state.json"),
+                        {"threads": {"T1": f"{head}:C1"}, "review": f"R1:{head}"})
+        self.assertEqual(sr.process(repo, 7, out, pr=pr, dry_run=True), {"threads": 0, "unflagged": False})
+        thread["comments"].append({**thread["comments"][0], "id": "C2", "author": "a"})
+        self.assertEqual(sr.process(repo, 7, out, pr=pr, dry_run=True)["threads"], 1)
+
+
+class Hook(unittest.TestCase):
+    def setUp(self):
+        self.repo, _ = _git_repo()
+        self.calls = []
+        ctx.run = lambda argv, timeout=None: subprocess.run(argv, capture_output=True, text=True)
+        hook._seen.clear()
+        hook._queued.clear()
+        hook._ensure_worker = lambda: None
+        while not hook._q.empty():
+            hook._q.get_nowait()
+
+    def _fresh(self, reviews=1, head="h1", state="OPEN"):
+        return {"b": {"number": 9, "reviewCount": reviews, "head": head, "state": state}}
+
+    def _queued(self):
+        out = []
+        while not hook._q.empty():
+            out.append(hook._q.get_nowait()[1])
+        hook._queued.clear()
+        return out
+
+    def test_off_by_default(self):
+        hook.on_refresh(self.repo, "o/r", self._fresh(), lambda s, n: {})
+        self.assertEqual(self._queued(), [])
+
+    def test_queues_on_a_new_review_or_head_only(self):
+        subprocess.run(["git", "-C", self.repo, "config", "stack.second-reader", "true"], check=True)
+        hook.on_refresh(self.repo, "o/r", self._fresh(), lambda s, n: {})
+        self.assertEqual(self._queued(), [9])
+        hook.on_refresh(self.repo, "o/r", self._fresh(), lambda s, n: {})
+        self.assertEqual(self._queued(), [])
+        hook.on_refresh(self.repo, "o/r", self._fresh(reviews=2), lambda s, n: {})
+        self.assertEqual(self._queued(), [9])
+        hook.on_refresh(self.repo, "o/r", self._fresh(reviews=2, head="h2"), lambda s, n: {})
+        self.assertEqual(self._queued(), [9])
+
+    def test_skips_unreviewed_and_closed(self):
+        subprocess.run(["git", "-C", self.repo, "config", "stack.second-reader", "true"], check=True)
+        hook.on_refresh(self.repo, "o/r", self._fresh(reviews=0), lambda s, n: {})
+        hook.on_refresh(self.repo, "o/r", {"c": {"number": 3, "reviewCount": 2, "head": "h", "state": "MERGED"}}, lambda s, n: {})
+        self.assertEqual(self._queued(), [])
+
+    def test_imported_review_branches_ride_the_same_refresh(self):
+        subprocess.run(["git", "-C", self.repo, "config", "stack.second-reader", "true"], check=True)
+        subprocess.run(["git", "-C", self.repo, "branch", "review/pr-42"], check=True)
+        asked = []
+
+        def fetch(slug, numbers):
+            asked.append(numbers)
+            return {"theirs": {"number": 42, "reviewCount": 1, "head": "x", "state": "OPEN"}}
+        hook.on_refresh(self.repo, "o/r", self._fresh(), fetch)
+        self.assertEqual(asked, [[42]])
+        self.assertEqual(sorted(self._queued()), [9, 42])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=1)
