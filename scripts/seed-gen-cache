@@ -281,7 +281,7 @@ def tree_names(root):
 
 # The key's parts. `omit` exists for test-seed-gen-cache, which shows for each one a pair of trees
 # that differ only in that part and emit differently — a cache keyed without it would cross them.
-PARTS = ("compiler", "tool", "names", "listings", "configs", "contents", "pkgjson", "missing", "lock", "side")
+PARTS = ("compiler", "tool", "names", "listings", "configs", "contents", "pkgjson", "missing", "lock", "side", "view")
 
 
 EXTENDS = re.compile(r'"extends"\s*:\s*("(?:[^"\\\\]|\\\\.)*"|\[[^\]]*\])')
@@ -319,6 +319,49 @@ def extended_configs(root, cfg, seen=None):
     return out
 
 
+def view(root, home):
+    """The tree's node_modules as the compiler walks it: each entry (scopes opened) and what it is —
+    a real dir/file, or a link to the home, into the tree, or elsewhere. The graph records where
+    files really were, not which link led there: a link retargeted (@loops/settings at another
+    package) makes the compile read other files through an unchanged graph."""
+    nm = os.path.join(root, "node_modules")
+    out = []
+    if os.path.islink(nm):
+        return ["node_modules -> " + _place(root, home, os.path.normpath(os.path.join(root, os.readlink(nm))))]
+
+    def one(rel):
+        p = os.path.join(nm, rel)
+        if os.path.islink(p):
+            target = os.path.normpath(os.path.join(os.path.dirname(p), os.readlink(p)))
+            out.append(f"{rel} -> {_place(root, home, target)}")
+        elif os.path.isdir(p):
+            out.append(f"{rel}/")
+        else:
+            out.append(rel)
+    try:
+        top = sorted(os.listdir(nm))
+    except OSError:
+        return []
+    for e in top:
+        if e.startswith(".seed-gen-") or e.startswith(".cache-probe"):
+            continue
+        one(e)
+        p = os.path.join(nm, e)
+        if e.startswith("@") and os.path.isdir(p) and not os.path.islink(p):
+            for sub in sorted(os.listdir(p)):
+                one(e + "/" + sub)
+    return out
+
+
+def _place(root, home, real):
+    low = real.lower()
+    if low.startswith(root.lower() + "/"):
+        return "tree:" + real[len(root) + 1:]
+    if home and low.startswith(home.lower() + "/"):
+        return "home:" + real[len(home) + 1:]
+    return "abs:" + real
+
+
 class Keyer:
     """Hashes one tree's view of a graph; file digests are shared across the graphs it tries."""
 
@@ -339,6 +382,9 @@ class Keyer:
             d.update(b"tool\0" + tool_id().encode() + b"\0")
         for n in (names if "names" not in omit else []) + (extra if "listings" not in omit else []):
             d.update(os.fsencode(n) + b"\0")
+        if "view" not in omit:
+            for entry in view(root, self.where.home):
+                d.update(b"view\0" + os.fsencode(entry) + b"\0")
         for n in names if "configs" not in omit else []:
             b = os.path.basename(n)
             if b == "package.json" or b.startswith(("tsconfig", "tsbase")):
