@@ -251,11 +251,12 @@ def compiler_id(root, compiler):
     for top, p in files:
         d.update(os.fsencode(os.path.relpath(p, top)) + b"\0" + file_sha(p).encode())
     cid = d.hexdigest()
-    try:
-        os.makedirs(store("compilers"), exist_ok=True)
-        write_atomic(memo, cid.encode())
-    except OSError:
-        pass
+    if os.environ.get("SEED_GEN_CACHE", "1") != "0":   # off means the store is left alone entirely
+        try:
+            os.makedirs(store("compilers"), exist_ok=True)
+            write_atomic(memo, cid.encode())
+        except OSError:
+            pass
     return cid
 
 
