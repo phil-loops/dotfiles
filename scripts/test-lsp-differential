@@ -16,9 +16,15 @@ mismatch against the byte bar, explained by that emit order rather than by the s
 
   test-lsp-differential [--fast] [--repo DIR] [--work DIR] [--branches a,b,…] [--per-side N]
                         [--orders forward,reverse,zigzag,shuffle] [--trees 1|2] [--refs-only] [--json OUT]
+                        [--gen-cache off|cold|warm]
 
 --trees N sizes the service's tree pool (default 4); --trees 1 measures the time-shared
 alternative, one tree flipped between tip and base.
+
+--gen-cache: the service's seed-gen against a private, emptied seed-gen-cache store — `cold` (default)
+starts it empty, so moves mix hits (commits sharing tRPC inputs) and misses; `warm` first stores every
+commit's emit from a throwaway tree, so every move that changes the types is a restore; `off` runs
+with SEED_GEN_CACHE=0. References are always built with the cache off.
 
 --fast: 5 branches, 10 positions a side, forward+zigzag, references reused from --work's cache.
 Read-only toward branches: every tree is the test's own detached worktree, removed at the end
@@ -272,7 +278,8 @@ def build_reference(lsp, repo, sha, positions, work, peak):
     tree = os.path.realpath(tree)
     os.makedirs(os.path.join(tree, "node_modules"))
     t1 = time.time()
-    r = subprocess.run([os.path.join(SCRIPTS, "seed-gen"), "--sync", tree], capture_output=True, text=True, timeout=1800)
+    r = subprocess.run([os.path.join(SCRIPTS, "seed-gen"), "--sync", tree], capture_output=True, text=True, timeout=1800,
+                       env=dict(os.environ, SEED_GEN_CACHE="0"))
     t2 = time.time()
     gen_key = gen_canon(tree)
     wait_for_memory("a reference tsgo")
@@ -301,6 +308,20 @@ def build_reference(lsp, repo, sha, positions, work, peak):
             "footprintMB": rss, "peakRssMB": peak.take()}
 
 
+def gen_cache_counts(store, mode):
+    """The service run's restores / builds, from the store's log (after the warm-up marker)."""
+    c = {"hits": 0, "misses": 0, "inserts": 0}
+    try:
+        lines = open(os.path.join(store, "log")).read().split("-- warmed\n")[-1].splitlines()
+    except OSError:
+        return c
+    for ln in lines:
+        w = ln.split()
+        if len(w) > 1 and w[1] in ("hit", "miss", "insert"):
+            c[{"hit": "hits", "miss": "misses", "insert": "inserts"}[w[1]]] += 1
+    return c
+
+
 # ── main ─────────────────────────────────────────────────────────────
 
 def main():
@@ -316,6 +337,7 @@ def main():
     ap.add_argument("--keep", action="store_true", help="keep the service's trees")
     ap.add_argument("--trees", default="4")
     ap.add_argument("--json")
+    ap.add_argument("--gen-cache", choices=("off", "cold", "warm"), default="cold")
     a = ap.parse_args()
     repo = os.path.realpath(a.repo)
     work = os.path.realpath(os.makedirs(a.work, exist_ok=True) or a.work)
@@ -374,6 +396,31 @@ def main():
               f"footprint {refs[sha]['footprintMB']}MB peak rss {refs[sha]['peakRssMB']}MB ({time.time() - t:.0f}s)", flush=True)
     if a.refs_only:
         return 0
+
+    # the service's generated-types cache
+    store = os.path.join(work, "gen-cache")
+    if os.path.isdir(store):
+        subprocess.run(["chmod", "-R", "u+w", store])
+        shutil.rmtree(store)
+    os.environ["SEED_GEN_CACHE_DIR"] = store
+    if a.gen_cache == "off":
+        os.environ["SEED_GEN_CACHE"] = "0"
+    else:
+        os.environ.pop("SEED_GEN_CACHE", None)
+    if a.gen_cache == "warm":
+        warm = os.path.join(work, "warm-tree")
+        git(repo, "worktree", "add", "--detach", warm, next(iter(need)))
+        warm = os.path.realpath(warm)
+        os.makedirs(os.path.join(warm, "node_modules"), exist_ok=True)
+        print(f"\n== warming the cache: {len(need)} commits in one throwaway tree")
+        for sha in need:
+            git(warm, "checkout", "-q", "-f", "--detach", sha)
+            r = subprocess.run([os.path.join(SCRIPTS, "seed-gen"), "--sync", warm], capture_output=True, text=True, timeout=1800)
+            print(f"  {sha[:9]}: {(r.stdout.strip().splitlines() or ['current'])[-1]}", flush=True)
+        git(repo, "worktree", "remove", "--force", warm, check=False)
+        shutil.rmtree(warm, ignore_errors=True)
+        os.makedirs(store, exist_ok=True)
+        open(os.path.join(store, "log"), "a").write("-- warmed\n")
 
     # service
     def visits(order):
@@ -462,10 +509,13 @@ def main():
                 git(r, "worktree", "remove", "--force", t.path, check=False)
         shutil.rmtree(state, ignore_errors=True)
         git(repo, "worktree", "prune")
+    report["genCache"] = gen_cache_counts(store, a.gen_cache)
     n_bad = len(report["mismatches"])
     n_order = sum(1 for m in report["mismatches"] if m["orderOnly"])
     print(f"\n{total - n_bad}/{total} answers byte-identical; {n_bad} mismatches ({n_order} order-only); "
           f"{len(report['gen_mismatches'])} .gen mismatches (canonical)")
+    print(f"gen cache ({a.gen_cache}): {report['genCache']['hits']} restores, {report['genCache']['misses']} builds, "
+          f"{report['genCache']['inserts']} stored during the service run")
     for mm in report["mismatches"][:20]:
         print(f"  ✗ {mm['order']} {mm['branch']} {mm['side']} {mm['ask']} ({mm['cat']} {mm['token']})\n"
               f"      got  {mm['got'][:300]}\n      want {mm['want'][:300]}")
