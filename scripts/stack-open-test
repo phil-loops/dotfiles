@@ -334,6 +334,14 @@ else
     [[ "$(md5 -q "$wt/$probe" 2>/dev/null)" == "$md5_before" ]] && ok "the file on disk is untouched" \
                                                                || no "the drive wrote into the file"
 
+    # A ':goto' whose Enter never comes (the deadline landing between echo and Enter) must not
+    # leave its prompt open: the next keys Phil typed went into ':goto 73' and Helix looked wedged.
+    env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx STACK_OPEN_HX_BUDGET=20 \
+        STACK_OPEN_TEST_DROP_ENTER=goto STACK_OPEN_DIR="$T/hx" "$SO" "$BRANCH" "$probe" 21 >/dev/null 2>&1
+    snap=$(tmux capture-pane -p -t "$pane" 2>/dev/null | tail -2)
+    [[ "$snap" == *NOR* && "${snap##*$'\n'}" != :* ]] && ok "a :goto that misses its Enter closes its prompt" \
+                                                    || no "a failed :goto left Helix in its prompt (${${snap##*$'\n'}:0:40})"
+
     # the point of the diff view: the editor itself marks what the branch changed
     dlast=$(( $(wc -l < "$dd/$dfile") ))
     env STACK_OPEN_TMUX="$SESSION" STACK_OPEN_TERMINAL=none STACK_OPEN_EDITOR=hx STACK_OPEN_HX_BUDGET=20 \

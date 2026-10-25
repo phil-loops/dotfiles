@@ -693,14 +693,17 @@ hx_cmd(){   # run one ':' command: open the prompt, watch the body echo back OUT
   before=$(hx_pane_line "$pane")
   tmux send-keys -t "$pane" :
   for i in {1..30}; do
-    hx_out_of_time && return 1
+    hx_out_of_time && break
     sleep 0.05
     last=$(hx_pane_line "$pane")
     # the line must CHANGE into a prompt — Helix pre-fills it with a history suggestion, so
     # "starts with ':'" alone would also match a leftover frame from the previous open
     if [[ "$last" == :* && "$last" != "$before" ]]; then opened=1; break; fi
   done
-  [[ -n "$opened" ]] || return 1
+  # Every failure below closes the prompt this call opened: left open, it swallows the next keys
+  # Phil types (a ':goto 73' that missed its Enter wedged Helix, 2026-10-25). Escape in normal
+  # mode is a no-op, so closing a prompt that never opened costs nothing.
+  [[ -n "$opened" ]] || { tmux send-keys -t "$pane" Escape; return 1; }
   width=$(tmux display -p -t "$pane" '#{pane_width}' 2>/dev/null) || width=0
   # PASTE the body, never type it: Helix re-lists the directory being completed on every
   # keystroke, and a path into the 120-worktree scratch dir took 4.6s to echo typed — past this
@@ -710,15 +713,16 @@ hx_cmd(){   # run one ':' command: open the prompt, watch the body echo back OUT
   tmux set-buffer -b "so-$$" -- "$cmd" 2>/dev/null && tmux paste-buffer -p -d -b "so-$$" -t "$pane" 2>/dev/null \
     || tmux send-keys -t "$pane" -l "$cmd"
   for i in {1..60}; do
-    hx_out_of_time && return 1
+    hx_out_of_time && break
     sleep 0.05
     last=$(hx_pane_line "$pane")
-    if [[ "$last" == "$expect" ]]; then tmux send-keys -t "$pane" Enter; return 0; fi
     # too long to fit — Helix scrolls the prompt, so only its tail is on screen
-    if (( ${#expect} >= width )) && [[ -n "$last" && "$expect" == *"$last" ]]; then
+    if [[ "$last" == "$expect" ]] || { (( ${#expect} >= width )) && [[ -n "$last" && "$expect" == *"$last" ]] }; then
+      [[ "${STACK_OPEN_TEST_DROP_ENTER:-}" == "${cmd%% *}" ]] && break   # stack-open-test: the deadline lands between echo and Enter
       tmux send-keys -t "$pane" Enter; return 0
     fi
   done
+  tmux send-keys -t "$pane" Escape
   return 1
 }
 
@@ -821,7 +825,10 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
          && hx_cmd "$pane" "cd ${dir}" \
          && hx_cmd "$pane" "open ${rel_target}"; then
         # The file IS open now — a cursor that didn't land is worth a warning, not a rival window.
-        hx_goto_line "$pane" "$line" || echo "stack-open: opened $rel_target but couldn't land on line $line" >&2
+        if ! hx_goto_line "$pane" "$line"; then
+          hx_out_of_time && starved=1   # the background retry lands it — the file's open, only the line is owed
+          echo "stack-open: opened $rel_target but couldn't land on line $line" >&2
+        fi
       else
         hx_out_of_time && starved=1   # read it BEFORE the recovery extends the deadline
         # A batch that died mid-way may have typed its body into the buffer. Undo only when the
