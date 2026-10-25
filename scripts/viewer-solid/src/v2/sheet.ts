@@ -1,6 +1,6 @@
 // What the `?` sheet shows: the current surface's scopes, the ones live under the cursor first,
 // then everywhere. Other surfaces' keys are left out — they don't work here.
-const SURFACE_SCOPES: Record<string, string[]> = {
+export const SURFACE_SCOPES: Record<string, string[]> = {
   forests: ["branch", "project", "row", "forests"],
   review: ["pending", "thread", "line", "review"],
   dashboard: ["dashboard"],

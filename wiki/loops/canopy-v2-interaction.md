@@ -14,9 +14,9 @@ lede: Every action is a named command with one key, reachable from the palette. 
 - `K` shows types; `gd` goes to definition.
 - `j`/`k` move, `↵` opens, `esc` backs out.
 - `m` shows the map, `e` edits the words, `o` opens in Helix.
-- `f`/`w`/`x` set focus, workbench and archive.
+- `f`/`w`/`X` set focus, workbench and archive; capitals toggle what's shown (`A` the archive, `F` only what's ready, `O` outdated conversations).
 
-No key means different things on different pages.
+No key means different things on different pages — `bindings.test.ts` loads the registry and fails on any key that does, unless the two commands are listed there as the same move (`j` is next row and next line).
 
 **Three surfaces:**
 

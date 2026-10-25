@@ -15,7 +15,7 @@ lede: Built alongside the current app at /v2 on the same server, surface by surf
 
 Done when the current app's top 20 commands are measured, giving a baseline.
 
-**Phase 1 — Forests.** Focus, workbench, archive, inline branch spines, the ready filter (absorbing the outbox), `f`/`w`/`x`. Switch `/` to v2 when it beats v1 on paint and feedback.
+**Phase 1 — Forests.** Focus, workbench, archive, inline branch spines, the ready filter (absorbing the outbox), `f`/`w`/`X`. Switch `/` to v2 when it beats v1 on paint and feedback.
 
 **Phase 2 — Branch.** The reading column, words on `e`, types on `K`/`gd`, map and spine as overlays, the review packet. Switch branch routes.
 

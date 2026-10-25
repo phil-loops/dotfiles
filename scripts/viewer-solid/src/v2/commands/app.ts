@@ -102,6 +102,6 @@ command({
   title: "Change the dashboard's window",
   scope: "dashboard",
   budget: "local",
-  keys: ["t"],
+  keys: ["T"],
   local: () => setDashDays((d) => RANGES[(RANGES.indexOf(d) + 1) % RANGES.length]),
 });

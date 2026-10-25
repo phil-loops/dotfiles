@@ -19,7 +19,8 @@ import {
 } from "../ui";
 
 const LABEL: Record<ProjectState, string> = { focus: "focus", workbench: "the workbench", archive: "the archive" };
-const KEY: Record<ProjectState, string> = { focus: "f", workbench: "w", archive: "x" };
+const KEY: Record<ProjectState, string> = { focus: "f", workbench: "w", archive: "X" };
+const V1_KEY: Record<ProjectState, string> = { focus: "f", workbench: "w", archive: "x" };
 
 function moveTo(state: ProjectState) {
   return (id: string): Write | null => {
@@ -47,7 +48,7 @@ for (const state of ["focus", "workbench", "archive"] as ProjectState[]) {
     scope: "project",
     budget: "config-write",
     keys: [KEY[state]],
-    v1: [`key:${KEY[state]}`],
+    v1: [`key:${V1_KEY[state]}`],
     available: (id) => exists(id) && view("project", id!)!.state !== state,
     write: moveTo(state),
   });
@@ -58,7 +59,6 @@ command({
   title: "Restore from the archive",
   scope: "project",
   budget: "config-write",
-  keys: ["R"],
   available: (id) => exists(id) && view("project", id!)!.state === "archive",
   write: moveTo("workbench"),
 });
@@ -196,7 +196,7 @@ command({
   title: "Show only what's ready for you",
   scope: "forests",
   budget: "local",
-  keys: ["r"],
+  keys: ["F"],
   v1: ["nav:outbox"],
   local: () => {
     setArmed(undefined);
@@ -209,7 +209,7 @@ command({
   title: "Show or hide the archive",
   scope: "forests",
   budget: "local",
-  keys: ["a"],
+  keys: ["A"],
   available: () => !readyOnly(),
   local: () => setShowArchive((v) => !v),
 });
