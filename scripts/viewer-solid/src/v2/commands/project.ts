@@ -16,6 +16,8 @@ import {
   setExpanded,
   setLaunching,
   setReadyOnly,
+  setForestFace,
+  forestFace,
   setWordsOpen,
   setShowArchive,
   toggleIn,
@@ -215,6 +217,30 @@ command({
   keys: ["e"],
   available: (id) => surface().id === "forest" && !!id,
   local: (id) => setWordsOpen((s) => toggleIn(s, id!)),
+});
+command({
+  id: "forest.face",
+  title: "The feature's story ↔ its branches",
+  scope: "forest",
+  budget: "local",
+  keys: ["tab"],
+  local: () => {
+    setForestFace(forestFace() === "story" ? "branches" : "story");
+    setCursor(undefined);
+    setCursorIdx(0);
+  },
+});
+command({
+  id: "story.why",
+  title: "Show why a landed chapter happened",
+  scope: "forest",
+  budget: "local",
+  keys: ["e"],
+  available: () => forestFace() === "story" && !!model.selected()?.startsWith("d:"),
+  local: () => {
+    const k = model.selected()!;
+    setWordsOpen((s) => toggleIn(s, k));
+  },
 });
 command({
   id: "forest.leave",

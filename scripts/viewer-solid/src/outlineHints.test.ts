@@ -43,6 +43,9 @@ test("a baked forest block is detected and stripped, prose kept", () => {
   assert.equal(stripPlan(body), "The query layer stays thin.");
   assert.equal(stripPlan("why it matters\n\nPart of a stack, in merge order:\n  1. [this branch]\n  2. #123"), "why it matters");
   assert.equal(stripPlan("prose\n-- forest --\nPart of x, 1 of 2."), "prose");
+  // GitHub wraps a squash message at ~72 columns, so a long step continues on an unindented line
+  const wrapped = "the why\n\nPart of a stack, in merge order:\n  1. #11090\n  2. [this branch]\n3. disable a team's domains in a transaction that records\nan event for each one it turns off\n4. record a disable event wherever an admin or a health check disables a\nsingle domain\n\n---\nTraffic Cop";
+  assert.equal(stripPlan(wrapped), "the why\n\n---\nTraffic Cop");
   const h = hintsFor({ subject: "feat(loo-9): add", body }, { opening: true, ticket: "loo-9" });
   assert.deepEqual(ids(h), ["plan"]);
 });

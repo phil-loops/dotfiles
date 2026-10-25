@@ -6,7 +6,7 @@ import { list, view, world } from "./store";
 import type { Branch, Pr, Project } from "./types";
 import { queue } from "./tracker";
 import type { Scope } from "./registry";
-import { cursor, cursorIdx, expanded, now, readyOnly, showArchive } from "./ui";
+import { cursor, cursorIdx, expanded, forestFace, now, readyOnly, showArchive } from "./ui";
 import { page } from "./review/page";
 
 export interface BranchView {
@@ -31,6 +31,8 @@ const byName = (a: Project, b: Project) => a.name.localeCompare(b.name) || a.rep
 export const pkey = (id: string) => `p:${id}`;
 export const bkey = (id: string) => `b:${id}`;
 export const tkey = (id: string) => `t:${id}`;
+/** a landed chapter of a forest's story — its branch is gone, so it's keyed by the landed PR */
+export const dkey = (id: string) => `d:${id}`;
 
 export const model = createRoot(() => {
   const projects = createMemo(() => {
@@ -79,6 +81,9 @@ export const model = createRoot(() => {
 
   const todos = createMemo(() => queue(list("todo")));
 
+  /** A forest's merged PRs, oldest first — its story's opening chapters. */
+  const landedOf = (pid: string) => list("landed").filter((l) => l.project === pid).sort((a, b) => a.at.localeCompare(b.at));
+
   /** The forest a /v2/p/<repo>/<project> page shows. */
   const pageProject = createMemo(() => {
     if (surface().id !== "forest") return undefined;
@@ -94,7 +99,13 @@ export const model = createRoot(() => {
     if (surface().id === "todo") return todos().flatMap((s) => s.items.map((t) => tkey(t.id)));
     if (surface().id === "forest") {
       const pid = pageProject();
-      return pid ? (forests().get(pid)?.branches ?? []).map((v) => bkey(v.b.id)) : [];
+      if (!pid) return [];
+      const bs = forests().get(pid)?.branches ?? [];
+      if (forestFace() === "branches") return bs.map((v) => bkey(v.b.id));
+      // the story's order: landed, then in flight, then what's left (Story.tsx draws the same)
+      const live = bs.filter((v) => v.st.ship !== "landed");
+      const flying = (v: BranchView) => !!v.pr || v.b.pushed !== "local";
+      return [...landedOf(pid).map((l) => dkey(l.id)), ...live.filter(flying).map((v) => bkey(v.b.id)), ...live.filter((v) => !flying(v)).map((v) => bkey(v.b.id))];
     }
     const p = projects();
     const f = forests();
@@ -146,7 +157,7 @@ export const model = createRoot(() => {
     return k?.startsWith("t:") ? k.slice(2) : undefined;
   });
 
-  return { projects, forests, todos, pageProject, rows, selected, selectedBranch, selectedProject, selectedItem, branchView };
+  return { projects, forests, todos, pageProject, landedOf, rows, selected, selectedBranch, selectedProject, selectedItem, branchView };
 });
 
 /** What a command of this scope acts on, from the cursor. */
