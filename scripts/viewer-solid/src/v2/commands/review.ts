@@ -8,6 +8,7 @@ import { command, type Write } from "../registry";
 import { view, world } from "../store";
 import type { Item, Thread } from "../types";
 import { setCursor, setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
+import { shown } from "../words";
 import { bkey } from "../model";
 import { suggestionOf } from "../review/markdown";
 import { atRepoPath, page as pg, short, sideLine, type Composer } from "../review/page";
@@ -125,6 +126,125 @@ command({
   },
 });
 command({ id: "review.filter", title: "Find a file", scope: "review", budget: "local", keys: ["t"], local: () => pg.setFiltering(true) });
+// ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
+
+const threadOf = (id: string | undefined) => (id ? (view("thread", id) as Thread | undefined) : undefined);
+const closeAddress = () => {
+  pg.setOverlay(null);
+  pg.setAddressing(null);
+  pg.setAddressPicking(false);
+};
+
+command({
+  id: "review.address",
+  title: "Address it — hand it to Claude, fix it yourself, or pick its commit",
+  scope: "thread",
+  budget: "local",
+  keys: ["E"],
+  available: (id) => !!threadOf(id) && !threadOf(id)!.outdated && !threadOf(id)!.resolved,
+  local: (id) => {
+    pg.setAddressing(id!);
+    pg.setAddressPicking(false);
+    pg.setOverlay("address");
+  },
+});
+command({
+  id: "review.address.claude",
+  title: "Hand a thread to Claude to fix",
+  scope: "review",
+  budget: "slow-io",
+  quiet: true,
+  write: (id) => {
+    const t = threadOf(id);
+    if (!t) return null;
+    closeAddress();
+    return {
+      ops: [],
+      path: repoPath("/review-address"),
+      body: { branch: name(), thread: t.node, claude: true },
+      settled: () => true,
+      said: "drafted into a new Claude window — read it and send it there; the reply waits for its commit",
+      failed: "couldn't start the Claude session",
+      inverse: (a) => (a.key ? { id: "review.address.cancel", target: pg.id(), arg: a.key } : undefined),
+    };
+  },
+});
+command({
+  id: "review.address.helix",
+  title: "Fix a thread yourself in Helix",
+  scope: "review",
+  budget: "slow-io",
+  quiet: true,
+  write: () => {
+    closeAddress();
+    const w = openHere();
+    return w && { ...w, said: "fix it there and commit; then E here picks the commit" };
+  },
+});
+command({
+  id: "review.address.pick.list",
+  title: "List the commits that could fix a thread",
+  scope: "review",
+  budget: "local",
+  quiet: true,
+  local: () => pg.setAddressPicking(!pg.addressPicking()),
+});
+command({
+  id: "review.address.pick",
+  title: "Declare a commit a thread's fix",
+  scope: "review",
+  budget: "git-write",
+  quiet: true,
+  write: (t) => {
+    const [id, sha] = (t ?? "").split(" ");
+    const th = threadOf(id);
+    const o = shown.get(pg.id());
+    if (!th || !o || !sha) return null;
+    closeAddress();
+    return {
+      ops: [],
+      path: repoPath("/review-address"),
+      body: { branch: name(), thread: th.node, sha, head: o.head },
+      settled: () => view("branch", pg.id())?.tip !== o.head,
+      said: `${sha.slice(0, 7)} addresses it now — the reply waits for your push · u takes it back`,
+      failed: "couldn't add the trailer — the branch may have moved",
+      inverse: (a) => (a.key ? { id: "review.address.undo", target: pg.id(), arg: a.key } : undefined),
+    };
+  },
+});
+command({
+  id: "review.address.undo",
+  title: "Take back a declared fix",
+  scope: "review",
+  budget: "git-write",
+  quiet: true,
+  write: (_id, key) => {
+    const tip = view("branch", pg.id())?.tip;
+    return {
+      ops: [],
+      path: repoPath("/review-address"),
+      body: { branch: name(), undo: key },
+      settled: () => view("branch", pg.id())?.tip !== tip,
+      said: "the trailer and its reply are gone",
+      failed: "couldn't take it back",
+    };
+  },
+});
+command({
+  id: "review.address.cancel",
+  title: "Drop a reply that waits for a fix",
+  scope: "review",
+  budget: "config-write",
+  quiet: true,
+  write: (_id, key) => ({
+    ops: [],
+    path: repoPath("/review-draft"),
+    body: { branch: name(), op: "remove", key },
+    settled: () => true,
+    failed: "couldn't drop the reply",
+  }),
+});
+
 // ── context: the unchanged lines between hunks ──
 
 command({
@@ -201,13 +321,16 @@ command({
   scope: "review",
   budget: "slow-io",
   keys: ["o"],
-  write: (): Write | null => {
-    const h = pg.here();
-    if (!h || h.kind === "file") return null;
-    const line = h.kind === "line" ? sideLine(h.row).line : h.kind === "gap" ? null : thread(h.id)?.local?.line ?? null;
-    return { ops: [], path: repoPath("/open"), body: { branch: name(), path: h.path, line }, settled: () => true, failed: "couldn't open it in Helix" };
-  },
+  write: () => openHere(),
 });
+
+/** Open what the cursor is on in the warm Helix, at its line. */
+function openHere(): Write | null {
+  const h = pg.here();
+  if (!h || h.kind === "file") return null;
+  const line = h.kind === "line" ? sideLine(h.row).line : h.kind === "gap" ? null : thread(h.id)?.local?.line ?? null;
+  return { ops: [], path: repoPath("/open"), body: { branch: name(), path: h.path, line }, settled: () => true, failed: "couldn't open it in Helix" };
+}
 
 // ── viewed ──
 

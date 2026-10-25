@@ -119,6 +119,8 @@ export interface Thread {
   comments: Comment[];
   /** the anchor followed to the local tip; addressedBy names the commit that changed its lines */
   local: { line: number; startLine: number | null; addressedBy: string | null } | null;
+  /** commits that declare they address it — an `Addresses: <its first comment's url>` trailer */
+  fixedBy: { sha: string; short: string; subject: string }[];
   note: Note | null;
   /** client-only: a suggestion being applied */
   applying?: boolean;
@@ -173,6 +175,10 @@ export interface Item {
   body: string;
   state: "draft" | "waiting" | "sending" | "pending" | "submitted" | "gone";
   waitsFor: string[];
+  /** a reply that names its thread's fix ("done in {fix}"): the thread's URL, and whether no
+   *  commit declares it yet */
+  fixFor?: string;
+  waitingFix?: boolean;
   err: string | null;
   send: boolean;
   at: string;

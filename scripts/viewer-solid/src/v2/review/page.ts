@@ -108,7 +108,11 @@ export const page = createRoot(() => {
   const [unfold, setUnfold] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const [composer, setComposer] = createSignal<Composer | null>(null);
   const [texts, setTexts] = createSignal<ReadonlyMap<string, string>>(new Map());
-  const [overlay, setOverlay] = createSignal<"map" | "words" | null>(null);
+  const [overlay, setOverlay] = createSignal<"map" | "words" | "address" | null>(null);
+  /** the thread E is addressing, while its chooser is open */
+  const [addressing, setAddressing] = createSignal<string | null>(null);
+  /** its chooser is showing the commits to pick from */
+  const [addressPicking, setAddressPicking] = createSignal(false);
   /** block key → viewed, ahead of the server's copy while a write is in flight */
   const [viewedOverride, setViewedOverride] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const [filter, setFilter] = createSignal("");
@@ -306,7 +310,7 @@ export const page = createRoot(() => {
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
-    overlay, setOverlay, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,
+    overlay, setOverlay, addressing, setAddressing, addressPicking, setAddressPicking, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,
   };
 });
 

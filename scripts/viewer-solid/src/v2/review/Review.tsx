@@ -11,7 +11,7 @@ import { highlight, langOf } from "./highlight";
 import { page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
 import Conversation from "./Conversation";
-import { MapOverlay, Words } from "./Overlays";
+import { AddressSheet, MapOverlay, Words } from "./Overlays";
 import TypesPop from "./TypesPop";
 import { notePointer } from "./types";
 
@@ -56,6 +56,9 @@ export default function Review() {
       </Show>
       <Show when={pg.overlay() === "map"}>
         <MapOverlay />
+      </Show>
+      <Show when={pg.overlay() === "address"}>
+        <AddressSheet />
       </Show>
       <TypesPop />
     </div>

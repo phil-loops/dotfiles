@@ -8,7 +8,9 @@
 #   thread  <repo>:<branch>#<node>   a review thread: full comment chain, GitHub's anchor (line on
 #                                    the PR head) and `local` — that anchor followed to the local tip
 #                                    (srv/linemap.py), with the commit that changed it, if one did;
-#                                    `note` is the second reader's, when it left one
+#                                    `note` is the second reader's, when it left one; `fixedBy` the
+#                                    commits that declare they address it (an `Addresses: <url of its
+#                                    first comment>` trailer — wiki canopy-v2-address)
 #   draft   <repo>:<branch>          the ledger's items for this branch (below), each with its state
 #
 # The ledger (<common>/stack-review-ledger.json) holds every comment and reply Phil writes here,
@@ -26,6 +28,14 @@
 #                                                         send: true goes on to the pending review
 #                       {branch, op: send, keys?}        send these drafts (all, without keys)
 #                       {branch, op: edit|remove, key, body?}   a draft not yet sent
+#   POST /review-address {branch, thread, sha, head}     declare `sha` the thread's fix: its message
+#                                                         gains `Addresses: <thread url>` (outline's
+#                                                         guarded rewrite) and a reply "done in {fix}"
+#                                                         is drafted to ride the push
+#                        {branch, thread, claude: true}   hand it to a fresh Claude in the branch's
+#                                                         worktree, the prompt drafted unsent, and
+#                                                         draft the reply to wait for its fix
+#                        {branch, undo: key}              take both back (outline undo + the draft)
 #   POST /review-apply  {branch, thread}                 apply a suggestion as a LOCAL commit — git
 #                                                         only, landed the way /revert-commit lands
 #                                                         one (reset --keep in the branch's worktree,
@@ -215,6 +225,7 @@ def entities(name):
         live = [t for t in pr["threads"] if not t["outdated"] and t["line"] is not None and t["side"] == "RIGHT"]
         mapping = linemap.commits_between(pr["head"], tip, [t["path"] for t in live])
         by_node, unflagged = notes(pr["number"])
+        fixed = fixes(snap, b, pr)
         for t in pr["threads"]:
             local = None
             if not t["outdated"] and t["line"] is not None:
@@ -228,16 +239,19 @@ def entities(name):
                     local = {"line": t["line"], "startLine": t["startLine"], "addressedBy": None}
             tid = f"{cid}#{t['node']}"
             out["thread"][tid] = {"id": tid, "repo": name, "branch": b, "pr": pr["number"], **t,
-                                  "local": local, "note": by_node.get(t["node"])}
+                                  "local": local, "note": by_node.get(t["node"]),
+                                  "fixedBy": fixed.get(thread_url(t)) or []}
         seen = on_github(pr)
         mine = []
         for it in items:
             if it["branch"] != b:
                 continue
-            waits = [w for w in it.get("waitsFor") or [] if not on_origin(snap, pr, w)]
-            mine.append({**{k: it.get(k) for k in ("key", "kind", "path", "side", "line", "startLine", "thread", "body", "err", "at")},
+            held = [w for w in waits(snap, pr, it) if not on_origin(snap, pr, w)]
+            no_fix = bool(it.get("fixFor")) and not _fix_of(snap, it, pr)
+            mine.append({**{k: it.get(k) for k in ("key", "kind", "path", "side", "line", "startLine", "thread", "body", "err", "at", "fixFor")},
                          "threadId": f"{cid}#{it['thread']}" if it.get("thread") else None,
-                         "state": shown(it, pr, seen, waits), "waitsFor": waits, "send": bool(it.get("send"))})
+                         "state": "waiting" if no_fix and it.get("state") in ("draft", None) else shown(it, pr, seen, held),
+                         "waitsFor": held, "waitingFix": no_fix, "send": bool(it.get("send"))})
         out["conv"][cid] = {
             "id": cid, "repo": name, "branch": b, "number": pr["number"], "title": pr["title"], "body": pr["body"],
             "url": pr["url"], "author": pr["author"], "state": pr["state"], "headRef": pr["headRef"],
@@ -265,7 +279,9 @@ def send_one(item, req=None, released=False):
     recognised, not sent again). Raises ghreview.Refused / Waiting; records the outcome."""
     snap = repostate.snapshot()
     pr = ghreview.refetch(item["number"]) or _pr_for(item["branch"])
-    if any(not on_origin(snap, pr, w) for w in item.get("waitsFor") or []):
+    if item.get("fixFor") and not _fix_of(snap, item, pr):
+        raise Waiting(item["key"])   # no commit declares the thread yet (or any more)
+    if any(not on_origin(snap, pr, w) for w in waits(snap, pr, item)):
         raise Waiting(item["key"])
     if item["key"] in on_github(pr):
         _update(item["key"], state="sent", err=None, send=False, sentAt=time.time())
@@ -281,7 +297,8 @@ def send_one(item, req=None, released=False):
         if not review:
             got = ghreview.mutate("addPullRequestReview", {"pullRequestId": pr["id"], "commitOID": pr["head"]}, req, released)
             review = got["pullRequestReview"]["id"]
-        body = item["body"] + ghreview.marker(item["key"])
+        text = item["body"].replace("{fix}", _fix_of(snap, item, pr)["short"]) if item.get("fixFor") else item["body"]
+        body = text + ghreview.marker(item["key"])
         if item["kind"] == "reply":
             ghreview.mutate("addPullRequestReviewThreadReply",
                             {"pullRequestReviewThreadId": item["thread"], "pullRequestReviewId": review, "body": body}, req, released)
@@ -311,7 +328,7 @@ def pushed():
 def release_due():
     """Send each draft Phil already sent that was waiting on a push, once its commits are on origin.
     Cheap when nothing moved: only a change in origin's refs re-checks; sending runs off the tick."""
-    items = [i for i in _items() if i.get("state") == "draft" and i.get("send") and i.get("waitsFor")]
+    items = [i for i in _items() if i.get("state") == "draft" and i.get("send") and (i.get("waitsFor") or i.get("fixFor"))]
     if not items or _RELEASE["busy"]:
         return
     snap = repostate.snapshot()
@@ -320,7 +337,8 @@ def release_due():
         return
     _RELEASE["seen"] = sig
     prs = reviewed(snap)
-    due = [i["key"] for i in items if prs.get(i["branch"]) and all(on_origin(snap, prs[i["branch"]], w) for w in i["waitsFor"])]
+    due = [i["key"] for i in items if prs.get(i["branch"]) and (not i.get("fixFor") or _fix_of(snap, i, prs[i["branch"]]))
+           and all(on_origin(snap, prs[i["branch"]], w) for w in waits(snap, prs[i["branch"]], i))]
     if due:
         _RELEASE["busy"] = True
         threading.Thread(target=_release, args=(ctx.repo_cwd(), due), daemon=True).start()
@@ -388,6 +406,73 @@ def _guarded(fn):
 
 _SHA_WORD = re.compile(r"\b[0-9a-f]{7,40}\b")
 
+# ── addressing a thread: a declared link, carried in the commit ──────────
+
+TRAILER = "Addresses"
+_TRAILER_LINE = re.compile(r"^[A-Za-z][A-Za-z-]*: \S")
+_FIXES = {}   # (repo, base, tip) -> {thread url: [{sha, short, subject}]}
+
+
+def add_trailer(body, url):
+    """The message body naming `url` as a thread it addresses, in its trailer block (made if it
+    has none); a body that already names it is returned as it is."""
+    line = f"{TRAILER}: {url}"
+    body = (body or "").rstrip()
+    if line in body.splitlines():
+        return body
+    if not body:
+        return line
+    last = body.split("\n\n")[-1]
+    trailers = all(_TRAILER_LINE.match(ln) for ln in last.splitlines())
+    return f"{body}\n{line}" if trailers and "\n\n" in body else f"{body}\n\n{line}"
+
+
+def fixes_between(base, branch):
+    """{thread url: [commits]} for the commits in base..branch whose trailers name a thread, newest
+    first. git parses the trailers, so a reworded or rebased commit keeps its link."""
+    fmt = f"%H%x1f%s%x1f%(trailers:key={TRAILER},valueonly,separator=%x1d)%x1e"
+    out = {}
+    for rec in ctx.run(["git", "log", f"--format={fmt}", f"{base}..{branch}"]).stdout.split("\x1e"):
+        parts = rec.strip("\n").split("\x1f")
+        if len(parts) < 3:
+            continue
+        for url in filter(None, (u.strip() for u in parts[2].split("\x1d"))):
+            out.setdefault(url, []).append({"sha": parts[0], "short": parts[0][:7], "subject": parts[1]})
+    return out
+
+
+def fixes(snap, branch, pr):
+    """fixes_between the PR's base and the local tip, memoised on both — a spawn only when they move."""
+    base = f"origin/{pr['base']}" if snap.remote(pr["base"]) else pr["base"]
+    key = (ctx.repo_cwd(), base, snap.local(branch))
+    hit = _FIXES.get(key)
+    if hit is None:
+        hit = _FIXES[key] = fixes_between(base, branch)
+        if len(_FIXES) > 400:
+            for k in list(_FIXES)[:200]:
+                del _FIXES[k]
+    return hit
+
+
+def thread_url(t):
+    return ((t.get("comments") or [{}])[0] or {}).get("url") or ""
+
+
+def _fix_of(snap, item, pr):
+    """The commit a "done in {fix}" reply names now: the newest one declaring its thread."""
+    got = fixes(snap, item["branch"], pr).get(item.get("fixFor") or "") or []
+    return got[0] if got else None
+
+
+def waits(snap, pr, item):
+    """What a draft waits on before it can go: the commits its body names, and its fix's."""
+    out = list(item.get("waitsFor") or [])
+    if item.get("fixFor"):
+        fx = _fix_of(snap, item, pr)
+        if fx and fx["sha"] not in out:
+            out.append(fx["sha"])
+    return out
+
 
 def waits_for(branch, pr, body):
     """The unpushed commits a body names (full shas): its draft waits for them to reach origin."""
@@ -408,6 +493,8 @@ def _new_item(branch, pr, it):
         if not any(t["node"] == it.get("thread") for t in pr["threads"]):
             raise ghreview.Refused("that thread isn't on this PR")
         out["thread"] = it["thread"]
+        if it.get("fixFor"):
+            out["fixFor"] = str(it["fixFor"])
     else:
         if not it.get("path") or not it.get("line"):
             raise ghreview.Refused("a comment needs a path and a line")
@@ -574,3 +661,101 @@ def apply(req, d):
     new = _commit_file(tip, t["path"], text, f"fix{scope}: apply {src['author']}'s suggestion in {leaf}\n\n{src['url']}\n")
     _land(branch, tip, new, t["path"])
     _send(req, 200, {"ok": True, "sha": new})
+
+
+# ── address: declare a commit the thread's fix ───────────────────────────
+
+class _Answer:
+    """Stands in for a request so one handler can call another and read what it answered."""
+
+    def __init__(self):
+        self.code, self.data = 0, {}
+
+    def _send(self, code, body, ctype=None):
+        self.code = code
+        try:
+            self.data = json.loads(body) if body else {}
+        except ValueError:
+            self.data = {"err": str(body)[:200]}
+
+    def ok(self):
+        return self.code == 200 and self.data.get("ok") is not False
+
+
+def address_prompt(branch, pr, t, note=None):
+    """What a Claude session is handed to address one thread: the conversation, the second
+    reader's read of it, where it is, and how to land the fix so the viewer can link it."""
+    url = thread_url(t)
+    out = [f"Address this review comment on PR #{pr['number']} (branch `{branch}`), at `{t['path']}:{t.get('line') or t.get('originalLine') or '?'}`.", ""]
+    for c in t.get("comments") or []:
+        out.append(f"{c.get('author') or 'someone'} wrote:")
+        out += [f"> {ln}" if ln else ">" for ln in (c.get("body") or "").splitlines()]
+        out.append("")
+    if note:
+        out.append(f"The second reader's read: {note.get('verdict') or 'unclear'}.")
+        for k, label in (("evidence", "Evidence"), ("elsewhere", "Elsewhere"), ("cause", "Cause")):
+            v = note.get(k)
+            if v:
+                out.append(f"{label}: {v if isinstance(v, str) else json.dumps(v)}")
+        out.append("")
+    out += [
+        "Make the change in this worktree, then commit it as one commit: a subject in Phil's voice (at most 40 characters after `type(scope):`; a follow-up commit reads bare, no prefix), and this trailer as the message's last line:",
+        "",
+        f"{TRAILER}: {url}",
+        "",
+        "Don't push and don't reply on GitHub. The viewer links the commit to the thread from that trailer and has already drafted the reply (\"done in <sha>\"), which goes out with Phil's push. If the comment is wrong or needs no change, say so here instead of committing.",
+    ]
+    return "\n".join(out)
+
+
+def _launch_claude(branch, prompt):
+    """A fresh Claude in the branch's worktree with `prompt` typed into its composer, never sent
+    (stack-claude's draft mode) — Phil reads and sends it."""
+    env = dict(os.environ, STACK_CLAUDE_DRAFT="1")
+    p = subprocess.Popen([os.path.join(ctx.SCRIPTS, "stack-claude"), branch], stdin=subprocess.PIPE, env=env,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd=ctx.repo_cwd(), start_new_session=True)
+    p.stdin.write(prompt.encode())
+    p.stdin.close()
+
+
+@_guarded
+def address(req, d):
+    """Declare `sha` the thread's fix, in one step: the commit's message gains the thread's
+    Addresses trailer through outline's guarded rewrite (same tree, refused if the branch moved),
+    and a reply "done in {fix}" is drafted to go into the pending review with the push. `undo`
+    takes both back."""
+    from . import outline
+    branch = d.get("branch") or ""
+    if d.get("undo"):
+        ans = _Answer()
+        outline.undo(ans, json.dumps({"branch": branch}))
+        if not ans.ok():
+            raise ghreview.Refused(ans.data.get("err") or "couldn't undo the trailer")
+        with _FLOCK:
+            _save_items([i for i in _items() if not (i["key"] == d["undo"] and i.get("state") in ("draft", None))])
+        return _send(req, 200, {"ok": True})
+    pr = _pr_for(branch)
+    t = next((x for x in pr["threads"] if x["node"] == d.get("thread")), None)
+    if not t or not thread_url(t):
+        raise ghreview.Refused("that thread isn't on this PR")
+    if d.get("claude"):
+        note = notes(pr["number"])[0].get(t["node"])
+        _launch_claude(branch, address_prompt(branch, pr, t, note))
+        item = dict(_new_item(branch, pr, {"kind": "reply", "thread": t["node"], "body": "done in {fix}", "fixFor": thread_url(t)}), send=True)
+        with _FLOCK:
+            _save_items([*_items(), item])
+        return _send(req, 200, {"ok": True, "key": item["key"]})
+    sha = d.get("sha") or ""
+    msg = ctx.run(["git", "log", "-1", "--format=%s%x1f%b", sha])
+    if msg.returncode != 0 or "\x1f" not in msg.stdout:
+        raise ghreview.Refused(f"no commit {sha[:7]}")
+    subject, body = msg.stdout.split("\x1f", 1)
+    ans = _Answer()
+    outline.save(ans, json.dumps({"branch": branch, "head": d.get("head") or "",
+                                  "edits": [{"sha": sha, "subject": subject.strip(), "body": add_trailer(body.strip(), thread_url(t))}]}))
+    if not ans.ok():
+        raise ghreview.Refused(ans.data.get("err") or "couldn't add the trailer")
+    item = dict(_new_item(branch, pr, {"kind": "reply", "thread": t["node"], "body": "done in {fix}", "fixFor": thread_url(t)}), send=True)
+    with _FLOCK:
+        _save_items([*_items(), item])
+    _send(req, 200, {"ok": True, "key": item["key"], "newTip": ans.data.get("newTip")})
