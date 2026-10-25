@@ -19,7 +19,7 @@ interface World {
 const [world, setWorld] = createStore<World>({
   ready: false,
   epoch: "",
-  versions: { git: 0, remote: 0, review: 0 },
+  versions: { git: 0, remote: 0, review: 0, todo: 0 },
   entities: emptyEntities(),
   conn: "connecting",
 });

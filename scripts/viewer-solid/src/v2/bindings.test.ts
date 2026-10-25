@@ -24,7 +24,7 @@ globalThis.setInterval = ((fn: () => void, ms: number) => every(fn, ms).unref())
 const { applyKeys, clashes, validKey } = await import("./bindings");
 
 async function registry() {
-  for (const m of ["app", "project", "branch", "review"]) await import(`./commands/${m}`);
+  for (const m of ["app", "project", "branch", "review", "todo"]) await import(`./commands/${m}`);
   const { commands } = await import("./registry");
   return commands().map((c) => ({ id: c.id, scope: c.scope, keys: c.keys && [...c.keys] }));
 }
@@ -53,7 +53,7 @@ test("an override that clashes, names nothing, or isn't a key is reported", () =
   ]);
   assert.deepEqual(clashes(cmds), []);
   applyKeys(cmds, { "review.extend": ["x"] });
-  assert.match(clashes(cmds).join(), /^x: forests → project.archive, review → review.extend$/);
+  assert.match(clashes(cmds).join(), /^x: forests → put it away, review → review.extend$/);
 });
 
 test("key names are what the keyboard produces", () => {

@@ -4,6 +4,7 @@ import { surface } from "./router";
 import { baseFor, isClosed, stand, type Stand } from "./ship";
 import { list, view, world } from "./store";
 import type { Branch, Pr, Project } from "./types";
+import { queue } from "./tracker";
 import type { Scope } from "./registry";
 import { cursor, cursorIdx, expanded, now, readyOnly, showArchive } from "./ui";
 import { page } from "./review/page";
@@ -29,6 +30,7 @@ export interface ForestView {
 const byName = (a: Project, b: Project) => a.name.localeCompare(b.name) || a.repo.localeCompare(b.repo);
 export const pkey = (id: string) => `p:${id}`;
 export const bkey = (id: string) => `b:${id}`;
+export const tkey = (id: string) => `t:${id}`;
 
 export const model = createRoot(() => {
   const projects = createMemo(() => {
@@ -75,8 +77,12 @@ export const model = createRoot(() => {
     return out;
   });
 
-  /** The rows the cursor moves through, top to bottom: forests, and the branches of open ones. */
+  const todos = createMemo(() => queue(list("todo")));
+
+  /** The rows the cursor moves through, top to bottom: forests and the branches of open ones, or
+   *  on the tracker its items. */
   const rows = createMemo(() => {
+    if (surface().id === "todo") return todos().flatMap((s) => s.items.map((t) => tkey(t.id)));
     const p = projects();
     const f = forests();
     const out: string[] = [];
@@ -121,7 +127,12 @@ export const model = createRoot(() => {
     return b ? forests().get(b.project)?.branches.find((v) => v.b.id === id) : undefined;
   };
 
-  return { projects, forests, rows, selected, selectedBranch, selectedProject, branchView };
+  const selectedItem = createMemo(() => {
+    const k = selected();
+    return k?.startsWith("t:") ? k.slice(2) : undefined;
+  });
+
+  return { projects, forests, todos, rows, selected, selectedBranch, selectedProject, selectedItem, branchView };
 });
 
 /** What a command of this scope acts on, from the cursor. */
@@ -133,6 +144,8 @@ export function targetFor(scope: Scope): string | undefined {
       return model.selectedBranch();
     case "row":
       return model.selected();
+    case "item":
+      return model.selectedItem();
     case "review":
       return page.id() || undefined;
     case "line":
@@ -154,6 +167,7 @@ export function liveScopes(): string[] {
     if (model.selectedProject()) out.push("project");
     if (model.selected()) out.push("row");
   }
+  if (surface().id === "todo" && model.selectedItem()) out.push("item");
   if (surface().id === "review" && page.tab() === "files" && !page.overlay()) {
     const h = page.here();
     if (h && h.kind !== "file") out.push(h.kind);

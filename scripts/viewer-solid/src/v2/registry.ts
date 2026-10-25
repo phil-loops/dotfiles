@@ -6,8 +6,8 @@ import type { Op } from "./store";
 
 /** Where a command applies, narrowest last: everywhere, on a surface, on the selected row (forest
  *  or branch), on its forest, on a branch; on the review page, the page itself, the cursor's diff
- *  line, the thread or the pending comment under it. A key binds once per scope; the narrowest live one wins. */
-export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch" | "review" | "line" | "thread" | "pending";
+ *  line, the thread or the pending comment under it; on the tracker, the page and the item under the cursor. A key binds once per scope; the narrowest live one wins. */
+export type Scope = "global" | "forests" | "dashboard" | "row" | "project" | "branch" | "review" | "line" | "thread" | "pending" | "todo" | "item";
 export type Via = "key" | "click" | "palette" | "menu" | "drag";
 
 export type Inverse = { id: string; target: string; arg?: unknown };
@@ -59,3 +59,6 @@ export function command(c: Command): Command {
 
 export const commands = (): Command[] => [...registry.values()];
 export const getCommand = (id: string): Command | undefined => registry.get(id);
+
+/** The key a hint names for a command — its first, after your keys.toml — so on-page hints follow the keymap. */
+export const keyOf = (id: string): string => registry.get(id)?.keys?.[0] ?? "space";

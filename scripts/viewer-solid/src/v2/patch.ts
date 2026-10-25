@@ -1,9 +1,9 @@
 // Pure patch logic, shared by the store and its tests.
 import type { Entities, EntityType, Patch, Versions } from "./types";
 
-export const TYPES: EntityType[] = ["repo", "project", "branch", "pr", "landed", "conv", "thread", "draft"];
+export const emptyEntities = (): Entities => ({ repo: {}, project: {}, branch: {}, pr: {}, landed: {}, conv: {}, thread: {}, draft: {}, todo: {} });
 
-export const emptyEntities = (): Entities => ({ repo: {}, project: {}, branch: {}, pr: {}, landed: {}, conv: {}, thread: {}, draft: {} });
+export const TYPES = Object.keys(emptyEntities()) as EntityType[];
 
 /** Each domain's versions advance by exactly one; anything else is a gap (resync) or a replay. */
 export function checkVersion(have: Versions, p: Patch): "ok" | "gap" | "stale" {

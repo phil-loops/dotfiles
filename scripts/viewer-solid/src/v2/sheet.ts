@@ -4,6 +4,7 @@ export const SURFACE_SCOPES: Record<string, string[]> = {
   forests: ["branch", "project", "row", "forests"],
   review: ["pending", "thread", "line", "review"],
   dashboard: ["dashboard"],
+  todo: ["item", "todo"],
 };
 
 export const SCOPE_TITLES: Record<string, string> = {
@@ -17,6 +18,8 @@ export const SCOPE_TITLES: Record<string, string> = {
   line: "On a diff line",
   thread: "On a conversation",
   pending: "On a pending comment",
+  todo: "On the tracker",
+  item: "On an item",
 };
 
 /** Sections in order; `live` marks the scopes under the cursor (narrowest first, from liveScopes). */
