@@ -164,9 +164,10 @@ export function targetFor(scope: Scope): string | undefined {
       return page.id() || undefined;
     case "line":
     case "thread":
-    case "pending": {
+    case "pending":
+    case "gap": {
       const h = page.here();
-      return h && h.kind === scope ? (h.kind === "line" ? h.key : h.id) : undefined;
+      return h && h.kind === scope ? (h.kind === "line" || h.kind === "gap" ? h.key : h.id) : undefined;
     }
     default:
       return undefined;

@@ -121,3 +121,66 @@ export function rowAnchors(r: Row): string[] {
   if (r.left) out.add(`L:${r.left.old}`);
   return [...out];
 }
+
+// ── context: the unchanged lines a diff leaves out, revealed on request ──
+
+/** A run of unchanged lines the diff hides: before hunk `at`, or after the last (`at` = hunks.length). */
+export interface Gap {
+  at: number;
+  /** new-side line numbers of what's still hidden, first..last; `last` null = to the end of a file not read yet */
+  first: number;
+  last: number | null;
+  /** the hunk header's own context (the enclosing function, say), for the gap row */
+  label: string;
+}
+
+const span = (h: Hunk) => {
+  const m = HUNK.exec(h.header);
+  if (!m) return null;
+  const [os, ol, ns, nl] = [+m[1], m[2] == null ? 1 : +m[2], +m[3], m[4] == null ? 1 : +m[4]];
+  // a side with no lines (`+12,0`) sits AFTER its start line
+  const first = nl ? ns : ns + 1;
+  const oldFirst = ol ? os : os + 1;
+  return { first, last: first + nl - 1, offset: oldFirst - first, after: oldFirst + ol - 1 - (first + nl - 1), label: m[5].trim() };
+};
+
+/**
+ * The file with `reveal[at]` more unchanged lines shown at each gap — taken from `lines` (the new
+ * file, 1-based by index + 1) and added to the neighbouring hunk as ordinary context lines, so rows,
+ * anchors and threads treat them like any other — plus the gaps still hidden. A gap before a hunk
+ * reveals upward from it (the lines nearest the change first), the gap after the last downward.
+ * Without `lines` nothing is revealed, and the trailing gap's end is unknown.
+ */
+export function expand(f: FileDiff, lines: string[] | undefined, reveal: ReadonlyMap<number, number>): { file: FileDiff; gaps: Gap[] } {
+  if (f.status === "added" || f.status === "deleted" || f.status === "binary" || !f.hunks.length) return { file: f, gaps: [] };
+  const spans = f.hunks.map(span);
+  if (spans.some((s) => !s)) return { file: f, gaps: [] };
+  const eof = lines ? (lines.length && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length) : null;
+  const hunks = f.hunks.map((h) => ({ header: h.header, lines: [...h.lines] }));
+  const gaps: Gap[] = [];
+  const ctx = (n: number, offset: number): Line => ({ kind: "ctx", old: n + offset, new: n, text: lines![n - 1] ?? "" });
+  let prevEnd = 0;
+  spans.forEach((s, i) => {
+    const want = reveal.get(i) ?? 0;
+    let hiddenLast = s!.first - 1;
+    if (lines && want > 0) {
+      const from = Math.max(prevEnd + 1, s!.first - want);
+      const add: Line[] = [];
+      for (let n = from; n < s!.first; n++) add.push(ctx(n, s!.offset));
+      hunks[i].lines.unshift(...add);
+      hiddenLast = from - 1;
+    }
+    if (hiddenLast >= prevEnd + 1) gaps.push({ at: i, first: prevEnd + 1, last: hiddenLast, label: s!.label });
+    prevEnd = s!.last;
+  });
+  const last = spans[spans.length - 1]!;
+  const want = reveal.get(spans.length) ?? 0;
+  let hiddenFirst = last.last + 1;
+  if (lines && want > 0) {
+    const to = Math.min(eof!, last.last + want);
+    for (let n = last.last + 1; n <= to; n++) hunks[hunks.length - 1].lines.push(ctx(n, last.after));
+    hiddenFirst = to + 1;
+  }
+  if (eof == null || hiddenFirst <= eof) gaps.push({ at: spans.length, first: hiddenFirst, last: eof, label: "" });
+  return { file: { ...f, hunks }, gaps };
+}
