@@ -240,7 +240,7 @@ export function PendingView(props: { item: Item; selected: (k: string | undefine
 }
 
 /** A reply's "{fix}" as the commit that declares its thread now, the sha it'll go out with. */
-function withFix(it: Item): string {
+export function withFix(it: Item): string {
   if (!it.fixFor) return it.body;
   const t = (list("thread") as Thread[]).find((x) => x.comments[0]?.url === it.fixFor);
   return it.body.replace("{fix}", t?.fixedBy?.[0]?.short ?? "‹its fix›");

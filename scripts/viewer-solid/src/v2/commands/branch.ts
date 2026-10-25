@@ -4,7 +4,7 @@
 import { atRepo, bkey, compareUrl, model, type BranchView } from "../model";
 import { command, type Write } from "../registry";
 import { navigate, reviewPath } from "../router";
-import { fmtMorning, leaf, nextMorning } from "../ship";
+import { canPush, fmtMorning, leaf, nextMorning } from "../ship";
 import { view, world } from "../store";
 import { armed, launching, now, setArmed, setCursor, setOpened, toggleIn } from "../ui";
 
@@ -18,7 +18,7 @@ command({
   keys: ["p"],
   route: (id) => {
     const v = bv(id);
-    if (!v || v.st.action !== "push" || v.b.pending) return null;
+    if (!v || !canPush(v.b, v.pr)) return null;
     return armed() === id ? "branch.push.confirm" : "branch.push.arm";
   },
 });
@@ -28,7 +28,7 @@ command({
   scope: "branch",
   budget: "local",
   quiet: true,
-  available: (id) => bv(id)?.st.action === "push",
+  available: (id) => !!bv(id) && canPush(bv(id)!.b, bv(id)!.pr),
   local: (id) => setArmed(id),
 });
 command({
@@ -48,6 +48,7 @@ command({
       path: atRepo(v.b.repo, "/push-origin"),
       body: { branch: v.b.name, stay: true },
       settled: () => world.entities.branch[id]?.pushed === "synced",
+      said: v.pr ? `pushed ${v.b.ahead} follow-up${v.b.ahead === 1 ? "" : "s"} onto #${v.pr.number}` : undefined,
       failed: `${leaf(v.b.name)} didn't push`,
     };
   },

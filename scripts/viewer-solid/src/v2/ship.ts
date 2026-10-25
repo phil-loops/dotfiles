@@ -78,6 +78,15 @@ export function stand(
   return { ship, action, waiting, ready, held };
 }
 
+/** Whether p can push the branch: it has commits origin doesn't, and the gates are green on this
+ *  tip — a first push (no PR yet) and follow-ups onto an open PR alike. The server's own wards
+ *  (/push-origin) still decide; this only says the key is worth offering. */
+export function canPush(b: Branch, pr: Pr | undefined): boolean {
+  if (b.pending || !b.commits || b.gates !== "green") return false;
+  if (b.pushed === "ahead") return b.ahead > 0;
+  return b.pushed === "local" && (!pr || pr.state === "OPEN");
+}
+
 /** The PR's base for a compare link: the parent's branch while it's unlanded, else trunk. */
 export const baseFor = (b: Branch, parent: { ship: Ship; name: string } | undefined, trunk: string) =>
   parent && !settled(parent.ship) ? parent.name : trunk;

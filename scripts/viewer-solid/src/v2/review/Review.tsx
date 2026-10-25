@@ -12,6 +12,7 @@ import { page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
 import Conversation from "./Conversation";
 import { AddressSheet, MapOverlay, Words } from "./Overlays";
+import Outgoing from "./Outgoing";
 import TypesPop from "./TypesPop";
 import { notePointer } from "./types";
 
@@ -35,6 +36,14 @@ export default function Review() {
         <Switch>
           <Match when={pg.tab() === "conversation"}>
             <Conversation />
+          </Match>
+          <Match when={pg.tab() === "outgoing"}>
+            <div class="rv-body">
+              <div />
+              <div class="rv-files" data-paint="outgoing">
+                <Outgoing />
+              </div>
+            </div>
           </Match>
           <Match when={pg.tab() === "files"}>
             <div class="rv-body">
@@ -135,6 +144,9 @@ function Header() {
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "files" }} onClick={bind("review.tab.files")}>
           Files changed <span class="rv-count">{pg.files().length}</span>
+        </button>
+        <button classList={{ "rv-tab-on": pg.tab() === "outgoing" }} onClick={bind("review.tab.outgoing")}>
+          Outgoing <span class="rv-count">{pg.conv()?.unpushed.length ?? view("branch", pg.id())?.ahead ?? 0}</span>
         </button>
         <span class="flex-1" />
         <span class="rv-meta">

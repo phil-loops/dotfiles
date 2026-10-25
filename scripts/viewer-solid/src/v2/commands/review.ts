@@ -7,9 +7,10 @@ import { BASE, forestPath, navigate, reviewPath } from "../router";
 import { command, type Write } from "../registry";
 import { view, world } from "../store";
 import type { Item, Thread } from "../types";
-import { setCursor, setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
+import { armed, setCursor, setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
+import { canPush } from "../ship";
 import { shown } from "../words";
-import { bkey } from "../model";
+import { bkey, model } from "../model";
 import { suggestionOf } from "../review/markdown";
 import { atRepoPath, page as pg, short, sideLine, type Composer } from "../review/page";
 import { definition, dismiss, hover, pop } from "../review/types";
@@ -106,7 +107,22 @@ command({
 
 // ── the page ──
 
-command({ id: "review.tab", title: "Conversation ↔ Files changed", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(pg.tab() === "files" ? "conversation" : "files") });
+const TABS = ["conversation", "files", "outgoing"] as const;
+command({ id: "review.tab", title: "Next tab — Conversation, Files changed, Outgoing", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
+command({ id: "review.tab.outgoing", title: "Outgoing — what a push sends", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("outgoing") });
+command({
+  id: "review.push",
+  title: "Push to origin — a first push or follow-ups onto the PR (press twice)",
+  scope: "review",
+  budget: "local",
+  keys: ["p"],
+  available: () => pg.tab() === "outgoing",
+  route: (id) => {
+    const v = id ? model.branchView(id) : undefined;
+    if (pg.tab() !== "outgoing" || !v || !canPush(v.b, v.pr)) return null;
+    return armed() === id ? "branch.push.confirm" : "branch.push.arm";
+  },
+});
 command({ id: "review.tab.files", title: "Files changed", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("files") });
 command({ id: "review.tab.conversation", title: "Conversation", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("conversation") });
 command({ id: "review.split", title: "Split ↔ unified diff", scope: "review", budget: "local", keys: ["s"], local: () => pg.setSplit(!pg.split()) });
@@ -164,6 +180,7 @@ command({
   budget: "local",
   quiet: true,
   local: (sha) => {
+    pg.setTab("files");
     if (!pg.historyOpen()) {
       pg.setHistoryOpen(true);
       void pg.loadHistory();
@@ -274,6 +291,27 @@ command({
       said: `${sha.slice(0, 7)} addresses it now — the reply waits for your push · u takes it back`,
       failed: "couldn't add the trailer — the branch may have moved",
       inverse: (a) => (a.key ? { id: "review.address.undo", target: pg.id(), arg: a.key } : undefined),
+    };
+  },
+});
+command({
+  id: "review.address.reply",
+  title: "Draft the 'done in' reply for a thread a commit already addresses",
+  scope: "review",
+  budget: "config-write",
+  quiet: true,
+  available: (id) => !!threadOf(id)?.fixedBy?.length,
+  write: (id) => {
+    const t = threadOf(id);
+    if (!t) return null;
+    return {
+      ops: [],
+      path: repoPath("/review-draft"),
+      // send: it rides the push — waits until its fix commit is on origin, then goes into the pending review
+      body: { branch: name(), op: "add", send: true, item: { kind: "reply", thread: t.node, body: "done in {fix}", fixFor: t.comments[0]?.url } },
+      settled: () => true,
+      said: "drafted — it goes into your pending review with the push",
+      failed: "couldn't draft the reply",
     };
   },
 });

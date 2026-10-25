@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { baseFor, isClosed, nextMorning, phaseAt, stand, windowLine } from "./ship.ts";
+import { baseFor, canPush, isClosed, nextMorning, phaseAt, stand, windowLine } from "./ship.ts";
 import type { Branch, Pr } from "./types.ts";
 
 const NOW = Date.parse("2026-10-22T18:00:00Z"); // Thu 11:00 PT
@@ -64,4 +64,13 @@ test("the push window speaks only near and after the cliff", () => {
   assert.match(windowLine(Date.parse("2026-10-22T23:00:00Z")), /^past 3pm .* from Fri 9am$/);
   assert.match(windowLine(Date.parse("2026-10-24T18:00:00Z")), /until Mon 9am$/);
   assert.equal(new Date(nextMorning(Date.parse("2026-10-23T23:00:00Z"))).toISOString(), "2026-10-26T16:00:00.000Z"); // Fri late → Mon 9 PT
+});
+
+test("p pushes follow-ups onto an open PR, not just a first push", () => {
+  const open = pr({ state: "OPEN", review: "APPROVED" });
+  assert.ok(canPush(br({ gates: "green", pushed: "ahead", ahead: 2, commits: 5 }), open), "follow-ups on an approved PR");
+  assert.ok(canPush(br({ gates: "green", pushed: "local" }), undefined), "a first push");
+  assert.ok(!canPush(br({ gates: "stale", pushed: "ahead", ahead: 2 }), open), "not before the gates are green on this tip");
+  assert.ok(!canPush(br({ gates: "green", pushed: "synced" }), open), "nothing to push");
+  assert.ok(!canPush(br({ gates: "green", pushed: "ahead", ahead: 1, pending: "pushing" }), open), "not while a push is in flight");
 });

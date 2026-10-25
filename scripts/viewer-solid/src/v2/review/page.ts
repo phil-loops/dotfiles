@@ -107,7 +107,7 @@ export const page = createRoot(() => {
   const branch = () => view("branch", id());
   const tip = createMemo(() => branch()?.tip ?? conv()?.tip ?? "");
 
-  const [tab, setTab] = createSignal<"files" | "conversation">("files");
+  const [tab, setTab] = createSignal<"files" | "conversation" | "outgoing">("files");
   const [split, setSplitSig] = createSignal(store.get("v2.review.split") === "1");
   const setSplit = (v: boolean) => {
     setSplitSig(v);
