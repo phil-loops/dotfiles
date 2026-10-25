@@ -6,7 +6,9 @@ import { bkey, model, type BranchView } from "./model";
 import { keyOf } from "./registry";
 import { bind } from "./runner";
 import { leaf, SHIP } from "./ship";
+import Commits from "./Commits";
 import { list, view, world } from "./store";
+import { wordsOpen } from "./ui";
 
 const GATES: Record<string, string> = { green: "gates green", red: "gates red", running: "gates running", stale: "gates stale", none: "not gated" };
 
@@ -50,10 +52,19 @@ function Branch(props: { v: BranchView }) {
         <p class="m-0 text-ink-dim" classList={{ "text-ink-faint italic": !b().description }}>
           {b().description || "no description"}
         </p>
-        <Show when={b().outline?.length}>
-          <ol class="m-0 mt-1.5 list-none p-0 text-[12px] text-ink-faint">
-            <For each={b().outline}>{(s) => <li class="truncate before:mr-2 before:content-['·']">{s}</li>}</For>
-          </ol>
+        <Show
+          when={wordsOpen().has(b().id)}
+          fallback={
+            <Show when={b().outline?.length}>
+              <ol class="m-0 mt-1.5 list-none p-0 text-[12px] text-ink-faint">
+                <For each={b().outline}>{(s) => <li class="truncate before:mr-2 before:content-['·']">{s}</li>}</For>
+              </ol>
+            </Show>
+          }
+        >
+          <div class="mt-2 text-[12.5px]">
+            <Commits branchId={b().id} />
+          </div>
         </Show>
         <Show when={facts().length}>
           <p class="m-0 mt-1.5 text-[11px]" classList={{ "text-del": !props.v.pr && b().gates === "red", "text-ink-faint": !!props.v.pr || b().gates !== "red" }}>
@@ -90,7 +101,7 @@ export default function Forest() {
               <p class="m-0 mt-1 text-ink-dim">{p()!.summary}</p>
             </Show>
             <p class="m-0 mt-2 text-[12px] text-ink-faint">
-              {p()!.state} · {counts()} · {keyOf("branch.open")} opens a branch, {keyOf("forest.leave")} back to Forests
+              {p()!.state} · {counts()} · {keyOf("forest.words")} shows a branch's commits in full, {keyOf("branch.open")} opens it, {keyOf("forest.leave")} back to Forests
             </p>
           </header>
           <ol class="m-0 list-none p-0">

@@ -88,8 +88,8 @@ def own_commits(branch):
     """The branch's own commits oldest first, each with its message, churn, and whether any
     remote already holds it. Two git calls regardless of length."""
     parent, base = _base(branch)
-    fmt = "%x1e%H%x1f%P%x1f%s%x1f%b%x1d"
-    log = _git("log", "--reverse", "--numstat", f"--format={fmt}", f"{base}..{branch}").stdout
+    fmt = "%x1e%H%x1f%P%x1f%an%x1f%ad%x1f%s%x1f%b%x1d"
+    log = _git("log", "--reverse", "--numstat", "--date=short", f"--format={fmt}", f"{base}..{branch}").stdout
     unpushed = set(_git("rev-list", f"{base}..{branch}", "--not", "--remotes").stdout.split())
     carried = _carried(branch, base)
     rows = []
@@ -97,7 +97,7 @@ def own_commits(branch):
         if "\x1d" not in rec:
             continue
         head, _, stat = rec.partition("\x1d")
-        sha, parents, subject, body = (head.split("\x1f") + ["", "", "", ""])[:4]
+        sha, parents, author, date, subject, body = (head.split("\x1f") + [""] * 6)[:6]
         add = dele = files = 0
         for ln in stat.strip().splitlines():
             cols = ln.split("\t")
@@ -109,7 +109,7 @@ def own_commits(branch):
         lock = ("on a remote — rewording it would force-push" if sha not in unpushed
                 else "a merge commit — reword it by hand" if merge
                 else "carried from a fan-in dep — reword it there" if sha in carried else "")
-        rows.append({"sha": sha, "short": sha[:10], "subject": subject, "body": body.strip(),
+        rows.append({"sha": sha, "short": sha[:10], "subject": subject, "body": body.strip(), "author": author, "date": date,
                      "pushed": sha not in unpushed, "merge": merge, "carried": sha in carried,
                      "locked": lock, "files": files, "add": add, "del": dele})
     return parent, base, rows

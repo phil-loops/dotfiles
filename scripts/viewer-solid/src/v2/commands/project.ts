@@ -1,7 +1,7 @@
 // Forests: moving one between focus, the workbench and the archive (POST /project-state),
 // ordering the focus lane (POST /focus), opening a forest into its spine, the ready filter, launch.
 import { startDrag } from "../drag";
-import { BASE, forestPath, navigate } from "../router";
+import { BASE, forestPath, navigate, surface } from "../router";
 import { bkey, model, pkey } from "../model";
 import { command, type Write } from "../registry";
 import { list, view, world } from "../store";
@@ -16,6 +16,7 @@ import {
   setExpanded,
   setLaunching,
   setReadyOnly,
+  setWordsOpen,
   setShowArchive,
   toggleIn,
 } from "../ui";
@@ -205,6 +206,15 @@ command({
     setCursorIdx(0);
     navigate(forestPath(p.repo, p.name), e);
   },
+});
+command({
+  id: "forest.words",
+  title: "Show the branch's commits in full",
+  scope: "branch",
+  budget: "local",
+  keys: ["e"],
+  available: (id) => surface().id === "forest" && !!id,
+  local: (id) => setWordsOpen((s) => toggleIn(s, id!)),
 });
 command({
   id: "forest.leave",

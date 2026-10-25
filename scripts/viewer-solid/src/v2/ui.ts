@@ -18,6 +18,8 @@ export const [armed, setArmed] = createSignal<string | undefined>();
 /** the forest being launched: every node pushed and opened, top to bottom */
 export const [launching, setLaunching] = createSignal<string | undefined>();
 /** branches whose compare form was opened from here — "waiting for GitHub" until the PR shows */
+/** branches on a forest page showing their whole commit messages */
+export const [wordsOpen, setWordsOpen] = createSignal<ReadonlySet<string>>(new Set());
 /** tracker items showing their body */
 export const [todoOpen, setTodoOpen] = createSignal<ReadonlySet<string>>(new Set());
 export const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());
