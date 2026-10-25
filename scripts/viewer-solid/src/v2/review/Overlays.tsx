@@ -7,6 +7,9 @@ import { leaf, SHIP } from "../ship";
 import { list, view } from "../store";
 import { getJSON } from "../sync";
 import Commits from "../Commits";
+import { plain } from "./markdown";
+import type { Thread } from "../types";
+import { shown, type Outline } from "../words";
 import { atRepoPath, page as pg, short } from "./page";
 
 export function Words() {
@@ -92,6 +95,77 @@ export function MapOverlay() {
             </button>
           )}
         </For>
+      </div>
+    </div>
+  );
+}
+
+/** E on a thread: who writes its fix. Claude (a fresh session in the branch's worktree, the prompt
+ *  drafted unsent), you in Helix, or — once a commit exists — pick it, which writes the commit's
+ *  `Addresses:` trailer. Keys belong to the sheet while it's open: ↵ or c, o, p, 1–9, esc. */
+export function AddressSheet() {
+  const id = () => pg.addressing() ?? "";
+  const t = () => view("thread", id()) as Thread | undefined;
+  const picking = () => pg.addressPicking();
+  const b = () => view("branch", pg.id());
+  const [o] = createResource(
+    () => (picking() && b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}` : null),
+    async () => {
+      const got = await getJSON<Outline>(atRepoPath(b()!.repo, `/outline?branch=${encodeURIComponent(b()!.name)}`)).catch(() => null);
+      if (got) shown.set(pg.id(), got);
+      return got;
+    },
+  );
+  const candidates = () => (o()?.commits ?? []).filter((c) => !c.locked).reverse().slice(0, 9);
+  let box!: HTMLDivElement;
+  onMount(() => requestAnimationFrame(() => box.focus({ preventScroll: true })));
+  const onKey = (e: KeyboardEvent) => {
+    e.stopPropagation();
+    const n = Number(e.key);
+    if (e.key === "Escape") {
+      pg.setOverlay(null);
+      pg.setAddressing(null);
+      pg.setAddressPicking(false);
+    } else if (!picking() && (e.key === "Enter" || e.key === "c")) dispatch("review.address.claude", "key", { target: id(), event: e });
+    else if (!picking() && e.key === "o") dispatch("review.address.helix", "key", { target: id(), event: e });
+    else if (e.key === "p") dispatch("review.address.pick.list", "key", { target: id(), event: e });
+    else if (picking() && n >= 1 && n <= candidates().length) dispatch("review.address.pick", "key", { target: `${id()} ${candidates()[n - 1].sha}`, event: e });
+    else return;
+    e.preventDefault();
+  };
+  return (
+    <div class="rv-scrim">
+      <div class="rv-map" ref={box} tabIndex={0} onKeyDown={onKey} role="dialog" aria-label="Address it">
+        <div class="rv-sheet-head">
+          Address it <span class="text-ink-faint">· {t()?.comments[0]?.author} on {t()?.path.split("/").pop()}</span>
+        </div>
+        <p class="m-0 mb-3 text-[12px] text-ink-dim">{plain(t()?.comments[0]?.body ?? "", 160)}</p>
+        <Show
+          when={picking()}
+          fallback={
+            <>
+              <button class="rv-map-row" onClick={bind("review.address.claude", id())}>
+                <span class="text-gold-leaf">↵ c</span> Hand it to Claude — drafted into a new session in the branch, you send it
+              </button>
+              <button class="rv-map-row" onClick={bind("review.address.helix", id())}>
+                <span class="text-gold-leaf">o</span> Fix it yourself in Helix — then E here picks the commit
+              </button>
+              <button class="rv-map-row" onClick={bind("review.address.pick.list", id())}>
+                <span class="text-gold-leaf">p</span> Pick the commit that fixes it
+              </button>
+            </>
+          }
+        >
+          <Show when={o()} fallback={<p class="text-ink-faint">{o.loading ? "reading the commits…" : "couldn't read the commits"}</p>}>
+            <For each={candidates()} fallback={<p class="text-ink-faint">no unpushed commit to pick — commit the fix first (esc)</p>}>
+              {(c, i) => (
+                <button class="rv-map-row" onClick={bind("review.address.pick", `${id()} ${c.sha}`)}>
+                  <span class="text-gold-leaf">{i() + 1}</span> <code class="text-gold-leaf">{c.short.slice(0, 7)}</code> {c.subject}
+                </button>
+              )}
+            </For>
+          </Show>
+        </Show>
       </div>
     </div>
   );

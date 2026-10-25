@@ -8,7 +8,7 @@ import { SUBJECT_LIMIT, wordsLength, type Hint } from "../outlineHints";
 import { atRepo } from "./model";
 import { keyOf } from "./registry";
 import { bind, dispatch } from "./runner";
-import { view } from "./store";
+import { list, view } from "./store";
 import { getJSON } from "./sync";
 import { changed, drafts, editPr, editTo, hintsOf, PR, prChange, prHints, prValue, shown, valueOf, type Commit, type Outline } from "./words";
 
@@ -30,6 +30,18 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
     const t = window.setTimeout(() => void refetch(), 1500);
     onCleanup(() => clearTimeout(t));
   });
+  /** thread URL → "author on file:line", for the commits whose Addresses: trailers name one */
+  const threadsByUrl = () => {
+    const out = new Map<string, string>();
+    for (const t of list("thread")) {
+      if (t.repo === b()?.repo && t.branch === b()?.name && t.comments[0]?.url) {
+        out.set(t.comments[0].url, `${t.comments[0].author} on ${t.path.split("/").pop()}:${t.local?.line ?? t.line ?? "?"}`);
+      }
+    }
+    return out;
+  };
+  const addresses = (body: string) =>
+    [...body.matchAll(/^Addresses:\s*(\S+)\s*$/gm)].map((m) => threadsByUrl().get(m[1]) ?? m[1].replace(/^https:\/\/github\.com\//, ""));
   const mine = () => drafts().get(props.branchId);
   const value = (c: Commit) => valueOf(props.branchId, c);
   const edit = (c: Commit, w: { subject: string; body: string }) => editTo(props.branchId, c, w);
@@ -112,6 +124,7 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
               const hints = () => (drafts(), hintsOf(props.branchId, c));
               return (
                 <li class="mb-4">
+                  <For each={addresses(w().body)}>{(a) => <div class="mb-0.5 text-[11px] text-gold-leaf">addresses {a}</div>}</For>
                   <div class="flex items-baseline gap-2 text-[11px] text-ink-faint">
                     <code class={c.pushed ? "text-ink-faint" : "text-gold-leaf"}>{c.short.slice(0, 7)}</code>
                     <span>

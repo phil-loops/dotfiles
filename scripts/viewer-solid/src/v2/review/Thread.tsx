@@ -3,7 +3,7 @@
 import { createMemo, For, onMount, Show } from "solid-js";
 import { keyOf } from "../registry";
 import { bind, dispatch } from "../runner";
-import { view } from "../store";
+import { list, view } from "../store";
 import type { Comment, Item, Thread } from "../types";
 import { now } from "../ui";
 import { renderMarkdown, plain } from "./markdown";
@@ -67,7 +67,12 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
           <Show when={t().outdated}>
             <span class="rv-chip">outdated</span>
           </Show>
-          <Show when={by() && !t().outdated}>
+          <Show when={t().fixedBy?.length}>
+            <span class="rv-chip rv-chip-gold" title="a commit declares it addresses this thread (its Addresses: trailer)">
+              addressed by {t().fixedBy.map((f) => f.short).join(", ")} — {t().fixedBy[0].subject}
+            </span>
+          </Show>
+          <Show when={by() && !t().outdated && !t().fixedBy?.length}>
             <span class="rv-chip rv-chip-gold" title="a local commit since the PR head changed these lines">
               addressed by {by() ? short(by()!) : "a local change"}?
             </span>
@@ -103,6 +108,7 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
 
 function hints(t: Thread): string {
   const out = ["↵ fold", "r reply"];
+  if (!t.outdated && !t.resolved) out.push(t.fixedBy?.length ? "E address again" : "E address");
   if (t.canResolve || t.canUnresolve) out.push(t.resolved ? "R reopen on GitHub" : "R resolve on GitHub");
   if (!t.outdated && !t.local?.addressedBy && t.comments.some((c) => c.body.includes("```suggestion"))) out.push("a apply");
   if (t.note?.draftReply) out.push("i its draft");
@@ -209,7 +215,11 @@ export function PendingView(props: { item: Item; selected: (k: string | undefine
       <div class="rv-th-head">
         <span class="rv-author">{pg.conv()?.viewer || "you"}</span>
         <span class="rv-chip rv-chip-gold">
-          {it().state === "waiting" ? `waits for ${it().waitsFor.map(short).join(", ")} to reach origin` : SAYS[it().state]}
+          {it().waitingFix
+            ? "waits for a commit that addresses it"
+            : it().state === "waiting"
+              ? `waits for ${it().waitsFor.map(short).join(", ")} to reach origin`
+              : SAYS[it().state]}
         </span>
         <Show when={it().kind === "comment" && it().startLine}>
           <span class="rv-where">lines {it().startLine}–{it().line}</span>
@@ -223,10 +233,17 @@ export function PendingView(props: { item: Item; selected: (k: string | undefine
         </Show>
       </div>
       <div class="rv-comment">
-        <div class="md" innerHTML={renderMarkdown(it().body)} />
+        <div class="md" innerHTML={renderMarkdown(withFix(it()))} />
       </div>
     </div>
   );
+}
+
+/** A reply's "{fix}" as the commit that declares its thread now, the sha it'll go out with. */
+function withFix(it: Item): string {
+  if (!it.fixFor) return it.body;
+  const t = (list("thread") as Thread[]).find((x) => x.comments[0]?.url === it.fixFor);
+  return it.body.replace("{fix}", t?.fixedBy?.[0]?.short ?? "‹its fix›");
 }
 
 const unpushedIn = (body: string): string[] => {

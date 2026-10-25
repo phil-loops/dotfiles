@@ -3,7 +3,7 @@ title: Address a thread with a commit
 section: Canopy v2
 order: 62
 project: canopy-v2
-lede: A review thread asks for a change; you say which commit makes it, the commit carries that link in its own message, both ends show it, and the reply naming it is drafted to go out with the push. Decided 2026-10-25.
+lede: A review thread asks for a change; you say which commit makes it, the commit carries that link in its own message, both ends show it, and the reply naming it is drafted to go out with the push. Built 2026-10-25.
 ---
 
 **Today.** `a` only applies a GitHub suggestion block. For a plain question, say nalanj on #11132 at `queries/sending-domain.test.ts:599`, asking "should this test ensure the sending domain is enabled after the function is called?", the path is: `o` into Helix, commit there, come back, `r`, and type the sha by hand. Nothing ties the commit to the thread.
@@ -22,11 +22,12 @@ Addresses: https://github.com/Loops-so/loops/pull/11132#discussion_r2456789
 - **It never reaches main:** the squash takes the PR's title and body, not commit messages.
 - **One commit can address several threads** (several trailer lines), **and one thread can be addressed by several commits.**
 
-**`E` on a thread:**
-1. **First press:** opens the thread's spot in Helix (as `o` does) and marks the thread as being addressed. Nothing is linked yet.
-2. **Back in the viewer, `E` again:** lists the branch's unpushed commits, newest first. Picking one adds the trailer to that commit through the words' guarded rewrite (`/outline`: same tree, refuses if the branch moved, `u` undoes).
-3. **With no commit to pick,** `E` just cancels. Write the reply with `r`.
-4. **A pushed commit can't take a trailer** without force-pushing, so it isn't offered. Address in a new commit.
+**`E` on a thread opens a chooser.** Who writes the fix?
+1. **Hand it to Claude** (`↵`/`c`, the main path). A fresh Claude opens in the branch's worktree (`stack-claude`, its own tmux window), with a prompt typed into its composer and **not sent**. The prompt carries the conversation, the second reader's note (verdict, evidence, elsewhere, cause), the branch, the `path:line`, and the instruction: one commit, a subject in your voice, the `Addresses:` trailer as its last line, no push, no GitHub reply. The reply is drafted at the same moment and waits until a commit declares the thread.
+2. **Fix it yourself in Helix** (`o`). Opens the spot, as `o` does. Commit, then `E` again to pick it.
+3. **Pick the commit** (`p`, then `1`–`9`). Lists the branch's unpushed commits, newest first. Picking one adds the trailer through the words' guarded rewrite (`/outline`: same tree, refuses if the branch moved) and drafts the reply. `u` takes both back.
+
+A pushed commit can't take a trailer without force-pushing, so it isn't offered: address in a new commit. With nothing to pick, `esc` and write the reply with `r`.
 
 **Shown on both ends,** read from the trailers of the branch's own commits:
 - **The thread:** "addressed by `abc1234` — add the enabled check".
@@ -45,7 +46,7 @@ The existing "addressed by `<sha>`?" hint, a commit that changed the thread's li
 3. The reply is "done in `<sha>`".
 4. No "no change needed" offer; with no commit, `E` cancels.
 
-**Build.**
+**Built** (dotfiles, 2026-10-25; tested in `viewer-sandbox --github`, end to end through the push).
 1. `review/diff.ts`-style pure helpers: parse and add `Addresses:` trailers. Test: several per commit, kept through a reword of the subject.
 2. Server: the review domain's thread entity gains `fixedBy` ({sha, subject}) from the trailers of the branch's own commits (`srv/reviewdesk.py`). A reply draft can name `{fix}`, resolved at send.
 3. Client: `E` (open + mark, then pick list), the thread and words displays, the drafted reply.

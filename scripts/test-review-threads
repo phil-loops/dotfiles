@@ -14,6 +14,81 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from srv import ctx, ghreview, linemap, reviewdesk  # noqa: E402
 
 
+class Trailer(unittest.TestCase):
+    URL = "https://github.com/o/r/pull/7#discussion_r1"
+
+    def test_a_body_gains_a_trailer_block(self):
+        self.assertEqual(reviewdesk.add_trailer("the why", self.URL), f"the why\n\nAddresses: {self.URL}")
+
+    def test_an_empty_body_is_just_the_trailer(self):
+        self.assertEqual(reviewdesk.add_trailer("", self.URL), f"Addresses: {self.URL}")
+
+    def test_an_existing_trailer_block_grows_by_a_line(self):
+        body = "why\n\nAddresses: https://x/1"
+        self.assertEqual(reviewdesk.add_trailer(body, self.URL), f"{body}\nAddresses: {self.URL}")
+
+    def test_the_same_trailer_twice_is_a_no_op(self):
+        body = f"why\n\nAddresses: {self.URL}"
+        self.assertEqual(reviewdesk.add_trailer(body, self.URL), body)
+
+
+class Handoff(unittest.TestCase):
+    """The prompt a Claude session gets to address nalanj's question on #11132 (fixed by hand in
+    14adf15710, 'check the domain is actually re-enabled')."""
+
+    def test_the_prompt_carries_the_thread_and_the_trailer_to_commit_with(self):
+        url = "https://github.com/Loops-so/loops/pull/11132#discussion_r4348525165"
+        t = {"node": "PRRT_x", "path": "queries/sending-domain.test.ts", "line": 599,
+             "comments": [{"author": "nalanj", "url": url,
+                           "body": "Should this test ensure the sending domain is enabled after the function is called?"}]}
+        p = reviewdesk.address_prompt("add-domain-reenable-queries", {"number": 11132}, t,
+                                      {"verdict": "right", "evidence": "the test never reads the row back"})
+        self.assertIn("PR #11132 (branch `add-domain-reenable-queries`), at `queries/sending-domain.test.ts:599`", p)
+        self.assertIn("> Should this test ensure the sending domain is enabled", p)
+        self.assertIn("The second reader's read: right.", p)
+        self.assertIn(f"\nAddresses: {url}\n", p)
+        self.assertIn("Don't push and don't reply on GitHub", p)
+
+    def test_the_real_fix_commit_parses(self):
+        self.assertEqual(reviewdesk.add_trailer("", "https://github.com/Loops-so/loops/pull/11132#discussion_r4348525165"),
+                         "Addresses: https://github.com/Loops-so/loops/pull/11132#discussion_r4348525165")
+
+
+class Fixes(unittest.TestCase):
+    """Which commit addresses which thread, read from the branch's own commits' trailers."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        run = lambda *a: subprocess.run(["git", "-C", self.dir, *a], capture_output=True, text=True, check=True).stdout.strip()
+        self.run = run
+        run("init", "-q", "-b", "main")
+        run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base")
+        run("checkout", "-q", "-b", "feat")
+        run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "unrelated")
+        run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m",
+            "add the enabled check\n\nAddresses: https://x/7#discussion_r1\nAddresses: https://x/7#discussion_r2")
+        self.fix = run("rev-parse", "HEAD")
+        self.was = ctx.run
+        ctx.run = lambda args, timeout=None: subprocess.run(args, cwd=self.dir, capture_output=True, text=True)
+
+    def tearDown(self):
+        ctx.run = self.was
+
+    def test_each_named_thread_maps_to_its_commit(self):
+        got = reviewdesk.fixes_between("main", "feat")
+        self.assertEqual([f["sha"] for f in got["https://x/7#discussion_r1"]], [self.fix])
+        self.assertEqual(got["https://x/7#discussion_r2"][0]["subject"], "add the enabled check")
+        self.assertEqual(len(got), 2)
+
+    def test_a_reworded_commit_keeps_its_link(self):
+        new = self.run("-c", "user.name=t", "-c", "user.email=t@t", "commit-tree", "HEAD^{tree}", "-p", "HEAD^", "-m",
+                       "check the domain is enabled\n\nAddresses: https://x/7#discussion_r1")
+        self.run("update-ref", "refs/heads/feat", new)
+        got = reviewdesk.fixes_between("main", "feat")
+        self.assertEqual(got["https://x/7#discussion_r1"][0]["subject"], "check the domain is enabled")
+        self.assertNotIn("https://x/7#discussion_r2", got)
+
+
 class Shift(unittest.TestCase):
     def test_a_hunk_above_moves_the_line(self):
         self.assertEqual(linemap.shift(10, 10, [(2, 1, 2, 3)]), (12, 12, False))
