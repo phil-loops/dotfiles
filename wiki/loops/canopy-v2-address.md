@@ -3,31 +3,49 @@ title: Address a thread with a commit
 section: Canopy v2
 order: 62
 project: canopy-v2
-lede: A review thread asks for a change; the commit that makes it is linked to the thread, shown on both, and the reply naming it is drafted to go out with the push. Spec, not built.
+lede: A review thread asks for a change; you say which commit makes it, the commit carries that link in its own message, both ends show it, and the reply naming it is drafted to go out with the push. Decided 2026-10-25.
 ---
 
 **Today.** `a` only applies a GitHub suggestion block. For a plain question, say nalanj on #11132 at `queries/sending-domain.test.ts:599`, asking "should this test ensure the sending domain is enabled after the function is called?", the path is: `o` into Helix, commit there, come back, `r`, and type the sha by hand. Nothing ties the commit to the thread.
 
-**The move.** On a thread, **address**:
-1. **Opens the spot to edit.** The thread's line goes into Helix, as `o` does today.
-2. **The thread starts waiting for its fix.** It shows "addressing — the next commit on this branch is its fix".
-3. **The next commit adopts it.** When the branch tip moves past where it was, the first new commit that touches the thread's file becomes the fix. If none touches the file, the first new commit does. Pressing the key again on an addressing thread instead picks from the branch's unpushed commits.
-4. **The link shows on both ends.** On the thread: "fixed by `abc1234` — add the enabled check". In the words (`e`), on the commit: "addresses nalanj on sending-domain.test.ts:599".
-5. **The reply is drafted.** A short reply in the ledger, in your voice ("added in abc1234"), editable like any draft. It already waits for the sha to be on GitHub, so it goes out with the push.
+**The link is declared, and it lives in the commit.** A commit that addresses a thread carries a trailer naming it by the URL of the thread's first comment:
 
-**Storage.** The review ledger (`srv/reviewdesk.py`) gains a `fix` item per thread: `{thread, state: addressing|fixed, since: tip, sha, patchId, subject, how: next|picked}`.
-- **Rewording or a rebase changes the sha but not the patch,** so the link follows the patch-id, then the subject.
-- **A fix squashed away** shows "its fix commit is gone" rather than a stale sha.
+```
+add the enabled check to the re-enable test
 
-**What stays as it is.**
-- **Resolving stays GitHub's:** `R` opens the thread there.
-- **The hankles gate stays:** today only replies on john-hankles threads leave the machine. A reply to nalanj stays a draft until that scope opens (`github-scope-all`).
-- **Suggestion blocks keep `a`.**
+Addresses: https://github.com/Loops-so/loops/pull/11132#discussion_r2456789
+```
 
-**Decisions:**
-1. **The key.** `a` stays "apply suggestion". The free letters that mean nothing on any page are `q y Y E H J M Q U V W Z`. Proposed: **`E`** (edit to address it).
-2. **The adoption rule:** first new commit touching the thread's file, else the first new commit (proposed). Or always the first new commit, or always ask.
-3. **The default reply:** "added in `<sha>`" (proposed), "done in `<sha>`", or the commit's subject.
-4. **What happens without a commit:** if the edit turns out unnecessary, pressing the key again with no new commits offers "no change needed" as the reply. Proposed: yes.
+- **Nothing is guessed.** You say which commit fixes which thread, either typed in the message yourself or set by `E`'s pick.
+- **It's durable:** rewording, rebasing and restacking carry the message, so the link follows the commit with no patch-id matching.
+- **It's readable:** on the PR's commits tab the trailer is a link back to the conversation.
+- **It never reaches main:** the squash takes the PR's title and body, not commit messages.
+- **One commit can address several threads** (several trailer lines), **and one thread can be addressed by several commits.**
 
-**Build, once decided.** A `fix` item and its adoption in `reviewdesk` (adoption runs on the tip moving, which the review domain already sees each tick), tested on the fake GitHub. Then the thread and words displays, the command and its pick list, and the drafted reply.
+**`E` on a thread:**
+1. **First press:** opens the thread's spot in Helix (as `o` does) and marks the thread as being addressed. Nothing is linked yet.
+2. **Back in the viewer, `E` again:** lists the branch's unpushed commits, newest first. Picking one adds the trailer to that commit through the words' guarded rewrite (`/outline`: same tree, refuses if the branch moved, `u` undoes).
+3. **With no commit to pick,** `E` just cancels. Write the reply with `r`.
+4. **A pushed commit can't take a trailer** without force-pushing, so it isn't offered. Address in a new commit.
+
+**Shown on both ends,** read from the trailers of the branch's own commits:
+- **The thread:** "addressed by `abc1234` — add the enabled check".
+- **The commit in the words (`e`):** "addresses nalanj on sending-domain.test.ts:599" in place of the raw trailer line.
+
+The existing "addressed by `<sha>`?" hint, a commit that changed the thread's lines, stays a question until a trailer declares it.
+
+**The reply.** Picking drafts a reply in the ledger, **"done in `<sha>`"**, editable like any draft.
+- **Its sha is filled in when it sends,** from whichever commit carries the trailer then. A reword or rebase between drafting and pushing can't leave it naming a sha that no longer exists.
+- **It waits for that commit to be on GitHub,** as replies already do, so it goes out with the push.
+- **The hankles gate still applies:** for now only replies on john-hankles threads leave the machine, so a reply to nalanj stays a draft until `github-scope-all`.
+
+**Decided** (Phil, 2026-10-25):
+1. The key is `E`; `a` stays "apply suggestion".
+2. Declarative, not implicit: the trailer in the commit is the link, chosen over a pick stored in the ledger.
+3. The reply is "done in `<sha>`".
+4. No "no change needed" offer; with no commit, `E` cancels.
+
+**Build.**
+1. `review/diff.ts`-style pure helpers: parse and add `Addresses:` trailers. Test: several per commit, kept through a reword of the subject.
+2. Server: the review domain's thread entity gains `fixedBy` ({sha, subject}) from the trailers of the branch's own commits (`srv/reviewdesk.py`). A reply draft can name `{fix}`, resolved at send.
+3. Client: `E` (open + mark, then pick list), the thread and words displays, the drafted reply.
