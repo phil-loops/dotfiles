@@ -126,6 +126,71 @@ command({
   },
 });
 command({ id: "review.filter", title: "Find a file", scope: "review", budget: "local", keys: ["t"], local: () => pg.setFiltering(true) });
+// ── history: the branch's commits one at a time (GitHub Desktop's view) ──
+
+/** The history list as it's walked: "all changes" first, then the own commits newest first. */
+const walk = (): (string | null)[] => [null, ...(pg.history()?.rows ?? []).map((r) => r.sha)];
+const step = (by: number) => () => {
+  const w = walk();
+  const i = Math.max(0, Math.min(w.length - 1, w.indexOf(pg.commitScope()) + by));
+  void pg.showCommit(w[i]);
+};
+const closeHistory = () => {
+  pg.setHistoryOpen(false);
+  pg.setHistoryFocus("list");
+  void pg.showCommit(null);
+};
+
+command({
+  id: "review.history",
+  title: "The commits, one at a time (the history)",
+  scope: "review",
+  budget: "local",
+  keys: ["H"],
+  local: () => {
+    if (pg.historyOpen()) return closeHistory();
+    pg.setTab("files");
+    pg.setHistoryOpen(true);
+    pg.setHistoryFocus("list");
+    void pg.loadHistory();
+  },
+});
+command({ id: "history.next", title: "Next commit", scope: "history", budget: "local", keys: ["j", "down"], quiet: true, local: step(1) });
+command({ id: "history.prev", title: "Previous commit", scope: "history", budget: "local", keys: ["k", "up"], quiet: true, local: step(-1) });
+command({
+  id: "history.select",
+  title: "Show one commit's diff",
+  scope: "review",
+  budget: "local",
+  quiet: true,
+  local: (sha) => {
+    if (!pg.historyOpen()) {
+      pg.setHistoryOpen(true);
+      void pg.loadHistory();
+    }
+    pg.setHistoryFocus("list");
+    void pg.showCommit(sha || null);
+  },
+});
+command({
+  id: "history.enter",
+  title: "Read the commit's diff",
+  scope: "history",
+  budget: "local",
+  keys: ["l", "right"],
+  local: () => pg.setHistoryFocus("diff"),
+});
+command({ id: "history.exit", title: "Back to all the branch's changes", scope: "history", budget: "local", keys: ["esc"], local: closeHistory });
+command({
+  id: "commit.back",
+  title: "Back to the commit list",
+  scope: "commit",
+  budget: "local",
+  keys: ["h", "left"],
+  local: () => pg.setHistoryFocus("list"),
+});
+command({ id: "commit.exit", title: "Back to all the branch's changes", scope: "commit", budget: "local", keys: ["esc"], local: closeHistory });
+
 // ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
 
 const threadOf = (id: string | undefined) => (id ? (view("thread", id) as Thread | undefined) : undefined);
@@ -392,7 +457,7 @@ command({
   scope: "review",
   budget: "config-write",
   keys: ["v"],
-  available: () => onFiles() && !!pg.here(),
+  available: () => onFiles() && !!pg.here() && !pg.scoped(),
   write: () => {
     const t = viewedTarget();
     return t ? viewedToggle(t.path, t.hunk) : null;
@@ -418,7 +483,7 @@ const lineComposer = (): Composer | null => {
   if (!r) return null;
   return { kind: "line", key: `c|${r.path}|${r.side}|${r.line}|${r.startLine ?? ""}`, path: r.path, side: r.side, line: r.line, startLine: r.startLine };
 };
-const canWrite = () => !!pg.conv();
+const canWrite = () => !!pg.conv() && !pg.scoped();   // one commit's view is read-only: its lines aren't the tip's
 
 command({
   id: "review.comment",

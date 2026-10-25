@@ -195,3 +195,11 @@
 .rv-gap.rv-on { box-shadow: inset 2px 0 0 var(--color-gold-leaf); }
 .rv-gap-mark { color: var(--color-gold-leaf); }
 .rv-row.rv-seen:not(.rv-on) { opacity: 0.5; }
+.rv-history { margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--color-vellum-edge); }
+.rv-hrow { display: block; width: 100%; text-align: left; padding: 4px 6px; border-left: 2px solid transparent; background: none; color: var(--color-ink-dim); cursor: pointer; }
+.rv-hrow:hover { background: var(--color-vellum-raise); }
+.rv-hrow-on { border-left-color: var(--color-gold-leaf); color: var(--color-ink); background: var(--color-gold-wash); }
+.rv-history:not(.rv-history-focus) .rv-hrow-on { border-left-color: var(--color-gold-deep); }
+.rv-hsub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rv-hmeta { display: block; font-size: 10.5px; color: var(--color-ink-faint); }
+.rv-commit-head { padding: 8px 12px; margin-bottom: 10px; border: 1px solid var(--color-vellum-edge); background: var(--color-vellum-raise); font-size: 12.5px; }

@@ -10,10 +10,11 @@ export interface Bound {
 
 /** Commands that are the same move on different pages, each page doing it to its own things. */
 export const SAME_MOVE: Record<string, string[]> = {
-  "next": ["cursor.down", "review.down"],
-  "previous": ["cursor.up", "review.up"],
-  "back out": ["overlay.close", "review.back"],
-  "out": ["forest.collapse", "review.leave", "forest.leave"],
+  "next": ["cursor.down", "review.down", "history.next"],
+  "previous": ["cursor.up", "review.up", "history.prev"],
+  "back out": ["overlay.close", "review.back", "history.exit", "commit.exit"],
+  "out": ["forest.collapse", "review.leave", "forest.leave", "commit.back"],
+  "in": ["forest.expand", "branch.open", "history.enter"],
   "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand"],
   "send to GitHub": ["branch.push", "review.send"],
   "move up the list": ["focus.up", "todo.up"],

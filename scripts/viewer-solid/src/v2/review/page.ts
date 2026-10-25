@@ -26,6 +26,17 @@ const store = {
   },
 };
 
+/** One of the branch's commits in the history list (GET /commits). */
+export interface HistoryCommit {
+  sha: string;
+  subject: string;
+  body: string;
+  author: string;
+  date: string;
+  own: boolean;
+  pushed?: boolean;
+}
+
 export interface NodeFile {
   path: string;
   status: string;
@@ -118,6 +129,16 @@ export const page = createRoot(() => {
   const [filter, setFilter] = createSignal("");
   const [filtering, setFiltering] = createSignal(false);
 
+  // ── history: the branch's commits, one at a time (GitHub Desktop's view) ──
+  /** the history list is open in the left column */
+  const [historyOpen, setHistoryOpen] = createSignal(false);
+  /** j/k move through the commit list ("list") or the selected commit's diff ("diff") */
+  const [historyFocus, setHistoryFocus] = createSignal<"list" | "diff">("list");
+  /** the commit whose diff the page shows instead of the whole branch's; null = all changes */
+  const [commitScope, setCommitScope] = createSignal<string | null>(null);
+  const [commitFiles, setCommitFiles] = createSignal<{ sha: string; files: NodeFile[] } | null>(null);
+  const [history, setHistory] = createSignal<{ key: string; rows: HistoryCommit[] } | null>(null);
+
   const [payload, setPayload] = createSignal<{ key: string; data: NodePayload } | null>(null);
   const [loadErr, setLoadErr] = createSignal<string | null>(null);
   const cache = new Map<string, NodePayload>();
@@ -127,18 +148,19 @@ export const page = createRoot(() => {
   // tip's sha, so it's exactly the file the diff's new side shows) and how many lines each gap shows.
   type Context = { lines?: string[]; reveal: ReadonlyMap<number, number> };
   const [context, setContext] = createSignal<{ key: string; files: ReadonlyMap<string, Context> }>({ key: "", files: new Map() });
-  const contextOf = (path: string): Context | undefined => (context().key === keyOf() ? context().files.get(path) : undefined);
+  const contextKey = () => `${keyOf()}|${commitScope() ?? ""}`;
+  const contextOf = (path: string): Context | undefined => (context().key === contextKey() ? context().files.get(path) : undefined);
   const putContext = (key: string, path: string, c: Context) =>
     setContext((cur) => ({ key, files: new Map(cur.key === key ? cur.files : []).set(path, c) }));
   /** Show `n` more hidden lines at a gap; returns once the file's text is here. */
   async function reveal(path: string, at: number, n = 20): Promise<void> {
-    const key = keyOf();
+    const key = contextKey();
     const t = target();
     const was: Context = contextOf(path) ?? { reveal: new Map() };
     putContext(key, path, { ...was, reveal: new Map(was.reveal).set(at, (was.reveal.get(at) ?? 0) + n) });
     if (was.lines || !t || !tip()) return;
-    const text = await getText(atRepoPath(t.repo, `/file?branch=${tip()}&path=${encodeURIComponent(path)}`));
-    if (text == null || keyOf() !== key) return;
+    const text = await getText(atRepoPath(t.repo, `/file?branch=${commitScope() ?? tip()}&path=${encodeURIComponent(path)}`));
+    if (text == null || contextKey() !== key) return;
     putContext(key, path, { ...(contextOf(path) ?? was), lines: text.split("\n") });
   }
 
@@ -168,6 +190,9 @@ export const page = createRoot(() => {
         setComposer(null);
         setViewedOverride(new Map());
         setTab("files");
+        setHistoryOpen(false);
+        setCommitScope(null);
+        setHistory(null);
       }
       void load(key, t.repo, t.name);
     }),
@@ -186,7 +211,31 @@ export const page = createRoot(() => {
     if (!cache.has(key)) void getJSON<NodePayload>(atRepoPath(repo, `/node?branch=${encodeURIComponent(name)}`)).then((d) => cache.set(key, d)).catch(() => {});
   };
 
-  const files = createMemo<FileDiff[]>(() => (payload()?.data.files ?? []).map((f) => ({ ...parsePatch(f.path, f.patch || ""), add: f.add, del: f.del })));
+  const scoped = () => commitScope() != null;
+  const files = createMemo<FileDiff[]>(() => {
+    const src = scoped() ? (commitFiles()?.sha === commitScope() ? commitFiles()!.files : []) : (payload()?.data.files ?? []);
+    return src.map((f) => ({ ...parsePatch(f.path, f.patch || ""), add: f.add, del: f.del }));
+  });
+
+  /** The branch's own commits, newest first (GET /commits): the history list. */
+  async function loadHistory(): Promise<void> {
+    const t = target();
+    const key = keyOf();
+    if (!t || history()?.key === key) return;
+    const rows = await getJSON<HistoryCommit[]>(atRepoPath(t.repo, `/commits?branch=${encodeURIComponent(t.name)}`)).catch(() => null);
+    if (rows && keyOf() === key) setHistory({ key, rows: rows.filter((r) => r.own) });
+  }
+  /** Show one commit's diff (GET /commit-diff), or the whole branch again with null. */
+  async function showCommit(sha: string | null): Promise<void> {
+    setCommitScope(sha);
+    setCursor(undefined);
+    setMark(undefined);
+    if (!sha || commitFiles()?.sha === sha) return;
+    const t = target();
+    if (!t) return;
+    const got = await getJSON<{ sha: string; files: NodeFile[] }>(atRepoPath(t.repo, `/commit-diff?sha=${encodeURIComponent(sha)}`)).catch(() => null);
+    if (got && commitScope() === sha) setCommitFiles({ sha, files: got.files });
+  }
   const base = () => payload()?.data.baseSha ?? "";
 
   const threads = createMemo(() => list("thread").filter((t) => t.branch === target()?.name && t.repo === target()?.repo));
@@ -212,6 +261,11 @@ export const page = createRoot(() => {
     for (const c of items()) if (c.kind === "comment" && c.path) (pend.get(c.path) ?? pend.set(c.path, []).get(c.path)!).push(c);
     return files().map((raw) => {
       const c = contextOf(raw.path);
+      if (scoped()) {
+        // one commit, read-only: its lines are that commit's, so no threads, drafts or viewed marks
+        const { file, gaps } = expand(raw, c?.lines, c?.reveal ?? new Map());
+        return { file, rows: rowsOf(file, sp), threadsAt: new Map(), pendingAt: new Map(), aside: [], open: 0, viewed: false, blocks: [], seen: 0, seenHunks: new Set<number>(), gaps };
+      }
       const { file, gaps } = expand(raw, c?.lines, c?.reveal ?? new Map());
       const rows = rowsOf(file, sp);
       const anchors = new Set(rows.flatMap(rowAnchors));
@@ -238,6 +292,7 @@ export const page = createRoot(() => {
 
   /** Threads not on any file of this diff (a file the branch no longer changes). */
   const elsewhere = createMemo(() => {
+    if (scoped()) return [];   // one commit's view is its diff alone
     const paths = new Set(files().map((f) => f.path));
     return threads().filter((t) => !paths.has(t.path) && (!t.outdated || showOutdated()));
   });
@@ -310,6 +365,7 @@ export const page = createRoot(() => {
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
+    historyOpen, setHistoryOpen, historyFocus, setHistoryFocus, commitScope, history, loadHistory, showCommit, scoped,
     overlay, setOverlay, addressing, setAddressing, addressPicking, setAddressPicking, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,
   };
 });

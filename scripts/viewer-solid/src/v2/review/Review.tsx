@@ -41,7 +41,10 @@ export default function Review() {
               <FileTree />
               <div class="rv-files" data-paint={loaded() ? "review" : undefined} onPointerMove={notePointer}>
                 <Show when={loaded()} fallback={<p class="rv-quiet">{pg.loadErr() ? `couldn't read the diff — ${pg.loadErr()}` : "reading the diff…"}</p>}>
-                  <Show when={pg.files().length} fallback={<p class="rv-quiet">nothing changes on this branch</p>}>
+                  <Show when={pg.scoped()}>
+                    <CommitHead />
+                  </Show>
+                  <Show when={pg.files().length} fallback={<p class="rv-quiet">{pg.scoped() ? "reading the commit…" : "nothing changes on this branch"}</p>}>
                     <For each={pg.files()}>{(f) => <FileBlock file={f} selected={selected} />}</For>
                     <Elsewhere selected={selected} />
                   </Show>
@@ -144,6 +147,51 @@ function Header() {
   );
 }
 
+/** The branch's commits down the side, newest first: j/k step through them, the diff shows only
+ *  the selected one; "all changes" is the whole branch again. */
+function History() {
+  const rows = () => pg.history()?.rows ?? [];
+  const on = (sha: string | null) => pg.commitScope() === sha;
+  const focused = () => pg.historyFocus() === "list";
+  return (
+    <div class="rv-history" classList={{ "rv-history-focus": focused() }}>
+      <div class="rv-dir">history</div>
+      <div class="mb-1 text-[10.5px] text-ink-faint">
+        {focused() ? `j/k steps · ${keyOf("history.enter")} reads it · esc all changes` : `${keyOf("commit.back")} back to the list`}
+      </div>
+      <button class="rv-hrow" classList={{ "rv-hrow-on": on(null) }} onClick={bind("history.select", "")}>
+        All changes
+      </button>
+      <For each={rows()} fallback={<p class="rv-quiet">{pg.history() ? "no commits of its own" : "reading the commits…"}</p>}>
+        {(c) => (
+          <button class="rv-hrow" classList={{ "rv-hrow-on": on(c.sha) }} onClick={bind("history.select", c.sha)} title={c.body || c.subject}>
+            <span class="rv-hsub">{c.subject}</span>
+            <span class="rv-hmeta">
+              <code classList={{ "text-gold-leaf": c.pushed === false }}>{c.sha.slice(0, 7)}</code> · {c.author} · {c.date} · {c.pushed === false ? "local" : "pushed"}
+            </span>
+          </button>
+        )}
+      </For>
+    </div>
+  );
+}
+
+/** Above a single commit's diff: which commit, and how to get back to the whole branch. */
+function CommitHead() {
+  const c = () => pg.history()?.rows.find((r) => r.sha === pg.commitScope());
+  return (
+    <div class="rv-commit-head">
+      <code class="text-gold-leaf">{pg.commitScope()?.slice(0, 7)}</code> <span class="text-ink">{c()?.subject}</span>
+      <span class="text-ink-faint">
+        {" "}· {c()?.author} · {c()?.date} · {c()?.pushed === false ? "local" : "pushed"} · read-only · {keyOf("history.exit")} all changes
+      </span>
+      <Show when={c()?.body}>
+        <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{c()!.body}</pre>
+      </Show>
+    </div>
+  );
+}
+
 function FileTree() {
   const groups = createMemo(() => {
     const q = pg.filter().toLowerCase();
@@ -165,6 +213,9 @@ function FileTree() {
   });
   return (
     <aside class="rv-tree">
+      <Show when={pg.historyOpen()}>
+        <History />
+      </Show>
       <Show when={pg.filtering() || pg.filter()}>
         <input
           ref={input}
