@@ -5,6 +5,7 @@ export const SURFACE_SCOPES: Record<string, string[]> = {
   review: ["pending", "thread", "line", "review"],
   dashboard: ["dashboard"],
   todo: ["item", "todo"],
+  forest: ["branch", "row", "forest", "project"],
 };
 
 export const SCOPE_TITLES: Record<string, string> = {
@@ -20,6 +21,7 @@ export const SCOPE_TITLES: Record<string, string> = {
   pending: "On a pending comment",
   todo: "On the tracker",
   item: "On an item",
+  forest: "On a forest's page",
 };
 
 export interface SheetCmd {

@@ -29,6 +29,8 @@ export interface Branch {
   description: string;
   subject: string;
   commits: number;
+  /** its own commits' subjects, oldest first */
+  outline: string[];
   tip: string;
   tree: string;
   pushed: "local" | "ahead" | "synced";

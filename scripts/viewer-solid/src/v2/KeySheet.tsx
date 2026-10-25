@@ -20,6 +20,8 @@ function labelOf(scope: string): string {
       return view("branch", model.selectedBranch()!)?.name ?? "this branch";
     case "project":
       return `the forest ${view("project", model.selectedProject()!)?.name ?? ""}`.trim();
+    case "forest":
+      return `${view("project", model.pageProject() ?? "")?.name ?? "this forest"}'s page`;
     case "row":
       return model.selectedBranch() ? labelOf("branch") : labelOf("project");
     case "item":

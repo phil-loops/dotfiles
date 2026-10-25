@@ -3,11 +3,12 @@
 // box, ^G a suggestion, t the file finder) and Helix's otherwise (j/k, n/N, ]/[, x extends, K and
 // g d types). What Phil writes lands in the ledger (srv/reviewdesk.py) and, on his keypress, in his
 // PENDING review on GitHub — submitting it, and resolving, happen on GitHub, which S and R open.
-import { BASE, navigate, reviewPath } from "../router";
+import { BASE, forestPath, navigate, reviewPath } from "../router";
 import { command, type Write } from "../registry";
 import { view, world } from "../store";
 import type { Item, Thread } from "../types";
-import { setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
+import { setCursor, setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
+import { bkey } from "../model";
 import { suggestionOf } from "../review/markdown";
 import { atRepoPath, page as pg, short, sideLine, type Composer } from "../review/page";
 import { definition, dismiss, hover, pop } from "../review/types";
@@ -124,6 +125,19 @@ command({
   },
 });
 command({ id: "review.filter", title: "Find a file", scope: "review", budget: "local", keys: ["t"], local: () => pg.setFiltering(true) });
+command({
+  id: "review.forest",
+  title: "Open this branch's forest page",
+  scope: "review",
+  budget: "local",
+  keys: ["g p"],
+  available: (id) => !!id && !!view("project", view("branch", id)?.project ?? ""),
+  local: (id, e) => {
+    const p = view("project", view("branch", id!)!.project)!;
+    setCursor(bkey(id!));
+    navigate(forestPath(p.repo, p.name), e);
+  },
+});
 command({ id: "review.leave", title: "Back to Forests", scope: "review", budget: "local", keys: ["h"], local: (_t, e) => navigate(BASE, e) });
 command({
   id: "review.back",
