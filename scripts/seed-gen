@@ -541,6 +541,10 @@ src=$("$(dirname "$0")/stack-donor" "$dir" 2>/dev/null) \
 
 if [[ "$(realpath_of "$dir")" != "$(realpath_of "$src")" ]]; then
   _gitdir=$(git -C "$dir" rev-parse --path-format=absolute --git-dir 2>/dev/null) || exit 0
+  # A plain seed of a tree that already has its .gen has nothing to wait for: the --sync holding
+  # the lock owns the tree and will leave .gen right. Waiting here (2s polls) is what turned a warm
+  # open's 0.7s prep into 2.7–9s whenever the previous open's background heal was still running.
+  (( ! sync )) && [[ -e "$dir/.gen" && -d "$_gitdir/seed-gen.lock" ]] && exit 0
   wait_lock "$_gitdir/seed-gen.lock" || { echo "a seed-gen run has held this tree for over 10 minutes"; exit 1; }
   tree_lock="$_gitdir/seed-gen.lock"; trap drop_tree_lock EXIT
 

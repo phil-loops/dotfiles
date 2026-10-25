@@ -159,6 +159,16 @@ if [[ -d "$MAIN/.gen" ]]; then
   [[ -L "$gdir/.gen" ]] && ok "a frozen .gen copy is traded for the link" \
                         || no "kept a frozen .gen copy"
 
+  # A warm open must not queue behind the previous open's background heal: with the tree's lock
+  # held (as a running --sync holds it), seeding an already-seeded tree returns at once.
+  ggd=$(git -C "$gdir" rev-parse --path-format=absolute --git-dir 2>/dev/null)
+  mkdir -p "$ggd/seed-gen.lock"
+  zmodload zsh/datetime; t0=$EPOCHREALTIME
+  STACK_OPEN_DIR="$g" "${SO:h}/seed-gen" "$gdir" >/dev/null 2>&1
+  (( EPOCHREALTIME - t0 < 1.0 )) && ok "seeding a seeded tree doesn't wait on a running heal" \
+                                 || no "seeding waited $(( EPOCHREALTIME - t0 ))s on the tree's heal lock"
+  rmdir "$ggd/seed-gen.lock" 2>/dev/null
+
   # A copy carries the marker of the tree it came from — left there it claims this worktree's
   # .gen was built for a commit it has never seen, which is what made 53 trees look up to date.
   ndir="$T/nonscratch"
@@ -171,7 +181,7 @@ if [[ -d "$MAIN/.gen" ]]; then
                                       || ok "the copy drops the source tree's marker"
 else
   print -r -- "  – .gen seeding: skipped (${MAIN:t} has no .gen to seed from)"
-  skipped=$(( skipped + 4 ))
+  skipped=$(( skipped + 5 ))
 fi
 
 print
@@ -269,7 +279,7 @@ fi
 if [[ "${1:-}" == --no-hx ]] || ! command -v tmux >/dev/null || ! command -v hx >/dev/null; then
   print
   print -r -- "editor drive: skipped"
-  skipped=$(( skipped + 4 ))
+  skipped=$(( skipped + 7 ))
 else
   print
   print -r -- "editor drive"

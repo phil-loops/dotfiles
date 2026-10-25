@@ -159,10 +159,10 @@ def _local_branch_for_pr(num):
 
 _refreshed = {}   # pr-num -> unix time of the last head fetch
 _refresh_locks = {}
-_REFRESH_TTL = 120
+_REFRESH_TTL = 1800   # the keypress trusts the page-load fetch this long; a reload fetches again (force)
 
 
-def _refresh_review_branch(num):
+def _refresh_review_branch(num, force=False):
     # Re-sync review/pr-N to the live PR head before a precise line-open, so the line lands where
     # GitHub shows it — a stale fetch drifts line numbers (a pushed refactor moves the line). The
     # bless ledger is content-keyed (patch-id/blob), so re-fetch is safe; --force because a PR
@@ -179,7 +179,7 @@ def _refresh_review_branch(num):
     # skip. Waiting for the in-flight fetch is strictly cheaper, and leaves the TTL warm.
     key = _pr_key(num)
     with _refresh_locks.setdefault(key, threading.Lock()):
-        if time.time() - _refreshed.get(key, 0) < _REFRESH_TTL:
+        if not force and time.time() - _refreshed.get(key, 0) < _REFRESH_TTL:
             return
         ctx.run(["git", "fetch", "--force", "origin", f"pull/{num}/head:review/pr-{num}"], timeout=20)
         _refreshed[key] = time.time()
@@ -251,7 +251,7 @@ def _open_pr(req, d):   # via open_url (POST /open-url) — Chrome ext: open a P
     path = (d.get("path") or "").strip()
     if not path:
         if not local:
-            _refresh_review_branch(num)   # warm the REF too — before the worktree, so it builds at the live head
+            _refresh_review_branch(num, force=True)   # a page (re)load is the moment the page's line numbers come from
         picker.prepare_branch(branch)   # warm the worktree in the background for a fast first open
         req._send(200, json.dumps({"ok": True, "branch": branch, "path": route, "opened": False, "local": local}))
         return

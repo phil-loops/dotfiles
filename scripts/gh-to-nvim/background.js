@@ -164,6 +164,10 @@ chrome.commands.onCommand.addListener((cmd) => {
 // leaves the browser is a URL matching PR_RE.
 const PR_RE = /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/;
 let lastPrewarmed = "";
+let lastPrewarmedAt = 0;
+// The server trusts a prewarm's fetch for the next keypress (30 min), so the same PR warms again
+// after a minute: a reload after the author pushes refetches, a line click inside the minute doesn't.
+const PREWARM_REPEAT_MS = 60000;
 
 let lastLaunchAt = 0;
 const LAUNCH_COOLDOWN_MS = 60000;   // bound a host that can't start; one boot per idle-reap cycle
@@ -179,10 +183,11 @@ function prewarmPost(pr) {
 
 async function prewarm(url) {
   const m = (url || "").match(PR_RE);
-  if (!m || m[0] === lastPrewarmed) {
-    return;   // not a PR, or the same one — clicking a line rewrites the hash, not the PR
+  if (!m || (m[0] === lastPrewarmed && Date.now() - lastPrewarmedAt < PREWARM_REPEAT_MS)) {
+    return;   // not a PR, or the same one just now — clicking a line rewrites the hash, not the PR
   }
   lastPrewarmed = m[0];
+  lastPrewarmedAt = Date.now();
   if (await prewarmPost(m[0])) {
     return;
   }
