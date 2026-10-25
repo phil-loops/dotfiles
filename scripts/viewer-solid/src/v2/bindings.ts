@@ -19,7 +19,8 @@ export const SAME_MOVE: Record<string, string[]> = {
   "move up the list": ["focus.up", "todo.up"],
   "move down the list": ["focus.down", "todo.down"],
   "put it away": ["project.archive", "todo.drop"],
-  "the words": ["review.words", "forest.words"],
+  "the words": ["review.words", "forest.words", "story.why"],
+  "the page's other face": ["review.tab", "forest.face"],
 };
 
 const KEY = /^(?:[CA]-)?(?:.|space|esc|ret|tab|up|down|left|right)$/u;

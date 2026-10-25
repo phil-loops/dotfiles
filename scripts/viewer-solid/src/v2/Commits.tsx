@@ -14,7 +14,7 @@ import { changed, drafts, editTo, hintsOf, shown, valueOf, type Commit, type Out
 
 const TONE: Record<Hint["tone"], string> = { error: "border-ember text-ember", warn: "border-gold-deep text-gold-leaf", note: "border-rule text-ink-faint" };
 
-export default function Commits(props: { branchId: string }) {
+export default function Commits(props: { branchId: string; readOnly?: boolean }) {
   const b = () => view("branch", props.branchId);
   const [o] = createResource(
     () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}` : null),
@@ -61,14 +61,16 @@ export default function Commits(props: { branchId: string }) {
                     </Show>
                   </div>
                   <Show
-                    when={!c.locked}
+                    when={!c.locked && !props.readOnly}
                     fallback={
                       <>
                         <div class="mt-0.5 text-ink">{c.subject}</div>
                         <Show when={c.body}>
                           <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{c.body}</pre>
                         </Show>
-                        <p class="m-0 mt-1 text-[11px] text-ink-faint">read-only: {c.locked}</p>
+                        <Show when={c.locked && !props.readOnly}>
+                          <p class="m-0 mt-1 text-[11px] text-ink-faint">read-only: {c.locked}</p>
+                        </Show>
                       </>
                     }
                   >
@@ -116,7 +118,7 @@ export default function Commits(props: { branchId: string }) {
           </For>
         </ol>
       </Show>
-      <Show when={pending()}>
+      <Show when={pending() && !props.readOnly}>
         <div class="sticky bottom-0 flex items-center gap-3 border-t border-rule bg-vellum-raise py-2">
           <button class="rv-btn rv-btn-gold" onClick={bind("words.save", props.branchId)}>
             Save {pending()} message{pending() === 1 ? "" : "s"} <kbd>⌘↵</kbd>

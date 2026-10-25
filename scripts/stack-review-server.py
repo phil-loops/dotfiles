@@ -41,6 +41,7 @@ from srv import reviewdesk   # own line: same reason
 from srv import keymap   # own line: same reason
 from srv import todo   # own line: same reason
 from srv import viewed   # own line: same reason
+from srv import story   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -446,6 +447,7 @@ class H(BaseHTTPRequestHandler):
                 with _pulse_subs_lock:
                     _pulse_subs[0] -= 1
             return
+        elif u.path == "/landed-why":     return story.why(self, u)   # a landed chapter's squash message on main
         elif u.path == "/state":          return state.get(self, u)   # the v2 store's snapshot: normalized entities + domain versions
         elif u.path == "/v2/events":      return state.events(self, u, keepalive=lambda: last.__setitem__(0, time.time()))   # SSE: entity patches per domain
         elif u.path == "/telemetry/summary": return telemetry.summary(self, u)   # command/surface latency vs budgets, from daily rollups

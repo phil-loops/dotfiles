@@ -49,7 +49,19 @@ export function stripPlan(body: string): string {
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim() === "-- forest --") continue;
     if (lines[i].startsWith("Part of ")) {
-      while (i + 1 < lines.length && (lines[i + 1].trim() === "" || /^\s+\S|^\s*(\d+\.|[-*•]|\[)/.test(lines[i + 1]))) i++;
+      // the block runs to the first blank line that isn't followed by more steps: a squash message
+      // wraps long steps onto unindented lines, so every non-blank line until then is the block's
+      const step = (l: string) => /^\s+\S|^\s*(\d+\.\s|[-*•]\s|\[)/.test(l);
+      while (i + 1 < lines.length) {
+        if (lines[i + 1].trim() !== "") {
+          i++;
+          continue;
+        }
+        let j = i + 1;
+        while (j < lines.length && lines[j].trim() === "") j++;
+        if (j < lines.length && step(lines[j])) i = j;
+        else break;
+      }
       continue;
     }
     out.push(lines[i]);

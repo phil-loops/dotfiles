@@ -18,7 +18,15 @@ export const [armed, setArmed] = createSignal<string | undefined>();
 /** the forest being launched: every node pushed and opened, top to bottom */
 export const [launching, setLaunching] = createSignal<string | undefined>();
 /** branches whose compare form was opened from here — "waiting for GitHub" until the PR shows */
-/** branches on a forest page showing their whole commit messages */
+/** a forest page's face: its branches as they stand, or the feature's story in merge order (remembered) */
+const FACE_KEY = "v2.forest.face";
+const savedFace = (() => { try { return localStorage.getItem(FACE_KEY) === "story" ? "story" : "branches"; } catch { return "branches"; } })();
+export const [forestFace, setForestFaceSig] = createSignal<"branches" | "story">(savedFace);
+export const setForestFace = (f: "branches" | "story") => {
+  setForestFaceSig(f);
+  try { localStorage.setItem(FACE_KEY, f); } catch { /* private window: per-load only */ }
+};
+/** branches on a forest page showing their whole commit messages (and landed chapters their why) */
 export const [wordsOpen, setWordsOpen] = createSignal<ReadonlySet<string>>(new Set());
 /** tracker items showing their body */
 export const [todoOpen, setTodoOpen] = createSignal<ReadonlySet<string>>(new Set());
