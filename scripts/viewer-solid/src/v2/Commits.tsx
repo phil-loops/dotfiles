@@ -14,7 +14,7 @@ import { changed, drafts, editPr, editTo, hintsOf, PR, prChange, prHints, prValu
 
 const TONE: Record<Hint["tone"], string> = { error: "border-ember text-ember", warn: "border-gold-deep text-gold-leaf", note: "border-rule text-ink-faint" };
 
-export default function Commits(props: { branchId: string; readOnly?: boolean; landing?: boolean }) {
+export default function Commits(props: { branchId: string; readOnly?: boolean; landing?: boolean; landingOnly?: boolean }) {
   const b = () => view("branch", props.branchId);
   const [o, { refetch }] = createResource(
     () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}` : null),
@@ -114,9 +114,11 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
             {hintChips((drafts(), prHints(props.branchId)), PR)}
           </Show>
         </div>
-        <div class="rv-words-k">commits</div>
+        <Show when={!props.landingOnly}>
+          <div class="rv-words-k">commits</div>
+        </Show>
       </Show>
-      <Show when={o()!.commits.length} fallback={<p class="m-0 text-ink-faint">no commits of its own</p>}>
+      <Show when={!props.landingOnly && o()!.commits.length} fallback={<Show when={!props.landingOnly}><p class="m-0 text-ink-faint">no commits of its own</p></Show>}>
         <ol class="m-0 list-none p-0">
           <For each={o()!.commits}>
             {(c) => {
