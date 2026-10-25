@@ -11,7 +11,7 @@ import { createStore, reconcile } from "solid-js/store";
 import { createQuery, useQueryClient, keepPreviousData } from "@tanstack/solid-query";
 import { withRepo, canMutate } from "./provider";
 import { postStatus } from "./actions";
-import { hintsFor, SUBJECT_LIMIT, type Hint, type Words } from "./outlineHints";
+import { hintsFor, SUBJECT_LIMIT, wordsLength, type Hint, type Words } from "./outlineHints";
 import { PacketEditor, PacketReview, usePacket } from "./ReviewPacket";
 import { EMPTY_HAND, handJson, sameHand, type Hand } from "./packetModel";
 
@@ -362,7 +362,7 @@ export function OutlineEditor(props: {
                     {(r, i) => {
                       const n = () => rows().slice(0, i() + 1).filter((x) => !x.carried).length;
                       const isReading = () => !!props.reading() && r.sha.startsWith(props.reading());
-                      const len = () => rowVal(r).subject.trim().length;
+                      const len = () => wordsLength(rowVal(r).subject);
                       return (
                         <li
                           class={`ol-row group relative rounded-[7px] border border-solid px-[10px] pt-[7px] pb-[7px] transition-[background,border-color] duration-150 ${

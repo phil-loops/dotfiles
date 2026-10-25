@@ -10,7 +10,9 @@
 # commit body or the map. Only --full touches stack-summary, which may spend a model call when
 # the stored summary is stale.
 #
-#   stack-pr-body <branch>           → purpose + commit outline + merge-order furniture on stdout
+#   stack-pr-body <branch>           → Phil's voice: the opening commit's short why (1–3 lines, plan
+#                                      stripped), or nothing — for above the Traffic Cop template
+#   stack-pr-body <branch> --plan    → purpose + commit outline + merge-order furniture (opt-in)
 #   stack-pr-body <branch> --full    → the full document (title, where-it-fits, stored change
 #                                      summary, merge order, mermaid map)
 #   stack-pr-body <branch> --link    → also link the fork's assembled integration (opt-in: that
@@ -23,13 +25,25 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:$HOME/.local/bin:$PA
 
 here="${0:A:h}"
 branch="${1:-}"
-[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--full] [--link] [--packet]" >&2; exit 2; }
+[[ -n "$branch" ]] || { echo "usage: stack-pr-body <branch> [--plan] [--full] [--link] [--packet]" >&2; exit 2; }
 shift
 [[ " $* " == *" --packet "* ]] && exec python3 "$here/review_packet.py" "$branch"
+if (( $# == 0 )); then   # the default: his voice, not furniture (2026-10-25)
+  parent=$(git config "branch.$branch.stack-parent" 2>/dev/null || echo main)
+  [[ "$parent" == main || "$parent" == master ]] && git rev-parse -q --verify "origin/$parent" >/dev/null && parent="origin/$parent"
+  first=$(git log --reverse --first-parent --format='%b%x1e' "$parent..$branch" | python3 -c 'import sys; print(sys.stdin.read().split("\x1e")[0])')
+  FIRST="$first" PYTHONPATH="$here" python3 -c '
+import os, review_packet as rp
+why = rp.strip_plan(os.environ["FIRST"])
+lines = [l for l in why.splitlines() if l.strip()]
+if why and len(why) <= 280 and len(lines) <= 3: print(why)'
+  exit 0
+fi
 
 full=0 link=0
 for arg in "$@"; do
   case "$arg" in
+    --plan) ;;
     --full) full=1 ;;
     --link) link=1 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;

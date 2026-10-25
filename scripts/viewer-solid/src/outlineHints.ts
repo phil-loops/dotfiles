@@ -3,7 +3,12 @@
 // they'd be typed at `git commit -m`; subjects stay short; a body is one non-obvious why, and
 // the forest plan belongs in the PR body, not baked into a commit.
 
-export const SUBJECT_LIMIT = 50;
+/** Phil's hand-typed PR titles run 20–35 chars after `type(scope):`; past 40 reads drafted. The
+ *  prefix isn't counted — the median subject on main is 49 chars whole, so a whole-line limit
+ *  flagged ordinary commits. */
+export const SUBJECT_LIMIT = 40;
+/** The subject's own words: what SUBJECT_LIMIT measures. */
+export const wordsLength = (subject: string) => bare(subject.trim()).length;
 const LONG_BODY = 240;
 const TYPES = ["feat", "fix", "chore", "refactor", "docs", "test", "perf", "style", "ci", "build", "revert"];
 const PREFIX = new RegExp(`^(${TYPES.join("|")})(\\(([^)]*)\\))?(!)?:\\s*`, "i");
@@ -78,8 +83,8 @@ export function hintsFor(w: Words, ctx: { opening: boolean; ticket?: string; kin
   if (WIP.test(subject)) {
     hints.push({ id: "wip", tone: "error", text: "a placeholder subject — saving refuses it" });
   }
-  if (subject.length > SUBJECT_LIMIT) {
-    hints.push({ id: "long", tone: "warn", text: `${subject.length} chars — terse reads better (≤ ${SUBJECT_LIMIT})` });
+  if (wordsLength(subject) > SUBJECT_LIMIT) {
+    hints.push({ id: "long", tone: "warn", text: `${wordsLength(subject)} chars after the prefix — yours run 20–35 (≤ ${SUBJECT_LIMIT})` });
   }
   const p = prefixOf(subject);
   if (ctx.opening && ctx.ticket) {
@@ -121,4 +126,14 @@ export function hintsFor(w: Words, ctx: { opening: boolean; ticket?: string; kin
     hints.push({ id: "prose", tone: "note", text: `${w.body.trim().length}-char body — one line of why is plenty` });
   }
   return hints;
+}
+
+/** Hints for a PR body: a baked forest block (GitHub squashes the PR body onto main, so it lands
+ *  there) and a long one — Phil's own run 0–3 casual lines above the template. */
+export function bodyHints(body: string, template = ""): Hint[] {
+  if (hasPlan(body)) {
+    return [{ id: "plan", tone: "warn", text: "a baked forest block — it lands on main with the squash", fix: { label: "strip it", apply: (x) => ({ ...x, body: stripPlan(x.body) }) } }];
+  }
+  const own = (template && body.includes(template.trim()) ? body.replace(template.trim(), "") : body).trim();
+  return own.length > LONG_BODY ? [{ id: "prose", tone: "note", text: `${own.length} chars above the template — yours are a line or three` }] : [];
 }

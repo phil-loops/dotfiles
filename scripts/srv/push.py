@@ -341,8 +341,9 @@ def landing_title(branch):
 
 
 def landing_body(branch):
-    """A hand-written branch.<b>.stack-pr-body verbatim, else the review packet (srv/packet.py)
-    above the repo's PR template — for a lone branch too: Intent and Verified need no forest."""
+    """A hand-written branch.<b>.stack-pr-body verbatim, else the drafted body (srv/packet.py
+    drafted): a short why in Phil's voice above the repo's PR template, or the full packet for a
+    forest that opts in."""
     from . import packet
     return packet.body(branch)
 

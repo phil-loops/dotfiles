@@ -9,19 +9,8 @@ import { getJSON } from "../sync";
 import Commits from "../Commits";
 import { atRepoPath, page as pg, short } from "./page";
 
-interface Outline {
-  description: string;
-  commits: { short: string; subject: string; pushed: boolean }[];
-  draft?: { title?: string };
-}
-
 export function Words() {
-  const t = () => pg.target()!;
-  const [o] = createResource(
-    () => `${t().repo}:${t().name}@${pg.tip()}`,
-    () => getJSON<Outline>(atRepoPath(t().repo, `/outline?branch=${encodeURIComponent(t().name)}`)).catch(() => null),
-  );
-  const desc = () => view("branch", pg.id())?.description ?? o()?.description ?? "";
+  const desc = () => view("branch", pg.id())?.description ?? "";
   return (
     <aside class="rv-words" role="dialog" aria-label="The words">
       <div class="rv-sheet-head">
@@ -29,10 +18,7 @@ export function Words() {
       </div>
       <div class="rv-words-k">description</div>
       <p class="font-display text-[16px] italic">{desc() || "—"}</p>
-      <div class="rv-words-k">lands on main as</div>
-      <p>{o()?.draft?.title || pg.conv()?.title || "—"}</p>
-      <div class="rv-words-k">commits</div>
-      <Commits branchId={pg.id()} />
+      <Commits branchId={pg.id()} landing />
       <Show when={pg.conv()?.unpushed.length}>
         <p class="text-ink-faint">
           {pg.conv()!.unpushed.length} commit{pg.conv()!.unpushed.length === 1 ? "" : "s"} past the PR head ({short(pg.conv()!.head)}) aren't on GitHub yet.
