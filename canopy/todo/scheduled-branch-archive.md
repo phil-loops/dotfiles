@@ -6,6 +6,7 @@ area = "machine"
 size = "S"
 why = "repo size is the recurring root of slow pages; keeping it small stops needing a sweep every month"
 links = ["memory:project_viewer-forest-page-perf.md", "0dd85fe"]
+rank = 19
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

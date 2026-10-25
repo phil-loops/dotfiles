@@ -1,10 +1,11 @@
 +++
 title = "Read the v2 dashboard after the review page and target what's most over budget"
 kind = "look"
-state = "open"
+state = "waiting"
 area = "dashboard"
 size = "S"
 why = "the next round of work goes where it's slowest times most used, not by taste"
+waiting = "a week of using the v2 review page — its commands have no uses yet (2026-10-25)"
 links = ["wiki/loops/canopy-v2-measure.md", "wiki/loops/canopy-v2-plan.md"]
 created = "2026-10-25"
 updated = "2026-10-25"

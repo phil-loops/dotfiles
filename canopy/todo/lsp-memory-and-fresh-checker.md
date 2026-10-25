@@ -6,6 +6,7 @@ area = "machine"
 size = "S"
 why = "types on hover cost ~3 GB of a 16 GB box; the trade between exact answers, speed and memory is mine to set"
 links = ["wiki/loops/canopy-v2-types.md", "/Users/philbrockman/sweeps/viewer-redesign-2026-10-21/types-service/types-service-research.md", "ed0a31c", "3a473b1"]
+rank = 14
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

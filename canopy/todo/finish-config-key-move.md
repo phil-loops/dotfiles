@@ -6,6 +6,7 @@ area = "config"
 size = "M"
 why = "deleted branches stop leaving config residue, and every reader loses a fallback arm"
 links = ["memory:project_stack-config-namespace-migration.md", "memory:reference_stack-config-keys.md"]
+rank = 17
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

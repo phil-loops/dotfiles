@@ -6,6 +6,7 @@ area = "gen"
 size = "S"
 why = "the repo's own tRPC type build may be silently stale the same way seed-gen was"
 links = ["wiki/loops/canopy-v2-gen-cache.md", "memory:project_canopy-v2.md"]
+rank = 11
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

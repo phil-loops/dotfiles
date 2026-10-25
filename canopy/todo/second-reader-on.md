@@ -6,6 +6,7 @@ area = "second-reader"
 size = "S"
 why = "every review thread arrives with a checked verdict, the same issue elsewhere, and a draft reply"
 links = ["memory:project_canopy-v2.md", "wiki/loops/canopy-v2-review.md", "/Users/philbrockman/sweeps/viewer-redesign-2026-10-21/second-reader/RESULTS.md"]
+rank = 5
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

@@ -7,6 +7,7 @@ size = "S"
 why = "the review page becomes the whole review, not just the bot half"
 blocked_by = ["hankles-replies-to-pending"]
 links = ["wiki/loops/canopy-v2-review.md", "memory:project_canopy-v2.md", "b1a8621"]
+rank = 20
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

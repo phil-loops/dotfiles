@@ -6,6 +6,7 @@ area = "forests"
 size = "S"
 why = "finished forests leave Forests without a manual archive press"
 links = ["memory:project_canopy-v2.md", "wiki/loops/canopy-v2-joy.md"]
+rank = 8
 created = "2026-10-25"
 updated = "2026-10-25"
 +++
