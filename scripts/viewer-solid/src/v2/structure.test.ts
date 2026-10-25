@@ -57,3 +57,11 @@ test("every clickable element dispatches a registered command", () => {
     }
   }
 });
+
+test("on-page key hints come from the registry, so they follow keys.toml", () => {
+  for (const f of SRC) {
+    for (const m of f.text.matchAll(/<kbd[^>]*>([^<{]+)<\/kbd>/g)) {
+      assert.ok(/[⌘⇧⌥↵]/.test(m[1]), `${f.name}: <kbd>${m[1]}</kbd> — write <kbd>{keyOf("<command>")}</kbd>`);
+    }
+  }
+});

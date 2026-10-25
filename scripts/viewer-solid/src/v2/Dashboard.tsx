@@ -1,6 +1,7 @@
 // Where to focus next: every command and surface against its budget, most used and never used,
 // refusals, the weekly trend, and v1 beside v2 — all from GET /telemetry/summary (daily rollups).
 import { createResource, For, Show, type JSX } from "solid-js";
+import { keyOf } from "./registry";
 import { bind } from "./runner";
 import { getJSON } from "./sync";
 import { dashDays } from "./ui";
@@ -99,7 +100,7 @@ export default function Dashboard() {
       <div class="mb-6 flex items-baseline gap-4">
         <h1 class="m-0 font-display text-[26px] font-normal text-ink">Where to focus</h1>
         <button class="text-ink-faint hover:text-gold-leaf" onClick={bind("dashboard.range")}>
-          last {dashDays()} days · t to change
+          last {dashDays()} days · {keyOf("dashboard.range")} to change
         </button>
       </div>
       <Show when={data()} fallback={<p class="text-ink-faint">{data.error ? "couldn't read the telemetry" : "reading the telemetry…"}</p>}>

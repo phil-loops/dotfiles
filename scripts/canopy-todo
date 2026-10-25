@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""canopy-todo — the viewer's feature tracker (~/.dotfiles/canopy/todo/, one file per item).
+
+  canopy-todo add "Fix the o key in line-by-line view" --kind fix --area review --size S \\
+      --why "opens Helix on the wrong line" [--link wiki/loops/x.md] [--waiting "…"] [--body -]
+  canopy-todo ls [--all] [--json]       open work in rank order (--all adds done/dropped)
+  canopy-todo show <id>
+  canopy-todo set <id> key=value …      e.g. state=doing size=M blocked_by=a,b
+  canopy-todo done <id> [note]          a note is appended under "## Done"
+  canopy-todo drop <id> [why]
+  canopy-todo rank <id> <id> …          the open queue, best first; everything else unranked
+  canopy-todo steps <id> < steps.md     replace the item's "## Next steps"
+  canopy-todo check                     every item's problems; exit 1 if any
+"""
+import argparse
+import json
+import os
+import re
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from srv import todo  # noqa: E402
+
+LISTS = ("blocked_by", "links")
+ORDER = {"doing": 0, "open": 1, "waiting": 2, "done": 3, "dropped": 4, "broken": 5}
+
+
+def queue(items):
+    return sorted(items, key=lambda it: (ORDER.get(it.get("state"), 9), it.get("rank") or 10**6, it.get("created", ""), it["id"]))
+
+
+def line(it):
+    rank = f"{it['rank']:>3}" if it.get("rank") else "  ·"
+    flag = " ⚠" if it.get("problems") else ""
+    wait = f"  ⏳ {it['waiting']}" if it.get("state") == "waiting" else ""
+    return f"{rank} {it.get('state', '?'):<8} {it.get('kind', '?'):<6} {it.get('size', '?')} {it.get('area', ''):<10} {it['id']}{flag}{wait}"
+
+
+def with_section(body, heading, text, replace):
+    pat = re.compile(rf"^## {re.escape(heading)}\n.*?(?=^## |\Z)", re.S | re.M)
+    block = f"## {heading}\n{text.strip()}\n"
+    if pat.search(body):
+        return pat.sub(lambda m: block + "\n" if replace else m.group(0).rstrip() + "\n" + text.strip() + "\n\n", body).strip()
+    return (body.strip() + "\n\n" + block).strip()
+
+
+def main():
+    ap = argparse.ArgumentParser(prog="canopy-todo", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("add")
+    a.add_argument("title")
+    a.add_argument("--kind", required=True, choices=todo.KINDS)
+    a.add_argument("--area", required=True)
+    a.add_argument("--size", default="M", choices=todo.SIZES)
+    a.add_argument("--why", required=True)
+    a.add_argument("--state", default="open", choices=todo.STATES)
+    a.add_argument("--waiting")
+    a.add_argument("--blocked-by", action="append", default=[])
+    a.add_argument("--link", action="append", default=[])
+    a.add_argument("--id")
+    a.add_argument("--body", help="markdown, or - for stdin")
+    ls = sub.add_parser("ls")
+    ls.add_argument("--all", action="store_true")
+    ls.add_argument("--json", action="store_true")
+    sub.add_parser("show").add_argument("id")
+    s = sub.add_parser("set")
+    s.add_argument("id")
+    s.add_argument("pairs", nargs="+")
+    for name in ("done", "drop"):
+        d = sub.add_parser(name)
+        d.add_argument("id")
+        d.add_argument("note", nargs="?")
+    sub.add_parser("rank").add_argument("ids", nargs="+")
+    sub.add_parser("steps").add_argument("id")
+    sub.add_parser("check")
+    args = ap.parse_args()
+
+    if args.cmd == "add":
+        item_id = args.id or todo.slug(args.title)
+        if os.path.exists(todo.path(item_id)):
+            sys.exit(f"canopy-todo: {item_id} exists — `canopy-todo show {item_id}`")
+        body = sys.stdin.read() if args.body == "-" else (args.body or "")
+        meta = {"title": args.title, "kind": args.kind, "state": args.state, "area": args.area, "size": args.size,
+                "why": args.why, "waiting": args.waiting, "blocked_by": args.blocked_by, "links": args.link,
+                "created": todo.today(), "updated": todo.today()}
+        todo.write(item_id, {k: v for k, v in meta.items() if v not in (None, "", [])}, body)
+        print(item_id)
+    elif args.cmd == "ls":
+        items = queue(it for it in todo.all_items() if args.all or it.get("state") not in ("done", "dropped"))
+        if args.json:
+            print(json.dumps(items, indent=1))
+        else:
+            for it in items:
+                print(line(it))
+                print(f"      {it.get('title', '')}")
+    elif args.cmd == "show":
+        print(open(todo.path(args.id)).read(), end="")
+    elif args.cmd == "set":
+        fields = {}
+        for pair in args.pairs:
+            k, _, v = pair.partition("=")
+            fields[k] = [x for x in v.split(",") if x] if k in LISTS else int(v) if k == "rank" and v else v or None
+        print(line(todo.update(args.id, **fields)))
+    elif args.cmd in ("done", "drop"):
+        it = todo.read(args.id)
+        body = with_section(it["body"], "Done" if args.cmd == "done" else "Dropped", f"{todo.today()} — {args.note}", False) if args.note else it["body"]
+        print(line(todo.update(args.id, state="done" if args.cmd == "done" else "dropped", rank=None, body=body)))
+    elif args.cmd == "rank":
+        for i in args.ids:
+            todo.read(i)
+        for it in todo.all_items():
+            want = args.ids.index(it["id"]) + 1 if it["id"] in args.ids else None
+            if it.get("rank") != want and it.get("state") != "broken":
+                todo.update(it["id"], rank=want)
+        for it in queue(todo.all_items()):
+            if it.get("rank"):
+                print(line(it))
+    elif args.cmd == "steps":
+        it = todo.read(args.id)
+        print(line(todo.update(args.id, body=with_section(it["body"], "Next steps", sys.stdin.read(), True))))
+    elif args.cmd == "check":
+        bad = [(it["id"], p) for it in todo.all_items() for p in it.get("problems", [])]
+        missing = [(it["id"], f"blocked by {b}, which doesn't exist") for it in todo.all_items() for b in it.get("blocked_by", []) if b not in todo.ids()]
+        for i, p in bad + missing:
+            print(f"{i}: {p}")
+        sys.exit(1 if bad or missing else 0)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, FileNotFoundError) as e:
+        sys.exit(f"canopy-todo: {e}")

@@ -192,10 +192,31 @@ export interface Entities {
   conv: Record<string, Conv>;
   thread: Record<string, Thread>;
   draft: Record<string, Draft>;
+  todo: Record<string, TodoItem>;
+}
+
+/** One item of the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo/<id>.md).
+ *  `broken` is a file that won't parse; `problems` says why. */
+export interface TodoItem {
+  id: string;
+  title: string;
+  kind: "build" | "fix" | "decide" | "look";
+  state: "open" | "doing" | "waiting" | "done" | "dropped" | "broken";
+  area: string;
+  size: "S" | "M" | "L";
+  why: string;
+  waiting?: string;
+  blocked_by?: string[];
+  links?: string[];
+  rank?: number;
+  created?: string;
+  updated?: string;
+  body: string;
+  problems?: string[];
 }
 
 export type EntityType = keyof Entities;
-export type Domain = "git" | "remote" | "review";
+export type Domain = "git" | "remote" | "review" | "todo";
 export type Versions = Record<Domain, number>;
 
 export interface Snapshot {

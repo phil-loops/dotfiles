@@ -5,6 +5,7 @@ import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
 import { shiftFor } from "./drag";
 import { bkey, model, pkey, type BranchView, type ForestView } from "./model";
 import { boot, catchIt, flip, settle } from "./motion";
+import { keyOf } from "./registry";
 import { bind } from "./runner";
 import { fmtMorning, leaf, nextMorning, phaseAt, SHIP, windowLine } from "./ship";
 import { view, world } from "./store";
@@ -186,7 +187,7 @@ function LaunchLine(props: { f: ForestView }) {
       </span>
       <Show when={done() < total()} fallback={<span class="font-display italic text-gold-leaf">✦ the whole forest is on GitHub</span>}>
         <span class="text-ink-dim">
-          {done()} of {total()} on GitHub — p pushes, P opens its PR on its parent's · esc
+          {done()} of {total()} on GitHub — {keyOf("branch.push")} pushes, {keyOf("branch.pr")} opens its PR on its parent's · {keyOf("overlay.close")}
         </span>
       </Show>
     </div>
@@ -276,10 +277,10 @@ export default function Forests() {
         <Show when={readyOnly()}>
           <p class="m-0 mb-5 px-4 pl-11 text-ink-dim">
             <span class="text-gold-leaf">ready</span> · {readyCount() ? `${readyCount()} thing${readyCount() === 1 ? "" : "s"} you can do now` : "nothing is waiting on you"} ·{" "}
-            <button class="text-ink-faint hover:text-ink-dim" onClick={bind("ready.toggle")}>r shows everything</button>
+            <button class="text-ink-faint hover:text-ink-dim" onClick={bind("ready.toggle")}>{keyOf("ready.toggle")} shows everything</button>
           </p>
         </Show>
-        <Section title="Focus" rows={p().focus} empty="nothing in focus — f on a forest puts it here" />
+        <Section title="Focus" rows={p().focus} empty={`nothing in focus — ${keyOf("project.focus")} on a forest puts it here`} />
         <Section title="Workbench" rows={p().workbench} empty="the workbench is clear" />
         <Show when={!readyOnly()}>
           <Show
@@ -288,7 +289,7 @@ export default function Forests() {
               <Show when={p().archive.length} keyed>
                 {(n) => (
                   <button ref={catchIt} class="ml-11 px-0 text-ink-faint hover:text-ink-dim" onClick={bind("archive.toggle")}>
-                    archive · {n} — a opens it
+                    archive · {n} — {keyOf("archive.toggle")} opens it
                   </button>
                 )}
               </Show>

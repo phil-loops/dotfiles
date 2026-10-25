@@ -18,6 +18,8 @@ export const [armed, setArmed] = createSignal<string | undefined>();
 /** the forest being launched: every node pushed and opened, top to bottom */
 export const [launching, setLaunching] = createSignal<string | undefined>();
 /** branches whose compare form was opened from here — "waiting for GitHub" until the PR shows */
+/** tracker items showing their body */
+export const [todoOpen, setTodoOpen] = createSignal<ReadonlySet<string>>(new Set());
 export const [opened, setOpened] = createSignal<ReadonlySet<string>>(new Set());
 /** a focus row being dragged: where it started, where it would land, how far the pointer moved */
 export const [drag, setDrag] = createSignal<{ id: string; from: number; to: number; dy: number; h: number } | undefined>();

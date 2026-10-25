@@ -26,6 +26,8 @@
 #                                  the fake GitHub) mapped onto the local tips, the second reader's
 #                                  notes, and the ledger of what Phil writes (srv/reviewdesk.py);
 #                                  rebuilt every tick from memory + stats
+#   todo    todo                   the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo),
+#                                  global rather than per repo; rebuilt when a file's stat moves
 # A version is per domain, monotonic within an epoch (one server process), and a patch's version is
 # the previous one + 1 — so a client that sees a gap, or connects with a version older than the
 # ring holds or from another epoch, gets `resync`. A client connecting without versions is assumed
@@ -41,10 +43,10 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, push, repostate, reviewdesk, sync, watch
+from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, watch
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
-DOMAINS = ("git", "remote", "review")
+DOMAINS = ("git", "remote", "review", "todo")
 RING = 128
 REVIEW_TYPES = ("conv", "thread", "draft")
 TICK = 0.5
@@ -334,6 +336,9 @@ def refresh():
         _commit("remote", _merge(remote.values(), ("pr", "landed")), None)
         review = _each_repo(reviewdesk.entities)
         _commit("review", _merge(review.values(), REVIEW_TYPES), None)
+        tfp = todo.fingerprint()
+        if tfp != _D["todo"].fp:
+            _commit("todo", todo.entities(), tfp)
         _each_repo(lambda n: reviewdesk.release_due())
 
 

@@ -2,6 +2,7 @@
 // boxes, the diff (unified or split) with conversations folded in at their lines — and the
 // Conversation. Everything it does is a registered command (commands/review.ts); this file draws.
 import { createEffect, createMemo, createSelector, For, Match, on, Show, Switch } from "solid-js";
+import { keyOf } from "../registry";
 import { bind } from "../runner";
 import { view, world } from "../store";
 import type { Thread } from "../types";
@@ -85,11 +86,11 @@ function Header() {
         <Show when={c()}>
           <Show when={drafts()}>
             <button class="rv-quietbtn mr-3" onClick={bind("review.send.all")}>
-              {drafts()} draft{drafts() === 1 ? "" : "s"} only here · <kbd>P</kbd> sends
+              {drafts()} draft{drafts() === 1 ? "" : "s"} only here · <kbd>{keyOf("review.send.all")}</kbd> sends
             </button>
           </Show>
           <button class="rv-finish" classList={{ "rv-finish-on": pending() > 0 }} onClick={bind("review.finish")} title="your pending review is private until you submit it on GitHub">
-            {pending() ? `${pending()} pending · open on GitHub to submit` : "Open on GitHub"} <kbd>S</kbd>
+            {pending() ? `${pending()} pending · open on GitHub to submit` : "Open on GitHub"} <kbd>{keyOf("review.finish")}</kbd>
           </button>
         </Show>
       </div>
@@ -126,8 +127,8 @@ function Header() {
         <span class="rv-meta">
           {openThreads()} open · viewed {viewedCount()}/{pg.files().length}
         </span>
-        <button class="rv-toggle" onClick={bind("review.split")}>{pg.split() ? "split" : "unified"} <kbd>s</kbd></button>
-        <button class="rv-toggle" onClick={bind("review.outdated")}>{pg.showOutdated() ? "hide" : "show"} outdated <kbd>O</kbd></button>
+        <button class="rv-toggle" onClick={bind("review.split")}>{pg.split() ? "split" : "unified"} <kbd>{keyOf("review.split")}</kbd></button>
+        <button class="rv-toggle" onClick={bind("review.outdated")}>{pg.showOutdated() ? "hide" : "show"} outdated <kbd>{keyOf("review.outdated")}</kbd></button>
       </nav>
     </header>
   );
@@ -182,7 +183,7 @@ function FileTree() {
             <For each={g.files}>
               {(v) => (
                 <div class="rv-tfile" classList={{ "rv-tfile-on": current() === v.file.path, "rv-tfile-done": v.viewed }}>
-                  <button class="rv-check" title={v.viewed ? "viewed — v unmarks it" : "mark viewed (v)"} onClick={bind("review.viewed.file", v.file.path)}>
+                  <button class="rv-check" title={v.viewed ? `viewed — ${keyOf("review.viewed")} unmarks it` : `mark viewed (${keyOf("review.viewed")})`} onClick={bind("review.viewed.file", v.file.path)}>
                     {v.viewed ? "☑" : "☐"}
                   </button>
                   <button class="rv-tname" onClick={bind("review.file.go", v.file.path)}>

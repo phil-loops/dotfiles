@@ -38,7 +38,7 @@ command({
 });
 
 // `g d` is Helix's go-to-definition on the review page, so the dashboard is `g D`
-const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g D" };
+const NAV_KEY: Record<string, string> = { forests: "g f", dashboard: "g D", todo: "g o" };
 for (const s of SURFACES.filter((x) => !x.arg)) {
   command({
     id: `nav.${s.id}`,

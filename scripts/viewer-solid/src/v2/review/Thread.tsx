@@ -1,6 +1,7 @@
 // A conversation at its line (folded like GitHub's when resolved or outdated), the second reader's
 // note under it, a draft from the ledger (a comment or a reply not on GitHub yet), and the comment box.
 import { createMemo, For, onMount, Show } from "solid-js";
+import { keyOf } from "../registry";
 import { bind, dispatch } from "../runner";
 import { view } from "../store";
 import type { Comment, Item, Thread } from "../types";
@@ -199,8 +200,8 @@ export function PendingView(props: { item: Item; selected: (k: string | undefine
   const it = () => props.item;
   const hint = () => {
     const out: string[] = [];
-    if (it().state === "draft") out.push("p sends to your pending review");
-    if (it().state !== "sending") out.push("d deletes");
+    if (it().state === "draft") out.push(`${keyOf("review.send")} sends to your pending review`);
+    if (it().state !== "sending") out.push(`${keyOf("review.pending.remove")} deletes`);
     return out.join(" · ");
   };
   return (

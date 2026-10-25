@@ -79,7 +79,7 @@ async function load(): Promise<void> {
 
 function open(): void {
   const v = world.versions;
-  es = new EventSource(`/v2/events?epoch=${encodeURIComponent(world.epoch)}&git=${v.git}&remote=${v.remote}&review=${v.review}`);
+  es = new EventSource(`/v2/events?epoch=${encodeURIComponent(world.epoch)}&git=${v.git}&remote=${v.remote}&review=${v.review}&todo=${v.todo}`);
   es.addEventListener("hello", () => {
     backoff = 500;
     setConn("live");
