@@ -1,7 +1,8 @@
-// A key means one thing everywhere: the same key on two pages runs the same command — or a
-// command listed below as the same move. Loads the real registry, so it checks what ships.
+// A key means one thing on every page — in the defaults and with your keys.toml laid over them.
+// Loads the real registry, so it checks what ships.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { registerHooks } from "node:module";
 
 registerHooks({
@@ -20,46 +21,42 @@ Object.assign(globalThis, {
 globalThis.window = globalThis as never;
 const every = globalThis.setInterval;
 globalThis.setInterval = ((fn: () => void, ms: number) => every(fn, ms).unref()) as never;
+const { applyKeys, clashes, validKey } = await import("./bindings");
 
-// Keys whose move is the same on every page, each page doing it to its own things.
-const SAME_MOVE: Record<string, string[]> = {
-  "next": ["cursor.down", "review.down"],
-  "previous": ["cursor.up", "review.up"],
-  "back out": ["overlay.close", "review.back"],
-  "out": ["forest.collapse", "review.leave"],
-  "the thing's main action": ["row.primary", "review.fold"],
-  "send to GitHub": ["branch.push", "review.send"],
-};
-
-test("a key means one thing on every page", async () => {
+async function registry() {
   for (const m of ["app", "project", "branch", "review"]) await import(`./commands/${m}`);
   const { commands } = await import("./registry");
-  const { SURFACE_SCOPES } = await import("./sheet");
-  const surfaces = Object.entries(SURFACE_SCOPES as Record<string, string[]>);
-  const move = (id: string) => Object.keys(SAME_MOVE).find((k) => SAME_MOVE[k].includes(id)) ?? id;
+  return commands().map((c) => ({ id: c.id, scope: c.scope, keys: c.keys && [...c.keys] }));
+}
 
-  const byKey = new Map<string, Map<string, Set<string>>>();
-  for (const c of commands()) {
-    for (const key of c.keys ?? []) {
-      const pages = c.scope === "global" ? surfaces.map(([s]) => s) : surfaces.filter(([, scopes]) => scopes.includes(c.scope)).map(([s]) => s);
-      assert.ok(pages.length, `${c.id}: scope ${c.scope} is on no page — add it to SURFACE_SCOPES`);
-      const at = byKey.get(key) ?? new Map<string, Set<string>>();
-      for (const p of pages) at.set(p, (at.get(p) ?? new Set()).add(c.id));
-      byKey.set(key, at);
-    }
-  }
+const yours = () =>
+  JSON.parse(execFileSync("python3", ["-I", "-c", "import json,sys; sys.path.insert(0, \".\"); import srv.keymap as k; print(json.dumps(k.load()))"], { cwd: new URL("../../../", import.meta.url).pathname }).toString());
 
-  const clashes: string[] = [];
-  for (const [key, at] of byKey) {
-    // On one page a key may run several commands — the narrowest live scope picks — so a page's
-    // meaning is what its own commands do, and the global one only where it has none.
-    const meaning = new Map<string, string>();
-    for (const [page, ids] of at) {
-      const own = [...ids].filter((id) => commands().find((c) => c.id === id)!.scope !== "global");
-      meaning.set(page, [...new Set((own.length ? own : [...ids]).map(move))].sort().join(" | "));
-    }
-    const distinct = new Set(meaning.values());
-    if (distinct.size > 1) clashes.push(`${key}: ${[...meaning].map(([p, m]) => `${p} → ${m}`).join(", ")}`);
-  }
-  assert.deepEqual(clashes, [], `keys that mean different things on different pages:\n  ${clashes.join("\n  ")}`);
+test("the default keys mean one thing on every page", async () => {
+  assert.deepEqual(clashes(await registry()), []);
+});
+
+test("your keys.toml applies cleanly and keeps the rule", async () => {
+  const cmds = await registry();
+  const { keys, errors } = yours();
+  assert.deepEqual([...errors, ...applyKeys(cmds, keys), ...clashes(cmds)], []);
+});
+
+test("an override that clashes, names nothing, or isn't a key is reported", () => {
+  const cmds = [
+    { id: "project.archive", scope: "project", keys: ["X"] },
+    { id: "review.extend", scope: "line", keys: ["x"] },
+  ];
+  assert.deepEqual(applyKeys(cmds, { "project.archive": ["x"], "nope": ["q"], "review.extend": ["Ctrl+x"] }), [
+    "nope: no such command",
+    'review.extend: not a key — "Ctrl+x"',
+  ]);
+  assert.deepEqual(clashes(cmds), []);
+  applyKeys(cmds, { "review.extend": ["x"] });
+  assert.match(clashes(cmds).join(), /^x: forests → project.archive, review → review.extend$/);
+});
+
+test("key names are what the keyboard produces", () => {
+  for (const k of ["x", "X", "?", "g d", "C-k", "A-x", "space", "esc", "ret", "tab", "down"]) assert.ok(validKey(k), k);
+  for (const k of ["Ctrl+x", "", "gd", "enter", "cmd-k"]) assert.ok(!validKey(k), k);
 });

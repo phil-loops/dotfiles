@@ -38,6 +38,7 @@ from srv import packet   # own line: same reason
 from srv import state   # own line: same reason
 from srv import telemetry   # own line: same reason
 from srv import reviewdesk   # own line: same reason
+from srv import keymap   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -181,7 +182,7 @@ def asset_sig():
     # fingerprint the built Solid app (dist/) so a fresh `npm run build` reloads open tabs.
     # dist/index.html names hashed asset files, so its mtime alone moves on a rebuild; we
     # hash the assets dir too to be safe.
-    parts = [os.path.join(DIST, "index.html")]
+    parts = [os.path.join(DIST, "index.html"), keymap.PATH]   # saving your keys reloads tabs too
     adir = os.path.join(DIST, "assets")
     try:
         parts += [os.path.join(adir, f) for f in sorted(os.listdir(adir))]
@@ -329,7 +330,8 @@ class H(BaseHTTPRequestHandler):
                     return
                 # Inject the registry repo names so the client router can tell a <repo> path
                 # segment from a <project> one (/forests/<repo>/<project> vs /forests/<project>).
-                inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))}</script>".encode()
+                keys = json.dumps(keymap.load()).replace("</", "<\\/")
+                inject = f"<script>window.__VIEWER_REPOS__={json.dumps(list(REPOS))};window.__CANOPY_KEYS__={keys}</script>".encode()
                 hit = _index_cache[page] = (sig, html.replace(b"<head>", b"<head>" + inject, 1))
             body = hit[1]
         self._send(200, body, "text/html; charset=utf-8")

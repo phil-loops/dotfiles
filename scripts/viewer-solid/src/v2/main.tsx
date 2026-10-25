@@ -10,9 +10,11 @@ import { startRouter, SURFACES } from "./router";
 import { announce } from "./runner";
 import { connect } from "./sync";
 import { installPageTelemetry } from "./telemetry";
+import { applyUserKeys } from "./userkeys";
 
 installPageTelemetry();
 connect();
+applyUserKeys();
 installKeys();
 render(() => <App />, document.getElementById("root")!);
 startRouter();
