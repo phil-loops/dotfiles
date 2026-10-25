@@ -1,42 +1,122 @@
-// `?`: the keys that work here, generated from the registry — so it can't drift from what the keys do.
+// `?`: what you can do right now — the keys that act on the thing under the cursor, as the commands
+// they'd run here, then what works anywhere, then this page's keys that do nothing at the moment.
+// Generated from the registry, so it can't drift from what the keys do.
 import { For, Show } from "solid-js";
-import { liveScopes, targetFor } from "./model";
+import { liveScopes, model, targetFor } from "./model";
 import { commands } from "./registry";
+import { page, sideLine } from "./review/page";
 import { surface } from "./router";
 import { bind } from "./runner";
-import { SCOPE_TITLES, sheetSections } from "./sheet";
+import { sheetNow, type SheetLine } from "./sheet";
+import { view } from "./store";
 import { sheetOpen } from "./ui";
 import { customized, keyProblems } from "./userkeys";
 
+/** What a scope's commands act on right now, in words. */
+function labelOf(scope: string): string {
+  const h = page.here();
+  switch (scope) {
+    case "branch":
+      return view("branch", model.selectedBranch()!)?.name ?? "this branch";
+    case "project":
+      return `the forest ${view("project", model.selectedProject()!)?.name ?? ""}`.trim();
+    case "row":
+      return model.selectedBranch() ? labelOf("branch") : labelOf("project");
+    case "item":
+      return view("todo", model.selectedItem()!)?.title ?? "this item";
+    case "line":
+      return h?.kind === "line" ? `${h.path.split("/").pop()}:${sideLine(h.row).line}` : "this line";
+    case "thread":
+      return "this conversation";
+    case "pending":
+      return "your draft";
+    default:
+      return `the ${surface().title} page`;
+  }
+}
+const hereLabel = () => labelOf(liveScopes()[0]);
+
+/** Right-now lines under a heading per target: the branch, then its forest, then the page. */
+const byTarget = (lines: SheetLine[]) => {
+  const out: { label: string; lines: SheetLine[] }[] = [];
+  for (const l of lines) {
+    const label = labelOf(l.cmd.scope);
+    const same = out.find((g) => g.label === label);
+    if (same) same.lines.push(l);
+    else out.push({ label, lines: [l] });
+  }
+  return out;
+};
+
+function Lines(props: { lines: SheetLine[]; dim?: boolean }) {
+  return (
+    <For each={props.lines}>
+      {(l) => (
+        <div class="flex justify-between gap-4 py-0.5">
+          <span class={props.dim ? "text-ink-faint" : "text-ink-dim"}>{l.cmd.title}</span>
+          <kbd class={`shrink-0 font-mono ${props.dim ? "text-ink-faint" : "text-gold-leaf"} ${customized.has(l.cmd.id) ? "underline decoration-dotted" : ""}`}>{l.key}</kbd>
+        </div>
+      )}
+    </For>
+  );
+}
 
 export default function KeySheet() {
+  const groups = () =>
+    sheetNow(
+      surface().id,
+      liveScopes(),
+      commands()
+        .filter((c) => c.keys?.length)
+        .map((c) => ({ id: c.id, title: c.title, scope: c.scope, keys: c.keys!, available: !c.available || c.available(targetFor(c.scope)) })),
+    );
+  const hints = () => commands().filter((c) => c.hint?.length && liveScopes().includes(c.scope));
   return (
     <Show when={sheetOpen()}>
       <div class="fixed inset-0 z-20 flex items-center justify-center">
         <div class="absolute inset-0 bg-vellum-night/70" onClick={bind("overlay.close")} />
         <div class="relative max-h-[86vh] w-[min(620px,92vw)] overflow-auto border border-rule bg-vellum-raise px-6 py-5">
-          <h2 class="m-0 mb-1 font-display text-[20px] font-normal text-ink">Keys <span class="text-ink-faint">· {surface().title}</span></h2>
-          <p class="m-0 mb-3 text-[12px] text-ink-faint">Set yours in <code>~/.dotfiles/canopy/keys.toml</code> — <span class="underline decoration-dotted">underlined</span> keys are yours.</p>
+          <h2 class="m-0 mb-3 font-display text-[20px] font-normal text-ink">
+            Right now <span class="text-ink-faint">· {hereLabel()}</span>
+          </h2>
           <Show when={keyProblems.length}>
             <ul class="m-0 mb-3 list-none border-l-2 border-gold-leaf p-0 pl-3 text-[12px] text-ink">
               <For each={keyProblems}>{(p) => <li>{p}</li>}</For>
             </ul>
           </Show>
-          <For each={sheetSections(surface().id, liveScopes())}>
-            {(s) => (
-              <section class="mb-3">
-                <h3 class={`m-0 mb-1 text-[11px] font-normal uppercase tracking-[0.12em] ${s.live ? "text-gold-leaf" : "text-ink-faint"}`}>{SCOPE_TITLES[s.scope]}</h3>
-                <For each={commands().filter((c) => c.scope === s.scope && (c.keys?.length || c.hint?.length))}>
-                  {(c) => (
-                    <div class="flex justify-between py-0.5">
-                      <span class={!s.live || !c.available || c.available(targetFor(c.scope)) ? "text-ink-dim" : "text-ink-faint"}>{c.title}</span>
-                      <kbd class={`font-mono text-gold-leaf ${customized.has(c.id) ? "underline decoration-dotted" : ""}`}>{(c.keys ?? c.hint)!.join(" · ")}</kbd>
-                    </div>
-                  )}
-                </For>
-              </section>
-            )}
-          </For>
+          <section class="mb-4">
+            <Show when={groups().now.length || hints().length} fallback={<p class="m-0 text-ink-faint">nothing here takes a key — move the cursor onto something</p>}>
+              <For each={byTarget(groups().now)}>
+                {(g) => (
+                  <div class="mb-2">
+                    <h3 class="m-0 mb-0.5 text-[11px] font-normal uppercase tracking-[0.12em] text-gold-leaf">{g.label}</h3>
+                    <Lines lines={g.lines} />
+                  </div>
+                )}
+              </For>
+              <For each={hints()}>
+                {(c) => (
+                  <div class="flex justify-between gap-4 py-0.5">
+                    <span class="text-ink-dim">{c.title}</span>
+                    <kbd class="shrink-0 font-mono text-gold-leaf">{c.hint!.join(" · ")}</kbd>
+                  </div>
+                )}
+              </For>
+            </Show>
+          </section>
+          <section class="mb-4">
+            <h3 class="m-0 mb-1 text-[11px] font-normal uppercase tracking-[0.12em] text-ink-faint">Anywhere</h3>
+            <Lines lines={groups().everywhere} />
+          </section>
+          <Show when={groups().notNow.length}>
+            <section>
+              <h3 class="m-0 mb-1 text-[11px] font-normal uppercase tracking-[0.12em] text-ink-faint">On this page, not right now</h3>
+              <Lines lines={groups().notNow} dim />
+            </section>
+          </Show>
+          <p class="m-0 mt-4 text-[11px] text-ink-faint">
+            Your keys: <code>~/.dotfiles/canopy/keys.toml</code> — <span class="underline decoration-dotted">underlined</span> ones are yours.
+          </p>
         </div>
       </div>
     </Show>
