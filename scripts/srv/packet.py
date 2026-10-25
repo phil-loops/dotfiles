@@ -181,13 +181,39 @@ def landing_title(snap, branch, subjects):
 
 
 def body(branch):
-    """The landing body: a hand-written legacy stack-pr-body wins verbatim; else the packet."""
+    """The landing body: a hand-written stack-pr-body wins verbatim; else the drafted one."""
     snap = repostate.snapshot()
     saved = snap.branch_key(branch, "pr-body")
     if saved:
         return saved
-    f = facts(branch)
-    return rp.render(rp.build(f), f["template"])
+    return drafted(branch)
+
+
+def packet_on(branch):
+    """A forest that opts into the full packet body: git config stack-project.<p>.pr-body packet."""
+    p = repostate.snapshot().project(branch)
+    return bool(p) and ctx.run(["git", "config", f"stack-project.{p}.pr-body"]).stdout.strip() == "packet"
+
+
+def casual_why(f):
+    """The opening commit's own why, when it's short enough to read as Phil writes one (1–3 lines);
+    else nothing — he types it."""
+    first = ctx.run(["git", "log", "--reverse", "--first-parent", "--format=%b%x1e", f"{f['floor']}..{f['branch']}"]).stdout.split("\x1e")[0]
+    why = rp.strip_plan(first)
+    return why if why and len(why) <= 280 and len([ln for ln in why.splitlines() if ln.strip()]) <= 3 else ""
+
+
+def drafted(branch, f=None):
+    """The body a PR opens with when Phil hasn't written one, in his voice: a short why (or none)
+    above the repo's template — his hand-typed PRs on main are 0–3 casual lines, then Traffic Cop.
+    A forest that opts in (packet_on) gets the full review packet instead: Intent, merge order,
+    reading order, verified."""
+    f = f or facts(branch)
+    if packet_on(branch):
+        return rp.render(rp.build(f), f["template"])
+    parts = [casual_why(f), (f["template"] or "").strip()]
+    text = "\n\n".join(x for x in parts if x)
+    return text + "\n" if text else ""
 
 
 def label_on(branch):
@@ -462,7 +488,7 @@ def get(req, u):
     _send(req, 200, {
         "ok": True, "branch": branch, "tree": f["tree"], "title": f["title"], "label": f["label"],
         "labelName": rp.LABEL, "sections": p, "hand": f["hand"],
-        "body": saved_body or rp.render(p, f["template"]), "packetBody": rp.render(p, f["template"]),
+        "body": saved_body or drafted(branch, f), "packetBody": rp.render(p, f["template"]),
         "legacyBody": bool(saved_body), "template": f["template"],
         "guide": _guide_state(f), "review": review,
         "pr": (node or {}).get("pr"),

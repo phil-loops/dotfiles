@@ -21,11 +21,11 @@ At branch creation, in one motion: `git config branch.<n>.description "<thesis>"
 
 Per-branch keys live under `branch.<n>.stack-*` (keystone ran 2026-09-13): git deletes them with the branch and carries them through `git branch -m`. **Never write the old `stack-branch.<n>.*` spelling** — `stack-config-move --check` flags it. Rename checklist: `git branch -m`, fix the `stack-project.<proj>.branch` registry entry, re-point children's `.stack-parent` (and any `.stack-requires`/`.stack-after` naming it). Health-scan: `stack-doctor [<project>]`; sweep dead config: `stack-doctor --prune` (`--dry-run` previews).
 
-Commit bodies carry no generated forest text — the merge-order block lives only in the PR body (`stack-pr-body`, drafted as `branch.<b>.stack-pr-body` and edited in the viewer's words column), the only text that reaches main. The description is the branch's one human line (stories fold into it) and refreshes freely (config, not history).
+Commit bodies carry no generated forest text, and PR bodies don't by default either — the PR body is the only text that reaches main (the squash), so the merge-order block is opt-in (`stack-pr-body --plan`, or `git config stack-project.<p>.pr-body packet`). The description is the branch's one human line (stories fold into it) and refreshes freely (config, not history).
 
 ## Creating
 
-`git checkout <parent> && git checkout -b <name>`; an independent base forks from `origin/main` with `--no-track`. Squash within a branch: `git reset --soft <base-sha> && git commit` — use the branch's REAL base SHA, never a `main`/`origin/main` ref that may have moved mid-session (2026-08-04: a soft-reset onto a just-advanced ref silently baked a revert of other people's merged work). PR bases: nearest ancestor with an open PR, else main; record "Stacked on: #N" in the body. PR bodies stay terse: one line of purpose + the commit outline (when 2+) + a numbered forest-position list.
+`git checkout <parent> && git checkout -b <name>`; an independent base forks from `origin/main` with `--no-track`. Squash within a branch: `git reset --soft <base-sha> && git commit` — use the branch's REAL base SHA, never a `main`/`origin/main` ref that may have moved mid-session (2026-08-04: a soft-reset onto a just-advanced ref silently baked a revert of other people's merged work). PR bases: nearest ancestor with an open PR, else main; record "Stacked on: #N" in the body. PR text is Phil's voice (2026-10-25, his hand-typed PRs on main): a title ≤ 40 chars after `type(scope):`, a body of 0–3 casual lowercase lines of why above the repo's Traffic Cop template — `stack-pr-body <b>` drafts just that why; the viewer's words editor flags anything longer.
 
 ## Restacking after a merge — raw git, no wrapper
 

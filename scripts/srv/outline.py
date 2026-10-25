@@ -195,8 +195,7 @@ def _pr(branch):
 
 def _drafted_body(branch):
     from . import packet
-    f = packet.facts(branch)
-    return packet.rp.render(packet.rp.build(f), f["template"]).strip()
+    return packet.drafted(branch).strip()
 
 
 def _draft(branch, rows):

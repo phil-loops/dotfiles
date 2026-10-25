@@ -276,6 +276,37 @@ def _bullets(lines):
                      else f"- {ln}" for ln in lines)
 
 
+_STEP = re.compile(r"^\s+\S|^\s*(\d+\.\s|[-*•]\s|\[)")
+
+
+def strip_plan(text):
+    """The text without a generated "Part of a stack" block (outlineHints.stripPlan's rule: the
+    block runs to the first blank line not followed by more steps — GitHub wraps long steps)."""
+    lines, out, i = (text or "").split("\n"), [], 0
+    while i < len(lines):
+        if lines[i].strip() == "-- forest --":
+            i += 1
+            continue
+        if lines[i].startswith("Part of "):
+            while i + 1 < len(lines):
+                if lines[i + 1].strip():
+                    i += 1
+                    continue
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines) and _STEP.match(lines[j]):
+                    i = j
+                else:
+                    break
+            i += 1
+            continue
+        out.append(lines[i])
+        i += 1
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+
+
+
 def render(p, template=""):
     out = []
     if p.get("lead"):

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { bare, hasPlan, hintsFor, prefixOf, stripPlan, withScope } from "./outlineHints.ts";
+import { bare, bodyHints, hasPlan, hintsFor, prefixOf, stripPlan, withScope } from "./outlineHints.ts";
 
 const ids = (h: { id: string }[]) => h.map((x) => x.id);
 
@@ -32,6 +32,13 @@ test("follow-ups read bare", () => {
   assert.equal(bare("refactor(x): extract the widget card"), "extract the widget card");
 });
 
+test("length is the words after type(scope): — Phil's own titles pass, drafted ones don't", () => {
+  for (const s of ["feat(LOO-6208): Unlock goal window", "fix(loo-6120): render critical notice", "feat(loo-6219): drop legacy admin interaction stuff", "fix(LOO-5990): Allowlist the campaign update body"]) {
+    assert.ok(!ids(hintsFor({ subject: s, body: "" }, { opening: true, ticket: s.match(/\((.*?)\)/)![1] })).includes("long"), s);
+  }
+  assert.ok(ids(hintsFor({ subject: "fix(loo-6229): migrate the disable domain function to always leave breadcrumbs", body: "" }, { opening: true, ticket: "loo-6229" })).includes("long"));
+});
+
 test("long subjects and placeholders are flagged", () => {
   const h = hintsFor({ subject: "wip " + "x".repeat(60), body: "" }, { opening: false });
   assert.deepEqual(ids(h), ["wip", "long"]);
@@ -53,4 +60,11 @@ test("a baked forest block is detected and stripped, prose kept", () => {
 test("the PR title follows the opening rule but ignores bodies", () => {
   const h = hintsFor({ subject: "show widgets", body: "Part of a stack" }, { opening: true, ticket: "loo-9", kind: "title" });
   assert.deepEqual(ids(h), ["scope"]);
+});
+
+test("a PR body: the plan block is flagged, long prose noted, the template not counted", () => {
+  const tpl = "---\n👮 Traffic Cop\n\n- [ ] tested";
+  assert.deepEqual(bodyHints("👋 fare thee well\n\n" + tpl, tpl), []);
+  assert.deepEqual(bodyHints("why\n\nPart of a stack, in merge order:\n  1. #1\n\n" + tpl, tpl).map((h) => h.id), ["plan"]);
+  assert.deepEqual(bodyHints("x".repeat(300) + "\n\n" + tpl, tpl).map((h) => h.id), ["prose"]);
 });
