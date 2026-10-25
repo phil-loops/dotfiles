@@ -6,6 +6,7 @@ area = "gates"
 size = "M"
 why = "a main merge or catch-up stops relocking push and re-costing a typecheck on code that didn't change"
 links = ["memory:project_push-gates-tree-keyed.md", "patches/gates-green-delta.patch"]
+rank = 9
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

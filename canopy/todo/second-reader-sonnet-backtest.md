@@ -6,6 +6,7 @@ area = "second-reader"
 size = "S"
 why = "if Sonnet matches Opus, the reader gets several times cheaper and faster per thread"
 links = ["/Users/philbrockman/sweeps/viewer-redesign-2026-10-21/second-reader/", "memory:project_canopy-v2.md"]
+rank = 12
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

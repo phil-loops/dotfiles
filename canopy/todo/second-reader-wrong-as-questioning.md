@@ -6,6 +6,7 @@ area = "second-reader"
 size = "S"
 why = "a soft label keeps the 4-in-5 useful catches without implying the reader knows when a comment is wrong"
 links = ["/Users/philbrockman/sweeps/viewer-redesign-2026-10-21/second-reader/RESULTS.md", "memory:project_canopy-v2.md"]
+rank = 4
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

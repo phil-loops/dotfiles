@@ -6,6 +6,7 @@ area = "push"
 size = "S"
 why = "the push count should say what this branch sends, not its parents' unpushed work"
 links = ["memory:project_push-door-friction.md"]
+rank = 10
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

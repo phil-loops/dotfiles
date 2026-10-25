@@ -6,6 +6,7 @@ area = "server"
 size = "S"
 why = "removes the port-reclaim path where the two models still collide"
 links = ["memory:project_viewer-lifecycle-debt.md"]
+rank = 18
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

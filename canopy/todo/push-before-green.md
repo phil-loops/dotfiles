@@ -6,6 +6,7 @@ area = "push"
 size = "S"
 why = "push stops feeling blocked on a lock that cost time but caught nothing on the last round"
 links = ["memory:project_push-door-friction.md"]
+rank = 16
 created = "2026-10-25"
 updated = "2026-10-25"
 +++

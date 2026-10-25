@@ -6,6 +6,7 @@ area = "review"
 size = "S"
 why = "the findings push-ready wasn't sure about sit next to the diff I'm reading instead of only in Claude's chat"
 links = ["memory:project_push-ready-review-phase.md"]
+rank = 15
 created = "2026-10-25"
 updated = "2026-10-25"
 +++
