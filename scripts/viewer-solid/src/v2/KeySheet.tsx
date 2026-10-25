@@ -30,6 +30,8 @@ function labelOf(scope: string): string {
       return h?.kind === "line" ? `${h.path.split("/").pop()}:${sideLine(h.row).line}` : "this line";
     case "thread":
       return "this conversation";
+    case "gap":
+      return "the hidden lines";
     case "pending":
       return "your draft";
     default:

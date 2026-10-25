@@ -14,7 +14,7 @@ export const SAME_MOVE: Record<string, string[]> = {
   "previous": ["cursor.up", "review.up"],
   "back out": ["overlay.close", "review.back"],
   "out": ["forest.collapse", "review.leave", "forest.leave"],
-  "the thing's main action": ["row.primary", "review.fold", "todo.open"],
+  "the thing's main action": ["row.primary", "review.fold", "todo.open", "review.expand"],
   "send to GitHub": ["branch.push", "review.send"],
   "move up the list": ["focus.up", "todo.up"],
   "move down the list": ["focus.down", "todo.down"],

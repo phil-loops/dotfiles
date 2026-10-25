@@ -2,7 +2,7 @@
 // then everywhere. Other surfaces' keys are left out — they don't work here.
 export const SURFACE_SCOPES: Record<string, string[]> = {
   forests: ["branch", "project", "row", "forests"],
-  review: ["pending", "thread", "line", "review"],
+  review: ["pending", "thread", "line", "gap", "review"],
   dashboard: ["dashboard"],
   todo: ["item", "todo"],
   forest: ["branch", "row", "forest", "project"],
@@ -19,6 +19,7 @@ export const SCOPE_TITLES: Record<string, string> = {
   line: "On a diff line",
   thread: "On a conversation",
   pending: "On a pending comment",
+  gap: "On hidden lines",
   todo: "On the tracker",
   item: "On an item",
   forest: "On a forest's page",

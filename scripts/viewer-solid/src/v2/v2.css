@@ -190,3 +190,7 @@
 [data-row] { scroll-margin-block: 56px; }
 /* the review cursor lands clear of the sticky header + file header above and the footer below */
 [data-stop] { scroll-margin-top: calc(var(--rv-head-h, 102px) + 40px); scroll-margin-bottom: 48px; }
+.rv-gap { cursor: pointer; }
+.rv-gap:hover, .rv-gap.rv-on { color: var(--color-ink-dim); background: rgba(127, 160, 147, 0.12); }
+.rv-gap.rv-on { box-shadow: inset 2px 0 0 var(--color-gold-leaf); }
+.rv-gap-mark { color: var(--color-gold-leaf); }

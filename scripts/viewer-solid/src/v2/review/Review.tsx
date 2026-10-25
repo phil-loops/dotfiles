@@ -6,7 +6,7 @@ import { keyOf } from "../registry";
 import { bind } from "../runner";
 import { view, world } from "../store";
 import type { Thread } from "../types";
-import { rowAnchors, type FileDiff, type Line, type Row } from "./diff";
+import { rowAnchors, type FileDiff, type Gap, type Line, type Row } from "./diff";
 import { highlight, langOf } from "./highlight";
 import { page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
@@ -215,7 +215,10 @@ function FileTree() {
 function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) => boolean }) {
   const fv = createMemo(() => pg.fileOf(props.file.path));
   const lang = langOf(props.file.path);
-  const rows = createMemo(() => rowsOf(props.file, pg.split()));
+  // the file as shown: with whatever unchanged lines have been revealed around its hunks
+  const file = () => fv()?.file ?? props.file;
+  const rows = createMemo(() => fv()?.rows ?? rowsOf(props.file, pg.split()));
+  const gapAt = (at: number) => fv()?.gaps.find((g) => g.at === at);
   const key = `f|${props.file.path}`;
   const aside = createMemo(() => (fv()?.aside ?? []).filter((t) => !t.outdated || pg.showOutdated()));
   const hiddenOutdated = createMemo(() => (fv()?.aside ?? []).filter((t) => t.outdated).length);
@@ -241,17 +244,44 @@ function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) =>
           <For each={rows()}>
             {(r, i) => (
               <>
-                <Show when={i() === 0 || rows()[i() - 1].hunk !== r.hunk}>
-                  <div class="rv-hunk">{props.file.hunks[r.hunk]?.header}</div>
+                <Show when={(i() === 0 || rows()[i() - 1].hunk !== r.hunk) && gapAt(r.hunk)} keyed>
+                  {(g) => <GapRow path={props.file.path} gap={g} selected={props.selected} />}
                 </Show>
-                <RowView file={props.file} row={r} lang={lang} selected={props.selected} />
-                <RowExtras file={props.file} row={r} selected={props.selected} />
+                <RowView file={file()} row={r} lang={lang} selected={props.selected} />
+                <RowExtras file={file()} row={r} selected={props.selected} />
               </>
             )}
           </For>
+          <Show when={gapAt(file().hunks.length)} keyed>
+            {(g) => <GapRow path={props.file.path} gap={g} selected={props.selected} />}
+          </Show>
         </div>
       </Show>
     </section>
+  );
+}
+
+/** Unchanged lines the diff leaves out: ↵ (or a click) shows 20 more, nearest the change first. */
+function GapRow(props: { path: string; gap: Gap; selected: (k: string | undefined) => boolean }) {
+  const key = `g|${props.path}|${props.gap.at}`;
+  const n = () => (props.gap.last == null ? null : props.gap.last - props.gap.first + 1);
+  const where = () => (props.gap.at === 0 ? "above" : props.gap.last == null || props.gap.label === "" ? "below" : "hidden");
+  return (
+    <div
+      class="rv-hunk rv-gap"
+      data-stop={key}
+      classList={{ "rv-on": props.selected(key) }}
+      onClick={bind("review.expand", key)}
+      title="show 20 more lines"
+    >
+      <span class="rv-gap-mark">⋯</span> {n() == null ? "more lines" : `${n()} ${where() === "hidden" ? "hidden" : "unchanged"} line${n() === 1 ? "" : "s"}${where() === "hidden" ? "" : ` ${where()}`}`}
+      <Show when={props.gap.label}>
+        <span class="text-ink-faint"> · {props.gap.label}</span>
+      </Show>
+      <Show when={props.selected(key)}>
+        <span class="text-ink-faint"> · {keyOf("review.expand")} shows 20 more</span>
+      </Show>
+    </div>
   );
 }
 

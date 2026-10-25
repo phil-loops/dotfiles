@@ -125,6 +125,29 @@ command({
   },
 });
 command({ id: "review.filter", title: "Find a file", scope: "review", budget: "local", keys: ["t"], local: () => pg.setFiltering(true) });
+// ── context: the unchanged lines between hunks ──
+
+command({
+  id: "review.expand",
+  title: "Show 20 more hidden lines",
+  scope: "gap",
+  budget: "local",
+  keys: ["ret"],
+  available: (key) => !!key?.startsWith("g|"),
+  local: (key) => {
+    const cut = key!.lastIndexOf("|");
+    const path = key!.slice(2, cut);
+    const at = Number(key!.slice(cut + 1));
+    void pg.reveal(path, at).then(() => {
+      // a gap that just closed takes the cursor to the line it ended on, not back to the top
+      const fv = pg.fileOf(path);
+      if (!fv || fv.gaps.some((g) => g.at === at)) return;
+      const end = at < fv.file.hunks.length ? fv.file.hunks[at].lines[0] : fv.file.hunks[fv.file.hunks.length - 1].lines.at(-1);
+      if (end) pg.setCursor(`l|${path}|${end.new != null ? `R:${end.new}` : `L:${end.old}`}`);
+    });
+  },
+});
+
 command({
   id: "review.leave",
   title: "Back to its forest",
@@ -181,7 +204,7 @@ command({
   write: (): Write | null => {
     const h = pg.here();
     if (!h || h.kind === "file") return null;
-    const line = h.kind === "line" ? sideLine(h.row).line : thread(h.id)?.local?.line ?? null;
+    const line = h.kind === "line" ? sideLine(h.row).line : h.kind === "gap" ? null : thread(h.id)?.local?.line ?? null;
     return { ops: [], path: repoPath("/open"), body: { branch: name(), path: h.path, line }, settled: () => true, failed: "couldn't open it in Helix" };
   },
 });

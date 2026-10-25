@@ -4,9 +4,9 @@
 import { createEffect, createMemo, createRoot, createSignal, on } from "solid-js";
 import { routeArg, surface } from "../router";
 import { list, view, world } from "../store";
-import { ask, getJSON } from "../sync";
+import { ask, getJSON, getText } from "../sync";
 import type { Conv, Draft, Item, Thread } from "../types";
-import { parsePatch, rowAnchors, splitRows, unifiedRows, type FileDiff, type Row } from "./diff";
+import { expand, parsePatch, rowAnchors, splitRows, unifiedRows, type FileDiff, type Gap, type Row } from "./diff";
 
 const store = {
   get: (k: string): string | null => {
@@ -56,13 +56,16 @@ export interface FileView {
   aside: Thread[];
   open: number;
   viewed: boolean;
+  /** unchanged lines the diff still hides (each is a cursor stop; ↵ shows more) */
+  gaps: Gap[];
 }
 
 export type Stop =
   | { key: string; kind: "file"; path: string }
   | { key: string; kind: "line"; path: string; row: Row }
   | { key: string; kind: "thread"; path: string; id: string }
-  | { key: string; kind: "pending"; path: string; id: string };
+  | { key: string; kind: "pending"; path: string; id: string }
+  | { key: string; kind: "gap"; path: string; at: number };
 
 const rowCache = new WeakMap<FileDiff, { u?: Row[]; s?: Row[] }>();
 /** A file's rows, built once per parsed diff: a thread or draft patch never rebuilds the diff's DOM. */
@@ -109,6 +112,25 @@ export const page = createRoot(() => {
   const [loadErr, setLoadErr] = createSignal<string | null>(null);
   const cache = new Map<string, NodePayload>();
   const keyOf = createMemo(() => `${id()}@${tip()}`);
+
+  // Unchanged lines revealed around the hunks, per file: the new file read once at the tip (the
+  // tip's sha, so it's exactly the file the diff's new side shows) and how many lines each gap shows.
+  type Context = { lines?: string[]; reveal: ReadonlyMap<number, number> };
+  const [context, setContext] = createSignal<{ key: string; files: ReadonlyMap<string, Context> }>({ key: "", files: new Map() });
+  const contextOf = (path: string): Context | undefined => (context().key === keyOf() ? context().files.get(path) : undefined);
+  const putContext = (key: string, path: string, c: Context) =>
+    setContext((cur) => ({ key, files: new Map(cur.key === key ? cur.files : []).set(path, c) }));
+  /** Show `n` more hidden lines at a gap; returns once the file's text is here. */
+  async function reveal(path: string, at: number, n = 20): Promise<void> {
+    const key = keyOf();
+    const t = target();
+    const was: Context = contextOf(path) ?? { reveal: new Map() };
+    putContext(key, path, { ...was, reveal: new Map(was.reveal).set(at, (was.reveal.get(at) ?? 0) + n) });
+    if (was.lines || !t || !tip()) return;
+    const text = await getText(atRepoPath(t.repo, `/file?branch=${tip()}&path=${encodeURIComponent(path)}`));
+    if (text == null || keyOf() !== key) return;
+    putContext(key, path, { ...(contextOf(path) ?? was), lines: text.split("\n") });
+  }
 
   async function load(key: string, repo: string, name: string): Promise<void> {
     const hit = cache.get(key);
@@ -171,7 +193,9 @@ export const page = createRoot(() => {
     for (const t of threads()) (byPath.get(t.path) ?? byPath.set(t.path, []).get(t.path)!).push(t);
     const pend = new Map<string, Item[]>();
     for (const c of items()) if (c.kind === "comment" && c.path) (pend.get(c.path) ?? pend.set(c.path, []).get(c.path)!).push(c);
-    return files().map((file) => {
+    return files().map((raw) => {
+      const c = contextOf(raw.path);
+      const { file, gaps } = expand(raw, c?.lines, c?.reveal ?? new Map());
       const rows = rowsOf(file, sp);
       const anchors = new Set(rows.flatMap(rowAnchors));
       const threadsAt = new Map<string, Thread[]>();
@@ -187,7 +211,7 @@ export const page = createRoot(() => {
         (pendingAt.get(a) ?? pendingAt.set(a, []).get(a)!).push(c);
       }
       const open = (byPath.get(file.path) ?? []).filter((t) => !t.resolved && !t.outdated).length;
-      return { file, rows, threadsAt, pendingAt, aside, open, viewed: isViewed(file.path) };
+      return { file, rows, threadsAt, pendingAt, aside, open, viewed: isViewed(file.path), gaps };
     });
   });
 
@@ -216,12 +240,16 @@ export const page = createRoot(() => {
         if (isOpen(t)) for (const r of repliesTo(t.id)) out.push({ key: `p|${r.key}`, kind: "pending", path, id: r.key });
       };
       for (const t of fv.aside) if (!t.outdated || showOutdated()) thread(t);
-      for (const r of fv.rows) {
+      const gapAt = new Map(fv.gaps.map((g) => [g.at, g]));
+      const gap = (at: number) => gapAt.has(at) && out.push({ key: `g|${path}|${at}`, kind: "gap", path, at });
+      fv.rows.forEach((r, i) => {
+        if (i === 0 || fv.rows[i - 1].hunk !== r.hunk) gap(r.hunk);
         out.push({ key: `l|${path}|${r.key}`, kind: "line", path, row: r });
         const at = atRow(fv, r);
         for (const t of at.threads) thread(t);
         for (const c of at.pending) out.push({ key: `p|${c.key}`, kind: "pending", path, id: c.key });
-      }
+      });
+      gap(fv.file.hunks.length);
     }
     return out;
   });
@@ -257,7 +285,7 @@ export const page = createRoot(() => {
   };
 
   return {
-    target, id, conv, draft, branch, tip, base, files, views, threads, items, repliesTo, elsewhere, stops, stopIndex, here, range,
+    target, id, conv, draft, branch, tip, base, files, views, reveal, threads, items, repliesTo, elsewhere, stops, stopIndex, here, range,
     fileOf, isOpen, atRow, isViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
