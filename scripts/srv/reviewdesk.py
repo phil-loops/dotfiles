@@ -240,7 +240,7 @@ def entities(name):
             tid = f"{cid}#{t['node']}"
             out["thread"][tid] = {"id": tid, "repo": name, "branch": b, "pr": pr["number"], **t,
                                   "local": local, "note": by_node.get(t["node"]),
-                                  "fixedBy": fixed.get(thread_url(t)) or []}
+                                  "fixedBy": fixed.get(url_key(thread_url(t))) or []}
         seen = on_github(pr)
         mine = []
         for it in items:
@@ -436,7 +436,7 @@ def fixes_between(base, branch):
         parts = rec.strip("\n").split("\x1f")
         if len(parts) < 3:
             continue
-        for url in filter(None, (u.strip() for u in parts[2].split("\x1d"))):
+        for url in filter(None, (url_key(u) for u in parts[2].split("\x1d"))):
             out.setdefault(url, []).append({"sha": parts[0], "short": parts[0][:7], "subject": parts[1]})
     return out
 
@@ -454,13 +454,19 @@ def fixes(snap, branch, pr):
     return hit
 
 
+def url_key(url):
+    """A thread URL as a key: GitHub owner and repo names are case-insensitive, and its API answers
+    `loops-so/loops` where a hand-written trailer says `Loops-so/loops`."""
+    return (url or "").strip().lower()
+
+
 def thread_url(t):
     return ((t.get("comments") or [{}])[0] or {}).get("url") or ""
 
 
 def _fix_of(snap, item, pr):
     """The commit a "done in {fix}" reply names now: the newest one declaring its thread."""
-    got = fixes(snap, item["branch"], pr).get(item.get("fixFor") or "") or []
+    got = fixes(snap, item["branch"], pr).get(url_key(item.get("fixFor"))) or []
     return got[0] if got else None
 
 
