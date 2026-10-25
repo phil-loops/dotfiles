@@ -28,7 +28,10 @@ esac
 dir="${1:-$PWD}"
 asker="${1:-}"
 
-primary=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}') || true
+# the first worktree is the one whose .git IS the common dir — `git worktree list` stats all ~220 to say so
+common=$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || common=""
+if [[ "${common:t}" == .git && -d "${common:h}" ]]; then primary=${common:h}
+else primary=$(git -C "$dir" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print substr($0,10); exit}') || true; fi
 [[ -n "$primary" ]] || { echo "stack-donor: $dir is not in a git repo" >&2; exit 1; }
 configured=$(git -C "$primary" config --get stack.donor 2>/dev/null || true)
 

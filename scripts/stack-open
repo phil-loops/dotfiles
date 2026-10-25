@@ -56,6 +56,9 @@ main_checkout(){   # the repo's FIRST worktree — the only one that really has 
                    # Not $main_root: we may be invoked from any sibling worktree, and hanging a
                    # scratch dir's node_modules off one of those breaks when it's removed.
   # `|| true`: awk exits on the first worktree, so the producer dies on SIGPIPE (141)
+  # The first worktree is the one whose .git IS the common dir; `git worktree list` stats every
+  # worktree to say so (~0.2s at 219), the path answers it for free.
+  if [[ "${_common_dir:t}" == .git && -d "${_common_dir:h}" ]]; then print -r -- "${_common_dir:h}"; return; fi
   local first; first=$(wt_list | awk '/^worktree /{print $2; exit}') || true
   print -r -- "${first:-$main_root}"
 }
@@ -69,8 +72,17 @@ existing_worktree(){   # echo the path of a real worktree holding <branch>, if a
   # `|| true`: awk exits at the match, so the producer dies on SIGPIPE (141) — pipefail+set -e would abort the caller's ex=$(...)
   # STACK_OPEN_SKIP_PRIMARY: pretend the primary checkout doesn't hold the branch — for callers
   # (loops-preview via --serve-path) that must never run a second server out of the main tree.
-  wt_list | awk -v ref="refs/heads/$1" -v skip="${STACK_OPEN_SKIP_PRIMARY:+$(main_checkout)}" '
-    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref && p != skip && p !~ /^\/(private\/)?tmp\/claude-/){print p; exit}}' || true
+  # Read git's own records — each worktree's HEAD and gitdir file — rather than `git worktree list`,
+  # which stats all ~220 worktrees to answer one question (220ms → ~12ms).
+  local want="ref: refs/heads/$1" skip="${STACK_OPEN_SKIP_PRIMARY:+$(main_checkout)}" d p
+  [[ -n "$_common_dir" && -d "$_common_dir" ]] || { wt_list | awk -v ref="refs/heads/$1" -v skip="$skip" '
+    /^worktree /{p=substr($0,10)} /^branch /{if($2==ref && p != skip && p !~ /^\/(private\/)?tmp\/claude-/){print p; exit}}' || true; return 0; }
+  for d in "$_common_dir" "$_common_dir"/worktrees/*(N/); do
+    [[ "$(<"$d/HEAD")" == "$want" ]] 2>/dev/null || continue
+    if [[ "$d" == "$_common_dir" ]]; then p=$(main_checkout); else p=$(<"$d/gitdir") 2>/dev/null; p=${p:h}; fi
+    [[ -d "$p" && "$p" != "$skip" && "$p" != (/private|)/tmp/claude-* ]] || continue
+    print -r -- "$p"; return 0
+  done
 }
 install_followup_hook(){   # idempotently install the detached-HEAD → branch-follow post-commit hook
   # Scratch worktrees are DETACHED so they never lock the branch (you can still
@@ -367,6 +379,24 @@ seed_gen(){   # give <dir> a .gen so tsgo can resolve #trpc imports — without 
 sync_tree(){   # foreground heal for machine callers; a caller's STACK_OPEN_NO_GEN_SYNC still opts out
   [[ -n "${_caller_no_gen_sync:-}" ]] && return 0
   "$SCRIPTS/seed-gen" --sync "$1" >/dev/null 2>&1 || true
+}
+
+# One line per open in ~/.cache/stack-open/opens.jsonl — ms since start at each mark (prep: the
+# checkout ready; locked: the Helix pane ours; drove: cd/open/goto done) — so a slow open says
+# where the time went. The viewer's 8s kill skips the line; the server's own log has the total.
+open_timing(){
+  zmodload zsh/datetime
+  typeset -g OPEN_T0=$EPOCHREALTIME OPEN_MARKS=""
+}
+open_ms(){ local -i ms; ms=$(( (EPOCHREALTIME - OPEN_T0) * 1000 )); print -r -- $ms }
+open_mark(){ [[ -n "${OPEN_T0:-}" ]] && OPEN_MARKS+=",\"$1\":$(open_ms)"; return 0 }   # timing never fails an open
+open_log(){
+  local f="${XDG_CACHE_HOME:-$HOME/.cache}/stack-open/opens.jsonl"
+  mkdir -p "${f:h}" 2>/dev/null
+  printf '{"at":"%s","branch":"%s","file":"%s","exit":%d,"starved":%s%s,"total":%d}\n' \
+    "$(strftime %Y-%m-%dT%H:%M:%S $EPOCHSECONDS)" "${branch//\"/}" "${rel//\"/}" "$1" \
+    "${${OPEN_STARVED:+true}:-false}" "$OPEN_MARKS" "$(open_ms)" >> "$f" 2>/dev/null
+  return 0
 }
 
 ensure_worktree(){   # echo a checkout dir for <branch> (real worktree, else scratch)
@@ -820,6 +850,7 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
     HX_DEADLINE=${STACK_OPEN_HX_BUDGET:-5}   # seconds of THIS script's life, not of the drive:
                                              # the worktree work before us spends the same 8s
     if hx_lock "$pane"; then
+      open_mark locked
       hx_modified "$pane" && dirty_before=1
       if hx_verify_normal "$pane" \
          && hx_cmd "$pane" "cd ${dir}" \
@@ -829,6 +860,7 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
           hx_out_of_time && starved=1   # the background retry lands it — the file's open, only the line is owed
           echo "stack-open: opened $rel_target but couldn't land on line $line" >&2
         fi
+        open_mark drove
       else
         hx_out_of_time && starved=1   # read it BEFORE the recovery extends the deadline
         # A batch that died mid-way may have typed its body into the buffer. Undo only when the
@@ -859,6 +891,7 @@ hx_open(){   # open <file...> in the warm review-hx tmux window (reuse via send-
     # ~3.5s EVERY press (measured 2026-08-18), so consecutive presses starve identically. Finish
     # the open ourselves instead: re-exec detached (setsid escapes the viewer's group-SIGKILL,
     # same trick as --heal-notify) with a fresh clock; hx_lock serializes it against any rival.
+    [[ -n "$starved" ]] && OPEN_STARVED=1
     if [[ -n "$starved" ]]; then
       if [[ -z "${STACK_OPEN_RETRY:-}" ]]; then
         echo "stack-open: prep ate the drive budget — finishing this open in the background" >&2
@@ -1015,7 +1048,9 @@ else
   branch="${1:?usage: stack-open <branch> <path> [<pos>]}"
   rel="${2:?usage: stack-open <branch> <path> [<pos>]}"   # NOT `path` — that's zsh's $PATH array
   pos="${3:-}"   # optional locator to land on: "<line>" or "<line>:<col>"
+  open_timing; trap 'open_log $?' EXIT   # at top level: a function's EXIT trap fires when the function returns
   dir=$(hx_worktree "$branch")
+  open_mark prep
 fi
 file="$dir/$rel"
 [[ -f "$file" ]] || { echo "stack-open: '$rel' not in $branch" >&2; exit 1; }
