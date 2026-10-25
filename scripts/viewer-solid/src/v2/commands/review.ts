@@ -211,36 +211,82 @@ command({
 
 // ── viewed ──
 
-function viewedWrite(path: string): Write {
-  const to = !pg.isViewed(path);
+/** Set change blocks viewed or not (POST /viewed): shown at once, rolled back if refused. */
+function viewedSet(keys: string[], on: boolean, said?: string): Write | null {
+  if (!keys.length) return null;
   const was = pg.viewedOverride();
-  pg.setViewedOverride(new Map(was).set(path, to));
-  if (to) {
-    const vs = pg.views();
-    const next = vs[vs.findIndex((v) => v.file.path === path) + 1];
-    pg.setCursor(`f|${next ? next.file.path : path}`);
-  }
+  const next = new Map(was);
+  for (const k of keys) next.set(k, on);
+  pg.setViewedOverride(next);
   return {
     ops: [],
-    path: repoPath("/bless"),
-    body: { branch: name(), file: path, ...(to ? {} : { unbless: true }) },
-    settled: () => true,
-    failed: `couldn't mark ${path.split("/").pop()} ${to ? "viewed" : "unviewed"}`,
+    path: repoPath("/viewed"),
+    body: { branch: name(), keys, on },
+    settled: () => keys.every((k) => pg.serverViewed().has(k) === on),
+    said,
+    failed: `couldn't mark it ${on ? "viewed" : "unviewed"}`,
     rollback: () => pg.setViewedOverride(was),
-    inverse: { id: "review.viewed.file", target: path },
+    inverse: { id: "review.viewed.set", target: pg.id(), arg: { keys, on: !on } },
   };
 }
+
+/** What v acts on: the hunk under the cursor, else (a file header, a conversation, the lines past
+ *  the last hunk) the whole file. */
+function viewedTarget(): { path: string; hunk: number | null } | null {
+  const h = pg.here();
+  if (!h) return null;
+  const fv = pg.fileOf(h.path);
+  const hunks = fv?.file.hunks.length ?? 0;
+  if (h.kind === "line") return { path: h.path, hunk: h.row.hunk };
+  if (h.kind === "gap" && h.at < hunks) return { path: h.path, hunk: h.at };
+  return { path: h.path, hunk: null };
+}
+
+function viewedToggle(path: string, hunk: number | null): Write | null {
+  const fv = pg.fileOf(path);
+  if (!fv) return null;
+  const blocks = fv.blocks.filter((b) => hunk == null || b.hunk === hunk);
+  const on = !blocks.every((b) => pg.isSeen(b.key));
+  if (on) {
+    // on to the next thing still to read: the next unviewed hunk in this file, else the next file
+    const next = hunk == null ? -1 : fv.file.hunks.findIndex((_, i) => i > hunk && !fv.seenHunks.has(i) && fv.blocks.some((b) => b.hunk === i));
+    if (next >= 0) {
+      const row = fv.rows.find((r) => r.hunk === next && (r.left?.kind !== "ctx" || r.right?.kind !== "ctx"));
+      if (row) pg.setCursor(`l|${path}|${row.key}`);
+    } else {
+      const vs = pg.views();
+      const after = vs.slice(vs.findIndex((v) => v.file.path === path) + 1).find((v) => !v.viewed);
+      pg.setCursor(`f|${after ? after.file.path : path}`);
+    }
+  }
+  const leafName = path.split("/").pop();
+  return viewedSet(blocks.map((b) => b.key), on, hunk == null || blocks.length === fv.blocks.length ? undefined : `${on ? "viewed" : "unviewed"} a hunk of ${leafName} — u puts it back`);
+}
+
 command({
   id: "review.viewed",
-  title: "Mark the file viewed",
+  title: "Mark viewed — the hunk, or the whole file on its header",
   scope: "review",
-  // the bless ledger hashes the file's blob through stack-bless: a git read, not a config write
-  budget: "git-write",
+  budget: "config-write",
   keys: ["v"],
   available: () => onFiles() && !!pg.here(),
-  write: () => viewedWrite(pg.here()!.path),
+  write: () => {
+    const t = viewedTarget();
+    return t ? viewedToggle(t.path, t.hunk) : null;
+  },
 });
-command({ id: "review.viewed.file", title: "Mark a file viewed", scope: "review", budget: "git-write", quiet: true, write: (path) => viewedWrite(path) });
+command({ id: "review.viewed.file", title: "Mark a file viewed", scope: "review", budget: "config-write", quiet: true, write: (path) => viewedToggle(path, null) });
+command({
+  id: "review.viewed.set",
+  title: "Put viewed marks back",
+  scope: "review",
+  budget: "config-write",
+  quiet: true,
+  write: (_id, arg) => {
+    const { keys, on } = arg as { keys: string[]; on: boolean };
+    return viewedSet(keys, on);
+  },
+});
 
 // ── writing: comments, the pending review, replies ──
 

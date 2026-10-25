@@ -194,7 +194,16 @@ export interface Entities {
   conv: Record<string, Conv>;
   thread: Record<string, Thread>;
   draft: Record<string, Draft>;
+  viewed: Record<string, Viewed>;
   todo: Record<string, TodoItem>;
+}
+
+/** The change blocks Phil has viewed on a branch (srv/viewed.py; keys from review/diff.ts blocksOf). */
+export interface Viewed {
+  id: string;
+  repo: string;
+  branch: string;
+  keys: string[];
 }
 
 /** One item of the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo/<id>.md).

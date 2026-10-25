@@ -184,3 +184,54 @@ export function expand(f: FileDiff, lines: string[] | undefined, reveal: Readonl
   if (eof == null || hiddenFirst <= eof) gaps.push({ at: spans.length, first: hiddenFirst, last: eof, label: "" });
   return { file: { ...f, hunks }, gaps };
 }
+
+// ── viewed: a change stays reviewed until its own text changes ──
+
+/** A run of consecutive changed lines — the unit "viewed" is kept on (wiki canopy-v2-viewed). */
+export interface Block {
+  key: string;
+  /** the hunk it sits in, or -1 for a file with no changed lines to show (binary, a pure rename) */
+  hunk: number;
+}
+
+/** cyrb53: a small, fast, stable string hash — keys only need to be equal for equal text. */
+function hash(s: string): string {
+  let h1 = 0xdeadbeef ^ s.length;
+  let h2 = 0x41c6ce57 ^ s.length;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 2654435761);
+    h2 = Math.imul(h2 ^ c, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+
+/** The file's change blocks, keyed by path + their -/+ text (no line numbers, no context), so a
+ *  key survives rebases, shifts, edited neighbours and git regrouping hunks. Identical blocks in
+ *  one file are told apart by order. A file with no changed lines gets one block for itself. */
+export function blocksOf(f: FileDiff): Block[] {
+  const out: Block[] = [];
+  const seen = new Map<string, number>();
+  const push = (body: string, hunk: number) => {
+    const base = hash(`${f.path}\0${body}`);
+    const n = seen.get(base) ?? 0;
+    seen.set(base, n + 1);
+    out.push({ key: n ? `${base}.${n}` : base, hunk });
+  };
+  f.hunks.forEach((h, i) => {
+    let run: string[] = [];
+    const flush = () => {
+      if (run.length) push([...run.filter((l) => l[0] === "-"), ...run.filter((l) => l[0] === "+")].join("\n"), i);
+      run = [];
+    };
+    for (const l of h.lines) {
+      if (l.kind === "ctx") flush();
+      else run.push(`${l.kind === "del" ? "-" : "+"}${l.text}`);
+    }
+    flush();
+  });
+  if (!out.length) push(`\0${f.status}\0${f.oldPath ?? ""}`, -1);
+  return out;
+}
