@@ -22,10 +22,40 @@ export const SCOPE_TITLES: Record<string, string> = {
   item: "On an item",
 };
 
-/** Sections in order; `live` marks the scopes under the cursor (narrowest first, from liveScopes). */
-export function sheetSections(surface: string, live: string[]): { scope: string; live: boolean }[] {
-  const mine = SURFACE_SCOPES[surface] ?? [];
-  const now = live.filter((s) => mine.includes(s));
-  const rest = mine.filter((s) => !now.includes(s));
-  return [...now.map((scope) => ({ scope, live: true })), ...rest.map((scope) => ({ scope, live: false })), { scope: "global", live: true }];
+export interface SheetCmd {
+  id: string;
+  title: string;
+  scope: string;
+  keys: string[];
+  /** whether it would do something to what's under the cursor now */
+  available: boolean;
+}
+export interface SheetLine {
+  key: string;
+  cmd: SheetCmd;
+}
+
+/** The `?` sheet as "what can I do right now": each key shown once, as the command it would run here
+ *  — the narrowest live scope binding it, the keymap's own rule — split into what works on the
+ *  thing under the cursor, what works anywhere, and the page's keys that do nothing at the moment. */
+export function sheetNow(surface: string, live: string[], cmds: SheetCmd[]): { now: SheetLine[]; everywhere: SheetLine[]; notNow: SheetLine[] } {
+  const mine = new Set([...(SURFACE_SCOPES[surface] ?? []), "global"]);
+  const here = cmds.filter((c) => mine.has(c.scope) && c.keys.length);
+  const rank = (c: SheetCmd) => (live.includes(c.scope) ? live.indexOf(c.scope) : Infinity);
+  const winner = new Map<string, SheetCmd>();
+  for (const c of [...here].sort((a, b) => rank(a) - rank(b))) {
+    if (rank(c) === Infinity) continue;
+    for (const k of c.keys) if (!winner.has(k)) winner.set(k, c);
+  }
+  const now: SheetLine[] = [];
+  const everywhere: SheetLine[] = [];
+  const shown = new Set<string>();
+  const byScope = [...winner.entries()].sort(([, a], [, b]) => rank(a) - rank(b));
+  for (const [key, cmd] of byScope) {
+    if (!cmd.available || shown.has(cmd.id)) continue;
+    (cmd.scope === "global" ? everywhere : now).push({ key: cmd.keys.filter((k) => winner.get(k) === cmd).join(" · ") || key, cmd });
+    shown.add(cmd.id);
+  }
+  const notNow = here.filter((c) => !shown.has(c.id) && c.scope !== "global").map((cmd) => ({ key: cmd.keys.join(" · "), cmd }));
+  return { now, everywhere, notNow };
 }

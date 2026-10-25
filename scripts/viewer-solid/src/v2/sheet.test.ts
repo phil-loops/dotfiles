@@ -1,17 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sheetSections } from "./sheet.ts";
+import { sheetNow, type SheetCmd } from "./sheet.ts";
 
-const order = (s: { scope: string; live: boolean }[]) => s.map((x) => `${x.scope}${x.live ? "*" : ""}`).join(" ");
+const c = (id: string, scope: string, keys: string[], available = true): SheetCmd => ({ id, title: id, scope, keys, available });
+const keys = (ls: { key: string; cmd: SheetCmd }[]) => ls.map((l) => `${l.key}=${l.cmd.id}`).join(" ");
 
-test("on a review thread, the thread's keys come first and Forests' keys are gone", () => {
-  assert.equal(order(sheetSections("review", ["thread", "review", "global"])), "thread* review* pending line global*");
+test("now: what the cursor's thing can do, narrowest first; a shadowed key shows as what it runs", () => {
+  const cmds = [
+    c("forest.expand", "project", ["l", "right"]),
+    c("branch.open", "branch", ["l", "right"]),
+    c("branch.push", "branch", ["p"], false),
+    c("project.archive", "project", ["X"]),
+    c("ready.toggle", "forests", ["F"]),
+    c("cursor.down", "global", ["j", "down"]),
+    c("review.reply", "thread", ["r"]),
+  ];
+  const s = sheetNow("forests", ["branch", "project", "row", "forests", "global"], cmds);
+  assert.equal(keys(s.now), "l · right=branch.open X=project.archive F=ready.toggle");
+  assert.equal(keys(s.everywhere), "j · down=cursor.down");
+  assert.equal(keys(s.notNow), "l · right=forest.expand p=branch.push");
 });
 
-test("on Forests with a branch selected, branch then forest then row", () => {
-  assert.equal(order(sheetSections("forests", ["branch", "project", "row", "forests", "global"])), "branch* project* row* forests* global*");
-});
-
-test("the dashboard shows only its own keys and everywhere", () => {
-  assert.equal(order(sheetSections("dashboard", ["dashboard", "global"])), "dashboard* global*");
+test("with nothing under the cursor, the item keys wait in not-now", () => {
+  const cmds = [c("todo.done", "item", ["D"]), c("nav.forests", "global", ["g f"])];
+  const s = sheetNow("todo", ["todo", "global"], cmds);
+  assert.equal(keys(s.now), "");
+  assert.equal(keys(s.everywhere), "g f=nav.forests");
+  assert.equal(keys(s.notNow), "D=todo.done");
 });
