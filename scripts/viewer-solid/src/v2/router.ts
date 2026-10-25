@@ -20,6 +20,7 @@ export const SURFACES: Surface[] = [
   { id: "dashboard", path: `${BASE}/dashboard`, title: "Dashboard" },
   { id: "review", path: `${BASE}/b`, title: "Review", v1: ["branch"], arg: true },
   { id: "todo", path: `${BASE}/todo`, title: "Todo" },
+  { id: "forest", path: `${BASE}/p`, title: "Forest", arg: true },
 ];
 
 const match = (pathname: string): Surface => {
@@ -51,6 +52,8 @@ export function navigate(path: string, e?: Event): void {
 }
 
 /** The review page of a branch. */
+/** One forest's page: every branch in merge order, what it does, where it stands. */
+export const forestPath = (repo: string, project: string) => `${BASE}/p/${encodeURIComponent(repo)}/${encodeURIComponent(project)}`;
 export const reviewPath = (repo: string, branch: string) => `${BASE}/b/${encodeURIComponent(repo)}/${branch.split("/").map(encodeURIComponent).join("/")}`;
 
 /** Leave v2 for a page it doesn't have yet (v1's branch page, Work, Wiki…): recorded as a

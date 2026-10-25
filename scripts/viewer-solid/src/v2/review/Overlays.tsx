@@ -86,6 +86,7 @@ export function MapOverlay() {
     else if (e.key === "k" || e.key === "ArrowUp") setI((n) => Math.max(0, n - 1));
     else if (e.key === "Enter" && rows()[i()]) dispatch("review.map.go", "key", { target: rows()[i()].id, event: e });
     else if (e.key === "Escape" || e.key === "m") dispatch("review.map", "key", { event: e });
+    else if (e.key === "p") dispatch("review.forest", "key", { target: pg.id(), event: e });
     else return;
     e.preventDefault();
   };
@@ -93,7 +94,10 @@ export function MapOverlay() {
     <div class="rv-scrim">
       <div class="rv-map" ref={box} tabIndex={0} onKeyDown={onKey} role="dialog" aria-label="The forest">
         <div class="rv-sheet-head">
-          The forest <span class="text-ink-faint">· j/k · ↵ opens · esc</span>
+          The forest <span class="text-ink-faint">· j/k · ↵ opens · esc ·</span>{" "}
+          <button class="rv-quietbtn" onClick={bind("review.forest", pg.id())}>
+            p its page
+          </button>
         </div>
         <For each={rows()} fallback={<p class="text-ink-faint">nothing else to review</p>}>
           {(r, n) => (

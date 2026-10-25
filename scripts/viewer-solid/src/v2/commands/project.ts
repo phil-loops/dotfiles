@@ -1,6 +1,7 @@
 // Forests: moving one between focus, the workbench and the archive (POST /project-state),
 // ordering the focus lane (POST /focus), opening a forest into its spine, the ready filter, launch.
 import { startDrag } from "../drag";
+import { BASE, forestPath, navigate } from "../router";
 import { bkey, model, pkey } from "../model";
 import { command, type Write } from "../registry";
 import { list, view, world } from "../store";
@@ -11,6 +12,7 @@ import {
   readyOnly,
   setArmed,
   setCursor,
+  setCursorIdx,
   setExpanded,
   setLaunching,
   setReadyOnly,
@@ -172,7 +174,7 @@ command({
 command({
   id: "row.primary",
   title: "Do the row's thing",
-  scope: "forests",
+  scope: "row",
   budget: "local",
   keys: ["ret"],
   quiet: true,
@@ -187,8 +189,30 @@ command({
     if (!p) return null;
     if (p.state === "archive") return "project.restore";
     if (model.forests().get(p.id)?.closed) return "project.archive";
-    return "forest.toggle";
+    return "forest.page";
   },
+});
+
+command({
+  id: "forest.page",
+  title: "Open the forest's page",
+  scope: "project",
+  budget: "local",
+  available: exists,
+  local: (id, e) => {
+    const p = view("project", id!)!;
+    setCursor(undefined);
+    setCursorIdx(0);
+    navigate(forestPath(p.repo, p.name), e);
+  },
+});
+command({
+  id: "forest.leave",
+  title: "Back to Forests",
+  scope: "forest",
+  budget: "local",
+  keys: ["h", "left"],
+  local: (_t, e) => navigate(BASE, e),
 });
 
 command({

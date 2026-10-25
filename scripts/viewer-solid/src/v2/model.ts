@@ -1,6 +1,6 @@
 // Derived views over the store, shared by the surfaces and the commands that move through them.
 import { createMemo, createRoot } from "solid-js";
-import { surface } from "./router";
+import { routeArg, surface } from "./router";
 import { baseFor, isClosed, stand, type Stand } from "./ship";
 import { list, view, world } from "./store";
 import type { Branch, Pr, Project } from "./types";
@@ -79,10 +79,23 @@ export const model = createRoot(() => {
 
   const todos = createMemo(() => queue(list("todo")));
 
+  /** The forest a /v2/p/<repo>/<project> page shows. */
+  const pageProject = createMemo(() => {
+    if (surface().id !== "forest") return undefined;
+    const a = routeArg();
+    const cut = a.indexOf("/");
+    const id = cut > 0 ? `${a.slice(0, cut)}:${a.slice(cut + 1)}` : "";
+    return view("project", id) ? id : undefined;
+  });
+
   /** The rows the cursor moves through, top to bottom: forests and the branches of open ones, or
    *  on the tracker its items. */
   const rows = createMemo(() => {
     if (surface().id === "todo") return todos().flatMap((s) => s.items.map((t) => tkey(t.id)));
+    if (surface().id === "forest") {
+      const pid = pageProject();
+      return pid ? (forests().get(pid)?.branches ?? []).map((v) => bkey(v.b.id)) : [];
+    }
     const p = projects();
     const f = forests();
     const out: string[] = [];
@@ -118,6 +131,7 @@ export const model = createRoot(() => {
   const selectedProject = createMemo(() => {
     const k = selected();
     if (k?.startsWith("p:")) return k.slice(2);
+    if (surface().id === "forest") return pageProject();
     const b = selectedBranch();
     return b ? view("branch", b)?.project : undefined;
   });
@@ -132,7 +146,7 @@ export const model = createRoot(() => {
     return k?.startsWith("t:") ? k.slice(2) : undefined;
   });
 
-  return { projects, forests, todos, rows, selected, selectedBranch, selectedProject, selectedItem, branchView };
+  return { projects, forests, todos, pageProject, rows, selected, selectedBranch, selectedProject, selectedItem, branchView };
 });
 
 /** What a command of this scope acts on, from the cursor. */
@@ -168,6 +182,13 @@ export function liveScopes(): string[] {
     if (model.selected()) out.push("row");
   }
   if (surface().id === "todo" && model.selectedItem()) out.push("item");
+  if (surface().id === "forest") {
+    if (model.selectedBranch()) out.push("branch", "row");
+    out.push("forest");
+    if (model.pageProject()) out.push("project");
+    out.push("global");
+    return out;
+  }
   if (surface().id === "review" && page.tab() === "files" && !page.overlay()) {
     const h = page.here();
     if (h && h.kind !== "file") out.push(h.kind);

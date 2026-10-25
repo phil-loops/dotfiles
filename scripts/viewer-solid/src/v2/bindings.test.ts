@@ -53,7 +53,7 @@ test("an override that clashes, names nothing, or isn't a key is reported", () =
   ]);
   assert.deepEqual(clashes(cmds), []);
   applyKeys(cmds, { "review.extend": ["x"] });
-  assert.match(clashes(cmds).join(), /^x: forests → put it away, review → review.extend$/);
+  assert.match(clashes(cmds).join(), /^x: forests → put it away, forest → put it away, review → review.extend$/);
 });
 
 test("key names are what the keyboard produces", () => {

@@ -209,7 +209,7 @@ def _git_entities(name, snap, jobs):
             "id": f"{name}:{b}", "repo": name, "name": b, "project": f"{name}:{p}",
             "parent": parent, "parentId": f"{name}:{parent}" if parent in member else None,
             "description": snap.description(b), "subject": own[0] if own else "",
-            "commits": len(own), "tip": tip, "tree": tree,
+            "commits": len(own), "outline": own[::-1], "tip": tip, "tree": tree,
             "pushed": "synced" if remote and not ahead else "ahead" if remote else "local", "ahead": ahead,
             "gates": gates, "redGates": red,
             "order": order.get(b, 999), "holdUntil": snap.branch_key(b, "hold-until") or None,
