@@ -1,7 +1,7 @@
 +++
 title = "Build viewed per change block"
 kind = "build"
-state = "open"
+state = "done"
 area = "review"
 size = "M"
 why = "a change stays reviewed until its own text changes, across rebases and forest reshaping"
@@ -10,3 +10,6 @@ links = ["wiki/loops/canopy-v2-viewed.md"]
 created = "2026-10-25"
 updated = "2026-10-25"
 +++
+
+## Done
+2026-10-25 — 732027d — per-block viewed, per branch, started fresh
