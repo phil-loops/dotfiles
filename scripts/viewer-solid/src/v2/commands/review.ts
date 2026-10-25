@@ -126,19 +126,18 @@ command({
 });
 command({ id: "review.filter", title: "Find a file", scope: "review", budget: "local", keys: ["t"], local: () => pg.setFiltering(true) });
 command({
-  id: "review.forest",
-  title: "Open this branch's forest page",
+  id: "review.leave",
+  title: "Back to its forest",
   scope: "review",
   budget: "local",
-  keys: ["g p"],
-  available: (id) => !!id && !!view("project", view("branch", id)?.project ?? ""),
+  keys: ["h"],
   local: (id, e) => {
-    const p = view("project", view("branch", id!)!.project)!;
+    const p = id ? view("project", view("branch", id)?.project ?? "") : undefined;
+    if (!p) return navigate(BASE, e);
     setCursor(bkey(id!));
     navigate(forestPath(p.repo, p.name), e);
   },
 });
-command({ id: "review.leave", title: "Back to Forests", scope: "review", budget: "local", keys: ["h"], local: (_t, e) => navigate(BASE, e) });
 command({
   id: "review.back",
   title: "Back out",
