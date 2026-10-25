@@ -6,6 +6,7 @@ import { bind, dispatch } from "../runner";
 import { leaf, SHIP } from "../ship";
 import { list, view } from "../store";
 import { getJSON } from "../sync";
+import Commits from "../Commits";
 import { atRepoPath, page as pg, short } from "./page";
 
 interface Outline {
@@ -30,19 +31,8 @@ export function Words() {
       <p class="font-display text-[16px] italic">{desc() || "—"}</p>
       <div class="rv-words-k">lands on main as</div>
       <p>{o()?.draft?.title || pg.conv()?.title || "—"}</p>
-      <div class="rv-words-k">outline</div>
-      <Show when={o()} fallback={<p class="text-ink-faint">reading…</p>}>
-        <For each={o()!.commits}>
-          {(c) => (
-            <div class="rv-words-commit">
-              <code class={c.pushed ? "text-ink-faint" : "text-gold-leaf"}>{c.short.slice(0, 7)}</code> {c.subject}
-              <Show when={!c.pushed}>
-                <span class="text-ink-faint"> · local</span>
-              </Show>
-            </div>
-          )}
-        </For>
-      </Show>
+      <div class="rv-words-k">commits</div>
+      <Commits branchId={pg.id()} />
       <Show when={pg.conv()?.unpushed.length}>
         <p class="text-ink-faint">
           {pg.conv()!.unpushed.length} commit{pg.conv()!.unpushed.length === 1 ? "" : "s"} past the PR head ({short(pg.conv()!.head)}) aren't on GitHub yet.
