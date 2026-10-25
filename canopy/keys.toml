@@ -1,0 +1,10 @@
+# Your keys for the viewer (canopy v2). Each line binds a command id to a key, or a list of keys:
+#
+#   "project.archive" = "x"
+#   "review.extend" = ["v", "x"]
+#   "hold.morning" = []          # no key; still in the space menu
+#
+# Ids are in the `space` menu and the `?` sheet. Keys: one character, C-x / A-x, space, esc, ret,
+# tab, up/down/left/right; "g d" is a chord. Defaults live in the code; this file only overrides.
+# Saving it reloads open tabs. A key that ends up meaning two things on two pages is flagged at
+# the top of `?` and fails `npm test`.

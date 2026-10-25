@@ -18,6 +18,8 @@ lede: Every action is a named command with one key, reachable from the palette. 
 
 No key means different things on different pages — `bindings.test.ts` loads the registry and fails on any key that does, unless the two commands are listed there as the same move (`j` is next row and next line).
 
+**Your keys** live in `~/.dotfiles/canopy/keys.toml` — command id → key or list of keys, Helix-style; the code holds the defaults. The server lays the file into the page, saving it reloads open tabs, and `?` underlines what's yours and lists anything wrong (an unknown id, a bad key name, a clash) at the top. The same test runs against the file, so a clash fails `npm test` too.
+
 **Three surfaces:**
 
 1. **Forests (home).** Focus, the workbench, the archive. A forest expands inline into its branch spine, with ship readiness on each branch (green, pushed, in review, approved and waiting) — the outbox becomes this page's "ready" filter, not a separate place.
