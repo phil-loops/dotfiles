@@ -1,7 +1,7 @@
 // The review page: GitHub's pull-request review, local. Files changed — a file tree with viewed
 // boxes, the diff (unified or split) with conversations folded in at their lines — and the
 // Conversation. Everything it does is a registered command (commands/review.ts); this file draws.
-import { createEffect, createMemo, createSelector, For, Match, on, Show, Switch } from "solid-js";
+import { createEffect, createMemo, createSelector, For, Match, on, onCleanup, Show, Switch } from "solid-js";
 import { keyOf } from "../registry";
 import { bind } from "../runner";
 import { view, world } from "../store";
@@ -74,9 +74,16 @@ function Header() {
     for (const r of c()?.reviews ?? []) if (r.state !== "COMMENTED") by.set(r.author, r.state);
     return [...by.entries()];
   });
+  // The file headers and the tree stick just under this header, so they read its real height —
+  // a fixed offset left a strip of diff showing through whenever the header's content changed.
+  const trackHeight = (el: HTMLElement) => {
+    const ro = new ResizeObserver(() => el.closest<HTMLElement>(".rv")?.style.setProperty("--rv-head-h", `${el.offsetHeight}px`));
+    ro.observe(el);
+    onCleanup(() => ro.disconnect());
+  };
   const openThreads = () => pg.threads().filter((x) => !x.resolved && !x.outdated).length;
   return (
-    <header class="rv-head">
+    <header class="rv-head" ref={trackHeight}>
       <div class="rv-title">
         <Show when={c()} fallback={<span class="font-display text-[20px] text-ink">{t()?.name}</span>}>
           <span class="font-display text-[20px] text-ink">{c()!.title}</span>

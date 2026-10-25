@@ -54,7 +54,7 @@
 .rv-finish-on { border-color: var(--color-gold-deep); color: var(--color-gold-leaf); background: var(--color-gold-wash); }
 
 .rv-body { display: grid; grid-template-columns: var(--rv-tree) minmax(0, 1fr); align-items: start; }
-.rv-tree { position: sticky; top: 112px; max-height: calc(100vh - 150px); overflow: auto; padding: 12px 8px 12px 16px; font-size: 12px; }
+.rv-tree { position: sticky; top: var(--rv-head-h, 102px); max-height: calc(100vh - var(--rv-head-h, 102px) - 38px); overflow: auto; padding: 12px 8px 12px 16px; font-size: 12px; }
 .rv-filter { width: 100%; margin-bottom: 8px; padding: 4px 8px; background: var(--color-vellum-raise); border: 1px solid var(--color-gold-deep); outline: none; }
 .rv-dir { color: var(--color-ink-faint); padding: 6px 0 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .rv-tfile { display: flex; align-items: center; gap: 6px; padding: 2px 4px; border-left: 2px solid transparent; }
@@ -69,7 +69,7 @@
 .rv-files { padding: 12px 16px 120px 8px; min-width: 0; }
 .rv-quiet { color: var(--color-ink-faint); padding: 24px 8px; }
 .rv-file { margin-bottom: 18px; border: 1px solid var(--color-vellum-edge); background: var(--color-vellum-night); content-visibility: auto; contain-intrinsic-size: auto 600px; }
-.rv-fhead { position: sticky; top: 112px; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: var(--color-vellum-raise); border-bottom: 1px solid var(--color-vellum-edge); font-size: 12px; border-left: 2px solid transparent; }
+.rv-fhead { position: sticky; top: var(--rv-head-h, 102px); z-index: 2; display: flex; align-items: center; gap: 10px; padding: 7px 10px; background: var(--color-vellum-raise); border-bottom: 1px solid var(--color-vellum-edge); font-size: 12px; border-left: 2px solid transparent; }
 .rv-fpath { color: var(--color-ink); }
 .rv-fstat { color: var(--color-ink-faint); font-size: 11px; }
 .rv-viewed { color: var(--color-ink-faint); font-size: 11px; }
@@ -188,3 +188,5 @@
 
 /* scrolled-to rows clear the header and the fixed footer */
 [data-row] { scroll-margin-block: 56px; }
+/* the review cursor lands clear of the sticky header + file header above and the footer below */
+[data-stop] { scroll-margin-top: calc(var(--rv-head-h, 102px) + 40px); scroll-margin-bottom: 48px; }
