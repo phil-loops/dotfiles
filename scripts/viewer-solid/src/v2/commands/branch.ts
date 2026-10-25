@@ -67,7 +67,7 @@ command({
   title: "Open the PR (the prefilled compare form if there's none yet)",
   scope: "branch",
   budget: "local",
-  keys: ["P"],
+  keys: ["g h"],
   v1: ["open-pr"],
   available: (id) => bv(id)?.st.action === "pr",
   local: (id) => {
@@ -123,7 +123,7 @@ command({
   title: "Hold for the morning",
   scope: "row",
   budget: "config-write",
-  keys: ["z"],
+  keys: ["b"],
   v1: ["outbox-hold"],
   available: (row) => holdable(row).some((v) => !v.b.holdUntil),
   write: (row, arg) => {
@@ -136,7 +136,7 @@ command({
   title: "Release the hold",
   scope: "row",
   budget: "config-write",
-  keys: ["Z"],
+  keys: ["B"],
   available: (row) => holdable(row).some((v) => v.b.holdUntil),
   write: (row, arg) => {
     const ids = Array.isArray(arg) ? (arg as string[]) : holdable(row).filter((v) => v.b.holdUntil).map((v) => v.b.id);
