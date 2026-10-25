@@ -47,6 +47,7 @@ The existing "addressed by `<sha>`?" hint, a commit that changed the thread's li
 4. No "no change needed" offer; with no commit, `E` cancels.
 
 **Built** (dotfiles, 2026-10-25; tested in `viewer-sandbox --github`, end to end through the push).
-1. `review/diff.ts`-style pure helpers: parse and add `Addresses:` trailers. Test: several per commit, kept through a reword of the subject.
+1. `srv/reviewdesk.py`: `add_trailer` and `fixes_between` (git parses the trailers). Tested in `test-review-threads`: several per commit, kept through a reword, your real fix `14adf15` as a fixture.
 2. Server: the review domain's thread entity gains `fixedBy` ({sha, subject}) from the trailers of the branch's own commits (`srv/reviewdesk.py`). A reply draft can name `{fix}`, resolved at send.
-3. Client: `E` (open + mark, then pick list), the thread and words displays, the drafted reply.
+3. Server: `POST /review-address` (trailer + reply in one step, undo; or `claude: true`, the handoff through `stack-claude` in draft mode).
+4. Client: `E`'s chooser (`AddressSheet`), the thread and words displays, the reply's live sha.
