@@ -1,50 +1,60 @@
-// A commit message's generated forest plan, stripped in place: POST /outline rewrites the unpushed
-// commit with the same tree (srv/outline.py — refuses if the branch moved since it was read), and
-// u replays /outline-undo.
-import { stripPlan } from "../../outlineHints";
+// Rewording a branch's unpushed commits: one save rewrites every changed message in a single
+// guarded pass (POST /outline — same trees, refuses if the branch moved since it was read,
+// reseats descendants), and u replays /outline-undo.
 import { atRepo } from "../model";
 import { command } from "../registry";
 import { view } from "../store";
-import { setStripping, shown, stripping } from "../words";
-
-const parse = (t: string | undefined) => {
-  const [id, sha] = (t ?? "").split(" ");
-  const o = id ? shown.get(id) : undefined;
-  const c = o?.commits.find((x) => x.sha === sha);
-  return o && c && view("branch", id) ? { id, o, c, b: view("branch", id)! } : null;
-};
+import { changed, drafts, editTo, hintsOf, setDrafts, shown, valueOf } from "../words";
 
 command({
-  id: "words.strip",
-  title: "Strip the forest plan from a commit message",
+  id: "words.save",
+  title: "Save the commit message edits",
   scope: "global",
   budget: "git-write",
   quiet: true,
-  available: (t) => {
-    const p = parse(t);
-    return !!p && !p.c.locked && stripPlan(p.c.body) !== p.c.body;
-  },
-  write: (t) => {
-    const p = parse(t)!;
-    const body = stripPlan(p.c.body);
-    const was = stripping();
-    setStripping(new Map(was).set(p.c.sha, body));
+  available: (id) => !!id && changed(id).length > 0,
+  write: (id) => {
+    const b = view("branch", id);
+    const o = shown.get(id);
+    const edits = changed(id);
+    if (!b || !o || !edits.length) return null;
+    if (edits.some((e) => !e.subject)) throw new Error("a commit needs a subject");
+    const was = drafts();
+    const mine = new Map(was.get(id) ?? []);
+    for (const e of edits) mine.delete(e.sha);
+    setDrafts(new Map(was).set(id, mine));
+    const n = edits.length;
     return {
       ops: [],
-      path: atRepo(p.b.repo, "/outline"),
-      body: { branch: p.b.name, head: p.o.head, edits: [{ sha: p.c.sha, subject: p.c.subject, body }] },
-      settled: () => view("branch", p.id)?.tip !== p.o.head,
-      said: `stripped the plan from ${p.c.short.slice(0, 7)} — u puts it back`,
-      failed: `couldn't reword ${p.c.short.slice(0, 7)}`,
-      rollback: () => setStripping(was),
-      inverse: { id: "words.undo", target: p.id },
+      path: atRepo(b.repo, "/outline"),
+      body: { branch: b.name, head: o.head, edits },
+      settled: () => view("branch", id)?.tip !== o.head,
+      said: `reworded ${n} commit${n === 1 ? "" : "s"} — u puts ${n === 1 ? "it" : "them"} back`,
+      failed: "couldn't save — the branch may have moved; your edits are kept",
+      rollback: () => setDrafts(was),
+      inverse: { id: "words.undo", target: id },
     };
   },
 });
 
 command({
+  id: "words.fix",
+  title: "Apply a hint's fix to a commit message",
+  scope: "global",
+  budget: "local",
+  quiet: true,
+  local: (t) => {
+    const [id, sha, hint] = (t ?? "").split(" ");
+    const c = shown.get(id)?.commits.find((x) => x.sha === sha);
+    const fix = c && hintsOf(id, c).find((h) => h.id === hint)?.fix;
+    if (!c || !fix) throw new Error("that hint has nothing to fix any more");
+    editTo(id, c, fix.apply(valueOf(id, c)));
+  },
+});
+
+command({
   id: "words.undo",
-  title: "Put a commit message back as it was",
+  title: "Put the commit messages back as they were",
   scope: "global",
   budget: "git-write",
   quiet: true,
@@ -57,8 +67,8 @@ command({
       path: atRepo(b.repo, "/outline-undo"),
       body: { branch: b.name },
       settled: () => view("branch", id)?.tip !== tip,
-      said: "message put back",
-      failed: "couldn't put the message back",
+      said: "messages put back",
+      failed: "couldn't put the messages back",
     };
   },
 });
