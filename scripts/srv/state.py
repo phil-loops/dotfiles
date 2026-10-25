@@ -22,10 +22,11 @@
 #                                  fingerprint or a gate job moves, so a quiet repo costs no spawn
 #   remote  pr, landed             sync's PR state cache (+ open-PR detail / the sandbox fixture) and
 #                                  the merge ledger; in-memory reads, rebuilt every tick
-#   review  conv, thread, draft    open PRs' review threads (packet's background GraphQL read, or
+#   review  conv, thread, draft,   open PRs' review threads (packet's background GraphQL read, or
 #                                  the fake GitHub) mapped onto the local tips, the second reader's
 #                                  notes, and the ledger of what Phil writes (srv/reviewdesk.py);
-#                                  rebuilt every tick from memory + stats
+#                                  rebuilt every tick from memory + stats; and `viewed`, the change
+#           viewed                 blocks Phil has viewed per branch (srv/viewed.py)
 #   todo    todo                   the viewer's own feature tracker (srv/todo.py, ~/.dotfiles/canopy/todo),
 #                                  global rather than per repo; rebuilt when a file's stat moves
 # A version is per domain, monotonic within an epoch (one server process), and a patch's version is
@@ -43,12 +44,12 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, watch
+from . import ctx, outbox, push, repostate, reviewdesk, sync, todo, viewed, watch
 
 EPOCH = f"{os.getpid():x}{int(time.time()):x}"
 DOMAINS = ("git", "remote", "review", "todo")
 RING = 128
-REVIEW_TYPES = ("conv", "thread", "draft")
+REVIEW_TYPES = ("conv", "thread", "draft", "viewed")
 TICK = 0.5
 _TRUNKS = ("main", "master")
 
@@ -334,7 +335,7 @@ def refresh():
         git = _D["git"].ents
         remote = _each_repo(lambda n: _remote_entities(n, git))
         _commit("remote", _merge(remote.values(), ("pr", "landed")), None)
-        review = _each_repo(reviewdesk.entities)
+        review = _each_repo(lambda n: {**reviewdesk.entities(n), **viewed.entities(n)})
         _commit("review", _merge(review.values(), REVIEW_TYPES), None)
         tfp = todo.fingerprint()
         if tfp != _D["todo"].fp:

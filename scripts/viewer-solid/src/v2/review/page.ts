@@ -6,7 +6,7 @@ import { routeArg, surface } from "../router";
 import { list, view, world } from "../store";
 import { ask, getJSON, getText } from "../sync";
 import type { Conv, Draft, Item, Thread } from "../types";
-import { expand, parsePatch, rowAnchors, splitRows, unifiedRows, type FileDiff, type Gap, type Row } from "./diff";
+import { blocksOf, expand, parsePatch, rowAnchors, splitRows, unifiedRows, type Block, type FileDiff, type Gap, type Row } from "./diff";
 
 const store = {
   get: (k: string): string | null => {
@@ -55,7 +55,12 @@ export interface FileView {
   /** threads whose line isn't a row here (outdated, or moved out of the diff) */
   aside: Thread[];
   open: number;
+  /** every change block viewed (wiki canopy-v2-viewed) */
   viewed: boolean;
+  blocks: Block[];
+  /** how many of its blocks are viewed, and the hunks whose blocks all are */
+  seen: number;
+  seenHunks: ReadonlySet<number>;
   /** unchanged lines the diff still hides (each is a cursor stop; ↵ shows more) */
   gaps: Gap[];
 }
@@ -104,6 +109,7 @@ export const page = createRoot(() => {
   const [composer, setComposer] = createSignal<Composer | null>(null);
   const [texts, setTexts] = createSignal<ReadonlyMap<string, string>>(new Map());
   const [overlay, setOverlay] = createSignal<"map" | "words" | null>(null);
+  /** block key → viewed, ahead of the server's copy while a write is in flight */
   const [viewedOverride, setViewedOverride] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const [filter, setFilter] = createSignal("");
   const [filtering, setFiltering] = createSignal(false);
@@ -177,7 +183,6 @@ export const page = createRoot(() => {
   };
 
   const files = createMemo<FileDiff[]>(() => (payload()?.data.files ?? []).map((f) => ({ ...parsePatch(f.path, f.patch || ""), add: f.add, del: f.del })));
-  const statusOf = createMemo(() => new Map((payload()?.data.files ?? []).map((f) => [f.path, f.status])));
   const base = () => payload()?.data.baseSha ?? "";
 
   const threads = createMemo(() => list("thread").filter((t) => t.branch === target()?.name && t.repo === target()?.repo));
@@ -185,7 +190,15 @@ export const page = createRoot(() => {
   /** replies not on GitHub yet, by thread id */
   const repliesTo = (threadId: string) => items().filter((i) => i.kind === "reply" && i.threadId === threadId);
 
-  const isViewed = (path: string) => viewedOverride().get(path) ?? statusOf().get(path) === "blessed";
+  const serverViewed = createMemo(() => new Set(view("viewed", id())?.keys ?? []));
+  const isSeen = (key: string) => viewedOverride().get(key) ?? serverViewed().has(key);
+  // an override the server now agrees with has done its job; dropping it lets later changes through
+  createEffect(
+    on(serverViewed, (srv) => {
+      const o = viewedOverride();
+      if ([...o].some(([k, v]) => srv.has(k) === v)) setViewedOverride(new Map([...o].filter(([k, v]) => srv.has(k) !== v)));
+    }),
+  );
 
   const views = createMemo<FileView[]>(() => {
     const sp = split();
@@ -211,7 +224,11 @@ export const page = createRoot(() => {
         (pendingAt.get(a) ?? pendingAt.set(a, []).get(a)!).push(c);
       }
       const open = (byPath.get(file.path) ?? []).filter((t) => !t.resolved && !t.outdated).length;
-      return { file, rows, threadsAt, pendingAt, aside, open, viewed: isViewed(file.path), gaps };
+      const blocks = blocksOf(raw);
+      const seenKeys = blocks.filter((b) => isSeen(b.key));
+      const seenHunks = new Set<number>(raw.hunks.map((_, i) => i).filter((i) => blocks.some((b) => b.hunk === i) && blocks.every((b) => b.hunk !== i || isSeen(b.key))));
+      const viewed = blocks.length > 0 && seenKeys.length === blocks.length;
+      return { file, rows, threadsAt, pendingAt, aside, open, viewed, blocks, seen: seenKeys.length, seenHunks, gaps };
     });
   });
 
@@ -286,7 +303,7 @@ export const page = createRoot(() => {
 
   return {
     target, id, conv, draft, branch, tip, base, files, views, reveal, threads, items, repliesTo, elsewhere, stops, stopIndex, here, range,
-    fileOf, isOpen, atRow, isViewed, payload, loadErr, warm,
+    fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
     overlay, setOverlay, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,

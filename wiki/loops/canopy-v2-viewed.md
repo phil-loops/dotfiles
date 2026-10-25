@@ -3,7 +3,7 @@ title: Viewed, per change
 section: Canopy v2
 order: 61
 project: canopy-v2
-lede: A change stays reviewed until its own text changes — not when another hunk in the file moves, and not when a rebase shifts it or edits the lines around it. Decided 2026-10-25.
+lede: A change stays reviewed until its own text changes — not when another hunk in the file moves, and not when a rebase shifts it or edits the lines around it. Built 2026-10-25.
 ---
 
 **Today.** "Viewed" is per file: `stack-bless` writes `$GIT_DIR/stack-blessed.json` as `{branch: {path: blob}}` (a leftover of the nvim `stack-blessed.lua`), and v2's `v` posts `/bless`. The key is the file's blob, so any change anywhere in the file un-views the whole file: a fix in another hunk, or a rebase that brings in main's edits to the same file. The ledger holds 391 entries across 116 branches.

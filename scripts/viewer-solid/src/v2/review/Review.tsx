@@ -191,7 +191,7 @@ function FileTree() {
               {(v) => (
                 <div class="rv-tfile" classList={{ "rv-tfile-on": current() === v.file.path, "rv-tfile-done": v.viewed }}>
                   <button class="rv-check" title={v.viewed ? `viewed — ${keyOf("review.viewed")} unmarks it` : `mark viewed (${keyOf("review.viewed")})`} onClick={bind("review.viewed.file", v.file.path)}>
-                    {v.viewed ? "☑" : "☐"}
+                    {v.viewed ? "☑" : v.seen ? "◪" : "☐"}
                   </button>
                   <button class="rv-tname" onClick={bind("review.file.go", v.file.path)}>
                     {v.file.path.slice(v.file.path.lastIndexOf("/") + 1)}
@@ -236,7 +236,9 @@ function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) =>
         <Show when={hiddenOutdated() && !pg.showOutdated()}>
           <button class="rv-quietbtn" onClick={bind("review.outdated")}>{hiddenOutdated()} outdated · O</button>
         </Show>
-        <span class="rv-viewed">{fv()?.viewed ? "Viewed" : ""}</span>
+        <span class="rv-viewed">
+          {fv()?.viewed ? "Viewed" : fv()?.seen ? `${fv()!.seen} of ${fv()!.blocks.length} changes viewed` : ""}
+        </span>
       </div>
       <Show when={!fv()?.viewed}>
         <For each={aside()}>{(t) => <ThreadView id={t.id} selected={props.selected} aside />}</For>
@@ -318,11 +320,13 @@ function RowView(props: { file: FileDiff; row: Row; lang: string; selected: (k: 
     const fv = pg.fileOf(props.file.path);
     return !!fv && rowAnchors(r).some((a) => fv.threadsAt.has(a));
   });
+  // a hunk whose changes are all viewed dims, so what's left to read stands out
+  const seen = createMemo(() => !!pg.fileOf(props.file.path)?.seenHunks.has(r.hunk));
   return (
     <div
       class="rv-row"
       data-stop={key}
-      classList={{ "rv-on": props.selected(key), "rv-marked": marked(), "rv-threaded": threaded() }}
+      classList={{ "rv-on": props.selected(key), "rv-marked": marked(), "rv-threaded": threaded(), "rv-seen": seen() }}
       onClick={bind("review.cursor.set", key)}
     >
       <Show

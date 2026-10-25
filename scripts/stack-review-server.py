@@ -40,6 +40,7 @@ from srv import telemetry   # own line: same reason
 from srv import reviewdesk   # own line: same reason
 from srv import keymap   # own line: same reason
 from srv import todo   # own line: same reason
+from srv import viewed   # own line: same reason
 srvctx.CWD = CWD   # set the default repo before any run() fires (run reads srvctx.repo_cwd())
 DIST = os.path.join(SCRIPTS, "viewer-solid", "dist")   # the built Solid app served at /
 
@@ -611,6 +612,8 @@ class H(BaseHTTPRequestHandler):
             return push.push_origin(self, raw)
         if self.path == "/force-origin":  # the ONE force exception: no PR, or a draft with zero reviews/comments; lease-guarded
             return push.force_origin(self, raw)
+        if self.path == "/viewed":   # the review page's v: view or un-view change blocks (srv/viewed.py)
+            return viewed.post(self, raw)
         if self.path == "/todo-item":   # the tracker page moves an item (state, rank)
             return todo.post(self, raw)
         if self.path in _REVIEW_POSTS:   # the branch page's review: the ledger (and Phil's pending review), local suggestion commits

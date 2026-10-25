@@ -194,3 +194,4 @@
 .rv-gap:hover, .rv-gap.rv-on { color: var(--color-ink-dim); background: rgba(127, 160, 147, 0.12); }
 .rv-gap.rv-on { box-shadow: inset 2px 0 0 var(--color-gold-leaf); }
 .rv-gap-mark { color: var(--color-gold-leaf); }
+.rv-row.rv-seen:not(.rv-on) { opacity: 0.5; }
