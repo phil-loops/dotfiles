@@ -202,8 +202,13 @@ export function liveScopes(): string[] {
     return out;
   }
   if (surface().id === "review" && page.tab() === "files" && !page.overlay()) {
-    const h = page.here();
-    if (h && h.kind !== "file") out.push(h.kind);
+    // in the history list j/k move through commits; inside a commit's diff they move through lines
+    if (page.historyOpen() && page.historyFocus() === "list") out.push("history");
+    else {
+      const h = page.here();
+      if (h && h.kind !== "file") out.push(h.kind);
+      if (page.historyOpen()) out.push("commit");
+    }
   }
   out.push(surface().id, "global");
   return out;
