@@ -1,8 +1,9 @@
-import { Match, Show, Switch } from "solid-js";
+import { createEffect, Match, on, Show, Switch } from "solid-js";
 import Dashboard from "./Dashboard";
 import Forest from "./Forest";
 import Forests from "./Forests";
 import KeySheet from "./KeySheet";
+import { model } from "./model";
 import Menu from "./Menu";
 import Review from "./review/Review";
 import Todo from "./Todo";
@@ -12,6 +13,17 @@ import { world } from "./store";
 import { pendingKeys } from "./ui";
 
 export default function App() {
+  // The cursor stays on screen: whichever page's rows it moves through, the selected one scrolls
+  // into view when it leaves it (the review page follows its own cursor the same way).
+  createEffect(
+    on(
+      () => model.selected(),
+      (k) => {
+        if (!k) return;
+        requestAnimationFrame(() => document.querySelector(`[data-row="${CSS.escape(k)}"]`)?.scrollIntoView({ block: "nearest" }));
+      },
+    ),
+  );
   return (
     <div class="min-h-full">
       <header class="flex items-baseline gap-3 px-4 pb-6 pt-5">
