@@ -49,6 +49,10 @@ class Handoff(unittest.TestCase):
         self.assertIn(f"\nAddresses: {url}\n", p)
         self.assertIn("Don't push and don't reply on GitHub", p)
 
+    def test_a_trailer_matches_its_thread_whatever_the_case(self):
+        self.assertEqual(reviewdesk.url_key("https://github.com/Loops-so/loops/pull/11132#discussion_r4348525165"),
+                         reviewdesk.url_key("https://github.com/loops-so/loops/pull/11132#discussion_r4348525165"))
+
     def test_the_real_fix_commit_parses(self):
         self.assertEqual(reviewdesk.add_trailer("", "https://github.com/Loops-so/loops/pull/11132#discussion_r4348525165"),
                          "Addresses: https://github.com/Loops-so/loops/pull/11132#discussion_r4348525165")
