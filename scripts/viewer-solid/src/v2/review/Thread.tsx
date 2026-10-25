@@ -30,7 +30,7 @@ function linesOf(t: Thread): string[] {
     .map((r) => r.right!.text);
 }
 
-const VERDICT: Record<string, string> = { right: "right", wrong: "wrong", partly: "partly right", unclear: "unclear" };
+const VERDICT: Record<string, string> = { right: "right", wrong: "worth questioning", partly: "partly right", unclear: "unclear" };
 
 export function ThreadView(props: { id: string; selected: (k: string | undefined) => boolean; aside?: boolean }) {
   const t = () => view("thread", props.id) as Thread;
