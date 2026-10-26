@@ -12,6 +12,7 @@ import { highlight, langOf } from "./highlight";
 import { page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
 import Conversation from "./Conversation";
+import { CommitWords } from "../Commits";
 import { AddressSheet, MapOverlay, Words } from "./Overlays";
 import Outgoing from "./Outgoing";
 import TypesPop from "./TypesPop";
@@ -202,14 +203,22 @@ function CommitHead() {
   const why = () => (c()?.body ?? "").replace(/^Addresses:.*$/gm, "").trim();
   return (
     <div class="rv-commit-head">
-      <code class="text-gold-leaf">{pg.commitScope()?.slice(0, 7)}</code> <span class="text-ink">{c()?.subject}</span>
-      <span class="text-ink-faint">
-        {" "}· {c()?.author} · {c()?.date}
+      <div class="text-[11px] text-ink-faint">
+        <code class="text-gold-leaf">{pg.commitScope()?.slice(0, 7)}</code> · {c()?.date}
         {c()?.pushed === false ? " · local" : ""} · this commit's {pg.files().length} file{pg.files().length === 1 ? "" : "s"}
-      </span>
-      <Show when={why()}>
-        <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{why()}</pre>
-      </Show>
+      </div>
+      <CommitWords
+        branchId={pg.id()}
+        sha={pg.commitScope() ?? ""}
+        fallback={
+          <>
+            <div class="text-ink">{c()?.subject}</div>
+            <Show when={why()}>
+              <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{why()}</pre>
+            </Show>
+          </>
+        }
+      />
       <For each={addresses(pg.commitScope() ?? "")}>{(a) => <div class="mt-0.5 text-[12px] text-gold-leaf">→ {a}</div>}</For>
     </div>
   );

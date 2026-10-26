@@ -3,7 +3,7 @@
 // commit. Every hint sits in one line on top, once, with its one-click fix. Edits are drafts
 // until one save (words.save, ⌘↵ in a field) rewrites them all; u undoes it. Pushed commits are
 // read-only, with the reason.
-import { createEffect, createResource, For, onCleanup, Show } from "solid-js";
+import { createEffect, createResource, For, onCleanup, Show, type JSX } from "solid-js";
 import { joinTemplate, splitTemplate, SUBJECT_LIMIT, type Hint } from "../outlineHints";
 import { atRepo } from "./model";
 import { keyOf } from "./registry";
@@ -14,22 +14,101 @@ import { changed, drafts, editPr, editTo, hintsOf, PR, prChange, prHints, prValu
 
 const TONE: Record<Hint["tone"], string> = { error: "border-ember text-ember", warn: "border-gold-deep text-gold-leaf", note: "border-rule text-ink-faint" };
 
-export default function Commits(props: { branchId: string; readOnly?: boolean; landing?: boolean; landingOnly?: boolean }) {
-  const b = () => view("branch", props.branchId);
+/** A branch's /outline, read again when its tip moves (and while the server drafts the PR body). */
+function useOutline(branchId: () => string) {
+  const b = () => view("branch", branchId());
   const [o, { refetch }] = createResource(
     () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}` : null),
     async () => {
       const got = await getJSON<Outline>(atRepo(b()!.repo, `/outline?branch=${encodeURIComponent(b()!.name)}`)).catch(() => null);
-      if (got) shown.set(props.branchId, got);
+      if (got) shown.set(branchId(), got);
       return got;
     },
   );
-  // the server drafts the PR body in the background; read again until it's there
   createEffect(() => {
     if (!o()?.draft?.bodyPending) return;
     const t = window.setTimeout(() => void refetch(), 1500);
     onCleanup(() => clearTimeout(t));
   });
+  return o;
+}
+
+const saveKey_ = (branchId: string) => (e: KeyboardEvent) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    dispatch("words.save", "key", { target: branchId, event: e });
+  }
+};
+
+function SaveBar(props: { branchId: string; pending: number }) {
+  return (
+    <Show when={props.pending}>
+      <div class="sticky bottom-0 flex items-center gap-3 border-t border-rule bg-vellum-raise py-2">
+        <button class="rv-btn rv-btn-gold" onClick={bind("words.save", props.branchId)}>
+          save {props.pending} <kbd>⌘↵</kbd>
+        </button>
+        <span class="text-[11px] text-ink-faint">{keyOf("undo")} undoes</span>
+      </div>
+    </Show>
+  );
+}
+
+/** One commit's message, edited where it's read (the commits tab): the same drafts and save as the
+ *  words, so an edit made in either shows in both. A pushed commit reads, with the reason. */
+export function CommitWords(props: { branchId: string; sha: string; fallback: JSX.Element }) {
+  const o = useOutline(() => props.branchId);
+  const c = () => o()?.commits.find((x) => x.sha.startsWith(props.sha));
+  const w = () => (drafts(), valueOf(props.branchId, c()!));
+  const edit = (x: { subject: string; body: string }) => editTo(props.branchId, c()!, x);
+  const issues = () => (drafts(), hintsOf(props.branchId, c()!));
+  const key = saveKey_(props.branchId);
+  return (
+    <Show when={c() && !c()!.locked} fallback={props.fallback}>
+      <textarea
+        class={`${FIELD} block resize-none text-[12.5px] text-ink [field-sizing:content]`}
+        rows={1}
+        value={w().subject}
+        onInput={(e) => edit({ ...w(), subject: e.currentTarget.value.replace(/\n/g, " ") })}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) e.preventDefault();
+          key(e);
+        }}
+        aria-label="commit subject"
+      />
+      <textarea
+        class={`${FIELD} block resize-none text-[12px] text-ink-dim placeholder:text-ink-faint [field-sizing:content]`}
+        rows={1}
+        value={w().body}
+        placeholder="why"
+        onInput={(e) => edit({ ...w(), body: e.currentTarget.value })}
+        onKeyDown={key}
+        aria-label="commit body"
+      />
+      <Show when={issues().length}>
+        <div class="mt-1 flex flex-wrap gap-x-3 px-2 text-[11px]">
+          <For each={issues()}>
+            {(h) => (
+              <span class={TONE[h.tone]}>
+                {short(h)}
+                <Show when={h.fix}>
+                  {" "}
+                  <button class="rv-quietbtn" onClick={bind("words.fix", `${props.branchId} ${c()!.sha} ${h.id}`)}>
+                    {h.fix!.label}
+                  </button>
+                </Show>
+              </span>
+            )}
+          </For>
+        </div>
+      </Show>
+      <SaveBar branchId={props.branchId} pending={(drafts(), changed(props.branchId).length + (prChange(props.branchId) ? 1 : 0))} />
+    </Show>
+  );
+}
+
+export default function Commits(props: { branchId: string; readOnly?: boolean; landing?: boolean; landingOnly?: boolean }) {
+  const b = () => view("branch", props.branchId);
+  const o = useOutline(() => props.branchId);
   /** thread URL → "author on file:line", for the commits whose Addresses: trailers name one */
   const threadsByUrl = () => {
     const out = new Map<string, string>();
@@ -63,12 +142,7 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
     return out;
   };
   const orphans = () => [...(mine()?.keys() ?? [])].filter((sha) => o() && !o()!.commits.some((c) => c.sha === sha)).length;
-  const saveKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault();
-      dispatch("words.save", "key", { target: props.branchId, event: e });
-    }
-  };
+  const saveKey = (e: KeyboardEvent) => saveKey_(props.branchId)(e);
 
   const prParts = () => splitTemplate(pr().body);
   const editOwn = (own: string) => editPr(props.branchId, { ...pr(), body: joinTemplate(own, prParts().template) });
@@ -190,13 +264,8 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
           </ol>
         </Show>
       </Show>
-      <Show when={pending() && !props.readOnly}>
-        <div class="sticky bottom-0 flex items-center gap-3 border-t border-rule bg-vellum-raise py-2">
-          <button class="rv-btn rv-btn-gold" onClick={bind("words.save", props.branchId)}>
-            save {pending()} <kbd>⌘↵</kbd>
-          </button>
-          <span class="text-[11px] text-ink-faint">{keyOf("undo")} undoes</span>
-        </div>
+      <Show when={!props.readOnly}>
+        <SaveBar branchId={props.branchId} pending={pending()} />
       </Show>
     </Show>
   );
