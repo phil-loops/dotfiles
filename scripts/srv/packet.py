@@ -181,12 +181,24 @@ def landing_title(snap, branch, subjects):
 
 
 def body(branch):
-    """The landing body: a hand-written stack-pr-body wins verbatim; else the drafted one."""
+    """The body the compare form opens with: the hand-written stack-pr-body, else the drafted one,
+    with the forest's merge order as it stands at this click under it."""
     snap = repostate.snapshot()
-    saved = snap.branch_key(branch, "pr-body")
-    if saved:
-        return saved
-    return drafted(branch)
+    words = (snap.branch_key(branch, "pr-body") or drafted(branch)).strip()
+    sync._pr_state_map()   # a cold PR cache would list open PRs by their job instead of their #number
+    _, forest, node = _forest_of(branch)
+    order = merge_order(forest_facts(snap.project(branch), (forest or {}).get("nodes", []), node)["plan"])
+    return "\n\n----\n".join(x for x in (words, order) if x) + "\n"
+
+
+def merge_order(plan):
+    """A forest's plan as the "Part of a stack" list: a step with a PR is its bare #number (GitHub
+    renders the title and merged state), the rest their one-line job; "" for a lone branch."""
+    if not plan:
+        return ""
+    rows = [f"  {i}. " + ("[this branch]" if s.get("me") else f"#{s['pr']}" if s.get("pr") else s.get("job") or s.get("title") or s["branch"])
+            for i, s in enumerate(plan, 1)]
+    return "\n".join(["Part of a stack, in merge order:", *rows])
 
 
 def packet_on(branch):
