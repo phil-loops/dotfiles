@@ -3,7 +3,7 @@
 // Generated from the registry, so it can't drift from what the keys do.
 import { For, Show } from "solid-js";
 import { liveScopes, model, targetFor } from "./model";
-import { commands } from "./registry";
+import { commands, glyph } from "./registry";
 import { page, sideLine } from "./review/page";
 import { surface } from "./router";
 import { bind } from "./runner";
@@ -58,7 +58,7 @@ function Lines(props: { lines: SheetLine[]; dim?: boolean }) {
       {(l) => (
         <div class="flex justify-between gap-4 py-0.5">
           <span class={props.dim ? "text-ink-faint" : "text-ink-dim"}>{l.cmd.title}</span>
-          <kbd class={`shrink-0 font-mono ${props.dim ? "text-ink-faint" : "text-gold-leaf"} ${customized.has(l.cmd.id) ? "underline decoration-dotted" : ""}`}>{l.key}</kbd>
+          <kbd class={`shrink-0 font-mono ${props.dim ? "text-ink-faint" : "text-gold-leaf"} ${customized.has(l.cmd.id) ? "underline decoration-dotted" : ""}`}>{l.key.split(" · ").map(glyph).join(" · ")}</kbd>
         </div>
       )}
     </For>

@@ -107,12 +107,13 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
 }
 
 function hints(t: Thread): string {
-  const out = ["↵ fold", "r reply"];
-  if (!t.outdated && !t.resolved) out.push(t.fixedBy?.length ? "E address again" : "E address");
-  if (t.canResolve || t.canUnresolve) out.push(t.resolved ? "R reopen on GitHub" : "R resolve on GitHub");
-  if (!t.outdated && !t.local?.addressedBy && t.comments.some((c) => c.body.includes("```suggestion"))) out.push("a apply");
-  if (t.note?.draftReply) out.push("i its draft");
-  if (t.note) out.push("z note");
+  const k = keyOf;
+  const out = [`${k("review.fold")} fold`, `${k("review.reply")} reply`];
+  if (!t.outdated && !t.resolved) out.push(`${k("review.address")} ${t.fixedBy?.length ? "address again" : "address"}`);
+  if (t.canResolve || t.canUnresolve) out.push(`${k("review.resolve")} ${t.resolved ? "reopen on GitHub" : "resolve on GitHub"}`);
+  if (!t.outdated && !t.local?.addressedBy && t.comments.some((c) => c.body.includes("```suggestion"))) out.push(`${k("review.apply")} apply`);
+  if (t.note?.draftReply) out.push(`${k("review.note.insert")} its draft`);
+  if (t.note) out.push(`${k("review.note.toggle")} note`);
   return out.join(" · ");
 }
 
@@ -152,7 +153,7 @@ function NoteView(props: { t: Thread }) {
           <span>· same issue in {places()} place{places() === 1 ? "" : "s"}</span>
         </Show>
         <Show when={n().draftReply}>
-          <span class="text-ink-faint">· i inserts its reply</span>
+          <span class="text-ink-faint">· {keyOf("review.note.insert")} inserts its reply</span>
         </Show>
         <span class="text-ink-faint">{open() ? "▾" : "▸"}</span>
       </button>

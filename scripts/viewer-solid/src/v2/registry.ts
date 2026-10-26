@@ -61,4 +61,19 @@ export const commands = (): Command[] => [...registry.values()];
 export const getCommand = (id: string): Command | undefined => registry.get(id);
 
 /** The key a hint names for a command — its first, after your keys.toml — so on-page hints follow the keymap. */
-export const keyOf = (id: string): string => registry.get(id)?.keys?.[0] ?? "space";
+export const keyOf = (id: string): string => glyph(registry.get(id)?.keys?.[0] ?? "space");
+
+/** A key as it reads on screen: ⇧s for S (so it never passes for s), ⇥ tab, ↵ ret, ⌃k for C-k. */
+export const glyph = (k: string): string =>
+  k
+    .split(" ")
+    .map((t) => {
+      const named = ({ tab: "⇥", ret: "↵", down: "↓", up: "↑", left: "←", right: "→" } as Record<string, string>)[t];
+      if (named) return named;
+      const m = /^([CA]-)?(.)$/u.exec(t);
+      if (!m) return t;
+      const mod = m[1] === "C-" ? "⌃" : m[1] === "A-" ? "⌥" : "";
+      const ch = m[2];
+      return mod + (ch !== ch.toLowerCase() ? `⇧${ch.toLowerCase()}` : ch);
+    })
+    .join(" ");

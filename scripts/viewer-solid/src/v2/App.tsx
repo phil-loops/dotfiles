@@ -2,6 +2,7 @@ import { createEffect, Match, on, Show, Switch } from "solid-js";
 import Dashboard from "./Dashboard";
 import Forest from "./Forest";
 import Forests from "./Forests";
+import HintLine from "./HintLine";
 import KeySheet from "./KeySheet";
 import { model } from "./model";
 import Menu from "./Menu";
@@ -61,6 +62,7 @@ export default function App() {
           <span role="status">{note()}</span>
         </Show>
         <span class="flex-1" />
+        <HintLine />
         <Show when={pendingKeys()}>
           <kbd class="font-mono text-gold-leaf">{pendingKeys()} …</kbd>
         </Show>
