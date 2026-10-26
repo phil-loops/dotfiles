@@ -60,7 +60,7 @@ command({ id: "review.thread.prev", label: "thread", title: "Previous conversati
 command({ id: "review.file.next", label: "file", pair: "review.file.prev", title: "Next file", scope: "review", budget: "local", keys: ["]"], available: onFiles, local: seek(1, (k) => k.startsWith("f|")) });
 command({ id: "review.file.prev", label: "file", title: "Previous file", scope: "review", budget: "local", keys: ["["], available: onFiles, local: seek(-1, (k) => k.startsWith("f|")) });
 nav("review.top", "First line", ["g g"], () => goTo(0), "ends", "review.bottom");
-nav("review.bottom", "Last line", ["G"], () => goTo(pg.stops().length - 1), "ends");
+nav("review.bottom", "Last line", ["G", "g e"], () => goTo(pg.stops().length - 1), "ends");
 command({
   id: "review.cursor.set",
   title: "Put the cursor here",
@@ -111,7 +111,7 @@ command({
 
 const TABS = ["conversation", "commits", "files"] as const;
 command({ id: "review.tab", label: "tab", title: "Next tab — Conversation, Commits, Files changed", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
-command({ id: "review.tab.commits", label: "commits", title: "Commits", scope: "review", budget: "local", keys: ["2"], available: () => pg.tab() !== "commits", local: () => pg.setTab("commits") });
+command({ id: "review.tab.commits", label: "commits", title: "Commits", scope: "review", budget: "local", keys: ["2"], local: () => pg.setTab("commits") });
 command({
   id: "review.push",
   label: "push",
@@ -126,12 +126,12 @@ command({
     return armed() === id ? "branch.push.confirm" : "branch.push.arm";
   },
 });
-command({ id: "review.tab.files", label: "files", title: "Files changed", scope: "review", budget: "local", keys: ["3"], available: () => pg.tab() !== "files", local: () => pg.setTab("files") });
-command({ id: "review.tab.conversation", label: "conversation", title: "Conversation", scope: "review", budget: "local", keys: ["1"], available: () => pg.tab() !== "conversation", local: () => pg.setTab("conversation") });
-command({ id: "review.split", label: "split", title: "Split ↔ unified diff", scope: "review", budget: "local", keys: ["s"], local: () => pg.setSplit(!pg.split()) });
-command({ id: "review.outdated", label: "outdated", title: "Show outdated conversations", scope: "review", budget: "local", keys: ["O"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
+command({ id: "review.tab.files", label: "files", title: "Files changed", scope: "review", budget: "local", keys: ["3"], local: () => pg.setTab("files") });
+command({ id: "review.tab.conversation", label: "conversation", title: "Conversation", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
+command({ id: "review.split", label: "split", title: "Split ↔ unified diff", scope: "review", budget: "local", keys: ["space s"], local: () => pg.setSplit(!pg.split()) });
+command({ id: "review.outdated", label: "outdated", title: "Show outdated conversations", scope: "review", budget: "local", keys: ["space o"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
 command({ id: "review.words", label: "words", title: "The words (description, outline, landing title)", scope: "review", budget: "local", keys: ["e"], local: () => pg.setOverlay(pg.overlay() === "words" ? null : "words") });
-command({ id: "review.map", label: "map", title: "The forest map", scope: "review", budget: "local", keys: ["m"], local: () => pg.setOverlay(pg.overlay() === "map" ? null : "map") });
+command({ id: "review.map", label: "map", title: "The forest map", scope: "review", budget: "local", keys: ["space m"], local: () => pg.setOverlay(pg.overlay() === "map" ? null : "map") });
 command({
   id: "review.map.go",
   title: "Open a branch from the map",
@@ -144,7 +144,7 @@ command({
     if (target && i > 0) navigate(reviewPath(target.slice(0, i), target.slice(i + 1)), e);
   },
 });
-command({ id: "review.filter", label: "find", title: "Find a file", scope: "review", budget: "local", keys: ["t"], local: () => pg.setFiltering(true) });
+command({ id: "review.filter", label: "find", title: "Find a file", scope: "review", budget: "local", keys: ["space f", "/"], local: () => pg.setFiltering(true) });
 // ── history: the branch's commits one at a time (GitHub Desktop's view) ──
 
 /** The history list as it's walked: "all changes" first, then the own commits newest first. */
@@ -160,7 +160,7 @@ command({
   title: "Commits — the branch's history, one commit at a time",
   scope: "review",
   budget: "local",
-  keys: ["H"],
+  keys: ["space h"],
   local: () => pg.setTab("commits"),
 });
 command({ id: "history.next", label: "commit", pair: "history.prev", title: "Next commit", scope: "history", budget: "local", keys: ["j", "down"], quiet: true, local: step(1) });
@@ -437,7 +437,7 @@ command({
     else throw new Error("nothing to close");
   },
 });
-command({ id: "review.types", label: "type", title: "Show the type (hover)", scope: "review", budget: "local", keys: ["K"], available: onFiles, local: () => hover() });
+command({ id: "review.types", label: "type", title: "Show the type (hover)", scope: "review", budget: "local", keys: ["space k"], available: onFiles, local: () => hover() });
 command({
   id: "review.definition",
   label: "def",
@@ -757,7 +757,7 @@ command({
   title: "Send every draft to your pending review",
   scope: "review",
   budget: "slow-io",
-  keys: ["P"],
+  keys: ["space p"],
   available: () => (pg.draft()?.items ?? []).some((i) => i.state === "draft"),
   write: () => sendWrite((pg.draft()?.items ?? []).filter((i) => i.state === "draft").map((i) => i.key)),
 });
@@ -896,7 +896,7 @@ command({
   title: "Open on GitHub to submit your review",
   scope: "review",
   budget: "local",
-  keys: ["S"],
+  keys: ["g h"],
   available: canWrite,
   local: () => void window.open(`${pg.conv()!.url}/files`, "_blank", "noopener"),
 });

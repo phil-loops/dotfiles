@@ -18,7 +18,7 @@ import {
   sheetOpen,
 } from "../ui";
 
-command({ id: "menu.open", label: "menu", title: "Command menu", scope: "global", budget: "local", keys: ["space"], quiet: true, local: () => setMenuOpen(true) });
+command({ id: "menu.open", label: "menu", title: "Command menu", scope: "global", budget: "local", keys: ["space ?", ":"], quiet: true, local: () => setMenuOpen(true) });
 command({ id: "help.keys", label: "keys", title: "Keys", scope: "global", budget: "local", keys: ["?"], local: () => setSheetOpen((v) => !v) });
 command({
   id: "overlay.close",
@@ -105,6 +105,6 @@ command({
   title: "Change the dashboard's window",
   scope: "dashboard",
   budget: "local",
-  keys: ["T"],
+  keys: ["space t"],
   local: () => setDashDays((d) => RANGES[(RANGES.indexOf(d) + 1) % RANGES.length]),
 });

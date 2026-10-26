@@ -112,17 +112,21 @@ function Header() {
         <span class="flex-1" />
         <Show when={c()}>
           <Show when={drafts()}>
-            <button class="rv-quietbtn mr-3" onClick={bind("review.send.all")}>
-              {drafts()} draft{drafts() === 1 ? "" : "s"} · <kbd>{keyOf("review.send.all")}</kbd> send
+            <button class="rv-quietbtn mr-3" onClick={bind("review.send.all")} title="send every draft to your pending review">
+              {drafts()} draft{drafts() === 1 ? "" : "s"}
             </button>
           </Show>
-          <button class="rv-finish" classList={{ "rv-finish-on": pending() > 0 }} onClick={bind("review.finish")} title="your pending review is private until you submit it on GitHub">
-            {pending() ? `${pending()} pending · open on GitHub to submit` : "Open on GitHub"} <kbd><Key id="review.finish" /></kbd>
-          </button>
+          <Show when={pending()}>
+            <button class="rv-finish rv-finish-on" onClick={bind("review.finish")} title="your pending review is private until you submit it on GitHub">
+              {pending()} pending · submit
+            </button>
+          </Show>
         </Show>
       </div>
       <div class="rv-sub">
-        <span class="text-ink-dim">{t()?.name}</span>
+        <Show when={!c()}>
+          <span class="text-ink-dim">{t()?.name}</span>
+        </Show>
         <Show when={c()}>
           <span>→ {c()!.base}</span>
           <span>@{c()!.author}</span>
@@ -145,25 +149,21 @@ function Header() {
       </div>
       <nav class="rv-tabs">
         <button classList={{ "rv-tab-on": pg.tab() === "conversation" }} onClick={bind("review.tab.conversation")}>
-          Conversation <Key id="review.tab.conversation" class="rv-tabkey" /> <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
+          <Key id="review.tab.conversation" class="rv-tabkey" /> conversation <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "commits" }} onClick={bind("review.tab.commits")}>
-          Commits <Key id="review.tab.commits" class="rv-tabkey" /> <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
+          <Key id="review.tab.commits" class="rv-tabkey" /> commits <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
           <Show when={(view("branch", pg.id())?.ahead ?? 0) > 0 || view("branch", pg.id())?.pushed === "local"}>
             <span class="rv-count rv-count-gold">{view("branch", pg.id())?.pushed === "local" ? "local" : `${view("branch", pg.id())!.ahead} to push`}</span>
           </Show>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "files" }} onClick={bind("review.tab.files")}>
-          Files changed <Key id="review.tab.files" class="rv-tabkey" /> <span class="rv-count">{pg.files().length}</span>
+          <Key id="review.tab.files" class="rv-tabkey" /> files <span class="rv-count">{pg.files().length}</span>
         </button>
-
-        <span class="rv-tabkey self-center"><Key id="review.tab" /> cycles</span>
         <span class="flex-1" />
         <span class="rv-meta">
           {openThreads()} open · viewed {viewedCount()}/{pg.files().length}
         </span>
-        <button class="rv-toggle" onClick={bind("review.split")}>{pg.split() ? "split" : "unified"} <kbd><Key id="review.split" /></kbd></button>
-        <button class="rv-toggle" onClick={bind("review.outdated")}>{pg.showOutdated() ? "hide" : "show"} outdated <kbd><Key id="review.outdated" /></kbd></button>
       </nav>
     </header>
   );
@@ -180,9 +180,6 @@ function History() {
   const focused = () => pg.historyFocus() === "list";
   return (
     <div class="rv-history" classList={{ "rv-history-focus": focused() }}>
-      <div class="mb-1 text-[10.5px] text-ink-faint">
-        {focused() ? "" : `${keyOf("commit.back")} list`}
-      </div>
       <button class="rv-hrow" classList={{ "rv-hrow-on": on(null) }} onClick={bind("history.select", "")}>
         to push
       </button>
@@ -191,7 +188,8 @@ function History() {
           <button class="rv-hrow" classList={{ "rv-hrow-on": on(c.sha) }} onClick={bind("history.select", c.sha)} title={c.body || c.subject}>
             <span class="rv-hsub">{c.subject}</span>
             <span class="rv-hmeta">
-              <code classList={{ "text-gold-leaf": c.pushed === false }}>{c.sha.slice(0, 7)}</code> · {c.author} · {c.date} · {c.pushed === false ? "local" : "pushed"}
+              <code classList={{ "text-gold-leaf": c.pushed === false }}>{c.sha.slice(0, 7)}</code> · {c.date.replace(/^\d{4}-/, "")}
+              {c.pushed === false ? " · local" : ""}
             </span>
             <For each={addresses(c.sha)}>{(a) => <span class="rv-hmeta text-gold-leaf">→ {a}</span>}</For>
           </button>
@@ -269,8 +267,9 @@ function FileTree() {
                   <button class="rv-check" title={v.viewed ? `viewed — ${keyOf("review.viewed")} unmarks it` : `mark viewed (${keyOf("review.viewed")})`} onClick={bind("review.viewed.file", v.file.path)}>
                     {v.viewed ? "☑" : v.seen ? "◪" : "☐"}
                   </button>
-                  <button class="rv-tname" onClick={bind("review.file.go", v.file.path)}>
-                    {v.file.path.slice(v.file.path.lastIndexOf("/") + 1)}
+                  <button class="rv-tname" onClick={bind("review.file.go", v.file.path)} title={v.file.path}>
+                    <span class="rv-thead">{baseName(v.file.path).slice(0, -TAIL)}</span>
+                    <span class="shrink-0">{baseName(v.file.path).slice(-TAIL)}</span>
                   </button>
                   <Show when={v.open}>
                     <span class="rv-dot" title={`${v.open} open conversation${v.open === 1 ? "" : "s"}`}>{v.open}</span>
@@ -287,6 +286,10 @@ function FileTree() {
     </aside>
   );
 }
+
+/** A file name cut in the middle when it doesn't fit, so its end — what tells two files apart — always shows. */
+const TAIL = 14;
+const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 
 function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) => boolean }) {
   const fv = createMemo(() => pg.fileOf(props.file.path));
@@ -310,7 +313,7 @@ function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) =>
         <span class="text-del">−{props.file.del}</span>
         <span class="flex-1" />
         <Show when={hiddenOutdated() && !pg.showOutdated()}>
-          <button class="rv-quietbtn" onClick={bind("review.outdated")}>{hiddenOutdated()} outdated · {keyOf("review.outdated")}</button>
+          <button class="rv-quietbtn" onClick={bind("review.outdated")}>{hiddenOutdated()} outdated</button>
         </Show>
         <span class="rv-viewed">
           {fv()?.viewed ? "viewed" : fv()?.seen ? `${fv()!.seen}/${fv()!.blocks.length} viewed` : ""}
@@ -357,7 +360,7 @@ function GapRow(props: { path: string; gap: Gap; selected: (k: string | undefine
         <span class="text-ink-faint"> · {props.gap.label}</span>
       </Show>
       <Show when={props.selected(key)}>
-        <span class="text-ink-faint"> · {keyOf("review.expand")} shows 20 more</span>
+        <span class="text-ink-faint"> · {keyOf("review.expand")} 20 more</span>
       </Show>
     </div>
   );

@@ -2,7 +2,6 @@
 // doing → the ranked queue → waiting. /next ranks it and writes each item's next steps.
 import { For, Show } from "solid-js";
 import { model, tkey } from "./model";
-import { keyOf } from "./registry";
 import { renderMarkdown } from "./review/markdown";
 import { bind } from "./runner";
 import { world } from "./store";
@@ -30,11 +29,13 @@ function Row(props: { t: TodoItem }) {
             <span class="ml-2 text-[12px] text-ember" title={props.t.problems!.join("\n")}>⚠</span>
           </Show>
         </span>
-        <span class="hidden w-[34%] shrink-0 truncate text-ink-dim md:inline">{props.t.state === "waiting" ? `⏳ ${props.t.waiting}` : props.t.why}</span>
-        <span class="w-[190px] shrink-0 whitespace-nowrap text-right text-[11px] text-ink-faint">
+        <span class="shrink-0 whitespace-nowrap text-right text-[11px] text-ink-faint">
           {KIND[props.t.kind] ?? props.t.kind} · {props.t.area} · {props.t.size}
         </span>
       </div>
+      <Show when={on() && !open() && (props.t.why || props.t.waiting)}>
+        <p class="m-0 -mt-1 bg-gold-wash pb-2 pl-[86px] pr-4 text-[12.5px] text-ink-dim">{props.t.state === "waiting" ? `⏳ ${props.t.waiting}` : props.t.why}</p>
+      </Show>
       <Show when={open()}>
         <div class="mb-3 ml-[86px] mr-4 border-l border-rule pl-4 text-[13px] text-ink-dim">
           <p class="m-0 mb-2 text-ink">{props.t.why}</p>

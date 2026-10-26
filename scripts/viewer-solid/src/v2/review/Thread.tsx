@@ -109,11 +109,9 @@ export function ThreadView(props: { id: string; selected: (k: string | undefined
 function hints(t: Thread): string {
   const k = keyOf;
   const out = [`${k("review.fold")} fold`, `${k("review.reply")} reply`];
-  if (!t.outdated && !t.resolved) out.push(`${k("review.address")} ${t.fixedBy?.length ? "address again" : "address"}`);
-  if (t.canResolve || t.canUnresolve) out.push(`${k("review.resolve")} ${t.resolved ? "reopen on GitHub" : "resolve on GitHub"}`);
+  if (!t.outdated && !t.resolved) out.push(`${k("review.address")} address`);
   if (!t.outdated && !t.local?.addressedBy && t.comments.some((c) => c.body.includes("```suggestion"))) out.push(`${k("review.apply")} apply`);
-  if (t.note?.draftReply) out.push(`${k("review.note.insert")} its draft`);
-  if (t.note) out.push(`${k("review.note.toggle")} note`);
+  if (t.note?.draftReply) out.push(`${k("review.note.insert")} draft`);
   return out.join(" · ");
 }
 

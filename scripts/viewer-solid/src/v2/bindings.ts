@@ -22,6 +22,7 @@ export const SAME_MOVE: Record<string, string[]> = {
   "put it away": ["project.archive", "todo.drop"],
   "the words": ["review.words", "forest.words", "story.why"],
   "the page's other face": ["review.tab", "forest.face"],
+  "open on GitHub": ["branch.pr", "review.finish"],
 };
 
 const KEY = /^(?:[CA]-)?(?:.|space|esc|ret|tab|up|down|left|right)$/u;
