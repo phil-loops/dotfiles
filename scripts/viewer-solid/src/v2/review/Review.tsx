@@ -13,8 +13,10 @@ import { page as pg, rowsOf, short, type FileView } from "./page";
 import { ThreadView, PendingView, ComposerView } from "./Thread";
 import Conversation from "./Conversation";
 import { CommitWords } from "../Commits";
-import { AddressSheet, MapOverlay, Words } from "./Overlays";
-import Outgoing from "./Outgoing";
+import Commits from "../Commits";
+import { prValue } from "../words";
+import { AddressSheet, MapOverlay } from "./Overlays";
+import ShipLine from "./Ship";
 import TypesPop from "./TypesPop";
 import { notePointer } from "./types";
 
@@ -45,7 +47,7 @@ export default function Review() {
                 <History />
               </aside>
               <div class="rv-files" data-paint="commits">
-                <Show when={pg.scoped()} fallback={<Outgoing />}>
+                <Show when={pg.scoped()} fallback={<LandsAs />}>
                   <CommitHead />
                   <Show when={pg.files().length} fallback={<p class="rv-quiet">reading the commit…</p>}>
                     <For each={pg.files()}>{(f) => <FileBlock file={f} selected={selected} />}</For>
@@ -68,9 +70,6 @@ export default function Review() {
             </div>
           </Match>
         </Switch>
-      </Show>
-      <Show when={pg.overlay() === "words"}>
-        <Words />
       </Show>
       <Show when={pg.overlay() === "map"}>
         <MapOverlay />
@@ -130,13 +129,11 @@ function Header() {
         </Show>
       </div>
       <div class="rv-sub">
+        <ShipLine />
         <Show when={c()}>
           <span>→ {c()!.base}</span>
           <span>@{c()!.author}</span>
           <For each={latest()}>{([who, st]) => <span class={st === "APPROVED" ? "text-patina" : "text-ember"}>{who} {st === "APPROVED" ? "approved" : "requested changes"}</span>}</For>
-          <Show when={c()!.unpushed.length}>
-            <span class="text-gold-leaf">{c()!.unpushed.length} local commit{c()!.unpushed.length === 1 ? "" : "s"} not on GitHub</span>
-          </Show>
           <Show when={c()!.mapping === "behind"}>
             <span class="text-ember" title="threads sit at their lines on the local tip; ones whose lines it doesn't have yet show beside their file">
               {c()!.behind} commit{c()!.behind === 1 ? "" : "s"} on GitHub not here — pull to review what's there
@@ -146,7 +143,7 @@ function Header() {
             <span class="text-gold-leaf">{waiting()} draft{waiting() === 1 ? " waits" : "s wait"} for a push</span>
           </Show>
         </Show>
-        <Show when={!c() && world.ready}>
+        <Show when={!c() && world.ready && view("branch", pg.id())?.pushed !== "local"}>
           <span class="text-ink-faint">{noPr()}</span>
         </Show>
       </div>
@@ -178,10 +175,13 @@ function History() {
   const rows = () => pg.history()?.rows ?? [];
   const on = (sha: string | null) => pg.commitScope() === sha;
   const focused = () => pg.historyFocus() === "list";
+  /** the commit that lands on main is the PR's: its title once it's open, the drafted one before */
+  const landing = () => pg.conv()?.title ?? (prValue(pg.id()).subject || view("branch", pg.id())?.description);
   return (
     <div class="rv-history" classList={{ "rv-history-focus": focused() }}>
       <button class="rv-hrow" classList={{ "rv-hrow-on": on(null) }} onClick={bind("history.select", "")}>
-        to push
+        <span class="rv-hsub">{landing() || "—"}</span>
+        <span class="rv-hmeta">lands on main{pg.conv() ? ` · #${pg.conv()!.number}` : ""}</span>
       </button>
       <For each={rows()} fallback={<p class="rv-quiet">{pg.history() ? "no commits of its own" : "reading the commits…"}</p>}>
         {(c) => (
@@ -195,6 +195,16 @@ function History() {
           </button>
         )}
       </For>
+    </div>
+  );
+}
+
+/** The landing commit selected: its title and why, edited here until the PR owns them. */
+function LandsAs() {
+  return (
+    <div class="rv-outgoing" data-paint="commits">
+      <Commits branchId={pg.id()} landing landingOnly />
+      <p class="rv-quiet">its diff is the whole branch: the files tab</p>
     </div>
   );
 }

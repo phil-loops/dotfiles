@@ -73,7 +73,7 @@ function Branch(props: { v: BranchView }) {
           }
         >
           <div class="mt-2 text-[12.5px]">
-            <Commits branchId={b().id} />
+            <Commits branchId={b().id} readOnly />
           </div>
         </Show>
         <Show when={facts().length}>

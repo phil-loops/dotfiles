@@ -131,7 +131,18 @@ command({ id: "review.tab.files", label: "files", title: "Show the files tab", s
 command({ id: "review.tab.conversation", label: "conversation", title: "Show the conversation tab", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
 command({ id: "review.split", label: "split", title: "Switch between split and unified diff", scope: "review", budget: "local", keys: ["space s"], local: () => pg.setSplit(!pg.split()) });
 command({ id: "review.outdated", label: "outdated", title: "Show or hide outdated conversations", scope: "review", budget: "local", keys: ["space o"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
-command({ id: "review.words", label: "words", title: "Edit the words: description, outline, PR title", scope: "review", budget: "local", keys: ["e"], local: () => pg.setOverlay(pg.overlay() === "words" ? null : "words") });
+command({
+  id: "review.words",
+  label: "words",
+  title: "Edit what lands on main: the PR's title and why",
+  scope: "review",
+  budget: "local",
+  keys: ["e"],
+  local: () => {
+    pg.setTab("commits");
+    void pg.showCommit(null);
+  },
+});
 command({ id: "review.map", label: "map", title: "Show the forest map", scope: "review", budget: "local", keys: ["space m"], local: () => pg.setOverlay(pg.overlay() === "map" ? null : "map") });
 command({
   id: "review.map.go",
@@ -199,7 +210,7 @@ command({
   available: () => pg.scoped(),
   local: () => pg.setHistoryFocus("diff"),
 });
-command({ id: "history.exit", label: "back", title: "Go back to what a push sends", scope: "history", budget: "local", keys: ["esc"], local: () => void pg.showCommit(null) });
+command({ id: "history.exit", label: "back", title: "Go back to what lands on main", scope: "history", budget: "local", keys: ["esc"], local: () => void pg.showCommit(null) });
 command({
   id: "commit.back",
   label: "list",

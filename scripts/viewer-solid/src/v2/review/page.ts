@@ -123,7 +123,7 @@ export const page = createRoot(() => {
   const [unfold, setUnfold] = createSignal<ReadonlyMap<string, boolean>>(new Map());
   const [composer, setComposer] = createSignal<Composer | null>(null);
   const [texts, setTexts] = createSignal<ReadonlyMap<string, string>>(new Map());
-  const [overlay, setOverlay] = createSignal<"map" | "words" | "address" | null>(null);
+  const [overlay, setOverlay] = createSignal<"map" | "address" | null>(null);
   /** the thread E is addressing, while its chooser is open */
   const [addressing, setAddressing] = createSignal<string | null>(null);
   /** its chooser is showing the commits to pick from */
@@ -202,7 +202,7 @@ export const page = createRoot(() => {
   );
   createEffect(
     on(tab, (t) => {
-      if (t === "commits") void loadHistory(true);
+      if (t === "commits") void loadHistory();
       else if (commitScope() != null) void showCommit(null);
       setHistoryFocus("list");
     }),
@@ -230,21 +230,12 @@ export const page = createRoot(() => {
   /** The branch's own commits, newest first (GET /commits): the history list. */
   /** the history's freshness: the tip, and what origin has — a push changes the second, not the first */
   const historyKey = () => `${keyOf()}|${branch()?.pushed ?? ""}|${branch()?.ahead ?? ""}`;
-  /** `pick`: opening the tab with nothing to push shows the newest commit rather than an empty push pane */
-  async function loadHistory(pick = false): Promise<void> {
+  async function loadHistory(): Promise<void> {
     const t = target();
     const key = historyKey();
-    const choose = () => {
-      const rows = history()?.rows ?? [];
-      if (pick && tab() === "commits" && commitScope() == null && rows.length && branch()?.pushed !== "local" && rows.every((r) => r.pushed !== false)) void showCommit(rows[0].sha);
-    };
-    if (!t) return;
-    if (history()?.key === key) return choose();
+    if (!t || history()?.key === key) return;
     const rows = await getJSON<HistoryCommit[]>(atRepoPath(t.repo, `/commits?branch=${encodeURIComponent(t.name)}`)).catch(() => null);
-    if (rows && historyKey() === key) {
-      setHistory({ key, rows: rows.filter((r) => r.own) });
-      choose();
-    }
+    if (rows && historyKey() === key) setHistory({ key, rows: rows.filter((r) => r.own) });
   }
   // a push (or a fetch) changes what origin has without moving the tip: the list's pushed marks follow
   createEffect(on(historyKey, () => tab() === "commits" && void loadHistory(), { defer: true }));

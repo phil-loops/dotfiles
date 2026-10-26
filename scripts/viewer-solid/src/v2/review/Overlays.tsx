@@ -1,4 +1,4 @@
-// The review page's overlays: the words (`e`) and the forest map (`m`). Each closes on esc; keys
+// The review page's overlays: the forest map (`m`) and the address sheet (`E`). Each closes on esc; keys
 // inside them go through the runner like everywhere else.
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { model } from "../model";
@@ -7,30 +7,10 @@ import { bind, dispatch } from "../runner";
 import { leaf, SHIP } from "../ship";
 import { list, view } from "../store";
 import { getJSON } from "../sync";
-import Commits from "../Commits";
 import { plain } from "./markdown";
 import type { Thread } from "../types";
 import { shown, type Outline } from "../words";
 import { atRepoPath, page as pg, short } from "./page";
-
-export function Words() {
-  const desc = () => view("branch", pg.id())?.description ?? "";
-  return (
-    <aside class="rv-words" role="dialog" aria-label="The words">
-      <div class="rv-sheet-head">
-        words
-      </div>
-      <div class="rv-words-k">description</div>
-      <p class="font-display text-[16px] italic">{desc() || "—"}</p>
-      <Commits branchId={pg.id()} landing />
-      <Show when={pg.conv()?.unpushed.length}>
-        <p class="text-ink-faint">
-          {pg.conv()!.unpushed.length} commit{pg.conv()!.unpushed.length === 1 ? "" : "s"} past the PR head ({short(pg.conv()!.head)}) aren't on GitHub yet.
-        </p>
-      </Show>
-    </aside>
-  );
-}
 
 export function MapOverlay() {
   const here = () => pg.id();
