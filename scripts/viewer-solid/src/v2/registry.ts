@@ -48,7 +48,7 @@ export interface Command {
   available?: (target: string | undefined) => boolean;
   /** a key that means "the right thing here" (↵): names the command that actually runs, which is
    *  the one recorded — so telemetry counts pushes, not presses of ↵ */
-  route?: (target: string | undefined) => string | null;
+  route?: (target: string | undefined) => string | { id: string; target: string } | null;
   local?: (target: string | undefined, e?: Event, arg?: unknown) => void;
   write?: (target: string, arg?: unknown) => Write | null;
 }

@@ -67,7 +67,8 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
   const named = opts.from ?? id;
   if (cmd.route) {
     const next = cmd.route(opts.target ?? targetFor(cmd.scope));
-    if (next && next !== id) dispatch(next, via, { ...opts, from: named });
+    const to = typeof next === "string" ? { id: next } : next;
+    if (to && to.id !== id) dispatch(to.id, via, { ...opts, ...("target" in to ? { target: to.target } : {}), from: named });
     else echo(named, via, false);
     return;
   }
