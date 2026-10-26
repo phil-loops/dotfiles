@@ -4,7 +4,8 @@
 # refreshes the gate donor; on every tick it restacks each focus forest that has fallen behind,
 # one project at a time, with stack-restack --no-claude in the shared scratch worktree. A forest
 # is left alone (and retried next tick) while any of its worktrees is dirty or has a process in
-# it, while another restack runs or parks, or while its root has an open PR. A conflict is
+# it, while another restack runs or parks, or while its root is on origin (pushed, PR or not —
+# a rebase there would leave the push door refusing a diverged branch). A conflict is
 # aborted, never left parked — the forest carries the reason on /projects (`sync`), and is not
 # retried until its branches or origin/main move.
 import json
@@ -150,6 +151,9 @@ def _sync_project(project, st, cwds):
     open_prs = sync._open_pr_heads()
     if any(r in open_prs for r in roots):
         st["projects"][project] = {"state": "skipped", "why": "its base has an open PR"}
+        return False
+    if any(_tip(f"refs/remotes/origin/{r}") and not sync._already_merged(r) for r in roots):
+        st["projects"][project] = {"state": "skipped", "why": "its base is pushed to origin"}
         return False
     for r in roots:
         if r in behind and sync._already_merged(r) and not _gh_merged(r):
