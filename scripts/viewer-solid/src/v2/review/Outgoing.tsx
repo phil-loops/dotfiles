@@ -128,6 +128,14 @@ export default function Outgoing() {
     onCleanup(() => clearTimeout(t));
   });
   const rows = () => (now(), gateRows(progress(), Date.now() / 1000));
+  /** with no run log left, the verdict git config recorded for this tree */
+  const recorded = () => {
+    const g = b()?.gates;
+    if (g === "green") return "green (recorded) · no run log";
+    if (g === "red") return `red (recorded): ${b()!.redGates.join(", ") || "gates"} · no run log`;
+    if (g === "stale") return "stale · the tree changed since the last run";
+    return "not run";
+  };
   const pushable = () => !!v() && canPush(v()!.b, v()!.pr);
 
   return (
@@ -147,7 +155,7 @@ export default function Outgoing() {
       </div>
 
       <div class="rv-words-k">gates</div>
-      <Show when={rows().length} fallback={<p class="rv-quiet">{progress.loading ? "reading the gates…" : "not run"}</p>}>
+      <Show when={rows().length} fallback={<p class="rv-quiet">{progress.loading ? "reading the gates…" : recorded()}</p>}>
         <ol class="m-0 mb-4 list-none p-0">
           <For each={rows()}>
             {(g) => (
