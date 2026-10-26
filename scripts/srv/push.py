@@ -136,7 +136,9 @@ def gates(req, raw):
     # oxfmt) gets one auto-fix attempt before the verdict. Default false since 2026-08-19 —
     # a bare gates check used to rebase stale branches as a side effect of observing, and
     # observation must never mutate. The sync strip passes fix:false explicitly anyway.
-    cmd = _gates_cmd(branch, fix=d.get("fix", False), tree=tree)
+    # skip: Phil's call that a gate doesn't apply to this tree — it reports as a waiver, never silently
+    skip = [g for g in d.get("skip") or [] if isinstance(g, str) and re.fullmatch(r"[a-z][a-z0-9-]*", g)]
+    cmd = _gates_cmd(branch, fix=d.get("fix", False), tree=tree, skip=skip)
     # detach: spawn with a progress journal and return at once — the strip tails
     # GET /gates-progress for live per-gate position instead of freezing for a tsc.
     if d.get("detach"):
@@ -152,7 +154,7 @@ def gates(req, raw):
                 _record_green(branch, old["tree"], result.get("gates", []))
                 repostate.invalidate()   # the verdict landed outside a POST: unstale the snapshot now
                 return req._send(200, json.dumps({"ok": True, "cached": True, "gates": result.get("gates", [])}))
-        _spawn_gates(branch, fix=d.get("fix", False))
+        _spawn_gates(branch, fix=d.get("fix", False), skip=skip)
         return req._send(200, json.dumps({"ok": True, "started": True}))
     # The verdict the push door hangs on: validated, never passed through. It used to ship
     # whatever stack-gates printed to the browser as HTTP 200, and decide green inside a bare
@@ -177,7 +179,7 @@ def _queue_file(job):
     return os.path.join(GATES_TURN_DIR, os.path.basename(job["path"]) + ".queue.json")
 
 
-def _gates_cmd(branch, fix=False, background=False, tree=None):
+def _gates_cmd(branch, fix=False, background=False, tree=None, skip=()):
     cmd = [os.path.join(ctx.SCRIPTS, "stack-gates-turn"),
            "--queue", GATES_TURN_DIR, "--branch", branch,
            "--tree", _tree(branch) if tree is None else tree,
@@ -185,10 +187,12 @@ def _gates_cmd(branch, fix=False, background=False, tree=None):
            os.path.join(ctx.SCRIPTS, "stack-gates"), "--branch", branch]
     if fix:
         cmd.append("--fix")
+    for g in skip:
+        cmd += ["--skip", g]
     return cmd
 
 
-def _spawn_gates(branch, fix=False, background=False):
+def _spawn_gates(branch, fix=False, background=False, skip=()):
     with _GATE_LOCK:
         tree = _tree(branch)
         old = _GATE_JOBS.get(_jkey(branch)) or _adopt_job(branch)
@@ -196,7 +200,7 @@ def _spawn_gates(branch, fix=False, background=False):
             if not background:
                 gate_queue.promote(_queue_file(old))
             return old
-        cmd = _gates_cmd(branch, fix=fix, background=background, tree=tree)
+        cmd = _gates_cmd(branch, fix=fix, background=background, tree=tree, skip=skip)
         path = os.path.join(
             tempfile.gettempdir(),
             f"stack-gates-{_repo_id()}-{quote(branch, safe='')}-{time.time_ns()}.jsonl")

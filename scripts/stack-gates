@@ -14,7 +14,7 @@ Each entry is "<label>::<shell command>"; a non-zero exit fails that gate. With 
 config, falls back to auto-detected defaults (repo-local tsc if a tsconfig exists,
 oxfmt --check on changed *.ts/*.tsx if oxfmt is present).
 
-  stack-gates [<branch> | --branch <b>] [--fix] [--progress <file>]
+  stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--progress <file>]
                                        run in the worktree of <b>; if none exists, materialize
                                        its stack-open scratch checkout (detached at the tip) —
                                        never gates an unrelated tree. Unrecognized arguments
@@ -40,6 +40,10 @@ Output (stdout): {"ok": bool, "gates": [{"name","ok","ms","summary","fixed"?,"ad
 A gate that is UNSATISFIABLE rather than unmet is waived: it reports ok with "advisory":
 true and its finding in "warn", so the verdict stays green but the warning is still told.
 Today that is `fresh` on a branch pinned under an open PR (see pinning_ancestor).
+
+--skip <gate> (repeatable, or comma-separated): Phil's call that a gate doesn't apply here. The
+gate doesn't run and reports like a waiver — ok, advisory, "skipped by you" in warn — so the
+door says a gate was skipped rather than passing it silently.
 """
 import json
 import os
@@ -334,6 +338,7 @@ def main():
     branch = ""
     progress_path = ""
     do_fix = False
+    skips = set()
     positional = []
     unknown = []
     argv = sys.argv[1:]
@@ -349,6 +354,9 @@ def main():
         elif a == "--fix":
             do_fix = True
             i += 1
+        elif a == "--skip" and i + 1 < len(argv):
+            skips.update(x for x in argv[i + 1].split(",") if x)
+            i += 2
         elif a.startswith("-"):
             unknown.append(a)
             i += 1
@@ -362,7 +370,7 @@ def main():
         verdict = {"ok": False, "gates": [
             {"name": "usage", "ok": False, "ms": 0,
              "summary": f"unrecognized argument(s): {bad}\n"
-                        "usage: stack-gates [<branch> | --branch <b>] [--fix] [--progress <file>]"}]}
+                        "usage: stack-gates [<branch> | --branch <b>] [--fix] [--skip <gate>]… [--progress <file>]"}]}
         print(json.dumps(verdict))
         return 0
 
@@ -422,6 +430,11 @@ def main():
         print(json.dumps(verdict))
         return 0
     for name, cmd in gates:
+        if name in skips:
+            entry = {"name": name, "ok": True, "ms": 0, "summary": "", "advisory": True, "warn": f"{name} skipped by you"}
+            results.append(entry)
+            emit({"event": "done", "gate": name, "ok": True, "ms": 0, "warn": entry["warn"]})
+            continue
         t0 = time.time()
         emit({"event": "start", "gate": name, "ts": t0})
         r = run(gate_argv(name, cmd), cwd)

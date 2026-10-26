@@ -20,7 +20,7 @@ import InlineDiff from "./InlineDiff";
 import { atRepoPath, page as pg, short } from "./page";
 import { withFix } from "./Thread";
 
-const MARK: Record<GateRow["state"], string> = { queued: "·", running: "◌", green: "✓", red: "✗", stopped: "■" };
+const MARK: Record<GateRow["state"], string> = { queued: "·", running: "◌", green: "✓", waived: "↷", red: "✗", stopped: "■" };
 const secs = (ms: number | null) => (ms == null ? "" : ms >= 60000 ? `${Math.floor(ms / 60000)}m ${Math.round((ms % 60000) / 1000)}s` : `${(ms / 1000).toFixed(1)}s`);
 
 /** The push, as a live status rather than a button beside grey text: readied, pushing (and for
@@ -134,6 +134,8 @@ export default function Outgoing() {
     onCleanup(() => clearTimeout(t));
   });
   const rows = () => (now(), gateRows(progress(), Date.now() / 1000));
+  /** the gates already skipped on this run — a second skip keeps them skipped */
+  const skipped = () => rows().filter((r) => r.state === "waived" && r.summary?.endsWith("skipped by you")).map((r) => r.name);
   /** with no run log left, the verdict git config recorded for this tree */
   const recorded = () => {
     const g = b()?.gates;
@@ -174,7 +176,12 @@ export default function Outgoing() {
                 <span class="w-24 text-ink">{g.name}</span>
                 <span class="w-24 text-ink-faint">{g.state === "stopped" ? "stopped" : g.state}</span>
                 <span class="w-16 text-right text-ink-faint">{secs(g.ms)}</span>
-                <span class="min-w-0 flex-1 truncate text-ink-faint">{g.summary}</span>
+                <span class="min-w-0 flex-1 truncate text-ink-faint" title={g.summary}>{g.summary}</span>
+                <Show when={g.state === "red"}>
+                  <button class="rv-quietbtn shrink-0" onClick={bind("branch.gates.skip", `${pg.id()} ${[...skipped(), g.name].join(",")}`)}>
+                    skip
+                  </button>
+                </Show>
               </li>
             )}
           </For>
