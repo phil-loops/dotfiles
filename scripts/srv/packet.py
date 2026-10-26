@@ -171,7 +171,7 @@ def facts(branch):
         **ff, "files": files, "guide": guide, "gates": _gates(snap, branch, tree),
         "template": outbox._template(snap),
         "title": landing_title(snap, branch, subjects),
-        "label": snap.branch_key(branch, "pr-label") != "off",
+        "label": snap.branch_key(branch, "pr-label") == "on",
         "node": node, "forest": forest,
     }
 
@@ -229,7 +229,7 @@ def drafted(branch, f=None):
 
 
 def label_on(branch):
-    return repostate.snapshot().branch_key(branch, "pr-label") != "off"
+    return repostate.snapshot().branch_key(branch, "pr-label") == "on"
 
 
 # ── open PRs: body + bot threads, one background GraphQL read per repo ───────
