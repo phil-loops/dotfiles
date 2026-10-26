@@ -33,7 +33,7 @@ export default function Conversation() {
   });
   return (
     <div class="rv-conv" data-paint={world.ready ? "review" : undefined}>
-      <Show when={c()} fallback={<p class="rv-quiet">this branch has no open PR on GitHub — nothing to converse about yet</p>}>
+      <Show when={c()} fallback={<p class="rv-quiet">no PR</p>}>
         <article class="rv-card">
           <div class="rv-c-head">
             <span class="rv-author">{c()!.author}</span>
@@ -110,11 +110,11 @@ export default function Conversation() {
           </article>
         </Show>
         <div class="rv-pending-bar">
-          <Show when={c()!.pending?.count} fallback={<span class="text-ink-faint">comment on a line in Files changed — it goes into your pending review, which you submit on GitHub</span>}>
+          <Show when={c()!.pending?.count} fallback={<span class="text-ink-faint">no pending comments</span>}>
             {c()!.pending!.count} comment{c()!.pending!.count === 1 ? "" : "s"} in your pending review —
           </Show>
           <button class="rv-btn rv-btn-gold" onClick={bind("review.finish")}>
-            Open on GitHub to submit <kbd>{keyOf("review.finish")}</kbd>
+            submit on GitHub <kbd>{keyOf("review.finish")}</kbd>
           </button>
         </div>
       </Show>

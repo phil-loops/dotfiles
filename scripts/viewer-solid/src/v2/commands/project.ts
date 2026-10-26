@@ -37,7 +37,7 @@ function moveTo(state: ProjectState) {
       path: "/project-state",
       body: { repo: p.repo, project: p.name, state },
       settled: () => world.entities.project[id]?.state === state,
-      said: state === "archive" ? `archived ${p.name} — u puts it back` : p.state === "archive" ? `restored ${p.name}` : undefined,
+      said: state === "archive" ? `archived ${p.name} · u undoes` : p.state === "archive" ? `restored ${p.name}` : undefined,
       failed: `couldn't move ${p.name} to ${LABEL[state]}`,
       inverse: { id: `project.${p.state}`, target: id },
     };
@@ -49,6 +49,7 @@ const exists = (id: string | undefined) => !!id && !!view("project", id);
 for (const state of ["focus", "workbench", "archive"] as ProjectState[]) {
   command({
     id: `project.${state}`,
+    label: state === "workbench" ? "bench" : state,
     title: `Move to ${LABEL[state]}`,
     scope: "project",
     budget: "config-write",
@@ -95,6 +96,7 @@ const inFocus = (id: string | undefined) => !!id && view("project", id)?.state =
 
 command({
   id: "focus.up",
+  label: "move", pair: "focus.down",
   title: "Move up the focus lane",
   scope: "project",
   budget: "config-write",
@@ -104,6 +106,7 @@ command({
 });
 command({
   id: "focus.down",
+  label: "move",
   title: "Move down the focus lane",
   scope: "project",
   budget: "config-write",
@@ -139,6 +142,7 @@ const hasBranches = (id: string | undefined) => !!id && !!model.forests().get(id
 
 command({
   id: "forest.expand",
+  label: "open",
   title: "Open the forest's branches",
   scope: "project",
   budget: "local",
@@ -148,6 +152,7 @@ command({
 });
 command({
   id: "forest.collapse",
+  label: "fold",
   title: "Fold the forest's branches away",
   scope: "project",
   budget: "local",
@@ -176,6 +181,7 @@ command({
 /** ↵: the selected row's one primary action. */
 command({
   id: "row.primary",
+  label: "go",
   title: "Do the row's thing",
   scope: "row",
   budget: "local",
@@ -211,6 +217,7 @@ command({
 });
 command({
   id: "forest.words",
+  label: "words",
   title: "Show the branch's commits in full",
   scope: "branch",
   budget: "local",
@@ -220,6 +227,7 @@ command({
 });
 command({
   id: "forest.face",
+  label: "story",
   title: "The feature's story ↔ its branches",
   scope: "forest",
   budget: "local",
@@ -232,6 +240,7 @@ command({
 });
 command({
   id: "story.why",
+  label: "why",
   title: "Show why a landed chapter happened",
   scope: "forest",
   budget: "local",
@@ -244,6 +253,7 @@ command({
 });
 command({
   id: "forest.leave",
+  label: "back",
   title: "Back to Forests",
   scope: "forest",
   budget: "local",
@@ -253,6 +263,7 @@ command({
 
 command({
   id: "ready.toggle",
+  label: "ready",
   title: "Show only what's ready for you",
   scope: "forests",
   budget: "local",
@@ -266,6 +277,7 @@ command({
 
 command({
   id: "archive.toggle",
+  label: "archive",
   title: "Show or hide the archive",
   scope: "forests",
   budget: "local",
@@ -276,6 +288,7 @@ command({
 
 command({
   id: "forest.launch",
+  label: "launch",
   title: "Launch the whole forest",
   scope: "project",
   budget: "local",

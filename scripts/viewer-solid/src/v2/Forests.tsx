@@ -186,9 +186,9 @@ function LaunchLine(props: { f: ForestView }) {
       <span class="h-[3px] w-28 overflow-hidden rounded-full bg-vellum-edge">
         <span class="block h-full bg-gold-leaf transition-[width] duration-300" style={{ width: `${(100 * done()) / Math.max(1, total())}%` }} />
       </span>
-      <Show when={done() < total()} fallback={<span class="font-display italic text-gold-leaf">✦ the whole forest is on GitHub</span>}>
+      <Show when={done() < total()} fallback={<span class="font-display italic text-gold-leaf">✦ all on GitHub</span>}>
         <span class="text-ink-dim">
-          {done()} of {total()} on GitHub — {keyOf("branch.push")} pushes, {keyOf("branch.pr")} opens its PR on its parent's · {keyOf("overlay.close")}
+          {done()}/{total()} on GitHub
         </span>
       </Show>
     </div>
@@ -277,12 +277,12 @@ export default function Forests() {
         <WindowLine />
         <Show when={readyOnly()}>
           <p class="m-0 mb-5 px-4 pl-11 text-ink-dim">
-            <span class="text-gold-leaf">ready</span> · {readyCount() ? `${readyCount()} thing${readyCount() === 1 ? "" : "s"} you can do now` : "nothing is waiting on you"} ·{" "}
-            <button class="text-ink-faint hover:text-ink-dim" onClick={bind("ready.toggle")}>{keyOf("ready.toggle")} shows everything</button>
+            <span class="text-gold-leaf">ready</span> · {readyCount() || "nothing"} ·{" "}
+            <button class="text-ink-faint hover:text-ink-dim" onClick={bind("ready.toggle")}>{keyOf("ready.toggle")} all</button>
           </p>
         </Show>
-        <Section title="Focus" rows={p().focus} empty={`nothing in focus — ${keyOf("project.focus")} on a forest puts it here`} />
-        <Section title="Workbench" rows={p().workbench} empty="the workbench is clear" />
+        <Section title="Focus" rows={p().focus} empty="empty" />
+        <Section title="Workbench" rows={p().workbench} empty="empty" />
         <Show when={!readyOnly()}>
           <Show
             when={showArchive()}
@@ -290,13 +290,13 @@ export default function Forests() {
               <Show when={p().archive.length} keyed>
                 {(n) => (
                   <button ref={catchIt} class="ml-11 px-0 text-ink-faint hover:text-ink-dim" onClick={bind("archive.toggle")}>
-                    archive · {n} — {keyOf("archive.toggle")} opens it
+                    archive · {n}
                   </button>
                 )}
               </Show>
             }
           >
-            <Section title="Archive" rows={p().archive} empty="the archive is empty" />
+            <Section title="Archive" rows={p().archive} empty="empty" />
           </Show>
         </Show>
       </div>

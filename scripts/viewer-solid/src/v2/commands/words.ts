@@ -37,7 +37,7 @@ command({
       body: { branch: b.name, head: o.head, edits, ...(pr ?? {}) },
       // rewording moves the tip; a PR-text-only save lands in config, done when the server answers
       settled: () => !n || view("branch", id)?.tip !== o.head,
-      said: `${what} — u puts it back`,
+      said: `${what} · u undoes`,
       failed: "couldn't save — the branch may have moved; your edits are kept",
       rollback: () => {
         setDrafts(was);
@@ -87,7 +87,7 @@ command({
       body: { branch: b.name },
       settled: () => !moves || view("branch", id)?.tip !== tip,
       rollback: () => setSavedPr(savedWas),
-      said: "messages put back",
+      said: "undone",
       failed: "couldn't put the messages back",
     };
   },

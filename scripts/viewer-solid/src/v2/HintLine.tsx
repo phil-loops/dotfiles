@@ -15,6 +15,25 @@ import { pendingKeys, shiftHeld } from "./ui";
 const MAX = 5;
 type Hint = { id: string; key: string; title: string };
 
+/** A command's one word for the line. */
+const word = (id: string, title: string) => getCommand(id)?.label ?? short(title);
+
+/** Opposites as one hint — "j/k line", "n/⇧n thread" — the partner folded into the first. */
+function paired(items: Hint[]): Hint[] {
+  const out: Hint[] = [];
+  const gone = new Set<string>();
+  for (const h of items) {
+    if (gone.has(h.id)) continue;
+    const partner = getCommand(h.id)?.pair;
+    const other = partner ? items.find((x) => x.id === partner) : undefined;
+    if (other) {
+      gone.add(other.id);
+      out.push({ ...h, key: `${h.key}/${other.key}` });
+    } else out.push(h);
+  }
+  return out.filter((h) => !gone.has(h.id));
+}
+
 export default function HintLine() {
   const cmds = () =>
     commands()
@@ -27,23 +46,20 @@ export default function HintLine() {
       // what can follow a half-typed chord, in the scopes live here
       const items = cmds()
         .filter((c) => (c.scope === "global" || live.includes(c.scope)) && c.available)
-        .flatMap((c) => c.keys.filter((k) => k.startsWith(`${prefix} `)).map((k) => ({ id: c.id, key: glyph(k), title: short(c.title) })));
+        .flatMap((c) => c.keys.filter((k) => k.startsWith(`${prefix} `)).map((k) => ({ id: c.id, key: glyph(k.slice(prefix.length + 1)), title: word(c.id, c.title) })));
       return { layer: `${glyph(prefix)} …`, items };
     }
     const g = sheetNow(surface().id, live, cmds());
     if (shiftHeld()) {
       const capital = (k: string) => /^[A-Z]$/.test(k);
       const items = [...g.now, ...g.everywhere]
-        .flatMap((l) => l.cmd.keys.filter(capital).map((k) => ({ id: l.cmd.id, key: glyph(k), title: short(l.cmd.title) })));
-      return { layer: "", items };
+        .flatMap((l) => l.cmd.keys.filter(capital).map((k) => ({ id: l.cmd.id, key: glyph(k), title: word(l.cmd.id, l.cmd.title) })));
+      return { layer: "", items: paired(items) };
     }
-    return {
-      layer: "",
-      items: g.now
-        .filter((l) => !known(l.cmd.id))
-        .slice(0, MAX)
-        .map((l) => ({ id: l.cmd.id, key: glyph(l.key.split(" · ")[0]), title: short(l.cmd.title) })),
-    };
+    const all = g.now.map((l) => ({ id: l.cmd.id, key: glyph(l.key.split(" · ")[0]), title: word(l.cmd.id, l.cmd.title) }));
+    // a pair is known only when both halves are
+    const fresh = (h: Hint) => !known(h.id) || !!(getCommand(h.id)?.pair && !known(getCommand(h.id)!.pair!));
+    return { layer: "", items: paired(all.filter(fresh)).slice(0, MAX) };
   });
   const missed = () => {
     const f = fired();
@@ -53,7 +69,7 @@ export default function HintLine() {
     <span class="truncate text-[11.5px] text-ink-faint" aria-label="keys for what the cursor is on">
       <Show when={missed()}>
         <span class="mr-3 text-ink-dim">
-          <span class="font-mono">{missed()}</span> — nothing to do here
+          <span class="font-mono">{missed()}</span> · nothing here
         </span>
       </Show>
       <Show when={hints().layer}>

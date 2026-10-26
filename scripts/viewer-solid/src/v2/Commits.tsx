@@ -77,12 +77,12 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
     <Show when={o()} fallback={<p class="m-0 text-ink-faint">{o.loading ? "reading the commits…" : "couldn't read the commits"}</p>}>
       <Show when={orphans()}>
         <p class="m-0 mb-2 text-[12px] text-ink-faint">
-          {orphans()} edit{orphans() === 1 ? " was" : "s were"} on commits that no longer exist — the branch moved; they won't be saved
+          {orphans()} edit{orphans() === 1 ? "" : "s"} dropped · branch moved
         </p>
       </Show>
       <Show when={props.landing}>
         <div class="mb-4">
-          <div class="rv-words-k">lands on main as</div>
+          <div class="rv-words-k">lands as</div>
           <Show
             when={!o()!.pr?.exists}
             fallback={
@@ -106,7 +106,7 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
               class="mt-1 w-full resize-y border border-rule bg-vellum-night px-2 py-1 font-mono text-[12px] text-ink-dim focus:border-gold-deep focus:outline-none"
               rows={Math.min(12, Math.max(3, pr().body.split("\n").length + 1))}
               value={pr().body}
-              placeholder="a line of why (optional), then the template"
+              placeholder="why"
               onInput={(e) => editPr(props.branchId, { ...pr(), body: e.currentTarget.value })}
               onKeyDown={saveKey}
               aria-label="PR body"
@@ -118,7 +118,7 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
           <div class="rv-words-k">commits</div>
         </Show>
       </Show>
-      <Show when={!props.landingOnly && o()!.commits.length} fallback={<Show when={!props.landingOnly}><p class="m-0 text-ink-faint">no commits of its own</p></Show>}>
+      <Show when={!props.landingOnly && o()!.commits.length} fallback={<Show when={!props.landingOnly}><p class="m-0 text-ink-faint">no commits</p></Show>}>
         <ol class="m-0 list-none p-0">
           <For each={o()!.commits}>
             {(c) => {
@@ -145,7 +145,7 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
                           <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{c.body}</pre>
                         </Show>
                         <Show when={c.locked && !props.readOnly}>
-                          <p class="m-0 mt-1 text-[11px] text-ink-faint">read-only: {c.locked}</p>
+                          <p class="m-0 mt-1 text-[11px] text-ink-faint">{c.locked}</p>
                         </Show>
                       </>
                     }
@@ -166,7 +166,7 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
                       class="mt-1 w-full resize-y border border-rule bg-vellum-night px-2 py-1 font-mono text-[12px] text-ink-dim focus:border-gold-deep focus:outline-none"
                       rows={Math.min(14, Math.max(2, w().body.split("\n").length + 1))}
                       value={w().body}
-                      placeholder="why, in a line (optional)"
+                      placeholder="why"
                       onInput={(e) => edit(c, { ...w(), body: e.currentTarget.value })}
                       onKeyDown={saveKey}
                       aria-label={`body of ${c.short.slice(0, 7)}`}
@@ -182,9 +182,9 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
       <Show when={pending() && !props.readOnly}>
         <div class="sticky bottom-0 flex items-center gap-3 border-t border-rule bg-vellum-raise py-2">
           <button class="rv-btn rv-btn-gold" onClick={bind("words.save", props.branchId)}>
-            Save {pending()} change{pending() === 1 ? "" : "s"} <kbd>⌘↵</kbd>
+            save {pending()} <kbd>⌘↵</kbd>
           </button>
-          <span class="text-[11px] text-ink-faint">rewrites the unpushed commits in place · {keyOf("undo")} undoes</span>
+          <span class="text-[11px] text-ink-faint">{keyOf("undo")} undoes</span>
         </div>
       </Show>
     </Show>

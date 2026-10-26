@@ -44,7 +44,7 @@ function LandedWhy(props: { l: Landed }) {
   );
   return (
     <Show when={w()} fallback={<p class="m-0 text-ink-faint">{w.loading ? "reading main…" : "not on main yet"}</p>}>
-      <pre class="m-0 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{stripPlan(w()!.body) || "no body — the title is the whole story"}</pre>
+      <pre class="m-0 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{stripPlan(w()!.body) || "no body"}</pre>
     </Show>
   );
 }

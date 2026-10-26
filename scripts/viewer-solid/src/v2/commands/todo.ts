@@ -29,6 +29,7 @@ function moveTo(state: State, said?: (t: TodoItem) => string) {
 
 command({
   id: "todo.open",
+  label: "open",
   title: "Show or hide the item's notes",
   scope: "item",
   budget: "local",
@@ -38,6 +39,7 @@ command({
 });
 command({
   id: "todo.start",
+  label: "start",
   title: "Start it (doing)",
   scope: "item",
   budget: "config-write",
@@ -47,6 +49,7 @@ command({
 });
 command({
   id: "todo.done",
+  label: "done",
   title: "Mark it done",
   scope: "item",
   budget: "config-write",
@@ -56,6 +59,7 @@ command({
 });
 command({
   id: "todo.drop",
+  label: "drop",
   title: "Drop it",
   scope: "item",
   budget: "config-write",
@@ -111,8 +115,8 @@ function move(id: string, by: number): Write | null {
 }
 
 const movable = (id: string | undefined) => exists(id) && !!sectionOf(view("todo", id!)!) && view("todo", id!)!.state !== "broken";
-command({ id: "todo.up", title: "Move up the queue", scope: "item", budget: "config-write", keys: ["C-k"], available: movable, write: (id) => move(id, -1) });
-command({ id: "todo.down", title: "Move down the queue", scope: "item", budget: "config-write", keys: ["C-j"], available: movable, write: (id) => move(id, 1) });
+command({ id: "todo.up", label: "move", pair: "todo.down", title: "Move up the queue", scope: "item", budget: "config-write", keys: ["C-k"], available: movable, write: (id) => move(id, -1) });
+command({ id: "todo.down", label: "move", title: "Move down the queue", scope: "item", budget: "config-write", keys: ["C-j"], available: movable, write: (id) => move(id, 1) });
 command({
   id: "todo.ranks",
   title: "Put the queue's order back",

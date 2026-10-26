@@ -18,10 +18,11 @@ import {
   sheetOpen,
 } from "../ui";
 
-command({ id: "menu.open", title: "Command menu", scope: "global", budget: "local", keys: ["space"], quiet: true, local: () => setMenuOpen(true) });
-command({ id: "help.keys", title: "Keys", scope: "global", budget: "local", keys: ["?"], local: () => setSheetOpen((v) => !v) });
+command({ id: "menu.open", label: "menu", title: "Command menu", scope: "global", budget: "local", keys: ["space"], quiet: true, local: () => setMenuOpen(true) });
+command({ id: "help.keys", label: "keys", title: "Keys", scope: "global", budget: "local", keys: ["?"], local: () => setSheetOpen((v) => !v) });
 command({
   id: "overlay.close",
+  label: "back",
   title: "Back out",
   scope: "global",
   budget: "local",
@@ -70,8 +71,8 @@ const move = (by: number) => () => {
   setCursor(rows[i]);
   setCursorIdx(i);
 };
-command({ id: "cursor.down", title: "Next row", scope: "global", budget: "local", keys: ["j", "down"], quiet: true, local: move(1) });
-command({ id: "cursor.up", title: "Previous row", scope: "global", budget: "local", keys: ["k", "up"], quiet: true, local: move(-1) });
+command({ id: "cursor.down", label: "row", pair: "cursor.up", title: "Next row", scope: "global", budget: "local", keys: ["j", "down"], quiet: true, local: move(1) });
+command({ id: "cursor.up", label: "row", title: "Previous row", scope: "global", budget: "local", keys: ["k", "up"], quiet: true, local: move(-1) });
 command({
   id: "cursor.set",
   title: "Select row",
@@ -87,6 +88,7 @@ command({
 
 command({
   id: "undo",
+  label: "undo",
   title: "Undo the last change",
   scope: "global",
   budget: "local",
@@ -99,6 +101,7 @@ command({
 const RANGES = [7, 30, 90];
 command({
   id: "dashboard.range",
+  label: "range",
   title: "Change the dashboard's window",
   scope: "dashboard",
   budget: "local",

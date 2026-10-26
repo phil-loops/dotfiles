@@ -12,6 +12,7 @@ const bv = (id: string | undefined) => (id ? model.branchView(id) : undefined);
 
 command({
   id: "branch.push",
+  label: "push",
   title: "Push to origin",
   scope: "branch",
   budget: "local",
@@ -65,6 +66,7 @@ function advance(after: BranchView): void {
 
 command({
   id: "branch.pr",
+  label: "pr",
   title: "Open the PR (the prefilled compare form if there's none yet)",
   scope: "branch",
   budget: "local",
@@ -83,6 +85,7 @@ command({
 
 command({
   id: "branch.open",
+  label: "open",
   title: "Open the branch",
   scope: "branch",
   budget: "local",
@@ -121,6 +124,7 @@ function holdWrite(row: string, ids: string[], until: string | null): Write | nu
 
 command({
   id: "hold.morning",
+  label: "hold",
   title: "Hold for the morning",
   scope: "row",
   budget: "config-write",
@@ -134,6 +138,7 @@ command({
 });
 command({
   id: "hold.release",
+  label: "unhold",
   title: "Release the hold",
   scope: "row",
   budget: "config-write",

@@ -89,7 +89,7 @@ export default function KeySheet() {
             </ul>
           </Show>
           <section class="mb-4">
-            <Show when={groups().now.length || hints().length} fallback={<p class="m-0 text-ink-faint">nothing here takes a key — move the cursor onto something</p>}>
+            <Show when={groups().now.length || hints().length} fallback={<p class="m-0 text-ink-faint">nothing under the cursor</p>}>
               <For each={byTarget(groups().now)}>
                 {(g) => (
                   <div class="mb-2">
@@ -114,12 +114,12 @@ export default function KeySheet() {
           </section>
           <Show when={groups().notNow.length}>
             <section>
-              <h3 class="m-0 mb-1 text-[11px] font-normal uppercase tracking-[0.12em] text-ink-faint">On this page, not right now</h3>
+              <h3 class="m-0 mb-1 text-[11px] font-normal uppercase tracking-[0.12em] text-ink-faint">not here</h3>
               <Lines lines={groups().notNow} dim />
             </section>
           </Show>
           <p class="m-0 mt-4 text-[11px] text-ink-faint">
-            Your keys: <code>~/.dotfiles/canopy/keys.toml</code> — <span class="underline decoration-dotted">underlined</span> ones are yours.
+            yours: <code>canopy/keys.toml</code> (<span class="underline decoration-dotted">underlined</span>)
           </p>
         </div>
       </div>
