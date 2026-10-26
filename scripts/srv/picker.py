@@ -905,7 +905,7 @@ def review_on_branch(branch):   # open <branch> as the whole-PR gm Diffview in t
 
 
 def prepare_branch(branch):   # background worktree prefetch (stack-open --prepare) — fire-and-forget
-    ctx.fire([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
+    return ctx.fire([os.path.join(ctx.SCRIPTS, "stack-open"), "--prepare", branch],
              cwd=ctx.repo_cwd(), start_new_session=True)
 
 

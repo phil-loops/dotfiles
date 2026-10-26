@@ -100,6 +100,7 @@ def requests(req):
 
 _WARM_EVERY = 300   # the review queue moves on human timescales; gh search is a ~1s network call
 _WARM_MAX = 5       # bound the git work — the queue is normally 1-2 PRs
+_warming = {}       # branch -> its prepare; a cold one outlives _WARM_EVERY, and re-firing stacked 3 per PR
 
 
 def _warm_review_requests():
@@ -113,7 +114,10 @@ def _warm_review_requests():
         if not p.get("imported") and \
                 ctx.run([os.path.join(ctx.SCRIPTS, "stack-review-import"), num]).returncode != 0:
             continue
-        picker.prepare_branch(f"review/pr-{num}")
+        branch = f"review/pr-{num}"
+        if branch in _warming and _warming[branch].poll() is None:
+            continue
+        _warming[branch] = picker.prepare_branch(branch)
 
 
 def warm_requests_forever():
