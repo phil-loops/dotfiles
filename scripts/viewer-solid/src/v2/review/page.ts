@@ -107,7 +107,7 @@ export const page = createRoot(() => {
   const branch = () => view("branch", id());
   const tip = createMemo(() => branch()?.tip ?? conv()?.tip ?? "");
 
-  const [tab, setTab] = createSignal<"files" | "conversation" | "outgoing">("files");
+  const [tab, setTab] = createSignal<"conversation" | "commits" | "files">("files");
   const [split, setSplitSig] = createSignal(store.get("v2.review.split") === "1");
   const setSplit = (v: boolean) => {
     setSplitSig(v);
@@ -130,8 +130,8 @@ export const page = createRoot(() => {
   const [filtering, setFiltering] = createSignal(false);
 
   // ── history: the branch's commits, one at a time (GitHub Desktop's view) ──
-  /** the history list is open in the left column */
-  const [historyOpen, setHistoryOpen] = createSignal(false);
+  /** the Commits tab: the branch's history down the side (GitHub's Commits tab, Desktop's list) */
+  const historyOpen = () => tab() === "commits";
   /** j/k move through the commit list ("list") or the selected commit's diff ("diff") */
   const [historyFocus, setHistoryFocus] = createSignal<"list" | "diff">("list");
   /** the commit whose diff the page shows instead of the whole branch's; null = all changes */
@@ -190,11 +190,17 @@ export const page = createRoot(() => {
         setComposer(null);
         setViewedOverride(new Map());
         setTab("files");
-        setHistoryOpen(false);
         setCommitScope(null);
         setHistory(null);
       }
       void load(key, t.repo, t.name);
+    }),
+  );
+  createEffect(
+    on(tab, (t) => {
+      if (t === "commits") void loadHistory();
+      else if (commitScope() != null) void showCommit(null);
+      setHistoryFocus("list");
     }),
   );
   // move the type trees to this tip (and the diff's base) while it's read, so the first K is warm
@@ -365,7 +371,7 @@ export const page = createRoot(() => {
     fileOf, isOpen, atRow, isSeen, serverViewed, payload, loadErr, warm,
     tab, setTab, split, setSplit, showOutdated, setShowOutdated, cursor, setCursor, mark, setMark,
     unfold, setUnfold, composer, setComposer, text, setText,
-    historyOpen, setHistoryOpen, historyFocus, setHistoryFocus, commitScope, history, loadHistory, showCommit, scoped,
+    historyOpen, historyFocus, setHistoryFocus, commitScope, history, loadHistory, showCommit, scoped,
     overlay, setOverlay, addressing, setAddressing, addressPicking, setAddressPicking, viewedOverride, setViewedOverride, filter, setFilter, filtering, setFiltering,
   };
 });

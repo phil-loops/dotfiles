@@ -201,8 +201,8 @@ export function liveScopes(): string[] {
     out.push("global");
     return out;
   }
-  if (surface().id === "review" && page.tab() === "files" && !page.overlay()) {
-    // in the history list j/k move through commits; inside a commit's diff they move through lines
+  if (surface().id === "review" && page.tab() !== "conversation" && !page.overlay()) {
+    // on Commits, j/k move through the list until l opens a commit's diff, then through its lines
     if (page.historyOpen() && page.historyFocus() === "list") out.push("history");
     else {
       const h = page.here();

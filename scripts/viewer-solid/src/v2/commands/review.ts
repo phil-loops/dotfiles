@@ -9,6 +9,7 @@ import { view, world } from "../store";
 import type { Item, Thread } from "../types";
 import { armed, setCursor, setMenuOpen, setSheetOpen, menuOpen, sheetOpen } from "../ui";
 import { canPush } from "../ship";
+import { revealAt, toggleFold } from "../review/inline";
 import { shown } from "../words";
 import { bkey, model } from "../model";
 import { suggestionOf } from "../review/markdown";
@@ -107,19 +108,19 @@ command({
 
 // ── the page ──
 
-const TABS = ["conversation", "files", "outgoing"] as const;
-command({ id: "review.tab", title: "Next tab — Conversation, Files changed, Outgoing", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
-command({ id: "review.tab.outgoing", title: "Outgoing — what a push sends", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("outgoing") });
+const TABS = ["conversation", "commits", "files"] as const;
+command({ id: "review.tab", title: "Next tab — Conversation, Commits, Files changed", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
+command({ id: "review.tab.commits", title: "Commits", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("commits") });
 command({
   id: "review.push",
   title: "Push to origin — a first push or follow-ups onto the PR (press twice)",
   scope: "review",
   budget: "local",
   keys: ["p"],
-  available: () => pg.tab() === "outgoing",
+  available: () => pg.tab() === "commits",
   route: (id) => {
     const v = id ? model.branchView(id) : undefined;
-    if (pg.tab() !== "outgoing" || !v || !canPush(v.b, v.pr)) return null;
+    if (pg.tab() !== "commits" || !v || !canPush(v.b, v.pr)) return null;
     return armed() === id ? "branch.push.confirm" : "branch.push.arm";
   },
 });
@@ -151,25 +152,13 @@ const step = (by: number) => () => {
   const i = Math.max(0, Math.min(w.length - 1, w.indexOf(pg.commitScope()) + by));
   void pg.showCommit(w[i]);
 };
-const closeHistory = () => {
-  pg.setHistoryOpen(false);
-  pg.setHistoryFocus("list");
-  void pg.showCommit(null);
-};
-
 command({
   id: "review.history",
-  title: "The commits, one at a time (the history)",
+  title: "Commits — the branch's history, one commit at a time",
   scope: "review",
   budget: "local",
   keys: ["H"],
-  local: () => {
-    if (pg.historyOpen()) return closeHistory();
-    pg.setTab("files");
-    pg.setHistoryOpen(true);
-    pg.setHistoryFocus("list");
-    void pg.loadHistory();
-  },
+  local: () => pg.setTab("commits"),
 });
 command({ id: "history.next", title: "Next commit", scope: "history", budget: "local", keys: ["j", "down"], quiet: true, local: step(1) });
 command({ id: "history.prev", title: "Previous commit", scope: "history", budget: "local", keys: ["k", "up"], quiet: true, local: step(-1) });
@@ -180,11 +169,7 @@ command({
   budget: "local",
   quiet: true,
   local: (sha) => {
-    pg.setTab("files");
-    if (!pg.historyOpen()) {
-      pg.setHistoryOpen(true);
-      void pg.loadHistory();
-    }
+    pg.setTab("commits");
     pg.setHistoryFocus("list");
     void pg.showCommit(sha || null);
   },
@@ -195,9 +180,20 @@ command({
   scope: "history",
   budget: "local",
   keys: ["l", "right"],
+  available: () => pg.scoped(),
   local: () => pg.setHistoryFocus("diff"),
 });
-command({ id: "history.exit", title: "Back to all the branch's changes", scope: "history", budget: "local", keys: ["esc"], local: closeHistory });
+command({
+  id: "history.open",
+  title: "Open the commit's diff",
+  scope: "history",
+  budget: "local",
+  keys: ["ret"],
+  quiet: true,
+  available: () => pg.scoped(),
+  local: () => pg.setHistoryFocus("diff"),
+});
+command({ id: "history.exit", title: "Back to what a push sends", scope: "history", budget: "local", keys: ["esc"], local: () => void pg.showCommit(null) });
 command({
   id: "commit.back",
   title: "Back to the commit list",
@@ -206,7 +202,35 @@ command({
   keys: ["h", "left"],
   local: () => pg.setHistoryFocus("list"),
 });
-command({ id: "commit.exit", title: "Back to all the branch's changes", scope: "commit", budget: "local", keys: ["esc"], local: closeHistory });
+command({ id: "commit.exit", title: "Back to the commit list", scope: "commit", budget: "local", keys: ["esc"], local: () => pg.setHistoryFocus("list") });
+
+// ── the outgoing change, commit by commit (inline diffs on the Commits tab) ──
+
+command({
+  id: "inline.expand",
+  title: "Show 20 more lines around a commit's change",
+  scope: "review",
+  budget: "local",
+  quiet: true,
+  local: (t) => {
+    const [sha, ...rest] = (t ?? "").split("|");
+    const at = Number(rest.pop());
+    const path = rest.join("|");
+    const repo = pg.target()?.repo ?? "";
+    revealAt((p) => atRepoPath(repo, p), sha, path, at);
+  },
+});
+command({
+  id: "inline.fold",
+  title: "Fold or unfold a commit's diff",
+  scope: "review",
+  budget: "local",
+  quiet: true,
+  local: (t) => {
+    const [sha, changed] = (t ?? "").split(" ");
+    toggleFold(sha, Number(changed));
+  },
+});
 
 // ── address: the commit that fixes a thread (wiki canopy-v2-address) ──
 
