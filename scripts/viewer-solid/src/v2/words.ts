@@ -31,8 +31,17 @@ export interface Outline {
 /** The PR's place in the drafts map: its title and body are one more pair of words. */
 export const PR = "__pr";
 
-/** the latest /outline read per branch id, so a save acts on exactly what was shown */
-export const shown = new Map<string, Outline>();
+/** the latest /outline read per branch id, so a save acts on exactly what was shown; reads track
+ *  it, so a title drawn before the read lands (the commit list's landing row) follows it in */
+const [shownAt, setShownAt] = createSignal(0);
+const shownMap = new Map<string, Outline>();
+export const shown = {
+  get: (branchId: string): Outline | undefined => (shownAt(), shownMap.get(branchId)),
+  set: (branchId: string, o: Outline): void => {
+    shownMap.set(branchId, o);
+    setShownAt((n) => n + 1);
+  },
+};
 
 /** unsaved message edits: branch id → commit sha → words. They outlive the overlay closing. */
 export const [drafts, setDrafts] = createSignal<ReadonlyMap<string, ReadonlyMap<string, Words>>>(new Map());

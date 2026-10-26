@@ -154,23 +154,6 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
           {orphans()} edit{orphans() === 1 ? "" : "s"} dropped · branch moved
         </p>
       </Show>
-      <Show when={issues().length}>
-        <div class="mb-3 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
-          <For each={issues()}>
-            {(x) => (
-              <span class={TONE[x.h.tone]}>
-                <span class="text-ink-faint">{x.where}</span> {short(x.h)}
-                <Show when={x.h.fix}>
-                  {" "}
-                  <button class="rv-quietbtn" onClick={bind("words.fix", `${props.branchId} ${x.key} ${x.h.id}`)}>
-                    {x.h.fix!.label}
-                  </button>
-                </Show>
-              </span>
-            )}
-          </For>
-        </div>
-      </Show>
       <Show when={props.landing}>
         <div class="mb-4">
           <div class="rv-words-k">lands as</div>
@@ -210,6 +193,23 @@ export default function Commits(props: { branchId: string; readOnly?: boolean; l
               <div class="px-2 text-[11px] text-ink-faint">＋ the repo's PR template</div>
             </Show>
           </Show>
+        </div>
+      </Show>
+      <Show when={!props.readOnly && issues().length}>
+        <div class="mb-3 mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+          <For each={issues()}>
+            {(x) => (
+              <span class={TONE[x.h.tone]}>
+                <span class="text-ink-faint">{x.where}</span> {short(x.h)}
+                <Show when={x.h.fix}>
+                  {" "}
+                  <button class="rv-quietbtn" onClick={bind("words.fix", `${props.branchId} ${x.key} ${x.h.id}`)}>
+                    {x.h.fix!.label}
+                  </button>
+                </Show>
+              </span>
+            )}
+          </For>
         </div>
       </Show>
       <Show when={!props.landingOnly}>

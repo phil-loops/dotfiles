@@ -42,7 +42,10 @@
 .rv kbd { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-ink-faint); margin-left: 4px; }
 .rv-head { position: sticky; top: 0; z-index: 5; background: var(--color-vellum-night); padding: 0 16px; border-bottom: 1px solid var(--color-vellum-edge); }
 .rv-title { display: flex; align-items: baseline; gap: 4px; }
-.rv-sub { display: flex; flex-wrap: wrap; gap: 14px; padding: 4px 0 10px; font-size: 12px; color: var(--color-ink-faint); }
+.rv-sub { display: flex; flex-wrap: wrap; align-items: baseline; gap: 14px; padding: 4px 0 10px; font-size: 12px; color: var(--color-ink-faint); }
+.rv-ship { display: inline-flex; align-items: baseline; gap: 8px; }
+.rv-ship:empty { display: none; }
+.rv-ship .rv-btn { margin-left: 0; padding-top: 1px; padding-bottom: 1px; }
 .rv-tabs { display: flex; align-items: center; gap: 4px; }
 .rv-tabs > button:not(.rv-toggle) { padding: 6px 12px 7px; border-bottom: 2px solid transparent; color: var(--color-ink-dim); }
 .rv-tabs > .rv-tab-on { border-bottom-color: var(--color-gold-leaf) !important; color: var(--color-ink) !important; }
@@ -177,9 +180,7 @@
 .rv-radio-on b { color: var(--color-gold-leaf); }
 .rv-radio-off { opacity: 0.45; cursor: not-allowed; }
 .rv-radio-dot { color: var(--color-gold-leaf); }
-.rv-words { position: fixed; z-index: 14; top: 44px; right: 0; bottom: 0; width: min(440px, 92vw); padding: 14px 18px; overflow: auto; background: var(--color-vellum-raise); border-left: 1px solid var(--color-rule); box-shadow: -18px 0 50px rgba(0, 0, 0, 0.4); }
 .rv-words-k { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.12em; color: var(--color-ink-faint); margin-top: 12px; }
-.rv-words-commit { font-size: 12px; padding: 2px 0; }
 .rv-scrim { position: fixed; inset: 0; z-index: 16; display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; background: rgba(20, 17, 10, 0.7); }
 .rv-map { width: min(560px, 92vw); max-height: 70vh; overflow: auto; padding: 12px; background: var(--color-vellum-raise); border: 1px solid var(--color-rule); outline: none; }
 .rv-map-row { display: flex; gap: 10px; width: 100%; padding: 4px 12px; font-size: 12.5px; border-left: 2px solid transparent; }
