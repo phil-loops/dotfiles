@@ -82,7 +82,12 @@ export function stand(
  *  tip — a first push (no PR yet) and follow-ups onto an open PR alike. The server's own wards
  *  (/push-origin) still decide; this only says the key is worth offering. */
 export function canPush(b: Branch, pr: Pr | undefined): boolean {
-  if (b.pending || !b.commits || b.gates !== "green") return false;
+  return b.gates === "green" && pushableButGates(b, pr);
+}
+
+/** Everything a push needs except green gates — where `p` runs them instead. */
+export function pushableButGates(b: Branch, pr: Pr | undefined): boolean {
+  if (b.pending || !b.commits) return false;
   if (b.pushed === "ahead") return b.ahead > 0;
   return b.pushed === "local" && (!pr || pr.state === "OPEN");
 }

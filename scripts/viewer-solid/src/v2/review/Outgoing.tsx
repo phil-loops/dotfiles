@@ -8,7 +8,8 @@ import { gateRows, type GateRow, type Progress } from "../gates";
 import { model } from "../model";
 import { keyOf } from "../registry";
 import { bind, runOf } from "../runner";
-import { canPush, leaf } from "../ship";
+import { pushRoute } from "../commands/branch";
+import { leaf } from "../ship";
 import { list, view } from "../store";
 import { getJSON } from "../sync";
 import type { Thread } from "../types";
@@ -25,7 +26,7 @@ const secs = (ms: number | null) => (ms == null ? "" : ms >= 60000 ? `${Math.flo
 /** The push, as a live status rather than a button beside grey text: readied, pushing (and for
  *  how long), on origin, done — with the PR and where the replies stand — or the reason it failed
  *  and a retry. Driven by the runner's own record of the push (runOf). */
-function PushStatus(props: { count: number; pushable: boolean }) {
+function PushStatus(props: { count: number }) {
   const id = () => pg.id();
   const v = () => model.branchView(id());
   const run = () => runOf("branch.push.confirm", id());
@@ -38,6 +39,12 @@ function PushStatus(props: { count: number; pushable: boolean }) {
     const t = window.setInterval(() => setTick(Date.now()), 250);
     onCleanup(() => clearInterval(t));
   });
+  const label = () => {
+    const r = pushRoute(id());
+    if (r === "branch.gates.run") return v()?.b.gates === "red" ? "re-run the gates" : "run the gates";
+    if (r === "branch.gates.wait") return "gates running…";
+    return armed() === id() ? `${keyOf("review.push")} again to push` : `push ${props.count}`;
+  };
   const secs = () => `${((((run()?.t1 ?? tick()) - (run()?.t0 ?? tick())) / 1000)).toFixed(1)}s`;
   const replies = () => {
     const rs = pg.items().filter((i) => i.kind === "reply" && (i.waitsFor.length || i.fixFor));
@@ -54,12 +61,11 @@ function PushStatus(props: { count: number; pushable: boolean }) {
         when={live()}
         fallback={
           <Show when={props.count}>
-            <button class="rv-btn rv-btn-gold" disabled={!props.pushable} onClick={bind("review.push", id())}>
-              {armed() === id() ? `${keyOf("review.push")} again to push` : `push ${props.count}`}{" "}
-              <kbd>{keyOf("review.push")}</kbd>
+            <button class="rv-btn rv-btn-gold" disabled={!pushRoute(id())} onClick={bind("review.push", id())}>
+              {label()} <kbd>{keyOf("review.push")}</kbd>
             </button>
-            <Show when={!props.pushable}>
-              <span class="ml-3 text-ink-faint">{v()?.b.gates !== "green" ? "gates not green" : "nothing to push"}</span>
+            <Show when={!pushRoute(id())}>
+              <span class="ml-3 text-ink-faint">nothing to push</span>
             </Show>
           </Show>
         }
@@ -119,7 +125,7 @@ export default function Outgoing() {
   const unanswered = (t: Thread) => !riding().some((i) => i.fixFor?.toLowerCase() === t.comments[0]?.url?.toLowerCase());
 
   const [progress, { refetch }] = createResource(
-    () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}` : null),
+    () => (b() ? `${b()!.repo}|${b()!.name}|${b()!.tip}|${b()!.gates}` : null),
     () => getJSON<Progress>(atRepoPath(b()!.repo, `/gates-progress?branch=${encodeURIComponent(b()!.name)}`)).catch(() => null),
   );
   createEffect(() => {
@@ -137,7 +143,6 @@ export default function Outgoing() {
     return "not run";
   };
   const logged = () => rows().length > 0 || progress.loading;
-  const pushable = () => !!v() && canPush(v()!.b, v()!.pr);
 
   return (
     <div class="rv-outgoing">
@@ -151,7 +156,7 @@ export default function Outgoing() {
           <span class="text-ink-faint">
             {" "}· {v()?.pr ? `onto #${v()!.pr!.number}` : "first push"} · <code>{short(b()!.tip)}</code> · gates {logged() ? (b()!.gates === "green" ? "✓" : b()!.gates) : recorded()}
           </span>
-          <PushStatus count={unpushed().length} pushable={pushable()} />
+          <PushStatus count={unpushed().length} />
         </Show>
       </div>
 
