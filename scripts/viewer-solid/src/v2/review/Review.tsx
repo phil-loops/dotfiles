@@ -39,7 +39,7 @@ export default function Review() {
             <Conversation />
           </Match>
           <Match when={pg.tab() === "commits"}>
-            <div class="rv-body">
+            <div class="rv-body rv-body-commits">
               <aside class="rv-tree">
                 <History />
               </aside>
@@ -85,7 +85,6 @@ export default function Review() {
 function Header() {
   const c = () => pg.conv();
   const t = () => pg.target();
-  const viewedCount = createMemo(() => pg.views().filter((v) => v.viewed).length);
   const pending = () => c()?.pending?.count ?? 0;
   const drafts = () => pg.items().filter((i) => i.state === "draft").length;
   const waiting = () => pg.items().filter((i) => i.state === "waiting").length;
@@ -105,7 +104,7 @@ function Header() {
   return (
     <header class="rv-head" ref={trackHeight}>
       <div class="rv-title">
-        <Show when={c()} fallback={<span class="font-display text-[20px] text-ink">{t()?.name}</span>}>
+        <Show when={c()} fallback={<span class="font-display text-[20px] text-ink">{view("branch", pg.id())?.description || t()?.name}</span>}>
           <span class="font-display text-[20px] text-ink">{c()!.title}</span>
           <span class="ml-2 text-ink-faint">#{c()!.number}</span>
         </Show>
@@ -124,9 +123,6 @@ function Header() {
         </Show>
       </div>
       <div class="rv-sub">
-        <Show when={!c()}>
-          <span class="text-ink-dim">{t()?.name}</span>
-        </Show>
         <Show when={c()}>
           <span>→ {c()!.base}</span>
           <span>@{c()!.author}</span>
@@ -158,11 +154,11 @@ function Header() {
           </Show>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "files" }} onClick={bind("review.tab.files")}>
-          <Key id="review.tab.files" class="rv-tabkey" /> files <span class="rv-count">{pg.files().length}</span>
+          <Key id="review.tab.files" class="rv-tabkey" /> files <span class="rv-count">{pg.branchFiles().length}</span>
         </button>
         <span class="flex-1" />
         <span class="rv-meta">
-          {openThreads()} open · viewed {viewedCount()}/{pg.files().length}
+          {openThreads()} open · viewed {pg.branchViewed()}/{pg.branchFiles().length}
         </span>
       </nav>
     </header>
@@ -173,9 +169,6 @@ function Header() {
  *  the selected one; "all changes" is the whole branch again. */
 function History() {
   const rows = () => pg.history()?.rows ?? [];
-  /** the threads a commit declares it addresses, as "author on file:line" */
-  const addresses = (sha: string) =>
-    pg.threads().filter((t) => t.fixedBy?.some((f) => f.sha.startsWith(sha))).map((t) => `${t.comments[0]?.author} on ${t.path.split("/").pop()}:${t.local?.line ?? t.line}`);
   const on = (sha: string | null) => pg.commitScope() === sha;
   const focused = () => pg.historyFocus() === "list";
   return (
@@ -199,18 +192,25 @@ function History() {
   );
 }
 
-/** Above a single commit's diff: which commit, and how to get back to the whole branch. */
+/** The threads a commit declares it addresses, as "author on file:line". */
+const addresses = (sha: string) =>
+  pg.threads().filter((t) => t.fixedBy?.some((f) => f.sha.startsWith(sha))).map((t) => `${t.comments[0]?.author} on ${t.path.split("/").pop()}:${t.local?.line ?? t.line}`);
+
+/** Above a single commit's diff: which commit, its why, and the threads it addresses (not their raw trailer URLs). */
 function CommitHead() {
   const c = () => pg.history()?.rows.find((r) => r.sha === pg.commitScope());
+  const why = () => (c()?.body ?? "").replace(/^Addresses:.*$/gm, "").trim();
   return (
     <div class="rv-commit-head">
       <code class="text-gold-leaf">{pg.commitScope()?.slice(0, 7)}</code> <span class="text-ink">{c()?.subject}</span>
       <span class="text-ink-faint">
-        {" "}· {c()?.author} · {c()?.date} · {c()?.pushed === false ? "local" : "pushed"} · read-only
+        {" "}· {c()?.author} · {c()?.date}
+        {c()?.pushed === false ? " · local" : ""} · this commit's {pg.files().length} file{pg.files().length === 1 ? "" : "s"}
       </span>
-      <Show when={c()?.body}>
-        <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{c()!.body}</pre>
+      <Show when={why()}>
+        <pre class="m-0 mt-1 whitespace-pre-wrap font-mono text-[12px] text-ink-dim">{why()}</pre>
       </Show>
+      <For each={addresses(pg.commitScope() ?? "")}>{(a) => <div class="mt-0.5 text-[12px] text-gold-leaf">→ {a}</div>}</For>
     </div>
   );
 }

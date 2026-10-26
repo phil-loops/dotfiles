@@ -97,7 +97,8 @@ export default function Outgoing() {
   const b = () => v()?.b;
   onMount(() => void pg.loadHistory());
   // what origin lacks: the branch's own count is live; the list's marks catch up when it re-reads
-  const unpushed = () => (b()?.pushed === "synced" ? [] : (pg.history()?.rows ?? []).filter((c) => c.pushed === false));
+  // a branch never pushed has no origin to compare with, so the server leaves `pushed` off its commits: all of them go
+  const unpushed = () => (b()?.pushed === "synced" ? [] : (pg.history()?.rows ?? []).filter((c) => c.pushed === false || (b()?.pushed === "local" && c.pushed == null)));
   /** reading order: the oldest unpushed commit first */
   const story = () => [...unpushed()].reverse();
   createEffect(() => {
