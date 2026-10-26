@@ -37,11 +37,18 @@ export default function Review() {
           <Match when={pg.tab() === "conversation"}>
             <Conversation />
           </Match>
-          <Match when={pg.tab() === "outgoing"}>
+          <Match when={pg.tab() === "commits"}>
             <div class="rv-body">
-              <div />
-              <div class="rv-files" data-paint="outgoing">
-                <Outgoing />
+              <aside class="rv-tree">
+                <History />
+              </aside>
+              <div class="rv-files" data-paint="commits">
+                <Show when={pg.scoped()} fallback={<Outgoing />}>
+                  <CommitHead />
+                  <Show when={pg.files().length} fallback={<p class="rv-quiet">reading the commit…</p>}>
+                    <For each={pg.files()}>{(f) => <FileBlock file={f} selected={selected} />}</For>
+                  </Show>
+                </Show>
               </div>
             </div>
           </Match>
@@ -50,10 +57,7 @@ export default function Review() {
               <FileTree />
               <div class="rv-files" data-paint={loaded() ? "review" : undefined} onPointerMove={notePointer}>
                 <Show when={loaded()} fallback={<p class="rv-quiet">{pg.loadErr() ? `couldn't read the diff — ${pg.loadErr()}` : "reading the diff…"}</p>}>
-                  <Show when={pg.scoped()}>
-                    <CommitHead />
-                  </Show>
-                  <Show when={pg.files().length} fallback={<p class="rv-quiet">{pg.scoped() ? "reading the commit…" : "nothing changes on this branch"}</p>}>
+                  <Show when={pg.files().length} fallback={<p class="rv-quiet">nothing changes on this branch</p>}>
                     <For each={pg.files()}>{(f) => <FileBlock file={f} selected={selected} />}</For>
                     <Elsewhere selected={selected} />
                   </Show>
@@ -142,12 +146,16 @@ function Header() {
         <button classList={{ "rv-tab-on": pg.tab() === "conversation" }} onClick={bind("review.tab.conversation")}>
           Conversation <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
         </button>
+        <button classList={{ "rv-tab-on": pg.tab() === "commits" }} onClick={bind("review.tab.commits")}>
+          Commits <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
+          <Show when={(view("branch", pg.id())?.ahead ?? 0) > 0 || view("branch", pg.id())?.pushed === "local"}>
+            <span class="rv-count rv-count-gold">{view("branch", pg.id())?.pushed === "local" ? "local" : `${view("branch", pg.id())!.ahead} to push`}</span>
+          </Show>
+        </button>
         <button classList={{ "rv-tab-on": pg.tab() === "files" }} onClick={bind("review.tab.files")}>
           Files changed <span class="rv-count">{pg.files().length}</span>
         </button>
-        <button classList={{ "rv-tab-on": pg.tab() === "outgoing" }} onClick={bind("review.tab.outgoing")}>
-          Outgoing <span class="rv-count">{pg.conv()?.unpushed.length ?? view("branch", pg.id())?.ahead ?? 0}</span>
-        </button>
+
         <span class="flex-1" />
         <span class="rv-meta">
           {openThreads()} open · viewed {viewedCount()}/{pg.files().length}
@@ -163,16 +171,18 @@ function Header() {
  *  the selected one; "all changes" is the whole branch again. */
 function History() {
   const rows = () => pg.history()?.rows ?? [];
+  /** the threads a commit declares it addresses, as "author on file:line" */
+  const addresses = (sha: string) =>
+    pg.threads().filter((t) => t.fixedBy?.some((f) => f.sha.startsWith(sha))).map((t) => `${t.comments[0]?.author} on ${t.path.split("/").pop()}:${t.local?.line ?? t.line}`);
   const on = (sha: string | null) => pg.commitScope() === sha;
   const focused = () => pg.historyFocus() === "list";
   return (
     <div class="rv-history" classList={{ "rv-history-focus": focused() }}>
-      <div class="rv-dir">history</div>
       <div class="mb-1 text-[10.5px] text-ink-faint">
-        {focused() ? `j/k steps · ${keyOf("history.enter")} reads it · esc all changes` : `${keyOf("commit.back")} back to the list`}
+        {focused() ? `j/k steps · ${keyOf("history.enter")} reads it · esc what a push sends` : `${keyOf("commit.back")} back to the list`}
       </div>
       <button class="rv-hrow" classList={{ "rv-hrow-on": on(null) }} onClick={bind("history.select", "")}>
-        All changes
+        What a push sends
       </button>
       <For each={rows()} fallback={<p class="rv-quiet">{pg.history() ? "no commits of its own" : "reading the commits…"}</p>}>
         {(c) => (
@@ -181,6 +191,7 @@ function History() {
             <span class="rv-hmeta">
               <code classList={{ "text-gold-leaf": c.pushed === false }}>{c.sha.slice(0, 7)}</code> · {c.author} · {c.date} · {c.pushed === false ? "local" : "pushed"}
             </span>
+            <For each={addresses(c.sha)}>{(a) => <span class="rv-hmeta text-gold-leaf">→ {a}</span>}</For>
           </button>
         )}
       </For>
@@ -225,9 +236,6 @@ function FileTree() {
   });
   return (
     <aside class="rv-tree">
-      <Show when={pg.historyOpen()}>
-        <History />
-      </Show>
       <Show when={pg.filtering() || pg.filter()}>
         <input
           ref={input}
