@@ -1,7 +1,7 @@
 // Forests, the home: focus (hand-ordered), the workbench, and a quiet archive count. Each forest is
 // one calm row that opens inline into its branch spine, in merge order; each branch says where it
 // stands in one glyph and word and does one thing on ↵. `r` narrows it all to what's ready for you.
-import { createEffect, createMemo, createSignal, For, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js";
 import { shiftFor } from "./drag";
 import { bkey, model, pkey, type BranchView, type ForestView } from "./model";
 import { boot, catchIt, flip, settle } from "./motion";
@@ -11,7 +11,7 @@ import { fmtMorning, leaf, phaseAt, SHIP, windowLine } from "./ship";
 import { view, world } from "./store";
 import { page } from "./review/page";
 import type { Project } from "./types";
-import { armed, drag, expanded, launching, now, opened, readyOnly, setExpanded, setLaunching, showArchive, toggleIn } from "./ui";
+import { armed, drag, expanded, launching, now, opened, readyOnly, setExpanded, setLaunching, setShelved, shelved, showArchive, toggleIn } from "./ui";
 
 /** Prefetch on intent: the cursor landing on a branch warms its review page's diff. */
 function warmSelected(): void {
@@ -30,12 +30,16 @@ function watchClosings(): void {
   createEffect(() => {
     if (!world.ready) return;
     const closed = new Set([...model.forests().values()].filter((f) => f.closed).map((f) => f.p.id));
-    if (was) {
+    // a shelved forest that grows a new branch is open again, so it comes back out
+    if (!was) setShelved(new Set(closed));
+    else {
+      if ([...untrack(shelved)].some((id) => !closed.has(id))) setShelved((s) => new Set([...s].filter((id) => closed.has(id))));
       for (const id of closed) {
         if (was.has(id)) continue;
         setClosing((s) => new Set(s).add(id));
         window.setTimeout(() => {
           setClosing((s) => new Set([...s].filter((x) => x !== id)));
+          setShelved((s) => new Set(s).add(id));
           setExpanded((s) => toggleIn(s, id, false));
           setLaunching((l) => (l === id ? undefined : l));
         }, 2600);
@@ -123,13 +127,13 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
   const isClosing = () => closing().has(p().id);
   const open = () => expanded().has(p().id) || readyOnly();
   const hint = () =>
-    p().state === "archive" ? `${keyOf("row.primary")} restore` : props.f.closed ? `${keyOf("row.primary")} archive` : !props.f.branches.length ? "" : readyOnly() ? "" : `${keyOf("row.primary")} page`;
+    p().state === "archive" ? `${keyOf("row.primary")} restore` : props.f.closed ? `${keyOf("row.primary")} archive` : !props.f.branches.length ? "" : readyOnly() ? "" : `${keyOf("row.primary")} page${props.f.unopened.length > 1 ? ` · ${keyOf("forest.launch")} launch all` : ""}`;
   const meta = () => {
     const f = props.f;
     if (p().state === "archive" || !f.branches.length) return "";
     const parts = [`${f.branches.length} branch${f.branches.length === 1 ? "" : "es"}`];
     if (f.ready.length) parts.push(`${f.ready.length} ready`);
-    if (f.unopened.length > 1) parts.push(`${keyOf("forest.launch")} launch ${f.unopened.length}`);
+    if (f.unopened.length > 1) parts.push(`${f.unopened.length} without a PR`);
     if (p().ticket) parts.push(p().ticket!);
     return parts.join(" · ");
   };

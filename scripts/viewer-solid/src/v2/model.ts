@@ -6,7 +6,7 @@ import { list, view, world } from "./store";
 import type { Branch, Pr, Project } from "./types";
 import { queue } from "./tracker";
 import type { Scope } from "./registry";
-import { cursor, cursorIdx, expanded, forestFace, now, readyOnly, showArchive } from "./ui";
+import { cursor, cursorIdx, expanded, forestFace, now, readyOnly, shelved, showArchive } from "./ui";
 import { page } from "./review/page";
 
 export interface BranchView {
@@ -38,9 +38,9 @@ export const model = createRoot(() => {
   const projects = createMemo(() => {
     const all = list("project");
     return {
-      focus: all.filter((p) => p.state === "focus").sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || byName(a, b)),
-      workbench: all.filter((p) => p.state === "workbench").sort(byName),
-      archive: all.filter((p) => p.state === "archive").sort(byName),
+      focus: all.filter((p) => p.state === "focus" && !shelved().has(p.id)).sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0) || byName(a, b)),
+      workbench: all.filter((p) => p.state === "workbench" && !shelved().has(p.id)).sort(byName),
+      archive: all.filter((p) => p.state === "archive" || shelved().has(p.id)).sort(byName),
     };
   });
 
