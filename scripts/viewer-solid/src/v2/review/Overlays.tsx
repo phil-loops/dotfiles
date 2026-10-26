@@ -2,6 +2,7 @@
 // inside them go through the runner like everywhere else.
 import { createMemo, createResource, createSignal, For, onMount, Show } from "solid-js";
 import { model } from "../model";
+import { keyOf } from "../registry";
 import { bind, dispatch } from "../runner";
 import { leaf, SHIP } from "../ship";
 import { list, view } from "../store";
@@ -17,7 +18,7 @@ export function Words() {
   return (
     <aside class="rv-words" role="dialog" aria-label="The words">
       <div class="rv-sheet-head">
-        The words <span class="text-ink-faint">· e closes</span>
+        The words <span class="text-ink-faint">· {keyOf("review.words")} closes</span>
       </div>
       <div class="rv-words-k">description</div>
       <p class="font-display text-[16px] italic">{desc() || "—"}</p>

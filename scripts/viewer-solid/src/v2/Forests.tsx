@@ -46,15 +46,16 @@ function watchClosings(): void {
 }
 
 function actionHint(v: BranchView): string {
-  if (armed() === v.b.id) return "↵ again sends it to origin · esc";
+  const go = keyOf("row.primary");
+  if (armed() === v.b.id) return `${go} again sends it to origin · ${keyOf("overlay.close")}`;
   if (v.b.pending) return "";
   switch (v.st.action) {
     case "push":
-      return "↵ push";
+      return `${go} push`;
     case "pr":
-      return v.pr ? `↵ view #${v.pr.number}` : "↵ open PR";
+      return v.pr ? `${go} view #${v.pr.number}` : `${go} open PR`;
     default:
-      return "↵ open";
+      return `${go} open`;
   }
 }
 
@@ -122,7 +123,7 @@ function ForestRow(props: { f: ForestView; grip: boolean }) {
   const isClosing = () => closing().has(p().id);
   const open = () => expanded().has(p().id) || readyOnly();
   const hint = () =>
-    p().state === "archive" ? "↵ restore" : props.f.closed ? "↵ archive" : !props.f.branches.length ? "" : open() && !readyOnly() ? "↵ fold" : readyOnly() ? "" : "↵ open";
+    p().state === "archive" ? `${keyOf("row.primary")} restore` : props.f.closed ? `${keyOf("row.primary")} archive` : !props.f.branches.length ? "" : readyOnly() ? "" : `${keyOf("row.primary")} its page`;
   const meta = () => {
     const f = props.f;
     if (p().state === "archive" || !f.branches.length) return "";
@@ -250,7 +251,7 @@ function WindowLine() {
       <p data-window={phaseAt(now()).phase} class="m-0 mb-6 px-4 pl-11 font-display text-[15px] italic" classList={{ "text-ember": late(), "text-gold-leaf": !late() }}>
         {text()}
         <Show when={late() && text()}>
-          <span class="font-mono text-[12px] not-italic text-ink-faint"> · z holds a forest for {fmtMorning(nextMorning(now()))}</span>
+          <span class="font-mono text-[12px] not-italic text-ink-faint"> · {keyOf("hold.morning")} holds a forest for {fmtMorning(nextMorning(now()))}</span>
         </Show>
         <Show when={due()}>
           <span class="text-gold-leaf">

@@ -144,18 +144,19 @@ function Header() {
       </div>
       <nav class="rv-tabs">
         <button classList={{ "rv-tab-on": pg.tab() === "conversation" }} onClick={bind("review.tab.conversation")}>
-          Conversation <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
+          Conversation <span class="rv-tabkey">{keyOf("review.tab.conversation")}</span> <span class="rv-count">{(c()?.comments.length ?? 0) + (c()?.reviews.filter((r) => r.body).length ?? 0) + pg.threads().length}</span>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "commits" }} onClick={bind("review.tab.commits")}>
-          Commits <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
+          Commits <span class="rv-tabkey">{keyOf("review.tab.commits")}</span> <span class="rv-count">{view("branch", pg.id())?.commits ?? ""}</span>
           <Show when={(view("branch", pg.id())?.ahead ?? 0) > 0 || view("branch", pg.id())?.pushed === "local"}>
             <span class="rv-count rv-count-gold">{view("branch", pg.id())?.pushed === "local" ? "local" : `${view("branch", pg.id())!.ahead} to push`}</span>
           </Show>
         </button>
         <button classList={{ "rv-tab-on": pg.tab() === "files" }} onClick={bind("review.tab.files")}>
-          Files changed <span class="rv-count">{pg.files().length}</span>
+          Files changed <span class="rv-tabkey">{keyOf("review.tab.files")}</span> <span class="rv-count">{pg.files().length}</span>
         </button>
 
+        <span class="rv-tabkey self-center">{keyOf("review.tab")} cycles</span>
         <span class="flex-1" />
         <span class="rv-meta">
           {openThreads()} open · viewed {viewedCount()}/{pg.files().length}
@@ -308,7 +309,7 @@ function FileBlock(props: { file: FileDiff; selected: (k: string | undefined) =>
         <span class="text-del">−{props.file.del}</span>
         <span class="flex-1" />
         <Show when={hiddenOutdated() && !pg.showOutdated()}>
-          <button class="rv-quietbtn" onClick={bind("review.outdated")}>{hiddenOutdated()} outdated · O</button>
+          <button class="rv-quietbtn" onClick={bind("review.outdated")}>{hiddenOutdated()} outdated · {keyOf("review.outdated")}</button>
         </Show>
         <span class="rv-viewed">
           {fv()?.viewed ? "Viewed" : fv()?.seen ? `${fv()!.seen} of ${fv()!.blocks.length} changes viewed` : ""}

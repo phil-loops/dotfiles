@@ -12,6 +12,7 @@ import { post, type Sent } from "./sync";
 import { emit, nextPaint } from "./telemetry";
 import { targetFor } from "./model";
 import { setMenuOpen } from "./ui";
+import { noteKeyUse } from "./hints";
 
 const [note, setNote] = createSignal<string | null>(null);
 export { note };
@@ -46,6 +47,7 @@ export interface RunOpts {
 export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
   const cmd = getCommand(id);
   if (!cmd) return;
+  if (via === "key") noteKeyUse(id);
   if (via === "menu" || via === "palette") setMenuOpen(false);
   if (cmd.route) {
     const next = cmd.route(opts.target ?? targetFor(cmd.scope));
@@ -81,6 +83,9 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
     return;
   }
   if (!w) return;
+  const runKey = `${id}|${target ?? ""}`;
+  const started = Date.now();
+  setRun(runKey, { state: "sending", t0: started });
   const s = ++seq;
   addOps(w.ops.map((o) => ({ ...o, seq: s })));
   const sent: Promise<Sent> = queue.then(() => post(w.path, w.body, via));
@@ -91,29 +96,50 @@ export function dispatch(id: string, via: Via, opts: RunOpts = {}): void {
       const inv = typeof w.inverse === "function" ? w.inverse(r.body ?? {}) : w.inverse;
       if (inv && !opts.undoing) undo.push(inv);
       if (w.said) say(w.said);
-      reconcile(s, w);
+      setRun(runKey, { state: "landing", t0: started });
+      reconcile(s, w, () => setRun(runKey, { state: "done", t0: started, t1: Date.now() }));
     } else {
       dropOps(s);
       w.rollback?.();
       // the server's own sentence says what to do next; the short class is the fallback
       const why = typeof r.body?.err === "string" && r.body.err.length <= 140 ? r.body.err : r.err && r.err !== "refused" ? r.err.replaceAll("-", " ") : "";
       say(`${w.failed}${why ? ` — ${why}` : ""}`);
+      setRun(runKey, { state: "failed", t0: started, t1: Date.now(), err: `${w.failed}${why ? ` — ${why}` : ""}` });
     }
     const feedbackMs = await feedback;
     emit({ ...base, outcome: r.outcome, ...(r.err ? { err: r.err } : {}), feedbackMs, settledMs, rid: r.rid });
   });
 }
 
-function reconcile(s: number, w: Write): void {
-  if (w.settled()) return dropOps(s);
+function reconcile(s: number, w: Write, onDone?: () => void): void {
+  if (w.settled()) {
+    dropOps(s);
+    return onDone?.();
+  }
   const t = window.setTimeout(() => done(), SETTLE_WAIT);
   const done = () => {
     clearTimeout(t);
     awaiting.delete(s);
     dropOps(s);
+    onDone?.();
   };
   awaiting.set(s, { settled: w.settled, done });
 }
+
+// ── a write's live state, for a button that becomes its own status ──
+
+/** sending: the request is out · landing: the server said yes, the page is catching up ·
+ *  done · failed (with the reason the quiet line also gave) */
+export interface Run {
+  state: "sending" | "landing" | "done" | "failed";
+  t0: number;
+  t1?: number;
+  err?: string;
+}
+const [runs, setRuns] = createSignal<ReadonlyMap<string, Run>>(new Map());
+const setRun = (k: string, r: Run) => setRuns((m) => new Map(m).set(k, r));
+/** The latest run of command `id` on `target` this page load. */
+export const runOf = (id: string, target: string | undefined): Run | undefined => runs().get(`${id}|${target ?? ""}`);
 
 /** Put back the last write (one level per press). */
 export function undoLast(): boolean {

@@ -224,13 +224,18 @@ export const page = createRoot(() => {
   });
 
   /** The branch's own commits, newest first (GET /commits): the history list. */
+  /** the history's freshness: the tip, and what origin has — a push changes the second, not the first */
+  const historyKey = () => `${keyOf()}|${branch()?.pushed ?? ""}|${branch()?.ahead ?? ""}`;
   async function loadHistory(): Promise<void> {
     const t = target();
-    const key = keyOf();
+    const key = historyKey();
     if (!t || history()?.key === key) return;
     const rows = await getJSON<HistoryCommit[]>(atRepoPath(t.repo, `/commits?branch=${encodeURIComponent(t.name)}`)).catch(() => null);
-    if (rows && keyOf() === key) setHistory({ key, rows: rows.filter((r) => r.own) });
+    if (rows && historyKey() === key) setHistory({ key, rows: rows.filter((r) => r.own) });
   }
+  // a push (or a fetch) changes what origin has without moving the tip: the list's pushed marks follow
+  createEffect(on(historyKey, () => tab() === "commits" && void loadHistory(), { defer: true }));
+
   /** Show one commit's diff (GET /commit-diff), or the whole branch again with null. */
   async function showCommit(sha: string | null): Promise<void> {
     setCommitScope(sha);

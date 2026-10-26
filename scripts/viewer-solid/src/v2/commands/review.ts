@@ -110,7 +110,7 @@ command({
 
 const TABS = ["conversation", "commits", "files"] as const;
 command({ id: "review.tab", title: "Next tab — Conversation, Commits, Files changed", scope: "review", budget: "local", keys: ["tab"], local: () => pg.setTab(TABS[(TABS.indexOf(pg.tab()) + 1) % TABS.length]) });
-command({ id: "review.tab.commits", title: "Commits", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("commits") });
+command({ id: "review.tab.commits", title: "Commits", scope: "review", budget: "local", keys: ["2"], local: () => pg.setTab("commits") });
 command({
   id: "review.push",
   title: "Push to origin — a first push or follow-ups onto the PR (press twice)",
@@ -124,8 +124,8 @@ command({
     return armed() === id ? "branch.push.confirm" : "branch.push.arm";
   },
 });
-command({ id: "review.tab.files", title: "Files changed", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("files") });
-command({ id: "review.tab.conversation", title: "Conversation", scope: "review", budget: "local", quiet: true, local: () => pg.setTab("conversation") });
+command({ id: "review.tab.files", title: "Files changed", scope: "review", budget: "local", keys: ["3"], local: () => pg.setTab("files") });
+command({ id: "review.tab.conversation", title: "Conversation", scope: "review", budget: "local", keys: ["1"], local: () => pg.setTab("conversation") });
 command({ id: "review.split", title: "Split ↔ unified diff", scope: "review", budget: "local", keys: ["s"], local: () => pg.setSplit(!pg.split()) });
 command({ id: "review.outdated", title: "Show outdated conversations", scope: "review", budget: "local", keys: ["O"], local: () => pg.setShowOutdated(!pg.showOutdated()) });
 command({ id: "review.words", title: "The words (description, outline, landing title)", scope: "review", budget: "local", keys: ["e"], local: () => pg.setOverlay(pg.overlay() === "words" ? null : "words") });

@@ -28,3 +28,13 @@ test("with nothing under the cursor, the item keys wait in not-now", () => {
   assert.equal(keys(s.everywhere), "g f=nav.forests");
   assert.equal(keys(s.notNow), "D=todo.done");
 });
+
+test("keys read unambiguously: ⇧s for S, ⌃k for C-k, ⇥ for tab", async () => {
+  const { glyph } = await import("./registry.ts");
+  assert.equal(glyph("S"), "⇧s");
+  assert.equal(glyph("s"), "s");
+  assert.equal(glyph("C-k"), "⌃k");
+  assert.equal(glyph("tab"), "⇥");
+  assert.equal(glyph("g D"), "g ⇧d");
+  assert.equal(glyph("?"), "?");
+});
