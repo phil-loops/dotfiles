@@ -112,7 +112,7 @@ function Header() {
       <div class="rv-title">
         <Show when={c()} fallback={<span class="font-display text-[20px] text-ink">{view("branch", pg.id())?.description || t()?.name}</span>}>
           <span class="font-display text-[20px] text-ink">{c()!.title}</span>
-          <span class="ml-2 text-ink-faint">#{c()!.number}</span>
+          <a class="ml-2 text-ink-faint no-underline hover:text-ink hover:underline" href={c()!.url} target="_blank" rel="noopener" title="open on GitHub">#{c()!.number}</a>
         </Show>
         <span class="flex-1" />
         <Show when={c()}>
