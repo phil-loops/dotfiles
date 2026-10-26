@@ -3,7 +3,7 @@
 // the push as it happens), or open the PR — and nothing once there's nothing to do. Gates show only
 // while something waits to be pushed: a word until they need you, the gate in flight while running,
 // the red ones by name.
-import { createEffect, createResource, createSignal, For, Match, onCleanup, Show, Switch } from "solid-js";
+import { createEffect, createResource, For, onCleanup, Show } from "solid-js";
 import { gateRows, type GateRow, type Progress } from "../gates";
 import { model } from "../model";
 import { keyOf } from "../registry";
@@ -38,59 +38,44 @@ export default function ShipLine() {
   const warm = () => !!world.entities.warm[b()?.repo ?? ""]?.prs;
 
   const push = () => runOf("branch.push.confirm", id());
-  const [sent, setSent] = createSignal(0);
-  createEffect(() => {
-    if (push()?.state === "sending" && !sent()) setSent(b()?.ahead || 0);
-  });
-  const pushing = () => push() && push()!.state !== "done";
+  /** a push in flight, or one that failed: the button carries it until the next step takes over */
+  const live = () => {
+    const st = push()?.state;
+    return st === "sending" || st === "landing" || st === "failed" ? st : null;
+  };
+  const acts = () => route() === "branch.gates.run" || route() === "branch.push.arm" || route() === "branch.push.confirm";
+  const label = () => {
+    if (live() === "sending") return "pushing…";
+    if (live() === "landing") return "✓ pushed";
+    if (live() === "failed") return "retry the push";
+    if (route() === "branch.gates.run") return b()!.gates === "red" ? "re-run the gates" : "run the gates";
+    if (armed() === id()) return `${keyOf("review.push")} again to push`;
+    return `push ${b()!.pushed === "local" ? b()!.commits : b()!.ahead}`;
+  };
 
   return (
     <Show when={b()}>
       <span class="rv-ship">
-        <Show
-          when={!pushing()}
-          fallback={
-            <Switch>
-              <Match when={push()!.state === "sending"}>
-                <span class="text-gold-leaf animate-breathe">◌ pushing</span>
-              </Match>
-              <Match when={push()!.state === "landing"}>
-                <span class="text-patina">✓ pushed</span>
-              </Match>
-              <Match when={push()!.state === "failed"}>
-                <span class="text-ember">✗ {push()!.err}</span>{" "}
-                <button class="rv-quietbtn" onClick={bind("review.push", id())}>
-                  retry
-                </button>
-              </Match>
-            </Switch>
-          }
-        >
-          <Show when={route()}>
-            <Show when={running()} fallback={<Gates red={red()} waived={waived()} gates={b()!.gates} skipped={skipped()} />}>
-              <span class="text-gold-leaf">◌ {running()!.name} {secs(running()!.ms)}</span>
-            </Show>
+        <Show when={acts() && !live()}>
+          <Show when={running()} fallback={<Gates red={red()} waived={waived()} gates={b()!.gates} skipped={skipped()} />}>
+            <span class="text-gold-leaf">◌ {running()!.name} {secs(running()!.ms)}</span>
           </Show>
-          <Show when={route() === "branch.gates.run" || route() === "branch.push.arm" || route() === "branch.push.confirm"}>
-            <button class="rv-btn rv-btn-gold ml-2" onClick={bind("review.push", id())}>
-              {route() === "branch.gates.run"
-                ? b()!.gates === "red"
-                  ? "re-run the gates"
-                  : "run the gates"
-                : armed() === id()
-                  ? `${keyOf("review.push")} again to push`
-                  : `push ${b()!.pushed === "local" ? b()!.commits : b()!.ahead}`}{" "}
-              <kbd>{keyOf("review.push")}</kbd>
-            </button>
-          </Show>
-          <Show when={!route() && !v()?.pr && v()?.st.action === "pr" && warm()}>
-            <button class="rv-btn rv-btn-gold ml-2" onClick={bind("review.finish", id())}>
-              open the PR ↗ <kbd>{keyOf("review.finish")}</kbd>
-            </button>
-          </Show>
-          <Show when={sent() && push()?.state === "done"}>
-            <span class="text-patina">✓ {sent()} on origin</span>
-          </Show>
+        </Show>
+        <Show when={acts() || live()}>
+          <button
+            class="rv-btn rv-btn-gold"
+            classList={{ "animate-breathe": live() === "sending", "text-ember": live() === "failed" }}
+            disabled={live() === "sending" || live() === "landing"}
+            title={live() === "failed" ? push()!.err : undefined}
+            onClick={bind("review.push", id())}
+          >
+            {label()} <Show when={!live() || live() === "failed"}><kbd>{keyOf("review.push")}</kbd></Show>
+          </button>
+        </Show>
+        <Show when={!acts() && !live() && !v()?.pr && v()?.st.action === "pr" && warm()}>
+          <button class="rv-btn rv-btn-gold" onClick={bind("review.finish", id())}>
+            open the PR ↗ <kbd>{keyOf("review.finish")}</kbd>
+          </button>
         </Show>
       </span>
     </Show>
